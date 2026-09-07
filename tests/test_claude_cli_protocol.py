@@ -137,11 +137,16 @@ def _policy(
     return policy, workspace, head, status
 
 
-def _fake_controls(tmp_path: Path, scenario: str = "ok") -> dict[str, str]:
+def _fake_controls(
+    tmp_path: Path,
+    scenario: str = "ok",
+    *,
+    version: str = "2.1.259",
+) -> dict[str, str]:
     return {
         "MMX_FAKE_CLAUDE_SCENARIO": scenario,
         "MMX_FAKE_CLAUDE_STATE_FILE": str(tmp_path / "fake-state.json"),
-        "MMX_FAKE_CLAUDE_VERSION": "2.1.259",
+        "MMX_FAKE_CLAUDE_VERSION": version,
     }
 
 
@@ -238,7 +243,7 @@ def test_compiler_emits_exact_248_command_and_closed_environment(tmp_path: Path)
 
 
 def test_compiler_adds_no_prompt_host_flag_only_when_supported(tmp_path: Path) -> None:
-    old_policy, _, _, _ = _policy(tmp_path / "old", version="2.1.258")
+    old_policy, _, _, _ = _policy(tmp_path / "old", version="2.1.248")
     new_policy, _, _, _ = _policy(tmp_path / "new", version="2.1.259")
 
     assert "--permission-prompts" not in compile_claude_cli_command(old_policy).argv
@@ -247,6 +252,107 @@ def test_compiler_adds_no_prompt_host_flag_only_when_supported(tmp_path: Path) -
     assert argv[index : index + 2] == ("--permission-prompts", "none")
     assert argv[index - 2 : index] == ("--permission-mode", "dontAsk")
     assert argv[index + 2 : index + 4] == ("--tools", "Read")
+
+
+@pytest.mark.parametrize(
+    ("version", "terminal_profile"),
+    [
+        ("2.1.248", "claude-cli-stream-json/2.1.248/pf1-f0.v1"),
+        ("2.1.259", "claude-cli-stream-json/2.1.259/pf1-f0.v1"),
+    ],
+)
+def test_compiler_binds_exact_terminal_profile_and_exit_relation(
+    tmp_path: Path,
+    version: str,
+    terminal_profile: str,
+) -> None:
+    policy, _, _, _ = _policy(tmp_path, version=version)
+
+    command = compile_claude_cli_command(policy)
+
+    assert command.policy_schema == "mmx.claude-cli-policy.v1"
+    assert command.terminal_profile == terminal_profile
+    assert command.expected_success_returncode == 0
+    assert command.expected_failure_returncode == 7
+    assert len(command.policy_sha256) == 64
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("api_timeout_ms", 1_001),
+        ("idle_timeout_seconds", 2.5),
+        ("absolute_timeout_seconds", 5.5),
+        ("terminate_grace_seconds", 0.2),
+        ("max_stdout_bytes", 131_073),
+        ("max_stderr_bytes", 4_097),
+        ("max_line_bytes", 32_769),
+        ("max_events", 17),
+        ("max_json_depth", 9),
+        ("max_json_string_bytes", 8_193),
+        ("max_json_collection_items", 65),
+    ],
+)
+def test_every_execution_bound_changes_the_compiled_policy_identity(
+    tmp_path: Path,
+    field: str,
+    value: object,
+) -> None:
+    policy, _, _, _ = _policy(tmp_path)
+    original = compile_claude_cli_command(policy)
+    changed = compile_claude_cli_command(dataclasses.replace(policy, **{field: value}))
+
+    assert changed.argv == original.argv
+    assert changed.environment == original.environment or field == "api_timeout_ms"
+    assert changed.policy_sha256 != original.policy_sha256
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("policy_schema", "mmx.claude-cli-policy.unreviewed"),
+        ("terminal_profile", "claude-cli-stream-json/unreviewed"),
+        ("expected_success_returncode", 7),
+        ("expected_failure_returncode", 0),
+        ("policy_sha256", "0" * 64),
+    ],
+)
+def test_runner_refuses_compiled_policy_identity_drift_before_spawn(
+    tmp_path: Path,
+    field: str,
+    value: object,
+) -> None:
+    policy, _, _, _ = _policy(tmp_path)
+    command = dataclasses.replace(
+        compile_claude_cli_command(policy),
+        **{field: value},
+    )
+
+    with pytest.raises(ClaudeCliProtocolError) as captured:
+        ClaudeCliRunner().run(command, fake_controls=_fake_controls(tmp_path))
+
+    assert captured.value.code == "COMMAND_DRIFT"
+    assert captured.value.observation is ClaudeCliObservation.PROCESS_NOT_STARTED
+    assert captured.value.cleanup is None
+    assert captured.value.evidence is None
+    assert not (tmp_path / "fake-state.json").exists()
+
+
+@pytest.mark.parametrize(
+    "version",
+    ["2.1.249", "2.1.258", "2.1.260", "2.1.261", "3.0.0", "999999.999999.999999"],
+)
+def test_compiler_refuses_every_unreviewed_future_profile_before_spawn(
+    tmp_path: Path,
+    version: str,
+) -> None:
+    policy, _, _, _ = _policy(tmp_path, version=version)
+
+    with pytest.raises(ClaudeCliProtocolError, match="reviewed profile") as captured:
+        compile_claude_cli_command(policy)
+
+    assert captured.value.code == "VERSION_UNSUPPORTED"
+    assert captured.value.observation is ClaudeCliObservation.PROCESS_NOT_STARTED
 
 
 @pytest.mark.parametrize("value", ["2.1.247", "2.0.999", "latest", "2.1", "v2.1.259", "2.1.259-beta"])
@@ -259,6 +365,58 @@ def test_version_parser_or_compiler_refuses_unfrozen_versions(tmp_path: Path, va
         with pytest.raises(ClaudeCliProtocolError, match="version") as error:
             ClaudeCliVersion.parse(value)
     assert error.value.observation is ClaudeCliObservation.PROCESS_NOT_STARTED
+
+
+@pytest.mark.parametrize("scenario", ["assistant_uuid_inventory", "result_uuid_inventory"])
+def test_248_profile_refuses_259_uuid_inventory(
+    tmp_path: Path,
+    scenario: str,
+) -> None:
+    policy, workspace, head, status = _policy(tmp_path, version="2.1.248")
+
+    with pytest.raises(ClaudeCliProtocolError) as captured:
+        ClaudeCliRunner().run(
+            compile_claude_cli_command(policy),
+            fake_controls=_fake_controls(tmp_path, scenario, version="2.1.248"),
+        )
+
+    assert captured.value.code == "VERSION_PROFILE_FIELD_DRIFT"
+    assert captured.value.observation is ClaudeCliObservation.OUTCOME_UNRECONCILED
+    _assert_workspace_unchanged(workspace, head, status)
+
+
+@pytest.mark.parametrize("scenario", ["assistant_uuid_inventory", "result_uuid_inventory"])
+def test_259_profile_accepts_its_reviewed_uuid_inventory(
+    tmp_path: Path,
+    scenario: str,
+) -> None:
+    policy, workspace, head, status = _policy(tmp_path)
+
+    receipt = ClaudeCliRunner().run(
+        compile_claude_cli_command(policy),
+        fake_controls=_fake_controls(tmp_path, scenario),
+    )
+
+    assert receipt.observation is ClaudeCliObservation.TERMINAL_RESULT_OBSERVED
+    _assert_workspace_unchanged(workspace, head, status)
+
+
+@pytest.mark.parametrize("version", ["2.1.248", "2.1.259"])
+def test_reviewed_profiles_refuse_260_latency_fields(
+    tmp_path: Path,
+    version: str,
+) -> None:
+    policy, workspace, head, status = _policy(tmp_path, version=version)
+
+    with pytest.raises(ClaudeCliProtocolError) as captured:
+        ClaudeCliRunner().run(
+            compile_claude_cli_command(policy),
+            fake_controls=_fake_controls(tmp_path, "result_260_latency", version=version),
+        )
+
+    assert captured.value.code == "VERSION_PROFILE_FIELD_DRIFT"
+    assert captured.value.observation is ClaudeCliObservation.OUTCOME_UNRECONCILED
+    _assert_workspace_unchanged(workspace, head, status)
 
 
 @pytest.mark.parametrize(
@@ -701,8 +859,17 @@ def test_happy_journey_is_one_read_one_submission_and_deterministic(tmp_path: Pa
     assert receipt.observation is ClaudeCliObservation.TERMINAL_RESULT_OBSERVED
     assert receipt.session_id == SESSION_ID
     assert receipt.model == MODEL
+    assert receipt.version == command.version
+    assert receipt.policy_schema == command.policy_schema
+    assert receipt.terminal_profile == command.terminal_profile
+    assert receipt.policy_sha256 == command.policy_sha256
     assert receipt.read_count == 1
     assert receipt.submission_count == 1
+    assert receipt.input_tokens == 11
+    assert receipt.output_tokens == 7
+    assert receipt.cache_creation_input_tokens == 0
+    assert receipt.cache_read_input_tokens == 0
+    assert receipt.cost_microusd == 1_000
     assert receipt.result_sha256 == _sha256_text(_expected_result())
     assert receipt.settings_sha256 == command.settings_sha256
     assert receipt.binary_sha256 == command.binary_sha256
@@ -742,6 +909,74 @@ def test_happy_journey_is_one_read_one_submission_and_deterministic(tmp_path: Pa
     serialized = json.dumps(receipt.to_dict(), sort_keys=True)
     assert str(tmp_path) not in serialized
     assert "evidence.txt" not in serialized
+
+
+@pytest.mark.parametrize("scenario", ["usage_regression", "assistant_usage_regression"])
+def test_receipt_preserves_the_strongest_observed_usage_counters(
+    tmp_path: Path,
+    scenario: str,
+) -> None:
+    policy, workspace, head, status = _policy(tmp_path)
+
+    receipt = ClaudeCliRunner().run(
+        compile_claude_cli_command(policy),
+        fake_controls=_fake_controls(tmp_path, scenario),
+    )
+
+    assert receipt.input_tokens == 999
+    assert receipt.output_tokens == 888
+    assert receipt.cache_creation_input_tokens == 77
+    assert receipt.cache_read_input_tokens == 66
+    assert receipt.cost_microusd == 1_000
+    _assert_workspace_unchanged(workspace, head, status)
+
+
+def test_changed_observation_policy_changes_success_evidence_identity(tmp_path: Path) -> None:
+    first_policy, _, _, _ = _policy(tmp_path / "first")
+    second_policy, _, _, _ = _policy(tmp_path / "second", max_events=17)
+    first_command = compile_claude_cli_command(first_policy)
+    second_command = compile_claude_cli_command(second_policy)
+
+    first = ClaudeCliRunner().run(
+        first_command,
+        fake_controls=_fake_controls(tmp_path / "first"),
+    )
+    second = ClaudeCliRunner().run(
+        second_command,
+        fake_controls=_fake_controls(tmp_path / "second"),
+    )
+
+    assert first.argv_sha256 == second.argv_sha256
+    assert first.environment_sha256 == second.environment_sha256
+    assert first.settings_sha256 == second.settings_sha256
+    assert first.policy_sha256 != second.policy_sha256
+    assert first.receipt_sha256 != second.receipt_sha256
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        "result_canonical_model_metadata",
+        "result_provider_metadata",
+        "result_cost_basis_metadata",
+    ],
+)
+def test_unbound_per_model_identity_and_cost_metadata_fail_closed(
+    tmp_path: Path,
+    scenario: str,
+) -> None:
+    policy, workspace, head, status = _policy(tmp_path)
+
+    with pytest.raises(ClaudeCliProtocolError) as captured:
+        ClaudeCliRunner().run(
+            compile_claude_cli_command(policy),
+            fake_controls=_fake_controls(tmp_path, scenario),
+        )
+
+    assert captured.value.code == "USAGE_IDENTITY_UNSUPPORTED"
+    assert captured.value.observation is ClaudeCliObservation.OUTCOME_UNRECONCILED
+    assert captured.value.evidence is None
+    _assert_workspace_unchanged(workspace, head, status)
 
 
 def test_phase4_missing_result_error_is_unreconciled_without_a_success_stream_prefix(
@@ -860,7 +1095,7 @@ def test_phase4_missing_result_error_is_unreconciled_without_a_success_stream_pr
         ("result_failure_timing_invalid", "RESULT_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
         ("result_failure_cost_invalid", "USAGE_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
         ("result_failure_usage_invalid", "USAGE_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
-        ("result_failure_model_usage_invalid", "USAGE_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
+        ("result_failure_model_usage_invalid", "USAGE_IDENTITY_UNSUPPORTED", ClaudeCliObservation.OUTCOME_UNRECONCILED),
         ("result_success_error_true", "RESULT_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
         ("result_failure_error_false", "RESULT_INVALID", ClaudeCliObservation.OUTCOME_UNRECONCILED),
         ("result_failure_session_drift", "SESSION_DRIFT", ClaudeCliObservation.OUTCOME_UNRECONCILED),
@@ -980,7 +1215,7 @@ def test_error_terminal_exit_mismatch_remains_unreconciled(tmp_path: Path) -> No
     with pytest.raises(ClaudeCliProtocolError) as captured:
         ClaudeCliRunner().run(
             compile_claude_cli_command(policy),
-            fake_controls=_fake_controls(tmp_path, "result_failure_nonzero"),
+            fake_controls=_fake_controls(tmp_path, "result_failure_exit_zero"),
         )
 
     error = captured.value
@@ -990,6 +1225,97 @@ def test_error_terminal_exit_mismatch_remains_unreconciled(tmp_path: Path) -> No
     assert error.cleanup.process_group_empty is True
     assert error.cleanup.leader_reaped is True
     assert error.cleanup.residue_rows == ()
+    assert error.evidence is None
+    _assert_workspace_unchanged(workspace, head, status)
+
+
+@pytest.mark.parametrize(
+    ("scenario", "code"),
+    [
+        ("result_failure", "PROVIDER_FAILURE"),
+        ("result_permission_denial", "PERMISSION_DENIED"),
+    ],
+)
+def test_exact_failure_carries_bounded_integrity_evidence_only_after_full_reconciliation(
+    tmp_path: Path,
+    scenario: str,
+    code: str,
+) -> None:
+    policy, workspace, head, status = _policy(tmp_path)
+    command = compile_claude_cli_command(policy)
+
+    with pytest.raises(ClaudeCliProtocolError) as captured:
+        ClaudeCliRunner().run(
+            command,
+            fake_controls=_fake_controls(tmp_path, scenario),
+        )
+
+    error = captured.value
+    assert error.code == code
+    assert error.observation is ClaudeCliObservation.TERMINAL_PROVIDER_FAILURE_OBSERVED
+    assert error.evidence is not None
+    assert error.evidence.version == command.version
+    assert error.evidence.policy_schema == command.policy_schema
+    assert error.evidence.terminal_profile == command.terminal_profile
+    assert error.evidence.policy_sha256 == command.policy_sha256
+    assert error.evidence.returncode == command.expected_failure_returncode
+    assert error.evidence.read_count == error.evidence.submission_count == 1
+    assert error.evidence.cache_creation_input_tokens == 0
+    assert error.evidence.cache_read_input_tokens == 0
+    assert error.evidence.cost_microusd == 1_000
+    assert len(error.evidence.receipt_sha256) == 64
+    serialized = json.dumps(error.evidence.to_dict(), sort_keys=True)
+    assert str(tmp_path) not in serialized
+    assert "bounded provider failure" not in serialized
+    _assert_workspace_unchanged(workspace, head, status)
+
+
+def test_one_failure_terminal_byte_changes_event_stream_and_receipt_binding(
+    tmp_path: Path,
+) -> None:
+    evidence_rows = []
+    for name, scenario in (("first", "result_failure"), ("second", "result_failure_variant")):
+        fixture = tmp_path / name
+        policy, workspace, head, status = _policy(fixture)
+        with pytest.raises(ClaudeCliProtocolError) as captured:
+            ClaudeCliRunner().run(
+                compile_claude_cli_command(policy),
+                fake_controls=_fake_controls(fixture, scenario),
+            )
+        assert captured.value.evidence is not None
+        evidence_rows.append(captured.value.evidence)
+        _assert_workspace_unchanged(workspace, head, status)
+
+    first, second = evidence_rows
+    assert first.policy_sha256 == second.policy_sha256
+    assert first.events[:-1] == second.events[:-1]
+    assert first.events[-1].sha256 != second.events[-1].sha256
+    assert first.stream_sha256 != second.stream_sha256
+    assert first.receipt_sha256 != second.receipt_sha256
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        "result_failure_stderr",
+        "result_failure_duplicate_later",
+        "result_failure_exit_zero",
+        "result_failure_scratch_residue",
+    ],
+)
+def test_unreconciled_error_terminal_never_carries_failure_evidence(
+    tmp_path: Path,
+    scenario: str,
+) -> None:
+    policy, workspace, head, status = _policy(tmp_path)
+
+    with pytest.raises(ClaudeCliProtocolError) as captured:
+        ClaudeCliRunner().run(
+            compile_claude_cli_command(policy),
+            fake_controls=_fake_controls(tmp_path, scenario),
+        )
+
+    assert captured.value.evidence is None
     _assert_workspace_unchanged(workspace, head, status)
 
 
@@ -1515,6 +1841,88 @@ def test_post_drain_cancellation_controls_preserve_uninterrupted_classification(
         assert captured.value.cleanup.residue_rows == ()
 
     assert not cancelled.is_set()
+    _assert_workspace_unchanged(workspace, head, status)
+
+
+@pytest.mark.parametrize("scenario", ["ok", "result_failure"])
+@pytest.mark.parametrize("boundary", ["final_eof", "exit_wait", "cleanup"])
+def test_absolute_deadline_covers_every_post_drain_promotion_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    scenario: str,
+    boundary: str,
+) -> None:
+    policy, workspace, head, status = _policy(
+        tmp_path,
+        idle_timeout_seconds=0.5,
+        absolute_timeout_seconds=0.5,
+    )
+    command = compile_claude_cli_command(policy)
+    boundary_observations: list[str] = []
+
+    if boundary == "final_eof":
+        real_selector_factory = protocol.selectors.DefaultSelector
+
+        class DelayOnFinalEofSelector:
+            def __init__(self) -> None:
+                self._selector = real_selector_factory()
+
+            def unregister(self, fileobj: object) -> object:
+                key = self._selector.unregister(fileobj)
+                if not self._selector.get_map():
+                    boundary_observations.append(boundary)
+                    time.sleep(0.55)
+                return key
+
+            def __getattr__(self, name: str) -> object:
+                return getattr(self._selector, name)
+
+        monkeypatch.setattr(protocol.selectors, "DefaultSelector", DelayOnFinalEofSelector)
+    elif boundary == "exit_wait":
+        real_wait = protocol.subprocess.Popen.wait
+
+        def delay_exit_wait(
+            process: subprocess.Popen[bytes],
+            *args: object,
+            **kwargs: object,
+        ) -> int:
+            process_args = process.args
+            if (
+                not boundary_observations
+                and isinstance(process_args, (list, tuple))
+                and len(process_args) > 1
+                and str(process_args[1]).startswith("/dev/fd/")
+            ):
+                boundary_observations.append(boundary)
+                time.sleep(0.55)
+            return real_wait(process, *args, **kwargs)
+
+        monkeypatch.setattr(protocol.subprocess.Popen, "wait", delay_exit_wait)
+    else:
+        real_cleanup = protocol._cleanup_process
+
+        def delay_cleanup(*args: object, **kwargs: object) -> object:
+            boundary_observations.append(boundary)
+            time.sleep(0.55)
+            return real_cleanup(*args, **kwargs)
+
+        monkeypatch.setattr(protocol, "_cleanup_process", delay_cleanup)
+
+    with pytest.raises(ClaudeCliProtocolError) as captured:
+        ClaudeCliRunner().run(
+            command,
+            fake_controls=_fake_controls(tmp_path, scenario),
+        )
+
+    assert boundary_observations == [boundary]
+    assert captured.value.code == "ABSOLUTE_TIMEOUT"
+    assert captured.value.observation is ClaudeCliObservation.OUTCOME_UNRECONCILED
+    assert captured.value.evidence is None
+    assert captured.value.cleanup is not None
+    assert captured.value.cleanup.process_group_empty is True
+    assert captured.value.cleanup.marked_descendants_empty is True
+    assert captured.value.cleanup.leader_reaped is True
+    assert captured.value.cleanup.residue_rows == ()
     _assert_workspace_unchanged(workspace, head, status)
 
 

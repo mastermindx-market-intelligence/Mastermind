@@ -1084,7 +1084,7 @@ def compose_control_room(
         # build_autonomy_snapshot and its two mapper siblings below, not just
         # into project_autonomy — so a real, aged Agent OS/inbox/bindings
         # document reads honestly STALE instead of unconditionally CURRENT.
-        autonomy_snapshot = autonomy_control_room_projection.build_autonomy_snapshot(
+        autonomy_mapper_inputs = dict(
             inbox=inbox,
             boot_packet=boot_packet,
             active_builds=active_builds,
@@ -1093,6 +1093,8 @@ def compose_control_room(
             bindings=bindings,
             generated_at=generated_at,
         )
+        autonomy_snapshot = autonomy_control_room_projection.build_autonomy_snapshot(**autonomy_mapper_inputs)
+        autonomy_validity_context = autonomy_control_room_projection.build_autonomy_validity_context(**autonomy_mapper_inputs)
         # Agent-OS-declared blockers travel beside the snapshot rather than inside
         # it: the Steward's BlockerFact contract admits only Executive OS / Inbox /
         # Wake owners, so an agent_os-owned blocker cannot lawfully be a BlockerFact
@@ -1128,6 +1130,7 @@ def compose_control_room(
             declared_blockers=autonomy_declared_blockers,
             unmapped_responsibilities=autonomy_unmapped_responsibilities,
             runtime_root_candidates=autonomy_runtime_root_candidates,
+            validity_context=autonomy_validity_context,
         )
         # Dispatch-consumption is a SECOND pure pass over the cards just
         # produced, joined on the same exact (responsibility_ref, root_job_id)
@@ -1146,6 +1149,8 @@ def compose_control_room(
                 generated_at=generated_at,
                 dispatch_evidence=dispatch_evidence,
             ),
+            validity_context=autonomy_validity_context,
+            bindings=bindings,
         )
 
     doc = {

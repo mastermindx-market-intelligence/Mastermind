@@ -423,7 +423,30 @@ def test_error_terminal_unterminated_scenario_appends_one_raw_fragment(
     assert fragment == b"unterminated-post-terminal-fragment"
 
 
-def test_error_terminal_nonzero_scenario_preserves_the_fake_only_exit_rule(
+@pytest.mark.parametrize("scenario", ["result_failure", "result_permission_denial"])
+def test_exact_error_terminal_scenarios_preserve_the_fake_only_exit_rule(
+    tmp_path: Path,
+    scenario: str,
+) -> None:
+    command = _command(tmp_path)
+    completed = _run(
+        command.argv,
+        cwd=Path(command.working_directory),
+        environment=_environment(
+            command,
+            tmp_path,
+            MMX_FAKE_CLAUDE_SCENARIO=scenario,
+        ),
+    )
+
+    assert completed.returncode == 7
+    assert completed.stderr == b""
+    events = [json.loads(line) for line in completed.stdout.splitlines()]
+    assert len(events) == 5
+    assert events[-1]["subtype"] == "error_during_execution"
+
+
+def test_error_terminal_exit_zero_scenario_is_an_explicit_mismatch_adversary(
     tmp_path: Path,
 ) -> None:
     command = _command(tmp_path)
@@ -433,11 +456,11 @@ def test_error_terminal_nonzero_scenario_preserves_the_fake_only_exit_rule(
         environment=_environment(
             command,
             tmp_path,
-            MMX_FAKE_CLAUDE_SCENARIO="result_failure_nonzero",
+            MMX_FAKE_CLAUDE_SCENARIO="result_failure_exit_zero",
         ),
     )
 
-    assert completed.returncode == 7
+    assert completed.returncode == 0
     assert completed.stderr == b""
     events = [json.loads(line) for line in completed.stdout.splitlines()]
     assert len(events) == 5
@@ -468,7 +491,7 @@ def test_error_terminal_cleanup_adversaries_leave_only_the_declared_fake_marker(
         ),
     )
 
-    assert completed.returncode == 0, completed.stderr.decode(errors="replace")
+    assert completed.returncode == 7, completed.stderr.decode(errors="replace")
     assert completed.stderr == b""
     events = [json.loads(line) for line in completed.stdout.splitlines()]
     assert events[-1]["subtype"] == "error_during_execution"
@@ -503,7 +526,7 @@ def test_error_terminal_descendant_scenarios_record_one_bounded_process(
                 MMX_FAKE_CLAUDE_SCENARIO=scenario,
             ),
         )
-        assert completed.returncode == 0, completed.stderr.decode(errors="replace")
+        assert completed.returncode == 7, completed.stderr.decode(errors="replace")
         assert completed.stderr == b""
         events = [json.loads(line) for line in completed.stdout.splitlines()]
         assert events[-1]["subtype"] == "error_during_execution"

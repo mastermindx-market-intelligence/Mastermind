@@ -1831,3 +1831,446 @@ def test_c2_r1a_second_root_refuses_existing_generation_one_carrier_before_c1(
         first_root.job_id
     ).carrier_job_id == (first.carrier_job_id)
     assert second_runtime.current_capacity_commitment(second_root.job_id) is None
+
+# M2 is deliberately absent from the production migration vector. Only this
+# synthetic fixture changes the three coupled expectations, with real verifiers.
+_M2_V4_VECTOR = executive_runtime._MIGRATIONS
+_M2_V4_DIGEST = executive_runtime._NORMALIZED_V4_SCHEMA_DIGEST
+_M2_CANDIDATE_DIGEST = 'cd6fe8982e5b8ca8ea40ffff1dee089b5ab0d395916e7384a1ff14b5748f0caf'
+_M2_CANDIDATE_CHECKSUM = '9bee01a6ee1f129a9c6b6fb24f52012d2cb790c39057722c5a6867163055b3d8'
+
+
+def _m2_inputs():
+    from test_executive_physical_resources import _request, _policy, _observations
+    return _request(), {'policy': _policy(), 'observations': _observations(),
+                        'binding': {'origin': 'SYNTHETIC_TEST_ONLY', 'runtime': 'runtime-test'}}
+
+
+@pytest.fixture
+def m2_store(tmp_path, monkeypatch):
+    import copy
+    candidate = executive_runtime._PHYSICAL_RESOURCE_SCHEMA_CANDIDATE
+    assert executive_runtime._migration_checksum(candidate) == _M2_CANDIDATE_CHECKSUM
+    monkeypatch.setattr(executive_runtime, '_MIGRATIONS', _M2_V4_VECTOR + (
+        (5, 'synthetic_m2_physical_resources', candidate),))
+    monkeypatch.setattr(executive_runtime, 'SCHEMA_VERSION', 5)
+    monkeypatch.setattr(executive_runtime, '_NORMALIZED_V4_SCHEMA_DIGEST', _M2_CANDIDATE_DIGEST)
+    contexts = {}
+    def admission(self, request, caller_context, *, connection=None, stage='entry'):
+        context = contexts[str(self.store.path)]
+        if callable(context.get('at_stage')):
+            context['at_stage'](self, connection, stage)
+        return copy.deepcopy({key: context[key] for key in ('policy', 'observations', 'binding')})
+    monkeypatch.setattr(executive_runtime.ResourceBroker, '_physical_admission', admission)
+    def create(name='one'):
+        runtime = Runtime.at(tmp_path / name, clock=MutableClock(100), busy_timeout_ms=1000)
+        with runtime.store.read() as connection:
+            assert executive_runtime._normalized_schema_digest(connection) == _M2_CANDIDATE_DIGEST
+        request, context = _m2_inputs()
+        # Synthetic timing allowances include real filesystem/schema validation.
+        context['policy']['waits'] = {'service_request_max_ms': 2000, 'database_lock_max_ms': 1000}
+        context['policy']['freshness']['decision_to_effect_max_ms'] = 1000
+        contexts[str(runtime.store.path)] = context
+        # Existing-store opening must exercise the genuine version/name/checksum/digest checks.
+        second = Runtime.at(tmp_path / name, clock=MutableClock(100), busy_timeout_ms=1000)
+        return runtime, second, request, context
+    return create
+
+
+def _m2_rows(runtime):
+    with runtime.store.read() as connection:
+        return {table: [tuple(row) for row in connection.execute(f'SELECT * FROM {table} ORDER BY 1')]
+                for table in ('physical_resource_commitments', 'physical_resource_demands', 'events')}
+
+
+def _m2_envelope(request, result, command, *, evidence=None):
+    import copy
+    reservation = copy.deepcopy(request); reservation['command_id'] = 'physical:' + command
+    value = {'reservation': reservation, 'commitments': [
+        {'commitment_id': row['commitment_id'], 'allocation_generation': row['allocation_generation'],
+         'expected_revision': row['revision']}
+        for row in result['receipt']['commitments']]}
+    if evidence is not None:
+        value['evidence'] = evidence
+    return value
+
+
+def _m2_reserve(runtime, request):
+    return runtime.broker.reserve_physical(request, caller_context=None)
+
+
+def test_m2_default_runtime_keeps_exact_v4_vector_and_has_no_candidate_tables(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    assert executive_runtime.SCHEMA_VERSION == 4
+    assert executive_runtime._MIGRATIONS == _M2_V4_VECTOR
+    assert executive_runtime._NORMALIZED_V4_SCHEMA_DIGEST == _M2_V4_DIGEST
+    with runtime.store.read() as connection:
+        assert connection.execute("SELECT name FROM sqlite_master WHERE name LIKE 'physical_resource_%'").fetchall() == []
+        assert connection.execute('SELECT max(version) FROM schema_migrations').fetchone()[0] == 4
+
+
+def test_m2_default_resource_entry_refuses_before_database_open(tmp_path):
+    # Construction has already opened its temporary store. Resource entry must
+    # still deny before touching its now-unavailable resource database path.
+    runtime = Runtime.at(tmp_path)
+    runtime.store.path = tmp_path / 'unavailable.sqlite3'
+    runtime.store.create = False
+    for method in ('reserve_physical', 'begin_physical', 'observe_physical', 'settle_physical', 'physical_status'):
+        result = getattr(runtime.broker, method)({}, caller_context={'verified': True})
+        assert result == {'admitted': False, 'code': 'CALLER_BINDING_UNAVAILABLE', 'fresh_begin': False}
+        assert not runtime.store.path.exists()
+
+
+def test_m2_candidate_schema_uses_same_store_and_existing_events_without_jobs(m2_store):
+    runtime, _, request, _ = m2_store()
+    result = _m2_reserve(runtime, request)
+    assert result['admitted'] and not result['fresh_begin'], result
+    with runtime.store.read() as connection:
+        assert connection.execute('SELECT count(*) FROM jobs').fetchone()[0] == 0
+        assert connection.execute('SELECT count(*) FROM attempts').fetchone()[0] == 0
+        events = connection.execute('SELECT aggregate_type,job_id,attempt_id,worker_id FROM events').fetchall()
+        assert [tuple(r) for r in events] == [('physical_resource_operation', None, None, None)]
+        assert connection.execute('SELECT count(*) FROM physical_resource_demands').fetchone()[0] == 6
+        assert connection.execute('PRAGMA foreign_key_check').fetchall() == []
+        assert executive_runtime._normalized_schema_digest(connection) == _M2_CANDIDATE_DIGEST
+    with runtime.store.transaction() as connection:
+        connection.execute("UPDATE schema_migrations SET checksum='bad' WHERE version=5")
+    with pytest.raises(PersistenceError):
+        Runtime.at(runtime.store.root, clock=MutableClock(100))
+
+
+def test_m2_same_operation_phase_new_command_reconciles_without_second_debit(m2_store):
+    runtime, second, request, _ = m2_store()
+    first = _m2_reserve(runtime, request)
+    request['command_id'] = 'physical:reserve-again'
+    second_result = _m2_reserve(second, request)
+    assert second_result['admitted'], second_result
+    assert second_result['receipt'] == first['receipt']
+    assert second_result['fresh_begin'] is False
+    rows = _m2_rows(runtime)
+    assert len(rows['physical_resource_commitments']) == 1
+    assert len(rows['physical_resource_demands']) == 6
+    assert len(rows['events']) == 2
+    assert _m2_reserve(second, request) == second_result
+
+
+def test_m2_changed_owner_carrier_or_source_conflicts_with_existing_phase(m2_store):
+    import copy
+    runtime, _, request, _ = m2_store()
+    _m2_reserve(runtime, request); before = _m2_rows(runtime)
+    for key in ('owner_id', 'carrier_id', 'source_binding'):
+        changed = copy.deepcopy(request); changed['command_id'] = 'physical:changed-' + key
+        if key == 'source_binding': changed[key]['commit_sha'] = 'd' * 40
+        else: changed[key] += '-changed'
+        assert _m2_reserve(runtime, changed)['code'] == 'PHASE_IDENTITY_CONFLICT'
+        assert _m2_rows(runtime) == before
+
+
+def test_m2_partial_existing_bundle_refuses_all_new_rows(m2_store):
+    import copy
+    runtime, _, request, _ = m2_store()
+    _m2_reserve(runtime, request); before = _m2_rows(runtime)
+    request['command_id'] = 'physical:partial'
+    phase = copy.deepcopy(request['phases'][0]); phase['phase_key'] = 'second'
+    request['phases'].append(phase)
+    assert _m2_reserve(runtime, request)['code'] == 'PHASE_IDENTITY_CONFLICT'
+    assert _m2_rows(runtime) == before
+
+
+def test_m2_linked_reserve_is_atomic_at_every_header_demand_event_fault(m2_store):
+    import copy
+    stages = ['after_event'] + ['after_header:' + p for p in ('create', 'linked')]
+    stages += [f'after_demand:{p}:{i}' for p in ('create', 'linked') for i in range(6)]
+    for i, fault in enumerate(stages):
+        runtime, _, request, context = m2_store(str(i))
+        phase = copy.deepcopy(request['phases'][0]); phase['phase_key'] = 'linked'
+        request['phases'].append(phase)
+        before = _m2_rows(runtime)
+        def fail(_broker, _connection, stage):
+            if stage == fault: raise sqlite3.OperationalError('injected resource transaction fault')
+        context['at_stage'] = fail
+        with pytest.raises(PersistenceError): _m2_reserve(runtime, request)
+        assert _m2_rows(runtime) == before
+
+
+def test_m2_linked_begin_cas_is_atomic_at_every_phase_fault(m2_store):
+    import copy
+    for fault in ('after_event', 'after_header:create', 'after_header:linked'):
+        runtime, _, request, context = m2_store(fault.replace(':', '-'))
+        phase = copy.deepcopy(request['phases'][0]); phase['phase_key'] = 'linked'; request['phases'].append(phase)
+        reserved = _m2_reserve(runtime, request); before = _m2_rows(runtime)
+        def fail(_broker, _connection, stage):
+            if stage == fault: raise sqlite3.OperationalError('injected linked CAS failure')
+        context['at_stage'] = fail
+        with pytest.raises(PersistenceError):
+            runtime.broker.begin_physical(_m2_envelope(request, reserved, 'begin'), caller_context=None)
+        assert _m2_rows(runtime) == before
+
+
+def test_m2_stale_generation_revision_and_terminal_reopen_are_refused(m2_store):
+    import copy
+    runtime, _, request, _ = m2_store(); reserved = _m2_reserve(runtime, request)
+    # A valid-schema but incomplete own reservation cannot borrow a foreign
+    # operation's matching pool rows to pass BEGIN completeness.
+    for corruption in ('missing', 'inflated', 'attributed', 'revision', 'peak', 'window', 'attribution'):
+        damaged, _, _, _ = m2_store('own-' + corruption)
+        with runtime.store.read() as source, damaged.store.transaction() as target:
+            for table in ('events', 'physical_resource_commitments', 'physical_resource_demands'):
+                columns = [row[1] for row in source.execute(f'PRAGMA table_info({table})')]
+                for row in source.execute(f'SELECT * FROM {table}'):
+                    values = list(row)
+                    if table == 'physical_resource_demands' and row['capacity_pool_id'] == 'memory':
+                        if corruption == 'missing': continue
+                        field, value = {'inflated': ('remaining_charge', 21),
+                                        'attributed': ('attributed_materialized_or_active', 1),
+                                        'revision': ('observed_revision', 2),
+                                        'peak': ('qualified_incremental_peak', 21),
+                                        'window': ('window_binding_json', json.dumps({**json.loads(row['window_binding_json']), 'baseline_id': 'foreign-baseline'})),
+                                        'attribution': ('attribution_json', '{"attribution_id":"foreign"}')}[corruption]
+                        values[columns.index(field)] = value
+                    placeholders = ','.join('?' for _ in columns)
+                    target.execute(f"INSERT INTO {table}({','.join(columns)}) VALUES({placeholders})", tuple(values))
+        foreign = copy.deepcopy(request); foreign['operation_key'] = 'foreign'; foreign['command_id'] = 'physical:foreign'
+        assert _m2_reserve(damaged, foreign)['admitted']
+        before = _m2_rows(damaged)
+        refused = damaged.broker.begin_physical(_m2_envelope(request, reserved, 'bad-own'), caller_context=None)
+        assert refused['code'] == 'OWN_DEMAND_MISMATCH' and refused['fresh_begin'] is False
+        assert _m2_rows(damaged) == before
+    for field in ('allocation_generation', 'expected_revision'):
+        stale = _m2_envelope(request, reserved, 'stale-' + field); stale['commitments'][0][field] += 1
+        assert runtime.broker.begin_physical(stale, caller_context=None)['code'] == 'STALE_COMMITMENT'
+    no_effect = {'terminal_effect_state': 'NO_EFFECT', 'positive_no_effect': True, 'pools': {}}
+    settled = runtime.broker.settle_physical(_m2_envelope(request, reserved, 'abandon', evidence=no_effect), caller_context=None)
+    assert settled['receipt']['commitments'][0]['state'] == 'ABANDONED_NO_EFFECT'
+    before = _m2_rows(runtime)
+    assert runtime.broker.begin_physical(_m2_envelope(request, settled, 'reopen'), caller_context=None)['code'] == 'TERMINAL_COMMITMENT'
+    assert _m2_rows(runtime) == before
+    with pytest.raises(StateConflict):
+        with runtime.store.transaction() as connection:
+            connection.execute("UPDATE physical_resource_commitments SET state='RESERVED',revision=revision+1")
+
+
+def test_m2_two_runtime_instances_contend_for_one_shared_pool(m2_store):
+    import copy
+    runtime, second, request, context = m2_store()
+    context['observations']['pools']['external']['available'] = 60
+    other = copy.deepcopy(request); other['operation_key'] = 'other'; other['command_id'] = 'physical:other'
+    barrier = Barrier(2)
+    def reserve(pair):
+        barrier.wait(); return _m2_reserve(*pair)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(reserve, [(runtime, request), (second, other)]))
+    assert sorted(r['code'] for r in results) == ['INSUFFICIENT_CAPACITY', 'RESERVED']
+    assert len(_m2_rows(runtime)['physical_resource_commitments']) == 1
+    # A later larger sample cannot convert the recorded refusal into a grant.
+    context['observations']['pools']['external']['available'] = 100
+    loser_index = next(i for i, value in enumerate(results) if not value['admitted'])
+    loser_runtime, loser_request = [(runtime, request), (second, other)][loser_index]
+    assert _m2_reserve(loser_runtime, loser_request)['code'] == 'INSUFFICIENT_CAPACITY'
+    loser_request['command_id'] = 'physical:new-command-same-refusal'
+    assert _m2_reserve(loser_runtime, loser_request)['code'] == 'INSUFFICIENT_CAPACITY'
+    assert loser_runtime.broker.physical_status({'reservation': loser_request}, caller_context=None)['code'] == 'INSUFFICIENT_CAPACITY'
+
+
+def test_m2_begin_rechecks_freshness_and_policy_after_write_lock(m2_store):
+    for mutation in ('age', 'policy', 'deadline', 'commit_clock'):
+        runtime, _, request, context = m2_store(mutation); reserved = _m2_reserve(runtime, request)
+        runtime.store.clock = WriteLockRequiredClock(runtime.store.path, 100)
+        if mutation == 'commit_clock':
+            samples = []
+            locked_clock = runtime.store.clock
+            def crossing_clock():
+                samples.append(True)
+                return locked_clock() if len(samples) <= 2 else 1101
+            runtime.store.clock = crossing_clock
+        def move(_broker, _connection, stage):
+            if stage == 'locked':
+                if mutation == 'age': context['observations']['observed_at_ms'] = 0
+                elif mutation == 'policy': context['policy']['policy_revision'] = 'moved'
+            if stage == 'before_commit' and mutation == 'deadline': runtime.store.clock.value = 1101
+        context['at_stage'] = move
+        result = runtime.broker.begin_physical(_m2_envelope(request, reserved, 'begin'), caller_context=None)
+        assert result['fresh_begin'] is False, result
+        assert result['admitted'] is (mutation == 'commit_clock')
+        status = runtime.broker.physical_status({'reservation': request}, caller_context=None)
+        assert status['receipt']['commitments'][0]['state'] == ('EFFECT_MAY_HAVE_BEGUN' if mutation == 'commit_clock' else 'RESERVED')
+
+
+def test_m2_begin_replay_and_new_command_never_return_fresh_grant(m2_store):
+    import copy
+    # Exercise real SQLite query order independently of insertion/phase order.
+    # A20 + B10 uses exactly the available40 minus protected10 memory boundary.
+    for co_start in (False, True):
+        for reverse_insertion in (False, True):
+            for reverse_rows in (False, True):
+                name = f'{co_start}-{reverse_insertion}-{reverse_rows}'
+                runtime, second, request, context = m2_store(name)
+                small = copy.deepcopy(request)
+                small['operation_key'] = 'smaller'; small['command_id'] = 'physical:smaller'
+                small_phase = small['phases'][0]
+                small_phase['phase_key'] = 'smaller'
+                small_phase['profile'] = 'SYNTHETIC_SMALL_CREATE'
+                small_phase['demands'][0]['qualified_incremental_peak'] = 10
+                profile = copy.deepcopy(context['policy']['profiles'][0])
+                profile['profile'] = small_phase['profile']
+                profile['qualified_demands'] = copy.deepcopy(small_phase['demands'])
+                context['policy']['profiles'].append(profile)
+                context['observations']['pools']['memory']['available'] = 40
+                def row_order(_broker, connection, stage):
+                    if stage == 'locked':
+                        connection.execute(f'PRAGMA reverse_unordered_selects={int(reverse_rows)}')
+                context['at_stage'] = row_order
+                if co_start:
+                    request['phases'].append(small_phase)
+                    if reverse_insertion: request['phases'].reverse()
+                    reserved = _m2_reserve(runtime, request)
+                else:
+                    pairs = [(runtime, request), (second, small)]
+                    if reverse_insertion: pairs.reverse()
+                    results = {value['operation_key']: _m2_reserve(instance, value) for instance, value in pairs}
+                    assert all(result['admitted'] for result in results.values()), results
+                    reserved = results[request['operation_key']]
+                assert reserved['admitted'], reserved
+                envelope = _m2_envelope(request, reserved, 'begin')
+                first = runtime.broker.begin_physical(envelope, caller_context=None)
+                assert first['fresh_begin'] is True, (name, first)
+                assert first['start_deadline_ms'] == 1100
+                with runtime.store.read() as connection:
+                    for row in connection.execute('SELECT payload_json FROM events'):
+                        payload = json.loads(row[0])
+                        assert 'fresh_begin' not in payload and 'fresh_begin' not in payload['receipt']
+                replay = second.broker.begin_physical(envelope, caller_context=None)
+                assert replay['receipt'] == first['receipt'] and replay['fresh_begin'] is False
+                envelope['reservation']['command_id'] = 'physical:new-begin-command'
+                reconciled = second.broker.begin_physical(envelope, caller_context=None)
+                assert reconciled['receipt'] == first['receipt'] and reconciled['fresh_begin'] is False
+
+                # A different store starts with the same pristine reservations,
+                # then its current observation crosses the protected boundary.
+                limited, _, limited_request, limited_context = m2_store(name + '-limited')
+                limited_context['policy'] = copy.deepcopy(context['policy'])
+                limited_context['at_stage'] = row_order
+                limited_request = copy.deepcopy(request)
+                limit_reserved = _m2_reserve(limited, limited_request)
+                assert limit_reserved['admitted'], limit_reserved
+                if not co_start: assert _m2_reserve(limited, small)['admitted']
+                limited_context['observations']['pools']['memory']['available'] = 39
+                before = _m2_rows(limited)
+                refused = limited.broker.begin_physical(_m2_envelope(limited_request, limit_reserved, 'capacity'), caller_context=None)
+                assert refused['code'] == 'INSUFFICIENT_CAPACITY' and refused['fresh_begin'] is False, refused
+                assert _m2_rows(limited) == before
+
+
+def test_m2_lost_begin_reply_reconciles_with_zero_effect_stub_calls(m2_store):
+    runtime, second, request, _ = m2_store(); reserved = _m2_reserve(runtime, request)
+    envelope = _m2_envelope(request, reserved, 'lost-reply')
+    runtime.broker.begin_physical(envelope, caller_context=None)  # transport discards first reply
+    effects = []
+    recovered = second.broker.begin_physical(envelope, caller_context=None)
+    if recovered['fresh_begin']: effects.append('launch')
+    status = second.broker.physical_status({'reservation': request}, caller_context=None)
+    if status['fresh_begin']: effects.append('launch')
+    assert effects == [] and status['receipt']['commitments'][0]['state'] == 'EFFECT_MAY_HAVE_BEGUN'
+
+
+def test_m2_overrun_and_unknown_settlement_retain_required_charge(m2_store):
+    runtime, _, request, _ = m2_store(); reserved = _m2_reserve(runtime, request)
+    begun = runtime.broker.begin_physical(_m2_envelope(request, reserved, 'begin'), caller_context=None)
+    observed = runtime.broker.observe_physical(_m2_envelope(request, begun, 'observe', evidence={
+        'usage': {'memory': 150}, 'attribution_id': 'observed-memory', 'baseline_id': 'base-1'}), caller_context=None)
+    row = observed['receipt']['commitments'][0]
+    assert row['state'] == 'RECONCILIATION_REQUIRED'
+    assert next(d for d in row['demands'] if d['capacity_pool_id'] == 'memory')['remaining_charge'] == 150
+    unknown = runtime.broker.settle_physical(_m2_envelope(request, observed, 'unknown', evidence={
+        'terminal_effect_state': 'UNKNOWN', 'pools': {}}), caller_context=None)
+    assert unknown['receipt']['commitments'][0]['demands'] == row['demands']
+    assert unknown['fresh_begin'] is False
+    with pytest.raises(StateConflict):
+        with runtime.store.transaction() as connection:
+            connection.execute("UPDATE physical_resource_demands SET remaining_charge=0,attributed_materialized_or_active=0,attribution_json='{}'")
+    with pytest.raises(StateConflict):
+        with runtime.store.transaction() as connection:
+            connection.execute('UPDATE physical_resource_commitments SET last_observation_event_id=decision_event_id,revision=revision+1')
+
+
+def test_m2_creator_settlement_does_not_release_linked_build(m2_store):
+    import copy
+    runtime, _, request, _ = m2_store(); creator = _m2_reserve(runtime, request)
+    linked = copy.deepcopy(request); linked['command_id'] = 'physical:linked'; linked['phases'][0]['phase_key'] = 'later-build'
+    build = _m2_reserve(runtime, linked)
+    abandoned = runtime.broker.settle_physical(_m2_envelope(request, creator, 'creator-no-effect', evidence={
+        'terminal_effect_state': 'NO_EFFECT', 'positive_no_effect': True, 'pools': {}}), caller_context=None)
+    assert abandoned['receipt']['commitments'][0]['state'] == 'ABANDONED_NO_EFFECT'
+    status = runtime.broker.physical_status({'reservation': linked}, caller_context=None)
+    assert status['receipt']['commitments'] == build['receipt']['commitments']
+    assert sum(d['remaining_charge'] for d in status['receipt']['commitments'][0]['demands']) == 116
+
+
+def test_m2_each_resource_read_and_write_requires_connection_verifier(m2_store):
+    # Record SQLite authorization calls, not a mocked verifier. A semantic
+    # resource read before PRAGMA database_list is an observable guard omission.
+    for method in ('reserve_physical', 'begin_physical', 'observe_physical', 'settle_physical', 'physical_status'):
+        runtime, _, request, context = m2_store(method); reserved = _m2_reserve(runtime, request)
+        events = []; connections = set()
+        def trace(_broker, connection, _stage):
+            if connection is not None:
+                connections.add(id(connection))
+                def authorize(action, arg1, arg2, _db, _trigger):
+                    if action == sqlite3.SQLITE_PRAGMA and arg1 == 'database_list': events.append('guard')
+                    if action == sqlite3.SQLITE_READ and str(arg1).startswith('physical_resource_'):
+                        assert 'guard' in events, 'semantic resource query preceded canonical identity guard'
+                    return sqlite3.SQLITE_OK
+                connection.set_authorizer(authorize)
+        context['at_stage'] = trace
+        evidence = {'usage': {}, 'attribution_id': None, 'baseline_id': 'base-1'} if method == 'observe_physical' else {'terminal_effect_state': 'UNKNOWN', 'pools': {}}
+        value = request if method == 'reserve_physical' else (
+            {'reservation': request} if method == 'physical_status' else _m2_envelope(request, reserved, 'verify-' + method,
+                evidence=evidence if method in ('observe_physical', 'settle_physical') else None))
+        result = getattr(runtime.broker, method)(value, caller_context=None)
+        assert result['admitted'] and events.count('guard') >= 2
+        foreign, _, _, _ = m2_store(method + '-foreign')
+        # An admission resolver must never receive a foreign, unverified handle.
+        queried = []
+        def admission_query(_broker, connection, _stage):
+            if connection is not None:
+                queried.append(connection.execute('SELECT count(*) FROM physical_resource_commitments').fetchone()[0])
+        context['at_stage'] = admission_query
+        with foreign.store.read() as other:
+            with pytest.raises(StateConflict): runtime.broker._physical_guard(value, None, other, 'probe')
+        assert queried == []
+        original_store = runtime.broker.store
+        def swap(broker, connection, stage):
+            if connection is not None and stage == 'locked': broker.store = foreign.store
+        context['at_stage'] = swap
+        try:
+            with pytest.raises(StateConflict): getattr(runtime.broker, method)(value, caller_context=None)
+        finally:
+            runtime.broker.store = original_store
+
+
+def test_m2_policy_or_connection_change_rolls_back_before_commit(m2_store):
+    for mutation in ('policy', 'connection'):
+        runtime, _, request, context = m2_store(mutation); before = _m2_rows(runtime)
+        def moved(broker, connection, stage):
+            if stage == 'before_commit':
+                if mutation == 'policy': context['binding']['runtime'] = 'moved'
+                else:
+                    connection.execute('ROLLBACK')
+                    broker.store._assert_owned_snapshot_connection(connection)
+        context['at_stage'] = moved
+        if mutation == 'connection':
+            with pytest.raises(StateConflict): _m2_reserve(runtime, request)
+        else:
+            assert _m2_reserve(runtime, request)['code'] == 'ADMISSION_MOVED'
+        assert _m2_rows(runtime) == before
+
+
+def test_m2_no_test_configuration_or_schema_flag_arms_production(m2_store, monkeypatch):
+    runtime, _, request, _ = m2_store()
+    # Undo only the admission replacement; installed synthetic tables are still present.
+    monkeypatch.setattr(executive_runtime.ResourceBroker, '_physical_admission', _M2_PRODUCTION_ADMISSION)
+    assert _m2_reserve(runtime, request)['code'] == 'CALLER_BINDING_UNAVAILABLE'
+    assert _m2_rows(runtime)['physical_resource_commitments'] == []
+
+
+_M2_PRODUCTION_ADMISSION = getattr(executive_runtime.ResourceBroker, '_physical_admission', None)

@@ -35,6 +35,14 @@ from typing import Any, Mapping, Sequence
 
 _MINIMUM_VERSION = (2, 1, 248)
 _PERMISSION_PROMPTS_VERSION = (2, 1, 259)
+_REVIEWED_VERSIONS = frozenset({_MINIMUM_VERSION, _PERMISSION_PROMPTS_VERSION})
+_TERMINAL_PROFILES = {
+    _MINIMUM_VERSION: "claude-cli-stream-json/2.1.248/pf1-f0.v1",
+    _PERMISSION_PROMPTS_VERSION: "claude-cli-stream-json/2.1.259/pf1-f0.v1",
+}
+_EXPECTED_SUCCESS_RETURNCODE = 0
+_EXPECTED_FAILURE_RETURNCODE = 7
+_POLICY_IDENTITY_SCHEMA = "mmx.claude-cli-policy.v1"
 _MODEL_PATTERN = re.compile(
     r"claude-(?:opus|sonnet|haiku)-[1-9][0-9]*(?:-[0-9]+)+(?:-[0-9]{8})?\Z"
 )
@@ -77,6 +85,65 @@ _RESULT_ELAPSED_TIMING_FIELDS = frozenset(
 _RESULT_WALL_TIMING_FIELDS = frozenset(
     {"request_sent_wall_ms", "first_stream_post_wall_ms", "time_origin_ms"}
 )
+_RESULT_260_FIELDS = frozenset(
+    {
+        "first_content_frame_ms",
+        "first_stream_post_ms",
+        "first_stream_post_ack_ms",
+        "first_stream_post_wall_ms",
+    }
+)
+_RESULT_REQUIRED_FIELDS = frozenset(
+    {
+        "type",
+        "subtype",
+        "duration_ms",
+        "duration_api_ms",
+        "is_error",
+        "num_turns",
+        "result",
+        "stop_reason",
+        "total_cost_usd",
+        "usage",
+        "modelUsage",
+        "permission_denials",
+        "uuid",
+        "session_id",
+    }
+)
+_RESULT_COMMON_OPTIONAL_FIELDS = frozenset(
+    {
+        "structured_output",
+        "ttft_ms",
+        "ttft_stream_ms",
+        "time_to_request_ms",
+        "user_message_uuid",
+        "request_sent_wall_ms",
+        "time_to_request_from_spawn_ms",
+        "warm_spare_claimed",
+        "time_origin_ms",
+        "api_error_status",
+        "queued_turn_count",
+        "deferred_tool_use",
+        "terminal_reason",
+        "fast_mode_state",
+        "fast_mode_disabled_reason",
+        "origin",
+    }
+)
+_RESULT_259_FIELDS = frozenset({"user_message_uuids"})
+_RESULT_PROFILE_FIELDS = {
+    _MINIMUM_VERSION: (
+        _RESULT_REQUIRED_FIELDS,
+        _RESULT_COMMON_OPTIONAL_FIELDS,
+        _RESULT_259_FIELDS | _RESULT_260_FIELDS,
+    ),
+    _PERMISSION_PROMPTS_VERSION: (
+        _RESULT_REQUIRED_FIELDS,
+        _RESULT_COMMON_OPTIONAL_FIELDS | _RESULT_259_FIELDS,
+        _RESULT_260_FIELDS,
+    ),
+}
 _SAFE_ENVIRONMENT = (
     ("PATH", "/usr/bin:/bin"),
     ("LANG", "C.UTF-8"),
@@ -193,6 +260,11 @@ class ClaudeCliCommand:
     model: str
     session_id: str
     version: ClaudeCliVersion
+    policy_schema: str
+    terminal_profile: str
+    expected_success_returncode: int
+    expected_failure_returncode: int
+    policy_sha256: str
     prompt: str
     isolated_home: str
     isolated_tmp: str
@@ -271,11 +343,17 @@ class ClaudeCliRunReceipt:
     observation: ClaudeCliObservation
     session_id: str
     model: str
+    version: ClaudeCliVersion
+    policy_schema: str
+    terminal_profile: str
+    policy_sha256: str
     event_count: int
     read_count: int
     submission_count: int
     input_tokens: int
     output_tokens: int
+    cache_creation_input_tokens: int
+    cache_read_input_tokens: int
     cost_microusd: int
     result_sha256: str
     stream_sha256: str
@@ -299,11 +377,91 @@ class ClaudeCliRunReceipt:
             "observation": self.observation.value,
             "session_id": self.session_id,
             "model": self.model,
+            "version": str(self.version),
+            "policy_schema": self.policy_schema,
+            "terminal_profile": self.terminal_profile,
+            "policy_sha256": self.policy_sha256,
             "event_count": self.event_count,
             "read_count": self.read_count,
             "submission_count": self.submission_count,
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
+            "cache_creation_input_tokens": self.cache_creation_input_tokens,
+            "cache_read_input_tokens": self.cache_read_input_tokens,
+            "cost_microusd": self.cost_microusd,
+            "result_sha256": self.result_sha256,
+            "stream_sha256": self.stream_sha256,
+            "argv_sha256": self.argv_sha256,
+            "environment_sha256": self.environment_sha256,
+            "settings_sha256": self.settings_sha256,
+            "binary_sha256": self.binary_sha256,
+            "binary_device": self.binary_device,
+            "binary_inode": self.binary_inode,
+            "binary_uid": self.binary_uid,
+            "binary_mode": self.binary_mode,
+            "binary_size": self.binary_size,
+            "binary_mtime_ns": self.binary_mtime_ns,
+            "returncode": self.returncode,
+            "events": [dataclasses.asdict(event) for event in self.events],
+            "cleanup": self.cleanup.to_dict(),
+            "receipt_sha256": self.receipt_sha256,
+        }
+
+
+@dataclasses.dataclass(frozen=True)
+class ClaudeCliFailureEvidence:
+    """Bounded public evidence for one fully reconciled terminal failure."""
+
+    observation: ClaudeCliObservation
+    failure_code: str
+    session_id: str
+    model: str
+    version: ClaudeCliVersion
+    policy_schema: str
+    terminal_profile: str
+    policy_sha256: str
+    event_count: int
+    read_count: int
+    submission_count: int
+    input_tokens: int
+    output_tokens: int
+    cache_creation_input_tokens: int
+    cache_read_input_tokens: int
+    cost_microusd: int
+    result_sha256: str
+    stream_sha256: str
+    argv_sha256: str
+    environment_sha256: str
+    settings_sha256: str
+    binary_sha256: str
+    binary_device: int
+    binary_inode: int
+    binary_uid: int
+    binary_mode: int
+    binary_size: int
+    binary_mtime_ns: int
+    returncode: int
+    events: tuple[ClaudeCliEvent, ...]
+    cleanup: ClaudeCliCleanupReceipt
+    receipt_sha256: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "observation": self.observation.value,
+            "failure_code": self.failure_code,
+            "session_id": self.session_id,
+            "model": self.model,
+            "version": str(self.version),
+            "policy_schema": self.policy_schema,
+            "terminal_profile": self.terminal_profile,
+            "policy_sha256": self.policy_sha256,
+            "event_count": self.event_count,
+            "read_count": self.read_count,
+            "submission_count": self.submission_count,
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "cache_creation_input_tokens": self.cache_creation_input_tokens,
+            "cache_read_input_tokens": self.cache_read_input_tokens,
             "cost_microusd": self.cost_microusd,
             "result_sha256": self.result_sha256,
             "stream_sha256": self.stream_sha256,
@@ -334,11 +492,13 @@ class ClaudeCliProtocolError(RuntimeError):
         message: str,
         *,
         cleanup: ClaudeCliCleanupReceipt | None = None,
+        evidence: ClaudeCliFailureEvidence | None = None,
     ) -> None:
         super().__init__(message)
         self.code = code
         self.observation = observation
         self.cleanup = cleanup
+        self.evidence = evidence
 
 
 class _DuplicateKey(ValueError):
@@ -481,10 +641,16 @@ def _validate_policy(
         raise _fail_before_start("POLICY_INVALID", "Claude invocation policy is invalid")
     if not isinstance(policy.version, ClaudeCliVersion):
         raise _fail_before_start("VERSION_INVALID", "Claude CLI version is invalid")
-    if (policy.version.major, policy.version.minor, policy.version.patch) < _MINIMUM_VERSION:
+    version_tuple = (policy.version.major, policy.version.minor, policy.version.patch)
+    if version_tuple < _MINIMUM_VERSION:
         raise _fail_before_start(
             "VERSION_UNSUPPORTED",
             "Claude CLI version is below the supported restricted-mode floor",
+        )
+    if version_tuple not in _REVIEWED_VERSIONS:
+        raise _fail_before_start(
+            "VERSION_UNSUPPORTED",
+            "Claude CLI version is not an exact reviewed profile",
         )
     if not isinstance(policy.binary, Path) or not policy.binary.is_absolute():
         raise _fail_before_start("BINARY_INVALID", "Claude binary must be an absolute path")
@@ -647,6 +813,57 @@ def _environment_digest(environment: Sequence[tuple[str, str]]) -> str:
     return _canonical_sha256(normalized)
 
 
+def _terminal_profile(version: ClaudeCliVersion) -> str:
+    profile = _TERMINAL_PROFILES.get((version.major, version.minor, version.patch))
+    if profile is None:
+        raise _fail_before_start(
+            "VERSION_UNSUPPORTED",
+            "Claude CLI version is not an exact reviewed profile",
+        )
+    return profile
+
+
+def _expected_policy_sha256(command: ClaudeCliCommand) -> str:
+    """Digest every semantic input without serializing private host paths."""
+
+    return _canonical_sha256(
+        {
+            "schema": _POLICY_IDENTITY_SCHEMA,
+            "version": str(command.version),
+            "terminal_profile": command.terminal_profile,
+            "expected_success_returncode": command.expected_success_returncode,
+            "expected_failure_returncode": command.expected_failure_returncode,
+            "model": command.model,
+            "session_id": command.session_id,
+            "prompt_sha256": _sha256_bytes(command.prompt.encode("utf-8")),
+            "evidence_relative_path": command.evidence_relative_path,
+            "evidence_sha256": command.evidence_sha256,
+            "expected_result_sha256": command.expected_result_sha256,
+            "api_timeout_ms": command.api_timeout_ms,
+            "idle_timeout_seconds": command.idle_timeout_seconds,
+            "absolute_timeout_seconds": command.absolute_timeout_seconds,
+            "terminate_grace_seconds": command.terminate_grace_seconds,
+            "max_stdout_bytes": command.max_stdout_bytes,
+            "max_stderr_bytes": command.max_stderr_bytes,
+            "max_line_bytes": command.max_line_bytes,
+            "max_events": command.max_events,
+            "max_json_depth": command.max_json_depth,
+            "max_json_string_bytes": command.max_json_string_bytes,
+            "max_json_collection_items": command.max_json_collection_items,
+            "argv_sha256": command.argv_sha256,
+            "environment_sha256": command.environment_sha256,
+            "settings_sha256": command.settings_sha256,
+            "binary_sha256": command.binary_sha256,
+            "binary_uid": command.binary_uid,
+            "binary_mode": command.binary_mode,
+            "binary_size": command.binary_size,
+            "evidence_uid": command.evidence_uid,
+            "evidence_mode": command.evidence_mode,
+            "evidence_size": command.evidence_size,
+        }
+    )
+
+
 def compile_claude_cli_command(
     policy: ClaudeCliInvocationPolicy,
     *,
@@ -689,13 +906,18 @@ def compile_claude_cli_command(
         prompt=policy.prompt,
         settings_json=_closed_settings_json(policy.evidence_relative_path),
     )
-    return ClaudeCliCommand(
+    command = ClaudeCliCommand(
         argv=argv,
         environment=environment,
         working_directory=str(workspace),
         model=policy.model,
         session_id=policy.session_id,
         version=policy.version,
+        policy_schema=_POLICY_IDENTITY_SCHEMA,
+        terminal_profile=_terminal_profile(policy.version),
+        expected_success_returncode=_EXPECTED_SUCCESS_RETURNCODE,
+        expected_failure_returncode=_EXPECTED_FAILURE_RETURNCODE,
+        policy_sha256="",
         prompt=policy.prompt,
         isolated_home=str(home),
         isolated_tmp=str(scratch),
@@ -732,6 +954,7 @@ def compile_claude_cli_command(
         evidence_size=evidence_info.st_size,
         evidence_mtime_ns=evidence_info.st_mtime_ns,
     )
+    return dataclasses.replace(command, policy_sha256=_expected_policy_sha256(command))
 
 
 def _reject_duplicate_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -866,12 +1089,23 @@ def _expect_session(value: Mapping[str, Any], session_id: str) -> None:
         )
 
 
-def _expect_optional_uuid_echoes(value: Mapping[str, Any], *, code: str) -> None:
+def _expect_optional_uuid_echoes(
+    value: Mapping[str, Any],
+    *,
+    code: str,
+    version: ClaudeCliVersion,
+) -> None:
     primary = value.get("user_message_uuid")
     if "user_message_uuid" in value:
         _expect_uuid(primary, code=code, message="user-message UUID was invalid")
     if "user_message_uuids" not in value:
         return
+    if (version.major, version.minor, version.patch) != _PERMISSION_PROMPTS_VERSION:
+        raise _StreamViolation(
+            "VERSION_PROFILE_FIELD_DRIFT",
+            ClaudeCliObservation.OUTCOME_UNRECONCILED,
+            "stream field was not admitted by the exact reviewed CLI profile",
+        )
     echoes = value.get("user_message_uuids")
     if not isinstance(echoes, list) or not 1 <= len(echoes) <= 64:
         raise _StreamViolation(
@@ -1142,16 +1376,12 @@ def _validate_model_usage(
                 ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "per-model capacity was invalid",
             )
-    for key in ("canonicalModel", "provider", "costBasis"):
-        token = model_usage.get(key)
-        if token is not None and (
-            not isinstance(token, str) or _SAFE_PROTOCOL_TOKEN.fullmatch(token) is None
-        ):
-            raise _StreamViolation(
-                "USAGE_INVALID",
-                ClaudeCliObservation.OUTCOME_UNRECONCILED,
-                "per-model metadata was invalid",
-            )
+    if any(key in model_usage for key in ("canonicalModel", "provider", "costBasis")):
+        raise _StreamViolation(
+            "USAGE_IDENTITY_UNSUPPORTED",
+            ClaudeCliObservation.OUTCOME_UNRECONCILED,
+            "per-model identity or cost metadata was not bound by the reviewed profile",
+        )
 
 
 def _validate_terminal_permission_denials(value: Any) -> bool:
@@ -1189,9 +1419,29 @@ class _StreamParser:
         self.result_sha256 = ""
         self.input_tokens = 0
         self.output_tokens = 0
+        self.cache_creation_input_tokens = 0
+        self.cache_read_input_tokens = 0
         self.cost_microusd = 0
         self._provisional_failure: tuple[str, ClaudeCliObservation, str] | None = None
         self.events: list[ClaudeCliEvent] = []
+
+    def _observe_usage(self, counters: tuple[int, int, int, int]) -> None:
+        (
+            input_tokens,
+            output_tokens,
+            cache_creation_input_tokens,
+            cache_read_input_tokens,
+        ) = counters
+        self.input_tokens = max(self.input_tokens, input_tokens)
+        self.output_tokens = max(self.output_tokens, output_tokens)
+        self.cache_creation_input_tokens = max(
+            self.cache_creation_input_tokens,
+            cache_creation_input_tokens,
+        )
+        self.cache_read_input_tokens = max(
+            self.cache_read_input_tokens,
+            cache_read_input_tokens,
+        )
 
     def consume(self, raw_line: bytes) -> None:
         self.event_count += 1
@@ -1485,9 +1735,7 @@ class _StreamParser:
                 code="USAGE_INVALID",
                 message="usage-event UUID was invalid",
             )
-        input_tokens, output_tokens, _, _ = _consume_usage_payload(value.get("usage"))
-        self.input_tokens = max(self.input_tokens, input_tokens)
-        self.output_tokens = max(self.output_tokens, output_tokens)
+        self._observe_usage(_consume_usage_payload(value.get("usage")))
 
     def _consume_assistant(self, value: Mapping[str, Any]) -> None:
         _expect_keys(
@@ -1556,7 +1804,11 @@ class _StreamParser:
                 ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "assistant request identity was invalid",
             )
-        _expect_optional_uuid_echoes(value, code="ASSISTANT_EVENT_INVALID")
+        _expect_optional_uuid_echoes(
+            value,
+            code="ASSISTANT_EVENT_INVALID",
+            version=self.command.version,
+        )
         if "timestamp" in value:
             _expect_optional_timestamp(
                 value.get("timestamp"),
@@ -1634,7 +1886,7 @@ class _StreamParser:
                 ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "assistant context-management metadata was not accepted",
             )
-        _consume_usage_payload(message.get("usage"))
+        self._observe_usage(_consume_usage_payload(message.get("usage")))
         content = message.get("content")
         if not isinstance(content, list) or len(content) != 1 or not isinstance(content[0], dict):
             raise _StreamViolation(
@@ -1916,68 +2168,27 @@ class _StreamParser:
                 ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "terminal result was out of order",
             )
+        version_key = (
+            self.command.version.major,
+            self.command.version.minor,
+            self.command.version.patch,
+        )
+        required_fields, optional_fields, forbidden_fields = _RESULT_PROFILE_FIELDS[
+            version_key
+        ]
+        if forbidden_fields.intersection(value):
+            raise _StreamViolation(
+                "VERSION_PROFILE_FIELD_DRIFT",
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                "stream field was not admitted by the exact reviewed CLI profile",
+            )
         _expect_keys(
             value,
-            frozenset(
-                {
-                    "type",
-                    "subtype",
-                    "is_error",
-                    "duration_ms",
-                    "duration_api_ms",
-                    "num_turns",
-                    "result",
-                    "session_id",
-                    "total_cost_usd",
-                    "usage",
-                    "modelUsage",
-                    "permission_denials",
-                    "uuid",
-                    "structured_output",
-                    "stop_reason",
-                    "ttft_ms",
-                    "ttft_stream_ms",
-                    "time_to_request_ms",
-                    "user_message_uuid",
-                    "user_message_uuids",
-                    "request_sent_wall_ms",
-                    "first_content_frame_ms",
-                    "first_stream_post_ms",
-                    "first_stream_post_ack_ms",
-                    "first_stream_post_wall_ms",
-                    "time_to_request_from_spawn_ms",
-                    "warm_spare_claimed",
-                    "time_origin_ms",
-                    "api_error_status",
-                    "queued_turn_count",
-                    "deferred_tool_use",
-                    "terminal_reason",
-                    "fast_mode_state",
-                    "fast_mode_disabled_reason",
-                    "origin",
-                }
-            ),
+            required_fields | optional_fields,
         )
         _expect_required_keys(
             value,
-            frozenset(
-                {
-                    "type",
-                    "subtype",
-                    "duration_ms",
-                    "duration_api_ms",
-                    "is_error",
-                    "num_turns",
-                    "result",
-                    "stop_reason",
-                    "total_cost_usd",
-                    "usage",
-                    "modelUsage",
-                    "permission_denials",
-                    "uuid",
-                    "session_id",
-                }
-            ),
+            required_fields,
             code="RESULT_INVALID",
             message="terminal result omitted required current-contract fields",
         )
@@ -2007,7 +2218,11 @@ class _StreamParser:
             code="RESULT_INVALID",
             message="terminal result UUID was invalid",
         )
-        _expect_optional_uuid_echoes(value, code="RESULT_INVALID")
+        _expect_optional_uuid_echoes(
+            value,
+            code="RESULT_INVALID",
+            version=self.command.version,
+        )
         for field in _RESULT_ELAPSED_TIMING_FIELDS:
             if field not in value:
                 continue
@@ -2153,8 +2368,14 @@ class _StreamParser:
                 ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "successful terminal result contradicted permission evidence",
             )
-        self.input_tokens = input_tokens
-        self.output_tokens = output_tokens
+        self._observe_usage(
+            (
+                input_tokens,
+                output_tokens,
+                cache_creation_input_tokens,
+                cache_read_input_tokens,
+            )
+        )
         self.cost_microusd = int(round(float(cost) * 1_000_000))
         self.result_sha256 = _sha256_bytes(result.encode("utf-8"))
         if subtype == "error_during_execution":
@@ -2729,6 +2950,21 @@ def _validate_command_integrity(command: ClaudeCliCommand) -> None:
     if not isinstance(command, ClaudeCliCommand):
         raise _fail_before_start("COMMAND_INVALID", "Claude command is invalid")
     relative = _validate_safe_relative_path(command.evidence_relative_path)
+    try:
+        expected_terminal_profile = _terminal_profile(command.version)
+    except ClaudeCliProtocolError:
+        raise _fail_before_start(
+            "COMMAND_DRIFT",
+            "compiled policy identity drifted",
+        ) from None
+    if (
+        command.policy_schema != _POLICY_IDENTITY_SCHEMA
+        or command.terminal_profile != expected_terminal_profile
+        or command.expected_success_returncode != _EXPECTED_SUCCESS_RETURNCODE
+        or command.expected_failure_returncode != _EXPECTED_FAILURE_RETURNCODE
+        or command.policy_sha256 != _expected_policy_sha256(command)
+    ):
+        raise _fail_before_start("COMMAND_DRIFT", "compiled policy identity drifted")
     settings_json = _closed_settings_json(command.evidence_relative_path)
     expected_argv = _build_argv(
         binary=command.argv[0] if command.argv else "",
@@ -2975,6 +3211,8 @@ class ClaudeCliRunner:
                 "MMX_FAKE_CLAUDE_EVIDENCE_MTIME_NS": str(command.evidence_mtime_ns),
             }
         )
+        started_at = time.monotonic()
+        semantic_deadline = started_at + command.absolute_timeout_seconds
         try:
             process = subprocess.Popen(
                 (sys.executable, f"/dev/fd/{binary_descriptor}", *command.argv[1:]),
@@ -3056,7 +3294,6 @@ class ClaudeCliRunner:
                 try:
                     selector.register(process.stdout, selectors.EVENT_READ, "stdout")
                     selector.register(process.stderr, selectors.EVENT_READ, "stderr")
-                    started_at = time.monotonic()
                     last_activity = started_at
                     while selector.get_map():
                         now = time.monotonic()
@@ -3066,7 +3303,7 @@ class ClaudeCliRunner:
                                 ClaudeCliObservation.OUTCOME_UNRECONCILED,
                                 "invocation was cancelled after process start",
                             )
-                        if now - started_at >= command.absolute_timeout_seconds:
+                        if now >= semantic_deadline:
                             raise _StreamViolation(
                                 "ABSOLUTE_TIMEOUT",
                                 ClaudeCliObservation.OUTCOME_UNRECONCILED,
@@ -3080,7 +3317,7 @@ class ClaudeCliRunner:
                             )
                         wait_for = min(
                             0.05,
-                            command.absolute_timeout_seconds - (now - started_at),
+                            semantic_deadline - now,
                             command.idle_timeout_seconds - (now - last_activity),
                         )
                         for key, _ in selector.select(timeout=max(wait_for, 0.001)):
@@ -3165,12 +3402,30 @@ class ClaudeCliRunner:
                             ClaudeCliObservation.OUTCOME_UNRECONCILED,
                             "stream ended with an unterminated line",
                         )
+                    if cancel_event is not None and cancel_event.is_set():
+                        raise _StreamViolation(
+                            "CANCELLED_AFTER_START",
+                            ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                            "invocation was cancelled after process start",
+                        )
+                    if time.monotonic() >= semantic_deadline:
+                        raise _StreamViolation(
+                            "ABSOLUTE_TIMEOUT",
+                            ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                            "Claude CLI absolute deadline expired",
+                        )
                     parser.finalize()
                     if cancel_event is not None and cancel_event.is_set():
                         raise _StreamViolation(
                             "CANCELLED_AFTER_START",
                             ClaudeCliObservation.OUTCOME_UNRECONCILED,
                             "invocation was cancelled after process start",
+                        )
+                    if time.monotonic() >= semantic_deadline:
+                        raise _StreamViolation(
+                            "ABSOLUTE_TIMEOUT",
+                            ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                            "Claude CLI absolute deadline expired",
                         )
                 finally:
                     try:
@@ -3180,14 +3435,19 @@ class ClaudeCliRunner:
                         reader_closed = False
 
                 try:
-                    returncode = process.wait(
-                        timeout=max(command.terminate_grace_seconds, 1.0)
-                    )
+                    remaining_semantic_budget = semantic_deadline - time.monotonic()
+                    if remaining_semantic_budget <= 0:
+                        raise _StreamViolation(
+                            "ABSOLUTE_TIMEOUT",
+                            ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                            "Claude CLI absolute deadline expired",
+                        )
+                    returncode = process.wait(timeout=remaining_semantic_budget)
                 except subprocess.TimeoutExpired:
                     raise _StreamViolation(
-                        "PROCESS_EXIT_TIMEOUT",
+                        "ABSOLUTE_TIMEOUT",
                         ClaudeCliObservation.OUTCOME_UNRECONCILED,
-                        "Claude CLI did not exit after its terminal result",
+                        "Claude CLI absolute deadline expired before process exit",
                     ) from None
                 if cancel_event is not None and cancel_event.is_set():
                     raise _StreamViolation(
@@ -3195,7 +3455,18 @@ class ClaudeCliRunner:
                         ClaudeCliObservation.OUTCOME_UNRECONCILED,
                         "invocation was cancelled after process start",
                     )
-                if returncode != 0:
+                if time.monotonic() >= semantic_deadline:
+                    raise _StreamViolation(
+                        "ABSOLUTE_TIMEOUT",
+                        ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                        "Claude CLI absolute deadline expired",
+                    )
+                expected_returncode = (
+                    command.expected_failure_returncode
+                    if parser._provisional_failure is not None
+                    else command.expected_success_returncode
+                )
+                if returncode != expected_returncode:
                     raise _StreamViolation(
                         "PROCESS_EXIT_INVALID",
                         ClaudeCliObservation.OUTCOME_UNRECONCILED,
@@ -3274,6 +3545,20 @@ class ClaudeCliRunner:
                             "Claude CLI cleanup failed",
                         )
 
+        if failure is None:
+            if cancel_event is not None and cancel_event.is_set():
+                failure = (
+                    "CANCELLED_AFTER_START",
+                    ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                    "invocation was cancelled after process start",
+                )
+            elif time.monotonic() >= semantic_deadline:
+                failure = (
+                    "ABSOLUTE_TIMEOUT",
+                    ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                    "Claude CLI absolute deadline expired",
+                )
+
         if failure is not None:
             raise ClaudeCliProtocolError(
                 failure[0],
@@ -3320,21 +3605,95 @@ class ClaudeCliRunner:
                 cleanup=cleanup,
             ) from None
         if parser._provisional_failure is not None:
+            failure_body = {
+                "observation": parser._provisional_failure[1].value,
+                "failure_code": parser._provisional_failure[0],
+                "session_id": command.session_id,
+                "model": command.model,
+                "version": str(command.version),
+                "policy_schema": command.policy_schema,
+                "terminal_profile": command.terminal_profile,
+                "policy_sha256": command.policy_sha256,
+                "event_count": parser.event_count,
+                "read_count": parser.read_count,
+                "submission_count": parser.submission_count,
+                "input_tokens": parser.input_tokens,
+                "output_tokens": parser.output_tokens,
+                "cache_creation_input_tokens": parser.cache_creation_input_tokens,
+                "cache_read_input_tokens": parser.cache_read_input_tokens,
+                "cost_microusd": parser.cost_microusd,
+                "result_sha256": parser.result_sha256,
+                "stream_sha256": stream_digest.hexdigest(),
+                "argv_sha256": command.argv_sha256,
+                "environment_sha256": command.environment_sha256,
+                "settings_sha256": command.settings_sha256,
+                "binary_sha256": command.binary_sha256,
+                "binary_device": command.binary_device,
+                "binary_inode": command.binary_inode,
+                "binary_uid": command.binary_uid,
+                "binary_mode": command.binary_mode,
+                "binary_size": command.binary_size,
+                "binary_mtime_ns": command.binary_mtime_ns,
+                "returncode": returncode,
+                "events": [dataclasses.asdict(event) for event in parser.events],
+                "cleanup": cleanup.to_dict(),
+            }
+            evidence = ClaudeCliFailureEvidence(
+                observation=parser._provisional_failure[1],
+                failure_code=parser._provisional_failure[0],
+                session_id=command.session_id,
+                model=command.model,
+                version=command.version,
+                policy_schema=command.policy_schema,
+                terminal_profile=command.terminal_profile,
+                policy_sha256=command.policy_sha256,
+                event_count=parser.event_count,
+                read_count=parser.read_count,
+                submission_count=parser.submission_count,
+                input_tokens=parser.input_tokens,
+                output_tokens=parser.output_tokens,
+                cache_creation_input_tokens=parser.cache_creation_input_tokens,
+                cache_read_input_tokens=parser.cache_read_input_tokens,
+                cost_microusd=parser.cost_microusd,
+                result_sha256=parser.result_sha256,
+                stream_sha256=stream_digest.hexdigest(),
+                argv_sha256=command.argv_sha256,
+                environment_sha256=command.environment_sha256,
+                settings_sha256=command.settings_sha256,
+                binary_sha256=command.binary_sha256,
+                binary_device=command.binary_device,
+                binary_inode=command.binary_inode,
+                binary_uid=command.binary_uid,
+                binary_mode=command.binary_mode,
+                binary_size=command.binary_size,
+                binary_mtime_ns=command.binary_mtime_ns,
+                returncode=returncode,
+                events=tuple(parser.events),
+                cleanup=cleanup,
+                receipt_sha256=_canonical_sha256(failure_body),
+            )
             raise ClaudeCliProtocolError(
                 parser._provisional_failure[0],
                 parser._provisional_failure[1],
                 parser._provisional_failure[2],
                 cleanup=cleanup,
+                evidence=evidence,
             ) from None
         receipt_body = {
             "observation": ClaudeCliObservation.TERMINAL_RESULT_OBSERVED.value,
             "session_id": command.session_id,
             "model": command.model,
+            "version": str(command.version),
+            "policy_schema": command.policy_schema,
+            "terminal_profile": command.terminal_profile,
+            "policy_sha256": command.policy_sha256,
             "event_count": parser.event_count,
             "read_count": parser.read_count,
             "submission_count": parser.submission_count,
             "input_tokens": parser.input_tokens,
             "output_tokens": parser.output_tokens,
+            "cache_creation_input_tokens": parser.cache_creation_input_tokens,
+            "cache_read_input_tokens": parser.cache_read_input_tokens,
             "cost_microusd": parser.cost_microusd,
             "result_sha256": parser.result_sha256,
             "stream_sha256": stream_digest.hexdigest(),
@@ -3356,11 +3715,17 @@ class ClaudeCliRunner:
             observation=ClaudeCliObservation.TERMINAL_RESULT_OBSERVED,
             session_id=command.session_id,
             model=command.model,
+            version=command.version,
+            policy_schema=command.policy_schema,
+            terminal_profile=command.terminal_profile,
+            policy_sha256=command.policy_sha256,
             event_count=parser.event_count,
             read_count=parser.read_count,
             submission_count=parser.submission_count,
             input_tokens=parser.input_tokens,
             output_tokens=parser.output_tokens,
+            cache_creation_input_tokens=parser.cache_creation_input_tokens,
+            cache_read_input_tokens=parser.cache_read_input_tokens,
             cost_microusd=parser.cost_microusd,
             result_sha256=parser.result_sha256,
             stream_sha256=stream_digest.hexdigest(),
@@ -3384,6 +3749,7 @@ __all__ = [
     "ClaudeCliCleanupReceipt",
     "ClaudeCliCommand",
     "ClaudeCliEvent",
+    "ClaudeCliFailureEvidence",
     "ClaudeCliInvocationPolicy",
     "ClaudeCliObservation",
     "ClaudeCliProtocolError",

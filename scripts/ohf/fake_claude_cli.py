@@ -954,6 +954,11 @@ def _main() -> int:
         events[0]["cwd"] = "cwd-mismatch"
     elif scenario == "init_version_drift":
         events[0]["claude_code_version"] = "2.1.258"
+    elif scenario == "assistant_uuid_inventory":
+        events[1]["user_message_uuid"] = "66666666-6666-4666-8666-666666666666"
+        events[1]["user_message_uuids"] = [
+            "66666666-6666-4666-8666-666666666666"
+        ]
     elif scenario == "assistant_parent_tool":
         events[1]["parent_tool_use_id"] = "toolu_parent"
     elif scenario == "assistant_write_tool":
@@ -1042,6 +1047,7 @@ def _main() -> int:
         "result_failure_duplicate_same_emission",
         "result_failure_escaped_child_after_result",
         "result_failure_hang",
+        "result_failure_exit_zero",
         "result_failure_nonzero",
         "result_failure_post_event",
         "result_failure_retry_later",
@@ -1063,6 +1069,14 @@ def _main() -> int:
                 "subtype": "error_during_execution",
                 "is_error": True,
                 "permission_denials": [{"tool_name": "Read"}],
+            }
+        )
+    elif scenario == "result_failure_variant":
+        events[-1].update(
+            {
+                "subtype": "error_during_execution",
+                "is_error": True,
+                "result": "alternate bounded provider failure",
             }
         )
     elif scenario in {
@@ -1190,6 +1204,41 @@ def _main() -> int:
         del events[-1]["usage"]["cache_creation_input_tokens"]
     elif scenario == "result_timing_type_invalid":
         events[-1]["ttft_ms"] = "fast"
+    elif scenario == "result_uuid_inventory":
+        events[-1]["user_message_uuid"] = "66666666-6666-4666-8666-666666666666"
+        events[-1]["user_message_uuids"] = [
+            "66666666-6666-4666-8666-666666666666"
+        ]
+    elif scenario == "result_260_latency":
+        events[-1]["first_content_frame_ms"] = 1
+    elif scenario == "usage_regression":
+        events.insert(
+            1,
+            {
+                "type": "system",
+                "subtype": "usage",
+                "session_id": session_id,
+                "usage": {
+                    "input_tokens": 999,
+                    "output_tokens": 888,
+                    "cache_creation_input_tokens": 77,
+                    "cache_read_input_tokens": 66,
+                },
+            },
+        )
+    elif scenario == "assistant_usage_regression":
+        events[1]["message"]["usage"] = {
+            "input_tokens": 999,
+            "output_tokens": 888,
+            "cache_creation_input_tokens": 77,
+            "cache_read_input_tokens": 66,
+        }
+    elif scenario == "result_canonical_model_metadata":
+        events[-1]["modelUsage"][model]["canonicalModel"] = "claude-opus-4-6"
+    elif scenario == "result_provider_metadata":
+        events[-1]["modelUsage"][model]["provider"] = "bedrock"
+    elif scenario == "result_cost_basis_metadata":
+        events[-1]["modelUsage"][model]["costBasis"] = "list-price"
     elif scenario == "result_queued_type_invalid":
         events[-1]["queued_turn_count"] = False
     elif scenario == "result_turn_count_bool":
@@ -1337,7 +1386,17 @@ def _main() -> int:
             os.utime(state_path, follow_symlinks=False)
             time.sleep(0.05)
 
-    return 7 if scenario in {"nonzero_after_success", "result_failure_nonzero"} else 0
+    return 7 if scenario in {
+        "nonzero_after_success",
+        "result_failure",
+        "result_failure_child_after_result",
+        "result_failure_cleanup_uncertain",
+        "result_failure_escaped_child_after_result",
+        "result_failure_nonzero",
+        "result_failure_scratch_residue",
+        "result_failure_variant",
+        "result_permission_denial",
+    } else 0
 
 
 if __name__ == "__main__":

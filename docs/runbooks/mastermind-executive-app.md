@@ -87,6 +87,18 @@ connects to one that already exists.
 
 ## HTTP surface
 
+* `GET <ResourcePolicy.resource_metadata_url path>` — an unauthenticated RFC
+  9728 protected-resource metadata document. The route is derived from the
+  validated read policy, not a host header or hard-coded hostname, and returns
+  exactly its A1-owned `resource`, `authorization_servers`, and
+  `scopes_supported` projection. Read and submit policy instances must name
+  the same resource, metadata URL, issuer, and authorization-server set when
+  the app starts; otherwise construction refuses the incoherent generation.
+  An authority-only metadata URL maps to HTTP path `/`; percent-encoded or
+  duplicate-slash path spellings are refused at construction because the
+  raw-path fence deliberately will not serve them.
+  The exact path accepts only a query-free `GET`: trailing-slash, query,
+  encoded-separator, duplicate-slash, and non-GET forms never alias it.
 * `POST /v1/tools/{executive_state|executive_inbox|executive_job|ceo_intent_status}`
   — body `{"arguments": {...}}`, `Authorization: Bearer <read-scope token>`.
   Returns the exact `ExecutiveMcpGateway.call()` envelope.
@@ -123,6 +135,12 @@ close). Any reverse proxy or gateway placed in front of
 `scripts/mastermind_executive_app.py` MUST forward the original raw path
 byte-for-byte and must not apply its own path normalization/decoding ahead
 of this app's own fence.
+
+The metadata document is a public resource-server configuration projection,
+not an authorization-server endpoint. This app never proxies, caches,
+rewrites, or fabricates `/.well-known/oauth-authorization-server`, JWKS,
+token, registration, callback, consent, or other IdP discovery routes; those
+remain owned by the configured authorization server.
 
 ## effect_unknown — what a caller must do
 
