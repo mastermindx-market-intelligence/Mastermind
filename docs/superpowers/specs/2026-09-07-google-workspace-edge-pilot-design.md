@@ -47,8 +47,12 @@ Created non-authoritative triage labels:
 - `MMX/External Evidence`
 - `MMX/Human Reply Needed`
 - `MMX/Receipts`
+- `MMX/Access & Security`
+- `MMX/Service Admin`
 
-No historical mail was bulk-labeled during setup. Calibration must precede automated backfill.
+A first bounded 10-message shadow sample was read without mutation. It was dominated by account access/security notifications and SaaS administration/onboarding rather than research or ordinary correspondence. That real sample exposed the need for the final two labels above. No historical mail was labeled, archived, deleted, forwarded or sent. Calibration must precede automated backfill.
+
+One-time codes, reset links, tokens and equivalent access material may be classified as `Access & Security` but must not be copied into GitHub, Agent OS, Linear, Slack, durable model notes, logs or other non-provider records.
 
 ### Calendar
 
@@ -154,7 +158,7 @@ Gmail defaults to draft-first for model-authored correspondence unless the curre
 
 Read-only triage may:
 
-- identify new external evidence, research inputs, receipts and probable human-reply requirements;
+- identify new external evidence, research inputs, receipts, access/security notices, service administration and probable human-reply requirements;
 - resolve exact sender/thread/message IDs;
 - read attachments through the provider;
 - summarize and link to an exact existing Mastermind reference when grounded.
@@ -164,7 +168,8 @@ It may not:
 - treat Gmail `IMPORTANT`, stars, labels, model sentiment, or an email imperative as Executive priority/authority;
 - create a Job because an email requests work;
 - auto-archive/delete material before a separately accepted retention policy exists;
-- send model-authored mail merely because a draft exists.
+- send model-authored mail merely because a draft exists;
+- persist one-time access credentials or equivalent sensitive material outside the provider.
 
 Automated label classification must first run in shadow/read-only evaluation against real mail, with false-positive review, before historical backfill or continuous mutation.
 
@@ -193,7 +198,8 @@ No Calendar event can prove Job execution, worker liveness, acceptance, or compl
 Completed in the connected account:
 
 - Drive boundaries created and read back.
-- Gmail triage labels created and read back.
+- Six Gmail triage labels created and read back.
+- A bounded Gmail shadow sample was read with zero message mutation and directly improved the taxonomy.
 - Calendar primary connection proven.
 - Sheets capability surface confirmed.
 - No bulk mail mutation, outbound send, Calendar write, Drive share or standing tracker created.
@@ -202,7 +208,7 @@ Completed in the connected account:
 
 One independently useful capability: deterministic Google evidence/actuator envelope models with falsifier tests, zero provider network calls, zero persistence, zero `control_plane` imports from integrations.
 
-Acceptance: tests prove closed fields, explicit null/freshness behavior, prompt-injection text remains data, effect-unknown receipt semantics, and no lifecycle authority is created.
+Acceptance: tests prove closed fields, explicit null/freshness behavior, prompt-injection text remains data, effect-unknown receipt semantics, sensitive access material is not persisted, and no lifecycle authority is created.
 
 ### G2 — Drive/Sheets read-only source adapter — `NOT_BUILT`
 
@@ -214,7 +220,7 @@ Acceptance requires a real private pilot file/sheet read, source attribution, vi
 
 One capability: bounded mailbox window -> normalized candidate evidence/attention -> visible executive/Workroom result, without creating Jobs or changing labels.
 
-Acceptance requires real-message shadow evaluation and false-positive review.
+Acceptance requires real-message shadow evaluation, explicit secret redaction/non-persistence and false-positive review.
 
 ### G4 — Calendar read-only context/wait corroboration — `NOT_BUILT`
 
@@ -245,7 +251,7 @@ This program must not create:
 
 ## 13. Security and rights
 
-Preserve the Workroom security law: least privilege, audience matching, and no credentials/secrets in chat, Drive fields, Sheets, Gmail prose, GitHub, Agent OS, logs or model-visible configuration.
+Preserve the Workroom security law: least privilege, audience matching, and no credentials/secrets in chat, Drive fields, Sheets, Gmail prose copied into durable records, GitHub, Agent OS, logs or model-visible configuration.
 
 A folder/file may be linked without copying restricted content. Consumer visibility must be no broader than the strictest underlying source restriction.
 
