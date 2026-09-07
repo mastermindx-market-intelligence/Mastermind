@@ -20,6 +20,9 @@ API_BASE = "https://api.notion.com/v1"
 MANIFEST_SCHEMA = "mastermind.notion_knowledge_surface_n0.v1"
 EXPECTED_CHILD_COUNT = 8
 VALID_KINDS = {"page", "database"}
+SUPPORTED_PROPERTY_TYPES = {"title", "rich_text", "select", "date", "url"}
+DEFAULT_MIN_REQUEST_INTERVAL = 0.35
+DEFINITIVE_MUTATION_HTTP_ERRORS = {400, 401, 403, 404, 406}
 
 
 class BootstrapError(RuntimeError):
@@ -31,6 +34,10 @@ class ManifestError(BootstrapError):
 
 
 class AmbiguousChildError(BootstrapError):
+    pass
+
+
+class SchemaMismatchError(BootstrapError):
     pass
 
 
@@ -64,6 +71,13 @@ def _normalized_id(value: str) -> str:
     return value.replace("-", "").lower()
 
 
+def _manifest_property_type(spec: Mapping[str, Any]) -> str:
+    matches = [key for key in spec if key in SUPPORTED_PROPERTY_TYPES]
+    if len(matches) != 1:
+        raise ManifestError("each property must declare exactly one supported type")
+    return matches[0]
+
+
 def load_manifest(path: str | Path) -> dict[str, Any]:
     with Path(path).open("r", encoding="utf-8") as handle:
         manifest = json.load(handle)
@@ -95,14 +109,16 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
             raise ManifestError(f"unsupported child kind for {key!r}")
         if kind == "database":
             properties = child.get("properties")
-            if not isinstance(properties, Mapping):
+            if not isinstance(properties, Mapping) or not properties:
                 raise ManifestError(f"database {key!r} requires properties")
-            title_properties = [
-                name
+            property_types = {
+                name: _manifest_property_type(spec)
                 for name, spec in properties.items()
-                if isinstance(spec, Mapping) and "title" in spec
-            ]
-            if len(title_properties) != 1:
+                if isinstance(name, str) and isinstance(spec, Mapping)
+            }
+            if len(property_types) != len(properties):
+                raise ManifestError(f"database {key!r} has malformed properties")
+            if list(property_types.values()).count("title") != 1:
                 raise ManifestError(f"database {key!r} must have exactly one title property")
         keys.add(key)
         titles.add(title)
@@ -155,12 +171,36 @@ class NotionClient:
         *,
         timeout: float = 20.0,
         sleeper: Callable[[float], None] = time.sleep,
+        clock: Callable[[], float] = time.monotonic,
+        min_request_interval: float = DEFAULT_MIN_REQUEST_INTERVAL,
     ):
         if not token:
             raise BootstrapError("Notion token is required")
+        if min_request_interval < 0:
+            raise BootstrapError("min_request_interval cannot be negative")
         self._token = token
         self._timeout = timeout
         self._sleeper = sleeper
+        self._clock = clock
+        self._min_request_interval = min_request_interval
+        self._last_request_started: float | None = None
+
+    def _pace(self) -> None:
+        now = self._clock()
+        if self._last_request_started is not None:
+            delay = self._min_request_interval - (now - self._last_request_started)
+            if delay > 0:
+                self._sleeper(delay)
+                now = self._clock()
+        self._last_request_started = now
+
+    @staticmethod
+    def _retry_after(headers: Mapping[str, Any]) -> float:
+        raw = headers.get("Retry-After", "1")
+        try:
+            return min(max(float(raw or "1"), 0.0), 5.0)
+        except (TypeError, ValueError):
+            return 1.0
 
     def _request(
         self,
@@ -177,6 +217,7 @@ class NotionClient:
         )
         attempts = 1 if mutating else 2
         for attempt in range(attempts):
+            self._pace()
             request = urllib.request.Request(
                 API_BASE + path,
                 data=body,
@@ -193,11 +234,12 @@ class NotionClient:
             except urllib.error.HTTPError as exc:
                 raw_error = exc.read().decode("utf-8", errors="replace")
                 if exc.code == 429 and not mutating and attempt + 1 < attempts:
-                    retry_after = min(
-                        float(exc.headers.get("Retry-After", "1") or "1"), 5.0
-                    )
-                    self._sleeper(max(retry_after, 0.0))
+                    self._sleeper(self._retry_after(exc.headers))
                     continue
+                if mutating and exc.code not in DEFINITIVE_MUTATION_HTTP_ERRORS:
+                    raise NotionEffectUnknown(
+                        f"mutating Notion HTTP {exc.code} has unknown effect: {raw_error[:500]}"
+                    ) from exc
                 raise NotionAPIError(
                     f"Notion HTTP {exc.code}: {raw_error[:500]}"
                 ) from exc
@@ -227,6 +269,14 @@ class NotionClient:
     def retrieve_page(self, page_id: str) -> dict[str, Any]:
         return self._request("GET", f"/pages/{urllib.parse.quote(page_id)}")
 
+    def retrieve_database(self, database_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/databases/{urllib.parse.quote(database_id)}")
+
+    def retrieve_data_source(self, data_source_id: str) -> dict[str, Any]:
+        return self._request(
+            "GET", f"/data_sources/{urllib.parse.quote(data_source_id)}"
+        )
+
     def list_children(self, parent_page_id: str) -> list[dict[str, Any]]:
         blocks: list[dict[str, Any]] = []
         cursor: str | None = None
@@ -253,9 +303,7 @@ class NotionClient:
         payload = {
             "parent": {"type": "page_id", "page_id": parent_page_id},
             "properties": {
-                "title": [
-                    {"type": "text", "text": {"content": title}}
-                ]
+                "title": [{"type": "text", "text": {"content": title}}]
             },
         }
         return self._request("POST", "/pages", payload, mutating=True)
@@ -286,6 +334,72 @@ def _prove_parent(client: NotionClient, parent_page_id: str) -> None:
         raise BootstrapError("Notion parent page is in trash")
 
 
+def _expected_schema(properties: Mapping[str, Any]) -> dict[str, str]:
+    return {
+        name: _manifest_property_type(spec)
+        for name, spec in properties.items()
+        if isinstance(name, str) and isinstance(spec, Mapping)
+    }
+
+
+def _prove_database_schema(
+    client: NotionClient,
+    database_id: str,
+    expected_properties: Mapping[str, Any],
+) -> None:
+    database = client.retrieve_database(database_id)
+    returned_id = database.get("id")
+    if not isinstance(returned_id, str) or _normalized_id(returned_id) != _normalized_id(
+        database_id
+    ):
+        raise SchemaMismatchError("Notion database identity did not round-trip exactly")
+    if database.get("in_trash") is True:
+        raise SchemaMismatchError("Notion database is in trash")
+    data_sources = database.get("data_sources")
+    if not isinstance(data_sources, list) or len(data_sources) != 1:
+        raise SchemaMismatchError(
+            "N0 database must contain exactly one data source"
+        )
+    source_id = data_sources[0].get("id") if isinstance(data_sources[0], Mapping) else None
+    if not isinstance(source_id, str) or not source_id:
+        raise SchemaMismatchError("N0 database data source identity is missing")
+    data_source = client.retrieve_data_source(source_id)
+    actual_properties = data_source.get("properties")
+    if not isinstance(actual_properties, Mapping):
+        raise SchemaMismatchError("N0 data source properties are missing")
+
+    expected = _expected_schema(expected_properties)
+    actual: dict[str, str] = {}
+    for name, spec in actual_properties.items():
+        if not isinstance(name, str) or not isinstance(spec, Mapping):
+            raise SchemaMismatchError("N0 data source contains malformed properties")
+        property_type = spec.get("type")
+        if not isinstance(property_type, str):
+            raise SchemaMismatchError(
+                f"N0 data source property {name!r} has no type"
+            )
+        actual[name] = property_type
+    if actual != expected:
+        raise SchemaMismatchError(
+            f"N0 database schema mismatch: expected {expected!r}, observed {actual!r}"
+        )
+
+
+def _prove_reused_database_schemas(
+    client: NotionClient,
+    manifest: Mapping[str, Any],
+    plan: Iterable[PlanItem],
+) -> None:
+    child_by_key = {child["key"]: child for child in manifest["children"]}
+    for item in plan:
+        if item.kind != "database" or item.action != "reuse":
+            continue
+        if not item.object_id:
+            raise SchemaMismatchError(f"reused database {item.key!r} has no object id")
+        child = child_by_key[item.key]
+        _prove_database_schema(client, item.object_id, child["properties"])
+
+
 def apply_workspace(
     client: NotionClient,
     parent_page_id: str,
@@ -295,6 +409,8 @@ def apply_workspace(
     _prove_parent(client, parent_page_id)
     existing = client.list_children(parent_page_id)
     plan = build_plan(manifest, existing)
+    _prove_reused_database_schemas(client, manifest, plan)
+
     results: list[PlanItem] = []
     child_by_key = {child["key"]: child for child in manifest["children"]}
 
@@ -335,4 +451,5 @@ def apply_workspace(
         raise BootstrapError(
             f"post-apply reconciliation did not observe all {EXPECTED_CHILD_COUNT} N0 children"
         )
+    _prove_reused_database_schemas(client, manifest, final_plan)
     return results
