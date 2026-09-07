@@ -215,6 +215,24 @@ class FullCompositionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.get("content", [{}])[0].get("type"), "text", result)
         return json.loads(result["content"][0]["text"])
 
+    def assert_private_result_withheld(self, result, *, private, bearer):
+        """Require the one public refusal shape and absence of every private representation."""
+        self.assertTrue(result["isError"], "PRIVATE_OUTPUT_WITHHELD")
+        self.assertNotIn("structuredContent", result, "PRIVATE_OUTPUT_STRUCTURED_WITHHELD")
+        self.assertEqual(
+            json.loads(result["content"][0]["text"]),
+            {"code": "READ_RESULT_UNVERIFIED"},
+            "PRIVATE_OUTPUT_EXACT_REFUSAL",
+        )
+        serialized = json.dumps(result)
+        escaped_source = json.dumps("alpha sentinel\n")[1:-1]
+        forbidden = {
+            "alpha-user", bearer, "alpha sentinel\n", escaped_source,
+            *private.keys(), *private.values(),
+        }
+        for value in forbidden:
+            self.assertNotIn(value, serialized, "PRIVATE_OUTPUT_WITHHELD")
+
     async def one_off_call(self, port, *, arguments=None):
         """Run an isolated real FastMCP app without a listener or shared state."""
         server = create_authenticated_read_server(
@@ -271,23 +289,36 @@ class FullCompositionTests(unittest.IsolatedAsyncioTestCase):
         }
         self.return_transform = lambda result: {**result, **private}
         before_observations = self.io_calls
+        signed_token = self.token()
 
         initialized = self.result(await self.rpc(
             "initialize",
             {"protocolVersion": "2025-03-26", "capabilities": {},
              "clientInfo": {"name": "private-output-proof", "version": "1"}},
-            self.token(),
+            signed_token,
         ))
         self.assertIn("serverInfo", initialized)
-        tools = self.result(await self.rpc("tools/list", token=self.token()))["tools"]
+        tools = self.result(await self.rpc("tools/list", token=signed_token))["tools"]
         self.assertEqual([tool["name"] for tool in tools], ["read_project_file"])
 
-        result = self.result(await self.call())
+        result = self.result(await self.call(token=signed_token))
         self.assertEqual(self.io_calls - before_observations, 1,
                          "exactly one real descriptor observation is required")
-        self.assertTrue(result["isError"], "PRIVATE_OUTPUT_WITHHELD")
-        self.assertFalse(any(value in json.dumps(result) for value in private.values()),
-                         "PRIVATE_OUTPUT_WITHHELD")
+        self.assert_private_result_withheld(result, private=private, bearer=signed_token)
+
+        # Assertion-only controls: these mutate the captured public result, not
+        # MCP wiring, and prove each named oracle rejects its targeted false pass.
+        wrong_code = json.loads(json.dumps(result))
+        wrong_code["content"][0]["text"] = json.dumps({"code": "READ_UNAVAILABLE"})
+        with self.assertRaisesRegex(AssertionError, "PRIVATE_OUTPUT_EXACT_REFUSAL"):
+            self.assert_private_result_withheld(wrong_code, private=private, bearer=signed_token)
+        structured_leak = {**result, "structuredContent": {"content": "alpha sentinel\n"}}
+        with self.assertRaisesRegex(AssertionError, "PRIVATE_OUTPUT_STRUCTURED_WITHHELD"):
+            self.assert_private_result_withheld(structured_leak, private=private, bearer=signed_token)
+        source_leak = json.loads(json.dumps(result))
+        source_leak["content"].append({"type": "text", "text": "alpha sentinel\n"})
+        with self.assertRaisesRegex(AssertionError, "PRIVATE_OUTPUT_WITHHELD"):
+            self.assert_private_result_withheld(source_leak, private=private, bearer=signed_token)
 
     async def test_auth_project_and_model_authority_refusals_precede_io(self):
         # Detects auth/binding shortcuts and acceptance of model-selected root/principal/policy fields.
