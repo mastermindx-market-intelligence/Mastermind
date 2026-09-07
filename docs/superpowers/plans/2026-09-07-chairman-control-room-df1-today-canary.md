@@ -17,11 +17,11 @@ production_effect: NONE
 
 # Chairman Control Room DF1 — Read-Only Today Canary Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Use superpowers:test-driven-development before writing implementation code, superpowers:systematic-debugging for any unexpected failure, and superpowers:verification-before-completion before claiming a task or PR complete.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Use superpowers:test-driven-development before implementation code, superpowers:systematic-debugging for unexpected behavior, and superpowers:verification-before-completion before every completion claim.
 
-**Goal:** Deliver one real, read-only local Chairman briefing at `GET /brief` that lets Chris determine within ten seconds whether he must act, what Sol is handling, and which material exceptions threaten outcomes, while preserving the current dense Control Room at `/` as the Advanced inspector.
+**Goal:** Deliver one real local Chairman briefing at `GET /brief` that lets Chris determine within ten seconds whether he must act, what Sol is handling, and which material exceptions threaten outcomes, while preserving the current dense Control Room at `/` as the Advanced inspector.
 
-**Architecture:** Add one pure `mastermind.chairman_brief.v1` reducer over the already-cached `mastermind.chairman_control_room.v1` document and its existing cache metadata. Add one fixed authenticated JSON read at `GET /api/brief` and three local-only static assets. Perform no second gather, no new source read, no mutation, no model call, no lifecycle inference, and no remote-X1 change.
+**Architecture:** Add one pure `mastermind.chairman_brief.v1` reducer over the already-cached `mastermind.chairman_control_room.v1` document and its existing source-validity/cache metadata. Add one fixed authenticated JSON read at `GET /api/brief` plus three local-only static assets. Perform no second gather, no new source read, no mutation, no model call, no lifecycle inference, and no remote-X1 change.
 
 **Tech Stack:** Python 3.11+, pytest, the existing stdlib `ThreadingHTTPServer`, dependency-free browser JavaScript and CSS, Node syntax validation when available, and the repository's existing isolated Chromium/Playwright proof pattern for real browser acceptance.
 
@@ -29,102 +29,97 @@ production_effect: NONE
 
 ---
 
-## Plan status and execution gate
+## 1. Status and implementation admission
 
 Chairman product direction is approved. This plan is a records-only stacked carrier. It does not authorize implementation by itself.
 
-DF1 implementation may start only after every gate below is positively verified against current protected source:
+DF1 START requires every gate below to be positively verified against one current protected revision:
 
 1. Mastermind PR #521 is independently reviewed and merged into protected `master`.
-2. The exact protected commit containing the design is pinned, and the current compatible Sol Skillpack is loaded from that same commit.
-3. Mastermind PR #424's incumbent owner has reconciled the older H1A route/static closure so it no longer authorizes a competing Workstream Workroom default or forbids the exact DF1 route/assets below.
-4. No open PR or active worktree owns any DF1 implementation path.
-5. The local P0A server and remote X1 contracts are re-read from the pinned source; remote X1 remains outside the change set.
-6. A bounded source writer is assigned to one implementation branch and one PR. No second writer may start against the same paths.
-7. The implementation plan itself has received Sol acceptance after independent review.
+2. The protected commit containing the design is pinned, and the compatible Sol Skillpack is loaded from that same commit.
+3. Mastermind PR #424's incumbent/current owner has reconciled the older H1A route/static closure so it neither authorizes a competing Workstream Workroom default nor forbids the exact DF1 route/assets below.
+4. No open PR, branch, worktree, process, or source writer owns any DF1 implementation path.
+5. Local P0A and remote X1 contracts are re-read from the pin; X1 remains outside the change set.
+6. This plan has independent review and explicit Sol acceptance.
+7. One implementation writer is assigned to one branch and one PR. No parallel writer touches the same paths.
 
-A missing gate returns:
+Missing gate:
 
 ```text
 BLOCKED SOURCE_OR_OWNERSHIP_PRECONDITION
 production_effect=NONE
 ```
 
-Do not create an implementation branch, edit a path, or send a worker START merely because the Chairman approved the product direction.
+Do not create the implementation branch, edit source, or send worker START solely because the Chairman approved the product direction.
 
 ---
 
-## Global constraints
+## 2. Product and authority constraints
 
-### Canonical-owner boundary
+### Canonical owners remain unchanged
 
-- Executive OS remains Job / Attempt / Worker / Event lifecycle and action-admission authority.
-- Agent OS remains durable workstream, decision, discovery, and handoff authority.
-- GitHub remains implementation, review, CI, merge, and evidence authority.
-- Linear remains the selected portfolio projection and project-management surface.
+- Executive OS owns Job / Attempt / Worker / Event lifecycle and action admission.
+- Agent OS owns durable workstreams, decisions, discoveries, and handoffs.
+- GitHub owns implementation, review, CI, merge, and evidence.
+- Linear remains the selected portfolio/project projection.
 - Slack and Agent Relay remain transport/hot-state projection, never lifecycle truth.
-- The existing Control Room compositor and server cache remain the only source-composition path used by DF1.
-- The brief is disposable presentation. Deleting every DF1 artifact changes no canonical company fact.
+- The existing Control Room compositor and process-memory cache remain the only source-composition path DF1 consumes.
+- The brief is disposable presentation. Deleting every DF1 artifact changes no canonical fact.
 
-### Hard non-goals
+### DF1 must not add
 
-DF1 must not add or modify:
+- a database, table, event store, queue, scheduler, retry ledger, wake path, dispatch path, lifecycle, identity registry, state cache, background gather loop, or analytics store;
+- a POST endpoint or action control;
+- a Linear, Slack, GitHub, Agent OS, Executive OS, browser, provider, account, or credential write;
+- a model invocation or model-authored ranking, owner, decision, status, closure, or suppression rule;
+- Programs, Ask Sol, display checkpointing, material-change history, default cutover, or Chairman mutation;
+- a second autonomy, source-validity, dispatch, watcher, effect, or actionability classifier;
+- any remote X1 change.
 
-- any database, table, queue, event store, scheduler, retry ledger, wake path, dispatch path, lifecycle, identity registry, current-state cache, or background gather loop;
-- any POST endpoint or action control;
-- any Linear, Slack, GitHub, Agent OS, Executive OS, provider, browser-profile, or credential write;
-- any model invocation, model-authored ranking, summary authority, status, decision, or owner inference;
-- the remote X1 projection, server, HTML, package, install service, or release closure;
-- the current shared `control_room.js` or `control_room.css`;
-- the current `index.html` inspector shell;
-- the existing source-validity/B5 clocks, proof maps, permission logic, autonomy classifier, dispatch classifier, watcher logic, or effect reconciliation;
-- Programs, Ask Sol, material-change checkpointing, default cutover, or Chairman mutation.
+### Truthfulness rules
 
-### Current-versus-historical law
+- Missing is not empty.
+- Failed refresh makes the retained cache historical until a successful current composition replaces it.
+- A source-degraded document may remain usable by section.
+- Chairman attention is not automatically a complete decision.
+- Bindings, tabs, provider sessions, windows, and process presence never prove cognition or execution.
+- CI, merge, installation, deployment, production proof, and final acceptance remain distinct.
 
-- A missing source is never a zero.
-- A failed refresh means the cached document is historical until a successful current composition supersedes it.
-- A source-degraded document may remain partially useful by section.
-- An attention item is not automatically a decision.
-- Open tabs, bindings, running apps, provider sessions, and processes never prove cognition, ownership, or execution.
-- `MERGED`, `CI GREEN`, `INSTALLED`, `DEPLOYED`, `PROVEN`, and `ACCEPTED` remain distinct.
+### Default-surface privacy
 
-### Security and privacy law
+The brief JSON and DOM must never expose:
 
-The default brief must not render or serialize:
-
-- credentials, bearer values, cookies, tokens, browser profiles, provider session identifiers, or authentication material;
+- credentials, bearer values, cookies, tokens, passwords, secrets, browser profiles, or provider-session identifiers;
 - hidden prompts, raw transcripts, private reasoning, or chain-of-thought;
-- raw exception or traceback bodies;
+- raw exception/traceback bodies;
 - absolute host paths;
-- arbitrary upstream mappings or unreviewed HTML;
-- arbitrary URLs supplied by upstream records or browser input.
+- arbitrary upstream mappings, arbitrary URLs, or unreviewed HTML.
 
-Every output object uses a closed allowlist. Source-derived strings pass through a bounded sanitizer. Unsafe source text is replaced with a fixed disclosure sentence, never partially redacted into misleading prose.
+Unsafe source text is replaced with one fixed disclosure sentence. The implementation never reveals which secret detector matched.
 
 ---
 
-## Current source map
+## 3. Current source bindings
 
-The implementation worker must re-read these paths at the admitted implementation base:
+The implementation worker must re-read these exact owners at the admitted base:
 
-| Existing path | Role in DF1 | Mutation permission |
+| Existing path | DF1 use | Permission |
 |---|---|---|
 | `control_plane/chairman_control_room.py` | Existing pure cross-owner composition | read only |
-| `control_plane/autonomy_control_room_projection.py` | Existing responsibility/freshness/actionability owner | read only |
-| `control_plane/executive_inbox.py` | Existing Chairman/CEO/COO attention owner | read only |
-| `scripts/chairman_control_room.py` | Existing local P0A cache and HTTP server | narrow additive edit |
-| `app/static/chairman_control/index.html` | Existing Advanced inspector entry | read only |
-| `app/static/chairman_control/control_room.js` | Existing local/X1 shared inspector client | read only |
-| `app/static/chairman_control/control_room.css` | Existing local/X1 shared inspector styles | read only |
-| `tests/test_chairman_control_room_server.py` | Existing server-test helpers and invariants | read only; import helpers from new tests |
-| `tests/test_chairman_control_room_ui_x1.py` | Existing safe-DOM and browser-proof patterns | read only |
-| `control_plane/chairman_control_room_remote.py` | Remote X1 projection/release owner | read only |
-| `scripts/chairman_control_room_remote.py` | Remote X1 server | read only |
-| `app/static/chairman_control/remote.html` | Remote X1 entry | read only |
+| `control_plane/autonomy_control_room_projection.py` | Responsibility, owner, source freshness, placement and dispatch projection | read only |
+| `control_plane/executive_inbox.py` | Chairman/CEO/COO attention projection | read only |
+| `scripts/chairman_control_room.py` | Existing P0A cache and local HTTP server | narrow additive edit |
+| `app/static/chairman_control/index.html` | Current Advanced inspector | read only |
+| `app/static/chairman_control/control_room.js` | Shared local/X1 inspector client | read only |
+| `app/static/chairman_control/control_room.css` | Shared local/X1 inspector styles | read only |
+| `tests/test_chairman_control_room_server.py` | Existing server harness/helpers | read only |
+| `tests/test_chairman_control_room_ui_x1.py` | Existing safe-DOM/browser-proof patterns | read only |
+| `control_plane/chairman_control_room_remote.py` | X1 projection/release owner | read only |
+| `scripts/chairman_control_room_remote.py` | X1 server | read only |
+| `app/static/chairman_control/remote.html` | X1 entry | read only |
 | `docs/CHAIRMAN_CONTROL_ROOM.md` | Local operator documentation | narrow additive edit |
 
-The current P0A state envelope already exposes the only inputs DF1 may consume:
+The current P0A cache envelope already supplies:
 
 ```text
 control_room
@@ -136,13 +131,41 @@ state_refresh_error
 source_validity
 ```
 
-DF1 consumes only `control_room`, `composed_at`, `refresh_in_flight`, `state_refresh_error`, and `source_validity`. It does not trigger capability census and does not inspect provider state.
+DF1 consumes only:
+
+```text
+control_room
+composed_at
+refresh_in_flight
+state_refresh_error
+source_validity
+```
+
+It does not call provider capability census.
+
+Load-bearing source shapes at the frozen pin:
+
+```text
+control_room.attention.chairman[]
+control_room.work[]
+control_room.autonomy.responsibilities[]
+control_room.autonomy.unmapped_responsibilities[]
+source_validity.cards[].components.card.state
+```
+
+The accepted dispatch field is:
+
+```text
+responsibility.dispatch.dispatch_state
+```
+
+It is not `responsibility.dispatch.state`. Implementation and tests must bind the current field exactly.
 
 ---
 
-## Exact DF1 implementation path ceiling
+## 4. Exact implementation path ceiling
 
-The implementation PR may touch exactly this ten-path set and no other path:
+The implementation PR may touch exactly ten paths.
 
 ### Create
 
@@ -160,22 +183,22 @@ The implementation PR may touch exactly this ten-path set and no other path:
 9. `scripts/chairman_control_room.py`
 10. `docs/CHAIRMAN_CONTROL_ROOM.md`
 
-A required eleventh path returns:
+Any eleventh path requires:
 
 ```text
 DECISION_REQUEST PATH_BOUNDARY_REQUIRED
 production_effect=NONE
 ```
 
-The worker must not absorb the change into `index.html`, `control_room.js`, or `control_room.css` to avoid the path gate. Those assets are shared with the legacy inspector and remote X1; DF1 deliberately uses separate local-only assets.
+Do not absorb work into `index.html`, `control_room.js`, or `control_room.css`. Those assets are deliberately preserved and shared with the existing inspector/X1 estate.
 
-Recommended future implementation branch, created only after the execution gate passes:
+Recommended implementation branch, created only after admission:
 
 ```text
 sol/chairman-decision-cockpit-df1-20260907
 ```
 
-Recommended PR state on return:
+Return state:
 
 ```text
 DRAFT / HOLD-FOR-SOL / BUILT_NOT_PROVEN
@@ -183,9 +206,9 @@ DRAFT / HOLD-FOR-SOL / BUILT_NOT_PROVEN
 
 ---
 
-## Fixed local route and asset closure
+## 5. Fixed route and static closure
 
-DF1 adds exactly these local GET paths:
+DF1 adds exactly:
 
 ```text
 GET /brief
@@ -196,14 +219,14 @@ GET /static/brief.css
 
 Rules:
 
-- `GET /brief` serves `brief.html`, injects the existing per-process `__CCR_TOKEN__`, and receives the same CSP as `/`.
-- `GET /api/brief` requires loopback, allowed Host, exact `X-CCR-Token`, matching Origin when present, and `Cache-Control: no-store`.
-- Both `/brief` and `/api/brief` reject any non-empty query string.
-- `GET /api/brief` reads the existing in-memory cache once; it performs no source gather, subprocess, filesystem discovery, provider census, or network operation.
-- `GET /api/brief` may trigger the existing single-flight background refresh check, but returns the already-cached snapshot immediately.
-- The canonical JSON response is fully encoded and measured before any byte is written.
-- Maximum successful JSON body: exactly `262144` bytes.
-- Overflow returns HTTP `503` with exactly:
+- `/brief` serves token-injected `brief.html` with the same CSP used by `/`.
+- `/api/brief` requires loopback, allowed Host, exact `X-CCR-Token`, matching Origin when present, and `Cache-Control: no-store`.
+- `/brief` and `/api/brief` reject every non-empty query string.
+- `/api/brief` reads one existing cached snapshot and performs no synchronous composition, filesystem discovery, network operation, provider census, or subprocess.
+- It may invoke the existing single-flight stale-cache check, but returns the cached snapshot immediately.
+- The success payload is canonical-encoded and measured before any byte is written.
+- Maximum successful body is exactly `262144` bytes.
+- A larger payload returns HTTP `503` with exactly:
 
 ```json
 {
@@ -212,16 +235,16 @@ Rules:
 }
 ```
 
-- No partial brief bytes are written before the overflow refusal.
+- No partial success payload is written.
 - No new POST route exists.
-- `/` remains the current inspector during DF1 and is labeled Advanced from the new page only.
-- Remote X1 route/static allowlists remain byte-unchanged.
+- `/` remains the legacy inspector during DF1.
+- Remote X1 route/static/package closure remains byte-unchanged.
 
 ---
 
-## Frozen `mastermind.chairman_brief.v1` contract
+## 6. Frozen `mastermind.chairman_brief.v1` contract
 
-### Pure entry point
+### Pure function
 
 ```python
 def compose_chairman_brief(
@@ -257,7 +280,7 @@ OUTPUT_KEYS = frozenset({
 })
 ```
 
-### Closed state vocabularies
+### Closed vocabularies
 
 ```python
 READ_STATES = frozenset({"CURRENT", "PARTIAL", "HISTORICAL", "UNAVAILABLE"})
@@ -269,9 +292,20 @@ HEADLINE_KINDS = frozenset({
     "PARTIAL",
     "UNAVAILABLE",
 })
+EXCEPTION_KINDS = frozenset({
+    "WORK_WAITING",
+    "WORK_BLOCKED",
+    "PROOF_MISSING",
+    "SOURCE_CONFLICT",
+    "SOURCE_UNAVAILABLE",
+    "EFFECT_UNKNOWN",
+    "PRODUCTION_REGRESSION",
+    "OWNER_NOT_ESTABLISHED",
+    "CAPACITY_BLOCKED",
+})
 ```
 
-### Exact output shape
+### Exact top-level shape
 
 ```json
 {
@@ -334,42 +368,50 @@ HEADLINE_KINDS = frozenset({
 }
 ```
 
-`changes` remains an explicitly unavailable future section. DF1 does not create the display checkpoint specified for DF3. The UI hides unavailable future sections rather than showing dead equal-weight navigation.
+`changes` remains explicitly unavailable. DF1 creates no local display checkpoint. The UI hides future unavailable sections rather than presenting dead navigation.
 
 ### Headline precedence
 
-Use this exact precedence:
+Apply exactly:
 
-1. Invalid/missing Control Room schema or no usable Chairman/ownership source → `UNAVAILABLE`.
-2. `state_refresh_error` on a cached document → `PARTIAL` headline with `read_state=HISTORICAL`.
-3. Any critical source unavailable while another section remains usable → `PARTIAL`.
-4. One or more complete current decision packets → `DECISIONS_REQUIRED`.
-5. One or more current Chairman attention items → `ATTENTION_REQUIRED`.
-6. Otherwise, only after a positively current Chairman-attention read → `CLEAR`.
+1. Invalid/missing Control Room schema or no usable attention/ownership source → `UNAVAILABLE`.
+2. `state_refresh_error` with retained data → `headline=PARTIAL`, `read_state=HISTORICAL`.
+3. One or more critical sources unavailable while another section remains usable → `PARTIAL`.
+4. Complete current decisions exist → `DECISIONS_REQUIRED`.
+5. Current Chairman attention exists → `ATTENTION_REQUIRED`.
+6. A positively current Chairman-attention read with zero items → `CLEAR`.
 
-DF1 has no complete decision-packet source. Therefore its decision count is zero and its decision section is `UNAVAILABLE`, not `EMPTY`. A future accepted source must be a separate architecture/contract change; DF1 does not add a speculative decision input.
+DF1 has no complete decision-packet source. Therefore:
 
-### Critical source interpretation
+```text
+decisions.state=UNAVAILABLE
+complete_decision_count=0
+reason=DECISION_PACKET_SOURCE_NOT_PROJECTED
+```
 
-Use closed source-presence checks, not substring interpretation of arbitrary error text:
+A future decision source requires a separate accepted contract. DF1 must not introduce a speculative input merely to render fixture-only decisions.
+
+### Critical source checks
 
 ```text
 Agent OS usable:
-  control_room.sources.agent_os_state_schema == agent_os_state.v1
+  sources.agent_os_state_schema == agent_os_state.v1
 
 Executive Inbox usable:
-  control_room.sources.executive_inbox_schema == mastermind.executive_inbox.v2
+  sources.executive_inbox_schema == mastermind.executive_inbox.v2
 
 GitHub evidence usable:
-  control_room.sources.active_builds_schema == project_active_builds.v1
+  sources.active_builds_schema == project_active_builds.v1
 
 Runtime usable:
-  control_room.sources.runtime_db_present is true
+  sources.runtime_db_present is true
 ```
 
-The reducer may examine only the prefix before the first colon in `control_room.degraded[]` to map a source to a fixed reason code. The remainder is never copied into the brief.
+The reducer may inspect only the prefix before the first colon in each `degraded[]` string to select a fixed source reason. The suffix is discarded and never serialized.
 
 ### Chairman attention item
+
+Closed keys:
 
 ```text
 attention_id
@@ -386,11 +428,17 @@ advanced_ref
 
 Rules:
 
-- `attention_id` must already exist and be a nonblank string.
-- Join to `work_ref` only through exactly one `work[].attention_ids[]` claim. Zero claims yields `null`; multiple claims yield a `SOURCE_CONFLICT` exception.
-- `summary` comes only from `summary` or `reason`, through the bounded sanitizer.
-- `source_time` remains `null` unless the source item itself carries an accepted source timestamp. `control_room.generated_at` is `observed_at`, never relabeled as source time.
-- `missing_decision_fields` is a fixed disclosure list for the current contract:
+- `attention_id` must be a safe nonblank existing identity.
+- Join to `work_ref` only through exactly one `work[].attention_ids[]` claim.
+- Zero claims yields `work_ref=null`.
+- Multiple claims produce `SOURCE_CONFLICT`; no winner is selected.
+- `summary` comes only from source `summary` or `reason`, through the sanitizer.
+- `source_time` remains null unless the source row itself supplies an accepted timestamp.
+- `control_room.generated_at` is `observed_at`, never mislabeled as source time.
+- `advanced_ref` is fixed `/#today`, never copied from upstream.
+- No approve/hold/continue/stop action exists.
+
+Current missing-decision disclosure:
 
 ```text
 authority_required
@@ -401,10 +449,9 @@ reversibility
 recommendation_provenance
 ```
 
-- No approve/hold control appears.
-- `advanced_ref` is the fixed local string `/#today`, never an upstream URL.
-
 ### Sol-handling item
+
+Closed keys:
 
 ```text
 item_id
@@ -422,20 +469,32 @@ freshness_state
 advanced_ref
 ```
 
-Admission requires all of:
+Exact admission requires:
 
 ```text
-autonomy responsibility accountable_seat == "ceo"
-autonomy responsibility query_status == "ok"
-autonomy responsibility freshness == "current"
-autonomy responsibility placement_state.value != "EFFECT_UNKNOWN"
-autonomy responsibility dispatch.state not in {"RETURNED", "EFFECT_UNKNOWN"}
-no Chairman attention id claims the joined work card
-no work-card disagreement
-Agent OS next_action is a safe nonblank sentence
+responsibility.accountable_seat == "ceo"
+responsibility.query_status == "ok"
+responsibility.freshness == "current"
+matching source_validity component card.state == "current"
+responsibility.placement_state.value != "EFFECT_UNKNOWN"
+responsibility.dispatch.dispatch_state not in {"RETURNED", "EFFECT_UNKNOWN"}
+exact joined work card has no Chairman attention
+exact joined work card has no disagreement
+Agent OS next_action is safe and nonblank
+Agent OS state/status is not blocked/done/killed
+unmet_dependencies is empty
 ```
 
-Join autonomy responsibility to work only by exact equality:
+The source-validity join is exact on:
+
+```text
+responsibility_ref
+root_job_id
+```
+
+No matching validity row means currentness is unproven. The row cannot appear under reassuring `Sol is handling`; the section becomes partial and the gap is represented by a fixed source-currentness reason.
+
+Join work only by:
 
 ```text
 responsibility.responsibility_ref == work.work_ref
@@ -443,17 +502,17 @@ responsibility.responsibility_ref == work.work_ref
 
 Fields:
 
-- `outcome`: safe `responsibility.title`, falling back to safe `work.agent_os.title`.
-- `why_it_matters`: safe `work.agent_os.reason`, or `null` with a typed reason in evidence.
-- `current_focus`: safe `work.agent_os.next_action`.
-- `next_checkpoint`: `null` in DF1 unless an exact accepted proof/checkpoint field already exists in the composed document. Do not turn the next action into proof.
-- `accountable_owner`: literal `SOL`, admitted only from the exact CEO accountability source above.
-- `chairman_action_required`: always `false` for admitted rows.
-- Sort by exact `responsibility_ref`; show at most six; disclose overflow.
-
-A row failing currentness or accountability is not silently dropped into a reassuring state. It either becomes a typed exception where material or remains absent with the section marked partial.
+- `outcome`: safe responsibility title, then safe Agent OS title.
+- `why_it_matters`: safe Agent OS reason, else null.
+- `current_focus`: safe Agent OS next action.
+- `next_checkpoint`: null unless an exact accepted checkpoint/proof field already exists. Do not relabel next action as proof.
+- `accountable_owner`: literal `SOL`, admitted only through exact CEO accountability.
+- `chairman_action_required`: always false for an admitted Sol row.
+- Sort by exact responsibility ref; show six; expose overflow.
 
 ### Exception item
+
+Closed keys:
 
 ```text
 exception_id
@@ -469,44 +528,28 @@ evidence_refs[]
 diagnostic_ref
 ```
 
-Closed kinds:
+Fixed admissions:
 
-```python
-EXCEPTION_KINDS = frozenset({
-    "WORK_WAITING",
-    "WORK_BLOCKED",
-    "PROOF_MISSING",
-    "SOURCE_CONFLICT",
-    "SOURCE_UNAVAILABLE",
-    "EFFECT_UNKNOWN",
-    "PRODUCTION_REGRESSION",
-    "OWNER_NOT_ESTABLISHED",
-    "CAPACITY_BLOCKED",
-})
-```
-
-Deterministic admission only:
-
-| Source fact | Exception kind | Fixed impact template |
+| Exact fact | Kind | Fixed impact |
 |---|---|---|
 | `state_refresh_error` | `SOURCE_UNAVAILABLE` | `The latest refresh failed. Cached evidence is historical until a successful composition replaces it.` |
-| missing/invalid Executive runtime | `SOURCE_UNAVAILABLE` | `Current execution claims are withheld. Organizational and implementation evidence may remain usable.` |
-| missing/invalid Executive Inbox | `SOURCE_UNAVAILABLE` | `Current Chairman attention cannot be established from Executive evidence.` |
-| missing/invalid Agent OS state | `SOURCE_UNAVAILABLE` | `Current outcomes, owners, and next actions cannot be established from Agent OS.` |
-| missing/invalid active-builds source | `SOURCE_UNAVAILABLE` | `Current implementation and proof changes cannot be established from GitHub evidence.` |
+| runtime missing/invalid | `SOURCE_UNAVAILABLE` | `Current execution claims are withheld. Organizational and implementation evidence may remain usable.` |
+| Inbox missing/invalid | `SOURCE_UNAVAILABLE` | `Current Chairman attention cannot be established from Executive evidence.` |
+| Agent OS missing/invalid | `SOURCE_UNAVAILABLE` | `Current outcomes, owners, and next actions cannot be established from Agent OS.` |
+| active-builds missing/invalid | `SOURCE_UNAVAILABLE` | `Current implementation and proof changes cannot be established from GitHub evidence.` |
 | `work[].disagreements` nonempty | `SOURCE_CONFLICT` | `Canonical and projected evidence disagree. No winner is selected in this briefing.` |
-| exact Agent OS blocked state or nonempty unmet dependencies | `WORK_BLOCKED` | `This outcome cannot advance through its recorded next step.` |
+| exact blocked status/state or unmet dependency | `WORK_BLOCKED` | `This outcome cannot advance through its recorded next step.` |
 | exact failed Executive job | `WORK_BLOCKED` | `A recorded Executive job failed. The next safe action requires inspection.` |
-| autonomy dispatch `RETURNED` with accountable seat `ceo` | `WORK_WAITING` | `A worker return is waiting for Sol adjudication.` |
+| `dispatch.dispatch_state == RETURNED` and accountable seat CEO | `WORK_WAITING` | `A worker return is waiting for Sol adjudication.` |
 | exact placement/dispatch `EFFECT_UNKNOWN` | `EFFECT_UNKNOWN` | `A prior operation may have taken effect. No retry or carrier change is permitted until reconciled.` |
 | exact placement `WAITING_CAPACITY` | `CAPACITY_BLOCKED` | `The operation is waiting for an eligible capacity assignment.` |
 | autonomy unmapped responsibility | `OWNER_NOT_ESTABLISHED` | `An accountable operator cannot be established from the current owner mapping.` |
-| exact source-owned proof-missing kind/code | `PROOF_MISSING` | `Implementation evidence exists, but the required accepted proof is not present.` |
-| exact source-owned production-regression kind/code | `PRODUCTION_REGRESSION` | `A previously usable production journey is reported as regressed.` |
+| exact source-owned proof-missing token | `PROOF_MISSING` | `Implementation evidence exists, but the required accepted proof is not present.` |
+| exact source-owned production-regression token | `PRODUCTION_REGRESSION` | `A previously usable production journey is reported as regressed.` |
 
-Never infer `PROOF_MISSING` from an open PR alone. Never infer `PRODUCTION_REGRESSION` from a failed test alone. Those classes require an exact source-owned kind or reason code.
+Do not infer proof missing from an open PR. Do not infer production regression from a failed test. Those kinds require exact source-owned tokens.
 
-`repair_owner` is a closed system owner, not a guessed human:
+Closed repair owners:
 
 ```text
 EXECUTIVE_OS
@@ -517,9 +560,11 @@ CAPACITY_OWNER
 UNKNOWN
 ```
 
-`chairman_action_required` is true only when an exact current Chairman attention item joins the same identity. An exception alone never escalates itself.
+`chairman_action_required` is true only when exact current Chairman attention joins the same work identity. An exception cannot escalate itself.
 
 ### Safe evidence reference
+
+Closed keys:
 
 ```text
 owner
@@ -541,7 +586,7 @@ control_room_cache
 source_validity
 ```
 
-Allowed reference forms:
+Allowed refs:
 
 ```text
 attention:<safe-id>
@@ -552,11 +597,11 @@ source:<repository-relative-path>
 cache:<sha256>
 ```
 
-No evidence URL is copied from upstream in DF1. The fixed `advanced_ref` lets the operator inspect the existing evidence UI. A later deep-link capability requires its own exact allowlist.
+No upstream URL is copied in DF1. The fixed Advanced link provides the detailed inspector.
 
-### Bounded sanitizer
+### Sanitizer
 
-Implement one pure sanitizer with these semantics:
+Required behavior:
 
 ```python
 def safe_sentence(value: Any, *, limit: int = 360) -> str | None:
@@ -570,21 +615,40 @@ def safe_sentence(value: Any, *, limit: int = 360) -> str | None:
     return text
 ```
 
-`_looks_sensitive` rejects, at minimum:
+Reject case-insensitively:
 
-- `Bearer `, `token=`, `api_key`, `cookie`, `authorization`, `password`, `secret` case-insensitively;
-- absolute path prefixes `/Users/`, `/home/`, `/private/`, `/var/`, `/opt/`, `/tmp/`, and Windows drive paths;
-- `Traceback (most recent call last)`;
-- `chain of thought`, `private reasoning`, `hidden prompt`, and transcript markers;
-- strings containing control characters other than ordinary whitespace.
+```text
+Bearer 
+token=
+api_key
+cookie
+authorization
+password
+secret
+Traceback (most recent call last)
+chain of thought
+private reasoning
+hidden prompt
+raw transcript
+```
 
-If the Chairman-facing summary is unsafe, emit the fixed sentence:
+Reject path forms:
+
+```text
+/Users/
+/home/
+/private/
+/var/
+/opt/
+/tmp/
+Windows drive-letter absolute paths
+```
+
+Unsafe summary replacement:
 
 ```text
 Source-owned detail is withheld from the default briefing. Inspect Advanced evidence.
 ```
-
-Do not echo which secret pattern matched.
 
 ---
 
@@ -592,68 +656,53 @@ Do not echo which secret pattern matched.
 
 **Files:** none.
 
-### Step 1: Re-pin protected source and procedure
-
-Run:
+### Step 1: Re-pin source and Skillpack
 
 ```bash
 git fetch origin master
 git rev-parse origin/master
-git show origin/master:docs/sol_skills/INDEX.md | sed -n '1,80p'
+git show origin/master:docs/sol_skills/INDEX.md | sed -n '1,100p'
 ```
 
-Expected:
+Record exact protected SHA and compatible schema/version/bootstrap in the eventual receipt.
 
-- the exact protected SHA is recorded in the implementation receipt;
-- Skillpack schema/version/bootstrap compatibility is proven at that same SHA;
-- the protected design file exists.
-
-### Step 2: Prove design protection and review
-
-Run:
+### Step 2: Verify design protection
 
 ```bash
 gh pr view 521 --repo mastermindx-market-intelligence/Mastermind \
   --json state,isDraft,mergedAt,mergeCommit,reviewDecision,headRefOid
 ```
 
-Required before START:
+Required:
 
 ```text
 state=MERGED
 isDraft=false
-mergedAt is non-null
-reviewDecision does not contain CHANGES_REQUESTED
+mergedAt non-null
+no unresolved blocking review
 ```
 
-Chairman approval in chat is product intent. It is not a substitute for source protection and independent review.
-
-### Step 3: Reconcile PR #424 without taking it over
-
-Run:
+### Step 3: Reconcile PR #424 without takeover
 
 ```bash
 gh pr view 424 --repo mastermindx-market-intelligence/Mastermind \
   --json state,isDraft,mergedAt,headRefOid,reviewDecision,files,comments
 ```
 
-Required receipt before START:
+Required immutable receipt from its current owner or accepted source successor:
 
-- the incumbent/current owner explicitly retains the useful H0 archaeology;
-- the older H1A default Workstream Workroom is superseded or held;
-- `/api/hub/workstream/chairman-control-room`, `hub_workroom.js`, and `hub_workroom.css` are not the only lawful future additions;
-- the exact DF1 closure in this plan is accepted;
-- no competing H1A implementation exists or may merge behind DF1.
+- useful H0 archaeology retained;
+- old H1A default Workstream Workroom superseded/held;
+- old `/api/hub/workstream/chairman-control-room` and `hub_workroom.*` exclusive closure removed;
+- this plan's `/brief`, `/api/brief`, and `brief.*` closure accepted;
+- no competing H1A implementation may merge behind DF1.
 
-Do not edit any of PR #424's four owned files from the DF1 carrier.
+Do not edit #424's four files from the DF1 carrier.
 
-### Step 4: Census open PRs and worktrees
-
-Check all ten paths, including rename history, across open PRs and local worktrees. Example:
+### Step 4: Census path ownership
 
 ```bash
 python3 - <<'PY'
-from pathlib import Path
 paths = {
     "control_plane/chairman_brief.py",
     "app/static/chairman_control/brief.html",
@@ -676,9 +725,9 @@ gh pr list --repo mastermindx-market-intelligence/Mastermind --state open --limi
   --json number,headRefName,headRefOid,title,files
 ```
 
-Stop on any unresolved path owner. Do not create a second writer.
+Include rename history. Stop on unresolved ownership.
 
-### Step 5: Create the isolated branch/worktree only after gates pass
+### Step 5: Create isolated worktree after admission
 
 ```bash
 git worktree add \
@@ -689,31 +738,28 @@ cd ../Mastermind-chairman-decision-cockpit-df1-20260907
 git status --short --branch
 ```
 
-Expected: clean worktree on the exact new branch and current protected base.
-
-### Step 6: Record the pre-start effect census
-
-Record branch, HEAD, tree, upstream, worktree path, open file handles if inspected, and the exact ten-path collision result. This is evidence, not lifecycle state.
+Expected: clean branch on current protected source.
 
 ---
 
-# Task 1: Build the pure brief skeleton and read-state ruler
+# Task 1: Build the pure contract and read-state ruler
 
 **Files:**
 - Create: `tests/test_chairman_brief.py`
 - Create: `control_plane/chairman_brief.py`
 
-### Step 1: Write the failing closed-contract tests
+### Step 1: Write RED contract tests
 
-Start with tests equivalent to:
+Use an explicit sentinel so `control_room=None` is distinguishable from the fixture default.
 
 ```python
 from __future__ import annotations
 
-import copy
 import json
 
 from control_plane import chairman_brief as brief
+
+_SENTINEL = object()
 
 
 def _base_doc() -> dict:
@@ -742,11 +788,12 @@ def _base_doc() -> dict:
     }
 
 
-def _compose(doc=None, **overrides):
+def _compose(doc=_SENTINEL, **overrides):
     args = {
-        "control_room": _base_doc() if doc is None else doc,
+        "control_room": _base_doc() if doc is _SENTINEL else doc,
         "source_validity": {
             "schema": "mastermind.control_room_source_validity.v1",
+            "publication_seq": 1,
             "cards": [],
         },
         "composed_at": "2026-09-07T00:00:01Z",
@@ -757,7 +804,7 @@ def _compose(doc=None, **overrides):
     return brief.compose_chairman_brief(**args)
 
 
-def test_closed_contract_and_determinism():
+def test_contract_is_closed_and_deterministic():
     one = _compose()
     two = _compose()
     assert set(one) == brief.OUTPUT_KEYS
@@ -767,20 +814,19 @@ def test_closed_contract_and_determinism():
     )
 
 
-def test_missing_control_room_is_unavailable_not_clear():
+def test_absent_control_room_is_unavailable_not_clear():
     out = _compose(doc=None)
     assert out["read_state"]["state"] == "UNAVAILABLE"
     assert out["headline"]["kind"] == "UNAVAILABLE"
 
 
-def test_failed_refresh_makes_cached_document_historical():
-    out = _compose(state_refresh_error="arbitrary raw exception")
+def test_refresh_failure_makes_retained_document_historical():
+    out = _compose(state_refresh_error="raw /Users/private/runtime failure")
+    encoded = json.dumps(out, sort_keys=True)
     assert out["read_state"]["state"] == "HISTORICAL"
     assert out["headline"]["kind"] == "PARTIAL"
-    assert "arbitrary raw exception" not in json.dumps(out)
+    assert "/Users/private/runtime" not in encoded
 ```
-
-The helper must distinguish a deliberately passed `None` from its default document; use an explicit sentinel if needed so `doc=None` truly exercises absence.
 
 ### Step 2: Run RED
 
@@ -788,11 +834,9 @@ The helper must distinguish a deliberately passed `None` from its default docume
 python -m pytest tests/test_chairman_brief.py -q
 ```
 
-Expected: import/contract failures because the module does not exist.
+Expected: import/contract failure.
 
-### Step 3: Implement constants, canonical JSON, digest, source availability, and read-state
-
-Implementation requirements:
+### Step 3: Implement constants, canonical digest, source checks, and read-state
 
 ```python
 SCHEMA = "mastermind.chairman_brief.v1"
@@ -820,23 +864,11 @@ def _digest(value: Mapping[str, Any]) -> str | None:
     return "sha256:" + hashlib.sha256(raw).hexdigest()
 ```
 
-Do not mutate or normalize the upstream document before hashing it.
+Do not normalize or mutate the source before hashing.
 
-### Step 4: Add hostile shape tests
+### Step 4: Add hostile-shape tests
 
-Cover:
-
-- wrong schema;
-- non-mapping source;
-- non-list attention/work/degraded values;
-- NaN or unserializable input;
-- missing `attention.chairman`;
-- invalid source-validity schema;
-- `refresh_in_flight` non-boolean;
-- `state_refresh_error` non-string;
-- input ordering changes that must not change semantic output where ordering is source-insensitive.
-
-Every case returns a complete closed document or a typed unavailable state. The pure reducer never raises on untrusted source shape.
+Cover wrong schema, non-mapping input, malformed lists, invalid source-validity shape, duplicate identities, NaN/unserializable values, non-boolean refresh state, and reordered source-insensitive lists. The reducer returns a closed unavailable/partial document; it never raises.
 
 ### Step 5: Run GREEN and commit
 
@@ -848,15 +880,13 @@ git commit -m "feat(control-room): add pure Chairman brief contract"
 
 ---
 
-# Task 2: Enforce the attention-versus-decision boundary
+# Task 2: Project truthful Chairman attention without manufacturing decisions
 
 **Files:**
 - Modify: `tests/test_chairman_brief.py`
 - Modify: `control_plane/chairman_brief.py`
 
-### Step 1: Write failing tests for exact Chairman attention
-
-Add a source row:
+### Step 1: Add RED source fixtures and assertions
 
 ```python
 def _chairman_attention(attention_id="eia-chairman-1") -> dict:
@@ -874,12 +904,9 @@ def _chairman_attention(attention_id="eia-chairman-1") -> dict:
         ],
         "existing_next_actions": [],
     }
-```
 
-Required assertions:
 
-```python
-def test_chairman_attention_is_not_promoted_to_a_decision():
+def test_attention_is_not_promoted_to_complete_decision():
     doc = _base_doc()
     doc["attention"]["chairman"] = [_chairman_attention()]
     doc["work"] = [{
@@ -905,18 +932,18 @@ def test_chairman_attention_is_not_promoted_to_a_decision():
     ]
 ```
 
-### Step 2: Test exact joins and conflicts
+### Step 2: Add exact-join and conflict RED tests
 
-Add tests proving:
+Prove:
 
-- one exact `attention_id` claim joins a work ref;
-- zero claims yields `work_ref=None`, not fuzzy title matching;
-- two work cards claiming the same `attention_id` add a `SOURCE_CONFLICT` exception and do not pick a winner;
-- duplicate attention identities do not silently collapse; they force partial/conflict state;
-- a `target != chairman` row never enters Chairman attention;
-- an item without a valid stable `attention_id` is not shown as current attention and creates a typed source-shape exception;
-- unsafe reason text is replaced by the fixed withheld sentence;
-- evidence is reduced to closed safe references rather than recursive pass-through.
+- one exact attention-id claim joins one work ref;
+- no claim yields null work ref, never title similarity;
+- multiple claims yield `SOURCE_CONFLICT`, never a selected winner;
+- duplicate attention identities force partial/conflict state;
+- non-Chairman targets never enter the Chairman section;
+- absent/invalid stable attention id cannot render as current;
+- unsafe reason text becomes fixed withheld copy;
+- evidence is closed and safe, not recursively copied.
 
 ### Step 3: Run RED
 
@@ -924,9 +951,7 @@ Add tests proving:
 python -m pytest tests/test_chairman_brief.py -q -k 'attention or decision'
 ```
 
-### Step 4: Implement the exact attention projection
-
-Implementation pattern:
+### Step 4: Implement exact claims
 
 ```python
 def _attention_claims(work_rows: Sequence[Mapping[str, Any]]) -> dict[str, list[str]]:
@@ -940,7 +965,7 @@ def _attention_claims(work_rows: Sequence[Mapping[str, Any]]) -> dict[str, list[
     return {key: sorted(set(values)) for key, values in claims.items()}
 ```
 
-Sort current items by source order, then stable `attention_id`; show three and report overflow. Do not add an urgency or severity model.
+Preserve source order, then stable identity. Show three and disclose overflow. Do not add a severity score.
 
 ### Step 5: Run GREEN and commit
 
@@ -952,18 +977,34 @@ git commit -m "feat(control-room): project truthful Chairman attention"
 
 ---
 
-# Task 3: Add exact Sol accountability and impact-oriented exceptions
+# Task 3: Add source-qualified Sol coverage and exceptions
 
 **Files:**
 - Modify: `tests/test_chairman_brief.py`
 - Modify: `control_plane/chairman_brief.py`
 
-### Step 1: Write failing Sol-handling tests
-
-Create exact joined work/autonomy fixtures and assert:
+### Step 1: Add exact validity fixture
 
 ```python
-def test_only_current_exact_ceo_responsibilities_enter_sol_handling():
+def _current_card_validity(ref="WS:EXAMPLE", root=None) -> dict:
+    return {
+        "responsibility_ref": ref,
+        "root_job_id": root,
+        "components": {
+            "card": {
+                "proof_ref": "a" * 64,
+                "qualified_at": "2026-09-07T00:00:00Z",
+                "remaining_ms": 1000,
+                "state": "current",
+            }
+        },
+    }
+```
+
+### Step 2: Write Sol-handling RED test with current field names
+
+```python
+def test_only_exact_current_ceo_responsibility_enters_sol_handling():
     doc = _base_doc()
     doc["work"] = [{
         "work_ref": "WS:EXAMPLE",
@@ -973,7 +1014,7 @@ def test_only_current_exact_ceo_responsibilities_enter_sol_handling():
             "program": "example",
             "next_action": "Prove one real user-visible result.",
             "state": "in_progress",
-            "reason": "The user journey is not yet production-proven.",
+            "reason": "The user journey is not production-proven.",
             "source": "agentos/workstreams/WS-EXAMPLE.md",
             "unmet_dependencies": [],
         },
@@ -985,6 +1026,7 @@ def test_only_current_exact_ceo_responsibilities_enter_sol_handling():
     }]
     doc["autonomy"]["responsibilities"] = [{
         "responsibility_ref": "WS:EXAMPLE",
+        "root_job_id": None,
         "title": "Example outcome",
         "accountable_seat": "ceo",
         "state": "in_progress",
@@ -992,10 +1034,15 @@ def test_only_current_exact_ceo_responsibilities_enter_sol_handling():
         "freshness": "current",
         "is_actionable": True,
         "placement_state": {"value": "not_observable"},
-        "dispatch": {"state": "UNKNOWN"},
+        "dispatch": {"dispatch_state": "UNKNOWN"},
         "source_receipts": [],
     }]
-    out = _compose(doc=doc)
+    validity = {
+        "schema": "mastermind.control_room_source_validity.v1",
+        "publication_seq": 1,
+        "cards": [_current_card_validity()],
+    }
+    out = _compose(doc=doc, source_validity=validity)
     item = out["sol_handling"]["items"][0]
     assert item["work_ref"] == "WS:EXAMPLE"
     assert item["accountable_owner"] == "SOL"
@@ -1004,26 +1051,30 @@ def test_only_current_exact_ceo_responsibilities_enter_sol_handling():
     assert item["next_checkpoint"] is None
 ```
 
-Add negative tests for:
+Negative cases:
 
-- accountable seat `coo`, `worker`, `chairman`, or unknown;
+- accountable seat not CEO;
 - stale/unknown freshness;
+- source-validity card absent/unqualified/expired;
+- source-validity ref or root mismatch;
 - refused/degraded query status;
-- exact Chairman attention on the work card;
-- a disagreement;
-- blocked/unmet dependencies;
-- returned-to-Sol dispatch;
-- effect-unknown placement/dispatch;
-- missing safe next action;
+- Chairman attention on joined work;
+- source disagreement;
+- blocked/done/killed state;
+- unmet dependency;
+- `dispatch.dispatch_state == RETURNED`;
+- `dispatch.dispatch_state == EFFECT_UNKNOWN`;
+- placement `EFFECT_UNKNOWN`;
+- unsafe/missing next action;
 - duplicate responsibility ref;
-- similar but unequal work refs.
+- similar but unequal refs.
 
-### Step 2: Write failing exception tests
+### Step 3: Write exception RED tests
 
-Test every deterministic row in the exception table. Include the live screenshot class:
+Include the observed failure class:
 
 ```python
-def test_raw_runtime_path_becomes_fixed_impact_copy():
+def test_runtime_path_is_replaced_with_fixed_impact_copy():
     doc = _base_doc()
     doc["sources"]["runtime_db_present"] = False
     doc["degraded"] = [
@@ -1040,37 +1091,28 @@ def test_raw_runtime_path_becomes_fixed_impact_copy():
     )
 ```
 
-Also prove:
+Prove every table row in §6. Also prove:
 
-- one exception identity is deterministic;
-- exact work disagreement is not resolved;
-- failed job and authored block are distinct source evidence but may dedupe to one work-level `WORK_BLOCKED` item by exact semantic fingerprint;
-- dispatch `RETURNED` becomes `WORK_WAITING` only when exact;
-- `EFFECT_UNKNOWN` never appears from an unrelated text string containing those words;
-- `WAITING_CAPACITY` requires the exact accepted token;
-- no open PR alone creates `PROOF_MISSING`;
-- no failed CI text alone creates `PRODUCTION_REGRESSION`;
-- owner-unmapped rows become `OWNER_NOT_ESTABLISHED`;
-- overflow count is visible after six items;
-- exception sort is the frozen kind order, then `work_ref`, then stable id—not an LLM or numeric score.
+- `EFFECT_UNKNOWN` is never inferred from prose;
+- `WAITING_CAPACITY` requires exact token;
+- open PR alone never creates `PROOF_MISSING`;
+- failed CI text alone never creates `PRODUCTION_REGRESSION`;
+- overflow is visible after six;
+- ordering is fixed kind order, work ref, stable id—not score;
+- duplicate source facts dedupe only on exact semantic fingerprint;
+- source conflict is preserved.
 
-### Step 3: Run RED
+### Step 4: Implement exact joins, fixed templates, stable ids, and sanitizer
 
-```bash
-python -m pytest tests/test_chairman_brief.py -q -k 'sol_handling or exception or blocked or effect_unknown'
-```
-
-### Step 4: Implement exact joins, fixed templates, evidence refs, and sanitizer
-
-Do not parse arbitrary prose to infer lifecycle or severity. Prefix parsing is allowed only for source family:
+Prefix use is limited to source family:
 
 ```python
 source_family = entry.split(":", 1)[0] if isinstance(entry, str) else None
 ```
 
-The remainder is discarded before any output object is assembled.
+Discard the suffix before output construction.
 
-Use stable IDs:
+Stable ids:
 
 ```python
 def _stable_id(prefix: str, *parts: str | None) -> str:
@@ -1078,9 +1120,9 @@ def _stable_id(prefix: str, *parts: str | None) -> str:
     return prefix + "-" + hashlib.sha256(material.encode("utf-8")).hexdigest()[:16]
 ```
 
-### Step 5: Add an AST anti-authority test
+### Step 5: Add anti-authority AST test
 
-Assert `control_plane/chairman_brief.py` does not import or call:
+Assert the pure module does not import/call:
 
 ```text
 open
@@ -1093,11 +1135,9 @@ os.environ
 time.time
 datetime.now
 random
-Executive Runtime mutation APIs
-surface binding writers
+runtime mutation APIs
+surface-binding writers
 ```
-
-Permit `hashlib`, `json`, `re`, mappings/sequences, and pure helpers.
 
 ### Step 6: Run GREEN and commit
 
@@ -1109,27 +1149,28 @@ git commit -m "feat(control-room): compress Sol coverage and exceptions"
 
 ---
 
-# Task 4: Add the fixed local read routes without a second gather
+# Task 4: Add fixed local reads without a second gather
 
 **Files:**
 - Create: `tests/test_chairman_control_room_brief_server.py`
 - Modify: `scripts/chairman_control_room.py`
 
-### Step 1: Write failing server tests using existing helpers
+### Step 1: Write server RED tests using existing harness
 
-Reuse `_make_config`, `_running_server`, `_get`, and `_auth_headers` from `tests/test_chairman_control_room_server.py`; do not clone a second server harness.
-
-Required initial tests:
+Pytest already adds the tests directory for sibling imports; use the repository's current pattern:
 
 ```python
-from tests.test_chairman_control_room_server import (
+from test_chairman_control_room_server import (
     _auth_headers,
     _get,
     _make_config,
     _running_server,
 )
+```
 
+Initial tests:
 
+```python
 def test_brief_html_bootstraps_nonce_and_csp(tmp_path):
     config = _make_config(tmp_path)
     with _running_server(config) as (_httpd, port):
@@ -1139,7 +1180,7 @@ def test_brief_html_bootstraps_nonce_and_csp(tmp_path):
     assert config.token.encode() in body
 
 
-def test_brief_api_requires_existing_nonce_and_is_no_store(tmp_path):
+def test_brief_api_requires_nonce_and_is_no_store(tmp_path):
     config = _make_config(tmp_path)
     with _running_server(config) as (_httpd, port):
         denied, _, _ = _get(port, "/api/brief")
@@ -1152,27 +1193,26 @@ def test_brief_api_requires_existing_nonce_and_is_no_store(tmp_path):
     assert json.loads(body)["schema"] == "mastermind.chairman_brief.v1"
 ```
 
-### Step 2: Add route-closure and zero-request-gather tests
+### Step 2: Add route/security/cache tests
 
 Prove:
 
-- `/brief?x=1` and `/api/brief?x=1` are rejected;
-- unknown static asset names return 404;
-- `brief.html`, `brief.js`, and `brief.css` are the only new assets;
-- `/api/brief` does not call `_compose_state_doc` synchronously;
-- `/api/brief` does not call capability census;
-- the response uses one `_cached_state_snapshot` generation;
-- background refresh remains single-flight and non-blocking;
-- `/` and `/api/state` behavior remains unchanged;
-- every current POST route behaves unchanged;
-- `POST /api/brief` returns 404;
-- external client, bad Host, bad token, and bad Origin fail before reducer execution.
+- non-empty queries on `/brief` or `/api/brief` refuse;
+- unknown static names 404;
+- only three new static assets exist;
+- `/api/brief` performs zero synchronous `_compose_state_doc` calls;
+- `/api/brief` performs zero capability-census calls;
+- one `_cached_state_snapshot` generation feeds one response;
+- existing single-flight refresh behavior remains;
+- `/`, `/api/state`, and current POST routes remain unchanged;
+- `POST /api/brief` 404s;
+- external peer, bad Host, token, or Origin fails before reducer call.
 
-Use injected counters rather than elapsed-time guesses.
+Use call counters, not timing guesses.
 
 ### Step 3: Add response-cap RED
 
-Monkeypatch the pure reducer to return a valid but oversized object. Assert:
+Assert:
 
 ```python
 assert status == 503
@@ -1183,7 +1223,7 @@ assert json.loads(body) == {
 assert b"mastermind.chairman_brief.v1" not in body
 ```
 
-Also test exactly `262144` bytes succeeds and `262145` refuses, using canonical encoder padding that does not rely on dictionary formatting ambiguity.
+Prove exactly `262144` encoded bytes succeeds and `262145` refuses using deterministic padding.
 
 ### Step 4: Run RED
 
@@ -1191,15 +1231,15 @@ Also test exactly `262144` bytes succeeds and `262145` refuses, using canonical 
 python -m pytest tests/test_chairman_control_room_brief_server.py -q
 ```
 
-### Step 5: Implement the minimal server change
+### Step 5: Implement minimal server changes
 
-Import the reducer after the existing path bootstrap:
+Import:
 
 ```python
 from control_plane import chairman_brief  # noqa: E402
 ```
 
-Add constants:
+Constants:
 
 ```python
 _BRIEF_MAX_BYTES = 262_144
@@ -1209,7 +1249,7 @@ _BRIEF_ERROR = {
 }
 ```
 
-Extend the static maps only:
+Static map additions:
 
 ```python
 "brief.html": (static_dir / "brief.html", "text/html; charset=utf-8"),
@@ -1217,15 +1257,17 @@ Extend the static maps only:
 "brief.css": (static_dir / "brief.css", "text/css; charset=utf-8"),
 ```
 
+Path additions:
+
 ```python
 "/brief": "brief.html",
 "/static/brief.js": "brief.js",
 "/static/brief.css": "brief.css",
 ```
 
-Use one tokenized HTML helper for `index.html` and `brief.html`, preserving existing `/` bytes except for refactoring-equivalent nonce injection.
+Use one tokenized-HTML helper for `index.html` and `brief.html`, preserving `/` semantics.
 
-Add the authenticated read:
+Handler:
 
 ```python
 def _handle_brief(self) -> None:
@@ -1256,9 +1298,9 @@ def _handle_brief(self) -> None:
     )
 ```
 
-Ensure `_send_json` canonicalization does not cause the boundary test to measure different bytes than the actual success response.
+The success-byte measurement and actual success write must use the same encoder.
 
-### Step 6: Run GREEN plus legacy server regression
+### Step 6: Run GREEN and legacy regression
 
 ```bash
 python -m pytest \
@@ -1279,11 +1321,9 @@ git commit -m "feat(control-room): expose fixed read-only Chairman brief"
 - Create: `app/static/chairman_control/brief.css`
 - Create: `tests/test_chairman_control_room_brief_ui.py`
 
-### Step 1: Write failing static-shell tests
+### Step 1: Write static-shell RED tests
 
-Parse `brief.html` with `HTMLParser`. Require unique IDs and exactly one external script.
-
-Required DOM ids:
+Parse HTML with `HTMLParser`. Required unique ids:
 
 ```text
 brief-main
@@ -1305,45 +1345,43 @@ brief-evidence-close
 brief-scrim
 ```
 
-Required assertions:
+Assert:
 
 ```python
 assert probe.script_srcs == ["/static/brief.js"]
 assert probe.inline_scripts == 0
 assert probe.style_attrs == []
-assert probe.ids == list(dict.fromkeys(probe.ids))
+assert len(probe.ids) == len(set(probe.ids))
 assert "/static/control_room.js" not in html
 assert "ccr-sidebar" not in html
 assert "ccr-surface-dock" not in html
 ```
 
-### Step 2: Write the exact HTML shell
+### Step 2: Implement exact HTML hierarchy
 
-The shell contains:
+Include:
 
-- one skip link to `#brief-main`;
+- skip link to `#brief-main`;
 - compact Mastermind X brand;
-- `Today` as current page;
-- no enabled Programs or Ask Sol control in DF1;
-- one quiet, fixed `Advanced` link to `/`;
-- one source-state element;
-- one hero headline and subheadline;
-- sections for Chairman attention, Sol handling, and exceptions;
-- one calm empty-state region;
-- one evidence drawer and scrim;
-- no sidebar, permanent rail, global search, project counts, or provider surface dock.
+- Today current-page label;
+- no enabled Programs/Ask Sol in DF1;
+- quiet fixed Advanced link to `/`;
+- one source-state indicator;
+- hero headline/subheadline;
+- Chairman attention, Sol handling, and Exceptions sections;
+- calm empty-state region;
+- evidence drawer and scrim;
+- no sidebar, global search, project counts, responsibility graph, or surface dock.
 
-The loading copy must avoid a present-tense company claim:
+Initial copy makes no present-tense claim:
 
 ```text
 Establishing the current briefing…
 ```
 
-### Step 3: Write the CSS hierarchy
+### Step 3: Implement CSS
 
-Use CSS custom properties local to `brief.css`; do not import the old stylesheet.
-
-Core rules:
+Local variables:
 
 ```css
 :root {
@@ -1368,26 +1406,20 @@ button, a { font: inherit; }
 :focus-visible { outline: 2px solid var(--brief-brass); outline-offset: 3px; }
 ```
 
-Layout requirements:
+Requirements:
 
-- main content max width 1040px;
-- no permanent side columns;
-- first headline visible at 390×844 without horizontal scroll;
-- one expanded attention card; later items use compact rows;
-- internal ids/tokens use wrap/overflow behavior rather than truncating the default copy;
-- evidence drawer becomes full-screen at narrow width;
-- `prefers-reduced-motion: reduce` disables transitions and smooth scrolling;
-- high-contrast text and status labels; no color-only meaning.
+- one centered primary column, maximum 1040px;
+- no permanent side rail;
+- one expanded attention item, later items compact;
+- no horizontal overflow at required viewports;
+- narrow evidence drawer becomes full-screen;
+- visible focus, semantic text labels, no color-only meaning;
+- reduced-motion query disables transitions/scroll animation.
 
-### Step 4: Run static RED/GREEN loop
+### Step 4: Run and commit
 
 ```bash
 python -m pytest tests/test_chairman_control_room_brief_ui.py -q -k 'shell or css'
-```
-
-Commit after green:
-
-```bash
 git add \
   app/static/chairman_control/brief.html \
   app/static/chairman_control/brief.css \
@@ -1397,42 +1429,34 @@ git commit -m "feat(control-room): add sparse Chairman Today shell"
 
 ---
 
-# Task 6: Render the brief safely and make evidence inspectable
+# Task 6: Render safely and expose evidence
 
 **Files:**
 - Create: `app/static/chairman_control/brief.js`
 - Modify: `tests/test_chairman_control_room_brief_ui.py`
 
-### Step 1: Write failing JavaScript contract tests
+### Step 1: Write JS RED contract tests
 
-Static assertions:
+Require:
 
 ```text
-/api/brief is present
-X-CCR-Token is present
-fetch uses GET and same-origin credentials
-innerHTML is absent
-document.write is absent
-eval is absent
-new Function is absent
-/api/open is absent
-/api/bind is absent
-/api/unbind is absent
-/api/refresh-builds is absent
-POST is absent
+/api/brief present
+X-CCR-Token present
+GET + same-origin credentials
+innerHTML absent
+document.write absent
+eval absent
+new Function absent
+/api/open absent
+/api/bind absent
+/api/unbind absent
+/api/refresh-builds absent
+POST absent
 ```
 
-Node syntax check when available:
+Run Node parse when present, and retain a conservative pure-Python structural-balance test for node-less CI.
 
-```bash
-node --check app/static/chairman_control/brief.js
-```
-
-Keep a conservative pure-Python bracket-balance test so node-less CI cannot ship a grossly malformed file.
-
-### Step 2: Implement safe DOM primitives
-
-Start the file with strict mode and one IIFE. Use only safe DOM construction:
+### Step 2: Implement safe primitives
 
 ```javascript
 "use strict";
@@ -1454,11 +1478,7 @@ Start the file with strict mode and one IIFE. Use only safe DOM construction:
   }
 ```
 
-No source string is interpreted as HTML.
-
-### Step 3: Implement fixed headline copy
-
-Map only the closed `headline.kind` values:
+### Step 3: Map only closed headline kinds
 
 ```javascript
 var HEADLINE = {
@@ -1470,50 +1490,53 @@ var HEADLINE = {
 };
 ```
 
-Pluralize from exact counts. Never display `healthy` as an inferred state.
+Subheadlines:
 
-Subheadline templates:
+- CLEAR: `No Chairman intervention is currently admitted. Sol coverage and exceptions are shown below.`
+- ATTENTION_REQUIRED: `The current source does not contain a complete decision packet, so no approval control is shown.`
+- PARTIAL: `Some present-tense claims are withheld. Available sections remain evidence-backed.`
+- UNAVAILABLE: `No present-tense company claim is being made. Advanced diagnostics remain available.`
 
-- `CLEAR`: `No Chairman intervention is currently admitted. Sol coverage and exceptions are shown below.`
-- `ATTENTION_REQUIRED`: `The current source does not contain a complete decision packet, so no approval control is shown.`
-- `PARTIAL`: `Some present-tense claims are withheld. Available sections remain evidence-backed.`
-- `UNAVAILABLE`: `No present-tense company claim is being made. Advanced diagnostics remain available.`
+### Step 4: Render sections
 
-### Step 4: Render one expanded plus two compact attention items
+Attention:
 
-The first item displays summary, work ref when present, source owner, and a fixed disclosure that decision fields are missing. Later items display one-line summaries with `Review evidence`.
+- first item expanded;
+- next two compact;
+- show missing-decision disclosure;
+- evidence button only;
+- no action verb that implies mutation.
 
-No control is labeled Approve, Hold, Continue, Stop, Retry, Dispatch, or Merge.
-
-### Step 5: Render Sol handling and exceptions
-
-Sol cards display:
+Sol handling:
 
 ```text
 outcome
-current_focus
-next_checkpoint or "Next proof is not projected in this briefing."
+current focus
+next checkpoint or "Next proof is not projected in this briefing."
 No Chairman action required.
 ```
 
-Exception cards display impact, repair owner, and whether an exact Chairman attention item joins them. Raw diagnostic strings do not exist in the payload and therefore cannot appear in DOM.
+Exceptions:
 
-### Step 6: Implement evidence drawer and accessibility
+```text
+impact
+repair owner
+Chairman action required only when exact source says so
+```
 
-Required behavior:
+### Step 5: Evidence drawer/accessibility
 
-- opener is remembered;
-- drawer gets `aria-hidden=false` and close button focus;
-- Tab and Shift+Tab are trapped inside the open drawer;
-- Escape closes it;
-- closing restores focus to the opener;
-- scrim click closes it;
-- evidence rows are rendered with `textContent`;
-- fixed Advanced link opens `/` normally; no arbitrary URL is passed to `window.open`;
-- network failure renders an unavailable headline and leaves Advanced usable;
-- refresh announcements use one bounded `role=status` update, not a repeating timer.
+- remember opener;
+- open with `aria-hidden=false` and focus close;
+- trap Tab/Shift+Tab;
+- Escape and scrim close;
+- restore opener focus;
+- render evidence via `textContent`;
+- Advanced link remains fixed `/`;
+- network failure renders UNAVAILABLE, not an endless spinner;
+- one bounded `role=status` update announces refresh result.
 
-### Step 7: Run GREEN and commit
+### Step 6: Run and commit
 
 ```bash
 python -m pytest tests/test_chairman_control_room_brief_ui.py -q
@@ -1522,68 +1545,63 @@ git add app/static/chairman_control/brief.js tests/test_chairman_control_room_br
 git commit -m "feat(control-room): render the read-only Chairman briefing"
 ```
 
-If Node is unavailable, record that fact and rely on the mandatory CI plus pure-Python structural check; do not claim Node proof.
+If Node is absent, record that and rely on the structural check plus hosted CI; do not claim Node proof.
 
 ---
 
-# Task 7: Exercise the complete failure and responsive browser matrix
+# Task 7: Complete deterministic and browser failure coverage
 
 **Files:**
 - Modify: `tests/test_chairman_brief.py`
 - Modify: `tests/test_chairman_control_room_brief_server.py`
 - Modify: `tests/test_chairman_control_room_brief_ui.py`
 
-### Step 1: Complete deterministic fixture coverage
+### Step 1: Cover every reachable DF1 state
 
-The test suite must cover all reachable DF1 states:
-
-1. current, no Chairman attention, no exceptions;
-2. current, one incomplete Chairman attention item;
+1. current zero Chairman attention and zero exception;
+2. one incomplete Chairman attention;
 3. three visible attention items plus overflow;
 4. duplicate attention identity;
-5. attention-to-work join absent;
-6. attention-to-work join ambiguous;
+5. absent work join;
+6. ambiguous work join;
 7. one exact current Sol-owned outcome;
-8. stale Sol responsibility excluded from reassuring copy;
-9. blocked Sol-owned outcome becomes exception;
-10. worker return waiting for Sol;
-11. runtime unavailable with Agent OS/GitHub still usable;
-12. Agent OS unavailable;
-13. Executive Inbox unavailable;
-14. GitHub evidence unavailable;
-15. all critical sources unavailable;
-16. failed refresh / historical cache;
-17. source conflict;
-18. effect unknown;
-19. owner not established;
-20. capacity blocked;
-21. unsafe token text upstream;
-22. absolute host path upstream;
-23. traceback upstream;
-24. hidden-prompt/private-reasoning text upstream;
-25. oversized response refusal;
-26. exact cap success;
-27. corrupt source shape;
-28. Programs unavailable and absent as enabled navigation;
-29. Ask Sol unavailable and absent as enabled navigation;
-30. Advanced available while the brief is unavailable.
+8. missing source-validity proof;
+9. expired/unqualified source-validity proof;
+10. stale Sol responsibility;
+11. blocked Sol outcome;
+12. worker return waiting for Sol using `dispatch.dispatch_state`;
+13. runtime unavailable with other sections usable;
+14. Agent OS unavailable;
+15. Executive Inbox unavailable;
+16. GitHub evidence unavailable;
+17. all critical sources unavailable;
+18. failed refresh/historical cache;
+19. source conflict;
+20. effect unknown;
+21. owner not established;
+22. capacity blocked;
+23. unsafe token text upstream;
+24. absolute path upstream;
+25. traceback upstream;
+26. hidden-prompt/private-reasoning text upstream;
+27. oversized response refusal;
+28. exact response cap success;
+29. corrupt source shape;
+30. Programs and Ask Sol absent as enabled navigation;
+31. Advanced available while brief unavailable.
 
-A complete decision card is intentionally not reachable in DF1 because no accepted complete decision-packet source exists. The test must assert that limitation rather than manufacture a fixture-only authority.
+A complete decision card is intentionally unreachable in DF1. Tests assert the source gap rather than fabricating authority.
 
-### Step 2: Build the isolated browser behavior harness
+### Step 2: Reuse the existing browser pattern
 
-Follow the existing `tests/test_chairman_control_room_ui_x1.py` pattern:
+- in-process P0A server on OS-assigned loopback port;
+- isolated browser profile;
+- deterministic cached fixture documents in CI;
+- explicitly supplied Chrome executable and Playwright module;
+- optional in environments without exact browser dependencies, mandatory for real acceptance;
+- prove browser process cleanup/absence.
 
-- start the in-process P0A server on an OS-assigned loopback port;
-- use an isolated browser profile;
-- inject deterministic cached documents rather than contacting real sources in CI;
-- use an explicitly supplied Chrome executable and Playwright module;
-- keep the test optional on environments without the exact browser dependencies, but require it for the real acceptance run;
-- prove browser process cleanup/absence after the test.
-
-### Step 3: Prove required viewports
-
-Run the same semantic cases at:
+### Step 3: Required viewports
 
 ```text
 1440 × 900
@@ -1591,25 +1609,15 @@ Run the same semantic cases at:
 390 × 844
 ```
 
-For each viewport assert:
+For each:
 
 ```javascript
 document.documentElement.scrollWidth <= window.innerWidth
 ```
 
-Also prove:
+Also prove headline visibility, no sidebar/dock, Advanced reachability, keyboard drawer flow, focus restoration, secret/path absence from body text, reduced-motion usability, and truthful network-failure state.
 
-- headline is visible without scroll;
-- one priority attention item is understandable above routine sections;
-- no sidebar or surface dock is visible;
-- Advanced is reachable;
-- evidence drawer opens/closes with keyboard;
-- focus restores;
-- source-derived secret/path strings are absent from `document.body.innerText`;
-- reduced-motion mode does not hide content;
-- network failure leaves a truthful unavailable state rather than a spinner.
-
-### Step 4: Run focused and integrated suites
+### Step 4: Run focused and legacy suites
 
 ```bash
 python -m pytest \
@@ -1626,9 +1634,9 @@ python -m pytest \
   -q
 ```
 
-Then run the repository-required test command exactly as CI defines it. Do not substitute a selected suite for the required gate.
+Then execute the exact repository-required CI command. Selected tests never substitute for the required gate.
 
-### Step 5: Prove remote X1 and shared assets are unchanged
+### Step 5: Prove X1/shared assets unchanged
 
 ```bash
 git diff --exit-code origin/master -- \
@@ -1641,9 +1649,7 @@ git diff --exit-code origin/master -- \
   ops/control_room_remote/mastermind-control-room-remote.service
 ```
 
-Expected: no diff.
-
-### Step 6: Commit the completed proof matrix
+### Step 6: Commit
 
 ```bash
 git add \
@@ -1655,64 +1661,57 @@ git commit -m "test(control-room): prove DF1 truth and responsive behavior"
 
 ---
 
-# Task 8: Document the canary and preserve Advanced
+# Task 8: Document canary and Advanced behavior
 
 **Files:**
 - Modify: `docs/CHAIRMAN_CONTROL_ROOM.md`
 
-### Step 1: Add the operator journey
-
-Document exactly:
+### Step 1: Add exact local journey
 
 ```bash
 python3 scripts/chairman_control_room.py --port 8787
 open http://127.0.0.1:8787/brief
 ```
 
-State clearly:
+Document:
 
 - `/brief` is the read-only Chairman canary;
-- `/` is the existing Advanced inspector;
-- `/api/brief` is token-gated and not a public API;
-- no action, decision submission, Programs, Ask Sol, or material-change checkpoint exists in DF1;
-- the local token is a browser-origin/CSRF nonce, not same-user process authentication;
-- a partial/historical/unavailable brief is expected when canonical inputs are absent;
-- raw diagnostics belong at `/`, not in the default brief;
-- restarting the process rebuilds from canonical readers and forgets process-memory cache;
+- `/` remains the Advanced inspector;
+- `/api/brief` is token-gated, no-store, and not public;
+- no action, Programs, Ask Sol, or material-change checkpoint exists in DF1;
+- local token is a CSRF/browser-origin nonce, not same-user process authentication;
+- partial/historical/unavailable states are truthful when sources are absent;
+- raw diagnostics live in Advanced;
+- process restart rebuilds cache from canonical readers;
 - remote X1 is unchanged.
 
-### Step 2: Add rollback instructions
-
-DF1 canary rollback is presentation-only:
+Rollback:
 
 ```text
-Stop using /brief and continue opening /.
+Stop opening /brief and continue opening /.
 ```
 
-No canonical state rollback, database migration, or data restoration exists.
+No canonical rollback or migration exists.
 
-### Step 3: Run documentation/source checks and commit
+### Step 2: Test and commit
 
 ```bash
 python -m pytest \
   tests/test_chairman_control_room_brief_server.py \
   tests/test_chairman_control_room_brief_ui.py \
   -q
-
 git add docs/CHAIRMAN_CONTROL_ROOM.md
 git commit -m "docs(control-room): document the DF1 Today canary"
 ```
 
 ---
 
-# Task 9: Produce immutable source and real-local proof receipts
+# Task 9: Produce immutable source and real-local proof receipt
 
 **Files:**
 - Create: `docs/superpowers/plans/2026-09-07-chairman-control-room-df1-implementation-receipt.md`
 
-### Step 1: Freeze the candidate identity
-
-Record:
+### Step 1: Freeze candidate identity
 
 ```bash
 git rev-parse HEAD
@@ -1733,11 +1732,9 @@ git ls-tree -r HEAD -- \
   docs/CHAIRMAN_CONTROL_ROOM.md
 ```
 
-The receipt lists exact commit, tree, base, and blob identities. Do not call an unpushed local commit published evidence.
+Record exact commit/tree/base/blobs. Unpushed local state is not published evidence.
 
-### Step 2: Run the real local canary
-
-On the authorized Chairman Mac, from the exact candidate worktree:
+### Step 2: Run real local canary on the authorized Mac
 
 ```bash
 python3 scripts/chairman_control_room.py --port 8787
@@ -1745,38 +1742,36 @@ python3 scripts/chairman_control_room.py --port 8787
 
 Prove:
 
-- startup composition completes or fails into the documented truthful state;
-- `GET /brief` loads;
-- `GET /api/brief` reads the same cached generation;
-- `GET /` still loads the complete Advanced inspector;
-- the current real degraded runtime path is translated to impact copy and is absent from brief JSON/DOM;
-- restart/readback preserves canonical semantics while process cache is rebuilt;
-- no provider open, bind, unbind, refresh, or mutation is triggered by `/brief`.
+- startup composes or enters a documented truthful failure state;
+- `/brief` loads;
+- `/api/brief` reads the same cached generation;
+- `/` still loads Advanced;
+- real raw runtime path is absent from brief JSON/DOM and translated into impact copy;
+- restart/readback rebuilds process cache without changing canonical semantics;
+- `/brief` triggers no provider open/bind/unbind/refresh/mutation.
 
 ### Step 3: Capture real browser evidence
 
-Capture at all three required viewports with exact candidate identity and timestamp. Record screenshot paths and SHA-256 digests in the receipt, but do not commit private screenshots or host paths unless the repository's accepted evidence policy explicitly permits them.
+Capture all three viewports with exact candidate identity and timestamp. Record screenshot paths and SHA-256 digests in the receipt, but do not commit private screenshots/host paths unless accepted evidence policy permits.
 
-The receipt must describe what each screenshot proves. A screenshot alone is not acceptance.
+### Step 4: Witness Chairman task
 
-### Step 4: Conduct the witnessed Chairman task
-
-Ask Chris one closed question while the exact canary is open:
+Ask while the exact canary is open:
 
 ```text
 Does anything on this page currently require your action: yes or no?
 ```
 
-Pass criteria:
+Pass:
 
 - correct answer within ten seconds;
-- no Slack, Linear, GitHub, Finder, or Advanced inspection required;
-- the answer agrees with the current admitted Chairman attention state;
-- any unavailable source is understood as withheld evidence, not a zero.
+- no Slack, Linear, GitHub, Finder, or Advanced required;
+- answer agrees with exact admitted Chairman attention;
+- unavailable source is understood as withheld evidence, not zero.
 
-Record the observed result. Do not invent or backfill a usability receipt without the witnessed run.
+Do not backfill a usability receipt without the witnessed run.
 
-### Step 5: Run final verification before publication
+### Step 5: Final verification
 
 ```bash
 python -m compileall control_plane scripts tests
@@ -1792,9 +1787,9 @@ python -m pytest \
   -q
 ```
 
-Then run the repository-required CI command and security checks on the exact immutable head.
+Then run exact repository CI/security checks on immutable head.
 
-### Step 6: Commit the receipt and publish once
+### Step 6: Commit, publish once, and open Draft/Hold PR
 
 ```bash
 git add docs/superpowers/plans/2026-09-07-chairman-control-room-df1-implementation-receipt.md
@@ -1802,112 +1797,108 @@ git commit -m "docs(control-room): record DF1 candidate proof"
 git push -u origin sol/chairman-decision-cockpit-df1-20260907
 ```
 
-Open one Draft/Hold PR. Do not mark Ready, merge, install as default, or start DF2.
-
-The PR body must distinguish:
+PR body distinguishes:
 
 ```text
 source built
 hosted CI
-local canary installed/running
+local canary running
 browser proof
 witnessed Chairman task
 Sol acceptance
 default cutover
 ```
 
-A missing row remains explicitly missing.
+A missing row remains missing. Do not mark Ready, merge, or start DF2.
 
 ---
 
-## Implementation order and worker routing
+## 7. Worker routing and implementation order
 
-This plan is sequential because Tasks 1–7 share one reducer/server/UI contract and one ten-path ceiling. Do not dispatch multiple concurrent writers against these files.
+Tasks 0–9 are sequential because reducer, server, UI, and proof share one contract/path ceiling. Do not send concurrent source writers.
 
-Recommended avenue after all gates pass:
+Recommended route after admission:
 
 ```text
-PREFERRED_AVENUE: Terra or bounded CTO Sol implementation worker
-WHY NOT FABLE: architecture and ambiguity are frozen; the remaining work is test-driven bounded implementation and browser proof.
+PREFERRED_AVENUE: Terra or bounded CTO Sol
+WHY NOT FABLE: product/authority ambiguity is frozen; remaining work is bounded TDD, integration, and browser proof.
 ```
 
-Use one source writer for Tasks 0–9. Independent review can run after a stable immutable head, but must not edit the writer's worktree. A review finding returns to the same writer and same PR as a bounded repair unless effect/ownership state requires reconciliation.
+Independent reviewers operate against immutable commits and do not edit the source worktree. A finding returns to the same writer/branch/PR unless ownership/effect state requires reconciliation.
 
 ---
 
-## Acceptance checklist
-
-DF1 source is eligible for Sol review only when all are true:
+## 8. Acceptance checklist
 
 ### Product
 
-- `/brief` immediately answers act/no-act at Chairman altitude.
-- No project board, percent complete, giant object counts, sidebar, or permanent surface rail appears.
-- Sol-handling items communicate coverage without invented progress.
-- Exceptions explain impact before machinery.
-- Advanced remains one click away and functionally complete.
+- `/brief` answers act/no-act at Chairman altitude.
+- No project board, percentages, giant counts, sidebar, or permanent surface rail appears.
+- Sol coverage does not invent progress.
+- Exceptions explain human impact first.
+- Advanced is one click away and complete.
 
 ### Truth
 
-- Missing source never becomes empty/clear.
-- Attention never becomes a complete decision without the missing source contract.
-- Current, partial, historical, and unavailable remain distinct.
-- Source conflict and effect uncertainty remain visible.
-- `NO_LONGER_PRESENT`, completion, merge, deployment, and acceptance are never invented.
+- Missing never becomes clear/empty.
+- Attention never becomes complete decision.
+- Current/partial/historical/unavailable are distinct.
+- Conflict/effect uncertainty remain visible.
+- Completion, merge, deployment, proof, and acceptance are never inferred.
 
 ### Security
 
-- Closed output keys and item allowlists are tested.
-- Raw paths, tracebacks, secrets, prompts, reasoning, and transcripts are absent from JSON and DOM.
-- `/api/brief` is loopback/Host/token/Origin-gated and no-store.
-- Query strings and arbitrary paths are refused.
-- No POST or arbitrary navigation input exists.
+- Closed output/item allowlists pass.
+- Raw paths, tracebacks, secrets, prompts, reasoning, and transcripts are absent from JSON/DOM.
+- `/api/brief` uses existing loopback/Host/token/Origin/no-store gates.
+- Query strings and arbitrary paths refuse.
+- No POST exists.
 - Response cap is enforced before write.
 
 ### No duplicate system
 
-- Reducer is pure over the cached document.
-- No database, cache authority, source reader, queue, lifecycle, identity registry, scheduler, retry, watcher, or model authority was added.
+- Reducer is pure over cached inputs.
+- No database, source reader, cache authority, queue, lifecycle, identity, scheduler, retry, watcher, or model authority was added.
 - Existing owner code is consumed, not copied.
 - Linear remains portfolio owner.
-- Remote X1 and shared inspector assets are unchanged.
+- Remote X1/shared inspector assets are unchanged.
 
 ### Proof
 
 - focused tests pass;
-- legacy local and remote tests pass;
-- required repository CI and security checks pass on exact head;
-- real local `/brief` and `/` readback pass;
+- legacy local/remote tests pass;
+- required CI/security checks pass on exact head;
+- real `/brief`, `/api/brief`, and `/` readback pass;
 - desktop/tablet/mobile browser evidence exists;
-- process restart behavior is proven;
-- witnessed Chairman ten-second task passes;
-- exact candidate identity and path census are recorded.
+- restart behavior is proven;
+- witnessed ten-second task passes;
+- exact path and candidate identity are recorded.
 
 ---
 
-## Stop conditions
+## 9. Stop conditions
 
-Stop and return to Sol without broadening scope when any of these occurs:
+Stop and return without broadening when:
 
-- PR #521 is not protected or has unresolved blocking review;
-- PR #424's older H1A closure remains unresolved;
-- an implementation path has another current writer;
-- the existing cache cannot supply the required input without a second gather;
-- complete decision cards would require invented or model-authored fields;
-- a safe default summary cannot be produced without leaking privileged text;
-- remote X1 or shared inspector assets would need modification;
+- #521 is unprotected or blocking review remains;
+- #424's older H1A closure is unresolved;
+- a path has another current writer;
+- required data would need a second gather;
+- complete decisions would need invented/model fields;
+- safe copy would require exposing privileged text;
+- X1/shared inspector assets would need modification;
 - an eleventh path is required;
-- a new POST/action path appears necessary;
-- exact source movement changes the material architecture, reducer inputs, security contract, or proof ruler;
-- browser proof reveals the Chairman still cannot answer act/no-act without Advanced;
-- any modification outcome becomes uncertain.
+- a POST/action path appears necessary;
+- protected movement changes material architecture/security/proof law;
+- browser proof shows Chris still needs Advanced to answer act/no-act;
+- any modifying outcome becomes uncertain.
 
-Return format:
+Return:
 
 ```text
 BLOCKED or DECISION_REQUEST
-exact operation key
-exact head/tree/base
+operation key
+head/tree/base
 known effect state
 blocking source/identity/path
 smallest safe next action
@@ -1916,20 +1907,20 @@ production_effect=NONE unless separately proven
 
 ---
 
-## Continuation handoff
+## 10. Continuation handoff
 
-On implementation return, provide:
+Implementation return includes:
 
 - mission and user outcome;
 - current protected source and same-SHA Skillpack;
-- exact branch/PR/head/tree/base and ten path/blob identities;
-- tests and hosted checks with exact run/job identities;
-- browser proof matrix and screenshot digests;
+- branch/PR/head/tree/base and ten blob identities;
+- focused and required tests plus hosted run/job ids;
+- browser matrix and screenshot digests;
 - real local process/readback result;
-- current capability classification;
-- all missing proof or disagreements;
-- explicit statement that DF2/default cutover remains held;
+- current capability state;
+- missing proof/disagreements;
+- explicit statement that DF2/default cutover is held;
 - exact requested Sol ruling;
-- watcher state and required same-carrier `CONTINUE`, `REQUEST_REPAIR`, or terminal `STOP` edge if a reciprocal worker dialogue is used.
+- watcher state and same-carrier `CONTINUE`, `REQUEST_REPAIR`, or terminal `STOP` edge when reciprocal dialogue is used.
 
-The implementation worker's stop boundary is one Draft/Hold DF1 PR. No merge, default-route switch, Programs, Ask Sol, actions, learning telemetry, or successor wave begins without a new explicit Sol/Chairman edge.
+The worker boundary is one Draft/Hold DF1 PR. No merge, default-route switch, Programs, Ask Sol, action, telemetry, or successor wave begins without a new explicit Sol/Chairman edge.
