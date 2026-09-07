@@ -8,7 +8,9 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+import re
 from typing import Any
+from urllib.parse import urlsplit
 
 from integrations.business_mcp_auth.contracts import (
     AuthAuditSink, ResourcePolicy, validate_resource_policy,
@@ -40,7 +42,8 @@ def observation_schema() -> dict[str, Any]:
     Byte/range/hash relationships remain checked by the protected observer/port;
     this closes the advertised shape without claiming a new observation epoch.
     """
-    digest = {'type': 'string', 'pattern': '^[0-9a-f]{64}$'}
+    digest = {'type': 'string', 'minLength': 64, 'maxLength': 64,
+              'pattern': '^[0-9a-f]{64}$'}
     integer = {'type': 'integer', 'minimum': 0, 'maximum': MAX_FILE_BYTES}
     reference = {'type': 'string', 'minLength': 1, 'maxLength': 256,
                  'pattern': '^[^\x00-\x1f\x7f]+$'}
@@ -52,7 +55,8 @@ def observation_schema() -> dict[str, Any]:
         'context_ref': dict(reference), 'owner_ref': dict(reference),
         'generation': dict(reference), 'view_kind': {'const': 'WORKING_TREE'},
         'committed_head': {'anyOf': [{'type': 'null'},
-                                    {'type': 'string', 'pattern': '^[0-9a-f]{40}$'}]},
+                                    {'type': 'string', 'minLength': 40, 'maxLength': 40,
+                                     'pattern': '^[0-9a-f]{40}$'}]},
         'file_sha256': dict(digest), 'file_identity_digest': dict(digest),
         'observation_digest': dict(digest),
         'file_bytes': dict(integer), 'total_lines': dict(integer),
@@ -67,6 +71,30 @@ def observation_schema() -> dict[str, Any]:
     }
     return {'type': 'object', 'properties': properties,
             'required': list(properties), 'additionalProperties': False}
+
+
+def validate_incoming_authority(services: RuntimeServices, authority: str) -> None:
+    """Require an owner-qualified exact Host with explicit port before serving.
+
+    This is the admitted request authority, not a derivation of the listener's
+    bind address. Runtime qualification must verify what the transport sends.
+    The launcher supports one exact authority, with no wildcard/default fallback.
+    """
+    if (not isinstance(services, RuntimeServices) or type(authority) is not str
+            or not authority or any(c not in
+                'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-:[]'
+                for c in authority)):
+        raise ValueError('INCOMING_AUTHORITY_INVALID')
+    parsed = urlsplit('//' + authority)
+    hostname = parsed.hostname
+    if (hostname and ':' not in hostname
+            and any(not re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?', label)
+                    for label in hostname.rstrip('.').split('.'))):
+        raise ValueError('INCOMING_AUTHORITY_INVALID')
+    if (not hostname or parsed.port is None or not 1 <= parsed.port <= 65535
+            or parsed.path or parsed.query or parsed.fragment
+            or services.allowed_hosts != (authority,)):
+        raise ValueError('INCOMING_AUTHORITY_MISMATCH')
 
 
 def create_deployment(services: RuntimeServices):

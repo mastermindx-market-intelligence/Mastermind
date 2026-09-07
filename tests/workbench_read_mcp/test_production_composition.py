@@ -350,6 +350,88 @@ class CompositionTests(unittest.IsolatedAsyncioTestCase):
                 self.transform = lambda result, change=mutation: {**result, **change}
                 self.withheld(await self.read())
 
+    async def assert_terminal_lf_digest_withheld(self, field):
+        # No expected_sha256: the output schema, not request-hash comparison,
+        # must reject the malformed success after actual descriptor observation.
+        token = self.token()
+        baseline = self.result(await self.read(token=token))
+        self.assertFalse(baseline['isError'], baseline)
+        value = baseline['structuredContent']
+        self.assertEqual(value['content'], SENTINEL)
+        self.assertEqual(value['committed_head'], '1' * 40)
+        self.assertEqual(len(value[field]), 64)
+        self.assertEqual(self.observations, 1)
+        self.transform = lambda result: {**result, field: result[field] + '\n'}
+        response = await self.read(token=token)
+        self.assertEqual(self.observations, 2)
+        self.withheld(response)
+
+    async def test_file_hash_terminal_lf_is_withheld(self):
+        await self.assert_terminal_lf_digest_withheld('file_sha256')
+
+    async def test_identity_digest_terminal_lf_is_withheld(self):
+        await self.assert_terminal_lf_digest_withheld('file_identity_digest')
+
+    async def test_observation_digest_terminal_lf_is_withheld(self):
+        await self.assert_terminal_lf_digest_withheld('observation_digest')
+
+    async def test_committed_head_schema_requires_exact_40_or_null(self):
+        from jsonschema import Draft202012Validator
+        validator = Draft202012Validator(
+            self.deployment.observation_schema()['properties']['committed_head'])
+        self.assertTrue(validator.is_valid(None))
+        self.assertTrue(validator.is_valid('1' * 40))
+        self.assertFalse(validator.is_valid('1' * 40 + '\n'))
+        self.assertFalse(validator.is_valid('1' * 39))
+        self.assertFalse(validator.is_valid('1' * 41))
+
+    async def test_launch_authority_is_qualified_before_serve(self):
+        from scripts.mastermind_workbench_read_server import main
+        # The owner supplies the request authority independently of the bind
+        # address: this also models a tunnel-facing Host unlike loopback:port.
+        for authority in ('127.0.0.1:8765', 'read0.example:443'):
+            services = dataclasses.replace(self.services, allowed_hosts=(authority,))
+            calls = []
+            def serve(app, *, host, port):
+                calls.append((app, host, port))
+            self.assertEqual(main(['--port', '8765'], runtime_services=services,
+                                  serve=serve, incoming_authority=authority), 0)
+            self.assertEqual(len(calls), 1)
+            app, host, port = calls[0]
+            self.assertEqual((host, port), ('127.0.0.1', 8765))
+            async with app.router.lifespan_context(app):
+                async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                             base_url='http://' + authority) as client:
+                    response = await client.post('/mcp', headers={
+                        'Host': authority, 'Accept': 'application/json, text/event-stream',
+                        'MCP-Protocol-Version': '2025-03-26',
+                        'Authorization': 'Bearer ' + self.token(),
+                    }, json={'jsonrpc': '2.0', 'id': 1, 'method': 'initialize',
+                             'params': {'protocolVersion': '2025-03-26', 'capabilities': {},
+                                        'clientInfo': {'name': 'read0-fixture', 'version': '1'}}})
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertIn('result', response.json())
+        invalid = [(None, ('127.0.0.1:8765',)),
+                   ('127.0.0.1:8765', ('127.0.0.1',)),
+                   ('127.0.0.1', ('127.0.0.1',)),
+                   ('127.0.0.1:*', ('127.0.0.1:8765',)),
+                   ('http://127.0.0.1:8765', ('127.0.0.1:8765',)),
+                   ('127.0.0.1:0', ('127.0.0.1:0',)),
+                   ('127.0.0.1:65536', ('127.0.0.1:65536',)),
+                   ('bad..host:8765', ('bad..host:8765',)),
+                   ('127.0.0.1:8765\n', ('127.0.0.1:8765',)),
+                   ('127.0.0.1:8765', ('127.0.0.1:8765', 'other.example:443'))]
+        for authority, hosts in invalid:
+            calls.clear()
+            services = dataclasses.replace(self.services, allowed_hosts=hosts)
+            with contextlib.redirect_stderr(io.StringIO()) as error:
+                result = main(['--port', '8765'], runtime_services=services,
+                              serve=serve, incoming_authority=authority)
+            self.assertEqual(result, 2, 'unqualified authority reached serve')
+            self.assertEqual(calls, [])
+            self.assertEqual(error.getvalue().strip(), 'DEPLOYMENT_CONFIGURATION_REFUSED')
+        self.assertEqual((self.resolves, self.io_calls), (0, 0))
+
     async def test_audit_is_real_and_never_contains_credentials_or_roots(self):
         token = self.token()
         self.assertFalse(self.result(await self.read(token=token))['isError'])
@@ -368,13 +450,14 @@ class CompositionTests(unittest.IsolatedAsyncioTestCase):
         def serve(app, *, host, port):
             self.assertTrue(callable(app))
             calls.append((host, port))
-        bad = dataclasses.replace(self.services,
+        services = dataclasses.replace(self.services, allowed_hosts=('127.0.0.1:8765',))
+        bad = dataclasses.replace(services,
                                   policy=dataclasses.replace(self.policy, policy_id='other.policy'))
         with contextlib.redirect_stderr(io.StringIO()):
-            self.assertEqual(main(['--port', '8765'], runtime_services=bad, serve=serve), 2)
+            self.assertEqual(main(['--port', '8765'], runtime_services=bad, serve=serve, incoming_authority='127.0.0.1:8765'), 2)
             self.assertEqual(main(['--port', '8765'], runtime_services=self.services), 2)
         self.assertEqual(calls, [])
-        self.assertEqual(main(['--port', '8765'], runtime_services=self.services, serve=serve), 0)
+        self.assertEqual(main(['--port', '8765'], runtime_services=services, serve=serve, incoming_authority='127.0.0.1:8765'), 0)
         self.assertEqual(calls, [('127.0.0.1', 8765)])
         self.assertEqual((self.resolves, self.io_calls), (0, 0))
         for fd in self.fds:
@@ -477,7 +560,7 @@ class MutationDiscriminators(unittest.TestCase):
     These controls change only in-memory test bindings; protected files stay intact.
     """
 
-    def test_same_assertions_detect_seven_real_boundary_bypasses(self):
+    def test_same_assertions_detect_original_and_repair_boundary_bypasses(self):
         from integrations.workbench_read_mcp import deployment, read_port, app
         from integrations.business_mcp_auth.mcp_adapter import MastermindTokenVerifier
         original_observer = read_port.observe_file
@@ -559,6 +642,30 @@ class MutationDiscriminators(unittest.TestCase):
             ('forged-observer-hash', 'test_hash_and_path_adversaries_withhold_real_file',
              lambda: patch.object(read_port, 'observe_file', forged_hash), 'False is not true'),
         ]
+        original_schema = deployment.observation_schema
+        def without_length(field):
+            def schema():
+                result = original_schema()
+                value = result['properties'][field]
+                if field == 'committed_head':
+                    value = value['anyOf'][1]
+                value.pop('minLength')
+                value.pop('maxLength')
+                return result
+            return patch.object(deployment, 'observation_schema', schema)
+        for field, method in (
+            ('file_sha256', 'test_file_hash_terminal_lf_is_withheld'),
+            ('file_identity_digest', 'test_identity_digest_terminal_lf_is_withheld'),
+            ('observation_digest', 'test_observation_digest_terminal_lf_is_withheld'),
+            ('committed_head', 'test_committed_head_schema_requires_exact_40_or_null'),
+        ):
+            controls.append(('length-guard-' + field, method,
+                             lambda field=field: without_length(field),
+                             'True is not false' if field == 'committed_head' else 'False is not true'))
+        controls.append(('incoming-authority-guard', 'test_launch_authority_is_qualified_before_serve',
+                         lambda: patch.object(deployment, 'validate_incoming_authority',
+                                              lambda services, authority: None),
+                         'unqualified authority reached serve'))
         for name, method, mutation, assertion in controls:
             with self.subTest(control=name):
                 baseline = unittest.TextTestRunner(stream=io.StringIO()).run(

@@ -50,12 +50,24 @@ automatic service-discovery flag exists. The parser accepts only a loopback host
 and an explicit port in 1..65535 for the serving boundary.
 
 After separate runtime admission, the **existing trusted host bootstrap** may
-call `main(argv, runtime_services=services, serve=owner_serve)`. The `serve`
+call `main(argv, runtime_services=services, serve=owner_serve,
+incoming_authority=owner_qualified_authority)`. The `serve`
 callback receives the constructed ASGI application plus exact host and port.
 Source tests use only a launch spy and in-process ASGI transport, never a listener.
 The concrete production bootstrap, service binding and process owner remain
 UNKNOWN until qualified. An executable Python entry point is not an installed
 production system.
+
+The trusted `incoming_authority` is the exact HTTP `Host` the admitted transport
+will send, including an explicit port; it is not a CLI/model parameter or derived
+from the listener bind tuple. This launcher supports one qualified authority and
+requires `services.allowed_hosts == (incoming_authority,)` before `serve`. Missing,
+malformed, wildcard, portless or mismatched values refuse before the callback.
+For example, a loopback bind at127.0.0.1:8765 may receive either that exact Host or
+an independently qualified tunnel-facing `read0.example:443`; the owner must prove
+which one the transport actually sends. A transport using an implicit/default-port
+Host is not qualified by this explicit-port launcher contract. No DNS-rebinding
+protection is disabled, and an otherwise valid string is not runtime identity proof.
 
 Missing services or pre-bind configuration refusal returns status2. Once the
 explicit owner's `serve` callback begins, exceptions propagate: they are not
@@ -83,13 +95,22 @@ observer. Its disposable bounded executor, signing key and fixture project map
 belong only to tests. The complete production output schema must remain in parity
 with the observer and port: source/content/hash identities, context/owner/generation,
 working-tree view, explicit committed baseline or null, returned ranges and cursor,
-`NOT_OBSERVED` index state and `atomic_workspace_snapshot=false`.
+`NOT_OBSERVED` index state and `atomic_workspace_snapshot=false`. All three digest
+strings require exactly64 lowercase hex characters; a non-null committed baseline
+requires exactly40. Real-read terminal-LF regressions omit expected_sha256 so the
+output schema is independently tested; valid64, valid40 and null controls remain.
+Real-lifespan launch tests prove initialize200 at the exact incoming Host, including
+a Host distinct from the bind tuple, and no serve call for invalid owner policy.
 
 Retain RED/GREEN command, cwd, timestamps, output, exit, exact source hashes and
 dependency identities. The mutation test runs identical baseline/adverse requests
 and identical assertions against process-local controls for fake observer,
 synchronous execution, cross-project binding, removed post-await binding check,
 bypassed post-read auth check, model-supplied authority and forged observer hash.
+Five additional pairs remove each digest/baseline length guard and the incoming
+request-authority guard, preserving the same successful baseline and refusal
+assertion. These24 nested baseline/mutant executions are not added to top-level
+suite counts.
 Each control must produce an intended assertion failure with no setup/runtime
 error. Successful-response and completed-I/O preconditions are outside expected
 failure handling. The forged-hash control deliberately corrupts both observer
@@ -99,6 +120,8 @@ the several hash checks alone bypasses the application.
 No source file is modified by a mutation test. Future tests must not substitute a
 fake port for positive read proof, accept unrelated refusals as kills, use different
 baseline/mutant security assertions, or claim cancellation stopped kernel I/O.
+The fixture capacity/deadline test proves waiter timeout while shielded work drains;
+it does not qualify production executor deadlines or suppression of its late results.
 
 Before long CI/review, retain CHECKPOINT_VERIFIED for the actual source branch,
 Draft/HOLD PR, exact remote head/tree/base/owned blobs, local cleanliness and

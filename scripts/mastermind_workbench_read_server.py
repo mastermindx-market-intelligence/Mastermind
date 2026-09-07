@@ -2,7 +2,7 @@
 """Describe Workbench Read or enter an explicitly owner-injected launch boundary.
 
 Standalone serving refuses until the existing host supplies runtime services and
-its serve callback in Python. No dynamic factory, root flag, tunnel or default
+its serve callback and exact incoming request authority in Python. No dynamic factory, root flag, tunnel or default
 executor is provided. The caller owns launch admission, effect reconciliation and
 shutdown; this module never closes borrowed roots, pools or shared services.
 """
@@ -13,7 +13,7 @@ import json
 import sys
 
 
-def main(argv=None, *, runtime_services=None, serve=None) -> int:
+def main(argv=None, *, runtime_services=None, serve=None, incoming_authority=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument('--describe', action='store_true')
     parser.add_argument('--host', choices=('127.0.0.1',), default='127.0.0.1')
@@ -33,7 +33,11 @@ def main(argv=None, *, runtime_services=None, serve=None) -> int:
         print('OWNER_LAUNCH_REQUIRED', file=sys.stderr)
         return 2
     try:
-        from integrations.workbench_read_mcp.deployment import create_deployment
+        from integrations.workbench_read_mcp.deployment import (
+            create_deployment, validate_incoming_authority,
+        )
+
+        validate_incoming_authority(runtime_services, incoming_authority)
 
         server = create_deployment(runtime_services)
         app = server.streamable_http_app()
