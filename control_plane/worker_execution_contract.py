@@ -16,9 +16,9 @@ from typing import Any, Protocol, runtime_checkable
 
 WORKER_EXECUTION_CONTRACT_VERSION = "mastermind.worker_execution_contract/v1"
 
-_MAX_ARTIFACTS = 32
-_MAX_ARTIFACT_BYTES = 8 * 1024 * 1024
-_MAX_ARTIFACT_TOTAL_BYTES = 32 * 1024 * 1024
+MAX_ARTIFACTS = 32
+MAX_ARTIFACT_BYTES = 8 * 1024 * 1024
+MAX_ARTIFACT_TOTAL_BYTES = 32 * 1024 * 1024
 
 
 class _FrozenMapping(Mapping[Any, Any]):
@@ -115,9 +115,9 @@ class WorkerLaunchSpec:
     isolation_manifest: Mapping[str, Any] = dataclasses.field(default_factory=dict)
     isolation_manifest_sha256: str | None = None
     forbidden_paths: tuple[Path, ...] = ()
-    max_artifacts: int = _MAX_ARTIFACTS
-    max_artifact_bytes: int = _MAX_ARTIFACT_BYTES
-    max_artifact_total_bytes: int = _MAX_ARTIFACT_TOTAL_BYTES
+    max_artifacts: int = MAX_ARTIFACTS
+    max_artifact_bytes: int = MAX_ARTIFACT_BYTES
+    max_artifact_total_bytes: int = MAX_ARTIFACT_TOTAL_BYTES
     expected_worker_uid: int | None = None
     expected_worker_gid: int | None = None
     shared_run_gid: int | None = None
@@ -241,6 +241,9 @@ class ProcessInspector(Protocol):
 
 __all__ = [
     "WORKER_EXECUTION_CONTRACT_VERSION",
+    "MAX_ARTIFACTS",
+    "MAX_ARTIFACT_BYTES",
+    "MAX_ARTIFACT_TOTAL_BYTES",
     "ArtifactReceipt",
     "BinaryAttestation",
     "CancelReceipt",

@@ -50,6 +50,9 @@ from control_plane.executive_workspace import (
     observe_launch_cleanliness,
 )
 from control_plane.worker_execution_contract import (
+    MAX_ARTIFACTS,
+    MAX_ARTIFACT_BYTES,
+    MAX_ARTIFACT_TOTAL_BYTES,
     ArtifactReceipt,
     BinaryAttestation,
     CancelReceipt,
@@ -76,9 +79,6 @@ _MAX_RESULT_BYTES = 1 * 1024 * 1024
 _MAX_STDOUT_BYTES = 32 * 1024 * 1024
 _MAX_STDERR_BYTES = 4 * 1024 * 1024
 _MAX_JSONL_LINE_BYTES = 1 * 1024 * 1024
-_MAX_ARTIFACTS = 32
-_MAX_ARTIFACT_BYTES = 8 * 1024 * 1024
-_MAX_ARTIFACT_TOTAL_BYTES = 32 * 1024 * 1024
 _MAX_VALIDATION_STDOUT_BYTES = 4 * 1024 * 1024
 _MAX_VALIDATION_STDERR_BYTES = 1 * 1024 * 1024
 _MAX_VALIDATION_ARGV_BYTES = 64 * 1024
@@ -2011,15 +2011,15 @@ class CodexWorkerAdapter:
                 raise LaunchValidationError(
                     f"write path targets protected Git/credential metadata: {pattern!r}"
                 )
-        if len(allowed) > _MAX_ARTIFACTS:
+        if len(allowed) > MAX_ARTIFACTS:
             raise LaunchValidationError("allowed artifact path patterns exceed adapter ceiling")
         if "WRITE_BRANCH" in _authority_set(spec) and not allowed:
             raise LaunchValidationError("WRITE_BRANCH requires at least one allowed write path")
-        if not 0 <= int(spec.max_artifacts) <= _MAX_ARTIFACTS:
+        if not 0 <= int(spec.max_artifacts) <= MAX_ARTIFACTS:
             raise LaunchValidationError("max_artifacts exceeds adapter ceiling")
-        if not 0 < int(spec.max_artifact_bytes) <= _MAX_ARTIFACT_BYTES:
+        if not 0 < int(spec.max_artifact_bytes) <= MAX_ARTIFACT_BYTES:
             raise LaunchValidationError("max_artifact_bytes exceeds adapter ceiling")
-        if not 0 < int(spec.max_artifact_total_bytes) <= _MAX_ARTIFACT_TOTAL_BYTES:
+        if not 0 < int(spec.max_artifact_total_bytes) <= MAX_ARTIFACT_TOTAL_BYTES:
             raise LaunchValidationError("max_artifact_total_bytes exceeds adapter ceiling")
         return workspace, run_dir, home, tmp, baseline, schema
 
