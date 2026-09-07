@@ -360,11 +360,12 @@ Level 1 is visible by default. Level 2 expands in place or in a clean drawer. Le
 At a 1440×900 desktop viewport, the first screen may contain:
 
 - one headline;
-- up to three decision/attention cards;
+- one expanded priority decision/attention card;
+- up to two compact decision/attention summaries;
 - one compact source-state indicator;
 - no more than seven primary interactive controls excluding browser chrome.
 
-The page must not use empty space as justification to add more work objects.
+All three priority entries remain visible, but only one is expanded above the fold. The page must not use empty space as justification to add more work objects.
 
 ---
 
@@ -422,9 +423,9 @@ Source clocks, schemas, commit hashes, database paths, and provider capability c
 
 This section appears first only when at least one exact, current, complete Chairman decision packet is admitted.
 
-Maximum visible full cards: **three**.
+Maximum visible priority entries: **three**. The first entry is expanded. The next two are compact summaries containing the decision question, one-line Sol recommendation state, and evidence affordance; either may expand without opening Advanced.
 
-Each card contains:
+Across progressive disclosure, each decision contains:
 
 1. **Decision question** — one sentence.
 2. **Why now** — why the decision is ready and why Chairman authority is required.
@@ -435,7 +436,7 @@ Each card contains:
 7. **Actions** — read-only navigation in the first vertical; canonical action controls only after the action path is independently proven.
 8. **Inspect evidence** — exact source drawer.
 
-Example presentation:
+Example expanded presentation:
 
 ```text
 Approve the decision-first Control Room experience reset
@@ -475,11 +476,13 @@ A decision card is eligible only when all of the following are exact and current
 - current conflict/effect state;
 - accepted source for Sol's recommendation, or an explicit `RECOMMENDATION_NOT_RECORDED`.
 
+`decision_id` must be an existing Agent OS decision key or an accepted Executive/Steward decision reference. The Today reducer and browser may not mint a new decision identity. Sol's recommendation must be projected from an accepted Agent OS decision/handoff or an accepted Steward-owned field; a UI model cannot create it.
+
 An incomplete packet appears under **Needs your attention**, not under Needs your decision. The UI never invents missing options, consequences, or a recommendation.
 
 ### 9.5 Decision overflow
 
-The first three cards are selected by a deterministic closed policy, never an LLM.
+The first three entries are selected by a deterministic closed policy, never an LLM.
 
 Priority order:
 
@@ -705,7 +708,7 @@ Below the fold:
 
 Programs may appear only when an existing accepted Initiative/Project read projection is available. The UI never hardcodes the seven current Initiatives as timeless truth and never opens a new independent Linear polling path merely to populate this screen.
 
-If the source is unavailable, Programs says so and links to Linear; it does not fabricate a stale portfolio as current.
+If the source is unavailable, Programs states the limitation and offers `View in Linear` only when an exact accepted Linear navigation target is already available. It does not fabricate a stale portfolio or URL as current.
 
 ---
 
@@ -811,7 +814,7 @@ It consumes an already-composed, immutable `mastermind.chairman_control_room.v1`
   "source": {
     "control_room_schema": "mastermind.chairman_control_room.v1",
     "control_room_generated_at": "2026-09-07T00:00:00Z",
-    "control_room_digest": "sha256:...",
+    "control_room_digest": "sha256:<64-lowercase-hex>",
     "portfolio_source": null
   },
   "read_state": {
@@ -861,7 +864,7 @@ It consumes an already-composed, immutable `mastermind.chairman_control_room.v1`
 }
 ```
 
-Exact implementation keys may be narrowed during the implementation plan, but they may not be widened into arbitrary upstream pass-through. A closed `OUTPUT_KEYS` test is mandatory.
+These top-level keys are frozen. A nested-field change requires an explicit spec amendment before implementation; no implementation may widen the contract into arbitrary upstream pass-through. A closed `OUTPUT_KEYS` test is mandatory.
 
 ### 13.2 Section state vocabulary
 
@@ -886,7 +889,19 @@ UNAVAILABLE
 
 The reducer does not invent freshness budgets. It consumes accepted source-validity results. It does not duplicate the B5 browser clock, proof map, permission owner, or actionability classifier.
 
-### 13.4 Decision item shape
+### 13.4 Feature-gate vocabulary
+
+```text
+AVAILABLE
+UNAVAILABLE
+READ_ONLY
+ELIGIBLE
+BLOCKED
+```
+
+A feature gate describes presentation/action availability only. It does not become lifecycle or organizational truth.
+
+### 13.5 Decision item shape
 
 A decision item contains only allowlisted fields:
 
@@ -913,7 +928,7 @@ action_blocker
 
 Unknown privileged fields are omitted or represented by a typed unavailability reason. They never pass through recursively.
 
-### 13.5 Sol-handling item shape
+### 13.6 Sol-handling item shape
 
 ```text
 item_id
@@ -931,7 +946,7 @@ freshness_state
 
 The accountable owner must come from an accepted organizational/responsibility source, not UI inference.
 
-### 13.6 Exception item shape
+### 13.7 Exception item shape
 
 ```text
 exception_id
@@ -948,7 +963,7 @@ freshness_state
 
 `diagnostic_ref` is a fixed local navigation reference, not an arbitrary URL or filesystem path.
 
-### 13.7 Evidence references
+### 13.8 Evidence references
 
 Every material claim either has:
 
@@ -1280,17 +1295,16 @@ The current inspector remains operational while the new experience is proven.
 
 ### 21.1 Additive canary
 
-The first implementation exposes an exact local briefing route without replacing the current root. The server derives the brief from the same cached canonical document; it performs no second gather.
-
-Likely presentation shape, subject to the post-spec implementation plan and current H0 route census:
+The first implementation exposes exactly these new local read surfaces:
 
 ```text
-/brief                  decision-first local canary
-/api/brief              fixed read-only brief payload
-/                       current operator inspector during canary
+GET /brief
+GET /api/brief
 ```
 
-This shape is not implementation authority. Exact route/assets must be reconciled with PR #424's current source-law and route-closure work before code starts.
+`/brief` is the decision-first local canary. `/api/brief` returns the fixed `mastermind.chairman_brief.v1` payload. The existing `/` remains the operator inspector during canary. The server derives the brief from the same cached canonical document and performs no second gather.
+
+These exact routes require reconciliation with PR #424's current route/static-asset closure before implementation. If that closure cannot be safely amended after this design is protected, DF1 returns to Sol rather than choosing a different route ad hoc.
 
 ### 21.2 Default cutover
 
@@ -1538,7 +1552,7 @@ Once protected, the following are frozen until an explicit later Chairman/Sol ar
 1. Today is the default Chairman product; Advanced is the machinery escape hatch.
 2. Linear remains the portfolio manager; the Control Room does not duplicate its board.
 3. The simple view begins with `Do I need to act?`, not `What objects exist?`.
-4. Maximum three full decision cards appear by default, with deterministic visible overflow.
+4. Maximum three priority decision entries appear by default; at most one is expanded above the fold, and overflow remains explicit.
 5. Attention is not automatically a decision; complete decision packets are required.
 6. Sol-is-handling requires exact accountability and exists to reduce Chairman burden.
 7. Raw source errors and internal vocabulary are absent from the default surface but available in Advanced evidence.
@@ -1560,7 +1574,7 @@ After Chairman review of this written specification:
 1. accept or revise this design;
 2. invoke the implementation-planning procedure;
 3. reconcile Mastermind PR #424's current H0/H1A handoff without editing its four files from this carrier;
-4. freeze the exact DF1 source paths, local route, payload contract, current source adapters, route/security closure, and browser proof path;
+4. freeze the exact DF1 source paths, static assets, current source adapters, route/security closure, and browser proof path around the already-frozen `/brief` and `/api/brief` canary routes;
 5. build only the read-only Today canary;
 6. return to Sol for adversarial review and real local acceptance before default cutover.
 
