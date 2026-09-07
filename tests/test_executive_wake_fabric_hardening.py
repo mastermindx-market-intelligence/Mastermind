@@ -55,8 +55,10 @@ from control_plane.wake_ledger import (
     WAKE_AGGREGATE_TYPE,
     WakeLedgerError,
     WakeLedgerRecord,
+    ack_record,
     acknowledge,
     assert_causal,
+    attempt_record,
     eligible_for_nudge,
     ledger_command_id,
     make_delivery_attempt,
@@ -107,6 +109,24 @@ def _armed_descriptor(transport: str):
     return dataclasses.replace(
         wake_transport_descriptor(transport),
         transport_implemented=True,
+    )
+
+
+def _human_ack_row(obligation):
+    return ack_record(
+        obligation,
+        acknowledge(
+            obligation,
+            trusted=TrustedAckContext(
+                ack_mode=AckMode.HUMAN_OPERATOR,
+                target_seat="chairman",
+                session_alias="EXECUTIVE-CHAIRMAN-A",
+                reasoning_surface="human",
+                acknowledged_at=_FROZEN,
+                operator_authority_receipt="OP-CHAIR-OVERRIDE-01",
+            ),
+            claimed_obligation_ids=(obligation.obligation_id,),
+        ),
     )
 
 
@@ -475,10 +495,11 @@ def test_mixed_destinations_cannot_coalesce_and_closed_obligations_are_excluded(
         w2.obligation_id: [requested_record(w2)],
         w3.obligation_id: [
             requested_record(w3),
+            _human_ack_row(w3),
             resolved_record(w3, _closed_resolution(w3)),
         ],
         w4.obligation_id: [requested_record(w4)],
-        w5.obligation_id: [requested_record(w5), _ack_row(w5)],
+        w5.obligation_id: [requested_record(w5), _human_ack_row(w5)],
     }
     plan = plan_eligible_nudge([r1, r2, r3, r4, r5], requested)
     assert list(plan.obligation_ids) == [w1.obligation_id, w2.obligation_id, w4.obligation_id]
@@ -657,11 +678,123 @@ def test_ack_requires_trusted_context_not_model_identity_claim():
             session_alias="PROPHET-COO-A",
             reasoning_surface="chatgpt-sol",
             binding_id="bind-rotated00008",
+            binding_generation=8,
             acknowledged_at=_FROZEN,
         ),
         claimed_obligation_ids=[obligation.obligation_id],
+        delivered_command_id=ledger_command_id(
+            obligation.obligation_id,
+            LedgerPhase.DELIVERED,
+            attempt_n=1,
+        ),
     )
     assert rotated.binding_id == "bind-rotated00008"
+
+
+def _exact_reasoning_ack_stream(obligation):
+    """Hand-built causal fixture; each identity comes from the route literal."""
+
+    binding = _binding()
+    route = route_obligation(obligation, _bound_registry(), binding=binding)
+    attempt = make_delivery_attempt(obligation, route, attempt_n=1)
+    delivered = attempt_record(attempt, LedgerPhase.DELIVERED)
+    ack = acknowledge(
+        obligation,
+        trusted=TrustedAckContext(
+            ack_mode=AckMode.REASONING_SESSION,
+            target_seat=obligation.declared_target_seat,
+            session_alias=route.session_alias,
+            reasoning_surface=route.reasoning_surface,
+            binding_id=route.binding_id,
+            binding_generation=route.binding_generation,
+            acknowledged_at=_FROZEN,
+        ),
+        claimed_obligation_ids=(obligation.obligation_id,),
+        delivered_command_id=delivered.command_id,
+    )
+    return (
+        requested_record(obligation),
+        attempt_record(attempt, LedgerPhase.DELIVERY_ATTEMPT),
+        delivered,
+        ack_record(obligation, ack),
+    )
+
+
+def test_reasoning_ack_requires_exact_prior_delivered_generation():
+    """Catches accepting an ACK that is not bound to exact delivery evidence."""
+
+    obligation = obligation_from_inbox(_inbox(root_job_id=_JOB))
+    records = _exact_reasoning_ack_stream(obligation)
+    assert_causal(records)
+
+    with pytest.raises(WakeLedgerError, match="matching DELIVERED"):
+        assert_causal((records[0], records[-1]))
+
+    stale_ack = dataclasses.replace(
+        records[-1].ack,
+        binding_generation=2,
+    )
+    with pytest.raises(WakeLedgerError, match="binding_generation"):
+        assert_causal((*records[:-1], ack_record(obligation, stale_ack)))
+
+    wrong_delivery = dataclasses.replace(
+        records[-1].ack,
+        delivered_command_id=ledger_command_id(
+            obligation.obligation_id,
+            LedgerPhase.DELIVERED,
+            attempt_n=2,
+        ),
+    )
+    with pytest.raises(WakeLedgerError, match="matching DELIVERED"):
+        assert_causal((*records[:-1], ack_record(obligation, wrong_delivery)))
+
+
+def test_source_resolution_requires_ack_and_advances_after_ack():
+    """Catches SOURCE_RESOLVED bypassing or conflicting with acknowledgement."""
+
+    obligation = obligation_from_inbox(_inbox(root_job_id=_JOB))
+    resolution = _closed_resolution(obligation)
+    with pytest.raises(WakeLedgerError, match="TARGET_ACKNOWLEDGED"):
+        assert_causal(
+            (
+                requested_record(obligation),
+                resolved_record(obligation, resolution),
+            )
+        )
+
+    acked = _exact_reasoning_ack_stream(obligation)
+    resolved = (*acked, resolved_record(obligation, resolution))
+    assert_causal(resolved)
+    assert (
+        reconstruct_status(obligation.obligation_id, acked)
+        is ObligationStatus.TARGET_ACKNOWLEDGED
+    )
+    assert (
+        reconstruct_status(obligation.obligation_id, resolved)
+        is ObligationStatus.SOURCE_RESOLVED
+    )
+    assert eligible_for_nudge(obligation.obligation_id, acked) is False
+    assert eligible_for_nudge(obligation.obligation_id, resolved) is False
+
+
+def test_ack_closes_delivery_but_not_source_resolution():
+    """Catches accepting another delivery attempt after target acknowledgement."""
+
+    obligation = obligation_from_inbox(_inbox(root_job_id=_JOB))
+    acked = _exact_reasoning_ack_stream(obligation)
+    route = route_obligation(obligation, _bound_registry(), binding=_binding())
+    later = make_delivery_attempt(obligation, route, attempt_n=2)
+    with pytest.raises(WakeLedgerError, match="no further delivery"):
+        assert_causal(
+            (*acked, attempt_record(later, LedgerPhase.DELIVERY_ATTEMPT))
+        )
+
+    with pytest.raises(WakeLedgerError, match="second acknowledgement"):
+        assert_causal((*acked, acked[-1]))
+
+    resolution = resolved_record(obligation, _closed_resolution(obligation))
+    with pytest.raises(WakeLedgerError, match="second source resolution"):
+        assert_causal((*acked, resolution, resolution))
 
 
 def test_review_wake_source_resolved_after_sibling_review_appears():
@@ -681,7 +814,11 @@ def test_review_wake_source_resolved_after_sibling_review_appears():
     assert later.review_job_exists is True
     assert obligation_from_runtime(later) is None
     resolution = _closed_resolution(obligation)
-    records = [requested_record(obligation), resolved_record(obligation, resolution)]
+    records = [
+        requested_record(obligation),
+        _human_ack_row(obligation),
+        resolved_record(obligation, resolution),
+    ]
     assert reconstruct_status(obligation.obligation_id, records) is ObligationStatus.SOURCE_RESOLVED
     assert eligible_for_nudge(obligation.obligation_id, records) is False
 
@@ -690,7 +827,12 @@ def test_repaired_job_and_withdrawn_agent_os_item_source_resolve_on_healthy_read
     failed = obligation_from_inbox(_inbox(root_job_id=_JOB))
     resolution = _closed_resolution(failed)
     assert reconstruct_status(
-        failed.obligation_id, [requested_record(failed), resolved_record(failed, resolution)]
+        failed.obligation_id,
+        [
+            requested_record(failed),
+            _human_ack_row(failed),
+            resolved_record(failed, resolution),
+        ],
     ) is ObligationStatus.SOURCE_RESOLVED
     ceo = obligation_from_inbox(_ceo_pending())
     items, degraded = project_needs_ceo(

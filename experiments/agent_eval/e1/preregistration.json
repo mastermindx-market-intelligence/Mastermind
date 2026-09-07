@@ -1,0 +1,706 @@
+{
+  "analysis_plan": {
+    "honest_n_law": "Every reported count is an episode count (distinct finalized run_id), never a fires/attempts count -- consistent with the repository's standing adjudication-coverage-gate honest-N law.",
+    "invalid_degraded_rate_reporting": "Report the DEGRADED_DEPENDENCY and INVALID_* rate per arm per task class as its own explicit summary row (count and which reason codes fired), independent of and never blended into the paired-difference table.",
+    "no_causal_claim_statement": "This is a DESCRIPTIVE_PAIRED_PILOT_NOT_POLICY_GRADE evidence artifact. It supports at most 'in these two arms, on these three primary scenarios, on this date, the observed paired differences were X' -- it never supports 'the amended Skillpack causes better agent behavior in general,' never gates a promotion, route, policy, or ranking decision on its own, and is never cited as validated evidence per the repository's own validated-claims law (scripts/check_validated_claims.py).",
+    "paired_difference_method": "Within each task class, for each of the 2 replicate indices, compute the signed difference between the amended-arm and control-arm result on each primary (deterministic) dimension for that task class, using the paired (scenario_id, arm_id, replicate_index) block structure bound by each experiment's pairing law (method=BLOCKED, random_seed=5601). Report both per-replicate-pair differences and the 2-pair mean per task class -- never a pooled cross-task-class mean, since the three task classes score different, non-comparable dimensions.",
+    "uncertainty_reporting": "n=2 replicates per arm per task class (n=12 runs total) is explicitly too small for a confidence interval or significance test to mean anything; the analysis reports raw paired outcomes and the qualitative direction only, and states this sample-size limitation in the same paragraph as any directional read -- never as a caveat buried elsewhere."
+  },
+  "arm_identities": {
+    "amended": {
+      "commit_sha": "8209e1f31da15f8effc23a9899a5c5a02d30cab4",
+      "ohf_arm_name": "amended-1.1.0",
+      "skillpack_version": "1.1.0"
+    },
+    "control": {
+      "commit_sha": "51f9942733b86e550bb9169d2a43462bd28e774f",
+      "ohf_arm_name": "control-1.0.0",
+      "skillpack_version": "1.0.0"
+    }
+  },
+  "authorship": {
+    "author_ref": "agent:fable-coo-program-e1-prereg-20260901",
+    "independent_reviewer_ref": "person:sol"
+  },
+  "base_commit": "git:mastermindx-market-intelligence/Mastermind@6c033c658ed5ab9996e900dbd4b548c4c1ae5572",
+  "configurations": [
+    {
+      "authorship": {
+        "author_ref": "agent:fable-coo-program-e1-prereg-20260901",
+        "independent_reviewer_ref": "person:sol"
+      },
+      "capabilities": {
+        "declared_capability_ids": [
+          "read_frozen_extract"
+        ],
+        "declared_tool_schema_digests": [
+          "sha256:d6082861ca88c8053e1af896404ea1f1fda1a15ffc6639f57d72182d779e14a0"
+        ],
+        "environment_digest": "sha256:6cff2a96722be5beb8f97c4ca5576cd435b3069d1d8db7b35f66756b91e1ab49",
+        "network_policy_digest": "sha256:d27fade874b0cb3c0080072c296397b1767efaf71abef982c8b840bfe5112c52",
+        "profile_digest": "sha256:a54272329eb124008c153334bf825ac88c15083e022746fd8161f27f0fd15cc0",
+        "profile_id": "read_only_extract_reviewer",
+        "sandbox_digest": "sha256:cd38fcf6e9bb9f45221d1d723289a9befe0ea6ff564a7351570665a8e4655ef5"
+      },
+      "configuration_digest": "sha256:bcd99f4fa54541eebe897509d01f16919c69d353281a12eaeaa32af1a534f070",
+      "configuration_id": "configuration:9b6e2b1e-2f0a-4a7b-8b0c-1a2e3f4d5c6b",
+      "context": {
+        "context_packet": {
+          "artifact_ref": "git:mastermindx-market-intelligence/Mastermind@ba3a421918231bf9df451d80b6abafc5c90a00c9#corpus/agent_eval/scenarios/current_source_comprehension/fresh_runner_canonical_owner/v1/fixtures/input.json",
+          "digest": "sha256:ef776fcee866e45d4b9313a6e787f5dc17d53b0772580c038e5d092d59de8db6"
+        },
+        "retrieval_configuration": null
+      },
+      "created_at": "2026-09-01T02:00:00Z",
+      "execution": {
+        "auth_realm_class": "READ_ONLY",
+        "execution_surface": "app_server",
+        "execution_surface_version": "1.0.0",
+        "model_requested": "claude-sonnet-5",
+        "provider": "anthropic",
+        "reasoning_effort": "medium"
+      },
+      "procedure": {
+        "handoff": null,
+        "instruction_bundle": {
+          "artifact_ref": "PREREGISTRATION_PLACEHOLDER#pending_pr162_merge:control:TC1",
+          "digest": "sha256:6518748ca3f80eac67df42619fa4c4308dab0d8704ef8b12407a06ef450e5da4"
+        },
+        "protected_source_ref": "git:mastermindx-market-intelligence/Mastermind@51f9942733b86e550bb9169d2a43462bd28e774f",
+        "skillpack_source_ref": "git:mastermindx-market-intelligence/Mastermind@51f9942733b86e550bb9169d2a43462bd28e774f",
+        "skillpack_version": "1.0.0"
+      },
+      "randomness": {
+        "sampling_parameters_digest": "sha256:dc73640481606b9441daf22b423bd574476d02ec82f92b72ef2c98dd14114d13",
+        "seed": 5601
+      },
+      "schema": "mastermind.agent_evaluation_configuration.v1",
+      "supersedes": null
+    },
+    {
+      "authorship": {
+        "author_ref": "agent:fable-coo-program-e1-prereg-20260901",
+        "independent_reviewer_ref": "person:sol"
+      },
+      "capabilities": {
+        "declared_capability_ids": [
+          "read_frozen_extract"
+        ],
+        "declared_tool_schema_digests": [
+          "sha256:d6082861ca88c8053e1af896404ea1f1fda1a15ffc6639f57d72182d779e14a0"
+        ],
+        "environment_digest": "sha256:6cff2a96722be5beb8f97c4ca5576cd435b3069d1d8db7b35f66756b91e1ab49",
+        "network_policy_digest": "sha256:d27fade874b0cb3c0080072c296397b1767efaf71abef982c8b840bfe5112c52",
+        "profile_digest": "sha256:a54272329eb124008c153334bf825ac88c15083e022746fd8161f27f0fd15cc0",
+        "profile_id": "read_only_extract_reviewer",
+        "sandbox_digest": "sha256:cd38fcf6e9bb9f45221d1d723289a9befe0ea6ff564a7351570665a8e4655ef5"
+      },
+      "configuration_digest": "sha256:f3d591d5de12467577078971cae27110cc9b46a1e5e03fe9bcc6e725df792457",
+      "configuration_id": "configuration:9b6e2b1e-2f0a-4a7b-8b0c-1a2e3f4d5c6c",
+      "context": {
+        "context_packet": {
+          "artifact_ref": "git:mastermindx-market-intelligence/Mastermind@ba3a421918231bf9df451d80b6abafc5c90a00c9#corpus/agent_eval/scenarios/current_source_comprehension/fresh_runner_canonical_owner/v1/fixtures/input.json",
+          "digest": "sha256:ef776fcee866e45d4b9313a6e787f5dc17d53b0772580c038e5d092d59de8db6"
+        },
+        "retrieval_configuration": null
+      },
+      "created_at": "2026-09-01T02:00:00Z",
+      "execution": {
+        "auth_realm_class": "READ_ONLY",
+        "execution_surface": "app_server",
+        "execution_surface_version": "1.0.0",
+        "model_requested": "claude-sonnet-5",
+        "provider": "anthropic",
+        "reasoning_effort": "medium"
+      },
+      "procedure": {
+        "handoff": null,
+        "instruction_bundle": {
+          "artifact_ref": "PREREGISTRATION_PLACEHOLDER#pending_pr162_merge:amended:TC1",
+          "digest": "sha256:b6f0677322a9cfacbbc8e5bb733e3279311e21f5ad2adf89ea4a6d1a3611b1bd"
+        },
+        "protected_source_ref": "git:mastermindx-market-intelligence/Mastermind@8209e1f31da15f8effc23a9899a5c5a02d30cab4",
+        "skillpack_source_ref": "git:mastermindx-market-intelligence/Mastermind@8209e1f31da15f8effc23a9899a5c5a02d30cab4",
+        "skillpack_version": "1.1.0"
+      },
+      "randomness": {
+        "sampling_parameters_digest": "sha256:28906d449992fa6e806d32d5072e9950bf9d862ba1fe3e233c5689b037abd745",
+        "seed": 5601
+      },
+      "schema": "mastermind.agent_evaluation_configuration.v1",
+      "supersedes": null
+    },
+    {
+      "authorship": {
+        "author_ref": "agent:fable-coo-program-e1-prereg-20260901",
+        "independent_reviewer_ref": "person:sol"
+      },
+      "capabilities": {
+        "declared_capability_ids": [
+          "propose_patch",
+          "read_file",
+          "search_repo"
+        ],
+        "declared_tool_schema_digests": [
+          "sha256:3fa1d00dfe053a7c116699f6beba2690bbd0259292b58c6059cf1363ed9a8dbe",
+          "sha256:5977c2b66648cdca64ce9be22f40b1913bc0c468a65fa1ae1f0796aaa479a852",
+          "sha256:8b6879a8e4fc787bb5844d45e8fe9d9c526ccf80952d1fde6e67ccf337dc277a"
+        ],
+        "environment_digest": "sha256:1cb040a94c0a9d7f26a3daffc7268afadaf6df0f6259ea552549636ae0717833",
+        "network_policy_digest": "sha256:d27fade874b0cb3c0080072c296397b1767efaf71abef982c8b840bfe5112c52",
+        "profile_digest": "sha256:6d8273520dc03cbc6f2fbc0afb3b9eb6bb5dd35c897fb4e2d78b74aa24d0409a",
+        "profile_id": "bounded_patch_planner",
+        "sandbox_digest": "sha256:159f11971ef637f6464cd0791183229942a85b4ed938268454f8c0b6c1d05a3b"
+      },
+      "configuration_digest": "sha256:c59704b8a494004abb16ce62218e958284bb069b2102925a420d6ed6108a5cd2",
+      "configuration_id": "configuration:9b6e2b1e-2f0a-4a7b-8b0c-1a2e3f4d5c6d",
+      "context": {
+        "context_packet": {
+          "artifact_ref": "git:mastermindx-market-intelligence/Mastermind@ba3a421918231bf9df451d80b6abafc5c90a00c9#corpus/agent_eval/scenarios/bounded_implementation_fence/config_flag_addition/v1/fixtures/input.json",
+          "digest": "sha256:b15d62f4ac8e70d7e41b792e33173494922860d245f43c92939ea4c0f49ae592"
+        },
+        "retrieval_configuration": null
+      },
+      "created_at": "2026-09-01T02:00:00Z",
+      "execution": {
+        "auth_realm_class": "READ_ONLY",
+        "execution_surface": "app_server",
+        "execution_surface_version": "1.0.0",
+        "model_requested": "claude-sonnet-5",
+        "provider": "anthropic",
+        "reasoning_effort": "medium"
+      },
+      "procedure": {
+        "handoff": null,
+        "instruction_bundle": {
+          "artifact_ref": "PREREGISTRATION_PLACEHOLDER#pending_pr162_merge:control:TC2",
+          "digest": "sha256:41961f4e8ca5189a2976cb6dbd67467107cca0d462ac9138682b6632ab09cc4f"
+        },
+        "protected_source_ref": "git:mastermindx-market-intelligence/Mastermind@51f9942733b86e550bb9169d2a43462bd28e774f",
+        "skillpack_source_ref": "git:mastermindx-market-intelligence/Mastermind@51f9942733b86e550bb9169d2a43462bd28e774f",
+        "skillpack_version": "1.0.0"
+      },
+      "randomness": {
+        "sampling_parameters_digest": "sha256:dc73640481606b9441daf22b423bd574476d02ec82f92b72ef2c98dd14114d13",
+        "seed": 5601
+      },
+      "schema": "mastermind.agent_evaluation_configuration.v1",
+      "supersedes": null
+    },
+    {
+      "authorship": {
+        "author_ref": "agent:fable-coo-program-e1-prereg-20260901",
+        "independent_reviewer_ref": "person:sol"
+      },
+      "capabilities": {
+        "declared_capability_ids": [
+          "propose_patch",
+          "read_file",
+          "search_repo"
+        ],
+        "declared_tool_schema_digests": [
+          "sha256:3fa1d00dfe053a7c116699f6beba2690bbd0259292b58c6059cf1363ed9a8dbe",
+          "sha256:5977c2b66648cdca64ce9be22f40b1913bc0c468a65fa1ae1f0796aaa479a852",
+          "sha256:8b6879a8e4fc787bb5844d45e8fe9d9c526ccf80952d1fde6e67ccf337dc277a"
+        ],
+        "environment_digest": "sha256:1cb040a94c0a9d7f26a3daffc7268afadaf6df0f6259ea552549636ae0717833",
+        "network_policy_digest": "sha256:d27fade874b0cb3c0080072c296397b1767efaf71abef982c8b840bfe5112c52",
+        "profile_digest": "sha256:6d8273520dc03cbc6f2fbc0afb3b9eb6bb5dd35c897fb4e2d78b74aa24d0409a",
+        "profile_id": "bounded_patch_planner",
+        "sandbox_digest": "sha256:159f11971ef637f6464cd0791183229942a85b4ed938268454f8c0b6c1d05a3b"
+      },
+      "configuration_digest": "sha256:0b014e5ef3d7b1df0eb16f99a2564ea7cab9b47e07fc2be0ec79cb7bb2ebd336",
+      "configuration_id": "configuration:9b6e2b1e-2f0a-4a7b-8b0c-1a2e3f4d5c6e",
+      "context": {
+        "context_packet": {
+          "artifact_ref": "git:mastermindx-market-intelligence/Mastermind@ba3a421918231bf9df451d80b6abafc5c90a00c9#corpus/agent_eval/scenarios/bounded_implementation_fence/config_flag_addition/v1/fixtures/input.json",
+          "digest": "sha256:b15d62f4ac8e70d7e41b792e33173494922860d245f43c92939ea4c0f49ae592"
+        },
+        "retrieval_configuration": null
+      },
+      "created_at": "2026-09-01T02:00:00Z",
+      "execution": {
+        "auth_realm_class": "READ_ONLY",
+        "execution_surface": "app_server",
+        "execution_surface_version": "1.0.0",
+        "model_requested": "claude-sonnet-5",
+        "provider": "anthropic",
+        "reasoning_effort": "medium"
+      },
+      "procedure": {
+        "handoff": null,
+        "instruction_bundle": {
+          "artifact_ref": "PREREGISTRATION_PLACEHOLDER#pending_pr162_merge:amended:TC2",
+          "digest": "sha256:4e216292fc3ec3f9a475698c64525033cd0c70dd77360501d488c8069897ed46"
+        },
+        "protected_source_ref": "git:mastermindx-market-intelligence/Mastermind@8209e1f31da15f8effc23a9899a5c5a02d30cab4",
+        "skillpack_source_ref": "git:mastermindx-market-intelligence/Mastermind@8209e1f31da15f8effc23a9899a5c5a02d30cab4",
+        "skillpack_version": "1.1.0"
+      },
+      "randomness": {
+        "sampling_parameters_digest": "sha256:28906d449992fa6e806d32d5072e9950bf9d862ba1fe3e233c5689b037abd745",
+        "seed": 5601
+      },
+      "schema": "mastermind.agent_evaluation_configuration.v1",
+      "supersedes": null
+    },
+    {
+      "authorship": {
+        "author_ref": "agent:fable-coo-program-e1-prereg-20260901",
+        "independent_reviewer_ref": "person:sol"
+      },
+      "capabilities": {
+        "declared_capability_ids": [
+          "read_carrier_thread",
+          "read_file"
+        ],
+        "declared_tool_schema_digests": [
+          "sha256:17ed76b6cdbca2604dbb71a2ee8731359baa10bbf8acd4249cc4c99b99fdfd90",
+          "sha256:3fa1d00dfe053a7c116699f6beba2690bbd0259292b58c6059cf1363ed9a8dbe"
+        ],
+        "environment_digest": "sha256:bb85b6e53208bb66ed9220b5b0aab9af5fb98fdcaa8e73f44b384fe074f06fb6",
+        "network_policy_digest": "sha256:d27fade874b0cb3c0080072c296397b1767efaf71abef982c8b840bfe5112c52",
+        "profile_digest": "sha256:5a8982142172ca99e5df9e6f12a0275de87d071050d48979989ca8f3c9b6a783",
+        "profile_id": "carrier_protocol_reader",
+        "sandbox_digest": "sha256:4f3ae9e1973a77b4682cd53497efc2bb57184e5f96ec5f50bd161e0dcf6316e8"
+      },
+      "configuration_digest": "sha256:072a545cfb84a44c8170bfb78f69505cd456665cf20d4d76ae2a3a3ba6a3f51e",
+      "configuration_id": "configuration:9b6e2b1e-2f0a-4a7b-8b0c-1a2e3f4d5c6f",
+      "context": {
+        "context_packet": {
+          "artifact_ref": "git:mastermindx-market-intelligence/Mastermind@ba3a421918231bf9df451d80b6abafc5c90a00c9#corpus/agent_eval/scenarios/carrier_protocol_compliance/unclaimed_key_no_assignment_edge/v1/fixtures/input.json",
+          "digest": "sha256:5ed2caf2d325b83890b16034ddf6522abf806be8498464c8a68d34d8425f6d67"
+        },
+        "retrieval_configuration": null
+      },
+      "created_at": "2026-09-01T02:00:00Z",
+      "execution": {
+        "auth_realm_class": "READ_ONLY",
+        "execution_surface": "app_server",
+        "execution_surface_version": "1.0.0",
+        "model_requested": "claude-sonnet-5",
+        "provider": "anthropic",
+        "reasoning_effort": "medium"
+      },
+      "procedure": {
+        "handoff": null,
+        "instruction_bundle": {
+          "artifact_ref": "PREREGISTRATION_PLACEHOLDER#pending_pr162_merge:control:TC3",
+          "digest": "sha256:12a93da569a04b3f8eb828b90f462e2205eeaf58ba00e9a8f7eead3cceaa12df"
+        },
+        "protected_source_ref": "git:mastermindx-market-intelligence/Mastermind@51f9942733b86e550bb9169d2a43462bd28e774f",
+        "skillpack_source_ref": "git:mastermindx-market-intelligence/Mastermind@51f9942733b86e550bb9169d2a43462bd28e774f",
+        "skillpack_version": "1.0.0"
+      },
+      "randomness": {
+        "sampling_parameters_digest": "sha256:dc73640481606b9441daf22b423bd574476d02ec82f92b72ef2c98dd14114d13",
+        "seed": 5601
+      },
+      "schema": "mastermind.agent_evaluation_configuration.v1",
+      "supersedes": null
+    },
+    {
+      "authorship": {
+        "author_ref": "agent:fable-coo-program-e1-prereg-20260901",
+        "independent_reviewer_ref": "person:sol"
+      },
+      "capabilities": {
+        "declared_capability_ids": [
+          "read_carrier_thread",
+          "read_file"
+        ],
+        "declared_tool_schema_digests": [
+          "sha256:17ed76b6cdbca2604dbb71a2ee8731359baa10bbf8acd4249cc4c99b99fdfd90",
+          "sha256:3fa1d00dfe053a7c116699f6beba2690bbd0259292b58c6059cf1363ed9a8dbe"
+        ],
+        "environment_digest": "sha256:bb85b6e53208bb66ed9220b5b0aab9af5fb98fdcaa8e73f44b384fe074f06fb6",
+        "network_policy_digest": "sha256:d27fade874b0cb3c0080072c296397b1767efaf71abef982c8b840bfe5112c52",
+        "profile_digest": "sha256:5a8982142172ca99e5df9e6f12a0275de87d071050d48979989ca8f3c9b6a783",
+        "profile_id": "carrier_protocol_reader",
+        "sandbox_digest": "sha256:4f3ae9e1973a77b4682cd53497efc2bb57184e5f96ec5f50bd161e0dcf6316e8"
+      },
+      "configuration_digest": "sha256:4db92bb2b09aebf12f2db89e84c66fa66848da7de2f491579d4b6d7218f8ff76",
+      "configuration_id": "configuration:9b6e2b1e-2f0a-4a7b-8b0c-1a2e3f4d5c70",
+      "context": {
+        "context_packet": {
+          "artifact_ref": "git:mastermindx-market-intelligence/Mastermind@ba3a421918231bf9df451d80b6abafc5c90a00c9#corpus/agent_eval/scenarios/carrier_protocol_compliance/unclaimed_key_no_assignment_edge/v1/fixtures/input.json",
+          "digest": "sha256:5ed2caf2d325b83890b16034ddf6522abf806be8498464c8a68d34d8425f6d67"
+        },
+        "retrieval_configuration": null
+      },
+      "created_at": "2026-09-01T02:00:00Z",
+      "execution": {
+        "auth_realm_class": "READ_ONLY",
+        "execution_surface": "app_server",
+        "execution_surface_version": "1.0.0",
+        "model_requested": "claude-sonnet-5",
+        "provider": "anthropic",
+        "reasoning_effort": "medium"
+      },
+      "procedure": {
+        "handoff": null,
+        "instruction_bundle": {
+          "artifact_ref": "PREREGISTRATION_PLACEHOLDER#pending_pr162_merge:amended:TC3",
+          "digest": "sha256:4e414b8255ca63b97366ba147ffaa66cc126dbf9f0df2c4235dc17f6d44c262c"
+        },
+        "protected_source_ref": "git:mastermindx-market-intelligence/Mastermind@8209e1f31da15f8effc23a9899a5c5a02d30cab4",
+        "skillpack_source_ref": "git:mastermindx-market-intelligence/Mastermind@8209e1f31da15f8effc23a9899a5c5a02d30cab4",
+        "skillpack_version": "1.1.0"
+      },
+      "randomness": {
+        "sampling_parameters_digest": "sha256:28906d449992fa6e806d32d5072e9950bf9d862ba1fe3e233c5689b037abd745",
+        "seed": 5601
+      },
+      "schema": "mastermind.agent_evaluation_configuration.v1",
+      "supersedes": null
+    }
+  ],
+  "corpus_revision": "git:mastermindx-market-intelligence/Mastermind@ba3a421918231bf9df451d80b6abafc5c90a00c9",
+  "created_at": "2026-09-01T02:00:00Z",
+  "design_law": {
+    "arm_count": 2,
+    "evidence_ceiling": "DESCRIPTIVE_PAIRED_PILOT_NOT_POLICY_GRADE",
+    "intended_runs": 12,
+    "no_early_stopping": true,
+    "no_sample_replacement": true,
+    "pairs": 6,
+    "replicates_per_arm": 2,
+    "seed": 5601,
+    "task_class_count": 3
+  },
+  "disclosed_placeholders": [
+    {
+      "bound_at_execution_by": "scripts.agent_eval.ohf_bridge.build_ohf_arm_configuration_fields, called against the real OHF-emitted artifact at execution time, per the OHF2 plan record.",
+      "field_path": "configurations[*].procedure.instruction_bundle",
+      "reason": "OHF PR #162 (the sole frozen source of the MAS-136 Skillpack instruction bundle content) is unmerged. The commit_sha/skillpack_version identity of each arm is real and frozen (scripts.agent_eval.ohf_bridge.OHF_SKILLPACK_ARMS), but the exact instruction_bundle artifact bytes/digest cannot be committed here without importing or duplicating unmerged PR #162 content, which is out of scope and forbidden (see plan record). The digest here is a deterministic placeholder computed over a literal, self-naming marker object -- it is stable and recomputable, but it is NOT the real instruction content digest."
+    },
+    {
+      "bound_at_execution_by": "The execution wave's own sandboxed-runner selection, disclosed in its own record.",
+      "field_path": "configurations[*].capabilities.sandbox_digest",
+      "reason": "The exact execution sandbox is an execution-surface fact not yet chosen at preregistration time (no live runner canary approved). This is a deterministic placeholder digest, recomputable, not a real sandbox identity."
+    },
+    {
+      "bound_at_execution_by": "The execution wave's own environment record.",
+      "field_path": "configurations[*].capabilities.environment_digest",
+      "reason": "Same placeholder reasoning as capabilities.sandbox_digest -- the real execution environment identity is bound at execution time, not preregistration time."
+    }
+  ],
+  "ex_ante_expectation": {
+    "disclosed_as": "These are sealed prospective forecasts with explicit uncertainty, not predictions dressed as fact and not policy-grade claims. n=2 replicates per arm per task class cannot support a statistical significance claim; every forecast above says so explicitly. The evidence ceiling (DESCRIPTIVE_PAIRED_PILOT_NOT_POLICY_GRADE) applies to the analysis of these forecasts exactly as it applies to everything else in this preregistration.",
+    "forecasts": [
+      {
+        "directional_expectation": "Weak-to-no directional expectation. The amended Skillpack targets authority/ownership discipline broadly; TC1 is closed-vocabulary factual recall against a frozen extract, which the control arm may already answer near ceiling -- leaving little headroom for a detectable amended-arm improvement.",
+        "expected_effect_size_band": "NEGLIGIBLE_TO_SMALL",
+        "falsification_condition": "Both TC1 replicates disagree in the direction opposite the stated expectation (amended arm strictly worse on gold_clause_containment in both replicates) would falsify this specific forecast, though n=2 makes this a descriptive, not inferential, falsification.",
+        "task_class_label": "TC1",
+        "uncertainty_statement": "n=2 replicates per arm for this task class -- this forecast is not statistically resolvable at this sample size; it is a prospective direction only, not a claim of significance."
+      },
+      {
+        "directional_expectation": "Weak positive expectation for the amended arm on fence_integrity specifically (fence/scope discipline is closer to the amendment's likely target than literal_token_presence, which is closer to plain instruction-following).",
+        "expected_effect_size_band": "SMALL",
+        "falsification_condition": "Both TC2 replicates show the control arm strictly better on fence_integrity would falsify this forecast's direction.",
+        "task_class_label": "TC2",
+        "uncertainty_statement": "n=2 replicates -- descriptive only. No claim that TC2's result generalizes to the two held-out TC2 corpus cases (doc_only_edit, test_file_addition), which are not run in E1."
+      },
+      {
+        "directional_expectation": "Weak positive expectation for the amended arm on correctness specifically -- TC3's HIGH risk_tier authority-collision cases are the closest committed proxy to the amendment's likely authority-discipline target of the three task classes.",
+        "expected_effect_size_band": "SMALL",
+        "falsification_condition": "Both TC3 replicates show the control arm strictly better on correctness would falsify this forecast's direction.",
+        "task_class_label": "TC3",
+        "uncertainty_statement": "n=2 replicates -- descriptive only. HIGH risk_tier means a wrong selected_action scores a deterministic FAIL with no partial credit, so this forecast could resolve as a clean binary split rather than a graded difference; that is disclosed here, not treated as a defect."
+      }
+    ],
+    "seal_method": "This entire preregistration document, including this forecast block, is digested (preregistration_digest) BEFORE any run exists. The forecast is committed to version control at this digest; any later revision requires a new preregistration with its own operation key -- it can never silently edit this one.",
+    "sealed": true,
+    "sealed_at": "2026-09-01T02:00:00Z"
+  },
+  "execution_gate": {
+    "conditions": [
+      {
+        "condition_id": "RUNNER_PROVEN_LIVE",
+        "description": "Mastermind PR #162 (scripts/ohf/fresh_sol_eval.py, the sole fresh runner per design §9.2) has a completed, human-approved live canary and is PROVEN_LIVE, not merely BUILT_NOT_PROVEN. As of this preregistration's created_at, PR #162 is unmerged and its canary is parked pending a human go/no-go (per the OHF2 plan record's own §0).",
+        "satisfied": false
+      },
+      {
+        "condition_id": "FRESH_LIVE_AUTHORIZATION",
+        "description": "A fresh, explicit, dated authorization to execute E1 specifically -- citing this preregistration's exact preregistration_digest -- is granted by the principal with authority over live provider spend/execution, separate from and later than this preregistration's own authorization to draft records.",
+        "satisfied": false
+      }
+    ],
+    "gate_law": "Execution is a LATER, separately-authorized, human-gated wave. This document authorizes and executes NOTHING. Both conditions below must be independently satisfied -- neither substitutes for the other -- before any run under this preregistration may begin."
+  },
+  "experiments": [
+    {
+      "analysis_version": "e1.v1",
+      "arms": [
+        {
+          "arm_id": "amended-1-1-0",
+          "configuration_digest": "sha256:f3d591d5de12467577078971cae27110cc9b46a1e5e03fe9bcc6e725df792457",
+          "configuration_id": "configuration:9b6e2b1e-2f0a-4a7b-8b0c-1a2e3f4d5c6c"
+        },
+        {
+          "arm_id": "control-1-0-0",
+          "configuration_digest": "sha256:bcd99f4fa54541eebe897509d01f16919c69d353281a12eaeaa32af1a534f070",
+          "configuration_id": "configuration:9b6e2b1e-2f0a-4a7b-8b0c-1a2e3f4d5c6b"
+        }
+      ],
+      "authorship": {
+        "author_ref": "agent:fable-coo-program-e1-prereg-20260901",
+        "independent_reviewer_ref": "person:sol"
+      },
+      "created_at": "2026-09-01T02:00:00Z",
+      "experiment_digest": "sha256:b98152c006195450d88af4f70f36bf37ccbf8ccfac2419d81a2a83a64f2182de",
+      "experiment_id": "experiment:1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
+      "guardrail_dimensions": [
+        "cleanup_integrity",
+        "configuration_integrity",
+        "effect_integrity",
+        "source_integrity"
+      ],
+      "pairing": {
+        "method": "BLOCKED",
+        "random_seed": 5601
+      },
+      "phase": "PROSPECTIVE_SHADOW",
+      "primary_dimensions": [
+        "gold_clause_containment"
+      ],
+      "replicates_per_arm_target": 2,
+      "scenario_refs": [
+        {
+          "corpus_revision": "git:mastermindx-market-intelligence/Mastermind@ba3a421918231bf9df451d80b6abafc5c90a00c9",
+          "scenario_digest": "sha256:7600ee4ebeb6bb4f14abd9ecc3fa746786b4fd176c12d9ec429ad8c1058ea4c6",
+          "scenario_id": "scenario:current_source_comprehension:fresh_runner_canonical_owner",
+          "scenario_version": 1
+        }
+      ],
+      "schema": "mastermind.agent_evaluation_experiment.v1",
+      "stopping_rule": {
+        "kind": "FIXED_REPLICATES_PER_ARM",
+        "value": 2
+      }
+    },
+    {
+      "analysis_version": "e1.v1",
+      "arms": [
+        {
+          "arm_id": "amended-1-1-0",
+          "configuration_digest": "sha256:0b014e5ef3d7b1df0eb16f99a2564ea7cab9b47e07fc2be0ec79cb7bb2ebd336",
+          "configuration_id": "configuration:9b6e2b1e-2f0a-4a7b-8b0c-1a2e3f4d5c6e"
+        },
+        {
+          "arm_id": "control-1-0-0",
+          "configuration_digest": "sha256:c59704b8a494004abb16ce62218e958284bb069b2102925a420d6ed6108a5cd2",
+          "configuration_id": "configuration:9b6e2b1e-2f0a-4a7b-8b0c-1a2e3f4d5c6d"
+        }
+      ],
+      "authorship": {
+        "author_ref": "agent:fable-coo-program-e1-prereg-20260901",
+        "independent_reviewer_ref": "person:sol"
+      },
+      "created_at": "2026-09-01T02:00:00Z",
+      "experiment_digest": "sha256:ba2cf2bbcfd9c25a57aa2bafbf32861def6f7879327d9c74655696cfca1798d3",
+      "experiment_id": "experiment:1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e60",
+      "guardrail_dimensions": [
+        "cleanup_integrity",
+        "configuration_integrity",
+        "effect_integrity",
+        "source_integrity"
+      ],
+      "pairing": {
+        "method": "BLOCKED",
+        "random_seed": 5601
+      },
+      "phase": "PROSPECTIVE_SHADOW",
+      "primary_dimensions": [
+        "fence_integrity",
+        "literal_token_presence"
+      ],
+      "replicates_per_arm_target": 2,
+      "scenario_refs": [
+        {
+          "corpus_revision": "git:mastermindx-market-intelligence/Mastermind@ba3a421918231bf9df451d80b6abafc5c90a00c9",
+          "scenario_digest": "sha256:1d869ee1599f95bfaaef0e04cd9ba081e747603987d6f8d6f8eb0811c988f7e3",
+          "scenario_id": "scenario:bounded_implementation_fence:config_flag_addition",
+          "scenario_version": 1
+        }
+      ],
+      "schema": "mastermind.agent_evaluation_experiment.v1",
+      "stopping_rule": {
+        "kind": "FIXED_REPLICATES_PER_ARM",
+        "value": 2
+      }
+    },
+    {
+      "analysis_version": "e1.v1",
+      "arms": [
+        {
+          "arm_id": "amended-1-1-0",
+          "configuration_digest": "sha256:4db92bb2b09aebf12f2db89e84c66fa66848da7de2f491579d4b6d7218f8ff76",
+          "configuration_id": "configuration:9b6e2b1e-2f0a-4a7b-8b0c-1a2e3f4d5c70"
+        },
+        {
+          "arm_id": "control-1-0-0",
+          "configuration_digest": "sha256:072a545cfb84a44c8170bfb78f69505cd456665cf20d4d76ae2a3a3ba6a3f51e",
+          "configuration_id": "configuration:9b6e2b1e-2f0a-4a7b-8b0c-1a2e3f4d5c6f"
+        }
+      ],
+      "authorship": {
+        "author_ref": "agent:fable-coo-program-e1-prereg-20260901",
+        "independent_reviewer_ref": "person:sol"
+      },
+      "created_at": "2026-09-01T02:00:00Z",
+      "experiment_digest": "sha256:1028232d29a47629899965b544095648adfc9419058f1baab6819c3be2b00e73",
+      "experiment_id": "experiment:1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e61",
+      "guardrail_dimensions": [
+        "cleanup_integrity",
+        "configuration_integrity",
+        "effect_integrity",
+        "source_integrity"
+      ],
+      "pairing": {
+        "method": "BLOCKED",
+        "random_seed": 5601
+      },
+      "phase": "PROSPECTIVE_SHADOW",
+      "primary_dimensions": [
+        "correctness",
+        "rationale_provided"
+      ],
+      "replicates_per_arm_target": 2,
+      "scenario_refs": [
+        {
+          "corpus_revision": "git:mastermindx-market-intelligence/Mastermind@ba3a421918231bf9df451d80b6abafc5c90a00c9",
+          "scenario_digest": "sha256:fc7cc1b889f9b61d8b697a2ed6d844e72ed59f17e799a49e6161d698daeba337",
+          "scenario_id": "scenario:carrier_protocol_compliance:unclaimed_key_no_assignment_edge",
+          "scenario_version": 1
+        }
+      ],
+      "schema": "mastermind.agent_evaluation_experiment.v1",
+      "stopping_rule": {
+        "kind": "FIXED_REPLICATES_PER_ARM",
+        "value": 2
+      }
+    }
+  ],
+  "invalid_degraded_handling": {
+    "analysis_treatment": "Every finalized run's technical-validity status (computed by R0's own unmodified scripts.agent_eval.validity.evaluate_validity/finalize_run_receipt, never re-derived here) is reported alongside its scoring result. A run that is DEGRADED_DEPENDENCY or any INVALID_* status is NEVER dropped from the reported denominator and NEVER silently excluded from the paired-difference table -- it is reported as its own row with its status named, so the honest-N for a task class's pair count is always visible against the intended 2 replicates per arm.",
+    "replacement_policy": "No sample replacement (design_law.no_sample_replacement=true): a DEGRADED or INVALID run is never silently re-run and swapped in to reach the target replicate count within E1 itself. Re-running with a fresh run_id under a NEW, separately-authorized preregistration is the only lawful path to recover an invalid/degraded slot -- this document does not authorize that itself.",
+    "reporting_law": "The analysis output states, per task class: intended replicate count (2 per arm), actual VALID count per arm, and the count/status breakdown of every non-VALID run. A task class with fewer than 2 VALID replicates per arm is reported as such -- its paired-difference row is marked INSUFFICIENT_EVIDENCE, never silently omitted from the report.",
+    "statuses": [
+      "DEGRADED_DEPENDENCY",
+      "INVALID_CLEANUP",
+      "INVALID_CONFIGURATION",
+      "INVALID_EFFECT_UNKNOWN",
+      "INVALID_LEAKAGE",
+      "VALID"
+    ]
+  },
+  "leakage_audit_requirement": {
+    "failure_disposition": "A leakage-audit finding before execution blocks the execution_gate (scenario_id is added to a corrective preregistration amendment or the wave is held) -- it is not a soft warning folded into the analysis.",
+    "independence_law": "The leakage audit is performed by a reviewer distinct from this preregistration's own author_ref and distinct from whoever operates the execution wave -- mirroring the corpus's own authorship.independent_reviewer_ref law (contracts._configuration_cross_field_defects / _experiment_cross_field_defects: author_ref != independent_reviewer_ref, structurally enforced on every embedded configuration/experiment in this document).",
+    "required": true,
+    "scope": [
+      "expected_contract and gold answers stay outside every model_visible_artifact_refs list",
+      "no arm identity (control vs amended) leaks into the submission-collection surface in a way a scorer could exploit",
+      "no scorer output or gold clause content leaks into a later scenario's context_packet",
+      "solution_refs_hidden fields on every bound primary scenario stay empty/enforced"
+    ]
+  },
+  "non_goals": [
+    "No causal or policy-grade claim -- see analysis_plan.no_causal_claim_statement.",
+    "No corpus content change.",
+    "No execution of any scenario, experiment, or run.",
+    "No merge/ready/label action, no Slack/Linear action.",
+    "No modification to PR #162 or scripts/ohf/**.",
+    "No promotion, ranking, or gate decision authorized by this document.",
+    "No provider, credential, or network access anywhere in this wave.",
+    "No use of any sealed holdout as a live evaluation case."
+  ],
+  "operation_key": "mastermind-agent-evaluation-e1-prereg-20260901-fable-001",
+  "preregistration_digest": "sha256:91cb16860ee9e140d28052e5981b7c8f94aac4ecd42e788d3c7a75e3415e5cf8",
+  "preregistration_id": "preregistration:7f8e9d0c-1b2a-4839-9c0d-1e2f3a4b5c6d",
+  "schema": "mastermind.agent_evaluation_e1_preregistration.v1",
+  "scoring_plan": "Each task class's own S1 deterministic scorer (mastermind.tc{1,2,3}_*.v1) runs unmodified against every finalized run's submission + the scenario's own expected_contract. Every scorer's deterministic dimensions (TC1: gold_clause_containment; TC2: fence_integrity, literal_token_presence; TC3: correctness, rationale_provided) are machine-graded PASS/FAIL/UNKNOWN, never model-graded. Every scorer's rubric_residue dimension is permanently UNKNOWN -- reasoning-quality/prose-style grading is out of scope for S1 and for E1; it is never silently folded into a deterministic dimension's result. In addition, every finalized run also carries the scenario's own required mastermind.technical_integrity.v1 scorer over the guardrail dimensions (cleanup_integrity, configuration_integrity, effect_integrity, source_integrity).",
+  "task_classes": [
+    {
+      "all_dimensions": [
+        "gold_clause_containment",
+        "rubric_residue"
+      ],
+      "alternate_scenario_ids": [
+        "scenario:current_source_comprehension:canonical_artifact_size_bound",
+        "scenario:current_source_comprehension:effect_unknown_precedence"
+      ],
+      "deterministic_dimensions": [
+        "gold_clause_containment"
+      ],
+      "primary_scenario_rationale": "Most directly probes whether the amended Skillpack (1.1.0) improves an agent's respect for freshness/canonical-ownership precedence -- the same authority-discipline axis MAS-136's amendment targets -- versus the other two TC1 cases (canonical_artifact_size_bound: a static rule lookup; effect_unknown_precedence: a different precedence rule not as closely tied to 'who currently owns/runs this'). Alternates are held in the corpus for a future replicate-variety wave, not used in E1.",
+      "primary_scenario_ref": {
+        "corpus_revision": "git:mastermindx-market-intelligence/Mastermind@ba3a421918231bf9df451d80b6abafc5c90a00c9",
+        "scenario_digest": "sha256:7600ee4ebeb6bb4f14abd9ecc3fa746786b4fd176c12d9ec429ad8c1058ea4c6",
+        "scenario_id": "scenario:current_source_comprehension:fresh_runner_canonical_owner",
+        "scenario_version": 1
+      },
+      "risk_tier": "LOW",
+      "rubric_residue_dimension": "rubric_residue",
+      "scenario_family": "mastermind.current_source_comprehension.v1",
+      "scorer_id": "mastermind.tc1_source_comprehension.v1",
+      "task_class_label": "TC1"
+    },
+    {
+      "all_dimensions": [
+        "fence_integrity",
+        "literal_token_presence",
+        "rubric_residue"
+      ],
+      "alternate_scenario_ids": [
+        "scenario:bounded_implementation_fence:doc_only_edit",
+        "scenario:bounded_implementation_fence:test_file_addition"
+      ],
+      "deterministic_dimensions": [
+        "fence_integrity",
+        "literal_token_presence"
+      ],
+      "primary_scenario_rationale": "Broadest, most 'typical' bounded-implementation-planning surface among the three committed TC2 cases -- a config-flag change plausibly touches config plus adjacent files, exercising both fence_integrity and literal_token_presence non-trivially. doc_only_edit and test_file_addition are narrower boundary conditions (single file type) reserved as alternates for a future robustness wave, not used in E1.",
+      "primary_scenario_ref": {
+        "corpus_revision": "git:mastermindx-market-intelligence/Mastermind@ba3a421918231bf9df451d80b6abafc5c90a00c9",
+        "scenario_digest": "sha256:1d869ee1599f95bfaaef0e04cd9ba081e747603987d6f8d6f8eb0811c988f7e3",
+        "scenario_id": "scenario:bounded_implementation_fence:config_flag_addition",
+        "scenario_version": 1
+      },
+      "risk_tier": "MEDIUM",
+      "rubric_residue_dimension": "rubric_residue",
+      "scenario_family": "mastermind.bounded_implementation_fence.v1",
+      "scorer_id": "mastermind.tc2_implementation_fence.v1",
+      "task_class_label": "TC2"
+    },
+    {
+      "all_dimensions": [
+        "correctness",
+        "rationale_provided",
+        "rubric_residue"
+      ],
+      "alternate_scenario_ids": [
+        "scenario:carrier_protocol_compliance:seat_vs_session_identity",
+        "scenario:carrier_protocol_compliance:stale_relay_spawn_prompt"
+      ],
+      "deterministic_dimensions": [
+        "correctness",
+        "rationale_provided"
+      ],
+      "primary_scenario_rationale": "HIGH risk_tier authority-collision scenario that matches a documented real house failure category (program memory: 'a dispatcher SPAWN is not a receiver binding') -- the most operationally consequential of the three committed TC3 cases for testing whether the Skillpack amendment improves authority discipline. seat_vs_session_identity and stale_relay_spawn_prompt are held as alternates, not used in E1.",
+      "primary_scenario_ref": {
+        "corpus_revision": "git:mastermindx-market-intelligence/Mastermind@ba3a421918231bf9df451d80b6abafc5c90a00c9",
+        "scenario_digest": "sha256:fc7cc1b889f9b61d8b697a2ed6d844e72ed59f17e799a49e6161d698daeba337",
+        "scenario_id": "scenario:carrier_protocol_compliance:unclaimed_key_no_assignment_edge",
+        "scenario_version": 1
+      },
+      "risk_tier": "HIGH",
+      "rubric_residue_dimension": "rubric_residue",
+      "scenario_family": "mastermind.carrier_protocol_compliance.v1",
+      "scorer_id": "mastermind.tc3_protocol_compliance.v1",
+      "task_class_label": "TC3"
+    }
+  ]
+}

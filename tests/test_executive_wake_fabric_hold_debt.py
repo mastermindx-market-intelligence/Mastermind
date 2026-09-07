@@ -33,6 +33,7 @@ from control_plane.wake_ledger import (
     WakeLedgerError,
     WakeLedgerRecord,
     WakeRetryPolicy,
+    ack_record,
     acknowledge,
     assert_causal,
     attempt_record,
@@ -198,10 +199,26 @@ def test_source_resolution_requires_closed_code_and_snapshot():
         snapshot_digest="ab" * 8,
         resolved_at=_FROZEN,
     )
+    human_ack = ack_record(
+        obligation,
+        acknowledge(
+            obligation,
+            trusted=TrustedAckContext(
+                ack_mode=AckMode.HUMAN_OPERATOR,
+                target_seat=obligation.declared_target_seat,
+                session_alias="EXECUTIVE-HUMAN-OPERATOR",
+                reasoning_surface="human",
+                acknowledged_at=_FROZEN,
+                operator_authority_receipt="OP-HOLD-DEBT-TEST",
+            ),
+            claimed_obligation_ids=(obligation.obligation_id,),
+        ),
+    )
     with pytest.raises(WakeLedgerError, match="code does not match"):
         assert_causal(
             [
                 requested_record(obligation),
+                human_ack,
                 WakeLedgerRecord(
                     command_id=ledger_command_id(
                         obligation.obligation_id, LedgerPhase.SOURCE_RESOLVED

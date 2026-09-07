@@ -16,6 +16,15 @@ Current GitHub/SCF boundary:
 Current wire/release finalization:
 `docs/superpowers/specs/2026-08-31-operation-assurance-a1-wire-release-finalization.md`.
 
+Current A2 source-seam design:
+`docs/superpowers/specs/2026-09-01-operation-assurance-a2-source-seam-design.md`.
+
+Current status appendix (2026-09-02, truthful; historical sections above remain historical):
+A1 deterministic engine: PROTECTED at master merge `c6af57d1ce96ed3f5ca8237099f4a5ecfa01d3cf`
+(`BUILT_NOT_PROVEN / REPORT_ONLY / PRODUCTION_INERT`). A2: design-candidate under repair on PR #339
+per Sol review `5086088649`; no A2 implementation exists; source gathering, attestation, current
+status, Control Room, canary, conformance, admission, and production all remain `NOT_BUILT`.
+
 Current diagnostic boundary:
 `docs/superpowers/specs/2026-08-30-operation-liveness-soundness-runtime-observability-reconciliation.md`.
 

@@ -20,14 +20,20 @@ import re
 import stat
 import subprocess
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from control_plane.executive_agent_capabilities import (
+    ExecutionCapabilityProfile,
     NativeHelperGrant,
     app_server_security_config_digest,
     observed_mcp_tool_schema_digest,
+)
+from control_plane.executive_capability_packages import (
+    CapabilityPackageError,
+    CapabilityPackageGeneration,
+    verify_capability_package_source,
 )
 from control_plane.operator_harness_contract import (
     ACCOUNT_REALM_STATUS,
@@ -62,6 +68,7 @@ from control_plane.operator_harness_contract import (
     StageConfigReceipt,
     TurnRef,
     TurnStartObservation,
+    WorkerLocalWakeAckProjection,
     WorkspaceIdentity,
     runtime_binding_id_for,
 )
@@ -76,27 +83,46 @@ from control_plane.executive_orchestration_result import (
     parse_canonical_json,
 )
 from control_plane.worker_browser_b1 import BROWSER_RESOURCE_ENV_KEYS
+from scripts.ohf.capability_skill_projection import SkillProjectionReceipt
 from scripts.ohf.laboratory import AppServerClient, AppServerStopProof, JsonRpcError
 from scripts.ohf.redaction import redact_evidence_text
 from scripts.ohf.protocol import (
+    SkillProtocolShapeError,
     config_mcp_names,
     config_plugin_names,
+    enabled_skill_names,
+    extra_roots_set_params,
     mcp_server_names,
     parse_account_read,
     parse_config_read,
     parse_mcp_status,
     parse_skills_list,
+    parse_skills_list_strict,
     skills_list_params,
     turn_texts,
 )
 
 _CLIENT_INFO = {"name": "mastermind-ohf", "title": "Mastermind OHF", "version": "p1b"}
+# Public alias: the CAP-S1 attestation probe MUST initialize with the same
+# clientInfo as the launch, because the real App Server's userAgent
+# incorporates it (proven by the live canary version-equality refusal).
+OHF_CLIENT_INFO = _CLIENT_INFO
 _FAKE_ENV_PREFIX = "OHF_FAKE_"
 _SAFE_ENV_KEYS = frozenset({"PATH", "LC_ALL", "LANG", "PYTHONPATH"})
 _ATTENTION_COMPLETION_METHOD = "turn/completed"
 _ATTENTION_COMPLETION_TIMEOUT_PREFIX = (
     "timeout waiting for notification turn/completed"
 )
+_ATTENTION_TERMINAL_STATUSES = frozenset({"completed", "failed", "interrupted"})
+_WAKE_ACK_MARKER_PREFIX = "MASTERMIND_WAKE_ACK "
+_WAKE_ACK_MARKER_RE = re.compile(r"^MASTERMIND_WAKE_ACK (WAKE-[A-Za-z0-9._:-]+)$")
+_CANONICAL_WAKE_ID_RE = re.compile(r"^WAKE-[0-9a-f]{32}$")
+_MARKDOWN_FENCE_OPEN_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+_HEX64_RE = re.compile(r"[0-9a-f]{64}")
+
+
+def _is_hex64(value: object) -> bool:
+    return isinstance(value, str) and _HEX64_RE.fullmatch(value) is not None
 
 
 class CodexAdapterError(RuntimeError):
@@ -115,13 +141,118 @@ class CodexAdapterError(RuntimeError):
 
 
 ClientFactory = Callable[[list[str], Mapping[str, str], Path], AppServerClient]
-TurnInputLoader = Callable[[TurnRef], str]
+TurnInputLoader = Callable[[TurnRef], "str | CodexTurnInputEnvelope"]
 ProcessIdentityObserver = Callable[[int], ProcessIdentityObservation]
 BaseShaResolver = Callable[[Path], str]
 
 MAX_RAW_TURN_PAGES = 128
 MAX_RAW_TURN_CUMULATIVE_FRAME_BYTES = 134_217_728
 RAW_TURN_TOTAL_TIMEOUT_SECONDS = 120.0
+
+
+def _attention_final_text(completion: Mapping[str, Any]) -> str | None:
+    """Reduce one unique final agent message without exporting provider bytes."""
+
+    params = completion.get("params")
+    turn = params.get("turn") if isinstance(params, Mapping) else None
+    items = turn.get("items") if isinstance(turn, Mapping) else None
+    if not isinstance(items, list):
+        return None
+    messages = [
+        item
+        for item in items
+        if isinstance(item, Mapping)
+        and str(item.get("type") or "") in {"agent_message", "agentMessage"}
+    ]
+    phased = [item for item in messages if item.get("phase") is not None]
+    if phased:
+        if len(phased) != len(messages) or any(
+            item.get("phase") not in {"commentary", "final_answer"} for item in phased
+        ):
+            return None
+        selected = [item for item in phased if item.get("phase") == "final_answer"]
+    else:
+        selected = messages
+    if len(selected) != 1:
+        return None
+    message = selected[0]
+    direct = message.get("text")
+    content = message.get("content")
+    blocks: list[str] = []
+    if isinstance(content, list):
+        for block in content:
+            if (
+                not isinstance(block, Mapping)
+                or block.get("type") not in {"text", "output_text"}
+                or not isinstance(block.get("text"), str)
+            ):
+                return None
+            blocks.append(str(block["text"]))
+    joined = "".join(blocks) if blocks else None
+    if direct is not None and not isinstance(direct, str):
+        return None
+    if isinstance(direct, str) and joined is not None and direct != joined:
+        return None
+    return direct if isinstance(direct, str) else joined
+
+
+def _fenced_line_states(lines: Sequence[str]) -> tuple[bool, ...]:
+    states: list[bool] = []
+    fence_character: str | None = None
+    fence_length = 0
+    for line in lines:
+        states.append(fence_character is not None)
+        if fence_character is None:
+            match = _MARKDOWN_FENCE_OPEN_RE.match(line)
+            if match is None:
+                continue
+            marker = match.group(1)
+            fence_character = marker[0]
+            fence_length = len(marker)
+        elif re.fullmatch(
+            rf" {{0,3}}{re.escape(fence_character)}{{{fence_length},}}[ \t]*",
+            line,
+        ):
+            fence_character = None
+            fence_length = 0
+    return tuple(states)
+
+
+def _terminal_wake_ack_ids(completion: Mapping[str, Any]) -> tuple[str, ...] | None:
+    """Accept only one exact, unfenced, contiguous terminal ACK trailer."""
+
+    text = _attention_final_text(completion)
+    if text is None:
+        return None
+    lines = text.splitlines()
+    while lines and not lines[-1].strip():
+        lines.pop()
+    if not lines or not lines[-1].startswith(_WAKE_ACK_MARKER_PREFIX):
+        return None
+    first = len(lines) - 1
+    while first > 0 and lines[first - 1].startswith(_WAKE_ACK_MARKER_PREFIX):
+        first -= 1
+    fence_states = _fenced_line_states(lines)
+    if any(fence_states[index] for index in range(first, len(lines))):
+        return None
+    ids: list[str] = []
+    for line in lines[first:]:
+        match = _WAKE_ACK_MARKER_RE.fullmatch(line)
+        if match is None or _CANONICAL_WAKE_ID_RE.fullmatch(match.group(1)) is None:
+            return None
+        ids.append(match.group(1))
+    if len(ids) != len(set(ids)):
+        return None
+    return tuple(sorted(ids))
+
+
+def _attention_terminal_status(completion: Mapping[str, Any]) -> str | None:
+    """Classify one exact provider terminal outcome without exporting it."""
+
+    params = completion.get("params")
+    turn = params.get("turn") if isinstance(params, Mapping) else None
+    status = turn.get("status") if isinstance(turn, Mapping) else None
+    return status if status in _ATTENTION_TERMINAL_STATUSES else None
 
 
 def _default_client_factory(
@@ -267,6 +398,15 @@ def _reject_symlink_components(path: Path, *, failure: AdapterFailureClass) -> N
 
 
 @dataclass
+class _PendingAttentionRequest:
+    attempt_id: str
+    binding_id: str
+    binding_generation: int
+    nudge_id: str
+    opaque_ids: tuple[str, ...]
+
+
+@dataclass
 class _GenerationState:
     epoch: SessionEpochRef
     generation: ProcessGenerationRef
@@ -282,9 +422,13 @@ class _GenerationState:
     turns: dict[str, str] = field(default_factory=dict)
     attention_inflight: bool = False
     attention_native_turn_id: str | None = None
+    attention_request: _PendingAttentionRequest | None = None
     turn_subordinates: dict[str, set[str]] = field(default_factory=dict)
     audited_native_helper_turns: set[str] = field(default_factory=set)
     candidate_artifact_digests: dict[str, str] = field(default_factory=dict)
+    skills_changed: bool = False
+    accepted_skill_observation: "tuple[tuple[str, str, str | None, str], ...] | None" = None
+    accepted_skill_observation_root: "str | None" = None
 
 
 @dataclass(frozen=True)
@@ -295,6 +439,154 @@ class _BoundAttemptResource:
     environment: tuple[tuple[str, str], ...]
     observed_capability: ObservedCapabilityIdentity
     network_state: str
+
+
+@dataclass(frozen=True)
+class CodexSkillTurnInput:
+    """One closed Skill identity for a single ``turn/start`` input item.
+
+    Caller-supplied values are identities to be matched against the sealed
+    :class:`CodexSkillCanaryBinding`, never paths or digests to be trusted
+    directly (CAP-S1 protocol-attestation amendment §7).
+    """
+
+    capability_id: str
+    runtime_name: str
+    skill_md_path: str
+    skill_content_digest: str
+    package_generation_digest: str
+
+
+@dataclass(frozen=True)
+class CodexTurnInputEnvelope:
+    """The one closed structured alternative to a plain-string turn input.
+
+    Exactly one :class:`CodexSkillTurnInput` per envelope (CAP-S1 uses one
+    relevant Skill per turn, in the frozen four-turn order).
+    """
+
+    text: str
+    skills: tuple[CodexSkillTurnInput, ...]
+
+
+@dataclass(frozen=True)
+class CodexProtocolAttestationReceipt:
+    """One frozen, typed attestation of the Codex protocol schema probe.
+
+    Replaces the untyped ``schema_receipt_digest``/``schema_supports_skill_
+    input_path`` pair (CAP-S1 Sol wave-3 review finding B3): a bare 64-hex
+    string plus a bare bool let any caller construct an authorizing receipt
+    unrelated to the binary this adapter actually launches. Every field here
+    is checked by :meth:`CodexOperatorAdapter._validate_skill_canary_binding`
+    against the adapter's own observed facts before Mode-B authorization is
+    ever read.
+    """
+
+    binary_path: str
+    binary_digest: str
+    binary_version: str
+    stable_inventory_digest: str
+    experimental_inventory_digest: str
+    supports_skill_input_path: bool
+    skill_input_schema_evidence: str
+    probe_user_agent: str
+    receipt_digest: str
+
+
+SKILL_INPUT_SCHEMA_EVIDENCE = "turn_start_request_input_skill_path_attested"
+
+
+def compute_protocol_attestation_receipt_digest(
+    *,
+    binary_path: str,
+    binary_digest: str,
+    binary_version: str,
+    stable_inventory_digest: str,
+    experimental_inventory_digest: str,
+    supports_skill_input_path: bool,
+    skill_input_schema_evidence: str,
+    probe_user_agent: str,
+) -> str:
+    """Canonical digest over every :class:`CodexProtocolAttestationReceipt`
+    field except ``receipt_digest`` itself (CAP-S1 Sol review item 1):
+    sort_keys/compact/utf-8/sha256, byte-identical between the sole producer
+    (``scripts.ohf.cap_s1_mastermind_operator_canary.attest_protocol_schema``)
+    and this adapter's own bind-time validator so neither can silently drift
+    from the other. Field order is frozen by ``sort_keys=True`` (alphabetical),
+    never by argument or dict-literal order.
+    """
+
+    return _canonical_digest(
+        {
+            "binary_path": binary_path,
+            "binary_digest": binary_digest,
+            "binary_version": binary_version,
+            "stable_inventory_digest": stable_inventory_digest,
+            "experimental_inventory_digest": experimental_inventory_digest,
+            "supports_skill_input_path": supports_skill_input_path,
+            "skill_input_schema_evidence": skill_input_schema_evidence,
+            "probe_user_agent": probe_user_agent,
+        }
+    )
+
+
+def build_protocol_attestation_receipt(
+    *,
+    binary_path: str,
+    binary_digest: str,
+    binary_version: str,
+    stable_inventory_digest: str,
+    experimental_inventory_digest: str,
+    supports_skill_input_path: bool,
+    skill_input_schema_evidence: str,
+    probe_user_agent: str,
+) -> CodexProtocolAttestationReceipt:
+    """The one lawful constructor for :class:`CodexProtocolAttestationReceipt`
+    (CAP-S1 Sol review item 1): computes ``receipt_digest`` itself so no
+    caller can hand-supply a digest inconsistent with the other fields.
+    ``attest_protocol_schema`` is the only production caller; test fixtures
+    that need a self-consistent receipt for adapter-level unit testing may
+    also call this directly.
+    """
+
+    digest = compute_protocol_attestation_receipt_digest(
+        binary_path=binary_path,
+        binary_digest=binary_digest,
+        binary_version=binary_version,
+        stable_inventory_digest=stable_inventory_digest,
+        experimental_inventory_digest=experimental_inventory_digest,
+        supports_skill_input_path=supports_skill_input_path,
+        skill_input_schema_evidence=skill_input_schema_evidence,
+        probe_user_agent=probe_user_agent,
+    )
+    return CodexProtocolAttestationReceipt(
+        binary_path=binary_path,
+        binary_digest=binary_digest,
+        binary_version=binary_version,
+        stable_inventory_digest=stable_inventory_digest,
+        experimental_inventory_digest=experimental_inventory_digest,
+        supports_skill_input_path=supports_skill_input_path,
+        skill_input_schema_evidence=skill_input_schema_evidence,
+        probe_user_agent=probe_user_agent,
+        receipt_digest=digest,
+    )
+
+
+@dataclass(frozen=True)
+class CodexSkillCanaryBinding:
+    """The sealed source/profile/projection evidence gating the causal
+    Skill-launch sequence and the structured turn-input seam.
+
+    Constructed once, outside this adapter, from an already-verified
+    ``CapabilityPackageGeneration``, a resolved V4 ``ExecutionCapabilityProfile``
+    carrying non-empty ``skill_grants``, and a ``SkillProjectionReceipt`` from
+    ``scripts.ohf.capability_skill_projection.stage_skill_projection``.
+    """
+
+    generation: CapabilityPackageGeneration
+    profile: ExecutionCapabilityProfile
+    projection: SkillProjectionReceipt
+    protocol_receipt: CodexProtocolAttestationReceipt
 
 
 class CodexOperatorAdapter:
@@ -320,6 +612,7 @@ class CodexOperatorAdapter:
         process_identity_observer: ProcessIdentityObserver = _default_process_identity,
         client_factory: ClientFactory = _default_client_factory,
         extra_env: Mapping[str, str] | None = None,
+        skill_canary_binding: CodexSkillCanaryBinding | None = None,
     ) -> None:
         raw_binary_path = Path(binary_path).expanduser()
         raw_codex_home = Path(codex_home).expanduser()
@@ -379,6 +672,7 @@ class CodexOperatorAdapter:
         self.process_identity_observer = process_identity_observer
         self.client_factory = client_factory
         self.extra_env = dict(extra_env or {})
+        self.skill_canary_binding = skill_canary_binding
         self._generations: dict[str, _GenerationState] = {}
         self._active_workers: dict[str, str] = {}
         self._bound_resources: dict[str, _BoundAttemptResource] = {}
@@ -492,6 +786,242 @@ class CodexOperatorAdapter:
                     AdapterFailureClass.VALIDATION_FAILURE,
                     "App Server config override is unsafe",
                 )
+        self._validate_skill_canary_binding()
+
+    def _validate_skill_canary_binding(self) -> None:
+        """Bind-time proof that a supplied ``skill_canary_binding`` is closed.
+
+        Never echoes a caller-supplied value; every refusal is a fixed,
+        bounded reason string (CAP-S1 protocol-attestation amendment §7;
+        Sol wave-3 review findings B1 and B3).
+
+        The projection's own ``skills_root`` is never inspected here -- it is
+        an identity to be re-derived and matched at launch time inside
+        :meth:`_run_skill_causal_sequence`, never a destination this
+        constructor-time pass trusts (finding B1).
+        """
+
+        binding = self.skill_canary_binding
+        if binding is None:
+            return
+        if type(binding) is not CodexSkillCanaryBinding:
+            raise CodexAdapterError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "skill canary binding must be the exact closed binding type",
+            )
+        try:
+            profile = binding.profile
+            generation = binding.generation
+            projection = binding.projection
+            receipt = binding.protocol_receipt
+
+            # --- B3: typed protocol attestation receipt ---------------------
+            if type(receipt) is not CodexProtocolAttestationReceipt:
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding protocol receipt must be the exact"
+                    " closed receipt type",
+                )
+            # Splice defense (CAP-S1 Sol review item 1): a schema generated
+            # from binary A must never authorize adapter binary B. Before
+            # this fix only ``binary_digest`` (compared against a fresh hash
+            # of THIS adapter's own ``self.binary_path``) was ever checked --
+            # ``receipt.binary_path`` itself was accepted unvalidated, so a
+            # caller could supply the correct digest for ``self.binary_path``
+            # while claiming an unrelated, never-dereferenced ``binary_path``
+            # and arbitrary "evidence" fields actually produced against a
+            # different binary entirely. ``receipt.binary_path`` is now an
+            # identity that must resolve to the exact same file as
+            # ``self.binary_path`` before its digest is ever trusted.
+            if not isinstance(receipt.binary_path, str) or not receipt.binary_path:
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding protocol receipt binary path is invalid",
+                )
+            if os.path.realpath(receipt.binary_path) != str(self.binary_path):
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding protocol receipt binary path mismatch",
+                )
+            try:
+                receipt_path_digest = _sha256_file(Path(receipt.binary_path))
+                # ``self.binary_digest`` is not yet assigned the first time
+                # this runs (constructor-time validation happens before that
+                # attribute is set), so the adapter's own binary is always
+                # freshly re-hashed here rather than trusted from a cache.
+                fresh_self_binary_digest = _sha256_file(self.binary_path)
+            except OSError as exc:
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding protocol receipt binary path is not observable",
+                ) from exc
+            if (
+                receipt_path_digest != receipt.binary_digest
+                or receipt.binary_digest != fresh_self_binary_digest
+            ):
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding protocol receipt binary digest mismatch",
+                )
+            if receipt.binary_version != self.expected_harness_version:
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding protocol receipt binary version mismatch",
+                )
+            if not _is_hex64(receipt.stable_inventory_digest) or not _is_hex64(
+                receipt.experimental_inventory_digest
+            ):
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding protocol receipt inventory digest is invalid",
+                )
+            if receipt.stable_inventory_digest == receipt.experimental_inventory_digest:
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding protocol receipt inventory digests must"
+                    " be distinct",
+                )
+            if not isinstance(receipt.supports_skill_input_path, bool):
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding protocol receipt supports flag is invalid",
+                )
+            if receipt.supports_skill_input_path and not (
+                isinstance(receipt.skill_input_schema_evidence, str)
+                and receipt.skill_input_schema_evidence.strip()
+            ):
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding protocol receipt schema evidence is required",
+                )
+            if (
+                receipt.supports_skill_input_path
+                and receipt.skill_input_schema_evidence != SKILL_INPUT_SCHEMA_EVIDENCE
+            ):
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding protocol receipt schema evidence is invalid",
+                )
+            if (
+                not receipt.supports_skill_input_path
+                and receipt.skill_input_schema_evidence != ""
+            ):
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding protocol receipt schema evidence is invalid",
+                )
+            # Real initialize-probe binding (CAP-S1 protocol-attestation
+            # amendment §2 item 4 / Sol review item 1): the runner seals
+            # ``expected_harness_version`` FROM this exact probe value, so
+            # requiring equality here closes the loop between the schema
+            # probe's own launch and this generation's actual launch-time
+            # ``initialize`` userAgent check in ``_initialize_and_attest``.
+            if (
+                not isinstance(receipt.probe_user_agent, str)
+                or not receipt.probe_user_agent.strip()
+                or receipt.probe_user_agent != self.expected_harness_version
+            ):
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding protocol receipt probe user agent mismatch",
+                )
+            # Producer-bound receipt digest (CAP-S1 Sol review item 1): a
+            # receipt not produced by ``attest_protocol_schema``'s own honest
+            # computation -- hand-built, or partially mutated via
+            # ``dataclasses.replace`` without recomputing the digest -- fails
+            # this recomputed equality even when every individual field above
+            # happens to look superficially well-formed. Placed last so the
+            # more specific messages above still fire for the field they
+            # actually diagnose.
+            recomputed_receipt_digest = compute_protocol_attestation_receipt_digest(
+                binary_path=receipt.binary_path,
+                binary_digest=receipt.binary_digest,
+                binary_version=receipt.binary_version,
+                stable_inventory_digest=receipt.stable_inventory_digest,
+                experimental_inventory_digest=receipt.experimental_inventory_digest,
+                supports_skill_input_path=receipt.supports_skill_input_path,
+                skill_input_schema_evidence=receipt.skill_input_schema_evidence,
+                probe_user_agent=receipt.probe_user_agent,
+            )
+            if (
+                not isinstance(receipt.receipt_digest, str)
+                or recomputed_receipt_digest != receipt.receipt_digest
+            ):
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding protocol receipt digest mismatch",
+                )
+
+            # --- source/generation binding -----------------------------------
+            grants = tuple(profile.skill_grants)
+            if not grants:
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding profile carries no skill grants",
+                )
+            grant_pairs = frozenset(
+                (grant.capability_id, grant.skill_content_digest) for grant in grants
+            )
+            projection_pairs = frozenset(projection.skill_content_digests)
+            if grant_pairs != projection_pairs:
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding grants do not match the verified projection",
+                )
+            if projection.package_generation_digest != generation.package_generation_digest:
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding projection does not match the package generation",
+                )
+
+            # --- B1: re-validate the complete projection receipt shape ------
+            if type(projection) is not SkillProjectionReceipt:
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding projection must be the exact closed"
+                    " receipt type",
+                )
+            projection_digests = (
+                projection.package_content_digest,
+                projection.package_source_digest,
+                projection.package_generation_digest,
+                *(digest for _name, digest in projection.skill_content_digests),
+            )
+            if not all(_is_hex64(value) for value in projection_digests):
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding projection digest is invalid",
+                )
+            projection_root_path = Path(projection.projection_root)
+            try:
+                projection_root_stat = projection_root_path.lstat()
+            except OSError as exc:
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding projection root is not observable",
+                ) from exc
+            if stat.S_ISLNK(projection_root_stat.st_mode) or not stat.S_ISDIR(
+                projection_root_stat.st_mode
+            ):
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding projection root must be a real directory",
+                )
+            if (
+                projection_root_stat.st_dev,
+                projection_root_stat.st_ino,
+            ) != projection.projection_root_identity:
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill canary binding projection root identity mismatch",
+                )
+        except CodexAdapterError:
+            raise
+        except (AttributeError, TypeError) as exc:
+            raise CodexAdapterError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "skill canary binding shape is invalid",
+            ) from exc
 
     def _workspace_identity(self) -> WorkspaceIdentity:
         stat = self.workspace_root.stat()
@@ -882,6 +1412,32 @@ class CodexOperatorAdapter:
                     "harness binary changed during initialization",
                     effect_unknown=True,
                 )
+            accepted_skill_observation: (
+                "tuple[tuple[str, str, str | None, str], ...] | None"
+            ) = None
+            accepted_skill_observation_root: "str | None" = None
+            skills_changed_during_launch = False
+            if self.skill_canary_binding is not None:
+                (
+                    skill_rows,
+                    accepted_skill_observation,
+                    accepted_skill_observation_root,
+                ) = self._run_skill_causal_sequence(
+                    client, self.skill_canary_binding
+                )
+                attestation = self._attestation_with_skill_rows(
+                    attestation, skill_rows
+                )
+                # M7: a skills/changed notification is fenced from the exact
+                # accepted-list boundary onward -- everything the causal
+                # sequence's own RPC calls may have already pushed into the
+                # live buffer is scanned here rather than silently discarded,
+                # so a notification landing before ``thread/start`` cannot be
+                # dropped as startup noise (CAP-S1 Sol wave-3 review M7).
+                skills_changed_during_launch = any(
+                    str(item.get("method") or "") == "skills/changed"
+                    for item in client.drain_notifications()
+                )
             if resume_session_id is None:
                 result = client.request(
                     "thread/start",
@@ -944,7 +1500,15 @@ class CodexOperatorAdapter:
                     "thread/started did not confirm the provider session",
                     effect_unknown=True,
                 )
-            client.notifications.clear()
+            # Drain (never bare-clear) so a skills/changed notification that
+            # arrived during thread/start itself -- the other half of the
+            # M7 fence -- is scanned rather than dropped as startup noise.
+            post_start_drained = client.drain_notifications()
+            if self.skill_canary_binding is not None and any(
+                str(item.get("method") or "") == "skills/changed"
+                for item in post_start_drained
+            ):
+                skills_changed_during_launch = True
         except CodexAdapterError:
             client.close()
             self._bound_resources.pop(generation.process_generation_id, None)
@@ -966,6 +1530,9 @@ class CodexOperatorAdapter:
             resource=(
                 resource_binding.resource if resource_binding is not None else None
             ),
+            skills_changed=skills_changed_during_launch,
+            accepted_skill_observation=accepted_skill_observation,
+            accepted_skill_observation_root=accepted_skill_observation_root,
         )
         self._generations[generation.process_generation_id] = state
         self._bound_resources.pop(generation.process_generation_id, None)
@@ -975,6 +1542,402 @@ class CodexOperatorAdapter:
             process=process,
             initialization_notes=("dedicated_codex_home", "credentials_not_read"),
         )
+
+    def _strict_skills_list(self, client: AppServerClient) -> list[dict[str, object]]:
+        """One ``skills/list forceReload=true`` call, strictly parsed.
+
+        A malformed shape never degrades to an empty list (unlike the
+        laboratory-era ``parse_skills_list``); it refuses with the bounded,
+        non-echoing ``skills_list_shape_refused`` reason.
+        """
+
+        expected_cwd = str(self.workspace_root)
+        try:
+            raw = client.request("skills/list", skills_list_params(expected_cwd))
+        except Exception as exc:
+            raise _rpc_failure(exc, effect_unknown=True) from exc
+        try:
+            return parse_skills_list_strict(raw, expected_cwd=expected_cwd)
+        except SkillProtocolShapeError as exc:
+            raise CodexAdapterError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "skills_list_shape_refused",
+                effect_unknown=True,
+            ) from exc
+
+    def _set_skill_extra_roots(
+        self, client: AppServerClient, paths: list[str]
+    ) -> None:
+        try:
+            client.request("skills/extraRoots/set", extra_roots_set_params(paths))
+        except Exception as exc:
+            raise _rpc_failure(exc, effect_unknown=True) from exc
+
+    @staticmethod
+    def _derive_and_verify_skills_root(binding: CodexSkillCanaryBinding) -> str:
+        """Re-derive the only lawful skills root from server-held identities.
+
+        Never trusts ``binding.projection.skills_root`` as a destination: it
+        is checked for STRING identity against the value this adapter
+        derives itself from the already-verified ``projection_root`` and
+        ``generation.package_root``, and every path component from the
+        projection root down is confirmed to be a real, non-symlink
+        directory before any ``extraRoots`` value is ever sent to the
+        provider (CAP-S1 Sol wave-3 review finding B1: a caller could
+        previously substitute an entirely different, attacker-controlled
+        real directory tree carrying the same Skill names).
+        """
+
+        projection = binding.projection
+        projection_root = Path(projection.projection_root)
+        package_root_parts = [
+            part for part in binding.generation.package_root.split("/") if part
+        ]
+        derived_path = projection_root.joinpath(*package_root_parts, "skills")
+        derived = str(derived_path)
+        if derived != projection.skills_root:
+            raise CodexAdapterError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "skill_root_identity_mismatch",
+                effect_unknown=True,
+            )
+        try:
+            root_stat = projection_root.lstat()
+        except OSError as exc:
+            raise CodexAdapterError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "skill_root_identity_mismatch",
+                effect_unknown=True,
+            ) from exc
+        if (
+            stat.S_ISLNK(root_stat.st_mode)
+            or not stat.S_ISDIR(root_stat.st_mode)
+            or (root_stat.st_dev, root_stat.st_ino) != projection.projection_root_identity
+        ):
+            raise CodexAdapterError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "skill_root_identity_mismatch",
+                effect_unknown=True,
+            )
+        current = projection_root
+        for part in (*package_root_parts, "skills"):
+            current = current / part
+            try:
+                part_stat = current.lstat()
+            except OSError as exc:
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill_root_identity_mismatch",
+                    effect_unknown=True,
+                ) from exc
+            if stat.S_ISLNK(part_stat.st_mode) or not stat.S_ISDIR(part_stat.st_mode):
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "skill_root_identity_mismatch",
+                    effect_unknown=True,
+                )
+        return derived
+
+    @staticmethod
+    def _reduce_skill_observation(
+        rows: list[dict[str, object]],
+        *,
+        skills_root: str,
+        binding: CodexSkillCanaryBinding,
+    ) -> "tuple[tuple[tuple[str, str, str | None, str], ...], str]":
+        """One pure, canonical reduction of a strict ``skills/list`` response.
+
+        Returns ``(observation, schema_support_mode)`` where ``observation``
+        is a sorted tuple of ``(runtime_name, path_mode, exact_path_or_None,
+        closure_digest_assignment)`` rows and ``schema_support_mode`` is
+        ``"path_precise"`` (Mode A) or ``"pathless"`` (Mode B). Used
+        byte-identically at launch, pre-turn, and post-turn so Mode-A path
+        validation logic can never diverge between call sites (CAP-S1 Sol
+        wave-3 review finding B2).
+        """
+
+        path_flags = {("path" in row) for row in rows}
+        if len(path_flags) > 1:
+            raise CodexAdapterError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "skill_path_precision_inconsistent",
+                effect_unknown=True,
+            )
+        mode_a = True in path_flags
+        schema_support_mode = "path_precise" if mode_a else "pathless"
+        if mode_a:
+            for row in rows:
+                name = str(row.get("name") or "")
+                path = str(row.get("path") or "")
+                expected_md = f"{skills_root}/{name}/SKILL.md"
+                expected_dir = f"{skills_root}/{name}"
+                if path not in (expected_md, expected_dir):
+                    raise CodexAdapterError(
+                        AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                        "skill_path_mismatch",
+                        effect_unknown=True,
+                    )
+        elif not binding.protocol_receipt.supports_skill_input_path:
+            raise CodexAdapterError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "skill_path_attestation_unavailable",
+                effect_unknown=True,
+            )
+        enabled_rows = [row for row in rows if row.get("enabled") is True]
+        names = [str(row.get("name") or "") for row in enabled_rows]
+        if len(names) != len(set(names)):
+            raise CodexAdapterError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "duplicate_skill_row",
+                effect_unknown=True,
+            )
+        digest_by_name = {
+            grant.runtime_name: grant.skill_content_digest
+            for grant in binding.profile.skill_grants
+        }
+        entries = tuple(
+            sorted(
+                (
+                    name,
+                    schema_support_mode,
+                    (str(row.get("path")) if mode_a else None),
+                    digest_by_name.get(name, ""),
+                )
+                for row, name in zip(enabled_rows, names)
+            )
+        )
+        return entries, schema_support_mode
+
+    def _run_skill_causal_sequence(
+        self, client: AppServerClient, binding: CodexSkillCanaryBinding
+    ) -> "tuple[tuple[ObservedCapabilityIdentity, ...], tuple[tuple[str, str, str | None, str], ...], str]":
+        """The frozen baseline/add/observe half of the CAP-S1 causal sequence.
+
+        Only the launch-time portion (protocol-attestation amendment §5, up
+        through ``compare requested vs observed``) lives in this adapter; the
+        trailing clear/terminate/cleanup half belongs to the canary runner
+        that owns process teardown, not to a single ``start_session`` call.
+
+        Returns ``(observed_capabilities, accepted_observation,
+        accepted_skills_root)`` so the launch-accepted reduction can be
+        sealed onto the generation state for exact pre/post-turn re-checks
+        (CAP-S1 Sol wave-3 review finding B2).
+        """
+
+        # -> skills/extraRoots/set []
+        self._set_skill_extra_roots(client, [])
+        # -> skills/list forceReload=true == enabled set {}
+        baseline_rows = self._strict_skills_list(client)
+        if enabled_skill_names(baseline_rows):
+            raise CodexAdapterError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "ambient_skill_surface_not_empty",
+                effect_unknown=True,
+            )
+        # -> verify exact package source snapshot
+        try:
+            verify_capability_package_source(
+                binding.projection.projection_root, binding.generation
+            )
+        except CapabilityPackageError as exc:
+            raise CodexAdapterError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "skill_source_changed",
+                effect_unknown=True,
+            ) from exc
+        # -> DERIVE the only lawful skills root server-side; the binding's own
+        #    ``skills_root`` is an identity to match, never a destination to
+        #    trust (finding B1).
+        skills_root = self._derive_and_verify_skills_root(binding)
+        # -> skills/extraRoots/set [<exact derived package root>/skills]
+        self._set_skill_extra_roots(client, [skills_root])
+        # -> skills/list forceReload=true == enabled set {four exact Operator Skills}
+        rows = self._strict_skills_list(client)
+        observation, _mode = self._reduce_skill_observation(
+            rows, skills_root=skills_root, binding=binding
+        )
+        required_names = tuple(
+            grant.runtime_name for grant in binding.profile.skill_grants
+        )
+        observed_names = tuple(entry[0] for entry in observation)
+        if set(observed_names) != set(required_names) or len(observed_names) != len(
+            required_names
+        ):
+            raise CodexAdapterError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "skill_set_causality_failed",
+                effect_unknown=True,
+            )
+        # -> construct four composite ObservedCapabilityIdentity rows
+        return self._skill_rows_to_observed(observation), observation, skills_root
+
+    @staticmethod
+    def _skill_rows_to_observed(
+        observation: "tuple[tuple[str, str, str | None, str], ...]",
+    ) -> tuple[ObservedCapabilityIdentity, ...]:
+        return tuple(
+            ObservedCapabilityIdentity(
+                kind="skill",
+                name=name,
+                skill_content_digest=digest,
+            )
+            for name, _mode, _path, digest in observation
+        )
+
+    @staticmethod
+    def _attestation_with_skill_rows(
+        attestation: ObservedHarnessAttestation,
+        skill_rows: tuple[ObservedCapabilityIdentity, ...],
+    ) -> ObservedHarnessAttestation:
+        """Replace name-only skill rows with the digest-bearing observed set."""
+
+        non_skill = tuple(
+            item for item in attestation.capabilities if item.kind != "skill"
+        )
+        return replace(
+            attestation,
+            capabilities=non_skill + skill_rows,
+            effective_skills=tuple(sorted(item.name for item in skill_rows)),
+        )
+
+    def _revalidate_skill_state_before_turn(
+        self, state: "_GenerationState", binding: CodexSkillCanaryBinding
+    ) -> None:
+        if state.skills_changed:
+            raise CodexAdapterError(
+                AdapterFailureClass.CONFIG_DRIFT,
+                "skills_changed_during_canary",
+                effect_unknown=True,
+            )
+        self._reconfirm_skill_state(
+            state, binding, mismatch_reason="skill_set_causality_failed"
+        )
+
+    def _verify_skill_state_after_turn(
+        self, state: "_GenerationState", binding: CodexSkillCanaryBinding
+    ) -> None:
+        if state.skills_changed:
+            raise CodexAdapterError(
+                AdapterFailureClass.CONFIG_DRIFT,
+                "skills_changed_during_canary",
+                effect_unknown=True,
+            )
+        self._reconfirm_skill_state(
+            state, binding, mismatch_reason="post_turn_skill_state_mismatch"
+        )
+
+    def _reconfirm_skill_state(
+        self,
+        state: "_GenerationState",
+        binding: CodexSkillCanaryBinding,
+        *,
+        mismatch_reason: str,
+    ) -> None:
+        """Re-check the exact accepted launch observation (CAP-S1 Sol wave-3
+        review finding B2).
+
+        Uses the same :meth:`_reduce_skill_observation` reducer the launch
+        path used, against the SAME accepted ``skills_root``, and requires
+        byte-identical tuple equality with the launch-accepted reduction --
+        never just an enabled-name/cardinality check, which cannot see a
+        moved path, a Mode flip, a duplicate, or root drift.
+        """
+
+        rows = self._strict_skills_list(state.client)
+        try:
+            observation, _mode = self._reduce_skill_observation(
+                rows,
+                skills_root=state.accepted_skill_observation_root,
+                binding=binding,
+            )
+        except CodexAdapterError as exc:
+            raise CodexAdapterError(
+                AdapterFailureClass.CONFIG_DRIFT,
+                mismatch_reason,
+                effect_unknown=True,
+            ) from exc
+        if observation != state.accepted_skill_observation:
+            raise CodexAdapterError(
+                AdapterFailureClass.CONFIG_DRIFT,
+                mismatch_reason,
+                effect_unknown=True,
+            )
+        try:
+            verify_capability_package_source(
+                binding.projection.projection_root, binding.generation
+            )
+        except CapabilityPackageError as exc:
+            raise CodexAdapterError(
+                AdapterFailureClass.CONFIG_DRIFT,
+                mismatch_reason,
+                effect_unknown=True,
+            ) from exc
+
+    def _build_skill_envelope_wire(
+        self, state: "_GenerationState", envelope: CodexTurnInputEnvelope
+    ) -> list[dict[str, object]]:
+        binding = self.skill_canary_binding
+        if binding is None:
+            raise CodexAdapterError(
+                AdapterFailureClass.VALIDATION_FAILURE,
+                "skill_envelope_without_binding",
+            )
+        if type(envelope) is not CodexTurnInputEnvelope:
+            raise CodexAdapterError(
+                AdapterFailureClass.VALIDATION_FAILURE,
+                "skill_envelope_shape_invalid",
+            )
+        text = envelope.text
+        if not isinstance(text, str) or not text.strip():
+            raise CodexAdapterError(
+                AdapterFailureClass.VALIDATION_FAILURE,
+                "skill_envelope_shape_invalid",
+            )
+        items = envelope.skills
+        if not isinstance(items, tuple) or any(
+            type(item) is not CodexSkillTurnInput for item in items
+        ):
+            raise CodexAdapterError(
+                AdapterFailureClass.VALIDATION_FAILURE,
+                "skill_envelope_shape_invalid",
+            )
+        if len(items) != 1:
+            raise CodexAdapterError(
+                AdapterFailureClass.VALIDATION_FAILURE,
+                "skill_envelope_cardinality",
+            )
+        item = items[0]
+        grants_by_capability_id = {
+            grant.capability_id: grant for grant in binding.profile.skill_grants
+        }
+        grant = grants_by_capability_id.get(item.capability_id)
+        if (
+            grant is None
+            or grant.runtime_name != item.runtime_name
+            or grant.skill_content_digest != item.skill_content_digest
+            or item.package_generation_digest
+            != binding.generation.package_generation_digest
+        ):
+            raise CodexAdapterError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "skill_envelope_identity_mismatch",
+            )
+        final_path = f"{binding.projection.skills_root}/{item.runtime_name}/SKILL.md"
+        if item.skill_md_path != final_path:
+            raise CodexAdapterError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "skill_input_path_mismatch",
+            )
+        if state.resource is not None:
+            raise CodexAdapterError(
+                AdapterFailureClass.VALIDATION_FAILURE,
+                "skill_envelope_resource_conflict",
+            )
+        self._revalidate_skill_state_before_turn(state, binding)
+        return [
+            {"type": "text", "text": text},
+            {"type": "skill", "name": item.runtime_name, "path": final_path},
+        ]
 
     def start_session(
         self,
@@ -1174,6 +2137,11 @@ class CodexOperatorAdapter:
 
         for item in notifications:
             method = str(item.get("method") or "unknown")
+            if self.skill_canary_binding is not None and method == "skills/changed":
+                # CAP-S1 protocol-attestation amendment §8: any post-observation
+                # skills/changed notification invalidates the launch attestation
+                # for the rest of this generation's life -- no automatic rerun.
+                state.skills_changed = True
             params = (
                 item.get("params") if isinstance(item.get("params"), Mapping) else {}
             )
@@ -1465,36 +2433,45 @@ class CodexOperatorAdapter:
                 "no Executive-owned turn input loader was supplied",
             )
         prompt = self.turn_input_loader(turn)
-        if not isinstance(prompt, str) or not prompt:
+        if isinstance(prompt, str):
+            if not prompt:
+                raise CodexAdapterError(
+                    AdapterFailureClass.VALIDATION_FAILURE,
+                    "turn input loader returned no prompt",
+                )
+            resource_prompt = getattr(state.resource, "turn_prompt_suffix", None)
+            if callable(resource_prompt):
+                try:
+                    suffix = resource_prompt()
+                except Exception as exc:
+                    raise CodexAdapterError(
+                        AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                        "attempt resource could not supply its closed turn contract",
+                    ) from exc
+                if (
+                    not isinstance(suffix, str)
+                    or not suffix
+                    or len(suffix.encode("utf-8")) > 8192
+                ):
+                    raise CodexAdapterError(
+                        AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                        "attempt resource turn contract is invalid",
+                    )
+                prompt += suffix
+            wire_input: list[dict[str, object]] = [{"type": "text", "text": prompt}]
+        elif type(prompt) is CodexTurnInputEnvelope:
+            wire_input = self._build_skill_envelope_wire(state, prompt)
+        else:
             raise CodexAdapterError(
                 AdapterFailureClass.VALIDATION_FAILURE,
-                "turn input loader returned no prompt",
+                "turn input loader returned an unsupported input type",
             )
-        resource_prompt = getattr(state.resource, "turn_prompt_suffix", None)
-        if callable(resource_prompt):
-            try:
-                suffix = resource_prompt()
-            except Exception as exc:
-                raise CodexAdapterError(
-                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
-                    "attempt resource could not supply its closed turn contract",
-                ) from exc
-            if (
-                not isinstance(suffix, str)
-                or not suffix
-                or len(suffix.encode("utf-8")) > 8192
-            ):
-                raise CodexAdapterError(
-                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
-                    "attempt resource turn contract is invalid",
-                )
-            prompt += suffix
         try:
             result = state.client.request(
                 "turn/start",
                 {
                     "threadId": state.provider_session_id,
-                    "input": [{"type": "text", "text": prompt}],
+                    "input": wire_input,
                     "cwd": str(self.workspace_root),
                     "approvalPolicy": state.requested.approval_policy,
                 },
@@ -1629,6 +2606,13 @@ class CodexOperatorAdapter:
         # effect-unknown and may never be translated into a retryable refusal.
         state.attention_inflight = True
         state.attention_native_turn_id = None
+        state.attention_request = _PendingAttentionRequest(
+            attempt_id=attempt_id,
+            binding_id=binding_id,
+            binding_generation=binding_generation,
+            nudge_id=nudge_id,
+            opaque_ids=opaque,
+        )
         try:
             started = state.client.request("turn/start", params, timeout=30.0)
         except Exception as exc:
@@ -1684,15 +2668,18 @@ class CodexOperatorAdapter:
                 "attention completion identity is ambiguous",
                 effect_unknown=True,
             )
-        state.attention_inflight = False
-        state.attention_native_turn_id = None
-        return AttentionTurnObservation(
-            process_generation_id=generation.process_generation_id,
-            provider_session_id=provider_session_id,
-            nudge_id=nudge_id,
-            provider_native_turn_id=native_turn_id,
-            accepted=True,
-            delivered=True,
+        terminal_status = _attention_terminal_status(completion)
+        if terminal_status is None:
+            raise CodexAdapterError(
+                AdapterFailureClass.MCP_OR_TOOL_TRANSPORT_FAILURE,
+                "attention completion status is not a recognized terminal outcome",
+                effect_unknown=True,
+            )
+        return self._terminal_attention_observation(
+            state,
+            completion=completion,
+            terminal_status=terminal_status,
+            native_turn_id=native_turn_id,
         )
 
     @staticmethod
@@ -1716,12 +2703,68 @@ class CodexOperatorAdapter:
             and str(completed_turn.get("id") or "").strip() == native_turn_id
         )
 
-    def _reconcile_late_attention_completion(self, state: _GenerationState) -> None:
-        """Clear a timed-out attention fence only on its exact queued completion."""
+    @staticmethod
+    def _terminal_attention_observation(
+        state: _GenerationState,
+        *,
+        completion: object,
+        terminal_status: str,
+        native_turn_id: str,
+    ) -> AttentionTurnObservation:
+        pending = state.attention_request
+        if pending is None:
+            raise CodexAdapterError(
+                AdapterFailureClass.MCP_OR_TOOL_TRANSPORT_FAILURE,
+                "attention completion has no exact pending request",
+                effect_unknown=True,
+            )
+        state.attention_inflight = False
+        state.attention_native_turn_id = None
+        state.attention_request = None
+        if terminal_status != "completed":
+            return AttentionTurnObservation(
+                process_generation_id=state.generation.process_generation_id,
+                provider_session_id=state.provider_session_id,
+                nudge_id=pending.nudge_id,
+                provider_native_turn_id=native_turn_id,
+                accepted=True,
+                delivered=False,
+            )
+        obligation_ids = _terminal_wake_ack_ids(completion)
+        wake_ack_projection = (
+            None
+            if obligation_ids is None
+            else WorkerLocalWakeAckProjection(
+                target_attempt_id=pending.attempt_id,
+                process_generation_id=state.generation.process_generation_id,
+                binding_id=pending.binding_id,
+                binding_generation=pending.binding_generation,
+                provider_session_id=state.provider_session_id,
+                provider_native_turn_id=native_turn_id,
+                nudge_id=pending.nudge_id,
+                obligation_ids=obligation_ids,
+                terminal_ack_trailer=True,
+            )
+        )
+        return AttentionTurnObservation(
+            process_generation_id=state.generation.process_generation_id,
+            provider_session_id=state.provider_session_id,
+            nudge_id=pending.nudge_id,
+            provider_native_turn_id=native_turn_id,
+            accepted=True,
+            delivered=True,
+            wake_ack_projection=wake_ack_projection,
+        )
+
+    def _reconcile_late_attention_completion(
+        self,
+        state: _GenerationState,
+    ) -> AttentionTurnObservation | None:
+        """Reduce a timed-out exact terminal completion without provider resubmission."""
 
         native_turn_id = state.attention_native_turn_id
         if not state.attention_inflight or not native_turn_id:
-            return
+            return None
         while True:
             try:
                 completion = state.client.wait_notification(
@@ -1731,15 +2774,20 @@ class CodexOperatorAdapter:
             except Exception:
                 # Absence, transport loss, and malformed reader behavior are all
                 # fail-closed: none is evidence that the provider completed.
-                return
+                return None
             if self._matches_attention_completion(
                 completion,
                 provider_session_id=state.provider_session_id,
                 native_turn_id=native_turn_id,
             ):
-                state.attention_inflight = False
-                state.attention_native_turn_id = None
-                return
+                terminal_status = _attention_terminal_status(completion)
+                if terminal_status is not None:
+                    return self._terminal_attention_observation(
+                        state,
+                        completion=completion,
+                        terminal_status=terminal_status,
+                        native_turn_id=native_turn_id,
+                    )
 
     def read_events(
         self, cursor: EventCursor, *, timeout_seconds: float = 30.0
@@ -1852,6 +2900,8 @@ class CodexOperatorAdapter:
         texts = turn_texts(matching)
         summary = redact_evidence_text(texts[-1][:4000]) if texts else None
         artifact_digest = _canonical_digest(matching)
+        if self.skill_canary_binding is not None:
+            self._verify_skill_state_after_turn(state, self.skill_canary_binding)
         state.candidate_artifact_digests[turn.turn_id] = artifact_digest
         return CandidateResult(
             attempt_id=turn.attempt_id,
@@ -2126,7 +3176,7 @@ class CodexOperatorAdapter:
                 recommended_failure_class=AdapterFailureClass.SESSION_MISSING,
             )
         if state.client.alive():
-            self._reconcile_late_attention_completion(state)
+            late_attention = self._reconcile_late_attention_completion(state)
             try:
                 result = state.client.request(
                     "thread/read", {"threadId": state.provider_session_id}
@@ -2145,8 +3195,16 @@ class CodexOperatorAdapter:
                 recommended_failure_class=(
                     None if reachable else AdapterFailureClass.SESSION_MISSING
                 ),
+                late_attention_observation=late_attention,
             )
         return self._observation(state, failure=AdapterFailureClass.PROCESS_CRASH)
 
 
-__all__ = ["CodexAdapterError", "CodexOperatorAdapter"]
+__all__ = [
+    "CodexAdapterError",
+    "CodexOperatorAdapter",
+    "CodexSkillCanaryBinding",
+    "CodexSkillTurnInput",
+    "CodexTurnInputEnvelope",
+    "SKILL_INPUT_SCHEMA_EVIDENCE",
+]

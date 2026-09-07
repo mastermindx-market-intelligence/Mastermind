@@ -1,0 +1,61 @@
+{
+  "schema": "mastermind.executive_app_policy_example.v1",
+  "note": [
+    "EXAMPLE ONLY. Not read by any production path and not installed by",
+    "scripts/mastermind_executive_app.py without an explicit --policy flag.",
+    "Every hostname below is the reserved example.com domain (RFC 2606) so this",
+    "file can never resolve to a live issuer or resource by accident.",
+    "'read' and 'submit' are each an independent, fully self-contained",
+    "integrations.business_mcp_auth.contracts.ResourcePolicy wire object",
+    "(schema mastermind.business_mcp_auth_policy.v1, POLICY_KEYS exactly) --",
+    "this envelope invents no new policy fields of its own. 'read' admits a",
+    "token carrying exactly the mastermind.executive.read scope; 'submit'",
+    "admits a token carrying exactly BOTH mastermind.executive.read AND",
+    "mastermind.executive.intent.submit -- ResourcePolicy.required_scopes is",
+    "matched exactly (see integrations/business_mcp_auth/claims.py",
+    "_scope_claim), so a single-scope 'read' token is refused by 'submit' and",
+    "a two-scope 'submit' token is refused by 'read'. Replace",
+    "allowed_subject_digests with the real sha256(issuer + \"\\n\" + subject)",
+    "digest(s) -- integrations.business_mcp_auth.contracts.subject_digest --",
+    "for the Chairman/Sol identities this deployment must admit; never a raw",
+    "subject value."
+  ],
+  "read": {
+    "schema": "mastermind.business_mcp_auth_policy.v1",
+    "policy_id": "mastermind-executive-app-read-example",
+    "resource": "https://executive-app.mastermind.example.com/mcp",
+    "resource_metadata_url": "https://executive-app.mastermind.example.com/.well-known/oauth-protected-resource",
+    "issuer": "https://issuer.mastermind.example.com",
+    "authorization_servers": ["https://issuer.mastermind.example.com"],
+    "jwks_uri": "https://issuer.mastermind.example.com/.well-known/jwks.json",
+    "required_scopes": ["mastermind.executive.read"],
+    "allowed_subject_digests": [
+      "0000000000000000000000000000000000000000000000000000000000000000"
+    ],
+    "allowed_algorithms": ["RS256"],
+    "clock_skew_seconds": 30,
+    "max_token_lifetime_seconds": 900,
+    "jwks_cache_ttl_seconds": 600,
+    "unknown_kid_refresh_cooldown_seconds": 30,
+    "fetch_failure_backoff_seconds": 30
+  },
+  "submit": {
+    "schema": "mastermind.business_mcp_auth_policy.v1",
+    "policy_id": "mastermind-executive-app-submit-example",
+    "resource": "https://executive-app.mastermind.example.com/mcp",
+    "resource_metadata_url": "https://executive-app.mastermind.example.com/.well-known/oauth-protected-resource",
+    "issuer": "https://issuer.mastermind.example.com",
+    "authorization_servers": ["https://issuer.mastermind.example.com"],
+    "jwks_uri": "https://issuer.mastermind.example.com/.well-known/jwks.json",
+    "required_scopes": ["mastermind.executive.intent.submit", "mastermind.executive.read"],
+    "allowed_subject_digests": [
+      "0000000000000000000000000000000000000000000000000000000000000000"
+    ],
+    "allowed_algorithms": ["RS256"],
+    "clock_skew_seconds": 30,
+    "max_token_lifetime_seconds": 900,
+    "jwks_cache_ttl_seconds": 600,
+    "unknown_kid_refresh_cooldown_seconds": 30,
+    "fetch_failure_backoff_seconds": 30
+  }
+}

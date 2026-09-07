@@ -24,11 +24,15 @@ from control_plane.executive_runtime import (
 from control_plane.session_targets import load_session_targets
 from control_plane.wake_dispatcher import dispatch_wake
 from control_plane.wake_ledger import (
+    AckMode,
     FORBIDDEN_EVENT_PAYLOAD_KEYS,
     LedgerPhase,
     SourceReadHealth,
+    TrustedAckContext,
     WAKE_AGGREGATE_TYPE,
     WakeLedgerError,
+    ack_record,
+    acknowledge,
     expected_resolution_code,
     requested_record,
     resolve_source,
@@ -126,6 +130,31 @@ def _requested_kind(runtime: Runtime, kind: str) -> list[Event]:
     ]
 
 
+def _ack_as_human_operator(runtime: Runtime, obligation_id: str) -> None:
+    repo = WakeLedgerRepository(runtime)
+    requested = repo.get_by_command_id(obligation_id)
+    assert requested is not None and requested.obligation is not None
+    obligation = requested.obligation
+    repo.append_record(
+        ack_record(
+            obligation,
+            acknowledge(
+                obligation,
+                trusted=TrustedAckContext(
+                    ack_mode=AckMode.HUMAN_OPERATOR,
+                    target_seat=obligation.declared_target_seat,
+                    session_alias="EXECUTIVE-HUMAN-OPERATOR",
+                    reasoning_surface="human",
+                    acknowledged_at=_NOW,
+                    operator_authority_receipt="OP-WAKE-RECONCILE-TEST",
+                ),
+                claimed_obligation_ids=(obligation_id,),
+            ),
+        ),
+        obligation=None,
+    )
+
+
 def _tables(runtime: Runtime) -> set[str]:
     with runtime.store.read() as connection:
         return {
@@ -203,6 +232,10 @@ def test_sibling_review_source_resolves_and_degraded_runtime_does_not(tmp_path, 
         parent_job_id=parent.job_id,
         reviews_job_id=child.job_id,
     )
+    pending_ack = _reconcile(runtime)
+    assert pending_ack.resolved == ()
+    assert oid in pending_ack.plan.already_requested
+    _ack_as_human_operator(runtime, oid)
     resolved = _reconcile(runtime)
     assert oid in resolved.resolved
     review_stream = [
@@ -210,7 +243,11 @@ def test_sibling_review_source_resolves_and_degraded_runtime_does_not(tmp_path, 
         for item in _wake_events(runtime)
         if item.aggregate_id == oid
     ]
-    assert review_stream == ["WAKE_REQUESTED", "SOURCE_RESOLVED"]
+    assert review_stream == [
+        "WAKE_REQUESTED",
+        "TARGET_ACKNOWLEDGED",
+        "SOURCE_RESOLVED",
+    ]
     assert all(item.event_type != "DELIVERY_ATTEMPT" for item in _wake_events(runtime))
 
     runtime2 = Runtime.at(tmp_path / "degraded-runtime")
@@ -242,6 +279,10 @@ def test_inbox_failed_job_requests_and_healthy_repair_resolves(tmp_path, frozen_
 
     runtime.jobs.requeue_job(job.job_id)
     _complete(runtime, job.job_id)
+    pending_ack = _reconcile(runtime)
+    assert pending_ack.resolved == ()
+    assert first.requested[0] in pending_ack.plan.already_requested
+    _ack_as_human_operator(runtime, first.requested[0])
     repaired = _reconcile(runtime)
     assert repaired.resolved == first.requested
     assert [item.event_type for item in _wake_events(runtime)][-1] == "SOURCE_RESOLVED"
@@ -480,6 +521,10 @@ def test_acceptance_demo_review_required_then_ceo_packet(tmp_path, frozen_git):
         parent_job_id=parent.job_id,
         reviews_job_id=child.job_id,
     )
+    pending_ack = _reconcile(restarted)
+    assert pending_ack.resolved == ()
+    assert review[0].command_id in pending_ack.plan.already_requested
+    _ack_as_human_operator(restarted, review[0].command_id)
     step8 = _reconcile(restarted)
     assert review[0].command_id in step8.resolved
     assert not any(item.event_type == "DELIVERY_ATTEMPT" for item in _wake_events(restarted))

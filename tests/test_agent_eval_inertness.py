@@ -665,6 +665,32 @@ ALLOWED_PATHS = frozenset(
         "scripts/agent_eval/tc3_protocol_compliance.py",
         "tests/test_agent_eval_s1_scorers.py",
         "tests/test_agent_eval_s1_multi_scenario_summarize.py",
+        # --- EVAL-OHF2 fence ratchet (principal-authorized 2026-09-01,
+        # operation mastermind-agent-evaluation-ohf2-integration-20260901-
+        # fable-001): the OHF-to-R0 bridge. Additive; imports nothing from
+        # scripts.ohf.* (verified by this same file's AST fence, which
+        # parametrizes over scripts/agent_eval/*.py automatically -- no
+        # separate fence edit needed for ohf_bridge.py itself).
+        "docs/superpowers/plans/2026-09-01-agent-evaluation-ohf2-integration.md",
+        "scripts/agent_eval/ohf_bridge.py",
+        "tests/test_agent_eval_ohf_bridge.py",
+        # review repair MAJOR-2 (same operation key): one committed,
+        # harness-written real-bytes fixture (plan record §9/§11).
+        "tests/fixtures/agent_eval_ohf_bridge/README.md",
+        "tests/fixtures/agent_eval_ohf_bridge/MANIFEST.json",
+        "tests/fixtures/agent_eval_ohf_bridge/runs/control-1.0.0/S2/1cdaa1b19b584d50ba012dc3910637eb.md",
+        # --- EVAL-E1 fence ratchet (principal-authorized 2026-09-01,
+        # operation mastermind-agent-evaluation-e1-prereg-20260901-fable-001):
+        # RECORDS ONLY paired-pilot preregistration -- a new additive shape
+        # validator, its committed sealed record, and this wave's own plan
+        # record. Executes nothing (tests/test_agent_eval_prereg.py's own
+        # inertness section, plus the shared AST/subprocess fence above,
+        # which parametrizes over prereg.py automatically -- no separate
+        # fence edit needed for prereg.py itself).
+        "docs/superpowers/plans/2026-09-01-agent-evaluation-e1-preregistration.md",
+        "scripts/agent_eval/prereg.py",
+        "tests/test_agent_eval_prereg.py",
+        "experiments/agent_eval/e1/preregistration.json",
     }
 )
 
@@ -818,7 +844,6 @@ def compute_pr_diff_paths(repo_dir: Path, *, head: str = "HEAD", upstream: str =
 
 def test_changed_paths_are_within_the_allowed_r0_surface() -> None:
     changed = compute_pr_diff_paths(ROOT)
-    assert changed, "expected at least one changed file relative to the effective PR base"
     not_applicable_reason = _fence_not_applicable_reason(changed)
     if not_applicable_reason is not None:
         pytest.skip(not_applicable_reason)
@@ -828,13 +853,31 @@ def test_changed_paths_are_within_the_allowed_r0_surface() -> None:
 
 def test_no_control_plane_config_dependency_or_workflow_file_touched() -> None:
     changed = compute_pr_diff_paths(ROOT)
-    assert changed, "expected at least one changed file relative to the effective PR base"
     not_applicable_reason = _fence_not_applicable_reason(changed)
     if not_applicable_reason is not None:
         pytest.skip(not_applicable_reason)
     forbidden_prefixes = ("control_plane/", ".github/workflows/", "config/", "pyproject.toml", "requirements")
     for path in changed:
         assert not path.startswith(forbidden_prefixes), f"unexpected control-plane/config/workflow change: {path}"
+
+
+@pytest.mark.parametrize(
+    "fence_test",
+    [
+        test_changed_paths_are_within_the_allowed_r0_surface,
+        test_no_control_plane_config_dependency_or_workflow_file_touched,
+    ],
+    ids=["allowed_surface_fence", "forbidden_surface_fence"],
+)
+def test_empty_delta_is_not_applicable_for_real_fences(monkeypatch, fence_test) -> None:
+    """An empty protected-master delta is not this program's business.
+
+    Exercise the real fence entry points, not only the classifier helper, so
+    a premature non-empty assertion cannot regress ahead of self-scoping.
+    """
+    monkeypatch.setattr(sys.modules[__name__], "compute_pr_diff_paths", lambda _repo: set())
+    with pytest.raises(pytest.skip.Exception, match="not applicable"):
+        fence_test()
 
 
 # ---------------------------------------------------------------------------

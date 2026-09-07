@@ -89,12 +89,14 @@ from control_plane.operator_harness_contract import (
     SessionStartObservation,
     TurnRef,
     TurnStartObservation,
+    compare_launch,
 )
 from control_plane.operator_harness_wire import (
     OperatorHarnessWireError,
     event_cursor as wire_event_cursor,
     launch_comparison as wire_launch_comparison,
     operation_id as wire_operation_id,
+    observed_harness_attestation as wire_observed_harness_attestation,
     process_identity_observation as wire_process_identity_observation,
     process_generation_ref as wire_process_generation_ref,
     requested_execution_profile as wire_requested_execution_profile,
@@ -102,6 +104,16 @@ from control_plane.operator_harness_wire import (
     provider_session_handoff as wire_provider_session_handoff,
     to_wire as operator_to_wire,
     turn_ref as wire_turn_ref,
+)
+from control_plane.operator_materialization_receipt import (
+    MATERIALIZATION_STATUS_SCHEMA,
+    OperatorMaterializationReceipt,
+    OperatorMaterializationReceiptError,
+    build_operator_materialization_receipt,
+    persist_operator_materialization_receipt,
+    read_operator_materialization_receipt,
+    requested_profile_digest,
+    validate_materialization_request,
 )
 from control_plane.worker_browser_b1 import (
     BrowserReviewReceipt,
@@ -146,6 +158,7 @@ _OHF_OPERATIONS = frozenset(
     {
         "ohf-validate",
         "ohf-identity",
+        "ohf-materialization-status",
         "ohf-start",
         "ohf-resume",
         "ohf-begin-turn",
@@ -895,6 +908,7 @@ class _BrokerOperatorRun:
     epoch: SessionEpochRef
     generation: ProcessGenerationRef
     provider_session_id: str
+    materialization_receipt: OperatorMaterializationReceipt | None = None
     resource: OperatorAttemptResource | None = None
     prompts: dict[str, str] = dataclasses.field(default_factory=dict)
     terminal_error: str | None = None
@@ -1409,6 +1423,8 @@ class ExecutiveWorkerBroker:
             return await self._ohf_validate(payload)
         if operation == "ohf-identity":
             return await self._ohf_identity(payload)
+        if operation == "ohf-materialization-status":
+            return await self._ohf_materialization_status(payload)
         if operation == "ohf-start":
             return await self._ohf_start(payload, resume=False)
         if operation == "ohf-resume":
@@ -1573,10 +1589,15 @@ class ExecutiveWorkerBroker:
             "operator_harness_armed": self.operator_harness_armed,
         }
 
-    async def _ohf_start(
+    def _materialization_request(
         self, payload: dict[str, Any], *, resume: bool
-    ) -> dict[str, Any]:
-        self._require_current_autonomy()
+    ) -> tuple[
+        OperationId,
+        RequestedExecutionProfile,
+        SessionEpochRef,
+        ProcessGenerationRef,
+        ProviderSessionHandoff | None,
+    ]:
         expected = {"operation_id", "requested", "epoch", "generation"}
         if resume:
             expected.add("provider_session")
@@ -1604,6 +1625,187 @@ class ExecutiveWorkerBroker:
             raise BrokerProtocolError("OHF session identities do not match the broker")
         if handoff is not None and handoff.worker_id != self.policy.worker_id:
             raise BrokerProtocolError("OHF resume handoff does not match the broker")
+        try:
+            validate_materialization_request(
+                operation_command_id=operation.command_id,
+                operation_kind="resume_session" if resume else "start_session",
+                attempt_id=epoch.attempt_id,
+                worker_id=epoch.worker_id,
+                session_epoch_id=epoch.session_epoch_id,
+                process_generation_id=generation.process_generation_id,
+                generation_number=generation.generation_number,
+                expected_provider_session_id=(
+                    handoff.provider_session_id if handoff is not None else None
+                ),
+            )
+        except OperatorMaterializationReceiptError as exc:
+            raise BrokerProtocolError(
+                "OHF materialization identity is invalid"
+            ) from exc
+        return operation, requested, epoch, generation, handoff
+
+    @staticmethod
+    def _receipt_matches_request(
+        receipt: OperatorMaterializationReceipt,
+        *,
+        operation: OperationId,
+        requested: RequestedExecutionProfile,
+        epoch: SessionEpochRef,
+        generation: ProcessGenerationRef,
+        handoff: ProviderSessionHandoff | None,
+    ) -> bool:
+        try:
+            observed = wire_observed_harness_attestation(
+                receipt.observed_attestation
+            )
+        except OperatorHarnessWireError:
+            return False
+        return (
+            receipt.operation_command_id == operation.command_id
+            and receipt.operation_kind
+            == ("resume_session" if handoff is not None else "start_session")
+            and receipt.attempt_id == epoch.attempt_id
+            and receipt.worker_id == epoch.worker_id
+            and receipt.session_epoch_id == epoch.session_epoch_id
+            and receipt.process_generation_id == generation.process_generation_id
+            and receipt.generation_number == generation.generation_number
+            and receipt.requested_profile_digest
+            == requested_profile_digest(operator_to_wire(requested))
+            and compare_launch(requested, observed).decision is LaunchDecision.ALLOW
+            and (
+                handoff is None
+                or receipt.provider_session_id == handoff.provider_session_id
+            )
+        )
+
+    def _materialization_result(
+        self, receipt: OperatorMaterializationReceipt
+    ) -> dict[str, Any]:
+        observation = SessionStartObservation(
+            receipt.provider_session_id,
+            ProcessIdentityObservation(**receipt.process_identity),
+        )
+        return {
+            "observation": operator_to_wire(observation),
+            "attestation": receipt.observed_attestation,
+            "process_credentials": receipt.process_credentials,
+            "provider_home": {
+                "provider_home_identity": receipt.provider_home_identity,
+            },
+            "startup_sweep": self.startup_sweep,
+            "materialization_receipt": receipt.to_dict(),
+        }
+
+    async def _ohf_materialization_status(
+        self, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        resume = "provider_session" in payload
+        operation, requested, epoch, generation, handoff = (
+            self._materialization_request(payload, resume=resume)
+        )
+        # Status is one atomic classification over the durable receipt and the
+        # process-local effect state.  Holding the existing state lock across
+        # the bounded read prevents a start/quarantine/terminal transition
+        # from being flattened into stale ABSENT or restart-only evidence.
+        async with self._state_lock:
+            read_conflict = False
+            try:
+                receipt = await asyncio.to_thread(
+                    read_operator_materialization_receipt,
+                    self.policy.run_root,
+                    operation.command_id,
+                    expected_owner_uid=self.policy.worker_uid,
+                )
+            except OperatorMaterializationReceiptError:
+                read_conflict = True
+                receipt = None
+            state = self._operator_run
+            terminal = self._operator_terminal.get(
+                generation.process_generation_id
+            )
+            effect_conflict = (
+                self._starting
+                or self._quarantined_reason is not None
+                or terminal is not None
+            )
+            if receipt is None:
+                if read_conflict or effect_conflict or state is not None:
+                    status = "CONFLICT"
+                else:
+                    status = "ABSENT"
+            elif effect_conflict or not self._receipt_matches_request(
+                receipt,
+                operation=operation,
+                requested=requested,
+                epoch=epoch,
+                generation=generation,
+                handoff=handoff,
+            ):
+                status = "CONFLICT"
+            elif state is None:
+                status = "RECEIPT_ONLY_AFTER_RESTART"
+            elif (
+                state.generation == generation
+                and state.materialization_receipt == receipt
+            ):
+                status = "RECEIPT_CURRENT_IN_LIVE_BROKER"
+            else:
+                status = "CONFLICT"
+        return {
+            "schema_version": MATERIALIZATION_STATUS_SCHEMA,
+            "status": status,
+            "receipt": (
+                receipt.to_dict()
+                if status
+                in {
+                    "RECEIPT_CURRENT_IN_LIVE_BROKER",
+                    "RECEIPT_ONLY_AFTER_RESTART",
+                }
+                else None
+            ),
+        }
+
+    async def _ohf_start(
+        self, payload: dict[str, Any], *, resume: bool
+    ) -> dict[str, Any]:
+        self._require_current_autonomy()
+        operation, requested, epoch, generation, handoff = (
+            self._materialization_request(payload, resume=resume)
+        )
+        try:
+            existing = await asyncio.to_thread(
+                read_operator_materialization_receipt,
+                self.policy.run_root,
+                operation.command_id,
+                expected_owner_uid=self.policy.worker_uid,
+            )
+        except OperatorMaterializationReceiptError as exc:
+            raise BrokerStateError(
+                "operator materialization receipt is unreadable"
+            ) from exc
+        if existing is not None:
+            if not self._receipt_matches_request(
+                existing,
+                operation=operation,
+                requested=requested,
+                epoch=epoch,
+                generation=generation,
+                handoff=handoff,
+            ):
+                raise BrokerStateError(
+                    "operator materialization receipt conflicts with the request"
+                )
+            async with self._state_lock:
+                state = self._operator_run
+                if state is None:
+                    raise BrokerStateError(
+                        "operator materialization is receipt-only after broker restart"
+                    )
+                if state.materialization_receipt != existing:
+                    raise BrokerStateError(
+                        "operator materialization receipt conflicts with live broker state"
+                    )
+            return self._materialization_result(existing)
         async with self._state_lock:
             if self._quarantined_reason is not None:
                 raise BrokerStateError(
@@ -1629,6 +1831,7 @@ class ExecutiveWorkerBroker:
         adapter: OperatorAdapter | None = None
         resource: OperatorAttemptResource | None = None
         state: _BrokerOperatorRun | None = None
+        provider_dispatch_committed = False
         try:
             adapter, prompts, workspace = self._operator_factory(requested)
             if self.operator_resource_factory is not None:
@@ -1656,6 +1859,10 @@ class ExecutiveWorkerBroker:
                     epoch=epoch,
                     generation=generation,
                 )
+            # From this assignment onward no caller may infer that an adapter
+            # exception means "no provider effect".  The provider has no native
+            # idempotency key, so missing durable evidence is EFFECT_UNKNOWN.
+            provider_dispatch_committed = True
             if resume:
                 assert handoff is not None
                 observation = await self._operator_call(
@@ -1704,12 +1911,51 @@ class ExecutiveWorkerBroker:
                 raise BrokerStateError(
                     "operator start returned untyped attestation or principal evidence"
                 )
+            try:
+                receipt = build_operator_materialization_receipt(
+                    operation_command_id=operation.command_id,
+                    operation_kind=(
+                        "resume_session" if handoff is not None else "start_session"
+                    ),
+                    attempt_id=epoch.attempt_id,
+                    worker_id=epoch.worker_id,
+                    session_epoch_id=epoch.session_epoch_id,
+                    process_generation_id=generation.process_generation_id,
+                    generation_number=generation.generation_number,
+                    requested_profile_digest=requested_profile_digest(
+                        operator_to_wire(requested)
+                    ),
+                    provider_session_id=provider_session_id,
+                    process_identity=operator_to_wire(observation.process),
+                    observed_attestation=operator_to_wire(observed),
+                    process_credentials=operator_to_wire(credentials),
+                    provider_home_identity=operator_to_wire(provider_home)[
+                        "provider_home_identity"
+                    ],
+                    created_at=_utc_now(),
+                )
+                receipt = await asyncio.to_thread(
+                    persist_operator_materialization_receipt,
+                    self.policy.run_root,
+                    receipt,
+                    expected_owner_uid=self.policy.worker_uid,
+                )
+            except OperatorMaterializationReceiptError as exc:
+                async with self._state_lock:
+                    self._quarantined_reason = (
+                        "operator materialization effect unknown"
+                    )
+                raise BrokerStateError(
+                    "operator materialization receipt persistence failed; "
+                    "provider effect is unknown"
+                ) from exc
             state = _BrokerOperatorRun(
                 adapter=adapter,
                 requested=requested,
                 epoch=epoch,
                 generation=generation,
                 provider_session_id=provider_session_id,
+                materialization_receipt=receipt,
                 resource=resource,
                 prompts=prompts,
             )
@@ -1719,15 +1965,20 @@ class ExecutiveWorkerBroker:
                 self._operator_session_attempts.move_to_end(provider_session_id)
                 while len(self._operator_session_attempts) > 64:
                     self._operator_session_attempts.popitem(last=False)
-            return {
-                "observation": operator_to_wire(observation),
-                "attestation": operator_to_wire(observed),
-                "process_credentials": operator_to_wire(credentials),
-                "provider_home": operator_to_wire(provider_home),
-                "startup_sweep": self.startup_sweep,
-            }
-        except Exception:
-            if adapter is not None and state is None:
+            return self._materialization_result(receipt)
+        except BaseException as exc:
+            if provider_dispatch_committed and state is None:
+                async with self._state_lock:
+                    self._quarantined_reason = (
+                        "operator materialization effect unknown"
+                    )
+                if not isinstance(exc, Exception):
+                    raise
+                raise BrokerStateError(
+                    "operator materialization provider dispatch has no durable "
+                    "receipt; provider effect is unknown"
+                ) from exc
+            if adapter is not None and state is None and isinstance(exc, Exception):
                 try:
                     if resource is not None:
                         await self._operator_call(

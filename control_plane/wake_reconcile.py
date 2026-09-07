@@ -264,7 +264,7 @@ def plan_wake_reconciliation(
         except WakeLedgerError as exc:
             contradictions.append(f"{oid}:{exc}")
             continue
-        if status in {ObligationStatus.TARGET_ACKNOWLEDGED, ObligationStatus.SOURCE_RESOLVED}:
+        if status is ObligationStatus.SOURCE_RESOLVED:
             already_closed.append(oid)
             continue
         observed = observed_ids.get(oid)
@@ -275,6 +275,12 @@ def plan_wake_reconciliation(
                 already_requested.append(oid)
             continue
         if status is ObligationStatus.NOT_SEEN:
+            continue
+        if status is not ObligationStatus.TARGET_ACKNOWLEDGED:
+            # Delivery may close only after an exact ACK.  A healthy source
+            # reread that no longer observes the obligation is not authority
+            # to skip TARGET_ACKNOWLEDGED and write SOURCE_RESOLVED directly.
+            already_requested.append(oid)
             continue
         stored = _obligation_from_rows(rows)
         if stored is None:

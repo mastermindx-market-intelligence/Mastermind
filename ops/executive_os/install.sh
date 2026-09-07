@@ -7,6 +7,7 @@ umask 077
 SCRIPT_DIR="$(cd -P "$(/usr/bin/dirname "$0")" && /bin/pwd)"
 CONTROL_LABEL="com.mastermind.executive.control"
 WORKER_LABEL="com.mastermind.executive.worker.codex"
+BACKUP_LABEL="com.mastermind.executive.backup"
 CONTROL_USER="_mastermind_exec"
 CONTROL_GROUP="_mastermind_exec"
 WORKER_USER="_mastermind_worker"
@@ -567,6 +568,19 @@ RUN_ROOT="$RUNTIME_ROOT/jobs/runs"
 CONTROL_RUNTIME_ROOT="$RUNTIME_ROOT/control/db"
 RECEIPTS_ROOT="$RUNTIME_ROOT/control/launch-receipts"
 BACKUP_ROOT="$RUNTIME_ROOT/control/backups"
+# Off-host DR (see ops/executive_os/DR_RUNBOOK.md). The daemon this installs
+# stays DISABLED, same as control/worker -- these paths are only laid down so
+# an operator arming ceremony has somewhere reviewed to point the key file,
+# token file, and receipts at. `DR_VAULT_REPO` names what the ceremony must
+# provision; none of these paths carry a credential themselves -- the key
+# and token FILES this wires in are created by that ceremony, 0400
+# _mastermind_exec (adversarial review B3: never a plist EnvironmentVariables
+# entry, which would be world-readable at 0644 and clobbered on reinstall).
+DR_KEY_FILE="$SYSTEM_ROOT/config/executive-dr-key.b64"
+DR_RECEIPTS_DIR="$RUNTIME_ROOT/control/dr-receipts"
+DR_TRANSPORT="github"
+DR_VAULT_REPO="mastermindx-market-intelligence/executive-dr-vault"
+DR_TOKEN_FILE="$RUNTIME_ROOT/control/dr/executive-dr-token"
 CANARY_RECEIPT="$RUNTIME_ROOT/control/canaries/secret-canary.json"
 CONTROL_ENV_ATTESTATION="$RUNTIME_ROOT/control/canaries/control-environment-attestation.json"
 CONTROL_SENTINEL_FILE="$SYSTEM_ROOT/config/control-env-canary"
@@ -640,8 +654,10 @@ STAGING=""
 leave_installed_services_stopped() {
   /bin/launchctl disable "system/$CONTROL_LABEL" >/dev/null 2>&1 || true
   /bin/launchctl disable "system/$WORKER_LABEL" >/dev/null 2>&1 || true
+  /bin/launchctl disable "system/$BACKUP_LABEL" >/dev/null 2>&1 || true
   /bin/launchctl bootout "system/$CONTROL_LABEL" >/dev/null 2>&1 || true
   /bin/launchctl bootout "system/$WORKER_LABEL" >/dev/null 2>&1 || true
+  /bin/launchctl bootout "system/$BACKUP_LABEL" >/dev/null 2>&1 || true
   if [ -n "${STAGING:-}" ] && [ -d "$STAGING" ]; then
     /bin/rm -rf -- "$STAGING"
   fi
@@ -649,14 +665,20 @@ leave_installed_services_stopped() {
 trap leave_installed_services_stopped EXIT
 /bin/launchctl disable "system/$CONTROL_LABEL"
 /bin/launchctl disable "system/$WORKER_LABEL"
+/bin/launchctl disable "system/$BACKUP_LABEL"
 /bin/launchctl bootout "system/$CONTROL_LABEL" >/dev/null 2>&1 || true
 /bin/launchctl bootout "system/$WORKER_LABEL" >/dev/null 2>&1 || true
+/bin/launchctl bootout "system/$BACKUP_LABEL" >/dev/null 2>&1 || true
 if /bin/launchctl print "system/$CONTROL_LABEL" >/dev/null 2>&1; then
   /bin/echo "control LaunchDaemon remained loaded after bootout" >&2
   exit 65
 fi
 if /bin/launchctl print "system/$WORKER_LABEL" >/dev/null 2>&1; then
   /bin/echo "worker LaunchDaemon remained loaded after bootout" >&2
+  exit 65
+fi
+if /bin/launchctl print "system/$BACKUP_LABEL" >/dev/null 2>&1; then
+  /bin/echo "backup LaunchDaemon remained loaded after bootout" >&2
   exit 65
 fi
 
@@ -837,10 +859,27 @@ ceo_ingress_expected = {
     "ceo_ingress_peer_uid": 452,
     "ceo_ingress_socket_path": "/var/run/mastermind-executive/ceo-ingress.sock",
 }
+dialogue_bridge_expected = {
+    "dialogue_observation_launchd_socket_name": "DialogueObservation",
+    "dialogue_observation_peer_uid": 457,
+    "dialogue_observation_socket_path": "/var/run/mastermind-dialogue-observation/dialogue-observation.sock",
+    "dialogue_bridge_armed": False,
+    "dialogue_wake_retry_policy": {
+        "max_delivery_attempts": None,
+        "retry_cooldown_s": None,
+        "accepted_ttl_s": None,
+        "target_unavailable_backoff_s": None,
+        "reenable_on_binding_rotation": True,
+        "armed": False,
+    },
+}
 schema_keys = _CONFIG_REQUIRED | _CONFIG_OPTIONAL
 ceo_ingress_schema_keys = set(ceo_ingress_expected) & schema_keys
 if ceo_ingress_schema_keys and ceo_ingress_schema_keys != set(ceo_ingress_expected):
     raise SystemExit("partial CeoIngress control-config schema")
+dialogue_bridge_schema_keys = set(dialogue_bridge_expected) & schema_keys
+if dialogue_bridge_schema_keys and dialogue_bridge_schema_keys != set(dialogue_bridge_expected):
+    raise SystemExit("partial Executive Dialogue Bridge control-config schema")
 
 expected = {
     "schema_version": CONTROL_CONFIG_SCHEMA_VERSION,
@@ -868,6 +907,8 @@ expected = {
 }
 if ceo_ingress_schema_keys:
     expected.update(ceo_ingress_expected)
+if dialogue_bridge_schema_keys:
+    expected.update(dialogue_bridge_expected)
 
 defaults = {
     "proof_branch": "codex/phase1c-a-proof",
@@ -1137,8 +1178,10 @@ PY
 
 CONTROL_PLIST="/Library/LaunchDaemons/$CONTROL_LABEL.plist"
 WORKER_PLIST="/Library/LaunchDaemons/$WORKER_LABEL.plist"
+BACKUP_PLIST="/Library/LaunchDaemons/$BACKUP_LABEL.plist"
 /usr/bin/install -o root -g wheel -m 0644 "$RELEASE_ROOT/ops/executive_os/$CONTROL_LABEL.plist.template" "$CONTROL_PLIST"
 /usr/bin/install -o root -g wheel -m 0644 "$RELEASE_ROOT/ops/executive_os/$WORKER_LABEL.plist.template" "$WORKER_PLIST"
+/usr/bin/install -o root -g wheel -m 0644 "$RELEASE_ROOT/ops/executive_os/$BACKUP_LABEL.plist.template" "$BACKUP_PLIST"
 
 "$PYTHON_BINARY" -I -S -B \
   "$RELEASE_ROOT/ops/executive_os/render_launchd_program_arguments.py" \
@@ -1156,6 +1199,10 @@ WORKER_PLIST="/Library/LaunchDaemons/$WORKER_LABEL.plist"
 /usr/bin/plutil -replace Sockets.Operator.SockPathName -string /var/run/mastermind-executive/control.sock "$CONTROL_PLIST"
 /usr/bin/plutil -replace Sockets.Operator.SockPathOwner -integer "$CONTROL_UID" "$CONTROL_PLIST"
 /usr/bin/plutil -replace Sockets.Operator.SockPathGroup -integer "$OPS_GID" "$CONTROL_PLIST"
+/usr/bin/plutil -replace Sockets.DialogueObservation.SockPathName -string /var/run/mastermind-dialogue-observation/dialogue-observation.sock "$CONTROL_PLIST"
+/usr/bin/plutil -replace Sockets.DialogueObservation.SockPathOwner -integer "$CONTROL_UID" "$CONTROL_PLIST"
+/usr/bin/plutil -replace Sockets.DialogueObservation.SockPathGroup -integer 457 "$CONTROL_PLIST"
+/usr/bin/plutil -replace Sockets.DialogueObservation.SockPathMode -integer 432 "$CONTROL_PLIST"
 /usr/bin/plutil -replace StandardOutPath -string /var/log/mastermind-executive/control/stdout.log "$CONTROL_PLIST"
 /usr/bin/plutil -replace StandardErrorPath -string /var/log/mastermind-executive/control/stderr.log "$CONTROL_PLIST"
 /usr/sbin/chown root:wheel "$CONTROL_PLIST"
@@ -1180,13 +1227,47 @@ WORKER_PLIST="/Library/LaunchDaemons/$WORKER_LABEL.plist"
 /usr/bin/plutil -replace StandardOutPath -string /var/log/mastermind-executive/worker/stdout.log "$WORKER_PLIST"
 /usr/bin/plutil -replace StandardErrorPath -string /var/log/mastermind-executive/worker/stderr.log "$WORKER_PLIST"
 
-for installed_policy_file in "$CONTROL_CONFIG" "$WORKER_CONFIG" "$CODEX_ATTESTATION_RECEIPT" "$CONTROL_SENTINEL_FILE" "$CONTROL_PLIST" "$WORKER_PLIST"; do
+# Off-host DR nightly backup daemon. It ships DISABLED (see
+# leave_installed_services_stopped above and DR_RUNBOOK.md) exactly like
+# control/worker: this installer never arms cadence, only lays reviewed
+# material down for the Chairman ceremony.
+#
+# Adversarial review M5: bootstrap-host.sh (which creates
+# /var/log/mastermind-executive/{control,worker}, each 0700 owned by that
+# job's own service account) predates this third daemon and will not have
+# created a `backup` subdirectory on a host that ran bootstrap before DR-V1
+# existed. Create it here so upgrades of an EXISTING host still get
+# somewhere the daemon can write, matching the exact ownership/mode
+# bootstrap-host.sh gives control's own log directory (same user: the
+# backup daemon also runs as CONTROL_USER).
+/usr/bin/install -d -o "$CONTROL_USER" -g "$CONTROL_GROUP" -m 0700 /var/log/mastermind-executive/backup
+"$PYTHON_BINARY" -I -S -B \
+  "$RELEASE_ROOT/ops/executive_os/render_launchd_program_arguments.py" \
+  "$BACKUP_PLIST" -- \
+  /bin/bash \
+  "$RELEASE_ROOT/ops/executive_os/run_nightly_backup.sh" \
+  --python-binary "$PYTHON_BINARY" \
+  --release-root "$RELEASE_ROOT" \
+  --config "$CONTROL_CONFIG" \
+  --key-file "$DR_KEY_FILE" \
+  --receipts-dir "$DR_RECEIPTS_DIR" \
+  --transport "$DR_TRANSPORT" \
+  --repo "$DR_VAULT_REPO" \
+  --token-file "$DR_TOKEN_FILE"
+/usr/bin/plutil -replace WorkingDirectory -string "$RELEASE_ROOT" "$BACKUP_PLIST"
+/usr/bin/plutil -replace UserName -string "$CONTROL_USER" "$BACKUP_PLIST"
+/usr/bin/plutil -replace GroupName -string "$CONTROL_GROUP" "$BACKUP_PLIST"
+/usr/bin/plutil -replace EnvironmentVariables.HOME -string "$CONTROL_HOME" "$BACKUP_PLIST"
+/usr/bin/plutil -replace StandardOutPath -string /var/log/mastermind-executive/backup/stdout.log "$BACKUP_PLIST"
+/usr/bin/plutil -replace StandardErrorPath -string /var/log/mastermind-executive/backup/stderr.log "$BACKUP_PLIST"
+
+for installed_policy_file in "$CONTROL_CONFIG" "$WORKER_CONFIG" "$CODEX_ATTESTATION_RECEIPT" "$CONTROL_SENTINEL_FILE" "$CONTROL_PLIST" "$WORKER_PLIST" "$BACKUP_PLIST"; do
   case "$(/usr/bin/stat -f '%Sp' "$installed_policy_file")" in
     *+) /bin/echo "installed policy file has a filesystem ACL: $installed_policy_file" >&2; exit 65 ;;
   esac
 done
 
-/usr/bin/plutil -lint "$CONTROL_PLIST" "$WORKER_PLIST"
+/usr/bin/plutil -lint "$CONTROL_PLIST" "$WORKER_PLIST" "$BACKUP_PLIST"
 (
   cd "$RELEASE_ROOT"
   /usr/bin/sudo -u "$WORKER_USER" /usr/bin/env -i \

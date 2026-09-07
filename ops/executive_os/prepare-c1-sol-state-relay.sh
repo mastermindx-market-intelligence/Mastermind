@@ -19,6 +19,8 @@ CONTROL_UID="450"
 CONTROL_GID="450"
 OPS_GID="453"
 CEO_INGRESS_SOCKET="/var/run/mastermind-executive/ceo-ingress.sock"
+DIALOGUE_OBSERVATION_SOCKET="/var/run/mastermind-dialogue-observation/dialogue-observation.sock"
+DIALOGUE_RELAY_GID="457"
 SOL_RUNTIME_CHANNEL_ID="C0BSGABKBFY"
 WORKSPACE_ID="T0BRD2AQXQV"
 
@@ -150,6 +152,18 @@ expected = {
     "ceo_ingress_peer_uid": 452,
     "ceo_ingress_socket_path": "/var/run/mastermind-executive/ceo-ingress.sock",
     "proof_base_sha": release_sha,
+    "dialogue_bridge_armed": False,
+    "dialogue_observation_launchd_socket_name": "DialogueObservation",
+    "dialogue_observation_peer_uid": 457,
+    "dialogue_observation_socket_path": "/var/run/mastermind-dialogue-observation/dialogue-observation.sock",
+    "dialogue_wake_retry_policy": {
+        "accepted_ttl_s": None,
+        "armed": False,
+        "max_delivery_attempts": None,
+        "reenable_on_binding_rotation": True,
+        "retry_cooldown_s": None,
+        "target_unavailable_backoff_s": None,
+    },
 }
 if not isinstance(value, dict) or any(value.get(k) != v for k, v in expected.items()):
     raise SystemExit(65)
@@ -296,6 +310,10 @@ done
 /usr/bin/plutil -replace Sockets.CeoIngress.SockPathOwner -integer "$CONTROL_UID" "$CONTROL_PLIST"
 /usr/bin/plutil -replace Sockets.CeoIngress.SockPathGroup -integer "$RELAY_GID" "$CONTROL_PLIST"
 /usr/bin/plutil -replace Sockets.CeoIngress.SockPathMode -integer 432 "$CONTROL_PLIST"
+/usr/bin/plutil -replace Sockets.DialogueObservation.SockPathName -string "$DIALOGUE_OBSERVATION_SOCKET" "$CONTROL_PLIST"
+/usr/bin/plutil -replace Sockets.DialogueObservation.SockPathOwner -integer "$CONTROL_UID" "$CONTROL_PLIST"
+/usr/bin/plutil -replace Sockets.DialogueObservation.SockPathGroup -integer "$DIALOGUE_RELAY_GID" "$CONTROL_PLIST"
+/usr/bin/plutil -replace Sockets.DialogueObservation.SockPathMode -integer 432 "$CONTROL_PLIST"
 
 # Re-assert the broad Operator socket is unchanged and inaccessible to Relay.
 /usr/bin/plutil -replace Sockets.Operator.SockPathOwner -integer "$CONTROL_UID" "$CONTROL_PLIST"
@@ -303,19 +321,23 @@ done
 /usr/bin/plutil -replace Sockets.Operator.SockPathMode -integer 432 "$CONTROL_PLIST"
 CONTROL_SOCKET_POLICY="$CONTROL_UID:$OPS_GID:432"
 CEO_SOCKET_POLICY="$CONTROL_UID:$RELAY_GID:432"
-"$PYTHON_BINARY" -I -S -B - "$CONTROL_PLIST" "$CONTROL_SOCKET_POLICY" "$CEO_SOCKET_POLICY" <<'PY' || {
+DIALOGUE_SOCKET_POLICY="$CONTROL_UID:$DIALOGUE_RELAY_GID:432"
+"$PYTHON_BINARY" -I -S -B - "$CONTROL_PLIST" "$CONTROL_SOCKET_POLICY" "$CEO_SOCKET_POLICY" "$DIALOGUE_SOCKET_POLICY" <<'PY' || {
 import plistlib, pathlib, sys
-path, expected_operator, expected_ceo = sys.argv[1:]
+path, expected_operator, expected_ceo, expected_dialogue = sys.argv[1:]
 doc = plistlib.loads(pathlib.Path(path).read_bytes())
 sockets = doc.get("Sockets")
-if not isinstance(sockets, dict) or set(sockets) != {"Operator", "CeoIngress"}:
+if not isinstance(sockets, dict) or set(sockets) != {"Operator", "CeoIngress", "DialogueObservation"}:
     raise SystemExit(65)
 def policy(name):
     row = sockets[name]
     return f"{row.get('SockPathOwner')}:{row.get('SockPathGroup')}:{row.get('SockPathMode')}"
-if policy("Operator") != expected_operator or policy("CeoIngress") != expected_ceo:
+if (policy("Operator") != expected_operator or policy("CeoIngress") != expected_ceo
+        or policy("DialogueObservation") != expected_dialogue):
     raise SystemExit(65)
 if sockets["CeoIngress"].get("SockPathName") != "/var/run/mastermind-executive/ceo-ingress.sock":
+    raise SystemExit(65)
+if sockets["DialogueObservation"].get("SockPathName") != "/var/run/mastermind-dialogue-observation/dialogue-observation.sock":
     raise SystemExit(65)
 PY
   /bin/echo "installed Executive socket policy differs from C1 freeze" >&2

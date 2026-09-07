@@ -8,14 +8,14 @@ skill: reconcile_state
 # RECONCILE STATE — Resolve Disagreement Without Creating Another Truth Store
 
 Use when canonical/projection layers disagree, state is stale, transport reconnects, a modifying
-response is ambiguous, an operation duplicates/conflicts, a worker/session may have moved a
-branch unexpectedly, or a watcher/dialogue state is ambiguous.
+response is ambiguous, an operation duplicates/conflicts, a worker/session may have moved a branch
+unexpectedly, or a watcher/dialogue state is ambiguous.
 
 ## Mission
 
-Recover the **single canonical fact for each layer**, preserve uncertainty where it genuinely
-exists, and repair only the layer that is wrong. Never create a new database/ledger merely to
-remember that two existing authorities disagree.
+Recover the **single canonical fact for each layer**, preserve uncertainty where it genuinely exists,
+and repair only the layer that is wrong. Never create a new database/ledger merely to remember that
+two existing authorities disagree.
 
 Apply `docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md` when the disagreement involves whether a
 counterpart should still be waiting or whether a watcher was actually stopped.
@@ -81,6 +81,35 @@ Record exact identifiers relevant to the disagreement:
 * state timestamps/hashes/freshness.
 
 A correction made against an ambiguous identity can create a second problem while hiding the first.
+
+## Step 3A — Path-disjoint protected movement
+
+Treat a reviewed candidate and its latest-base compatibility as separate evidence.
+
+When protected master advances after a semantic review:
+
+1. freeze the exact reviewed semantic head and candidate-owned path/blob set;
+2. compare protected movement against candidate-owned paths;
+3. perform a `material-source comparison` over the governing Skillpack, architecture/authority law,
+   imported interfaces, dependency closure and proof contract;
+4. obtain `latest-base merge-ref proof` or an equivalent immutable integrated-candidate result;
+5. read current CI/security, reviews, unresolved threads and capability claims;
+6. classify review reuse according to
+   `docs/superpowers/specs/2026-09-02-autonomy-release-compatibility-review-reuse.md`.
+
+Do not merge protected master into the carrier merely to make `behind_by=0`.
+
+When candidate-owned blobs and paths remain byte-identical, governing material source is unchanged,
+protected movement is path/dependency-disjoint, the current merge ref is green and no blocker or
+stronger capability claim appears, `semantic review may be reused`. Refresh the compatibility receipt
+only; leave the source branch and substantive review intact.
+
+When candidate semantics, governing source, dependency behavior, authority/security/effect/retry or
+persistence meaning changes, obtain a new immutable semantic head and full review.
+
+When materiality, integration identity or effect state is unknown, remain blocked. Do not create a
+replacement branch/PR, rebase/reset/force, or use an ancestry-only join as a substitute for knowing
+whether the candidate is compatible.
 
 ## Step 4 — Ambiguous modifying outcome
 
@@ -182,12 +211,15 @@ If remote GitHub advanced beyond the Executive-host grounding:
 3. compare the **material decision-source artifacts** used for the intended operation—relevant
    architecture/authority/WS/DEC/Skillpack—not arbitrary entire diff volume;
 4. material source changed → re-evaluate/refuse until host/current context is reconciled;
-5. only unrelated data/render/publication paths moved and material sources are byte-identical →
-   Sol may reason against the known host grounding, while the server still applies exact grounding
+5. only unrelated data/render/publication paths moved and material sources are byte-identical → Sol
+   may reason against the known host grounding, while the server still applies exact grounding
    equality/TOCTOU rules.
 
 Do not invent a selective server grounding epoch in V1. Use the F0 falsifier before commissioning
 that future architecture.
+
+Step 3A is a GitHub release-review optimization only. It does not change Executive Runtime's exact
+server grounding or allow a stale host to perform modifying work.
 
 ## Step 11 — Linear false-green repair
 
@@ -210,6 +242,9 @@ If a branch expected to be empty/behind now contains commits:
 * search for a PR/worker return;
 * classify it as concurrent work, expected builder return or unauthorized drift;
 * review it under `REVIEW_RETURN.md` when it is real work.
+
+A branch that is merely behind protected master is not unexpected movement and does not require an
+ancestry-only commit. Apply Step 3A.
 
 ## Step 13 — Correction destination
 
@@ -236,6 +271,8 @@ Exact identities/revisions
 What is known
 What is uncertain
 Which layer is wrong/stale
+Semantic head and current integration proof when GitHub release state moved
+Review reuse classification
 Dialogue edge / watcher state when applicable
 Repair performed or withheld
 Whether modification is safe now
@@ -244,7 +281,8 @@ Exact next action
 
 ## K3 pass criteria
 
-A fresh Sol confronted with stale/duplicate/ambiguous/colliding state reaches one canonical
-answer per layer, performs zero duplicate modification, performs zero cross-carrier failover, does
-not create a new truth store to make reconciliation easier, and never resolves watcher/dialogue
-ambiguity by treating silence as a terminal receipt.
+A fresh Sol confronted with stale/duplicate/ambiguous/colliding state reaches one canonical answer per
+layer, performs zero duplicate modification, performs zero cross-carrier failover, does not create a
+new truth store to make reconciliation easier, does not create ancestry-only commits for path-disjoint
+protected movement, and never resolves watcher/dialogue ambiguity by treating silence as a terminal
+receipt.

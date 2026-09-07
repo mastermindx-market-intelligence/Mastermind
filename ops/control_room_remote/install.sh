@@ -24,6 +24,7 @@ RELEASE_TRACKED_PATHS=(
   app/static/chairman_control/control_room.js
   app/static/chairman_control/remote.html
   common/__init__.py
+  common/commission_ref.py
   common/redaction.py
   config/strategic_state.yml
   control_plane/__init__.py
@@ -35,6 +36,7 @@ RELEASE_TRACKED_PATHS=(
   control_plane/executive_agent_capabilities.py
   control_plane/executive_ambient_process.py
   control_plane/executive_authority.py
+  control_plane/executive_capability_packages.py
   control_plane/executive_coo_policy.py
   control_plane/executive_inbox.py
   control_plane/executive_orchestration_principal.py
@@ -47,6 +49,7 @@ RELEASE_TRACKED_PATHS=(
   control_plane/flags.py
   control_plane/operator_harness_contract.py
   control_plane/operator_harness_wire.py
+  control_plane/operator_materialization_receipt.py
   control_plane/strategic_state.py
   control_plane/surface_bindings.py
   control_plane/worker_adapter.py

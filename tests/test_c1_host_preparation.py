@@ -55,6 +55,10 @@ def test_c1_host_preparation_verifies_exact_release_and_unarmed_control_config()
     assert '"proof_base_sha": release_sha' in text
     assert '"ceo_ingress_peer_uid": 452' in text
     assert '"ceo_ingress_launchd_socket_name": "CeoIngress"' in text
+    assert '"dialogue_bridge_armed": False' in text
+    assert '"dialogue_observation_launchd_socket_name": "DialogueObservation"' in text
+    assert '"dialogue_observation_peer_uid": 457' in text
+    assert '"armed": False' in text
     assert 'if "ceo_ingress_armed" in value' in text
     assert "0000000000000000000000000000000000000000" not in text
 
@@ -69,8 +73,13 @@ def test_c1_host_preparation_patches_only_dedicated_ceo_socket_boundary():
     assert "Sockets.Operator.SockPathOwner" in text
     assert "Sockets.Operator.SockPathGroup" in text
     assert "Sockets.Operator.SockPathMode" in text
+    assert "Sockets.DialogueObservation.SockPathName" in text
+    assert "Sockets.DialogueObservation.SockPathOwner" in text
+    assert "Sockets.DialogueObservation.SockPathGroup" in text
+    assert "Sockets.DialogueObservation.SockPathMode" in text
     assert '"$CONTROL_UID:$OPS_GID:432"' in text
     assert '"$CONTROL_UID:$RELAY_GID:432"' in text
+    assert '"$CONTROL_UID:$DIALOGUE_RELAY_GID:432"' in text
 
 
 def test_c1_relay_launchd_template_has_config_only_program_and_no_socket_or_secret_env():
