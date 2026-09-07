@@ -217,17 +217,25 @@ class FullCompositionTests(unittest.IsolatedAsyncioTestCase):
 
     def assert_private_result_withheld(self, result, *, private, bearer):
         """Require the one public refusal shape and absence of every private representation."""
-        self.assertTrue(result["isError"], "PRIVATE_OUTPUT_WITHHELD")
+        self.assertIs(
+            result.get("isError"), True,
+            "PRIVATE_OUTPUT_WITHHELD / PRIVATE_OUTPUT_ERROR_BOOLEAN",
+        )
         self.assertNotIn("structuredContent", result, "PRIVATE_OUTPUT_STRUCTURED_WITHHELD")
+        self.assertIs(type(result.get("content")), list,
+                      "PRIVATE_OUTPUT_EXACT_CONTENT_CARDINALITY")
+        self.assertEqual(len(result["content"]), 1,
+                         "PRIVATE_OUTPUT_EXACT_CONTENT_CARDINALITY")
+        self.assertEqual(result["content"][0].get("type"), "text",
+                         "PRIVATE_OUTPUT_TEXT_BLOCK")
         self.assertEqual(
             json.loads(result["content"][0]["text"]),
             {"code": "READ_RESULT_UNVERIFIED"},
             "PRIVATE_OUTPUT_EXACT_REFUSAL",
         )
         serialized = json.dumps(result)
-        escaped_source = json.dumps("alpha sentinel\n")[1:-1]
         forbidden = {
-            "alpha-user", bearer, "alpha sentinel\n", escaped_source,
+            "alpha-user", bearer, "alpha sentinel",
             *private.keys(), *private.values(),
         }
         for value in forbidden:
@@ -315,10 +323,33 @@ class FullCompositionTests(unittest.IsolatedAsyncioTestCase):
         structured_leak = {**result, "structuredContent": {"content": "alpha sentinel\n"}}
         with self.assertRaisesRegex(AssertionError, "PRIVATE_OUTPUT_STRUCTURED_WITHHELD"):
             self.assert_private_result_withheld(structured_leak, private=private, bearer=signed_token)
-        source_leak = json.loads(json.dumps(result))
-        source_leak["content"].append({"type": "text", "text": "alpha sentinel\n"})
+        nested_source_leak = {**result, "_meta": {
+            "diagnostic": json.dumps({"content": "alpha sentinel\n"}),
+        }}
         with self.assertRaisesRegex(AssertionError, "PRIVATE_OUTPUT_WITHHELD"):
-            self.assert_private_result_withheld(source_leak, private=private, bearer=signed_token)
+            self.assert_private_result_withheld(
+                nested_source_leak, private=private, bearer=signed_token,
+            )
+        extra_block = json.loads(json.dumps(result))
+        extra_block["content"].append({"type": "text", "text": "benign"})
+        with self.assertRaisesRegex(AssertionError, "PRIVATE_OUTPUT_EXACT_CONTENT_CARDINALITY"):
+            self.assert_private_result_withheld(extra_block, private=private, bearer=signed_token)
+        direct_source_leak = {**result, "_meta": {"source": "alpha sentinel\n"}}
+        with self.assertRaisesRegex(AssertionError, "PRIVATE_OUTPUT_WITHHELD"):
+            self.assert_private_result_withheld(
+                direct_source_leak, private=private, bearer=signed_token,
+            )
+        nonboolean_error = {**result, "isError": 1}
+        with self.assertRaisesRegex(AssertionError, "PRIVATE_OUTPUT_ERROR_BOOLEAN"):
+            self.assert_private_result_withheld(
+                nonboolean_error, private=private, bearer=signed_token,
+            )
+        nontext_block = json.loads(json.dumps(result))
+        nontext_block["content"][0]["type"] = "image"
+        with self.assertRaisesRegex(AssertionError, "PRIVATE_OUTPUT_TEXT_BLOCK"):
+            self.assert_private_result_withheld(
+                nontext_block, private=private, bearer=signed_token,
+            )
 
     async def test_auth_project_and_model_authority_refusals_precede_io(self):
         # Detects auth/binding shortcuts and acceptance of model-selected root/principal/policy fields.
