@@ -10,6 +10,7 @@ class DescriptorPortTests(unittest.IsolatedAsyncioTestCase):
         self.temp=tempfile.TemporaryDirectory(prefix='mmx-descriptor-port-')
         self.root=pathlib.Path(self.temp.name); self.clock=100000; self.io_calls=0; self.bind_calls=0
         self.active=True;self.mode='normal';self.fds=[];self.bindings={}
+        self.return_transform=lambda result:result
         self.caller_a=ReadCaller('a'*64,'client-a','https://workbench.example/mcp',('workbench.read',),200)
         self.caller_b=ReadCaller('b'*64,'client-b','https://workbench.example/mcp',('workbench.read',),200)
         for project,caller in [('alpha',self.caller_a),('beta',self.caller_b)]:
@@ -32,7 +33,7 @@ class DescriptorPortTests(unittest.IsolatedAsyncioTestCase):
             if self.mode == 'change-after-io':
                 b=self.bindings[('a'*64,'alpha')]
                 self.bindings[('a'*64,'alpha')]=dataclasses.replace(b,scope=dataclasses.replace(b.scope,generation='generation-2'))
-            return result
+            return self.return_transform(result)
         self.resolve=resolve
         self.port=create_descriptor_read_port(resolve_binding=resolve,clock_ms=lambda:self.clock,run_io=io)
 
@@ -143,5 +144,93 @@ class DescriptorPortTests(unittest.IsolatedAsyncioTestCase):
         self.mode='change-after-io'
         with self.assertRaises(ProjectReadRefused):await self.read()
         self.assertEqual(self.io_calls,1)
+
+
+    async def reject_return(self, transform, **kwargs):
+        self.return_transform=transform
+        with self.assertRaises(ProjectReadRefused) as caught:
+            await self.read(**kwargs)
+        self.assertEqual(caught.exception.code,'PROJECT_READ_REFUSED')
+        self.assertNotIn('instructions',str(caught.exception))
+
+    async def test_return_from_real_other_project_is_not_relabelled(self):
+        beta=await self.read(self.caller_b,project_ref='beta')
+        await self.reject_return(lambda actual:beta)
+
+    async def test_return_context_matches_selected_scope(self):
+        await self.reject_return(lambda r:{**r,'context_ref':'context-beta'})
+
+    async def test_return_owner_matches_selected_scope(self):
+        await self.reject_return(lambda r:{**r,'owner_ref':'owner-beta'})
+
+    async def test_return_generation_matches_selected_scope(self):
+        await self.reject_return(lambda r:{**r,'generation':'generation-2'})
+
+    async def test_return_baseline_matches_selected_scope(self):
+        await self.reject_return(lambda r:{**r,'committed_head':'2'*40})
+
+    async def test_return_relative_path_matches_requested_file(self):
+        await self.reject_return(lambda r:{**r,'relative_path':'OTHER.md'})
+
+    async def test_return_missing_identity_is_not_inferred(self):
+        for key in ('context_ref','owner_ref','generation','committed_head','relative_path'):
+            with self.subTest(key=key):
+                await self.reject_return(lambda r,k=key:{n:v for n,v in r.items() if n!=k})
+
+    async def test_return_conflicting_project_ref_is_not_overwritten(self):
+        await self.reject_return(lambda r:{**r,'project_ref':'beta'})
+
+    async def test_return_matching_project_ref_remains_valid(self):
+        self.return_transform=lambda r:{**r,'project_ref':'alpha'}
+        self.assertEqual((await self.read())['project_ref'],'alpha')
+
+    async def test_return_line_start_matches_requested_range(self):
+        other_page=await self.read(line_start=1,line_count=1)
+        await self.reject_return(lambda r:other_page,line_start=0,line_count=1)
+
+    async def test_return_does_not_exceed_requested_line_count(self):
+        full=await self.read()
+        await self.reject_return(lambda r:full,line_count=1)
+
+    async def test_return_range_does_not_exceed_total_lines(self):
+        await self.reject_return(lambda r:{**r,'total_lines':1})
+
+    async def test_return_range_fields_require_exact_integers(self):
+        for key in ('line_start','line_end','total_lines','content_bytes'):
+            with self.subTest(key=key):
+                await self.reject_return(lambda r,k=key:{**r,k:False})
+
+    async def test_return_truncation_and_cursor_are_consistent(self):
+        for patch in ({'truncated':False},{'truncated':1},{'next_line':0},{'next_line':None}):
+            with self.subTest(patch=patch):
+                await self.reject_return(lambda r,p=patch:{**r,**p},line_count=1)
+
+    async def test_return_completed_range_has_no_continuation(self):
+        await self.reject_return(lambda r:{**r,'next_line':r['line_end']})
+
+    async def test_return_expected_hash_is_checked_at_port(self):
+        expected=hashlib.sha256((self.root/'alpha/CLAUDE.md').read_bytes()).hexdigest()
+        await self.reject_return(lambda r:{**r,'file_sha256':'0'*64},expected_sha256=expected)
+
+    async def test_return_content_bytes_and_range_match(self):
+        for patch in ({'content_bytes':1},{'content':'different\n'},{'content':'\ud800'}):
+            with self.subTest(patch=repr(patch)):
+                await self.reject_return(lambda r,p=patch:{**r,**p})
+
+    async def test_return_declared_unknown_baseline_stays_unknown(self):
+        b=self.bindings[('a'*64,'alpha')]
+        self.bindings[('a'*64,'alpha')]=dataclasses.replace(b,scope=dataclasses.replace(b.scope,committed_head=None))
+        self.assertIsNone((await self.read())['committed_head'])
+        await self.reject_return(lambda r:{k:v for k,v in r.items() if k!='committed_head'})
+
+    async def test_return_empty_file_and_eof_are_valid(self):
+        self.assertEqual((await self.read(line_start=2))['content'],'')
+        (self.root/'alpha/CLAUDE.md').write_bytes(b'')
+        r=await self.read();self.assertEqual(r['line_end'],0);self.assertFalse(r['truncated'])
+
+    async def test_return_byte_limited_page_is_valid(self):
+        (self.root/'alpha/CLAUDE.md').write_bytes((b'a'*20000+b'\n')*2)
+        r=await self.read(line_count=2)
+        self.assertEqual(r['line_end'],1);self.assertTrue(r['truncated']);self.assertEqual(r['next_line'],1)
 
 if __name__=='__main__':unittest.main(verbosity=2)

@@ -14,7 +14,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
 from .app import ReadCaller, ProjectReadRefused
-from .observer import ReadScope, ReadRefusal, observe_file
+from .observer import MAX_TEXT_BYTES, ReadScope, ReadRefusal, observe_file
 
 
 @dataclasses.dataclass(frozen=True)
@@ -28,6 +28,59 @@ class ProjectReadBinding:
 BindingResolver = Callable[[ReadCaller, str], ProjectReadBinding | None]
 ReadExecutor = Callable[[Callable[[], dict[str, Any]]], Awaitable[dict[str, Any]]]
 _REQUEST_KEYS = frozenset({'project_ref', 'relative_path', 'line_start', 'line_count', 'expected_sha256'})
+
+
+def _checked_observation(observed: object, selected: Mapping[str, Any],
+                         scope: ReadScope, project: str) -> dict[str, Any]:
+    """Check return consistency, not authenticity of a compromised executor.
+
+    The selected project may only label an observation already matching this
+    request. No missing identity is inferred; an unknown baseline is explicit.
+    Valid byte-limited pages may contain fewer than the requested maximum lines.
+    """
+    if type(observed) is not dict:
+        raise ProjectReadRefused()
+    result = dict(observed)
+    expected = {
+        'status': 'OK', 'context_ref': scope.context_ref,
+        'owner_ref': scope.owner_ref, 'generation': scope.generation,
+        'committed_head': scope.committed_head,
+        'relative_path': selected['relative_path'],
+    }
+    for key, value in expected.items():
+        if key not in result or type(result[key]) is not type(value) or result[key] != value:
+            raise ProjectReadRefused()
+    if 'project_ref' in result and (type(result['project_ref']) is not str or result['project_ref'] != project):
+        raise ProjectReadRefused()
+    if 'expected_sha256' in selected and result.get('file_sha256') != selected['expected_sha256']:
+        raise ProjectReadRefused()
+    for key in ('line_start', 'line_end', 'total_lines', 'content_bytes'):
+        if type(result.get(key)) is not int or result[key] < 0:
+            raise ProjectReadRefused()
+    start, end, total = (result[k] for k in ('line_start', 'line_end', 'total_lines'))
+    requested_start = selected.get('start_line', 0)
+    requested_maximum = selected.get('max_lines', 128)
+    if (type(requested_start) is not int or type(requested_maximum) is not int
+        or requested_maximum < 1 or start != requested_start
+        or not start <= end <= min(total, start + requested_maximum)):
+        raise ProjectReadRefused()
+    remaining = end < total
+    if type(result.get('truncated')) is not bool or result['truncated'] != remaining:
+        raise ProjectReadRefused()
+    if ('next_line' not in result
+        or (remaining and (type(result['next_line']) is not int or result['next_line'] != end))
+        or (not remaining and result['next_line'] is not None)):
+        raise ProjectReadRefused()
+    content = result.get('content')
+    if type(content) is not str or len(content) > MAX_TEXT_BYTES:
+        raise ProjectReadRefused()
+    encoded = content.encode('utf-8', errors='strict')
+    lines = content.count('\n') + int(bool(content) and not content.endswith('\n'))
+    if (len(encoded) != result['content_bytes'] or len(encoded) > MAX_TEXT_BYTES
+        or lines != end - start or (end == start and start < total)
+        or (remaining and not content.endswith('\n'))):
+        raise ProjectReadRefused()
+    return {**result, 'project_ref': project}
 
 
 def create_descriptor_read_port(
@@ -106,9 +159,7 @@ def create_descriptor_read_port(
             observed = await pending
             # A queued/completed I/O result is not permission after revocation.
             current_scope()
-            if type(observed) is not dict:
-                raise ProjectReadRefused()
-            return {**observed, 'project_ref': project}
+            return _checked_observation(observed, selected, original.scope, project)
         except ProjectReadRefused:
             raise
         except ReadRefusal as error:

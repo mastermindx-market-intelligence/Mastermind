@@ -31,7 +31,12 @@ expected_sha256. The caller cannot supply an absolute root, principal, policy,
 permission or source generation. Per-call immutable requests prevent accidental
 retargeting across asynchronous callbacks. Exact project/hash identity is checked
 before returning a successful result. Token and policy are verified again after
-the port await; scope is checked before, during and after the file read.
+the port await. Scope is resolved before opening and after reading, and checked
+again after the I/O await. Reads are withheld on observed revocation; there is no
+per-chunk revocation check or guarantee that a kernel read is interrupted.
+The returned observation must match the selected context, owner, generation,
+explicit baseline, requested path/range and expected hash before project identity
+is added. A conflicting project label is refused rather than overwritten.
 
 The observer returns exact text, a full-file SHA-256, file-identity digest, range,
 truncation and continuation position. The selected committed baseline is separate
@@ -57,7 +62,7 @@ libraries, run:
 
 The native qualification used Python3.11.10, Python MCP1.27.2, PyJWT2.13.0,
 cryptography48.0.0 and the existing jsonschema/httpx stack, with no installation.
-Component populations: 29 auth/ASGI tests, 22 descriptor-port tests, 47 filesystem
+Component populations: 29 auth/ASGI tests, 42 descriptor-port tests, 47 filesystem
 tests. Counts are separate from earlier runs and must be verified on this package.
 All signed credentials and project maps in tests are ephemeral fixtures. No real
 OAuth account, live project grant or publicly listening endpoint is implied.
