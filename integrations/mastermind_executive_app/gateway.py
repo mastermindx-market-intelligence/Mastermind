@@ -181,7 +181,12 @@ def make_jwt_authenticators(
     return read_authenticator, submit_authenticator
 
 
-def read_only_gateway_config(repo_root: "Path | str") -> GatewayConfig:
+def read_only_gateway_config(
+    repo_root: "Path | str",
+    *,
+    macro_root_flag: str | None = None,
+    runtime_root: "Path | str | None" = None,
+) -> GatewayConfig:
     """The one legal :class:`GatewayConfig` this app ever builds.
 
     Always ``ServerMode.READONLY`` — there is no fixture/write mode here.
@@ -191,11 +196,27 @@ def read_only_gateway_config(repo_root: "Path | str") -> GatewayConfig:
 
     from integrations.executive_mcp.schemas import ServerMode
 
-    return GatewayConfig(mode=ServerMode.READONLY, repo_root=Path(repo_root))
+    return GatewayConfig(
+        mode=ServerMode.READONLY,
+        repo_root=Path(repo_root),
+        macro_root_flag=macro_root_flag,
+        read_runtime_root=runtime_root,
+    )
 
 
-def build_read_gateway(repo_root: "Path | str") -> ExecutiveMcpGateway:
-    return ExecutiveMcpGateway(read_only_gateway_config(repo_root))
+def build_read_gateway(
+    repo_root: "Path | str",
+    *,
+    macro_root_flag: str | None = None,
+    runtime_root: "Path | str | None" = None,
+) -> ExecutiveMcpGateway:
+    return ExecutiveMcpGateway(
+        read_only_gateway_config(
+            repo_root,
+            macro_root_flag=macro_root_flag,
+            runtime_root=runtime_root,
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
