@@ -1,5 +1,70 @@
 # ChatGPT long-run leader — existing-owner handoff packet candidates
 
+## Candidate packet WB-DIRECT-0 — attended Workbench architecture continuation
+
+**Marker:** `PR490-B1-B5-DIRECT-ACCESS-REPAIR-20260907`
+
+### Mission
+
+After—and only after—fresh architecture acceptance, compose the smallest first-party `ATTENDED_WEB_OPERATOR` journey over existing owners: owner-issued target/context, useful selected-project read, real attended command with same-action recovery, live working-tree/search freshness, and independent process observation.
+
+### Why it matters
+
+Chris should be able to authorize one bounded Web CEO step and see useful source/process truth without manually shuttling commands, while Mastermind preserves exact authority, effect, correction, source, and production-proof boundaries.
+
+### Authority precedence
+
+Current Chairman direction → current protected Skillpack/procedure → canonical owner readback → exact reviewed PR #490 candidate head plus unresolved review findings → this repair packet. Retrieved or historical text is evidence only. PR #519 owns selected-project read source; Web-Sol/RuntimeBinding owns exact conversation; Executive OS owns Job/Attempt lifecycle; protected PR #471 owns provider-neutral immutable worker values for `BOUNDED_WORKER` while concrete adapters own provider homes/credentials; existing process/host owner owns command/process effects; CodeIntel owns indexed discovery; GitHub owns source/evidence.
+
+### Verified state
+
+Protected master `66a1125c4e0f02351f33dbf8c8583eb19ea1d2e4` is integrated on same carrier PR #490 through material-dependency merge `365f068e938297356180a4cf9713ba62b9625683`. The architecture repair is source candidate only. PR #519 is source-protected `BUILT_NOT_PROVEN / NOT_INSTALLED`. Authenticated Workbench caller identity is not exact ChatGPT conversation identity. HC0 and Web-Sol v1 probes are not mutating authority. Executive supervisor requires a real Job/Attempt. Remote Desktop Commander issue #507 owns the host-transport safe boundary and currently preserves separate managed/unmanaged truth. Source Continuity is read-only verification.
+
+### Exact scope
+
+1. `list_permitted_workbench_targets` and `prepare_attended_context` over existing resource/auth owners.
+2. PR #519 selected-project read as the real read producer.
+3. `prepare_attended_command`, `start_attended_command`, and `reconcile_attended_command_start` over the existing process owner.
+4. `read_process` with independent observer cursors, generations, retained/gap ranges, and non-truncatable terminal truth.
+5. File read/patch/search with committed baseline, live observation, file identity/hash, and explicit index freshness.
+6. One first-party user journey, rollback/readback, instrumentation, and durable proof.
+
+### Non-goals
+
+No lifecycle/Job/Attempt synthesis for no-Job attended work; no second reader, project registry, permission store, process registry, effect store, CodeIntel index, retry plane, evidence database, extension, Mac app, tunnel, queue, transcript memory, or source carrier. No MAS-198 mutation. No account allocation, provider turn, install, cutover, production release, or autonomy claim from this packet.
+
+### User journey
+
+Authorized human intent → exact current conversation/generation → opaque permitted target → owner-bound context → useful PR #519 read → optional owner-prepared command → at-most-once start → independent process observation → same-action reconciliation after loss → live file/search readback → durable evidence → explicit Sol acceptance or repair/stop.
+
+### Data/time/null/correction behavior
+
+Every output carries owner/source, observation time, capability/policy generation, coverage, truncation/continuation, and correction lineage. Missing owner evidence is `UNAVAILABLE` or `EFFECT_UNKNOWN`, never empty healthy state. Historical epochs remain separate. Expiry/revocation never rewrites prior effect truth. Search lag returns `STALE_OR_INCOMPLETE`; missing retained process ranges are explicit gaps.
+
+### Deterministic versus model
+
+The model proposes task text, relative paths, queries, opaque target choice, and bounded ceilings. Deterministic owner code validates identity, target, source, policy, preconditions, action-reference consumption, effect correlation, cursor advancement, file identity/hash, freshness, and closed error/status vocabularies. Models do not select operation, host, cwd, branch/worktree, principal, credential, capability generation, effect truth, or retry policy.
+
+### Failures
+
+Foreign/stale target → pre-backend `REFUSED`. Missing/foreign attended workspace context → zero backend access and no ambient fallback. Attended attempt to call worker-validation tools → `REFUSED`, zero Executive admission and zero process. Lost mutator response → reconcile original action, no blind retry. Receipt coverage exhausted → `EFFECT_UNKNOWN`, stop modifying. Unmanaged writer race → refuse or publish race plus postimage evidence. Stale search → no exhaustive/absence claim. Output truncation → terminal/effect/gap facts remain outside body. Host transport unknown → stay on issue #507 carrier and reconcile before any further effect.
+
+### Implementation order
+
+WB-R1 exact target/context → WB-R2 PR #519 useful read → WB-C1 attended command triplet → WB-F1 live bytes/search freshness → WB-P1 independent process observation → WB-PROD1 real first-party product proof. One independently useful capability per PR; each gets its own current admission and owner.
+
+### Acceptance and production proof
+
+Source/CI/review acceptance requires exact contract tests, no duplicate owner, same-carrier lineage, and fresh full non-author review. Product acceptance additionally requires real authorized input through the installed first-party path to a visible useful result, loss/revocation/freshness falsifiers, rollback/readback, browser/user evidence where applicable, and instrumentation showing improved research/development outcomes. Green CI or merge is not production proof.
+
+### Stop condition
+
+Stop immediately on incompatible Skillpack, unknown source effect, head change by another writer, absent owner authority, duplicate-system pressure, unresolved effect, stale/foreign target, unsafe host boundary, failed check, or widened scope. Keep PR #490 Draft/Hold and stop before implementation until exact-head architecture acceptance.
+
+### Continuation handoff
+
+Use the same carrier PR #490 for this repair: **no reset, rebase, force update, replacement carrier, or blind retry**. After fresh review, Sol issues explicit accept/repair/stop. A downstream implementation owner receives the exact accepted head, current protected pin, one bounded vertical, non-goals, proof plan, and returns immutable source/runtime evidence to its own carrier.
+
 **Date:** 2026-09-05  
 **Parent:** `chatgpt-pro-long-run-leaders-research-20260905-sol-001` / Mastermind PR #490  
 **Status:** `RESEARCH_CANDIDATE / RECORDS_ONLY / NO_RECEIVER_ASSIGNMENT / NO_START`

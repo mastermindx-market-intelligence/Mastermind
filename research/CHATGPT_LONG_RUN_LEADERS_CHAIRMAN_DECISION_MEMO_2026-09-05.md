@@ -1,5 +1,26 @@
 # Chairman Decision Memo — ChatGPT Web as a Long-Run Mastermind Leader
 
+## Binding 2026-09-07 architecture amendment
+
+**Marker:** `PR490-B1-B5-DIRECT-ACCESS-REPAIR-20260907`
+**Precedence:** this section controls whenever older effect, source-selection, current-state, owner, or next-action language conflicts. The original thesis and dated evidence remain preserved.
+
+Current contract candidate version: 6. Its machine-readable generation is `PR490_REPAIR_CANDIDATE_V6_CURRENT_SOURCE_PROFILE_GATED_SOURCE_ONLY`; every earlier revision-number statement below is dated history, not current contract truth.
+
+### Decision
+
+The product remains a durable leader of governed work with replaceable reasoning surfaces and one coherent experience over existing federated authorities. The direct first-party path is now explicitly `ATTENDED_WEB_OPERATOR`: a task-scoped technical grant bound to current Chairman/human authorization, authenticated subject, exact current Web conversation and generation, an owner-issued target/source/scope context, policy/capability generation, expiry, revocation, and one original action identity. It is not an organizational role, Job, Attempt, Worker, source-writer assignment, account election, autonomous fleet entitlement, or strong-confinement claim.
+
+The common modifying effect vocabulary is exactly `NOT_APPLIED | APPLIED | EFFECT_UNKNOWN`. `REFUSED` is a response status. `PARTIAL` is owner-native/per-step outcome evidence: use `APPLIED` when a bounded effect is proven and publish exact step results; use `EFFECT_UNKNOWN` when the effect boundary cannot be proven. Expiry, revocation, rotation, succession, reauthorization, timeout, cancellation, reconnect, or retention loss never manufactures `NOT_APPLIED` and never authorizes replay.
+
+PR #519 is the current source-protected selected-project read dependency (`BUILT_NOT_PROVEN / NOT_INSTALLED`). Authenticated Workbench caller identity is not exact ChatGPT conversation identity. HC0 and Web-Sol v1 evidence cannot mint mutating authority; exact conversation/generation comes from the existing Web-Sol/RuntimeBinding chain. The trusted host/resource/source owner selects source and emits opaque permitted target options. Caller path/hash assertions are mismatch-only, and a match grants nothing.
+
+Executive supervisor requires a real Job/Attempt and therefore belongs to `BOUNDED_WORKER`; it cannot hide no-Job attended execution. Protected PR #471 supplies provider-neutral immutable worker contract values for this Executive path only; concrete adapters retain exclusive ownership of provider homes, credentials, and provider-specific launch mechanics, and PR #471 proves no attended mode or RuntimeBinding. Tool access is deny-by-default per profile: surface membership alone grants nothing, worker-validation tools are unavailable to `ATTENDED_WEB_OPERATOR`, and every attended workspace call requires the current owner-issued context or an opaque action reference already bound to it. The no-Job attended path composes existing resource/auth/process owners through `list_permitted_workbench_targets`, `prepare_attended_context`, and a real command `prepare_attended_command` / `start_attended_command` / `reconcile_attended_command_start` triplet. A lost response reconciles the original launch and never creates process two.
+
+Remote Desktop Commander issue #507 retains its own host-transport carrier, operation, safe-drain boundary, and managed/unmanaged truth. Source Continuity is read-only verification around the incumbent source writer. Neither becomes PR #490's process owner or writer.
+
+`Linear: NONE` applies to PR #490. MAS-198 is externally owned Web-Sol extension/native-bridge work and is not owned or gated here. This repair remains research-only `SPEC_ONLY`, Draft/Hold, and implementation-inert pending fresh full non-author exact-head review.
+
 **Originated:** 2026-09-05  
 **Current-state correction:** 2026-09-06  
 **Carrier:** Mastermind Draft PR #490  
@@ -168,13 +189,13 @@ Optimize accepted capabilities per scarce reasoning turn, recovery quality, inte
 
 No worker receives “build the whole workbench.”
 
-## Current evidence and gates — superseding recovery correction
+## Historical 2026-09-06 evidence and gates — superseded by the binding 2026-09-07 amendment
 
-This section supersedes older “current,” “next action,” and recovery language in this memo while preserving those statements as dated history.
+At its 2026-09-06 observation epoch, this section superseded older “current,” “next action,” and recovery language. It is now historical and subordinate to the binding amendment above; its dated evidence remains preserved.
 
 - Protected Mastermind at the start of this correction was `467a81e84b08a7f1c3cdb9a410b2f7857816675d`, compatible Skillpack 1.0.1/bootstrap-major 1.
 - PR #490 remains Draft/Hold. Author-side semantic review comment `5558973712` preserves the product direction but requested bounded repairs; it is not independent acceptance.
-- The Workbench contract is now revision 2 in this branch: operation identity is host-derived; every mutator has a pre-effect action reference and dedicated reconciliation; reads and modifying effects are distinct; source selection is host-bound; `ATTENDED_ONLY` is normalized. This is still `SPEC_ONLY`.
+- At the 2026-09-06 recovery-correction epoch, the Workbench contract was revision 2 in this branch: operation identity is host-derived; every mutator has a pre-effect action reference and dedicated reconciliation; reads and modifying effects are distinct; source selection is host-bound; `ATTENDED_ONLY` is normalized. This is still `SPEC_ONLY`.
 - The 24-task artifact is now explicitly `EVALUATION_TEMPLATE_NOT_PREREGISTERED_NOT_EXECUTABLE`. It preserves all 24 tasks but freezes no fixture pairs, answer keys, assignment, graders, denominators, exclusions, statistics, budget, authorization or owner acceptance. No task may be run from this carrier.
 - Connector issue comment `5552174789` proves one real GitHub issue-comment write through the observed path and exposes app registration/configuration metadata. It does not prove the complete effective installation/token grant, repository selection, every product-exposed action or stale-session reachability.
 - The old records lookup `chatgpt-pro-long-run-evidence-reconciliation-20260905-sol-001`, root `C0BSBM78V1N/1788668858.166259`, never received ACK/START/RESULT and was terminally closed on the same thread at `1788694916.617049`. Do not pick it up late or create a replacement. Historical canary/reviewer/artifact claims remain `DELIVERY_UNVERIFIED / NOT_RECOVERED`, not proven nonexistent.

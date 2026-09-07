@@ -1,5 +1,17 @@
 # ChatGPT long-run leader reference architecture and rollout
 
+## Architecture amendment — attended direct mode and evidence truth
+
+**Marker:** `PR490-B1-B5-DIRECT-ACCESS-REPAIR-20260907`
+
+Add `ATTENDED_WEB_OPERATOR` between leader read and autonomous bounded worker. It is a current-human-authorized technical context, not persistent organizational identity. Its issuer is the existing Web-Sol/RuntimeBinding plus resource/auth/process owner chain; its consumer is the exact current conversation. Its claim ceiling is `ATTENDED_ONLY`.
+
+The direct mode composes five existing-owner seams: owner-issued target/context, PR #519 selected-project read, owner-prepared real command with same-action reconciliation, observer-scoped process output, and committed/live/indexed freshness. Tool access is deny-by-default per profile; worker-validation launch remains Executive Job/Attempt-only, while attended workspace access requires the current context or an opaque reference already bound to it. The universal effect law is `NOT_APPLIED | APPLIED | EFFECT_UNKNOWN`; refusal is response status and mixed completion is per-step owner evidence. Authority changes never erase action history.
+
+Source is host-selected. No ambient machine/project/cwd exists. Caller assertions are mismatch-only. Executive supervisor requires a real Job/Attempt, so no-Job attended work cannot reuse it without becoming `BOUNDED_WORKER`. Protected PR #471 supplies provider-neutral common worker values only for that Executive-bound mode; provider homes/credentials remain adapter-private, and the source is `BUILT_NOT_PROVEN / PRODUCTION_INERT`. Issue #507 keeps host-transport ownership and safe-drain law; Source Continuity remains read-only verification.
+
+Freeze boundary: no duplicate lifecycle, session, permission, target registry, process registry, effect store, evidence store, retry plane, CodeIntel index, queue, workspace manager, or control plane. The post-acceptance order is WB-R1 → WB-R2 → WB-C1 → WB-F1 → WB-P1 → WB-PROD1, each independently useful and separately proven.
+
 **Date:** 2026-09-05  
 **Parent operation:** `chatgpt-pro-long-run-leaders-research-20260905-sol-001`  
 **Publication carrier:** Mastermind PR #490  

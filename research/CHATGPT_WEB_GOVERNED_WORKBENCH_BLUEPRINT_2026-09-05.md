@@ -1,10 +1,77 @@
 # ChatGPT Web Governed Workbench — Integration Blueprint
 
+## 2026-09-07 governed direct-access amendment
+
+**Marker:** `PR490-B1-B5-DIRECT-ACCESS-REPAIR-20260907`
+**State:** `SPEC_ONLY / SOURCE_REPAIR_CANDIDATE / NO_RUNTIME_OR_INSTALL_AUTHORITY`
+
+### User journey and profile
+
+```text
+current authorized human intent
+→ exact Web conversation/generation attestation from existing Web-Sol/RuntimeBinding authority
+→ list owner-issued permitted target options
+→ request one opaque option and bounded scope
+→ owner revalidates subject/conversation/policy/generation/occupancy/source
+→ issue one expiring workbench_context_ref
+→ read or prepare one bounded action
+→ commit at most once through the existing owner
+→ reconcile the same original action after response loss
+→ observe live bytes/process terminal truth with explicit freshness/coverage
+→ durable source/evidence receipt
+```
+
+`ATTENDED_WEB_OPERATOR` is a technical grant, not an organizational role or lifecycle identity. It does not fabricate Job/Attempt/Worker identifiers and does not require a second provider reasoning turn merely to carry out each already-authorized direct step. Tool access is deny-by-default at the profile/tool pair: a surface name grants nothing, worker-validation launch tools remain `BOUNDED_WORKER`-only, and attended workspace calls require the current owner-issued `workbench_context_ref` or an action/process reference already bound to it. Its ceiling is `ATTENDED_ONLY`; it proves neither unattended execution nor autonomous fleet capability.
+
+Authenticated Workbench caller identity is not exact ChatGPT conversation identity. HC0 and Web-Sol v1 locator/probe evidence cannot create the grant. Executive supervisor requires a real Job/Attempt and remains a `BOUNDED_WORKER` path. Protected PR #471 provides `mastermind.worker_execution_contract/v1` for that Executive path, with provider homes and credentials adapter-private; it does not implement attended execution or RuntimeBinding. Remote Desktop Commander issue #507 stays under its own transport owner and safe-boundary law. Source Continuity is read-only verification, not writer or process owner.
+
+### Owner-issued target selection
+
+`list_permitted_workbench_targets` projects the existing resource owner. It returns opaque target options, policy generation, coverage, and observation time. `prepare_attended_context` accepts only one option, bounded requested scope, and non-authoritative correlation. The owner binds exact conversation, subject, target, source, policy/capability generation, scope, and expiry into `workbench_context_ref`.
+
+An option is not an access grant. There is no ambient current target, first-online-device rule, model-selected host/cwd/root/branch/worktree, or implicit worktree/process/browser creation. A foreign, stale, revoked, or overbroad option is `REFUSED` before backend effect and does not alter any caller's current context.
+
+### Real attended command route
+
+Restricted worker validation recipes remain intact. The separately authorized direct route is:
+
+```text
+prepare_attended_command
+start_attended_command
+reconcile_attended_command_start
+```
+
+The model may request `command_text`, a shorter timeout, and a smaller output ceiling within the bound context. The existing process owner derives cwd, executable/shell policy, environment, network, resources, principal, source, timeout ceiling, output ceiling, cleanup, and target identity. `start_attended_command` consumes one owner-issued launch reference at most once. Lost launch response is reconciled through that same reference; no blind retry, provider switch, backend switch, carrier switch, or process two is allowed while effect is unknown. This route may eventually prove real exit `0` and exit `7`, but source text alone proves neither.
+
+### Effect and action history
+
+The universal modifying truth is:
+
+```text
+NOT_APPLIED | APPLIED | EFFECT_UNKNOWN
+```
+
+`REFUSED` is response status, not effect truth. `PARTIAL` is owner-native/per-step outcome evidence, not a fourth universal state. Commit permission, receipt-read permission, and durable original-action correlation are separate. Revocation or expiry blocks new commit; it cannot erase a historical effect. A separately authorized successor may read the old result but may not execute it. Evidence-retention exhaustion yields `EFFECT_UNKNOWN` and blocks modifying continuation; it never yields a guessed `NOT_APPLIED`.
+
+### Process observation
+
+`read_process` uses `process_ref` plus observer-scoped `observer_cursor_ref`. Two observers never consume one another's output. Every result carries process generation, retained range, explicit gap ranges, next observer cursor, terminal state, exit code, truncation, and observation time. Terminal, cancel, effect, cleanup, process identity, and retained/gap facts stay outside truncatable display text. A visible head/tail cannot prove that omitted output contained no failure.
+
+### Live working-tree and search freshness
+
+A read after an allowed patch returns the new live working-tree bytes and separately reports the unchanged committed baseline, owner-issued working-tree observation, file identity, content hash, and time. Git HEAD is not the identity of uncommitted bytes. Search reports requested live observation, indexed observation, coverage, freshness, truncation, and continuation. **Stale or incomplete search never claims exhaustive live content.** Reuse existing CodeIntel invalidation/refresh; do not create a second index.
+
+Preimage checks and atomic rename are useful conflict detectors but are not exclusive-writer locks. Exclusive-writer claims require enforcement at the real owner/OS boundary. Where unmanaged writers may race, preserve that risk and verify the postimage.
+
+### No-rebuild boundary
+
+No new lifecycle, session, permission, source-selection, process, evidence, retry, queue, workspace, transcript, identity, or control plane is approved. The facade consumes PR #519 and existing Web-Sol/RuntimeBinding, resource/auth, process/host, CodeIntel, GitHub, Dialogue/Wake, and Source Continuity owners at their actual proof ceilings.
+
 **Date:** 2026-09-05  
 **Research carrier:** Mastermind PR #490  
 **Parent operation:** `chatgpt-pro-long-run-leaders-research-20260905-sol-001`  
 **Status:** `RESEARCH_CANDIDATE / RECORDS_ONLY / NOT_AN_ARCHITECTURE_FREEZE / NO_RUNTIME_AUTHORIZATION`  
-**Current protected basis checked for this continuation:** Mastermind `8f3370e349ab8f1a54acac4c63697740f32715b1`; `mastermind.sol_skillpack.v1` 1.0.1; bootstrap major 1.
+**Historical protected basis of the 2026-09-06 continuation:** Mastermind `8f3370e349ab8f1a54acac4c63697740f32715b1`; `mastermind.sol_skillpack.v1` 1.0.1; bootstrap major 1.
 
 This blueprint turns the Chairman's desired end state into one coherent integration candidate: ChatGPT web sessions should lead difficult, sustained projects, while exact workers and local tools perform bounded execution under existing Mastermind authority. It does not create a new workstream, app, MCP server, browser extension, worker, Job, Attempt, session registry, permission service, queue, watcher, credential, installation, release, or production effect.
 
@@ -305,12 +372,10 @@ A server must validate the envelope at invocation time. A cached tool schema fro
 ### 8.1 Common effect vocabulary
 
 ```text
-NOT_APPLIED
-APPLIED
-PARTIAL
-EFFECT_UNKNOWN
-REFUSED
+NOT_APPLIED | APPLIED | EFFECT_UNKNOWN
 ```
+
+`REFUSED` is response status. `PARTIAL` is owner-native/per-step outcome evidence, not common effect truth.
 
 An individual existing owner may use its frozen vocabulary; adapters map only when the mapping is lossless and reviewed.
 
@@ -613,7 +678,7 @@ No primary-host Chat On Steroids install; no Workbench app publication; no arbit
 
 ### Mastermind
 
-- Protected source/Skillpack basis for this continuation: `mastermindx-market-intelligence/Mastermind@8f3370e349ab8f1a54acac4c63697740f32715b1`.
+- Historical protected source/Skillpack basis for the 2026-09-06 continuation: `mastermindx-market-intelligence/Mastermind@8f3370e349ab8f1a54acac4c63697740f32715b1`.
 - Original and integration research in this PR.
 - `docs/CEO_BOOT_PACKET.md`.
 - `docs/superpowers/specs/2026-08-29-business-sol-surface-convergence-design.md`.

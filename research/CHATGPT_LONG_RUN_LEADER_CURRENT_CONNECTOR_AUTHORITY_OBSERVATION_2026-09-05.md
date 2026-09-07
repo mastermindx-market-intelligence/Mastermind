@@ -97,3 +97,12 @@ Before this observation, the ambient-native-writer concern was an unexecuted arc
 After this observation, one immutable receipt proves one real GitHub issue-comment write through the named connector path and exposes the app object's registered/configured permission metadata. The complete effective installation/token grant, repository selection, per-conversation action surface and stale-session reachability remain unverified.
 
 The required next evidence is a bounded effective-scope readback and route-availability/stale-session falsifier—not an assumption in either direction.
+
+---
+
+## 2026-09-07 supersession pointer
+
+**Marker:** `PR490-B1-B5-DIRECT-ACCESS-REPAIR-20260907`
+**Preservation:** The September 5 connector-authority observation remains immutable dated evidence and is not rewritten as current runtime truth.
+
+Current host/transport interpretation lives in the supersession register and preserves three separate epochs. The observation grants no permission, installation, source-writer status, or production capability. Authenticated caller identity remains distinct from exact ChatGPT conversation identity.

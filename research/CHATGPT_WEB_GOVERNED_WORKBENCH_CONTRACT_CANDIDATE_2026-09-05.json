@@ -1,19 +1,25 @@
 {
   "document_type": "mastermind.governed_workbench_contract_candidate",
-  "version": 2,
+  "version": 6,
   "date": "2026-09-06",
   "publication_carrier": "Mastermind PR #490",
   "parent_operation": "chatgpt-pro-long-run-leaders-research-20260905-sol-001",
   "authority": "RESEARCH_ONLY_NOT_A_RUNTIME_SCHEMA_OR_IMPLEMENTATION_COMMISSION",
-  "protected_source_basis": "467a81e84b08a7f1c3cdb9a410b2f7857816675d",
-  "supersedes_blob": "767204353203885a908fb31ae04728e4d42f5d44",
+  "protected_source_basis": "66a1125c4e0f02351f33dbf8c8583eb19ea1d2e4",
+  "supersedes_blob": "423ff21ea7773b36c26a709c5d4ac6216fb2cd02",
   "capability_state": "SPEC_ONLY",
   "revision_reason": [
-    "Remove canonical operation identity from model-authored tool input.",
-    "Add owner-issued pre-effect references and loss-safe reconciliation for every proposed mutator.",
-    "Bind workspace reads to the host-selected source envelope.",
-    "Separate read status from modifying effect state.",
-    "Normalize native route coverage vocabulary to ATTENDED_ONLY."
+    "Preserve the prior owner-issued pre-effect reference and loss-safe reconciliation architecture.",
+    "Reduce universal effect truth to NOT_APPLIED, APPLIED, or EFFECT_UNKNOWN; keep REFUSED as response status and mixed completion as owner-native step evidence.",
+    "Keep source selection host-owned and caller path/hash/source assertions mismatch-only.",
+    "Separate ATTENDED_WEB_OPERATOR from Executive Job/Attempt/Worker lifecycle identity.",
+    "Add owner-issued target context, real attended command prepare/start/reconcile, observer-scoped process output, and committed/live/indexed freshness contracts.",
+    "Preserve authority history across expiry, revocation, rotation, succession, reauthorization, and receipt-coverage loss.",
+    "Record three transport observation epochs separately and retain existing owner boundaries.",
+    "Resolve the MAS-198 metadata collision by projecting Linear NONE and retaining MAS-198 only as an external dependency.",
+    "Add deny-by-default profile/tool gates so surface membership grants nothing and worker-validation launch remains Executive-bound.",
+    "Require attended workspace context or a reference already bound to it; prohibit cross-profile action and process reference reuse.",
+    "Consume protected PR #471 as the existing provider-neutral BOUNDED_WORKER contract: common immutable values stay provider-neutral, provider homes and credentials remain adapter-private, and ATTENDED_WEB_OPERATOR remains explicitly outside that lifecycle."
   ],
   "principles": [
     "The workbench is a facade over an existing exact Attempt/provider execution context, not a lifecycle, session, memory, retry, queue, permission, workspace, process, or evidence owner.",
@@ -26,7 +32,11 @@
     "Read status and modifying effect state are separate closed vocabularies.",
     "A durable process or MCP task handle is not proof that an inactive ChatGPT reasoning session can be awakened.",
     "Existing frozen Mastermind tool contracts are not modified by this candidate.",
-    "All named tools below are proposed semantics, not callable or approved schemas."
+    "All named tools below are proposed semantics, not callable or approved schemas.",
+    "No new lifecycle, queue, permission, retry, effect, process, evidence, source-selection, workspace, or session owner.",
+    "One original action retains one owner-native identity across timeout, expiry, revocation, rotation, succession, and reauthorization.",
+    "Source and target authority are owner-issued; caller assertions are mismatch-only.",
+    "CI, merge, review, installation, execution, production proof, and final acceptance remain distinct."
   ],
   "capability_profiles": [
     {
@@ -40,7 +50,16 @@
         "process",
         "desktop"
       ],
-      "authority_note": "Use existing Steward, GitHub and CodeIntel owners where possible; no unrestricted local access."
+      "authority_note": "Use existing Steward, GitHub and CodeIntel owners where possible; no unrestricted local access.",
+      "runtime_class": "LEADER_READ",
+      "mutation_allowed": false,
+      "tool_allowlist": [
+        "read_workspace_files",
+        "search_workspace",
+        "view_workspace_image",
+        "workspace_manifest",
+        "workspace_semantics"
+      ]
     },
     {
       "id": "EXACT_OPERATOR",
@@ -53,7 +72,33 @@
       "forbidden_surfaces": [
         "desktop"
       ],
-      "authority_note": "Requires exact Attempt binding, current source and an enforcing worker sandbox/provider owner."
+      "authority_note": "Requires exact Attempt binding, current source and an enforcing worker sandbox/provider owner.",
+      "runtime_class": "BOUNDED_WORKER",
+      "executive_job_attempt_required": true,
+      "tool_allowlist": [
+        "checkpoint_workspace",
+        "commit_workspace_patch",
+        "list_validation_recipes",
+        "prepare_process_cancel",
+        "prepare_process_input",
+        "prepare_validation_start",
+        "prepare_workspace_patch",
+        "read_process",
+        "read_workspace_files",
+        "reconcile_process",
+        "reconcile_process_cancel",
+        "reconcile_process_input",
+        "reconcile_validation_start",
+        "reconcile_workspace_patch",
+        "request_process_cancel",
+        "search_workspace",
+        "send_process_input",
+        "start_validation",
+        "view_workspace_image",
+        "workspace_diff",
+        "workspace_manifest",
+        "workspace_semantics"
+      ]
     },
     {
       "id": "EXACT_OPERATOR_DESKTOP",
@@ -65,7 +110,102 @@
         "desktop"
       ],
       "forbidden_surfaces": [],
-      "authority_note": "Requires a separately reviewed Desktop capability generation and exact approved profile/window."
+      "authority_note": "Requires a separately reviewed Desktop capability generation and exact approved profile/window.",
+      "runtime_class": "BOUNDED_WORKER",
+      "executive_job_attempt_required": true,
+      "tool_allowlist": [
+        "act_on_worker_observation",
+        "checkpoint_workspace",
+        "commit_workspace_patch",
+        "list_validation_recipes",
+        "observe_worker_desktop",
+        "prepare_desktop_action",
+        "prepare_process_cancel",
+        "prepare_process_input",
+        "prepare_validation_start",
+        "prepare_workspace_patch",
+        "read_process",
+        "read_workspace_files",
+        "reconcile_desktop_action",
+        "reconcile_process",
+        "reconcile_process_cancel",
+        "reconcile_process_input",
+        "reconcile_validation_start",
+        "reconcile_workspace_patch",
+        "request_process_cancel",
+        "search_workspace",
+        "send_process_input",
+        "start_validation",
+        "view_workspace_image",
+        "workspace_diff",
+        "workspace_manifest",
+        "workspace_semantics"
+      ]
+    },
+    {
+      "id": "ATTENDED_WEB_OPERATOR",
+      "purpose": "Execute a bounded, currently authorized first-party Web operator step through existing resource/auth/process owners without fabricating Executive lifecycle identity.",
+      "allowed_surfaces": [
+        "resource_selection",
+        "workspace_read",
+        "workspace_change",
+        "attended_command",
+        "process"
+      ],
+      "forbidden_surfaces": [
+        "autonomous_fleet",
+        "credential_access",
+        "unbounded_host_shell",
+        "implicit_project_selection"
+      ],
+      "context_issuer": "EXISTING_RESOURCE_AUTH_AND_PROCESS_OWNERS",
+      "context_consumer": "CURRENT_EXACT_WEB_CONVERSATION",
+      "organizational_role_is_technical_grant": false,
+      "exact_conversation_identity_required": true,
+      "second_provider_reasoning_turn_required": false,
+      "job_attempt_identity_required_when_no_executive_lifecycle": false,
+      "claim_ceiling": "ATTENDED_ONLY",
+      "authority_note": "Task-scoped technical grant only; not a Worker, Job, Attempt, account election, source-writer assignment, or unattended autonomy claim.",
+      "runtime_class": "ATTENDED_WEB_OPERATOR",
+      "executive_job_attempt_required": false,
+      "workspace_context_ref_required": true,
+      "worker_validation_tools_allowed": false,
+      "process_ref_origin_requirement": "Existing process owner must prove the process_ref originated from this current attended context and generation before any read, input, or cancellation operation.",
+      "tool_allowlist": [
+        "checkpoint_workspace",
+        "commit_workspace_patch",
+        "list_permitted_workbench_targets",
+        "prepare_attended_command",
+        "prepare_attended_context",
+        "prepare_process_cancel",
+        "prepare_process_input",
+        "prepare_workspace_patch",
+        "read_process",
+        "read_workspace_files",
+        "reconcile_attended_command_start",
+        "reconcile_process",
+        "reconcile_process_cancel",
+        "reconcile_process_input",
+        "reconcile_workspace_patch",
+        "request_process_cancel",
+        "search_workspace",
+        "send_process_input",
+        "start_attended_command",
+        "view_workspace_image",
+        "workspace_diff",
+        "workspace_manifest",
+        "workspace_semantics"
+      ],
+      "tool_denylist": [
+        "act_on_worker_observation",
+        "list_validation_recipes",
+        "observe_worker_desktop",
+        "prepare_desktop_action",
+        "prepare_validation_start",
+        "reconcile_desktop_action",
+        "reconcile_validation_start",
+        "start_validation"
+      ]
     }
   ],
   "host_injected_context": [
@@ -101,10 +241,12 @@
   ],
   "trusted_derivation": {
     "canonical_operation_identity": "Derived from the authenticated host envelope and never accepted from model input.",
-    "source_selection": "workspace_ref and source_head are host-bound. Optional historical evidence reads require an owner-supplied immutable reference already present in allowed_evidence_refs.",
+    "source_selection": "The trusted host/resource/source owner selects the actual source and binds it into context. Caller content/path/hash assertions are mismatch-only; a match grants nothing and a mismatch is refused before effect.",
     "action_identity": "Each prepare operation returns one opaque owner-issued action reference bound to operation_key, attempt_ref, capability_generation, target, payload digest, preconditions and expiry.",
     "caller_correlation": "A model may provide a non-authoritative client_call_ref for display correlation. It cannot select operation, authority, owner, target, idempotency scope or reconciliation scope.",
-    "untrusted_field_rule": "Supplying a forbidden authority field yields REFUSED with NOT_APPLIED and no downstream call."
+    "untrusted_field_rule": "Supplying a forbidden authority field yields REFUSED with NOT_APPLIED and no downstream call.",
+    "attended_target_selection": "The existing resource owner enumerates opaque permitted options and revalidates subject, exact conversation, policy, generation, occupancy, source, and scope before issuing context.",
+    "attended_command_policy": "The caller may request command text and bounded ceilings; the existing process owner derives cwd, executable/shell policy, environment, network, resources, principal, source, timeout, and output limits."
   },
   "model_forbidden_fields": [
     "operation_key",
@@ -134,7 +276,16 @@
     "arbitrary_environment",
     "arbitrary_shell_command",
     "arbitrary_url",
-    "arbitrary_javascript"
+    "arbitrary_javascript",
+    "expected_source_head",
+    "target_host",
+    "machine",
+    "machine_id",
+    "device_id",
+    "current_machine",
+    "cwd",
+    "working_directory",
+    "unbounded_shell_policy_override"
   ],
   "read_statuses": [
     "OK",
@@ -146,33 +297,71 @@
   "effect_states": [
     "NOT_APPLIED",
     "APPLIED",
-    "PARTIAL",
-    "EFFECT_UNKNOWN",
-    "REFUSED"
+    "EFFECT_UNKNOWN"
   ],
   "effect_semantics": {
-    "scope": "effect_state appears only for a modifying action or its reconciliation.",
-    "read_rule": "A read-only response uses status and never implies a modifying effect.",
-    "unknown_rule": "EFFECT_UNKNOWN means the owning actuator cannot yet prove whether zero, one, or a partial effect occurred; no retry or failover is permitted.",
-    "process_specialization": "PROCESS_EFFECT_UNKNOWN is a closed error code whose effect_state is EFFECT_UNKNOWN and whose target family is process. It is not a second effect state."
+    "scope": "effect_state appears only for a modifying action or read-only reconciliation of that original action.",
+    "read_rule": "Ordinary reads use response status and never imply a modifying effect; reconciliation reads may report the original action effect.",
+    "unknown_rule": "EFFECT_UNKNOWN means authoritative evidence cannot prove the effect boundary. Timeout, expiry, revocation, rotation, cancellation, reconnect, reauthorization, or retention loss never manufacture NOT_APPLIED and never authorize replay.",
+    "refusal_rule": "REFUSED is a response status. A pre-effect refusal carries NOT_APPLIED only when the owner proves no backend effect occurred.",
+    "partial_outcome_rule": "PARTIAL is owner-native or per-step outcome evidence, not a common effect state. Proven mixed completion uses APPLIED plus exact per-step results; an unprovable boundary uses EFFECT_UNKNOWN.",
+    "process_specialization": "PROCESS_EFFECT_UNKNOWN is a closed process error code whose common effect truth is EFFECT_UNKNOWN; it is not another effect state."
   },
   "action_reference_contract": {
-    "issuer": "Existing owning actuator or its approved adapter; never the model and never a new generic retry database.",
+    "issuer": "The existing owning actuator or its approved adapter; never the model and never a replacement retry/effect database.",
     "binding_fields": [
+      "authority_mode",
       "operation_key",
-      "attempt_ref",
       "capability_generation",
       "action_family",
       "target_owner",
       "target_identity",
+      "source_identity",
       "payload_digest",
       "precondition_digest",
       "issued_at",
       "expires_at"
     ],
-    "consume_rule": "A modifying action reference is accepted at most once. Duplicate delivery returns the one canonical prior result or EFFECT_UNKNOWN; it never performs effect two.",
-    "reconcile_rule": "The corresponding read-only reconcile tool accepts the pre-effect reference and returns NOT_APPLIED, APPLIED, PARTIAL, EFFECT_UNKNOWN or REFUSED plus the canonical target identity when one exists.",
-    "retention_rule": "Reference and result retention remain with the existing actuator/evidence owner. This candidate creates no cross-system retry or effect store."
+    "consume_rule": "A modifying action reference is consumed at most once. Duplicate delivery returns the canonical prior result or EFFECT_UNKNOWN; it never performs effect two.",
+    "reconcile_rule": "The dedicated read-only reconcile tool accepts the same original pre-effect reference and queries the existing owner-native action identity.",
+    "retention_rule": "Receipt retention remains with the existing actuator/evidence owner. Coverage loss is explicit and cannot be interpreted as NOT_APPLIED.",
+    "authorization_and_history": {
+      "commit_permission_is_read_permission": false,
+      "correlation_is_authorization": false,
+      "expiry_erases_effect_knowledge": false,
+      "authorized_successor_may_reexecute": false,
+      "new_effect_store": false,
+      "unavailable_evidence_effect": "EFFECT_UNKNOWN",
+      "commit_authority": "Present authority to consume one original owner-issued pre-effect reference at most once.",
+      "receipt_read_authority": "Separately granted authority to read or reconcile the already-existing owner-native action and receipt.",
+      "durable_correlation": "The original owner-native action identity survives actor/session/credential rotation; correlation grants no commit authority.",
+      "coverage_loss": "If authoritative receipt coverage is exhausted, return EFFECT_UNKNOWN with the missing range/source and block modifying continuation.",
+      "successor": "A separately authorized successor may read the same original result but may not execute, reissue, or reset its identity.",
+      "reauthorization": "A new grant does not create a new idempotency domain or erase the original action correlation."
+    },
+    "mode_binding_fields": {
+      "EXACT_OPERATOR": [
+        "job_ref",
+        "attempt_ref",
+        "worker_ref",
+        "workspace_ref"
+      ],
+      "EXACT_OPERATOR_DESKTOP": [
+        "job_ref",
+        "attempt_ref",
+        "worker_ref",
+        "workspace_ref",
+        "desktop_policy_ref"
+      ],
+      "ATTENDED_WEB_OPERATOR": [
+        "workbench_context_ref",
+        "exact_conversation_identity_ref",
+        "conversation_generation",
+        "bound_target_ref"
+      ]
+    },
+    "mode_exclusivity_rule": "Exactly one authority mode is bound. An attended action reference contains no synthetic job_ref, attempt_ref, or worker_ref; an Executive worker action never treats a caller-provided workbench_context_ref as a substitute for its Job/Attempt binding.",
+    "profile_transition_rule": "Action references are not portable across profiles. Reconciliation follows the original owner-native action identity under separately authorized receipt-read access."
   },
   "surfaces": [
     {
@@ -184,7 +373,9 @@
           "name": "workspace_manifest",
           "privilege": "R0_OBSERVE",
           "mutating": false,
-          "model_input": [],
+          "model_input": [
+            "workbench_context_ref"
+          ],
           "minimum_output": [
             "status",
             "workspace_ref",
@@ -195,7 +386,19 @@
             "degraded",
             "source_refs",
             "observed_at"
-          ]
+          ],
+          "permitted_profiles": [
+            "LEADER_READ",
+            "EXACT_OPERATOR",
+            "EXACT_OPERATOR_DESKTOP",
+            "ATTENDED_WEB_OPERATOR"
+          ],
+          "profile_binding": {
+            "LEADER_READ": "Existing read owner grants task-bounded read context; no mutation.",
+            "EXACT_OPERATOR": "Host-injected Executive Job/Attempt/Worker/workspace binding is required.",
+            "EXACT_OPERATOR_DESKTOP": "Host-injected Executive Job/Attempt/Worker/workspace binding is required.",
+            "ATTENDED_WEB_OPERATOR": "workbench_context_ref is required and revalidated against exact conversation, target, source, scope, policy/capability generation, expiry, and revocation."
+          }
         },
         {
           "name": "read_workspace_files",
@@ -205,18 +408,35 @@
             "relative_paths",
             "ranges",
             "continuation",
+            "workbench_context_ref",
             "client_call_ref"
           ],
           "minimum_output": [
             "status",
             "path",
-            "blob_or_content_hash",
+            "committed_baseline_ref",
+            "working_tree_observation_ref",
+            "file_identity",
+            "content_hash",
             "content_or_artifact_ref",
+            "observed_at",
             "truncated",
             "continuation",
-            "source_head"
+            "issues"
           ],
-          "notes": "Paths are resolved only within the host-bound workspace and allowed_read_paths."
+          "notes": "Paths are resolved only within the host-bound workspace and allowed_read_paths.",
+          "permitted_profiles": [
+            "LEADER_READ",
+            "EXACT_OPERATOR",
+            "EXACT_OPERATOR_DESKTOP",
+            "ATTENDED_WEB_OPERATOR"
+          ],
+          "profile_binding": {
+            "LEADER_READ": "Existing read owner grants task-bounded read context; no mutation.",
+            "EXACT_OPERATOR": "Host-injected Executive Job/Attempt/Worker/workspace binding is required.",
+            "EXACT_OPERATOR_DESKTOP": "Host-injected Executive Job/Attempt/Worker/workspace binding is required.",
+            "ATTENDED_WEB_OPERATOR": "workbench_context_ref is required and revalidated against exact conversation, target, source, scope, policy/capability generation, expiry, and revocation."
+          }
         },
         {
           "name": "search_workspace",
@@ -228,19 +448,35 @@
             "language_filters",
             "limit",
             "continuation",
+            "workbench_context_ref",
             "client_call_ref"
           ],
           "minimum_output": [
             "status",
             "matches",
-            "searched_ref",
+            "committed_baseline_ref",
+            "working_tree_observation_ref",
+            "indexed_observation_ref",
             "coverage",
             "freshness",
             "truncated",
             "continuation",
-            "source_refs"
+            "observed_at",
+            "issues"
           ],
-          "notes": "Searches the host-bound source_head. A caller-selected requested_ref is forbidden. Immutable historical evidence is available only through an owner-supplied allowed_evidence_ref in the current host envelope."
+          "notes": "Searches the host-bound source_head. A caller-selected requested_ref is forbidden. Immutable historical evidence is available only through an owner-supplied allowed_evidence_ref in the current host envelope.",
+          "permitted_profiles": [
+            "LEADER_READ",
+            "EXACT_OPERATOR",
+            "EXACT_OPERATOR_DESKTOP",
+            "ATTENDED_WEB_OPERATOR"
+          ],
+          "profile_binding": {
+            "LEADER_READ": "Existing read owner grants task-bounded read context; no mutation.",
+            "EXACT_OPERATOR": "Host-injected Executive Job/Attempt/Worker/workspace binding is required.",
+            "EXACT_OPERATOR_DESKTOP": "Host-injected Executive Job/Attempt/Worker/workspace binding is required.",
+            "ATTENDED_WEB_OPERATOR": "workbench_context_ref is required and revalidated against exact conversation, target, source, scope, policy/capability generation, expiry, and revocation."
+          }
         },
         {
           "name": "workspace_semantics",
@@ -252,6 +488,7 @@
             "language",
             "limit",
             "continuation",
+            "workbench_context_ref",
             "client_call_ref"
           ],
           "minimum_output": [
@@ -263,7 +500,19 @@
             "coverage",
             "issues",
             "continuation"
-          ]
+          ],
+          "permitted_profiles": [
+            "LEADER_READ",
+            "EXACT_OPERATOR",
+            "EXACT_OPERATOR_DESKTOP",
+            "ATTENDED_WEB_OPERATOR"
+          ],
+          "profile_binding": {
+            "LEADER_READ": "Existing read owner grants task-bounded read context; no mutation.",
+            "EXACT_OPERATOR": "Host-injected Executive Job/Attempt/Worker/workspace binding is required.",
+            "EXACT_OPERATOR_DESKTOP": "Host-injected Executive Job/Attempt/Worker/workspace binding is required.",
+            "ATTENDED_WEB_OPERATOR": "workbench_context_ref is required and revalidated against exact conversation, target, source, scope, policy/capability generation, expiry, and revocation."
+          }
         },
         {
           "name": "view_workspace_image",
@@ -271,6 +520,7 @@
           "mutating": false,
           "model_input": [
             "relative_path",
+            "workbench_context_ref",
             "client_call_ref"
           ],
           "minimum_output": [
@@ -281,9 +531,22 @@
             "height",
             "content_hash",
             "source_head"
-          ]
+          ],
+          "permitted_profiles": [
+            "LEADER_READ",
+            "EXACT_OPERATOR",
+            "EXACT_OPERATOR_DESKTOP",
+            "ATTENDED_WEB_OPERATOR"
+          ],
+          "profile_binding": {
+            "LEADER_READ": "Existing read owner grants task-bounded read context; no mutation.",
+            "EXACT_OPERATOR": "Host-injected Executive Job/Attempt/Worker/workspace binding is required.",
+            "EXACT_OPERATOR_DESKTOP": "Host-injected Executive Job/Attempt/Worker/workspace binding is required.",
+            "ATTENDED_WEB_OPERATOR": "workbench_context_ref is required and revalidated against exact conversation, target, source, scope, policy/capability generation, expiry, and revocation."
+          }
         }
-      ]
+      ],
+      "authority_owner": "EXISTING_WORKBENCH_READ_RESOURCE_AND_CODEINTEL_OWNERS"
     },
     {
       "id": "workspace_change",
@@ -297,6 +560,7 @@
           "model_input": [
             "patch",
             "expected_path_hashes",
+            "workbench_context_ref",
             "client_call_ref"
           ],
           "minimum_output": [
@@ -308,7 +572,18 @@
             "preconditions",
             "issues"
           ],
-          "notes": "Returns an owner-issued pre-effect reference bound to the host-derived operation and Attempt. Preparation performs no file write and creates no new generic prepared-action database."
+          "notes": "Returns an owner-issued pre-effect reference bound either to the real Executive Job/Attempt/workspace or to the current attended workbench context. Preparation performs no file write and creates no generic prepared-action database.",
+          "permitted_profiles": [
+            "EXACT_OPERATOR",
+            "EXACT_OPERATOR_DESKTOP",
+            "ATTENDED_WEB_OPERATOR"
+          ],
+          "profile_binding": {
+            "LEADER_READ": "Existing read owner grants task-bounded read context; no mutation.",
+            "EXACT_OPERATOR": "Host-injected Executive Job/Attempt/Worker/workspace binding is required.",
+            "EXACT_OPERATOR_DESKTOP": "Host-injected Executive Job/Attempt/Worker/workspace binding is required.",
+            "ATTENDED_WEB_OPERATOR": "workbench_context_ref is required and revalidated against exact conversation, target, source, scope, policy/capability generation, expiry, and revocation."
+          }
         },
         {
           "name": "commit_workspace_patch",
@@ -326,7 +601,13 @@
             "source_preconditions",
             "reconciliation_ref"
           ],
-          "notes": "Consumes workspace_patch_ref at most once after revalidating binding, permission and source."
+          "notes": "Consumes workspace_patch_ref at most once after revalidating binding, permission and source.",
+          "permitted_profiles": [
+            "EXACT_OPERATOR",
+            "EXACT_OPERATOR_DESKTOP",
+            "ATTENDED_WEB_OPERATOR"
+          ],
+          "reference_binding_rule": "The opaque owner-issued reference carries the original authority mode and mode-specific binding; profile mismatch, stale generation, expiry without receipt-read authority, or foreign context is refused and never remapped to another mode."
         },
         {
           "name": "reconcile_workspace_patch",
@@ -345,7 +626,13 @@
             "issues",
             "observed_at"
           ],
-          "notes": "A lost commit response is reconciled through the pre-effect reference before another patch can be prepared."
+          "notes": "A lost commit response is reconciled through the pre-effect reference before another patch can be prepared.",
+          "permitted_profiles": [
+            "EXACT_OPERATOR",
+            "EXACT_OPERATOR_DESKTOP",
+            "ATTENDED_WEB_OPERATOR"
+          ],
+          "reference_binding_rule": "The opaque owner-issued reference carries the original authority mode and mode-specific binding; profile mismatch, stale generation, expiry without receipt-read authority, or foreign context is refused and never remapped to another mode."
         },
         {
           "name": "workspace_diff",
@@ -355,6 +642,7 @@
             "relative_path_filters",
             "limit",
             "continuation",
+            "workbench_context_ref",
             "client_call_ref"
           ],
           "minimum_output": [
@@ -366,13 +654,25 @@
             "truncated",
             "continuation",
             "workspace_ref"
-          ]
+          ],
+          "permitted_profiles": [
+            "EXACT_OPERATOR",
+            "EXACT_OPERATOR_DESKTOP",
+            "ATTENDED_WEB_OPERATOR"
+          ],
+          "profile_binding": {
+            "LEADER_READ": "Existing read owner grants task-bounded read context; no mutation.",
+            "EXACT_OPERATOR": "Host-injected Executive Job/Attempt/Worker/workspace binding is required.",
+            "EXACT_OPERATOR_DESKTOP": "Host-injected Executive Job/Attempt/Worker/workspace binding is required.",
+            "ATTENDED_WEB_OPERATOR": "workbench_context_ref is required and revalidated against exact conversation, target, source, scope, policy/capability generation, expiry, and revocation."
+          }
         },
         {
           "name": "checkpoint_workspace",
           "privilege": "R0_OBSERVE",
           "mutating": false,
           "model_input": [
+            "workbench_context_ref",
             "client_call_ref"
           ],
           "minimum_output": [
@@ -386,7 +686,18 @@
             "dirty_state",
             "issues"
           ],
-          "notes": "Projects the existing Source Continuity owner and grants no commit, push, receiver transfer, Ready, merge or release authority."
+          "notes": "Projects the existing Source Continuity owner and grants no commit, push, receiver transfer, Ready, merge or release authority.",
+          "permitted_profiles": [
+            "EXACT_OPERATOR",
+            "EXACT_OPERATOR_DESKTOP",
+            "ATTENDED_WEB_OPERATOR"
+          ],
+          "profile_binding": {
+            "LEADER_READ": "Existing read owner grants task-bounded read context; no mutation.",
+            "EXACT_OPERATOR": "Host-injected Executive Job/Attempt/Worker/workspace binding is required.",
+            "EXACT_OPERATOR_DESKTOP": "Host-injected Executive Job/Attempt/Worker/workspace binding is required.",
+            "ATTENDED_WEB_OPERATOR": "workbench_context_ref is required and revalidated against exact conversation, target, source, scope, policy/capability generation, expiry, and revocation."
+          }
         }
       ]
     },
@@ -408,7 +719,12 @@
             "source_head",
             "process_policy_ref",
             "capability_generation"
-          ]
+          ],
+          "permitted_profiles": [
+            "EXACT_OPERATOR",
+            "EXACT_OPERATOR_DESKTOP"
+          ],
+          "profile_binding": "Requires a real host-injected Executive Job/Attempt/Worker/workspace binding. ATTENDED_WEB_OPERATOR is not permitted."
         },
         {
           "name": "prepare_validation_start",
@@ -417,7 +733,7 @@
           "model_input": [
             "recipe_id",
             "bounded_targets",
-            "expected_source_head",
+            "source_mismatch_assertion",
             "client_call_ref"
           ],
           "minimum_output": [
@@ -429,7 +745,13 @@
             "expires_at",
             "issues"
           ],
-          "notes": "Issues the immutable Attempt-bound reference before any process launch."
+          "notes": "Issues the immutable Attempt-bound reference before any process launch.",
+          "source_assertion_rule": "Mismatch-only; host-selected source remains authoritative and a match grants nothing.",
+          "permitted_profiles": [
+            "EXACT_OPERATOR",
+            "EXACT_OPERATOR_DESKTOP"
+          ],
+          "profile_binding": "Requires a real host-injected Executive Job/Attempt/Worker/workspace binding. ATTENDED_WEB_OPERATOR is not permitted."
         },
         {
           "name": "start_validation",
@@ -448,7 +770,13 @@
             "state",
             "reconciliation_ref"
           ],
-          "notes": "Consumes validation_start_ref at most once. Owner derives argv, cwd, environment, network and resource policy. No raw shell text."
+          "notes": "Consumes validation_start_ref at most once. Owner derives argv, cwd, environment, network and resource policy. No raw shell text.",
+          "permitted_profiles": [
+            "EXACT_OPERATOR",
+            "EXACT_OPERATOR_DESKTOP"
+          ],
+          "profile_binding": "Requires a real host-injected Executive Job/Attempt/Worker/workspace binding. ATTENDED_WEB_OPERATOR is not permitted.",
+          "reference_binding_rule": "The opaque owner-issued reference carries the original authority mode and mode-specific binding; profile mismatch, stale generation, expiry without receipt-read authority, or foreign context is refused and never remapped to another mode."
         },
         {
           "name": "reconcile_validation_start",
@@ -467,7 +795,13 @@
             "issues",
             "observed_at"
           ],
-          "notes": "Can prove NOT_APPLIED or return the one canonical process identity after a lost launch response. It never starts a process."
+          "notes": "Can prove NOT_APPLIED or return the one canonical process identity after a lost launch response. It never starts a process.",
+          "permitted_profiles": [
+            "EXACT_OPERATOR",
+            "EXACT_OPERATOR_DESKTOP"
+          ],
+          "profile_binding": "Requires a real host-injected Executive Job/Attempt/Worker/workspace binding. ATTENDED_WEB_OPERATOR is not permitted.",
+          "reference_binding_rule": "The opaque owner-issued reference carries the original authority mode and mode-specific binding; profile mismatch, stale generation, expiry without receipt-read authority, or foreign context is refused and never remapped to another mode."
         },
         {
           "name": "read_process",
@@ -475,20 +809,34 @@
           "mutating": false,
           "model_input": [
             "process_ref",
-            "output_cursor",
+            "observer_cursor_ref",
             "limit",
             "client_call_ref"
           ],
           "minimum_output": [
             "status",
             "process_ref",
-            "state",
+            "process_generation",
+            "observer_cursor_ref",
             "output_delta",
-            "next_output_cursor",
+            "retained_range",
+            "gap_ranges",
+            "next_observer_cursor_ref",
+            "terminal_state",
             "exit_code",
+            "cancel_state",
+            "effect_state_when_reconciling",
+            "cleanup_state",
             "truncated",
-            "observed_at"
-          ]
+            "observed_at",
+            "issues"
+          ],
+          "permitted_profiles": [
+            "EXACT_OPERATOR",
+            "EXACT_OPERATOR_DESKTOP",
+            "ATTENDED_WEB_OPERATOR"
+          ],
+          "profile_binding": "The existing process owner validates process_ref provenance against the current Job/Attempt or attended workbench context and generation; cross-profile refs are refused."
         },
         {
           "name": "prepare_process_input",
@@ -511,7 +859,13 @@
             "expires_at",
             "issues"
           ],
-          "notes": "The owner seals the exact bytes and monotonic sequence in the pre-effect reference."
+          "notes": "The owner seals the exact bytes and monotonic sequence in the pre-effect reference.",
+          "permitted_profiles": [
+            "EXACT_OPERATOR",
+            "EXACT_OPERATOR_DESKTOP",
+            "ATTENDED_WEB_OPERATOR"
+          ],
+          "profile_binding": "The existing process owner validates process_ref provenance against the current Job/Attempt or attended workbench context and generation; cross-profile refs are refused."
         },
         {
           "name": "send_process_input",
@@ -528,7 +882,14 @@
             "sequence",
             "reconciliation_ref"
           ],
-          "notes": "Consumes process_input_ref at most once and never accepts unbound raw bytes."
+          "notes": "Consumes process_input_ref at most once and never accepts unbound raw bytes.",
+          "permitted_profiles": [
+            "EXACT_OPERATOR",
+            "EXACT_OPERATOR_DESKTOP",
+            "ATTENDED_WEB_OPERATOR"
+          ],
+          "profile_binding": "The existing process owner validates process_ref provenance against the current Job/Attempt or attended workbench context and generation; cross-profile refs are refused.",
+          "reference_binding_rule": "The opaque owner-issued reference carries the original authority mode and mode-specific binding; profile mismatch, stale generation, expiry without receipt-read authority, or foreign context is refused and never remapped to another mode."
         },
         {
           "name": "reconcile_process_input",
@@ -546,7 +907,14 @@
             "sequence",
             "issues",
             "observed_at"
-          ]
+          ],
+          "permitted_profiles": [
+            "EXACT_OPERATOR",
+            "EXACT_OPERATOR_DESKTOP",
+            "ATTENDED_WEB_OPERATOR"
+          ],
+          "profile_binding": "The existing process owner validates process_ref provenance against the current Job/Attempt or attended workbench context and generation; cross-profile refs are refused.",
+          "reference_binding_rule": "The opaque owner-issued reference carries the original authority mode and mode-specific binding; profile mismatch, stale generation, expiry without receipt-read authority, or foreign context is refused and never remapped to another mode."
         },
         {
           "name": "prepare_process_cancel",
@@ -566,7 +934,13 @@
             "preconditions",
             "expires_at",
             "issues"
-          ]
+          ],
+          "permitted_profiles": [
+            "EXACT_OPERATOR",
+            "EXACT_OPERATOR_DESKTOP",
+            "ATTENDED_WEB_OPERATOR"
+          ],
+          "profile_binding": "The existing process owner validates process_ref provenance against the current Job/Attempt or attended workbench context and generation; cross-profile refs are refused."
         },
         {
           "name": "request_process_cancel",
@@ -583,7 +957,14 @@
             "terminal_proven",
             "reconciliation_ref"
           ],
-          "notes": "A request receipt never proves terminal process state or reversal of completed effects."
+          "notes": "A request receipt never proves terminal process state or reversal of completed effects.",
+          "permitted_profiles": [
+            "EXACT_OPERATOR",
+            "EXACT_OPERATOR_DESKTOP",
+            "ATTENDED_WEB_OPERATOR"
+          ],
+          "profile_binding": "The existing process owner validates process_ref provenance against the current Job/Attempt or attended workbench context and generation; cross-profile refs are refused.",
+          "reference_binding_rule": "The opaque owner-issued reference carries the original authority mode and mode-specific binding; profile mismatch, stale generation, expiry without receipt-read authority, or foreign context is refused and never remapped to another mode."
         },
         {
           "name": "reconcile_process_cancel",
@@ -602,7 +983,14 @@
             "cleanup_state",
             "issues",
             "observed_at"
-          ]
+          ],
+          "permitted_profiles": [
+            "EXACT_OPERATOR",
+            "EXACT_OPERATOR_DESKTOP",
+            "ATTENDED_WEB_OPERATOR"
+          ],
+          "profile_binding": "The existing process owner validates process_ref provenance against the current Job/Attempt or attended workbench context and generation; cross-profile refs are refused.",
+          "reference_binding_rule": "The opaque owner-issued reference carries the original authority mode and mode-specific binding; profile mismatch, stale generation, expiry without receipt-read authority, or foreign context is refused and never remapped to another mode."
         },
         {
           "name": "reconcile_process",
@@ -621,9 +1009,16 @@
             "evidence_refs",
             "observed_at"
           ],
-          "notes": "General process observation is not a substitute for reconciling a lost modifying action through its pre-effect reference."
+          "notes": "General process observation is not a substitute for reconciling a lost modifying action through its pre-effect reference.",
+          "permitted_profiles": [
+            "EXACT_OPERATOR",
+            "EXACT_OPERATOR_DESKTOP",
+            "ATTENDED_WEB_OPERATOR"
+          ],
+          "profile_binding": "The existing process owner validates process_ref provenance against the current Job/Attempt or attended workbench context and generation; cross-profile refs are refused."
         }
-      ]
+      ],
+      "authority_owner": "EXISTING_PROCESS_OWNER"
     },
     {
       "id": "desktop",
@@ -647,6 +1042,9 @@
             "controls",
             "redacted_artifact_ref",
             "issues"
+          ],
+          "permitted_profiles": [
+            "EXACT_OPERATOR_DESKTOP"
           ]
         },
         {
@@ -670,7 +1068,10 @@
             "expires_at",
             "issues"
           ],
-          "notes": "Binds one intended semantic action to one fresh observation before any desktop effect."
+          "notes": "Binds one intended semantic action to one fresh observation before any desktop effect.",
+          "permitted_profiles": [
+            "EXACT_OPERATOR_DESKTOP"
+          ]
         },
         {
           "name": "act_on_worker_observation",
@@ -688,7 +1089,11 @@
             "uncertain_boundary",
             "reconciliation_ref"
           ],
-          "notes": "Consumes desktop_action_ref at most once. No arbitrary coordinates, JavaScript, account switching, clipboard, credential/settings surface, or caller-selected native application in V1."
+          "notes": "Consumes desktop_action_ref at most once. No arbitrary coordinates, JavaScript, account switching, clipboard, credential/settings surface, or caller-selected native application in V1.",
+          "permitted_profiles": [
+            "EXACT_OPERATOR_DESKTOP"
+          ],
+          "reference_binding_rule": "The opaque owner-issued reference carries the original authority mode and mode-specific binding; profile mismatch, stale generation, expiry without receipt-read authority, or foreign context is refused and never remapped to another mode."
         },
         {
           "name": "reconcile_desktop_action",
@@ -707,7 +1112,171 @@
             "issues",
             "observed_at"
           ],
-          "notes": "A lost desktop response is reconciled by the pre-effect action reference, never by replaying the click or typing."
+          "notes": "A lost desktop response is reconciled by the pre-effect action reference, never by replaying the click or typing.",
+          "permitted_profiles": [
+            "EXACT_OPERATOR_DESKTOP"
+          ],
+          "reference_binding_rule": "The opaque owner-issued reference carries the original authority mode and mode-specific binding; profile mismatch, stale generation, expiry without receipt-read authority, or foreign context is refused and never remapped to another mode."
+        }
+      ]
+    },
+    {
+      "id": "resource_selection",
+      "authority_owner": "EXISTING_RESOURCE_AND_SOURCE_OWNER",
+      "option_ref_is_access_grant": false,
+      "global_current_target": false,
+      "implicit_resource_creation": false,
+      "selection_rule": "Every operation carries its own bound context; selecting a target does not mutate another caller or later call through shared ambient state.",
+      "tools": [
+        {
+          "name": "list_permitted_workbench_targets",
+          "mutating": false,
+          "model_input": [
+            "client_call_ref"
+          ],
+          "host_owned": [
+            "authenticated_subject",
+            "conversation_identity",
+            "policy_generation",
+            "permitted_target_set"
+          ],
+          "issued_by": "EXISTING_RESOURCE_OWNER",
+          "minimum_output": [
+            "status",
+            "target_options",
+            "policy_generation",
+            "observed_at",
+            "coverage",
+            "issues"
+          ],
+          "permitted_profiles": [
+            "ATTENDED_WEB_OPERATOR"
+          ]
+        },
+        {
+          "name": "prepare_attended_context",
+          "mutating": false,
+          "model_input": [
+            "target_option_ref",
+            "requested_scope",
+            "client_call_ref"
+          ],
+          "host_owned": [
+            "subject",
+            "exact_conversation_identity",
+            "target",
+            "source",
+            "scope_ceiling",
+            "policy_generation",
+            "capability_generation",
+            "expiry"
+          ],
+          "issued_by": "EXISTING_RESOURCE_AUTH_OWNER",
+          "minimum_output": [
+            "status",
+            "workbench_context_ref",
+            "bound_target_ref",
+            "bound_scope",
+            "capability_generation",
+            "conversation_identity_ref",
+            "expires_at",
+            "issues"
+          ],
+          "permitted_profiles": [
+            "ATTENDED_WEB_OPERATOR"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "attended_command",
+      "owner": "EXISTING_PROCESS_OWNER",
+      "authority_owner": "EXISTING_RESOURCE_AUTH_AND_PROCESS_OWNERS",
+      "strong_confinement_claim": false,
+      "executive_supervisor_requires_job_attempt": true,
+      "executive_supervisor_profile": "BOUNDED_WORKER",
+      "no_job_attended_may_use_executive_supervisor": false,
+      "host_transport_safe_boundary_required": true,
+      "claim_ceiling": "ATTENDED_ONLY",
+      "policy_rule": "Command text is requested work. Target, cwd, shell/executable policy, environment, network, resources, principal, source, timeout ceiling, output ceiling, and cleanup remain owner-bound.",
+      "tools": [
+        {
+          "name": "prepare_attended_command",
+          "mutating": false,
+          "model_input": [
+            "command_text",
+            "requested_timeout_ms",
+            "requested_output_limit",
+            "workbench_context_ref",
+            "client_call_ref"
+          ],
+          "host_owned": [
+            "cwd",
+            "executable_policy",
+            "shell_policy",
+            "environment",
+            "network_policy",
+            "resource_policy",
+            "principal",
+            "source",
+            "timeout_ceiling",
+            "output_ceiling"
+          ],
+          "issued_by": "EXISTING_PROCESS_OWNER",
+          "minimum_output": [
+            "status",
+            "attended_command_start_ref",
+            "command_digest",
+            "policy_digest",
+            "bound_target_ref",
+            "expires_at",
+            "issues"
+          ],
+          "permitted_profiles": [
+            "ATTENDED_WEB_OPERATOR"
+          ]
+        },
+        {
+          "name": "start_attended_command",
+          "mutating": true,
+          "model_input": [
+            "attended_command_start_ref"
+          ],
+          "minimum_output": [
+            "effect_state",
+            "attended_command_start_ref",
+            "process_ref",
+            "process_generation",
+            "started_at",
+            "reconciliation_ref",
+            "issues"
+          ],
+          "permitted_profiles": [
+            "ATTENDED_WEB_OPERATOR"
+          ],
+          "reference_binding_rule": "The opaque owner-issued reference carries the original authority mode and mode-specific binding; profile mismatch, stale generation, expiry without receipt-read authority, or foreign context is refused and never remapped to another mode."
+        },
+        {
+          "name": "reconcile_attended_command_start",
+          "mutating": false,
+          "model_input": [
+            "attended_command_start_ref"
+          ],
+          "minimum_output": [
+            "status",
+            "effect_state",
+            "attended_command_start_ref",
+            "process_ref_when_applied",
+            "process_generation",
+            "started_at",
+            "coverage",
+            "observed_at",
+            "issues"
+          ],
+          "permitted_profiles": [
+            "ATTENDED_WEB_OPERATOR"
+          ],
+          "reference_binding_rule": "The opaque owner-issued reference carries the original authority mode and mode-specific binding; profile mismatch, stale generation, expiry without receipt-read authority, or foreign context is refused and never remapped to another mode."
         }
       ]
     }
@@ -795,6 +1364,14 @@
     {
       "id": "DESKTOP_ACTION_PARTIAL_RESPONSE_LOST",
       "expected": "reconcile_desktop_action returns completed steps and uncertain boundary; action is not replayed."
+    },
+    {
+      "id": "ATTENDED_PROFILE_WORKER_VALIDATION_TOOL_REFUSED",
+      "expected": "The profile/tool gate returns REFUSED before any Executive or process-owner launch path; no Job, Attempt, Worker, process, or validation action is synthesized."
+    },
+    {
+      "id": "ATTENDED_WORKSPACE_CONTEXT_REQUIRED",
+      "expected": "The owner returns REFUSED before backend access and proves NOT_APPLIED for any prepared mutation; no ambient project, workspace, source, or prior context is selected."
     }
   ],
   "native_mutator_coverage": {
@@ -869,6 +1446,12 @@
       "owner": "owning Program CEO, workers, Sol acceptance and production proof owners",
       "outcome": "One consequential capability completes from Chairman intent to real product/machine consumer and durable closeout without Chairman message shuttling.",
       "state": "NOT_RUN_BY_THIS_RESEARCH"
+    },
+    {
+      "id": "ATTENDED_PROFILE_SEPARATION_FALSIFIER",
+      "owner": "existing Web-Sol/RuntimeBinding, resource/auth, Executive and process owners",
+      "outcome": "One attended context can use only its explicit owner-bound tools; worker-validation and foreign/missing-context workspace calls are refused with zero lifecycle or backend effect.",
+      "state": "NOT_RUN_BY_THIS_RESEARCH"
     }
   ],
   "rejected_designs": [
@@ -883,5 +1466,284 @@
     "mcp_task_handle_as_exact_chat_wake_proof",
     "automatic_context_compaction_as_runtime_binding_transfer",
     "upstream_unsigned_binary_on_primary_authenticated_host"
-  ]
+  ],
+  "repair_marker": "PR490-B1-B5-DIRECT-ACCESS-REPAIR-20260907",
+  "repair_observed_at": "2026-09-07T15:50:13Z",
+  "integrated_protected_source_via": "365f068e938297356180a4cf9713ba62b9625683",
+  "conversation_identity_contract": {
+    "authenticated_caller_is_exact_conversation": false,
+    "hc0_fingerprint_is_authority": false,
+    "web_sol_v1_probe_is_runtime_attestation": false,
+    "authority_owner": "EXISTING_WEB_SOL_AND_RUNTIME_BINDING_OWNER",
+    "required_evidence": "Owner-issued attestation for the exact current conversation and generation, bound to subject, resource, policy, expiry, and revocation behavior.",
+    "prohibited_derivations": [
+      "URL",
+      "title",
+      "active tab",
+      "newest tab",
+      "authenticated subject alone",
+      "HC0 pseudonymous fingerprint",
+      "Web-Sol v1 locator/probe alone"
+    ]
+  },
+  "process_output_contract": {
+    "observer_scoped_cursors": true,
+    "one_observer_consumes_another": false,
+    "terminal_state_outside_truncatable_body": true,
+    "retention_or_gap_explicit": true,
+    "rule": "Each observer advances its own cursor over one process generation. Retained and missing ranges are explicit; omitted output never proves absence of failure.",
+    "non_truncatable_fields": [
+      "process_ref",
+      "process_generation",
+      "terminal_state",
+      "exit_code",
+      "cancel_state",
+      "effect_state",
+      "cleanup_state",
+      "retained_range",
+      "gap_ranges",
+      "observed_at"
+    ]
+  },
+  "worktree_freshness_contract": {
+    "committed_baseline": "Immutable Git source identity for the committed baseline; it does not identify uncommitted live bytes.",
+    "live_worktree": "Owner-issued working-tree observation with file identity, content hash, observation time, and correction lineage.",
+    "search_rule": "Search reports both requested live observation and indexed observation, coverage, freshness, truncation, and continuation. Stale or incomplete coverage never proves absence from live content.",
+    "freshness_states": [
+      "CURRENT_LIVE_WORKTREE",
+      "COMMITTED_BASELINE_ONLY",
+      "STALE_OR_INCOMPLETE",
+      "UNAVAILABLE"
+    ],
+    "preimage_hash_is_exclusive_lock": false,
+    "exclusive_writer_claim_requires_enforced_scope": true,
+    "unmanaged_writer_race": "A preimage hash and atomic rename detect some conflicts but do not exclude an unmanaged writer. Claim exclusivity only when the real owner/OS scope enforces it; otherwise preserve writer-race risk and verify the postimage.",
+    "new_index": false,
+    "post_patch_rule": "Read the changed live bytes without advancing the committed baseline. Reuse the existing CodeIntel invalidation/refresh path or return STALE_OR_INCOMPLETE."
+  },
+  "recovery_cases": [
+    {
+      "id": "EFFECT_RESPONSE_LOST_THEN_COMMIT_EXPIRY",
+      "family": "effect_recovery",
+      "stimulus": "An owner consumes the original modifying reference, the response is lost, and the commit grant expires before the caller observes the result.",
+      "required_outcome": "Reconcile the original owner-native action. Expiry removes future commit permission but never erases the historical effect or creates NOT_APPLIED.",
+      "evidence_required": "Original action identity, grant expiry, owner receipt or explicit coverage loss, and zero evidence of a second effect.",
+      "non_goal": "No renewal, reprepare, failover, or replay while original effect truth is unresolved.",
+      "execution_state": "NOT_RUN_CONTRACT_REQUIREMENT"
+    },
+    {
+      "id": "EFFECT_RESPONSE_LOST_THEN_REVOCATION_OR_ROTATION",
+      "family": "effect_recovery",
+      "stimulus": "A mutator may have committed, its response is lost, and the actor credential, session, or binding is revoked or rotated.",
+      "required_outcome": "Revocation blocks new commits but preserves correlation to the original action; separately authorized reconciliation returns APPLIED, NOT_APPLIED, or EFFECT_UNKNOWN.",
+      "evidence_required": "Original action identity, revocation/rotation boundary, receipt-read authorization, and no second effect.",
+      "non_goal": "Do not treat a new credential or session as a new idempotency domain.",
+      "execution_state": "NOT_RUN_CONTRACT_REQUIREMENT"
+    },
+    {
+      "id": "AUTHORIZED_SUCCESSOR_READ_OLD_ACTOR_DENIED",
+      "family": "effect_recovery",
+      "stimulus": "The original actor loses authority and a successor receives separately bounded receipt-read authority.",
+      "required_outcome": "The successor may read the original action result; the old actor is denied and the successor may not reissue the action.",
+      "evidence_required": "Separate commit and receipt-read grants, original action correlation, old-actor denial, and no execution capability on the successor read.",
+      "non_goal": "Succession is not action replay or ownership transfer of the actuator.",
+      "execution_state": "NOT_RUN_CONTRACT_REQUIREMENT"
+    },
+    {
+      "id": "EVIDENCE_RETENTION_EXHAUSTED",
+      "family": "effect_recovery",
+      "stimulus": "The owner can no longer prove whether the original action committed because its authoritative receipt coverage is exhausted.",
+      "required_outcome": "Return EFFECT_UNKNOWN, report the missing coverage, and block modifying continuation on that target until an owner ruling resolves the ambiguity.",
+      "evidence_required": "Original action identity, retention/coverage statement, and explicit absence of a NOT_APPLIED inference.",
+      "non_goal": "No compensating store, guessed result, or duplicate execution.",
+      "execution_state": "NOT_RUN_CONTRACT_REQUIREMENT"
+    },
+    {
+      "id": "REAUTHORIZED_DUPLICATE_RECONCILES_ORIGINAL",
+      "family": "effect_recovery",
+      "stimulus": "A caller is reauthorized after a lost response and submits the same intended mutation again.",
+      "required_outcome": "The owner correlates to the original action and returns its canonical result or EFFECT_UNKNOWN; reauthorization does not create effect two.",
+      "evidence_required": "Original action identity, duplicate correlation, reauthorization boundary, and exactly one owner-native effect record.",
+      "non_goal": "A refreshed grant never resets effect history.",
+      "execution_state": "NOT_RUN_CONTRACT_REQUIREMENT"
+    },
+    {
+      "id": "ATTENDED_COMMAND_RESPONSE_LOST_NO_PROCESS_TWO",
+      "family": "direct_access",
+      "stimulus": "start_attended_command consumes an owner-issued launch reference and the launch response is lost.",
+      "required_outcome": "reconcile_attended_command_start resolves the same launch reference to one process, NOT_APPLIED, or EFFECT_UNKNOWN; no second process is started.",
+      "evidence_required": "Attended command start reference, process-owner receipt, one process identity, and duplicate-start refusal/reconciliation.",
+      "non_goal": "No retry, backend switch, carrier switch, or fabricated process reference.",
+      "execution_state": "NOT_RUN_CONTRACT_REQUIREMENT"
+    },
+    {
+      "id": "ATTENDED_FOREIGN_OR_STALE_TARGET_OPTION_REFUSED",
+      "family": "direct_access",
+      "stimulus": "A caller presents a target option issued to another conversation/subject or from a stale policy generation.",
+      "required_outcome": "prepare_attended_context returns REFUSED before backend access and leaves every current context unchanged.",
+      "evidence_required": "Opaque option identity, subject/conversation/generation mismatch, zero backend call, and zero implicit resource creation.",
+      "non_goal": "An option reference alone is never an access grant.",
+      "execution_state": "NOT_RUN_CONTRACT_REQUIREMENT"
+    },
+    {
+      "id": "PATCH_THEN_READ_LIVE_BYTES_BASELINE_UNCHANGED",
+      "family": "direct_access",
+      "stimulus": "An allowed workspace patch changes uncommitted bytes while the committed Git baseline remains unchanged.",
+      "required_outcome": "A subsequent file read returns the new live bytes, unchanged committed baseline reference, advanced working-tree observation, exact file identity, and content hash.",
+      "evidence_required": "Before/after live observations, committed baseline identity, patch receipt, file identity, and postimage hash.",
+      "non_goal": "Do not create a commit or synthetic source version merely to represent live bytes.",
+      "execution_state": "NOT_RUN_CONTRACT_REQUIREMENT"
+    },
+    {
+      "id": "STALE_SEARCH_NEVER_EXHAUSTIVE",
+      "family": "direct_access",
+      "stimulus": "A live patch is newer than the indexed search generation.",
+      "required_outcome": "Search returns STALE_OR_INCOMPLETE or equivalent with requested/indexed observations, coverage, and continuation; it never concludes the symbol/content is absent from the live worktree.",
+      "evidence_required": "Requested worktree observation, indexed observation, invalidation/refresh state, coverage, truncation, and freshness.",
+      "non_goal": "No second index and no absence claim from stale coverage.",
+      "execution_state": "NOT_RUN_CONTRACT_REQUIREMENT"
+    },
+    {
+      "id": "ATTENDED_PROFILE_WORKER_VALIDATION_TOOL_REFUSED",
+      "family": "profile_separation",
+      "stimulus": "An ATTENDED_WEB_OPERATOR caller attempts list_validation_recipes, prepare_validation_start, start_validation, or reconcile_validation_start.",
+      "required_outcome": "The profile/tool gate returns REFUSED before any Executive or process-owner launch path; no Job, Attempt, Worker, process, or validation action is synthesized.",
+      "evidence_required": "Authenticated attended profile, explicit permitted_profiles mismatch, zero Executive admission, zero process creation, and unchanged current context.",
+      "non_goal": "Do not auto-upgrade attended work into BOUNDED_WORKER or create a shadow lifecycle.",
+      "execution_state": "NOT_RUN_CONTRACT_REQUIREMENT"
+    },
+    {
+      "id": "ATTENDED_WORKSPACE_CONTEXT_REQUIRED",
+      "family": "profile_separation",
+      "stimulus": "An attended caller invokes a workspace read/change tool without the current workbench_context_ref or with a foreign, stale, expired, or revoked context.",
+      "required_outcome": "The owner returns REFUSED before backend access and proves NOT_APPLIED for any prepared mutation; no ambient project, workspace, source, or prior context is selected.",
+      "evidence_required": "Exact profile/tool pair, context validation result, policy/capability generation, zero backend access, zero prepared action, and unchanged context.",
+      "non_goal": "Surface membership, active tab, last target, or process history never substitutes for context.",
+      "execution_state": "NOT_RUN_CONTRACT_REQUIREMENT"
+    }
+  ],
+  "current_observation_epochs": [
+    {
+      "id": "DC_EPOCH_20260906_ATTENDED_PASS",
+      "state": "PROVEN_LIVE / BOUNDED_ATTENDED_EPOCH",
+      "proof": "Disposable file create/update/readback and real exit-0/exit-7 command evidence under one attended connection.",
+      "ceiling": "No managed-service, unattended, fleet, first-party Workbench, or strong-confinement proof."
+    },
+    {
+      "id": "DC_EPOCH_20260906_DEGRADED",
+      "state": "BROKEN_OR_DEGRADED / OBSERVATION_UNAVAILABLE",
+      "proof": "Device ping remained healthy while useful file, metadata, shell, and history observations timed out.",
+      "ceiling": "Ping alone did not prove command readiness, authorization continuity, or owner release."
+    },
+    {
+      "id": "DC_EPOCH_20260907_UNMANAGED_PASS",
+      "state": "PROVEN_LIVE / UNMANAGED_ATTENDED_FILE_AND_SHORT_COMMAND",
+      "service_state": "MANAGED_SERVICE_DISABLED_OR_UNLOADED",
+      "proof": "Issue #507 evidence and this repair session separately showed an unmanaged finite file/short-command path.",
+      "ceiling": "No managed cutover, managed acceptance, unattended host route, or autonomous production proof."
+    }
+  ],
+  "current_owner_dependencies": [
+    {
+      "pr": 513,
+      "capability": "native role descriptors",
+      "state": "SOURCE_PROTECTED / INSTALLED_USE_NOT_PROVEN"
+    },
+    {
+      "pr": 516,
+      "capability": "Personal four-read E1 source",
+      "state": "SOURCE_PROTECTED / BUILT_NOT_PROVEN / PRODUCTION_INERT"
+    },
+    {
+      "pr": 517,
+      "capability": "ASF-F0 authority architecture",
+      "state": "SOURCE_PROTECTED / RECORDS_ONLY / SPEC_ONLY"
+    },
+    {
+      "pr": 519,
+      "capability": "selected-project Workbench read package",
+      "state": "SOURCE_PROTECTED / BUILT_NOT_PROVEN / NOT_INSTALLED"
+    },
+    {
+      "pr": 491,
+      "capability": "runtime delayed Wake/continuity",
+      "state": "OPEN / DRAFT / HOLD / END_TO_END_NOT_PROVEN"
+    },
+    {
+      "pr": 514,
+      "capability": "Web-Sol census read admission",
+      "state": "SOURCE_PROTECTED / BUILT_NOT_PROVEN / NOT_INSTALLED"
+    },
+    {
+      "pr": 520,
+      "capability": "Web-Sol popup snapshot truth and unknown inventory",
+      "state": "SOURCE_PROTECTED / BUILT_NOT_PROVEN / NOT_INSTALLED"
+    },
+    {
+      "pr": 471,
+      "protected_commit": "66a1125c4e0f02351f33dbf8c8583eb19ea1d2e4",
+      "capability": "provider-neutral Executive worker execution contract",
+      "contract_path": "control_plane/worker_execution_contract.py",
+      "contract_version": "mastermind.worker_execution_contract/v1",
+      "state": "SOURCE_PROTECTED / BUILT_NOT_PROVEN / PRODUCTION_INERT",
+      "consumed_by_profiles": [
+        "EXACT_OPERATOR",
+        "EXACT_OPERATOR_DESKTOP"
+      ],
+      "excluded_profile": "ATTENDED_WEB_OPERATOR",
+      "boundary": "Executive supervisors consume immutable provider-neutral launch, process, result, receipt, validation, status, and artifact-limit values. Concrete adapters exclusively own provider homes, credentials, and provider-specific launch mechanics. This dependency proves no RuntimeBinding, attended command, installation, deployment, or production execution."
+    }
+  ],
+  "linear_boundary": {
+    "pr490_projection": "NONE",
+    "mas_198": "Externally owned Web-Sol extension/native-bridge dependency; PR #490 neither owns nor gates it."
+  },
+  "current_source_collision_boundaries": {
+    "workbench_read": "PR #519 is the selected-project read dependency; authenticated caller subject is not exact ChatGPT conversation identity.",
+    "conversation_identity": "HC0 and Web-Sol v1 locator/probe evidence cannot mint mutating authority; exact conversation/generation comes from existing Web-Sol/RuntimeBinding owners.",
+    "executive_supervisor": "Requires a real Job/Attempt and therefore belongs to BOUNDED_WORKER, not hidden no-Job attended execution.",
+    "host_transport": "Remote Desktop Commander issue #507 retains its own carrier, operation, safe-drain, and managed/unmanaged boundaries.",
+    "source_continuity": "Read-only verification around the incumbent source writer; not writer, worktree creator, push, merge, retry, or release owner."
+  },
+  "host_injected_context_scope": "The legacy host_injected_context list is the Executive-bound EXACT_OPERATOR / EXACT_OPERATOR_DESKTOP envelope. It is not synthesized for ATTENDED_WEB_OPERATOR.",
+  "attended_injected_context": [
+    "authenticated_principal_ref",
+    "exact_conversation_identity_ref",
+    "conversation_generation",
+    "responsibility_ref",
+    "operation_key",
+    "workbench_context_ref",
+    "bound_target_ref",
+    "source_ref",
+    "granted_scopes",
+    "policy_generation",
+    "capability_generation",
+    "observed_at",
+    "expires_at",
+    "reconciliation_owner_ref"
+  ],
+  "profile_tool_gate_contract": {
+    "deny_by_default": true,
+    "surface_membership_grants_tool_access": false,
+    "rule": "Effective tool access is the intersection of the authenticated capability profile, the tool permitted_profiles allowlist, the current owner-issued binding, and the current policy/capability generation. A surface name alone grants nothing.",
+    "unknown_or_mismatched_pair": "REFUSED before backend access with NOT_APPLIED only when the owner proves zero effect.",
+    "worker_mode": "EXACT_OPERATOR and EXACT_OPERATOR_DESKTOP require a real Executive Job/Attempt/Worker/workspace binding for worker-validation preparation and launch.",
+    "attended_mode": "ATTENDED_WEB_OPERATOR requires the exact current conversation and one owner-issued workbench_context_ref. It may not invoke worker-validation launch tools or fabricate Job/Attempt/Worker identity.",
+    "shared_process_rule": "A process tool shared by worker and attended profiles accepts only a process_ref issued under the same current profile binding; a foreign-profile or stale-generation process_ref is refused before effect."
+  },
+  "revision_generation": "PR490_REPAIR_CANDIDATE_V6_CURRENT_SOURCE_PROFILE_GATED_SOURCE_ONLY",
+  "protected_worker_execution_dependency": {
+    "pr": 471,
+    "protected_commit": "66a1125c4e0f02351f33dbf8c8583eb19ea1d2e4",
+    "capability": "provider-neutral Executive worker execution contract",
+    "contract_path": "control_plane/worker_execution_contract.py",
+    "contract_version": "mastermind.worker_execution_contract/v1",
+    "state": "SOURCE_PROTECTED / BUILT_NOT_PROVEN / PRODUCTION_INERT",
+    "consumed_by_profiles": [
+      "EXACT_OPERATOR",
+      "EXACT_OPERATOR_DESKTOP"
+    ],
+    "excluded_profile": "ATTENDED_WEB_OPERATOR",
+    "boundary": "Executive supervisors consume immutable provider-neutral launch, process, result, receipt, validation, status, and artifact-limit values. Concrete adapters exclusively own provider homes, credentials, and provider-specific launch mechanics. This dependency proves no RuntimeBinding, attended command, installation, deployment, or production execution."
+  }
 }

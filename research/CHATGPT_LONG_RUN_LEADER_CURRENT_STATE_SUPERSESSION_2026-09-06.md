@@ -1,175 +1,102 @@
 # ChatGPT long-run leader — current-state supersession register
 
-**Date:** 2026-09-06  
+**Repair marker:** `PR490-B1-B5-DIRECT-ACCESS-REPAIR-20260907`
+**Corrected through:** 2026-09-07
 **Parent operation:** `chatgpt-pro-long-run-leaders-research-20260905-sol-001`  
-**Evidence-refresh operation:** `chatgpt-pro-long-run-fs0-evidence-refresh-20260906-sol-002`  
-**Carrier:** Mastermind Draft PR #490  
-**Authority:** `RECORDS_ONLY / CURRENT_STATE_CORRECTION / NO_RUNTIME_INSTALL_DISPATCH_OR_RELEASE_AUTHORITY`  
-**Capability state:** `SPEC_ONLY / PARTIAL_EVIDENCE / ATTENDED_VENDOR_FILE_SHELL_INTERACTIVE_PROCESS_PASSIVE_VISUAL_PROVEN / GOVERNED_FS0_NOT_PROVEN`
+**Carrier:** Mastermind Draft PR #490, branch `sol/chatgpt-pro-long-run-leaders-research-20260905`
+**Integrated protected master:** `66a1125c4e0f02351f33dbf8c8583eb19ea1d2e4` through material-dependency history-preserving merge `365f068e938297356180a4cf9713ba62b9625683`
+**Original reviewed PR head:** `65f178f0b21d0976d9dde6c765197a6f68b72d61`
+**Authority:** `RECORDS_ONLY / CURRENT_STATE_CORRECTION / NO_RUNTIME_INSTALL_DISPATCH_RELEASE_OR_LINEAR_AUTHORITY`
+**Capability state:** `SPEC_ONLY / SOURCE_REPAIR_CANDIDATE / FRESH_FULL_REVIEW_REQUIRED`
 
-## Purpose and precedence
+## Precedence and correction law
 
-The original PR #490 research set was assembled across several protected-source and operating-state transitions. Its product thesis and architecture remain useful, but sections labeled **current**, **next action**, **critical path**, **active owner**, or **release sequence** became stale after:
+This register supersedes older PR #490 claims labeled current, next, active, repaired, selected, or release-ready. It preserves dated observations as observations; it does not retroactively change them. Current action truth is recovered from the canonical owner at the action boundary. This source candidate, a green check, a merge, a plugin connection, or a receipt does not by itself create installation, managed-service readiness, Executive admission, provider execution, production proof, or final acceptance.
 
-- protected PR #500 landed U1 installation-binding/enrollment tooling;
-- the old records-recovery Slack child remained unconsumed and was terminally closed;
-- the Chairman selected direct Web-CEO access to one real Mac Studio file/shell slice as the quickest useful product vertical;
-- a concrete FS0 plan and disposable helper evidence were published;
-- author-side review identified and repaired contract, connector-evidence and evaluation-admission defects;
-- immutable PR #490 comment `5559023488` proved one attended Remote Desktop Commander file/write/shell smoke connection;
-- independent later receipt `5559187015` proved interactive process input, exact-owned-process cancellation, passive Mac observation and actual cropped-image delivery to a Web CEO;
-- later same-author receipt `5559231616` independently reproduced checked file/edit/shell proof and exposed the current connection's missing confinement, transient completed-process retention and broken exported `edit_block` schema.
+The final immutable repair head is read from the PR carrier after commit rather than embedded in its own bytes. Review must target that exact head and current protected source.
 
-This register is the current records interpretation for PR #490. When a dated statement conflicts with this register or an in-place corrected artifact, use this order:
+## Binding source-repair rulings
 
-1. current protected Mastermind procedure and canonical owner readback at the action boundary;
-2. this current-state register at the latest PR #490 exact head;
-3. the machine-readable capability crosswalk at that same head;
-4. older PR #490 “current/next action” prose as historical evidence only.
+1. Common modifying effect truth is exactly `NOT_APPLIED | APPLIED | EFFECT_UNKNOWN`.
+2. `REFUSED` is response status. `PARTIAL` is owner-native/per-step outcome evidence, never a fourth common effect state.
+3. Commit permission, receipt-read permission, and durable original-action correlation are distinct. Expiry, revocation, credential/session rotation, succession, reauthorization, timeout, cancellation, reconnect, and evidence loss never erase a possible effect or authorize replay.
+4. The trusted existing host/resource/source owner selects actual source and target. A caller assertion is mismatch-only; a match grants nothing.
+5. `ATTENDED_WEB_OPERATOR` is a bounded technical grant, not a Job, Attempt, Worker, organizational role, source-writer assignment, account election, or autonomous fleet entitlement.
+6. Every mutator consumes one owner-issued pre-effect identity at most once and has a dedicated read-only same-action reconciliation path. Unknown effect remains on the same carrier until resolved.
+7. Committed source, live working-tree bytes, indexed search freshness, process output, terminal truth, and production proof are separate evidence layers.
 
-This document does not erase history, retroactively alter a prior observation or grant implementation authority.
+## Observation epochs — preserved, not averaged
 
-## Exact source and evidence snapshot
+| Epoch | State | Proven evidence | Proof ceiling |
+|---|---|---|---|
+| `DC_EPOCH_20260906_ATTENDED_PASS` | `PROVEN_LIVE / BOUNDED_ATTENDED_EPOCH` | Disposable file create/update/readback and real exit `0` / exit `7` under one attended connection. | No managed service, unattended route, fleet capability, first-party Workbench seam, or strong confinement. |
+| `DC_EPOCH_20260906_DEGRADED` | `BROKEN_OR_DEGRADED / OBSERVATION_UNAVAILABLE` | Device ping remained healthy while useful file, metadata, shell, and history calls timed out. | Ping is not command readiness, authority continuity, or owner release. |
+| `DC_EPOCH_20260907_UNMANAGED_PASS` | `PROVEN_LIVE / UNMANAGED_ATTENDED_FILE_AND_SHORT_COMMAND`; `MANAGED_SERVICE_DISABLED_OR_UNLOADED` | Issue #507 evidence and this bounded repair session separately observed an unmanaged finite file/short-command path. | No managed cutover/acceptance, unattended host route, autonomous production, or carrier transfer. |
 
-- protected `master`: `467a81e84b08a7f1c3cdb9a410b2f7857816675d`
-- protected tree: `3b6c3a02440dd77055756d4a4ff4a5f7a91feeca`
-- protected procedure compatibility: Skillpack `1.0.1`, bootstrap major `1`
-- protected movement: PR #500, **Add Business Sol U1 installation binding compiler**
-- PR #490 branch before this refresh: `19c9abb721a42de55488d00dff6f1b11869bffc8`
-- attended file/shell baseline: comment `5559023488`, created `2026-09-06T11:51:37Z`
-- attended process/passive-visual follow-through: comment `5559187015`, created `2026-09-06T12:23:22Z`
-- attended confinement/schema/retention observation: comment `5559231616`, created `2026-09-06T12:31:47Z`
-- Agent OS discovery candidate: Macro Draft/Hold PR #6944, observed head `de6fe26a484e249cc2d78febb1e5e830895cece2`
-- branch/tree and checks must be refreshed after this records commit and before review or release adjudication.
+The September 7 observation does not erase the September 6 failure epoch. The failure epoch does not erase earlier bounded successes. Every claim carries its observation time, owner, path, and ceiling.
 
-## Evidence epoch — what is actually proven
+## Current owner and source collision boundaries
 
-### File and shell baseline
+Authenticated Workbench caller identity is not exact ChatGPT conversation identity. PR #519 protects a selected-project read package, but its caller identity proves subject/client/resource/scope rather than the exact current ChatGPT conversation and generation. It remains `BUILT_NOT_PROVEN / NOT_INSTALLED` and must be extended or consumed, not recreated.
 
-On explicit device `cfd09f03-2e6e-4a24-843c-8401d4a7169d`, the connected Web sessions proved:
+HC0 is a pseudonymous correlation falsifier, not authorization. Web-Sol v1 census/locator evidence is not exact document, conversation, or RuntimeBinding attestation. Exact current conversation and generation must come from the existing Web-Sol/RuntimeBinding authority chain; URL, title, active tab, newest tab, authenticated subject, and fingerprint cannot mint mutating authority.
 
-- synthetic native seed list/read;
-- disposable create, separate read, one complete-preimage-checked single-file edit and exact-byte readback;
-- Unicode-preserving final file of 102 UTF-8 bytes with SHA-256 `f33c27f5cae5281248b3fe3dd17ca4c9a57ec9c8ee667316fa717b20ff3afd1f`;
-- one independently read completed process with exit `0`;
-- one independently read intentional nonzero process with exit `7`.
+Executive supervisor requires a real Job/Attempt. A path using it is `BOUNDED_WORKER`; it cannot secretly implement no-Job `ATTENDED_WEB_OPERATOR`. Protected PR #471 now supplies the provider-neutral `mastermind.worker_execution_contract/v1` values for that Executive-bound path, while concrete adapters exclusively own provider homes, credentials, and provider-specific launch mechanics. PR #471 is `SOURCE_PROTECTED / BUILT_NOT_PROVEN / PRODUCTION_INERT`; it creates no RuntimeBinding or attended-command proof. A no-Job attended command requires a separately adjudicated facade over an existing process/host owner and may not create a shadow lifecycle or process registry.
 
-The exposed stream was not separately typed stdout/stderr. The checked shell edit is not a first-party patch service or cross-process compare-and-swap claim.
+Remote Desktop Commander issue #507 retains sole host-transport maintenance ownership, its attached unmanaged obligation, safe-drain boundary, and managed-service state. PR #490 owns no cutover, restart, command release, fallback, or transport acceptance.
 
-### Interactive process and passive visual baseline
+Source Continuity is read-only verification around the incumbent writer. It is not a writer, worktree creator, ownership-transfer mechanism, push/merge agent, retry owner, or release owner.
 
-Receipt `5559187015` additionally proves:
+## Current external dependencies
 
-- stateful input to one isolated owned process across multiple tool calls, ending exit `0`;
-- force termination of one exact owned `sleep` process, followed by terminal readback with `exit=null` and independent process absence;
-- native application/window observation through installed Peekaboo;
-- a bounded `480x64` Finder-toolbar capture returned as actual image bytes to the Web model.
+| Carrier | Capability | Current evidence state | PR #490 boundary |
+|---|---|---|---|
+| PR #513 | native role descriptors | `SOURCE_PROTECTED / INSTALLED_USE_NOT_PROVEN` | External owner; consume at its proof ceiling and do not transfer ownership. |
+| PR #516 | Personal four-read E1 source | `SOURCE_PROTECTED / BUILT_NOT_PROVEN / PRODUCTION_INERT` | External owner; consume at its proof ceiling and do not transfer ownership. |
+| PR #517 | ASF-F0 authority architecture | `SOURCE_PROTECTED / RECORDS_ONLY / SPEC_ONLY` | External owner; consume at its proof ceiling and do not transfer ownership. |
+| PR #519 | selected-project Workbench read package | `SOURCE_PROTECTED / BUILT_NOT_PROVEN / NOT_INSTALLED` | External owner; consume at its proof ceiling and do not transfer ownership. |
+| PR #491 | runtime delayed Wake/continuity | `OPEN / DRAFT / HOLD / END_TO_END_NOT_PROVEN` | External owner; consume at its proof ceiling and do not transfer ownership. |
+| PR #514 | Web-Sol census read admission | `SOURCE_PROTECTED / BUILT_NOT_PROVEN / NOT_INSTALLED` | External owner; consume at its proof ceiling and do not transfer ownership. |
+| PR #520 | Web-Sol popup snapshot truth and unknown inventory | `SOURCE_PROTECTED / BUILT_NOT_PROVEN / NOT_INSTALLED` | External owner; consume at its proof ceiling and do not transfer ownership. |
+| PR #471 | provider-neutral Executive worker execution contract | `SOURCE_PROTECTED / BUILT_NOT_PROVEN / PRODUCTION_INERT` | `BOUNDED_WORKER` values only; provider homes/credentials stay adapter-private; no attended or RuntimeBinding capability. |
 
-It does not prove arbitrary descendant-tree cleanup, restart/cross-chat durability, active desktop mutation, browser attachment, exact ChatGPT identity, pointer isolation or unattended actuation.
+PR #520 clears stale popup snapshots and preserves unavailable inventory as unknown; it does not establish exact conversation/document/RuntimeBinding identity, installation, command authority, or production capability.
 
-### Current connection does not satisfy governed isolation
+## Review and proposal lineage
 
-Receipt `5559231616` records two fresh `get_config` reads with:
+- Full review `5126193148` remains the five-finding B1-B5 blocker until a fresh full exact-head review accepts coherent source.
+- Direct-access review `5126501266` remains blocking for attended mode, owner-issued target selection, real command prepare/start/reconcile, independent process cursors, and live-worktree/search freshness.
+- Comment `5566682171` remains `PROPOSED_UNADOPTED` at its historical epoch. Accepted semantics are independently re-expressed in this candidate source; the comment itself never became authority, runtime schema, or review acceptance.
+- The prior statement that the old blob had already repaired B1-B3 is withdrawn. The old reviewed head `65f178f0b21d0976d9dde6c765197a6f68b72d61` remains changes-requested evidence.
 
-- `allowedDirectories: []`;
-- `telemetryEnabled: true`.
+## Linear boundary
 
-A second owned synthetic control file outside the declared proof root was ordinarily readable. No private user file or credential was probed. The supported conclusion is that the current connection does **not** enforce the proposed pilot root and does not satisfy the intended telemetry posture. It is not a vulnerability claim and no global configuration was changed.
-
-### Exported surgical-edit schema is broken at a later boundary
-
-The installed local schema plus its installed converter produced the expected object requiring `file_path` with eight fields: `file_path`, `old_string`, `new_string`, `expected_replacements`, `range`, `content`, `options`, and `origin`. The model-facing connection still exposes zero-argument `edit_block`.
-
-The underlying local editor schema is therefore present. The exact registration/cache/remote-integration/client-conversion loss boundary remains `UNKNOWN`. No blind empty edit, vendor patch, restart or reinstall was performed.
-
-### Completed process evidence is transient
-
-A later read of previously successful PID `92561` returned `No session found`. The command was not rerun. Installed `dist/terminal-manager.js:350-367` retains only the last 100 completed sessions in a shared in-memory map and removes the oldest entry beyond that bound. Eviction is a supported explanation, but the exact loss cause for that PID was not established.
-
-A vendor PID is therefore not durable long-run evidence and cannot be the sole reconciliation identity. The accepted design must retain exact terminal/effect/output receipts through existing provider/Attempt and GitHub/evidence owners. Missing transient output never authorizes replay of a possible effect. Do not create a second process manager, PID ledger, log database, polling daemon or retry store.
+`Linear: NONE` is the only truthful PR #490 projection pending an explicit non-colliding owner ruling. MAS-198 is the externally owned Web-Sol extension/native-bridge program. It is not owned or gated by PR #490, and this repair performs no Linear mutation.
 
 ## Current capability ledger
 
-| Capability | Current classification | Evidence and missing gate |
-|---|---|---|
-| Long-run leader product thesis and owner architecture | `SPEC_ONLY / REPAIR_IN_PROGRESS` | Strong records candidate; no independent current-head architecture acceptance yet. |
-| Governed Workbench contract | `SPEC_ONLY / CONTRACT_BLOCKERS_REPAIRED_IN_SOURCE` | Revision 2 excludes model-selected operation/source authority and supplies pre-effect reconciliation. No first-party implementation or contract-qualified canary. |
-| 24-task evaluation | `TEMPLATE_ONLY / NOT_PREREGISTERED / NOT_RUN` | Twenty-four task definitions remain; no executable fixtures or authorization. |
-| Output-helper characterization | `PARTIAL_EVIDENCE` | 57 unique disposable helper cases passed once, with one identical repeat; no whole upstream build or real Workbench consumer. |
-| GitHub connector authority evidence | `PARTIAL_EVIDENCE` | One real comment write proven; effective installation/token/repository/action/stale-session scope remains unverified. |
-| U1 installation binding/enrollment tooling | `SOURCE_PROTECTED / BUILT_NOT_PROVEN / PRODUCTION_INERT` | PR #500 protected deterministic tooling; no package publication, install, OAuth or live read. |
-| Business Steward S1 | `PARTIAL / DRAFT_HOLD` | PR #463 has truthful partial source; current-base/release, app, auth, useful read, refresh and rollback remain. Its old builder is terminal. |
-| Attended vendor file/write/shell | `PROVEN_LIVE / ONE_CURRENT_CONNECTION / BOUNDED_SYNTHETIC_ONLY` | Comments `5559023488` and `5559231616` prove the listed synthetic file/edit/exit-0/exit-7 path. |
-| Attended interactive process input/cancel | `PROVEN_LIVE / ONE_CURRENT_CONNECTION / EXACT_OWNED_PROCESS_ONLY` | Comment `5559187015`; cancellation returned `exit=null`, not success, and arbitrary tree cleanup remains unproved. |
-| Attended passive Mac image delivery | `PROVEN_LIVE / ONE_CURRENT_CONNECTION / PASSIVE_CROP_ONLY` | Comment `5559187015`; no click, typing, focus, navigation, browser attachment or exact-chat action. |
-| Pilot root isolation | `UNSATISFIED_ON_CURRENT_CONNECTION` | `allowedDirectories=[]`; a second owned synthetic path outside the declared proof root was readable. |
-| Pilot telemetry posture | `UNSATISFIED_ON_CURRENT_CONNECTION` | `telemetryEnabled=true`; no setting mutation or waiver is recorded. |
-| Surgical `edit_block` tool | `BROKEN_ON_EXPOSED_CONNECTION / LOCAL_SCHEMA_PRESENT` | Local conversion yields eight fields; the connection exposes zero arguments; loss boundary unknown. |
-| Durable process-result retrieval | `PARTIAL / TRANSIENT_SHARED_MEMORY` | A completed PID later disappeared; installed manager retains only the last 100 completed sessions. |
-| FS0 source branch, implementation PR or child START | `NOT_PROVEN / PRESTART` | No public first-party FS0 implementation branch, receiver ACK or START was found. The working vendor connection does not create that lifecycle. |
-| Complete governed FS0 | `NOT_PROVEN` | No enforced isolated policy, source/Attempt binding, durable structured receipt path, lost-response proof, pilot-only revoke/reconnect or unchanged Executive proof. |
-| Exact dormant ChatGPT wake | `PARTIAL / NOT_PROVEN_END_TO_END` | Durable process/return and exact inactive-session wake remain separate claims. |
-| All-reachable-mutator stale-session fencing | `NOT_BUILT_AS_PROVEN_CAPABILITY` | Closed vocabulary and falsifier exist; complete route inventory/evidence does not. |
-| Fleet-scale multi-account autonomy | `NOT_PROVEN` | Capacity, binding, wake, permissions, review throughput and real product outcomes remain separate prerequisites. |
+| Capability | State | What exists | What remains |
+|---|---|---|---|
+| Long-run leader product thesis | `SPEC_ONLY / SOURCE_REPAIR_CANDIDATE` | Persistent responsibility with replaceable reasoning and one experience over federated owners. | Fresh full exact-head non-author review. |
+| Governed Workbench contract | `SPEC_ONLY` | Three-state effect law, same-action history, attended profile, target selection, command triplet, cursor and freshness contracts in candidate source. | Owner implementation, installation, real producer/consumer proof, acceptance. |
+| Selected-project read | `BUILT_NOT_PROVEN / NOT_INSTALLED` via PR #519 | Existing source-protected read dependency. | Exact-conversation binding, install, useful attended journey, rollback/readback. |
+| Provider-neutral worker contract | `BUILT_NOT_PROVEN / PRODUCTION_INERT` via protected PR #471 | Immutable common worker values with provider home/configuration removed from the supervisor contract. | No provider launch, install, production proof, RuntimeBinding, or attended-mode implementation follows. |
+| Host file/short command | epoch-bounded as above | Bounded attended and unmanaged observations. | Managed state, first-party seam, safe drain, durable receipt, security proof. |
+| 24-task evaluation | `TEMPLATE_ONLY / NOT_PREREGISTERED / NOT_RUN` | Task-bank structure only. | Separate immutable preregistration, admission, execution, grading, statistics. |
+| Eleven repair discriminators | `NOT_RUN_CONTRACT_REQUIREMENT` | Contract and casebook definitions, including profile/tool and attended-context separation. | Owner-native implementation and proof after architecture acceptance. |
+| Full product completion | `NOT_BUILT / NOT_PROVEN` | No complete premium workflow or production learning loop follows from this repair. | Truth, intelligence, product, and learning proof through real users/machines. |
 
-## Current Lane A — governed Web-CEO host access
+## Post-acceptance vertical sequence — no implementation admission
 
-**Observable mission:** one authorized Web CEO completes a useful, isolated, source/effect-bound file/process journey through one existing executor, with durable receipts and pilot-only revoke/readback.
+1. `WB-R1`: exact target/context issuance through existing Web-Sol/RuntimeBinding and resource/auth owners.
+2. `WB-R2`: selected-project read through PR #519 with useful output and honest degraded/unknown behavior.
+3. `WB-C1`: real attended command prepare/start/reconcile over the existing process owner.
+4. `WB-F1`: patch/read/search freshness over existing worktree and CodeIntel owners.
+5. `WB-P1`: independent process observers, retained/gap ranges, and terminal truth.
+6. `WB-PROD1`: first-party user journey, managed release/rollback, instrumentation, and production acceptance.
 
-**Existing owner:**
+Each vertical needs its own current admission, owner, one carrier, implementation tests, real input through the real path, and durable proof. PR #490 admits none of them.
 
-- operation: `personal-mcp-cockpit-integration-20260906-sol-001`
-- carrier: `D0BTAKPHX8S/1788689346.571769`
-- Cockpit task: `01a06f73-d4cf-7933-8268-d3c9644bc63d`
-- Integration task: `01a06f72-aaae-77f1-a3fb-28f5d05c107a`
-- proposed child: `web-ceo-workbench-fs0-20260906-sol-001`
-- last verified child state: `NOT_SUBMITTED / PRESTART`
-- accessible transport pointer: `C0BSBM78V1N/1788695066.321929`, effect `NONE`.
+## Exact continuation and stop condition
 
-The current Slack identity cannot read the canonical DM carrier and therefore cannot infer owner pickup or first-party child execution. The public pointer is evidence transport only. It is not a replacement carrier.
-
-**Proven; do not repeat merely to enlarge the record:** baseline synthetic file/write/checked-edit/readback, exit `0`, exit `7`, exact-owned interactive process input, exact-owned process cancellation readback, passive bounded image delivery and the current connection's schema/configuration observations.
-
-**Smallest remaining product composition:**
-
-1. **Schema delivery:** preserve the existing local editor; locate and repair the exact supported boundary that strips the exported `edit_block` schema, with discovery/readback tests.
-2. **Structured durable evidence:** expose typed launch/input/cancel/terminal/effect/output receipts, explicit retention/coverage, owner-issued pre-effect identity and loss-safe reconciliation through existing provider/Attempt and GitHub/evidence owners.
-3. **Isolated policy and revoke:** one pilot-specific nonempty root policy, synthetic traversal/symlink/out-of-scope refusals, bounded command/environment/output/timeout behavior, explicit telemetry disposition, disconnect/revoke/reconnect and proof that the existing Executive connection is unchanged.
-4. **First-party seam:** exact source/Attempt/worker binding and independent consumer readback. The working vendor connection is a provider, not the lifecycle or evidence owner.
-
-Browser attachment and active desktop action remain separately admitted later capabilities. The passive image receipt does not authorize clicking, typing or generic mutation of the originating CEO conversation.
-
-**No-rebuild boundary:** reuse one existing suitable executor and supported private transport. Do not build both OpenClaw and DesktopCommander adapters; repoint Executive; add a scheduler, lifecycle, permission database, process manager, PID registry, log store, retry plane, transcript memory, cloud relay, new Mac app or browser extension.
-
-## Current Lane B — authenticated Business Steward cockpit
-
-**Observable mission:** one selected Business cockpit obtains useful nonempty source-attributed company reads, honest degraded states, a successful read after access-token expiry/refresh and rollback while two Personal-Pro controls remain unchanged.
-
-**Current truth:** PR #500 protects U1 binding/enrollment tooling only. Do not commission another U1 source-publication worker. PR #463 remains the truthful partial S1 carrier; its prior writer is terminal and must not be revived.
-
-**Remaining gates:** current-base/release resolution, immutable package/app generation, publication/import/install, endpoint and OAuth/resource/subject/client configuration, useful reads, degraded states, post-expiry refresh, independent evidence acceptance and rollback/readback.
-
-## Skillpack and Agent OS boundaries
-
-The later host proof identifies a useful future cold-start rule: a Web Sol should discover currently connected host capabilities before claiming that computer/file access is unavailable. Protected PR #147 already owns an overlapping frozen Skillpack 1.1.0 candidate and a missing 16-run behavioral gate. Do not mutate or widen #147 from this carrier, do not invalidate its frozen procedure bytes, and do not create another Skillpack authority plane. Composition requires a separate current-source ruling after #147's exact state is reconciled.
-
-Macro Draft/Hold PR #6944 records the load-bearing Desktop Commander discovery in the existing Agent OS discovery plane. It has one added discovery only and no workstream-status, worker, runtime, FS0 acceptance or release effect. It must pass current Agent OS validation and independent review before any merge; its existence does not substitute for the current owner decision above.
-
-## Terminal recovery child
-
-The read-only lookup `chatgpt-pro-long-run-evidence-reconciliation-20260905-sol-001`, root `C0BSBM78V1N/1788668858.166259`, received no receiver ACK, START, RESULT or other reply. Sol posted and read back explicit terminal `CLOSED / STOP` at `1788694916.617049`.
-
-Do not pick up, resume, replace or fan out that child. Historical claims about a Secretary canary, an independent review execution and two audit artifacts remain `DELIVERY_UNVERIFIED / NOT_RECOVERED`. Search absence is not proof that they never existed.
-
-## Executive runtime observation
-
-The Executive connector visible to this Sol returned fixture/degraded state with no live database or trustworthy Job/Attempt/Worker admission readback. Do not convert a Slack transport receipt into Executive execution and do not submit a duplicate runtime job from this research carrier.
-
-## Exact next action
-
-1. Finish this bounded PR #490 evidence refresh and publish one exact-head/source/check/review/thread checkpoint.
-2. The existing Personal-MCP Cockpit/Integration owner consumes comments `5559023488`, `5559187015` and `5559231616`, reconciles the DM carrier and any proposed child/effect, and freezes the smallest schema-delivery + durable-terminal-evidence + isolated-policy/revoke composition over one existing executor.
-3. Validate and independently review Macro PR #6944 as a records-only Agent OS discovery without advancing workstream or FS0 status.
-4. Existing Steward/Integration owners continue the independent one-cockpit read lane.
-5. After the PR #490 records refresh is immutable and checks are terminal, obtain one exact-head independent architecture review. Do not treat an evidence comment as that review.
-6. Keep PR #490 Draft/Hold until independent review and release adjudication. A records merge would preserve evidence only; it would not install, configure, isolate, revoke, execute or accept the governed Workbench.
+Complete only this same-carrier source repair, deterministic checks, current-base/path verification, immutable push, and fresh full non-author review request. Keep PR #490 Draft/Hold. Stop before implementation, installation, host cutover, Linear mutation, provider execution, or merge. After review, Sol must explicitly accept/repair/stop against the exact reviewed head; silence is not acceptance.

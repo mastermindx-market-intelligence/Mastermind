@@ -1,11 +1,11 @@
 {
   "document_type": "research_capability_crosswalk",
-  "schema_version": 2,
+  "schema_version": 3,
   "date": "2026-09-06",
   "parent_operation": "chatgpt-pro-long-run-leaders-research-20260905-sol-001",
   "publication_carrier": "Mastermind PR #490",
   "authority": "ADVISORY_CURRENT_STATE_SNAPSHOT_NOT_CANONICAL_STATE_ASSIGNMENT_OR_RELEASE",
-  "protected_source_basis": "467a81e84b08a7f1c3cdb9a410b2f7857816675d",
+  "protected_source_basis": "66a1125c4e0f02351f33dbf8c8583eb19ea1d2e4",
   "supersedes_blob": "a1ca3c40e6f1bc749976676edd96ba3ea299e161",
   "current_state_register": "research/CHATGPT_LONG_RUN_LEADER_CURRENT_STATE_SUPERSESSION_2026-09-06.md",
   "refresh_law": "Every carrier, entitlement, source, host, permission, action, effect and proof fact must be refreshed from its canonical owner immediately before action. This crosswalk never authorizes a Job, worker, source writer, app installation, permission change, provider turn, review, release or production effect.",
@@ -19,6 +19,7 @@
     "NOT_BUILT",
     "REJECTED_BY_DESIGN"
   ],
+  "state_rule": "research_state is exactly one member of state_vocabulary; qualifiers, proof ceilings, and carrier detail belong in current_evidence and next_useful_proof.",
   "parallel_frontier": [
     {
       "id": "WEB_CEO_FILE_SHELL_FS0",
@@ -80,7 +81,7 @@
         "Control Room",
         "OAuth and deployment owners"
       ],
-      "research_state": "PARTIAL_DRAFT_HOLD_U1_SOURCE_TOOLING_PROTECTED_PRODUCTION_INERT",
+      "research_state": "PARTIAL",
       "current_evidence": "Protected PR #500 provides deterministic U1 binding/enrollment source tooling only. PR #463 remains the truthful partial Steward S1 carrier; its old builder is terminal and must not be revived.",
       "next_useful_proof": "Resolve PR #463 on current protected source; generate immutable package/app material; publish/import/install; configure endpoint and OAuth/resource/subject/client identity; prove useful nonempty reads, explicit degraded state, post-expiry refresh, independent evidence acceptance and rollback with two unchanged Personal-Pro controls.",
       "must_not_build": [
@@ -118,7 +119,7 @@
         "CeoIngress",
         "Executive MCP or approved relay"
       ],
-      "research_state": "PARTIAL_PRODUCTION_WRITE_NOT_ASSUMED",
+      "research_state": "PARTIAL",
       "current_evidence": "The Executive connector visible during this continuation returned fixture/degraded state with no trustworthy live database or Job/Attempt/Worker admission readback.",
       "next_useful_proof": "One separately authorized harmless admission returns one idempotent QUEUED root with dispatched=false and zero unintended Attempt, Worker or Wake effect through the real production owner.",
       "must_not_build": [
@@ -137,7 +138,7 @@
         "Executive Attempt/Worker context",
         "Slack transport"
       ],
-      "research_state": "BUILT_NOT_PROVEN_AS_COMPLETE_CHATGPT_RETURN_LOOP",
+      "research_state": "BUILT_NOT_PROVEN",
       "current_evidence": "Source contracts and dialogue law exist. Delivery, pickup, START, execution, result consumption and exact leader wake remain distinct proofs.",
       "next_useful_proof": "A real returned child is consumed by the exact parent and receives explicit CONTINUE or STOP with child watcher cleanup and no lifecycle inference from Slack delivery.",
       "must_not_build": [
@@ -156,7 +157,7 @@
         "macro-context-index",
         "GitHub"
       ],
-      "research_state": "PARTIAL_ACTIVE_EXISTING_CARRIERS",
+      "research_state": "PARTIAL",
       "current_evidence": "Architecture and existing source carriers exist; broad production coverage, freshness and absence safety are not assumed by this research.",
       "next_useful_proof": "A real task finds owner and code evidence faster without treating stale, missing or truncated coverage as proof of absence.",
       "must_not_build": [
@@ -174,7 +175,7 @@
         "Executive Attempt/workspace",
         "worker provider"
       ],
-      "research_state": "PARTIAL_CURRENT_OWNER_RECONCILIATION_REQUIRED",
+      "research_state": "PARTIAL",
       "current_evidence": "Exact-worktree semantic design exists; current owner binding, language coverage, containment, cleanup and real canary proof remain separate.",
       "next_useful_proof": "Python and TypeScript/TSX exact-worktree canaries with closed source/result validation, containment, cleanup and current owner binding.",
       "must_not_build": [
@@ -193,7 +194,7 @@
         "supported private MCP tunnel",
         "host security"
       ],
-      "research_state": "PARTIAL_ATTENDED_VENDOR_READ_WRITE_PROVEN_COMPLETE_FS0_NOT_PROVEN",
+      "research_state": "PARTIAL",
       "current_evidence": "PR #490 comment 5559023488 proves explicit-device Web-to-Mac execution through one attended Remote Desktop Commander connection: bounded system/scratch reads plus disposable create/update/readback and exact-byte verification. It does not prove out-of-scope/traversal/symlink denial, revoke/reconnect, first-party Workbench/Executive integration, an FS0 source child, desktop/Chrome or unattended access.",
       "next_useful_proof": "Consume the existing receipt rather than repeat baseline reads; prove traversal, symlink and out-of-scope denial, disconnect/revoke/reconnect and unchanged Executive connectivity through the existing owner, then originate only the remaining gap implementation if evidence requires it.",
       "must_not_build": [
@@ -216,7 +217,7 @@
         "Source Continuity",
         "GitHub"
       ],
-      "research_state": "PARTIAL_ATTENDED_VENDOR_WRITE_SHELL_PROVEN_COMPLETE_FS0_NOT_PROVEN",
+      "research_state": "PARTIAL",
       "current_evidence": "PR #490 comment 5559023488 proves one disposable file create/update/readback, exact-byte comparison, one exit-0 shell process and one intentional exit-7 process on the explicit Mac device. The connector merged stdout/stderr and exposed malformed edit_block discovery; pre-effect/lost-response reconciliation, bounded timeout/cancel, rollback/revoke, independent observation and first-party integration remain unproven.",
       "next_useful_proof": "Use the functioning attended connection to close only remaining gaps: denied-path and stale-preimage cases, typed bounded output policy, timeout/cancel, loss-safe effect reconciliation, rollback/revoke and unchanged Executive readback. Do not add a second backend or rerun the already-proven exit-0/exit-7 baseline as a substitute.",
       "must_not_build": [
@@ -236,7 +237,7 @@
         "provider adapter",
         "existing process/session owner"
       ],
-      "research_state": "PARTIAL_PROVIDER_SPECIFIC",
+      "research_state": "PARTIAL",
       "current_evidence": "Provider and process lineages exist; a durable handle is not exact ChatGPT wake and a launch response lost before process identity requires pre-effect reconciliation.",
       "next_useful_proof": "One long command or worker survives client disconnect and is retrieved once under the same owner and pre-effect launch identity; cancellation request, terminal process and cleanup remain distinct.",
       "must_not_build": [
@@ -255,7 +256,7 @@
         "RuntimeBinding",
         "provider-native continuation"
       ],
-      "research_state": "PARTIAL_BUILT_NOT_PROVEN",
+      "research_state": "PARTIAL",
       "current_evidence": "Return and watcher lineages exist; exact inactive ChatGPT reentry and consumption remain unproven as one end-to-end production path.",
       "next_useful_proof": "A worker completes while the leader is inactive; one material event reaches the exact bound leader, which fresh-reads and acts on the same operation, or emits typed wake unavailable.",
       "must_not_build": [
@@ -274,7 +275,7 @@
         "surface navigation",
         "RuntimeBinding"
       ],
-      "research_state": "BUILT_NOT_PROVEN_PRODUCTION_NOT_ASSUMED",
+      "research_state": "BUILT_NOT_PROVEN",
       "current_evidence": "Protected source lineage exists; installed host/profile, exact identity, restart and end-to-end continuation remain separate.",
       "next_useful_proof": "An installed disposable managed-profile canary proves exact identity, foreground postcondition, restart/reconstitution, transport faults, cross-profile isolation and rollback.",
       "must_not_build": [
@@ -293,7 +294,7 @@
         "Company Dialogue semantic readiness",
         "Agent OS continuation"
       ],
-      "research_state": "PARTIAL_SPEC_AND_SOURCE_LINEAGE_NOT_PROVEN_END_TO_END",
+      "research_state": "PARTIAL",
       "current_evidence": "Rotation law and source lineages exist; semantic readiness, binding advancement, stale-route denial and next governed action remain one unproven production journey.",
       "next_useful_proof": "Dead predecessor, exact same profile/Project successor, one bootstrap, semantic readiness, generation transition, stale refusal, lost-receipt handling and next governed action.",
       "must_not_build": [
@@ -312,7 +313,7 @@
         "each native/custom action owner",
         "security and audit owners"
       ],
-      "research_state": "NOT_BUILT_AS_PROVEN_CAPABILITY",
+      "research_state": "NOT_BUILT",
       "current_evidence": "The closed vocabulary and falsifier are specified. One GitHub comment write is proven, while effective installation/token scope, per-chat action availability and stale-session reachability remain unverified.",
       "next_useful_proof": "Two synthetic chats sharing a principal, one binding transition, and inventory/test of every enabled mutator classified ENFORCED, DENIED, ATTENDED_ONLY or UNKNOWN with current actor and unrelated siblings preserved.",
       "must_not_build": [
@@ -331,7 +332,7 @@
         "strategic and Agent OS priority owners",
         "worker routing"
       ],
-      "research_state": "PARTIAL_AS_LAW_NOT_PROVEN_AS_AUTOMATED_FLEET",
+      "research_state": "PARTIAL",
       "current_evidence": "Routing and hierarchy laws exist; exact placement, quota truth, wake, review capacity and accepted-outcome improvement are not established as one automated fleet.",
       "next_useful_proof": "One bounded council of independent Sol responsibilities, Integrator and Auditor with parking/backpressure, exact placement and measured accepted-decision improvement without routine Pro polling or account hopping.",
       "must_not_build": [
@@ -351,7 +352,7 @@
         "product consumer",
         "Sol acceptance"
       ],
-      "research_state": "PARTIAL_BY_PROGRAM",
+      "research_state": "PARTIAL",
       "current_evidence": "Review and proof laws exist. PR #490 itself is records-only and proves no installation, Mac capability, runtime execution, evaluation result or production outcome.",
       "next_useful_proof": "One real producer-to-consumer program slice with exact source/deployment, independent review, negative states, visible product or machine result, durable acceptance and learning instrumentation.",
       "must_not_build": [
@@ -386,7 +387,7 @@
         "Sol acceptance",
         "GitHub evidence"
       ],
-      "research_state": "TEMPLATE_ONLY_NOT_PREREGISTERED_NOT_RUN",
+      "research_state": "SPEC_ONLY",
       "current_evidence": "The 24-task artifact preserves a task bank and design intent but freezes no fixtures, answer keys, assignment, graders, denominators, exclusions, statistics, budget, provider authorization or owner acceptance.",
       "next_useful_proof": "First create and independently approve one immutable preregistration under a new exact experiment operation. Only then run matched tasks with zero catastrophic failures, direct measurements, independent grading and full pair-level reporting.",
       "must_not_build": [
@@ -394,6 +395,118 @@
         "new telemetry truth store",
         "GPU-hours inferred from wall time",
         "single-score override of safety or product failure"
+      ]
+    },
+    {
+      "id": "LRL-C19",
+      "name": "attended_web_operator_context",
+      "user_outcome": "An authorized Web CEO chooses one permitted target and receives one exact, expiring, conversation-bound technical context without becoming an autonomous Worker.",
+      "canonical_owners": [
+        "existing Web-Sol/RuntimeBinding authority",
+        "existing resource/auth owner",
+        "PR #519 read dependency"
+      ],
+      "research_state": "SPEC_ONLY",
+      "current_evidence": "Contract candidate defines ATTENDED_WEB_OPERATOR, opaque target options, exact-conversation binding, and no ambient target. No installation or real product journey is claimed.",
+      "next_useful_proof": "WB-R1/WB-R2 after architecture acceptance: two callers select distinct permitted targets; foreign/stale options refuse before backend and PR #519 supplies useful read output.",
+      "must_not_build": [
+        "second project registry",
+        "URL/title identity authority",
+        "implicit first-online-device selection",
+        "shadow Executive lifecycle"
+      ]
+    },
+    {
+      "id": "LRL-C20",
+      "name": "attended_real_command",
+      "user_outcome": "The authorized Web CEO runs one bounded real command and can reconcile a lost launch response without starting process two.",
+      "canonical_owners": [
+        "existing process owner",
+        "existing host transport owner",
+        "existing evidence owner"
+      ],
+      "research_state": "SPEC_ONLY",
+      "current_evidence": "Unmanaged attended command epochs exist, but the first-party prepare/start/reconcile product route is unbuilt and managed service remains disabled or unloaded.",
+      "next_useful_proof": "WB-C1 after architecture acceptance: real exit 0 and exit 7 plus lost-response same-action reconciliation, no process two, bounded output, and exact terminal receipt.",
+      "must_not_build": [
+        "second process registry",
+        "general shell as confinement",
+        "blind retry",
+        "host-carrier failover on unknown effect"
+      ]
+    },
+    {
+      "id": "LRL-C21",
+      "name": "independent_process_observation",
+      "user_outcome": "Multiple observers can follow the same process without consuming one another's output or losing terminal truth behind truncation.",
+      "canonical_owners": [
+        "existing process owner",
+        "existing provider/Attempt evidence owner"
+      ],
+      "research_state": "SPEC_ONLY",
+      "current_evidence": "The candidate now specifies observer cursors, process generations, retained/gap ranges, and non-truncatable terminal/effect fields; no runtime implementation is claimed.",
+      "next_useful_proof": "WB-P1 after architecture acceptance: two independent observers recover complete/gapped ranges and identical terminal facts under bounded output.",
+      "must_not_build": [
+        "shared destructive cursor",
+        "second PID ledger",
+        "terminal status inferred from visible tail text"
+      ]
+    },
+    {
+      "id": "LRL-C22",
+      "name": "live_worktree_and_search_freshness",
+      "user_outcome": "Reads show current uncommitted bytes and searches never claim absence when their index is stale.",
+      "canonical_owners": [
+        "existing source/worktree owner",
+        "existing CodeIntel invalidation and refresh owner",
+        "PR #519 read dependency"
+      ],
+      "research_state": "SPEC_ONLY",
+      "current_evidence": "The candidate separates committed baseline, live observation, file identity/hash, indexed observation, coverage, and freshness. Runtime route is unbuilt.",
+      "next_useful_proof": "WB-F1 after architecture acceptance: patch then read new bytes with unchanged baseline; stale search degrades until existing CodeIntel refresh catches up.",
+      "must_not_build": [
+        "synthetic commit per edit",
+        "second code index",
+        "preimage hash described as exclusive writer lock",
+        "absence claim from stale search"
+      ]
+    },
+    {
+      "id": "LRL-C23",
+      "name": "effect_history_survives_authority_change",
+      "user_outcome": "A lost write remains safely reconcilable after expiry, revocation, session rotation, succession, reauthorization, or evidence loss.",
+      "canonical_owners": [
+        "each existing owning actuator",
+        "existing receipt/evidence owner"
+      ],
+      "research_state": "SPEC_ONLY",
+      "current_evidence": "The candidate separates commit permission, receipt-read permission, and durable action correlation and adds five unrun recovery discriminators.",
+      "next_useful_proof": "Each downstream mutator owner proves its own same-action recovery before release; retention exhaustion returns EFFECT_UNKNOWN and blocks replay.",
+      "must_not_build": [
+        "universal effect database",
+        "reauthorization resets history",
+        "revocation implies NOT_APPLIED",
+        "successor reexecutes old action"
+      ]
+    },
+    {
+      "id": "LRL-C24",
+      "name": "profile_tool_and_context_separation",
+      "user_outcome": "An attended Web operator can use only tools explicitly allowed for its owner-bound context and cannot silently enter an Executive worker lifecycle or another workspace/process.",
+      "canonical_owners": [
+        "Web-Sol and RuntimeBinding exact-conversation owner",
+        "existing resource/auth owner",
+        "Executive OS Job/Attempt owner",
+        "existing workspace and process owners"
+      ],
+      "research_state": "SPEC_ONLY",
+      "current_evidence": "The candidate has deny-by-default permitted_profiles gates, mode-specific action bindings, and two explicit NOT_RUN separation falsifiers. Protected PR #471 now supplies provider-neutral immutable worker values only for Executive-bound profiles; provider homes remain adapter-private and attended mode remains unimplemented.",
+      "next_useful_proof": "One attended context succeeds on an allowed bound read while worker-validation and missing/foreign context calls are refused with zero Executive admission, process, workspace, or mutation effect.",
+      "must_not_build": [
+        "shadow Job/Attempt for attended mode",
+        "ambient current workspace",
+        "surface-wide implicit tool grants",
+        "cross-profile process reference reuse"
       ]
     }
   ],
@@ -404,10 +517,92 @@
     "A records-only merge of PR #490 would not prove any runtime or product capability."
   ],
   "ordered_next_actions": [
+    {
+      "order": 0,
+      "action": "Obtain fresh exact-head architecture review of the same-carrier PR #490 B1-B5/direct-access repair; keep all implementation verticals unadmitted until acceptance.",
+      "state": "SOURCE_REPAIR_CANDIDATE / REVIEW_REQUIRED"
+    },
     "Finish PR #490 records repair, exact-head source continuity and checks while retaining Draft/Hold.",
     "Existing Personal-MCP Cockpit/Integration reconciles FS0/equivalent prior effect and either returns typed terminal, inaccessible or EFFECT_UNKNOWN state, or binds one executor and originates one lawful child.",
     "Existing Steward/Integration owners continue the independent one-cockpit read lane without reviving the terminal PR #463 builder or creating another U1 source worker.",
     "After a terminal-green immutable repair head, the already-requested independent reviewer performs exact-head architecture review; its prior plan comment is not that review.",
     "Only accepted owner-specific verticals advance to implementation or production proof; no umbrella runtime or forty-task fan-out is authorized."
-  ]
+  ],
+  "repair_marker": "PR490-B1-B5-DIRECT-ACCESS-REPAIR-20260907",
+  "observation_epochs": [
+    {
+      "id": "DC_EPOCH_20260906_ATTENDED_PASS",
+      "state": "PROVEN_LIVE / BOUNDED_ATTENDED_EPOCH",
+      "proof": "Disposable file create/update/readback and real exit-0/exit-7 command evidence under one attended connection.",
+      "ceiling": "No managed-service, unattended, fleet, first-party Workbench, or strong-confinement proof."
+    },
+    {
+      "id": "DC_EPOCH_20260906_DEGRADED",
+      "state": "BROKEN_OR_DEGRADED / OBSERVATION_UNAVAILABLE",
+      "proof": "Device ping remained healthy while useful file, metadata, shell, and history observations timed out.",
+      "ceiling": "Ping alone did not prove command readiness, authorization continuity, or owner release."
+    },
+    {
+      "id": "DC_EPOCH_20260907_UNMANAGED_PASS",
+      "state": "PROVEN_LIVE / UNMANAGED_ATTENDED_FILE_AND_SHORT_COMMAND",
+      "service_state": "MANAGED_SERVICE_DISABLED_OR_UNLOADED",
+      "proof": "Issue #507 evidence and this repair session separately showed an unmanaged finite file/short-command path.",
+      "ceiling": "No managed cutover, managed acceptance, unattended host route, or autonomous production proof."
+    }
+  ],
+  "external_owner_dependencies": [
+    {
+      "pr": 513,
+      "capability": "native role descriptors",
+      "state": "SOURCE_PROTECTED / INSTALLED_USE_NOT_PROVEN"
+    },
+    {
+      "pr": 516,
+      "capability": "Personal four-read E1 source",
+      "state": "SOURCE_PROTECTED / BUILT_NOT_PROVEN / PRODUCTION_INERT"
+    },
+    {
+      "pr": 517,
+      "capability": "ASF-F0 authority architecture",
+      "state": "SOURCE_PROTECTED / RECORDS_ONLY / SPEC_ONLY"
+    },
+    {
+      "pr": 519,
+      "capability": "selected-project Workbench read package",
+      "state": "SOURCE_PROTECTED / BUILT_NOT_PROVEN / NOT_INSTALLED"
+    },
+    {
+      "pr": 491,
+      "capability": "runtime delayed Wake/continuity",
+      "state": "OPEN / DRAFT / HOLD / END_TO_END_NOT_PROVEN"
+    },
+    {
+      "pr": 514,
+      "capability": "Web-Sol census read admission",
+      "state": "SOURCE_PROTECTED / BUILT_NOT_PROVEN / NOT_INSTALLED"
+    },
+    {
+      "pr": 520,
+      "capability": "Web-Sol popup snapshot truth and unknown inventory",
+      "state": "SOURCE_PROTECTED / BUILT_NOT_PROVEN / NOT_INSTALLED"
+    },
+    {
+      "pr": 471,
+      "protected_commit": "66a1125c4e0f02351f33dbf8c8583eb19ea1d2e4",
+      "capability": "provider-neutral Executive worker execution contract",
+      "contract_path": "control_plane/worker_execution_contract.py",
+      "contract_version": "mastermind.worker_execution_contract/v1",
+      "state": "SOURCE_PROTECTED / BUILT_NOT_PROVEN / PRODUCTION_INERT",
+      "consumed_by_profiles": [
+        "EXACT_OPERATOR",
+        "EXACT_OPERATOR_DESKTOP"
+      ],
+      "excluded_profile": "ATTENDED_WEB_OPERATOR",
+      "boundary": "Executive supervisors consume immutable provider-neutral launch, process, result, receipt, validation, status, and artifact-limit values. Concrete adapters exclusively own provider homes, credentials, and provider-specific launch mechanics. This dependency proves no RuntimeBinding, attended command, installation, deployment, or production execution."
+    }
+  ],
+  "linear_boundary": {
+    "pr490": "NONE",
+    "mas_198": "external Web-Sol dependency; not owned or gated"
+  }
 }

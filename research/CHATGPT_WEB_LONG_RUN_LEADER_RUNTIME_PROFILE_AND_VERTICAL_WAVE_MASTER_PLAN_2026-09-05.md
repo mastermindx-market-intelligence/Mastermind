@@ -1,5 +1,19 @@
 # ChatGPT Web long-run leader runtime profile and vertical-wave master plan
 
+## Runtime-profile and vertical-wave amendment
+
+**Marker:** `PR490-B1-B5-DIRECT-ACCESS-REPAIR-20260907`
+
+| Profile | Identity | Allowed use | Claim ceiling |
+|---|---|---|---|
+| `LEADER_READ` | current authenticated reader plus owner-issued evidence context | research, review, routing, acceptance | no mutation |
+| `ATTENDED_WEB_OPERATOR` | exact current conversation/generation plus expiring owner-issued target/source/scope context | bounded direct read and separately prepared action | `ATTENDED_ONLY`; not Job/Attempt/Worker/autonomous fleet |
+| `BOUNDED_WORKER` | real Executive Job/Attempt/Worker/worktree binding plus protected PR #471 provider-neutral worker values; provider home stays adapter-private | autonomous bounded execution within admitted mission | only as proven by owner-native enforcement; PR #471 remains `BUILT_NOT_PROVEN / PRODUCTION_INERT` |
+
+`ATTENDED_WEB_OPERATOR` consumes existing owners and must not become a second lifecycle or session authority. Protected PR #471 is consumed only by Executive-bound worker profiles and does not implement this attended profile; provider homes and credentials remain concrete-adapter private. Tool exposure is deny-by-default per profile/tool pair: worker-validation launch is available only to Executive-bound `EXACT_OPERATOR` profiles, and an attended workspace tool requires the current owner-issued context or an opaque reference already bound to it. PR #519 supplies selected-project read; Web-Sol/RuntimeBinding supplies exact conversation; process/host owner supplies command effects; CodeIntel supplies search freshness. Authenticated Workbench caller identity is not exact ChatGPT conversation identity. Executive supervisor requires a real Job/Attempt. Issue #507 retains safe-drain/transport ownership. Source Continuity is read-only verification.
+
+Post-freeze waves: WB-R1 target/context, WB-R2 useful read, WB-C1 real command, WB-F1 live file/search, WB-P1 process observers, WB-PROD1 full first-party journey. Each PR must deliver one useful producer→consumer capability, tests, real proof, rollback/readback, and durable handoff; no wave is admitted by this architecture carrier.
+
 **Date:** 2026-09-05  
 **Research carrier:** Mastermind PR #490  
 **Parent operation:** `chatgpt-pro-long-run-leaders-research-20260905-sol-001`  

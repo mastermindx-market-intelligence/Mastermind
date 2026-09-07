@@ -1,5 +1,11 @@
 # ChatGPT Pro capacity operating playbook
 
+## Attended-profile capacity boundary
+
+**Marker:** `PR490-B1-B5-DIRECT-ACCESS-REPAIR-20260907`
+
+`ATTENDED_WEB_OPERATOR` is a task-scoped technical grant. It is not account placement, quota allocation, role election, worker identity, fleet capacity, or permission to start another provider turn. Capacity arithmetic remains observational and subordinate to current Capacity/provider attestation. This source repair allocates no account, starts no session, and consumes no experimental/provider workload.
+
 **Date:** 2026-09-05  
 **Parent:** `chatgpt-pro-long-run-leaders-research-20260905-sol-001` / Mastermind PR #490  
 **Status:** `RESEARCH_CANDIDATE / RECORDS_ONLY / NOT_CAPACITY_STATE / NOT_ROUTING_AUTHORITY`

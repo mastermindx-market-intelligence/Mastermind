@@ -237,3 +237,12 @@ process.exitCode=summary.functional_failed?1:0;
   "non_goals": ["full upstream typecheck/build/test suite", "software bill of materials", "vulnerability or exploit reproduction", "native installation", "Mastermind integration", "40-case casebook completion", "24-task leader evaluation", "production acceptance"]
 }
 ```
+
+---
+
+## 2026-09-07 supersession pointer
+
+**Marker:** `PR490-B1-B5-DIRECT-ACCESS-REPAIR-20260907`
+**Preservation:** The executed 57-case output-helper characterization remains immutable dated evidence and is not rewritten as current runtime truth.
+
+Helper behavior does not prove Workbench or production behavior. Any process projection must keep terminal/effect/cancel/cleanup identity and retained/gap ranges outside truncatable display text, and each observer must receive its own cursor.

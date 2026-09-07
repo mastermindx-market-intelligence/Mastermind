@@ -1,5 +1,24 @@
 # ChatGPT Web long-run leader existing-owner crosswalk and gap DAG
 
+## Current owner-DAG amendment
+
+**Marker:** `PR490-B1-B5-DIRECT-ACCESS-REPAIR-20260907`
+
+```text
+current human authorization
+  → existing Web-Sol/RuntimeBinding exact-conversation owner
+  → existing resource/auth owner emits opaque target/context
+  → PR #519 selected-project read OR existing process owner prepares one command
+  → existing worktree/CodeIntel owners expose live bytes and freshness
+  → existing process/evidence owner exposes observer-scoped output and terminal truth
+  → GitHub immutable source/evidence
+  → Sol exact-head acceptance
+```
+
+This is composition, not a new umbrella owner. PRs #513, #516, #517, #519, #491, #514, #520, and protected PR #471 remain separately owned dependencies. PR #471 supplies provider-neutral Executive worker values only; concrete adapters retain provider-home and credential ownership, and no attended/RuntimeBinding proof follows. MAS-198 is external WSX work, not PR #490 projection ownership. Preserve the three host epochs: `DC_EPOCH_20260906_ATTENDED_PASS`, `DC_EPOCH_20260906_DEGRADED`, and `DC_EPOCH_20260907_UNMANAGED_PASS`; managed and unmanaged capability are not interchangeable.
+
+Authenticated Workbench caller identity is not exact ChatGPT conversation identity. HC0 and Web-Sol v1 are insufficient for mutation. Executive supervisor requires a real Job/Attempt. The profile/tool matrix is deny-by-default: attended contexts cannot call worker-validation launch, and attended workspace access has no ambient-target fallback. Remote Desktop Commander issue #507 retains its own transport carrier. Source Continuity is read-only verification.
+
 **Date:** 2026-09-05  
 **Research carrier:** Mastermind PR #490  
 **Parent operation:** `chatgpt-pro-long-run-leaders-research-20260905-sol-001`  

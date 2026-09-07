@@ -1,5 +1,13 @@
 # Chat On Steroids selective reuse and Mastermind integration ledger
 
+## PR #490 selective-reuse boundary amendment
+
+**Marker:** `PR490-B1-B5-DIRECT-ACCESS-REPAIR-20260907`
+
+Selective reuse remains limited to lawful pinned-source patterns and original Mastermind implementation over existing owners. Eligible patterns include bounded batch/continuation ergonomics, prepare/commit/reconcile action shape, observer-scoped output cursors, explicit freshness/coverage, and separation of Core versus Desktop discovery. Rejected uses include upstream lifecycle/session/transcript/permission/process/retry/evidence authority, unattended broad shell, and false confinement claims.
+
+The common effect law is `NOT_APPLIED | APPLIED | EFFECT_UNKNOWN`; `REFUSED` is response status and `PARTIAL` remains owner-native/per-step evidence. An attended command must be separately granted, owner-bound, at-most-once, and same-action reconcilable. Committed baseline, live bytes, and search index freshness remain distinct. Unmanaged writer races stay explicit. Current dependencies are PRs #513, #516, #517, #519, #491, #514, and #520; this ledger transfers none of their ownership.
+
 **Date:** 2026-09-05  
 **Research carrier:** Mastermind PR #490  
 **Parent operation:** `chatgpt-pro-long-run-leaders-research-20260905-sol-001`  

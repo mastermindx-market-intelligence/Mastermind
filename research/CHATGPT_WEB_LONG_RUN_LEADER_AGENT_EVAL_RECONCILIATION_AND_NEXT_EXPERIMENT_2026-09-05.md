@@ -741,3 +741,12 @@ No new child, provider run, review request, route change or account action follo
 - Slack Agent Evaluation program root `C0BSBM78V1N/1788250800.769259`, RESULT `1788343129.195309`, terminal Sol STOP `1788343964.683749`, terminal consumption `1788345133.345829`.
 
 All dynamic facts require current action-time reconciliation before any modification or provider execution.
+
+---
+
+## 2026-09-07 supersession pointer
+
+**Marker:** `PR490-B1-B5-DIRECT-ACCESS-REPAIR-20260907`
+**Preservation:** The Agent Evaluation reconciliation and sealed receipts remain immutable dated evidence and are not rewritten as current runtime truth.
+
+PR #490's contract/casebook repair neither preregisters nor executes the 24-task template. Existing Agent Evaluation owners retain admission, assignment, fixture, grading, statistics, and closeout authority.

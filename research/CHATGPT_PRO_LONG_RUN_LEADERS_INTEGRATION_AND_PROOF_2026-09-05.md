@@ -1,5 +1,30 @@
 # ChatGPT long-run leaders: integration, authority coverage, and proof design
 
+## 2026-09-07 proof amendment
+
+**Marker:** `PR490-B1-B5-DIRECT-ACCESS-REPAIR-20260907`
+**Authority:** case design only; no execution or provider admission.
+
+Every mutator must consume one owner-issued pre-effect reference and expose dedicated same-action reconciliation. Commit expiry, revocation/rotation, succession, reauthorization, and receipt-retention loss are separate from effect truth. Two process observers must not consume one another's cursor. Patch/read/search proof must distinguish committed source, live bytes, indexed observation, coverage, and unmanaged-writer risk. Source/CI/review, installation, managed runtime, real consumer proof, and final acceptance remain separate gates.
+
+### Required unexecuted discriminators
+
+- `EFFECT_RESPONSE_LOST_THEN_COMMIT_EXPIRY` — `NOT_RUN`; Reconcile the original owner-native action. Expiry removes future commit permission but never erases the historical effect or creates NOT_APPLIED.
+- `EFFECT_RESPONSE_LOST_THEN_REVOCATION_OR_ROTATION` — `NOT_RUN`; Revocation blocks new commits but preserves correlation to the original action; separately authorized reconciliation returns APPLIED, NOT_APPLIED, or EFFECT_UNKNOWN.
+- `AUTHORIZED_SUCCESSOR_READ_OLD_ACTOR_DENIED` — `NOT_RUN`; The successor may read the original action result; the old actor is denied and the successor may not reissue the action.
+- `EVIDENCE_RETENTION_EXHAUSTED` — `NOT_RUN`; Return EFFECT_UNKNOWN, report the missing coverage, and block modifying continuation on that target until an owner ruling resolves the ambiguity.
+- `REAUTHORIZED_DUPLICATE_RECONCILES_ORIGINAL` — `NOT_RUN`; The owner correlates to the original action and returns its canonical result or EFFECT_UNKNOWN; reauthorization does not create effect two.
+- `ATTENDED_COMMAND_RESPONSE_LOST_NO_PROCESS_TWO` — `NOT_RUN`; reconcile_attended_command_start resolves the same launch reference to one process, NOT_APPLIED, or EFFECT_UNKNOWN; no second process is started.
+- `ATTENDED_FOREIGN_OR_STALE_TARGET_OPTION_REFUSED` — `NOT_RUN`; prepare_attended_context returns REFUSED before backend access and leaves every current context unchanged.
+- `PATCH_THEN_READ_LIVE_BYTES_BASELINE_UNCHANGED` — `NOT_RUN`; A subsequent file read returns the new live bytes, unchanged committed baseline reference, advanced working-tree observation, exact file identity, and content hash.
+- `STALE_SEARCH_NEVER_EXHAUSTIVE` — `NOT_RUN`; Search returns STALE_OR_INCOMPLETE or equivalent with requested/indexed observations, coverage, and continuation; it never concludes the symbol/content is absent from the live worktree.
+- `ATTENDED_PROFILE_WORKER_VALIDATION_TOOL_REFUSED` — `NOT_RUN`; The attended profile is denied before Executive/process launch and cannot synthesize Job, Attempt, Worker, or process identity.
+- `ATTENDED_WORKSPACE_CONTEXT_REQUIRED` — `NOT_RUN`; A missing, foreign, stale, expired, or revoked attended context is refused before workspace access or patch preparation, with no ambient target fallback.
+
+### Current owner composition
+
+Consume PRs #513, #516, #517, #519, #491, #514, #520, and protected PR #471 at their current source/proof ceilings. PR #471 contributes `mastermind.worker_execution_contract/v1` only to Executive-bound `BOUNDED_WORKER`; provider homes/credentials remain adapter-private, and its ceiling is `BUILT_NOT_PROVEN / PRODUCTION_INERT`. MAS-198 is an external Web-Sol dependency. Authenticated Workbench caller identity is not exact ChatGPT conversation identity; HC0/Web-Sol v1 cannot mint the grant. Executive supervisor requires a real Job/Attempt. Issue #507 owns the host-transport boundary. Source Continuity is read-only verification.
+
 Date: 2026-09-05. Carrier: **Mastermind PR #490**. Operation: `chatgpt-pro-long-run-leaders-research-20260905-sol-001`.
 
 **RESEARCH CANDIDATE / RECORDS_ONLY / NOT AN ARCHITECTURE FREEZE / NO IMPLEMENTATION OR RUNTIME RELEASE.**

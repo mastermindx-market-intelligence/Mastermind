@@ -1,10 +1,20 @@
 # ChatGPT Pro long-run leaders: Chat On Steroids assessment
 
+## 2026-09-07 direct-access boundary amendment
+
+**Marker:** `PR490-B1-B5-DIRECT-ACCESS-REPAIR-20260907`
+
+The upstream general-shell/session design remains rejected as Mastermind lifecycle, authority, memory, permission, process, retry, or evidence infrastructure. A narrower pattern is eligible only for a separately authorized `ATTENDED_WEB_OPERATOR` route whose existing process owner binds target, source, cwd, executable/shell policy, environment, network, resources, principal, timeout, output, and one pre-effect launch identity. This is not strong confinement or autonomous live-seat authority.
+
+Lost launch response must reconcile the same original action; no process two. Process output uses observer-scoped cursors and explicit retained/gap ranges. File reads separate committed baseline from live working-tree bytes; search exposes index freshness and never proves live absence when stale. Preimage hashes do not establish exclusive-writer control against unmanaged writers.
+
+MAS-198 is an externally owned Web-Sol extension/native-bridge dependency and is not owned or gated by PR #490. Current capability claims come from the epoch register, not static September 5 assumptions.
+
 Date: 2026-09-05
 
 Operation: `chatgpt-pro-long-run-leaders-research-20260905-sol-001`
 
-Existing organizational context: `WS:CHAIRMAN-CONTROL-ROOM`; related projection `MAS-198`.
+Existing organizational context: `WS:CHAIRMAN-CONTROL-ROOM`; PR #490 has `Linear: NONE`. MAS-198 is an externally owned Web-Sol dependency and is not owned or gated here.
 
 Status: **RESEARCH CANDIDATE / RECORDS_ONLY / NOT AN ARCHITECTURE FREEZE / NO RUNTIME AUTHORIZATION**.
 
