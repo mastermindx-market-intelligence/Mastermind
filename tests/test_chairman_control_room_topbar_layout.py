@@ -22,6 +22,8 @@ CLOCKS = (
 )
 
 
+_SCRIPT_TAGS = re.compile(r"<script\b[^>]*>.*?</script\s*>", re.I | re.S)
+
 def require_or_skip(reason):
     if os.environ.get("MMX_REQUIRE_LAYOUT_BROWSER") == "1":
         pytest.fail(reason)
@@ -56,7 +58,7 @@ def render(browser, width, theme, clocks, *, remote=False):
     name = "remote.html" if remote else "index.html"
     html = (ASSETS / name).read_text()
     # Keep the real markup; clocks are the only synthetic dynamic input.
-    html = re.sub(r"<script\b[^>]*>.*?</script>", "", html, flags=re.I | re.S)
+    html = _SCRIPT_TAGS.sub("", html)
     html = re.sub(r"<link\b[^>]*>", "", html, flags=re.I)
     page.set_content(html)
     page.add_style_tag(content=(ASSETS / "control_room.css").read_text())
@@ -155,3 +157,9 @@ def test_shipped_header_has_distinct_source_and_control_regions():
     assert html.count('id="ccr-theme"') == 1
     assert 'aria-label="Source clocks"' in html
     assert 'Local · canonical read-only' in html
+
+
+@pytest.mark.parametrize("closing", ("</script>", "</script >", "</script\t>", "</SCRIPT\n>"))
+def test_fixture_script_filter_accepts_legal_closing_tag_whitespace(closing):
+    html = "<script>window.unwanted = true;" + closing + "<header>Header</header>"
+    assert _SCRIPT_TAGS.sub("", html) == "<header>Header</header>"
