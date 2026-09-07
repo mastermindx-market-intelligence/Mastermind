@@ -18,6 +18,7 @@ from typing import Any, Callable, Iterable, Mapping
 NOTION_VERSION = "2026-03-11"
 API_BASE = "https://api.notion.com/v1"
 MANIFEST_SCHEMA = "mastermind.notion_knowledge_surface_n0.v1"
+EXPECTED_CHILD_COUNT = 8
 VALID_KINDS = {"page", "database"}
 
 
@@ -76,8 +77,8 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
     if manifest.get("notion_version") != NOTION_VERSION:
         raise ManifestError("manifest Notion version is not the reviewed version")
     children = manifest.get("children")
-    if not isinstance(children, list) or len(children) != 7:
-        raise ManifestError("N0 manifest must contain exactly seven children")
+    if not isinstance(children, list) or len(children) != EXPECTED_CHILD_COUNT:
+        raise ManifestError(f"N0 manifest must contain exactly {EXPECTED_CHILD_COUNT} children")
     keys: set[str] = set()
     titles: set[str] = set()
     for child in children:
@@ -96,7 +97,11 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
             properties = child.get("properties")
             if not isinstance(properties, Mapping):
                 raise ManifestError(f"database {key!r} requires properties")
-            title_properties = [name for name, spec in properties.items() if isinstance(spec, Mapping) and "title" in spec]
+            title_properties = [
+                name
+                for name, spec in properties.items()
+                if isinstance(spec, Mapping) and "title" in spec
+            ]
             if len(title_properties) != 1:
                 raise ManifestError(f"database {key!r} must have exactly one title property")
         keys.add(key)
@@ -114,7 +119,9 @@ def _block_identity(block: Mapping[str, Any]) -> tuple[str, str, str] | None:
     return None
 
 
-def build_plan(manifest: Mapping[str, Any], existing_blocks: Iterable[Mapping[str, Any]]) -> list[PlanItem]:
+def build_plan(
+    manifest: Mapping[str, Any], existing_blocks: Iterable[Mapping[str, Any]]
+) -> list[PlanItem]:
     validate_manifest(manifest)
     by_identity: dict[tuple[str, str], list[str]] = {}
     for block in existing_blocks:
@@ -142,15 +149,32 @@ def build_plan(manifest: Mapping[str, Any], existing_blocks: Iterable[Mapping[st
 class NotionClient:
     """Minimal reviewed REST client; token is kept only in process memory."""
 
-    def __init__(self, token: str, *, timeout: float = 20.0, sleeper: Callable[[float], None] = time.sleep):
+    def __init__(
+        self,
+        token: str,
+        *,
+        timeout: float = 20.0,
+        sleeper: Callable[[float], None] = time.sleep,
+    ):
         if not token:
             raise BootstrapError("Notion token is required")
         self._token = token
         self._timeout = timeout
         self._sleeper = sleeper
 
-    def _request(self, method: str, path: str, payload: Mapping[str, Any] | None = None, *, mutating: bool = False) -> dict[str, Any]:
-        body = None if payload is None else json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    def _request(
+        self,
+        method: str,
+        path: str,
+        payload: Mapping[str, Any] | None = None,
+        *,
+        mutating: bool = False,
+    ) -> dict[str, Any]:
+        body = (
+            None
+            if payload is None
+            else json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        )
         attempts = 1 if mutating else 2
         for attempt in range(attempts):
             request = urllib.request.Request(
@@ -169,23 +193,33 @@ class NotionClient:
             except urllib.error.HTTPError as exc:
                 raw_error = exc.read().decode("utf-8", errors="replace")
                 if exc.code == 429 and not mutating and attempt + 1 < attempts:
-                    retry_after = min(float(exc.headers.get("Retry-After", "1") or "1"), 5.0)
+                    retry_after = min(
+                        float(exc.headers.get("Retry-After", "1") or "1"), 5.0
+                    )
                     self._sleeper(max(retry_after, 0.0))
                     continue
-                raise NotionAPIError(f"Notion HTTP {exc.code}: {raw_error[:500]}") from exc
+                raise NotionAPIError(
+                    f"Notion HTTP {exc.code}: {raw_error[:500]}"
+                ) from exc
             except (urllib.error.URLError, TimeoutError, OSError) as exc:
                 if mutating:
-                    raise NotionEffectUnknown(f"mutating Notion request has unknown effect: {exc}") from exc
+                    raise NotionEffectUnknown(
+                        f"mutating Notion request has unknown effect: {exc}"
+                    ) from exc
                 raise NotionAPIError(f"Notion transport error: {exc}") from exc
             try:
                 decoded = json.loads(raw.decode("utf-8"))
             except (UnicodeDecodeError, json.JSONDecodeError) as exc:
                 if mutating:
-                    raise NotionEffectUnknown("mutating Notion response was not valid JSON") from exc
+                    raise NotionEffectUnknown(
+                        "mutating Notion response was not valid JSON"
+                    ) from exc
                 raise NotionAPIError("Notion response was not valid JSON") from exc
             if not isinstance(decoded, dict):
                 if mutating:
-                    raise NotionEffectUnknown("mutating Notion response had an unexpected shape")
+                    raise NotionEffectUnknown(
+                        "mutating Notion response had an unexpected shape"
+                    )
                 raise NotionAPIError("Notion response had an unexpected shape")
             return decoded
         raise AssertionError("unreachable")
@@ -200,7 +234,10 @@ class NotionClient:
             query = {"page_size": "100"}
             if cursor:
                 query["start_cursor"] = cursor
-            path = f"/blocks/{urllib.parse.quote(parent_page_id)}/children?{urllib.parse.urlencode(query)}"
+            path = (
+                f"/blocks/{urllib.parse.quote(parent_page_id)}/children?"
+                f"{urllib.parse.urlencode(query)}"
+            )
             response = self._request("GET", path)
             results = response.get("results")
             if not isinstance(results, list):
@@ -215,11 +252,20 @@ class NotionClient:
     def create_page(self, parent_page_id: str, title: str) -> dict[str, Any]:
         payload = {
             "parent": {"type": "page_id", "page_id": parent_page_id},
-            "properties": {"title": {"type": "title", "title": [{"type": "text", "text": {"content": title}}]}},
+            "properties": {
+                "title": [
+                    {"type": "text", "text": {"content": title}}
+                ]
+            },
         }
         return self._request("POST", "/pages", payload, mutating=True)
 
-    def create_database(self, parent_page_id: str, title: str, properties: Mapping[str, Any]) -> dict[str, Any]:
+    def create_database(
+        self,
+        parent_page_id: str,
+        title: str,
+        properties: Mapping[str, Any],
+    ) -> dict[str, Any]:
         payload = {
             "parent": {"type": "page_id", "page_id": parent_page_id},
             "title": [{"type": "text", "text": {"content": title}}],
@@ -232,13 +278,19 @@ class NotionClient:
 def _prove_parent(client: NotionClient, parent_page_id: str) -> None:
     response = client.retrieve_page(parent_page_id)
     returned_id = response.get("id")
-    if not isinstance(returned_id, str) or _normalized_id(returned_id) != _normalized_id(parent_page_id):
+    if not isinstance(returned_id, str) or _normalized_id(returned_id) != _normalized_id(
+        parent_page_id
+    ):
         raise BootstrapError("Notion parent identity did not round-trip exactly")
     if response.get("in_trash") is True:
         raise BootstrapError("Notion parent page is in trash")
 
 
-def apply_workspace(client: NotionClient, parent_page_id: str, manifest: Mapping[str, Any]) -> list[PlanItem]:
+def apply_workspace(
+    client: NotionClient,
+    parent_page_id: str,
+    manifest: Mapping[str, Any],
+) -> list[PlanItem]:
     validate_manifest(manifest)
     _prove_parent(client, parent_page_id)
     existing = client.list_children(parent_page_id)
@@ -255,12 +307,22 @@ def apply_workspace(client: NotionClient, parent_page_id: str, manifest: Mapping
             if item.kind == "page":
                 created = client.create_page(parent_page_id, item.title)
             else:
-                created = client.create_database(parent_page_id, item.title, child["properties"])
+                created = client.create_database(
+                    parent_page_id, item.title, child["properties"]
+                )
         except NotionEffectUnknown:
             reconciled = build_plan(manifest, client.list_children(parent_page_id))
             exact = next(candidate for candidate in reconciled if candidate.key == item.key)
             if exact.action == "reuse":
-                results.append(PlanItem(item.key, item.kind, item.title, "reconciled", exact.object_id))
+                results.append(
+                    PlanItem(
+                        item.key,
+                        item.kind,
+                        item.title,
+                        "reconciled",
+                        exact.object_id,
+                    )
+                )
                 continue
             raise
         object_id = created.get("id")
@@ -270,5 +332,7 @@ def apply_workspace(client: NotionClient, parent_page_id: str, manifest: Mapping
 
     final_plan = build_plan(manifest, client.list_children(parent_page_id))
     if any(item.action != "reuse" for item in final_plan):
-        raise BootstrapError("post-apply reconciliation did not observe all seven N0 children")
+        raise BootstrapError(
+            f"post-apply reconciliation did not observe all {EXPECTED_CHILD_COUNT} N0 children"
+        )
     return results
