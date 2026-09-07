@@ -38,11 +38,12 @@ from scripts.ohf.laboratory import (
 )
 from scripts.ohf.p1a_capability_policy import LAUNCH_OK, classify_observed, launch_decision
 from scripts.ohf.protocol import (
+    SkillProtocolShapeError,
     config_mcp_names,
     config_plugin_names,
     parse_account_read,
     parse_config_read,
-    skill_names,
+    parse_skills_list_strict,
     skills_list_params,
     thread_turns,
 )
@@ -761,7 +762,28 @@ def _attest_capability(
             "CAPABILITY_ATTESTATION_INVALID",
             f"skills/list was unavailable: {_redact_exception_text(exc)}",
         ) from exc
-    discovered_skills = tuple(skill_names(skills_raw))
+    # MAS-136 current-base release repair. The legacy ``skill_names()`` helper
+    # degraded a MALFORMED ``skills/list`` payload to an empty list, so a hostile
+    # or ambiguous capability observation was indistinguishable from a genuinely
+    # empty model-visible skill surface and the run proceeded to ``thread/start``.
+    # Design §8 and this function's own contract require the opposite: an
+    # unavailable or ambiguous observation REFUSES. The protected CAP-S1 parser
+    # supplies the missing discriminator by raising instead of degrading.
+    try:
+        skill_rows = parse_skills_list_strict(skills_raw, expected_cwd=str(client.cwd))
+    except SkillProtocolShapeError as exc:
+        # Fixed, content-free reason on purpose: never echo caller-supplied
+        # response values (names, paths, row content) into an evidence-adjacent
+        # surface (design §10 error hygiene).
+        raise FreshSolEvalError(
+            "CAPABILITY_ATTESTATION_INVALID",
+            "skills/list violated the strict CAP-S1 shape contract",
+        ) from exc
+    # The no-visible-skill law is unchanged and applies to EVERY returned row,
+    # enabled or not -- a disabled row is still a model-visible skill surface
+    # for §8.3 purposes. Same normalization as before (sorted, unique) so the
+    # capability receipt's evidence semantics do not move.
+    discovered_skills = tuple(sorted({str(row.get("name")) for row in skill_rows}))
 
     try:
         mcp_status_raw = client.request("mcpServerStatus/list", {"detail": "toolsAndAuthOnly"})

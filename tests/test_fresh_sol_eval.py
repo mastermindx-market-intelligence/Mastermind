@@ -330,6 +330,7 @@ class _FakeEvalClient:
         fail_capability_rpc: str | None = None,
         turn_error: dict[str, Any] | None = None,
         turn_error_at: str = "turn",  # "turn" (params.turn.error) | "top" (params.error)
+        skills_list_override: dict[str, Any] | None = None,
     ) -> None:
         self.workspace = workspace
         self.config_dir = config_dir
@@ -354,6 +355,7 @@ class _FakeEvalClient:
         self._fail_capability_rpc = fail_capability_rpc
         self._turn_error = turn_error
         self._turn_error_at = turn_error_at
+        self._skills_list_override = skills_list_override
         self.thread_start_calls = 0
         self.thread_resume_calls = 0
         self.thread_fork_calls = 0
@@ -388,6 +390,8 @@ class _FakeEvalClient:
                 config["model"] = self._served_model
             return {"config": config}
         if method == "skills/list":
+            if self._skills_list_override is not None:
+                return dict(self._skills_list_override)
             return {"data": [{"cwd": str(self.workspace), "skills": self._skills, "errors": []}]}
         if method == "mcpServerStatus/list":
             return {"data": self._mcp_status}
@@ -2231,3 +2235,162 @@ def test_auth_json_home_tilde_path_is_laundered(monkeypatch: pytest.MonkeyPatch,
     assert "~/fixture-codex-home" not in str(excinfo.value)
     assert "<path>" in str(excinfo.value)
 
+
+
+# --- MAS-136 current-base release repair: strict ``skills/list`` shape law ---------
+#
+# Protected ``scripts/ohf/protocol.py`` carries the closed CAP-S1 parser
+# (``parse_skills_list_strict`` / ``SkillProtocolShapeError``). The legacy
+# ``skill_names()`` path this runner used degraded a MALFORMED payload to an
+# empty list, so a hostile/ambiguous capability observation was read as "no
+# model-visible skills" and the run proceeded to ``thread/start``. That
+# contradicts design section 8 and ``_attest_capability``'s own contract:
+# an unavailable or ambiguous observation must refuse with
+# ``CAPABILITY_ATTESTATION_INVALID`` BEFORE any thread is started.
+#
+# These regressions are runner-bound on purpose: they drive ``_attest_capability``
+# through the client boundary and never import the strict parser directly, so the
+# contract is pinned by observable runner behavior rather than by the helper it
+# happens to call.
+
+
+def _malformed_skills_payloads(workspace_cwd: str) -> dict[str, dict[str, Any]]:
+    """Hostile ``skills/list`` envelopes the legacy parser silently accepted as empty."""
+    return {
+        # The exact shape reported by the current-base release review.
+        "skills_not_a_list": {
+            "data": [{"cwd": workspace_cwd, "skills": "not-a-list", "errors": []}]
+        },
+        "row_not_a_mapping": {"data": [{"cwd": workspace_cwd, "skills": ["bare-string"]}]},
+        "row_missing_name": {"data": [{"cwd": workspace_cwd, "skills": [{"enabled": True}]}]},
+        "group_missing_skills_key": {"data": [{"cwd": workspace_cwd}]},
+        "group_not_a_mapping": {"data": ["not-a-group"]},
+        "data_not_a_list": {"data": "not-a-list"},
+        "data_empty": {"data": []},
+    }
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "skills_not_a_list",
+        "row_not_a_mapping",
+        "row_missing_name",
+        "group_missing_skills_key",
+        "group_not_a_mapping",
+        "data_not_a_list",
+        "data_empty",
+    ],
+)
+def test_malformed_skills_list_refuses_before_thread_start(
+    mastermind_repo_root: Path, tmp_path: Path, case: str
+):
+    """A malformed ``skills/list`` must REFUSE, not degrade to an empty skill surface."""
+    workspace_cwd_holder: list[str] = []
+
+    def factory(workspace: Path, config_dir: Path, home: Path) -> _FakeEvalClient:
+        workspace_cwd_holder.append(str(workspace))
+        payload = _malformed_skills_payloads(str(workspace))[case]
+        client = _FakeEvalClient(workspace, config_dir, home, skills_list_override=payload)
+        factory.made.append(client)  # type: ignore[attr-defined]
+        return client
+
+    factory.made = []  # type: ignore[attr-defined]
+
+    with pytest.raises(FreshSolEvalError) as excinfo:
+        run_one(
+            repo_root=mastermind_repo_root,
+            arm=_control_arm(),
+            scenario=_scenario(),
+            run_root=tmp_path / "run",
+            client_factory=factory,
+        )
+
+    assert excinfo.value.code == "CAPABILITY_ATTESTATION_INVALID"
+    client = factory.made[0]  # type: ignore[attr-defined]
+    # The refusal must land BEFORE any thread/turn is started.
+    assert client.thread_start_calls == 0
+    assert client.turn_start_calls == 0
+    # ...and cleanup must still run despite the failure (BLOCKER-2 invariant).
+    assert client.graceful_close_calls == 1
+
+
+def test_skills_list_cwd_mismatch_refuses(mastermind_repo_root: Path, tmp_path: Path):
+    """A group reporting a DIFFERENT cwd is an ambiguous observation, not an empty surface."""
+
+    def factory(workspace: Path, config_dir: Path, home: Path) -> _FakeEvalClient:
+        payload = {"data": [{"cwd": str(workspace) + "-other", "skills": [], "errors": []}]}
+        client = _FakeEvalClient(workspace, config_dir, home, skills_list_override=payload)
+        factory.made.append(client)  # type: ignore[attr-defined]
+        return client
+
+    factory.made = []  # type: ignore[attr-defined]
+
+    with pytest.raises(FreshSolEvalError) as excinfo:
+        run_one(
+            repo_root=mastermind_repo_root,
+            arm=_control_arm(),
+            scenario=_scenario(),
+            run_root=tmp_path / "run",
+            client_factory=factory,
+        )
+
+    assert excinfo.value.code == "CAPABILITY_ATTESTATION_INVALID"
+    assert factory.made[0].thread_start_calls == 0  # type: ignore[attr-defined]
+    assert factory.made[0].graceful_close_calls == 1  # type: ignore[attr-defined]
+
+
+def test_malformed_skills_list_refusal_never_echoes_hostile_values(
+    mastermind_repo_root: Path, tmp_path: Path
+):
+    """The refusal reason must not echo caller-supplied response content."""
+    marker = "HOSTILE-ECHO-CANARY-8c5db3ee"
+
+    def factory(workspace: Path, config_dir: Path, home: Path) -> _FakeEvalClient:
+        payload = {"data": [{"cwd": str(workspace), "skills": marker, "errors": [marker]}]}
+        client = _FakeEvalClient(workspace, config_dir, home, skills_list_override=payload)
+        factory.made.append(client)  # type: ignore[attr-defined]
+        return client
+
+    factory.made = []  # type: ignore[attr-defined]
+
+    with pytest.raises(FreshSolEvalError) as excinfo:
+        run_one(
+            repo_root=mastermind_repo_root,
+            arm=_control_arm(),
+            scenario=_scenario(),
+            run_root=tmp_path / "run",
+            client_factory=factory,
+        )
+
+    assert excinfo.value.code == "CAPABILITY_ATTESTATION_INVALID"
+    assert marker not in str(excinfo.value)
+
+
+def test_wellformed_empty_skills_list_still_passes(mastermind_repo_root: Path, tmp_path: Path):
+    """Guard against over-tightening: a valid, genuinely empty surface must still run."""
+    factory = _fake_factory(skills=())
+    observation = run_one(
+        repo_root=mastermind_repo_root,
+        arm=_control_arm(),
+        scenario=_scenario(),
+        run_root=tmp_path / "run",
+        client_factory=factory,
+    )
+    assert observation is not None
+    assert factory.made[0].thread_start_calls == 1
+
+
+def test_wellformed_nonempty_skills_list_still_refuses(mastermind_repo_root: Path, tmp_path: Path):
+    """Guard against lowering the gate: ANY returned row still refuses, enabled or not."""
+    factory = _fake_factory(skills=({"name": "some-skill", "enabled": False},))
+    with pytest.raises(FreshSolEvalError) as excinfo:
+        run_one(
+            repo_root=mastermind_repo_root,
+            arm=_control_arm(),
+            scenario=_scenario(),
+            run_root=tmp_path / "run",
+            client_factory=factory,
+        )
+    assert excinfo.value.code == "CAPABILITY_ATTESTATION_INVALID"
+    assert factory.made[0].thread_start_calls == 0
