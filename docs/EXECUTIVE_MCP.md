@@ -496,3 +496,71 @@ because orchestration got richer.
 All three run in the CI hermetic governance gate. The submit battery does **not**
 mock the adapter → service → CEO-intent → runtime chain: it starts the real
 service with a supervisor that raises if anything ever tries to execute work.
+
+## Temporary E1 first-read profile
+
+`--profile e1-read` is a separate, explicit, temporary source composition. It
+advertises only `executive_state`, `executive_inbox`, `executive_job`, and
+`ceo_intent_status`; it has no submit/reconcile route, ingress/admission
+construction, installed-runtime activation, or production claim. It requires
+explicit repo, Macro, temporary-runtime, policy, and loopback-port inputs. Its
+fixed in-process boundary rechecks the current bearer under the exact read
+policy and bounds request/response frames at 65,536 and 262,144 bytes without
+retry or partial healthy overflow. Legacy stdio remains the default five-tool
+surface with its pinned digest unchanged.
+
+### E1 invocation and HTTP composition
+
+The operator-owned source invocation is deliberately explicit; there are no
+defaults for the policy or any of the three roots:
+
+```bash
+python3 scripts/executive_mcp.py \
+  --profile e1-read --mode readonly \
+  --policy /approved/temporary/e1-policy.json \
+  --repo-root /approved/reviewed/mastermind \
+  --macro-root /approved/reviewed/macro \
+  --read-runtime-root /approved/temporary/e1-runtime \
+  --host 127.0.0.1 --port 9123
+```
+
+The only externally served E1 application route is authenticated `POST /mcp`.
+It is a stateless MCP HTTP manager with exactly the four static reader tools;
+the inner `/v1/tools/...` application is an in-process ASGI boundary, not a
+second public surface. One raw `Authorization` value must satisfy the exact
+read policy. Missing, duplicate, malformed, wrong-principal, expired, or
+wider submit-scope credentials refuse before any inner read. A valid request
+is re-validated against the existing strict tool argument schema before its
+single inner POST. A complete canonical E1 result envelope is preserved; a
+non-200, malformed, oversized, disconnected, or foreign-shaped inner result
+becomes the ordinary canonical `backend_unavailable` envelope. There is no
+retry or synthetic healthy result.
+
+Both paths count ASGI body frames rather than trusting `Content-Length`:
+65,536 bytes is the exact request ceiling; 65,537 bytes, incomplete requests,
+and non-request frames refuse before MCP manager dispatch. The inner response
+is fully buffered and checked against 262,144 bytes before a response start is
+released, so malformed framing or an overflow cannot leak a partial 2xx result.
+
+E1 rejects lexical and symlink-resolved aliases of all installed production
+coordinate roots for its policy, repository, Macro, and temporary-runtime
+arguments. It re-verifies the explicit runtime root and derived runtime DB
+before every reader call; a missing, foreign, unreadable, or subsequently moved
+temporary runtime is named as degradation/unavailability and never falls back
+to repository lifecycle data or creates an artifact. At outer shutdown the one
+inner read gateway is closed through its existing bounded lifecycle rule.
+
+`--describe` for this profile reports its pinned four-reader fingerprint
+without loading the policy, importing the serving SDK, or starting a listener:
+
+```bash
+python3 scripts/executive_mcp.py --profile e1-read --mode readonly --describe \
+  --policy /approved/temporary/e1-policy.json \
+  --repo-root /approved/reviewed/mastermind \
+  --macro-root /approved/reviewed/macro \
+  --read-runtime-root /approved/temporary/e1-runtime --port 9123
+```
+
+These commands document a reviewed source composition only. They do **not**
+authorize an installation, listener launch, tunnel, custom-app connection,
+runtime access, production readiness claim, or production deployment.

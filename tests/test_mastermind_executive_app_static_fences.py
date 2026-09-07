@@ -208,6 +208,19 @@ def test_schema_digest_unchanged():
     )
 
 
+def test_temporary_e1_profile_has_no_admission_or_general_socket_reference():
+    """The new four-read boundary cannot gain a hidden mutation dependency."""
+
+    for relative in (
+        "integrations/executive_mcp/e1_http.py",
+        "integrations/executive_mcp/server.py",
+    ):
+        source = (REPO_ROOT / relative).read_text(encoding="utf-8")
+        assert "send_control_request" not in source
+        assert "submit_ceo_intent" not in source
+        assert "reconcile_by_request_ref" not in source
+
+
 def _git_stdout(*args: str) -> str:
     result = subprocess.run(
         ["git", "-C", str(REPO_ROOT), *args],

@@ -49,6 +49,7 @@ from integrations.business_mcp_auth.contracts import (
 )
 from integrations.executive_mcp import schemas as mcp_schemas
 from integrations.mastermind_executive_app.admission import STATUS_ACCEPTED, STATUS_CONFLICT
+from integrations.mastermind_executive_app import app as app_module
 from integrations.mastermind_executive_app.app import AppSettings, create_app
 from integrations.mastermind_executive_app.gateway import AppPolicies, READ_SCOPE, SUBMIT_SCOPE
 
@@ -225,6 +226,53 @@ def _client(
     )
     app = create_app(settings)
     return TestClient(app, raise_server_exceptions=False), settings
+
+
+def test_read_only_app_constructs_no_ingress_or_admission_surface(
+    rsa_key, tmp_path, monkeypatch
+):
+    """The E1 direct app is structurally incapable of constructing writers."""
+
+    def forbidden_writer(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("read-only E1 must not construct a writer")
+
+    monkeypatch.setattr(app_module, "CeoIngressClient", forbidden_writer)
+    monkeypatch.setattr(app_module, "AdmissionRequest", forbidden_writer)
+    settings = AppSettings(
+        policies=AppPolicies(read=_read_policy(), submit=_submit_policy()),
+        mastermind_root=tmp_path / "mastermind",
+        macro_root_flag=str(tmp_path / "macro"),
+        runtime_root=tmp_path / "runtime",
+        environ={},
+        ceo_ingress_socket_path=None,
+        read_only=True,
+        jwks_cache=_FakeJwksCache(rsa_key),
+        clock=lambda: NOW,
+    )
+
+    app = create_app(settings)
+    paths = {route.path for route in app._app.routes}
+
+    assert "/v1/tools/submit_ceo_intent" not in paths
+    assert "/v1/tools/submit_ceo_intent/reconcile" not in paths
+    assert "/v1/tools/{tool_name}" in paths
+
+
+def test_read_only_app_requires_an_explicit_macro_root(rsa_key, tmp_path):
+    """Removing the explicit Macro root must refuse direct E1 construction."""
+
+    with pytest.raises(ValueError, match="macro_root_flag"):
+        AppSettings(
+            policies=AppPolicies(read=_read_policy(), submit=_submit_policy()),
+            mastermind_root=tmp_path / "mastermind",
+            macro_root_flag=None,
+            runtime_root=tmp_path / "runtime",
+            environ={},
+            ceo_ingress_socket_path=None,
+            read_only=True,
+            jwks_cache=_FakeJwksCache(rsa_key),
+            clock=lambda: NOW,
+        )
 
 
 # ===========================================================================
