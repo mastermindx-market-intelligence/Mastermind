@@ -1,0 +1,88 @@
+{
+  "schema": "mastermind.notion_knowledge_surface_n0.v1",
+  "notion_version": "2026-03-11",
+  "workspace_key": "mastermind-x",
+  "children": [
+    {
+      "key": "chairman_board_book",
+      "kind": "page",
+      "title": "00 — Chairman Board Book"
+    },
+    {
+      "key": "programs",
+      "kind": "database",
+      "title": "01 — Programs",
+      "properties": {
+        "Name": {"title": {}},
+        "Canonical ID": {"rich_text": {}},
+        "Canonical Source": {"select": {}},
+        "Source SHA": {"rich_text": {}},
+        "As Of": {"date": {}},
+        "Last Synced At": {"date": {}},
+        "Projection Health": {"select": {}},
+        "Source URL": {"url": {}}
+      }
+    },
+    {
+      "key": "decisions",
+      "kind": "database",
+      "title": "02 — Decisions",
+      "properties": {
+        "Name": {"title": {}},
+        "Canonical ID": {"rich_text": {}},
+        "Canonical Source": {"select": {}},
+        "Source SHA": {"rich_text": {}},
+        "As Of": {"date": {}},
+        "Last Synced At": {"date": {}},
+        "Projection Health": {"select": {}},
+        "Source URL": {"url": {}}
+      }
+    },
+    {
+      "key": "research_library",
+      "kind": "database",
+      "title": "03 — Research Library",
+      "properties": {
+        "Name": {"title": {}},
+        "Canonical ID": {"rich_text": {}},
+        "Canonical Source": {"select": {}},
+        "Source SHA": {"rich_text": {}},
+        "As Of": {"date": {}},
+        "Last Synced At": {"date": {}},
+        "Projection Health": {"select": {}},
+        "Source URL": {"url": {}}
+      }
+    },
+    {
+      "key": "product_architecture",
+      "kind": "database",
+      "title": "04 — Product & Architecture",
+      "properties": {
+        "Name": {"title": {}},
+        "Canonical ID": {"rich_text": {}},
+        "Canonical Source": {"select": {}},
+        "Source SHA": {"rich_text": {}},
+        "As Of": {"date": {}},
+        "Last Synced At": {"date": {}},
+        "Projection Health": {"select": {}},
+        "Source URL": {"url": {}}
+      }
+    },
+    {
+      "key": "chairman_inputs",
+      "kind": "database",
+      "title": "06 — Chairman Notes & Inputs",
+      "properties": {
+        "Name": {"title": {}},
+        "Input State": {"select": {}},
+        "Reviewed At": {"date": {}},
+        "Promoted Canonical ID": {"rich_text": {}}
+      }
+    },
+    {
+      "key": "archive",
+      "kind": "page",
+      "title": "99 — Archive"
+    }
+  ]
+}
