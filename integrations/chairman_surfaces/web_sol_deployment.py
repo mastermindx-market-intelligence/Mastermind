@@ -160,6 +160,24 @@ class DeploymentBundle:
 
 
 @dataclasses.dataclass(frozen=True)
+class _CensusExtensionDeploymentBundle(DeploymentBundle):
+    """Complete census bundle with a payload-free public projection."""
+
+    @property
+    def public_receipt(self) -> dict[str, object]:
+        return {
+            "schema": PUBLIC_RECEIPT_SCHEMA,
+            "package_version": wsp.WEB_SOL_PACKAGE_VERSION,
+            "protocol_major": wsp.TRANSPORT_PROTOCOL_MAJOR,
+            "capability_digest": wsp.transport_capability_digest(),
+            "bundle_digest": self.bundle_digest,
+            "artifact_digests": {
+                item.kind: item.sha256 for item in self.artifacts
+            },
+        }
+
+
+@dataclasses.dataclass(frozen=True)
 class DeploymentChange:
     path: Path
     action: str
@@ -422,15 +440,17 @@ def verify_deployment_readback(
     expected = bundle.as_files()
     if any(current.get(path) != payload for path, payload in expected.items()):
         raise WebSolDeploymentError("readback_mismatch")
-    return {
+    receipt: dict[str, object] = {
         "schema": READBACK_RECEIPT_SCHEMA,
         "ok": True,
-        "instance_id": bundle.instance_id,
-        "bundle_digest": bundle.bundle_digest,
-        "artifact_digests": {
-            item.kind: item.sha256 for item in bundle.artifacts
-        },
     }
+    if not isinstance(bundle, _CensusExtensionDeploymentBundle):
+        receipt["instance_id"] = bundle.instance_id
+    receipt["bundle_digest"] = bundle.bundle_digest
+    receipt["artifact_digests"] = {
+        item.kind: item.sha256 for item in bundle.artifacts
+    }
+    return receipt
 
 
 __all__ = [
@@ -447,3 +467,124 @@ __all__ = [
     "render_bundle",
     "verify_deployment_readback",
 ]
+
+
+# CENSUS1 is one fixed package layout, not a caller-selected asset registry.
+_CENSUS_SOURCE_KINDS = (
+    ("manifest.json", "extension_manifest"),
+    ("background.js", "extension_background"),
+    ("content.js", "extension_content"),
+    ("census.html", "extension_census_html"),
+    ("census.css", "extension_census_css"),
+    ("census_core.js", "extension_census_core"),
+    ("census.js", "extension_census_controller"),
+)
+_CENSUS_SOURCE_NAMES = frozenset(name for name, _kind in _CENSUS_SOURCE_KINDS)
+_CENSUS_MAX_FILE_BYTES = 262144
+_CENSUS_MAX_TOTAL_BYTES = 1048576
+
+
+def _manifest_members(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate_manifest_member")
+        result[key] = value
+    return result
+
+
+def _validate_census_manifest(payload: bytes, release: WebSolRelease) -> None:
+    """Refuse any layout/identity/permission widening of the CENSUS1 package."""
+    import base64
+
+    try:
+        manifest = json.loads(payload.decode("utf-8"), object_pairs_hook=_manifest_members)
+        keys = {"manifest_version", "name", "version", "key", "permissions",
+                "host_permissions", "background", "content_scripts", "action"}
+        if not isinstance(manifest, dict) or set(manifest) != keys:
+            raise ValueError("unsupported_manifest")
+        origins = ["https://chat.openai.com/*", "https://chatgpt.com/*"]
+        if (type(manifest["manifest_version"]) is not int
+                or manifest["manifest_version"] != 3
+                or manifest["version"] != release.package_version
+                or manifest["permissions"] != ["nativeMessaging", "alarms"]
+                or manifest["host_permissions"] != origins
+                or manifest["background"] != {"service_worker": "background.js"}
+                or manifest["content_scripts"] != [{"matches": origins,
+                    "js": ["content.js"], "run_at": "document_idle"}]):
+            raise ValueError("unsupported_manifest")
+        action = manifest["action"]
+        if (not isinstance(action, dict) or set(action) != {"default_title", "default_popup"}
+                or action["default_popup"] != "census.html"
+                or not isinstance(action["default_title"], str)
+                or not 1 <= len(action["default_title"]) <= 120
+                or not isinstance(manifest["name"], str)
+                or not 1 <= len(manifest["name"]) <= 75
+                or not isinstance(manifest["key"], str)):
+            raise ValueError("unsupported_manifest")
+        public_key = base64.b64decode(manifest["key"], validate=True)
+        extension_id = hashlib.sha256(public_key).hexdigest()[:32].translate(
+            str.maketrans("0123456789abcdef", "abcdefghijklmnop"))
+        if f"chrome-extension://{extension_id}/" != native.ALLOWED_EXTENSION_ORIGIN:
+            raise ValueError("wrong_extension_identity")
+    except (ValueError, TypeError, UnicodeError, RecursionError):
+        raise WebSolDeploymentError("extension_manifest_invalid") from None
+
+
+def render_census_extension_bundle(
+    binding: dict[str, Any],
+    release: WebSolRelease,
+    *,
+    source_files: Mapping[str, bytes],
+    expected_source_digests: Mapping[str, str],
+) -> DeploymentBundle:
+    """Render ten complete CENSUS1 artifacts; perform no installation.
+
+    The caller must authenticate the source commit and supply independently
+    established asset digests. Matching caller-supplied hashes proves integrity,
+    not protected-source admission. The legacy generated-only API is unchanged.
+    """
+    if not isinstance(release, WebSolRelease):
+        raise WebSolDeploymentError("release_invalid")
+    if not isinstance(source_files, Mapping) or set(source_files) != _CENSUS_SOURCE_NAMES:
+        raise WebSolDeploymentError("extension_sources_invalid")
+    accepted = dict(source_files)
+    if (any(type(value) is not bytes or not 0 < len(value) <= _CENSUS_MAX_FILE_BYTES
+            for value in accepted.values())
+            or sum(len(value) for value in accepted.values()) > _CENSUS_MAX_TOTAL_BYTES):
+        raise WebSolDeploymentError("extension_source_content_invalid")
+    if (not isinstance(expected_source_digests, Mapping)
+            or set(expected_source_digests) != _CENSUS_SOURCE_NAMES):
+        raise WebSolDeploymentError("extension_source_digests_invalid")
+    expected = dict(expected_source_digests)
+    if any(type(value) is not str or re.fullmatch(r"[0-9a-f]{64}", value) is None
+           for value in expected.values()):
+        raise WebSolDeploymentError("extension_source_digests_invalid")
+    if any(_sha256(value) != expected[name] for name, value in accepted.items()):
+        raise WebSolDeploymentError("extension_source_digest_mismatch")
+    _validate_census_manifest(accepted["manifest.json"], release)
+    generated = render_bundle(binding, release)
+    extension_root = release.install_root / "extensions" / generated.instance_id[:24]
+    source_artifacts = tuple(
+        DeploymentArtifact(kind, extension_root / name, accepted[name], 0o600)
+        for name, kind in _CENSUS_SOURCE_KINDS
+    )
+    artifacts = tuple(sorted(
+        (*generated.artifacts, *source_artifacts),
+        key=lambda item: (str(item.destination), item.kind),
+    ))
+    return _CensusExtensionDeploymentBundle(
+        instance_id=generated.instance_id,
+        native_host_name=generated.native_host_name,
+        source_commit=generated.source_commit,
+        wrapper_argv=generated.wrapper_argv,
+        artifacts=artifacts,
+        bundle_digest=_bundle_digest(
+            release=release,
+            instance_id=generated.instance_id,
+            artifacts=artifacts,
+        ),
+    )
+
+
+__all__.append("render_census_extension_bundle")
