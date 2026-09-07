@@ -8,6 +8,7 @@ from integrations.notion_knowledge_surface.bootstrap import (
     AmbiguousChildError,
     NotionClient,
     NotionEffectUnknown,
+    SchemaMismatchError,
     apply_workspace,
     build_plan,
     load_manifest,
@@ -23,15 +24,46 @@ def _block(kind: str, title: str, object_id: str) -> dict:
     return {"id": object_id, "type": block_type, block_type: {"title": title}}
 
 
+def _actual_properties(properties: dict) -> dict:
+    actual = {}
+    for index, (name, spec) in enumerate(properties.items()):
+        property_type = next(iter(spec))
+        actual[name] = {
+            "id": "title" if property_type == "title" else f"p{index}",
+            "name": name,
+            "type": property_type,
+            property_type: spec[property_type],
+        }
+    return actual
+
+
 class FakeClient:
     def __init__(self, *, effect_unknown_key: str | None = None):
         self.blocks: list[dict] = []
         self.created: list[str] = []
         self.effect_unknown_key = effect_unknown_key
         self._unknown_fired = False
+        self._database_sources: dict[str, str] = {}
+        self._data_source_properties: dict[str, dict] = {}
 
     def retrieve_page(self, page_id: str) -> dict:
         return {"object": "page", "id": page_id, "in_trash": False}
+
+    def retrieve_database(self, database_id: str) -> dict:
+        source_id = self._database_sources[database_id]
+        return {
+            "object": "database",
+            "id": database_id,
+            "in_trash": False,
+            "data_sources": [{"id": source_id, "name": "Initial data source"}],
+        }
+
+    def retrieve_data_source(self, data_source_id: str) -> dict:
+        return {
+            "object": "data_source",
+            "id": data_source_id,
+            "properties": self._data_source_properties[data_source_id],
+        }
 
     def list_children(self, parent_page_id: str) -> list[dict]:
         assert parent_page_id == PARENT
@@ -42,11 +74,25 @@ class FakeClient:
 
     def create_database(self, parent_page_id: str, title: str, properties: dict) -> dict:
         assert properties
-        return self._create("database", title)
+        return self._create("database", title, properties)
 
-    def _create(self, kind: str, title: str) -> dict:
+    def seed_database(self, title: str, properties: dict) -> str:
+        object_id = f"10000000-0000-4000-8000-{len(self.blocks) + 1:012d}"
+        self.blocks.append(_block("database", title, object_id))
+        self._register_database(object_id, properties)
+        return object_id
+
+    def _register_database(self, database_id: str, properties: dict) -> None:
+        source_id = f"20000000-0000-4000-8000-{len(self._database_sources) + 1:012d}"
+        self._database_sources[database_id] = source_id
+        self._data_source_properties[source_id] = _actual_properties(properties)
+
+    def _create(self, kind: str, title: str, properties: dict | None = None) -> dict:
         object_id = f"00000000-0000-4000-8000-{len(self.blocks) + 1:012d}"
         self.blocks.append(_block(kind, title, object_id))
+        if kind == "database":
+            assert properties is not None
+            self._register_database(object_id, properties)
         self.created.append(title)
         if self.effect_unknown_key == title and not self._unknown_fired:
             self._unknown_fired = True
@@ -99,6 +145,18 @@ def test_duplicate_exact_children_refuse() -> None:
     ]
     with pytest.raises(AmbiguousChildError):
         build_plan(manifest, blocks)
+
+
+def test_reused_database_schema_is_proven_before_any_write() -> None:
+    manifest = load_manifest(MANIFEST)
+    client = FakeClient()
+    programs = next(child for child in manifest["children"] if child["key"] == "programs")
+    client.seed_database(programs["title"], {"Name": {"title": {}}})
+
+    with pytest.raises(SchemaMismatchError):
+        apply_workspace(client, PARENT, manifest)
+
+    assert client.created == []
 
 
 def test_apply_is_idempotent_on_second_run() -> None:
