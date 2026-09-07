@@ -135,8 +135,9 @@ def _is_e1_envelope(payload: Any, tool: str) -> bool:
 class _DuplicateAuthorizationGuard:
     """Reject raw duplicate credentials before SDK header coalescing."""
 
-    def __init__(self, app: Any) -> None:
+    def __init__(self, app: Any, *, fenced_app: Any | None = None) -> None:
         self._app = app
+        self._fenced_app = fenced_app or app
 
     async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
         if scope.get("type") == "http" and scope.get("path") == "/mcp":
@@ -149,7 +150,7 @@ class _DuplicateAuthorizationGuard:
                 )
                 await response(scope, receive, send)
                 return
-        await self._app(scope, receive, send)
+        await self._fenced_app(scope, receive, send)
 
 
 def build_e1_tools() -> list[mcp_types.Tool]:
@@ -273,14 +274,21 @@ def build_e1_mcp_app(settings: Any, *, audit_sink: Any) -> Any:
     async def metadata(_request: Request) -> JSONResponse:
         return JSONResponse(protected_resource_metadata(settings.policies.read))
 
+    outer_app = Starlette(
+        routes=[
+            Route(metadata_path, metadata, methods=["GET"]),
+            Route("/mcp", authenticated, methods=["POST"]),
+        ],
+        lifespan=lifespan,
+    )
+    outer_app.router.redirect_slashes = False
+    from integrations.mastermind_executive_app.app import _RawPathFence
+
     return _DuplicateAuthorizationGuard(
-        Starlette(
-            routes=[
-                Route(metadata_path, metadata, methods=["GET"]),
-                Route("/mcp", authenticated, methods=["POST"]),
-            ],
-            lifespan=lifespan,
-        )
+        outer_app,
+        fenced_app=_RawPathFence(
+            outer_app, metadata_path=metadata_path, read_gateway=inner_app
+        ),
     )
 
 

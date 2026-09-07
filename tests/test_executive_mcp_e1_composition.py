@@ -634,6 +634,210 @@ def test_real_e1_mcp_metadata_initialize_list_and_four_reader_calls(tmp_path, mo
     asyncio.run(exercise())
 
 
+def test_real_e1_outer_wrapper_refuses_aliases_and_propagates_lifespan_once(tmp_path, monkeypatch):
+    """Removing the returned fence or its lifetime must expose an alias or skip a real close."""
+
+    from contextlib import asynccontextmanager, suppress
+
+    sys.path.insert(0, str(Path(__file__).parent))
+    try:
+        import test_mastermind_executive_app_asgi as auth_fixture
+    finally:
+        sys.path.pop(0)
+    import json
+    import httpx
+    from control_plane.executive_runtime import Runtime
+    from mcp.server.streamable_http_manager import StreamableHTTPSessionManager as RealManager
+    from integrations.mastermind_executive_app import app as app_module
+    from integrations.mastermind_executive_app.app import AppSettings
+    from integrations.mastermind_executive_app.gateway import AppPolicies
+    import integrations.executive_mcp.server as server_module
+
+    class Sink:
+        def emit(self, _event: Any) -> None:
+            pass
+
+    manager_runs: list[Any] = []
+    manager_exits: list[Any] = []
+    backend_calls: list[str] = []
+    reader_calls: list[str] = []
+    inner_closes: list[Any] = []
+    gateway_closes: list[Any] = []
+    captured_gateways: list[Any] = []
+
+    class CountingManager(RealManager):
+        @asynccontextmanager
+        async def run(self):
+            manager_runs.append(self)
+            try:
+                async with super().run():
+                    yield
+            finally:
+                manager_exits.append(self)
+
+        async def handle_request(self, scope: Any, receive: Any, send: Any) -> None:
+            backend_calls.append(str(scope.get("path")))
+            await super().handle_request(scope, receive, send)
+
+    original_inner = server_module.build_e1_app
+    original_gateway_builder = app_module.build_read_gateway
+
+    def observe_gateway(*args: Any, **kwargs: Any) -> Any:
+        gateway = original_gateway_builder(*args, **kwargs)
+        original_close = gateway.aclose
+
+        async def observed_close() -> None:
+            gateway_closes.append(gateway)
+            await original_close()
+
+        monkeypatch.setattr(gateway, "aclose", observed_close)
+        captured_gateways.append(gateway)
+        return gateway
+
+    class ObservedInner:
+        def __init__(self, inner: Any) -> None:
+            self._inner = inner
+
+        async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+            if scope.get("path", "").startswith("/v1/tools/"):
+                reader_calls.append(str(scope["path"]))
+            await self._inner(scope, receive, send)
+
+        async def aclose(self) -> None:
+            inner_closes.append(self._inner)
+            await self._inner.aclose()
+
+    monkeypatch.setattr(server_module, "StreamableHTTPSessionManager", CountingManager)
+    monkeypatch.setattr(app_module, "build_read_gateway", observe_gateway)
+    monkeypatch.setattr(
+        server_module, "build_e1_app", lambda settings: ObservedInner(original_inner(settings))
+    )
+    key = auth_fixture.rsa_key.__wrapped__()
+    runtime_root = tmp_path / "runtime"
+    job = Runtime.at(runtime_root).jobs.create_job(
+        "temporary outer-wrapper Job", department="research", priority=1
+    )
+    app = server_module.build_e1_mcp_app(
+        AppSettings(
+            policies=AppPolicies(read=auth_fixture._read_policy(), submit=auth_fixture._submit_policy()),
+            mastermind_root=tmp_path / "mastermind", macro_root_flag=str(tmp_path / "macro"),
+            runtime_root=runtime_root, environ={}, ceo_ingress_socket_path=None,
+            read_only=True, jwks_cache=auth_fixture._FakeJwksCache(key),
+            clock=lambda: auth_fixture.NOW,
+        ),
+        audit_sink=Sink(),
+    )
+    assert len(captured_gateways) == 1
+    gateway = captured_gateways[0]
+
+    async def exercise() -> None:
+        lifespan_events: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        lifespan_signals: list[dict[str, Any]] = []
+        startup_complete = asyncio.Event()
+
+        async def receive_lifespan() -> dict[str, Any]:
+            return await lifespan_events.get()
+
+        async def send_lifespan(event: dict[str, Any]) -> None:
+            lifespan_signals.append(dict(event))
+            if event["type"] == "lifespan.startup.complete":
+                startup_complete.set()
+
+        await lifespan_events.put({"type": "lifespan.startup"})
+        lifespan_task = asyncio.create_task(
+            app(
+                {"type": "lifespan", "asgi": {"version": "3.0", "spec_version": "2.0"}},
+                receive_lifespan,
+                send_lifespan,
+            )
+        )
+        try:
+            await asyncio.wait_for(startup_complete.wait(), timeout=1)
+            assert manager_runs == [manager_runs[0]]
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://e1.local",
+                follow_redirects=False,
+            ) as client:
+                canonical = await client.get(auth_fixture.METADATA_PATH)
+                refusals = {
+                    "head": await client.head(auth_fixture.METADATA_PATH),
+                    "query": await client.get(auth_fixture.METADATA_PATH + "?alias=1"),
+                    "slash": await client.get(auth_fixture.METADATA_PATH + "/"),
+                    "encoded": await client.get(auth_fixture.METADATA_PATH + "%2F"),
+                    "alternate": await client.get(auth_fixture.METADATA_PATH + "//"),
+                }
+                mcp_aliases = {
+                    "slash": await client.post("/mcp/", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"}),
+                    "encoded": await client.post("/mcp%2F", json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
+                    "alternate": await client.post("/mcp//", json={"jsonrpc": "2.0", "id": 3, "method": "tools/list"}),
+                }
+                denied = await client.post("/mcp", json={"jsonrpc": "2.0", "id": 4, "method": "tools/list"})
+
+                assert canonical.status_code == 200
+                assert all(response.status_code == 404 for name, response in refusals.items() if name in {"head", "query", "slash"})
+                assert all(response.status_code == 400 for name, response in refusals.items() if name in {"encoded", "alternate"})
+                assert all(response.status_code != 307 for response in refusals.values())
+                assert mcp_aliases["slash"].status_code == 404
+                assert all(response.status_code == 400 for name, response in mcp_aliases.items() if name in {"encoded", "alternate"})
+                assert all(response.status_code != 307 for response in mcp_aliases.values())
+                assert denied.status_code == 401 and "www-authenticate" in denied.headers
+                assert backend_calls == []
+                assert reader_calls == []
+
+                headers = {
+                    "authorization": f"Bearer {auth_fixture._read_token(key)}",
+                    "accept": "application/json, text/event-stream",
+                    "mcp-protocol-version": "2025-06-18",
+                }
+                initialize = await client.post(
+                    "/mcp", headers=headers,
+                    json={"jsonrpc": "2.0", "id": 5, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "test", "version": "1"}}},
+                )
+                assert initialize.status_code == 200
+                listed = await client.post(
+                    "/mcp", headers=headers, json={"jsonrpc": "2.0", "id": 6, "method": "tools/list"}
+                )
+                assert sorted(item["name"] for item in listed.json()["result"]["tools"]) == [
+                    "ceo_intent_status", "executive_inbox", "executive_job", "executive_state",
+                ]
+                for request_id, name, arguments in (
+                    (7, "executive_state", {}),
+                    (8, "executive_inbox", {}),
+                    (9, "executive_job", {"job_id": job.job_id}),
+                    (10, "ceo_intent_status", {"intent_id": "INTENT-OUTER-WRAPPER"}),
+                ):
+                    response = await client.post(
+                        "/mcp", headers=headers,
+                        json={"jsonrpc": "2.0", "id": request_id, "method": "tools/call", "params": {"name": name, "arguments": arguments}},
+                    )
+                    assert response.status_code == 200, response.text
+                    assert json.loads(response.json()["result"]["content"][0]["text"])["tool"] == name
+        finally:
+            if not lifespan_task.done():
+                await lifespan_events.put({"type": "lifespan.shutdown"})
+            try:
+                await asyncio.wait_for(lifespan_task, timeout=1)
+            except asyncio.TimeoutError:
+                lifespan_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await lifespan_task
+
+        assert [event["type"] for event in lifespan_signals] == [
+            "lifespan.startup.complete", "lifespan.shutdown.complete",
+        ]
+
+    asyncio.run(exercise())
+    assert len(manager_runs) == 1
+    assert manager_exits == manager_runs
+    assert len(inner_closes) == 1
+    assert gateway_closes == [gateway]
+    assert gateway._closed is True
+    assert reader_calls == [
+        "/v1/tools/executive_state", "/v1/tools/executive_inbox",
+        "/v1/tools/executive_job", "/v1/tools/ceo_intent_status",
+    ]
+
+
 def test_real_e1_mcp_validates_outer_arguments_and_canonicalizes_inner_failures(tmp_path, monkeypatch):
     """The MCP handler is a strict one-request proxy, never an envelope forge."""
 
