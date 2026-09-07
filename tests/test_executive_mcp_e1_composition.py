@@ -36,6 +36,231 @@ def _run(app: Any, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sent
 
 
+def test_bounded_request_coalesces_streamed_empty_frames_into_one_terminal_replay():
+    """Both request guards retain the bounded payload, rather than every empty frame."""
+
+    from integrations.executive_mcp.e1_http import BoundedE1App, BoundedRequestApp
+
+    empty_frames = 10_000
+
+    def streamed_receive(fragments: tuple[bytes, ...]) -> Any:
+        cursor = 0
+
+        async def receive() -> dict[str, Any]:
+            nonlocal cursor
+            if cursor < empty_frames:
+                cursor += 1
+                return {"type": "http.request", "body": b"", "more_body": True}
+            fragment_index = cursor - empty_frames
+            if fragment_index < len(fragments):
+                cursor += 1
+                return {
+                    "type": "http.request",
+                    "body": fragments[fragment_index],
+                    "more_body": fragment_index + 1 < len(fragments),
+                }
+            return {"type": "http.disconnect"}
+
+        return receive
+
+    async def exercise() -> None:
+        for wrapper in (BoundedE1App, BoundedRequestApp):
+            for fragments, expected in (
+                ((b"",), b""),
+                ((b"left", b""), b"left"),
+                ((b"left", b"", b"right"), b"leftright"),
+            ):
+                received: list[dict[str, Any]] = []
+                sent: list[dict[str, Any]] = []
+
+                async def inner(_scope: Any, receive: Any, send: Any) -> None:
+                    received.extend((dict(await receive()), dict(await receive())))
+                    await send({"type": "http.response.start", "status": 200, "headers": []})
+                    await send({"type": "http.response.body", "body": b"ok", "more_body": False})
+
+                async def send(event: dict[str, Any]) -> None:
+                    sent.append(dict(event))
+
+                await wrapper(inner)(
+                    {
+                        "type": "http",
+                        "method": "POST",
+                        "path": "/v1/tools/executive_state",
+                        "raw_path": b"/v1/tools/executive_state",
+                        "headers": [],
+                    },
+                    streamed_receive(fragments),
+                    send,
+                )
+
+                assert received == [
+                    {"type": "http.request", "body": expected, "more_body": False},
+                    {"type": "http.disconnect"},
+                ]
+                assert sent[-1]["body"] == b"ok"
+
+    asyncio.run(exercise())
+
+
+def test_bounded_request_storage_does_not_grow_with_streamed_empty_frames():
+    """Pausing before the terminal frame exposes a constant-size local buffer."""
+
+    from integrations.executive_mcp.e1_http import BoundedE1App
+
+    def direct_container_size(frame: Any, *excluded: object) -> int:
+        excluded_ids = {id(value) for value in excluded}
+        sizes = [
+            len(value)
+            for value in frame.f_locals.values()
+            if id(value) not in excluded_ids and isinstance(value, (list, tuple, dict, set, bytearray))
+        ]
+        assert sizes
+        return max(sizes)
+
+    async def observe(empty_frames: int) -> tuple[int, Any]:
+        cursor = 0
+        before_terminal = asyncio.Event()
+        release = asyncio.Event()
+
+        async def receive() -> dict[str, Any]:
+            nonlocal cursor
+            if cursor == 0:
+                cursor += 1
+                return {"type": "http.request", "body": b"left", "more_body": True}
+            if cursor <= empty_frames:
+                cursor += 1
+                return {"type": "http.request", "body": b"", "more_body": True}
+            before_terminal.set()
+            await release.wait()
+            return {"type": "http.request", "body": b"right", "more_body": False}
+
+        task = asyncio.create_task(BoundedE1App._bounded_request(receive))
+        try:
+            await before_terminal.wait()
+            frame = task.get_coro().cr_frame
+            assert frame is not None
+            retained_size = direct_container_size(frame)
+        finally:
+            release.set()
+            body = await task
+        return retained_size, body
+
+    small, small_body = asyncio.run(observe(1))
+    large, large_body = asyncio.run(observe(10_000))
+
+    assert small == large
+    assert large <= 16
+    assert small_body == large_body == b"leftright"
+
+
+def test_e1_asgi_empty_response_frames_do_not_form_a_frame_buffer():
+    """Pausing before the terminal response finds no empty-frame-sized collection."""
+
+    from integrations.executive_mcp.e1_http import BoundedE1App
+
+    def direct_container_size(frame: Any, *excluded: object) -> int:
+        excluded_ids = {id(value) for value in excluded}
+        sizes = [
+            len(value)
+            for value in frame.f_locals.values()
+            if id(value) not in excluded_ids and isinstance(value, (list, tuple, dict, set, bytearray))
+        ]
+        assert sizes
+        return max(sizes)
+
+    async def observe(empty_frames: int) -> int:
+        empty_frames_sent = asyncio.Event()
+        release = asyncio.Event()
+        sent: list[dict[str, Any]] = []
+        scope = {
+            "type": "http",
+            "method": "POST",
+            "path": "/v1/tools/executive_state",
+            "raw_path": b"/v1/tools/executive_state",
+            "headers": [],
+        }
+
+        async def receive() -> dict[str, Any]:
+            return {"type": "http.request", "body": b"{}", "more_body": False}
+
+        async def send(event: dict[str, Any]) -> None:
+            sent.append(dict(event))
+
+        async def inner(_scope: Any, _receive: Any, bounded_send: Any) -> None:
+            await bounded_send({"type": "http.response.start", "status": 200, "headers": []})
+            await bounded_send({"type": "http.response.body", "body": b"left", "more_body": True})
+            for _ in range(empty_frames):
+                await bounded_send({"type": "http.response.body", "body": b"", "more_body": True})
+            empty_frames_sent.set()
+            await release.wait()
+            await bounded_send({"type": "http.response.body", "body": b"right", "more_body": False})
+
+        app = BoundedE1App(inner)
+        task = asyncio.create_task(app(scope, receive, send))
+        try:
+            await empty_frames_sent.wait()
+            frame = task.get_coro().cr_frame
+            assert frame is not None
+            retained_size = direct_container_size(frame, scope, app)
+        finally:
+            release.set()
+            await task
+
+        assert sent[-1]["body"] == b"leftright"
+        return retained_size
+
+    small, large = asyncio.run(observe(1)), asyncio.run(observe(10_000))
+
+    assert small == large
+    assert large <= 16
+
+
+def test_e1_asgi_coalesces_empty_response_fragments_without_changing_payload_order():
+    """Entirely empty, terminal empty, and interleaved empties have one ordered body."""
+
+    from integrations.executive_mcp.e1_http import BoundedE1App
+
+    async def exercise() -> None:
+        for fragments, expected in (
+            ((b"",), b""),
+            ((b"left", b""), b"left"),
+            ((b"left", b"", b"right"), b"leftright"),
+        ):
+            sent: list[dict[str, Any]] = []
+
+            async def receive() -> dict[str, Any]:
+                return {"type": "http.request", "body": b"{}", "more_body": False}
+
+            async def send(event: dict[str, Any]) -> None:
+                sent.append(dict(event))
+
+            async def inner(_scope: Any, _receive: Any, bounded_send: Any) -> None:
+                await bounded_send({"type": "http.response.start", "status": 200, "headers": []})
+                for index, body in enumerate(fragments):
+                    await bounded_send(
+                        {
+                            "type": "http.response.body",
+                            "body": body,
+                            "more_body": index + 1 < len(fragments),
+                        }
+                    )
+
+            await BoundedE1App(inner)(
+                {
+                    "type": "http",
+                    "method": "POST",
+                    "path": "/v1/tools/executive_state",
+                    "raw_path": b"/v1/tools/executive_state",
+                    "headers": [],
+                },
+                receive,
+                send,
+            )
+            assert sent[-1] == {"type": "http.response.body", "body": expected, "more_body": False}
+
+    asyncio.run(exercise())
+
+
 def test_e1_asgi_refuses_incremental_body_overflow_before_inner_app_runs():
     """Removing receive accounting must let the oversized body reach the app."""
 

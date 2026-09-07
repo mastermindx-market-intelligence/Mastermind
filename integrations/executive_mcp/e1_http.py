@@ -87,7 +87,7 @@ class BoundedE1App:
             await self._app(scope, receive, send)
             return
         try:
-            events = await self._bounded_request(receive)
+            request_body = await self._bounded_request(receive)
         except _RequestTooLarge:
             await _error(send, 413, "invalid_input", "request body exceeds 65536 bytes")
             return
@@ -95,18 +95,17 @@ class BoundedE1App:
             await _error(send, 400, "invalid_input", "request body is incomplete")
             return
 
-        cursor = 0
+        replayed = False
 
         async def replay_receive() -> Mapping[str, Any]:
-            nonlocal cursor
-            if cursor < len(events):
-                event = events[cursor]
-                cursor += 1
-                return event
+            nonlocal replayed
+            if not replayed:
+                replayed = True
+                return {"type": "http.request", "body": request_body, "more_body": False}
             return {"type": "http.disconnect"}
 
         start: Mapping[str, Any] | None = None
-        response_chunks: list[bytes] = []
+        response_body = bytearray()
         response_total = 0
         response_complete = False
 
@@ -126,7 +125,7 @@ class BoundedE1App:
             if response_total + len(body) > MAX_RESPONSE_BYTES:
                 raise _ResponseTooLarge
             response_total += len(body)
-            response_chunks.append(body)
+            response_body.extend(body)
             if not event.get("more_body", False):
                 response_complete = True
 
@@ -148,14 +147,14 @@ class BoundedE1App:
         await send(
             {
                 "type": "http.response.body",
-                "body": b"".join(response_chunks),
+                "body": bytes(response_body),
                 "more_body": False,
             }
         )
 
     @staticmethod
-    async def _bounded_request(receive: _Receive) -> list[Mapping[str, Any]]:
-        events: list[Mapping[str, Any]] = []
+    async def _bounded_request(receive: _Receive) -> bytes:
+        request_body = bytearray()
         total = 0
         while True:
             event = await receive()
@@ -167,9 +166,9 @@ class BoundedE1App:
             total += len(body)
             if total > MAX_REQUEST_BYTES:
                 raise _RequestTooLarge
-            events.append(dict(event))
+            request_body.extend(body)
             if not event.get("more_body", False):
-                return events
+                return bytes(request_body)
 
 
 class BoundedRequestApp:
@@ -183,21 +182,20 @@ class BoundedRequestApp:
             await self._app(scope, receive, send)
             return
         try:
-            events = await BoundedE1App._bounded_request(receive)
+            request_body = await BoundedE1App._bounded_request(receive)
         except _RequestTooLarge:
             await _error(send, 413, "invalid_input", "request body exceeds 65536 bytes")
             return
         except RuntimeError:
             await _error(send, 400, "invalid_input", "request body is incomplete")
             return
-        cursor = 0
+        replayed = False
 
         async def replay_receive() -> Mapping[str, Any]:
-            nonlocal cursor
-            if cursor < len(events):
-                event = events[cursor]
-                cursor += 1
-                return event
+            nonlocal replayed
+            if not replayed:
+                replayed = True
+                return {"type": "http.request", "body": request_body, "more_body": False}
             return {"type": "http.disconnect"}
 
         await self._app(scope, replay_receive, send)
