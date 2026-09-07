@@ -19,15 +19,23 @@ Rules of the house (non-negotiable):
 - Read-only: you analyze and recommend; you never execute or write trade state. Treat submit_book
 and every other state-changing MCP as unavailable even if a runtime mistakenly exposes one."""
 
-# Agent files are config layers: an empty table does not erase the parent's MCP map. Deny leaves
-# are applied after the parent's exact enabled_tools list, retaining reads while removing writes.
+# Native role files are parsed before parent overlays: even disabled MCP entries need
+# a transport. Portfolio servers stay inert; active-book reads use the research server below.
 [mcp_servers.bot]
+command = "false"
+enabled = false
 disabled_tools = ["save_research_note", "propose_thesis", "flag_emerging_theme", "file_research_paper", "propose_portfolio_action"]
 [mcp_servers.desk]
+command = "false"
+enabled = false
 disabled_tools = ["request_context_upgrade", "submit_book"]
 [mcp_servers.china]
+command = "false"
+enabled = false
 disabled_tools = ["request_context_upgrade", "submit_book"]
 [mcp_servers.hk]
+command = "false"
+enabled = false
 disabled_tools = ["request_context_upgrade", "submit_book"]
 [mcp_servers.research]
 command = "sh"

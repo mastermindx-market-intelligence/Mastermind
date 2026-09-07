@@ -8,6 +8,65 @@ exposing the existing five-tool Executive MCP contract
 or Sol) over plain HTTP, without the MCP SDK, without a new admission path,
 and without touching the general Executive control socket.
 
+## Temporary E1 four-read mode
+
+The source-only `e1-read` mode is explicit-root and production-inert: it
+requires Mastermind, Macro, and temporary runtime roots, accepts no ingress
+socket, constructs no admission writer, and exposes only the four reader tool
+paths. The outer MCP request authenticates its single current bearer before
+the inner E1 app independently re-verifies it. Duplicate Authorization fields,
+non-loopback configuration, production-root aliases, malformed frames, and
+bounded request/response overflow refuse without fallback, retry, or partial
+success. This is neither an installed-runtime nor deployment proof.
+
+Use the profile only with all operator coordinates named explicitly:
+
+```bash
+python3 scripts/executive_mcp.py \
+  --profile e1-read --mode readonly \
+  --policy /approved/temporary/e1-policy.json \
+  --repo-root /approved/reviewed/mastermind \
+  --macro-root /approved/reviewed/macro \
+  --read-runtime-root /approved/temporary/e1-runtime \
+  --host 127.0.0.1 --port 9123
+```
+
+E1 serves the stateless authenticated MCP surface at `POST /mcp`, with exactly
+`executive_state`, `executive_inbox`, `executive_job`, and
+`ceo_intent_status`. The in-process `/v1/tools/...` reader map is not a second
+listener and has no submit/reconcile route. A sole raw bearer must have the
+exact read scope; missing, duplicate, malformed, wider submit-scope, or invalid
+bearers stop at the outer gate. Valid MCP arguments are passed through the
+existing strict validator before the one inner request. Only a complete
+canonical reader envelope crosses back unchanged; invalid JSON, foreign
+envelopes, non-200 responses, response loss, and response overflow return the
+canonical `backend_unavailable` envelope without retry.
+
+The request ceiling is 65,536 bytes across all ASGI frames (not the declared
+`Content-Length`); incomplete, malformed, or 65,537-byte input refuses before
+MCP dispatch. The inner response is held until it is fully framed and within
+262,144 bytes, preventing partial healthy responses. Every temporary runtime
+root is fenced lexically and after symlink resolution at construction and again
+before each reader. Missing, foreign, unreadable, or moved runtime state remains
+an explicit degradation/unavailable result and never falls back to repository
+lifecycle data or causes the reader to create files.
+
+`--describe` confirms the pinned four-reader profile without reading the policy,
+importing the serving SDK, or binding a listener. It still requires the explicit
+coordinate flags so the production-path refusal is exercised:
+
+```bash
+python3 scripts/executive_mcp.py --profile e1-read --mode readonly --describe \
+  --policy /approved/temporary/e1-policy.json \
+  --repo-root /approved/reviewed/mastermind \
+  --macro-root /approved/reviewed/macro \
+  --read-runtime-root /approved/temporary/e1-runtime --port 9123
+```
+
+This runbook documents a source-only temporary composition. It does not grant
+authority to install, start, tunnel, connect a custom app, read a real runtime,
+or describe the composition as production-ready.
+
 * The four READ tools (`executive_state`, `executive_inbox`, `executive_job`,
   `ceo_intent_status`) are reused verbatim through
   `integrations.executive_mcp.adapter.ExecutiveMcpGateway` — same schemas,
