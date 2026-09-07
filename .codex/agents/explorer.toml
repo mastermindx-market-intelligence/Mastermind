@@ -9,12 +9,20 @@ request_context_upgrade, or any other state-changing MCP. Never size or execute 
 """
 
 [mcp_servers.bot]
+command = "false"
+enabled = false
 disabled_tools = ["save_research_note", "propose_thesis", "flag_emerging_theme", "file_research_paper", "propose_portfolio_action"]
 [mcp_servers.desk]
+command = "false"
+enabled = false
 disabled_tools = ["request_context_upgrade", "submit_book"]
 [mcp_servers.china]
+command = "false"
+enabled = false
 disabled_tools = ["request_context_upgrade", "submit_book"]
 [mcp_servers.hk]
+command = "false"
+enabled = false
 disabled_tools = ["request_context_upgrade", "submit_book"]
 [mcp_servers.research]
 command = "sh"

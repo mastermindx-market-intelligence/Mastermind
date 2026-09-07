@@ -8,17 +8,21 @@
   const CALL_MS = 800;
   const SWEEP_MS = 5000;
   const SCHEMA = "mastermind.web_sol_local_census.v1";
-  // Popup-lifetime backpressure only: one count per API object, no target map,
-  // saved observation, queue, retry or lifecycle state. Closing the view drops it.
+  // Popup-lifetime backpressure for collector-issued reads: one count per API object,
+  // no target map, saved observation, queue, retry or lifecycle state. A timeout
+  // never releases a still-pending read. Closing the view drops this local count.
   const pendingReads = new WeakMap();
-  const NO_SLOT = Symbol("no-probe-slot");
-  function readProbe(tabs, id, request) {
+  const NO_SLOT = Symbol("no-read-slot");
+  function readBrowser(tabs, call) {
     const pending = pendingReads.get(tabs) || 0;
     if (pending >= CONCURRENCY) return NO_SLOT;
     pendingReads.set(tabs, pending + 1);
-    return Promise.resolve().then(() => tabs.sendMessage(id, request, {frameId: 0})).finally(() => {
+    return Promise.resolve().then(call).finally(() => {
       pendingReads.set(tabs, Math.max(0, (pendingReads.get(tabs) || 0) - 1));
     });
+  }
+  function readProbe(tabs, id, request) {
+    return readBrowser(tabs, () => tabs.sendMessage(id, request, {frameId: 0}));
   }
   const PATTERNS = Object.freeze(["https://chatgpt.com/*", "https://chat.openai.com/*"]);
   const HEX = /^[0-9a-f]{64}$/;
@@ -119,8 +123,9 @@
     row.conversation_fingerprint = digest.value; row.identity_evidence = "BROWSER_LOCATOR";
     const asleep = sleepState(t);
     if (asleep) { row.status = asleep; return row; }
-    const before = await call(() => tabs.get(t.id));
+    const before = await call(() => readBrowser(tabs, () => tabs.get(t.id)));
     if (!before.ok) { row.status = before.timeout ? "SWEEP_DEADLINE" : "LOOKUP_UNAVAILABLE"; return row; }
+    if (before.value === NO_SLOT) { row.status = "PROBE_SLOTS_EXHAUSTED"; return row; }
     if (!sameLocator(t, before.value)) { row.status = "TARGET_CHANGED"; return row; }
     const nowAsleep = sleepState(before.value);
     if (nowAsleep) { row.status = nowAsleep; return row; }
@@ -135,8 +140,9 @@
       row.status = "TARGET_CHANGED"; return row;
     }
     if (!o.page_responsive || o.document_ready_state !== "complete") { row.status = "LOADING"; return row; }
-    const after = await call(() => tabs.get(t.id));
+    const after = await call(() => readBrowser(tabs, () => tabs.get(t.id)));
     if (!after.ok) { row.status = after.timeout ? "SWEEP_DEADLINE" : "LOOKUP_UNAVAILABLE"; return row; }
+    if (after.value === NO_SLOT) { row.status = "PROBE_SLOTS_EXHAUSTED"; return row; }
     if (!sameLocator(before.value, after.value) || sleepState(after.value)) { row.status = "TARGET_CHANGED"; return row; }
     row.status = "OBSERVED"; row.identity_evidence = "LOCATOR_AND_V1_PROBE";
     // A v1 probe does not bind a Chrome documentId. Never promote this to a document or runtime attestation.
@@ -206,8 +212,8 @@
     if (!out.adapter_instance_id) { out.reason = "ADAPTER_UNCONFIGURED"; return finish(); }
     if (!tabs || !["query", "get", "sendMessage"].every(k => typeof tabs[k] === "function")) return finish();
     try {
-      const first = await bounded(() => tabs.query({url: PATTERNS.slice()}), CALL_MS);
-      if (!first.ok) return finish();
+      const first = await bounded(() => readBrowser(tabs, () => tabs.query({url: PATTERNS.slice()})), CALL_MS);
+      if (!first.ok || first.value === NO_SLOT) return finish();
       if (!Array.isArray(first.value)) { out.reason = "INVALID_INVENTORY"; return finish(); }
       if (first.value.length > MAX_INVENTORY) {
         out.reason = "INVENTORY_LIMIT"; out.inventory_coverage = "PARTIAL";
@@ -239,7 +245,7 @@
       if (retired && monotonic() < start + SWEEP_MS - CALL_MS) {
         for (const row of out.rows) if (row.status === "SWEEP_DEADLINE") row.status = "PROBE_SLOTS_EXHAUSTED";
       }
-      const last = await bounded(() => tabs.query({url: PATTERNS.slice()}), Math.min(CALL_MS, start + SWEEP_MS - monotonic()));
+      const last = await bounded(() => readBrowser(tabs, () => tabs.query({url: PATTERNS.slice()})), Math.min(CALL_MS, start + SWEEP_MS - monotonic()));
       if (!last.ok || !Array.isArray(last.value) || last.value.length > MAX_INVENTORY) {
         out.inventory_coverage = "PARTIAL";
         if (out.reason === "NONE") out.reason = "FINAL_QUERY_UNAVAILABLE";
