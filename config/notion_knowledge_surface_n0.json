@@ -69,6 +69,11 @@
       }
     },
     {
+      "key": "operating_manual",
+      "kind": "page",
+      "title": "05 — Operating Manual"
+    },
+    {
       "key": "chairman_inputs",
       "kind": "database",
       "title": "06 — Chairman Notes & Inputs",
