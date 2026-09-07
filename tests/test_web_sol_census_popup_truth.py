@@ -18,6 +18,8 @@ MAX_TAP_BYTES = 128 * 1024
 
 def _assert_node_result(result: subprocess.CompletedProcess[str]) -> None:
     """Require a complete flat suite, not merely a zero child exit status."""
+    if result.returncode != 0:
+        print(f"popup Node stdout:\n{result.stdout}\npopup Node stderr:\n{result.stderr}")
     assert result.returncode == 0, "popup Node suite returned nonzero"
     assert isinstance(result.stdout, str) and isinstance(result.stderr, str)
     assert not result.stderr, "popup Node suite emitted unexpected stderr"
