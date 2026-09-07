@@ -103,6 +103,7 @@ from control_plane.operator_harness_contract import (
     apply_resume_bind,
     apply_same_epoch_generation_recovery,
     classify_capability,
+    classify_observed_capabilities,
     compare_launch,
     compare_launch_parameter_names,
     diagnose_resume_bind,
@@ -800,6 +801,211 @@ def test_resource_capability_exact_digest_allows_and_missing_or_drift_refuses_be
             ),
         )
         assert refused.decision is LaunchDecision.REFUSE_MISSING_REQUIRED
+
+
+def _digest_required_profile(**overrides: object) -> RequestedExecutionProfile:
+    """A requested profile whose one required capability carries a
+    skill_content_digest, so a "wrong" observed row (same name, different
+    digest) can be constructed distinctly from an "exact" one."""
+
+    payload = dict(
+        capabilities=CapabilityManifest(
+            required=(
+                CapabilityIdentity(
+                    name="ohf-probe",
+                    harness_binary_digest="digest-v1",
+                    skill_content_digest="skill-digest-v1",
+                ),
+            ),
+            forbidden=("codex_apps",),
+        ),
+    )
+    payload.update(overrides)
+    return _requested(**payload)
+
+
+def test_exactly_one_comparator_exact_and_wrong_duplicate_is_not_satisfied():
+    """RED (CAP-S1 P6-7): classify_observed_capabilities() must require
+    EXACTLY ONE observed row for a required name.  Pre-fix,
+    `any(_identity_proven(...) for item in observed_caps)` lets the correct
+    row satisfy the rule even though a second, wrong-identity row sharing the
+    same name is also present -- the exact defect Sol's seam map names."""
+    requested = _digest_required_profile(write_capable=True)
+    exact_row = ObservedCapabilityIdentity(
+        kind="skill", name="ohf-probe", skill_content_digest="skill-digest-v1"
+    )
+    wrong_row = ObservedCapabilityIdentity(
+        kind="skill", name="ohf-probe", skill_content_digest="wrong-digest"
+    )
+    observed = _observed(
+        capabilities=(exact_row, wrong_row),
+        effective_skills=("ohf-probe",),
+        effective_mcp=(),
+    )
+    missing, forbidden_present, unclassified, unknown_precision = classify_observed_capabilities(
+        requested, observed
+    )
+    assert missing == ("ohf-probe",)
+    assert "ohf-probe" in unknown_precision
+    comparison = compare_launch(requested, observed)
+    assert comparison.decision is LaunchDecision.REFUSE_MISSING_REQUIRED
+    assert "missing_required" in comparison.mismatch_reasons
+
+
+def test_exactly_one_comparator_two_identical_proven_rows_is_not_satisfied():
+    """RED (CAP-S1 P6-7): two IDENTICAL proven rows for the same required
+    name are still not "exactly one" -- duplication itself is the defect,
+    independent of whether the duplicate content agrees."""
+    requested = _digest_required_profile(write_capable=True)
+    exact_row = ObservedCapabilityIdentity(
+        kind="skill", name="ohf-probe", skill_content_digest="skill-digest-v1"
+    )
+    observed = _observed(
+        capabilities=(exact_row, dataclasses.replace(exact_row)),
+        effective_skills=("ohf-probe",),
+        effective_mcp=(),
+    )
+    missing, _forbidden, _unclassified, unknown_precision = classify_observed_capabilities(
+        requested, observed
+    )
+    assert missing == ("ohf-probe",)
+    assert "ohf-probe" in unknown_precision
+    comparison = compare_launch(requested, observed)
+    assert comparison.decision is LaunchDecision.REFUSE_MISSING_REQUIRED
+    assert "missing_required" in comparison.mismatch_reasons
+
+
+def test_exactly_one_comparator_two_wrong_duplicates_stays_missing():
+    """Regression: two duplicate rows that are BOTH wrong were already
+    refused pre-fix; assert the refusal is unchanged and now also carries
+    unknown_precision."""
+    requested = _digest_required_profile(write_capable=True)
+    wrong_a = ObservedCapabilityIdentity(
+        kind="skill", name="ohf-probe", skill_content_digest="wrong-a"
+    )
+    wrong_b = ObservedCapabilityIdentity(
+        kind="skill", name="ohf-probe", skill_content_digest="wrong-b"
+    )
+    observed = _observed(
+        capabilities=(wrong_a, wrong_b),
+        effective_skills=("ohf-probe",),
+        effective_mcp=(),
+    )
+    missing, _forbidden, _unclassified, unknown_precision = classify_observed_capabilities(
+        requested, observed
+    )
+    assert missing == ("ohf-probe",)
+    assert "ohf-probe" in unknown_precision
+    comparison = compare_launch(requested, observed)
+    assert comparison.decision is LaunchDecision.REFUSE_MISSING_REQUIRED
+    assert "missing_required" in comparison.mismatch_reasons
+
+
+def test_exactly_one_comparator_lone_exact_row_is_satisfied():
+    """Regression: the ordinary lone-exact-row case must stay ALLOW."""
+    requested = _digest_required_profile(write_capable=True)
+    exact_row = ObservedCapabilityIdentity(
+        kind="skill", name="ohf-probe", skill_content_digest="skill-digest-v1"
+    )
+    observed = _observed(
+        capabilities=(exact_row,),
+        effective_skills=("ohf-probe",),
+        effective_mcp=(),
+    )
+    missing, _forbidden, _unclassified, unknown_precision = classify_observed_capabilities(
+        requested, observed
+    )
+    assert missing == ()
+    assert "ohf-probe" not in unknown_precision
+    comparison = compare_launch(requested, observed)
+    assert comparison.decision is LaunchDecision.ALLOW
+
+
+def test_exactly_one_comparator_lone_wrong_row_stays_missing():
+    """Regression: a lone but wrong-identity row was already refused
+    pre-fix; assert it is unchanged."""
+    requested = _digest_required_profile(write_capable=True)
+    wrong_row = ObservedCapabilityIdentity(
+        kind="skill", name="ohf-probe", skill_content_digest="wrong-digest"
+    )
+    observed = _observed(
+        capabilities=(wrong_row,),
+        effective_skills=("ohf-probe",),
+        effective_mcp=(),
+    )
+    missing, _forbidden, _unclassified, unknown_precision = classify_observed_capabilities(
+        requested, observed
+    )
+    assert missing == ("ohf-probe",)
+    assert "ohf-probe" in unknown_precision
+    comparison = compare_launch(requested, observed)
+    assert comparison.decision is LaunchDecision.REFUSE_MISSING_REQUIRED
+
+
+def test_required_capability_present_only_in_a_summary_set_never_satisfies():
+    """A required name observed ONLY via a `named` summary set
+    (effective_skills/effective_mcp/effective_plugins_or_apps), with zero
+    typed observation rows, must never satisfy a digest-bearing requirement
+    -- len(same_name_rows) == 0 is "missing", never "proven by summary"."""
+    requested = _digest_required_profile(write_capable=True)
+    observed = _observed(
+        capabilities=(),
+        effective_skills=("ohf-probe",),
+        effective_mcp=(),
+    )
+    missing, _forbidden, _unclassified, unknown_precision = classify_observed_capabilities(
+        requested, observed
+    )
+    assert missing == ("ohf-probe",)
+    assert "ohf-probe" in unknown_precision
+    comparison = compare_launch(requested, observed)
+    assert comparison.decision is LaunchDecision.REFUSE_MISSING_REQUIRED
+
+
+def test_kind_mismatch_on_the_lone_observed_row_is_not_proven():
+    """Regression via _identity_proven's own kind check: a lone row sharing
+    the required name but a different `kind` is not proven, so it must stay
+    missing (exactly-one-row is necessary but not sufficient)."""
+    requested = _requested(write_capable=True)  # default required rule kind="skill"
+    wrong_kind_row = ObservedCapabilityIdentity(kind="mcp_server", name="ohf-probe")
+    observed = _observed(
+        capabilities=(wrong_kind_row,),
+        effective_skills=("ohf-probe",),
+        effective_mcp=(),
+    )
+    missing, _forbidden, _unclassified, unknown_precision = classify_observed_capabilities(
+        requested, observed
+    )
+    assert missing == ("ohf-probe",)
+    assert "ohf-probe" in unknown_precision
+    comparison = compare_launch(requested, observed)
+    assert comparison.decision is LaunchDecision.REFUSE_MISSING_REQUIRED
+
+
+def test_exactly_one_comparator_is_order_invariant():
+    """Shuffling observed row order must never change any of the four
+    returned tuples -- the comparator counts rows by name, not position."""
+    requested = _digest_required_profile(write_capable=True)
+    exact_row = ObservedCapabilityIdentity(
+        kind="skill", name="ohf-probe", skill_content_digest="skill-digest-v1"
+    )
+    wrong_row = ObservedCapabilityIdentity(
+        kind="skill", name="ohf-probe", skill_content_digest="wrong-digest"
+    )
+    forward = _observed(
+        capabilities=(exact_row, wrong_row),
+        effective_skills=("ohf-probe",),
+        effective_mcp=(),
+    )
+    backward = _observed(
+        capabilities=(wrong_row, exact_row),
+        effective_skills=("ohf-probe",),
+        effective_mcp=(),
+    )
+    forward_result = classify_observed_capabilities(requested, forward)
+    backward_result = classify_observed_capabilities(requested, backward)
+    assert forward_result == backward_result
+    assert forward_result[0] == ("ohf-probe",)
 
 
 def test_auth_realm_fact_rejects_credential_shaped_fields():

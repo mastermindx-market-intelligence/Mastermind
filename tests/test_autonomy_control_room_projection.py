@@ -1363,7 +1363,7 @@ def test_output_keys_is_a_closed_set():
             "declared_blocker", "freshness", "is_actionable",
             "actionability_reason", "chairman_decision_required",
             "chairman_decision_reason", "disagreements", "source_receipts",
-            "query_status",
+            "query_status", "validity",
         }
 
 

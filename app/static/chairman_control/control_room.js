@@ -40,6 +40,7 @@
     workMode: "focus",
     workQuery: "",
     selectedWork: null,
+    selectedAutonomy: null,
     paletteItems: [],
     paletteResults: [],
     paletteIndex: 0,
@@ -48,6 +49,199 @@
 
   var LAST_DRAWER_OPENER = null;
   var LAST_PALETTE_OPENER = null;
+
+  // B5 finite source permission --------------------------------------------
+  // Cache/page metadata only. Canonical facts and the independent Inbox stay
+  // untouched. Generic HTTP has no qualified browser launcher and grants no
+  // positive permission; the owned test boundary is deliberately test-only.
+  var B5 = { bounds: new Map(), active: new Map(), body: null, timer: null, epoch: {}, publication: 0, exhausted: false };
+  var B5_MAX_PROOFS = 8192;
+  var B5_COMPONENTS = ["card", "decision_current", "dispatch", "owed_open_age"];
+  var B5_PROFILE = "b5.darwin-chrome-paired-v1";
+  var B5_CLOCK = { monotonic: performance.now, wall: Date.now };
+
+  function b5Sample() {
+    try {
+      if (document.visibilityState !== "visible" || performance.now !== B5_CLOCK.monotonic ||
+          Date.now !== B5_CLOCK.wall) return b5Unavailable();
+      var origin = performance.timeOrigin;
+      var ml = performance.now(), wl = Date.now(), mh = performance.now(), wh = Date.now();
+      if (!Number.isFinite(origin) || origin < 0 || !Number.isFinite(ml) || !Number.isFinite(mh) ||
+          ml < 0 || mh < ml || mh >= Math.pow(2, 40) || !Number.isSafeInteger(wl) ||
+          !Number.isSafeInteger(wh) || wl < 0 || wh < wl) return b5Unavailable();
+      var values = [Math.floor(ml), wl, Math.floor(mh), wh];
+      if (values[2] - values[0] > 1 || values[3] - values[1] > 1) return b5Unavailable();
+      return { values: values, origin: origin };
+    } catch (_error) { return b5Unavailable(); }
+  }
+
+  function b5Unavailable() {
+    b5Invalidate();
+    return null;
+  }
+
+  function b5Elapsed(anchor, current, previous) {
+    if (!anchor || !current || anchor.origin !== current.origin) return null;
+    var a = anchor.values, z = current.values;
+    if (!Array.isArray(a) || !Array.isArray(z) || a.length !== 4 || z.length !== 4) return null;
+    for (var i = 0; i < 4; i++) {
+      if (!Number.isSafeInteger(a[i]) || !Number.isSafeInteger(z[i]) || a[i] < 0 || z[i] < a[i]) return null;
+    }
+    if (a[2] < a[0] || a[2] - a[0] > 1 || a[3] < a[1] || a[3] - a[1] > 1 ||
+        z[2] < z[0] || z[2] - z[0] > 1 || z[3] < z[1] || z[3] - z[1] > 1) return null;
+    if (previous && b5Elapsed(previous, current, null) === null) return null;
+    var dm = z[2] - a[0], dw = z[3] - a[1];
+    return Math.abs(dm - dw) <= 8 ? dm : null;
+  }
+
+  function b5Remaining(bound, sample) {
+    if (!bound || bound.invalid) return null;
+    var elapsed = b5Elapsed(bound.anchor, sample, bound.previous);
+    if (!Number.isSafeInteger(bound.budget) || bound.budget < 0 || bound.budget > 176400000 || elapsed === null) {
+      bound.invalid = true;
+      if (elapsed === null) b5Invalidate();
+      return null;
+    }
+    bound.previous = sample;
+    return Math.max(0, bound.budget - elapsed - 16);
+  }
+
+  function b5Key(card, name) {
+    return JSON.stringify([card.responsibility_ref, card.root_job_id, name]);
+  }
+
+  function b5Qualified(envelope, anchor) {
+    var q = envelope && envelope.browser_qualification;
+    // This is a server-supplied controlled fixture context, never browser
+    // identity inferred from UA, metadata, agreeing clocks or a public flag.
+    return !!(anchor && q && q.schema === "mastermind.browser_qualification.v1" &&
+      q.boundary === "owned_test_fixture" && q.profile === B5_PROFILE && q.time_origin === anchor.origin &&
+      q.product === "Chrome/152.0.7977.82" && q.revision === "d04cdb24d67b081f6cf80200ffc5233f44b61109" &&
+      q.configuration === "b5-default-throttling-bfcache-v1");
+  }
+
+  function b5Accept(body, anchor) {
+    if (B5.timer !== null) clearTimeout(B5.timer);
+    B5.timer = null;
+    B5.active = new Map();
+    B5.epoch = {};
+    B5.body = body;
+    var acceptedEpoch = B5.epoch;
+    var env = body && body.source_validity, doc = body && body.control_room;
+    var sample = b5Sample();
+    if (B5.exhausted || !env || env.schema !== "mastermind.control_room_source_validity.v1" || env.profile !== B5_PROFILE ||
+        !Number.isSafeInteger(env.publication_seq) || env.publication_seq < 1 ||
+        env.publication_seq < B5.publication || !b5Qualified(env, anchor) || !doc) return;
+    B5.publication = env.publication_seq;
+    var rows = Array.isArray(env.cards) ? env.cards : [];
+    ((doc.autonomy || {}).responsibilities || []).forEach(function (card) {
+      var matches = rows.filter(function (row) { return row.responsibility_ref === card.responsibility_ref && row.root_job_id === card.root_job_id; });
+      if (matches.length !== 1) return;
+      B5_COMPONENTS.forEach(function (name) {
+        if (B5.exhausted) return;
+        var meta = (card.validity || {})[name], receipt = (matches[0].components || {})[name];
+        if (!meta || !receipt || meta.schema !== "mastermind.autonomy_validity.v1" ||
+            meta.policy !== "mapper-inclusive-48h-future-1h.v1" || !/^[0-9a-f]{64}$/.test(meta.proof_ref) ||
+            meta.proof_ref !== receipt.proof_ref || meta.qualified_at !== receipt.qualified_at ||
+            meta.qualified_at !== doc.generated_at || meta.qualified_at !== doc.autonomy.generated_at) return;
+        var key = b5Key(card, name), proofKey = key + ":" + meta.proof_ref;
+        var bound = { budget: receipt.remaining_ms, anchor: anchor, previous: anchor,
+          invalid: receipt.state !== "current" || !Number.isSafeInteger(meta.valid_for_ms) ||
+            receipt.remaining_ms > meta.valid_for_ms, proof: meta.proof_ref, card: card };
+        var remaining = b5Remaining(bound, sample), prior = B5.bounds.get(proofKey);
+        if (!prior && B5.bounds.size >= B5_MAX_PROOFS) {
+          B5.exhausted = true;
+          b5Invalidate();
+          return;
+        }
+        if (prior) {
+          var before = b5Remaining(prior, sample);
+          if (before === null || (remaining !== null && before <= remaining)) bound = prior;
+        }
+        B5.bounds.set(proofKey, bound);
+        B5.active.set(key, { bound: bound, card: card });
+      });
+    });
+    if (acceptedEpoch !== B5.epoch) B5.active = new Map();
+  }
+
+  function b5Allows(card, name) {
+    var entry = B5.active.get(b5Key(card, name));
+    if (!entry || entry.card !== card || B5.body !== STATE.body) return false;
+    var remaining = b5Remaining(entry.bound, b5Sample());
+    var allowed = remaining !== null && remaining > 0;
+    if (allowed) entry.renderedCurrent = true;
+    return allowed;
+  }
+
+  function b5Invalidate() {
+    B5.repaintNeeded = true;
+    if (B5.timer !== null) clearTimeout(B5.timer);
+    B5.timer = null;
+    B5.epoch = {};
+    B5.bounds.forEach(function (bound) { bound.invalid = true; });
+    B5.active = new Map();
+  }
+
+  function b5RenderRetained() {
+    B5.repaintNeeded = false;
+    if (STATE.doc) renderAutonomy(STATE.doc.autonomy);
+    if (STATE.selectedAutonomy) renderAutonomyDetail(STATE.selectedAutonomy);
+  }
+
+  function b5Schedule() {
+    if (B5.timer !== null) clearTimeout(B5.timer);
+    B5.timer = null;
+    if (B5.repaintNeeded) b5RenderRetained();
+    if (B5.active.size === 0) return;
+    var earliest = Infinity, sample = b5Sample(), epoch = B5.epoch, redraw = false;
+    if (!sample) { b5RenderRetained(); return; }
+    B5.active.forEach(function (entry) {
+      var remaining = b5Remaining(entry.bound, sample);
+      if (entry.renderedCurrent && (remaining === null || remaining <= 0)) redraw = true;
+      if (remaining !== null && remaining > 0) earliest = Math.min(earliest, remaining);
+    });
+    if (redraw) { b5RenderRetained(); b5Schedule(); return; }
+    if (!Number.isFinite(earliest)) return;
+    B5.timer = setTimeout(function () {
+      if (epoch !== B5.epoch) return;
+      B5.timer = null;
+      b5RenderRetained();
+      b5Schedule();
+    }, Math.min(earliest, 2147483647));
+  }
+
+  function b5OwedContext(card, binding) {
+    if (!binding || auOwedBinding(card) !== binding) return null;
+    var meta = (card.validity || {}).owed_open_age;
+    if (!meta || meta.binding_id !== binding.binding_id || meta.owed_seat !== binding.role) return null;
+    return { schema: "mastermind.owed_navigation.v1", publication_seq: B5.publication,
+      responsibility_ref: card.responsibility_ref, root_job_id: card.root_job_id,
+      proof_ref: meta.proof_ref, binding_fingerprint: meta.binding_fingerprint, owed_seat: meta.owed_seat };
+  }
+
+  function b5OwedButton(card, binding, label) {
+    var epoch = B5.epoch;
+    var btn = button(label, "ccr-open-button", function (event) {
+      event.stopPropagation();
+      var context = epoch === B5.epoch ? b5OwedContext(card, binding) : null;
+      if (!context) { btn.disabled = true; b5RenderRetained(); return; }
+      btn.disabled = true;
+      postJSON("/api/open", { binding_id: binding.binding_id, owed_context: context }).then(function (outcome) {
+        if (epoch !== B5.epoch) return;
+        if (!outcome || outcome.ok !== true) btn.textContent = "Needs a current read";
+      }).catch(function () {
+        if (epoch === B5.epoch) btn.textContent = "Needs a current read";
+      }).finally(function () {
+        // A pending provider result cannot resurrect an expired or replaced
+        // control. Fresh state arrives only through the existing bounded read.
+        btn.disabled = !(epoch === B5.epoch && b5OwedContext(card, binding));
+        if (epoch === B5.epoch) loadState();
+      });
+    });
+    btn.disabled = !b5OwedContext(card, binding);
+    return btn;
+  }
 
   // DOM -------------------------------------------------------------------
   function el(tag, opts) {
@@ -162,12 +356,13 @@
   }
 
   // transport -------------------------------------------------------------
-  function getJSON(path) {
+  function getJSON(path, signal) {
     var options = {
       method: "GET",
       credentials: "same-origin",
       headers: {},
     };
+    if (signal) options.signal = signal;
     if (!REMOTE_READ_ONLY) options.headers["X-CCR-Token"] = TOKEN;
     return fetch(path, options).then(function (resp) {
       return resp.json();
@@ -422,6 +617,7 @@
   function openAttentionDetail(item, target, opener) {
     LAST_DRAWER_OPENER = openerCandidate(opener);
     STATE.selectedWork = null;
+    STATE.selectedAutonomy = null;
     renderAttentionDetail(item, target);
     var drawer = document.getElementById("ccr-detail-drawer");
     drawer.classList.add("is-open");
@@ -999,6 +1195,7 @@
 
   function openDetail(card, opener) {
     LAST_DRAWER_OPENER = openerCandidate(opener);
+    STATE.selectedAutonomy = null;
     STATE.selectedWork = card;
     renderDetail(card);
     var drawer = document.getElementById("ccr-detail-drawer");
@@ -1015,6 +1212,7 @@
     drawer.setAttribute("aria-hidden", "true");
     document.getElementById("ccr-drawer-scrim").hidden = true;
     STATE.selectedWork = null;
+    STATE.selectedAutonomy = null;
     if (wasOpen) {
       var opener = LAST_DRAWER_OPENER;
       LAST_DRAWER_OPENER = null;
@@ -1452,6 +1650,7 @@
   // here either, regardless of who owes the turn.
   function auOwedBinding(card) {
     if (REMOTE_READ_ONLY) return null;
+    if (!b5Allows(card, "card") || !b5Allows(card, "dispatch") || !b5Allows(card, "owed_open_age")) return null;
     if (auIsHold(card)) return null;
     // AD-CR1A dispatch-consumption groundwork, 2026-09-03: the FROZEN SPEC
     // names the same law auIsHold already enforces for EFFECT_UNKNOWN
@@ -1516,21 +1715,22 @@
 
   function auMarks(card) {
     var marks = el("div", { className: "ccr-au-marks" });
-    if (card.chairman_decision_required === true) marks.appendChild(chip("YOUR CALL", "is-brass"));
-    if (card.is_actionable === true && !auIsHistory(card)) marks.appendChild(chip("LIVE", "is-slate"));
+    if (card.chairman_decision_required === true && b5Allows(card, "decision_current")) marks.appendChild(chip("YOUR CALL", "is-brass"));
+    if (card.is_actionable === true && !auIsHistory(card) && b5Allows(card, "card")) marks.appendChild(chip("LIVE", "is-slate"));
     else if (auIsHistory(card)) marks.appendChild(chip("HISTORY", "is-dim"));
     else marks.appendChild(chip("NOT ACTIONABLE", "is-dim"));
-    marks.appendChild(auPlacementChip(card));
-    var dispatchChip = auDispatchChip(card);
+    if (!b5Allows(card, "card")) marks.appendChild(chip("NEEDS A CURRENT READ", "is-dim"));
+    if (b5Allows(card, "card")) marks.appendChild(auPlacementChip(card));
+    var dispatchChip = b5Allows(card, "dispatch") ? auDispatchChip(card) : chip("DISPATCH AS OF READ", "is-dim");
     if (dispatchChip) marks.appendChild(dispatchChip);
-    var rootChip = auRuntimeRootChip(card);
+    var rootChip = b5Allows(card, "card") ? auRuntimeRootChip(card) : null;
     if (rootChip) marks.appendChild(rootChip);
-    var carrierChip = auCarrierChip(card);
+    var carrierChip = b5Allows(card, "dispatch") ? auCarrierChip(card) : null;
     if (carrierChip) marks.appendChild(carrierChip);
-    var w3cChip = auW3cChip(card);
+    var w3cChip = b5Allows(card, "dispatch") ? auW3cChip(card) : null;
     if (w3cChip) marks.appendChild(w3cChip);
     var freshness = AU_FRESHNESS_CHIP[card.freshness];
-    if (freshness) marks.appendChild(chip(freshness.text, freshness.variant));
+    if (freshness) marks.appendChild(chip(b5Allows(card, "card") ? freshness.text : "AS OF READ: " + freshness.text, b5Allows(card, "card") ? freshness.variant : "is-dim"));
     var status = AU_QUERY_CHIP[card.query_status];
     if (status) marks.appendChild(chip(status.text, status.variant));
     if ((card.disagreements || []).length) marks.appendChild(chip("SOURCE DRIFT", "is-danger"));
@@ -1559,9 +1759,10 @@
   }
 
   function auRow(card) {
-    var seat = auOwedSeat(card);
+    var current = b5Allows(card, "card");
+    var seat = current ? auOwedSeat(card) : "unknown";
     var cls = "ccr-au-row";
-    if (card.chairman_decision_required === true) cls += " is-decision";
+    if (card.chairman_decision_required === true && b5Allows(card, "decision_current")) cls += " is-decision";
     else if (seat === "ceo" || seat === "coo") cls += " is-owed-person";
     else if (seat === "worker") cls += " is-owed-machine";
     if (auIsHistory(card)) cls += " is-history";
@@ -1575,18 +1776,18 @@
       AU_SEAT_SHORT[card.accountable_seat] ? "accountable " + AU_SEAT_SHORT[card.accountable_seat] : "",
       isBlank(card.state) ? "no recorded state" : String(card.state),
     ].filter(function (part) { return part !== ""; }).join(" · ");
-    id.appendChild(el("div", { text: stateWords, className: "ccr-au-state" }));
+    id.appendChild(el("div", { text: (current ? "" : "As of source read · ") + stateWords, className: "ccr-au-state" }));
     row.appendChild(id);
 
     var turn = el("div", { className: "ccr-au-turn" });
     turn.appendChild(el("span", { text: "Whose turn", className: "ccr-au-label" }));
     turn.appendChild(el("p", {
-      text: AU_TURN_HEADLINE[seat],
+      text: current ? AU_TURN_HEADLINE[seat] : "Needs a current read",
       className: seat === "unknown" ? "ccr-au-turn-name is-unknown" : "ccr-au-turn-name",
     }));
     turn.appendChild(auTurnTrack(seat));
     turn.appendChild(el("p", {
-      text: auWords(AU_TURN_REASON, (card.owed_turn || {}).reason, "No reason recorded."),
+      text: (current ? "" : "Recorded turn: " + AU_TURN_HEADLINE[auOwedSeat(card)] + ". ") + auWords(AU_TURN_REASON, (card.owed_turn || {}).reason, "No reason recorded."),
       className: "ccr-au-turn-reason",
     }));
     row.appendChild(turn);
@@ -1594,7 +1795,7 @@
     var read = el("div", { className: "ccr-au-read" });
     var blocker = card.blocker || null;
     var gate = el("div", { className: "ccr-au-gate" });
-    gate.appendChild(el("span", { text: "Gate", className: "ccr-au-label" }));
+    gate.appendChild(el("span", { text: current ? "Gate" : "Gate as of source read", className: "ccr-au-label" }));
     if (blocker) {
       gate.appendChild(el("p", { text: safeText(blocker.explanation, "A gate is recorded without an explanation."), className: "ccr-au-gate-text" }));
       gate.appendChild(el("p", {
@@ -1602,7 +1803,7 @@
         className: "ccr-au-gate-code",
       }));
     } else {
-      gate.appendChild(el("p", { text: "No recorded gate. Conditions are still being watched.", className: "ccr-au-gate-text is-quiet" }));
+      gate.appendChild(el("p", { text: current ? "No recorded gate. Conditions are still being watched." : "No gate was recorded in this read. Current conditions are unknown.", className: "ccr-au-gate-text is-quiet" }));
     }
     if (card.declared_blocker) gate.appendChild(auDeclaredBlockerNote(card.declared_blocker));
     if (auIsHold(card)) {
@@ -1614,7 +1815,7 @@
     read.appendChild(gate);
 
     var onit = el("div", { className: "ccr-au-onit" });
-    onit.appendChild(el("span", { text: "On it", className: "ccr-au-label" }));
+    onit.appendChild(el("span", { text: current ? "On it" : "Runtime as of source read", className: "ccr-au-label" }));
     onit.appendChild(el("p", {
       text: "worker · " + auRuntimeWords(card.current_worker, "no worker runtime recorded"),
       className: card.current_worker ? "ccr-au-mono" : "ccr-au-mono is-quiet",
@@ -1636,7 +1837,7 @@
     });
     actions.appendChild(openBtn);
     var binding = auOwedBinding(card);
-    if (binding) actions.appendChild(openBindingButton(binding, "Open " + AU_SEAT_SHORT[auOwedSeat(card)]));
+    if (binding) actions.appendChild(b5OwedButton(card, binding, "Open " + AU_SEAT_SHORT[auOwedSeat(card)]));
     right.appendChild(actions);
     row.appendChild(right);
 
@@ -1662,10 +1863,12 @@
     var counts = projection.counts || {};
     var owed = {};
     (projection.responsibilities || []).forEach(function (card) {
-      if (!card || card.is_actionable !== true) return;
+      if (!card || card.is_actionable !== true || !b5Allows(card, "card")) return;
       var seat = card.owed_turn && card.owed_turn.seat ? card.owed_turn.seat : "unknown";
       owed[seat] = (typeof owed[seat] === "number" ? owed[seat] : 0) + 1;
     });
+    var unknownCurrent = (projection.responsibilities || []).some(function (card) { return !b5Allows(card, "card"); });
+    var liveCount = (projection.responsibilities || []).filter(function (card) { return card.is_actionable === true && b5Allows(card, "card"); }).length;
     var ledger = el("section", { className: "ccr-au-ledger" });
 
     var track = el("div", { className: "ccr-au-ledger-track" });
@@ -1676,7 +1879,7 @@
       if (seat === "unknown") cls += " is-open";
       if (value === 0) cls += " is-zero";
       var cell = el("div", { className: cls });
-      cell.appendChild(el("div", { text: String(value), className: "ccr-au-ledger-count" }));
+      cell.appendChild(el("div", { text: unknownCurrent && value === 0 ? "—" : String(value), className: "ccr-au-ledger-count" }));
       cell.appendChild(el("div", { text: seat === "unknown" ? "No seat" : AU_SEAT_SHORT[seat], className: "ccr-au-ledger-name" }));
       track.appendChild(cell);
     });
@@ -1690,7 +1893,7 @@
       // block on an unmapped row) — never merged into "gated" — so the
       // Chairman can never read "0 gated" while a declared block is
       // visible on a card or unmapped row directly beneath the ledger.
-      ["live", counts.actionable],
+      ["live", unknownCurrent ? null : liveCount],
       ["history", counts.stale],
       ["gated", counts.blocked],
       ["declared", counts.declared_blocked],
@@ -1707,16 +1910,19 @@
   }
 
   function auDecisions(projection, byRef) {
-    var refs = projection.chairman_decisions || [];
+    var recordedRefs = projection.chairman_decisions || [];
+    var uncertain = (projection.responsibilities || []).length === 0 || (projection.responsibilities || []).some(function (card) { return !b5Allows(card, "decision_current"); });
+    var refs = recordedRefs.filter(function (ref) { return byRef[ref] && b5Allows(byRef[ref], "decision_current"); });
     var band = el("section", { className: refs.length ? "ccr-au-decisions ccr-has-items" : "ccr-au-decisions" });
     var head = el("div", { className: "ccr-au-decisions-head" });
     head.appendChild(el("p", { text: "Chairman", className: "ccr-section-eyebrow" }));
-    head.appendChild(el("h3", { text: "Only you can decide" }));
-    head.appendChild(el("span", { text: String(refs.length), className: "ccr-count" }));
+    head.appendChild(el("h3", { text: uncertain ? "Current read needed" : "Only you can decide" }));
+    head.appendChild(el("span", { text: uncertain ? "—" : String(refs.length), className: "ccr-count" }));
     band.appendChild(head);
 
+    if (uncertain) band.appendChild(el("p", { text: "Current decision count is unknown. Recorded decisions and source receipts remain in each Detail.", className: "ccr-empty-line" }));
     if (!refs.length) {
-      band.appendChild(el("p", { text: "No Chairman decision is recorded in this projection. Check source-read issues before treating it as current.", className: "ccr-empty-line" }));
+      band.appendChild(el("p", { text: recordedRefs.length ? "Recorded decisions need a current read. Their source receipts remain in Detail." : "No Chairman decision is recorded in this projection. Check source-read issues before treating it as current.", className: "ccr-empty-line" }));
       return band;
     }
     var list = el("ul", { className: "ccr-au-decision-list" });
@@ -1849,15 +2055,16 @@
   }
 
   function renderAutonomyDetail(card) {
-    var seat = auOwedSeat(card);
+    var current = b5Allows(card, "card");
+    var seat = current ? auOwedSeat(card) : "unknown";
     document.getElementById("ccr-detail-ref").textContent = "RESPONSIBILITY · " + safeText(card.responsibility_ref).toUpperCase();
     document.getElementById("ccr-detail-title").textContent = safeText(card.title, "Untitled responsibility");
     var body = document.getElementById("ccr-detail-body");
     clear(body);
 
     var summary = el("section", { className: "ccr-detail-summary" });
-    summary.appendChild(el("span", { text: "Whose turn", className: "ccr-detail-next-label" }));
-    summary.appendChild(el("p", { text: AU_TURN_HEADLINE[seat], className: "ccr-detail-next" }));
+    summary.appendChild(el("span", { text: current ? "Whose turn" : "Source read retained · current permission unavailable", className: "ccr-detail-next-label" }));
+    summary.appendChild(el("p", { text: current ? AU_TURN_HEADLINE[seat] : "Needs a current read", className: "ccr-detail-next" }));
     summary.appendChild(el("p", {
       text: auWords(AU_TURN_REASON, (card.owed_turn || {}).reason, "No reason recorded."),
       className: "ccr-au-detail-sub",
@@ -1872,7 +2079,7 @@
     }
 
     var rails = el("div", { className: "ccr-detail-rails" });
-    detailRail(rails, "Reading", function (node) {
+    detailRail(rails, current ? "Reading" : "Reading as of source receipts", function (node) {
       detailLine(node, auWords(AU_ACTIONABILITY, card.actionability_reason, "No actionability reason recorded."), false);
       detailLine(node, "freshness " + safeText(card.freshness) + " · read " + safeText(card.query_status), true);
       if (card.chairman_decision_required === true) {
@@ -1907,7 +2114,7 @@
       }
       detailLine(node, "wake " + (AU_WAKE[card.wake_outcome] || "not observable"), true);
     });
-    detailRail(rails, "Dispatch proof", function (node) {
+    detailRail(rails, b5Allows(card, "dispatch") ? "Dispatch proof" : "Dispatch proof as of source read", function (node) {
       var dispatch = card.dispatch || {};
       var carrier = dispatch.carrier || null;
       var w3c = dispatch.w3c || null;
@@ -1999,7 +2206,9 @@
   function openAutonomyDetail(card, opener) {
     LAST_DRAWER_OPENER = openerCandidate(opener);
     STATE.selectedWork = null;
+    STATE.selectedAutonomy = card;
     renderAutonomyDetail(card);
+    b5Schedule();
     var drawer = document.getElementById("ccr-detail-drawer");
     drawer.classList.add("is-open");
     drawer.setAttribute("aria-hidden", "false");
@@ -2018,10 +2227,14 @@
   }
 
   function renderAutonomy(projection) {
+    B5.active.forEach(function (entry) { entry.renderedCurrent = false; });
     var mount = document.getElementById("ccr-autonomy");
     if (!mount) return;
     clear(mount);
     var count = document.getElementById("nav-autonomy-count");
+    var reread = button("Read current state", "ccr-open-button", function () { loadState(); });
+    reread.id = "ccr-autonomy-read";
+    mount.appendChild(reread);
     STATE.autonomy = projection && typeof projection === "object" ? projection : null;
 
     if (!STATE.autonomy) {
@@ -2052,6 +2265,132 @@
   }
 
   // state -----------------------------------------------------------------
+  var STATE_LOAD_GENERATION = 0;
+  var REFRESH_FOLLOW_UP = { generation: 0, timer: null, attempt: 0 };
+  var ACTIVE_STATE_READ = null;
+  var REFRESH_FOLLOW_UP_BACKOFF_MS = [1000, 2000, 5000, 10000, 20000, 30000];
+  // The local server gives a background composition up to 240 seconds. Leave
+  // a small final-read window, but never keep a browser-side poll alive.
+  var STATE_READ_DEADLINE_MS = 250000;
+  var STATE_READ_DEADLINE_AT = 0;
+
+  function clearRefreshFollowUp() {
+    if (REFRESH_FOLLOW_UP.timer !== null) clearTimeout(REFRESH_FOLLOW_UP.timer);
+    REFRESH_FOLLOW_UP.generation = 0;
+    REFRESH_FOLLOW_UP.timer = null;
+    REFRESH_FOLLOW_UP.attempt = 0;
+  }
+
+  function stateReadElapsedTime() {
+    try {
+      if (typeof performance === "undefined" || typeof performance.now !== "function") return null;
+      var now = performance.now();
+      return typeof now === "number" && isFinite(now) && now >= 0 ? now : null;
+    } catch (_e) { return null; }
+  }
+
+  function remainingStateReadBudget() {
+    if (STATE_READ_DEADLINE_AT === 0) return 0;
+    var now = stateReadElapsedTime();
+    return now === null ? null : Math.max(0, STATE_READ_DEADLINE_AT - now);
+  }
+
+  function clearStateReadDeadline() {
+    STATE_READ_DEADLINE_AT = 0;
+  }
+
+  function refreshFollowUpIsCurrent(generation) {
+    return STATE_LOAD_GENERATION === generation && REFRESH_FOLLOW_UP.generation === generation;
+  }
+
+  function stateReadIsCurrent(generation, followUp, request) {
+    return STATE_LOAD_GENERATION === generation && (!followUp || refreshFollowUpIsCurrent(generation)) &&
+      (!request || !request.expired);
+  }
+
+  function renderRefreshStopped() {
+    var banner = document.getElementById("ccr-refresh-banner");
+    if (!banner) return;
+    banner.hidden = false;
+    document.getElementById("ccr-refresh-banner-text").textContent =
+      "Refresh did not complete — showing last good composition";
+  }
+
+  function renderStateUnavailable(reason, refreshStopped) {
+    var previous = STATE.doc && typeof STATE.doc === "object" ? STATE.doc : {};
+    var previousDegraded = Array.isArray(previous.degraded) ? previous.degraded.slice() : [];
+    previousDegraded.push(reason || "control_room_api: unavailable — current state could not be read");
+    renderDegraded(previousDegraded);
+    var attention = previous.attention && typeof previous.attention === "object" ? previous.attention : {};
+    renderNeedsYou(Array.isArray(attention.chairman) ? attention.chairman : [], "unavailable");
+    renderMiniAttention("sol-attention", Array.isArray(attention.ceo) ? attention.ceo : [], "unavailable");
+    renderMiniAttention("coo", Array.isArray(attention.coo) ? attention.coo : [], "unavailable");
+    setTally("chairman", "—");
+    setTally("ceo", "—");
+    setTally("coo", "—");
+    document.getElementById("nav-today-count").textContent = "—";
+    if (refreshStopped) renderRefreshStopped();
+  }
+
+  function clearActiveStateRead(request) {
+    if (ACTIVE_STATE_READ !== request) return;
+    if (request.timeout !== null) clearTimeout(request.timeout);
+    ACTIVE_STATE_READ = null;
+  }
+
+  function abortActiveStateRead() {
+    var request = ACTIVE_STATE_READ;
+    if (!request) return;
+    request.expired = true;
+    clearActiveStateRead(request);
+    if (request.controller) request.controller.abort();
+  }
+
+  function invalidateStateReads() {
+    STATE_LOAD_GENERATION += 1;
+    clearRefreshFollowUp();
+    abortActiveStateRead();
+    clearStateReadDeadline();
+  }
+
+  function expireStateReads(generation, refreshStopped, clockUnavailable) {
+    if (STATE_LOAD_GENERATION !== generation) return;
+    invalidateStateReads();
+    renderStateUnavailable(clockUnavailable ? null :
+      "control_room_api: state read timed out — current state could not be read", refreshStopped);
+  }
+
+  function scheduleRefreshFollowUp(generation) {
+    if (!refreshFollowUpIsCurrent(generation)) return;
+    var remaining = remainingStateReadBudget();
+    if (remaining === null || remaining <= 0) {
+      expireStateReads(generation, true, remaining === null);
+      return;
+    }
+    var delay = REFRESH_FOLLOW_UP_BACKOFF_MS[Math.min(
+      REFRESH_FOLLOW_UP.attempt, REFRESH_FOLLOW_UP_BACKOFF_MS.length - 1
+    )];
+    delay = Math.min(delay, remaining);
+    REFRESH_FOLLOW_UP.attempt += 1;
+    REFRESH_FOLLOW_UP.timer = setTimeout(function () {
+      REFRESH_FOLLOW_UP.timer = null;
+      var budget = remainingStateReadBudget();
+      if (budget === null || budget <= 0) {
+        expireStateReads(generation, true, budget === null);
+        return;
+      }
+      readState(generation, true);
+    }, delay);
+  }
+
+  function beginRefreshFollowUp(generation) {
+    if (refreshFollowUpIsCurrent(generation)) return;
+    clearRefreshFollowUp();
+    if (STATE_LOAD_GENERATION !== generation) return;
+    REFRESH_FOLLOW_UP.generation = generation;
+    scheduleRefreshFollowUp(generation);
+  }
+
   function indexState(doc) {
     STATE.work = doc.work || [];
     STATE.workByRef = {};
@@ -2101,6 +2440,7 @@
     document.getElementById("nav-today-count").textContent = String(attentionTally);
 
     renderAutonomy(doc.autonomy);
+    if (STATE.selectedAutonomy) renderAutonomyDetail(STATE.selectedAutonomy);
     renderWork();
     if (!REMOTE_READ_ONLY) renderSurfaces();
     var loose = renderLooseEnds(doc);
@@ -2114,8 +2454,34 @@
     document.getElementById("nav-system-count").textContent = degraded.length || loose ? String(degraded.length + loose) : "";
   }
 
-  function loadState() {
-    return getJSON("/api/state").then(function (body) {
+  function readState(generation, followUp) {
+    if (!stateReadIsCurrent(generation, followUp)) return Promise.resolve(null);
+    var remaining = remainingStateReadBudget();
+    if (remaining === null || remaining <= 0) {
+      expireStateReads(generation, followUp, remaining === null);
+      return Promise.resolve(null);
+    }
+    var controller = typeof AbortController === "function" ? new AbortController() : null;
+    var request = { generation: generation, followUp: followUp, controller: controller, timeout: null, expired: false, sourceAnchor: b5Sample() };
+    ACTIVE_STATE_READ = request;
+    request.timeout = setTimeout(function () {
+      if (!stateReadIsCurrent(generation, followUp, request)) return;
+      request.expired = true;
+      clearActiveStateRead(request);
+      if (followUp) clearRefreshFollowUp();
+      if (request.controller) request.controller.abort();
+      renderStateUnavailable("control_room_api: state read timed out — current state could not be read", followUp);
+    }, remaining);
+    return getJSON("/api/state", controller && controller.signal).then(function (body) {
+      if (!stateReadIsCurrent(generation, followUp, request)) return null;
+      // A response microtask can run before an already-due timer task. Check
+      // elapsed time before cancelling that guard or consuming the response.
+      var budget = remainingStateReadBudget();
+      if (budget === null || budget <= 0) {
+        expireStateReads(generation, followUp, budget === null);
+        return null;
+      }
+      clearActiveStateRead(request);
       // Local state envelopes intentionally have no `ok` member, while the
       // remote read-only relay uses `{ok:true, control_room:…}`.  Both must
       // contain the Control Room's essential Inbox arrays before replacing
@@ -2125,23 +2491,42 @@
       if (!hasUsableStateEnvelope(body)) {
         return Promise.reject(new Error("control_room_state_unavailable"));
       }
+      b5Accept(body, request.sourceAnchor);
       renderEverything(body);
+      b5Schedule();
+      if (body.state_refresh_error) {
+        if (followUp) clearRefreshFollowUp();
+        clearStateReadDeadline();
+        renderRefreshStopped();
+      } else if (body.refresh_in_flight) {
+        if (followUp) scheduleRefreshFollowUp(generation);
+        else beginRefreshFollowUp(generation);
+      } else if (followUp) {
+        clearRefreshFollowUp();
+        clearStateReadDeadline();
+      } else {
+        clearStateReadDeadline();
+      }
       return body;
     }).catch(function () {
-      var previous = STATE.doc && typeof STATE.doc === "object" ? STATE.doc : {};
-      var previousDegraded = Array.isArray(previous.degraded) ? previous.degraded.slice() : [];
-      previousDegraded.push("control_room_api: unavailable — current state could not be read");
-      renderDegraded(previousDegraded);
-      var attention = previous.attention && typeof previous.attention === "object" ? previous.attention : {};
-      renderNeedsYou(Array.isArray(attention.chairman) ? attention.chairman : [], "unavailable");
-      renderMiniAttention("sol-attention", Array.isArray(attention.ceo) ? attention.ceo : [], "unavailable");
-      renderMiniAttention("coo", Array.isArray(attention.coo) ? attention.coo : [], "unavailable");
-      setTally("chairman", "—");
-      setTally("ceo", "—");
-      setTally("coo", "—");
-      document.getElementById("nav-today-count").textContent = "—";
+      clearActiveStateRead(request);
+      if (!stateReadIsCurrent(generation, followUp, request)) return null;
+      clearRefreshFollowUp();
+      clearStateReadDeadline();
+      renderStateUnavailable(null, followUp);
       return null;
     });
+  }
+
+  function loadState() {
+    invalidateStateReads();
+    var now = stateReadElapsedTime();
+    if (now === null) {
+      renderStateUnavailable(null, false);
+      return Promise.resolve(null);
+    }
+    STATE_READ_DEADLINE_AT = now + STATE_READ_DEADLINE_MS;
+    return readState(STATE_LOAD_GENERATION, false);
   }
 
   function hasUsableStateEnvelope(body) {
@@ -2195,6 +2580,30 @@
   document.addEventListener("DOMContentLoaded", function () {
     applyTheme(readTheme());
     loadState();
+    function suspendSourceRead() {
+      b5Invalidate();
+      invalidateStateReads();
+      b5RenderRetained();
+    }
+    function resumeSourceRead() {
+      b5Invalidate();
+      b5RenderRetained();
+      if (document.visibilityState === "visible" && !ACTIVE_STATE_READ) loadState();
+    }
+    window.addEventListener("pagehide", function () {
+      invalidateStateReads();
+      b5Invalidate();
+      b5RenderRetained();
+    });
+    document.addEventListener("visibilitychange", function () {
+      if (document.visibilityState === "visible") resumeSourceRead();
+      else suspendSourceRead();
+    });
+    document.addEventListener("freeze", suspendSourceRead);
+    document.addEventListener("resume", resumeSourceRead);
+    window.addEventListener("pageshow", function (event) {
+      if (event.persisted) resumeSourceRead();
+    });
 
     var dock = document.getElementById("ccr-surface-dock");
     var layout = document.querySelector(".ccr-layout");
