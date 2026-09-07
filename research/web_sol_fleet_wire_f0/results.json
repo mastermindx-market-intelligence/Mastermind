@@ -1,0 +1,161 @@
+{
+  "browser_used": false,
+  "cases": [
+    {
+      "compact_frame_payload_bytes": 1048,
+      "compact_round_trip_exact": true,
+      "fixture_tab_count": 0,
+      "inventory_coverage": "COMPLETE_IN_SCOPE",
+      "mode": "ordinary",
+      "omitted_tab_count": 0,
+      "probe_calls": 0,
+      "probe_coverage": "NONE",
+      "raw_json_bytes": 648,
+      "raw_native_status": "ACCEPTED",
+      "retained_rows": 0
+    },
+    {
+      "compact_frame_payload_bytes": 1291,
+      "compact_round_trip_exact": true,
+      "fixture_tab_count": 1,
+      "inventory_coverage": "COMPLETE_IN_SCOPE",
+      "mode": "ordinary",
+      "omitted_tab_count": 0,
+      "probe_calls": 1,
+      "probe_coverage": "COMPLETE_IN_SCOPE",
+      "raw_json_bytes": 1214,
+      "raw_native_status": "ACCEPTED",
+      "retained_rows": 1
+    },
+    {
+      "compact_frame_payload_bytes": 5746,
+      "compact_round_trip_exact": true,
+      "fixture_tab_count": 20,
+      "inventory_coverage": "COMPLETE_IN_SCOPE",
+      "mode": "ordinary",
+      "omitted_tab_count": 0,
+      "probe_calls": 20,
+      "probe_coverage": "COMPLETE_IN_SCOPE",
+      "raw_json_bytes": 11806,
+      "raw_native_status": "ACCEPTED",
+      "retained_rows": 20
+    },
+    {
+      "compact_frame_payload_bytes": 16064,
+      "compact_round_trip_exact": true,
+      "fixture_tab_count": 64,
+      "inventory_coverage": "COMPLETE_IN_SCOPE",
+      "mode": "ordinary",
+      "omitted_tab_count": 0,
+      "probe_calls": 64,
+      "probe_coverage": "COMPLETE_IN_SCOPE",
+      "raw_json_bytes": 36336,
+      "raw_native_status": "ACCEPTED",
+      "retained_rows": 64
+    },
+    {
+      "compact_frame_payload_bytes": 23568,
+      "compact_round_trip_exact": true,
+      "fixture_tab_count": 96,
+      "inventory_coverage": "COMPLETE_IN_SCOPE",
+      "mode": "ordinary",
+      "omitted_tab_count": 0,
+      "probe_calls": 96,
+      "probe_coverage": "COMPLETE_IN_SCOPE",
+      "raw_json_bytes": 54176,
+      "raw_native_status": "ACCEPTED",
+      "retained_rows": 96
+    },
+    {
+      "compact_frame_payload_bytes": 31105,
+      "compact_round_trip_exact": true,
+      "fixture_tab_count": 128,
+      "inventory_coverage": "COMPLETE_IN_SCOPE",
+      "mode": "ordinary",
+      "omitted_tab_count": 0,
+      "probe_calls": 128,
+      "probe_coverage": "COMPLETE_IN_SCOPE",
+      "raw_json_bytes": 72049,
+      "raw_native_status": "frame_too_large",
+      "retained_rows": 128
+    },
+    {
+      "compact_frame_payload_bytes": 31090,
+      "compact_round_trip_exact": true,
+      "fixture_tab_count": 129,
+      "inventory_coverage": "PARTIAL",
+      "mode": "ordinary",
+      "omitted_tab_count": 1,
+      "probe_calls": 128,
+      "probe_coverage": "PARTIAL",
+      "raw_json_bytes": 72034,
+      "raw_native_status": "frame_too_large",
+      "retained_rows": 128
+    },
+    {
+      "compact_frame_payload_bytes": 28257,
+      "compact_round_trip_exact": true,
+      "fixture_tab_count": 128,
+      "inventory_coverage": "COMPLETE_IN_SCOPE",
+      "mode": "mixed",
+      "omitted_tab_count": 0,
+      "probe_calls": 42,
+      "probe_coverage": "PARTIAL",
+      "raw_json_bytes": 69201,
+      "raw_native_status": "frame_too_large",
+      "retained_rows": 128
+    }
+  ],
+  "census_git_blob": "190ab7064973cd8b58d6d23e89bcb4b8d40fd197",
+  "census_native_action_implemented": false,
+  "census_sha256": "b854099ea304937547663706a1100cbb22fe6182e2d0071e1a01cc35f35488ff",
+  "census_source_commit": "a6dc03dc8ac241af7690101626a465c44e352c7a",
+  "collector_max_tabs": 128,
+  "completed": true,
+  "installation_performed": false,
+  "legacy_census_request_refused": true,
+  "legacy_inspect_request_valid": true,
+  "malformed_experiment_controls": 3,
+  "native_exact_limit_round_trip": true,
+  "native_over_limit_refused": true,
+  "native_payload_limit_bytes": 65536,
+  "native_source_commit": "4fe4d6bc93d9543f77320f68342a10c5af4d4f49",
+  "node_version": "v26.5.0",
+  "observed_at": "2026-09-06T19:09:47.706611+00:00",
+  "pinned_modules": {
+    "control_plane/surface_bindings.py": {
+      "git_blob": "120782ed1e63739b9a3c2f3b2badfe5c7570c5d9",
+      "sha256": "b3782658203aba4900e407451b3b368b940287fb05c08c8f11822e55694b1a66"
+    },
+    "integrations/chairman_surfaces/_web_sol_native_host_impl.py": {
+      "git_blob": "e38de2dd27326bec2facc262d600a489aee76f0c",
+      "sha256": "615fc7c5f98384e5d9ebe892424237a6dd8316160f730b0b1aa1300c338132a5"
+    },
+    "integrations/chairman_surfaces/web_sol_client.py": {
+      "git_blob": "3c83a0ccb8713484679f63ec3a03fd1ea2b06a2f",
+      "sha256": "7b4431411ab016bc0b1aa6aea7cb3efaf26dea07892835f297ca69f4af6167ba"
+    },
+    "integrations/chairman_surfaces/web_sol_instance.py": {
+      "git_blob": "13a3d88e461cff02dc50b522e8b23458c2edffa2",
+      "sha256": "e601fc609695623ce3cfb42c2b211ef51bc97f842f9fc8d3274e10e53d8c6dbc"
+    },
+    "integrations/chairman_surfaces/web_sol_native_host.py": {
+      "git_blob": "4684478e0e577ee735abdb6bd8db568809d1307d",
+      "sha256": "4f197921bc0b4465c753143354e25ca01d2d34712953a850a313bd331a150357"
+    },
+    "integrations/chairman_surfaces/web_sol_protocol.py": {
+      "git_blob": "32581d76ba6a28738b1335f7269ab05cf6ee712e",
+      "sha256": "3b97323acbc911a642e580e719278aa6df764cb3c455c1e5870cf2b1da20457a"
+    }
+  },
+  "proof_ceiling": "OFFLINE_SYNTHETIC_COLLECTOR_AND_FRAME_CODEC_ONLY",
+  "provider_used": false,
+  "python_version": "3.14.7",
+  "schema": "mastermind.web_sol_fleet_wire_research.v1",
+  "static_deadline_comparison": {
+    "client_total_seconds": 5.0,
+    "collector_sweep_ms": 5000,
+    "measured_latency_claim": false,
+    "native_default_total_seconds": 5.0
+  }
+}
