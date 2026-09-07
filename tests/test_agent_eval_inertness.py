@@ -844,7 +844,6 @@ def compute_pr_diff_paths(repo_dir: Path, *, head: str = "HEAD", upstream: str =
 
 def test_changed_paths_are_within_the_allowed_r0_surface() -> None:
     changed = compute_pr_diff_paths(ROOT)
-    assert changed, "expected at least one changed file relative to the effective PR base"
     not_applicable_reason = _fence_not_applicable_reason(changed)
     if not_applicable_reason is not None:
         pytest.skip(not_applicable_reason)
@@ -854,13 +853,31 @@ def test_changed_paths_are_within_the_allowed_r0_surface() -> None:
 
 def test_no_control_plane_config_dependency_or_workflow_file_touched() -> None:
     changed = compute_pr_diff_paths(ROOT)
-    assert changed, "expected at least one changed file relative to the effective PR base"
     not_applicable_reason = _fence_not_applicable_reason(changed)
     if not_applicable_reason is not None:
         pytest.skip(not_applicable_reason)
     forbidden_prefixes = ("control_plane/", ".github/workflows/", "config/", "pyproject.toml", "requirements")
     for path in changed:
         assert not path.startswith(forbidden_prefixes), f"unexpected control-plane/config/workflow change: {path}"
+
+
+@pytest.mark.parametrize(
+    "fence_test",
+    [
+        test_changed_paths_are_within_the_allowed_r0_surface,
+        test_no_control_plane_config_dependency_or_workflow_file_touched,
+    ],
+    ids=["allowed_surface_fence", "forbidden_surface_fence"],
+)
+def test_empty_delta_is_not_applicable_for_real_fences(monkeypatch, fence_test) -> None:
+    """An empty protected-master delta is not this program's business.
+
+    Exercise the real fence entry points, not only the classifier helper, so
+    a premature non-empty assertion cannot regress ahead of self-scoping.
+    """
+    monkeypatch.setattr(sys.modules[__name__], "compute_pr_diff_paths", lambda _repo: set())
+    with pytest.raises(pytest.skip.Exception, match="not applicable"):
+        fence_test()
 
 
 # ---------------------------------------------------------------------------

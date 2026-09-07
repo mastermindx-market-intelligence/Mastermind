@@ -111,6 +111,11 @@ def test_launchd_templates_are_two_non_root_persistent_system_jobs() -> None:
         assert set(value["EnvironmentVariables"]) == expected_environment
 
     _assert_private_unix_socket(control["Sockets"]["Operator"], mode=0o660)
+    _assert_private_unix_socket(
+        control["Sockets"]["DialogueObservation"], mode=0o660
+    )
+    assert control["Sockets"]["DialogueObservation"]["SockPathOwner"] == 450
+    assert control["Sockets"]["DialogueObservation"]["SockPathGroup"] == 457
     _assert_private_unix_socket(worker["Sockets"]["WorkerBroker"], mode=0o600)
     assert worker["Sockets"]["WorkerBroker"]["SockPathOwner"] == 450
     assert worker["Sockets"]["WorkerBroker"]["SockPathGroup"] == 450
@@ -199,6 +204,23 @@ def test_generated_launchd_plists_pass_plutil_lint(tmp_path: Path) -> None:
     plutil("-replace", "Sockets.Operator.SockPathOwner", "-integer", "450", str(control))
     plutil("-replace", "Sockets.Operator.SockPathGroup", "-integer", "453", str(control))
     plutil(
+        "-replace", "Sockets.DialogueObservation.SockPathName", "-string",
+        "/var/run/mastermind-dialogue-observation/dialogue-observation.sock",
+        str(control),
+    )
+    plutil(
+        "-replace", "Sockets.DialogueObservation.SockPathOwner", "-integer",
+        "450", str(control),
+    )
+    plutil(
+        "-replace", "Sockets.DialogueObservation.SockPathGroup", "-integer",
+        "457", str(control),
+    )
+    plutil(
+        "-replace", "Sockets.DialogueObservation.SockPathMode", "-integer",
+        "432", str(control),
+    )
+    plutil(
         "-replace", "StandardOutPath", "-string",
         "/var/log/mastermind-executive/control/stdout.log", str(control),
     )
@@ -253,6 +275,24 @@ def test_generated_launchd_plists_pass_plutil_lint(tmp_path: Path) -> None:
         text=True,
     )
     assert completed.returncode == 0, completed.stdout + completed.stderr
+
+    rendered_control = plistlib.loads(control.read_bytes())
+    assert set(rendered_control["Sockets"]) == {
+        "Operator",
+        "CeoIngress",
+        "DialogueObservation",
+    }
+    assert rendered_control["Sockets"]["DialogueObservation"] == {
+        "SockPathName": (
+            "/var/run/mastermind-dialogue-observation/"
+            "dialogue-observation.sock"
+        ),
+        "SockType": "stream",
+        "SockPassive": True,
+        "SockPathOwner": 450,
+        "SockPathGroup": 457,
+        "SockPathMode": 0o660,
+    }
 
     for rendered_path in (control, worker):
         with rendered_path.open("rb") as handle:

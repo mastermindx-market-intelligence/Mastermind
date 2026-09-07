@@ -75,6 +75,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
@@ -90,6 +91,7 @@ from control_plane.executive_runtime import (
     Runtime,
     RuntimeProofError,
     WorkerStatus,
+    orchestration_digest,
 )
 
 #: Schema version of the document this module emits.  A bump means a migration.
@@ -638,7 +640,8 @@ def ceo_intent_provenance(
     than nothing: after a ``ceo_intent`` schema bump, silently dropping the
     evidence would turn every CEO-submitted job anonymous without a sound.
     """
-    for event in runtime.events.list_events(job_id=job_id):
+    events = runtime.events.list_events(job_id=job_id)
+    for event in events:
         if event.event_type != "JOB_CREATED":
             continue
         payload = event.payload if isinstance(event.payload, Mapping) else {}
@@ -648,6 +651,96 @@ def ceo_intent_provenance(
         found = provenance.get("schema")
         if found == CEO_INTENT_PROVENANCE_SCHEMA:
             return dict(provenance), None
+        if found == "mastermind.ceo_intent.v2":
+            if sum(candidate.event_type == "JOB_CREATED" for candidate in events) != 1:
+                return None, (
+                    f"{job_id} provenance schema {found!r} unrecognized (this build reads "
+                    f"{CEO_INTENT_PROVENANCE_SCHEMA!r}); intent evidence not attached"
+                )
+            intent_id = provenance.get("intent_id")
+            actor = provenance.get("actor")
+            fingerprint = provenance.get("fingerprint")
+            grounding = provenance.get("grounding")
+            workstream = provenance.get("workstream")
+            command_id = (
+                f"ceo-intent:{intent_id}" if isinstance(intent_id, str) else ""
+            )
+            job = runtime.jobs.get_job(job_id)
+            cycle = job.orchestration_provenance if job is not None else None
+            valid = (
+                event.job_id == job_id
+                and event.aggregate_type == "job"
+                and event.aggregate_id == job_id
+                and event.command_id == command_id
+                and isinstance(intent_id, str)
+                and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{2,63}", intent_id)
+                is not None
+                and isinstance(actor, str)
+                and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{1,63}", actor)
+                is not None
+                and isinstance(fingerprint, str)
+                and re.fullmatch(r"[0-9a-f]{64}", fingerprint) is not None
+                and isinstance(grounding, Mapping)
+                and (
+                    "workstream" not in provenance
+                    or (
+                        isinstance(workstream, str)
+                        and re.fullmatch(
+                            r"WS:[A-Z0-9][A-Za-z0-9._-]{1,63}", workstream
+                        )
+                        is not None
+                    )
+                )
+                and job is not None
+                and job.job_id == job_id
+                and job.parent_job_id is None
+                and job.root_job_id == job_id
+                and job.orchestration_role == "aggregation"
+                and isinstance(job.orchestration_provenance_digest, str)
+                and re.fullmatch(r"[0-9a-f]{64}", job.orchestration_provenance_digest)
+                is not None
+                and isinstance(cycle, Mapping)
+                and set(cycle)
+                == {
+                    "schema_version",
+                    "creator",
+                    "source_id",
+                    "source_digest",
+                    "command_id",
+                    "job_id",
+                    "parent_job_id",
+                    "root_job_id",
+                    "role",
+                }
+                and job.orchestration_provenance_digest == orchestration_digest(cycle)
+                and cycle.get("schema_version")
+                == "mastermind.executive_orchestration_provenance/v1"
+                and cycle.get("creator") == "ceo_intent"
+                and cycle.get("source_id") == intent_id
+                and cycle.get("source_digest") == fingerprint
+                and cycle.get("command_id") == command_id
+                and cycle.get("job_id") == job_id
+                and cycle.get("parent_job_id") is None
+                and cycle.get("root_job_id") == job_id
+                and cycle.get("role") == "aggregation"
+                and payload.get("orchestration_role") == job.orchestration_role
+                and payload.get("orchestration_provenance_digest")
+                == job.orchestration_provenance_digest
+            )
+            if valid:
+                projected = {
+                    key: provenance[key]
+                    for key in (
+                        "schema",
+                        "intent_id",
+                        "actor",
+                        "fingerprint",
+                        "grounding",
+                        "workstream",
+                    )
+                    if key in provenance
+                }
+                return projected, None
         if isinstance(found, str) and found.startswith(CEO_INTENT_SCHEMA_PREFIX):
             return None, (
                 f"{job_id} provenance schema {found!r} unrecognized (this build reads "
@@ -959,6 +1052,7 @@ def _sort_key(item: Mapping[str, Any]) -> tuple[int, str, str, str]:
 def build_inbox(
     *,
     repo_root: Path | str | None = None,
+    runtime_root: Path | str | None = None,
     boot_packet: Mapping[str, Any] | None = None,
     include_boot_packet: bool = True,
     boot_packet_file: str | Path | None = None,
@@ -985,6 +1079,10 @@ def build_inbox(
     """
     # Resolved so `grounding.mastermind.root` names the same path the store does.
     root = Path(repo_root).resolve() if repo_root is not None else _REPO_ROOT
+    # Runtime projection is independently rooted for the temporary E1 reader.
+    # Repository grounding, Git reads, and boot-packet collection remain rooted
+    # at ``root``; only the existing runtime projector consumes this value.
+    projection_root = Path(runtime_root).resolve() if runtime_root is not None else root
     environ = os.environ if environ is None else environ
     degraded: list[str] = []
 
@@ -1064,7 +1162,7 @@ def build_inbox(
             ceo_items, packet_degraded = project_needs_ceo(packet)
             degraded.extend(packet_degraded)
 
-    runtime = project_runtime(root, now_dt)
+    runtime = project_runtime(projection_root, now_dt)
     degraded.extend(runtime.degraded)
 
     attention = sorted(ceo_items + runtime.attention, key=_sort_key)
@@ -1081,8 +1179,8 @@ def build_inbox(
             "macro": {"root": macro_root, "sha": macro_sha},
             "boot_packet_schema": packet_schema,
             "runtime_db": {
-                "path": os.fspath(root / DB_RELATIVE_PATH),
-                "present": (root / DB_RELATIVE_PATH).is_file(),
+                "path": os.fspath(projection_root / DB_RELATIVE_PATH),
+                "present": (projection_root / DB_RELATIVE_PATH).is_file(),
             },
         },
         "attention": attention,

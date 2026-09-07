@@ -859,10 +859,27 @@ ceo_ingress_expected = {
     "ceo_ingress_peer_uid": 452,
     "ceo_ingress_socket_path": "/var/run/mastermind-executive/ceo-ingress.sock",
 }
+dialogue_bridge_expected = {
+    "dialogue_observation_launchd_socket_name": "DialogueObservation",
+    "dialogue_observation_peer_uid": 457,
+    "dialogue_observation_socket_path": "/var/run/mastermind-dialogue-observation/dialogue-observation.sock",
+    "dialogue_bridge_armed": False,
+    "dialogue_wake_retry_policy": {
+        "max_delivery_attempts": None,
+        "retry_cooldown_s": None,
+        "accepted_ttl_s": None,
+        "target_unavailable_backoff_s": None,
+        "reenable_on_binding_rotation": True,
+        "armed": False,
+    },
+}
 schema_keys = _CONFIG_REQUIRED | _CONFIG_OPTIONAL
 ceo_ingress_schema_keys = set(ceo_ingress_expected) & schema_keys
 if ceo_ingress_schema_keys and ceo_ingress_schema_keys != set(ceo_ingress_expected):
     raise SystemExit("partial CeoIngress control-config schema")
+dialogue_bridge_schema_keys = set(dialogue_bridge_expected) & schema_keys
+if dialogue_bridge_schema_keys and dialogue_bridge_schema_keys != set(dialogue_bridge_expected):
+    raise SystemExit("partial Executive Dialogue Bridge control-config schema")
 
 expected = {
     "schema_version": CONTROL_CONFIG_SCHEMA_VERSION,
@@ -890,6 +907,8 @@ expected = {
 }
 if ceo_ingress_schema_keys:
     expected.update(ceo_ingress_expected)
+if dialogue_bridge_schema_keys:
+    expected.update(dialogue_bridge_expected)
 
 defaults = {
     "proof_branch": "codex/phase1c-a-proof",
@@ -1180,6 +1199,10 @@ BACKUP_PLIST="/Library/LaunchDaemons/$BACKUP_LABEL.plist"
 /usr/bin/plutil -replace Sockets.Operator.SockPathName -string /var/run/mastermind-executive/control.sock "$CONTROL_PLIST"
 /usr/bin/plutil -replace Sockets.Operator.SockPathOwner -integer "$CONTROL_UID" "$CONTROL_PLIST"
 /usr/bin/plutil -replace Sockets.Operator.SockPathGroup -integer "$OPS_GID" "$CONTROL_PLIST"
+/usr/bin/plutil -replace Sockets.DialogueObservation.SockPathName -string /var/run/mastermind-dialogue-observation/dialogue-observation.sock "$CONTROL_PLIST"
+/usr/bin/plutil -replace Sockets.DialogueObservation.SockPathOwner -integer "$CONTROL_UID" "$CONTROL_PLIST"
+/usr/bin/plutil -replace Sockets.DialogueObservation.SockPathGroup -integer 457 "$CONTROL_PLIST"
+/usr/bin/plutil -replace Sockets.DialogueObservation.SockPathMode -integer 432 "$CONTROL_PLIST"
 /usr/bin/plutil -replace StandardOutPath -string /var/log/mastermind-executive/control/stdout.log "$CONTROL_PLIST"
 /usr/bin/plutil -replace StandardErrorPath -string /var/log/mastermind-executive/control/stderr.log "$CONTROL_PLIST"
 /usr/sbin/chown root:wheel "$CONTROL_PLIST"

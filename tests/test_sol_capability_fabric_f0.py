@@ -8,6 +8,7 @@ SPEC = ROOT / "docs/superpowers/specs/2026-08-30-sol-capability-fabric-design.md
 CATALOG = ROOT / "docs/superpowers/plans/2026-08-30-sol-capability-fabric-tool-catalog.md"
 PROGRAM = ROOT / "docs/superpowers/plans/2026-08-30-sol-capability-fabric-program.md"
 PREPARED_TOKEN_CORRECTION = ROOT / "docs/superpowers/specs/2026-08-30-sol-capability-fabric-prepared-action-token-correction.md"
+COGNITION_LAW = ROOT / "docs/EXECUTIVE_CHAT_NATIVE_SOL_HIERARCHY_LAW.md"
 
 
 def _text(path: Path) -> str:
@@ -25,7 +26,6 @@ def test_architecture_preserves_canonical_owners_and_chat_native_cognition() -> 
     text = _text(SPEC)
     for required in (
         "mastermind-sol-capability-fabric-20260830-sol-001",
-        "COGNITION_ROUTE: CHAT_PRO_DEFAULT",
         "Executive OS",
         "Agent OS",
         "GitHub",
@@ -36,6 +36,17 @@ def test_architecture_preserves_canonical_owners_and_chat_native_cognition() -> 
         "One Experience, Federated Authority",
     ):
         assert required in text
+
+    # Preserve the frozen historical receipt while proving it cannot authorize current Pro mode.
+    assert "COGNITION_ROUTE: CHAT_PRO_DEFAULT" in text
+    current_law = " ".join(_text(COGNITION_LAW).split())
+    for required in (
+        "COGNITION_ROUTE: CHAT_INCLUDED_DEFAULT",
+        "CHAT_REASONING_MODE: NON_PRO_DEFAULT",
+        "`CHAT_PRO_DEFAULT` is deprecated and ambiguous",
+        "grants no Pro-mode authorization",
+    ):
+        assert required in current_law
 
 
 def test_architecture_freezes_privilege_and_effect_semantics() -> None:

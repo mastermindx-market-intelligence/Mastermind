@@ -6,10 +6,12 @@ import hashlib
 import json
 import os
 import stat
+import threading
 from pathlib import Path
 
 import pytest
 
+from control_plane import executive_worker_broker as broker_module
 from control_plane.codex_worker import BinaryAttestation
 from control_plane.executive_orchestration_principal import (
     OSProcessCredentialObservation,
@@ -53,6 +55,12 @@ from control_plane.operator_harness_contract import (
     compare_launch,
 )
 from control_plane.operator_harness_wire import to_wire
+from control_plane.operator_materialization_receipt import (
+    MATERIALIZATION_STATUS_SCHEMA,
+    OperatorMaterializationReceiptError,
+    canonical_json_bytes,
+    materialization_receipt_path,
+)
 from control_plane.worker_browser_b1 import BrowserReviewReceipt
 
 
@@ -126,6 +134,7 @@ class _OperatorAdapter:
         return SessionStartObservation("thread-1", self.process)
 
     def resume_session(self, *, provider_session, **_kwargs):
+        self.lifecycle.append("provider_resume")
         return SessionStartObservation(provider_session.provider_session_id, self.process)
 
     def observed_attestation(self, _generation):
@@ -261,6 +270,33 @@ def _request(operation: str, payload: dict, suffix: str) -> dict:
     }
 
 
+def _materialization_payload(
+    profile: RequestedExecutionProfile,
+    epoch: SessionEpochRef,
+    generation: ProcessGenerationRef,
+    *,
+    resume: bool = False,
+    provider_session_id: str = "thread-1",
+) -> dict:
+    payload = {
+        "operation_id": to_wire(
+            OperationId(
+                f"ohf-op:recover-resume:{epoch.attempt_id}"
+                if resume
+                else f"ohf-op:start:{epoch.attempt_id}"
+            )
+        ),
+        "requested": to_wire(profile),
+        "epoch": to_wire(epoch),
+        "generation": to_wire(generation),
+    }
+    if resume:
+        payload["provider_session"] = to_wire(
+            ProviderSessionHandoff(provider_session_id, epoch.worker_id)
+        )
+    return payload
+
+
 def _fixture(tmp_path: Path, *, armed: bool = True, autonomy_guard=None):
     workspace_root = tmp_path / "workspaces"
     workspace = workspace_root / "job-1"
@@ -376,7 +412,7 @@ def test_operator_autonomy_guard_rechecks_before_each_provider_effect(tmp_path: 
             _request(
                 "ohf-start",
                 {
-                    "operation_id": to_wire(OperationId("ohf-op:start-guard")),
+                    "operation_id": to_wire(OperationId("ohf-op:start:ATT-GUARD")),
                     "requested": to_wire(profile),
                     "epoch": to_wire(epoch),
                     "generation": to_wire(generation),
@@ -511,7 +547,7 @@ def test_browser_resource_is_generation_bound_and_sealed_only_after_uid_sweep(
             _request(
                 "ohf-start",
                 {
-                    "operation_id": to_wire(OperationId("ohf-op:start-browser")),
+                    "operation_id": to_wire(OperationId("ohf-op:start:ATT-BROWSER")),
                     "requested": to_wire(profile),
                     "epoch": to_wire(epoch),
                     "generation": to_wire(generation),
@@ -579,7 +615,7 @@ def test_browser_receipt_is_not_sealed_when_uid_sweep_is_not_passing(
             _request(
                 "ohf-start",
                 {
-                    "operation_id": to_wire(OperationId("ohf-op:start-sweep-red")),
+                    "operation_id": to_wire(OperationId("ohf-op:start:ATT-SWEEP-RED")),
                     "requested": to_wire(profile),
                     "epoch": to_wire(epoch),
                     "generation": to_wire(generation),
@@ -661,7 +697,7 @@ def test_operator_broker_runs_one_exact_generation_and_cleans_uid(tmp_path: Path
             _request(
                 "ohf-start",
                 {
-                    "operation_id": to_wire(OperationId("ohf-op:start-1")),
+                    "operation_id": to_wire(OperationId("ohf-op:start:ATT-1")),
                     "requested": to_wire(profile),
                     "epoch": to_wire(epoch),
                     "generation": to_wire(generation),
@@ -752,7 +788,7 @@ def test_operator_broker_refuses_unarmed_and_cross_attempt_session_reuse(
         epoch = SessionEpochRef("epoch-1", "ATT-1", "codex-01", 1)
         generation = ProcessGenerationRef("generation-1", "epoch-1", 1, "codex-01")
         payload = {
-            "operation_id": to_wire(OperationId("ohf-op:start-unarmed")),
+            "operation_id": to_wire(OperationId("ohf-op:start:ATT-1")),
             "requested": to_wire(profile),
             "epoch": to_wire(epoch),
             "generation": to_wire(generation),
@@ -781,14 +817,16 @@ def test_operator_broker_refuses_unarmed_and_cross_attempt_session_reuse(
         )
         epoch_two = SessionEpochRef("epoch-2", "ATT-2", "codex-01", 1)
         generation_two = ProcessGenerationRef(
-            "generation-2", "epoch-2", 1, "codex-01"
+            "generation-2", "epoch-2", 2, "codex-01"
         )
         with pytest.raises(BrokerStateError, match="across Executive Attempts"):
             await broker.execute(
                 _request(
                     "ohf-resume",
                     {
-                        "operation_id": to_wire(OperationId("ohf-op:resume-cross")),
+                        "operation_id": to_wire(
+                            OperationId("ohf-op:recover-resume:ATT-2")
+                        ),
                         "requested": to_wire(profile),
                         "epoch": to_wire(epoch_two),
                         "generation": to_wire(generation_two),
@@ -828,5 +866,509 @@ def test_operator_restart_absence_uses_fresh_dedicated_uid_sweep(
         assert result["result"]["observation"]["provider_writer_state"] == "RELEASED"
         assert result["result"]["uid_sweep"]["passed"] is True
         assert sweeper.calls == ["operator_reconcile_absence"]
+
+    asyncio.run(scenario())
+
+
+def test_materialization_exact_replay_returns_receipt_without_second_provider_call(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        broker, peer, profile, _sweeper, adapters = _fixture(tmp_path)
+        epoch = SessionEpochRef("epoch-replay", "ATT-REPLAY", "codex-01", 1)
+        generation = ProcessGenerationRef(
+            "generation-replay", "epoch-replay", 1, "codex-01"
+        )
+        payload = _materialization_payload(profile, epoch, generation)
+
+        first = await broker.execute(
+            _request("ohf-start", payload, "replay-first"), peer=peer
+        )
+        replay = await broker.execute(
+            _request("ohf-start", payload, "replay-second"), peer=peer
+        )
+
+        assert first["result"] == replay["result"]
+        assert first["result"]["materialization_receipt"]["operation_command_id"] == (
+            "ohf-op:start:ATT-REPLAY"
+        )
+        assert adapters[0].lifecycle.count("provider_start") == 1
+
+        status = await broker.execute(
+            _request("ohf-materialization-status", payload, "replay-status"),
+            peer=peer,
+        )
+        assert status["result"] == {
+            "schema_version": MATERIALIZATION_STATUS_SCHEMA,
+            "status": "RECEIPT_CURRENT_IN_LIVE_BROKER",
+            "receipt": first["result"]["materialization_receipt"],
+        }
+
+    asyncio.run(scenario())
+
+
+def test_materialization_status_recovers_lost_response_after_broker_restart(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        broker, peer, profile, _sweeper, adapters = _fixture(tmp_path)
+        epoch = SessionEpochRef("epoch-lost", "ATT-LOST", "codex-01", 1)
+        generation = ProcessGenerationRef(
+            "generation-lost", "epoch-lost", 1, "codex-01"
+        )
+        payload = _materialization_payload(profile, epoch, generation)
+
+        # The caller deliberately drops this successful response, modeling a
+        # connection loss after the worker committed the receipt.
+        await broker.execute(_request("ohf-start", payload, "lost"), peer=peer)
+        assert adapters[0].lifecycle.count("provider_start") == 1
+
+        restarted = ExecutiveWorkerBroker(
+            broker.adapter,
+            broker.policy,
+            _Sweeper(),
+            operator_adapter_factory=broker.operator_adapter_factory,
+            operator_harness_armed=True,
+            autonomy_guard=lambda: None,
+            autonomy_canary_factory=lambda value: dict(value),
+        )
+        status = await restarted.execute(
+            _request("ohf-materialization-status", payload, "restart-status"),
+            peer=peer,
+        )
+        assert status["result"]["status"] == "RECEIPT_ONLY_AFTER_RESTART"
+        assert status["result"]["receipt"]["provider_session_id"] == "thread-1"
+
+        with pytest.raises(BrokerStateError, match="receipt-only"):
+            await restarted.execute(
+                _request("ohf-start", payload, "restart-retry"), peer=peer
+            )
+        assert len(adapters) == 1
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda attestation: {**attestation, "served_model": "gpt-cross-spliced"},
+        lambda attestation: {
+            **attestation,
+            "auth": {**attestation["auth"], "provider": "other-provider"},
+        },
+        lambda attestation: {
+            **attestation,
+            "workspace": {
+                **attestation["workspace"],
+                "workspace_path": "/cross-spliced/workspace",
+            },
+        },
+        lambda attestation: {
+            **attestation,
+            "capabilities": [
+                {
+                    "kind": "skill",
+                    "name": "cross-spliced-capability",
+                    "skill_content_digest": None,
+                    "tool_schema_digest": None,
+                    "mcp_server_identity": None,
+                    "mcp_server_version": None,
+                    "mcp_auth_status": None,
+                    "resource_contract_digest": None,
+                }
+            ],
+        },
+    ],
+)
+def test_restarted_status_refuses_cross_spliced_typed_attestation(
+    tmp_path: Path,
+    mutate,
+) -> None:
+    async def scenario() -> None:
+        broker, peer, profile, _sweeper, _adapters = _fixture(tmp_path)
+        epoch = SessionEpochRef("epoch-splice", "ATT-SPLICE", "codex-01", 1)
+        generation = ProcessGenerationRef(
+            "generation-splice", "epoch-splice", 1, "codex-01"
+        )
+        payload = _materialization_payload(profile, epoch, generation)
+        result = await broker.execute(
+            _request("ohf-start", payload, "splice-start"), peer=peer
+        )
+        receipt = result["result"]["materialization_receipt"]
+        receipt["observed_attestation"] = mutate(
+            dict(receipt["observed_attestation"])
+        )
+        unsigned = {
+            key: value for key, value in receipt.items() if key != "receipt_digest"
+        }
+        receipt["receipt_digest"] = hashlib.sha256(
+            canonical_json_bytes(unsigned)
+        ).hexdigest()
+        path = materialization_receipt_path(tmp_path / "runs", f"ohf-op:start:{epoch.attempt_id}")
+        path.write_bytes(canonical_json_bytes(receipt))
+        path.chmod(0o600)
+
+        restarted = ExecutiveWorkerBroker(
+            broker.adapter,
+            broker.policy,
+            _Sweeper(),
+            operator_adapter_factory=broker.operator_adapter_factory,
+            operator_harness_armed=True,
+            autonomy_guard=lambda: None,
+            autonomy_canary_factory=lambda value: dict(value),
+        )
+        status = await restarted.execute(
+            _request("ohf-materialization-status", payload, "splice-status"),
+            peer=peer,
+        )
+        assert status["result"] == {
+            "schema_version": MATERIALIZATION_STATUS_SCHEMA,
+            "status": "CONFLICT",
+            "receipt": None,
+        }
+
+    asyncio.run(scenario())
+
+
+def test_g2_resume_persists_the_exact_handoff_receipt(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        broker, peer, profile, _sweeper, adapters = _fixture(tmp_path)
+        epoch = SessionEpochRef("epoch-resume", "ATT-RESUME", "codex-01", 1)
+        generation = ProcessGenerationRef(
+            "generation-resume", "epoch-resume", 2, "codex-01"
+        )
+        payload = _materialization_payload(
+            profile,
+            epoch,
+            generation,
+            resume=True,
+            provider_session_id="thread-resume",
+        )
+        result = await broker.execute(
+            _request("ohf-resume", payload, "resume-g2"), peer=peer
+        )
+        receipt = result["result"]["materialization_receipt"]
+        assert receipt["operation_command_id"] == (
+            "ohf-op:recover-resume:ATT-RESUME"
+        )
+        assert receipt["operation_kind"] == "resume_session"
+        assert receipt["generation_number"] == 2
+        assert receipt["provider_session_id"] == "thread-resume"
+        assert adapters[0].lifecycle == ["provider_resume"]
+
+    asyncio.run(scenario())
+
+
+def test_materialization_status_is_absent_or_conflict_without_provider_io(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        broker, peer, profile, _sweeper, adapters = _fixture(tmp_path)
+        epoch = SessionEpochRef("epoch-status", "ATT-STATUS", "codex-01", 1)
+        generation = ProcessGenerationRef(
+            "generation-status", "epoch-status", 1, "codex-01"
+        )
+        payload = _materialization_payload(profile, epoch, generation)
+        absent = await broker.execute(
+            _request("ohf-materialization-status", payload, "status-absent"),
+            peer=peer,
+        )
+        assert absent["result"] == {
+            "schema_version": MATERIALIZATION_STATUS_SCHEMA,
+            "status": "ABSENT",
+            "receipt": None,
+        }
+        assert adapters == []
+
+        await broker.execute(_request("ohf-start", payload, "status-start"), peer=peer)
+        drifted = {
+            **payload,
+            "requested": {**payload["requested"], "requested_model": "gpt-drift"},
+        }
+        conflict = await broker.execute(
+            _request("ohf-materialization-status", drifted, "status-conflict"),
+            peer=peer,
+        )
+        assert conflict["result"] == {
+            "schema_version": MATERIALIZATION_STATUS_SCHEMA,
+            "status": "CONFLICT",
+            "receipt": None,
+        }
+        assert adapters[0].lifecycle.count("provider_start") == 1
+
+    asyncio.run(scenario())
+
+
+def test_materialization_concurrency_allows_exactly_one_provider_call(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        broker, peer, profile, _sweeper, adapters = _fixture(tmp_path)
+        entered = threading.Event()
+        release = threading.Event()
+        original_factory = broker.operator_adapter_factory
+
+        def blocking_factory(*args):
+            assert original_factory is not None
+            adapter = original_factory(*args)
+
+            def blocking_start(**_kwargs):
+                adapter.lifecycle.append("provider_start")
+                entered.set()
+                assert release.wait(3)
+                return SessionStartObservation("thread-1", adapter.process)
+
+            adapter.start_session = blocking_start
+            return adapter
+
+        broker.operator_adapter_factory = blocking_factory
+        epoch = SessionEpochRef("epoch-race", "ATT-RACE", "codex-01", 1)
+        generation = ProcessGenerationRef(
+            "generation-race", "epoch-race", 1, "codex-01"
+        )
+        payload = _materialization_payload(profile, epoch, generation)
+        first = asyncio.create_task(
+            broker.execute(_request("ohf-start", payload, "race-first"), peer=peer)
+        )
+        assert await asyncio.to_thread(entered.wait, 2)
+        with pytest.raises(BrokerStateError, match="active work"):
+            await broker.execute(
+                _request("ohf-start", payload, "race-second"), peer=peer
+            )
+        release.set()
+        await first
+        assert adapters[0].lifecycle.count("provider_start") == 1
+
+    asyncio.run(scenario())
+
+
+def test_materialization_status_is_conflict_while_provider_dispatch_is_in_flight(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        broker, peer, profile, _sweeper, adapters = _fixture(tmp_path)
+        entered = threading.Event()
+        release = threading.Event()
+        original_factory = broker.operator_adapter_factory
+
+        def blocking_factory(*args):
+            assert original_factory is not None
+            adapter = original_factory(*args)
+
+            def blocking_start(**_kwargs):
+                adapter.lifecycle.append("provider_start")
+                entered.set()
+                assert release.wait(3)
+                return SessionStartObservation("thread-1", adapter.process)
+
+            adapter.start_session = blocking_start
+            return adapter
+
+        broker.operator_adapter_factory = blocking_factory
+        epoch = SessionEpochRef("epoch-status-race", "ATT-STATUS-RACE", "codex-01", 1)
+        generation = ProcessGenerationRef(
+            "generation-status-race", "epoch-status-race", 1, "codex-01"
+        )
+        payload = _materialization_payload(profile, epoch, generation)
+        start = asyncio.create_task(
+            broker.execute(_request("ohf-start", payload, "status-race-start"), peer=peer)
+        )
+        assert await asyncio.to_thread(entered.wait, 2)
+
+        status = await broker.execute(
+            _request("ohf-materialization-status", payload, "status-race-read"),
+            peer=peer,
+        )
+        assert status["result"] == {
+            "schema_version": MATERIALIZATION_STATUS_SCHEMA,
+            "status": "CONFLICT",
+            "receipt": None,
+        }
+
+        release.set()
+        await start
+        assert adapters[0].lifecycle.count("provider_start") == 1
+
+    asyncio.run(scenario())
+
+
+def test_post_effect_receipt_failure_quarantines_and_never_retries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def scenario() -> None:
+        broker, peer, profile, sweeper, adapters = _fixture(tmp_path)
+        epoch = SessionEpochRef("epoch-red", "ATT-RED", "codex-01", 1)
+        generation = ProcessGenerationRef(
+            "generation-red", "epoch-red", 1, "codex-01"
+        )
+        payload = _materialization_payload(profile, epoch, generation)
+
+        def fail_persistence(*_args, **_kwargs):
+            raise OperatorMaterializationReceiptError("private disk diagnostic")
+
+        monkeypatch.setattr(
+            broker_module,
+            "persist_operator_materialization_receipt",
+            fail_persistence,
+        )
+        with pytest.raises(BrokerStateError, match="effect is unknown") as failed:
+            await broker.execute(_request("ohf-start", payload, "red-first"), peer=peer)
+        assert "private disk diagnostic" not in str(failed.value)
+        assert adapters[0].lifecycle.count("provider_start") == 1
+        assert sweeper.calls == []
+
+        status = await broker.execute(
+            _request("ohf-materialization-status", payload, "red-status"),
+            peer=peer,
+        )
+        assert status["result"]["status"] == "CONFLICT"
+        assert status["result"]["receipt"] is None
+
+        with pytest.raises(BrokerStateError, match="quarantined"):
+            await broker.execute(_request("ohf-start", payload, "red-retry"), peer=peer)
+        assert adapters[0].lifecycle.count("provider_start") == 1
+
+    asyncio.run(scenario())
+
+
+def test_ambiguous_provider_response_quarantines_and_never_retries(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        broker, peer, profile, sweeper, adapters = _fixture(tmp_path)
+        original_factory = broker.operator_adapter_factory
+
+        def ambiguous_factory(*args):
+            assert original_factory is not None
+            adapter = original_factory(*args)
+
+            def ambiguous_start(**_kwargs):
+                adapter.lifecycle.append("provider_start")
+                raise TimeoutError("private ambiguous provider diagnostic")
+
+            adapter.start_session = ambiguous_start
+            return adapter
+
+        broker.operator_adapter_factory = ambiguous_factory
+        epoch = SessionEpochRef("epoch-ambiguous", "ATT-AMBIGUOUS", "codex-01", 1)
+        generation = ProcessGenerationRef(
+            "generation-ambiguous", "epoch-ambiguous", 1, "codex-01"
+        )
+        payload = _materialization_payload(profile, epoch, generation)
+
+        with pytest.raises(BrokerStateError, match="effect is unknown") as failed:
+            await broker.execute(
+                _request("ohf-start", payload, "ambiguous-first"), peer=peer
+            )
+        assert "private ambiguous provider diagnostic" not in str(failed.value)
+        assert adapters[0].lifecycle.count("provider_start") == 1
+        assert sweeper.calls == []
+
+        status = await broker.execute(
+            _request("ohf-materialization-status", payload, "ambiguous-status"),
+            peer=peer,
+        )
+        assert status["result"]["status"] == "CONFLICT"
+        assert status["result"]["receipt"] is None
+
+        with pytest.raises(BrokerStateError, match="quarantined"):
+            await broker.execute(
+                _request("ohf-start", payload, "ambiguous-retry"), peer=peer
+            )
+        assert adapters[0].lifecycle.count("provider_start") == 1
+
+    asyncio.run(scenario())
+
+
+def test_cancelled_provider_dispatch_stays_quarantined_while_thread_unwinds(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        broker, peer, profile, sweeper, adapters = _fixture(tmp_path)
+        entered = threading.Event()
+        release = threading.Event()
+        original_factory = broker.operator_adapter_factory
+
+        def cancellable_factory(*args):
+            assert original_factory is not None
+            adapter = original_factory(*args)
+
+            def cancellable_start(**_kwargs):
+                adapter.lifecycle.append("provider_start")
+                entered.set()
+                assert release.wait(3)
+                return SessionStartObservation("thread-cancelled", adapter.process)
+
+            adapter.start_session = cancellable_start
+            return adapter
+
+        broker.operator_adapter_factory = cancellable_factory
+        epoch = SessionEpochRef("epoch-cancelled", "ATT-CANCELLED", "codex-01", 1)
+        generation = ProcessGenerationRef(
+            "generation-cancelled", "epoch-cancelled", 1, "codex-01"
+        )
+        payload = _materialization_payload(profile, epoch, generation)
+        task = asyncio.create_task(
+            broker.execute(
+                _request("ohf-start", payload, "cancelled-first"), peer=peer
+            )
+        )
+        assert await asyncio.to_thread(entered.wait, 2)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        status = await broker.execute(
+            _request("ohf-materialization-status", payload, "cancelled-status"),
+            peer=peer,
+        )
+        assert status["result"]["status"] == "CONFLICT"
+        assert status["result"]["receipt"] is None
+        with pytest.raises(BrokerStateError, match="quarantined"):
+            await broker.execute(
+                _request("ohf-start", payload, "cancelled-retry"), peer=peer
+            )
+        release.set()
+        await asyncio.sleep(0)
+        assert adapters[0].lifecycle.count("provider_start") == 1
+        assert sweeper.calls == []
+
+    asyncio.run(scenario())
+
+
+def test_same_process_terminal_generation_is_not_restart_only(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        broker, peer, profile, _sweeper, adapters = _fixture(tmp_path)
+        epoch = SessionEpochRef("epoch-terminal", "ATT-TERMINAL", "codex-01", 1)
+        generation = ProcessGenerationRef(
+            "generation-terminal", "epoch-terminal", 1, "codex-01"
+        )
+        payload = _materialization_payload(profile, epoch, generation)
+        await broker.execute(
+            _request("ohf-start", payload, "terminal-start"), peer=peer
+        )
+        await broker.execute(
+            _request(
+                "ohf-stop",
+                {
+                    "operation_id": to_wire(OperationId("ohf-op:stop-terminal")),
+                    "generation": to_wire(generation),
+                },
+                "terminal-stop",
+            ),
+            peer=peer,
+        )
+
+        status = await broker.execute(
+            _request("ohf-materialization-status", payload, "terminal-status"),
+            peer=peer,
+        )
+        assert status["result"] == {
+            "schema_version": MATERIALIZATION_STATUS_SCHEMA,
+            "status": "CONFLICT",
+            "receipt": None,
+        }
+        assert adapters[0].lifecycle.count("provider_start") == 1
 
     asyncio.run(scenario())

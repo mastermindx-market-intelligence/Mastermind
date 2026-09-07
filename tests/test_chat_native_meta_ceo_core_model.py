@@ -27,16 +27,58 @@ def test_chat_native_meta_ceo_law_is_canonical_and_reached_from_mandatory_routin
 
     assert LAW_PATH in routing
     assert "ChatGPT Personal Pro / GPT-5.6 Sol" in personal_pro
-    assert "ChatGPT Pro Chat is the default Sol-class cognition surface" in routing
+    assert "Included Chat web with non-Pro reasoning is the default Sol-class cognition surface" in routing
     assert "Personal-Pro Chat remains the primary Sol cognition plane" in law
+    assert "Personal-Pro subscription/account, Chat web surface, and reasoning mode are separate" in law
 
 
-def test_metered_sol_cognition_requires_a_complete_exception_receipt() -> None:
+def test_included_chat_defaults_to_non_pro_and_pro_mode_requires_a_complete_exception() -> None:
     law = _normalized(_read(LAW_PATH))
     routing = _normalized(_read(ROUTING_PATH))
 
     required = (
-        "COGNITION_ROUTE: CHAT_PRO_DEFAULT",
+        "COGNITION_ROUTE: CHAT_INCLUDED_DEFAULT",
+        "CHAT_REASONING_MODE: NON_PRO_DEFAULT",
+        "CHAT_REASONING_MODE: PRO_MODE_EXCEPTION",
+        "WHY_PRO_MODE",
+        "WHY_NON_PRO_INSUFFICIENT",
+        "PRO_MODE_TASK_CLASS",
+        "EXPECTED_DURATION_MINUTES",
+        "LONG_HORIZON_FRONTIER_REASONING",
+        "CROSS_SYSTEM_ARCHITECTURE",
+        "HARD_DEBUGGING",
+        "ADVERSARIAL_JUDGMENT",
+        "at least 80 minutes",
+        "between 80 and 1440 minutes",
+        "`CHAT_PRO_DEFAULT` is deprecated and ambiguous",
+        "grants no Pro-mode authorization",
+        "PRO_MODE_REFUSED / USE_NON_PRO_MODE",
+    )
+    for phrase in required:
+        assert phrase in law, f"missing Chat reasoning-mode law: {phrase}"
+        assert phrase in routing, f"mandatory routing addendum omits reasoning-mode law: {phrase}"
+
+    refused_work = (
+        "handoffs",
+        "ACK / PICKUP_ACK / START / CONTINUE / STOP",
+        "status checks",
+        "monitoring / watchers / polling",
+        "message relay",
+        "routing / placement / foregrounding",
+        "mechanical edits or tests",
+        "simple reviews",
+        "short bounded work",
+    )
+    for phrase in refused_work:
+        assert phrase in law, f"missing categorical Pro-mode refusal: {phrase}"
+        assert phrase in routing, f"routing addendum omits categorical Pro-mode refusal: {phrase}"
+
+
+def test_metered_sol_cognition_remains_a_separate_complete_exception_receipt() -> None:
+    law = _normalized(_read(LAW_PATH))
+    routing = _normalized(_read(ROUTING_PATH))
+
+    required = (
         "COGNITION_ROUTE: METERED_EXCEPTION",
         "WHY_METERED",
         "WHY_PRO_CHAT_INSUFFICIENT",
@@ -50,6 +92,8 @@ def test_metered_sol_cognition_requires_a_complete_exception_receipt() -> None:
         assert phrase in law, f"missing Chat-native cognition route law: {phrase}"
         assert phrase in routing, f"mandatory routing addendum omits metered receipt: {phrase}"
 
+    assert "Pro reasoning mode is not a metered cognition surface" in law
+    assert "Pro reasoning mode is not a metered cognition surface" in routing
     assert "Convenience is not a metered-route justification" in routing
     assert "larger advertised context window" in law
 
@@ -114,7 +158,7 @@ def test_business_agents_work_and_api_are_companions_or_metered_exceptions() -> 
         "Workspace Agents",
         "ChatGPT Work",
         "API inference is default-off for Sol-class cognition",
-        "must not replace Personal-Pro Chat as the default Sol cognition plane",
+        "must not replace included Chat web with non-Pro reasoning as the default Sol cognition plane",
     )
     for phrase in required_law:
         assert phrase in law, f"missing paid-surface boundary: {phrase}"

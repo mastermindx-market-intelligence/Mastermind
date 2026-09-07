@@ -1,0 +1,5 @@
+{
+  "schema": "mastermind.identity_observation.v1",
+  "available": false,
+  "reason": "IDENTITY_BINDING_READ_PATH_UNAVAILABLE"
+}
