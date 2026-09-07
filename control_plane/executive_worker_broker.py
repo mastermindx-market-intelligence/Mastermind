@@ -2650,10 +2650,12 @@ class ExecutiveWorkerBroker:
             if spec.run_id in self._runs:
                 raise BrokerStateError("run_id cannot be reused")
             self._starting = True
+        started = False
         try:
             process_ref = await self.adapter.start(spec)
             attestation_reader = getattr(self.adapter, "launch_attestation", None)
             attestation = attestation_reader(process_ref) if callable(attestation_reader) else None
+            started = True
         except Exception:
             try:
                 self.last_sweep = await asyncio.to_thread(self.sweeper.sweep, "start_failed")
@@ -2663,16 +2665,17 @@ class ExecutiveWorkerBroker:
             raise
         finally:
             async with self._state_lock:
+                if started:
+                    # Publish before releasing admission, in the original finalizer.
+                    state = _BrokerRun(
+                        spec=spec,
+                        process_ref=process_ref,
+                        validation_commands=commands,
+                        launch_attestation=attestation,
+                    )
+                    self._remember(spec.run_id, state)
+                    self._active_run_id = spec.run_id
                 self._starting = False
-        async with self._state_lock:
-            state = _BrokerRun(
-                spec=spec,
-                process_ref=process_ref,
-                validation_commands=commands,
-                launch_attestation=attestation,
-            )
-            self._remember(spec.run_id, state)
-            self._active_run_id = spec.run_id
         return {
             "process_ref": process_ref,
             "launch_attestation": attestation,
