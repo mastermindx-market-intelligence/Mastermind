@@ -1396,7 +1396,8 @@ class _CollisionFenceHTTP(_ProbeHTTP):
                     pulls.append({"number": self.OTHER_PR})
                 return pulls
             if self.final_incomplete and self.census_reads == 2:
-                return [{"number": 9999}]
+                # Keep the closing census genuinely over the current fixed ceiling.
+                return [{"number": page * 1000 + index} for index in range(100)]
             return []
 
         other_files = (
