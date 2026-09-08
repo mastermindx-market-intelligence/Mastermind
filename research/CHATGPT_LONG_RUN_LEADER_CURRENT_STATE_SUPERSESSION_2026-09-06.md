@@ -1,10 +1,10 @@
 # ChatGPT long-run leader — current-state supersession register
 
-**Repair marker:** `PR490-B1-B5-DIRECT-ACCESS-REPAIR-20260907`
-**Corrected through:** 2026-09-07
+**Repair marker:** `PR490-V7-CURRENT-PROTECTED-COHERENCE-REPAIR-20260908`
+**Corrected through:** 2026-09-08
 **Parent operation:** `chatgpt-pro-long-run-leaders-research-20260905-sol-001`  
 **Carrier:** Mastermind Draft PR #490, branch `sol/chatgpt-pro-long-run-leaders-research-20260905`
-**Integrated protected master:** `66a1125c4e0f02351f33dbf8c8583eb19ea1d2e4` through material-dependency history-preserving merge `365f068e938297356180a4cf9713ba62b9625683`
+**Action-time protected master:** `03eaa8e9aa32fdc949551ad0f88a890d269daea4`; current-base compatibility is a separate immutable merge-tree/check receipt, not an ancestry-only source commit
 **Original reviewed PR head:** `65f178f0b21d0976d9dde6c765197a6f68b72d61`
 **Authority:** `RECORDS_ONLY / CURRENT_STATE_CORRECTION / NO_RUNTIME_INSTALL_DISPATCH_RELEASE_OR_LINEAR_AUTHORITY`
 **Capability state:** `SPEC_ONLY / SOURCE_REPAIR_CANDIDATE / FRESH_FULL_REVIEW_REQUIRED`
@@ -58,9 +58,15 @@ Source Continuity is read-only verification around the incumbent writer. It is n
 | PR #491 | runtime delayed Wake/continuity | `OPEN / DRAFT / HOLD / END_TO_END_NOT_PROVEN` | External owner; consume at its proof ceiling and do not transfer ownership. |
 | PR #514 | Web-Sol census read admission | `SOURCE_PROTECTED / BUILT_NOT_PROVEN / NOT_INSTALLED` | External owner; consume at its proof ceiling and do not transfer ownership. |
 | PR #520 | Web-Sol popup snapshot truth and unknown inventory | `SOURCE_PROTECTED / BUILT_NOT_PROVEN / NOT_INSTALLED` | External owner; consume at its proof ceiling and do not transfer ownership. |
+| PR #511 | profile-scoped native CENSUS research and implementation freeze | `SOURCE_PROTECTED / SPEC_ONLY / RESEARCH_EXECUTED / PRODUCTION_INERT` | Read-only profile census only; no conversation, RuntimeBinding, account/session, installation, or production authority. |
+| PR #529 | authenticated selected-project Workbench read composition proof | `SOURCE_PROTECTED / BUILT_NOT_PROVEN / FULL_HERMETIC_COMPOSITION_PRIVATE_OUTPUT_GUARD / NOT_INSTALLED` | Exact read-composition evidence only; no exact-conversation, general mutation/shell/process, service, installation, or production authority. |
 | PR #471 | provider-neutral Executive worker execution contract | `SOURCE_PROTECTED / BUILT_NOT_PROVEN / PRODUCTION_INERT` | `BOUNDED_WORKER` values only; provider homes/credentials stay adapter-private; no attended or RuntimeBinding capability. |
 
 PR #520 clears stale popup snapshots and preserves unavailable inventory as unknown; it does not establish exact conversation/document/RuntimeBinding identity, installation, command authority, or production capability.
+
+PR #511 protects the profile-scoped, read-only native CENSUS research and implementation freeze. It is `SPEC_ONLY / RESEARCH_EXECUTED / PRODUCTION_INERT`; a profile census is not a conversation election and grants no RuntimeBinding, account/session authority, installation, or production proof.
+
+PR #529 protects the full hermetic authenticated selected-project descriptor/observer read-composition test. It is `BUILT_NOT_PROVEN / FULL_HERMETIC_COMPOSITION_PRIVATE_OUTPUT_GUARD / NOT_INSTALLED`; it proves neither exact ChatGPT conversation attestation nor general Workbench mutation, shell, process, service, installation, or production behavior.
 
 ## Review and proposal lineage
 
@@ -79,7 +85,7 @@ PR #520 clears stale popup snapshots and preserves unavailable inventory as unkn
 |---|---|---|---|
 | Long-run leader product thesis | `SPEC_ONLY / SOURCE_REPAIR_CANDIDATE` | Persistent responsibility with replaceable reasoning and one experience over federated owners. | Fresh full exact-head non-author review. |
 | Governed Workbench contract | `SPEC_ONLY` | Three-state effect law, same-action history, attended profile, target selection, command triplet, cursor and freshness contracts in candidate source. | Owner implementation, installation, real producer/consumer proof, acceptance. |
-| Selected-project read | `BUILT_NOT_PROVEN / NOT_INSTALLED` via PR #519 | Existing source-protected read dependency. | Exact-conversation binding, install, useful attended journey, rollback/readback. |
+| Selected-project read | `BUILT_NOT_PROVEN / NOT_INSTALLED` via PR #519 plus PR #529 composition proof | Existing source-protected read implementation and full hermetic authenticated composition guard. | Exact-conversation binding, installed service, useful attended journey, rollback/readback, and production proof. |
 | Provider-neutral worker contract | `BUILT_NOT_PROVEN / PRODUCTION_INERT` via protected PR #471 | Immutable common worker values with provider home/configuration removed from the supervisor contract. | No provider launch, install, production proof, RuntimeBinding, or attended-mode implementation follows. |
 | Host file/short command | epoch-bounded as above | Bounded attended and unmanaged observations. | Managed state, first-party seam, safe drain, durable receipt, security proof. |
 | 24-task evaluation | `TEMPLATE_ONLY / NOT_PREREGISTERED / NOT_RUN` | Task-bank structure only. | Separate immutable preregistration, admission, execution, grading, statistics. |

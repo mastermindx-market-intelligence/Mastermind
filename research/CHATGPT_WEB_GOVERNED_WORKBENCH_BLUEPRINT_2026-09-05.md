@@ -1,8 +1,8 @@
 # ChatGPT Web Governed Workbench — Integration Blueprint
 
-## 2026-09-07 governed direct-access amendment
+## 2026-09-08 governed direct-access amendment
 
-**Marker:** `PR490-B1-B5-DIRECT-ACCESS-REPAIR-20260907`
+**Marker:** `PR490-V7-CURRENT-PROTECTED-COHERENCE-REPAIR-20260908`
 **State:** `SPEC_ONLY / SOURCE_REPAIR_CANDIDATE / NO_RUNTIME_OR_INSTALL_AUTHORITY`
 
 ### User journey and profile
@@ -65,7 +65,7 @@ Preimage checks and atomic rename are useful conflict detectors but are not excl
 
 ### No-rebuild boundary
 
-No new lifecycle, session, permission, source-selection, process, evidence, retry, queue, workspace, transcript, identity, or control plane is approved. The facade consumes PR #519 and existing Web-Sol/RuntimeBinding, resource/auth, process/host, CodeIntel, GitHub, Dialogue/Wake, and Source Continuity owners at their actual proof ceilings.
+No new lifecycle, session, permission, source-selection, process, evidence, retry, queue, workspace, transcript, identity, or control plane is approved. The facade consumes PR #519, PR #529 composition evidence, PR #511 profile-census research, and existing Web-Sol/RuntimeBinding, resource/auth, process/host, CodeIntel, GitHub, Dialogue/Wake, and Source Continuity owners at their actual proof ceilings.
 
 **Date:** 2026-09-05  
 **Research carrier:** Mastermind PR #490  
@@ -89,7 +89,7 @@ Use it in three narrower ways:
 2. **Selective pattern adoption:** reuse or independently implement only bounded interaction patterns that improve model efficiency and operator ergonomics—batched reads, structured patches, durable process handles, current-permission enforcement, observation-bound desktop actions, and explicit incomplete/effect-unknown states.
 3. **Upstream contribution where generic:** fixes that are broadly useful and do not expose Mastermind architecture may be proposed upstream after separate review. Mastermind-specific authority, identity, evidence and continuity behavior remains first-party.
 
-The desired operating system already exists conceptually: Executive OS owns lifecycle/admission; Agent OS owns durable organizational continuity; RuntimeBinding owns exact rotating surfaces; Capacity owns eligibility/placement; Dialogue/Relay/Wake own return and attention; GitHub owns source/evidence; Steward/Control Room compose reads; Code Intelligence owns governed code discovery; Web-Sol/Worker Browser own bounded browser actuation. The workbench is a **facade over an exact existing Attempt/provider execution context**, never another owner.
+The desired operating system already exists conceptually: Executive OS owns lifecycle/admission; Agent OS owns durable organizational continuity; RuntimeBinding owns exact rotating surfaces; Capacity owns eligibility/placement; Dialogue/Relay/Wake own return and attention; GitHub owns source/evidence; Steward/Control Room compose reads; Code Intelligence owns governed code discovery; Web-Sol/Worker Browser own bounded browser actuation. The Workbench is a facade over one owner-bound context—Leader read, Executive worker, or attended Web—and never another owner.
 
 ---
 
@@ -125,7 +125,7 @@ One real, consequential program slice completes through:
 Chairman outcome
 → current-source Sol recovery
 → bounded CEO/worker admission
-→ exact Attempt-bound workspace and tools
+→ authority-mode-bound workspace and tools
 → durable execution
 → material return to the exact leader
 → difficult evidence-based Sol review
@@ -138,41 +138,37 @@ No Chairman tab hunting, message shuttling, account choosing, duplicate branch c
 
 ---
 
-## 3. Two modes, not one super-agent
+## 3. Three authority profiles, not one super-agent
 
-### 3.1 Leader mode
+### 3.1 Leader read mode
 
-Leader mode is the normal Sol experience. It needs:
+Leader read mode is the normal Sol experience. It needs protected procedure, current company context, source-attributed Steward/Control Room reads, GitHub/CodeIntel evidence, and bounded CEO-intent submission only where production-proven. It has no unrestricted filesystem, shell, desktop, credential, account, source-writer, or lifecycle authority.
 
-- protected procedure and current company context;
-- source-attributed Steward/Control Room reads;
-- GitHub/CodeIntel evidence reads;
-- bounded CEO-intent submission where production-proven;
-- child status and material returns through existing owners;
-- exact continuation/rotation when required;
-- no unrestricted filesystem, shell, desktop, credential or account administration.
+**Leader read binding** is issued by the existing read/resource owner. It binds subject, permitted resource and scope, source/capability generation, expiry, freshness, and correction behavior. It does not synthesize a Job, Attempt, Worker, project, worktree, or process.
 
-Leader mode can therefore be powerful without pretending every Sol chat is a local root user.
+### 3.2 Executive worker mode
 
-### 3.2 Operator mode
+Executive worker mode is an exact admitted Job/Attempt/Worker. It may receive a local Workbench only when existing owners inject and enforce:
 
-Operator mode is an exact, already-admitted worker/Attempt. It may receive an optional local workbench only when the host can inject and enforce:
+- exact `job_ref`, `attempt_ref`, `worker_ref`, responsibility and operation identity;
+- exact repository/worktree, branch, source head/base, and allowed path set;
+- execution profile, network, resource, environment and secret policy;
+- provider-neutral worker contract values from protected PR #471;
+- effect-reconciliation owner and current RuntimeBinding generation where relevant.
 
-- exact `job_ref`, `attempt_ref`, worker and operation identity;
-- exact repository/worktree and branch;
-- allowed read/write path set;
-- source head/base and expected file digests;
-- execution profile, network policy, resource limits and secret policy;
-- effect-reconciliation owner;
-- current RuntimeBinding/provider-session identity when the surface matters.
+**Executive worker binding** is lifecycle-bound and short-lived. Concrete provider adapters exclusively own provider homes, credentials and launch mechanics. A Business subject, plugin connection, browser title, or arbitrary host path cannot manufacture this binding.
 
-The model cannot choose or override those values. A generic Business user, OAuth subject, browser tab title or plugin install is not an Operator binding.
+### 3.3 Attended operator mode
 
-### 3.3 Why this split matters
+`ATTENDED_WEB_OPERATOR` is a separately granted task-scoped technical context for the exact current Web conversation and generation. It does not fabricate a Job, Attempt, Worker, source-writer assignment, organizational role, account election, or unattended autonomy claim.
 
-Trying to make every CEO chat a Codex worker would combine high-level authority, broad local access, browser credentials and many app permissions in one long-lived principal. That increases blast radius and makes stale-session fencing difficult. The split preserves a premium one-cockpit experience while keeping execution attached to a short-lived, exact, least-privilege context.
+**Attended Web binding** contains `workbench_context_ref`, exact conversation identity, conversation generation, one owner-issued target/source/scope, policy and capability generation, expiry, revocation behavior, and reconciliation ownership. It may request bounded file/process work only through the existing resource/auth/process owners. Worker validation remains unavailable unless a real Executive Job/Attempt is separately admitted.
 
----
+A profile-scoped CENSUS from protected PR #511 is not this binding. Authenticated selected-project read composition from PR #529 proves one read path, not exact conversation attestation or general mutation/shell/process authority.
+
+### 3.4 Why this split matters
+
+Combining leader authority, broad host access, browser credentials, lifecycle execution, and attended direct tools in one long-lived principal would widen blast radius and blur stale-session fencing. Three explicit profiles preserve one premium cockpit while keeping every action attached to the owner and identity that can truthfully authorize, observe, reconcile, and correct it.
 
 ## 4. Account-specific product routes
 
@@ -196,7 +192,7 @@ Business custom MCP write support makes a direct workbench technically possible,
 - Steward: read-only company truth composition;
 - Executive: bounded root intent admission;
 - Dialogue: exact worker return path;
-- Workbench: exact Attempt-bound file/process tools, if approved;
+- Workbench: authority-mode-bound file/process tools, if approved;
 - Desktop: optional exact worker-browser/computer tools, if approved;
 - Admin: separate normally disabled installation/credential infrastructure surface.
 
@@ -271,49 +267,40 @@ This is a semantic design candidate, not a final MCP schema or authorization to 
 
 ### 6.1 Discovery surface — read-only
 
-| Candidate operation | Model-authored input | Host-injected/derived context | Output |
+| Candidate operation | Model-authored request | Owner-bound context | Minimum truthful output |
 |---|---|---|---|
-| `workspace_manifest` | none | exact Attempt/workspace/source/capability generation | bounded roots, source identity, language/build inventory, permissions, degradation |
-| `read_workspace_files` | relative paths, bounded ranges | exact root and read policy | exact content/blob/hash, truncation and continuation |
-| `search_workspace` | query, bounded glob/language/ref | exact root/index generation/coverage | matches plus coverage, freshness, omitted/truncated state |
-| `workspace_semantics` | symbol/reference query | exact Attempt worktree and accepted CodeIntel backend | definitions/references/diagnostics with backend/evidence identity |
-| `view_workspace_image` | relative image path | exact read root and media limit | image artifact reference, dimensions/hash |
+| `workspace_manifest` | none | one permitted target plus the applicable Leader read, Executive worker, or Attended Web binding | bounded roots, source identity, permissions, capability generation, coverage and degradation |
+| `read_workspace_files` | relative paths and bounded ranges | exact owner-selected root/read policy and current mode binding | content/artifact, file identity, content hash, committed baseline, live observation, truncation, continuation and time |
+| `search_workspace` | query, bounded glob/language/ref | exact owner-selected target plus existing CodeIntel generation | matches, requested live observation, indexed observation, coverage, freshness, truncation, continuation and time |
+| `workspace_semantics` | symbol/reference query | exact owner-selected target plus accepted CodeIntel backend and current mode binding | definitions/references/diagnostics, committed baseline, live and indexed observation identities, coverage, freshness and time |
+| `view_workspace_image` | relative image path | exact owner-selected read root/media policy and current mode binding | artifact, dimensions, file identity, content hash, committed baseline, live observation, coverage, freshness and time |
 
-These should compose existing filesystem/CodeIntel/GitHub owners rather than implement a new repository index.
+These operations compose the existing filesystem, Workbench-read, CodeIntel and GitHub owners. Protected PR #529 strengthens the authenticated selected-project read-composition proof but does not install a service or grant any broader tool.
 
-### 6.2 Change surface — exact Attempt only
+### 6.2 Change surface — authority-mode-bound
 
 | Candidate operation | Required semantics |
 |---|---|
-| `prepare_workspace_patch` | validate closed relative paths, expected source/blob preconditions, size, permission and candidate diff; return an opaque short-lived preparation |
-| `commit_workspace_patch` | accept only the opaque preparation, re-read source/permission/binding, apply at most once, return per-path post-images/effect |
-| `workspace_diff` | read current exact Attempt diff with binary/truncation/path coverage |
-| `checkpoint_workspace` | project existing Source Continuity facts; no commit/push/transfer authority |
+| `prepare_workspace_patch` | validate closed relative paths, current mode binding, expected live/committed preimages, permission, size and candidate diff; return one opaque short-lived preparation |
+| `commit_workspace_patch` | consume only that owner-issued preparation, revalidate authority/source/binding, apply at most once and return per-path post-images plus common effect truth |
+| `reconcile_workspace_patch` | read the original action through its owner after timeout, revocation, rotation or response loss; never create a second action identity |
+| `workspace_diff` | report committed baseline and live working-tree observation separately, with path/binary coverage, freshness, truncation, continuation and observation time |
+| `checkpoint_workspace` | project existing Source Continuity facts; no commit, push, transfer, retry, release or ownership authority |
 
-The patch input may carry unified patch text or a structured edit representation, but never an absolute root, branch, worktree, credential, Git ref update, commit, force operation or target account. Cross-file crash atomicity must not be claimed merely because preflight succeeded. If a write response is lost after a possible effect, reconcile exact file/diff state before another action.
+The patch request may carry unified text or a structured edit representation, but never an absolute root, branch, worktree, credential, Git ref update, force operation or target account. Executive worker mutation requires its real lifecycle binding. Attended mutation requires the current Attended Web binding and an existing owner willing to issue the preparation. Leader read has no patch commit authority.
 
-### 6.3 Process surface — existing execution owner
+Cross-file crash atomicity is not inferred from preflight. A lost write response preserves `EFFECT_UNKNOWN` until the same owner-native action is reconciled; no provider, account, backend, carrier or receiver failover is allowed.
 
-Initial execution should use closed repository-aware recipes, not unrestricted shell text:
+### 6.3 Process surface — mode-separated existing execution owner
 
-- current `git status`/diff/read-only inspection;
-- reviewed test target;
-- reviewed build/lint/typecheck task;
-- Python compile or exact package script;
-- exact existing project runner entrypoint.
+The process owner remains canonical. Two entry paths are deliberately distinct:
 
-Candidate operations:
+1. **Executive worker validation.** A real Job/Attempt may use `list_validation_recipes`, `prepare_validation_start`, `start_validation`, and `reconcile_validation_start` under the provider-neutral worker contract and adapter-private launch mechanics.
+2. **Attended command.** A current `ATTENDED_WEB_OPERATOR` context may use `prepare_attended_command`, `start_attended_command`, and `reconcile_attended_command_start` when the existing process/host owner has separately approved the safe boundary. This path does not invoke an Executive supervisor or create a shadow Job/Attempt.
 
-| Operation | Semantics |
-|---|---|
-| `list_validation_recipes` | read the exact reviewed commands/targets available to this Attempt |
-| `start_validation` | select recipe + bounded target parameters; owner derives argv, cwd, environment, resource/network policy |
-| `read_process` | return only new output since owner cursor plus process identity/state/exit evidence |
-| `send_process_input` | only when the process is declared interactive and input kind is allowed |
-| `request_process_cancel` | request cancellation; never call request receipt terminal proof |
-| `reconcile_process` | read the canonical process/Attempt state after timeout, disconnect or unknown cancellation |
+Both paths may then use owner-bound `read_process`, `send_process_input`, `request_process_cancel`, `reconcile_process_input`, `reconcile_process_cancel`, and `reconcile_process` only where the original process reference and generation permit them. Observer cursors are independent; terminal, exit, cancellation, effect, cleanup, retained-range and gap facts remain outside truncatable output.
 
-A later structured arbitrary-argv capability would require separate evidence and an enforceable executable/environment/network policy. A shell string that starts in an approved folder is not a sandbox.
+The caller may request command text, a shorter timeout and a smaller output ceiling. Cwd, executable/shell policy, environment, network, resource policy, principal, source, target, cleanup, timeout ceiling and output ceiling remain owner-derived. A shell string that merely starts in an approved folder is not a sandbox. Cancellation request receipt is not terminal proof, and elapsed time does not prove an underlying worker stopped.
 
 ### 6.4 Desktop surface — separate optional connector
 
@@ -343,29 +330,30 @@ The provider harness may mechanically produce these frames where accepted. The m
 
 ## 7. Host-injected authority envelope
 
-Every Workbench call should be evaluated against an immutable current call context conceptually containing:
+Every Workbench call is evaluated against common owner-bound context plus exactly one mode-specific binding.
+
+Common owner-bound context contains:
 
 ```text
 schema / capability generation
-principal/resource/scope
-responsibility_ref
-operation_key
-job_ref / attempt_ref / worker_ref
-provider session and RuntimeBinding generation when relevant
-repository / exact workspace identity
-source head / base / expected path/blob state
-allowed read/write paths
-allowed recipe/process/desktop capabilities
-network and secret policy
-observed_at / expires_at
+principal / resource / granted scope
+responsibility_ref and operation_key
+owner-selected target and source identity
+allowed read/write/process/desktop capability set
+network, environment, resource and secret policy
+observed_at / expires_at / revocation generation
 owner-specific reconciliation reference
 ```
 
-The model sees only public opaque references and useful policy descriptions. It never supplies a UID, credential, host, account, browser profile, absolute path, branch, worktree, lease, fence, capability generation, privileged role or effect state.
+**Leader read binding** adds the permitted read target, source/freshness ceiling and no-mutation rule.
 
-A server must validate the envelope at invocation time. A cached tool schema from an earlier permission epoch cannot keep a revoked capability alive.
+**Executive worker binding** adds exact `job_ref`, `attempt_ref`, `worker_ref`, repository/worktree/branch, source head/base, expected path/blob state, execution profile and provider-neutral worker values.
 
----
+**Attended Web binding** adds `workbench_context_ref`, exact current conversation identity and generation, one owner-issued target/source/scope, policy/capability generation, expiry and revocation behavior. It never synthesizes Job, Attempt or Worker identifiers.
+
+The model sees only opaque references and useful public policy descriptions. It never supplies a UID, credential, host, account, browser profile, absolute path, branch, worktree, lease, fence, capability generation, privileged role or effect state. Caller content/path/hash/source assertions are mismatch-only; matching text grants nothing.
+
+The relevant owner revalidates the envelope at invocation time and, after awaited I/O, revalidates any binding that could have changed. A cached schema or earlier successful read cannot keep a revoked capability alive. One action remains authority-mode-bound for its lifetime and cannot be remapped between profiles after timeout, rotation or succession.
 
 ## 8. Effect and correction contract
 
@@ -509,6 +497,10 @@ Any upstream component evaluation must pin source and dependency locks, produce 
 CAPABILITY_UNAVAILABLE
 CAPABILITY_GENERATION_MISMATCH
 PRINCIPAL_OR_SCOPE_REFUSED
+WORKBENCH_CONTEXT_MISSING
+WORKBENCH_CONTEXT_EXPIRED_OR_REVOKED
+EXACT_CONVERSATION_IDENTITY_MISMATCH
+TARGET_OPTION_INVALID_OR_STALE
 ATTEMPT_BINDING_MISSING
 ATTEMPT_BINDING_STALE
 WORKSPACE_IDENTITY_MISMATCH
@@ -648,7 +640,8 @@ No worker should receive “build the workbench.” It receives one of the proof
 | Executive MCP production write | inspected source exposes no production-write mode; live production capability not established here |
 | Company Dialogue source | source exists; exact production/live state belongs to its owner |
 | CodeIntel production read capability | `PARTIAL / active prerequisite work` in its existing carriers |
-| Exact Workbench local-file/process app for ChatGPT web | `NOT_BUILT` as a separately proven product capability |
+| Exact Workbench local-file/process app for ChatGPT web | `PARTIAL` — PR #519 read source and PR #529 hermetic composition proof exist, but installation, exact-conversation binding, mutation/process capability and production proof do not |
+| Native profile census | `SPEC_ONLY / RESEARCH_EXECUTED / PRODUCTION_INERT` via protected PR #511; no installed CENSUS or Control Room fleet proof |
 | Personal Pro project-leadership parity | `PARTIAL` architecture/transport pieces; end-to-end proof missing |
 | Exact ChatGPT wake/resume and rotation | `PARTIAL / proof ladder incomplete` |
 | All-reachable-mutator stale-session fencing | `NOT_PROVEN` |
@@ -662,22 +655,29 @@ This table is a research synthesis and must not overwrite a fresher canonical ow
 
 ### Primary
 
-Complete the existing **one-cockpit authenticated Steward read vertical** under its current BSC/Integration source, review, endpoint/auth, admin-confirmation, post-expiry refresh and rollback gates. It should deliver useful source-attributed company context before any Workbench write authority is introduced.
+Freeze one immutable V7 semantic head on this same PR #490 carrier, publish it once, establish exact remote identity, regenerate the separate current-protected merge-tree/check receipt, and obtain one fresh full non-author exact-head architecture review. Keep Draft/Hold and all implementation verticals unadmitted until that review returns.
 
-### Independent research/architecture follow-up
+### Review adjudication
 
-The existing Sol Capability Fabric, Executive/provider execution, CodeIntel, Worker Browser and Business plugin owners should review this blueprint and map the first **read-only synthetic repository investigation** onto existing contracts. The output is one bounded implementation packet, not a new umbrella program.
+Sol consumes the exact-head review and issues one explicit ruling: bounded same-carrier repair, continued HOLD, or acceptance of the records-only architecture candidate. A passing review still does not install, execute, merge or prove production capability.
+
+### Records-only protection
+
+Only after explicit Sol acceptance may an authorized release owner perform current-base maintenance and expected-head records-only protection. The release must preserve the nineteen semantic paths, settle the exact effect, and stop on movement or uncertainty without retry or failover.
+
+### Post-protection product continuation
+
+After records are protected, select one independently useful owner-specific vertical—such as installed authenticated read, attended command, live worktree freshness, durable process return, or native census-to-Control-Room display—and issue a new complete operator handoff through its existing owner. Do not launch an umbrella implementation program or duplicate lifecycle, identity, permission, process, index, retry, transcript, queue, or state planes.
 
 ### Held
 
-No primary-host Chat On Steroids install; no Workbench app publication; no arbitrary shell; no account/permission changes; no new Web-Sol composer authority; no exact-chat autonomy claim; no fleet rollout; no parallel task/session registry.
-
----
+No primary-host Chat On Steroids install; no Workbench app publication; no arbitrary shell; no account/permission changes; no native CENSUS activation; no new Web-Sol composer authority; no exact-chat autonomy claim; no fleet rollout; no parallel task/session registry.
 
 ## 19. Sources
 
 ### Mastermind
 
+- Action-time protected source and Skillpack basis for V7: `mastermindx-market-intelligence/Mastermind@03eaa8e9aa32fdc949551ad0f88a890d269daea4`; PR #511 and PR #529 are consumed only at the proof ceilings stated above.
 - Historical protected source/Skillpack basis for the 2026-09-06 continuation: `mastermindx-market-intelligence/Mastermind@8f3370e349ab8f1a54acac4c63697740f32715b1`.
 - Original and integration research in this PR.
 - `docs/CEO_BOOT_PACKET.md`.

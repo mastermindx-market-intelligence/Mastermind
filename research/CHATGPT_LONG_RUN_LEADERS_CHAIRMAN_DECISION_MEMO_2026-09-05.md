@@ -1,11 +1,11 @@
 # Chairman Decision Memo — ChatGPT Web as a Long-Run Mastermind Leader
 
-## Binding 2026-09-07 architecture amendment
+## Binding 2026-09-08 architecture amendment
 
-**Marker:** `PR490-B1-B5-DIRECT-ACCESS-REPAIR-20260907`
+**Marker:** `PR490-V7-CURRENT-PROTECTED-COHERENCE-REPAIR-20260908`
 **Precedence:** this section controls whenever older effect, source-selection, current-state, owner, or next-action language conflicts. The original thesis and dated evidence remain preserved.
 
-Current contract candidate version: 6. Its machine-readable generation is `PR490_REPAIR_CANDIDATE_V6_CURRENT_SOURCE_PROFILE_GATED_SOURCE_ONLY`; every earlier revision-number statement below is dated history, not current contract truth.
+Current contract candidate version: 7. Its machine-readable generation is `PR490_REPAIR_CANDIDATE_V7_CURRENT_PROTECTED_PROFILE_GATED_MODE_COHERENT_SOURCE_ONLY`; every earlier revision-number statement below is dated history, not current contract truth.
 
 ### Decision
 
@@ -13,16 +13,18 @@ The product remains a durable leader of governed work with replaceable reasoning
 
 The common modifying effect vocabulary is exactly `NOT_APPLIED | APPLIED | EFFECT_UNKNOWN`. `REFUSED` is a response status. `PARTIAL` is owner-native/per-step outcome evidence: use `APPLIED` when a bounded effect is proven and publish exact step results; use `EFFECT_UNKNOWN` when the effect boundary cannot be proven. Expiry, revocation, rotation, succession, reauthorization, timeout, cancellation, reconnect, or retention loss never manufactures `NOT_APPLIED` and never authorizes replay.
 
-PR #519 is the current source-protected selected-project read dependency (`BUILT_NOT_PROVEN / NOT_INSTALLED`). Authenticated Workbench caller identity is not exact ChatGPT conversation identity. HC0 and Web-Sol v1 evidence cannot mint mutating authority; exact conversation/generation comes from the existing Web-Sol/RuntimeBinding chain. The trusted host/resource/source owner selects source and emits opaque permitted target options. Caller path/hash assertions are mismatch-only, and a match grants nothing.
+PR #519 is the current source-protected selected-project read dependency (`BUILT_NOT_PROVEN / NOT_INSTALLED`). Protected PR #529 adds full hermetic authenticated selected-project descriptor/observer composition evidence (`BUILT_NOT_PROVEN / FULL_HERMETIC_COMPOSITION_PRIVATE_OUTPUT_GUARD / NOT_INSTALLED`), but it grants no exact-conversation, general mutation/shell/process, installation, service, or production authority. Authenticated Workbench caller identity is not exact ChatGPT conversation identity. HC0 and Web-Sol v1 evidence cannot mint mutating authority; exact conversation/generation comes from the existing Web-Sol/RuntimeBinding chain. The trusted host/resource/source owner selects source and emits opaque permitted target options. Caller path/hash assertions are mismatch-only, and a match grants nothing. Protected PR #511 is profile-scoped read-only CENSUS research/freeze (`SPEC_ONLY / RESEARCH_EXECUTED / PRODUCTION_INERT`); it is not conversation election, RuntimeBinding, account/session, installation, or production authority.
 
 Executive supervisor requires a real Job/Attempt and therefore belongs to `BOUNDED_WORKER`; it cannot hide no-Job attended execution. Protected PR #471 supplies provider-neutral immutable worker contract values for this Executive path only; concrete adapters retain exclusive ownership of provider homes, credentials, and provider-specific launch mechanics, and PR #471 proves no attended mode or RuntimeBinding. Tool access is deny-by-default per profile: surface membership alone grants nothing, worker-validation tools are unavailable to `ATTENDED_WEB_OPERATOR`, and every attended workspace call requires the current owner-issued context or an opaque action reference already bound to it. The no-Job attended path composes existing resource/auth/process owners through `list_permitted_workbench_targets`, `prepare_attended_context`, and a real command `prepare_attended_command` / `start_attended_command` / `reconcile_attended_command_start` triplet. A lost response reconciles the original launch and never creates process two.
 
 Remote Desktop Commander issue #507 retains its own host-transport carrier, operation, safe-drain boundary, and managed/unmanaged truth. Source Continuity is read-only verification around the incumbent source writer. Neither becomes PR #490's process owner or writer.
 
+Action-time protected grounding is `03eaa8e9aa32fdc949551ad0f88a890d269daea4`; current-base compatibility remains a separate immutable integration receipt, not an ancestry-only source update.
+
 `Linear: NONE` applies to PR #490. MAS-198 is externally owned Web-Sol extension/native-bridge work and is not owned or gated here. This repair remains research-only `SPEC_ONLY`, Draft/Hold, and implementation-inert pending fresh full non-author exact-head review.
 
 **Originated:** 2026-09-05  
-**Current-state correction:** 2026-09-06  
+**Current-state correction:** 2026-09-08<br>
 **Carrier:** Mastermind Draft PR #490  
 **Parent operation:** `chatgpt-pro-long-run-leaders-research-20260905-sol-001`  
 **Status:** `CHAIRMAN_DIRECTION_RECORDED / ARCHITECTURE_CANDIDATE / RESEARCH_ONLY / NO_RUNTIME_OR_INSTALL_AUTHORITY`

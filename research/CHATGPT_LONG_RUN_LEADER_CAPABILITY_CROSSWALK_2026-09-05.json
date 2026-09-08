@@ -5,7 +5,7 @@
   "parent_operation": "chatgpt-pro-long-run-leaders-research-20260905-sol-001",
   "publication_carrier": "Mastermind PR #490",
   "authority": "ADVISORY_CURRENT_STATE_SNAPSHOT_NOT_CANONICAL_STATE_ASSIGNMENT_OR_RELEASE",
-  "protected_source_basis": "66a1125c4e0f02351f33dbf8c8583eb19ea1d2e4",
+  "protected_source_basis": "03eaa8e9aa32fdc949551ad0f88a890d269daea4",
   "supersedes_blob": "a1ca3c40e6f1bc749976676edd96ba3ea299e161",
   "current_state_register": "research/CHATGPT_LONG_RUN_LEADER_CURRENT_STATE_SUPERSESSION_2026-09-06.md",
   "refresh_law": "Every carrier, entitlement, source, host, permission, action, effect and proof fact must be refreshed from its canonical owner immediately before action. This crosswalk never authorizes a Job, worker, source writer, app installation, permission change, provider turn, review, release or production effect.",
@@ -519,16 +519,48 @@
   "ordered_next_actions": [
     {
       "order": 0,
-      "action": "Obtain fresh exact-head architecture review of the same-carrier PR #490 B1-B5/direct-access repair; keep all implementation verticals unadmitted until acceptance.",
-      "state": "SOURCE_REPAIR_CANDIDATE / REVIEW_REQUIRED"
+      "id": "PR490_FRESH_EXACT_HEAD_REVIEW",
+      "action": "Obtain one fresh full non-author exact-head architecture review of the immutable V7 same-carrier candidate after remote identity, current-base integration, and hosted checks are established.",
+      "owner": "independent non-author architecture reviewer",
+      "state": "REVIEW_REQUIRED / DRAFT_HOLD",
+      "stop_condition": "Return PASS or bounded findings anchored to the exact V7 head; implementation remains unadmitted.",
+      "preconditions": [
+        "one forward V7 commit on PR #490",
+        "remote branch readback matches",
+        "current-base integration receipt matches nineteen semantic paths",
+        "required hosted checks terminal"
+      ],
+      "acceptance": [
+        "review names exact head, tree, and path set",
+        "review tests authority, effect, freshness, dependency, and no-rebuild boundaries"
+      ]
     },
-    "Finish PR #490 records repair, exact-head source continuity and checks while retaining Draft/Hold.",
-    "Existing Personal-MCP Cockpit/Integration reconciles FS0/equivalent prior effect and either returns typed terminal, inaccessible or EFFECT_UNKNOWN state, or binds one executor and originates one lawful child.",
-    "Existing Steward/Integration owners continue the independent one-cockpit read lane without reviving the terminal PR #463 builder or creating another U1 source worker.",
-    "After a terminal-green immutable repair head, the already-requested independent reviewer performs exact-head architecture review; its prior plan comment is not that review.",
-    "Only accepted owner-specific verticals advance to implementation or production proof; no umbrella runtime or forty-task fan-out is authorized."
+    {
+      "order": 1,
+      "id": "PR490_SOL_REVIEW_ADJUDICATION",
+      "action": "Adjudicate the exact-head review against the Chairman outcome and either issue a bounded same-carrier repair ruling or accept only the records-only architecture candidate.",
+      "owner": "Sol",
+      "state": "HELD_PENDING_REVIEW_RETURN",
+      "stop_condition": "One explicit PASS, REQUEST_CHANGES, or HOLD ruling is durable and Draft/Hold truth remains accurate."
+    },
+    {
+      "order": 2,
+      "id": "PR490_RECORDS_ONLY_RELEASE",
+      "action": "After a PASS ruling, perform separately authorized current-base release maintenance and expected-head records-only protection without changing semantic source.",
+      "owner": "authorized Integration Root or release maintainer",
+      "state": "NOT_ADMITTED_UNTIL_REVIEW_PASS",
+      "stop_condition": "Merge settlement and protected-master readback are exact, or uncertainty is held without retry."
+    },
+    {
+      "order": 3,
+      "id": "OWNER_SPECIFIC_VERTICAL_SELECTION",
+      "action": "Select one independently useful owner-specific vertical from the accepted architecture and issue a new bounded implementation handoff through its existing owner.",
+      "owner": "Sol with the applicable existing capability owner",
+      "state": "HELD_UNTIL_RECORDS_PROTECTED",
+      "stop_condition": "One vertical has an exact owner, capability, scope, non-goals, proof, and fresh operation carrier; no umbrella fan-out is created."
+    }
   ],
-  "repair_marker": "PR490-B1-B5-DIRECT-ACCESS-REPAIR-20260907",
+  "repair_marker": "PR490-V7-CURRENT-PROTECTED-COHERENCE-REPAIR-20260908",
   "observation_epochs": [
     {
       "id": "DC_EPOCH_20260906_ATTENDED_PASS",
@@ -599,6 +631,20 @@
       ],
       "excluded_profile": "ATTENDED_WEB_OPERATOR",
       "boundary": "Executive supervisors consume immutable provider-neutral launch, process, result, receipt, validation, status, and artifact-limit values. Concrete adapters exclusively own provider homes, credentials, and provider-specific launch mechanics. This dependency proves no RuntimeBinding, attended command, installation, deployment, or production execution."
+    },
+    {
+      "pr": 511,
+      "protected_commit": "d7ffac605c547da593bfa4b4ac2b45ccafd009d6",
+      "capability": "profile-scoped native census research and implementation freeze",
+      "state": "SOURCE_PROTECTED / SPEC_ONLY / RESEARCH_EXECUTED / PRODUCTION_INERT",
+      "boundary": "Read-only profile-scoped CENSUS over the existing native port; no conversation election, RuntimeBinding, account/session authority, installation, or production proof."
+    },
+    {
+      "pr": 529,
+      "protected_commit": "03eaa8e9aa32fdc949551ad0f88a890d269daea4",
+      "capability": "authenticated selected-project Workbench read composition proof",
+      "state": "SOURCE_PROTECTED / BUILT_NOT_PROVEN / FULL_HERMETIC_COMPOSITION_PRIVATE_OUTPUT_GUARD / NOT_INSTALLED",
+      "boundary": "Signed caller through official MCP into one selected-project descriptor/observer read only; no exact conversation attestation, general Workbench mutation/shell/process, installation, service, or production proof."
     }
   ],
   "linear_boundary": {

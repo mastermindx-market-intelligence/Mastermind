@@ -1,12 +1,12 @@
 {
   "document_type": "mastermind.governed_workbench_contract_candidate",
-  "version": 6,
+  "version": 7,
   "date": "2026-09-06",
   "publication_carrier": "Mastermind PR #490",
   "parent_operation": "chatgpt-pro-long-run-leaders-research-20260905-sol-001",
   "authority": "RESEARCH_ONLY_NOT_A_RUNTIME_SCHEMA_OR_IMPLEMENTATION_COMMISSION",
-  "protected_source_basis": "66a1125c4e0f02351f33dbf8c8583eb19ea1d2e4",
-  "supersedes_blob": "423ff21ea7773b36c26a709c5d4ac6216fb2cd02",
+  "protected_source_basis": "03eaa8e9aa32fdc949551ad0f88a890d269daea4",
+  "supersedes_blob": "6582fde2a414a66d1fbc7b0d3fa0bf2284f7e17c",
   "capability_state": "SPEC_ONLY",
   "revision_reason": [
     "Preserve the prior owner-issued pre-effect reference and loss-safe reconciliation architecture.",
@@ -19,14 +19,20 @@
     "Resolve the MAS-198 metadata collision by projecting Linear NONE and retaining MAS-198 only as an external dependency.",
     "Add deny-by-default profile/tool gates so surface membership grants nothing and worker-validation launch remains Executive-bound.",
     "Require attended workspace context or a reference already bound to it; prohibit cross-profile action and process reference reuse.",
-    "Consume protected PR #471 as the existing provider-neutral BOUNDED_WORKER contract: common immutable values stay provider-neutral, provider homes and credentials remain adapter-private, and ATTENDED_WEB_OPERATOR remains explicitly outside that lifecycle."
+    "Consume protected PR #471 as the existing provider-neutral BOUNDED_WORKER contract: common immutable values stay provider-neutral, provider homes and credentials remain adapter-private, and ATTENDED_WEB_OPERATOR remains explicitly outside that lifecycle.",
+    "Make universal Workbench and action-reference law authority-mode-bound rather than silently requiring an Executive Attempt for attended Web execution.",
+    "Preserve the real bounded attended Mac file/write/shell epoch while withholding complete governed FS0, managed-service, fleet, and autonomy claims.",
+    "Require image, semantic, and diff reads to distinguish committed baseline, live working-tree observation, indexed observation where applicable, coverage, freshness, and observation time.",
+    "Bind attended context and target refusals to explicit closed error codes before backend access.",
+    "Consume protected PR #511 only as profile-scoped read-only CENSUS research/freeze and protected PR #529 only as authenticated selected-project read-composition evidence at their stated proof ceilings.",
+    "Advance action-time protected grounding to 03eaa8e9 while retaining PR #471 historical dependency identity and using a separate conflict-free current-base merge-tree receipt."
   ],
   "principles": [
-    "The workbench is a facade over an existing exact Attempt/provider execution context, not a lifecycle, session, memory, retry, queue, permission, workspace, process, or evidence owner.",
-    "Leader and operator capability profiles are separate.",
+    "The workbench is a facade over one owner-bound execution context: either an exact Executive Job/Attempt/Worker/provider context or an explicit attended Web context; it is not a lifecycle, session, memory, retry, queue, permission, workspace, process, or evidence owner.",
+    "Leader read, Executive worker, and attended Web operator capability profiles are separate.",
     "The model never supplies or selects canonical operation, host, principal, credential, account, profile, absolute root, worktree, branch, source ref, lease, fence, capability generation, authority, or effect state.",
     "Canonical operation identity is derived exclusively from the current authenticated host envelope; a caller-provided operation_key is refused and has zero effect.",
-    "Every modifying call consumes one owner-issued, Attempt-bound, pre-effect action reference at most once and revalidates current owner predicates at invocation time.",
+    "Every modifying call consumes one owner-issued, authority-mode-bound, pre-effect action reference at most once and revalidates current owner predicates at invocation time.",
     "A lost modifying response is reconciled through that pre-effect action reference before any new action can be prepared.",
     "EFFECT_UNKNOWN blocks retry and provider, account, receiver, backend, or carrier failover.",
     "Read status and modifying effect state are separate closed vocabularies.",
@@ -242,7 +248,7 @@
   "trusted_derivation": {
     "canonical_operation_identity": "Derived from the authenticated host envelope and never accepted from model input.",
     "source_selection": "The trusted host/resource/source owner selects the actual source and binds it into context. Caller content/path/hash assertions are mismatch-only; a match grants nothing and a mismatch is refused before effect.",
-    "action_identity": "Each prepare operation returns one opaque owner-issued action reference bound to operation_key, attempt_ref, capability_generation, target, payload digest, preconditions and expiry.",
+    "action_identity": "Each prepare operation returns one opaque owner-issued, authority-mode-bound action reference bound to operation_key, capability_generation, target, payload digest, preconditions, expiry, and exactly one mode-specific binding from action_reference_contract.mode_binding_fields.",
     "caller_correlation": "A model may provide a non-authoritative client_call_ref for display correlation. It cannot select operation, authority, owner, target, idempotency scope or reconciliation scope.",
     "untrusted_field_rule": "Supplying a forbidden authority field yields REFUSED with NOT_APPLIED and no downstream call.",
     "attended_target_selection": "The existing resource owner enumerates opaque permitted options and revalidates subject, exact conversation, policy, generation, occupancy, source, and scope before issuing context.",
@@ -499,7 +505,12 @@
             "source_head",
             "coverage",
             "issues",
-            "continuation"
+            "continuation",
+            "committed_baseline_ref",
+            "working_tree_observation_ref",
+            "indexed_observation_ref",
+            "freshness",
+            "observed_at"
           ],
           "permitted_profiles": [
             "LEADER_READ",
@@ -530,7 +541,13 @@
             "width",
             "height",
             "content_hash",
-            "source_head"
+            "source_head",
+            "committed_baseline_ref",
+            "working_tree_observation_ref",
+            "file_identity",
+            "coverage",
+            "freshness",
+            "observed_at"
           ],
           "permitted_profiles": [
             "LEADER_READ",
@@ -653,7 +670,11 @@
             "binary_paths",
             "truncated",
             "continuation",
-            "workspace_ref"
+            "workspace_ref",
+            "committed_baseline_ref",
+            "working_tree_observation_ref",
+            "freshness",
+            "observed_at"
           ],
           "permitted_profiles": [
             "EXACT_OPERATOR",
@@ -1334,7 +1355,11 @@
     "WAKE_UNAVAILABLE",
     "CONTEXT_ROTATION_REQUIRED",
     "NATIVE_MUTATOR_COVERAGE_INCOMPLETE",
-    "EFFECT_UNKNOWN"
+    "EFFECT_UNKNOWN",
+    "WORKBENCH_CONTEXT_MISSING",
+    "WORKBENCH_CONTEXT_EXPIRED_OR_REVOKED",
+    "EXACT_CONVERSATION_IDENTITY_MISMATCH",
+    "TARGET_OPTION_INVALID_OR_STALE"
   ],
   "mandatory_negative_cases": [
     {
@@ -1408,8 +1433,9 @@
       "id": "WEB_CEO_FILE_SHELL_FS0",
       "owner": "existing Personal MCP Cockpit/Integration and selected local-executor owners",
       "outcome": "One authorized Web CEO lists and reads a real Mac scratch file, creates and edits one disposable file, verifies real exit 0 and intentional exit 7, refuses an out-of-scope file, and disconnects the pilot while Executive remains unchanged.",
-      "state": "PLAN_READY_HELPER_PROVEN_LOCALLY_REAL_MAC_NOT_RUN",
-      "evidence": "Mastermind PR #490 issue comment 5558890710"
+      "state": "PARTIAL_ATTENDED_VENDOR_REAL_MAC_FILE_WRITE_SHELL_PROVEN_COMPLETE_FS0_NOT_PROVEN",
+      "evidence": "Mastermind PR #490 issue comments 5558890710 and 5559023488",
+      "claim_ceiling": "One bounded attended vendor-mediated Mac epoch; not first-party Workbench installation, managed service, complete FS0, fleet health, unattended autonomy, or production acceptance."
     },
     {
       "id": "READ_SYNTHETIC_WORKSPACE",
@@ -1467,9 +1493,9 @@
     "automatic_context_compaction_as_runtime_binding_transfer",
     "upstream_unsigned_binary_on_primary_authenticated_host"
   ],
-  "repair_marker": "PR490-B1-B5-DIRECT-ACCESS-REPAIR-20260907",
-  "repair_observed_at": "2026-09-07T15:50:13Z",
-  "integrated_protected_source_via": "365f068e938297356180a4cf9713ba62b9625683",
+  "repair_marker": "PR490-V7-CURRENT-PROTECTED-COHERENCE-REPAIR-20260908",
+  "repair_observed_at": "2026-09-08T06:21:47Z",
+  "integrated_protected_source_via": "EXTERNAL_MERGE_TREE_RECEIPT_f83c92129ef7d4364d3f146a66ecc883b493cc42_NO_ANCESTRY_ONLY_COMMIT",
   "conversation_identity_contract": {
     "authenticated_caller_is_exact_conversation": false,
     "hc0_fingerprint_is_authority": false,
@@ -1583,7 +1609,11 @@
       "required_outcome": "prepare_attended_context returns REFUSED before backend access and leaves every current context unchanged.",
       "evidence_required": "Opaque option identity, subject/conversation/generation mismatch, zero backend call, and zero implicit resource creation.",
       "non_goal": "An option reference alone is never an access grant.",
-      "execution_state": "NOT_RUN_CONTRACT_REQUIREMENT"
+      "execution_state": "NOT_RUN_CONTRACT_REQUIREMENT",
+      "closed_error_codes": [
+        "TARGET_OPTION_INVALID_OR_STALE",
+        "EXACT_CONVERSATION_IDENTITY_MISMATCH"
+      ]
     },
     {
       "id": "PATCH_THEN_READ_LIVE_BYTES_BASELINE_UNCHANGED",
@@ -1619,7 +1649,12 @@
       "required_outcome": "The owner returns REFUSED before backend access and proves NOT_APPLIED for any prepared mutation; no ambient project, workspace, source, or prior context is selected.",
       "evidence_required": "Exact profile/tool pair, context validation result, policy/capability generation, zero backend access, zero prepared action, and unchanged context.",
       "non_goal": "Surface membership, active tab, last target, or process history never substitutes for context.",
-      "execution_state": "NOT_RUN_CONTRACT_REQUIREMENT"
+      "execution_state": "NOT_RUN_CONTRACT_REQUIREMENT",
+      "closed_error_codes": [
+        "WORKBENCH_CONTEXT_MISSING",
+        "WORKBENCH_CONTEXT_EXPIRED_OR_REVOKED",
+        "EXACT_CONVERSATION_IDENTITY_MISMATCH"
+      ]
     }
   ],
   "current_observation_epochs": [
@@ -1692,6 +1727,20 @@
       ],
       "excluded_profile": "ATTENDED_WEB_OPERATOR",
       "boundary": "Executive supervisors consume immutable provider-neutral launch, process, result, receipt, validation, status, and artifact-limit values. Concrete adapters exclusively own provider homes, credentials, and provider-specific launch mechanics. This dependency proves no RuntimeBinding, attended command, installation, deployment, or production execution."
+    },
+    {
+      "pr": 511,
+      "protected_commit": "d7ffac605c547da593bfa4b4ac2b45ccafd009d6",
+      "capability": "profile-scoped native census research and implementation freeze",
+      "state": "SOURCE_PROTECTED / SPEC_ONLY / RESEARCH_EXECUTED / PRODUCTION_INERT",
+      "boundary": "Read-only profile-scoped CENSUS over the existing native port; no conversation election, RuntimeBinding, account/session authority, installation, or production proof."
+    },
+    {
+      "pr": 529,
+      "protected_commit": "03eaa8e9aa32fdc949551ad0f88a890d269daea4",
+      "capability": "authenticated selected-project Workbench read composition proof",
+      "state": "SOURCE_PROTECTED / BUILT_NOT_PROVEN / FULL_HERMETIC_COMPOSITION_PRIVATE_OUTPUT_GUARD / NOT_INSTALLED",
+      "boundary": "Signed caller through official MCP into one selected-project descriptor/observer read only; no exact conversation attestation, general Workbench mutation/shell/process, installation, service, or production proof."
     }
   ],
   "linear_boundary": {
@@ -1703,7 +1752,9 @@
     "conversation_identity": "HC0 and Web-Sol v1 locator/probe evidence cannot mint mutating authority; exact conversation/generation comes from existing Web-Sol/RuntimeBinding owners.",
     "executive_supervisor": "Requires a real Job/Attempt and therefore belongs to BOUNDED_WORKER, not hidden no-Job attended execution.",
     "host_transport": "Remote Desktop Commander issue #507 retains its own carrier, operation, safe-drain, and managed/unmanaged boundaries.",
-    "source_continuity": "Read-only verification around the incumbent source writer; not writer, worktree creator, push, merge, retry, or release owner."
+    "source_continuity": "Read-only verification around the incumbent source writer; not writer, worktree creator, push, merge, retry, or release owner.",
+    "native_census": "PR #511 is profile-scoped read-only CENSUS research/freeze; it does not elect a conversation or grant RuntimeBinding, account/session, installation, or production authority.",
+    "authenticated_read_composition": "PR #529 proves one authenticated selected-project descriptor/observer read composition; it does not grant exact-conversation identity, general Workbench mutation/shell/process, installation, service, or production authority."
   },
   "host_injected_context_scope": "The legacy host_injected_context list is the Executive-bound EXACT_OPERATOR / EXACT_OPERATOR_DESKTOP envelope. It is not synthesized for ATTENDED_WEB_OPERATOR.",
   "attended_injected_context": [
@@ -1731,7 +1782,7 @@
     "attended_mode": "ATTENDED_WEB_OPERATOR requires the exact current conversation and one owner-issued workbench_context_ref. It may not invoke worker-validation launch tools or fabricate Job/Attempt/Worker identity.",
     "shared_process_rule": "A process tool shared by worker and attended profiles accepts only a process_ref issued under the same current profile binding; a foreign-profile or stale-generation process_ref is refused before effect."
   },
-  "revision_generation": "PR490_REPAIR_CANDIDATE_V6_CURRENT_SOURCE_PROFILE_GATED_SOURCE_ONLY",
+  "revision_generation": "PR490_REPAIR_CANDIDATE_V7_CURRENT_PROTECTED_PROFILE_GATED_MODE_COHERENT_SOURCE_ONLY",
   "protected_worker_execution_dependency": {
     "pr": 471,
     "protected_commit": "66a1125c4e0f02351f33dbf8c8583eb19ea1d2e4",
@@ -1745,5 +1796,13 @@
     ],
     "excluded_profile": "ATTENDED_WEB_OPERATOR",
     "boundary": "Executive supervisors consume immutable provider-neutral launch, process, result, receipt, validation, status, and artifact-limit values. Concrete adapters exclusively own provider homes, credentials, and provider-specific launch mechanics. This dependency proves no RuntimeBinding, attended command, installation, deployment, or production execution."
+  },
+  "current_protected_integration_receipt": {
+    "semantic_base": "66a1125c4e0f02351f33dbf8c8583eb19ea1d2e4",
+    "semantic_head_pre_v7": "484f6b5b223c75f0256d9cb21893dfc4d199d55a",
+    "protected_master": "03eaa8e9aa32fdc949551ad0f88a890d269daea4",
+    "conflict_free_integrated_tree": "f83c92129ef7d4364d3f146a66ecc883b493cc42",
+    "net_semantic_path_count": 19,
+    "source_effect": "NONE_EXTERNAL_READ_ONLY_COMPOSITION"
   }
 }

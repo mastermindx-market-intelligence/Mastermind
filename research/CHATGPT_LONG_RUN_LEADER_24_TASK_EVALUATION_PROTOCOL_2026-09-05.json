@@ -5,7 +5,7 @@
   "parent_operation": "chatgpt-pro-long-run-leaders-research-20260905-sol-001",
   "publication_carrier": "Mastermind PR #490",
   "authority": "RESEARCH_ONLY_NOT_A_RUNTIME_SCHEMA_QUEUE_COMMISSION_OR_EXPERIMENT_ADMISSION",
-  "protected_source_basis": "66a1125c4e0f02351f33dbf8c8583eb19ea1d2e4",
+  "protected_source_basis": "03eaa8e9aa32fdc949551ad0f88a890d269daea4",
   "supersedes_blob": "b981b16d2bac5e26035876855c942f225a2ec006",
   "protocol_state": "EVALUATION_TEMPLATE_NOT_PREREGISTERED_NOT_EXECUTABLE",
   "execution_status": "NOT_RUN",
@@ -20,7 +20,9 @@
     "capacity": "existing Capacity owner",
     "evaluation_artifacts": "existing GitHub/research evidence path selected by a separately approved experiment operation",
     "prohibited_new_owner": "This template creates no telemetry database, benchmark queue, session registry, worker lifecycle, scoring authority, hidden answer store, or experiment scheduler.",
-    "worker_execution_contract": "Protected PR #471 / control_plane/worker_execution_contract.py owns provider-neutral BOUNDED_WORKER launch/process/result/receipt values. Provider homes and credentials remain inside concrete adapters. It does not implement ATTENDED_WEB_OPERATOR or RuntimeBinding."
+    "worker_execution_contract": "Protected PR #471 / control_plane/worker_execution_contract.py owns provider-neutral BOUNDED_WORKER launch/process/result/receipt values. Provider homes and credentials remain inside concrete adapters. It does not implement ATTENDED_WEB_OPERATOR or RuntimeBinding.",
+    "native_census_contract": "Protected PR #511 is profile-scoped read-only CENSUS research and grants no conversation, RuntimeBinding, account, installation, or production authority.",
+    "authenticated_read_composition": "Protected PR #529 proves one authenticated selected-project read composition and grants no exact-conversation, mutation, shell, process, installation, service, or production authority."
   },
   "conditions_template": [
     {
@@ -444,8 +446,8 @@
     "capability_delta": "A reviewable experiment-design template now exists. No task pair, model turn, app action, worker, account, repository, provider, evaluation result, or production effect was created.",
     "exact_next_action": "A separately authorized evaluation owner may create one immutable preregistration artifact and exact experiment operation after freezing every missing field. Until then, do not execute any of the 24 tasks from this carrier."
   },
-  "repair_marker": "PR490-B1-B5-DIRECT-ACCESS-REPAIR-20260907",
-  "current_contract_generation": "PR490_REPAIR_CANDIDATE_V6_CURRENT_SOURCE_PROFILE_GATED_SOURCE_ONLY",
+  "repair_marker": "PR490-V7-CURRENT-PROTECTED-COHERENCE-REPAIR-20260908",
+  "current_contract_generation": "PR490_REPAIR_CANDIDATE_V7_CURRENT_PROTECTED_PROFILE_GATED_MODE_COHERENT_SOURCE_ONLY",
   "contract_discriminator_refs": [
     "EFFECT_RESPONSE_LOST_THEN_COMMIT_EXPIRY",
     "EFFECT_RESPONSE_LOST_THEN_REVOCATION_OR_ROTATION",

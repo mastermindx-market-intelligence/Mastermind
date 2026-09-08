@@ -5,7 +5,7 @@
   "publication_carrier": "Mastermind PR #490",
   "operation_key": "chatgpt-pro-long-run-leaders-research-20260905-sol-001",
   "authority": "RESEARCH_ONLY_NOT_A_RUNTIME_SCHEMA_OR_COMMISSION",
-  "source_snapshot": "66a1125c4e0f02351f33dbf8c8583eb19ea1d2e4",
+  "source_snapshot": "03eaa8e9aa32fdc949551ad0f88a890d269daea4",
   "purpose": "Discriminating acceptance definitions for existing owners; no runtime test has been executed by this casebook.",
   "cases": [
     {
@@ -541,14 +541,14 @@
       "admission": "NOT_ADMITTED_BY_PR490"
     }
   ],
-  "repair_marker": "PR490-B1-B5-DIRECT-ACCESS-REPAIR-20260907",
+  "repair_marker": "PR490-V7-CURRENT-PROTECTED-COHERENCE-REPAIR-20260908",
   "case_count": 51,
-  "protected_source_basis": "66a1125c4e0f02351f33dbf8c8583eb19ea1d2e4",
+  "protected_source_basis": "03eaa8e9aa32fdc949551ad0f88a890d269daea4",
   "proof_ceiling": "Case definition only. NOT_RUN does not prove behavior, installation, managed service, or production capability.",
-  "contract_generation": "PR490_REPAIR_CANDIDATE_V6_CURRENT_SOURCE_PROFILE_GATED_SOURCE_ONLY",
+  "contract_generation": "PR490_REPAIR_CANDIDATE_V7_CURRENT_PROTECTED_PROFILE_GATED_MODE_COHERENT_SOURCE_ONLY",
   "source_snapshot_type": "PROTECTED_MASTER_COMMIT",
   "contract_candidate_path": "research/CHATGPT_WEB_GOVERNED_WORKBENCH_CONTRACT_CANDIDATE_2026-09-05.json",
-  "contract_candidate_content_sha256": "f0513e5cb6e7b80fedcbc7ebd922be45e428aa75bcc6fbafb17497528d082140",
+  "contract_candidate_content_sha256": "1f0175676c4d3b0fcae0b68d45b33c44fe597edd3e6d1a1a1e5cf062474d3992",
   "dependency_closure": [
     {
       "pr": 471,
@@ -563,6 +563,20 @@
       ],
       "excluded_profile": "ATTENDED_WEB_OPERATOR",
       "boundary": "Executive supervisors consume immutable provider-neutral launch, process, result, receipt, validation, status, and artifact-limit values. Concrete adapters exclusively own provider homes, credentials, and provider-specific launch mechanics. This dependency proves no RuntimeBinding, attended command, installation, deployment, or production execution."
+    },
+    {
+      "pr": 511,
+      "protected_commit": "d7ffac605c547da593bfa4b4ac2b45ccafd009d6",
+      "capability": "profile-scoped native census research and implementation freeze",
+      "state": "SOURCE_PROTECTED / SPEC_ONLY / RESEARCH_EXECUTED / PRODUCTION_INERT",
+      "boundary": "Read-only profile-scoped CENSUS over the existing native port; no conversation election, RuntimeBinding, account/session authority, installation, or production proof."
+    },
+    {
+      "pr": 529,
+      "protected_commit": "03eaa8e9aa32fdc949551ad0f88a890d269daea4",
+      "capability": "authenticated selected-project Workbench read composition proof",
+      "state": "SOURCE_PROTECTED / BUILT_NOT_PROVEN / FULL_HERMETIC_COMPOSITION_PRIVATE_OUTPUT_GUARD / NOT_INSTALLED",
+      "boundary": "Signed caller through official MCP into one selected-project descriptor/observer read only; no exact conversation attestation, general Workbench mutation/shell/process, installation, service, or production proof."
     }
   ]
 }
