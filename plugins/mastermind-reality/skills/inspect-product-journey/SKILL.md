@@ -36,6 +36,8 @@ The approved target classes are `APPROVED_PRODUCT` and a deliberately bounded `T
 
 Freeze the target, environment, authorization reference, viewport, data state, observed time window, protected source revision, observed deployed revision when available, and the relation among them. When the deployed revision is not observable, record `UNKNOWN`; never manufacture equality from a branch name.
 
+Perform the source comparison mechanically. `MATCH requires identical source revisions`; `DIFFERENT requires distinct source revisions`; `UNKNOWN` requires an unobservable deployed revision rather than a guessed alias. Record the comparison result and the exact deployed-observation time separately from the capture window.
+
 ## 4. Qualify the evidence seam
 
 Before the journey:
@@ -47,7 +49,7 @@ Before the journey:
 5. Confirm cleanup and artifact retention destinations belong to existing owners.
 6. Confirm the intended parent or web model can consume the bounded artifacts.
 
-A pathname, digest, HTTP status, DOM node, or capture command is not visual proof. The model must inspect the actual PNG bytes. If bytes cannot be delivered and inspected, record a failed visual-consumption seam and do not make a visual claim.
+A pathname, digest, HTTP status, DOM node, or capture command is not visual proof. The model must inspect the actual PNG bytes. A bare boolean is not consumption proof: bind the consumer, delivery method, exact retained proof reference and digest, consumption time when available, and any receipt limitation. If bytes cannot be delivered and inspected, record a failed visual-consumption seam and do not make a visual claim.
 
 ## 5. Run the bounded journey
 
@@ -58,9 +60,10 @@ For each capture:
 - record start and completion times separately as UTC RFC 3339 timestamps ending in `Z`, and prove completion does not precede start;
 - preserve viewport and data-state identity;
 - hash the exact artifact bytes;
-- keep source time, observation time, and recorded time distinct;
+- keep source time, observation time, and `recorded_at` distinct;
 - collect the smallest semantic, accessibility, trace, and runtime evidence that can support or contradict the finding;
-- mark unobserved evidence as unavailable rather than empty.
+- mark complete evidence `AVAILABLE`, incomplete retained evidence `PARTIAL` with a reason, and absent evidence `UNAVAILABLE with a concrete reason` rather than empty;
+- verify each evidence reference resolves to one declared artifact or one retained owner-native proof receipt.
 
 Do not upload private artifacts to a public destination. Do not expose tokens, cookies, account data, filesystem secrets, raw browser profiles, or unrelated personal information.
 
@@ -90,18 +93,21 @@ Differentiate absent tool schema, disconnected provider, denied target, stale so
 
 Read-only failure does not authorize a different target, provider, account, or carrier. Any modifying action retains its owner-native operation identity and the original carrier. Preserve `NOT_APPLIED`, `APPLIED`, and `EFFECT_UNKNOWN` separately. A timeout, cancellation, expired grant, or lost reply never proves no effect. Under `EFFECT_UNKNOWN`, perform read-only reconciliation on the same operation; do not retry or fail over.
 
+The return must state effect and cleanup separately. Effect comes from the owning operation evidence; cleanup reports temporary process/profile disposition and whether shared resources changed. A clean capture does not strengthen product, installation, or lifecycle authority.
+
 ## 9. Build the closed return
 
 Emit one `mastermind.reality_observation.v1` record containing:
 
-- capability state;
+- capability state and `recorded_at`;
 - persona and frozen journey;
-- approved target and source/deployed relationship;
-- exact capture times and viewports;
-- screenshot-byte presence and model-consumption proof;
-- semantic and runtime evidence references with coverage;
+- approved target, deployed-observation time, revision comparison, and source/deployed relationship;
+- exact capture times and viewports, after proving completion does not precede start;
+- screenshot-byte presence and structured consumption proof;
+- semantic and runtime evidence availability, references, reasons, and coverage;
 - deterministic observations and model inferences;
 - all seven negative controls;
+- owner-grounded effect and cleanup receipts;
 - limitations and unknowns;
 - one exact next owner and action.
 

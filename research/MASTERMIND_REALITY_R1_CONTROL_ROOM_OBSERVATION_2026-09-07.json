@@ -2,6 +2,7 @@
   "schema": "mastermind.reality_observation.v1",
   "observation_id": "REALITY-CCR-20260907-ONE-SHOT",
   "capability_state": "PARTIAL",
+  "recorded_at": "2026-09-08T06:22:29.936576Z",
   "persona": {
     "name": "Chairman",
     "user_job": "See what truly needs attention and whether a decision is safe now",
@@ -21,7 +22,9 @@
   "source_relationship": {
     "protected_sha": "b30422efde0308beb7fa069ddefd0987ac0bf4f3",
     "observed_deployed_sha": "767409b6d3e7103a3b11428b870357d4a01bbe26",
-    "relation": "DIFFERENT"
+    "relation": "DIFFERENT",
+    "observed_at": "2026-09-07T16:00:56.958849Z",
+    "revision_comparison": "DISTINCT"
   },
   "journey": {
     "steps": [
@@ -54,12 +57,20 @@
         "mime_type": "image/png",
         "bytes": 288325,
         "bytes_present": true,
-        "model_consumed": true,
         "viewport": {
           "width": 1440,
           "height": 900
         },
-        "data_state": "DEGRADED"
+        "data_state": "DEGRADED",
+        "consumption": {
+          "state": "CONSUMED",
+          "consumer_ref": "web-sol/current-chairman-directed-session",
+          "method": "MODEL_VISIBLE_IMAGE_DELIVERY",
+          "proof_ref": "private-evidence/visual-consumption-attestation-20260908.json",
+          "proof_sha256": "b46f7b966655811309fef4d0c9941f72ff44f1bc890b19dbde747413112fb4fc",
+          "consumed_at": null,
+          "limitation": "The provider exposed no immutable native conversation identifier or native image-consumption timestamp; the retained receipt is a session-local attestation bound to exact PNG identities."
+        }
       },
       {
         "artifact_ref": "private-evidence/control-room-mobile-390x844.png",
@@ -67,42 +78,58 @@
         "mime_type": "image/png",
         "bytes": 95519,
         "bytes_present": true,
-        "model_consumed": true,
         "viewport": {
           "width": 390,
           "height": 844
         },
-        "data_state": "DEGRADED"
+        "data_state": "DEGRADED",
+        "consumption": {
+          "state": "CONSUMED",
+          "consumer_ref": "web-sol/current-chairman-directed-session",
+          "method": "MODEL_VISIBLE_IMAGE_DELIVERY",
+          "proof_ref": "private-evidence/visual-consumption-attestation-20260908.json",
+          "proof_sha256": "b46f7b966655811309fef4d0c9941f72ff44f1bc890b19dbde747413112fb4fc",
+          "consumed_at": null,
+          "limitation": "The provider exposed no immutable native conversation identifier or native image-consumption timestamp; the retained receipt is a session-local attestation bound to exact PNG identities."
+        }
       }
     ],
-    "semantic_evidence": [
-      {
-        "artifact_ref": "private-evidence/control-room-desktop-1440x900.semantic.json",
-        "sha256": "0c02ab077cb2ca4ed5c08483455679e7c8f2aced2d0bcd654e78cf4611b13e27",
-        "coverage": "desktop accessibility and semantic snapshot for the rendered Control Room",
-        "consumed": true
-      },
-      {
-        "artifact_ref": "private-evidence/control-room-mobile-390x844.semantic.json",
-        "sha256": "c70cfe6db96b3b4f6451540e6665219a8e3943237c34daba420a21ce3c2ea7d5",
-        "coverage": "mobile accessibility and semantic snapshot for the rendered Control Room",
-        "consumed": true
-      }
-    ],
-    "runtime_evidence": [
-      {
-        "artifact_ref": "private-evidence/control-room-rendered-state.json",
-        "sha256": "9540945a0f841067e9b362d6d91f19333ebcc999f0fe8076060bf1a8e1923027",
-        "coverage": "rendered Control Room state envelope shared by the two capture viewports",
-        "consumed": true
-      },
-      {
-        "artifact_ref": "private-evidence/control-room-desktop-1440x900.trace.zip",
-        "sha256": "adbe826424fc81412a2f4d8c7b31a3bfe7e1c9a491a9d784c313d86ef86f2289",
-        "coverage": "loopback navigation, response, network, console, and page-error trace for the desktop capture",
-        "consumed": true
-      }
-    ]
+    "semantic_evidence": {
+      "state": "AVAILABLE",
+      "artifacts": [
+        {
+          "artifact_ref": "private-evidence/control-room-desktop-1440x900.semantic.json",
+          "sha256": "0c02ab077cb2ca4ed5c08483455679e7c8f2aced2d0bcd654e78cf4611b13e27",
+          "coverage": "desktop accessibility and semantic snapshot for the rendered Control Room",
+          "consumed": true
+        },
+        {
+          "artifact_ref": "private-evidence/control-room-mobile-390x844.semantic.json",
+          "sha256": "c70cfe6db96b3b4f6451540e6665219a8e3943237c34daba420a21ce3c2ea7d5",
+          "coverage": "mobile accessibility and semantic snapshot for the rendered Control Room",
+          "consumed": true
+        }
+      ],
+      "reason": null
+    },
+    "runtime_evidence": {
+      "state": "AVAILABLE",
+      "artifacts": [
+        {
+          "artifact_ref": "private-evidence/control-room-rendered-state.json",
+          "sha256": "9540945a0f841067e9b362d6d91f19333ebcc999f0fe8076060bf1a8e1923027",
+          "coverage": "rendered Control Room state envelope shared by the two capture viewports",
+          "consumed": true
+        },
+        {
+          "artifact_ref": "private-evidence/control-room-desktop-1440x900.trace.zip",
+          "sha256": "adbe826424fc81412a2f4d8c7b31a3bfe7e1c9a491a9d784c313d86ef86f2289",
+          "coverage": "loopback navigation, response, network, console, and page-error trace for the desktop capture",
+          "consumed": true
+        }
+      ],
+      "reason": null
+    }
   },
   "findings": [
     {
@@ -170,7 +197,7 @@
     },
     "missing_screenshot_bytes": {
       "status": "REFUSED",
-      "detail": "The Reality contract refuses a visual claim unless screenshot bytes are present and model_consumed is true."
+      "detail": "The Reality contract refuses a visual claim unless screenshot bytes are present and a structured consumption receipt binds the intended model to the exact PNG identity."
     },
     "broken_browser_connection": {
       "status": "DETECTED",
@@ -181,12 +208,32 @@
       "detail": "No managed Chairman account or ChatGPT provider surface was opened, inspected, or actuated."
     }
   },
+  "effect": {
+    "state": "NOT_APPLIED",
+    "operation_ref": "reality-control-room-inspection-20260907",
+    "carrier_ref": "web-sol/current-chairman-directed-session",
+    "evidence_refs": [
+      "private-evidence/capture-set.json"
+    ],
+    "detail": "The bounded journey was read-only. No product, account, provider, source, or lifecycle mutation was attempted or observed."
+  },
+  "cleanup": {
+    "state": "CLEAN",
+    "temporary_processes": "ABSENT",
+    "temporary_profile": "REMOVED",
+    "shared_resources": "UNCHANGED",
+    "evidence_refs": [
+      "private-evidence/cleanup-attestation-20260908.json"
+    ],
+    "detail": "The isolated browser process and temporary profile are absent; the persistent Control Room and unrelated browser, trace, observability, account, and worker resources were left unchanged."
+  },
   "limitations": [
     "This is a historical capture epoch, not a claim about current product or runtime state.",
     "No accepted Executive runtime admission existed for the Reality package operation at capture time.",
     "No causal user study, witnessed completion-time benchmark, or fabricated speed multiplier is claimed.",
     "Private screenshots, state payloads, semantic snapshots, and traces remain on the authorized Mac and are not published in this public repository.",
-    "No managed Chairman account, Web-Sol ChatGPT surface, or provider-native account target was tested."
+    "No managed Chairman account, Web-Sol ChatGPT surface, or provider-native account target was tested.",
+    "Visual consumption is supported by a session-local attestation bound to exact image digests; the provider exposed no independent native consumption timestamp or immutable conversation identifier."
   ],
   "next_action": {
     "owner": "shared plugin-package integration owner",

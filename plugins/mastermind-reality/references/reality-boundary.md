@@ -49,6 +49,10 @@ A visual claim requires:
 
 A path, URL, hash, file-exists result, HTTP success, DOM node, or worker statement does not prove visual consumption. Screenshots alone do not prove backend truth. Semantic evidence alone does not prove visual usability. Runtime evidence alone does not prove the user completed the task.
 
+A bare boolean is not consumption proof. The screenshot receipt must identify the intended consumer and delivery method, bind a safe owner-relative reference plus digest for the retained consumption evidence, and expose any missing provider-native timestamp or identity as a limitation.
+
+Semantic and runtime evidence are explicit sets. `AVAILABLE` requires at least one consumed artifact; `PARTIAL` requires retained artifacts plus a concrete limitation; absence is explicitly `UNAVAILABLE` with a concrete reason and zero artifacts. Unavailable is never encoded as an empty available array.
+
 Use the smallest evidence needed to make or falsify the claim. Keep private evidence in its approved private owner; public source may contain schemas, sanitized findings, and digests only when policy permits.
 
 ## Data, time, null, and coverage
@@ -58,9 +62,9 @@ Keep these clocks distinct:
 - source event time;
 - deployed or release observation time;
 - capture start and completion time, both as UTC RFC 3339 values ending in `Z`;
-- evidence-recorded time.
+- evidence `recorded_at`.
 
-Capture completion must not precede capture start. A newer recorded timestamp does not make older source current. A matching title does not establish build identity. When the deployed revision cannot be observed, the relation is `UNKNOWN`.
+Capture completion must not precede capture start. A newer `recorded_at` does not make older source current. A matching title does not establish build identity. `MATCH requires identical` source revisions and an exact comparison receipt. `DIFFERENT requires distinct` source revisions and an exact comparison receipt. When the deployed revision cannot be observed, the relation and comparison are `UNKNOWN`/`UNOBSERVABLE`; do not manufacture equality.
 
 The data rule is explicit: unknown is not zero. Unavailable is not empty. Partial coverage cannot prove global absence. Every runtime or trace reference states what it covered. Every model finding retains material unknowns.
 
@@ -83,6 +87,8 @@ Keep response status separate from effect:
 - `EFFECT_UNKNOWN`: the effect boundary cannot be established.
 
 Refusal, process exit, timeout, cancellation request, permission expiry, and lost transport are not additional effect states. Under `EFFECT_UNKNOWN`, retain the original operation and carrier and perform only owner-native read reconciliation. Never retry through a different browser, account, session, service, or carrier for a cleaner result.
+
+Every return records effect and cleanup as separate closed objects. Effect states what the owning operation proves; cleanup states temporary-process, temporary-profile, and shared-resource disposition. Cleanup success never converts missing effect evidence into `NOT_APPLIED`, and effect success never proves cleanup.
 
 ## Negative controls
 

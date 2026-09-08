@@ -36,10 +36,21 @@ def load_json(path: Path) -> object:
 
 def valid_observation() -> dict[str, object]:
     control = lambda status, detail: {"status": status, "detail": detail}
+    proof_digest = "9" * 64
+    consumption = lambda suffix: {
+        "state": "CONSUMED",
+        "consumer_ref": "web-sol/current-chairman-directed-session",
+        "method": "MODEL_VISIBLE_IMAGE_DELIVERY",
+        "proof_ref": f"private-evidence/visual-consumption-{suffix}.json",
+        "proof_sha256": proof_digest,
+        "consumed_at": None,
+        "limitation": "The provider exposed no native consumption timestamp.",
+    }
     return {
         "schema": "mastermind.reality_observation.v1",
         "observation_id": "REALITY-CONTROL-ROOM-R1",
         "capability_state": "PARTIAL",
+        "recorded_at": "2026-09-08T06:15:00Z",
         "persona": {
             "name": "Chairman",
             "user_job": "See what truly needs attention",
@@ -55,15 +66,12 @@ def valid_observation() -> dict[str, object]:
         "source_relationship": {
             "protected_sha": "b" * 40,
             "observed_deployed_sha": "7" * 40,
+            "observed_at": "2026-09-08T05:30:00Z",
             "relation": "DIFFERENT",
+            "revision_comparison": "DISTINCT",
         },
         "journey": {
-            "steps": [
-                {
-                    "action": "load the decision surface",
-                    "result": "degraded state rendered honestly",
-                }
-            ],
+            "steps": [{"action": "load the decision surface", "result": "degraded state rendered honestly"}],
             "outcome": "PARTIAL",
         },
         "capture": {
@@ -71,75 +79,92 @@ def valid_observation() -> dict[str, object]:
             "completed_at": "2026-09-08T05:30:10Z",
             "screenshots": [
                 {
-                    "artifact_ref": "desktop.png",
+                    "artifact_ref": "private-evidence/desktop.png",
                     "sha256": "a" * 64,
                     "mime_type": "image/png",
                     "bytes": 100,
                     "bytes_present": True,
-                    "model_consumed": True,
+                    "consumption": consumption("desktop"),
                     "viewport": {"width": 1440, "height": 900},
                     "data_state": "DEGRADED",
                 },
                 {
-                    "artifact_ref": "mobile.png",
+                    "artifact_ref": "private-evidence/mobile.png",
                     "sha256": "c" * 64,
                     "mime_type": "image/png",
                     "bytes": 90,
                     "bytes_present": True,
-                    "model_consumed": True,
+                    "consumption": consumption("mobile"),
                     "viewport": {"width": 390, "height": 844},
                     "data_state": "DEGRADED",
                 },
             ],
-            "semantic_evidence": [
-                {
-                    "artifact_ref": "desktop-semantic.json",
-                    "sha256": "d" * 64,
-                    "coverage": "desktop semantic snapshot",
-                    "consumed": True,
-                },
-                {
-                    "artifact_ref": "mobile-semantic.json",
-                    "sha256": "f" * 64,
-                    "coverage": "mobile semantic snapshot",
-                    "consumed": True,
-                },
-            ],
-            "runtime_evidence": [
-                {
-                    "artifact_ref": "state.json",
-                    "sha256": "e" * 64,
-                    "coverage": "rendered state envelope",
-                    "consumed": True,
-                }
-            ],
+            "semantic_evidence": {
+                "state": "AVAILABLE",
+                "artifacts": [
+                    {
+                        "artifact_ref": "private-evidence/desktop-semantic.json",
+                        "sha256": "d" * 64,
+                        "coverage": "desktop semantic snapshot",
+                        "consumed": True,
+                    },
+                    {
+                        "artifact_ref": "private-evidence/mobile-semantic.json",
+                        "sha256": "f" * 64,
+                        "coverage": "mobile semantic snapshot",
+                        "consumed": True,
+                    },
+                ],
+                "reason": None,
+            },
+            "runtime_evidence": {
+                "state": "AVAILABLE",
+                "artifacts": [
+                    {
+                        "artifact_ref": "private-evidence/state.json",
+                        "sha256": "e" * 64,
+                        "coverage": "rendered state envelope",
+                        "consumed": True,
+                    }
+                ],
+                "reason": None,
+            },
         },
         "findings": [
             {
                 "basis": "MODEL_INFERENCE",
                 "claim": "raw diagnostics displace the decision outcome",
-                "evidence_refs": ["desktop.png", "mobile.png", "semantic.json"],
+                "evidence_refs": [
+                    "private-evidence/desktop.png",
+                    "private-evidence/mobile.png",
+                    "private-evidence/semantic.json",
+                ],
                 "unknowns": ["causal user impact is not instrumented"],
             }
         ],
         "negative_controls": {
             "wrong_target": control("DETECTED", "target identity differs"),
             "stale_capture": control("DETECTED", "source clocks expose age"),
-            "different_build": control(
-                "DETECTED", "deployed and protected revisions differ"
-            ),
-            "different_viewport_or_data_state": control(
-                "DETECTED", "receipts remain distinct"
-            ),
-            "missing_screenshot_bytes": control(
-                "REFUSED", "visual claims require bytes"
-            ),
-            "broken_browser_connection": control(
-                "DETECTED", "provider-specific disconnection retained"
-            ),
-            "excluded_account_surface": control(
-                "REFUSED", "managed account surface is outside scope"
-            ),
+            "different_build": control("DETECTED", "deployed and protected revisions differ"),
+            "different_viewport_or_data_state": control("DETECTED", "receipts remain distinct"),
+            "missing_screenshot_bytes": control("REFUSED", "visual claims require bytes"),
+            "broken_browser_connection": control("DETECTED", "provider-specific disconnection retained"),
+            "excluded_account_surface": control("REFUSED", "managed account surface is outside scope"),
+        },
+        "effect": {
+            "state": "NOT_APPLIED",
+            "operation_ref": "reality-control-room-r1",
+            "carrier_ref": "web-sol/current-chairman-directed-session",
+            "evidence_refs": ["private-evidence/capture-set.json"],
+            "detail": "The one-shot journey was read-only and produced no product or account mutation.",
+        },
+        "cleanup": {
+            "state": "CLEAN",
+            "temporary_processes": "ABSENT",
+            "temporary_profile": "REMOVED",
+            "shared_resources": "UNCHANGED",
+            "evidence_refs": ["private-evidence/cleanup-attestation.json"],
+            "detail": "The isolated browser process and temporary profile were absent at return.",
         },
         "limitations": ["no accepted runtime admission"],
         "next_action": {
@@ -204,7 +229,7 @@ def test_published_control_room_observation_validates() -> None:
 
 def test_observation_rejects_unconsumed_screenshot_bytes() -> None:
     candidate = deepcopy(valid_observation())
-    candidate["capture"]["screenshots"][0]["model_consumed"] = False
+    candidate["capture"]["screenshots"][0]["consumption"]["state"] = "UNCONSUMED"
     assert list(validator().iter_errors(candidate))
 
 
@@ -224,6 +249,7 @@ def test_observation_rejects_known_relation_without_deployed_sha() -> None:
     candidate = deepcopy(valid_observation())
     candidate["source_relationship"]["observed_deployed_sha"] = None
     candidate["source_relationship"]["relation"] = "MATCH"
+    candidate["source_relationship"]["revision_comparison"] = "EQUAL"
     assert list(validator().iter_errors(candidate))
 
 
@@ -311,3 +337,80 @@ def test_package_contains_no_live_binding_or_secret_shape() -> None:
         assert path.name not in forbidden_names
         text = path.read_text(encoding="utf-8").casefold()
         assert not any(marker in text for marker in forbidden_markers)
+
+
+def test_schema_accepts_recording_effect_cleanup_and_consumption_receipts() -> None:
+    validator().validate(valid_observation())
+
+
+def test_schema_accepts_explicitly_unavailable_runtime_evidence() -> None:
+    candidate = valid_observation()
+    candidate["capture"]["runtime_evidence"] = {
+        "state": "UNAVAILABLE",
+        "artifacts": [],
+        "reason": "The runtime owner was unavailable for this observation epoch.",
+    }
+    validator().validate(candidate)
+
+
+def test_schema_rejects_available_evidence_without_artifacts() -> None:
+    candidate = valid_observation()
+    candidate["capture"]["semantic_evidence"] = {
+        "state": "AVAILABLE",
+        "artifacts": [],
+        "reason": None,
+    }
+    assert list(validator().iter_errors(candidate))
+
+
+def test_schema_rejects_absolute_and_traversal_artifact_refs() -> None:
+    for unsafe in (
+        "/Users/example/private.png",
+        "../private.png",
+        "private-evidence/../../private.png",
+        "https://example.invalid/image.png?token=secret",
+    ):
+        candidate = valid_observation()
+        candidate["capture"]["screenshots"][0]["artifact_ref"] = unsafe
+        assert list(validator().iter_errors(candidate)), unsafe
+
+
+def test_schema_rejects_inconsistent_source_relationship_claim() -> None:
+    candidate = valid_observation()
+    candidate["source_relationship"]["relation"] = "MATCH"
+    assert list(validator().iter_errors(candidate))
+
+
+def test_schema_rejects_consumption_without_proof_reference() -> None:
+    candidate = valid_observation()
+    del candidate["capture"]["screenshots"][0]["consumption"]["proof_ref"]
+    assert list(validator().iter_errors(candidate))
+
+
+def test_skill_requires_closed_cross_field_and_missing_evidence_checks() -> None:
+    text = SKILL.read_text(encoding="utf-8")
+    for marker in (
+        "recorded_at",
+        "completion does not precede start",
+        "MATCH requires identical source revisions",
+        "DIFFERENT requires distinct source revisions",
+        "evidence reference resolves to one declared artifact",
+        "UNAVAILABLE with a concrete reason",
+        "consumption proof",
+        "effect and cleanup",
+    ):
+        assert marker in text
+
+
+def test_boundary_requires_consumption_proof_and_explicit_absence() -> None:
+    text = BOUNDARY.read_text(encoding="utf-8")
+    for marker in (
+        "bare boolean is not consumption proof",
+        "explicitly `UNAVAILABLE`",
+        "safe owner-relative reference",
+        "effect and cleanup",
+        "recorded_at",
+        "MATCH requires identical",
+        "DIFFERENT requires distinct",
+    ):
+        assert marker in text
