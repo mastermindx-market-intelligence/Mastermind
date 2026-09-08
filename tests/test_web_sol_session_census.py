@@ -47,7 +47,9 @@ def test_reader_is_a_real_local_consumer_with_no_remote_or_inline_scripts():
     assert not page.inline_script
     assert {"refresh", "rows", "summary", "scope", "status", "timestamp"} <= page.ids
     source = (EXTENSION / "census.js").read_text()
-    assert "MMXWebSolCensus.collect" in source
+    assert "chrome.runtime.sendMessage" in source
+    assert "MMX_WEB_SOL_CENSUS_REFRESH" in source
+    assert "MMXWebSolCensus.collect" not in source
     assert "textContent" in source
     assert "innerHTML" not in source
     assert "setInterval" not in source

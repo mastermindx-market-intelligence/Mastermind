@@ -21,6 +21,7 @@ from control_plane import surface_bindings as sb
 from . import web_sol_instance as wsi
 from . import web_sol_native_host as native
 from . import web_sol_protocol as wsp
+from . import web_sol_census_protocol as census
 
 SOCKET_TIMEOUT_SECONDS = 5.0
 _CHATGPT_CANONICAL_HOST = "chatgpt.com"
@@ -317,6 +318,8 @@ def _transport_failure_code(
 ) -> str:
     if sent and action == "FOREGROUND":
         return "foreground_effect_unknown"
+    if action == "CENSUS":
+        return "census_unavailable"
     if sent:
         return "inspect_effect_unknown"
     return "extension_unavailable"
@@ -330,10 +333,12 @@ def _exchange_web_sol_socket(
     challenge_factory: Callable[[], str] | None = None,
     monotonic: Callable[[], float] = time.monotonic,
 ) -> dict[str, Any]:
+    is_census = request.get("schema") == census.REQUEST_SCHEMA
+    if is_census:
+        census.validate_census_window(request)
     _private_socket(path)
-    deadline = native.Deadline(
-        ends_at=monotonic() + SOCKET_TIMEOUT_SECONDS,
-    )
+    started = monotonic()
+    deadline = native.Deadline(ends_at=started + SOCKET_TIMEOUT_SECONDS)
     connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     connection.settimeout(deadline.remaining(monotonic))
     sent = False
@@ -369,6 +374,9 @@ def _exchange_web_sol_socket(
                 sent = action_writer.effect_possible
                 raise
             sent = True
+            if is_census:
+                deadline = native.Deadline(ends_at=started + census.TOTAL_SECONDS)
+                connection.settimeout(deadline.remaining(monotonic))
             response = native.read_frame(
                 reader,
                 deadline=deadline,
@@ -389,7 +397,7 @@ def _exchange_web_sol_socket(
             _transport_failure_code(
                 exc,
                 sent=sent,
-                action=request["action"],
+                action=request.get("action", "CENSUS"),
             )
         ) from exc
     finally:
@@ -492,3 +500,32 @@ def foreground_via_extension(
         expires_at=expires_at,
         nonce=nonce,
     )
+
+
+def census_via_extension(
+    binding: dict[str, Any],
+    *,
+    operation_key: str,
+    issued_at: str,
+    expires_at: str,
+    nonce: str,
+) -> dict[str, Any]:
+    """Read one validated profile binding; no alternate socket or profile selector."""
+    accepted = _accepted_binding(binding)
+    try:
+        instance_id = wsi.adapter_instance_id(accepted)
+        request = census.validate_census_window({
+            "schema": census.REQUEST_SCHEMA, "adapter_instance_id": instance_id,
+            "operation_key": operation_key, "issued_at": issued_at,
+            "expires_at": expires_at, "nonce": nonce,
+        })
+        response = _exchange_web_sol_socket(request, path=wsi.socket_path(instance_id),
+                                            expected_instance_id=instance_id)
+        receipt = census.validate_census_receipt(response)
+    except wsp.WebSolProtocolError:
+        raise WebSolExtensionError("invalid_census_value") from None
+    except wsi.WebSolInstanceError:
+        raise WebSolExtensionError("invalid_binding") from None
+    if any(receipt[field] != request[field] for field in census.IDENTITY_FIELDS):
+        raise WebSolExtensionError("receipt_identity_mismatch")
+    return receipt
