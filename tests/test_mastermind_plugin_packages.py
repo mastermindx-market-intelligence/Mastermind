@@ -27,6 +27,7 @@ OPERATOR_SKILLS = (
     "escalate-decision",
     "finish-operation",
 )
+CORTEX_SKILLS = ("orient-mastermind-mission",)
 
 
 def _copy_package(destination: Path) -> None:
@@ -69,6 +70,12 @@ def test_repository_plugin_package_is_valid() -> None:
                 "manifest": "plugins/mastermind-operator/.codex-plugin/plugin.json",
                 "skills": list(OPERATOR_SKILLS),
             },
+            {
+                "name": "mastermind-cortex",
+                "version": "0.1.0",
+                "manifest": "plugins/mastermind-cortex/.codex-plugin/plugin.json",
+                "skills": list(CORTEX_SKILLS),
+            },
         ],
         "errors": [],
     }
@@ -89,6 +96,13 @@ def test_repository_documents_match_the_closed_contract() -> None:
                 "source": {
                     "source": "local",
                     "path": "./plugins/mastermind-operator",
+                },
+            },
+            {
+                "name": "mastermind-cortex",
+                "source": {
+                    "source": "local",
+                    "path": "./plugins/mastermind-cortex",
                 },
             },
         ],

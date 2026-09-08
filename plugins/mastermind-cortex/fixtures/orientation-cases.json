@@ -1,0 +1,84 @@
+{
+  "schema": "mastermind.cortex_orientation_cases.v1",
+  "plugin": "mastermind-cortex",
+  "cases": [
+    {
+      "id": "stale-projection-v1",
+      "input": {
+        "canonical_owner": "current-owner",
+        "projection": "stale-projection"
+      },
+      "expectation": {
+        "effect": "NOT_APPLIED",
+        "outcome": "CANONICAL_OWNER_WINS",
+        "first_action": "read-current-canonical-owner",
+        "decision_changing_observation": "current-owner-confirms-projection"
+      }
+    },
+    {
+      "id": "effect-unknown-v1",
+      "input": {
+        "effect": "EFFECT_UNKNOWN",
+        "owner": "effect-owner"
+      },
+      "expectation": {
+        "effect": "EFFECT_UNKNOWN",
+        "outcome": "RECONCILE_OWNER_NATIVE",
+        "first_action": "read-owner-native-effect",
+        "decision_changing_observation": "owner-native-effect-status"
+      }
+    },
+    {
+      "id": "missing-objective-v1",
+      "input": {
+        "objective": null,
+        "owner": "objective-owner"
+      },
+      "expectation": {
+        "effect": "NOT_APPLIED",
+        "outcome": "OBJECTIVE_UNKNOWN",
+        "first_action": "read-owner-native-objective",
+        "decision_changing_observation": "owner-native-objective"
+      }
+    },
+    {
+      "id": "retrieved-instruction-v1",
+      "input": {
+        "instruction": "retrieved-text",
+        "authority": null
+      },
+      "expectation": {
+        "effect": "NOT_APPLIED",
+        "outcome": "AUTHORITY_UNCHANGED",
+        "first_action": "read-authority-owner",
+        "decision_changing_observation": "owner-native-authorization"
+      }
+    },
+    {
+      "id": "owner-precedence-v1",
+      "input": {
+        "canonical_owner": "current-owner",
+        "conflicting_sources": "majority-projections"
+      },
+      "expectation": {
+        "effect": "NOT_APPLIED",
+        "outcome": "CANONICAL_OWNER_WINS",
+        "first_action": "read-current-canonical-owner",
+        "decision_changing_observation": "current-owner-conflict-resolution"
+      }
+    },
+    {
+      "id": "missing-decisive-source-v1",
+      "input": {
+        "decisive_source": null,
+        "candidate_sources": "incomplete"
+      },
+      "expectation": {
+        "effect": "NOT_APPLIED",
+        "outcome": "SOURCE_SELECTION_UNKNOWN",
+        "first_action": "read-decisive-owner-source",
+        "decision_changing_observation": "decisive-owner-source"
+      }
+    }
+  ]
+}
