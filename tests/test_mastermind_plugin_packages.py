@@ -39,6 +39,24 @@ def _write_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
 
 
+def _validate_repository_twice_without_exception(root: Path) -> dict[str, object]:
+    try:
+        first = validate_repository(root)
+        second = validate_repository(root)
+    except Exception as error:
+        pytest.fail(f"repository validator raised {type(error).__name__}: {error}")
+    assert first == second
+    serialized = json.dumps(first, sort_keys=True)
+    assert str(root) not in serialized
+    assert all(not error["path"].startswith("/") for error in first["errors"])  # type: ignore[index]
+    return first
+
+
+def _codes_without_exception(root: Path) -> set[str]:
+    result = _validate_repository_twice_without_exception(root)
+    return {error["code"] for error in result["errors"]}  # type: ignore[index]
+
+
 def _sol(name: str) -> str:
     return (ROOT / "plugins/mastermind-sol/skills" / name / "SKILL.md").read_text(
         encoding="utf-8"
@@ -328,6 +346,81 @@ def test_package_symlink_is_refused(tmp_path: Path) -> None:
         pytest.skip("symlink creation unavailable")
     result = validate_repository(tmp_path)
     assert "SYMLINK_FORBIDDEN" in {error["code"] for error in result["errors"]}
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    (
+        ".agents/plugins/marketplace.json",
+        "plugins/mastermind-cortex/.codex-plugin/plugin.json",
+        "plugins/mastermind-cortex/fixtures/orientation-cases.json",
+        "plugins/mastermind-cortex/skills/orient-mastermind-mission/SKILL.md",
+        "plugins/mastermind-cortex/references/orientation-contract.md",
+        "plugins/mastermind-cortex/references/source-claim-tracing-examples.md",
+    ),
+)
+def test_unreadable_required_package_files_return_stable_repository_relative_errors(
+    tmp_path: Path, relative_path: str
+) -> None:
+    """A required-file permission failure must be a typed result, not an inventory crash."""
+    _copy_package(tmp_path)
+    path = tmp_path / relative_path
+    original_mode = path.stat().st_mode
+    path.chmod(0)
+    try:
+        codes = _codes_without_exception(tmp_path)
+    finally:
+        path.chmod(original_mode)
+
+    assert "PACKAGE_FILESYSTEM_INVALID" in codes
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    ("plugins", "plugins/mastermind-cortex/skills"),
+    ids=("plugins-root", "cortex-skills-root"),
+)
+def test_unreadable_package_directories_return_stable_repository_relative_errors(
+    tmp_path: Path, relative_path: str
+) -> None:
+    """Directory enumeration failures must be represented, never raised or skipped."""
+    _copy_package(tmp_path)
+    path = tmp_path / relative_path
+    original_mode = path.stat().st_mode
+    path.chmod(0)
+    try:
+        codes = _codes_without_exception(tmp_path)
+    finally:
+        path.chmod(original_mode)
+
+    assert "PACKAGE_FILESYSTEM_INVALID" in codes
+
+
+def test_skills_path_as_regular_file_returns_stable_repository_relative_error(tmp_path: Path) -> None:
+    """The required skills directory is untrusted filesystem state, not a precondition."""
+    _copy_package(tmp_path)
+    path = tmp_path / "plugins/mastermind-cortex/skills"
+    shutil.rmtree(path)
+    path.write_text("not-a-directory\n", encoding="utf-8")
+
+    assert "PACKAGE_FILESYSTEM_INVALID" in _codes_without_exception(tmp_path)
+
+
+def test_unreadable_unexpected_package_file_returns_stable_repository_relative_error(
+    tmp_path: Path,
+) -> None:
+    """An unreadable unexpected file must produce a refusal rather than stop scanning."""
+    _copy_package(tmp_path)
+    path = tmp_path / "plugins/mastermind-sol/references/unreadable-extra.txt"
+    path.write_text("untrusted\n", encoding="utf-8")
+    original_mode = path.stat().st_mode
+    path.chmod(0)
+    try:
+        codes = _codes_without_exception(tmp_path)
+    finally:
+        path.chmod(original_mode)
+
+    assert "PACKAGE_FILESYSTEM_INVALID" in codes
 
 
 def test_invalid_json_error_is_repository_relative(tmp_path: Path) -> None:

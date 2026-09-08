@@ -473,6 +473,62 @@ def test_repository_rejects_duplicate_json_keys_in_cortex_documents(
     assert "DUPLICATE_JSON_KEY" in _validation_codes_without_exception(tmp_path)
 
 
+@pytest.mark.parametrize(
+    ("relative_path", "needle", "replacement"),
+    (
+        (
+            "plugins/mastermind-cortex/fixtures/orientation-cases.json",
+            '"unknown":false',
+            '"unknown":false,"unknown":true',
+        ),
+        (
+            "plugins/mastermind-cortex/fixtures/orientation-cases.json",
+            '"bounded":true',
+            '"bounded":false,"bounded":true',
+        ),
+        (
+            "plugins/mastermind-cortex/fixtures/orientation-cases.json",
+            '"effect":"EFFECT_UNKNOWN"',
+            '"effect":"APPLIED","effect":"EFFECT_UNKNOWN"',
+        ),
+        (
+            "plugins/mastermind-cortex/fixtures/orientation-cases.json",
+            '"retry_allowed":false',
+            '"retry_allowed":true,"retry_allowed":false',
+        ),
+        (
+            "plugins/mastermind-cortex/fixtures/orientation-cases.json",
+            '"kind":"READ"',
+            '"kind":"WRITE","kind":"READ"',
+        ),
+        (
+            ".agents/plugins/marketplace.json",
+            '"source": "local"',
+            '"source": "remote", "source": "local"',
+        ),
+    ),
+    ids=(
+        "unknown-authority-sensitive",
+        "bounded-authority-sensitive",
+        "effect-authority-sensitive",
+        "retry-authority-sensitive",
+        "kind-authority-sensitive",
+        "nested-marketplace-source",
+    ),
+)
+def test_repository_rejects_raw_byte_authority_sensitive_and_nested_duplicate_keys(
+    tmp_path: Path, relative_path: str, needle: str, replacement: str
+) -> None:
+    """A permissive duplicate-key parser would silently use the final authority value."""
+    _copy_packages(tmp_path)
+    path = tmp_path / relative_path
+    text = path.read_text(encoding="utf-8")
+    assert text.count(needle) >= 1
+    path.write_text(text.replace(needle, replacement, 1), encoding="utf-8")
+
+    assert "DUPLICATE_JSON_KEY" in _validation_codes_without_exception(tmp_path)
+
+
 @pytest.mark.parametrize("literal", ("NaN", "Infinity", "-Infinity", "9" * 5_000))
 def test_repository_refuses_nonstandard_or_overlong_json_numbers_without_exception(
     literal: str, tmp_path: Path

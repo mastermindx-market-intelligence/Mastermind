@@ -762,20 +762,31 @@ def _validate_reference(
 def _package_files(root: Path, errors: list[dict[str, str]]) -> list[Path]:
     paths: set[Path] = set()
     for package_root in (root / ".agents/plugins", root / "plugins"):
-        if not package_root.exists():
-            continue
-        for path in package_root.rglob("*"):
-            if path.is_symlink():
-                errors.append(
-                    _error(
-                        root,
-                        path,
-                        "SYMLINK_FORBIDDEN",
-                        "plugin packages may not contain symbolic links",
+        try:
+            if not package_root.exists():
+                continue
+            candidates = package_root.rglob("*")
+            for path in candidates:
+                if path.is_symlink():
+                    errors.append(
+                        _error(
+                            root,
+                            path,
+                            "SYMLINK_FORBIDDEN",
+                            "plugin packages may not contain symbolic links",
+                        )
                     )
+                elif path.is_file():
+                    paths.add(path)
+        except OSError:
+            errors.append(
+                _error(
+                    root,
+                    package_root,
+                    "PACKAGE_FILESYSTEM_INVALID",
+                    "plugin package filesystem cannot be enumerated",
                 )
-            elif path.is_file():
-                paths.add(path)
+            )
     return sorted(paths, key=lambda path: _relative(root, path))
 
 
@@ -785,17 +796,40 @@ def _scan_files(root: Path, errors: list[dict[str, str]]) -> None:
         for plugin in TEMPLATES
     }
     plugins_root = root / "plugins"
-    if plugins_root.exists():
-        for path in plugins_root.iterdir():
-            if path.is_dir() and path.name not in EXPECTED_SKILLS:
-                errors.append(
-                    _error(
-                        root,
-                        path,
-                        "UNKNOWN_PLUGIN",
-                        "plugin family is not recognized by this validator",
-                    )
+    try:
+        plugin_paths = list(plugins_root.iterdir()) if plugins_root.exists() else []
+    except OSError:
+        errors.append(
+            _error(
+                root,
+                plugins_root,
+                "PACKAGE_FILESYSTEM_INVALID",
+                "plugin package filesystem cannot be enumerated",
+            )
+        )
+        plugin_paths = []
+    for path in plugin_paths:
+        try:
+            is_directory = path.is_dir()
+        except OSError:
+            errors.append(
+                _error(
+                    root,
+                    path,
+                    "PACKAGE_FILESYSTEM_INVALID",
+                    "plugin package filesystem cannot be inspected",
                 )
+            )
+            continue
+        if is_directory and path.name not in EXPECTED_SKILLS:
+            errors.append(
+                _error(
+                    root,
+                    path,
+                    "UNKNOWN_PLUGIN",
+                    "plugin family is not recognized by this validator",
+                )
+            )
     for path in _package_files(root, errors):
         relative = _relative(root, path)
         if relative not in ALLOWED_PACKAGE_FILES:
@@ -816,6 +850,16 @@ def _scan_files(root: Path, errors: list[dict[str, str]]) -> None:
             text = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             errors.append(_error(root, path, "INVALID_UTF8", "file is not UTF-8"))
+            continue
+        except OSError:
+            errors.append(
+                _error(
+                    root,
+                    path,
+                    "PACKAGE_FILESYSTEM_INVALID",
+                    "plugin package file cannot be read",
+                )
+            )
             continue
         lowered = text.casefold()
         if any(marker in lowered for marker in SECRET_MARKERS):
@@ -925,7 +969,29 @@ def validate_repository(root: Path) -> dict[str, Any]:
                 )
 
         skills_root = plugin_root / "skills"
-        actual = sorted(path.name for path in skills_root.iterdir() if path.is_dir()) if skills_root.exists() else []
+        try:
+            if skills_root.exists() and not skills_root.is_dir():
+                errors.append(
+                    _error(
+                        root,
+                        skills_root,
+                        "PACKAGE_FILESYSTEM_INVALID",
+                        "skills path must be a readable directory",
+                    )
+                )
+                actual = []
+            else:
+                actual = sorted(path.name for path in skills_root.iterdir() if path.is_dir()) if skills_root.exists() else []
+        except OSError:
+            errors.append(
+                _error(
+                    root,
+                    skills_root,
+                    "PACKAGE_FILESYSTEM_INVALID",
+                    "skills directory cannot be enumerated",
+                )
+            )
+            actual = []
         if actual != sorted(skills):
             errors.append(
                 _error(root, skills_root, "SKILL_SET_MISMATCH", f"skill directories must be exactly {sorted(skills)}; got {actual}")
