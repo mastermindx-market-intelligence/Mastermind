@@ -900,7 +900,10 @@ Stop and reconcile instead of creating another task when:
 
 ---
 
-## Primary sequencing recommendation
+## Historical sequencing recommendation
+
+> This is a dated/historical interpretation. Current PR #490 continuation authority lives only in `research/CHATGPT_LONG_RUN_LEADER_CURRENT_STATE_SUPERSESSION_2026-09-06.md`.
+
 
 1. Complete Packet 1 through the existing BSC/Integration owners.
 2. Freeze Packet 2's pilot while Packet 1 is finishing; use the real Steward consumer when available.

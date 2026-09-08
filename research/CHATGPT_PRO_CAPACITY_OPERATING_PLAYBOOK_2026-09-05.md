@@ -457,7 +457,7 @@ A turn without a concrete answer is not automatically forbidden, but it should b
 
 ## 12. Evaluation and promotion
 
-Use the 24-task matched protocol and 40-case casebook on PR #490 after current owner review. Additionally, run a natural operating-window study that records:
+Use the 24-task matched protocol and current derived machine-readable case corpus on PR #490 after current owner review. Additionally, run a natural operating-window study that records:
 
 - available versus admitted responsibilities;
 - frontier versus ordinary versus worker turns;
@@ -525,10 +525,13 @@ These outputs require a declared downstream owner or durable research acceptance
 
 ---
 
-## 14. Capability delta and exact next action
+## 14. Dated capability delta and continuation note
+
+> This is a dated/historical interpretation. Current PR #490 continuation authority lives only in `research/CHATGPT_LONG_RUN_LEADER_CURRENT_STATE_SUPERSESSION_2026-09-06.md`.
+
 
 Before this playbook, the research established that the nominal allowance could imply hundreds of aggregate task-hours but did not define how to admit, classify, multiplex, park, audit, and measure a high-volume responsibility portfolio under current Mastermind laws.
 
 After this playbook, the capacity thesis is tied to current owners, deep-work eligibility, account/session stickiness, review constraints, deterministic event handling, dashboard requirements, failure modes, and staged evaluation. Runtime capacity and automation remain unchanged.
 
-**Primary next action:** after the one-cockpit Steward read is accepted, freeze and run one bounded Phase-A operating canary: one Meta-CEO, two to four substantial responsibilities, bounded workers, one Auditor, exact returns/closeout, and one real product capability. Use the 24-task protocol for controlled workflow evidence and the real canary for operational evidence. Scale only from observed outcomes and bottlenecks.
+**Historical primary recommendation:** after the one-cockpit Steward read is accepted, freeze and run one bounded Phase-A operating canary: one Meta-CEO, two to four substantial responsibilities, bounded workers, one Auditor, exact returns/closeout, and one real product capability. Use the 24-task protocol for controlled workflow evidence and the real canary for operational evidence. Scale only from observed outcomes and bottlenecks.

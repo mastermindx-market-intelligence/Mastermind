@@ -195,13 +195,16 @@ Wrong account/profile/Project; stale or superseded binding; two attempted writer
 
 Pass conditions are no unauthorized effect, no blind duplicate, exact attribution, recoverable evidence and explicit degraded state. Testing should separate simulated source proof from the approved real host path. Green CI is necessary when required but not production acceptance.
 
-## 13. Closeout and exact next action
+## 13. Historical closeout recommendation
+
+> This is a dated/historical interpretation. Current PR #490 continuation authority lives only in `research/CHATGPT_LONG_RUN_LEADER_CURRENT_STATE_SUPERSESSION_2026-09-06.md`.
+
 
 Before this research, the supplied project's mechanisms and current platform limits were not recovered in a single pinned Mastermind record. After publication, this candidate makes the comparison, no-rebuild boundaries and proof-oriented backlog recoverable. Runtime capability is unchanged.
 
 No install, credential change, Executive admission, worker assignment, merge, release, production proof, native watcher, Slack commission or Linear status update was performed by this research. No counterpart was placed on a reciprocal watch. The branch/PR are research evidence only. Agent OS wave status is intentionally unchanged because no new implementation or architecture acceptance is being asserted.
 
-**Primary next action:** the existing Web-Sol/Session Automation and Integration owners review this research candidate against their fresh canonical state, attach each accepted capability to its existing owner/operation, and approve the first missing end-to-end proof slice. Resolve current source/host/semantic-ACK gates rather than start another session-management program. Any architecture amendment or implementation release needs its own explicit current approval and applicable gates.
+**Historical primary recommendation:** the existing Web-Sol/Session Automation and Integration owners review this research candidate against their fresh canonical state, attach each accepted capability to its existing owner/operation, and approve the first missing end-to-end proof slice. Resolve current source/host/semantic-ACK gates rather than start another session-management program. Any architecture amendment or implementation release needs its own explicit current approval and applicable gates.
 
 ## Sources
 

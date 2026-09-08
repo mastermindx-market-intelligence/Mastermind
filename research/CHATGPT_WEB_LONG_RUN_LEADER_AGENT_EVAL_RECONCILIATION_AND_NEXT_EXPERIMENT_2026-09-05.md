@@ -123,7 +123,7 @@ bounded_implementation_fence
 carrier_protocol_compliance
 ```
 
-This is a governed corpus foundation, not evidence that long-run-leader tasks or the forty PR #490 cases have already been admitted to it.
+This is a governed corpus foundation, not evidence that long-run-leader tasks or the historical original forty PR #490 cases have already been admitted to it.
 
 ### 2.4 EVAL-S1 deterministic scorers
 
@@ -268,7 +268,10 @@ Before another program treats the runner as protected infrastructure, the curren
 
 ---
 
-## 4. Correct current capability ledger
+## 4. Dated evaluation capability snapshot
+
+> This is a dated/historical interpretation. Current PR #490 continuation authority lives only in `research/CHATGPT_LONG_RUN_LEADER_CURRENT_STATE_SUPERSESSION_2026-09-06.md`.
+
 
 | Capability | Current state | What it proves | What remains false/open |
 |---|---|---|---|
@@ -460,7 +463,7 @@ Exact hidden reasoning, GPU compute and private chain-of-thought are never colle
 
 ## 8. Candidate corpus mapping
 
-The existing PR #490 forty-case casebook is a source of candidate scenario requirements, not an executable corpus. Current C0 contains only the three established task classes above. A later owner may admit selected long-run-leader scenarios through a fresh C0-style corpus wave with rights/provenance, expected outputs, capability policy, scorer mapping and holdout law.
+The existing PR #490 current derived machine-readable case corpus is a source of candidate scenario requirements, not an executable corpus. Current C0 contains only the three established task classes above. A later owner may admit selected long-run-leader scenarios through a fresh C0-style corpus wave with rights/provenance, expected outputs, capability policy, scorer mapping and holdout law.
 
 ### 8.1 Existing classes that can carry some long-run-leader evidence
 
@@ -682,7 +685,10 @@ This research does not author that Agent OS patch because the program is delegat
 
 ---
 
-## 14. Exact next actions
+## 14. Historical evaluation continuation candidates
+
+> This is a dated/historical interpretation. Current PR #490 continuation authority lives only in `research/CHATGPT_LONG_RUN_LEADER_CURRENT_STATE_SUPERSESSION_2026-09-06.md`.
+
 
 ### Agent Evaluation program
 

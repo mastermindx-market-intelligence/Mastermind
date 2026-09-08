@@ -1,5 +1,15 @@
 # ChatGPT long-run leader reference architecture and rollout
 
+## Binding Decision-First current-protected supersession — 2026-09-08
+
+**Marker:** `PR490_DECISION_FIRST_CURRENT_PROTECTED_SUPERSESSION_20260908`
+**Protected authority consumed:** Mastermind PR #521, protected in `185dc742dac94d39bcbca81d20d89963ed36f744`.
+**Capability ceiling:** `SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT`.
+
+Decision-First **Today** is the sparse default Chairman experience: coverage-qualified act/no-act, admitted decisions and attention, Sol accountability, material exceptions, and evidence drill-down. Lifecycle, worker, provider, Workbench, evidence, permission, binding, source, and diagnostic machinery belongs under explicit **Advanced** progressive disclosure. **Linear** remains the human portfolio/project projection rather than being duplicated by this product. **Ask Sol** remains `HIDDEN_UNTIL_GROUNDED`; model explanation cannot manufacture current company truth or authority. Missing admission coverage is `NOT_CLEAR`, never an empty or healthy zero. Owner-specific Workbench canaries are `ENABLING_INFRASTRUCTURE_NOT_CHAIRMAN_PRODUCT_COMPLETION`; source, CI, merge, install, rendering, production proof, and Chairman acceptance remain distinct.
+
+This clause changes no route, UI, reducer, source reader, cache, lifecycle, provider session, permission, action, Linear object, installation, deployment, or production state. It preserves the governed long-run-leader thesis while making the Chairman outcome—not machinery—the default product ruler.
+
 ## Architecture amendment — attended direct mode and evidence truth
 
 **Marker:** `PR490-B1-B5-DIRECT-ACCESS-REPAIR-20260907`
@@ -17,7 +27,7 @@ Freeze boundary: no duplicate lifecycle, session, permission, target registry, p
 **Publication carrier:** Mastermind PR #490  
 **Status:** `RESEARCH_CANDIDATE / RECORDS_ONLY / NOT_AN_ARCHITECTURE_FREEZE / PRODUCTION_INERT`
 
-This document turns the Chairman's desired outcome into a complete candidate product, systems, experience, security, and proof architecture. It supplements the assessment, integration annex, and forty-case proof casebook on the same PR. It does not create a new workstream, lifecycle, queue, session registry, authority plane, runtime schema, app generation, worker commission, installation, credential, or production effect.
+This document turns the Chairman's desired outcome into a complete candidate product, systems, experience, security, and proof architecture. It supplements the assessment, integration annex, and current derived machine-readable proof corpus on the same PR. It does not create a new workstream, lifecycle, queue, session registry, authority plane, runtime schema, app generation, worker commission, installation, credential, or production effect.
 
 The current protected Sol Skillpack, accepted Business Sol, Chat-native hierarchy, Web-Sol rotation, Sol Capability Fabric, Executive OS, Agent OS, RuntimeBinding, Capacity, Wake, Company Dialogue, Code Intelligence, and evidence laws remain controlling. Names introduced here are conceptual compositions or candidate wave labels only. Existing owners must adopt or reject them through their current procedures.
 
@@ -803,7 +813,7 @@ Do not infer:
 
 Use paired, equivalent, isolated tasks with matched model/mode, permissions, source snapshot, time budget, and independent rubric. Prevent answer leakage between conditions. Include architecture, research, hard debugging, implementation review, interrupted recovery, and multi-source reconciliation. Report each task and disagreement, not only averages.
 
-The forty-case companion file supplies adverse definitions. A separate machine-readable 24-task protocol on this PR specifies the evaluation design; it is also records-only and unexecuted.
+The current derived machine-readable companion corpus supplies adverse definitions. A separate machine-readable 24-task protocol on this PR specifies the evaluation design; it is also records-only and unexecuted.
 
 ---
 
@@ -971,6 +981,125 @@ After evidence:
 
 ---
 
+## 18.4 Provider-native harness translation — records-only
+
+**Marker:** `PR490_PROVIDER_NATIVE_HARNESS_TRANSLATION_20260908`
+**Primary-source marker:** `PR490_PROVIDER_PRIMARY_SOURCE_BASIS_20260908`
+
+Official provider compatibility basis observed `2026-09-08`; authority ceiling `OFFICIAL_PROVIDER_COMPATIBILITY_EVIDENCE_NOT_ORGANIZATIONAL_AUTHORITY`. These moving provider documents must be revalidated before implementation and never grant Mastermind organizational authority:
+
+- `ANTHROPIC` / `AGENT_TEAMS`: https://code.claude.com/docs/en/agent-teams
+- `ANTHROPIC` / `SUBAGENTS`: https://code.claude.com/docs/en/sub-agents
+- `ANTHROPIC` / `SKILLS`: https://code.claude.com/docs/en/skills
+- `ANTHROPIC` / `HOOKS`: https://code.claude.com/docs/en/hooks
+- `OPENAI` / `CODEX_APP_SERVER`: https://developers.openai.com/codex/app-server
+
+Provider-native primitives can reduce orchestration friction, but they remain evidence under one exact admitted Attempt or owner-issued attended context. They do not replace Executive OS, Agent OS, Company Dialogue, GitHub source/effect truth, independent review, resource/auth, RuntimeBinding, host/process ownership, or current source custody. The machine-readable closed contract is in the governed Workbench candidate; the rows below are its human architecture projection.
+
+### `TEAM_TASK_MAILBOX`
+
+- **Native primitive:** Provider-native team, task, mailbox, member, and assignment state.
+- **Mastermind owner:** Executive OS owns Job/Attempt/Worker/Event lifecycle; Company Dialogue owns bounded worker returns.
+- **Permitted use:** Provider-private evidence inside one exact admitted Attempt or one owner-issued attended context, with explicit observation time and coverage.
+- **Forbidden promotion:** Never becomes Executive OS lifecycle, Agent OS canon, Company Dialogue authority, START, source/effect truth, or a second task registry.
+- **Source/authority binding:** Exact operation_key, Attempt or attended-context reference, provider account/profile, source head/worktree, and observation generation.
+- **Failure/correction:** Missing, partial, or contradictory native state remains UNKNOWN and is reconciled against Executive OS and the current source owner; it does not allocate a replacement child.
+- **Required evidence:** Native task/team/mailbox identifiers, native status, observation time, exact admitted context, Executive OS comparison, and proof that no duplicate lifecycle row was created.
+
+### `PLAN_GOAL_STATUS_APPROVAL`
+
+- **Native primitive:** Provider-native plan, goal, status, approval, and permission-prompt state.
+- **Mastermind owner:** Chairman direction and Sol adjudication govern intent; Executive OS governs admission; Agent OS governs durable decisions and handoffs.
+- **Permitted use:** Advisory execution evidence for the exact admitted operation, including whether a provider-side plan or prompt was observed.
+- **Forbidden promotion:** A provider approval never becomes Chairman consent, Sol START, permission widening, source-write authority, release approval, or effect truth.
+- **Source/authority binding:** Exact operation/Attempt or attended context, provider generation, requested action digest, policy generation, and source carrier.
+- **Failure/correction:** A missing or ambiguous provider approval blocks the stronger claim; it never defaults to approved and never authorizes a retry or failover.
+- **Required evidence:** Provider plan/goal/status payload, authenticated actor and generation, controlling Mastermind ruling, permission decision, and zero-effect proof when refused.
+
+### `RESUME_CHILD_CENSUS`
+
+- **Native primitive:** Provider resume, continuation, subagent roster, and incomplete-child census.
+- **Mastermind owner:** Executive OS owns lifecycle; Company Dialogue owns material returns; RuntimeBinding/Wake own exact surface continuation.
+- **Permitted use:** Bounded evidence that a named provider child or process may still exist for one exact admitted operation.
+- **Forbidden promotion:** Never proves the complete child census, parent wake, semantic ACK, Company Dialogue delivery, terminal STOP, or writer release.
+- **Source/authority binding:** Exact provider session/child reference mapped to one operation/Attempt and one current carrier, with observation generation and coverage.
+- **Failure/correction:** Incomplete enumeration remains INCOMPLETE or UNKNOWN; silence is never terminal and does not create a successor child.
+- **Required evidence:** Requested and observed child scope, pagination/coverage, provider status, operation mapping, latest Dialogue edge, and explicit terminal or nonterminal ruling.
+
+### `PROVIDER_WORKTREE`
+
+- **Native primitive:** Provider-created or provider-selected repository checkout, branch, worktree, and current-working-directory state.
+- **Mastermind owner:** The existing GitHub/source owner controls source identity and writer custody; Source Continuity is read-only verification only.
+- **Permitted use:** Evidence about the exact checkout used by an already-admitted worker after independent Git and filesystem verification.
+- **Forbidden promotion:** A provider worktree name or path never selects canonical source, transfers writer custody, satisfies current-base composition, or proves release.
+- **Source/authority binding:** Owner-issued repository, immutable head/tree, branch, canonical workspace, path ceiling, writer lease, and expected remote preimage.
+- **Failure/correction:** A source mismatch is refused before write or re-bound only by the source owner after a fresh census; the model/provider cannot self-correct by switching checkout.
+- **Required evidence:** Canonicalized path, Git common directory, head/tree/branch/upstream, status/index/locks, remote identity, path collision census, and source-owner ruling.
+
+### `MEMORY_SKILLS_HOOKS_COMPACTION`
+
+- **Native primitive:** Provider memory, skills, hooks, transcript compaction, local caches, and resume summaries.
+- **Mastermind owner:** Agent OS owns durable organizational canon; protected Skillpack owns current procedure; GitHub owns implementation/evidence.
+- **Permitted use:** Advisory provider-private context inside the exact active operation when provenance, generation, and staleness are explicit.
+- **Forbidden promotion:** Never becomes Agent OS canon, protected procedure, authority transfer, exact RuntimeBinding succession, transcript memory, or a second memory plane.
+- **Source/authority binding:** Exact provider/session generation, source operation, protected Skillpack SHA, Agent OS references, and compaction observation time.
+- **Failure/correction:** Stale, missing, or conflicting provider memory is discarded or labeled advisory; canonical owners are reread instead of merging summaries by recency.
+- **Required evidence:** Provider feature/version, enabled hooks/skills, source/procedure pins, compaction boundaries, omitted ranges, and comparison with Agent OS/GitHub truth.
+
+### `PROFILE_TOOL_GRANTS`
+
+- **Native primitive:** Provider profile, full-access mode, tool grants, approval settings, and account-level entitlements.
+- **Mastermind owner:** Existing resource/auth, RuntimeBinding, host, and tool owners issue effective capability; organizational authority remains separate.
+- **Permitted use:** One input to the effective permission intersection for an exact profile/tool/context generation.
+- **Forbidden promotion:** Provider profile membership cannot widen Mastermind permissions, elect an account/session, create an organizational role, bypass attended confirmation, or grant source authority.
+- **Source/authority binding:** Authenticated subject/client/resource/scope, provider account/profile, tool allowlist, owner-issued context, capability generation, expiry, and revocation state.
+- **Failure/correction:** Unknown or mismatched profile/tool pairs refuse before backend access; approval prompts never substitute for technical revocation or organizational permission.
+- **Required evidence:** Effective provider grant, Mastermind allowlist intersection, authenticated identity, context/generation, denial path, and zero backend/effect evidence on refusal.
+
+### `ASYNC_POST_EFFECT_HOOKS`
+
+- **Native primitive:** Provider async hooks, callbacks, notifications, and post-effect completion signals.
+- **Mastermind owner:** The exact existing mutator and same-action reconciliation owner govern modifying effect truth.
+- **Permitted use:** Corroborating owner-native/per-step evidence after it is correlated to the original prepared action.
+- **Forbidden promotion:** An async or post-effect hook cannot prove refusal-before-effect, NOT_APPLIED, safe retry, lifecycle completion, or release acceptance.
+- **Source/authority binding:** Original owner-issued action reference, payload digest, target/preconditions, operation/Attempt/context, hook generation, and observation time.
+- **Failure/correction:** Lost, late, duplicate, or uncorrelated hooks require read-only same-action reconciliation; unresolved boundaries remain EFFECT_UNKNOWN with no retry or failover.
+- **Required evidence:** Pre-effect action identity, hook payload/generation, owner receipt, per-step results, terminal effect classification, and duplicate-delivery behavior.
+
+### `BACKGROUND_EFFECTS`
+
+- **Native primitive:** Provider background task, unattended continuation, delayed mutation, and completion status.
+- **Mastermind owner:** Executive OS owns admitted lifecycle; the concrete existing mutator owns action/effect reconciliation; Company Dialogue carries material returns.
+- **Permitted use:** Evidence that a previously admitted provider action may still be running or may have produced a bounded effect.
+- **Forbidden promotion:** Provider background status never proves APPLIED, terminal completion, parent delivery, writer release, production success, or permission to launch process two.
+- **Source/authority binding:** Exact operation/Attempt, provider task/process generation, owner-issued action reference, source/target preimage, and current carrier.
+- **Failure/correction:** Timeout, cancellation, reconnect, or missing background output triggers same-action reconciliation; effect remains EFFECT_UNKNOWN until the owner proves a boundary.
+- **Required evidence:** Provider task/process status, mutator receipt, source/target readback, effect classification, Dialogue edge, and explicit cleanup/writer-release evidence.
+
+### `CHILD_REVIEW_OUTPUT`
+
+- **Native primitive:** Provider child-agent critique, self-review, test summary, confidence score, and proposed approval.
+- **Mastermind owner:** GitHub and the selected distinct authenticated reviewer own independent review evidence; Sol owns intent-level adjudication.
+- **Permitted use:** Advisory pre-review analysis attached to the exact immutable candidate and disclosed as non-independent.
+- **Forbidden promotion:** Provider child output never satisfies independent review, exact-head approval, source acceptance, merge permission, final Sol adjudication, or production proof.
+- **Source/authority binding:** Exact immutable head/tree/path set, child identity and parent relation, review rubric, tool/source generation, and disclosure of author relationship.
+- **Failure/correction:** A stale-head, same-author, incomplete, or unbound review is rejected as acceptance evidence and must not be administratively rewritten or dismissed to unblock release.
+- **Required evidence:** Reviewer principal, independence, exact commit/tree/path set, reviewed evidence, formal state, findings, and subsequent Sol ruling.
+
+### `CODEX_FULL_ACCESS_SHELL_AND_REMOTE_WEBSOCKET`
+
+- **Native primitive:** Codex full-access non-loopback thread/shellCommand and remote WebSocket capability.
+- **Mastermind owner:** Existing attended Workbench, host/resource/auth, process, and RuntimeBinding owners govern any model-reachable file/process surface.
+- **Permitted use:** Only a separately authorized attended binding with exact target/source scope, authentication, TLS, command policy, deadline, output bounds, and same-action reconciliation.
+- **Forbidden promotion:** Full-access thread/shellCommand stays absent from default model-reachable profiles; remote WebSocket reachability never creates unattended shell, source writer, account election, or fleet authority.
+- **Source/authority binding:** Exact current conversation/context, authenticated subject/client/resource, host, non-loopback endpoint, TLS identity, process owner, command/action reference, and revocation generation.
+- **Failure/correction:** Missing authentication/TLS, stale context, foreign process reference, lost launch response, or endpoint mismatch refuses or remains EFFECT_UNKNOWN; no alternate backend or process two.
+- **Required evidence:** Profile/tool intersection, endpoint and TLS/authentication proof, command policy, owner-issued action reference, process generation, bounded output, effect reconciliation, revocation, and rollback.
+
+No row creates a provider-owned company lifecycle, memory, permission, source, review, effect, retry, transcript, or control plane. A provider feature is useful only when it serves one existing owner and preserves correction-safe failure behavior.
+
+---
+
 ## 19. Durable completion and learning
 
 A rollout stage is not complete merely because source landed. Closeout records:
@@ -1001,7 +1130,10 @@ The next generation is justified by observed failure or value, not by a desire f
 
 ---
 
-## 20. Current capability ledger for this research candidate
+## 20. Dated research capability snapshot
+
+> This is a dated/historical interpretation. Current PR #490 continuation authority lives only in `research/CHATGPT_LONG_RUN_LEADER_CURRENT_STATE_SUPERSESSION_2026-09-06.md`.
+
 
 This table is a bounded research interpretation and must be refreshed from current owners before action.
 
@@ -1022,13 +1154,16 @@ This table is a bounded research interpretation and must be refreshed from curre
 
 ---
 
-## 21. Exact next action and independent parallel actions
+## 21. Historical recommendation and independent owner actions
+
+> This is a dated/historical interpretation. Current PR #490 continuation authority lives only in `research/CHATGPT_LONG_RUN_LEADER_CURRENT_STATE_SUPERSESSION_2026-09-06.md`.
+
 
 **Primary product action:** finish the existing one-cockpit authenticated Steward read vertical under the current Business Sol and Integration owners: exact source release, hardened endpoint/auth, exact plugin/app generation, useful nonempty source-attributed read, post-expiry refresh read, H1 evidence acceptance, and rollback with two untouched Pro controls.
 
 This is the fastest independently useful context improvement and does not require pretending exact-child autonomy is already solved.
 
-**Independent design action:** review this reference architecture and the forty-case casebook against current owners; accept only the deltas that fill an actual gap. Convert each accepted delta into one existing-owner vertical with a fresh current source/collision check. Do not create a new umbrella runtime or forty tasks by default.
+**Independent design action:** review this reference architecture and the current derived machine-readable case corpus against current owners; accept only the deltas that fill an actual gap. Convert each accepted delta into one existing-owner vertical with a fresh current source/collision check. Do not create a new umbrella runtime or forty tasks by default.
 
 **Held until prerequisites:** unrestricted local workbench on live seats; generic browser composer; autonomous root/child writes across native apps; account migration; fleet cutover; exact-session wake claims; production context rotation; and all-path stale-writer autonomy.
 

@@ -5,8 +5,8 @@
   "parent_operation": "chatgpt-pro-long-run-leaders-research-20260905-sol-001",
   "publication_carrier": "Mastermind PR #490",
   "authority": "ADVISORY_CURRENT_STATE_SNAPSHOT_NOT_CANONICAL_STATE_ASSIGNMENT_OR_RELEASE",
-  "protected_source_basis": "03eaa8e9aa32fdc949551ad0f88a890d269daea4",
-  "supersedes_blob": "a1ca3c40e6f1bc749976676edd96ba3ea299e161",
+  "protected_source_basis": "185dc742dac94d39bcbca81d20d89963ed36f744",
+  "supersedes_blob": "6b40fbe2795ab1924e1342f016bf28a1a6e35324",
   "current_state_register": "research/CHATGPT_LONG_RUN_LEADER_CURRENT_STATE_SUPERSESSION_2026-09-06.md",
   "refresh_law": "Every carrier, entitlement, source, host, permission, action, effect and proof fact must be refreshed from its canonical owner immediately before action. This crosswalk never authorizes a Job, worker, source writer, app installation, permission change, provider turn, review, release or production effect.",
   "state_vocabulary": [
@@ -520,12 +520,12 @@
     {
       "order": 0,
       "id": "PR490_FRESH_EXACT_HEAD_REVIEW",
-      "action": "Obtain one fresh full non-author exact-head architecture review of the immutable V7 same-carrier candidate after remote identity, current-base integration, and hosted checks are established.",
+      "action": "Obtain one fresh full non-author exact-head architecture review of the immutable V8 same-carrier candidate after remote identity, current-base integration, and hosted checks are established.",
       "owner": "independent non-author architecture reviewer",
       "state": "REVIEW_REQUIRED / DRAFT_HOLD",
-      "stop_condition": "Return PASS or bounded findings anchored to the exact V7 head; implementation remains unadmitted.",
+      "stop_condition": "Return PASS or bounded findings anchored to the exact V8 head; implementation remains unadmitted.",
       "preconditions": [
-        "one forward V7 commit on PR #490",
+        "one forward V8 commit on PR #490",
         "remote branch readback matches",
         "current-base integration receipt matches nineteen semantic paths",
         "required hosted checks terminal"
@@ -560,7 +560,7 @@
       "stop_condition": "One vertical has an exact owner, capability, scope, non-goals, proof, and fresh operation carrier; no umbrella fan-out is created."
     }
   ],
-  "repair_marker": "PR490-V7-CURRENT-PROTECTED-COHERENCE-REPAIR-20260908",
+  "repair_marker": "PR490-R4-COHERENCE-REPAIR-20260908",
   "observation_epochs": [
     {
       "id": "DC_EPOCH_20260906_ATTENDED_PASS",
@@ -645,10 +645,88 @@
       "capability": "authenticated selected-project Workbench read composition proof",
       "state": "SOURCE_PROTECTED / BUILT_NOT_PROVEN / FULL_HERMETIC_COMPOSITION_PRIVATE_OUTPUT_GUARD / NOT_INSTALLED",
       "boundary": "Signed caller through official MCP into one selected-project descriptor/observer read only; no exact conversation attestation, general Workbench mutation/shell/process, installation, service, or production proof."
+    },
+    {
+      "pr": 521,
+      "protected_commit": "185dc742dac94d39bcbca81d20d89963ed36f744",
+      "capability": "Decision-First Chairman experience architecture",
+      "state": "SOURCE_PROTECTED / SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT",
+      "boundary": "Decision-First Today is the sparse default Chairman experience; machinery remains under Advanced; Linear remains portfolio projection; Ask Sol is hidden until grounded; incomplete admission coverage is never CLEAR. This dependency builds or installs nothing."
     }
   ],
   "linear_boundary": {
     "pr490": "NONE",
     "mas_198": "external Web-Sol dependency; not owned or gated"
+  },
+  "supersedes_head": "210aa15c66894a0a24dcca166c26419c1143dc17",
+  "current_contract_generation": "PR490_REPAIR_CANDIDATE_V8_CURRENT_PROTECTED_PROFILE_GATED_MODE_COHERENT_DERIVED_CORPUS_PROVIDER_TRANSLATION_DECISION_FIRST_SOURCE_ONLY",
+  "provider_native_harness_translation": {
+    "schema": "mastermind.provider_native_harness_crosswalk.v1",
+    "contract_path": "research/CHATGPT_WEB_GOVERNED_WORKBENCH_CONTRACT_CANDIDATE_2026-09-05.json",
+    "row_ids": [
+      "TEAM_TASK_MAILBOX",
+      "PLAN_GOAL_STATUS_APPROVAL",
+      "RESUME_CHILD_CENSUS",
+      "PROVIDER_WORKTREE",
+      "MEMORY_SKILLS_HOOKS_COMPACTION",
+      "PROFILE_TOOL_GRANTS",
+      "ASYNC_POST_EFFECT_HOOKS",
+      "BACKGROUND_EFFECTS",
+      "CHILD_REVIEW_OUTPUT",
+      "CODEX_FULL_ACCESS_SHELL_AND_REMOTE_WEBSOCKET"
+    ],
+    "rows_sha256": "dfb14999a01cc1154a434d59476b01b396c0358d1a88c5c82eda484e1c41101d",
+    "source_basis_sha256": "7ac7b681e494490580acb8c50b0dcb59b2726ca55500f27915b067c101c99a3d",
+    "source_basis_contract_path": "research/CHATGPT_WEB_GOVERNED_WORKBENCH_CONTRACT_CANDIDATE_2026-09-05.json",
+    "state": "RECORDS_ONLY / NOT_RUN / PRODUCTION_INERT",
+    "rule": "Each provider-native primitive remains evidence under its existing Mastermind owner and never promotes into lifecycle, canon, source/effect truth, consent, review, release, or product completion."
+  },
+  "decision_first_experience_contract": {
+    "default_surface": "TODAY",
+    "machinery_surface": "ADVANCED",
+    "portfolio_owner": "LINEAR",
+    "ask_sol": "HIDDEN_UNTIL_GROUNDED",
+    "missing_admission_coverage": "NOT_CLEAR",
+    "workbench_canary": "ENABLING_INFRASTRUCTURE_NOT_CHAIRMAN_PRODUCT_COMPLETION"
+  },
+  "ordered_next_actions_state": "HISTORICAL_PROJECTION_NO_AUTHORITY",
+  "current_continuation_projection": {
+    "schema": "mastermind.pr490_current_continuation_projection.v1",
+    "authority_path": "research/CHATGPT_LONG_RUN_LEADER_CURRENT_STATE_SUPERSESSION_2026-09-06.md",
+    "authority_marker": "CURRENT_PR490_CONTINUATION_AUTHORITY",
+    "ordered_sequence": [
+      "SOURCE_REPAIR",
+      "TERMINAL_CHECKS",
+      "FULL_NON_AUTHOR_EXACT_HEAD_REVIEW",
+      "SOL_ADJUDICATION",
+      "SEPARATELY_AUTHORIZED_RECORDS_RELEASE",
+      "SEPARATELY_ADMITTED_OWNER_VERTICAL"
+    ],
+    "projection_only_not_authority": true
+  },
+  "proof_corpus_projection": {
+    "schema": "mastermind.pr490_derived_proof_corpus_projection.v1",
+    "casebook_path": "research/CHATGPT_PRO_LONG_RUN_LEADERS_PROOF_CASEBOOK_2026-09-05.json",
+    "case_count": 66,
+    "count_derivation": "LEN_CASES_NOT_PROSE",
+    "case_id_order": "CASEBOOK_ARRAY_ORDER",
+    "case_ids_sha256": "572b76c4da2a808bf423f896e1b33e86aa6c383f195f143ba5c52cd21bbe882e",
+    "required_case_ids": [
+      "PROVIDER_TASK_STATE_PRIVATE_EVIDENCE",
+      "PROVIDER_PLAN_APPROVAL_NOT_MASTERMIND_CONSENT",
+      "PROVIDER_RESUME_INCOMPLETE_CHILD_CENSUS",
+      "PROVIDER_WORKTREE_SOURCE_MISMATCH_REFUSED",
+      "PROVIDER_MEMORY_SKILL_HOOK_PRIVATE_CACHE",
+      "PROVIDER_PROFILE_GRANT_CANNOT_WIDEN",
+      "PROVIDER_ASYNC_HOOK_NOT_PREEFFECT_PROOF",
+      "PROVIDER_BACKGROUND_EFFECT_RECONCILIATION_REQUIRED",
+      "PROVIDER_CHILD_OUTPUT_NOT_INDEPENDENT_REVIEW",
+      "CODEX_FULL_ACCESS_SHELL_NOT_MODEL_REACHABLE",
+      "TODAY_MISSING_ADMISSION_COVERAGE_NOT_CLEAR",
+      "TODAY_DEFAULT_EXCLUDES_MACHINERY",
+      "ADVANCED_NOT_DEFAULT_OR_NEXT_LAUNCH",
+      "ASK_SOL_HIDDEN_UNTIL_GROUNDED",
+      "NO_SECOND_CONTROL_PORTFOLIO_ATTENTION_ACTION_AUTHORITY"
+    ]
   }
 }

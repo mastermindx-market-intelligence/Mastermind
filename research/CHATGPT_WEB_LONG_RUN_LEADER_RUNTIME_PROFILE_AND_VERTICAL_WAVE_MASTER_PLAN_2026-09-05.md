@@ -21,7 +21,7 @@ Post-freeze waves: WB-R1 target/context, WB-R2 useful read, WB-C1 real command, 
 **Current protected source read before publication:** `mastermindx-market-intelligence/Mastermind@767409b6d3e7103a3b11428b870357d4a01bbe26`, tree `cb8486ea0bfacc1036846cc8325676eddd22ce77`  
 **Compatible procedure:** `mastermind.sol_skillpack.v1` 1.0.1 / bootstrap major 1, loaded atomically from the protected commit above
 
-This document turns the preceding Chat On Steroids assessment, integration analysis, and forty-case proof casebook into one executable-looking but **non-executing** master plan. It names existing owners, runtime profiles, boundaries, vertical proof slices, and acceptance rulers. It creates no new workstream, Job, Attempt, Worker, lifecycle, session registry, task database, app, tool, credential, endpoint, branch writer, release, or production authority.
+This document turns the preceding Chat On Steroids assessment, integration analysis, and current derived machine-readable proof corpus into one executable-looking but **non-executing** master plan. It names existing owners, runtime profiles, boundaries, vertical proof slices, and acceptance rulers. It creates no new workstream, Job, Attempt, Worker, lifecycle, session registry, task database, app, tool, credential, endpoint, branch writer, release, or production authority.
 
 The plan is subordinate to current protected Mastermind source law and to the owner-specific architectures it references. Dynamic current state below is an observation window, not durable permission. Before any later effect, the acting Sol or worker must load current protected procedure, reconcile the exact current carriers and effects, and use the existing owner for the intended capability.
 
@@ -132,7 +132,10 @@ A provider may retain its own thread/process handle. That handle remains impleme
 
 ---
 
-## 3. Current capability ledger at this research window
+## 3. Dated runtime-profile capability snapshot
+
+> This is a dated/historical interpretation. Current PR #490 continuation authority lives only in `research/CHATGPT_LONG_RUN_LEADER_CURRENT_STATE_SUPERSESSION_2026-09-06.md`.
+
 
 This ledger is intentionally granular. It does not average source presence into a false platform-completion percentage.
 
@@ -943,7 +946,10 @@ A packet must not use “build the whole system” or ask a bounded worker to re
 
 ---
 
-## 17. Primary execution order
+## 17. Historical proposed execution order
+
+> This is a dated/historical interpretation. Current PR #490 continuation authority lives only in `research/CHATGPT_LONG_RUN_LEADER_CURRENT_STATE_SUPERSESSION_2026-09-06.md`.
+
 
 The most efficient path from current state to useful product is:
 
@@ -965,13 +971,16 @@ Independent source work may proceed in parallel only where current owners, paths
 
 ---
 
-## 18. Exact next action from this research
+## 18. Historical runtime-profile continuation candidates
+
+> This is a dated/historical interpretation. Current PR #490 continuation authority lives only in `research/CHATGPT_LONG_RUN_LEADER_CURRENT_STATE_SUPERSESSION_2026-09-06.md`.
+
 
 The primary product action remains the existing Business read vertical, not another architecture rewrite:
 
 > Consume the current S1 #463 same-carrier result after its truthful partial-capability correction, complete the active U1 source operation under its existing owner, and then execute the separately authorized one-cockpit authenticated Steward read, post-expiry refresh, and rollback canary through the current BSC/Integration gates.
 
-In parallel, this master plan and the forty-case casebook should receive architecture-owner review as research. Accepted sections should be mapped onto existing CNM, BSC, SCF, CodeIntel, RuntimeBinding, Wake, Dialogue, and Executive operations. Rejected or redundant sections should remain recorded as such. No new umbrella workstream is needed.
+In parallel, this master plan and the current derived machine-readable case corpus should receive architecture-owner review as research. Accepted sections should be mapped onto existing CNM, BSC, SCF, CodeIntel, RuntimeBinding, Wake, Dialogue, and Executive operations. Rejected or redundant sections should remain recorded as such. No new umbrella workstream is needed.
 
 ---
 

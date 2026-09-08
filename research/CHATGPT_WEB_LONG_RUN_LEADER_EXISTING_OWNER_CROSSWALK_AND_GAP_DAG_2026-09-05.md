@@ -1,6 +1,19 @@
 # ChatGPT Web long-run leader existing-owner crosswalk and gap DAG
 
-## Current owner-DAG amendment
+## Binding Decision-First current-protected supersession — 2026-09-08
+
+**Marker:** `PR490_DECISION_FIRST_CURRENT_PROTECTED_SUPERSESSION_20260908`
+**Protected authority consumed:** Mastermind PR #521, protected in `185dc742dac94d39bcbca81d20d89963ed36f744`.
+**Capability ceiling:** `SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT`.
+
+Decision-First **Today** is the sparse default Chairman experience: coverage-qualified act/no-act, admitted decisions and attention, Sol accountability, material exceptions, and evidence drill-down. Lifecycle, worker, provider, Workbench, evidence, permission, binding, source, and diagnostic machinery belongs under explicit **Advanced** progressive disclosure. **Linear** remains the human portfolio/project projection rather than being duplicated by this product. **Ask Sol** remains `HIDDEN_UNTIL_GROUNDED`; model explanation cannot manufacture current company truth or authority. Missing admission coverage is `NOT_CLEAR`, never an empty or healthy zero. Owner-specific Workbench canaries are `ENABLING_INFRASTRUCTURE_NOT_CHAIRMAN_PRODUCT_COMPLETION`; source, CI, merge, install, rendering, production proof, and Chairman acceptance remain distinct.
+
+This clause changes no route, UI, reducer, source reader, cache, lifecycle, provider session, permission, action, Linear object, installation, deployment, or production state. It preserves the governed long-run-leader thesis while making the Chairman outcome—not machinery—the default product ruler.
+
+## Dated owner-DAG amendment at the source freeze
+
+> This is a dated/historical interpretation. Current PR #490 continuation authority lives only in `research/CHATGPT_LONG_RUN_LEADER_CURRENT_STATE_SUPERSESSION_2026-09-06.md`.
+
 
 **Marker:** `PR490-B1-B5-DIRECT-ACCESS-REPAIR-20260907`
 
@@ -599,7 +612,10 @@ Wait until all mutating routes included in the claim are enforced or unavailable
 
 ---
 
-## 8. Forty-case proof-family ownership
+## 8. Derived machine-corpus proof-family ownership
+
+> This is a dated/historical interpretation. Current PR #490 continuation authority lives only in `research/CHATGPT_LONG_RUN_LEADER_CURRENT_STATE_SUPERSESSION_2026-09-06.md`.
+
 
 The existing PR #490 casebook should be partitioned into current owners rather than executed as one giant test project.
 
@@ -638,6 +654,38 @@ Hard deterministic scorers own:
 - production proof identity.
 
 Models may score architecture coherence, synthesis usefulness and adversarial judgment only under versioned rubrics with evidence citations and human/Sol adjudication. Model scores never originate authority or auto-promote routes.
+
+---
+
+## 8.3 Provider-native primitive-to-owner crosswalk
+
+**Marker:** `PR490_PROVIDER_NATIVE_HARNESS_TRANSLATION_20260908`
+**Primary-source marker:** `PR490_PROVIDER_PRIMARY_SOURCE_BASIS_20260908`
+
+Official provider compatibility basis observed `2026-09-08`; authority ceiling `OFFICIAL_PROVIDER_COMPATIBILITY_EVIDENCE_NOT_ORGANIZATIONAL_AUTHORITY`. Revalidate before implementation; these documents are compatibility evidence, not organizational authority:
+
+- `ANTHROPIC` / `AGENT_TEAMS`: https://code.claude.com/docs/en/agent-teams
+- `ANTHROPIC` / `SUBAGENTS`: https://code.claude.com/docs/en/sub-agents
+- `ANTHROPIC` / `SKILLS`: https://code.claude.com/docs/en/skills
+- `ANTHROPIC` / `HOOKS`: https://code.claude.com/docs/en/hooks
+- `OPENAI` / `CODEX_APP_SERVER`: https://developers.openai.com/codex/app-server
+
+This crosswalk is records-only. Native provider state is bounded evidence; canonical lifecycle, durable work, return, source, permission, effect, review, and product authority stay with the existing Mastermind owners.
+
+| Primitive ID | Existing owner | Permitted evidence | Forbidden promotion |
+|---|---|---|---|
+| `TEAM_TASK_MAILBOX` | Executive OS owns Job/Attempt/Worker/Event lifecycle; Company Dialogue owns bounded worker returns. | Provider-private evidence inside one exact admitted Attempt or one owner-issued attended context, with explicit observation time and coverage. | Never becomes Executive OS lifecycle, Agent OS canon, Company Dialogue authority, START, source/effect truth, or a second task registry. |
+| `PLAN_GOAL_STATUS_APPROVAL` | Chairman direction and Sol adjudication govern intent; Executive OS governs admission; Agent OS governs durable decisions and handoffs. | Advisory execution evidence for the exact admitted operation, including whether a provider-side plan or prompt was observed. | A provider approval never becomes Chairman consent, Sol START, permission widening, source-write authority, release approval, or effect truth. |
+| `RESUME_CHILD_CENSUS` | Executive OS owns lifecycle; Company Dialogue owns material returns; RuntimeBinding/Wake own exact surface continuation. | Bounded evidence that a named provider child or process may still exist for one exact admitted operation. | Never proves the complete child census, parent wake, semantic ACK, Company Dialogue delivery, terminal STOP, or writer release. |
+| `PROVIDER_WORKTREE` | The existing GitHub/source owner controls source identity and writer custody; Source Continuity is read-only verification only. | Evidence about the exact checkout used by an already-admitted worker after independent Git and filesystem verification. | A provider worktree name or path never selects canonical source, transfers writer custody, satisfies current-base composition, or proves release. |
+| `MEMORY_SKILLS_HOOKS_COMPACTION` | Agent OS owns durable organizational canon; protected Skillpack owns current procedure; GitHub owns implementation/evidence. | Advisory provider-private context inside the exact active operation when provenance, generation, and staleness are explicit. | Never becomes Agent OS canon, protected procedure, authority transfer, exact RuntimeBinding succession, transcript memory, or a second memory plane. |
+| `PROFILE_TOOL_GRANTS` | Existing resource/auth, RuntimeBinding, host, and tool owners issue effective capability; organizational authority remains separate. | One input to the effective permission intersection for an exact profile/tool/context generation. | Provider profile membership cannot widen Mastermind permissions, elect an account/session, create an organizational role, bypass attended confirmation, or grant source authority. |
+| `ASYNC_POST_EFFECT_HOOKS` | The exact existing mutator and same-action reconciliation owner govern modifying effect truth. | Corroborating owner-native/per-step evidence after it is correlated to the original prepared action. | An async or post-effect hook cannot prove refusal-before-effect, NOT_APPLIED, safe retry, lifecycle completion, or release acceptance. |
+| `BACKGROUND_EFFECTS` | Executive OS owns admitted lifecycle; the concrete existing mutator owns action/effect reconciliation; Company Dialogue carries material returns. | Evidence that a previously admitted provider action may still be running or may have produced a bounded effect. | Provider background status never proves APPLIED, terminal completion, parent delivery, writer release, production success, or permission to launch process two. |
+| `CHILD_REVIEW_OUTPUT` | GitHub and the selected distinct authenticated reviewer own independent review evidence; Sol owns intent-level adjudication. | Advisory pre-review analysis attached to the exact immutable candidate and disclosed as non-independent. | Provider child output never satisfies independent review, exact-head approval, source acceptance, merge permission, final Sol adjudication, or production proof. |
+| `CODEX_FULL_ACCESS_SHELL_AND_REMOTE_WEBSOCKET` | Existing attended Workbench, host/resource/auth, process, and RuntimeBinding owners govern any model-reachable file/process surface. | Only a separately authorized attended binding with exact target/source scope, authentication, TLS, command policy, deadline, output bounds, and same-action reconciliation. | Full-access thread/shellCommand stays absent from default model-reachable profiles; remote WebSocket reachability never creates unattended shell, source writer, account election, or fleet authority. |
+
+The authoritative closed fields—including source/authority binding, failure/correction, and required evidence—live in the governed Workbench machine contract. Source mismatch is refused or re-bound only by the source owner; async hooks do not prove refusal-before-effect; provider child output is not independent review; and non-loopback `thread/shellCommand` or remote WebSocket capability requires a separately authorized attended binding with authentication and TLS.
 
 ---
 
@@ -805,7 +853,10 @@ A “yes” requires rejection or an explicit new architecture ruling. Most such
 
 ---
 
-## 14. Exact next action
+## 14. Historical owner-routing recommendation
+
+> This is a dated/historical interpretation. Current PR #490 continuation authority lives only in `research/CHATGPT_LONG_RUN_LEADER_CURRENT_STATE_SUPERSESSION_2026-09-06.md`.
+
 
 The primary executable product action remains outside this research branch and on its current existing carriers:
 

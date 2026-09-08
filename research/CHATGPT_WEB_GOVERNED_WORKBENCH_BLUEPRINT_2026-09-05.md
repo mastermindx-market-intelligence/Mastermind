@@ -1,8 +1,18 @@
 # ChatGPT Web Governed Workbench — Integration Blueprint
 
+## Binding Decision-First current-protected supersession — 2026-09-08
+
+**Marker:** `PR490_DECISION_FIRST_CURRENT_PROTECTED_SUPERSESSION_20260908`
+**Protected authority consumed:** Mastermind PR #521, protected in `185dc742dac94d39bcbca81d20d89963ed36f744`.
+**Capability ceiling:** `SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT`.
+
+Decision-First **Today** is the sparse default Chairman experience: coverage-qualified act/no-act, admitted decisions and attention, Sol accountability, material exceptions, and evidence drill-down. Lifecycle, worker, provider, Workbench, evidence, permission, binding, source, and diagnostic machinery belongs under explicit **Advanced** progressive disclosure. **Linear** remains the human portfolio/project projection rather than being duplicated by this product. **Ask Sol** remains `HIDDEN_UNTIL_GROUNDED`; model explanation cannot manufacture current company truth or authority. Missing admission coverage is `NOT_CLEAR`, never an empty or healthy zero. Owner-specific Workbench canaries are `ENABLING_INFRASTRUCTURE_NOT_CHAIRMAN_PRODUCT_COMPLETION`; source, CI, merge, install, rendering, production proof, and Chairman acceptance remain distinct.
+
+This clause changes no route, UI, reducer, source reader, cache, lifecycle, provider session, permission, action, Linear object, installation, deployment, or production state. It preserves the governed long-run-leader thesis while making the Chairman outcome—not machinery—the default product ruler.
+
 ## 2026-09-08 governed direct-access amendment
 
-**Marker:** `PR490-V7-CURRENT-PROTECTED-COHERENCE-REPAIR-20260908`
+**Marker:** `PR490-R4-COHERENCE-REPAIR-20260908`
 **State:** `SPEC_ONLY / SOURCE_REPAIR_CANDIDATE / NO_RUNTIME_OR_INSTALL_AUTHORITY`
 
 ### User journey and profile
@@ -567,7 +577,7 @@ A real product capability travels from Chairman outcome through leader, worker, 
 
 ## 14. Evaluation and operating metrics
 
-Use the existing proposed 24-task matched evaluation and 40-case research casebook. Add Workbench-specific measurements only through an accepted evaluation owner:
+Use the existing proposed 24-task matched evaluation and current derived machine-readable research corpus. Add Workbench-specific measurements only through an accepted evaluation owner:
 
 - correct useful result rate;
 - accepted capability per scarce reasoning turn;
@@ -629,7 +639,10 @@ No worker should receive “build the workbench.” It receives one of the proof
 
 ---
 
-## 17. Current capability ledger
+## 17. Dated research capability snapshot
+
+> This is a dated/historical interpretation. Current PR #490 continuation authority lives only in `research/CHATGPT_LONG_RUN_LEADER_CURRENT_STATE_SUPERSESSION_2026-09-06.md`.
+
 
 | Capability | State for this research |
 |---|---|
@@ -651,11 +664,14 @@ This table is a research synthesis and must not overwrite a fresher canonical ow
 
 ---
 
-## 18. Exact next actions
+## 18. Historical review and owner actions
+
+> This is a dated/historical interpretation. Current PR #490 continuation authority lives only in `research/CHATGPT_LONG_RUN_LEADER_CURRENT_STATE_SUPERSESSION_2026-09-06.md`.
+
 
 ### Primary
 
-Freeze one immutable V7 semantic head on this same PR #490 carrier, publish it once, establish exact remote identity, regenerate the separate current-protected merge-tree/check receipt, and obtain one fresh full non-author exact-head architecture review. Keep Draft/Hold and all implementation verticals unadmitted until that review returns.
+Freeze one immutable V8 semantic head on this same PR #490 carrier, publish it once, establish exact remote identity, regenerate the separate current-protected merge-tree/check receipt, and obtain one fresh full non-author exact-head architecture review. Keep Draft/Hold and all implementation verticals unadmitted until that review returns.
 
 ### Review adjudication
 
@@ -677,7 +693,7 @@ No primary-host Chat On Steroids install; no Workbench app publication; no arbit
 
 ### Mastermind
 
-- Action-time protected source and Skillpack basis for V7: `mastermindx-market-intelligence/Mastermind@03eaa8e9aa32fdc949551ad0f88a890d269daea4`; PR #511 and PR #529 are consumed only at the proof ceilings stated above.
+- Action-time protected source and Skillpack basis for V8: `mastermindx-market-intelligence/Mastermind@185dc742dac94d39bcbca81d20d89963ed36f744`; PR #511 and PR #529 are consumed only at the proof ceilings stated above.
 - Historical protected source/Skillpack basis for the 2026-09-06 continuation: `mastermindx-market-intelligence/Mastermind@8f3370e349ab8f1a54acac4c63697740f32715b1`.
 - Original and integration research in this PR.
 - `docs/CEO_BOOT_PACKET.md`.

@@ -565,7 +565,10 @@ No single green CI run, source merge, packaged binary, plugin import, tunnel hea
 
 ---
 
-## 10. Current collision and non-takeover boundary
+## 10. Standing collision and non-takeover boundary
+
+> This is a dated/historical interpretation. Current PR #490 continuation authority lives only in `research/CHATGPT_LONG_RUN_LEADER_CURRENT_STATE_SUPERSESSION_2026-09-06.md`.
+
 
 At this research window:
 
@@ -581,7 +584,10 @@ This ledger creates no receiver assignment, child START, watcher, review request
 
 ---
 
-## 11. Exact next action
+## 11. Historical selective-reuse recommendation
+
+> This is a dated/historical interpretation. Current PR #490 continuation authority lives only in `research/CHATGPT_LONG_RUN_LEADER_CURRENT_STATE_SUPERSESSION_2026-09-06.md`.
+
 
 The near-term product action remains unchanged:
 

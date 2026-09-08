@@ -85,11 +85,14 @@ That typings path is an environment-specific input, not a required Mastermind ho
 
 The archived result includes all 57 case IDs, all five unsatisfied suitability observations, environment details and claim exclusions. Reproduction yields a new timestamp and therefore a new raw result digest; compare behavioral fields separately. No third-party source is republished in Mastermind by this report.
 
-## Existing-owner continuation
+## Historical existing-owner continuation
+
+> This is a dated/historical interpretation. Current PR #490 continuation authority lives only in `research/CHATGPT_LONG_RUN_LEADER_CURRENT_STATE_SUPERSESSION_2026-09-06.md`.
+
 
 The exact reviewer of PR #490 should consider this executed evidence when adjudicating selective output-helper reuse. The existing provider/process and CodeIntel/tool-output owners should reuse the relevant cases only within their current bounded missions: complete serialized byte budget, Unicode-safe display composition, typed nontruncatable failure facts, and source-backed expansion of omitted content. No source worker, new facade, schema, queue, process store, generic evaluator, install or release is commissioned here.
 
-This settles only the selected output-helper experiment. The whole upstream build, native dependency realization, full suite, SBOM, read-only host containment, live ChatGPT tool journey, exact worker binding, material-return wake, context succession and production program acceptance remain open. The original 40-case research casebook and 24-task leader evaluation remain NOT_RUN by this experiment.
+This settles only the selected output-helper experiment. The whole upstream build, native dependency realization, full suite, SBOM, read-only host containment, live ChatGPT tool journey, exact worker binding, material-return wake, context succession and production program acceptance remain open. The historical original 40-case research casebook and 24-task leader evaluation remain NOT_RUN by this experiment.
 
 ## Executed harness
 
@@ -234,7 +237,7 @@ process.exitCode=summary.functional_failed?1:0;
   ],
   "measurement": "Measure bytes of fixed synthetic 1MiB output and bounded display; not tokens, GPU time, leader-quality uplift or real workload benchmark",
   "preregistered_thresholds": "Functional expected behaviors must hold; unsuitable compositional properties are recorded as limitations, never patched or silently excluded",
-  "non_goals": ["full upstream typecheck/build/test suite", "software bill of materials", "vulnerability or exploit reproduction", "native installation", "Mastermind integration", "40-case casebook completion", "24-task leader evaluation", "production acceptance"]
+  "non_goals": ["full upstream typecheck/build/test suite", "software bill of materials", "vulnerability or exploit reproduction", "native installation", "Mastermind integration", "current derived machine-readable case corpus completion", "24-task leader evaluation", "production acceptance"]
 }
 ```
 

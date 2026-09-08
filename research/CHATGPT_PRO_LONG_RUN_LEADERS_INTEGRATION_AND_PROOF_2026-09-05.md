@@ -51,7 +51,7 @@ Chat On Steroids remains analyzed at `dbff15b7296358102ee3e141f183e89a4a8d1e0e`.
 
 Macro Code Intelligence records were read at `03a971458f4d2977a29e12fdae16a2a35553d2bc`. OpenAI and MCP primary documentation was checked on September 5, 2026. Source/current-state observations are time-bounded; refresh them before any later effect.
 
-This is a source/document/design investigation. There was no repository checkout or local runtime test of Mastermind, Chat On Steroids, an MCP client, a browser, or a provider. Download attempts did not obtain a usable source checkout. The accompanying casebook contains **40 definitions marked NOT_RUN**. Checking that JSON document's structure is not executing those cases.
+This is a source/document/design investigation. There was no repository checkout or local runtime test of Mastermind, Chat On Steroids, an MCP client, a browser, or a provider. Download attempts did not obtain a usable source checkout. The accompanying casebook contains **current derived machine-readable case definitions marked NOT_RUN**. Checking that JSON document's structure is not executing those cases.
 
 ## 3. Concrete integration map: reuse the actual owners
 
@@ -234,7 +234,10 @@ Directly measure tool calls, discovery calls, response bytes, duplicate retrieva
 
 Do not increase concurrency just because daily message allowance remains. Capacity, provider concurrency, local CPU/memory, actual tool availability, branch ownership and review bandwidth all constrain useful throughput. Under an illustrative limit of six simultaneous turns and 30-minute average occupancy, at most 288 turns fit into a day before other losses; this is arithmetic under an assumption, not a provider limit. The existing Capacity owner holds unknown/exhausted capacity rather than silently moving a started operation between accounts.
 
-## 11. Forty discriminating acceptance definitions
+## 11. Historical original forty discriminating acceptance definitions
+
+> This is a dated/historical interpretation. Current PR #490 continuation authority lives only in `research/CHATGPT_LONG_RUN_LEADER_CURRENT_STATE_SUPERSESSION_2026-09-06.md`.
+
 
 The companion `CHATGPT_PRO_LONG_RUN_LEADERS_PROOF_CASEBOOK_2026-09-05.json` contains five cases in each family below. Every case names its existing owner, stimulus, required outcome, evidence and non-goal. All are **NOT_RUN**. It is research data, not an executable test suite, runtime schema, task queue, new workstream, commission or production authorization.
 
@@ -249,9 +252,12 @@ The companion `CHATGPT_PRO_LONG_RUN_LEADERS_PROOF_CASEBOOK_2026-09-05.json` cont
 | Protocol | PROTO-01..05 | absent task support; old/new task versions; reconnect under one owner; OAuth refresh; public-edge negative tests |
 | Evaluation | EVAL-01..05 | expected failures; honest elapsed-time accounting; exhausted capacity; paired comparison; disconnected product consumer |
 
-The casebook deliberately reuses #495 for the already-owned JSON repair, the protected grouped-v2 Secretary contract for company reads, BSC S1/U1 for edge/auth proof, and existing Web-Sol/RuntimeBinding/Dialogue owners for continuation. It does not demand one PR implementing all forty cases.
+The casebook deliberately reuses #495 for the already-owned JSON repair, the protected grouped-v2 Secretary contract for company reads, BSC S1/U1 for edge/auth proof, and existing Web-Sol/RuntimeBinding/Dialogue owners for continuation. It does not demand one PR implementing all cases in the current derived machine-readable corpus.
 
-## 12. Bounded next-work packets, not new assignments
+## 12. Historical bounded-work packets, not current assignments
+
+> This is a dated/historical interpretation. Current PR #490 continuation authority lives only in `research/CHATGPT_LONG_RUN_LEADER_CURRENT_STATE_SUPERSESSION_2026-09-06.md`.
+
 
 ### Packet A: complete the existing Business read vertical
 
@@ -295,9 +301,12 @@ The casebook deliberately reuses #495 for the already-owned JSON repair, the pro
 
 These packets are planning inputs for existing owners, not worker-facing commissions. They carry no receiver assignment, START, watcher, admission, source-write lease, release or production permission. Their implementation must include the actual current heads, path census, runtime/effect gates and exact receiver binding that cannot be truthfully invented in research.
 
-## 13. What this continuation changes
+## 13. What the dated research continuation changed
 
-The original research supplied a broad direction. This annex supplies exact source/contract owners, reconciles obsolete carrier and transport assumptions, identifies an unproven all-path fencing gap, distinguishes current protocol support from wake capability, proposes measured improvements to the existing plugin skills, and defines forty falsifiable proof cases.
+> This is a dated/historical interpretation. Current PR #490 continuation authority lives only in `research/CHATGPT_LONG_RUN_LEADER_CURRENT_STATE_SUPERSESSION_2026-09-06.md`.
+
+
+The original research supplied a broad direction. This annex supplies exact source/contract owners, reconciles obsolete carrier and transport assumptions, identifies an unproven all-path fencing gap, distinguishes current protocol support from wake capability, proposes measured improvements to the existing plugin skills, and preserves the historical original forty falsifiable proof cases.
 
 Runtime remains unchanged. No app was installed, no permission widened or revoked, no existing worker redirected, no account/session/host mutated, no source candidate released, and no production test executed. This research must stay Draft/Hold until reviewed; it is not an implementation freeze. Any selective Linear comment links evidence only and must not mark these unexecuted capabilities Done.
 

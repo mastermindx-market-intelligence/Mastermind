@@ -1,13 +1,24 @@
 # ChatGPT long-run leader — current-state supersession register
 
-**Repair marker:** `PR490-V7-CURRENT-PROTECTED-COHERENCE-REPAIR-20260908`
+## Binding Decision-First current-protected supersession — 2026-09-08
+
+**Marker:** `PR490_DECISION_FIRST_CURRENT_PROTECTED_SUPERSESSION_20260908`
+**Protected authority consumed:** Mastermind PR #521, protected in `185dc742dac94d39bcbca81d20d89963ed36f744`.
+**Capability ceiling:** `SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT`.
+
+Decision-First **Today** is the sparse default Chairman experience: coverage-qualified act/no-act, admitted decisions and attention, Sol accountability, material exceptions, and evidence drill-down. Lifecycle, worker, provider, Workbench, evidence, permission, binding, source, and diagnostic machinery belongs under explicit **Advanced** progressive disclosure. **Linear** remains the human portfolio/project projection rather than being duplicated by this product. **Ask Sol** remains `HIDDEN_UNTIL_GROUNDED`; model explanation cannot manufacture current company truth or authority. Missing admission coverage is `NOT_CLEAR`, never an empty or healthy zero. Owner-specific Workbench canaries are `ENABLING_INFRASTRUCTURE_NOT_CHAIRMAN_PRODUCT_COMPLETION`; source, CI, merge, install, rendering, production proof, and Chairman acceptance remain distinct.
+
+This clause changes no route, UI, reducer, source reader, cache, lifecycle, provider session, permission, action, Linear object, installation, deployment, or production state. It preserves the governed long-run-leader thesis while making the Chairman outcome—not machinery—the default product ruler.
+
+**Repair marker:** `PR490-R4-COHERENCE-REPAIR-20260908`
 **Corrected through:** 2026-09-08
 **Parent operation:** `chatgpt-pro-long-run-leaders-research-20260905-sol-001`  
 **Carrier:** Mastermind Draft PR #490, branch `sol/chatgpt-pro-long-run-leaders-research-20260905`
-**Action-time protected master:** `03eaa8e9aa32fdc949551ad0f88a890d269daea4`; current-base compatibility is a separate immutable merge-tree/check receipt, not an ancestry-only source commit
+**Action-time protected master:** `185dc742dac94d39bcbca81d20d89963ed36f744`; current-base compatibility is a separate immutable merge-tree/check receipt, not an ancestry-only source commit
 **Original reviewed PR head:** `65f178f0b21d0976d9dde6c765197a6f68b72d61`
 **Authority:** `RECORDS_ONLY / CURRENT_STATE_CORRECTION / NO_RUNTIME_INSTALL_DISPATCH_RELEASE_OR_LINEAR_AUTHORITY`
 **Capability state:** `SPEC_ONLY / SOURCE_REPAIR_CANDIDATE / FRESH_FULL_REVIEW_REQUIRED`
+**Current continuation authority:** `CURRENT_PR490_CONTINUATION_AUTHORITY` — this file is the sole current PR #490 sequence owner; all other action sections are dated or historical.
 
 ## Precedence and correction law
 
@@ -58,6 +69,7 @@ Source Continuity is read-only verification around the incumbent writer. It is n
 | PR #491 | runtime delayed Wake/continuity | `OPEN / DRAFT / HOLD / END_TO_END_NOT_PROVEN` | External owner; consume at its proof ceiling and do not transfer ownership. |
 | PR #514 | Web-Sol census read admission | `SOURCE_PROTECTED / BUILT_NOT_PROVEN / NOT_INSTALLED` | External owner; consume at its proof ceiling and do not transfer ownership. |
 | PR #520 | Web-Sol popup snapshot truth and unknown inventory | `SOURCE_PROTECTED / BUILT_NOT_PROVEN / NOT_INSTALLED` | External owner; consume at its proof ceiling and do not transfer ownership. |
+| PR #521 | Decision-First Chairman experience architecture | `SOURCE_PROTECTED / SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT` | Binding product hierarchy only: Today default, Advanced machinery, Linear projection, Ask Sol grounded-only, and no false CLEAR; no implementation authority. |
 | PR #511 | profile-scoped native CENSUS research and implementation freeze | `SOURCE_PROTECTED / SPEC_ONLY / RESEARCH_EXECUTED / PRODUCTION_INERT` | Read-only profile census only; no conversation, RuntimeBinding, account/session, installation, or production authority. |
 | PR #529 | authenticated selected-project Workbench read composition proof | `SOURCE_PROTECTED / BUILT_NOT_PROVEN / FULL_HERMETIC_COMPOSITION_PRIVATE_OUTPUT_GUARD / NOT_INSTALLED` | Exact read-composition evidence only; no exact-conversation, general mutation/shell/process, service, installation, or production authority. |
 | PR #471 | provider-neutral Executive worker execution contract | `SOURCE_PROTECTED / BUILT_NOT_PROVEN / PRODUCTION_INERT` | `BOUNDED_WORKER` values only; provider homes/credentials stay adapter-private; no attended or RuntimeBinding capability. |
@@ -70,7 +82,8 @@ PR #529 protects the full hermetic authenticated selected-project descriptor/obs
 
 ## Review and proposal lineage
 
-- Full review `5126193148` remains the five-finding B1-B5 blocker until a fresh full exact-head review accepts coherent source.
+- Full review `5126193148` remains historical five-finding changes-requested evidence; its closed findings stay part of the audit lineage rather than being erased.
+- Exact-head review `5139161819` is the controlling R3 changes-requested evidence: self-reference is closed and the four R4 coherence findings remain blocked until this successor candidate receives a fresh full exact-head review.
 - Direct-access review `5126501266` remains blocking for attended mode, owner-issued target selection, real command prepare/start/reconcile, independent process cursors, and live-worktree/search freshness.
 - Comment `5566682171` remains `PROPOSED_UNADOPTED` at its historical epoch. Accepted semantics are independently re-expressed in this candidate source; the comment itself never became authority, runtime schema, or review acceptance.
 - The prior statement that the old blob had already repaired B1-B3 is withdrawn. The old reviewed head `65f178f0b21d0976d9dde6c765197a6f68b72d61` remains changes-requested evidence.
@@ -89,7 +102,7 @@ PR #529 protects the full hermetic authenticated selected-project descriptor/obs
 | Provider-neutral worker contract | `BUILT_NOT_PROVEN / PRODUCTION_INERT` via protected PR #471 | Immutable common worker values with provider home/configuration removed from the supervisor contract. | No provider launch, install, production proof, RuntimeBinding, or attended-mode implementation follows. |
 | Host file/short command | epoch-bounded as above | Bounded attended and unmanaged observations. | Managed state, first-party seam, safe drain, durable receipt, security proof. |
 | 24-task evaluation | `TEMPLATE_ONLY / NOT_PREREGISTERED / NOT_RUN` | Task-bank structure only. | Separate immutable preregistration, admission, execution, grading, statistics. |
-| Eleven repair discriminators | `NOT_RUN_CONTRACT_REQUIREMENT` | Contract and casebook definitions, including profile/tool and attended-context separation. | Owner-native implementation and proof after architecture acceptance. |
+| Derived machine-readable proof corpus | `NOT_RUN_CONTRACT_REQUIREMENT` | The machine case array is the sole count source and includes effect, direct-access, provider-native, profile-separation, and Decision-First discriminators. | Owner-native implementation and proof only after architecture acceptance and separate admission. |
 | Full product completion | `NOT_BUILT / NOT_PROVEN` | No complete premium workflow or production learning loop follows from this repair. | Truth, intelligence, product, and learning proof through real users/machines. |
 
 ## Post-acceptance vertical sequence — no implementation admission
@@ -105,4 +118,13 @@ Each vertical needs its own current admission, owner, one carrier, implementatio
 
 ## Exact continuation and stop condition
 
-Complete only this same-carrier source repair, deterministic checks, current-base/path verification, immutable push, and fresh full non-author review request. Keep PR #490 Draft/Hold. Stop before implementation, installation, host cutover, Linear mutation, provider execution, or merge. After review, Sol must explicitly accept/repair/stop against the exact reviewed head; silence is not acceptance.
+The sole current sequence is:
+
+1. `SOURCE_REPAIR` — finish this bounded 19-path records repair on the existing PR/branch/carrier.
+2. `TERMINAL_CHECKS` — establish deterministic, hostile-mutation, legacy, JSON, scope, and natural hosted-check evidence for the immutable candidate.
+3. `FULL_NON_AUTHOR_EXACT_HEAD_REVIEW` — one distinct authenticated reviewer assesses the complete exact head/tree/path set against the Chairman outcome and no-rebuild law.
+4. `SOL_ADJUDICATION` — Sol explicitly accepts, requests repair, or holds the records-only candidate; silence is not acceptance.
+5. `SEPARATELY_AUTHORIZED_RECORDS_RELEASE` — only an authorized release owner may perform current-base expected-head protection after acceptance.
+6. `SEPARATELY_ADMITTED_OWNER_VERTICAL` — only after records protection may one useful owner-specific implementation vertical receive a new complete handoff and START.
+
+Keep PR #490 Draft/Hold. Stop before implementation, installation, host cutover, Linear mutation, provider execution, merge, or production claim.

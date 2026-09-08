@@ -1,11 +1,21 @@
 # Chairman Decision Memo — ChatGPT Web as a Long-Run Mastermind Leader
 
+## Binding Decision-First current-protected supersession — 2026-09-08
+
+**Marker:** `PR490_DECISION_FIRST_CURRENT_PROTECTED_SUPERSESSION_20260908`
+**Protected authority consumed:** Mastermind PR #521, protected in `185dc742dac94d39bcbca81d20d89963ed36f744`.
+**Capability ceiling:** `SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT`.
+
+Decision-First **Today** is the sparse default Chairman experience: coverage-qualified act/no-act, admitted decisions and attention, Sol accountability, material exceptions, and evidence drill-down. Lifecycle, worker, provider, Workbench, evidence, permission, binding, source, and diagnostic machinery belongs under explicit **Advanced** progressive disclosure. **Linear** remains the human portfolio/project projection rather than being duplicated by this product. **Ask Sol** remains `HIDDEN_UNTIL_GROUNDED`; model explanation cannot manufacture current company truth or authority. Missing admission coverage is `NOT_CLEAR`, never an empty or healthy zero. Owner-specific Workbench canaries are `ENABLING_INFRASTRUCTURE_NOT_CHAIRMAN_PRODUCT_COMPLETION`; source, CI, merge, install, rendering, production proof, and Chairman acceptance remain distinct.
+
+This clause changes no route, UI, reducer, source reader, cache, lifecycle, provider session, permission, action, Linear object, installation, deployment, or production state. It preserves the governed long-run-leader thesis while making the Chairman outcome—not machinery—the default product ruler.
+
 ## Binding 2026-09-08 architecture amendment
 
-**Marker:** `PR490-V7-CURRENT-PROTECTED-COHERENCE-REPAIR-20260908`
+**Marker:** `PR490-R4-COHERENCE-REPAIR-20260908`
 **Precedence:** this section controls whenever older effect, source-selection, current-state, owner, or next-action language conflicts. The original thesis and dated evidence remain preserved.
 
-Current contract candidate version: 7. Its machine-readable generation is `PR490_REPAIR_CANDIDATE_V7_CURRENT_PROTECTED_PROFILE_GATED_MODE_COHERENT_SOURCE_ONLY`; every earlier revision-number statement below is dated history, not current contract truth.
+Current contract candidate version: 8. Its machine-readable generation is `PR490_REPAIR_CANDIDATE_V8_CURRENT_PROTECTED_PROFILE_GATED_MODE_COHERENT_DERIVED_CORPUS_PROVIDER_TRANSLATION_DECISION_FIRST_SOURCE_ONLY`; every earlier revision-number statement below is dated history, not current contract truth.
 
 ### Decision
 
@@ -19,7 +29,7 @@ Executive supervisor requires a real Job/Attempt and therefore belongs to `BOUND
 
 Remote Desktop Commander issue #507 retains its own host-transport carrier, operation, safe-drain boundary, and managed/unmanaged truth. Source Continuity is read-only verification around the incumbent source writer. Neither becomes PR #490's process owner or writer.
 
-Action-time protected grounding is `03eaa8e9aa32fdc949551ad0f88a890d269daea4`; current-base compatibility remains a separate immutable integration receipt, not an ancestry-only source update.
+Action-time protected grounding is `185dc742dac94d39bcbca81d20d89963ed36f744`; current-base compatibility remains a separate immutable integration receipt, not an ancestry-only source update.
 
 `Linear: NONE` applies to PR #490. MAS-198 is externally owned Web-Sol extension/native-bridge work and is not owned or gated here. This repair remains research-only `SPEC_ONLY`, Draft/Hold, and implementation-inert pending fresh full non-author exact-head review.
 
@@ -156,7 +166,10 @@ Use the current protected Pro-mode exception law. High-value uses include cross-
 
 Optimize accepted capabilities per scarce reasoning turn, recovery quality, intervention rate, duplicate/unknown effects and real consumer completion—not elapsed turn duration or a raw zero-error metric.
 
-## Current parallel release lanes
+## Dated parallel release lanes at the 2026-09-08 amendment
+
+> This is a dated/historical interpretation. Current PR #490 continuation authority lives only in `research/CHATGPT_LONG_RUN_LEADER_CURRENT_STATE_SUPERSESSION_2026-09-06.md`.
+
 
 ### Lane A — `WEB_CEO_FILE_SHELL_FS0` (Chairman-selected quickest useful slice)
 
@@ -227,4 +240,4 @@ At its 2026-09-06 observation epoch, this section superseded older “current,�
 
 Chairman direction determines product priority. It does **not** by itself merge PR #490, accept its architecture, install third-party software, publish an app, create an Executive operation, assign a worker, widen a runtime schema, change account permissions, mutate a browser profile, deploy a service or prove production.
 
-**Exact next action:** the already-existing Personal-MCP Cockpit/Integration owner consumes immutable receipt `5559023488` and stops treating baseline attended Web-to-Mac file/write/shell availability as absent for this seat. It reconciles the existing DM carrier and any proposed child/effect, reuses the functioning Remote Desktop Commander connection for expressly authorized attended work, and originates at most one gap-only continuation if remaining FS0 security/integration/product proof requires implementation. It must not duplicate the backend, tunnel, queue, permission store, lifecycle or source carrier. In parallel, existing Steward/Integration owners continue the independently gated one-cockpit read path. PR #490 remains Draft/Hold until refreshed current-head records receive independent architecture review.
+**Historical action interpretation at this amendment:** the already-existing Personal-MCP Cockpit/Integration owner consumes immutable receipt `5559023488` and stops treating baseline attended Web-to-Mac file/write/shell availability as absent for this seat. It reconciles the existing DM carrier and any proposed child/effect, reuses the functioning Remote Desktop Commander connection for expressly authorized attended work, and originates at most one gap-only continuation if remaining FS0 security/integration/product proof requires implementation. It must not duplicate the backend, tunnel, queue, permission store, lifecycle or source carrier. In parallel, existing Steward/Integration owners continue the independently gated one-cockpit read path. PR #490 remains Draft/Hold until refreshed current-head records receive independent architecture review.
