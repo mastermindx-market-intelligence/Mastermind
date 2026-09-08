@@ -13,16 +13,25 @@
   // never releases a still-pending read. Closing the view drops this local count.
   const pendingReads = new WeakMap();
   const NO_SLOT = Symbol("no-read-slot");
-  function readBrowser(tabs, call) {
+  const EXPIRED = Symbol("expired-read");
+  function readBrowser(tabs, call, deadline, observation) {
+    if (monotonic() >= deadline) return EXPIRED;
     const pending = pendingReads.get(tabs) || 0;
     if (pending >= CONCURRENCY) return NO_SLOT;
     pendingReads.set(tabs, pending + 1);
-    return Promise.resolve().then(call).finally(() => {
+    let acquired = false;
+    return Promise.resolve().then(() => {
+      if (monotonic() >= deadline) return EXPIRED;
+      acquired = true;
+      if (observation) observation.pending++;
+      return call();
+    }).finally(() => {
+      if (acquired && observation) observation.pending--;
       pendingReads.set(tabs, Math.max(0, (pendingReads.get(tabs) || 0) - 1));
     });
   }
-  function readProbe(tabs, id, request) {
-    return readBrowser(tabs, () => tabs.sendMessage(id, request, {frameId: 0}));
+  function readProbe(tabs, id, request, deadline, observation) {
+    return readBrowser(tabs, () => tabs.sendMessage(id, request, {frameId: 0}), deadline, observation);
   }
   const PATTERNS = Object.freeze(["https://chatgpt.com/*", "https://chat.openai.com/*"]);
   const HEX = /^[0-9a-f]{64}$/;
@@ -60,7 +69,8 @@
     return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, "0")).join("");
   }
   // Late results are discarded; this function neither retries nor cancels a browser action.
-  function bounded(call, ms) {
+  function bounded(call, deadline) {
+    const ms = deadline - monotonic();
     if (ms <= 0) return Promise.resolve({ok: false, timeout: true});
     return new Promise(resolve => {
       let settled = false;
@@ -69,8 +79,9 @@
         settled = true; clearTimeout(timer); resolve(value);
       };
       const timer = setTimeout(() => finish({ok: false, timeout: true}), ms);
-      Promise.resolve().then(call).then(
-        value => finish({ok: true, value}),
+      Promise.resolve().then(() => monotonic() >= deadline ? EXPIRED : call()).then(
+        value => finish(value === EXPIRED || monotonic() >= deadline
+          ? {ok: false, timeout: true} : {ok: true, value}),
         () => finish({ok: false, timeout: false}),
       );
     });
@@ -111,9 +122,9 @@
     if (t.status !== "complete") return "LOADING";
     return null;
   }
-  async function observe(t, slot, tabs, deadline, duplicatedId) {
+  async function observe(t, slot, tabs, deadline, duplicatedId, observation) {
     const row = blankRow(t, slot);
-    const call = fn => bounded(fn, Math.min(CALL_MS, deadline - monotonic()));
+    const call = fn => bounded(fn, Math.min(deadline, monotonic() + CALL_MS));
     if (!validTab(t) || duplicatedId) { row.status = "INVALID_TAB"; return row; }
     const initial = locator(t.url);
     if (!initial) { row.status = "OUT_OF_SCOPE"; return row; }
@@ -123,7 +134,7 @@
     row.conversation_fingerprint = digest.value; row.identity_evidence = "BROWSER_LOCATOR";
     const asleep = sleepState(t);
     if (asleep) { row.status = asleep; return row; }
-    const before = await call(() => readBrowser(tabs, () => tabs.get(t.id)));
+    const before = await call(() => readBrowser(tabs, () => tabs.get(t.id), deadline, observation));
     if (!before.ok) { row.status = before.timeout ? "SWEEP_DEADLINE" : "LOOKUP_UNAVAILABLE"; return row; }
     if (before.value === NO_SLOT) { row.status = "PROBE_SLOTS_EXHAUSTED"; return row; }
     if (!sameLocator(t, before.value)) { row.status = "TARGET_CHANGED"; return row; }
@@ -131,7 +142,7 @@
     if (nowAsleep) { row.status = nowAsleep; return row; }
     const reply = await call(() => readProbe(tabs, t.id, {
       kind: "MMX_WEB_SOL_REPROBE", expected_conversation_fingerprint: digest.value,
-    }));
+    }, deadline, observation));
     if (!reply.ok) { row.status = reply.timeout ? "PROBE_TIMEOUT" : "PROBE_UNAVAILABLE"; return row; }
     if (reply.value === NO_SLOT) { row.status = "PROBE_SLOTS_EXHAUSTED"; return row; }
     if (!validProbe(reply.value)) { row.status = "INVALID_PROBE"; return row; }
@@ -140,7 +151,7 @@
       row.status = "TARGET_CHANGED"; return row;
     }
     if (!o.page_responsive || o.document_ready_state !== "complete") { row.status = "LOADING"; return row; }
-    const after = await call(() => readBrowser(tabs, () => tabs.get(t.id)));
+    const after = await call(() => readBrowser(tabs, () => tabs.get(t.id), deadline, observation));
     if (!after.ok) { row.status = after.timeout ? "SWEEP_DEADLINE" : "LOOKUP_UNAVAILABLE"; return row; }
     if (after.value === NO_SLOT) { row.status = "PROBE_SLOTS_EXHAUSTED"; return row; }
     if (!sameLocator(before.value, after.value) || sleepState(after.value)) { row.status = "TARGET_CHANGED"; return row; }
@@ -195,8 +206,14 @@
       out.probed_tab_count === out.initial_tab_count ? "COMPLETE_IN_SCOPE" : "PARTIAL";
     return out;
   }
-  async function collect(tabs, instanceId) {
+  async function collect(tabs, instanceId, outerDeadline) {
     const start = monotonic();
+    // One absolute deadline: omitted means the historical popup maximum. Invalid
+    // inputs fail closed, and a short caller budget is never renewed by a stage.
+    const deadline = outerDeadline === undefined ? start + SWEEP_MS :
+      typeof outerDeadline === "number" && Number.isFinite(outerDeadline)
+        ? Math.min(start + SWEEP_MS, outerDeadline) : start;
+    const observationDeadline = deadline - Math.min(CALL_MS, Math.max(0, deadline - start) / 5);
     const out = {
       schema: SCHEMA, scope: "CURRENT_PROFILE_NORMAL_CHATGPT_TABS",
       adapter_instance_id: typeof instanceId === "string" && HEX.test(instanceId) ? instanceId : null,
@@ -210,9 +227,11 @@
       return summarize(out);
     };
     if (!out.adapter_instance_id) { out.reason = "ADAPTER_UNCONFIGURED"; return finish(); }
-    if (!tabs || !["query", "get", "sendMessage"].every(k => typeof tabs[k] === "function")) return finish();
+    if (!tabs || !["query", "get", "sendMessage"].every(k => typeof tabs[k] === "function") ||
+        monotonic() >= deadline) return finish();
     try {
-      const first = await bounded(() => readBrowser(tabs, () => tabs.query({url: PATTERNS.slice()})), CALL_MS);
+      const first = await bounded(() => readBrowser(tabs, () => tabs.query({url: PATTERNS.slice()}), deadline),
+        Math.min(deadline, monotonic() + CALL_MS));
       if (!first.ok || first.value === NO_SLOT) return finish();
       if (!Array.isArray(first.value)) { out.reason = "INVALID_INVENTORY"; return finish(); }
       if (first.value.length > MAX_INVENTORY) {
@@ -228,24 +247,26 @@
       const sampled = initial.normal.slice(0, MAX_TABS);
       out.rows = sampled.map((t, i) => blankRow(t, i + 1));
       let next = 0;
-      let retired = 0;
       async function worker() {
         while (next < sampled.length) {
           const i = next++;
-          if (monotonic() >= start + SWEEP_MS - CALL_MS) continue;
-          try { out.rows[i] = await observe(sampled[i], i + 1, tabs, start + SWEEP_MS - CALL_MS,
-            validTab(sampled[i]) && initial.ids.get(sampled[i].id) !== 1); }
+          if (monotonic() >= observationDeadline) continue;
+          const observation = {pending: 0};
+          try { out.rows[i] = await observe(sampled[i], i + 1, tabs, observationDeadline,
+            validTab(sampled[i]) && initial.ids.get(sampled[i].id) !== 1, observation); }
           catch (_) { out.rows[i].status = "INVALID_PROBE"; }
-          // A timeout cannot cancel Chrome's pending read. Retire this slot, so
-          // unresolved requests plus active slots never exceed CONCURRENCY.
-          if (["PROBE_TIMEOUT", "SWEEP_DEADLINE", "PROBE_SLOTS_EXHAUSTED"].includes(out.rows[i].status)) { retired++; return; }
+          // Retire only an actually acquired, unresolved Chrome promise. Local
+          // hashing deadlines and refused/deferred calls hold no browser slot.
+          if (observation.pending > 0) return;
         }
       }
       await Promise.all(Array.from({length: Math.min(CONCURRENCY, sampled.length)}, worker));
-      if (retired && monotonic() < start + SWEEP_MS - CALL_MS) {
-        for (const row of out.rows) if (row.status === "SWEEP_DEADLINE") row.status = "PROBE_SLOTS_EXHAUSTED";
+      if ((pendingReads.get(tabs) || 0) >= CONCURRENCY && monotonic() < observationDeadline) {
+        // Only unvisited rows lacked capacity; keep each processed row's cause.
+        for (let i = next; i < out.rows.length; i++) out.rows[i].status = "PROBE_SLOTS_EXHAUSTED";
       }
-      const last = await bounded(() => readBrowser(tabs, () => tabs.query({url: PATTERNS.slice()})), Math.min(CALL_MS, start + SWEEP_MS - monotonic()));
+      const last = await bounded(() => readBrowser(tabs, () => tabs.query({url: PATTERNS.slice()}), deadline),
+        Math.min(deadline, monotonic() + CALL_MS));
       if (!last.ok || !Array.isArray(last.value) || last.value.length > MAX_INVENTORY) {
         out.inventory_coverage = "PARTIAL";
         if (out.reason === "NONE") out.reason = "FINAL_QUERY_UNAVAILABLE";
