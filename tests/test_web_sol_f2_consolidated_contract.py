@@ -243,17 +243,34 @@ def test_chat_openai_and_chatgpt_aliases_share_one_exact_conversation_identity()
 CONTENT_HARNESS = r"""
 const fs = require("node:fs");
 const vm = require("node:vm");
-const { webcrypto } = require("node:crypto");
+const { webcrypto, pbkdf2 } = require("node:crypto");
 
 const source = fs.readFileSync(process.argv[1], "utf8");
 const host = process.argv[2];
-let sent = null;
+const mode = process.argv[3];
+const saturate = mode === "saturate";
+const delayProbe = mode === "delayed";
+const dropProbe = mode === "missing";
+if (saturate) {
+  for (let index = 0; index < 4; index += 1) {
+    pbkdf2("a", "b", 200000, 32, "sha256", () => {});
+  }
+}
+let resolveProbe;
+const probeReceived = new Promise((resolve) => {
+  resolveProbe = resolve;
+});
 const context = {
   chrome: {
     runtime: {
       onMessage: { addListener() {} },
       sendMessage(value) {
-        sent = value;
+        if (dropProbe) return Promise.resolve();
+        if (delayProbe) {
+          setTimeout(() => resolveProbe(value), 100);
+        } else {
+          resolveProbe(value);
+        }
         return Promise.resolve();
       },
     },
@@ -280,13 +297,22 @@ vm.createContext(context);
 vm.runInContext(source, context, {filename: "content.js"});
 
 (async () => {
-  for (let index = 0; index < 20 && sent === null; index += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 1));
+  let probeTimeout;
+  try {
+    const probeDeadline = new Promise((_, reject) => {
+      probeTimeout = setTimeout(
+        () => reject(new Error("probe fingerprint not emitted")),
+        5000,
+      );
+    });
+    const observed = await Promise.race([probeReceived, probeDeadline]);
+    if (!observed || typeof observed.conversation_fingerprint !== "string") {
+      throw new Error("probe fingerprint not emitted");
+    }
+    process.stdout.write(observed.conversation_fingerprint);
+  } finally {
+    clearTimeout(probeTimeout);
   }
-  if (!sent || typeof sent.conversation_fingerprint !== "string") {
-    throw new Error("probe fingerprint not emitted");
-  }
-  process.stdout.write(sent.conversation_fingerprint);
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;
@@ -294,11 +320,18 @@ vm.runInContext(source, context, {filename: "content.js"});
 """
 
 
-def _content_fingerprint(host: str) -> str:
+def _content_fingerprint(host: str, *, saturate_crypto: bool = False) -> str:
     node = shutil.which("node")
     assert node is not None, "Node is required for cross-language identity proof"
     completed = subprocess.run(
-        [node, "-e", CONTENT_HARNESS, str(CONTENT), host],
+        [
+            node,
+            "-e",
+            CONTENT_HARNESS,
+            str(CONTENT),
+            host,
+            "saturate" if saturate_crypto else "normal",
+        ],
         capture_output=True,
         text=True,
         timeout=20,
@@ -312,6 +345,12 @@ def test_content_script_alias_canonicalization_matches_python_exactly():
     python_value = client.conversation_fingerprint(binding(host="chatgpt.com"))
     assert _content_fingerprint("chatgpt.com") == python_value
     assert _content_fingerprint("chat.openai.com") == python_value
+
+
+@pytest.mark.parametrize("host", ["chatgpt.com", "chat.openai.com"])
+def test_content_script_probe_waits_for_crypto_completion_under_saturation(host):
+    python_value = client.conversation_fingerprint(binding(host="chatgpt.com"))
+    assert _content_fingerprint(host, saturate_crypto=True) == python_value
 
 
 @pytest.mark.parametrize("mode", ["malformed", "wrong_nonce", "wrong_action"])
@@ -583,3 +622,131 @@ def test_every_post_actuation_foreground_failure_is_effect_unknown_without_repla
 ):
     completed = _run_background_scenario(scenario)
     assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+def test_successful_content_harness_process_settles_without_losing_timeout():
+    node = shutil.which("node")
+    assert node is not None, "Node is required for process-settlement proof"
+    process = subprocess.Popen(
+        [node, "-e", CONTENT_HARNESS, str(CONTENT), "chatgpt.com", "normal"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=2)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        stdout, stderr = process.communicate(timeout=5)
+        pytest.fail(
+            "successful content harness remained alive behind losing probe timeout",
+            pytrace=False,
+        )
+    assert process.returncode == 0, stdout + stderr
+    assert stdout.strip() == client.conversation_fingerprint(binding(host="chatgpt.com"))
+    assert stderr == ""
+
+
+
+def _start_content_harness_process(
+    mode: str,
+    *,
+    host: str = "chatgpt.com",
+    harness: str = CONTENT_HARNESS,
+) -> subprocess.Popen[str]:
+    node = shutil.which("node")
+    assert node is not None, "Node is required for process-lifecycle proof"
+    return subprocess.Popen(
+        [node, "-e", harness, str(CONTENT), host, mode],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+
+def _communicate_or_fail(
+    process: subprocess.Popen[str],
+    *,
+    timeout: float,
+    message: str,
+) -> tuple[str, str]:
+    try:
+        return process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        stdout, stderr = process.communicate(timeout=5)
+        pytest.fail(message + "\n" + stdout + stderr, pytrace=False)
+
+
+def _assert_content_harness_timer_source(source: str) -> None:
+    assert source.count("probeTimeout = setTimeout(") == 1
+    assert source.count("clearTimeout(probeTimeout);") == 1
+    assert source.count("        5000,") == 1
+    assert ".unref(" not in source
+    assert "setInterval(" not in source
+    assert "await new Promise((resolve) => setTimeout(resolve" not in source
+    assert "for (let attempt" not in source
+
+
+def test_delayed_content_probe_settles_before_failure_deadline():
+    process = _start_content_harness_process("delayed")
+    stdout, stderr = _communicate_or_fail(
+        process,
+        timeout=2,
+        message="delayed successful probe remained alive behind failure timeout",
+    )
+    assert process.returncode == 0, stdout + stderr
+    assert stdout.strip() == client.conversation_fingerprint(binding(host="chatgpt.com"))
+    assert stderr == ""
+
+
+def test_missing_content_probe_remains_alive_then_fails_at_full_deadline():
+    process = _start_content_harness_process("missing")
+    stdout = ""
+    stderr = ""
+    try:
+        with pytest.raises(subprocess.TimeoutExpired):
+            process.wait(timeout=1)
+        stdout, stderr = process.communicate(timeout=6)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            stdout, stderr = process.communicate(timeout=5)
+    assert process.returncode == 1, stdout + stderr
+    assert stdout == ""
+    assert stderr.startswith("Error: probe fingerprint not emitted\n")
+    assert stderr.count("probe fingerprint not emitted") == 1
+
+
+def test_content_harness_timer_source_is_event_driven_and_exact():
+    _assert_content_harness_timer_source(CONTENT_HARNESS)
+
+
+@pytest.mark.parametrize(
+    "mutant",
+    [
+        CONTENT_HARNESS.replace("    clearTimeout(probeTimeout);", ""),
+        CONTENT_HARNESS.replace(
+            "    clearTimeout(probeTimeout);",
+            "    probeTimeout.unref();",
+        ),
+        CONTENT_HARNESS.replace("        5000,", "        250,"),
+        CONTENT_HARNESS.replace(
+            "    const observed = await Promise.race([probeReceived, probeDeadline]);",
+            "    await new Promise((resolve) => setTimeout(resolve, 250));\n"
+            "    const observed = await Promise.race([probeReceived, probeDeadline]);",
+        ),
+        CONTENT_HARNESS.replace(
+            "    const observed = await Promise.race([probeReceived, probeDeadline]);",
+            "    for (let attempt = 0; attempt < 20; attempt += 1) {\n"
+            "      await new Promise((resolve) => setTimeout(resolve, 1));\n"
+            "    }\n"
+            "    const observed = await Promise.race([probeReceived, probeDeadline]);",
+        ),
+    ],
+    ids=["no-clear", "unref", "shortened", "sleep-inflation", "polling"],
+)
+def test_content_harness_timer_source_law_kills_forbidden_mutants(mutant: str):
+    assert mutant != CONTENT_HARNESS
+    with pytest.raises(AssertionError):
+        _assert_content_harness_timer_source(mutant)
