@@ -51,6 +51,7 @@ REQUIRED_RUNTIME_PATHS = frozenset({
     "control_plane/executive_agent_capabilities.py",
     "control_plane/executive_ambient_process.py",
     "control_plane/executive_authority.py",
+    "control_plane/executive_capability_packages.py",
     "control_plane/executive_coo_policy.py",
     "control_plane/executive_inbox.py",
     "control_plane/executive_orchestration_principal.py",
@@ -68,6 +69,7 @@ REQUIRED_RUNTIME_PATHS = frozenset({
     "control_plane/surface_bindings.py",
     "control_plane/worker_adapter.py",
     "control_plane/worker_browser_b1.py",
+    "control_plane/worker_execution_contract.py",
     "ops/control_room_remote/mastermind-control-room-remote.service",
     "scripts/__init__.py",
     "scripts/chairman_control_room_remote.py",
@@ -94,7 +96,7 @@ _PRIVATE_HOST_RE = re.compile(
     r"\b172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2}\b)"
 )
 _PATH_RE = re.compile(
-    r"/(?:Users|opt|home|var|private|etc|root|run|srv|tmp|usr)(?:/|$)"
+    r"/(?:Users|Volumes|opt|home|var|private|etc|root|run|srv|tmp|usr)(?:/|$)"
 )
 _SESSION_RE = re.compile(r"(?i)\b(?:provider[_ -]?session(?:[_ -]?id)?|session[_ -]?identity)\s*[:=]")
 
