@@ -177,3 +177,10 @@ def test_fixture_markup_cannot_execute_page_scripts(browser, tmp_path, monkeypat
         assert_geometry(measured, 1440)
     finally:
         context.close()
+
+
+def test_desktop_header_rules_stay_in_the_header_section():
+    """Header IDs must not enter the separately guarded autonomy palette region."""
+    styles = (ASSETS / "control_room.css").read_text()
+    position = styles.index("/* Desktop source clocks keep their intrinsic width.")
+    assert styles.index("/* topbar */") < position < styles.index("/* main layout */")
