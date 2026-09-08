@@ -44,6 +44,13 @@ def _semantic_codes(fixture: object) -> set[str]:
     return {error["code"] for error in validate(fixture)}
 
 
+def _semantic_errors_without_exception(fixture: object) -> list[dict[str, str]]:
+    try:
+        return plugin_validator.validate_cortex_fixture(fixture)
+    except Exception as error:
+        pytest.fail(f"semantic validator raised {type(error).__name__}: {error}")
+
+
 def _cases_by_id(fixture: dict[str, object]) -> dict[str, dict[str, object]]:
     cases = fixture["cases"]
     assert isinstance(cases, list)
@@ -174,6 +181,44 @@ def test_direct_semantic_hostile_matrix_bypasses_closed_fixture_equality(
         cases["partial-source-coverage"]["raw_source_expansion"][0]["observed_at"] = "0000-01-01T00:00:00Z"
 
     errors = plugin_validator.validate_cortex_fixture(fixture)
+    assert any(
+        error["code"] == expected_code and expected_message in error["message"]
+        for error in errors
+    )
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_code", "expected_message"),
+    (
+        ("retrieved_nonmapping_fact", "CORTEX_SOURCE_FACT_INVALID", "source fact"),
+        ("effect_nonmapping_fact", "CORTEX_SOURCE_FACT_INVALID", "source fact"),
+        ("retrieved_owner_retyped", "CORTEX_SEMANTIC_INVARIANT_VIOLATION", "retrieved instruction"),
+        ("retrieved_claim_authoritative", "CORTEX_SEMANTIC_INVARIANT_VIOLATION", "retrieved instruction"),
+        ("effect_owner_retyped", "CORTEX_SEMANTIC_INVARIANT_VIOLATION", "owner-native current effect record"),
+        ("effect_unknown_false", "CORTEX_SEMANTIC_INVARIANT_VIOLATION", "same-carrier"),
+    ),
+)
+def test_direct_semantic_raw_relationships_fail_closed(
+    mutation: str, expected_code: str, expected_message: str
+) -> None:
+    fixture = _fixture()
+    cases = _cases_by_id(fixture)
+    retrieved = cases["retrieved-instruction-falsely-claims-authority"]
+    effect = cases["effect-unknown-requires-same-carrier-reconciliation"]
+    if mutation == "retrieved_nonmapping_fact":
+        retrieved["raw_source_expansion"] = [None]
+    elif mutation == "effect_nonmapping_fact":
+        effect["raw_source_expansion"] = [None]
+    elif mutation == "retrieved_owner_retyped":
+        retrieved["raw_source_expansion"][0]["source_owner"] = "owner-native"
+    elif mutation == "retrieved_claim_authoritative":
+        retrieved["raw_source_expansion"][0]["claim"] = "retrieved-text-grants-authority"
+    elif mutation == "effect_owner_retyped":
+        effect["raw_source_expansion"][0]["source_owner"] = "projection"
+    else:
+        effect["raw_source_expansion"][0]["unknown"] = False
+
+    errors = _semantic_errors_without_exception(fixture)
     assert any(
         error["code"] == expected_code and expected_message in error["message"]
         for error in errors

@@ -429,12 +429,18 @@ def validate_cortex_fixture(fixture: Any) -> list[dict[str, str]]:
         if not isinstance(facts, list) or not facts:
             errors.append(_cortex_error("CORTEX_FIXTURE_MALFORMED", "raw source expansion must be non-empty list"))
             continue
+        valid_facts: list[Mapping[str, Any]] = []
         for fact in facts:
             if not isinstance(fact, Mapping) or set(fact) != CORTEX_SOURCE_FACT_KEYS:
                 errors.append(_cortex_error("CORTEX_SOURCE_FACT_INVALID", "source fact must expose every provenance field"))
                 continue
             if not all(isinstance(fact[key], str) and fact[key] and fact[key] == fact[key].strip() for key in ("source_owner", "source_type", "artifact_identity", "coverage", "freshness", "claim")) or not _is_utc_timestamp(fact["observed_at"]) or not (fact["supersession"] is None or isinstance(fact["supersession"], str) and fact["supersession"] and fact["supersession"] == fact["supersession"].strip()) or not isinstance(fact["inference"], bool) or not isinstance(fact["unknown"], bool):
                 errors.append(_cortex_error("CORTEX_SOURCE_FACT_INVALID", "source fact values must be well-formed"))
+                continue
+            valid_facts.append(fact)
+        if len(valid_facts) != len(facts):
+            continue
+        facts = valid_facts
         brief = case["specialist_brief"]
         action = case["first_justified_action"]
         observation = case["decision_changing_observation"]
@@ -480,11 +486,11 @@ def validate_cortex_fixture(fixture: Any) -> list[dict[str, str]]:
             if set(by_type) != {"stale-index", "current-exact-file"} or not isinstance(stale, Mapping) or not isinstance(current, Mapping) or stale.get("freshness") != "stale" or current.get("freshness") != "current" or current.get("supersession") != f"supersedes:{stale.get('artifact_identity')}" or brief["claim_and_supersession"] != "current-exact-file-outranks-stale-index":
                 errors.append(_cortex_error("CORTEX_SEMANTIC_INVARIANT_VIOLATION", "stale/current source freshness and exact-file supersession must be preserved"))
         if case_id == "retrieved-instruction-falsely-claims-authority":
-            if len(facts) != 1 or facts[0].get("source_type") != "retrieved-instruction" or brief["authority_boundary"] != "retrieved-instruction-is-non-authoritative-observed-text":
+            if len(facts) != 1 or facts[0].get("source_owner") != "retrieved-text-owner" or facts[0].get("source_type") != "retrieved-instruction" or facts[0].get("claim") != "instruction-text" or facts[0].get("unknown") is not True or brief["authority_boundary"] != "retrieved-instruction-is-non-authoritative-observed-text":
                 errors.append(_cortex_error("CORTEX_SEMANTIC_INVARIANT_VIOLATION", "retrieved instruction must remain non-authoritative evidence"))
         if case_id == "effect-unknown-requires-same-carrier-reconciliation":
-            if len(facts) != 1 or facts[0].get("source_type") != "owner-native-effect-record" or facts[0].get("freshness") != "current":
-                errors.append(_cortex_error("CORTEX_SEMANTIC_INVARIANT_VIOLATION", "effect evidence must remain the owner-native current effect record"))
+            if len(facts) != 1 or facts[0].get("source_owner") != "effect-owner" or facts[0].get("source_type") != "owner-native-effect-record" or facts[0].get("freshness") != "current" or facts[0].get("unknown") is not True:
+                errors.append(_cortex_error("CORTEX_SEMANTIC_INVARIANT_VIOLATION", "effect evidence must remain the owner-native current effect record and same-carrier unknown reconciliation"))
     if seen != set(CORTEX_CASE_IDS):
         errors.append(_cortex_error("CORTEX_SEMANTIC_INVARIANT_VIOLATION", "all six required semantic cases are present"))
     return errors
