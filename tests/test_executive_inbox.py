@@ -653,6 +653,30 @@ def runtime_items(inbox: dict) -> list[dict]:
     return [item for item in inbox["attention"] if item["source"] == "runtime"]
 
 
+def test_runtime_root_only_changes_the_runtime_projection(tmp_path, frozen_git):
+    """A supplied runtime root must not silently re-root Mastermind grounding."""
+
+    repo_root = tmp_path / "mastermind"
+    runtime_root = tmp_path / "temporary-runtime"
+    repo_root.mkdir()
+    runtime = Runtime.at(runtime_root)
+    runtime.jobs.create_job("runtime job", department="research", priority=1)
+
+    inbox = build_inbox(
+        repo_root=repo_root,
+        runtime_root=runtime_root,
+        boot_packet=packet(),
+        environ={},
+        now=_NOW,
+    )
+
+    assert inbox["grounding"]["mastermind"]["root"] == str(repo_root.resolve())
+    assert inbox["grounding"]["runtime_db"]["path"] == str(
+        runtime_root / DB_RELATIVE_PATH
+    )
+    assert inbox["runtime_counts"]["jobs"]["by_status"]["QUEUED"] == 1
+
+
 # ---------------------------------------------------------------------------
 # 1. zero runtime mutations
 # ---------------------------------------------------------------------------

@@ -14,13 +14,13 @@ from __future__ import annotations
 import dataclasses
 from typing import Protocol, Sequence, runtime_checkable
 
-from control_plane.codex_worker import (
+from control_plane.worker_execution_contract import (
     CancelReceipt,
     CollectionReceipt,
-    LaunchSpec,
     ProcessInspector,
-    ProcessRef,
     ValidationReceipt,
+    WorkerLaunchSpec,
+    WorkerProcessRef,
 )
 
 
@@ -64,15 +64,15 @@ class WorkerExecutionAdapter(Protocol):
 
     inspector: ProcessInspector
 
-    async def start(self, spec: LaunchSpec) -> ProcessRef: ...
+    async def start(self, spec: WorkerLaunchSpec) -> WorkerProcessRef: ...
 
-    async def collect_result(self, ref: ProcessRef) -> CollectionReceipt: ...
+    async def collect_result(self, ref: WorkerProcessRef) -> CollectionReceipt: ...
 
-    async def cancel(self, ref: ProcessRef, reason: str) -> CancelReceipt: ...
+    async def cancel(self, ref: WorkerProcessRef, reason: str) -> CancelReceipt: ...
 
     async def run_validation_argv(
         self,
-        spec: LaunchSpec,
+        spec: WorkerLaunchSpec,
         argv: Sequence[str],
         *,
         timeout_seconds: float = 300.0,

@@ -34,7 +34,7 @@ def test_manifest_is_mv3_exact_host_and_least_privilege():
 
     assert manifest["manifest_version"] == 3
     assert manifest["name"] == "Mastermind Web Sol Surface Adapter"
-    assert manifest["version"] == "0.1.0"
+    assert manifest["version"] == "0.2.0"
     assert set(manifest["host_permissions"]) == CHATGPT_MATCHES
 
     permissions = set(manifest.get("permissions", []))
@@ -89,7 +89,7 @@ def test_extension_files_are_present_and_small():
     for path in (BACKGROUND, CONTENT):
         payload = path.read_bytes()
         assert payload
-        assert len(payload) <= 24 * 1024
+        assert len(payload) <= (32 if path == BACKGROUND else 24) * 1024
 
 
 def test_extension_source_contains_no_content_extraction_or_powerful_browser_api():

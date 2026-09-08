@@ -23,7 +23,7 @@ HELLO_ACK_SCHEMA = "mastermind.web_sol_transport_hello_ack.v1"
 INSTANCE_CONFIG_SCHEMA = "mastermind.web_sol_instance_config.v1"
 TRANSPORT_CAPABILITY_SCHEMA = "mastermind.web_sol_transport_capabilities.v1"
 TRANSPORT_PROTOCOL_MAJOR = 1
-WEB_SOL_PACKAGE_VERSION = "0.1.0"
+WEB_SOL_PACKAGE_VERSION = "0.2.0"
 MAX_ACTION_TTL_SECONDS = 60
 ALLOWED_FUTURE_SKEW_SECONDS = 5
 
@@ -263,6 +263,9 @@ def transport_capability_digest() -> str:
         "actions": sorted(action.value for action in SurfaceAction),
         "schemas": sorted(
             [
+                "mastermind.web_sol_census_request.v1",
+                "mastermind.web_sol_census_receipt.v1",
+                "mastermind.web_sol_census_table.v1",
                 ACTION_SCHEMA,
                 HELLO_ACK_SCHEMA,
                 HELLO_SCHEMA,
