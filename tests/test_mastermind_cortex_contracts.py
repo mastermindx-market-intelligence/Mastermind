@@ -478,7 +478,7 @@ def test_repository_rejects_duplicate_json_keys_in_cortex_documents(
     (
         (
             "plugins/mastermind-cortex/fixtures/orientation-cases.json",
-            '"unknown":false',
+            '"unknown":true',
             '"unknown":false,"unknown":true',
         ),
         (

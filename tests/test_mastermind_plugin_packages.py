@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import ast
 import json
+import os
+import re
 import shutil
+import socket
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -55,6 +59,18 @@ def _validate_repository_twice_without_exception(root: Path) -> dict[str, object
 def _codes_without_exception(root: Path) -> set[str]:
     result = _validate_repository_twice_without_exception(root)
     return {error["code"] for error in result["errors"]}  # type: ignore[index]
+
+
+def _closed_json_document_paths() -> tuple[str, ...]:
+    return (
+        ".agents/plugins/marketplace.json",
+        "plugins/mastermind-sol/.codex-plugin/plugin.json",
+        "plugins/mastermind-operator/.codex-plugin/plugin.json",
+        "plugins/mastermind-cortex/.codex-plugin/plugin.json",
+        "plugins/mastermind-sol/references/app-bindings.template.json",
+        "plugins/mastermind-operator/references/app-bindings.template.json",
+        "plugins/mastermind-cortex/fixtures/orientation-cases.json",
+    )
 
 
 def _sol(name: str) -> str:
@@ -423,6 +439,123 @@ def test_unreadable_unexpected_package_file_returns_stable_repository_relative_e
     assert "PACKAGE_FILESYSTEM_INVALID" in codes
 
 
+def test_unexpected_empty_package_directory_is_refused_without_exception(tmp_path: Path) -> None:
+    """A closed package tree cannot silently accept an empty extra directory."""
+    _copy_package(tmp_path)
+    path = tmp_path / "plugins/mastermind-cortex/hidden-empty"
+    path.mkdir()
+    try:
+        assert "UNEXPECTED_PACKAGE_DIRECTORY" in _codes_without_exception(tmp_path)
+    finally:
+        path.rmdir()
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX FIFO nodes are unavailable")
+def test_unexpected_package_fifo_is_refused_without_opening_it(tmp_path: Path) -> None:
+    """A validator must classify a FIFO, never open it or silently omit it."""
+    _copy_package(tmp_path)
+    path = tmp_path / "plugins/mastermind-cortex/references/hidden.pipe"
+    os.mkfifo(path)
+    try:
+        assert "PACKAGE_FILESYSTEM_INVALID" in _codes_without_exception(tmp_path)
+    finally:
+        path.unlink(missing_ok=True)
+
+
+@pytest.mark.skipif(not hasattr(socket, "AF_UNIX"), reason="Unix-domain sockets are unavailable")
+def test_unexpected_package_socket_is_refused_without_opening_it() -> None:
+    """A validator must classify a socket node without treating it as package text."""
+    root = Path(tempfile.mkdtemp(prefix="cortex-v9-", dir="/tmp"))
+    _copy_package(root)
+    path = root / "plugins/mastermind-cortex/references/hidden.sock"
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        listener.bind(str(path))
+        assert "PACKAGE_FILESYSTEM_INVALID" in _codes_without_exception(root)
+    finally:
+        listener.close()
+        path.unlink(missing_ok=True)
+        shutil.rmtree(root)
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    (
+        ".agents/plugins",
+        "plugins",
+        "plugins/mastermind-cortex",
+        "plugins/mastermind-sol/references",
+        "plugins/mastermind-cortex/skills",
+    ),
+)
+def test_unreadable_package_ancestors_preserve_filesystem_error_identity(
+    tmp_path: Path, relative_path: str
+) -> None:
+    """Unreadable roots and ancestors are not equivalent to absent package content."""
+    _copy_package(tmp_path)
+    path = tmp_path / relative_path
+    original_mode = path.stat().st_mode
+    path.chmod(0)
+    try:
+        assert "PACKAGE_FILESYSTEM_INVALID" in _codes_without_exception(tmp_path)
+    finally:
+        path.chmod(original_mode)
+
+
+@pytest.mark.parametrize(
+    ("plugin", "binding_index", "numeric"),
+    (
+        ("mastermind-sol", 0, "1"),
+        ("mastermind-sol", 0, "1.0"),
+        ("mastermind-sol", 0, "1e0"),
+        ("mastermind-sol", 1, "1"),
+        ("mastermind-sol", 1, "1.0"),
+        ("mastermind-sol", 1, "1e0"),
+        ("mastermind-operator", 0, "1"),
+        ("mastermind-operator", 0, "1.0"),
+        ("mastermind-operator", 0, "1e0"),
+    ),
+)
+def test_closed_template_required_boolean_rejects_each_numeric_alias(
+    tmp_path: Path, plugin: str, binding_index: int, numeric: str
+) -> None:
+    """Closed template equality must not accept Python's bool/int aliases."""
+    _copy_package(tmp_path)
+    path = tmp_path / f"plugins/{plugin}/references/app-bindings.template.json"
+    text = path.read_text(encoding="utf-8")
+    needle = '"required": true'
+    positions = [match.start() for match in re.finditer(re.escape(needle), text)]
+    assert len(positions) > binding_index
+    start = positions[binding_index]
+    mutated = text[:start] + f'"required": {numeric}' + text[start + len(needle):]
+    path.write_text(mutated, encoding="utf-8")
+
+    assert "INVALID_APP_TEMPLATE" in _codes_without_exception(tmp_path)
+
+
+def test_closed_json_scalar_alias_sweep_refuses_all_120_mutations(tmp_path: Path) -> None:
+    """Every closed JSON Boolean leaf rejects the three numeric alias spellings."""
+    _copy_package(tmp_path)
+    mutations: list[tuple[Path, str, int, str]] = []
+    for relative_path in _closed_json_document_paths():
+        path = tmp_path / relative_path
+        text = path.read_text(encoding="utf-8")
+        for index, match in enumerate(re.finditer(r"\b(?:true|false)\b", text)):
+            for numeric in ("1", "1.0", "1e0"):
+                mutations.append((path, text, index, numeric))
+    assert len(mutations) == 120
+
+    for path, original, index, numeric in mutations:
+        matches = list(re.finditer(r"\b(?:true|false)\b", original))
+        match = matches[index]
+        path.write_text(original[:match.start()] + numeric + original[match.end():], encoding="utf-8")
+        try:
+            result = _validate_repository_twice_without_exception(tmp_path)
+            assert result["ok"] is False
+        finally:
+            path.write_text(original, encoding="utf-8")
+
+
 def test_invalid_json_error_is_repository_relative(tmp_path: Path) -> None:
     _copy_package(tmp_path)
     path = tmp_path / "plugins/mastermind-sol/.codex-plugin/plugin.json"
@@ -464,10 +597,12 @@ def test_validator_is_stdlib_only_and_has_no_action_surface() -> None:
             imported.add(node.module.split(".", 1)[0])
     assert imported <= {
         "__future__",
-        "argparse",
-        "json",
-        "re",
-        "sys",
+            "argparse",
+            "json",
+            "os",
+            "re",
+            "stat",
+            "sys",
         "pathlib",
         "typing",
     }

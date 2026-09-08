@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import stat
 import sys
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -317,8 +319,8 @@ APP_ID_RE = re.compile(r"\b(?:asdk_app|connector|templated_apps|plugin)_[A-Za-z0
 
 def _relative(root: Path, path: Path) -> str:
     try:
-        return path.resolve().relative_to(root.resolve()).as_posix()
-    except ValueError:
+        return path.absolute().relative_to(root.absolute()).as_posix()
+    except (OSError, ValueError):
         return "<outside-root>"
 
 
@@ -351,10 +353,8 @@ def _read_required_text(
     root: Path, path: Path, errors: list[dict[str, str]]
 ) -> str | None:
     try:
-        if not path.exists():
-            errors.append(_error(root, path, "MISSING_FILE", "required file is absent"))
-            return None
-        if path.is_symlink() or not path.is_file():
+        mode = path.lstat().st_mode
+        if stat.S_ISLNK(mode) or not stat.S_ISREG(mode):
             errors.append(_error(root, path, "REQUIRED_FILE_INVALID", "required path must be a regular readable file"))
             return None
         return path.read_text(encoding="utf-8")
@@ -363,7 +363,7 @@ def _read_required_text(
     except UnicodeDecodeError:
         errors.append(_error(root, path, "INVALID_UTF8", "file is not UTF-8"))
     except OSError:
-        errors.append(_error(root, path, "REQUIRED_FILE_INVALID", "required path must be a regular readable file"))
+        errors.append(_error(root, path, "PACKAGE_FILESYSTEM_INVALID", "required path cannot be inspected or read"))
     return None
 
 
@@ -392,7 +392,7 @@ def _require_exact(
     code: str,
     errors: list[dict[str, str]],
 ) -> None:
-    if actual != expected:
+    if not _strict_json_contract_equal(actual, expected):
         errors.append(_error(root, path, code, "document differs from the closed BSC-P1 contract"))
 
 
@@ -759,69 +759,98 @@ def _validate_reference(
         )
 
 
-def _package_files(root: Path, errors: list[dict[str, str]]) -> list[Path]:
-    paths: set[Path] = set()
-    for package_root in (root / ".agents/plugins", root / "plugins"):
-        try:
-            if not package_root.exists():
+def _allowed_package_directories() -> frozenset[str]:
+    directories: set[str] = set()
+    for relative_file in ALLOWED_PACKAGE_FILES:
+        parent = Path(relative_file).parent
+        while parent != Path("."):
+            directories.add(parent.as_posix())
+            parent = parent.parent
+    return frozenset(directories)
+
+
+def _directory_entries(
+    root: Path, path: Path, errors: list[dict[str, str]], message: str
+) -> list[os.DirEntry[str]] | None:
+    try:
+        if not stat.S_ISDIR(path.lstat().st_mode):
+            errors.append(_error(root, path, "PACKAGE_FILESYSTEM_INVALID", message))
+            return None
+        with os.scandir(path) as entries:
+            return list(entries)
+    except FileNotFoundError:
+        return []
+    except OSError:
+        errors.append(_error(root, path, "PACKAGE_FILESYSTEM_INVALID", message))
+        return None
+
+
+def _package_tree(root: Path, errors: list[dict[str, str]]) -> tuple[list[Path], list[Path]]:
+    files: list[Path] = []
+    directories: list[Path] = []
+    allowed_directories = _allowed_package_directories()
+    pending = [root / ".agents/plugins", root / "plugins"]
+    while pending:
+        directory = pending.pop()
+        entries = _directory_entries(
+            root, directory, errors, "plugin package filesystem cannot be enumerated"
+        )
+        if entries is None:
+            continue
+        if not entries and not directory.exists():
+            continue
+        for entry in entries:
+            path = Path(entry.path)
+            try:
+                mode = entry.stat(follow_symlinks=False).st_mode
+            except OSError:
+                errors.append(
+                    _error(root, path, "PACKAGE_FILESYSTEM_INVALID", "plugin package node cannot be inspected")
+                )
                 continue
-            candidates = package_root.rglob("*")
-            for path in candidates:
-                if path.is_symlink():
+            relative = _relative(root, path)
+            if stat.S_ISLNK(mode):
+                errors.append(
+                    _error(root, path, "SYMLINK_FORBIDDEN", "plugin packages may not contain symbolic links")
+                )
+            elif stat.S_ISDIR(mode):
+                directories.append(path)
+                if relative not in allowed_directories:
                     errors.append(
                         _error(
                             root,
                             path,
-                            "SYMLINK_FORBIDDEN",
-                            "plugin packages may not contain symbolic links",
+                            "UNEXPECTED_PACKAGE_DIRECTORY",
+                            "directory is outside the closed BSC-P1 package inventory",
                         )
                     )
-                elif path.is_file():
-                    paths.add(path)
-        except OSError:
-            errors.append(
-                _error(
-                    root,
-                    package_root,
-                    "PACKAGE_FILESYSTEM_INVALID",
-                    "plugin package filesystem cannot be enumerated",
+                pending.append(path)
+            elif stat.S_ISREG(mode):
+                files.append(path)
+            else:
+                errors.append(
+                    _error(
+                        root,
+                        path,
+                        "PACKAGE_FILESYSTEM_INVALID",
+                        "plugin package node must be a regular file or directory",
+                    )
                 )
-            )
-    return sorted(paths, key=lambda path: _relative(root, path))
+    return (
+        sorted(files, key=lambda path: _relative(root, path)),
+        sorted(directories, key=lambda path: _relative(root, path)),
+    )
 
 
 def _scan_files(root: Path, errors: list[dict[str, str]]) -> None:
     templates = {
-        (root / "plugins" / plugin / "references/app-bindings.template.json").resolve()
+        root / "plugins" / plugin / "references/app-bindings.template.json"
         for plugin in TEMPLATES
     }
     plugins_root = root / "plugins"
-    try:
-        plugin_paths = list(plugins_root.iterdir()) if plugins_root.exists() else []
-    except OSError:
-        errors.append(
-            _error(
-                root,
-                plugins_root,
-                "PACKAGE_FILESYSTEM_INVALID",
-                "plugin package filesystem cannot be enumerated",
-            )
-        )
-        plugin_paths = []
-    for path in plugin_paths:
-        try:
-            is_directory = path.is_dir()
-        except OSError:
-            errors.append(
-                _error(
-                    root,
-                    path,
-                    "PACKAGE_FILESYSTEM_INVALID",
-                    "plugin package filesystem cannot be inspected",
-                )
-            )
-            continue
-        if is_directory and path.name not in EXPECTED_SKILLS:
+    files, directories = _package_tree(root, errors)
+    for path in directories:
+        if path.parent == plugins_root and path.name not in EXPECTED_SKILLS:
             errors.append(
                 _error(
                     root,
@@ -830,7 +859,7 @@ def _scan_files(root: Path, errors: list[dict[str, str]]) -> None:
                     "plugin family is not recognized by this validator",
                 )
             )
-    for path in _package_files(root, errors):
+    for path in files:
         relative = _relative(root, path)
         if relative not in ALLOWED_PACKAGE_FILES:
             errors.append(
@@ -866,7 +895,7 @@ def _scan_files(root: Path, errors: list[dict[str, str]]) -> None:
             errors.append(
                 _error(root, path, "SECRET_MARKER_FORBIDDEN", "secret-shaped marker is forbidden")
             )
-        if APP_ID_RE.search(text) and path.resolve() not in templates:
+        if APP_ID_RE.search(text) and path not in templates:
             errors.append(
                 _error(root, path, "INSTALLED_APP_ID_FORBIDDEN", "installed app identifier is forbidden")
             )
@@ -969,29 +998,24 @@ def validate_repository(root: Path) -> dict[str, Any]:
                 )
 
         skills_root = plugin_root / "skills"
-        try:
-            if skills_root.exists() and not skills_root.is_dir():
+        entries = _directory_entries(
+            root, skills_root, errors, "skills directory cannot be enumerated"
+        )
+        actual = []
+        for entry in entries or []:
+            try:
+                if stat.S_ISDIR(entry.stat(follow_symlinks=False).st_mode):
+                    actual.append(entry.name)
+            except OSError:
                 errors.append(
                     _error(
                         root,
-                        skills_root,
+                        Path(entry.path),
                         "PACKAGE_FILESYSTEM_INVALID",
-                        "skills path must be a readable directory",
+                        "skills directory node cannot be inspected",
                     )
                 )
-                actual = []
-            else:
-                actual = sorted(path.name for path in skills_root.iterdir() if path.is_dir()) if skills_root.exists() else []
-        except OSError:
-            errors.append(
-                _error(
-                    root,
-                    skills_root,
-                    "PACKAGE_FILESYSTEM_INVALID",
-                    "skills directory cannot be enumerated",
-                )
-            )
-            actual = []
+        actual.sort()
         if actual != sorted(skills):
             errors.append(
                 _error(root, skills_root, "SKILL_SET_MISMATCH", f"skill directories must be exactly {sorted(skills)}; got {actual}")
