@@ -838,6 +838,123 @@ def test_public_quiet_update_preserves_original_pending_identity(kind, quiet, ac
     assert original.attention.message_fingerprint == material['fingerprint']
     assert original.attention.evidence_refs == tuple(material['evidence_refs'])
 
+def test_public_quiet_update_from_different_worker_identity_refuses():
+    material = _pending_msg('RESULT', 41, actor=_PENDING_WORKER)
+    other = _PENDING_WORKER | {
+        'attempt_id': 'ATTEMPT-SECOND',
+        'worker_id': 'worker-second',
+    }
+    update = _pending_msg('PROGRESS', 42, material, actor=other)
+    decision = _pending_decide(material, update)
+    assert decision.action is TurnAction.REFUSE
+    assert decision.refusal_code == 'REPLY_LINEAGE_INVALID'
+
+
+def test_public_first_quiet_coo_identity_drift_with_exact_original_target_refuses():
+    material = _pending_msg('RESULT', 43, actor=_PENDING_COO)
+    update = _pending_msg('PROGRESS', 44, material, actor=_PENDING_COO)
+    update['actor_ref'] = _PENDING_COO | {'reasoning_surface': 'codex'}
+    assert update['actor_ref'] != material['actor_ref']
+    assert update['applies_to'] == material['applies_to']
+    update['fingerprint'] = semantic_fingerprint(update)
+    decision = _pending_decide(material, update)
+    assert decision.action is TurnAction.REFUSE
+    assert decision.refusal_code == 'REPLY_LINEAGE_INVALID'
+
+
+def test_public_later_quiet_coo_identity_drift_with_exact_original_target_refuses():
+    material = _pending_msg('RESULT', 45, actor=_PENDING_COO)
+    first = _pending_msg('ACK', 46, material, actor=_PENDING_COO)
+    second = _pending_msg('PROGRESS', 47, first, actor=_PENDING_COO)
+    second['actor_ref'] = _PENDING_COO | {'reasoning_surface': 'codex'}
+    assert second['actor_ref'] != material['actor_ref']
+    assert second['applies_to'] == material['applies_to']
+    second['fingerprint'] = semantic_fingerprint(second)
+    decision = _pending_decide(material, first, second)
+    assert decision.action is TurnAction.REFUSE
+    assert decision.refusal_code == 'REPLY_LINEAGE_INVALID'
+
+
+def test_public_quiet_update_with_changed_coo_repository_target_refuses():
+    material = _pending_msg('RESULT', 51, actor=_PENDING_COO)
+    update = _pending_msg('PROGRESS', 52, material, actor=_PENDING_COO)
+    update['applies_to'] = {
+        'kind': 'repository',
+        'repository': _PENDING_REPO,
+        'head_sha': 'd' * 40,
+        'pr': _PENDING_REPO + '#2',
+    }
+    update['fingerprint'] = semantic_fingerprint(update)
+    decision = _pending_decide(material, update)
+    assert decision.action is TurnAction.REFUSE
+    assert decision.refusal_code == 'REPLY_LINEAGE_INVALID'
+
+
+def test_public_later_quiet_identity_drift_refuses():
+    material = _pending_msg('RESULT', 61, actor=_PENDING_WORKER)
+    first = _pending_msg('ACK', 62, material, actor=_PENDING_WORKER)
+    other = _PENDING_WORKER | {
+        'attempt_id': 'ATTEMPT-SECOND',
+        'worker_id': 'worker-second',
+    }
+    second = _pending_msg('PROGRESS', 63, first, actor=other)
+    decision = _pending_decide(material, first, second)
+    assert decision.action is TurnAction.REFUSE
+    assert decision.refusal_code == 'REPLY_LINEAGE_INVALID'
+
+
+def test_public_later_quiet_repository_target_drift_refuses():
+    material = _pending_msg('RESULT', 71, actor=_PENDING_COO)
+    first = _pending_msg('ACK', 72, material, actor=_PENDING_COO)
+    second = _pending_msg('PROGRESS', 73, first, actor=_PENDING_COO)
+    second['applies_to'] = {
+        'kind': 'repository',
+        'repository': _PENDING_REPO,
+        'head_sha': 'e' * 40,
+        'pr': _PENDING_REPO + '#3',
+    }
+    second['fingerprint'] = semantic_fingerprint(second)
+    decision = _pending_decide(material, first, second)
+    assert decision.action is TurnAction.REFUSE
+    assert decision.refusal_code == 'REPLY_LINEAGE_INVALID'
+
+
+def test_public_direct_command_does_not_launder_foreign_worker_quiet_branch():
+    material = _pending_msg('RESULT', 75, actor=_PENDING_WORKER)
+    other = _PENDING_WORKER | {
+        'attempt_id': 'ATTEMPT-SECOND',
+        'worker_id': 'worker-second',
+    }
+    update = _pending_msg('PROGRESS', 76, material, actor=other)
+    command = _pending_msg('CONTINUE', 77, material)
+    decision = _pending_decide(material, update, command)
+    assert decision.action is TurnAction.REFUSE
+    assert decision.refusal_code == 'REPLY_LINEAGE_INVALID'
+
+
+def test_public_direct_command_does_not_launder_retargeted_coo_quiet_branch():
+    material = _pending_msg('RESULT', 78, actor=_PENDING_COO)
+    update = _pending_msg('PROGRESS', 79, material, actor=_PENDING_COO)
+    update['applies_to'] = {
+        'kind': 'repository',
+        'repository': _PENDING_REPO,
+        'head_sha': 'f' * 40,
+        'pr': _PENDING_REPO + '#4',
+    }
+    update['fingerprint'] = semantic_fingerprint(update)
+    command = _pending_msg('CONTINUE', 80, material)
+    decision = _pending_decide(material, update, command)
+    assert decision.action is TurnAction.REFUSE
+    assert decision.refusal_code == 'REPLY_LINEAGE_INVALID'
+
+
+def test_public_exact_worker_quiet_chain_preserves_original_pending_identity():
+    material = _pending_msg('RESULT', 81, actor=_PENDING_WORKER)
+    first = _pending_msg('ACK', 82, material, actor=_PENDING_WORKER)
+    second = _pending_msg('PROGRESS', 83, first, actor=_PENDING_WORKER)
+    assert _pending_decide(material, first, second) == _pending_decide(material)
+
+
 @pytest.mark.parametrize('request_kind,reply', [('RESULT', 'CONTINUE'), ('BLOCKED', 'CONTINUE'), ('DECISION_REQUEST', 'RULING'), ('RESULT', 'STOP'), ('RESULT', 'AMENDMENT_AVAILABLE')])
 def test_public_direct_responses_keep_their_existing_shape(request_kind, reply):
     first = _pending_msg(request_kind, 1)

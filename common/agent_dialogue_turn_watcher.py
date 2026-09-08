@@ -435,6 +435,15 @@ def _classify_accepted_history(
             pending_command_valid = None
         elif _is_contributor(message):
             if message_type in {"ACK", "PROGRESS"}:
+                # A quiet annotation may preserve a pending material return
+                # only for the exact same contributor identity and target.
+                # Otherwise a foreign or stale branch would be silently
+                # admitted into the accepted semantic history.
+                if pending_return is not None and (
+                    message["actor_ref"] != pending_return["actor_ref"]
+                    or message["applies_to"] != pending_return["applies_to"]
+                ):
+                    return _refuse("REPLY_LINEAGE_INVALID")
                 # The contributor can acknowledge a parent command, but its
                 # own routine update cannot answer its pending material return.
                 pending_command = None
