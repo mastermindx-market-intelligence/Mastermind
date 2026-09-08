@@ -152,6 +152,9 @@ def test_transport_capability_digest_binds_probe_and_instance_config_contracts()
                 wsp.HELLO_ACK_SCHEMA,
                 wsp.HELLO_SCHEMA,
                 wsp.INSTANCE_CONFIG_SCHEMA,
+                "mastermind.web_sol_census_request.v1",
+                "mastermind.web_sol_census_receipt.v1",
+                "mastermind.web_sol_census_table.v1",
                 wsp.PROBE_SCHEMA,
                 wsp.RECEIPT_SCHEMA,
             ]
@@ -421,9 +424,9 @@ const config = {
   instanceId: INSTANCE,
   nativeHost: `com.mastermind.web_sol_surface.${INSTANCE.slice(0, 24)}`,
   protocolMajor: 1,
-  clientPackageVersion: "0.1.0",
-  nativePackageVersion: "0.1.0",
-  extensionPackageVersion: "0.1.0",
+  clientPackageVersion: "0.2.0",
+  nativePackageVersion: "0.2.0",
+  extensionPackageVersion: "0.2.0",
   capabilityDigest,
 };
 
