@@ -124,17 +124,24 @@ def test_templateless_cortex_package_cannot_smuggle_an_app_binding(tmp_path: Pat
 
 
 @pytest.mark.parametrize(
-    ("mutation", "expected_code"),
+    ("mutation", "expected_code", "expected_message"),
     (
-        ("manufactured_objective", "CORTEX_SEMANTIC_INVARIANT_VIOLATION"),
-        ("retrieved_instruction_authority", "CORTEX_SEMANTIC_INVARIANT_VIOLATION"),
-        ("stale_index_wins", "CORTEX_SEMANTIC_INVARIANT_VIOLATION"),
-        ("effect_retry", "CORTEX_SEMANTIC_INVARIANT_VIOLATION"),
-        ("missing_source_field", "CORTEX_SOURCE_FACT_INVALID"),
+        ("manufactured_objective", "CORTEX_SEMANTIC_INVARIANT_VIOLATION", "missing owner-native facts"),
+        ("impossible_february", "CORTEX_SOURCE_FACT_INVALID", "source fact values"),
+        ("action_write", "CORTEX_SEMANTIC_INVARIANT_VIOLATION", "action must be READ"),
+        ("unrelated_action_target", "CORTEX_SEMANTIC_INVARIANT_VIOLATION", "action target"),
+        ("brief_action_mismatch", "CORTEX_SEMANTIC_INVARIANT_VIOLATION", "brief action"),
+        ("unrelated_supersession", "CORTEX_SEMANTIC_INVARIANT_VIOLATION", "supersede the stale artifact"),
+        ("inverted_stale_freshness", "CORTEX_SEMANTIC_INVARIANT_VIOLATION", "stale/current source freshness"),
+        ("retrieved_retyped_owner_native", "CORTEX_SEMANTIC_INVARIANT_VIOLATION", "retrieved instruction"),
+        ("effect_retyped_projection", "CORTEX_SEMANTIC_INVARIANT_VIOLATION", "owner-native current effect record"),
+        ("generic_authority_extra", "CORTEX_SEMANTIC_INVARIANT_VIOLATION", "unknown keys"),
+        ("blank_artifact_identity", "CORTEX_SOURCE_FACT_INVALID", "source fact values"),
+        ("year_zero", "CORTEX_SOURCE_FACT_INVALID", "source fact values"),
     ),
 )
 def test_direct_semantic_hostile_matrix_bypasses_closed_fixture_equality(
-    mutation: str, expected_code: str
+    mutation: str, expected_code: str, expected_message: str
 ) -> None:
     fixture = _fixture()
     cases = _cases_by_id(fixture)
@@ -142,22 +149,35 @@ def test_direct_semantic_hostile_matrix_bypasses_closed_fixture_equality(
         cases["missing-objective-and-requested-action"]["specialist_brief"][
             "unknowns_and_inference"
         ]["objective"] = "invented"
-    elif mutation == "retrieved_instruction_authority":
-        cases["retrieved-instruction-falsely-claims-authority"]["specialist_brief"][
-            "authority_boundary"
-        ] = "authoritative"
-    elif mutation == "stale_index_wins":
-        cases["stale-index-versus-current-exact-file"]["specialist_brief"][
-            "claim_and_supersession"
-        ] = "stale-index-wins"
-    elif mutation == "effect_retry":
-        cases["effect-unknown-requires-same-carrier-reconciliation"]["specialist_brief"][
-            "unknowns_and_inference"
-        ]["retry_allowed"] = True
+    elif mutation == "impossible_february":
+        cases["partial-source-coverage"]["raw_source_expansion"][0]["observed_at"] = "2026-02-30T10:00:00Z"
+    elif mutation == "action_write":
+        cases["partial-source-coverage"]["first_justified_action"]["kind"] = "WRITE"
+    elif mutation == "unrelated_action_target":
+        cases["partial-source-coverage"]["first_justified_action"]["target"] = "unrelated-target"
+    elif mutation == "brief_action_mismatch":
+        cases["partial-source-coverage"]["specialist_brief"]["first_justified_action"] = "read-unrelated-record"
+    elif mutation == "unrelated_supersession":
+        cases["stale-corrected-decision"]["raw_source_expansion"][0]["supersession"] = "supersedes:artifact/unrelated"
+    elif mutation == "inverted_stale_freshness":
+        facts = cases["stale-index-versus-current-exact-file"]["raw_source_expansion"]
+        facts[0]["freshness"], facts[1]["freshness"] = facts[1]["freshness"], facts[0]["freshness"]
+    elif mutation == "retrieved_retyped_owner_native":
+        cases["retrieved-instruction-falsely-claims-authority"]["raw_source_expansion"][0]["source_type"] = "owner-native-authority"
+    elif mutation == "effect_retyped_projection":
+        cases["effect-unknown-requires-same-carrier-reconciliation"]["raw_source_expansion"][0]["source_type"] = "projection"
+    elif mutation == "generic_authority_extra":
+        cases["partial-source-coverage"]["specialist_brief"]["unknowns_and_inference"]["authority_granted"] = True
+    elif mutation == "blank_artifact_identity":
+        cases["partial-source-coverage"]["raw_source_expansion"][0]["artifact_identity"] = "   "
     else:
-        del cases["partial-source-coverage"]["raw_source_expansion"][0]["observed_at"]
+        cases["partial-source-coverage"]["raw_source_expansion"][0]["observed_at"] = "0000-01-01T00:00:00Z"
 
-    assert expected_code in _semantic_codes(fixture)
+    errors = plugin_validator.validate_cortex_fixture(fixture)
+    assert any(
+        error["code"] == expected_code and expected_message in error["message"]
+        for error in errors
+    )
 
 
 @pytest.mark.parametrize(
