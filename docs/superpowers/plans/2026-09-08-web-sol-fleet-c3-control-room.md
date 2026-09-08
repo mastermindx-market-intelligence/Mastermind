@@ -4,7 +4,7 @@
 
 **Goal:** Deliver one bounded, read-only, multi-profile Web-Sol fleet observation inside the existing local Chairman Control Room at **Advanced → Web Sessions**, using protected C2 reads and existing surface bindings without creating another source reader, cache, lifecycle, registry, retry plane, endpoint, or remote profile surface.
 
-**Architecture:** The existing Control Room gather layer groups valid ChatGPT surface bindings into unique adapter instances and performs at most four deterministic sequential C2 reads inside one 40-second admission window. A new pure `mastermind.web_sol_fleet_projection.v1` module validates and aggregates those already-collected results. The canonical Control Room adds one local-only key; the existing cached `/api/state` path serves it; the existing UI renders it; remote X1 type-checks and omits it.
+**Architecture:** The existing Control Room gather layer groups one loaded valid binding document into unique ChatGPT adapter instances and performs at most four deterministic sequential C2 reads inside one 40-second admission window. A new pure `mastermind.web_sol_fleet_projection.v1` module validates and aggregates closed, content-free inputs. The canonical Control Room adds one local-only key; the existing cached `/api/state` path serves it; the existing UI renders it; remote X1 type-checks and omits it.
 
 **Tech Stack:** Python 3.12, existing Web-Sol Python/native contracts, dependency-free browser JavaScript, existing HTML/CSS, pytest, Node syntax checks, Playwright through the existing UI test harness.
 
@@ -13,13 +13,16 @@
 **Operation:** `web-sol-fleet-c3-source-20260908-sol-001`  
 **Parent:** Mastermind issue #501 / approval comment `5592792563`  
 **Plan source operation:** `web-sol-fleet-c3-design-plan-source-20260908-sol-001`  
+**Self-review parent:** `b45f042040157c03fc97c5d6ad27acaa4c5b93e4`  
 **Admission state:** `PRE_START / DEPENDENCY_HELD / effect=NONE`
+
+The self-review repair freezes exact C2 receipt/null mapping, rejects duplicate case-folded binding IDs, bounds pure inputs, caps displayed navigation matches at six, and removes the contradictory synthetic payload fallback. These are plan corrections, not C3 implementation.
 
 ---
 
 ## 0. Admission, exact source, and path freeze
 
-Do not implement until every spec section 14 gate is positively true in one fresh turn.
+Do not implement until every spec section 15 gate is positively true in one fresh turn, including protection and source-writer release of the C3 records carrier itself.
 
 **Expected implementation ceiling:**
 
@@ -38,7 +41,7 @@ Do not implement until every spec section 14 gate is positively true in one fres
 
 `scripts/chairman_control_room.py` is not modified. A required server production edit is a path-widening decision return before modification.
 
-**Preflight commands/evidence:**
+**Preflight:**
 
 ```bash
 git fetch origin master
@@ -49,9 +52,9 @@ git diff --check
 git worktree list --porcelain
 ```
 
-Perform the repository’s current complete open-PR/path/rename census and registered-worktree/process/source-writer census. Confirm no exact path is owned by another source carrier. Re-read #501, #531, #537, #542, #340, #359, #338, #480 and the current Decision-First records.
+Run the repository’s current complete open-PR/path/rename census and registered-worktree/process/source-writer census. Re-read #501, #531, #537, #546, #542, #340, #359, #338, #480 and current Decision-First records. Confirm the exact expected paths are unowned and no C3 effect is unknown.
 
-Create exactly one branch from the action-time protected SHA only after the gates pass:
+Only then create one implementation branch from the action-time protected SHA:
 
 ```text
 sol/web-sol-fleet-c3-20260908
@@ -69,13 +72,13 @@ Return `DEPENDENCY_HELD / effect=NONE` if any gate is missing. Do not create a p
 
 ### Step 1: Write closed-shape RED tests
 
-Write tests that import:
+Import:
 
 ```python
 from control_plane import web_sol_fleet_projection as fleet
 ```
 
-Define and assert the exact public API:
+Require exactly:
 
 ```python
 fleet.validate_fleet_projection(value: object) -> dict
@@ -90,46 +93,40 @@ fleet.compose_fleet_projection(
 ) -> dict
 ```
 
-Use these names. The two closed input envelopes and every nested key are frozen by the spec.
+Tests must pin:
 
-RED cases:
-
-- exact top-level key set;
-- exact profile and session key sets;
-- unknown key at every level;
+- exact top-level, profile, session, expected-profile, navigation-index, and observation key sets;
+- fixed schema/scope/admission window;
+- `MAX_ADAPTERS=4`, C2 owner `TOTAL_SECONDS=10`, `MAX_EXPECTED_PROFILES=8192`, total navigation rows `<=8192`, `MAX_NAVIGATION_MATCHES_PER_SESSION=6`, C2 rows `<=128`, and output `<=524288` bytes;
+- exact fleet/profile/receipt/C2 enums;
+- unknown key refusal at every level;
 - bool-as-int refusal;
-- malformed/non-Z UTC timestamps;
-- completion before start;
-- `admission_window_ms` other than exactly `40000`;
-- negative/non-integer/unsafe actual duration;
+- malformed/non-Z UTC timestamp and completion-before-start refusal;
+- negative, non-finite, non-integer, regressing, or unsafe durations;
 - invalid zero/non-sequential session `slot`;
-- invalid 64-hex adapter or conversation fingerprint;
-- invalid enums;
-- free-form reason text;
-- non-null model/effort/served-model;
-- model evidence other than `UNVERIFIED`;
-- locator/URL/profile/folder/account/path/traceback/credential keys anywhere;
-- non-finite values and oversized strings;
-- output greater than 524,288 canonical JSON bytes;
-- unknown/missing keys in `expected_profiles`, `navigation_index`, `observations`, and input `sessions`;
-- private representative binding or locator material passed into the pure module.
+- invalid lower-case 64-hex adapter/conversation fingerprint;
+- invalid UUID binding ID;
+- duplicate adapter ID;
+- duplicate `binding_id.lower()` anywhere in the input;
+- `binding_count != len(navigation_index)`;
+- non-empty expected/observation inputs under `MISSING` or `INVALID` binding state;
+- observation for an omitted or unknown adapter;
+- non-null model/effort/served-model or model evidence other than `UNVERIFIED`;
+- locator/URL/profile/folder/account/path/traceback/credential/operation-key/nonce fields anywhere;
+- non-finite JSON, control characters, oversized strings, and canonical output above 524,288 bytes.
 
 ### Step 2: Verify RED
-
-Run:
 
 ```bash
 python3 -B -m pytest -p no:cacheprovider -o addopts= -q \
   tests/test_web_sol_fleet_projection.py
 ```
 
-Expected: collection/import failure because the module does not exist. Record the exact failure.
+Expected initial result: import/collection failure because the module does not exist. Record it.
 
-### Step 3: Implement the smallest closed types/validators
+### Step 3: Implement the smallest pure validator surface
 
-Implement constants and pure helpers only. No integration imports, I/O, clocks, environment, subprocess, sockets, filesystem, model, or network.
-
-Use exact-key validation and `type(value) is int` for integers. Deep-copy accepted inputs/outputs. Serialize with:
+Use exact-key validation, `type(value) is int`, deep copies, and canonical compact JSON:
 
 ```python
 json.dumps(
@@ -141,17 +138,17 @@ json.dumps(
 )
 ```
 
-Enforce `MAX_FLEET_JSON_BYTES = 512 * 1024`.
+No integration import, I/O, clock, environment, subprocess, socket, filesystem, network, model, or caller callback belongs in the pure module.
 
-### Step 4: Verify GREEN
+`validate_fleet_projection` rejects malformed or oversized documents. No synthetic payload fallback.
 
-Run the focused test. Confirm every test passes, then commit the pure contract and tests.
+### Step 4: Verify GREEN and commit
 
-This commit is not a useful C3 release by itself.
+Run the focused contract tests. Commit only the pure module and its owning test when green. This is not an independently useful C3 release yet.
 
 ---
 
-## Task 2: Implement count, coverage, ordering, and correction equations
+## Task 2: Implement deterministic count, coverage, probe, and correction equations
 
 **Files:**
 - Modify: `tests/test_web_sol_fleet_projection.py`
@@ -161,46 +158,61 @@ This commit is not a useful C3 release by itself.
 
 Cover:
 
-1. valid empty binding state -> `EMPTY_IN_SCOPE`, exact zero totals;
-2. bindings missing -> `UNAVAILABLE`, expected/total counts null;
-3. bindings invalid -> `UNAVAILABLE`;
+1. `AVAILABLE` + zero expected -> `EMPTY_IN_SCOPE`, exact zero totals, `probe_coverage=NONE`;
+2. `MISSING` -> `UNAVAILABLE / BINDINGS_UNAVAILABLE`, expected null, other profile counts zero;
+3. `INVALID` -> `UNAVAILABLE / BINDINGS_INVALID`;
 4. one complete profile -> complete exact totals;
-5. one partial profile -> retained rows, fleet `PARTIAL`, total null;
-6. one collected + one unavailable -> known rows retained, total null;
-7. all expected profiles unavailable -> `UNAVAILABLE`, not empty;
-8. five expected profiles -> four selected observations plus one omitted, `ADAPTER_LIMIT`, total null;
-9. fleet deadline not-attempted row -> partial, increments `not_attempted_profile_count`, and emits `FLEET_DEADLINE`;
-10. completed-after-deadline row -> partial and `FLEET_DEADLINE`;
-11. complete inventory + partial probe coverage -> complete inventory, partial probe coverage;
-12. duplicate tabs within one profile -> one unique conversation and correct duplicate count;
-13. same conversation fingerprint across two adapters -> two profile-scoped unique observations;
-14. input order permutations -> byte-identical canonical output;
-15. caller mutation after composition -> prior output unchanged;
-16. corrected next input -> warning removed without sticky state.
+5. one collected partial-inventory profile -> retained rows, `PARTIAL`, total null;
+6. one collected complete profile with partial probes -> fleet inventory complete but probe partial and `PROFILE_PARTIAL`;
+7. one collected + one unavailable -> known rows retained, fleet partial, total null;
+8. all expected profiles unavailable -> `UNAVAILABLE`, never empty/zero-complete;
+9. five expected profiles -> four selected profile rows, one omitted, `ADAPTER_LIMIT`;
+10. selected deadline-skipped profile -> `NOT_ATTEMPTED`, exact not-attempted count, `FLEET_DEADLINE`;
+11. collected or unavailable result completing at/after deadline -> non-complete and `FLEET_DEADLINE`;
+12. duplicate tabs within one profile -> exact unique/duplicate count;
+13. same fingerprint in two adapters -> two profile-scoped unique observations;
+14. zero known sessions -> probe coverage `NONE`;
+15. some `OBSERVED` rows -> probe `PARTIAL`;
+16. all known rows `OBSERVED` under complete fleet -> probe `COMPLETE_IN_SCOPE`;
+17. input-order permutations -> byte-identical output;
+18. caller mutation after composition -> prior output unchanged;
+19. corrected next input -> warning disappears without sticky state.
+
+Pin equations:
+
+```text
+selected = min(expected, 4)
+len(profiles) = selected
+attempted + not_attempted = selected
+collected + unavailable = attempted
+expected = selected + omitted
+```
+
+All output counts are derived, never caller-authored.
 
 ### Step 2: Verify RED
 
-Run only the new equations tests and confirm failures name missing behavior rather than test setup errors.
+Run only the new equation tests and confirm failures name missing behavior rather than setup errors.
 
-### Step 3: Implement minimal deterministic aggregation
+### Step 3: Implement minimal aggregation
 
-- sort expected profiles by adapter ID;
-- sort observations by adapter ID;
-- reject duplicates and observations outside the expected set;
-- preserve each validated C2 profile snapshot’s session order by exact one-based `slot`;
-- derive every count from rows; never trust caller-supplied totals;
-- sort/deduplicate reason codes;
-- compute coverage from the frozen truth table.
+- canonicalize expected profiles by adapter ID;
+- canonicalize navigation rows by `(binding_id.lower(), binding_id)`;
+- canonicalize observations by adapter ID;
+- reject duplicates and observations outside the selected first four;
+- preserve session order by validated one-based `slot`;
+- derive exact top-level reason set;
+- derive all counts, profile totals, fleet coverage, and probe coverage from rows and fixed state.
 
-Do not add history or a clock read.
+Do not add a clock, history, fallback count, or inferred total.
 
 ### Step 4: Verify GREEN and commit
 
-Run the complete projection suite twice and compare canonical output digest for one permuted fixture.
+Run the complete projection suite twice and compare one canonical permutation digest.
 
 ---
 
-## Task 3: Add deterministic adapter grouping and one-call-per-profile gather
+## Task 3: Add deterministic adapter grouping and binding safety
 
 **Files:**
 - Modify: `tests/test_chairman_control_room.py`
@@ -208,26 +220,28 @@ Run the complete projection suite twice and compare canonical output digest for 
 
 ### Step 1: Write RED target-derivation tests
 
-Use valid `mastermind.surface_bindings.v1` fixtures.
+Use real valid `mastermind.surface_bindings.v1` fixtures.
 
 Required cases:
 
-- non-ChatGPT bindings excluded;
-- only `chatgpt_managed_env` accepted;
-- two conversation bindings for the same managed profile produce one adapter target;
-- adapter identity uses the existing `web_sol_instance.adapter_instance_id`;
-- conversation identity uses the existing `web_sol_client.conversation_fingerprint`;
-- the pure navigation index carries only `(conversation_fingerprint, binding_id)`;
-- target and binding order are deterministic under input permutations;
-- representative is the lower-case minimum binding ID;
+- non-ChatGPT binding excluded;
+- only `chatgpt_managed_env` included;
+- two conversation bindings for one managed profile produce one adapter target;
+- adapter identity comes only from existing `web_sol_instance.adapter_instance_id`;
+- conversation identity comes only from existing `web_sol_client.conversation_fingerprint`;
+- pure navigation index carries only conversation fingerprint and exact source-spelled binding ID;
+- adapter/binding order deterministic under permutations;
+- representative sort key is `(binding_id.lower(), binding_id)`;
 - representative changes do not change adapter identity;
-- malformed binding input produces no C2 call and an unavailable fleet document;
-- valid empty document produces no C2 call and `EMPTY_IN_SCOPE`;
-- five adapters produce only four call targets and one explicit omission.
+- duplicate case-folded binding IDs anywhere -> `INVALID`, zero C2 calls;
+- structurally malformed binding document -> unavailable, zero C2 calls;
+- existing permission warning with returned valid document remains available while the existing degraded warning survives;
+- valid empty/no-eligible document -> `EMPTY_IN_SCOPE`, zero calls;
+- more than 8,192 expected/navigation rows -> invalid;
+- five adapters -> four targets and one explicit omission;
+- no work ref, seat ref, profile ID, locator, URL, title, or account label enters pure input.
 
 ### Step 2: Verify RED
-
-Run:
 
 ```bash
 python3 -B -m pytest -p no:cacheprovider -o addopts= -q \
@@ -235,11 +249,9 @@ python3 -B -m pytest -p no:cacheprovider -o addopts= -q \
   -k 'web_sol_fleet or fleet_census'
 ```
 
-Confirm failures occur before implementation.
+### Step 3: Implement the private local target seam
 
-### Step 3: Implement the private local gather seam
-
-Inside `chairman_control_room.py`, add private helpers with injectable boundaries:
+Inside `chairman_control_room.py`, add private, injectable helpers:
 
 ```python
 def _web_sol_fleet_targets(bindings: Mapping[str, Any] | None) -> ...
@@ -251,73 +263,83 @@ def _gather_web_sol_fleet(
     monotonic=None,
     operation_key_factory=None,
     nonce_factory=None,
-) -> dict[str, Any]:
+) -> dict[str, Any] | None:
     ...
 ```
 
-Production defaults import `web_sol_instance`, `web_sol_client`, and `web_sol_census_protocol` only inside the local helper. Avoid a module-scope integration import.
+Production defaults import Web-Sol instance/client/C2 protocol only inside the local helper. Avoid module-scope integration imports.
 
-Rules:
-
-- one deterministic representative binding per adapter;
-- max four;
-- sequential loop;
-- one C2 call each;
-- no retry/fallback;
-- no alternate socket/profile;
-- fixed safe error mapping;
-- no raw exception text;
-- no profile/locator data in the returned wire.
+Keep the representative binding private. Return only the closed expected-profile input plus private call target in an internal type; never serialize the latter.
 
 ### Step 4: Verify GREEN and commit
 
-Run target/gather tests and all Web-Sol native census tests that exercise the client’s stable behavior. Do not modify C2 source to make C3 tests pass.
+Run target tests and all stable Web-Sol instance/client/census protocol suites. Do not modify protected C2 source to make C3 pass.
 
 ---
 
-## Task 4: Prove the shared 40-second admission window and no replay
+## Task 4: Prove request construction, sequential acquisition, deadline, and no replay
 
 **Files:**
 - Modify: `tests/test_chairman_control_room.py`
 - Modify: `control_plane/chairman_control_room.py`
 
-### Step 1: Write RED controlled-clock tests
+### Step 1: Write RED controlled-clock/client tests
 
-Use an injected monotonic clock and fake C2 call.
+Inject aware UTC samples, monotonic samples, factories, and a fake C2 call.
 
-Cases:
+Required cases:
 
-- four fast calls execute sequentially and in adapter order;
-- no second call begins before the prior call returns;
-- a call failure does not trigger retry;
-- a call returning at/after the fleet deadline preserves actual elapsed time, is retained only as partial, and stops later calls;
-- insufficient remaining admission budget emits `NOT_ATTEMPTED / FLEET_DEADLINE`;
-- invalid receipt or identity mismatch does not retry or switch representative;
-- unknown exception maps to fixed `CENSUS_UNAVAILABLE`;
-- operation keys/nonces are unique per attempted adapter and absent from public output;
-- total invocation count never exceeds four;
-- a fifth adapter is never called;
-- the gather performs zero writes and has no retained state across calls.
+- issued/expires window is exactly owner-valid and no longer than C2 `TOTAL_SECONDS`;
+- operation keys and nonces are unique per attempted profile and never appear in public output;
+- invalid/naive/regressing UTC or invalid monotonic samples produce fixed gather unavailability and zero fabricated fleet facts;
+- four fast calls execute sequentially in adapter order;
+- no later call begins before the prior return;
+- one C2 call per attempted adapter, never more than four;
+- fifth adapter never called;
+- less than one full C2 budget remaining -> selected profile `NOT_ATTEMPTED / FLEET_DEADLINE`;
+- a call returning strictly before deadline -> `completed_within_fleet_deadline=true`;
+- return at or after deadline -> false, no later call, top deadline reason;
+- no retry on valid non-collected receipt, exception, invalid receipt, identity mismatch, or overrun;
+- no representative/socket/profile failover;
+- no retained state across gather invocations;
+- no writes.
 
-### Step 2: Verify RED
+### Step 2: Write RED exact receipt/failure-mapping tests
 
-Confirm at least the sequential/deadline/retry tests fail on the initial gather implementation.
+Pin:
 
-### Step 3: Implement minimal budget enforcement
+```text
+accepted COLLECTED receipt -> state COLLECTED, receipt_status COLLECTED
+accepted non-collected C2 status -> state UNAVAILABLE, receipt_status and reason preserved
+invalid_census_value -> RECEIPT_INVALID, receipt_status null
+receipt_identity_mismatch -> RECEIPT_IDENTITY_MISMATCH, receipt_status null
+invalid_binding -> INVALID_BINDING, receipt_status null
+other fixed/unknown client failure -> CENSUS_UNAVAILABLE, receipt_status null
+lawful result returned late -> reason FLEET_DEADLINE_OVERRUN while receipt_status remains owner value
+not attempted -> receipt_status and all attempt fields null
+```
 
-The outer budget is an admission boundary, not a promise that an uninterruptible local syscall can be killed safely.
+For attempted states, attempt times/duration and completion Boolean are present. C2 snapshot fields are present only for collected state.
 
-- start the fleet monotonic admission window immediately before the first possible C2 call;
-- expose fixed `admission_window_ms=40000` while preserving actual `duration_ms`;
-- do not start an attempt when its full C2 budget cannot fit;
-- after a returned call, compare to the fleet deadline;
-- after an overrun, downgrade and stop;
+### Step 3: Verify RED
+
+Confirm sequential, receipt/null, deadline, and no-retry tests fail on the initial target-only code.
+
+### Step 4: Implement minimal acquisition
+
+- start fleet monotonic admission window immediately before first possible attempt;
+- use existing C2 owner constants and validators;
+- require full remaining C2 budget before start;
+- use one request identity per attempt;
+- catch only to fixed mapping; never expose `str(exc)`;
+- preserve validated C2 snapshot rows and owner enums;
+- stop after deadline overrun;
 - do not wrap C2 in a timeout thread/process;
-- never cancel and then start another profile.
+- do not cancel and start another adapter.
 
-### Step 4: Verify GREEN and commit
+### Step 5: Verify GREEN and commit
 
-Run the focused gather suite twice. Assert exactly one call per attempted adapter.
+Run focused gather tests twice. Assert exact call counts and no retry.
 
 ---
 
@@ -329,35 +351,28 @@ Run the focused gather suite twice. Assert exactly one call per attempted adapte
 
 ### Step 1: Write RED compositor tests
 
-Add `web_sol_fleet` to the pure signature and closed output.
+Add optional `web_sol_fleet` to the pure signature and closed output.
 
 Cases:
 
-- valid fleet document is copied verbatim;
+- valid fleet document copied verbatim but without aliasing;
 - caller mutation after composition cannot mutate output;
-- invalid document becomes `null` and one fixed degradation;
-- optional projection module absent still composes all existing sections;
-- no C3 input changes attention, work, autonomy, placement, bindings, or disagreements;
-- same inputs remain byte-deterministic;
-- C3 has no clock/file/socket/environment reads in the pure path.
+- invalid supplied document -> null + exactly `web_sol_fleet: invalid`;
+- optional projection module absent -> null, no fleet-specific degradation, every existing section intact;
+- `None` supplied -> null and silent;
+- no C3 input changes sources, attention, work, autonomy, placement, bindings, disagreements, or focus;
+- same inputs byte-deterministic;
+- pure path performs no clock/file/socket/environment read.
 
 ### Step 2: Verify RED
 
-Run the focused composition tests.
+Run focused composition tests.
 
-### Step 3: Implement minimal optional-owner composition
+### Step 3: Implement optional-owner composition
 
-Use the existing `_optional_control_plane_module` pattern for the pure projection module.
+Use the existing `_optional_control_plane_module` pattern. Add only `web_sol_fleet` to `OUTPUT_KEYS` and final document.
 
-Add:
-
-```text
-web_sol_fleet
-```
-
-to `OUTPUT_KEYS` and the final document only.
-
-Do not add C3 values to `sources`, `attention`, `work`, `autonomy`, or `degraded` except the one fixed invalid-source message.
+Do not add C3 values to `sources`, attention, work, autonomy, or source validity.
 
 ### Step 4: Verify GREEN and commit
 
@@ -365,29 +380,29 @@ Run all `tests/test_chairman_control_room.py`.
 
 ---
 
-## Task 6: Gather once per canonical cache generation
+## Task 6: Gather once per canonical cache generation and fail safely
 
 **Files:**
 - Modify: `tests/test_chairman_control_room.py`
-- Modify: `control_plane/chairman_control_room.py`
 - Modify: `tests/test_chairman_control_room_server.py`
+- Modify: `control_plane/chairman_control_room.py`
 
 ### Step 1: Write RED integration tests
 
 Prove:
 
-- `build_control_room()` gathers C3 once;
-- precursor autonomy compose and final compose receive the same object;
-- the C3 gather is not repeated during the precursor compose;
-- an absent optional module makes zero Web-Sol calls;
-- binding load occurs through the existing single read;
+- `build_control_room()` gathers C3 once after the existing binding load;
+- precursor autonomy compose and final compose receive the same C3 object;
 - direct `compose_control_room()` never gathers;
+- absent optional module makes zero Web-Sol calls;
+- missing/invalid binding input produces an explicit valid unavailable C3 document;
+- unexpected target/time/projection failure produces `web_sol_fleet=null` and exactly `web_sol_fleet: unavailable`, with no exception text;
+- binding load still occurs once;
 - current `/api/state` envelope carries the canonical document without a new endpoint;
-- a retained cached document remains visibly dated while refresh is in flight/error.
+- retained cached C3 evidence remains dated while the existing refresh is in flight or failed;
+- no C3 cache, route, interval, TTL, generation, or refresh arbitration appears.
 
 ### Step 2: Verify RED
-
-Run:
 
 ```bash
 python3 -B -m pytest -p no:cacheprovider -o addopts= -q \
@@ -396,20 +411,11 @@ python3 -B -m pytest -p no:cacheprovider -o addopts= -q \
   -k 'web_sol_fleet or fleet_census or state_cache'
 ```
 
-The server tests must still pin that `/api/state` carries the canonical C3 key and retains existing cache-generation semantics. Leave the server production file untouched.
+Leave `scripts/chairman_control_room.py` untouched. Server tests pin reuse of the existing cached canonical document.
 
 ### Step 3: Implement gather placement
 
-Gather after the existing binding load and before the precursor compose. Pass the same value to both compose calls.
-
-Do not:
-
-- add a C3 cache;
-- add a route;
-- call `/api/refresh-builds`;
-- add an interval;
-- change the state TTL;
-- alter refresh generation arbitration.
+Gather once after binding load and before precursor compose. Pass the same value to both compose calls. Carry an internal fixed failure marker into the existing extra-degraded stage; never duplicate gather or expose a path/exception.
 
 ### Step 4: Verify GREEN and commit
 
@@ -427,32 +433,26 @@ Run all Control Room compositor/server tests.
 
 Cases:
 
-- canonical document with valid C3 still produces the exact existing remote output key set;
-- remote output contains no `web_sol_fleet`, adapter ID, conversation fingerprint, binding ID, seat ref, model field, profile count, or generation cue;
-- a non-null non-mapping C3 branch is rejected;
-- sensitive/path/URL/session-shaped data nested inside the local-only mapping cannot hide behind omission;
-- remote extracted release boots without `control_plane/web_sol_fleet_projection.py`;
+- canonical document with valid C3 still produces the exact old remote output key set;
+- remote output contains no C3 key, adapter/conversation fingerprint, binding ID, profile count, cue, or model field;
+- non-null non-mapping C3 rejected;
+- sensitive/path/URL/session-shaped data nested in a mapping cannot hide behind omission;
+- safe but otherwise malformed local mapping may be omitted only because the canonical compositor already owns full validation;
+- extracted remote release boots without `control_plane/web_sol_fleet_projection.py` or Web-Sol integrations;
 - `REQUIRED_RUNTIME_PATHS` remains unchanged;
-- `compose_collected()` supplies `web_sol_fleet=None` explicitly or through the new default without a local gather.
+- remote composition supplies `None` and never runs the local gather.
 
 ### Step 2: Verify RED
 
-Run the remote suite and confirm closed-key failure occurs before implementation.
+Run the remote suite and confirm closed-key failure before implementation.
 
-### Step 3: Implement type-check-and-drop
+### Step 3: Implement type-check, sensitive-scan, and drop
 
-At the remote boundary:
-
-- accept `None`;
-- otherwise require a mapping;
-- run the existing recursive sensitive-value refusal over that mapping;
-- omit it from the remote document.
-
-Do not duplicate the full C3 validator and do not stage the local C3 module or Web-Sol integration into the remote release solely to discard the data.
+Accept null or mapping, run the existing recursive sensitive-value refusal on mapping, and omit it. Do not duplicate the C3 validator or add local modules to the remote release.
 
 ### Step 4: Verify GREEN and commit
 
-Run all remote projection/release tests and the extracted no-`.git` boot proof.
+Run full remote projection, release-manifest, and no-`.git` extracted-boot proof.
 
 ---
 
@@ -468,41 +468,41 @@ Run all remote projection/release tests and the extracted no-`.git` boot proof.
 
 Require:
 
-- one `#ccr-web-sol-fleet` card inside `#system`;
-- it follows canonical inputs and precedes navigation capability;
+- exactly one `#ccr-web-sol-fleet` card inside `#system`;
+- it follows canonical inputs and precedes provider/navigation capability;
 - no new primary nav item;
-- no C3 markup in Today/Autonomy/Work/Surfaces;
+- no C3 markup in Today, Autonomy, Work, or Surfaces;
 - remote HTML contains no C3 container;
 - no inline script/style;
-- existing CSP/static map remains unchanged.
+- existing CSP/static map unchanged.
 
 ### Step 2: Write actual-browser RED tests
 
-Use the existing intercepted-fixture Playwright harness.
-
-Render:
+Use the existing intercepted-fixture Playwright harness. Render:
 
 1. complete two-profile fleet;
-2. partial fleet with one collected and one unavailable;
-3. all-unavailable fleet;
-4. valid empty-in-scope;
-5. five expected/four attempted with exact omitted count;
-6. duplicate tabs;
-7. one exact navigation-match binding ID resolved through the canonical binding summary;
-8. more than eight exact matches with explicit omitted count;
-9. null model/effort;
-10. correction from partial to complete on the next loaded canonical document;
-11. refresh-in-flight and refresh-error dated copy;
-12. malformed C3 document causing fixed unavailable rendering, not script failure;
-13. 375, 760, 1280, 1440, and 1920 widths;
-14. light and dark themes;
-15. remote page unchanged.
+2. collected partial inventory;
+3. complete inventory with partial/none probe coverage;
+4. one collected plus one unavailable profile;
+5. all-unavailable fleet;
+6. valid empty-in-scope;
+7. five expected/four selected with exact omitted count;
+8. deadline not-attempted row;
+9. duplicate tabs;
+10. one exact navigation binding;
+11. duplicate/missing canonical binding resolution suppressing Open;
+12. more than six exact matches with exact total and omitted count;
+13. null model/effort;
+14. correction from partial to complete on next canonical document;
+15. refresh-in-flight and refresh-error dated copy;
+16. null or malformed direct fixture input causing fixed unavailable rendering, not script failure;
+17. 375, 760, 1280, 1440, and 1920 widths;
+18. light and dark themes;
+19. remote page unchanged.
 
 Assert zero page errors and zero unexpected requests.
 
 ### Step 3: Verify RED
-
-Run:
 
 ```bash
 MMX_REQUIRE_INVENTORY_BROWSER=1 \
@@ -513,97 +513,87 @@ python3 -B -m pytest -p no:cacheprovider -o addopts= -q \
 
 ### Step 4: Implement minimal UI
 
-Use safe text nodes and existing helpers.
-
-Recommended renderer:
+Use safe text nodes and existing helpers. Recommended renderer:
 
 ```javascript
 function renderWebSolFleet(fleet, envelope) { ... }
 ```
 
-Render explicit labels:
+Render exact coverage, profile cardinality, known-versus-total, probe coverage, observation time, and cache state. Display only a short adapter prefix.
 
-```text
-COMPLETE IN SCOPE
-PARTIAL
-UNAVAILABLE
-EMPTY IN SCOPE
-PROBE COVERAGE PARTIAL
-TOTAL UNKNOWN
-```
+For navigation, resolve a projected binding ID against `allBindings()` from the same loaded document. Only exactly one canonical object may reach existing `openBinding()`. Never post the C3 row itself or build a URL.
 
-Resolve each match ID against the existing `allBindings()`/canonical binding summaries, then use the existing `openBinding()` path. Never build a URL from C3 data and never elect one of multiple matches.
-
-Do not render running/idle/capacity/account-online/actual-model claims.
+Never render running, idle, spare capacity, account online, all-company coverage, Sol Pro, or actual served model.
 
 ### Step 5: Verify GREEN and commit
 
-Run the actual-browser C3 tests and the full existing UI/remote/topbar inventory suites. Preserve #531/#537 semantics exactly.
+Run C3 browser tests and all existing UI/remote/topbar/inventory suites. Preserve #531/#537 behavior and tests intact.
 
 ---
 
-## Task 9: Payload, privacy, and hostile mutation proof
+## Task 9: Prove payload, privacy, and hostile mutations
 
 **Files:**
 - Modify: `tests/test_web_sol_fleet_projection.py`
 - Modify: `tests/test_chairman_control_room.py`
 - Modify: `tests/test_chairman_control_room_ui_x1.py`
 
-### Step 1: Build worst-case legal fixtures
+### Step 1: Build the exact legal worst case
 
-Construct four complete 128-row C2 snapshots with:
+Construct four collected 128-row C2 profiles with:
 
-- maximum fixed-length timestamps/fingerprints;
-- every nullable boolean populated;
-- duplicate groups;
-- eight projected navigation matches on every session;
-- exact omitted navigation counts;
-- all closed enum extremes.
+- longest legal closed strings and timestamps;
+- every nullable Boolean populated where legal;
+- 8,192 exact source binding rows distributed across expected profiles;
+- exact duplicate/cue extremes;
+- six displayed navigation matches on every session;
+- exact total/omitted match counts.
 
-Prove canonical C3 JSON is at most 524,288 bytes. If the legal worst case exceeds the limit, reduce projected redundancy through the same schema before acceptance; do not silently truncate rows or raise the C2 native guard.
+Canonical compact JSON must be `<=524288` bytes. The same construction with seven displayed matches per session must fail the cap or frozen six-match assertion. Do not raise the ceiling or drop rows.
 
 ### Step 2: Add hostile privacy tests
 
 Attempt to inject:
 
-- raw `https://` and `file://` URLs;
+- `https://`, `file://`, arbitrary URL and HTML;
 - `/Users`, `/Volumes`, `/home`, `/private`, `/var`, `/tmp`, `/etc`, `/opt`, `/Library`;
-- Windows drive and UNC paths;
-- profile/folder/account names;
-- email addresses;
-- cookies/tokens/password/secret/auth strings;
-- raw exception/traceback;
-- prompt/transcript/reasoning/model-output content;
-- arbitrary HTML;
-- non-finite JSON;
-- control characters and oversized strings.
+- Windows drive/UNC paths;
+- profile/folder/account labels;
+- email, cookie, token, password, secret, auth data;
+- operation key, nonce, raw exception, traceback;
+- prompt, transcript, reasoning, output, model prose;
+- non-finite JSON, control characters, oversized strings.
 
-Only fixed closed fields may survive.
+Only frozen closed fields survive.
 
 ### Step 3: Mutation discrimination
 
-Mutate one behavior at a time and require a test failure:
+Kill at least:
 
-- missing binding file -> empty;
+- missing binding -> empty;
 - partial total -> integer;
-- all unavailable -> zero complete;
-- fifth adapter call enabled;
+- all unavailable -> complete zero;
+- fifth adapter call;
 - retry on C2 failure;
 - parallel calls;
-- adapter grouping by seat/title instead of instance ID;
+- adapter grouping by seat/title;
+- duplicate binding-ID first-match election;
 - cross-profile fingerprint deduplication;
 - newest binding election;
+- invalid receipt accepted;
+- receipt status fabricated on exception;
 - raw exception copied;
 - non-null model inference;
-- remote projection leaks C3;
-- UI says “running” or “idle”;
-- over-limit payload accepted.
+- seven navigation matches displayed;
+- payload fallback fabricated;
+- remote C3 leak;
+- UI says running/idle.
 
-Restore each mutation and re-run GREEN.
+Restore each mutation and re-run GREEN. Record exact mutants and outcomes.
 
 ### Step 4: Commit proof tests
 
-Record exact mutant list and outcomes in the PR body/evidence packet.
+No production code-only commit may bypass the owning tests.
 
 ---
 
@@ -617,14 +607,15 @@ Record exact mutant list and outcomes in the PR body/evidence packet.
 Add:
 
 - Advanced → Web Sessions location;
-- meaning of expected/attempted/collected/omitted;
+- expected/selected/attempted/collected/unavailable/not-attempted/omitted meanings;
 - inventory versus probe coverage;
-- observation timestamp/cache behavior;
+- observation/cache timestamp behavior;
 - no worker/capacity/model inference;
 - no new refresh endpoint;
 - exact source/install/production distinctions;
-- troubleshooting for missing bindings, C2 unavailable, partial inventory, and expired retained cache;
-- #340 installation proof dependency.
+- duplicate-binding refusal;
+- missing binding, C2 unavailable, partial inventory, and retained-cache troubleshooting;
+- #340 installation-proof dependency.
 
 ### Step 2: Run focused verification
 
@@ -644,46 +635,37 @@ python3 -m compileall -q \
 git diff --check
 ```
 
-Set required browser flags so browser absence fails rather than skips for the C3 evidence lane.
+Set required browser flags so C3 browser absence fails rather than skips.
 
 ### Step 3: Run current repository/security proof
 
-Use the repository’s discovery-first current test gate. Record:
-
-- protected base;
-- source head/tree;
-- generated merge-ref commit/tree and ordered parents;
-- actual checkout from logs;
-- test and security conclusions;
-- every skip/limitation;
-- exact changed paths.
-
-Do not transfer a green result from an older head or older merge ref.
+Use the repository’s discovery-first current gate. Record exact protected base, source head/tree, generated merge ref/tree/parents, actual hosted checkout, test/security conclusions, every skip/limitation, and exact changed paths. Never transfer older green.
 
 ### Step 4: Independent review
 
 A genuine non-author reviewer must assess:
 
-- no duplicate owner/control plane;
-- exact binding/adapter identity;
-- strict null/coverage equations;
-- sequential/no-retry deadline behavior;
-- privacy and payload bound;
-- gather-once/pure compose;
+- one canonical gather/cache and no duplicate owner;
+- exact adapter/binding identity and duplicate-ID refusal;
+- strict null/receipt/count/coverage equations;
+- sequential request-window/deadline/no-retry behavior;
+- pure-input and payload bounds;
+- privacy and fixed failures;
+- gather once/pure compose;
 - Today isolation;
 - remote omission;
-- real consumer usefulness;
-- proof class honesty.
+- useful real consumer;
+- proof-class honesty.
 
-Repair on the same branch/PR only.
+Repair only on the same branch/PR.
 
 ---
 
 ## Task 11: Installed two-profile production proof
 
-**Owner boundary:** this task is not performed by the source worker unless issue #340 explicitly transfers the exact installed-evidence duty after its own gates.
+**Owner boundary:** the source worker does not perform this task unless issue #340 explicitly transfers the exact installed-evidence duty after its own gates.
 
-Required real journey:
+Required journey:
 
 ```text
 exact protected C2+C3 generation
@@ -698,17 +680,7 @@ exact protected C2+C3 generation
 -> rollback or retained-install disposition
 ```
 
-Evidence must include:
-
-- protected source/package/artifact digests;
-- host/profile opaque fingerprints;
-- complete/partial/unavailable screenshots;
-- C2 CLI receipts matching the visible generation;
-- no private content leak;
-- no Today/remote regression;
-- fault injection and zero retry;
-- rollback/residual-state proof;
-- independent evidence review.
+Evidence includes protected source/package/artifact digests, opaque host/profile identities, complete/partial/unavailable screenshots, matching C2 receipts, no private leak, no Today/remote regression, fault/no-retry proof, rollback/residual-state proof, and independent evidence review.
 
 Only this may support `PROVEN_LIVE` for the exact two-profile C3 epoch.
 
