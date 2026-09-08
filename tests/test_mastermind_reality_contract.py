@@ -227,6 +227,42 @@ def test_published_control_room_observation_validates() -> None:
     validator().validate(load_json(OBSERVATION))
 
 
+def test_published_observation_uses_exact_retained_evidence_refs() -> None:
+    observation = load_json(OBSERVATION)
+    assert isinstance(observation, dict)
+
+    retained = {
+        "private-evidence/control-room-desktop-1440x900.png":
+            "6ec2806af08b02d4b1761517ec86cc28a87659fcd57dff3407186d65acb2fbf5",
+        "private-evidence/control-room-mobile-390x844.png":
+            "d0e9308c3ed055b7b2fecdbfc947a0f2efbfcecde3e0b0d9e3c5b7c1edecbeea",
+        "private-evidence/visual-consumption-attestation-20260908.json":
+            "b46f7b966655811309fef4d0c9941f72ff44f1bc890b19dbde747413112fb4fc",
+        "private-evidence/control-room-desktop-1440x900.semantic.json":
+            "0c02ab077cb2ca4ed5c08483455679e7c8f2aced2d0bcd654e78cf4611b13e27",
+        "private-evidence/control-room-mobile-390x844.semantic.json":
+            "c70cfe6db96b3b4f6451540e6665219a8e3943237c34daba420a21ce3c2ea7d5",
+        "private-evidence/control-room-desktop-1440x900.state.json":
+            "9540945a0f841067e9b362d6d91f19333ebcc999f0fe8076060bf1a8e1923027",
+        "private-evidence/control-room-desktop-1440x900.trace.zip":
+            "adbe826424fc81412a2f4d8c7b31a3bfe7e1c9a491a9d784c313d86ef86f2289",
+    }
+
+    capture = observation["capture"]
+    evidence = []
+    for screenshot in capture["screenshots"]:
+        evidence.append((screenshot["artifact_ref"], screenshot["sha256"]))
+        consumption = screenshot["consumption"]
+        evidence.append((consumption["proof_ref"], consumption["proof_sha256"]))
+    for family in ("semantic_evidence", "runtime_evidence"):
+        evidence.extend(
+            (artifact["artifact_ref"], artifact["sha256"])
+            for artifact in capture[family]["artifacts"]
+        )
+
+    assert set(evidence) == set(retained.items())
+
+
 def test_observation_rejects_unconsumed_screenshot_bytes() -> None:
     candidate = deepcopy(valid_observation())
     candidate["capture"]["screenshots"][0]["consumption"]["state"] = "UNCONSUMED"

@@ -116,7 +116,7 @@
       "state": "AVAILABLE",
       "artifacts": [
         {
-          "artifact_ref": "private-evidence/control-room-rendered-state.json",
+          "artifact_ref": "private-evidence/control-room-desktop-1440x900.state.json",
           "sha256": "9540945a0f841067e9b362d6d91f19333ebcc999f0fe8076060bf1a8e1923027",
           "coverage": "rendered Control Room state envelope shared by the two capture viewports",
           "consumed": true
@@ -137,7 +137,7 @@
       "claim": "The approved local page, its static assets, and authenticated state reads returned HTTP 200 with zero failed requests, page errors, or console entries in the captured journey.",
       "evidence_refs": [
         "private-evidence/control-room-desktop-1440x900.trace.zip",
-        "private-evidence/control-room-rendered-state.json"
+        "private-evidence/control-room-desktop-1440x900.state.json"
       ],
       "unknowns": [
         "No other product origin or account surface was exercised."
@@ -147,7 +147,7 @@
       "basis": "DETERMINISTIC_OBSERVATION",
       "claim": "The captured envelope reported the Executive runtime unavailable, all three attention groups unavailable, 70 work references, 58 autonomy responsibilities, 61 autonomy issues, 155 unjoined open pull requests, and a background refresh in progress.",
       "evidence_refs": [
-        "private-evidence/control-room-rendered-state.json",
+        "private-evidence/control-room-desktop-1440x900.state.json",
         "private-evidence/control-room-desktop-1440x900.semantic.json",
         "private-evidence/control-room-mobile-390x844.semantic.json"
       ],
