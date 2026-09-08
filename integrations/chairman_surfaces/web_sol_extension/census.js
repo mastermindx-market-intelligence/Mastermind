@@ -34,25 +34,31 @@
     node.append(element("strong", Number.isSafeInteger(value) ? String(value) : "—"), element("span", label));
     return node;
   }
+  function clearSnapshot() {
+    byId("rows").replaceChildren(); byId("summary").replaceChildren();
+    byId("scope").textContent = ""; byId("timestamp").textContent = "";
+  }
   function render(result) {
+    const hasInventory = Number.isSafeInteger(result.initial_tab_count);
     byId("summary").replaceChildren(
       metric(result.initial_tab_count, "Tabs in initial query"),
-      metric(result.generation_cue_count, "Generation cues"),
-      metric(result.unknown_cue_count, "Unknown cue state"),
-      metric(result.duplicate_tab_count, "Extra conversation views"),
+      metric(hasInventory ? result.generation_cue_count : null, "Generation cues"),
+      metric(hasInventory ? result.unknown_cue_count : null, "Unknown cue state"),
+      metric(hasInventory ? result.duplicate_tab_count : null, "Extra conversation views"),
     );
     const status = byId("status");
     status.className = `status${result.inventory_coverage === "UNAVAILABLE" ? " error" :
       result.inventory_coverage === "PARTIAL" ? " warning" : ""}`;
     status.textContent = REASONS[result.reason] || "Observation unavailable.";
-    const scope = `Normal ChatGPT tabs in this profile only · ${result.probed_tab_count} sampled · ` +
-      `${result.unique_conversation_count} distinct observed conversation locators`;
+    const scope = "Normal ChatGPT tabs in this profile only · " + (hasInventory
+      ? `${result.probed_tab_count} sampled · ${result.unique_conversation_count} distinct observed conversation locators`
+      : "Inventory unavailable");
     byId("scope").textContent = scope + (result.excluded_private_count ? ` · ${result.excluded_private_count} private tabs excluded` : "") +
       (result.omitted_tab_count ? ` · ${result.omitted_tab_count} returned entries omitted` : "") +
       (result.unobserved_added_count ? ` · ${result.unobserved_added_count} new tabs not sampled` : "");
     const when = typeof result.completed_at === "string" && /^\d{4}-\d{2}-\d{2}T/.test(result.completed_at)
       ? result.completed_at.replace("T", " ").replace("Z", " UTC") : "Time unavailable";
-    byId("timestamp").textContent = `Captured ${when} · ${result.duration_ms} ms · Refresh to resample`;
+    byId("timestamp").textContent = `${hasInventory ? "Captured" : "Attempted"} ${when} · ${result.duration_ms} ms · Refresh to resample`;
     const rows = byId("rows"); rows.replaceChildren();
     for (const row of result.rows) {
       const tr = document.createElement("tr");
@@ -77,7 +83,7 @@
       tr.append(surface, cue, browser, mode); rows.append(tr);
     }
     if (!result.rows.length) {
-      const tr = document.createElement("tr"), td = element("td", result.inventory_coverage === "UNAVAILABLE"
+      const tr = document.createElement("tr"), td = element("td", !hasInventory
         ? "No usable snapshot. This is not evidence that no sessions exist."
         : "No normal ChatGPT tabs were sampled in this profile.", "empty");
       td.colSpan = 4; tr.append(td); rows.append(tr);
@@ -87,11 +93,12 @@
     if (busy) return;
     busy = true; byId("refresh").disabled = true;
     byId("status").className = "status"; byId("status").textContent = "Collecting a bounded read-only snapshot…";
-    byId("rows").replaceChildren(); byId("summary").replaceChildren(); byId("timestamp").textContent = "";
+    clearSnapshot();
     try {
       const instance = globalThis.MMX_WEB_SOL_INSTANCE;
       render(await globalThis.MMXWebSolCensus.collect(chrome.tabs, instance && instance.instanceId));
     } catch (_) {
+      clearSnapshot();
       byId("status").className = "status error";
       byId("status").textContent = "Snapshot unavailable. No browser-control action was attempted.";
     } finally { busy = false; byId("refresh").disabled = false; }
