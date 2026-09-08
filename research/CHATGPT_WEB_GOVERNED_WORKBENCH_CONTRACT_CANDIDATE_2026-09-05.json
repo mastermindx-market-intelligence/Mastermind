@@ -6,7 +6,7 @@
   "parent_operation": "chatgpt-pro-long-run-leaders-research-20260905-sol-001",
   "authority": "RESEARCH_ONLY_NOT_A_RUNTIME_SCHEMA_OR_IMPLEMENTATION_COMMISSION",
   "protected_source_basis": "03eaa8e9aa32fdc949551ad0f88a890d269daea4",
-  "supersedes_blob": "6582fde2a414a66d1fbc7b0d3fa0bf2284f7e17c",
+  "supersedes_blob": "43c038c79fac9dbed9c2c54324121f1a4e2d1d8c",
   "capability_state": "SPEC_ONLY",
   "revision_reason": [
     "Preserve the prior owner-issued pre-effect reference and loss-safe reconciliation architecture.",
@@ -25,7 +25,8 @@
     "Require image, semantic, and diff reads to distinguish committed baseline, live working-tree observation, indexed observation where applicable, coverage, freshness, and observation time.",
     "Bind attended context and target refusals to explicit closed error codes before backend access.",
     "Consume protected PR #511 only as profile-scoped read-only CENSUS research/freeze and protected PR #529 only as authenticated selected-project read-composition evidence at their stated proof ceilings.",
-    "Advance action-time protected grounding to 03eaa8e9 while retaining PR #471 historical dependency identity and using a separate conflict-free current-base merge-tree receipt."
+    "Retain the V7 authored-source grounding at 03eaa8e9 and the exact PR #471 / PR #529 dependency identities while requiring every later current-base integration result to live in a separate post-freeze external receipt.",
+    "Externalize final-head/current-protected integration evidence so the source declares a post-freeze receipt contract instead of embedding a self-referential integrated tree."
   ],
   "principles": [
     "The workbench is a facade over one owner-bound execution context: either an exact Executive Job/Attempt/Worker/provider context or an explicit attended Web context; it is not a lifecycle, session, memory, retry, queue, permission, workspace, process, or evidence owner.",
@@ -1494,8 +1495,8 @@
     "upstream_unsigned_binary_on_primary_authenticated_host"
   ],
   "repair_marker": "PR490-V7-CURRENT-PROTECTED-COHERENCE-REPAIR-20260908",
-  "repair_observed_at": "2026-09-08T06:21:47Z",
-  "integrated_protected_source_via": "EXTERNAL_MERGE_TREE_RECEIPT_f83c92129ef7d4364d3f146a66ecc883b493cc42_NO_ANCESTRY_ONLY_COMMIT",
+  "repair_observed_at": "2026-09-08T08:07:50Z",
+  "integrated_protected_source_via": "POST_FREEZE_EXTERNAL_MERGE_TREE_RECEIPT_REQUIRED_NO_ANCESTRY_ONLY_COMMIT",
   "conversation_identity_contract": {
     "authenticated_caller_is_exact_conversation": false,
     "hc0_fingerprint_is_authority": false,
@@ -1797,12 +1798,26 @@
     "excluded_profile": "ATTENDED_WEB_OPERATOR",
     "boundary": "Executive supervisors consume immutable provider-neutral launch, process, result, receipt, validation, status, and artifact-limit values. Concrete adapters exclusively own provider homes, credentials, and provider-specific launch mechanics. This dependency proves no RuntimeBinding, attended command, installation, deployment, or production execution."
   },
-  "current_protected_integration_receipt": {
+  "current_protected_integration_requirement": {
+    "state": "POST_FREEZE_EXTERNAL_RECEIPT_REQUIRED",
     "semantic_base": "66a1125c4e0f02351f33dbf8c8583eb19ea1d2e4",
-    "semantic_head_pre_v7": "484f6b5b223c75f0256d9cb21893dfc4d199d55a",
-    "protected_master": "03eaa8e9aa32fdc949551ad0f88a890d269daea4",
-    "conflict_free_integrated_tree": "f83c92129ef7d4364d3f146a66ecc883b493cc42",
-    "net_semantic_path_count": 19,
-    "source_effect": "NONE_EXTERNAL_READ_ONLY_COMPOSITION"
+    "protected_master_at_repair": "03eaa8e9aa32fdc949551ad0f88a890d269daea4",
+    "candidate_identity": "EXACT_REMOTE_HEAD_AND_TREE_AFTER_FINAL_SOURCE_FREEZE",
+    "required_receipt_fields": [
+      "candidate_head",
+      "candidate_tree",
+      "protected_master",
+      "integrated_tree",
+      "parents",
+      "semantic_path_count",
+      "path_blob_identities",
+      "conflict_state",
+      "required_check_states",
+      "effect"
+    ],
+    "semantic_path_count": 19,
+    "source_effect": "NONE_EXTERNAL_READ_ONLY_COMPOSITION",
+    "self_reference_forbidden": true,
+    "external_receipt_is_source_authority": false
   }
 }

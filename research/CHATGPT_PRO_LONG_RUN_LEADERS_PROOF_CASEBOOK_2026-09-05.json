@@ -548,7 +548,7 @@
   "contract_generation": "PR490_REPAIR_CANDIDATE_V7_CURRENT_PROTECTED_PROFILE_GATED_MODE_COHERENT_SOURCE_ONLY",
   "source_snapshot_type": "PROTECTED_MASTER_COMMIT",
   "contract_candidate_path": "research/CHATGPT_WEB_GOVERNED_WORKBENCH_CONTRACT_CANDIDATE_2026-09-05.json",
-  "contract_candidate_content_sha256": "1f0175676c4d3b0fcae0b68d45b33c44fe597edd3e6d1a1a1e5cf062474d3992",
+  "contract_candidate_content_sha256": "526b1c3790e88be40349737510e82e464ad06d066575efe5dfa387f8c52a521b",
   "dependency_closure": [
     {
       "pr": 471,
