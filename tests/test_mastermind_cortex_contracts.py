@@ -32,6 +32,13 @@ def _codes(result: dict[str, object]) -> set[str]:
     return {error["code"] for error in result["errors"]}  # type: ignore[index]
 
 
+def _validation_codes_without_exception(root: Path) -> set[str]:
+    try:
+        return _codes(validate_repository(root))
+    except Exception as error:
+        pytest.fail(f"repository validator raised {type(error).__name__}: {error}")
+
+
 def _fixture() -> dict[str, object]:
     return json.loads(
         (ROOT / "plugins/mastermind-cortex/fixtures/orientation-cases.json").read_text()
@@ -437,6 +444,106 @@ def test_cortex_hostile_truth_mutations_are_refused(
     target.write_text(text.replace(needle, replacement, 1))
 
     assert expected_code in _codes(validate_repository(tmp_path))
+
+
+@pytest.mark.parametrize("target", ("fixture", "manifest"))
+def test_repository_rejects_duplicate_json_keys_in_cortex_documents(
+    target: str, tmp_path: Path
+) -> None:
+    _copy_packages(tmp_path)
+    path = (
+        tmp_path / "plugins/mastermind-cortex/fixtures/orientation-cases.json"
+        if target == "fixture"
+        else tmp_path / "plugins/mastermind-cortex/.codex-plugin/plugin.json"
+    )
+    text = path.read_text()
+    needle = (
+        '"plugin":"mastermind-cortex"'
+        if target == "fixture"
+        else '"name": "mastermind-cortex"'
+    )
+    duplicate = (
+        '"plugin":"untrusted-shadow","plugin":"mastermind-cortex"'
+        if target == "fixture"
+        else '"name": "untrusted-shadow", "name": "mastermind-cortex"'
+    )
+    assert needle in text
+    path.write_text(text.replace(needle, duplicate, 1))
+
+    assert "DUPLICATE_JSON_KEY" in _validation_codes_without_exception(tmp_path)
+
+
+@pytest.mark.parametrize("literal", ("NaN", "Infinity", "-Infinity", "9" * 5_000))
+def test_repository_refuses_nonstandard_or_overlong_json_numbers_without_exception(
+    literal: str, tmp_path: Path
+) -> None:
+    _copy_packages(tmp_path)
+    path = tmp_path / "plugins/mastermind-cortex/fixtures/orientation-cases.json"
+    path.write_text('{"schema":' + literal + "}\n")
+
+    assert "INVALID_JSON" in _validation_codes_without_exception(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    (
+        "plugins/mastermind-cortex/fixtures/orientation-cases.json",
+        "plugins/mastermind-cortex/skills/orient-mastermind-mission/SKILL.md",
+        "plugins/mastermind-cortex/references/orientation-contract.md",
+        "plugins/mastermind-cortex/references/source-claim-tracing-examples.md",
+    ),
+)
+def test_repository_refuses_required_cortex_directories_without_exception(
+    relative_path: str, tmp_path: Path
+) -> None:
+    _copy_packages(tmp_path)
+    path = tmp_path / relative_path
+    path.unlink()
+    path.mkdir()
+
+    assert "REQUIRED_FILE_INVALID" in _validation_codes_without_exception(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "surface",
+    (
+        "manifest_description",
+        "manifest_short_description",
+        "manifest_long_description",
+        "skill",
+        "orientation_contract",
+        "source_claim_examples",
+    ),
+)
+@pytest.mark.parametrize("mutation", ("append", "delete", "replace"))
+def test_cortex_truth_bearing_prose_has_a_closed_content_contract(
+    surface: str, mutation: str, tmp_path: Path
+) -> None:
+    _copy_packages(tmp_path)
+    manifest_path = tmp_path / "plugins/mastermind-cortex/.codex-plugin/plugin.json"
+    file_paths = {
+        "skill": tmp_path / "plugins/mastermind-cortex/skills/orient-mastermind-mission/SKILL.md",
+        "orientation_contract": tmp_path / "plugins/mastermind-cortex/references/orientation-contract.md",
+        "source_claim_examples": tmp_path / "plugins/mastermind-cortex/references/source-claim-tracing-examples.md",
+    }
+
+    if surface.startswith("manifest_"):
+        manifest = json.loads(manifest_path.read_text())
+        field = {
+            "manifest_description": "description",
+            "manifest_short_description": "shortDescription",
+            "manifest_long_description": "longDescription",
+        }[surface]
+        parent = manifest if field == "description" else manifest["interface"]
+        value = parent[field]
+        parent[field] = value + "x" if mutation == "append" else value[:-1] if mutation == "delete" else value[:-1] + "x"
+        manifest_path.write_text(json.dumps(manifest) + "\n")
+    else:
+        path = file_paths[surface]
+        value = path.read_text()
+        path.write_text(value + "x" if mutation == "append" else value[:-1] if mutation == "delete" else value[:-1] + "x")
+
+    assert "CORTEX_CONTENT_CONTRACT_MISMATCH" in _validation_codes_without_exception(tmp_path)
 
 
 @pytest.mark.parametrize("location", ("marketplace", "package"))
