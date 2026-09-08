@@ -249,16 +249,25 @@ def _is_ceo(message: Mapping[str, Any]) -> bool:
     return actor["kind"] == "executive_surface" and actor["seat"] == "ceo"
 
 
-def _reduce_semantic_leaf(
+def _ordered_semantic_chain(
     messages: Sequence[Mapping[str, Any]],
-) -> tuple[Mapping[str, Any] | None, Mapping[str, Any] | None, str | None]:
+) -> tuple[tuple[Mapping[str, Any], ...], str | None]:
+    """Reduce accepted messages into one semantic order.
+
+    A contributor may append a linear ACK/PROGRESS annotation chain while a
+    material return is waiting.  A single CEO disposition that still replies
+    to the original material return is not a competing semantic leaf: the
+    worker's request-bound consumer requires that exact reference.  Any second
+    command, second annotation branch, material side branch, or non-quiet
+    descendant remains a fork.
+    """
     by_key: dict[str, Mapping[str, Any]] = {}
     for message in messages:
         key = str(message["message_key"])
         previous = by_key.get(key)
         if previous is not None:
             if previous["fingerprint"] != message["fingerprint"]:
-                return None, None, "MESSAGE_KEY_CONFLICT"
+                return (), "MESSAGE_KEY_CONFLICT"
             continue
         by_key[key] = message
 
@@ -270,48 +279,226 @@ def _reduce_semantic_leaf(
             roots.append(key)
             continue
         if reply_to not in by_key:
-            return None, None, "REPLY_LINEAGE_INVALID"
+            return (), "REPLY_LINEAGE_INVALID"
         children[str(reply_to)].append(key)
 
-    if len(roots) != 1 or any(len(values) > 1 for values in children.values()):
-        return None, None, "DIALOGUE_FORKED"
+    if len(roots) != 1:
+        return (), "DIALOGUE_FORKED"
+
+    def quiet_annotation(key: str) -> bool:
+        message = by_key[key]
+        return _is_contributor(message) and message["message_type"] in {
+            "ACK",
+            "PROGRESS",
+        }
+
+    def parent_command(key: str) -> bool:
+        message = by_key[key]
+        return _is_ceo(message) and message["message_type"] in {
+            "RULING",
+            "CONTINUE",
+            "STOP",
+            "AMENDMENT_AVAILABLE",
+        }
 
     current_key = roots[0]
     visited: set[str] = set()
-    previous: Mapping[str, Any] | None = None
+    ordered: list[Mapping[str, Any]] = []
     while True:
         if current_key in visited:
-            return None, None, "REPLY_LINEAGE_INVALID"
+            return (), "REPLY_LINEAGE_INVALID"
         visited.add(current_key)
         current = by_key[current_key]
+        ordered.append(current)
         next_keys = children[current_key]
         if not next_keys:
             if len(visited) != len(by_key):
-                return None, None, "DIALOGUE_FORKED"
-            return current, previous, None
-        previous = current
-        current_key = next_keys[0]
+                return (), "DIALOGUE_FORKED"
+            return tuple(ordered), None
+        if len(next_keys) == 1:
+            current_key = next_keys[0]
+            continue
+
+        if not (
+            _is_contributor(current)
+            and current["message_type"] in {"BLOCKED", "DECISION_REQUEST", "RESULT"}
+        ):
+            return (), "DIALOGUE_FORKED"
+        quiet_roots = [key for key in next_keys if quiet_annotation(key)]
+        command_roots = [key for key in next_keys if parent_command(key)]
+        if (
+            len(quiet_roots) != 1
+            or len(command_roots) != 1
+            or len(next_keys) != 2
+        ):
+            return (), "DIALOGUE_FORKED"
+
+        quiet_key = quiet_roots[0]
+        while True:
+            if quiet_key in visited or not quiet_annotation(quiet_key):
+                return (), "DIALOGUE_FORKED"
+            visited.add(quiet_key)
+            ordered.append(by_key[quiet_key])
+            quiet_children = children[quiet_key]
+            if not quiet_children:
+                break
+            if len(quiet_children) != 1 or not quiet_annotation(quiet_children[0]):
+                return (), "DIALOGUE_FORKED"
+            quiet_key = quiet_children[0]
+        current_key = command_roots[0]
+
+
+def _reduce_semantic_leaf(
+    messages: Sequence[Mapping[str, Any]],
+) -> tuple[Mapping[str, Any] | None, Mapping[str, Any] | None, str | None]:
+    """Preserve the existing leaf API over the single chain reducer."""
+    ordered, error = _ordered_semantic_chain(messages)
+    if error is not None:
+        return None, None, error
+    return ordered[-1], ordered[-2] if len(ordered) > 1 else None, None
 
 
 def _ceo_reply_lineage_valid(
-    message: Mapping[str, Any], previous: Mapping[str, Any] | None
+    message: Mapping[str, Any],
+    previous: Mapping[str, Any] | None,
+    pending_return: Mapping[str, Any] | None = None,
 ) -> bool:
-    if previous is None or not _is_contributor(previous):
-        return False
-    if message["reply_to_message_key"] != previous["message_key"]:
-        return False
+    if pending_return is not None:
+        # Quiet contributor annotations do not become the subject of the
+        # decision.  The command must retain the exact original request key so
+        # the existing request-bound waiter can consume it.
+        if message["reply_to_message_key"] != pending_return["message_key"]:
+            return False
+        subject = pending_return
+    else:
+        if previous is None or not _is_contributor(previous):
+            return False
+        if message["reply_to_message_key"] != previous["message_key"]:
+            return False
+        subject = previous
     message_type = message["message_type"]
-    previous_type = previous["message_type"]
+    previous_type = subject["message_type"]
     if message_type == "RULING":
-        return previous_type == "DECISION_REQUEST"
+        return previous_type == "DECISION_REQUEST" and any(
+            option["id"] == message["body"]["selected_option"]
+            for option in subject["body"]["options"]
+        )
     if message_type == "CONTINUE":
         if previous_type not in {"ACK", "PROGRESS", "BLOCKED", "RESULT"}:
             return False
         return not (
             previous_type == "BLOCKED"
-            and previous["body"]["needed_from"] != "sol"
+            and subject["body"]["needed_from"] != "sol"
         )
     return message_type in {"STOP", "AMENDMENT_AVAILABLE"}
+
+
+def _classify_accepted_history(
+    *,
+    normalized_parent: Mapping[str, Any],
+    normalized_messages: Sequence[Mapping[str, Any]],
+    routing: TurnRoutingFacts,
+) -> TurnDecision:
+    """Interpret an already-normalized history, without storing new state.
+
+    The public entry point owns schema, parent, routing and context validation.
+    This fold keeps one unresolved material return per child. Competing returns
+    with no explicit disposition refuse instead of inventing a supersession or
+    a second queue. All accumulators are discarded after this call.
+    """
+    ordered, reduction_error = _ordered_semantic_chain(normalized_messages)
+    if reduction_error is not None:
+        return _refuse(reduction_error)
+
+    pending_return: Mapping[str, Any] | None = None
+    pending_command: Mapping[str, Any] | None = None
+    pending_command_valid: bool | None = None
+    previous: Mapping[str, Any] | None = None
+    terminal_consumed = False
+    for message in ordered:
+        message_type = message["message_type"]
+        if terminal_consumed:
+            # A terminal consumption is not assignment of a successor child.
+            return _refuse("REPLY_LINEAGE_INVALID")
+        if pending_command is not None and pending_command["message_type"] == "STOP":
+            actor = message["actor_ref"]
+            if not (
+                pending_command_valid is True
+                and message_type == "ACK"
+                and actor["kind"] == "executive_surface"
+                and actor["seat"] == "coo"
+                and message["reply_to_message_key"] == pending_command["message_key"]
+            ):
+                return _refuse("REPLY_LINEAGE_INVALID")
+            terminal_consumed = True
+            pending_command = None
+            pending_command_valid = None
+        elif _is_contributor(message):
+            if message_type in {"ACK", "PROGRESS"}:
+                # The contributor can acknowledge a parent command, but its
+                # own routine update cannot answer its pending material return.
+                pending_command = None
+                pending_command_valid = None
+            elif message_type in {"BLOCKED", "DECISION_REQUEST", "RESULT"}:
+                if pending_return is not None:
+                    return _refuse("REPLY_LINEAGE_INVALID")
+                pending_return = message
+                pending_command = None
+                pending_command_valid = None
+            else:
+                return _refuse("MESSAGE_TYPE_UNCLASSIFIED")
+        else:
+            if not _is_ceo(message):
+                return _refuse("DIALOGUE_SENDER_INVALID")
+            # Preserve the existing source-reconciliation boundary: a command
+            # that remains the actionable leaf must be valid, while a later
+            # quiet contributor leaf leaves exact successor validation to the
+            # source owner.  This prevents a historical invalid successor from
+            # being relabeled as a whole-history semantics failure.
+            pending_command_valid = _ceo_reply_lineage_valid(
+                message, previous, pending_return
+            )
+            pending_return = None
+            pending_command = message
+        previous = message
+
+    if terminal_consumed:
+        return TurnDecision(
+            action=TurnAction.TERMINAL,
+            attention=None,
+            reason="DIALOGUE_STOP_CONSUMED",
+            refusal_code=None,
+        )
+    if pending_return is not None:
+        return _requires_attention(
+            action=TurnAction.WAKE_CEO,
+            target_seat="ceo",
+            parent=normalized_parent,
+            message=pending_return,
+            routing=routing,
+        )
+    if pending_command is not None:
+        if pending_command_valid is not True:
+            return _refuse("REPLY_LINEAGE_INVALID")
+        action = (
+            TurnAction.WAKE_COO_TERMINAL
+            if pending_command["message_type"] == "STOP"
+            else TurnAction.WAKE_COO
+        )
+        return _requires_attention(
+            action=action,
+            target_seat="coo",
+            parent=normalized_parent,
+            message=pending_command,
+            routing=routing,
+        )
+    if previous is None:
+        return _refuse("DIALOGUE_HISTORY_EMPTY")
+    return _no_action(
+        "DIALOGUE_ACKNOWLEDGED"
+        if previous["message_type"] == "ACK"
+        else "DIALOGUE_PROGRESS"
+    )
 
 
 def classify_turn(
@@ -363,60 +550,9 @@ def classify_turn(
             return _refuse("DIALOGUE_CONTEXT_MISMATCH")
         normalized_messages.append(normalized)
 
-    leaf, previous, reduction_error = _reduce_semantic_leaf(normalized_messages)
-    if reduction_error is not None:
-        return _refuse(reduction_error)
-    if leaf is None:
-        return _refuse("DIALOGUE_HISTORY_EMPTY")
-
-    message_type = leaf["message_type"]
-    if _is_contributor(leaf):
-        if (
-            message_type == "ACK"
-            and previous is not None
-            and previous["message_type"] == "STOP"
-            and leaf["reply_to_message_key"] == previous["message_key"]
-        ):
-            actor = leaf["actor_ref"]
-            if actor["kind"] != "executive_surface" or actor["seat"] != "coo":
-                return _refuse("REPLY_LINEAGE_INVALID")
-            return TurnDecision(
-                action=TurnAction.TERMINAL,
-                attention=None,
-                reason="DIALOGUE_STOP_CONSUMED",
-                refusal_code=None,
-            )
-        if message_type == "ACK":
-            return _no_action("DIALOGUE_ACKNOWLEDGED")
-        if message_type == "PROGRESS":
-            return _no_action("DIALOGUE_PROGRESS")
-        if message_type in {"BLOCKED", "DECISION_REQUEST", "RESULT"}:
-            return _requires_attention(
-                action=TurnAction.WAKE_CEO,
-                target_seat="ceo",
-                parent=normalized_parent,
-                message=leaf,
-                routing=routing,
-            )
-        return _refuse("MESSAGE_TYPE_UNCLASSIFIED")
-
-    if not _is_ceo(leaf):
-        return _refuse("DIALOGUE_SENDER_INVALID")
-    if not _ceo_reply_lineage_valid(leaf, previous):
-        return _refuse("REPLY_LINEAGE_INVALID")
-    action = {
-        "RULING": TurnAction.WAKE_COO,
-        "CONTINUE": TurnAction.WAKE_COO,
-        "AMENDMENT_AVAILABLE": TurnAction.WAKE_COO,
-        "STOP": TurnAction.WAKE_COO_TERMINAL,
-    }.get(message_type)
-    if action is None:
-        return _refuse("MESSAGE_TYPE_UNCLASSIFIED")
-    return _requires_attention(
-        action=action,
-        target_seat="coo",
-        parent=normalized_parent,
-        message=leaf,
+    return _classify_accepted_history(
+        normalized_parent=normalized_parent,
+        normalized_messages=normalized_messages,
         routing=routing,
     )
 
