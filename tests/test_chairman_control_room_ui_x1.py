@@ -2964,3 +2964,84 @@ window.events.pageshow({persisted:true});btn.click();
 console.log(JSON.stringify({withdrawn,reads,invalidations,posts:posts.length}));
 """)
     assert result == {"withdrawn": [False]*4, "reads": 1, "invalidations": 1, "posts": 0}
+
+
+def test_build_inventory_absence_wording_is_observation_scoped():
+    source = JS.read_text()
+    assert '"NO OPEN PR"' not in source
+    assert '"NO PR OBSERVED"' in source
+    assert "No open PR in the loaded snapshot cites this reference." in source
+    assert "Every loaded open PR is linked to a work card." in source
+
+
+@pytest.mark.parametrize("coverage", ["complete", "truncated", "unknown"])
+def test_build_inventory_coverage_reaches_the_shipped_browser(coverage):
+    import os
+    from urllib.parse import urlsplit
+    from control_plane import chairman_control_room as compositor
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        if os.environ.get("MMX_REQUIRE_INVENTORY_BROWSER") == "1":
+            pytest.fail("required inventory browser is unavailable")
+        pytest.skip("Playwright not installed; browser proof not executed")
+    fixtures = ROOT / "tests" / "fixtures" / "chairman_control_room"
+    def load(name):
+        return json.loads((fixtures / name).read_text())
+    builds = load("active_builds_v1.json")
+    repo = builds["repositories"][0]
+    if coverage == "truncated":
+        repo["open_prs_truncated"] = True
+        repo["open_prs"][0]["files_truncated"] = True
+    elif coverage == "unknown":
+        del repo["open_prs_truncated"]
+        del repo["open_prs"][0]["files_truncated"]
+    doc = compositor.compose_control_room(inbox=load("executive_inbox_v2.json"),
+        boot_packet=load("boot_packet_v1.json"), active_builds=builds,
+        agent_os_state=load("agent_os_state_v1.json"), runtime_jobs=[],
+        bindings=None, generated_at="2026-09-07T17:00:00Z")
+    body = {"control_room": doc, "composed_at": doc["generated_at"], "capabilities": {}}
+    resources = {"/": ("text/html", INDEX.read_text()),
+        "/static/control_room.css": ("text/css", CSS.read_text()),
+        "/static/control_room.js": ("text/javascript", JS.read_text()),
+        "/api/state": ("application/json", json.dumps(body))}
+    blocked, errors = [], []
+    with sync_playwright() as engine:
+        try:
+            browser = engine.chromium.launch(headless=True)
+        except Exception as exc:
+            if os.environ.get("MMX_REQUIRE_INVENTORY_BROWSER") == "1":
+                pytest.fail("required Chromium launch failed: " + type(exc).__name__)
+            pytest.skip("Chromium unavailable; browser proof not executed")
+        context = browser.new_context()
+        try:
+            def route_request(route):
+                request = route.request
+                parsed = urlsplit(request.url)
+                if request.method != "GET" or parsed.netloc != "control-room.test" or parsed.path not in resources:
+                    blocked.append(request.method)
+                    route.abort()
+                    return
+                mime, content = resources[parsed.path]
+                route.fulfill(status=200, content_type=mime, body=content)
+            context.route("**/*", route_request)
+            page = context.new_page()
+            page.on("pageerror", lambda exc: errors.append(str(exc)))
+            page.goto("http://control-room.test/", wait_until="domcontentloaded")
+            page.wait_for_function("document.querySelector('#ccr-work-list').children.length > 0")
+            page.locator('button[data-work-mode="all"]').click()
+            warnings = page.locator("#degraded").text_content() or ""
+            if coverage == "truncated":
+                assert "open-PR inventory truncated" in warnings
+                assert "PR file coverage truncated" in warnings
+            elif coverage == "unknown":
+                assert "open-PR inventory completeness unknown" in warnings
+                assert "PR file coverage completeness unknown" in warnings
+            else:
+                assert "active_builds:" not in warnings
+            cards = page.locator("#ccr-work-list").inner_text()
+            assert "NO PR OBSERVED" in cards and "NO OPEN PR" not in cards
+            assert not errors and not blocked
+        finally:
+            context.close()
+            browser.close()

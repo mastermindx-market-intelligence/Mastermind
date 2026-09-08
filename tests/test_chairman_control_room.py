@@ -3730,3 +3730,113 @@ def test_cr1a_gather_has_no_raw_event_or_tree_election_path() -> None:
     assert "EXECUTIVE_TERMINAL_RETURN_APPLIED" not in gather
     assert "SELECT * FROM attempts" not in gather
     assert "SELECT * FROM jobs" not in gather
+
+
+# Loaded build evidence is not a complete inventory unless the producer says so.
+_BUILD_OPEN_TRUNCATED = "active_builds: open-PR inventory truncated; absent PRs are unknown"
+_BUILD_OPEN_UNKNOWN = "active_builds: open-PR inventory completeness unknown"
+_BUILD_FILES_TRUNCATED = "active_builds: PR file coverage truncated; absent workstream links are unknown"
+_BUILD_FILES_UNKNOWN = "active_builds: PR file coverage completeness unknown"
+
+
+def _coverage_document(active_builds):
+    return ccr.compose_control_room(inbox=None, boot_packet=None, bindings=None,
+        active_builds=active_builds, generated_at="2026-09-07T17:00:00Z")
+
+
+@pytest.mark.parametrize("field,expected", [
+    ("open_prs_truncated", _BUILD_OPEN_TRUNCATED),
+    ("files_truncated", _BUILD_FILES_TRUNCATED),
+])
+def test_build_coverage_truncation_survives_without_erasing_observed_rows(active_builds, field, expected):
+    baseline = _coverage_document(active_builds)
+    source = copy.deepcopy(active_builds)
+    target = source["repositories"][0]
+    if field == "files_truncated":
+        target = target["open_prs"][0]
+    target[field] = True
+    before = copy.deepcopy(source)
+    actual = _coverage_document(source)
+    assert expected in actual["degraded"]
+    assert {k: v for k, v in actual.items() if k != "degraded"} == {
+        k: v for k, v in baseline.items() if k != "degraded"}
+    assert source == before
+
+
+@pytest.mark.parametrize("field,expected", [
+    ("open_prs_truncated", _BUILD_OPEN_UNKNOWN),
+    ("files_truncated", _BUILD_FILES_UNKNOWN),
+])
+@pytest.mark.parametrize("value", [None, 0, 1, "false", "PRIVATE_SENTINEL", []])
+def test_build_coverage_nonboolean_flags_remain_unknown(active_builds, field, expected, value):
+    source = copy.deepcopy(active_builds)
+    target = source["repositories"][0]
+    if field == "files_truncated":
+        target = target["open_prs"][0]
+    target[field] = value
+    actual = _coverage_document(source)
+    assert expected in actual["degraded"]
+    assert "PRIVATE_SENTINEL" not in json.dumps(actual)
+
+
+@pytest.mark.parametrize("field,expected", [
+    ("open_prs_truncated", _BUILD_OPEN_UNKNOWN),
+    ("files_truncated", _BUILD_FILES_UNKNOWN),
+])
+def test_build_coverage_missing_flags_do_not_default_to_complete(active_builds, field, expected):
+    source = copy.deepcopy(active_builds)
+    target = source["repositories"][0]
+    if field == "files_truncated":
+        target = target["open_prs"][0]
+    del target[field]
+    assert expected in _coverage_document(source)["degraded"]
+
+
+@pytest.mark.parametrize("repositories", [None, "invalid", {}, [None]])
+def test_build_coverage_unusable_repository_collection_is_unknown(active_builds, repositories):
+    source = copy.deepcopy(active_builds)
+    source["repositories"] = repositories
+    assert _BUILD_OPEN_UNKNOWN in _coverage_document(source)["degraded"]
+
+
+@pytest.mark.parametrize("collection,value,expected", [
+    ("open_prs", None, _BUILD_OPEN_UNKNOWN),
+    ("open_prs", "invalid", _BUILD_OPEN_UNKNOWN),
+    ("open_prs", [None], _BUILD_OPEN_UNKNOWN),
+    ("files", None, _BUILD_FILES_UNKNOWN),
+    ("files", "invalid", _BUILD_FILES_UNKNOWN),
+    ("files", [None], _BUILD_FILES_UNKNOWN),
+])
+def test_build_coverage_malformed_collections_do_not_imply_absence(active_builds, collection, value, expected):
+    source = copy.deepcopy(active_builds)
+    target = source["repositories"][0]
+    if collection == "files":
+        target = target["open_prs"][0]
+    target[collection] = value
+    assert expected in _coverage_document(source)["degraded"]
+
+
+def test_build_coverage_deduplicates_warnings_and_preserves_determinism(active_builds):
+    source = copy.deepcopy(active_builds)
+    repo = source["repositories"][0]
+    repo["open_prs_truncated"] = True
+    for pr in repo["open_prs"]:
+        pr["files_truncated"] = True
+    source["repositories"].append(copy.deepcopy(repo))
+    before = _coverage_document(source)
+    source["repositories"].reverse()
+    for row in source["repositories"]:
+        row["open_prs"].reverse()
+    after = _coverage_document(source)
+    assert before == after
+    assert after["degraded"].count(_BUILD_OPEN_TRUNCATED) == 1
+    assert after["degraded"].count(_BUILD_FILES_TRUNCATED) == 1
+
+
+def test_build_coverage_explicit_complete_empty_scope_adds_no_false_warning(active_builds):
+    source = copy.deepcopy(active_builds)
+    source["repositories"][0]["open_prs"] = []
+    source["repositories"][0]["recently_merged_truncated"] = True
+    actual = _coverage_document(source)
+    assert not any("inventory" in x or "file coverage" in x for x in actual["degraded"])
+    assert actual["schema"] == ccr.SCHEMA

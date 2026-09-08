@@ -667,6 +667,52 @@ def _open_prs(active_builds: Any) -> list[dict[str, Any]]:
     return prs
 
 
+def _active_build_coverage_problems(active_builds: Mapping[str, Any]) -> list[str]:
+    """Carry existing collector completeness into existing degradation, without new truth.
+
+    Known rows still join normally. Missing/invalid flags are not False. The
+    fixed, deduplicated messages disclose no untrusted source strings, and a
+    complete loaded snapshot is never an assertion of current fleet coverage.
+    """
+    open_unknown = "active_builds: open-PR inventory completeness unknown"
+    files_unknown = "active_builds: PR file coverage completeness unknown"
+    problems: set[str] = set()
+
+    def rows(value: Any) -> bool:
+        return isinstance(value, Sequence) and not isinstance(value, (str, bytes))
+
+    repositories = active_builds.get("repositories")
+    if not rows(repositories):
+        return [open_unknown]
+    # An explicit empty declared scope remains valid; it does not attest a fleet.
+    for repository in repositories:
+        if not isinstance(repository, Mapping):
+            problems.add(open_unknown)
+            continue
+        truncated = repository.get("open_prs_truncated")
+        if truncated is True:
+            problems.add("active_builds: open-PR inventory truncated; absent PRs are unknown")
+        elif truncated is not False:
+            problems.add(open_unknown)
+        prs = repository.get("open_prs")
+        if not rows(prs):
+            problems.add(open_unknown)
+            continue
+        for pr in prs:
+            if not isinstance(pr, Mapping):
+                problems.add(open_unknown)
+                continue
+            truncated = pr.get("files_truncated")
+            if truncated is True:
+                problems.add("active_builds: PR file coverage truncated; absent workstream links are unknown")
+            elif truncated is not False:
+                problems.add(files_unknown)
+            files = pr.get("files")
+            if not rows(files) or any(not isinstance(path, str) for path in files):
+                problems.add(files_unknown)
+    return sorted(problems)
+
+
 def _pr_files(pr: Mapping[str, Any]) -> list[str]:
     files = pr.get("files")
     if isinstance(files, Sequence) and not isinstance(files, (str, bytes)):
@@ -938,6 +984,7 @@ def compose_control_room(
             )
         active_builds_collected_at = active_builds.get("collected_at")
         open_prs = _open_prs(active_builds)
+        degraded.extend(_active_build_coverage_problems(active_builds))
 
     # --- surface bindings --------------------------------------------------
     for problem in binding_problems:
