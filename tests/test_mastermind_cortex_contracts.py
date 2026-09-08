@@ -310,6 +310,52 @@ def test_direct_semantic_contract_rejects_cross_layer_contradictions(
 
 
 @pytest.mark.parametrize(
+    ("mutation", "value"),
+    (
+        ("action_bounded", 1),
+        ("action_bounded", 1.0),
+        ("partial_unknown", 1),
+        ("partial_inference", 0),
+        ("missing_execution_ready", 0),
+        ("effect_retry_allowed", 0),
+        ("effect_alternate_carrier_allowed", 0),
+        ("effect_unknown", 1),
+    ),
+)
+def test_direct_semantic_contract_rejects_json_numeric_boolean_aliases(
+    mutation: str, value: int | float
+) -> None:
+    """A numeric JSON scalar must never satisfy a privileged Boolean contract leaf."""
+    fixture = _fixture()
+    cases = _cases_by_id(fixture)
+    partial = cases["partial-source-coverage"]
+    missing = cases["missing-objective-and-requested-action"]
+    effect = cases["effect-unknown-requires-same-carrier-reconciliation"]
+
+    if mutation == "action_bounded":
+        partial["first_justified_action"]["bounded"] = value
+    elif mutation == "partial_unknown":
+        partial["specialist_brief"]["unknowns_and_inference"]["unknown"] = value
+    elif mutation == "partial_inference":
+        partial["specialist_brief"]["unknowns_and_inference"]["inference"] = value
+    elif mutation == "missing_execution_ready":
+        missing["specialist_brief"]["unknowns_and_inference"]["execution_ready"] = value
+    elif mutation == "effect_retry_allowed":
+        effect["specialist_brief"]["unknowns_and_inference"]["retry_allowed"] = value
+    elif mutation == "effect_alternate_carrier_allowed":
+        effect["specialist_brief"]["unknowns_and_inference"]["alternate_carrier_allowed"] = value
+    else:
+        effect["specialist_brief"]["unknowns_and_inference"]["unknown"] = value
+
+    errors = _semantic_errors_without_exception(fixture)
+    assert any(
+        error["code"] == "CORTEX_SEMANTIC_INVARIANT_VIOLATION"
+        and "strict JSON contract" in error["message"]
+        for error in errors
+    )
+
+
+@pytest.mark.parametrize(
     "malformed",
     (
         None,

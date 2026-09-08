@@ -439,6 +439,23 @@ def _utc_sort_key(value: str) -> tuple[int, int, int, int, int, int]:
     return tuple(int(part) for part in match.groups())  # type: ignore[return-value]
 
 
+def _strict_json_contract_equal(actual: Any, expected: Any) -> bool:
+    """Compare JSON contracts without Python's bool/int equality aliases."""
+    if type(actual) is not type(expected):
+        return False
+    if isinstance(expected, dict):
+        return set(actual) == set(expected) and all(
+            _strict_json_contract_equal(actual[key], value)
+            for key, value in expected.items()
+        )
+    if isinstance(expected, list):
+        return len(actual) == len(expected) and all(
+            _strict_json_contract_equal(value, expected[index])
+            for index, value in enumerate(actual)
+        )
+    return actual == expected
+
+
 def validate_cortex_fixture(fixture: Any) -> list[dict[str, str]]:
     """Apply fail-closed semantic rules independently of closed fixture equality."""
     errors: list[dict[str, str]] = []
@@ -481,7 +498,10 @@ def validate_cortex_fixture(fixture: Any) -> list[dict[str, str]]:
         facts_by_role = {fact["source_type"]: fact for fact in valid_facts}
         expected_by_role = {fact["source_type"]: fact for fact in expected_facts}
         if len(valid_facts) != len(expected_facts) or len(facts_by_role) != len(valid_facts) or set(facts_by_role) != set(expected_by_role) or any(
-            any(facts_by_role[role].get(field) != expected for field, expected in expected_fact.items())
+            any(
+                not _strict_json_contract_equal(facts_by_role[role].get(field), expected)
+                for field, expected in expected_fact.items()
+            )
             for role, expected_fact in expected_by_role.items()
         ):
             errors.append(_cortex_error("CORTEX_SEMANTIC_INVARIANT_VIOLATION", "raw fact contract must preserve the exact role, owner, identity, claim, coverage, freshness, inference, unknown, and supersession semantics"))
@@ -497,10 +517,10 @@ def validate_cortex_fixture(fixture: Any) -> list[dict[str, str]]:
         if not all(isinstance(brief[key], str) and brief[key] and brief[key] == brief[key].strip() for key in CORTEX_BRIEF_KEYS - {"unknowns_and_inference"}) or not isinstance(action["kind"], str) or not isinstance(action["target"], str):
             errors.append(_cortex_error("CORTEX_SEMANTIC_INVARIANT_VIOLATION", "brief and action values must be non-empty text"))
             continue
-        if dict(brief) != contract["brief"]:
-            errors.append(_cortex_error("CORTEX_SEMANTIC_INVARIANT_VIOLATION", "brief contract must preserve all six controlled layers without widening authority or collapsing unknowns"))
-        if dict(action) != contract["action"]:
-            errors.append(_cortex_error("CORTEX_SEMANTIC_INVARIANT_VIOLATION", "action contract must preserve the exact bounded READ"))
+        if not _strict_json_contract_equal(brief, contract["brief"]):
+            errors.append(_cortex_error("CORTEX_SEMANTIC_INVARIANT_VIOLATION", "brief contract must preserve all six controlled layers without widening authority or collapsing unknowns under strict JSON contract comparison"))
+        if not _strict_json_contract_equal(action, contract["action"]):
+            errors.append(_cortex_error("CORTEX_SEMANTIC_INVARIANT_VIOLATION", "action contract must preserve the exact bounded READ under strict JSON contract comparison"))
         if not observation or observation != observation.strip():
             errors.append(_cortex_error("CORTEX_SEMANTIC_INVARIANT_VIOLATION", "decision-changing observation must be stripped non-empty text"))
         elif observation != contract["observation"]:
