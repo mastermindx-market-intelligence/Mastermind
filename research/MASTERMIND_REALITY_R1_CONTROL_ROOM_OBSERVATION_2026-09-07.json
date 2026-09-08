@@ -1,0 +1,196 @@
+{
+  "schema": "mastermind.reality_observation.v1",
+  "observation_id": "REALITY-CCR-20260907-ONE-SHOT",
+  "capability_state": "PARTIAL",
+  "persona": {
+    "name": "Chairman",
+    "user_job": "See what truly needs attention and whether a decision is safe now",
+    "non_goals": [
+      "modify the Control Room",
+      "actuate a managed Chairman account",
+      "create a new browser, trace, evidence, lifecycle, or control plane"
+    ]
+  },
+  "target": {
+    "product": "Chairman Control Room",
+    "environment": "approved local read-only product at loopback origin",
+    "locator": "owner-qualified local Control Room origin",
+    "authorization_ref": "current Chairman-directed Reality R1 read-only inspection",
+    "surface_class": "APPROVED_PRODUCT"
+  },
+  "source_relationship": {
+    "protected_sha": "b30422efde0308beb7fa069ddefd0987ac0bf4f3",
+    "observed_deployed_sha": "767409b6d3e7103a3b11428b870357d4a01bbe26",
+    "relation": "DIFFERENT"
+  },
+  "journey": {
+    "steps": [
+      {
+        "action": "Load the Chairman Today decision surface at desktop and mobile viewports",
+        "result": "The product rendered successfully and disclosed an active background refresh"
+      },
+      {
+        "action": "Inspect the truth-boundary and attention areas",
+        "result": "The Executive runtime database was unavailable and all Chairman, Sol, and Fable/ops attention groups were unavailable"
+      },
+      {
+        "action": "Inspect the deterministic work and autonomy projections",
+        "result": "The rendered envelope contained 70 work references, 58 autonomy responsibilities, 61 autonomy issues, and 155 unjoined open pull requests"
+      },
+      {
+        "action": "Compare desktop and mobile hierarchy using actual screenshot bytes and semantic snapshots",
+        "result": "Both viewports preserved degraded truth, while raw technical diagnostics displaced the decision outcome most severely on mobile"
+      }
+    ],
+    "outcome": "PARTIAL"
+  },
+  "capture": {
+    "started_at": "2026-09-07T16:00:56.958849Z",
+    "completed_at": "2026-09-07T16:01:06.963190Z",
+    "screenshots": [
+      {
+        "artifact_ref": "private-evidence/control-room-desktop-1440x900.png",
+        "sha256": "6ec2806af08b02d4b1761517ec86cc28a87659fcd57dff3407186d65acb2fbf5",
+        "mime_type": "image/png",
+        "bytes": 288325,
+        "bytes_present": true,
+        "model_consumed": true,
+        "viewport": {
+          "width": 1440,
+          "height": 900
+        },
+        "data_state": "DEGRADED"
+      },
+      {
+        "artifact_ref": "private-evidence/control-room-mobile-390x844.png",
+        "sha256": "d0e9308c3ed055b7b2fecdbfc947a0f2efbfcecde3e0b0d9e3c5b7c1edecbeea",
+        "mime_type": "image/png",
+        "bytes": 95519,
+        "bytes_present": true,
+        "model_consumed": true,
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "data_state": "DEGRADED"
+      }
+    ],
+    "semantic_evidence": [
+      {
+        "artifact_ref": "private-evidence/control-room-desktop-1440x900.semantic.json",
+        "sha256": "0c02ab077cb2ca4ed5c08483455679e7c8f2aced2d0bcd654e78cf4611b13e27",
+        "coverage": "desktop accessibility and semantic snapshot for the rendered Control Room",
+        "consumed": true
+      },
+      {
+        "artifact_ref": "private-evidence/control-room-mobile-390x844.semantic.json",
+        "sha256": "c70cfe6db96b3b4f6451540e6665219a8e3943237c34daba420a21ce3c2ea7d5",
+        "coverage": "mobile accessibility and semantic snapshot for the rendered Control Room",
+        "consumed": true
+      }
+    ],
+    "runtime_evidence": [
+      {
+        "artifact_ref": "private-evidence/control-room-rendered-state.json",
+        "sha256": "9540945a0f841067e9b362d6d91f19333ebcc999f0fe8076060bf1a8e1923027",
+        "coverage": "rendered Control Room state envelope shared by the two capture viewports",
+        "consumed": true
+      },
+      {
+        "artifact_ref": "private-evidence/control-room-desktop-1440x900.trace.zip",
+        "sha256": "adbe826424fc81412a2f4d8c7b31a3bfe7e1c9a491a9d784c313d86ef86f2289",
+        "coverage": "loopback navigation, response, network, console, and page-error trace for the desktop capture",
+        "consumed": true
+      }
+    ]
+  },
+  "findings": [
+    {
+      "basis": "DETERMINISTIC_OBSERVATION",
+      "claim": "The approved local page, its static assets, and authenticated state reads returned HTTP 200 with zero failed requests, page errors, or console entries in the captured journey.",
+      "evidence_refs": [
+        "private-evidence/control-room-desktop-1440x900.trace.zip",
+        "private-evidence/control-room-rendered-state.json"
+      ],
+      "unknowns": [
+        "No other product origin or account surface was exercised."
+      ]
+    },
+    {
+      "basis": "DETERMINISTIC_OBSERVATION",
+      "claim": "The captured envelope reported the Executive runtime unavailable, all three attention groups unavailable, 70 work references, 58 autonomy responsibilities, 61 autonomy issues, 155 unjoined open pull requests, and a background refresh in progress.",
+      "evidence_refs": [
+        "private-evidence/control-room-rendered-state.json",
+        "private-evidence/control-room-desktop-1440x900.semantic.json",
+        "private-evidence/control-room-mobile-390x844.semantic.json"
+      ],
+      "unknowns": [
+        "The absent Executive database prevented a current canonical runtime read."
+      ]
+    },
+    {
+      "basis": "MODEL_INFERENCE",
+      "claim": "Raw absolute-path diagnostics dominate the mobile first viewport and displace the calm decision outcome the Chairman needs.",
+      "evidence_refs": [
+        "private-evidence/control-room-mobile-390x844.png",
+        "private-evidence/control-room-mobile-390x844.semantic.json"
+      ],
+      "unknowns": [
+        "No causal user study or witnessed task timing was performed."
+      ]
+    },
+    {
+      "basis": "MODEL_INFERENCE",
+      "claim": "On desktop, source-status chips and the persistent Surfaces rail compete with an unavailable decision area instead of resolving whether the Chairman should act, wait, or delegate.",
+      "evidence_refs": [
+        "private-evidence/control-room-desktop-1440x900.png",
+        "private-evidence/control-room-desktop-1440x900.semantic.json"
+      ],
+      "unknowns": [
+        "No comparative usability benchmark was run."
+      ]
+    }
+  ],
+  "negative_controls": {
+    "wrong_target": {
+      "status": "DETECTED",
+      "detail": "An isolated wrong loopback path returned HTTP 404; response SHA-256 442382ccc7e785caee0f26ebc4f061713d4cd1a2eeb1ae79b3994f9d8878964d."
+    },
+    "stale_capture": {
+      "status": "DETECTED",
+      "detail": "The UI exposed Agent OS at 22h, GitHub live cache at 17h, and composed state at 59m rather than silently presenting those inputs as current."
+    },
+    "different_build": {
+      "status": "DETECTED",
+      "detail": "The deployed Mastermind revision differed from the protected Mastermind revision at the capture epoch."
+    },
+    "different_viewport_or_data_state": {
+      "status": "DETECTED",
+      "detail": "Desktop and mobile captures have distinct viewport identities, PNG digests, and semantic artifact digests while retaining the same degraded source envelope."
+    },
+    "missing_screenshot_bytes": {
+      "status": "REFUSED",
+      "detail": "The Reality contract refuses a visual claim unless screenshot bytes are present and model_consumed is true."
+    },
+    "broken_browser_connection": {
+      "status": "DETECTED",
+      "detail": "Opera reported Browser not connected; this is retained as provider-specific evidence and is not generalized to all browser providers."
+    },
+    "excluded_account_surface": {
+      "status": "REFUSED",
+      "detail": "No managed Chairman account or ChatGPT provider surface was opened, inspected, or actuated."
+    }
+  },
+  "limitations": [
+    "This is a historical capture epoch, not a claim about current product or runtime state.",
+    "No accepted Executive runtime admission existed for the Reality package operation at capture time.",
+    "No causal user study, witnessed completion-time benchmark, or fabricated speed multiplier is claimed.",
+    "Private screenshots, state payloads, semantic snapshots, and traces remain on the authorized Mac and are not published in this public repository.",
+    "No managed Chairman account, Web-Sol ChatGPT surface, or provider-native account target was tested."
+  ],
+  "next_action": {
+    "owner": "shared plugin-package integration owner",
+    "action": "Review and admit the package-local Reality fragment through the existing marketplace and validator owner, then qualify the exact installed generation and repeat one approved product journey.",
+    "terminal": false
+  }
+}

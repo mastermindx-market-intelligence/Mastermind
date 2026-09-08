@@ -4,6 +4,7 @@ from __future__ import annotations
 from copy import deepcopy
 import json
 from pathlib import Path
+import re
 
 from jsonschema import Draft202012Validator
 
@@ -15,6 +16,7 @@ SCHEMA = PACKAGE / "references/reality-observation.schema.json"
 BOUNDARY = PACKAGE / "references/reality-boundary.md"
 CATALOG = PACKAGE / "references/catalog.fragment.json"
 SKILL = PACKAGE / "skills/inspect-product-journey/SKILL.md"
+OBSERVATION = ROOT / "research/MASTERMIND_REALITY_R1_CONTROL_ROOM_OBSERVATION_2026-09-07.json"
 
 EXPECTED_PACKAGE_FILES = {
     ".codex-plugin/plugin.json",
@@ -23,6 +25,9 @@ EXPECTED_PACKAGE_FILES = {
     "references/reality-observation.schema.json",
     "skills/inspect-product-journey/SKILL.md",
 }
+APP_ID_RE = re.compile(
+    r"\b(?:asdk_app|connector|templated_apps|plugin)_[A-Za-z0-9_-]+\b"
+)
 
 
 def load_json(path: Path) -> object:
@@ -86,11 +91,20 @@ def valid_observation() -> dict[str, object]:
                     "data_state": "DEGRADED",
                 },
             ],
-            "semantic_evidence": {
-                "artifact_ref": "semantic.json",
-                "sha256": "d" * 64,
-                "consumed": True,
-            },
+            "semantic_evidence": [
+                {
+                    "artifact_ref": "desktop-semantic.json",
+                    "sha256": "d" * 64,
+                    "coverage": "desktop semantic snapshot",
+                    "consumed": True,
+                },
+                {
+                    "artifact_ref": "mobile-semantic.json",
+                    "sha256": "f" * 64,
+                    "coverage": "mobile semantic snapshot",
+                    "consumed": True,
+                },
+            ],
             "runtime_evidence": [
                 {
                     "artifact_ref": "state.json",
@@ -111,11 +125,21 @@ def valid_observation() -> dict[str, object]:
         "negative_controls": {
             "wrong_target": control("DETECTED", "target identity differs"),
             "stale_capture": control("DETECTED", "source clocks expose age"),
-            "different_build": control("DETECTED", "deployed and protected revisions differ"),
-            "different_viewport_or_data_state": control("DETECTED", "receipts remain distinct"),
-            "missing_screenshot_bytes": control("REFUSED", "visual claims require bytes"),
-            "broken_browser_connection": control("DETECTED", "provider-specific disconnection retained"),
-            "excluded_account_surface": control("REFUSED", "managed account surface is outside scope"),
+            "different_build": control(
+                "DETECTED", "deployed and protected revisions differ"
+            ),
+            "different_viewport_or_data_state": control(
+                "DETECTED", "receipts remain distinct"
+            ),
+            "missing_screenshot_bytes": control(
+                "REFUSED", "visual claims require bytes"
+            ),
+            "broken_browser_connection": control(
+                "DETECTED", "provider-specific disconnection retained"
+            ),
+            "excluded_account_surface": control(
+                "REFUSED", "managed account surface is outside scope"
+            ),
         },
         "limitations": ["no accepted runtime admission"],
         "next_action": {
@@ -133,23 +157,26 @@ def validator() -> Draft202012Validator:
 
 
 def test_manifest_is_closed_skills_only_read_package() -> None:
-    manifest = load_json(MANIFEST)
-    assert manifest == {
+    assert load_json(MANIFEST) == {
         "name": "mastermind-reality",
         "version": "0.1.0",
         "description": (
-            "Governed inspection of one approved Mastermind product journey with actual visual, "
-            "semantic, runtime, uncertainty, and negative-control evidence."
+            "Governed inspection of one approved Mastermind product journey "
+            "with actual visual, semantic, runtime, uncertainty, and "
+            "negative-control evidence."
         ),
         "author": {"name": "Mastermind-X"},
         "skills": "./skills/",
         "interface": {
             "displayName": "Mastermind Reality",
-            "shortDescription": "Inspect real product journeys and degraded states",
+            "shortDescription": (
+                "Inspect real product journeys and degraded states"
+            ),
             "longDescription": (
-                "Inspect one approved Mastermind product journey through existing browser and "
-                "observability owners, consume actual pixels, and return bounded evidence without "
-                "creating another browser, lifecycle, identity, evidence, or control plane."
+                "Inspect one approved Mastermind product journey through "
+                "existing browser and observability owners, consume actual "
+                "pixels, and return bounded evidence without creating another "
+                "browser, lifecycle, identity, evidence, or control plane."
             ),
             "developerName": "Mastermind-X",
             "category": "Productivity",
@@ -169,6 +196,10 @@ def test_package_file_inventory_is_closed() -> None:
 
 def test_observation_schema_accepts_closed_receipt() -> None:
     validator().validate(valid_observation())
+
+
+def test_published_control_room_observation_validates() -> None:
+    validator().validate(load_json(OBSERVATION))
 
 
 def test_observation_rejects_unconsumed_screenshot_bytes() -> None:
@@ -196,15 +227,26 @@ def test_observation_rejects_known_relation_without_deployed_sha() -> None:
     assert list(validator().iter_errors(candidate))
 
 
-def test_skill_requires_current_source_pixels_owner_reuse_and_negative_controls() -> None:
+def test_observation_rejects_non_utc_capture_timestamp() -> None:
+    candidate = deepcopy(valid_observation())
+    candidate["capture"]["started_at"] = "September 8, 2026"
+    assert list(validator().iter_errors(candidate))
+
+
+def test_observation_rejects_oversized_finding_claim() -> None:
+    candidate = deepcopy(valid_observation())
+    candidate["findings"][0]["claim"] = "x" * 4001
+    assert list(validator().iter_errors(candidate))
+
+
+def test_skill_requires_source_pixels_owner_reuse_and_controls() -> None:
     text = SKILL.read_text(encoding="utf-8")
-    for marker in (
+    markers = (
         "Read protected Mastermind `master`",
         "`docs/sol_skills/INDEX.md`",
         "same exact commit",
         "modifying workflow is unavailable",
-        "actual PNG bytes",
-        "model must inspect",
+        "The model must inspect the actual PNG bytes.",
         "existing browser owner",
         "existing trace owner",
         "existing observability owner",
@@ -216,13 +258,13 @@ def test_skill_requires_current_source_pixels_owner_reuse_and_negative_controls(
         "broken browser connection",
         "excluded account surface",
         "EFFECT_UNKNOWN",
-    ):
-        assert marker in text
+    )
+    assert all(marker in text for marker in markers)
 
 
 def test_boundary_refuses_duplicate_planes_and_false_completion() -> None:
     text = BOUNDARY.read_text(encoding="utf-8")
-    for marker in (
+    markers = (
         "no new browser registry",
         "no credential passthrough",
         "managed Chairman account surfaces",
@@ -232,14 +274,14 @@ def test_boundary_refuses_duplicate_planes_and_false_completion() -> None:
         "NOT_APPLIED",
         "APPLIED",
         "EFFECT_UNKNOWN",
-    ):
-        assert marker in text
+    )
+    assert all(marker in text for marker in markers)
 
 
-def test_catalog_fragment_is_inert_and_package_local() -> None:
+def test_catalog_fragment_is_inert_package_local_and_not_app_id_shaped() -> None:
     fragment = load_json(CATALOG)
     assert fragment == {
-        "schema": "mastermind.plugin_catalog_fragment.v1",
+        "schema": "mastermind.reality_catalog_fragment.v1",
         "plugin": "mastermind-reality",
         "package_path": "plugins/mastermind-reality",
         "manifest_path": "plugins/mastermind-reality/.codex-plugin/plugin.json",
@@ -248,6 +290,7 @@ def test_catalog_fragment_is_inert_and_package_local() -> None:
         "source_state": "SOURCE_CANDIDATE",
         "installation_state": "NOT_INSTALLED",
     }
+    assert APP_ID_RE.search(json.dumps(fragment, sort_keys=True)) is None
 
 
 def test_package_contains_no_live_binding_or_secret_shape() -> None:
