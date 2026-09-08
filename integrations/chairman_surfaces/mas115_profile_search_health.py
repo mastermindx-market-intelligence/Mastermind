@@ -34,7 +34,6 @@ _RECEIPT_KEYS = frozenset({
     "initial_peer_census_diagnostic",
     "initial_peer_census_decode_context",
 })
-_DISCARD_PROFILE_NAME = object()
 
 
 def _receipt(
@@ -186,154 +185,54 @@ def _checked_close_keychain_pipe(pipe) -> bool:
     return closed is True and reaped is True and cleanup_error is False
 
 
-class _ProfileSearchOnlyClient:
-    """Sealed transport that can issue only the canonical diagnostic search."""
+def _is_exact_profile_search_request(
+    method: str,
+    origin: str,
+    path: str,
+    *,
+    headers=None,
+    params=None,
+    json_body=None,
+    diagnostic_sink=None,
+) -> bool:
+    """Return whether a request is exactly one diagnostic Profile Search page."""
 
-    __slots__ = ("_client", "_closed")
-
-    def __init__(self, *, client=None):
-        if isinstance(client, _vendors.BoundedHttpClient):
-            raise TypeError("full bounded client authority is forbidden")
-        _vendors.BoundedHttpClient.__init__(self, client=client)
-        self._closed = False
-
-    @staticmethod
-    def _bearer(credential):
-        return _vendors.BoundedHttpClient._bearer(credential)
-
-    def _request(
-        self,
-        method: str,
-        origin: str,
-        path: str,
-        *,
-        headers=None,
-        params=None,
-        json_body=None,
-        diagnostic_sink=None,
-    ):
-        """Fail closed unless the request is exactly one Profile Search page."""
-
-        body = json_body
-        authorization = headers.get("Authorization") if isinstance(headers, dict) else None
-        fixed_body_keys = {
-            "is_removed",
-            "limit",
-            "offset",
-            "search_text",
-            "storage_type",
-            "order_by",
-            "sort",
-            "folder_id",
-        }
-        if (
-            method != "POST"
-            or origin != _vendors._MLX_CLOUD_ORIGIN  # noqa: SLF001
-            or path != "/profile/search"
-            or params is not None
-            or not isinstance(headers, dict)
-            or set(headers) != {"Authorization"}
-            or not isinstance(authorization, str)
-            or not authorization.startswith("Bearer ")
-            or len(authorization) <= len("Bearer ")
-            or not isinstance(body, dict)
-            or set(body) != fixed_body_keys
-            or body.get("is_removed") is not False
-            or body.get("limit") != _vendors._PROFILE_PAGE_SIZE  # noqa: SLF001
-            or type(body.get("offset")) is not int
-            or body["offset"] < 0
-            or body["offset"] >= _vendors._MAX_PROFILE_CENSUS  # noqa: SLF001
-            or body.get("search_text") != ""
-            or body.get("storage_type") != "all"
-            or body.get("order_by") != "created_at"
-            or body.get("sort") != "asc"
-            or not isinstance(body.get("folder_id"), str)
-            or not body["folder_id"]
-        ):
-            raise _core.CanaryRefusal("VENDOR_ERROR")
-        if type(diagnostic_sink) is not _vendors._InitialPeerCensusDiagnosticSink:  # noqa: SLF001
-            raise _core.CanaryRefusal("VENDOR_ERROR")
-        return _vendors.BoundedHttpClient._request(
-            self,
-            method,
-            origin,
-            path,
-            headers=headers,
-            params=params,
-            json_body=body,
-            diagnostic_sink=diagnostic_sink,
-        )
-
-    def _mlx_profile_search_with_diagnostic(
-        self,
-        credential,
-        folder_id: str,
-        *,
-        offset: int,
-        diagnostic_sink,
-    ):
-        if type(diagnostic_sink) is not _vendors._InitialPeerCensusDiagnosticSink:  # noqa: SLF001
-            raise TypeError("initial peer census diagnostic sink required")
-        return _vendors.BoundedHttpClient._mlx_profile_search_request(  # noqa: SLF001
-            self,
-            credential,
-            folder_id,
-            offset=offset,
-            diagnostic_sink=diagnostic_sink,
-        )
-
-
-def _checked_close_http_client(client) -> bool:
-    """Close the exact sealed HTTP owner once without exposing legacy close."""
-
-    if type(client) is not _ProfileSearchOnlyClient:
-        return False
-    if client._closed is not False:  # noqa: SLF001
-        return False
-    client._closed = True  # noqa: SLF001
-    try:
-        client._client.close()  # noqa: SLF001 - checked raw owner under sealed guard
-    except Exception:  # noqa: BLE001
-        return False
-    return True
-
-
-class _ProfileSearchProxy:
-    """Minimum surface required by the existing canonical census parser."""
-
-    __slots__ = ("_credential", "_client")
-
-    def __init__(self, credential, client: _ProfileSearchOnlyClient):
-        if type(client) is not _ProfileSearchOnlyClient:
-            raise TypeError("sealed Profile Search capability required")
-        self._credential = credential
-        self._client = client
-
-    def _require_credential(self) -> None:
-        if getattr(self._credential, "present", False) is not True:
-            raise _core.CanaryRefusal("AUTH_MISSING")
-
-    @staticmethod
-    def _safe_call(call, *, diagnostic_sink=None):
-        return _vendors.MultiloginClient._safe_call(
-            call,
-            diagnostic_sink=diagnostic_sink,
-        )
-
-    @staticmethod
-    def _successful_envelope(
-        payload,
-        *,
-        profile_id=None,
-        folder_id=None,
-        expected_message="",
-    ):
-        return _vendors.MultiloginClient._successful_envelope(
-            payload,
-            profile_id=profile_id,
-            folder_id=folder_id,
-            expected_message=expected_message,
-        )
+    body = json_body
+    authorization = headers.get("Authorization") if isinstance(headers, dict) else None
+    fixed_body_keys = {
+        "is_removed",
+        "limit",
+        "offset",
+        "search_text",
+        "storage_type",
+        "order_by",
+        "sort",
+        "folder_id",
+    }
+    return (
+        method == "POST"
+        and origin == _vendors._MLX_CLOUD_ORIGIN  # noqa: SLF001
+        and path == "/profile/search"
+        and params is None
+        and isinstance(headers, dict)
+        and set(headers) == {"Authorization"}
+        and isinstance(authorization, str)
+        and authorization.startswith("Bearer ")
+        and len(authorization) > len("Bearer ")
+        and isinstance(body, dict)
+        and set(body) == fixed_body_keys
+        and body.get("is_removed") is False
+        and body.get("limit") == _vendors._PROFILE_PAGE_SIZE  # noqa: SLF001
+        and type(body.get("offset")) is int
+        and 0 <= body["offset"] < _vendors._MAX_PROFILE_CENSUS  # noqa: SLF001
+        and body.get("search_text") == ""
+        and body.get("storage_type") == "all"
+        and body.get("order_by") == "created_at"
+        and body.get("sort") == "asc"
+        and isinstance(body.get("folder_id"), str)
+        and bool(body["folder_id"])
+        and type(diagnostic_sink) is _vendors._InitialPeerCensusDiagnosticSink  # noqa: SLF001
+    )
 
 
 def _run_profile_search_health(
@@ -343,18 +242,36 @@ def _run_profile_search_health(
     pipe_factory,
     credential_reader,
     pipe_closer,
-    client_factory,
-    client_closer,
 ) -> int:
     """Hermetic core; the public wrapper fixes every live dependency owner."""
+
+    provision = None
+    preflight_code = None
+    pipe = None
+    credential = None
+    client = None
+    raw_owner = None
+    sink = None
+    state = None
+    response = None
+    matches = None
+    method = None
+    origin = None
+    path = None
+    headers = None
+    params = None
+    body = None
+    request_sink = None
+    client_closed = None
+    code = "VENDOR_ERROR"
 
     try:
         provision, preflight_code = preflight_loader()
     except Exception:  # noqa: BLE001
         provision, preflight_code = None, "BINDINGS_UNAVAILABLE"
     if provision is None:
-        return _emit(stdout, _receipt(preflight_code or "PROVISION_MISSING"))
-    if (
+        code = preflight_code or "PROVISION_MISSING"
+    elif (
         not isinstance(provision, dict)
         or provision.get("vendor") != "multilogin"
         or provision.get("browser_type") != "mimic"
@@ -363,64 +280,120 @@ def _run_profile_search_health(
         or not isinstance(provision.get("folder_id"), str)
         or not provision.get("folder_id")
     ):
-        return _emit(stdout, _receipt("PROVISION_MISSING"))
+        code = "PROVISION_MISSING"
+    else:
+        try:
+            pipe = pipe_factory()
+            credential = credential_reader(pipe)
+        except (Exception, KeyboardInterrupt):  # noqa: BLE001
+            credential = None
+        try:
+            pipe_closed = pipe_closer(pipe) if pipe is not None else False
+        except Exception:  # noqa: BLE001
+            pipe_closed = False
+        if pipe_closed is not True:
+            code = "VENDOR_ERROR"
+        elif credential is None or getattr(credential, "present", False) is not True:
+            code = "AUTH_MISSING"
+        else:
+            try:
+                client = _vendors.BoundedHttpClient()
+            except Exception:  # noqa: BLE001
+                client = None
+            if type(client) is not _vendors.BoundedHttpClient:
+                code = "VENDOR_ERROR"
+            else:
+                try:
+                    sink = _vendors._InitialPeerCensusDiagnosticSink(  # noqa: SLF001
+                        _vendors._INITIAL_PEER_CENSUS_DIAGNOSTIC_SEAL,  # noqa: SLF001
+                    )
+                    state = _vendors._ProfileSearchCensusState(  # noqa: SLF001
+                        folder_id=provision["folder_id"],
+                        peer_name=None,
+                    )
+                    while not state.complete:
+                        (
+                            method,
+                            origin,
+                            path,
+                            headers,
+                            params,
+                            body,
+                            request_sink,
+                        ) = _vendors._mlx_profile_search_request_arguments(  # noqa: SLF001
+                            credential,
+                            provision["folder_id"],
+                            offset=state.next_offset,
+                            diagnostic_sink=sink,
+                        )
+                        if not _is_exact_profile_search_request(
+                            method,
+                            origin,
+                            path,
+                            headers=headers,
+                            params=params,
+                            json_body=body,
+                            diagnostic_sink=request_sink,
+                        ):
+                            raise _core.CanaryRefusal("VENDOR_ERROR")
+                        response = _vendors.BoundedHttpClient._request(  # noqa: SLF001
+                            client,
+                            method,
+                            origin,
+                            path,
+                            headers=headers,
+                            params=params,
+                            json_body=body,
+                            diagnostic_sink=request_sink,
+                        )
+                        state.consume(response, diagnostic_sink=sink)
+                        response = None
+                        method = origin = path = headers = params = body = request_sink = None
+                    matches = state.finish()
+                    code = "OK" if type(matches) is list and not matches else "VENDOR_ERROR"
+                except _core.CanaryRefusal as refusal:
+                    code = refusal.code if refusal.code in _core.RESULT_CODES else "VENDOR_ERROR"
+                except (Exception, KeyboardInterrupt):  # noqa: BLE001
+                    code = "VENDOR_ERROR"
 
+    if type(client) is _vendors.BoundedHttpClient:
+        try:
+            raw_owner = client._client  # noqa: SLF001 - detach before close
+            client._client = None  # noqa: SLF001 - one-shot raw-owner detach
+        except Exception:  # noqa: BLE001
+            raw_owner = None
+        if raw_owner is not None:
+            try:
+                raw_owner.close()
+            except Exception:  # noqa: BLE001
+                client_closed = False
+            else:
+                client_closed = True
+        else:
+            client_closed = False
+        if client_closed is not True:
+            code = "VENDOR_ERROR"
+
+    diagnostic = sink.value if sink is not None else "NONE"
+    decode_context = sink.decode_context if sink is not None else None
+    provision = None
     pipe = None
     credential = None
-    try:
-        pipe = pipe_factory()
-        credential = credential_reader(pipe)
-    except (Exception, KeyboardInterrupt):  # noqa: BLE001
-        credential = None
-    try:
-        pipe_closed = pipe_closer(pipe) if pipe is not None else False
-    except Exception:  # noqa: BLE001
-        pipe_closed = False
-    if pipe_closed is not True:
-        return _emit(stdout, _receipt("VENDOR_ERROR"))
-    if credential is None or getattr(credential, "present", False) is not True:
-        return _emit(stdout, _receipt("AUTH_MISSING"))
-
     client = None
-    try:
-        client = client_factory()
-    except Exception:  # noqa: BLE001
-        client = None
-    if type(client) is not _ProfileSearchOnlyClient:
-        return _emit(stdout, _receipt("VENDOR_ERROR"))
-
+    raw_owner = None
+    state = None
+    response = None
+    matches = None
+    method = origin = path = headers = params = body = request_sink = None
+    preflight_loader = pipe_factory = credential_reader = pipe_closer = None
     sink = None
-    code = "VENDOR_ERROR"
-    try:
-        sink = _vendors._InitialPeerCensusDiagnosticSink(  # noqa: SLF001
-            _vendors._INITIAL_PEER_CENSUS_DIAGNOSTIC_SEAL,  # noqa: SLF001
-        )
-        proxy = _ProfileSearchProxy(credential, client)
-        matches = _vendors.MultiloginClient._peer_candidates(  # noqa: SLF001
-            proxy,
-            folder_id=provision["folder_id"],
-            peer_name=_DISCARD_PROFILE_NAME,
-            diagnostic_sink=sink,
-        )
-        code = "OK" if type(matches) is list and not matches else "VENDOR_ERROR"
-    except _core.CanaryRefusal as refusal:
-        code = refusal.code if refusal.code in _core.RESULT_CODES else "VENDOR_ERROR"
-    except (Exception, KeyboardInterrupt):  # noqa: BLE001
-        code = "VENDOR_ERROR"
-    finally:
-        try:
-            client_closed = client_closer(client)
-        except Exception:  # noqa: BLE001
-            client_closed = False
-    if client_closed is not True:
-        code = "VENDOR_ERROR"
 
     return _emit(
         stdout,
         _receipt(
             code,
-            diagnostic=sink.value if sink is not None else "NONE",
-            decode_context=sink.decode_context if sink is not None else None,
+            diagnostic=diagnostic,
+            decode_context=decode_context,
         ),
     )
 
@@ -434,6 +407,4 @@ def run_coordinator_profile_search_health(*, stdout=None) -> int:
         pipe_factory=_vendors._open_keychain_credential_pipe,  # noqa: SLF001
         credential_reader=_vendors._read_direct_pipe_credential,  # noqa: SLF001
         pipe_closer=_checked_close_keychain_pipe,
-        client_factory=_ProfileSearchOnlyClient,
-        client_closer=_checked_close_http_client,
     )

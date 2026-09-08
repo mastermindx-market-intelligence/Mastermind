@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import ast
+import functools
 import importlib.util
+import inspect
 import io
 import json
+import math
 import os
 from pathlib import Path
 import signal
 import sys
+import types
 from types import SimpleNamespace
 
 import pytest
@@ -51,6 +55,37 @@ def _payload(profiles, total):
 
 def _rendered(receipt):
     return json.dumps(receipt, separators=(",", ":"), sort_keys=True) + "\n"
+
+
+def _profile_row(
+    profile_id=_PROFILE,
+    folder_id=_FOLDER,
+    name="peer",
+    **extra,
+):
+    return {
+        "id": profile_id,
+        "folder_id": folder_id,
+        "name": name,
+        "browser_type": "mimic",
+        "os_type": "macos",
+        **extra,
+    }
+
+
+def _census_state(*, folder_id=_FOLDER, peer_name="peer"):
+    return vendors._ProfileSearchCensusState(  # noqa: SLF001
+        folder_id=folder_id,
+        peer_name=peer_name,
+    )
+
+
+def _consume_census(state, response):
+    sink = vendors._InitialPeerCensusDiagnosticSink(
+        vendors._INITIAL_PEER_CENSUS_DIAGNOSTIC_SEAL,
+    )
+    state.consume(response, diagnostic_sink=sink)
+    return sink
 
 
 class _FakeHeaders:
@@ -140,15 +175,19 @@ def _run(
     pipe = SimpleNamespace()
     credential = core.Credential(_SECRET if credential_present else None, "stdin" if credential_present else "absent")
     fake_http = _FakeHttp(responses, events, close_error=client_close_error)
-    code = health._run_profile_search_health(
-        stdout=out,
-        preflight_loader=lambda: preflight,
-        pipe_factory=lambda: events.append("pipe_open") or pipe,
-        credential_reader=lambda actual: events.append("credential_read") or credential,
-        pipe_closer=lambda actual: events.append("pipe_close") or pipe_close,
-        client_factory=lambda: events.append("client_open") or health._ProfileSearchOnlyClient(client=fake_http),
-        client_closer=lambda actual: health._checked_close_http_client(actual),
-    )
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(
+            vendors.httpx,
+            "Client",
+            lambda **_kwargs: events.append("client_open") or fake_http,
+        )
+        code = health._run_profile_search_health(
+            stdout=out,
+            preflight_loader=lambda: preflight,
+            pipe_factory=lambda: events.append("pipe_open") or pipe,
+            credential_reader=lambda actual: events.append("credential_read") or credential,
+            pipe_closer=lambda actual: events.append("pipe_close") or pipe_close,
+        )
     return code, json.loads(out.getvalue()), events, fake_http
 
 
@@ -232,8 +271,6 @@ def test_credential_reader_cancellation_still_closes_pipe_before_refusal():
         pipe_factory=lambda: events.append("pipe_open") or pipe,
         credential_reader=lambda actual: (_ for _ in ()).throw(KeyboardInterrupt()),
         pipe_closer=lambda actual: events.append("pipe_close") or True,
-        client_factory=lambda: pytest.fail("HTTP must not be constructed"),
-        client_closer=lambda actual: pytest.fail("HTTP close is not applicable"),
     )
     receipt = json.loads(out.getvalue())
     assert code == 2
@@ -320,40 +357,796 @@ def test_auth_rejection_is_not_recovery_or_refresh(status):
     assert http.search_calls == 1
 
 
-def test_profile_only_client_exposes_no_mutator_or_fallback_surface():
-    narrowed = health._ProfileSearchOnlyClient(client=_FakeHttp([]))
-    assert type(narrowed) is not vendors.BoundedHttpClient
-    assert callable(narrowed._mlx_profile_search_with_diagnostic)
-    assert not hasattr(narrowed, "_delegate")
+def test_hermetic_run_rejects_injected_raw_transport_before_any_effect():
+    events = []
+
+    class MutationCapableRawTransport:
+        def stream(self, *_args, **_kwargs):
+            events.append("request")
+            raise AssertionError("raw transport request was reached")
+
+        def close(self):
+            events.append("close")
+
+        def mutate_profile(self, *_args, **_kwargs):
+            events.append("mutator")
+            raise AssertionError("raw transport mutator was reached")
+
+    raw_transport = MutationCapableRawTransport()
+
+    def hostile_factory():
+        events.append("factory")
+        return raw_transport
+
+    def hostile_closer(client):
+        events.append("closer")
+        client.close()
+
+    rejected_before_invocation = False
+    try:
+        health._run_profile_search_health(  # noqa: SLF001
+            stdout=io.StringIO(),
+            preflight_loader=lambda: (None, "BINDINGS_UNAVAILABLE"),
+            pipe_factory=SimpleNamespace,
+            credential_reader=lambda _pipe: core.Credential(_SECRET, "stdin"),
+            pipe_closer=lambda _pipe: True,
+            client_factory=hostile_factory,
+            client_closer=hostile_closer,
+        )
+    except TypeError:
+        rejected_before_invocation = True
+
+    assert events == []
+    assert rejected_before_invocation is True
+    assert "_ProfileSearchOnlyClient" not in health.__dict__
+    assert "_ProfileSearchProxy" not in health.__dict__
+
+
+def test_health_module_exports_no_injectable_transport_or_proxy_surface():
     for forbidden in (
-        "_mlx_profile_search", "_mlx_profile_create", "_mlx_profile_remove",
-        "_mlx_profile_start", "_mlx_profile_stop", "_mlx_configure_canary_port",
+        "_ProfileSearchOnlyClient",
+        "_ProfileSearchProxy",
+        "_checked_close_http_client",
     ):
-        assert not hasattr(narrowed, forbidden)
-    assert not hasattr(narrowed, "__dict__")
-    for name in dir(narrowed):
-        value = getattr(narrowed, name, None)
-        owner = getattr(value, "__self__", None)
-        assert type(owner) is not vendors.BoundedHttpClient
+        assert forbidden not in health.__dict__
 
 
-def test_profile_only_client_rejects_full_bounded_constructor_input():
-    bounded = vendors.BoundedHttpClient(client=_FakeHttp([]))
+def test_hermetic_run_rejects_subclassed_client_factory_before_invocation():
+    events = []
+
+    class SubclassedClient(vendors.BoundedHttpClient):
+        def __init__(self):
+            events.append("subclass_constructed")
+
+    def hostile_factory():
+        events.append("factory")
+        return SubclassedClient()
+
     with pytest.raises(TypeError):
-        health._ProfileSearchOnlyClient(client=bounded)
+        health._run_profile_search_health(  # noqa: SLF001
+            stdout=io.StringIO(),
+            preflight_loader=lambda: (_provision(), None),
+            pipe_factory=SimpleNamespace,
+            credential_reader=lambda _pipe: core.Credential(_SECRET, "stdin"),
+            pipe_closer=lambda _pipe: True,
+            client_factory=hostile_factory,
+        )
+    assert events == []
 
 
-def test_proxy_exposes_only_parser_requirements_not_full_multilogin_client():
+def test_h2_uses_transport_free_vendor_census_state(monkeypatch):
+    observed = {}
+    original_init = vendors._ProfileSearchCensusState.__init__
+
+    def record_init(state, *args, **kwargs):
+        original_init(state, *args, **kwargs)
+        observed["state"] = state
+
+    monkeypatch.setattr(vendors._ProfileSearchCensusState, "__init__", record_init)
+    code, receipt, _events, _http = _run([
+        vendors._BoundedResponse(200, _payload([], 0)),
+    ])
+    state = observed["state"]
+    assert code == 0
+    assert receipt["verdict"] == "PASS"
+    assert not hasattr(state, "_client")
+    assert not hasattr(state, "_credential")
+    assert not hasattr(state, "_mlx_profile_search_with_diagnostic")
+    assert not hasattr(state, "__dict__")
+    assert state._folder_id is None  # noqa: SLF001
+    assert state._matches == []  # noqa: SLF001
+    assert "_ProfileSearchParserFacade" not in health.__dict__
+
+
+def test_h2_parser_boundary_retains_no_transport_or_authority(monkeypatch):
+    captured = {}
+    events = []
+    out = io.StringIO()
+    raw_transport = _FakeHttp([
+        vendors._BoundedResponse(200, _payload([], 0)),
+    ], events)
     credential = core.Credential(_SECRET, "stdin")
-    narrowed = health._ProfileSearchOnlyClient(client=_FakeHttp([]))
-    proxy = health._ProfileSearchProxy(credential, narrowed)
-    assert type(proxy) is not vendors.MultiloginClient
-    assert not hasattr(proxy, "create_peer_profile")
-    assert not hasattr(proxy, "remove_peer_profile")
-    assert not hasattr(proxy, "configure_canary_port")
-    assert not hasattr(proxy, "start")
-    assert not hasattr(proxy, "stop")
-    assert not hasattr(proxy, "__dict__")
+
+    original_client_init = vendors.BoundedHttpClient.__init__
+
+    def record_client_init(client, *args, **kwargs):
+        original_client_init(client, *args, **kwargs)
+        captured["client"] = client
+
+    original_request = vendors.BoundedHttpClient._request
+
+    def record_request(client, *args, **kwargs):
+        response = original_request(client, *args, **kwargs)
+        captured["response"] = response
+        return response
+
+    original_sink_init = vendors._InitialPeerCensusDiagnosticSink.__init__
+
+    def record_sink_init(sink, *args, **kwargs):
+        original_sink_init(sink, *args, **kwargs)
+        captured["sink"] = sink
+
+    state_type = getattr(vendors, "_ProfileSearchCensusState", None)
+    if state_type is not None:
+        original_state_init = state_type.__init__
+
+        def record_state_init(state, *args, **kwargs):
+            original_state_init(state, *args, **kwargs)
+            captured["state"] = state
+
+        monkeypatch.setattr(state_type, "__init__", record_state_init)
+
+    original_peer_candidates = vendors.MultiloginClient._peer_candidates
+
+    def capture_peer_candidates(parser, **kwargs):
+        captured["parser"] = parser
+        captured["bound_callable"] = parser._mlx_profile_search_with_diagnostic
+        return original_peer_candidates(parser, **kwargs)
+
+    monkeypatch.setattr(vendors.BoundedHttpClient, "__init__", record_client_init)
+    monkeypatch.setattr(vendors.BoundedHttpClient, "_request", record_request)
+    monkeypatch.setattr(
+        vendors._InitialPeerCensusDiagnosticSink,
+        "__init__",
+        record_sink_init,
+    )
+    monkeypatch.setattr(
+        vendors.MultiloginClient,
+        "_peer_candidates",
+        capture_peer_candidates,
+    )
+    monkeypatch.setattr(vendors.httpx, "Client", lambda **_kwargs: raw_transport)
+
+    assert health._run_profile_search_health(  # noqa: SLF001
+        stdout=out,
+        preflight_loader=lambda: (_provision(), None),
+        pipe_factory=SimpleNamespace,
+        credential_reader=lambda _pipe: credential,
+        pipe_closer=lambda _pipe: True,
+    ) == 0
+    assert json.loads(out.getvalue())["verdict"] == "PASS"
+
+    def authority_path(value, target, path=(), seen=None):
+        seen = set() if seen is None else seen
+        if value is target:
+            return path
+        value_id = id(value)
+        if value_id in seen:
+            return None
+        seen.add(value_id)
+
+        children = []
+        if type(value) is dict:
+            children.extend((f"key:{key!r}", item) for key, item in value.items())
+        elif type(value) in (list, tuple, set, frozenset):
+            children.extend((str(index), item) for index, item in enumerate(value))
+        elif isinstance(value, functools.partial):
+            children.extend((("partial.func", value.func), ("partial.args", value.args)))
+            children.append(("partial.keywords", value.keywords))
+        elif isinstance(value, types.MethodType):
+            children.extend((("bound_owner", value.__self__), ("bound_function", value.__func__)))
+        elif isinstance(value, types.FunctionType):
+            children.extend((("defaults", value.__defaults__), ("kwdefaults", value.__kwdefaults__)))
+            if value.__closure__ is not None:
+                children.extend(
+                    (f"closure:{index}", cell.cell_contents)
+                    for index, cell in enumerate(value.__closure__)
+                )
+        else:
+            value_dict = getattr(value, "__dict__", None)
+            if type(value_dict) is dict:
+                children.append(("__dict__", value_dict))
+            for owner in type(value).__mro__:
+                slots = owner.__dict__.get("__slots__", ())
+                if type(slots) is str:
+                    slots = (slots,)
+                for slot in slots:
+                    try:
+                        children.append((f"slot:{slot}", object.__getattribute__(value, slot)))
+                    except AttributeError:
+                        pass
+
+        for label, child in children:
+            found = authority_path(child, target, path + (label,), seen)
+            if found is not None:
+                return found
+        return None
+
+    parser_roots = [
+        captured[key]
+        for key in ("bound_callable", "parser", "state")
+        if key in captured
+    ]
+    assert parser_roots
+    for parser_root in parser_roots:
+        for target in (
+            captured["client"],
+            raw_transport,
+            credential,
+            captured["sink"],
+            captured["response"],
+        ):
+            assert authority_path(parser_root, target) is None
+
+
+def test_shared_census_state_has_transactional_two_page_parity_and_scrubs():
+    first_id = "00000000-0000-4000-8000-00000000000a"
+    second_id = "00000000-0000-4000-8000-00000000000b"
+    state = _census_state()
+    _consume_census(state, vendors._BoundedResponse(
+        200,
+        _payload([_profile_row(first_id)], 2),
+    ))
+    assert state.next_offset == 1
+    assert state.complete is False
+    _consume_census(state, vendors._BoundedResponse(
+        200,
+        _payload([_profile_row(second_id)], 2),
+    ))
+    assert state.complete is True
+    assert state.finish() == [
+        _profile_row(first_id),
+        _profile_row(second_id),
+    ]
+    assert state._folder_id is None  # noqa: SLF001
+    assert state._peer_name is None  # noqa: SLF001
+    assert state._offset is None  # noqa: SLF001
+    assert state._expected_total is None  # noqa: SLF001
+    assert state._seen_ids == set()  # noqa: SLF001
+    assert state._matches == []  # noqa: SLF001
+    assert state._complete is False  # noqa: SLF001
+    with pytest.raises(core.CanaryRefusal):
+        state.finish()
+    with pytest.raises(core.CanaryRefusal):
+        _consume_census(state, vendors._BoundedResponse(200, _payload([], 0)))
+
+
+def test_shared_census_state_h2_discard_mode_retains_no_rows():
+    state = _census_state(peer_name=None)
+    _consume_census(state, vendors._BoundedResponse(
+        200,
+        _payload([_profile_row(name="unrelated")], 1),
+    ))
+    assert state.finish() == []
+
+
+def test_shared_census_state_is_transactional_after_a_malformed_later_row():
+    state = _census_state()
+    malformed = _profile_row(
+        "00000000-0000-4000-8000-00000000000a",
+    )
+    malformed["id"] = "not-a-uuid"
+    with pytest.raises(core.CanaryRefusal):
+        _consume_census(state, vendors._BoundedResponse(
+            200,
+            _payload([
+                _profile_row("00000000-0000-4000-8000-00000000000b"),
+                malformed,
+            ], 2),
+        ))
+    assert state._expected_total is None  # noqa: SLF001
+    assert state.next_offset == 0
+    assert state._seen_ids == set()  # noqa: SLF001
+    assert state._matches == []  # noqa: SLF001
+    _consume_census(state, vendors._BoundedResponse(
+        200,
+        _payload([_profile_row("00000000-0000-4000-8000-00000000000c")], 1),
+    ))
+    assert state.finish() == [_profile_row("00000000-0000-4000-8000-00000000000c")]
+
+
+@pytest.mark.parametrize(
+    ("response", "diagnostic", "code"),
+    (
+        (vendors._BoundedResponse(401, {}), "NONE", "AUTH_EXPIRED"),
+        (vendors._BoundedResponse(403, {}), "NONE", "AUTH_EXPIRED"),
+        (vendors._BoundedResponse(429, {}), "HTTP_RATE_LIMITED", "VENDOR_ERROR"),
+        (vendors._BoundedResponse(422, {}), "HTTP_REQUEST_REJECTED", "VENDOR_ERROR"),
+        (vendors._BoundedResponse(503, {}), "HTTP_SERVICE_UNAVAILABLE", "VENDOR_ERROR"),
+        (vendors._BoundedResponse(299, {}), "HTTP_UNEXPECTED", "VENDOR_ERROR"),
+        (vendors._BoundedResponse(200, {"status": {}, "data": {}}), "STATUS_ENVELOPE_INVALID", "VENDOR_ERROR"),
+        (vendors._BoundedResponse(200, _payload("not-a-list", 0)), "DATA_SCHEMA_INVALID", "VENDOR_ERROR"),
+        (vendors._BoundedResponse(200, _payload([], True)), "DATA_SCHEMA_INVALID", "VENDOR_ERROR"),
+        (vendors._BoundedResponse(200, _payload([], -1)), "DATA_SCHEMA_INVALID", "VENDOR_ERROR"),
+        (vendors._BoundedResponse(200, _payload([], vendors._MAX_PROFILE_CENSUS + 1)), "DATA_SCHEMA_INVALID", "VENDOR_ERROR"),
+    ),
+)
+def test_shared_census_state_preserves_closed_status_and_shape_diagnostics(
+    response, diagnostic, code,
+):
+    state = _census_state()
+    sink = vendors._InitialPeerCensusDiagnosticSink(
+        vendors._INITIAL_PEER_CENSUS_DIAGNOSTIC_SEAL,
+    )
+    with pytest.raises(core.CanaryRefusal) as raised:
+        state.consume(response, diagnostic_sink=sink)
+    assert raised.value.code == code
+    assert sink.value == diagnostic
+    assert state.next_offset == 0
+
+
+def test_shared_census_state_rejects_total_drift_duplicate_and_incomplete_pages():
+    state = _census_state()
+    first_id = "00000000-0000-4000-8000-00000000000a"
+    _consume_census(state, vendors._BoundedResponse(
+        200,
+        _payload([_profile_row(first_id)], 2),
+    ))
+    with pytest.raises(core.CanaryRefusal):
+        _consume_census(state, vendors._BoundedResponse(
+            200,
+            _payload([_profile_row("00000000-0000-4000-8000-00000000000b")], 3),
+        ))
+    assert state.next_offset == 1
+    with pytest.raises(core.CanaryRefusal):
+        _consume_census(state, vendors._BoundedResponse(
+            200,
+            _payload([_profile_row(first_id)], 2),
+        ))
+    assert state.next_offset == 1
+
+    empty_page = _census_state()
+    with pytest.raises(core.CanaryRefusal):
+        _consume_census(empty_page, vendors._BoundedResponse(200, _payload([], 1)))
+    assert empty_page.next_offset == 0
+
+    over_page = _census_state()
+    rows = [
+        _profile_row(f"00000000-0000-4000-8000-{index:012x}")
+        for index in range(vendors._PROFILE_PAGE_SIZE + 1)
+    ]
+    with pytest.raises(core.CanaryRefusal):
+        _consume_census(over_page, vendors._BoundedResponse(
+            200,
+            _payload(rows, len(rows)),
+        ))
+
+
+def test_shared_census_state_canonicalizes_uppercase_ids_and_completes_at_cap():
+    upper_folder = "ABCDEFAB-CDEF-4ABC-8DEF-ABCDEFABCDEF"
+    upper_profile = "ABCDEFAB-CDEF-4ABC-8DEF-ABCDEFABCDE0"
+    state = _census_state(folder_id=upper_folder)
+    _consume_census(state, vendors._BoundedResponse(
+        200,
+        _payload([_profile_row(upper_profile, upper_folder)], 1),
+    ))
+    assert state.finish()[0]["id"] == upper_profile.lower()
+
+    at_cap = _census_state(peer_name=None)
+    for offset in range(0, vendors._MAX_PROFILE_CENSUS, vendors._PROFILE_PAGE_SIZE):
+        rows = [
+            _profile_row(
+                f"00000000-0000-4000-8000-{index:012x}",
+                name="discard",
+            )
+            for index in range(offset, offset + vendors._PROFILE_PAGE_SIZE)
+        ]
+        _consume_census(at_cap, vendors._BoundedResponse(
+            200,
+            _payload(rows, vendors._MAX_PROFILE_CENSUS),
+        ))
+    assert at_cap.complete is True
+    assert at_cap.finish() == []
+
+
+@pytest.mark.parametrize(
+    "extra",
+    (
+        {"custom": object()},
+        {"callable": lambda: None},
+        {"nan": math.nan},
+        {"nested": {"deep": [object()]}},
+    ),
+)
+def test_shared_census_state_rejects_non_json_matching_values(extra):
+    state = _census_state()
+    with pytest.raises(core.CanaryRefusal):
+        _consume_census(state, vendors._BoundedResponse(
+            200,
+            _payload([_profile_row(**extra)], 1),
+        ))
+    assert state.next_offset == 0
+
+
+def test_shared_census_state_rejects_matching_aliases_but_not_unmatched_extras():
+    shared = []
+    aliased = _profile_row(nested={"left": shared, "right": shared})
+    state = _census_state()
+    with pytest.raises(core.CanaryRefusal):
+        _consume_census(state, vendors._BoundedResponse(200, _payload([aliased], 1)))
+
+    discard = _census_state(peer_name=None)
+    _consume_census(discard, vendors._BoundedResponse(
+        200,
+        _payload([_profile_row(name="other", hostile=object())], 1),
+    ))
+    assert discard.finish() == []
+
+
+def test_shared_census_state_copies_nested_matching_rows_at_consume_time():
+    source = _profile_row(nested={"metadata": {"value": "before"}})
+    state = _census_state()
+    _consume_census(state, vendors._BoundedResponse(200, _payload([source], 1)))
+
+    source["nested"]["metadata"]["value"] = "after"
+    source["nested"]["metadata"]["new"] = "mutated"
+
+    assert state.finish() == [
+        _profile_row(nested={"metadata": {"value": "before"}}),
+    ]
+
+
+def _matching_row_with_exact_json_nodes(nodes):
+    assert nodes >= 7
+    return _profile_row(payload=[None] * (nodes - 7))
+
+
+def _matching_row_with_exact_json_depth(depth):
+    assert depth >= 1
+    value = None
+    for _ in range(depth - 1):
+        value = {"next": value}
+    return _profile_row(payload=value)
+
+
+@pytest.mark.parametrize(
+    "row",
+    (
+        _matching_row_with_exact_json_nodes(vendors._PROFILE_ITEM_COPY_MAX_NODES),
+        _matching_row_with_exact_json_depth(vendors._PROFILE_ITEM_COPY_MAX_DEPTH),
+    ),
+    ids=("exact_node_limit", "exact_depth_limit"),
+)
+def test_shared_census_state_finish_preserves_exact_per_item_copy_limits(row):
+    state = _census_state()
+    _consume_census(state, vendors._BoundedResponse(200, _payload([row], 1)))
+    assert state.finish() == [row]
+
+
+def test_shared_census_state_finish_accepts_full_matching_census_without_aggregate_limit():
+    state = _census_state()
+    for offset in range(0, vendors._MAX_PROFILE_CENSUS, vendors._PROFILE_PAGE_SIZE):
+        rows = [
+            _profile_row(f"00000000-0000-4000-8000-{index:012x}")
+            for index in range(offset, offset + vendors._PROFILE_PAGE_SIZE)
+        ]
+        _consume_census(state, vendors._BoundedResponse(
+            200,
+            _payload(rows, vendors._MAX_PROFILE_CENSUS),
+        ))
+    result = state.finish()
+    assert len(result) == vendors._MAX_PROFILE_CENSUS
+    assert result[0]["id"] == "00000000-0000-4000-8000-000000000000"
+    assert result[-1]["id"] == "00000000-0000-4000-8000-0000000003e7"
+
+
+@pytest.mark.parametrize(
+    "row",
+    (
+        _matching_row_with_exact_json_nodes(vendors._PROFILE_ITEM_COPY_MAX_NODES + 1),
+        _matching_row_with_exact_json_depth(vendors._PROFILE_ITEM_COPY_MAX_DEPTH + 1),
+    ),
+    ids=("one_over_node_limit", "one_over_depth_limit"),
+)
+def test_shared_census_state_rejects_one_over_per_item_copy_limits(row):
+    state = _census_state()
+    with pytest.raises(core.CanaryRefusal):
+        _consume_census(state, vendors._BoundedResponse(200, _payload([row], 1)))
+    assert state.next_offset == 0
+    assert state._matches == []  # noqa: SLF001
+
+
+@pytest.mark.parametrize(
+    "extra",
+    (
+        {"scalar_subclass": type("ExactStringSubclass", (str,), {})("value")},
+        {"container_subclass": type("ExactListSubclass", (list,), {})([None])},
+        {"mapping_subclass": type("ExactDictSubclass", (dict,), {})(value="value")},
+    ),
+)
+def test_shared_census_state_rejects_matching_exact_json_subclasses(extra):
+    state = _census_state()
+    with pytest.raises(core.CanaryRefusal):
+        _consume_census(state, vendors._BoundedResponse(
+            200,
+            _payload([_profile_row(**extra)], 1),
+        ))
+    assert state.next_offset == 0
+    assert state._matches == []  # noqa: SLF001
+
+
+def test_shared_census_state_refuses_before_and_after_exact_completion():
+    state = _census_state()
+    with pytest.raises(core.CanaryRefusal):
+        state.finish()
+    assert state.next_offset == 0
+
+    row = _profile_row()
+    _consume_census(state, vendors._BoundedResponse(200, _payload([row], 1)))
+    with pytest.raises(core.CanaryRefusal):
+        _consume_census(state, vendors._BoundedResponse(200, _payload([], 1)))
+    assert state.finish() == [row]
+
+
+def test_shared_census_state_scrubs_on_unexpected_finish_copy_failure():
+    state = _census_state()
+    _consume_census(state, vendors._BoundedResponse(
+        200,
+        _payload([_profile_row()], 1),
+    ))
+    state._matches = [object()]  # noqa: SLF001 - deliberate private-state corruption
+    with pytest.raises(core.CanaryRefusal) as raised:
+        state.finish()
+    assert raised.value.code == "VENDOR_ERROR"
+    assert state._finished is True  # noqa: SLF001
+    assert state._folder_id is None  # noqa: SLF001
+    assert state._matches == []  # noqa: SLF001
+
+
+def test_profile_search_request_builder_matches_canonical_vendor_dispatch(monkeypatch):
+    credential = core.Credential(_SECRET, "stdin")
+    sink = vendors._InitialPeerCensusDiagnosticSink(
+        vendors._INITIAL_PEER_CENSUS_DIAGNOSTIC_SEAL,
+    )
+    expected = vendors._mlx_profile_search_request_arguments(  # noqa: SLF001
+        credential,
+        _FOLDER,
+        offset=0,
+        diagnostic_sink=sink,
+    )
+    observed = {}
+
+    def record_request(_client, *args, **kwargs):
+        observed["arguments"] = (*args, kwargs)
+        return vendors._BoundedResponse(200, _payload([], 0))
+
+    monkeypatch.setattr(vendors.BoundedHttpClient, "_request", record_request)
+    client = vendors.BoundedHttpClient(client=_FakeHttp([]))
+    client._mlx_profile_search_request(
+        credential,
+        _FOLDER,
+        offset=0,
+        diagnostic_sink=sink,
+    )
+    method, origin, path, headers, params, body, actual_sink = expected
+    assert observed["arguments"] == (
+        method,
+        origin,
+        path,
+        {
+            "headers": headers,
+            "params": params,
+            "json_body": body,
+            "diagnostic_sink": actual_sink,
+        },
+    )
+
+
+def test_h2_uses_the_shared_profile_search_request_builder(monkeypatch):
+    calls = []
+    original_builder = vendors._mlx_profile_search_request_arguments
+
+    def record_builder(*args, **kwargs):
+        request = original_builder(*args, **kwargs)
+        calls.append(request)
+        return request
+
+    monkeypatch.setattr(
+        vendors,
+        "_mlx_profile_search_request_arguments",
+        record_builder,
+    )
+    code, receipt, _events, _http = _run([
+        vendors._BoundedResponse(200, _payload([], 0)),
+    ])
+    assert code == 0
+    assert receipt["verdict"] == "PASS"
+    assert len(calls) == 1
+    method, origin, path, headers, params, body, sink = calls[0]
+    assert health._is_exact_profile_search_request(  # noqa: SLF001
+        method,
+        origin,
+        path,
+        headers=headers,
+        params=params,
+        json_body=body,
+        diagnostic_sink=sink,
+    ) is True
+
+
+def test_h2_refuses_malformed_shared_builder_result_before_any_dispatch(monkeypatch):
+    class PermissiveRawTransport:
+        def __init__(self):
+            self.calls = []
+            self.closed = 0
+
+        def stream(self, method, url, *, headers=None, params=None, json=None):
+            self.calls.append((method, url, headers, params, json))
+            return _FakeWireResponse(vendors._BoundedResponse(200, _payload([], 0)))
+
+        def close(self):
+            self.closed += 1
+
+    raw_transport = PermissiveRawTransport()
+    original_builder = vendors._mlx_profile_search_request_arguments
+
+    def malformed_builder(*args, **kwargs):
+        request = list(original_builder(*args, **kwargs))
+        request[0] = "GET"
+        return tuple(request)
+
+    monkeypatch.setattr(vendors.httpx, "Client", lambda **_kwargs: raw_transport)
+    monkeypatch.setattr(
+        vendors,
+        "_mlx_profile_search_request_arguments",
+        malformed_builder,
+    )
+    out = io.StringIO()
+    assert health._run_profile_search_health(  # noqa: SLF001
+        stdout=out,
+        preflight_loader=lambda: (_provision(), None),
+        pipe_factory=SimpleNamespace,
+        credential_reader=lambda _pipe: core.Credential(_SECRET, "stdin"),
+        pipe_closer=lambda _pipe: True,
+    ) == 2
+    assert json.loads(out.getvalue()) == health._receipt("VENDOR_ERROR")
+    assert raw_transport.calls == []
+    assert raw_transport.closed == 1
+
+
+@pytest.mark.parametrize(
+    ("responses", "expected_code"),
+    (
+        ([vendors._BoundedResponse(200, _payload([], 0))], "OK"),
+        ([RuntimeError("private transport failure")], "VENDOR_ERROR"),
+    ),
+)
+def test_h2_scrubs_authority_from_the_final_emission_frame(
+    monkeypatch, responses, expected_code,
+):
+    target_ids = set()
+    leaks = []
+    raw_transport = _FakeHttp(responses, [])
+    credential = core.Credential(_SECRET, "stdin")
+    provision = _provision()
+    target_ids.update((id(raw_transport), id(credential), id(provision)))
+
+    class InspectingStdout:
+        __slots__ = ("_target_ids", "_leaks", "_rendered")
+
+        def __init__(self):
+            self._target_ids = target_ids
+            self._leaks = leaks
+            self._rendered = ""
+
+        def write(self, text):
+            frame = inspect.currentframe().f_back
+            while frame is not None and frame.f_code.co_name != "_run_profile_search_health":
+                frame = frame.f_back
+            assert frame is not None
+
+            def finds_target(value, seen=None):
+                seen = set() if seen is None else seen
+                if id(value) in self._target_ids:
+                    return True
+                value_id = id(value)
+                if value_id in seen:
+                    return False
+                seen.add(value_id)
+                if type(value) is dict:
+                    return any(finds_target(item, seen) for item in value.values())
+                if type(value) in (list, tuple, set, frozenset):
+                    return any(finds_target(item, seen) for item in value)
+                if isinstance(value, functools.partial):
+                    return (
+                        finds_target(value.func, seen)
+                        or finds_target(value.args, seen)
+                        or finds_target(value.keywords, seen)
+                    )
+                if isinstance(value, types.MethodType):
+                    return (
+                        finds_target(value.__self__, seen)
+                        or finds_target(value.__func__, seen)
+                    )
+                if isinstance(value, types.FunctionType):
+                    if finds_target(value.__defaults__, seen) or finds_target(value.__kwdefaults__, seen):
+                        return True
+                    return value.__closure__ is not None and any(
+                        finds_target(cell.cell_contents, seen)
+                        for cell in value.__closure__
+                    )
+                value_dict = getattr(value, "__dict__", None)
+                if type(value_dict) is dict and finds_target(value_dict, seen):
+                    return True
+                for owner in type(value).__mro__:
+                    slots = owner.__dict__.get("__slots__", ())
+                    if type(slots) is str:
+                        slots = (slots,)
+                    for slot in slots:
+                        try:
+                            if finds_target(object.__getattribute__(value, slot), seen):
+                                return True
+                        except AttributeError:
+                            pass
+                return False
+
+            self._leaks.extend(
+                name for name, value in frame.f_locals.items()
+                if finds_target(value)
+            )
+            self._rendered += text
+            return len(text)
+
+    original_client_init = vendors.BoundedHttpClient.__init__
+
+    def record_client_init(client, *args, **kwargs):
+        original_client_init(client, *args, **kwargs)
+        target_ids.add(id(client))
+
+    original_sink_init = vendors._InitialPeerCensusDiagnosticSink.__init__
+
+    def record_sink_init(sink, *args, **kwargs):
+        original_sink_init(sink, *args, **kwargs)
+        target_ids.add(id(sink))
+
+    original_state_init = vendors._ProfileSearchCensusState.__init__
+
+    def record_state_init(state, *args, **kwargs):
+        original_state_init(state, *args, **kwargs)
+        target_ids.add(id(state))
+
+    original_request = vendors.BoundedHttpClient._request
+
+    def record_request(client, *args, **kwargs):
+        response = original_request(client, *args, **kwargs)
+        if response is not None:
+            target_ids.add(id(response))
+        return response
+
+    original_builder = vendors._mlx_profile_search_request_arguments
+
+    def record_builder(*args, **kwargs):
+        request = original_builder(*args, **kwargs)
+        target_ids.update((id(request[3]), id(request[5])))
+        return request
+
+    monkeypatch.setattr(vendors.BoundedHttpClient, "__init__", record_client_init)
+    monkeypatch.setattr(vendors.BoundedHttpClient, "_request", record_request)
+    monkeypatch.setattr(vendors._InitialPeerCensusDiagnosticSink, "__init__", record_sink_init)
+    monkeypatch.setattr(vendors._ProfileSearchCensusState, "__init__", record_state_init)
+    monkeypatch.setattr(vendors.httpx, "Client", lambda **_kwargs: raw_transport)
+    monkeypatch.setattr(vendors, "_mlx_profile_search_request_arguments", record_builder)
+
+    stdout = InspectingStdout()
+    assert health._run_profile_search_health(  # noqa: SLF001
+        stdout=stdout,
+        preflight_loader=lambda: (provision, None),
+        pipe_factory=SimpleNamespace,
+        credential_reader=lambda _pipe: credential,
+        pipe_closer=lambda _pipe: True,
+    ) == (0 if expected_code == "OK" else 2)
+    assert json.loads(stdout._rendered)["code"] == expected_code
+    assert leaks == []
 
 
 def test_health_source_ast_has_no_mutation_peer_state_or_retry_calls():
@@ -397,16 +1190,7 @@ def test_success_path_never_calls_other_bounded_http_endpoints(monkeypatch):
     assert http.search_calls == 1
 
 
-def test_profile_only_request_guard_refuses_non_search_shapes_before_http():
-    # The fake records every shape; it must not enforce the guard under test.
-    class RecordingHttp:
-        def __init__(self):
-            self.calls = []
-
-        def stream(self, *args, **kwargs):
-            self.calls.append((args, kwargs))
-            return _FakeWireResponse(vendors._BoundedResponse(200, _payload([], 0)))
-
+def test_profile_search_request_guard_refuses_non_search_shapes_before_http():
     canonical_body = {
         "is_removed": False,
         "limit": vendors._PROFILE_PAGE_SIZE,
@@ -426,16 +1210,16 @@ def test_profile_only_request_guard_refuses_non_search_shapes_before_http():
         "json_body": canonical_body,
     }
 
-    def invoke(fake, request):
+    def invoke(request):
         sink = vendors._InitialPeerCensusDiagnosticSink(
             vendors._INITIAL_PEER_CENSUS_DIAGNOSTIC_SEAL,
         )
-        client = health._ProfileSearchOnlyClient(client=fake)
-        return client._request(**request, diagnostic_sink=sink)
+        return health._is_exact_profile_search_request(  # noqa: SLF001
+            **request,
+            diagnostic_sink=sink,
+        )
 
-    positive = RecordingHttp()
-    assert invoke(positive, canonical).status_code == 200
-    assert len(positive.calls) == 1
+    assert invoke(canonical) is True
 
     attempts = [
         {**canonical, "method": "GET"},
@@ -458,41 +1242,36 @@ def test_profile_only_request_guard_refuses_non_search_shapes_before_http():
         "json_body": {key: value for key, value in canonical_body.items() if key != "folder_id"},
     })
     for request in attempts:
-        fake = RecordingHttp()
-        with pytest.raises(core.CanaryRefusal):
-            invoke(fake, request)
-        assert fake.calls == []
+        assert invoke(request) is False
 
 
-def test_checked_http_close_is_one_shot_and_exact_boolean():
-    fake = _FakeHttp([])
-    client = health._ProfileSearchOnlyClient(client=fake)
-    assert health._checked_close_http_client(client) is True
-    assert health._checked_close_http_client(client) is False
-    assert fake.closed == 1
-
-
-def test_truthy_non_boolean_client_cleanup_cannot_produce_pass():
-    events = []
-    out = io.StringIO()
-    pipe = SimpleNamespace()
-    fake_http = _FakeHttp(
-        [vendors._BoundedResponse(200, _payload([], 0))], events,
-    )
-    code = health._run_profile_search_health(
-        stdout=out,
-        preflight_loader=lambda: (_provision(), None),
-        pipe_factory=lambda: events.append("pipe_open") or pipe,
-        credential_reader=lambda actual: events.append("credential_read") or core.Credential(_SECRET, "stdin"),
-        pipe_closer=lambda actual: events.append("pipe_close") or True,
-        client_factory=lambda: events.append("client_open") or health._ProfileSearchOnlyClient(client=fake_http),
-        client_closer=lambda actual: actual._client.close() or 1,
-    )
-    receipt = json.loads(out.getvalue())
-    assert code == 2
-    assert receipt["code"] == "VENDOR_ERROR"
-    assert receipt["read_surface_usable"] is False
+def test_hermetic_run_closes_the_exact_canonical_client_once():
+    code, receipt, events, http = _run([
+        vendors._BoundedResponse(200, _payload([], 0)),
+    ])
+    assert code == 0
+    assert receipt["verdict"] == "PASS"
     assert events[-1] == "client_close"
+    assert http.closed == 1
+
+
+def test_hermetic_run_rejects_client_cleanup_injection_before_transport():
+    events = []
+
+    def hostile_closer(_client):
+        events.append("close")
+        return True
+
+    with pytest.raises(TypeError):
+        health._run_profile_search_health(  # noqa: SLF001
+            stdout=io.StringIO(),
+            preflight_loader=lambda: (_provision(), None),
+            pipe_factory=SimpleNamespace,
+            credential_reader=lambda _pipe: core.Credential(_SECRET, "stdin"),
+            pipe_closer=lambda _pipe: True,
+            client_closer=hostile_closer,
+        )
+    assert events == []
 
 
 def test_checked_pipe_close_reaps_without_signal_and_is_one_shot():
@@ -599,9 +1378,14 @@ def test_live_wrapper_fixes_all_dependency_owners(monkeypatch):
     assert observed["preflight_loader"] is health._load_live_preflight
     assert observed["pipe_factory"] is vendors._open_keychain_credential_pipe
     assert observed["credential_reader"] is vendors._read_direct_pipe_credential
-    assert observed["client_factory"] is health._ProfileSearchOnlyClient
     assert observed["pipe_closer"] is health._checked_close_keychain_pipe
-    assert observed["client_closer"] is health._checked_close_http_client
+    assert set(observed) == {
+        "stdout",
+        "preflight_loader",
+        "pipe_factory",
+        "credential_reader",
+        "pipe_closer",
+    }
 
 
 def test_setup_gologin_refuses_before_prompt_or_health(monkeypatch, capsys):
@@ -723,24 +1507,12 @@ def test_setup_exact_confirmation_dispatches_only_fixed_health_entry(monkeypatch
 
 
 def test_request_cancellation_emits_one_closed_receipt_after_http_cleanup():
-    events = []
-    out = io.StringIO()
-    fake_http = _FakeHttp([KeyboardInterrupt("private cancellation detail")], events)
-    try:
-        code = health._run_profile_search_health(
-            stdout=out,
-            preflight_loader=lambda: (_provision(), None),
-            pipe_factory=lambda: events.append("pipe_open") or SimpleNamespace(),
-            credential_reader=lambda pipe: events.append("credential_read") or core.Credential(_SECRET, "stdin"),
-            pipe_closer=lambda pipe: events.append("pipe_close") or True,
-            client_factory=lambda: events.append("client_open") or health._ProfileSearchOnlyClient(client=fake_http),
-            client_closer=health._checked_close_http_client,
-        )
-    except KeyboardInterrupt:
-        pytest.fail("request cancellation escaped before the closed receipt")
+    code, receipt, events, fake_http = _run([
+        KeyboardInterrupt("private cancellation detail"),
+    ])
     assert code == 2
-    assert out.getvalue() == _rendered(health._receipt("VENDOR_ERROR"))
-    assert set(json.loads(out.getvalue())) == _KEYS
+    assert receipt == health._receipt("VENDOR_ERROR")
+    assert set(receipt) == _KEYS
     assert events == ["pipe_open", "credential_read", "pipe_close", "client_open", "search:0", "client_close"]
     assert fake_http.search_calls == 1
     assert fake_http.closed == 1
