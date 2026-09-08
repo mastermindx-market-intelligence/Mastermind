@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-import re
 import shutil
 
 import pytest
@@ -21,8 +20,6 @@ CLOCKS = (
     ("Agent OS · unknown age", "Executive · DB unknown", "GitHub · snapshot · unknown age"),
 )
 
-
-_SCRIPT_TAGS = re.compile(r"<script\b[^>]*>.*?</script\s*>", re.I | re.S)
 
 def require_or_skip(reason):
     if os.environ.get("MMX_REQUIRE_LAYOUT_BROWSER") == "1":
@@ -52,16 +49,18 @@ def browser():
 
 def render(browser, width, theme, clocks, *, remote=False):
     context = browser.new_context(viewport={"width": width, "height": 900},
-                                  service_workers="block")
+                                  service_workers="block", java_script_enabled=False)
     context.route("**/*", lambda route: route.abort())
     page = context.new_page()
     name = "remote.html" if remote else "index.html"
     html = (ASSETS / name).read_text()
-    # Keep the real markup; clocks are the only synthetic dynamic input.
-    html = _SCRIPT_TAGS.sub("", html)
-    html = re.sub(r"<link\b[^>]*>", "", html, flags=re.I)
-    page.set_content(html)
-    page.add_style_tag(content=(ASSETS / "control_room.css").read_text())
+    # Keep the real markup unchanged. Page scripts are disabled by the browser;
+    # driver evaluation supplies only the synthetic clock/theme inputs below.
+    # Trusted fixture CSS is present before parsing; dynamic style injection can
+    # wait indefinitely with page JavaScript disabled. No HTML/script filtering.
+    assert html.count("</head>") == 1
+    css = (ASSETS / "control_room.css").read_text()
+    page.set_content(html.replace("</head>", "<style>" + css + "</style></head>", 1))
     page.evaluate("""({theme, clocks}) => {
         document.documentElement.dataset.theme = theme;
         const pulse = document.getElementById('ccr-source-pulse');
@@ -159,7 +158,22 @@ def test_shipped_header_has_distinct_source_and_control_regions():
     assert 'Local · canonical read-only' in html
 
 
-@pytest.mark.parametrize("closing", ("</script>", "</script >", "</script\t>", "</SCRIPT\n>"))
-def test_fixture_script_filter_accepts_legal_closing_tag_whitespace(closing):
-    html = "<script>window.unwanted = true;" + closing + "<header>Header</header>"
-    assert _SCRIPT_TAGS.sub("", html) == "<header>Header</header>"
+@pytest.mark.parametrize("closing", ("</script>", "</script >", "</script\t>",
+                                    "</SCRIPT\n>", "</script\t\n bar>"))
+def test_fixture_markup_cannot_execute_page_scripts(browser, tmp_path, monkeypatch, closing):
+    """The actual browser must stay inert even when HTML end tags are unusual."""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    html = (ASSETS / "index.html").read_text()
+    sentinel = "<script>window.fixture_should_not_run = true;" + closing
+    (assets / "index.html").write_text(html.replace("</head>", sentinel + "</head>", 1))
+    (assets / "control_room.css").write_text((ASSETS / "control_room.css").read_text())
+    monkeypatch.setitem(globals(), "ASSETS", assets)
+    context, page = render(browser, 1440, "dark", CLOCKS[1])
+    try:
+        assert page.evaluate("window.fixture_should_not_run") is None
+        measured = page.evaluate(GEOMETRY)
+        assert measured["clocks"] == list(CLOCKS[1])
+        assert_geometry(measured, 1440)
+    finally:
+        context.close()
