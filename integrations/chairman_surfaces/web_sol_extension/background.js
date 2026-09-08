@@ -1,6 +1,7 @@
 "use strict";
 
 importScripts("instance_config.js");
+importScripts("census_core.js");
 
 const PROBE_KIND = "MMX_WEB_SOL_PROBE";
 const REPROBE_KIND = "MMX_WEB_SOL_REPROBE";
@@ -11,8 +12,8 @@ const HELLO_SCHEMA = "mastermind.web_sol_transport_hello.v1";
 const HELLO_ACK_SCHEMA = "mastermind.web_sol_transport_hello_ack.v1";
 const INSTANCE_CONFIG_SCHEMA = "mastermind.web_sol_instance_config.v1";
 const TRANSPORT_PROTOCOL_MAJOR = 1;
-const PACKAGE_VERSION = "0.1.0";
-const EXPECTED_CAPABILITY_DIGEST = "87276c884840bf14e3717a7249c07e6fff5ae09c591782dadadb05f9affa2d26";
+const PACKAGE_VERSION = "0.2.0";
+const EXPECTED_CAPABILITY_DIGEST = "7bb800e54488f056cf14ed30e6083583bbff021b3695e1ca6b3c61d463905f12";
 const MAX_ACTION_TTL_MS = 60000;
 const ALLOWED_FUTURE_SKEW_MS = 5000;
 const CHATGPT_TAB_PATTERNS = Object.freeze([
@@ -310,7 +311,83 @@ async function handleForeground(request) {
   return receipt(request, "FOREGROUNDED_VERIFIED", after.observation);
 }
 
+const CENSUS_REQUEST_SCHEMA = "mastermind.web_sol_census_request.v1";
+const CENSUS_RECEIPT_SCHEMA = "mastermind.web_sol_census_receipt.v1";
+const CENSUS_HEADERS = Object.freeze(["schema", "scope", "adapter_instance_id", "started_at", "completed_at",
+  "duration_ms", "inventory_coverage", "consistency", "reason", "initial_tab_count", "final_tab_count",
+  "excluded_private_count", "omitted_tab_count", "unobserved_added_count", "unique_conversation_count",
+  "duplicate_tab_count", "probed_tab_count", "generation_cue_count", "unknown_cue_count", "probe_coverage"]);
+const CENSUS_ROWS = Object.freeze(["slot", "conversation_fingerprint", "identity_evidence", "document_binding",
+  "status", "generation_cue", "selected_in_window", "discarded", "frozen", "visibility", "auth_required",
+  "provider_error_present", "duplicate_count", "duplicate_cue_disagreement", "observed_at",
+  "selected_model", "selected_effort", "served_model", "model_evidence"]);
+const CENSUS_KEYS = new Set(["schema", "adapter_instance_id", "operation_key", "nonce", "issued_at", "expires_at"]);
+function validCensusCorrelation(value, minimum, maximum) {
+  // Match Python str length/isspace exactly for this sibling protocol. Legacy
+  // handshake/action nonce grammar remains with isNonce above.
+  return typeof value === "string" && Array.from(value).length >= minimum &&
+    Array.from(value).length <= maximum &&
+    !/[\u0009-\u000d\u001c-\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]/.test(value);
+}
+function validCensusRequest(request) {
+  return exactKeys(request, CENSUS_KEYS) && request.schema === CENSUS_REQUEST_SCHEMA && INSTANCE_CONFIG &&
+    request.adapter_instance_id === INSTANCE_CONFIG.instanceId && validCensusCorrelation(request.nonce, 16, 128) &&
+    validCensusCorrelation(request.operation_key, 1, 256) &&
+    [request.issued_at, request.expires_at].every(v => typeof v === "string" &&
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(v)) &&
+    Number.isFinite(Date.parse(request.issued_at)) && Number.isFinite(Date.parse(request.expires_at)) &&
+    Date.parse(request.expires_at) > Date.parse(request.issued_at) &&
+    Date.parse(request.expires_at) - Date.parse(request.issued_at) <= 10000;
+}
+function packCensus(snapshot) {
+  if (!exactKeys(snapshot, new Set([...CENSUS_HEADERS, "rows"])) ||
+      snapshot.schema !== "mastermind.web_sol_local_census.v1" ||
+      snapshot.adapter_instance_id !== INSTANCE_CONFIG.instanceId ||
+      !Array.isArray(snapshot.rows) || snapshot.rows.length > 128 ||
+      !snapshot.rows.every(r => exactKeys(r, new Set(CENSUS_ROWS)) &&
+        r.selected_model === null && r.selected_effort === null && r.served_model === null &&
+        r.document_binding === "UNVERIFIED" && r.model_evidence === "UNVERIFIED")) throw Error("INVALID_OBSERVATION");
+  return {schema: "mastermind.web_sol_census_table.v1",
+    header: CENSUS_HEADERS.map(k => snapshot[k]), rows: snapshot.rows.map(r => CENSUS_ROWS.map(k => r[k]))};
+}
+function censusReceipt(request, status, snapshot = null) {
+  return {schema: CENSUS_RECEIPT_SCHEMA, adapter_instance_id: request.adapter_instance_id,
+    operation_key: request.operation_key, nonce: request.nonce, status, snapshot};
+}
+async function handleCensusRequest(request, port) {
+  if (!validCensusRequest(request)) return;
+  const accepted = Object.freeze({...request});
+  const token = nativePortToken, boot = transportBootNonce;
+  if (nativePort !== port || !transportHandshakeReady || !boot) return;
+  const ms = Math.min(10000, Date.parse(accepted.expires_at) - Date.now());
+  if (ms <= 0 || Date.parse(accepted.issued_at) > Date.now()+5000) {
+    port.postMessage(censusReceipt(accepted, "READ_DEADLINE_EXCEEDED")); return;
+  }
+  const deadline = performance.now()+ms;
+  let result;
+  try {
+    // One stable API object and collector realm own pending-read backpressure.
+    const snapshot = await globalThis.MMXWebSolCensus.collect(
+      chrome.tabs, INSTANCE_CONFIG.instanceId, deadline);
+    result = snapshot.reason === "ADAPTER_UNCONFIGURED" ? censusReceipt(accepted, "COLLECTOR_UNAVAILABLE") :
+      censusReceipt(accepted, "COLLECTED", packCensus(snapshot));
+    if (new TextEncoder().encode(JSON.stringify(result)).length > 61440)
+      result = censusReceipt(accepted, "RESULT_TOO_LARGE");
+  } catch (_) { result = censusReceipt(accepted, "INVALID_OBSERVATION"); }
+  // A completed or timed-out old operation cannot write to either port generation.
+  if (nativePort !== port || nativePortToken !== token || transportBootNonce !== boot ||
+      !transportHandshakeReady || performance.now() >= deadline) return;
+  port.postMessage(result);
+}
+function validCensusPopup(event, sender) {
+  return INSTANCE_CONFIG && exactKeys(event, new Set(["kind"])) && event.kind === "MMX_WEB_SOL_CENSUS_REFRESH" &&
+    sender && sender.id === chrome.runtime.id && !Object.prototype.hasOwnProperty.call(sender, "tab") &&
+    sender.url === chrome.runtime.getURL("census.html") &&
+    sender.origin === `chrome-extension://${chrome.runtime.id}`;
+}
+
 async function handleNativeRequest(request, port) {
+  if (request && request.schema === CENSUS_REQUEST_SCHEMA) return handleCensusRequest(request, port);
   if (!validActionRequest(request)) return;
   const accepted = Object.freeze({...request});
   const windowStatus = requestWindowStatus(accepted);
@@ -540,7 +617,12 @@ function getNativePort(epoch, reconnectAttempt = -1) {
   return nativePort;
 }
 
-chrome.runtime.onMessage.addListener((event, sender) => {
+chrome.runtime.onMessage.addListener((event, sender, sendResponse) => {
+  if (validCensusPopup(event, sender)) {
+    globalThis.MMXWebSolCensus.collect(chrome.tabs, INSTANCE_CONFIG.instanceId)
+      .then(sendResponse, () => sendResponse(null));
+    return true;
+  }
   if (!recordProbe(event, sender)) return;
   const port = nativePort;
   if (!port || !transportHandshakeReady) return;
