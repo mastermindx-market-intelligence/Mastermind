@@ -117,6 +117,32 @@ if(process.argv.includes('--native-pipe')) {
  nativeResult(harness({count:input.count||0,mode:input.mode,queryFailure:input.queryFailure,instance:input.request.adapter_instance_id}),input.request)
  .then(x=>process.stdout.write(JSON.stringify(x))).catch(e=>{console.error(e.message);process.exitCode=1;});
 } else {
+ test('local digest timeout is not an acquired Chrome slot or retirement',async()=>{
+  for(const count of [1,9]) {
+   let now=0,serial=0,queries=0,gets=0,sends=0,digests=0;const timers=new Map();
+   const rows=Array.from({length:count},(_,i)=>({...awake,id:i+1,active:false,discarded:false,frozen:false}));
+   const context=vm.createContext({TextEncoder,URL,Date,performance:{now:()=>now},
+    crypto:{subtle:{digest(...args){digests++;return digests<=Math.min(count,8)
+     ?new Promise(()=>{}):webcrypto.subtle.digest(...args);}}},
+    setTimeout(fn,ms){const id=++serial;timers.set(id,{fn,at:now+ms});return id;},
+    clearTimeout:id=>timers.delete(id)});
+   vm.runInContext(source('census_core.js'),context);
+   const result=context.MMXWebSolCensus.collect({query:async()=>{queries++;return rows;},
+    get:async id=>{gets++;return rows[id-1];},sendMessage:async()=>{sends++;return validObservation();}},INSTANCE);
+   for(let i=0;i<100&&digests<Math.min(count,8);i++)await tick();
+   assert.equal(digests,Math.min(count,8));now=800;
+   for(const [id,t] of [...timers])if(t.at<=now){timers.delete(id);t.fn();}
+   const snapshot=await result;
+   const proof={count,statuses:plain(snapshot.rows.map(r=>r.status)),queries,gets,sends,pending_timer_count:timers.size};
+   console.log(JSON.stringify({local_digest_timeout:proof}));
+   assert.deepEqual(proof.statuses.slice(0,Math.min(count,8)),Array(Math.min(count,8)).fill('SWEEP_DEADLINE'),
+    'local digest timeout must not invent Chrome slot exhaustion');
+   assert.equal(queries,2);assert.equal(timers.size,0);
+   if(count===1){assert.equal(gets,0);assert.equal(sends,0);}
+   else {assert.equal(snapshot.rows[8].status,'OBSERVED','local computation cannot retire an unacquired Chrome slot');
+    assert.equal(gets,2);assert.equal(sends,1);}
+  }
+ });
  test('invalid, exhausted and both deferred dispatch boundaries acquire zero reads',async()=>{
   let reads=0;const tabs={query:async()=>{reads++;return [];},get:async()=>{reads++;},sendMessage:async()=>{reads++;}};
   for(const deadline of [0,-1,NaN,Infinity,-Infinity,null,'100',{}]) {
@@ -156,10 +182,12 @@ if(process.argv.includes('--native-pipe')) {
   }
  });
  test('eight unresolved reads remain charged after expiry and only settlement frees capacity',async()=>{
+  for(const reject of [false,true]) {
   let c,queries=0,gets=0;const releases=[];const calls=[];
   const rows=Array.from({length:8},(_,i)=>({...awake,id:i+1}));
   const tabs={query:async()=>{queries++;calls.push(c.now);return rows;},
-   get:id=>{gets++;calls.push(c.now);return new Promise(r=>releases.push(()=>r(rows[id-1])));},
+   get:id=>{gets++;calls.push(c.now);return new Promise((resolve,fail)=>releases.push(()=>
+    reject?fail(Error('actual Chrome rejection')):resolve(rows[id-1])));},
    sendMessage:async()=>{calls.push(c.now);return validObservation();}};
   c=collectorClock(tabs);const first=c.collect(100);
   for(let i=0;i<50&&gets<8;i++)await tick();assert.equal(gets,8);
@@ -171,6 +199,27 @@ if(process.argv.includes('--native-pipe')) {
   tabs.query=async()=>{queries++;calls.push(c.now);return [];};
   const fresh=await c.collect(250);assert.equal(fresh.initial_tab_count,0);
   assert.equal(queries,3,'new caller obtains real freed slots for both inventory reads');
+  }
+ });
+ test('one unresolved Chrome read is not eight exhausted slots',async()=>{
+  let now=0,serial=0,queries=0,gets=0,digests=0,release;const timers=new Map();
+  const rows=Array.from({length:9},(_,i)=>({...awake,id:i+1}));
+  const context=vm.createContext({TextEncoder,URL,Date,performance:{now:()=>now},
+   crypto:{subtle:{digest(...args){digests++;return digests===1||digests>8
+    ?webcrypto.subtle.digest(...args):new Promise(()=>{});}}},
+   setTimeout(fn,ms){const id=++serial;timers.set(id,{fn,at:now+ms});return id;},
+   clearTimeout:id=>timers.delete(id)});
+  vm.runInContext(source('census_core.js'),context);
+  const snapshot=context.MMXWebSolCensus.collect({query:async()=>{queries++;return rows;},
+   get:id=>{gets++;return id===1?new Promise(r=>{release=()=>r(rows[0]);}):Promise.resolve(rows[id-1]);},
+   sendMessage:async()=>validObservation()},INSTANCE);
+  for(let i=0;i<100&&!release;i++)await tick();assert.ok(release);assert.equal(digests,8);
+  now=800;for(const [id,t] of [...timers])if(t.at<=now){timers.delete(id);t.fn();}
+  const result=await snapshot;
+  assert.deepEqual(plain(result.rows.slice(0,8).map(r=>r.status)),Array(8).fill('SWEEP_DEADLINE'),
+   'one real pending read cannot relabel local deadline rows as full capacity');
+  assert.equal(result.rows[8].status,'OBSERVED');assert.equal(gets,3);assert.equal(queries,2);
+  release();await tick();assert.equal(timers.size,0);
  });
  test('outer expiry forbids Chrome acquisitions after a delayed initial query',async()=>{
   let now=0, release;const calls=[];

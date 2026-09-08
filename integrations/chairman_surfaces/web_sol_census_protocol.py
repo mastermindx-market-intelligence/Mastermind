@@ -93,7 +93,8 @@ def _validate_snapshot(value):
     _keys(value, (*HEADER_FIELDS, 'rows'))
     _require(value['schema'] == LOCAL_SCHEMA and value['scope'] == 'CURRENT_PROFILE_NORMAL_CHATGPT_TABS')
     _require(_hex(value['adapter_instance_id']))
-    _require(_timestamp(value['completed_at']) >= _timestamp(value['started_at']))
+    started, completed = _timestamp(value['started_at']), _timestamp(value['completed_at'])
+    _require(completed >= started)
     _require(_integer(value['duration_ms'], 10000))
     _require(value['inventory_coverage'] in ('UNAVAILABLE', 'PARTIAL', 'COMPLETE_IN_SCOPE'))
     _require(value['consistency'] in ('UNKNOWN', 'CHANGED', 'STABLE_AT_BOUNDARIES'))
@@ -103,6 +104,7 @@ def _validate_snapshot(value):
     for field in ('excluded_private_count', 'omitted_tab_count', 'unique_conversation_count',
                   'duplicate_tab_count', 'probed_tab_count', 'generation_cue_count', 'unknown_cue_count'):
         _require(_integer(value[field]))
+    _require(value['excluded_private_count'] <= 4096)
     rows = value['rows']
     _require(type(rows) is list and len(rows) <= MAX_ROWS)
     groups, cues = {}, {}
@@ -112,6 +114,7 @@ def _validate_snapshot(value):
         fp = row['conversation_fingerprint']
         _require(fp is None or _hex(fp))
         _require(row['identity_evidence'] in ('UNVERIFIED', 'BROWSER_LOCATOR', 'LOCATOR_AND_V1_PROBE'))
+        _require((fp is None) == (row['identity_evidence'] == 'UNVERIFIED'))
         _require(row['document_binding'] == 'UNVERIFIED' and row['model_evidence'] == 'UNVERIFIED')
         _require(all(row[k] is None for k in ('selected_model', 'selected_effort', 'served_model')))
         _require(type(row['status']) is str and row['status'] in ROW_STATUSES)
@@ -125,8 +128,22 @@ def _validate_snapshot(value):
         if row['status'] == 'OBSERVED':
             _require(fp is not None and row['observed_at'] is not None and
                      row['identity_evidence'] == 'LOCATOR_AND_V1_PROBE')
+            _require(started <= _timestamp(row['observed_at']) <= completed)
+            _require(row['visibility'] in ('VISIBLE', 'HIDDEN') and
+                     row['discarded'] is not True and row['frozen'] is not True)
         else:
-            _require(row['generation_cue'] == 'UNKNOWN' and row['observed_at'] is None)
+            _require(row['generation_cue'] == 'UNKNOWN' and row['observed_at'] is None and
+                     row['visibility'] == 'UNKNOWN' and row['auth_required'] is None and
+                     row['provider_error_present'] is None and
+                     row['identity_evidence'] != 'LOCATOR_AND_V1_PROBE')
+            # Early locator refusals precede hashing; sleep/read outcomes follow
+            # it. TARGET_CHANGED and deadlines can occur on either side. The
+            # selection/sleep hints retain their own sample, including nulls.
+            if row['status'] in ('INVALID_TAB', 'OUT_OF_SCOPE', 'NOT_A_CONVERSATION'):
+                _require(fp is None)
+            if row['status'] in ('DISCARDED', 'FROZEN', 'LOADING', 'NAVIGATING',
+                                 'PROBE_UNAVAILABLE', 'PROBE_TIMEOUT', 'LOOKUP_UNAVAILABLE'):
+                _require(fp is not None)
         if fp:
             groups[fp] = groups.get(fp, 0)+1
             if row['generation_cue'] != 'UNKNOWN': cues.setdefault(fp, set()).add(row['generation_cue'])
@@ -144,6 +161,7 @@ def _validate_snapshot(value):
     initial = value['initial_tab_count']
     if initial is None: _require(not rows)
     else:
+        _require(initial + value['excluded_private_count'] <= 4096)
         _require(len(rows) == min(initial, MAX_ROWS))
         _require(value['omitted_tab_count'] == max(initial-MAX_ROWS, 0))
     _require(value['probe_coverage'] == ('NONE' if not probed else

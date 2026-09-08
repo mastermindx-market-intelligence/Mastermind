@@ -14,17 +14,24 @@
   const pendingReads = new WeakMap();
   const NO_SLOT = Symbol("no-read-slot");
   const EXPIRED = Symbol("expired-read");
-  function readBrowser(tabs, call, deadline) {
+  function readBrowser(tabs, call, deadline, observation) {
     if (monotonic() >= deadline) return EXPIRED;
     const pending = pendingReads.get(tabs) || 0;
     if (pending >= CONCURRENCY) return NO_SLOT;
     pendingReads.set(tabs, pending + 1);
-    return Promise.resolve().then(() => monotonic() >= deadline ? EXPIRED : call()).finally(() => {
+    let acquired = false;
+    return Promise.resolve().then(() => {
+      if (monotonic() >= deadline) return EXPIRED;
+      acquired = true;
+      if (observation) observation.pending++;
+      return call();
+    }).finally(() => {
+      if (acquired && observation) observation.pending--;
       pendingReads.set(tabs, Math.max(0, (pendingReads.get(tabs) || 0) - 1));
     });
   }
-  function readProbe(tabs, id, request, deadline) {
-    return readBrowser(tabs, () => tabs.sendMessage(id, request, {frameId: 0}), deadline);
+  function readProbe(tabs, id, request, deadline, observation) {
+    return readBrowser(tabs, () => tabs.sendMessage(id, request, {frameId: 0}), deadline, observation);
   }
   const PATTERNS = Object.freeze(["https://chatgpt.com/*", "https://chat.openai.com/*"]);
   const HEX = /^[0-9a-f]{64}$/;
@@ -115,7 +122,7 @@
     if (t.status !== "complete") return "LOADING";
     return null;
   }
-  async function observe(t, slot, tabs, deadline, duplicatedId) {
+  async function observe(t, slot, tabs, deadline, duplicatedId, observation) {
     const row = blankRow(t, slot);
     const call = fn => bounded(fn, Math.min(deadline, monotonic() + CALL_MS));
     if (!validTab(t) || duplicatedId) { row.status = "INVALID_TAB"; return row; }
@@ -127,7 +134,7 @@
     row.conversation_fingerprint = digest.value; row.identity_evidence = "BROWSER_LOCATOR";
     const asleep = sleepState(t);
     if (asleep) { row.status = asleep; return row; }
-    const before = await call(() => readBrowser(tabs, () => tabs.get(t.id), deadline));
+    const before = await call(() => readBrowser(tabs, () => tabs.get(t.id), deadline, observation));
     if (!before.ok) { row.status = before.timeout ? "SWEEP_DEADLINE" : "LOOKUP_UNAVAILABLE"; return row; }
     if (before.value === NO_SLOT) { row.status = "PROBE_SLOTS_EXHAUSTED"; return row; }
     if (!sameLocator(t, before.value)) { row.status = "TARGET_CHANGED"; return row; }
@@ -135,7 +142,7 @@
     if (nowAsleep) { row.status = nowAsleep; return row; }
     const reply = await call(() => readProbe(tabs, t.id, {
       kind: "MMX_WEB_SOL_REPROBE", expected_conversation_fingerprint: digest.value,
-    }, deadline));
+    }, deadline, observation));
     if (!reply.ok) { row.status = reply.timeout ? "PROBE_TIMEOUT" : "PROBE_UNAVAILABLE"; return row; }
     if (reply.value === NO_SLOT) { row.status = "PROBE_SLOTS_EXHAUSTED"; return row; }
     if (!validProbe(reply.value)) { row.status = "INVALID_PROBE"; return row; }
@@ -144,7 +151,7 @@
       row.status = "TARGET_CHANGED"; return row;
     }
     if (!o.page_responsive || o.document_ready_state !== "complete") { row.status = "LOADING"; return row; }
-    const after = await call(() => readBrowser(tabs, () => tabs.get(t.id), deadline));
+    const after = await call(() => readBrowser(tabs, () => tabs.get(t.id), deadline, observation));
     if (!after.ok) { row.status = after.timeout ? "SWEEP_DEADLINE" : "LOOKUP_UNAVAILABLE"; return row; }
     if (after.value === NO_SLOT) { row.status = "PROBE_SLOTS_EXHAUSTED"; return row; }
     if (!sameLocator(before.value, after.value) || sleepState(after.value)) { row.status = "TARGET_CHANGED"; return row; }
@@ -240,22 +247,23 @@
       const sampled = initial.normal.slice(0, MAX_TABS);
       out.rows = sampled.map((t, i) => blankRow(t, i + 1));
       let next = 0;
-      let retired = 0;
       async function worker() {
         while (next < sampled.length) {
           const i = next++;
           if (monotonic() >= observationDeadline) continue;
+          const observation = {pending: 0};
           try { out.rows[i] = await observe(sampled[i], i + 1, tabs, observationDeadline,
-            validTab(sampled[i]) && initial.ids.get(sampled[i].id) !== 1); }
+            validTab(sampled[i]) && initial.ids.get(sampled[i].id) !== 1, observation); }
           catch (_) { out.rows[i].status = "INVALID_PROBE"; }
-          // A timeout cannot cancel Chrome's pending read. Retire this slot, so
-          // unresolved requests plus active slots never exceed CONCURRENCY.
-          if (["PROBE_TIMEOUT", "SWEEP_DEADLINE", "PROBE_SLOTS_EXHAUSTED"].includes(out.rows[i].status)) { retired++; return; }
+          // Retire only an actually acquired, unresolved Chrome promise. Local
+          // hashing deadlines and refused/deferred calls hold no browser slot.
+          if (observation.pending > 0) return;
         }
       }
       await Promise.all(Array.from({length: Math.min(CONCURRENCY, sampled.length)}, worker));
-      if (retired && monotonic() < observationDeadline) {
-        for (const row of out.rows) if (row.status === "SWEEP_DEADLINE") row.status = "PROBE_SLOTS_EXHAUSTED";
+      if ((pendingReads.get(tabs) || 0) >= CONCURRENCY && monotonic() < observationDeadline) {
+        // Only unvisited rows lacked capacity; keep each processed row's cause.
+        for (let i = next; i < out.rows.length; i++) out.rows[i].status = "PROBE_SLOTS_EXHAUSTED";
       }
       const last = await bounded(() => readBrowser(tabs, () => tabs.query({url: PATTERNS.slice()}), deadline),
         Math.min(deadline, monotonic() + CALL_MS));

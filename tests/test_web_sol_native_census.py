@@ -202,6 +202,117 @@ def test_malformed_snapshot_types_counts_and_private_fields_are_rejected():
         with pytest.raises(legacy.WebSolProtocolError): p.decode_snapshot(changed)
 
 
+@pytest.mark.parametrize('mode,changes', [
+    ('empty',{'excluded_private_count':4097}),
+    ('empty',{'excluded_private_count':9007199254740991}),
+    ('discarded',{'excluded_private_count':4096}),
+    ('discarded',{'identity_evidence':'LOCATOR_AND_V1_PROBE'}),
+    ('discarded',{'visibility':'VISIBLE'}),
+    ('discarded',{'auth_required':True}),
+    ('discarded',{'provider_error_present':True}),
+    ('discarded',{'identity_evidence':'LOCATOR_AND_V1_PROBE','visibility':'VISIBLE',
+                  'auth_required':True,'provider_error_present':True}),
+    ('observed',{'observed_at':'2099-01-01T00:00:00Z'}),
+    ('observed',{'observed_at':'2000-01-01T00:00:00Z'}),
+    ('observed',{'discarded':True}),('observed',{'frozen':True}),
+    ('observed',{'visibility':'UNKNOWN'}),
+    ('observed',{'observed_at':'2099-01-01T00:00:00Z','discarded':True,'frozen':True,
+                 'visibility':'UNKNOWN','selected_in_window':None}),
+])
+def test_unreachable_claim_mutations_of_actual_collector_outputs_refuse(mode, changes):
+    p=protocol()
+    if mode=='observed':
+        run=subprocess.run(['node',str(ROOT/'tests/web_sol_native_census.test.cjs'),'--fixture'],
+            input=json.dumps({'request':current_request(),'count':1,'mode':'observed'}),
+            cwd=ROOT,text=True,capture_output=True,timeout=15,check=True)
+        baseline=json.loads(run.stdout)
+    else:baseline=receipt(p,snapshot(0 if mode=='empty' else 1))
+    assert p.validate_census_receipt(baseline)==baseline
+    original=p.decode_snapshot(baseline['snapshot']);malformed=copy.deepcopy(baseline)
+    for key,value in changes.items():
+        if key in p.HEADER_FIELDS:malformed['snapshot']['header'][p.HEADER_FIELDS.index(key)]=value
+        else:malformed['snapshot']['rows'][0][p.ROW_FIELDS.index(key)]=value
+    with pytest.raises(legacy.WebSolProtocolError):p.validate_census_receipt(malformed)
+    assert p.decode_snapshot(baseline['snapshot'])==original
+
+
+@pytest.mark.parametrize('mode', ['private_empty','private_plus_one','private_turnover','becomes_discarded','becomes_frozen','becomes_discarded_null','becomes_frozen_null'])
+def test_reachable_inventory_and_sleep_transitions_round_trip_actual_collector(mode):
+    script=r'''
+const core=require('./integrations/chairman_surfaces/web_sol_extension/census_core.js');
+const mode=process.argv[1];let calls=0;const tab={id:1,windowId:1,url:'https://chatgpt.com/c/one',
+ status:'complete',active:false,discarded:false,frozen:false,incognito:false};
+if(mode.endsWith('_null')){delete tab.active;delete tab.discarded;delete tab.frozen;}
+const priv=Array.from({length:mode==='private_plus_one'?4095:4096},(_,i)=>({...tab,id:i+2,incognito:true}));
+core.collect({query:async()=>{calls++;
+ if(mode==='private_turnover'&&calls===2)return Array.from({length:4096},(_,i)=>({...tab,id:i+1}));
+ if(mode==='private_plus_one')return [{...tab,discarded:true},...priv];
+ return mode.startsWith('private_')?priv:[tab];},
+ get:async()=>({...tab,discarded:mode.startsWith('becomes_discarded'),frozen:mode.startsWith('becomes_frozen')}),
+ sendMessage:async()=>{throw Error('sleeping transition must not probe');}},'a'.repeat(64))
+ .then(x=>process.stdout.write(JSON.stringify(x)));
+'''
+    run=subprocess.run(['node','-e',script,mode],cwd=ROOT,text=True,capture_output=True,timeout=15,check=True)
+    p=protocol();original=json.loads(run.stdout)
+    if mode.startswith('becomes_'):
+        row=original['rows'][0]
+        assert row['status']==('DISCARDED' if 'discarded' in mode else 'FROZEN')
+        # The hints retain the initial inventory sample, before this lookup transition.
+        assert all(row[k] is (None if mode.endswith('_null') else False)
+                   for k in ['selected_in_window','discarded','frozen'])
+    assert p.decode_snapshot(p.validate_census_receipt(receipt(p,original))['snapshot'])==original
+    if mode=='private_turnover':
+        assert original['initial_tab_count']==0 and original['final_tab_count']==4096
+        assert original['excluded_private_count']==4096 and original['unobserved_added_count']==4096
+
+
+@pytest.mark.parametrize('mode', ['observed_unknowns', 'target_lookup', 'target_final', 'invalid_retained'])
+def test_sampled_hints_identity_transitions_and_partial_retention_are_legal(mode):
+    script=r'''
+const core=require('./integrations/chairman_surfaces/web_sol_extension/census_core.js');
+const {createHash}=require('node:crypto');const mode=process.argv[1];let queries=0;
+const tab={id:1,windowId:1,url:'https://chatgpt.com/c/one',status:'complete'};
+const rows=mode==='invalid_retained'?Array.from({length:129},(_,i)=>({...tab,id:i+1})):[tab];
+if(mode==='invalid_retained'){
+ Object.defineProperty(rows[0],'active',{get(){throw Error('invalid inventory fixture');}});
+ rows.push({...tab,id:130,incognito:true},{...tab,id:131,incognito:true});
+}
+core.collect({query:async()=>{queries++;return mode==='target_final'&&queries===2?[]:rows;},
+ get:async()=>mode==='target_lookup'?{...tab,url:'https://chatgpt.com/c/other'}:tab,
+ sendMessage:async()=>({kind:'MMX_WEB_SOL_PROBE',conversation_fingerprint:createHash('sha256').update(tab.url).digest('hex'),
+ observation:{schema:'mastermind.web_sol_surface_probe.v1',target_present:true,exact_conversation_loaded:true,
+ page_responsive:true,document_ready_state:'complete',visibility:'hidden',composer_available:null,
+ generation_state:'unknown',auth_required:null,provider_error_present:null}})},'a'.repeat(64))
+ .then(x=>process.stdout.write(JSON.stringify(x)));
+'''
+    run=subprocess.run(['node','-e',script,mode],cwd=ROOT,text=True,capture_output=True,timeout=15,check=True)
+    p=protocol(); original=json.loads(run.stdout)
+    assert p.decode_snapshot(p.validate_census_receipt(receipt(p,original))['snapshot'])==original
+    if mode=='invalid_retained':
+        assert original['reason']=='INVALID_INVENTORY' and original['rows']==[]
+        assert original['initial_tab_count'] is None and original['final_tab_count'] is None
+        assert original['excluded_private_count']==2 and original['omitted_tab_count']==1
+    elif mode=='observed_unknowns':
+        row=original['rows'][0]
+        assert row['status']=='OBSERVED' and row['generation_cue']=='UNKNOWN'
+        assert all(row[k] is None for k in ['selected_in_window','discarded','frozen','auth_required','provider_error_present'])
+        # Inclusive wall-clock endpoints; duration remains the independent monotonic measurement.
+        for key in ['started_at','completed_at']:
+            endpoint=copy.deepcopy(original); endpoint['rows'][0]['observed_at']=original[key]
+            endpoint['duration_ms']=17
+            assert p.decode_snapshot(receipt(p,endpoint)['snapshot'])==endpoint
+        from datetime import datetime, timedelta
+        for key,delta in [('started_at',-1),('completed_at',1)]:
+            malformed=copy.deepcopy(receipt(p,original))
+            outside=datetime.fromisoformat(original[key].replace('Z','+00:00'))+timedelta(milliseconds=delta)
+            malformed['snapshot']['rows'][0][p.ROW_FIELDS.index('observed_at')]=outside.isoformat(timespec='milliseconds').replace('+00:00','Z')
+            with pytest.raises(legacy.WebSolProtocolError): p.validate_census_receipt(malformed)
+    else:
+        row=original['rows'][0]; assert row['status']=='TARGET_CHANGED'
+        assert row['identity_evidence']==('BROWSER_LOCATOR' if mode=='target_lookup' else 'UNVERIFIED')
+        assert (row['conversation_fingerprint'] is None)==(mode=='target_final')
+
+
 def test_existing_native_byte_boundary_and_duplicate_key_guard_remain_real():
     n = 65536-len(b'{"pad":""}')
     valid = {'pad':'x'*n}
@@ -289,7 +400,7 @@ def test_repository_gate_runs_complete_native_census_node_suite():
         cwd=ROOT,capture_output=True,text=True,timeout=20,
         env={k:v for k,v in os.environ.items() if k!='C2_TEST_MUTATION'})
     assert run.returncode==0, run.stdout+run.stderr
-    assert '# tests 16\n' in run.stdout and '# pass 16\n' in run.stdout
+    assert '# tests 18\n' in run.stdout and '# pass 18\n' in run.stdout
     assert '# fail 0\n' in run.stdout and '# cancelled 0\n' in run.stdout
     assert '# skipped 0\n' in run.stdout and not run.stderr
 
