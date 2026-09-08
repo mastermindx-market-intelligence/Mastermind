@@ -541,7 +541,12 @@ def test_closed_json_scalar_alias_sweep_refuses_all_120_mutations(tmp_path: Path
         path = tmp_path / relative_path
         text = path.read_text(encoding="utf-8")
         for index, match in enumerate(re.finditer(r"\b(?:true|false)\b", text)):
-            for numeric in ("1", "1.0", "1e0"):
+            aliases = (
+                ("1", "1.0", "1e0")
+                if match.group() == "true"
+                else ("0", "0.0", "0e0")
+            )
+            for numeric in aliases:
                 mutations.append((path, text, index, numeric))
     assert len(mutations) == 120
 
