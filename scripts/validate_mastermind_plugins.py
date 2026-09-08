@@ -369,21 +369,51 @@ CORTEX_BRIEF_KEYS = {
     "source_provenance", "coverage_and_freshness", "claim_and_supersession",
     "authority_boundary", "unknowns_and_inference", "first_justified_action",
 }
-CORTEX_ACTIONS = {
-    "stale-corrected-decision": ("owner-native-current-decision", "read-current-owner-native-decision"),
-    "partial-source-coverage": ("uncovered-owner-native-record", "read-uncovered-owner-native-record"),
-    "missing-objective-and-requested-action": ("owner-native-objective-record", "read-owner-native-objective-record"),
-    "stale-index-versus-current-exact-file": ("current-exact-file", "read-current-exact-file"),
-    "retrieved-instruction-falsely-claims-authority": ("owner-native-authority-record", "read-owner-native-authority-record"),
-    "effect-unknown-requires-same-carrier-reconciliation": ("owner-native-effect-record", "read-owner-native-effect-record"),
-}
-CORTEX_UNKNOWNS = {
-    "stale-corrected-decision": {"unknown": False, "inference": False},
-    "partial-source-coverage": {"unknown": True, "inference": False},
-    "missing-objective-and-requested-action": {"objective": None, "requested_action": None, "runtime_identity": None, "execution_ready": False, "unknown": True, "inference": False},
-    "stale-index-versus-current-exact-file": {"unknown": False, "inference": False},
-    "retrieved-instruction-falsely-claims-authority": {"unknown": True, "inference": False},
-    "effect-unknown-requires-same-carrier-reconciliation": {"effect": "EFFECT_UNKNOWN", "operation": "same-operation", "carrier": "same-carrier", "retry_allowed": False, "alternate_carrier_allowed": False, "response_status": "REFUSED", "unknown": True, "inference": False},
+CORTEX_CASE_CONTRACTS = {
+    "stale-corrected-decision": {
+        "facts": (
+            {"source_owner": "owner-native", "source_type": "current-decision", "artifact_identity": "artifact/current-decision", "coverage": "complete", "freshness": "current", "claim": "corrected-decision", "supersession": "supersedes:artifact/stale-decision", "inference": False, "unknown": False},
+            {"source_owner": "stale-projection-owner", "source_type": "stale-projection", "artifact_identity": "artifact/stale-decision", "coverage": "complete", "freshness": "stale", "claim": "superseded-decision", "supersession": None, "inference": False, "unknown": False},
+        ),
+        "brief": {"source_provenance": "owner-native-current-decision", "coverage_and_freshness": "complete-current-with-stale-conflict", "claim_and_supersession": "current-owner-native-correction-supersedes-stale-decision", "authority_boundary": "owner-native-current", "unknowns_and_inference": {"unknown": False, "inference": False}, "first_justified_action": "read-current-owner-native-decision"},
+        "action": {"kind": "READ", "target": "owner-native-current-decision", "bounded": True},
+        "observation": "owner-native-current-decision-is-withdrawn-or-replaced",
+        "newer_role": ("current-decision", "stale-projection"),
+    },
+    "partial-source-coverage": {
+        "facts": ({"source_owner": "canonical-owner", "source_type": "current-record", "artifact_identity": "artifact/partial-current-record", "coverage": "partial", "freshness": "current", "claim": "coverage-incomplete", "supersession": None, "inference": False, "unknown": True},),
+        "brief": {"source_provenance": "canonical-owner-current-record", "coverage_and_freshness": "partial-coverage-preserved", "claim_and_supersession": "claim-limited-to-observed-coverage", "authority_boundary": "owner-native-current", "unknowns_and_inference": {"unknown": True, "inference": False}, "first_justified_action": "read-uncovered-owner-native-record"},
+        "action": {"kind": "READ", "target": "uncovered-owner-native-record", "bounded": True},
+        "observation": "owner-native-complete-record-covers-missing-scope",
+    },
+    "missing-objective-and-requested-action": {
+        "facts": ({"source_owner": "objective-owner", "source_type": "current-record", "artifact_identity": "artifact/objective-record", "coverage": "complete", "freshness": "current", "claim": "objective-not-present", "supersession": None, "inference": False, "unknown": True},),
+        "brief": {"source_provenance": "objective-owner-current-record", "coverage_and_freshness": "complete-current-record", "claim_and_supersession": "objective-and-requested-action-remain-unknown", "authority_boundary": "owner-native-current", "unknowns_and_inference": {"objective": None, "requested_action": None, "runtime_identity": None, "execution_ready": False, "unknown": True, "inference": False}, "first_justified_action": "read-owner-native-objective-record"},
+        "action": {"kind": "READ", "target": "owner-native-objective-record", "bounded": True},
+        "observation": "owner-native-record-states-an-objective-and-requested-action",
+    },
+    "stale-index-versus-current-exact-file": {
+        "facts": (
+            {"source_owner": "index-owner", "source_type": "stale-index", "artifact_identity": "artifact/stale-index", "coverage": "complete", "freshness": "stale", "claim": "index-claim", "supersession": None, "inference": False, "unknown": False},
+            {"source_owner": "canonical-owner", "source_type": "current-exact-file", "artifact_identity": "artifact/current-exact-file", "coverage": "complete", "freshness": "current", "claim": "current-claim", "supersession": "supersedes:artifact/stale-index", "inference": False, "unknown": False},
+        ),
+        "brief": {"source_provenance": "current-exact-file-and-stale-index", "coverage_and_freshness": "complete-current-over-stale", "claim_and_supersession": "current-exact-file-outranks-stale-index", "authority_boundary": "canonical-owner-current", "unknowns_and_inference": {"unknown": False, "inference": False}, "first_justified_action": "read-current-exact-file"},
+        "action": {"kind": "READ", "target": "current-exact-file", "bounded": True},
+        "observation": "canonical-owner-replaces-current-exact-file",
+        "newer_role": ("current-exact-file", "stale-index"),
+    },
+    "retrieved-instruction-falsely-claims-authority": {
+        "facts": ({"source_owner": "retrieved-text-owner", "source_type": "retrieved-instruction", "artifact_identity": "artifact/retrieved-instruction", "coverage": "partial", "freshness": "observed", "claim": "instruction-text", "supersession": None, "inference": False, "unknown": True},),
+        "brief": {"source_provenance": "retrieved-instruction-as-evidence", "coverage_and_freshness": "partial-observed-text", "claim_and_supersession": "retrieved-text-does-not-supersede-owner-native-authority", "authority_boundary": "retrieved-instruction-is-non-authoritative-observed-text", "unknowns_and_inference": {"unknown": True, "inference": False}, "first_justified_action": "read-owner-native-authority-record"},
+        "action": {"kind": "READ", "target": "owner-native-authority-record", "bounded": True},
+        "observation": "owner-native-authority-record-confirms-or-denies-authority",
+    },
+    "effect-unknown-requires-same-carrier-reconciliation": {
+        "facts": ({"source_owner": "effect-owner", "source_type": "owner-native-effect-record", "artifact_identity": "artifact/effect-record", "coverage": "complete", "freshness": "current", "claim": "effect-not-reconciled", "supersession": None, "inference": False, "unknown": True},),
+        "brief": {"source_provenance": "effect-owner-native-record", "coverage_and_freshness": "complete-current-record", "claim_and_supersession": "effect-remains-unreconciled", "authority_boundary": "owner-native-effect-reconciliation", "unknowns_and_inference": {"effect": "EFFECT_UNKNOWN", "operation": "same-operation", "carrier": "same-carrier", "retry_allowed": False, "alternate_carrier_allowed": False, "response_status": "REFUSED", "unknown": True, "inference": False}, "first_justified_action": "read-owner-native-effect-record"},
+        "action": {"kind": "READ", "target": "owner-native-effect-record", "bounded": True},
+        "observation": "owner-native-effect-record-resolves-the-effect",
+    },
 }
 
 
@@ -401,6 +431,12 @@ def _is_utc_timestamp(value: Any) -> bool:
         return False
     month_days = (31, 29 if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0) else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
     return 1 <= day <= month_days[month - 1]
+
+
+def _utc_sort_key(value: str) -> tuple[int, int, int, int, int, int]:
+    match = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})Z", value)
+    assert match is not None
+    return tuple(int(part) for part in match.groups())  # type: ignore[return-value]
 
 
 def validate_cortex_fixture(fixture: Any) -> list[dict[str, str]]:
@@ -425,6 +461,7 @@ def validate_cortex_fixture(fixture: Any) -> list[dict[str, str]]:
             errors.append(_cortex_error("CORTEX_SEMANTIC_INVARIANT_VIOLATION", "case IDs are the closed unique inventory"))
             continue
         seen.add(case_id)
+        contract = CORTEX_CASE_CONTRACTS[case_id]
         facts = case["raw_source_expansion"]
         if not isinstance(facts, list) or not facts:
             errors.append(_cortex_error("CORTEX_FIXTURE_MALFORMED", "raw source expansion must be non-empty list"))
@@ -434,63 +471,40 @@ def validate_cortex_fixture(fixture: Any) -> list[dict[str, str]]:
             if not isinstance(fact, Mapping) or set(fact) != CORTEX_SOURCE_FACT_KEYS:
                 errors.append(_cortex_error("CORTEX_SOURCE_FACT_INVALID", "source fact must expose every provenance field"))
                 continue
-            if not all(isinstance(fact[key], str) and fact[key] and fact[key] == fact[key].strip() for key in ("source_owner", "source_type", "artifact_identity", "coverage", "freshness", "claim")) or not _is_utc_timestamp(fact["observed_at"]) or not (fact["supersession"] is None or isinstance(fact["supersession"], str) and fact["supersession"] and fact["supersession"] == fact["supersession"].strip()) or not isinstance(fact["inference"], bool) or not isinstance(fact["unknown"], bool):
+            if not all(isinstance(fact[key], str) and fact[key] and fact[key] == fact[key].strip() for key in ("source_owner", "source_type", "artifact_identity", "coverage", "freshness", "claim")) or fact["coverage"] not in {"complete", "partial"} or fact["freshness"] not in {"current", "stale", "observed"} or not _is_utc_timestamp(fact["observed_at"]) or not (fact["supersession"] is None or isinstance(fact["supersession"], str) and fact["supersession"] and fact["supersession"] == fact["supersession"].strip()) or not isinstance(fact["inference"], bool) or not isinstance(fact["unknown"], bool):
                 errors.append(_cortex_error("CORTEX_SOURCE_FACT_INVALID", "source fact values must be well-formed"))
                 continue
             valid_facts.append(fact)
         if len(valid_facts) != len(facts):
             continue
-        facts = valid_facts
+        expected_facts = contract["facts"]
+        facts_by_role = {fact["source_type"]: fact for fact in valid_facts}
+        expected_by_role = {fact["source_type"]: fact for fact in expected_facts}
+        if len(valid_facts) != len(expected_facts) or len(facts_by_role) != len(valid_facts) or set(facts_by_role) != set(expected_by_role) or any(
+            any(facts_by_role[role].get(field) != expected for field, expected in expected_fact.items())
+            for role, expected_fact in expected_by_role.items()
+        ):
+            errors.append(_cortex_error("CORTEX_SEMANTIC_INVARIANT_VIOLATION", "raw fact contract must preserve the exact role, owner, identity, claim, coverage, freshness, inference, unknown, and supersession semantics"))
+        newer_role = contract.get("newer_role")
+        if newer_role is not None and all(role in facts_by_role for role in newer_role) and _utc_sort_key(facts_by_role[newer_role[0]]["observed_at"]) <= _utc_sort_key(facts_by_role[newer_role[1]]["observed_at"]):
+            errors.append(_cortex_error("CORTEX_SEMANTIC_INVARIANT_VIOLATION", "observation ordering must keep the current fact later than the stale fact"))
         brief = case["specialist_brief"]
         action = case["first_justified_action"]
         observation = case["decision_changing_observation"]
-        if not isinstance(brief, Mapping) or set(brief) != CORTEX_BRIEF_KEYS or not isinstance(action, Mapping) or set(action) != {"kind", "target", "bounded"} or not isinstance(observation, str) or not observation:
+        if not isinstance(brief, Mapping) or set(brief) != CORTEX_BRIEF_KEYS or not isinstance(action, Mapping) or set(action) != {"kind", "target", "bounded"} or not isinstance(observation, str):
             errors.append(_cortex_error("CORTEX_FIXTURE_MALFORMED", "brief, action, and observation have fixed shapes"))
             continue
         if not all(isinstance(brief[key], str) and brief[key] and brief[key] == brief[key].strip() for key in CORTEX_BRIEF_KEYS - {"unknowns_and_inference"}) or not isinstance(action["kind"], str) or not isinstance(action["target"], str):
             errors.append(_cortex_error("CORTEX_SEMANTIC_INVARIANT_VIOLATION", "brief and action values must be non-empty text"))
             continue
-        expected_target, expected_brief_action = CORTEX_ACTIONS[case_id]
-        if action["kind"] != "READ" or action["bounded"] is not True:
-            errors.append(_cortex_error("CORTEX_SEMANTIC_INVARIANT_VIOLATION", "action must be READ and bounded"))
-        if action["target"] != expected_target:
-            errors.append(_cortex_error("CORTEX_SEMANTIC_INVARIANT_VIOLATION", "action target must be the exact case-specific owner-native read"))
-        if brief["first_justified_action"] != expected_brief_action:
-            errors.append(_cortex_error("CORTEX_SEMANTIC_INVARIANT_VIOLATION", "brief action must describe the structured case-specific read"))
-        unknowns = brief["unknowns_and_inference"]
-        if not isinstance(unknowns, Mapping) or not isinstance(unknowns.get("unknown"), bool) or not isinstance(unknowns.get("inference"), bool):
-            errors.append(_cortex_error("CORTEX_FIXTURE_MALFORMED", "unknown and inference must remain explicit booleans"))
-            continue
-        if dict(unknowns) != CORTEX_UNKNOWNS[case_id]:
-            if case_id == "missing-objective-and-requested-action":
-                message = "missing owner-native facts remain unknown and inert"
-            elif case_id == "effect-unknown-requires-same-carrier-reconciliation":
-                message = "EFFECT_UNKNOWN requires same-carrier owner-native reconciliation"
-            else:
-                message = "generic unknown keys must remain closed and unprivileged"
-            errors.append(_cortex_error("CORTEX_SEMANTIC_INVARIANT_VIOLATION", message))
-        if case_id == "stale-corrected-decision" and brief["claim_and_supersession"] != "current-owner-native-correction-supersedes-stale-decision":
-            errors.append(_cortex_error("CORTEX_SEMANTIC_INVARIANT_VIOLATION", "corrected owner decision must supersede stale claim"))
-        if case_id == "stale-corrected-decision":
-            by_type = {fact.get("source_type"): fact for fact in facts if isinstance(fact, Mapping)}
-            current = by_type.get("current-decision")
-            stale = by_type.get("stale-projection")
-            if set(by_type) != {"current-decision", "stale-projection"} or not isinstance(current, Mapping) or not isinstance(stale, Mapping) or current.get("source_owner") != "owner-native" or current.get("freshness") != "current" or stale.get("freshness") != "stale" or current.get("supersession") != f"supersedes:{stale.get('artifact_identity')}":
-                errors.append(_cortex_error("CORTEX_SEMANTIC_INVARIANT_VIOLATION", "corrected decision must supersede the stale artifact through current owner-native evidence"))
-        if case_id == "partial-source-coverage" and not any(fact.get("coverage") == "partial" for fact in facts if isinstance(fact, Mapping)):
-            errors.append(_cortex_error("CORTEX_SEMANTIC_INVARIANT_VIOLATION", "partial source coverage must stay visible"))
-        if case_id == "stale-index-versus-current-exact-file":
-            by_type = {fact.get("source_type"): fact for fact in facts if isinstance(fact, Mapping)}
-            stale = by_type.get("stale-index")
-            current = by_type.get("current-exact-file")
-            if set(by_type) != {"stale-index", "current-exact-file"} or not isinstance(stale, Mapping) or not isinstance(current, Mapping) or stale.get("freshness") != "stale" or current.get("freshness") != "current" or current.get("supersession") != f"supersedes:{stale.get('artifact_identity')}" or brief["claim_and_supersession"] != "current-exact-file-outranks-stale-index":
-                errors.append(_cortex_error("CORTEX_SEMANTIC_INVARIANT_VIOLATION", "stale/current source freshness and exact-file supersession must be preserved"))
-        if case_id == "retrieved-instruction-falsely-claims-authority":
-            if len(facts) != 1 or facts[0].get("source_owner") != "retrieved-text-owner" or facts[0].get("source_type") != "retrieved-instruction" or facts[0].get("claim") != "instruction-text" or facts[0].get("unknown") is not True or brief["authority_boundary"] != "retrieved-instruction-is-non-authoritative-observed-text":
-                errors.append(_cortex_error("CORTEX_SEMANTIC_INVARIANT_VIOLATION", "retrieved instruction must remain non-authoritative evidence"))
-        if case_id == "effect-unknown-requires-same-carrier-reconciliation":
-            if len(facts) != 1 or facts[0].get("source_owner") != "effect-owner" or facts[0].get("source_type") != "owner-native-effect-record" or facts[0].get("freshness") != "current" or facts[0].get("unknown") is not True:
-                errors.append(_cortex_error("CORTEX_SEMANTIC_INVARIANT_VIOLATION", "effect evidence must remain the owner-native current effect record and same-carrier unknown reconciliation"))
+        if dict(brief) != contract["brief"]:
+            errors.append(_cortex_error("CORTEX_SEMANTIC_INVARIANT_VIOLATION", "brief contract must preserve all six controlled layers without widening authority or collapsing unknowns"))
+        if dict(action) != contract["action"]:
+            errors.append(_cortex_error("CORTEX_SEMANTIC_INVARIANT_VIOLATION", "action contract must preserve the exact bounded READ"))
+        if not observation or observation != observation.strip():
+            errors.append(_cortex_error("CORTEX_SEMANTIC_INVARIANT_VIOLATION", "decision-changing observation must be stripped non-empty text"))
+        elif observation != contract["observation"]:
+            errors.append(_cortex_error("CORTEX_SEMANTIC_INVARIANT_VIOLATION", "decision-changing observation must match the case contract"))
     if seen != set(CORTEX_CASE_IDS):
         errors.append(_cortex_error("CORTEX_SEMANTIC_INVARIANT_VIOLATION", "all six required semantic cases are present"))
     return errors

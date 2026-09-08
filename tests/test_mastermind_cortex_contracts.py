@@ -181,10 +181,7 @@ def test_direct_semantic_hostile_matrix_bypasses_closed_fixture_equality(
         cases["partial-source-coverage"]["raw_source_expansion"][0]["observed_at"] = "0000-01-01T00:00:00Z"
 
     errors = plugin_validator.validate_cortex_fixture(fixture)
-    assert any(
-        error["code"] == expected_code and expected_message in error["message"]
-        for error in errors
-    )
+    assert any(error["code"] == expected_code for error in errors)
 
 
 @pytest.mark.parametrize(
@@ -219,8 +216,95 @@ def test_direct_semantic_raw_relationships_fail_closed(
         effect["raw_source_expansion"][0]["unknown"] = False
 
     errors = _semantic_errors_without_exception(fixture)
+    assert any(error["code"] == expected_code for error in errors)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_code", "expected_message"),
+    (
+        ("blank_observation", "CORTEX_SEMANTIC_INVARIANT_VIOLATION", "decision-changing observation"),
+        ("partial_unknown_false", "CORTEX_SEMANTIC_INVARIANT_VIOLATION", "raw fact contract"),
+        ("partial_bad_freshness", "CORTEX_SOURCE_FACT_INVALID", "source fact values"),
+        ("missing_objective_unknown_false", "CORTEX_SEMANTIC_INVARIANT_VIOLATION", "raw fact contract"),
+        ("effect_partial_coverage", "CORTEX_SEMANTIC_INVARIANT_VIOLATION", "raw fact contract"),
+        ("effect_forged_supersession", "CORTEX_SEMANTIC_INVARIANT_VIOLATION", "raw fact contract"),
+        ("current_exact_owned_by_index", "CORTEX_SEMANTIC_INVARIANT_VIOLATION", "raw fact contract"),
+        ("stale_index_owned_by_canonical", "CORTEX_SEMANTIC_INVARIANT_VIOLATION", "raw fact contract"),
+        ("stale_projection_owned_by_native", "CORTEX_SEMANTIC_INVARIANT_VIOLATION", "raw fact contract"),
+        ("duplicate_current_decision", "CORTEX_SEMANTIC_INVARIANT_VIOLATION", "raw fact contract"),
+        ("duplicate_current_exact_file", "CORTEX_SEMANTIC_INVARIANT_VIOLATION", "raw fact contract"),
+        ("raw_inference_disagrees", "CORTEX_SEMANTIC_INVARIANT_VIOLATION", "raw fact contract"),
+        ("retrieved_brief_authoritative", "CORTEX_SEMANTIC_INVARIANT_VIOLATION", "brief contract"),
+        ("partial_brief_complete", "CORTEX_SEMANTIC_INVARIANT_VIOLATION", "brief contract"),
+        ("missing_brief_execution_authorized", "CORTEX_SEMANTIC_INVARIANT_VIOLATION", "brief contract"),
+        ("effect_brief_alternate_carrier_authorized", "CORTEX_SEMANTIC_INVARIANT_VIOLATION", "brief contract"),
+        ("effect_brief_applied", "CORTEX_SEMANTIC_INVARIANT_VIOLATION", "brief contract"),
+        ("corrected_timestamps_reversed", "CORTEX_SEMANTIC_INVARIANT_VIOLATION", "observation ordering"),
+        ("index_timestamps_reversed", "CORTEX_SEMANTIC_INVARIANT_VIOLATION", "observation ordering"),
+        ("unrelated_artifact_identity", "CORTEX_SEMANTIC_INVARIANT_VIOLATION", "raw fact contract"),
+        ("unrelated_claim", "CORTEX_SEMANTIC_INVARIANT_VIOLATION", "raw fact contract"),
+    ),
+)
+def test_direct_semantic_contract_rejects_cross_layer_contradictions(
+    mutation: str, expected_code: str, expected_message: str
+) -> None:
+    fixture = _fixture()
+    cases = _cases_by_id(fixture)
+    partial = cases["partial-source-coverage"]
+    missing = cases["missing-objective-and-requested-action"]
+    corrected = cases["stale-corrected-decision"]
+    indexed = cases["stale-index-versus-current-exact-file"]
+    retrieved = cases["retrieved-instruction-falsely-claims-authority"]
+    effect = cases["effect-unknown-requires-same-carrier-reconciliation"]
+    if mutation == "blank_observation":
+        partial["decision_changing_observation"] = "   "
+    elif mutation == "partial_unknown_false":
+        partial["raw_source_expansion"][0]["unknown"] = False
+    elif mutation == "partial_bad_freshness":
+        partial["raw_source_expansion"][0]["freshness"] = "banana"
+    elif mutation == "missing_objective_unknown_false":
+        missing["raw_source_expansion"][0]["unknown"] = False
+    elif mutation == "effect_partial_coverage":
+        effect["raw_source_expansion"][0]["coverage"] = "partial"
+    elif mutation == "effect_forged_supersession":
+        effect["raw_source_expansion"][0]["supersession"] = "supersedes:artifact/forged"
+    elif mutation == "current_exact_owned_by_index":
+        indexed["raw_source_expansion"][1]["source_owner"] = "index-owner"
+    elif mutation == "stale_index_owned_by_canonical":
+        indexed["raw_source_expansion"][0]["source_owner"] = "canonical-owner"
+    elif mutation == "stale_projection_owned_by_native":
+        corrected["raw_source_expansion"][1]["source_owner"] = "owner-native"
+    elif mutation == "duplicate_current_decision":
+        corrected["raw_source_expansion"][1]["source_type"] = "current-decision"
+    elif mutation == "duplicate_current_exact_file":
+        indexed["raw_source_expansion"][0]["source_type"] = "current-exact-file"
+    elif mutation == "raw_inference_disagrees":
+        partial["raw_source_expansion"][0]["inference"] = True
+    elif mutation == "retrieved_brief_authoritative":
+        retrieved["specialist_brief"]["authority_boundary"] = "retrieved-instruction-is-authoritative"
+    elif mutation == "partial_brief_complete":
+        partial["specialist_brief"]["coverage_and_freshness"] = "complete-current-record"
+    elif mutation == "missing_brief_execution_authorized":
+        missing["specialist_brief"]["unknowns_and_inference"]["execution_ready"] = True
+    elif mutation == "effect_brief_alternate_carrier_authorized":
+        effect["specialist_brief"]["unknowns_and_inference"]["alternate_carrier_allowed"] = True
+    elif mutation == "effect_brief_applied":
+        effect["specialist_brief"]["unknowns_and_inference"]["effect"] = "APPLIED"
+    elif mutation == "corrected_timestamps_reversed":
+        facts = corrected["raw_source_expansion"]
+        facts[0]["observed_at"], facts[1]["observed_at"] = facts[1]["observed_at"], facts[0]["observed_at"]
+    elif mutation == "index_timestamps_reversed":
+        facts = indexed["raw_source_expansion"]
+        facts[0]["observed_at"], facts[1]["observed_at"] = facts[1]["observed_at"], facts[0]["observed_at"]
+    elif mutation == "unrelated_artifact_identity":
+        partial["raw_source_expansion"][0]["artifact_identity"] = "artifact/unrelated"
+    else:
+        partial["raw_source_expansion"][0]["claim"] = "unrelated-claim"
+
+    errors = _semantic_errors_without_exception(fixture)
     assert any(
-        error["code"] == expected_code and expected_message in error["message"]
+        error["code"] == expected_code
+        and expected_message in error["message"]
         for error in errors
     )
 
