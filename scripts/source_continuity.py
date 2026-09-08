@@ -13,12 +13,14 @@ import argparse
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
+import math
 import os
 from pathlib import Path, PurePosixPath
 import re
 import stat
 import subprocess
 import sys
+from time import monotonic
 from typing import Callable, Mapping, Sequence
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
@@ -55,7 +57,11 @@ _MAX_GIT_CONFIG_CENSUS_BYTES = 65_536
 _MAX_GIT_PATH_BYTES = 4_096
 _PAGE_SIZE = 100
 _MAX_PAGES = 10
-_MAX_COLLISION_PRS = 100
+_MAX_COLLISION_PRS = 256
+# One invocation-local cooperative budget spans both observations, not hard preemption.
+_MAX_HTTP_CALLS = 640
+_HTTP_READ_BUDGET_SECONDS = 180.0
+_MAX_HTTP_NORMALIZED_BYTES = 32 * 1024 * 1024
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _HOLD_LABELS = frozenset({"hold", "hold-for-sol", "hold_for_sol"})
 _PR_FILE_STATUSES = frozenset(
@@ -115,6 +121,53 @@ class _AuthProbeError(Exception):
 
 class _RemoteProbeError(Exception):
     pass
+
+
+class _ReadBudgetExceeded(Exception):
+    pass
+
+
+class _BoundedHTTPGet:
+    """Bounded, ephemeral GET accounting; no retry, cache or receipt authority.
+
+    The existing transport retains raw-body and HTTP behavior. This wrapper
+    rejects late results but cannot preempt HTTP, JSON or local Git work.
+    """
+
+    def __init__(self, transport: Callable[..., object]) -> None:
+        self._transport = transport
+        self._calls = 0
+        self._bytes = 0
+        started = monotonic()
+        if type(started) not in (int, float) or not math.isfinite(started):
+            raise _ReadBudgetExceeded()
+        self._last = started
+        self._deadline = started + _HTTP_READ_BUDGET_SECONDS
+        if not math.isfinite(self._deadline) or self._deadline <= started:
+            raise _ReadBudgetExceeded()
+
+    def check(self) -> float:
+        now = monotonic()
+        if (type(now) not in (int, float) or not math.isfinite(now)
+                or now < self._last or now >= self._deadline):
+            raise _ReadBudgetExceeded()
+        self._last = now
+        return self._deadline - now
+
+    def __call__(self, url: str, *, token: str, timeout: float) -> object:
+        remaining = self.check()
+        if self._calls >= _MAX_HTTP_CALLS:
+            raise _ReadBudgetExceeded()
+        self._calls += 1
+        payload = self._transport(url, token=token, timeout=min(timeout, remaining))
+        self.check()
+        # Isolated surrogates may be escaped JSON in otherwise unused metadata.
+        # Keep malformed-path decisions with the unchanged path validator.
+        self._bytes += len(canonical_json(payload).encode("utf-8", "backslashreplace"))
+        if self._bytes > _MAX_HTTP_NORMALIZED_BYTES:
+            raise _ReadBudgetExceeded()
+        self.check()
+        return payload
 
 
 @dataclass(frozen=True)
@@ -943,7 +996,8 @@ def main(
         return _emit(_refusal(RefusalCode.AUTH_UNAVAILABLE, 2))
 
     try:
-        remote_prefix = _probe_remote_prefix(http_get, token, request)
+        bounded_get = _BoundedHTTPGet(http_get)
+        remote_prefix = _probe_remote_prefix(bounded_get, token, request)
         if isinstance(remote_prefix, SourceContinuityRefusal):
             return _emit(remote_prefix)
         (
@@ -983,7 +1037,7 @@ def main(
         local_facts, path_entries = local_probe
 
         remote_refusal = _remote_still_matches(
-            http_get,
+            bounded_get,
             token,
             request,
             first_identity,
@@ -1022,6 +1076,9 @@ def main(
             evidence_fingerprint=args.external_effect_evidence_fingerprint,
         )
         result = verify_source_continuity(request, local_facts, remote_facts, external)
+        bounded_get.check()
+    except _ReadBudgetExceeded:
+        result = _refusal(RefusalCode.REMOTE_CENSUS_INCOMPLETE, 2)
     except _AuthProbeError:
         result = _refusal(RefusalCode.AUTH_UNAVAILABLE, 2)
     except _RemoteProbeError:
