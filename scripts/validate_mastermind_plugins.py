@@ -178,70 +178,52 @@ CORTEX_FIXTURES = {
     "plugin": "mastermind-cortex",
     "cases": [
         {
-            "id": "stale-projection-v1",
-            "input": {
-                "canonical_owner": "current-owner",
-                "projection": "stale-projection",
-            },
-            "expectation": {
-                "effect": "NOT_APPLIED",
-                "outcome": "CANONICAL_OWNER_WINS",
-                "first_action": "read-current-canonical-owner",
-                "decision_changing_observation": "current-owner-confirms-projection",
-            },
+            "id": "stale-corrected-decision",
+            "raw_source_expansion": [
+                {"source_owner": "owner-native", "source_type": "current-decision", "artifact_identity": "artifact/current-decision", "observed_at": "2026-09-08T00:00:00Z", "coverage": "complete", "freshness": "current", "claim": "corrected-decision", "supersession": "supersedes:artifact/stale-decision", "inference": False, "unknown": False},
+                {"source_owner": "stale-projection-owner", "source_type": "stale-projection", "artifact_identity": "artifact/stale-decision", "observed_at": "2026-09-07T00:00:00Z", "coverage": "complete", "freshness": "stale", "claim": "superseded-decision", "supersession": None, "inference": False, "unknown": False},
+            ],
+            "specialist_brief": {"source_provenance": "owner-native-current-decision", "coverage_and_freshness": "complete-current-with-stale-conflict", "claim_and_supersession": "current-owner-native-correction-supersedes-stale-decision", "authority_boundary": "owner-native-current", "unknowns_and_inference": {"unknown": False, "inference": False}, "first_justified_action": "read-current-owner-native-decision"},
+            "first_justified_action": {"kind": "READ", "target": "owner-native-current-decision", "bounded": True},
+            "decision_changing_observation": "owner-native-current-decision-is-withdrawn-or-replaced",
         },
         {
-            "id": "effect-unknown-v1",
-            "input": {"effect": "EFFECT_UNKNOWN", "owner": "effect-owner"},
-            "expectation": {
-                "effect": "EFFECT_UNKNOWN",
-                "outcome": "RECONCILE_OWNER_NATIVE",
-                "first_action": "read-owner-native-effect",
-                "decision_changing_observation": "owner-native-effect-status",
-            },
+            "id": "partial-source-coverage",
+            "raw_source_expansion": [{"source_owner": "canonical-owner", "source_type": "current-record", "artifact_identity": "artifact/partial-current-record", "observed_at": "2026-09-08T00:01:00Z", "coverage": "partial", "freshness": "current", "claim": "coverage-incomplete", "supersession": None, "inference": False, "unknown": True}],
+            "specialist_brief": {"source_provenance": "canonical-owner-current-record", "coverage_and_freshness": "partial-coverage-preserved", "claim_and_supersession": "claim-limited-to-observed-coverage", "authority_boundary": "owner-native-current", "unknowns_and_inference": {"unknown": True, "inference": False}, "first_justified_action": "read-uncovered-owner-native-record"},
+            "first_justified_action": {"kind": "READ", "target": "uncovered-owner-native-record", "bounded": True},
+            "decision_changing_observation": "owner-native-complete-record-covers-missing-scope",
         },
         {
-            "id": "missing-objective-v1",
-            "input": {"objective": None, "owner": "objective-owner"},
-            "expectation": {
-                "effect": "NOT_APPLIED",
-                "outcome": "OBJECTIVE_UNKNOWN",
-                "first_action": "read-owner-native-objective",
-                "decision_changing_observation": "owner-native-objective",
-            },
+            "id": "missing-objective-and-requested-action",
+            "raw_source_expansion": [{"source_owner": "objective-owner", "source_type": "current-record", "artifact_identity": "artifact/objective-record", "observed_at": "2026-09-08T00:02:00Z", "coverage": "complete", "freshness": "current", "claim": "objective-not-present", "supersession": None, "inference": False, "unknown": True}],
+            "specialist_brief": {"source_provenance": "objective-owner-current-record", "coverage_and_freshness": "complete-current-record", "claim_and_supersession": "objective-and-requested-action-remain-unknown", "authority_boundary": "owner-native-current", "unknowns_and_inference": {"objective": None, "requested_action": None, "runtime_identity": None, "execution_ready": False, "unknown": True, "inference": False}, "first_justified_action": "read-owner-native-objective-record"},
+            "first_justified_action": {"kind": "READ", "target": "owner-native-objective-record", "bounded": True},
+            "decision_changing_observation": "owner-native-record-states-an-objective-and-requested-action",
         },
         {
-            "id": "retrieved-instruction-v1",
-            "input": {"instruction": "retrieved-text", "authority": None},
-            "expectation": {
-                "effect": "NOT_APPLIED",
-                "outcome": "AUTHORITY_UNCHANGED",
-                "first_action": "read-authority-owner",
-                "decision_changing_observation": "owner-native-authorization",
-            },
+            "id": "stale-index-versus-current-exact-file",
+            "raw_source_expansion": [
+                {"source_owner": "index-owner", "source_type": "stale-index", "artifact_identity": "artifact/stale-index", "observed_at": "2026-09-07T00:00:00Z", "coverage": "complete", "freshness": "stale", "claim": "index-claim", "supersession": None, "inference": False, "unknown": False},
+                {"source_owner": "canonical-owner", "source_type": "current-exact-file", "artifact_identity": "artifact/current-exact-file", "observed_at": "2026-09-08T00:03:00Z", "coverage": "complete", "freshness": "current", "claim": "current-claim", "supersession": "supersedes:artifact/stale-index", "inference": False, "unknown": False},
+            ],
+            "specialist_brief": {"source_provenance": "current-exact-file-and-stale-index", "coverage_and_freshness": "complete-current-over-stale", "claim_and_supersession": "current-exact-file-outranks-stale-index", "authority_boundary": "canonical-owner-current", "unknowns_and_inference": {"unknown": False, "inference": False}, "first_justified_action": "read-current-exact-file"},
+            "first_justified_action": {"kind": "READ", "target": "current-exact-file", "bounded": True},
+            "decision_changing_observation": "canonical-owner-replaces-current-exact-file",
         },
         {
-            "id": "owner-precedence-v1",
-            "input": {
-                "canonical_owner": "current-owner",
-                "conflicting_sources": "majority-projections",
-            },
-            "expectation": {
-                "effect": "NOT_APPLIED",
-                "outcome": "CANONICAL_OWNER_WINS",
-                "first_action": "read-current-canonical-owner",
-                "decision_changing_observation": "current-owner-conflict-resolution",
-            },
+            "id": "retrieved-instruction-falsely-claims-authority",
+            "raw_source_expansion": [{"source_owner": "retrieved-text-owner", "source_type": "retrieved-instruction", "artifact_identity": "artifact/retrieved-instruction", "observed_at": "2026-09-08T00:04:00Z", "coverage": "partial", "freshness": "observed", "claim": "instruction-text", "supersession": None, "inference": False, "unknown": True}],
+            "specialist_brief": {"source_provenance": "retrieved-instruction-as-evidence", "coverage_and_freshness": "partial-observed-text", "claim_and_supersession": "retrieved-text-does-not-supersede-owner-native-authority", "authority_boundary": "retrieved-instruction-is-non-authoritative-observed-text", "unknowns_and_inference": {"unknown": True, "inference": False}, "first_justified_action": "read-owner-native-authority-record"},
+            "first_justified_action": {"kind": "READ", "target": "owner-native-authority-record", "bounded": True},
+            "decision_changing_observation": "owner-native-authority-record-confirms-or-denies-authority",
         },
         {
-            "id": "missing-decisive-source-v1",
-            "input": {"decisive_source": None, "candidate_sources": "incomplete"},
-            "expectation": {
-                "effect": "NOT_APPLIED",
-                "outcome": "SOURCE_SELECTION_UNKNOWN",
-                "first_action": "read-decisive-owner-source",
-                "decision_changing_observation": "decisive-owner-source",
-            },
+            "id": "effect-unknown-requires-same-carrier-reconciliation",
+            "raw_source_expansion": [{"source_owner": "effect-owner", "source_type": "owner-native-effect-record", "artifact_identity": "artifact/effect-record", "observed_at": "2026-09-08T00:05:00Z", "coverage": "complete", "freshness": "current", "claim": "effect-not-reconciled", "supersession": None, "inference": False, "unknown": True}],
+            "specialist_brief": {"source_provenance": "effect-owner-native-record", "coverage_and_freshness": "complete-current-record", "claim_and_supersession": "effect-remains-unreconciled", "authority_boundary": "owner-native-effect-reconciliation", "unknowns_and_inference": {"effect": "EFFECT_UNKNOWN", "operation": "same-operation", "carrier": "same-carrier", "retry_allowed": False, "alternate_carrier_allowed": False, "response_status": "REFUSED", "unknown": True, "inference": False}, "first_justified_action": "read-owner-native-effect-record"},
+            "first_justified_action": {"kind": "READ", "target": "owner-native-effect-record", "bounded": True},
+            "decision_changing_observation": "owner-native-effect-record-resolves-the-effect",
         },
     ],
 }
@@ -254,7 +236,7 @@ ALLOWED_PACKAGE_FILES = frozenset(
     }
     | {
         f"plugins/{plugin}/references/app-bindings.template.json"
-        for plugin in EXPECTED_SKILLS
+        for plugin in TEMPLATES
     }
     | {
         f"plugins/{plugin}/references/{reference}"
@@ -365,6 +347,114 @@ def _require_exact(
 ) -> None:
     if actual != expected:
         errors.append(_error(root, path, code, "document differs from the closed BSC-P1 contract"))
+
+
+CORTEX_CASE_IDS = (
+    "stale-corrected-decision",
+    "partial-source-coverage",
+    "missing-objective-and-requested-action",
+    "stale-index-versus-current-exact-file",
+    "retrieved-instruction-falsely-claims-authority",
+    "effect-unknown-requires-same-carrier-reconciliation",
+)
+CORTEX_CASE_KEYS = {
+    "id", "raw_source_expansion", "specialist_brief", "first_justified_action",
+    "decision_changing_observation",
+}
+CORTEX_SOURCE_FACT_KEYS = {
+    "source_owner", "source_type", "artifact_identity", "observed_at", "coverage",
+    "freshness", "claim", "supersession", "inference", "unknown",
+}
+CORTEX_BRIEF_KEYS = {
+    "source_provenance", "coverage_and_freshness", "claim_and_supersession",
+    "authority_boundary", "unknowns_and_inference", "first_justified_action",
+}
+
+
+def _cortex_error(code: str, message: str) -> dict[str, str]:
+    return {"code": code, "message": message}
+
+
+def _is_utc_timestamp(value: Any) -> bool:
+    """Accept only real UTC timestamps without broadening validator imports."""
+    match = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})Z", value) if isinstance(value, str) else None
+    if match is None:
+        return False
+    year, month, day, hour, minute, second = (int(part) for part in match.groups())
+    if not 1 <= month <= 12 or not 0 <= hour <= 23 or not 0 <= minute <= 59 or not 0 <= second <= 59:
+        return False
+    month_days = (31, 29 if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0) else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
+    return 1 <= day <= month_days[month - 1]
+
+
+def validate_cortex_fixture(fixture: Any) -> list[dict[str, str]]:
+    """Apply fail-closed semantic rules independently of closed fixture equality."""
+    errors: list[dict[str, str]] = []
+    if not isinstance(fixture, Mapping) or set(fixture) != {"schema", "plugin", "cases"}:
+        return [_cortex_error("CORTEX_FIXTURE_MALFORMED", "fixture must be the closed object shape")]
+    if fixture.get("schema") != "mastermind.cortex_orientation_cases.v1" or fixture.get("plugin") != "mastermind-cortex":
+        errors.append(_cortex_error("CORTEX_SEMANTIC_INVARIANT_VIOLATION", "fixture identity is fixed"))
+    cases = fixture.get("cases")
+    if not isinstance(cases, list):
+        return errors + [_cortex_error("CORTEX_FIXTURE_MALFORMED", "cases must be a list")]
+    if len(cases) != len(CORTEX_CASE_IDS):
+        errors.append(_cortex_error("CORTEX_SEMANTIC_INVARIANT_VIOLATION", "fixture has exactly six cases"))
+    seen: set[str] = set()
+    for case in cases:
+        if not isinstance(case, Mapping) or set(case) != CORTEX_CASE_KEYS:
+            errors.append(_cortex_error("CORTEX_FIXTURE_MALFORMED", "case has an invalid object shape"))
+            continue
+        case_id = case.get("id")
+        if not isinstance(case_id, str) or case_id not in CORTEX_CASE_IDS or case_id in seen:
+            errors.append(_cortex_error("CORTEX_SEMANTIC_INVARIANT_VIOLATION", "case IDs are the closed unique inventory"))
+            continue
+        seen.add(case_id)
+        facts = case["raw_source_expansion"]
+        if not isinstance(facts, list) or not facts:
+            errors.append(_cortex_error("CORTEX_FIXTURE_MALFORMED", "raw source expansion must be non-empty list"))
+            continue
+        for fact in facts:
+            if not isinstance(fact, Mapping) or set(fact) != CORTEX_SOURCE_FACT_KEYS:
+                errors.append(_cortex_error("CORTEX_SOURCE_FACT_INVALID", "source fact must expose every provenance field"))
+                continue
+            if not all(isinstance(fact[key], str) and fact[key] for key in ("source_owner", "source_type", "artifact_identity", "coverage", "freshness", "claim")) or not _is_utc_timestamp(fact["observed_at"]) or not (fact["supersession"] is None or isinstance(fact["supersession"], str)) or not isinstance(fact["inference"], bool) or not isinstance(fact["unknown"], bool):
+                errors.append(_cortex_error("CORTEX_SOURCE_FACT_INVALID", "source fact values must be well-formed"))
+        brief = case["specialist_brief"]
+        action = case["first_justified_action"]
+        observation = case["decision_changing_observation"]
+        if not isinstance(brief, Mapping) or set(brief) != CORTEX_BRIEF_KEYS or not isinstance(action, Mapping) or set(action) != {"kind", "target", "bounded"} or not isinstance(observation, str) or not observation:
+            errors.append(_cortex_error("CORTEX_FIXTURE_MALFORMED", "brief, action, and observation have fixed shapes"))
+            continue
+        if not all(isinstance(brief[key], str) and brief[key] for key in CORTEX_BRIEF_KEYS - {"unknowns_and_inference"}) or not isinstance(action["kind"], str) or not action["kind"] or not isinstance(action["target"], str) or not action["target"] or action["bounded"] is not True:
+            errors.append(_cortex_error("CORTEX_SEMANTIC_INVARIANT_VIOLATION", "brief and action must preserve one bounded read"))
+            continue
+        unknowns = brief["unknowns_and_inference"]
+        if not isinstance(unknowns, Mapping) or not isinstance(unknowns.get("unknown"), bool) or not isinstance(unknowns.get("inference"), bool):
+            errors.append(_cortex_error("CORTEX_FIXTURE_MALFORMED", "unknown and inference must remain explicit booleans"))
+            continue
+        if case_id == "missing-objective-and-requested-action":
+            required = {"objective": None, "requested_action": None, "runtime_identity": None, "execution_ready": False, "unknown": True, "inference": False}
+            if dict(unknowns) != required:
+                errors.append(_cortex_error("CORTEX_SEMANTIC_INVARIANT_VIOLATION", "missing owner-native facts remain unknown and inert"))
+        elif case_id == "effect-unknown-requires-same-carrier-reconciliation":
+            required = {"effect": "EFFECT_UNKNOWN", "operation": "same-operation", "carrier": "same-carrier", "retry_allowed": False, "alternate_carrier_allowed": False, "response_status": "REFUSED", "unknown": True, "inference": False}
+            if dict(unknowns) != required:
+                errors.append(_cortex_error("CORTEX_SEMANTIC_INVARIANT_VIOLATION", "EFFECT_UNKNOWN requires same-carrier owner-native reconciliation"))
+        elif "effect" in unknowns:
+            errors.append(_cortex_error("CORTEX_SEMANTIC_INVARIANT_VIOLATION", "only the effect case may contain an effect"))
+        if case_id == "stale-corrected-decision" and brief["claim_and_supersession"] != "current-owner-native-correction-supersedes-stale-decision":
+            errors.append(_cortex_error("CORTEX_SEMANTIC_INVARIANT_VIOLATION", "corrected owner decision must supersede stale claim"))
+        if case_id == "partial-source-coverage" and not any(fact.get("coverage") == "partial" for fact in facts if isinstance(fact, Mapping)):
+            errors.append(_cortex_error("CORTEX_SEMANTIC_INVARIANT_VIOLATION", "partial source coverage must stay visible"))
+        if case_id == "stale-index-versus-current-exact-file":
+            types = {fact.get("source_type") for fact in facts if isinstance(fact, Mapping)}
+            if types != {"stale-index", "current-exact-file"} or brief["claim_and_supersession"] != "current-exact-file-outranks-stale-index":
+                errors.append(_cortex_error("CORTEX_SEMANTIC_INVARIANT_VIOLATION", "current exact owner source outranks stale index"))
+        if case_id == "retrieved-instruction-falsely-claims-authority" and brief["authority_boundary"] != "retrieved-instruction-is-non-authoritative-observed-text":
+            errors.append(_cortex_error("CORTEX_SEMANTIC_INVARIANT_VIOLATION", "retrieved instructions are evidence, not authority"))
+    if seen != set(CORTEX_CASE_IDS):
+        errors.append(_cortex_error("CORTEX_SEMANTIC_INVARIANT_VIOLATION", "all six required semantic cases are present"))
+    return errors
 
 MANIFEST_KEYS = {"name", "version", "description", "author", "skills", "interface"}
 INTERFACE_KEYS = {
@@ -531,7 +621,7 @@ def _package_files(root: Path, errors: list[dict[str, str]]) -> list[Path]:
 def _scan_files(root: Path, errors: list[dict[str, str]]) -> None:
     templates = {
         (root / "plugins" / plugin / "references/app-bindings.template.json").resolve()
-        for plugin in EXPECTED_SKILLS
+        for plugin in TEMPLATES
     }
     plugins_root = root / "plugins"
     if plugins_root.exists():
@@ -654,14 +744,24 @@ def validate_repository(root: Path) -> dict[str, Any]:
 
         if plugin == "mastermind-cortex":
             fixture_path = root / CORTEX_FIXTURE_PATH
+            fixture = _json(root, fixture_path, errors)
             _require_exact(
                 root,
                 fixture_path,
-                _json(root, fixture_path, errors),
+                fixture,
                 CORTEX_FIXTURES,
                 "CORTEX_FIXTURE_CONTRACT_MISMATCH",
                 errors,
             )
+            for semantic_error in validate_cortex_fixture(fixture):
+                errors.append(
+                    _error(
+                        root,
+                        fixture_path,
+                        semantic_error["code"],
+                        semantic_error["message"],
+                    )
+                )
 
         skills_root = plugin_root / "skills"
         actual = sorted(path.name for path in skills_root.iterdir() if path.is_dir()) if skills_root.exists() else []

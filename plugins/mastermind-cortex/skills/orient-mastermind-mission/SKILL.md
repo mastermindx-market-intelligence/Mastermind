@@ -32,16 +32,16 @@ Read `../../references/orientation-contract.md` and `../../references/source-cla
 4. For an unknown effect, preserve `EFFECT_UNKNOWN` and recommend only the owner-native reconciliation read.
 5. For a missing decisive fact, return the exact owner-native read required to decide; do not infer a result.
 6. State the one first justified action, the observation that would change it, and the facts that remain unknown.
+7. Express the result as raw source expansion plus the six-layer specialist brief: provenance; coverage/freshness; claim/supersession; authority boundary; unknowns/inference; and one first justified action.
 
 ## Output
 
 ```text
 claims and asserted owners
-current canonical owner per disputed fact
-known facts, conflicts, and genuine unknowns
-effect classification
-first justified read or withheld action
-decision-changing observation
+raw source expansion: owner, type, artifact identity, UTC observation, coverage, freshness, claim, supersession, inference, unknown
+six-layer specialist brief
+one bounded first justified read or withheld action
+one decision-changing observation
 authority and lifecycle boundaries preserved
 ```
 

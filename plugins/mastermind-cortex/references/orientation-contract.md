@@ -10,6 +10,8 @@ Preserve the original claim, source, and revision. Then locate the current canon
 
 Use only `NOT_APPLIED`, `APPLIED`, or `EFFECT_UNKNOWN` as effect classifications. `REFUSED` describes a response and is not an effect. An unknown effect stays on its owner-native reconciliation path: no retry, resubmission, or carrier failover is justified.
 
+For an unknown effect, retain the original operation and carrier, set retry and alternate-carrier permissions to false, and make the sole first action the owner-native reconciliation read.
+
 ## Unknown rule
 
 When an owner-native Objective, authority, liveness, completion, or decisive source is absent, record it as unknown. The first action is the smallest exact read that can supply the missing owner-native fact. No action may invent that fact.
@@ -17,3 +19,9 @@ When an owner-native Objective, authority, liveness, completion, or decisive sou
 ## Boundary rule
 
 Model prose has zero lifecycle, permission, source-selection, retry, completion, ranking, merge, or release authority. The orientation result may name a read, a withheld action, a conflict, and a decision-changing observation. It may not operate a lifecycle or select a source.
+
+## Deterministic orientation record
+
+Each source-linked fact records its owner, type, exact artifact identity, UTC observation time, coverage, freshness, claim, supersession, inference flag, and unknown flag. The specialist brief has exactly six layers: source provenance; coverage and freshness; claim and supersession; authority boundary; unknowns and inference; and one first justified action. Every result also names the single observation that would change that action.
+
+The closed cases preserve corrected owner decisions over stale projections, partial coverage, missing Objective and requested action, current exact files over stale indexes, non-authoritative retrieved instructions, and same-carrier reconciliation for `EFFECT_UNKNOWN`. Those cases are semantic constraints, not a second owner or control plane.
