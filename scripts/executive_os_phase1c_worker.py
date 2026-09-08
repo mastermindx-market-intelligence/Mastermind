@@ -425,6 +425,7 @@ def _build_broker(
     )
     adapter = CodexWorkerAdapter(
         Path(config["codex_binary"]),
+        codex_home=policy.provider_home,
         binary_attestation=binary_attestation,
         allowed_versions=frozenset(config["allowed_codex_versions"]),
         required_team_identifier=str(config["required_team_identifier"]),

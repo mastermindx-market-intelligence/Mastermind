@@ -250,3 +250,20 @@ def test_all_discovered_tests_are_accounted_for():
     argv = cip.pytest_argv(gate["included"])
     assert argv[:4] == [cip.sys.executable, "-m", "pytest", "-q"]
     assert argv[4:] == list(gate["included"])
+
+
+def test_hosted_full_gate_has_a_bounded_completion_window():
+    """PR544 reached 98% when its old 25-minute job ceiling cancelled the gate."""
+    import yaml
+
+    workflow = yaml.safe_load(
+        (_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
+    job = workflow["jobs"]["test"]
+    assert job["timeout-minutes"] == 40
+    assert workflow["permissions"] == {"contents": "read"}
+    assert job.get("continue-on-error", False) is False
+    gate_steps = [step for step in job["steps"]
+                  if step.get("name") == "Run repository test gate"]
+    assert len(gate_steps) == 1
+    assert gate_steps[0]["run"] == "python scripts/ci_pytest.py"
+    assert all(step.get("continue-on-error", False) is False for step in job["steps"])

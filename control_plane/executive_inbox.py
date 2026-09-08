@@ -1052,6 +1052,7 @@ def _sort_key(item: Mapping[str, Any]) -> tuple[int, str, str, str]:
 def build_inbox(
     *,
     repo_root: Path | str | None = None,
+    runtime_root: Path | str | None = None,
     boot_packet: Mapping[str, Any] | None = None,
     include_boot_packet: bool = True,
     boot_packet_file: str | Path | None = None,
@@ -1078,6 +1079,10 @@ def build_inbox(
     """
     # Resolved so `grounding.mastermind.root` names the same path the store does.
     root = Path(repo_root).resolve() if repo_root is not None else _REPO_ROOT
+    # Runtime projection is independently rooted for the temporary E1 reader.
+    # Repository grounding, Git reads, and boot-packet collection remain rooted
+    # at ``root``; only the existing runtime projector consumes this value.
+    projection_root = Path(runtime_root).resolve() if runtime_root is not None else root
     environ = os.environ if environ is None else environ
     degraded: list[str] = []
 
@@ -1157,7 +1162,7 @@ def build_inbox(
             ceo_items, packet_degraded = project_needs_ceo(packet)
             degraded.extend(packet_degraded)
 
-    runtime = project_runtime(root, now_dt)
+    runtime = project_runtime(projection_root, now_dt)
     degraded.extend(runtime.degraded)
 
     attention = sorted(ceo_items + runtime.attention, key=_sort_key)
@@ -1174,8 +1179,8 @@ def build_inbox(
             "macro": {"root": macro_root, "sha": macro_sha},
             "boot_packet_schema": packet_schema,
             "runtime_db": {
-                "path": os.fspath(root / DB_RELATIVE_PATH),
-                "present": (root / DB_RELATIVE_PATH).is_file(),
+                "path": os.fspath(projection_root / DB_RELATIVE_PATH),
+                "present": (projection_root / DB_RELATIVE_PATH).is_file(),
             },
         },
         "attention": attention,

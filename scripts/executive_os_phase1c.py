@@ -951,7 +951,6 @@ def _service_from_config(
         return ExecutiveSupervisor(
             runtime,
             adapter,
-            codex_home=raw["worker_provider_home"],
             runs_root=raw["worker_runs_root"],
             isolation_roots=(
                 raw["proof_workspace_root"],
