@@ -7,6 +7,12 @@ from dataclasses import replace
 from unittest.mock import patch
 
 from control_plane.session_targets import load_session_targets, route_obligation
+from control_plane.dialogue_source_resolution import (
+    DialogueDelayedAckReconciler,
+    DialogueSourceObservation,
+    DialogueSourceReconciler,
+    DialogueSourceSnapshot,
+)
 from control_plane.wake_dispatcher import WakeEffectUnknownError, WakePreSubmitError
 from integrations.slack_agent_dialogue.contract_v2 import (
     MESSAGE_SCHEMA_V2,
@@ -210,6 +216,70 @@ class RecordingWakeCarrier:
             raise WakeEffectUnknownError("provider result is ambiguous")
 
 
+class SourceAwareRecordingWakeCarrier(DialogueSourceReconciler, RecordingWakeCarrier):
+    def __init__(self, source_state: str) -> None:
+        RecordingWakeCarrier.__init__(self)
+        self.source_state = source_state
+        self.source_calls: list[DialogueSourceSnapshot] = []
+
+    async def reconcile_dialogue_sources(self, snapshot: object) -> object:
+        assert type(snapshot) is DialogueSourceSnapshot
+        self.source_calls.append(snapshot)
+        return {"state": self.source_state, "reason": "TEST_SOURCE_STATE"}
+
+    async def reconcile_from_source(self, _source, obligation, route) -> WakeCarrierState:
+        return await self.reconcile(obligation, route)
+
+    async def submit_from_source(self, _source, obligation, route) -> None:
+        await self.submit(obligation, route)
+
+
+class DelayedAckRecordingCarrier(
+    DialogueDelayedAckReconciler, SourceAwareRecordingWakeCarrier
+):
+    def __init__(self, source: DialogueSourceObservation) -> None:
+        SourceAwareRecordingWakeCarrier.__init__(self, "ACK_REQUIRED")
+        self.source = source
+        self.delayed_ack_calls = []
+
+    async def reconcile_dialogue_sources(self, snapshot: object) -> object:
+        self.source_calls.append(snapshot)
+        return {
+            "state": "ACK_REQUIRED", "reason": "DELIVERED_ACK_PENDING",
+            "source_observation": self.source,
+        }
+
+    async def reconcile_delayed_ack(self, source_observation):
+        self.delayed_ack_calls.append(source_observation)
+        return {"state": "RECORDED", "reason": "ACK_RECORDED"}
+
+
+def test_observer_echoes_server_selected_delayed_ack_once_then_holds() -> None:
+    async def scenario() -> None:
+        parent = _parent()
+        source = DialogueSourceObservation(
+            workspace_id="T0BRD2AQXQV", channel_id="C0BSBM78V1N",
+            thread_ts=PARENT_TS, predecessor_message_key="asd-old-source-01",
+            predecessor_message_fingerprint="e" * 64,
+        )
+        carrier = DelayedAckRecordingCarrier(source)
+        observer = DialogueTurnObserver(
+            policy=_policy(), client=_client_with_result(parent),
+            registry=_registry(), wake_carrier=carrier,
+        )
+        result = await observer.reconcile_once(
+            context=_context(parent), routing=_routing(parent)
+        )
+        assert result.outcome is ObservationOutcome.RECONCILIATION_INCOMPLETE
+        assert result.reason == "DIALOGUE_SOURCE_RECONCILIATION_REQUIRED"
+        assert carrier.delayed_ack_calls == [source]
+        assert len(carrier.source_calls) == 1
+        assert carrier.reconcile_calls == []
+        assert carrier.submit_calls == []
+
+    asyncio.run(scenario())
+
+
 def _attention() -> AgentDialogueAttention:
     return AgentDialogueAttention(
         schema="mastermind.agent_dialogue_attention.v1",
@@ -317,6 +387,54 @@ def test_observer_reconstructs_initial_turn_and_submits_one_canonical_wake() -> 
         assert result.route.target_seat == "coo"
         assert len(carrier.reconcile_calls) == 1
         assert carrier.submit_calls == [(result.obligation, result.route)]
+
+    asyncio.run(scenario())
+
+
+def test_nominal_source_reconciler_receives_exact_history_before_wake_decision() -> None:
+    async def scenario() -> None:
+        parent = _parent()
+        carrier = SourceAwareRecordingWakeCarrier("NO_RESOLUTION_REQUIRED")
+        observer = DialogueTurnObserver(
+            policy=_policy(),
+            client=_client(parent),
+            registry=_registry(),
+            wake_carrier=carrier,
+            emitted_at=lambda: "2026-08-29T01:02:00Z",
+        )
+        result = await observer.reconcile_once(
+            context=_context(parent), routing=_routing(parent)
+        )
+        assert result.outcome is ObservationOutcome.WAKE_SUBMITTED
+        assert len(carrier.source_calls) == 1
+        snapshot = carrier.source_calls[0]
+        assert snapshot.workspace_id == _policy().workspace_id
+        assert snapshot.channel_id == _policy().channel_id
+        assert snapshot.thread_ts == PARENT_TS
+        assert snapshot.parent_fingerprint == parent["fingerprint"]
+        assert snapshot.operation_key == parent["operation_key"]
+        assert snapshot.messages == ()
+        assert len(carrier.submit_calls) == 1
+
+        held = SourceAwareRecordingWakeCarrier("ACK_REQUIRED")
+        held_observer = DialogueTurnObserver(
+            policy=_policy(),
+            client=_client_with_result(parent),
+            registry=_registry(),
+            wake_carrier=held,
+            emitted_at=lambda: "2026-08-29T01:02:00Z",
+        )
+        held_result = await held_observer.reconcile_once(
+            context=_context(parent), routing=_routing(parent)
+        )
+        assert held_result.outcome is ObservationOutcome.RECONCILIATION_INCOMPLETE
+        assert held_result.reason == "DIALOGUE_SOURCE_RECONCILIATION_REQUIRED"
+        assert len(held.source_calls) == 1
+        assert [
+            item.to_dict()["message_key"] for item in held.source_calls[0].messages
+        ] == ["asd-result-00000002"]
+        assert held.reconcile_calls == []
+        assert held.submit_calls == []
 
     asyncio.run(scenario())
 
@@ -639,6 +757,58 @@ def test_incomplete_bounded_history_refuses_before_wake_carrier() -> None:
         assert result.reason == "BOUNDED_HISTORY_INCOMPLETE"
         assert carrier.reconcile_calls == []
         assert carrier.submit_calls == []
+
+    asyncio.run(scenario())
+
+
+def test_source_outage_and_text_only_reply_cannot_prove_source_absence() -> None:
+    async def scenario() -> None:
+        parent = _parent()
+
+        class OutageClient(InMemorySlackClient):
+            async def fetch_channel_history(self, *_args, **_kwargs):
+                raise TimeoutError("diagnostic Slack outage")
+
+        outage_carrier = SourceAwareRecordingWakeCarrier("RECORDED")
+        outage = DialogueTurnObserver(
+            policy=_policy(),
+            client=OutageClient(relay_bot_user_id=RELAY_USER),
+            registry=_registry(),
+            wake_carrier=outage_carrier,
+        )
+        outage_result = await outage.reconcile_once(
+            context=_context(parent), routing=_routing(parent)
+        )
+        assert outage_result.outcome is ObservationOutcome.RECONCILIATION_INCOMPLETE
+        assert outage_result.reason == "TRANSPORT_UNAVAILABLE"
+        assert outage_carrier.source_calls == []
+        assert outage_carrier.reconcile_calls == []
+        assert outage_carrier.submit_calls == []
+
+        text_client = _client(parent)
+        text_client.add_reply(
+            SlackMessage(
+                ts="1787961600.000004",
+                author_user_id=RELAY_USER,
+                text="Completed successfully without a canonical V2 frame.",
+                thread_ts=PARENT_TS,
+            )
+        )
+        text_carrier = SourceAwareRecordingWakeCarrier("ACK_REQUIRED")
+        text_observer = DialogueTurnObserver(
+            policy=_policy(),
+            client=text_client,
+            registry=_registry(),
+            wake_carrier=text_carrier,
+        )
+        text_result = await text_observer.reconcile_once(
+            context=_context(parent), routing=_routing(parent)
+        )
+        assert text_result.outcome is ObservationOutcome.RECONCILIATION_INCOMPLETE
+        assert len(text_carrier.source_calls) == 1
+        assert text_carrier.source_calls[0].messages == ()
+        assert text_carrier.reconcile_calls == []
+        assert text_carrier.submit_calls == []
 
     asyncio.run(scenario())
 
