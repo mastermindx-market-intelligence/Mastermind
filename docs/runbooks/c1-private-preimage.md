@@ -43,7 +43,7 @@ Do not use this example during source review or on an unapproved host.
 
 ## Frozen probe surface
 
-The collector projects nine content-bearing public/provenance documents:
+The collector projects nine fixed content-bearing public/provenance documents:
 
 - five LaunchDaemon plists: `control`, `worker.codex`, `backup`,
   `sol-state-relay`, and `agent-relay`;
@@ -51,11 +51,15 @@ The collector projects nine content-bearing public/provenance documents:
 - the pinned Python runtime provenance receipt;
 - the pinned Codex attestation receipt.
 
-It also reads the expected release's `.executive-release-manifest.json`. Each
-content read is limited to 1 MiB, aggregate accepted content is limited to
-9 MiB, JSON rejects duplicate keys, plist parsing is in-process, and only
-whitelisted fields enter the receipt. Unknown fields are deliberately not
-projected.
+It separately reads exactly one `.executive-release-manifest.json`, and only
+under the release directory derived from the admitted expected SHA. Thus the
+closed surface has nine fixed documents plus one exact-SHA manifest, while the
+aggregate accepted content ceiling remains 9 MiB. Each individual content read
+is limited to 1 MiB. JSON rejects duplicate keys. Plist decoding uses a
+duplicate-rejecting mapping so XML plists—with or without a declaration—and
+binary plists are rejected before a repeated key can overwrite its predecessor.
+Plist parsing is in-process, and only validated projections enter the receipt.
+Unknown fields are deliberately not projected.
 
 Private config, tokens, keys, canaries, provider auth, DR, job, backup, relay,
 and socket paths are metadata-only. Their bytes, hashes, values, prefixes, and
@@ -63,9 +67,11 @@ suffixes are never read or emitted. Metadata is restricted to lexical path,
 existence, type, device, inode, link count, UID, GID, mode, size, `mtime_ns`,
 and `ctime_ns`.
 
-Filesystem reads reject final symlinks and unexpected ancestor symlinks, use
-read-only `O_NOFOLLOW|O_CLOEXEC`, bind descriptor identity to pre-open and
-post-read named identity, and reject torn observations. The exact macOS
+Filesystem reads reject final symlinks and unexpected ancestor symlinks, require
+read-only `O_NOFOLLOW|O_CLOEXEC|O_NONBLOCK`, apply path-specific descriptor
+type/owner/group/mode/link contracts, bind the metadata/ACL observation to the
+opened descriptor and post-read named identity, recheck ancestor identities,
+and reject torn observations. The exact macOS
 `/var -> /private/var` alias is the only accepted alias. ACL checks use the
 macOS stat marker and bind pre/post device and inode.
 
@@ -78,10 +84,19 @@ The command adapter permits only:
 /usr/bin/stat -f %Sp <one frozen path>
 ```
 
-Commands use no shell, a five-second deadline, no retry, bounded output,
-`stdin=DEVNULL`, and `close_fds=True`. Process output contains only UID, GID,
-PID, and PPID for the exact positive PID reported by launchd. Raw stderr and
-arbitrary exception text are never serialized.
+Commands use no shell, a five-second total execution/settlement deadline, no
+retry, acquisition-time bounded nonblocking output, `stdin=DEVNULL`, and
+`close_fds=True`. One second of the deadline is reserved for terminating and
+reaping only the directly created probe child. Custody begins immediately after
+spawn, covers selector/stream setup and cleanup failures, and samples the
+original monotonic deadline after potentially blocking operations before
+accepting a result. A known exit observed after the boundary is a late, reaped
+timeout; unknown termination, reap, or cleanup outcomes remain explicit
+sanitized facts. Bytes returned by a bounded read are counted before the fresh
+deadline decision, so late data remains rejected without losing its known byte
+count. It never signals the host-service PID. Process output contains only UID,
+GID, PID, and PPID for the exact positive PID reported by launchd. Raw stderr,
+partial output, and arbitrary exception text are never serialized.
 
 ## Receipt and interpretation
 
@@ -116,9 +131,22 @@ this precedence:
 6. `STALE_STOPPED`
 7. `ABSENT_CLEAN`
 
-`ACTIVE_OWNED` binds the frozen launchd label and plist user to the exact UID
-and GID returned for launchd's positive PID. A process mismatch is
-`ACTIVE_FOREIGN`; it never falls through to owned.
+`ACTIVE_OWNED` binds the frozen launchd label, loaded `program` and `arguments`
+fields, exact disk ProgramArguments and working directory, the admitted expected
+release, plist user/group, and the UID/GID returned for launchd's positive PID.
+Loaded arguments must exactly equal the internally retained validated disk
+arguments; raw values are never projected. A different executable, entrypoint,
+argument, or release is `ACTIVE_FOREIGN`; missing or ambiguous loaded identity
+is `UNSETTLED`. None can fall through to owned.
+
+`ABSENT_CLEAN` additionally requires coherent absence of the whole frozen
+surface, all four principals, and every service. A residual socket, principal,
+partial document set, generic launchctl error, or unrecognized launchd state
+cannot become clean absence. `STALE_STOPPED` also requires all four expected
+principals to be present and matching; stale documents with missing principals
+remain `EFFECT_UNKNOWN`. Validated stale release identities are compared
+internally but emitted only as `release_matches: false`; rejected schema,
+principal, path, and provenance values never enter a receipt.
 
 Exit codes describe receipt transport only:
 

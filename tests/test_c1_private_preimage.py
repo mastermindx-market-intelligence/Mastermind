@@ -202,6 +202,24 @@ def test_command_adapter_closes_nonzero_and_oversized_output(completion, code):
     assert "private detail" not in str(error.value)
 
 
+def test_launchctl_exit_113_requires_exact_absence_grammar():
+    module = subject()
+    label = module.LABELS[0]
+    argv = ("/bin/launchctl", "print", f"system/{label}")
+    accepted = Completed(
+        returncode=113,
+        stderr=f'Could not find service "{label}" in domain for system\n'.encode(),
+    )
+    assert module.CommandAdapter(runner=lambda *_a, **_k: accepted).run(argv) == {
+        "status": "absent",
+        "stdout": "",
+    }
+    rejected = Completed(returncode=113, stderr=b"permission denied\n")
+    with pytest.raises(module.PreimageUnsettled) as error:
+        module.CommandAdapter(runner=lambda *_a, **_k: rejected).run(argv)
+    assert error.value.code == "COMMAND_NONZERO"
+
+
 def test_command_timeout_is_unsettled_and_not_retried():
     module = subject()
     calls = 0
@@ -358,6 +376,7 @@ def test_bounded_file_read_uses_readonly_nofollow_cloexec_and_detects_torn_ident
     assert flags_seen[0] & os.O_ACCMODE == os.O_RDONLY
     assert flags_seen[0] & getattr(os, "O_NOFOLLOW", 0)
     assert flags_seen[0] & getattr(os, "O_CLOEXEC", 0)
+    assert flags_seen[0] & getattr(os, "O_NONBLOCK", 0)
 
     real_lstat = module.os.lstat
     calls = 0
@@ -387,7 +406,7 @@ class EmptyFilesystem:
         self.paths.append(path)
         return {"path": path, "exists": False}
 
-    def read(self, path):
+    def read(self, path, *, expected=None):
         self.reads.append(path)
         raise AssertionError("absent paths must not be read")
 
@@ -401,7 +420,7 @@ class AbsentCommands:
         if tuple(argv) == ("/bin/launchctl", "print-disabled", "system"):
             entries = "".join(f'    "{label}" => true\n' for label in subject().LABELS)
             return {"status": "ok", "stdout": f"disabled services = {{\n{entries}}}\n"}
-        raise subject().PreimageUnsettled("COMMAND_NONZERO")
+        return {"status": "absent", "stdout": ""}
 
 
 class MissingPrincipals:
@@ -507,9 +526,75 @@ def test_service_ownership_binds_label_plist_user_and_process_identity(label, ui
     module = subject()
     plist = {"Label": label, "UserName": module.SERVICE_OWNERS[label][0]}
     process = {"uid": uid, "gid": gid, "pid": 99, "ppid": 1}
-    assert module.service_owned(label, plist, process) is True
-    assert module.service_owned(label, {**plist, "Label": "foreign"}, process) is False
-    assert module.service_owned(label, plist, {**process, "uid": 999}) is False
+    assert module.service_owned(
+        label,
+        plist,
+        process,
+        program_matches=True,
+        arguments_match=True,
+        release_matches=True,
+    ) is True
+    assert (
+        module.service_owned(
+            label,
+            {**plist, "Label": "foreign"},
+            process,
+            program_matches=True,
+            arguments_match=True,
+            release_matches=True,
+        )
+        is False
+    )
+    assert (
+        module.service_owned(
+            label,
+            plist,
+            {**process, "uid": 999},
+            program_matches=True,
+            arguments_match=True,
+            release_matches=True,
+        )
+        is False
+    )
+    assert module.service_owned(
+        label,
+        plist,
+        process,
+        program_matches=False,
+        arguments_match=True,
+        release_matches=True,
+    ) is False
+    assert module.service_owned(
+        label,
+        plist,
+        process,
+        program_matches=True,
+        arguments_match=False,
+        release_matches=True,
+    ) is False
+    assert module.service_owned(
+        label,
+        plist,
+        process,
+        program_matches=True,
+        arguments_match=True,
+        release_matches=False,
+    ) is False
+
+
+def test_loaded_program_expectation_covers_every_frozen_label():
+    module = subject()
+    expected = {
+        "com.mastermind.executive.control": module.PYTHON_BINARY,
+        "com.mastermind.executive.worker.codex": module.PYTHON_BINARY,
+        "com.mastermind.executive.backup": "/bin/bash",
+        "com.mastermind.executive.sol-state-relay": module.PYTHON_BINARY,
+        "com.mastermind.executive.agent-relay": module.PYTHON_BINARY,
+    }
+    assert {
+        label: module.expected_loaded_program(label, SHA)
+        for label in module.LABELS
+    } == expected
 
 
 def test_disabled_state_parser_requires_one_closed_boolean_per_frozen_label():
@@ -532,38 +617,80 @@ class InstalledFilesystem:
     def __init__(self, module):
         release_root = f"{module.SYSTEM_ROOT}/releases/{SHA}"
         self.manifest_path = f"{release_root}/.executive-release-manifest.json"
-        self.payloads = {
-            module.CONTROL_CONFIG: json.dumps(
-                {
-                    "schema_version": "mastermind.executive_control_config/v1",
-                    "proof_base_sha": SHA,
-                    "ignored": "not projected",
-                }
-            ).encode(),
-            module.WORKER_CONFIG: (
-                b'{"schema_version":"mastermind.executive_worker_broker_config/v4"}'
-            ),
-            module.PYTHON_PROVENANCE: (
-                b'{"schema_version":"mastermind.executive_python_runtime/v1"}'
-            ),
-            module.CODEX_ATTESTATION: (
-                b'{"schema_version":"mastermind.executive_codex_attestation/v1"}'
-            ),
-            self.manifest_path: json.dumps(
-                {
-                    "schema_version": "mastermind.executive_release_manifest/v1",
-                    "commit_sha": SHA,
-                    "tree_sha": TREE,
-                    "entries": ["not projected"],
-                }
-            ).encode(),
-        }
+        expected = module.expected_document_fixture(SHA, TREE)
+        self.payloads = {}
+        for path in (
+            module.CONTROL_CONFIG,
+            module.WORKER_CONFIG,
+            module.PYTHON_PROVENANCE,
+            module.CODEX_ATTESTATION,
+        ):
+            value = {**expected[path], "ignored": "not projected"}
+            if path == module.PYTHON_PROVENANCE:
+                value.update(
+                    {
+                        "prior_runtime_archive": "",
+                        "prior_runtime_receipt_archive": "",
+                    }
+                )
+            if path == module.CODEX_ATTESTATION:
+                value.update(
+                    {
+                        "recorded_at": "2026-09-09T19:00:00+00:00",
+                        "identity": {
+                            "device": 1,
+                            "inode": 2,
+                            "size": 3,
+                            "mode": 0o755,
+                            "uid": 0,
+                            "gid": 0,
+                            "mtime_ns": 4,
+                            "ctime_ns": 5,
+                        },
+                    }
+                )
+            self.payloads[path] = json.dumps(value).encode()
+        self.payloads[self.manifest_path] = json.dumps(
+            {**expected["release_manifest"], "entries": ["not projected"]}
+        ).encode()
         for label, path in zip(module.LABELS, module.PLISTS, strict=True):
+            if label == "com.mastermind.executive.agent-relay":
+                arguments = [
+                    module.PYTHON_BINARY,
+                    "-I",
+                    "-S",
+                    "-B",
+                    f"{release_root}/scripts/slack_agent_dialogue_service.py",
+                    "--socket-path",
+                    "/var/run/mastermind-agent-relay/agent-relay.sock",
+                    "--token-file",
+                    f"{module.SYSTEM_ROOT}/config/agent-relay.token",
+                    "--workspace-id",
+                    "T0BRD2AQXQV",
+                    "--channel-id",
+                    "C0BSBM78V1N",
+                    "--bot-user-id",
+                    "U0BRGTF1H26",
+                    "--allowed-peer-uid",
+                    "450",
+                    "--allowed-sol-user-id",
+                    "U0BRETDUAS2",
+                    "--allowed-sol-user-id",
+                    "U0BSB73JWNL",
+                    "--allowed-parent-user-id",
+                    "U0BRETDUAS2",
+                    "--dialogue-coordination-socket-path",
+                    "/var/run/mastermind-dialogue-observation/dialogue-observation.sock",
+                ]
+            else:
+                arguments = module.expected_program_arguments(label, SHA)
             self.payloads[path] = plistlib.dumps(
                 {
                     "Label": label,
                     "UserName": module.SERVICE_OWNERS[label][0],
-                    "ProgramArguments": [f"{release_root}/entrypoint.py"],
+                    "GroupName": module.SERVICE_OWNERS[label][0],
+                    "WorkingDirectory": release_root,
+                    "ProgramArguments": arguments,
                     "EnvironmentVariables": {"PRIVATE": "not projected"},
                 }
             )
@@ -587,7 +714,8 @@ class InstalledFilesystem:
             "ctime_ns": 1,
         }
 
-    def read(self, path):
+    def read(self, path, *, expected=None):
+        assert expected["inode"] == abs(hash(path))
         return self.payloads[path]
 
 
@@ -618,10 +746,19 @@ class InstalledCommands:
             "print",
             "system/com.mastermind.executive.control",
         ) and self.foreign_active:
-            return {"status": "ok", "stdout": "state = running\npid = 99\n"}
+            return {
+                "status": "ok",
+                "stdout": (
+                    f"program = {module.PYTHON_BINARY}\n"
+                    "state = running\npid = 99\n"
+                    "arguments = {\n"
+                    + "\n".join(module.expected_program_arguments(module.LABELS[0], SHA))
+                    + "\n}\n"
+                ),
+            }
         if command[:3] == ("/bin/ps", "-o", "uid=,gid=,pid=,ppid="):
             return {"status": "ok", "stdout": "999 999 99 1\n"}
-        raise module.PreimageUnsettled("COMMAND_NONZERO")
+        return {"status": "absent", "stdout": ""}
 
 
 def collect_installed(*, foreign_active=False):
@@ -653,6 +790,107 @@ def test_collect_active_process_principal_mismatch_is_foreign():
     receipt = collect_installed(foreign_active=True)
     assert receipt["state"] == "FACTS"
     assert receipt["classification"] == "ACTIVE_FOREIGN"
+
+
+def test_collect_coherent_older_documents_without_expected_manifest_is_stale():
+    module = subject()
+    stale_sha = "c" * 40
+    filesystem = InstalledFilesystem(module)
+    control = json.loads(filesystem.payloads[module.CONTROL_CONFIG])
+    control.update(
+        {
+            "proof_base_sha": stale_sha,
+            "proof_source_repository": (
+                f"{module.RUNTIME_ROOT}/control/admin-checkout/{stale_sha}"
+            ),
+        }
+    )
+    filesystem.payloads[module.CONTROL_CONFIG] = json.dumps(control).encode()
+    stale_root = f"{module.SYSTEM_ROOT}/releases/{stale_sha}"
+    for label, path in zip(module.LABELS, module.PLISTS, strict=True):
+        value = plistlib.loads(filesystem.payloads[path])
+        value["WorkingDirectory"] = stale_root
+        if label == "com.mastermind.executive.agent-relay":
+            value["ProgramArguments"][4] = (
+                f"{stale_root}/scripts/slack_agent_dialogue_service.py"
+            )
+        else:
+            value["ProgramArguments"] = module.expected_program_arguments(
+                label, stale_sha
+            )
+        filesystem.payloads[path] = plistlib.dumps(value)
+    filesystem.payloads.pop(filesystem.manifest_path)
+    filesystem.present.remove(filesystem.manifest_path)
+    filesystem.present.remove(f"{module.SYSTEM_ROOT}/releases/{SHA}")
+    receipt = module.collect_preimage(
+        expected_release_sha=SHA,
+        expected_tree_sha=TREE,
+        filesystem=filesystem,
+        commands=InstalledCommands(),
+        principals=InstalledPrincipals(),
+        clock=lambda: "2026-09-09T19:00:00+00:00",
+        platform="darwin",
+        uid=0,
+        euid=0,
+    )
+    assert receipt["classification"] == "STALE_STOPPED"
+    encoded = module.canonical_receipt(receipt)
+    assert stale_sha.encode() not in encoded
+
+    class ActiveStaleCommands(InstalledCommands):
+        def run(self, argv):
+            command = tuple(argv)
+            if command == (
+                "/bin/launchctl",
+                "print",
+                "system/com.mastermind.executive.control",
+            ):
+                arguments = "\n".join(
+                    module.expected_program_arguments(module.LABELS[0], stale_sha)
+                )
+                return {
+                    "status": "ok",
+                    "stdout": (
+                        f"program = {module.PYTHON_BINARY}\n"
+                        "state = running\npid = 99\n"
+                        f"arguments = {{\n{arguments}\n}}\n"
+                    ),
+                }
+            if command == (
+                "/bin/ps",
+                "-o",
+                "uid=,gid=,pid=,ppid=",
+                "-p",
+                "99",
+            ):
+                return {"status": "ok", "stdout": "450 450 99 1\n"}
+            return super().run(argv)
+
+    active_stale = module.collect_preimage(
+        expected_release_sha=SHA,
+        expected_tree_sha=TREE,
+        filesystem=filesystem,
+        commands=ActiveStaleCommands(),
+        principals=InstalledPrincipals(),
+        clock=lambda: "2026-09-09T19:00:00+00:00",
+        platform="darwin",
+        uid=0,
+        euid=0,
+    )
+    assert active_stale["classification"] == "ACTIVE_FOREIGN"
+
+    missing_principals = module.collect_preimage(
+        expected_release_sha=SHA,
+        expected_tree_sha=TREE,
+        filesystem=filesystem,
+        commands=InstalledCommands(),
+        principals=MissingPrincipals(),
+        clock=lambda: "2026-09-09T19:00:00+00:00",
+        platform="darwin",
+        uid=0,
+        euid=0,
+    )
+    assert missing_principals["classification"] == "EFFECT_UNKNOWN"
 
 
 @pytest.mark.parametrize(
@@ -688,3 +926,787 @@ def test_collection_closes_filesystem_safety_and_observation_failures(
     assert receipt["classification"] == classification
     assert receipt["reason_codes"] == [exception]
     assert receipt["mutation_count"] == 0
+
+
+def test_generic_launchctl_nonzero_remains_unsettled():
+    module = subject()
+
+    class Commands(AbsentCommands):
+        def run(self, argv):
+            if tuple(argv) == ("/bin/launchctl", "print-disabled", "system"):
+                return super().run(argv)
+            raise module.PreimageUnsettled("COMMAND_NONZERO")
+
+    receipt = module.collect_preimage(
+        expected_release_sha=SHA,
+        expected_tree_sha=TREE,
+        filesystem=EmptyFilesystem(),
+        commands=Commands(),
+        principals=MissingPrincipals(),
+        clock=lambda: "2026-09-09T19:00:00+00:00",
+        platform="darwin",
+        uid=0,
+        euid=0,
+    )
+    assert receipt["state"] == "UNSETTLED"
+    assert receipt["classification"] == "UNKNOWN"
+
+
+def test_residual_socket_and_principals_only_are_never_absent_clean():
+    module = subject()
+    filesystem = EmptyFilesystem()
+    residual = module.METADATA_PATHS[-1]
+
+    def metadata(path):
+        if path != residual:
+            return {"path": path, "exists": False}
+        return {
+            "path": path,
+            "exists": True,
+            "type": "socket",
+            "device": 1,
+            "inode": 2,
+            "link_count": 1,
+            "uid": 0,
+            "gid": 0,
+            "mode": 0o600,
+            "size": 0,
+            "mtime_ns": 1,
+            "ctime_ns": 1,
+        }
+
+    filesystem.metadata = metadata
+    receipt = module.collect_preimage(
+        expected_release_sha=SHA,
+        expected_tree_sha=TREE,
+        filesystem=filesystem,
+        commands=InstalledCommands(),
+        principals=MissingPrincipals(),
+        clock=lambda: "2026-09-09T19:00:00+00:00",
+        platform="darwin",
+        uid=0,
+        euid=0,
+    )
+    assert receipt["classification"] == "EFFECT_UNKNOWN"
+
+    principals_only = module.collect_preimage(
+        expected_release_sha=SHA,
+        expected_tree_sha=TREE,
+        filesystem=EmptyFilesystem(),
+        commands=AbsentCommands(),
+        principals=InstalledPrincipals(),
+        clock=lambda: "2026-09-09T19:00:00+00:00",
+        platform="darwin",
+        uid=0,
+        euid=0,
+    )
+    assert principals_only["classification"] == "EFFECT_UNKNOWN"
+
+
+def test_unknown_launchd_state_and_pid_relationship_are_unsettled():
+    module = subject()
+    for value in (
+        "state = nonsense\n",
+        "state = nonsense\npid = 99\n",
+        "state = waiting\npid = 99\n",
+        "state = running\n",
+    ):
+        with pytest.raises(module.PreimageUnsettled) as error:
+            module.parse_launchd_state(value)
+        assert error.value.code == "MALFORMED_LAUNCHD"
+
+
+def test_documented_ps_command_reaches_runner_and_wrong_uid_stays_foreign():
+    module = subject()
+    calls = []
+
+    def runner(argv, **_kwargs):
+        calls.append(tuple(argv))
+        return Completed(stdout=b"450 450 99 1\n")
+
+    result = module.CommandAdapter(runner=runner).run(
+        ("/bin/ps", "-o", "uid=,gid=,pid=,ppid=", "-p", "99")
+    )
+    assert result["status"] == "ok"
+    assert calls == [("/bin/ps", "-o", "uid=,gid=,pid=,ppid=", "-p", "99")]
+    assert collect_installed(foreign_active=True)["classification"] == "ACTIVE_FOREIGN"
+
+
+@pytest.mark.parametrize(
+    ("process_line", "classification"),
+    [(b"450 450 99 1\n", "ACTIVE_OWNED"), (b"999 999 99 1\n", "ACTIVE_FOREIGN")],
+)
+def test_command_adapter_is_joined_to_active_service_ownership(
+    process_line, classification
+):
+    module = subject()
+    control = module.LABELS[0]
+
+    def runner(argv, **_kwargs):
+        command = tuple(argv)
+        if command[:3] == ("/usr/bin/stat", "-f", "%Sp"):
+            return Completed(stdout=b"-r--r-----\n")
+        if command == ("/bin/launchctl", "print-disabled", "system"):
+            entries = b"".join(
+                f'    "{label}" => true\n'.encode() for label in module.LABELS
+            )
+            return Completed(stdout=b"disabled services = {\n" + entries + b"}\n")
+        if command == ("/bin/launchctl", "print", f"system/{control}"):
+            return Completed(
+                stdout=(
+                    f"program = {module.PYTHON_BINARY}\n"
+                    "state = running\npid = 99\n"
+                    "arguments = {\n"
+                    + "\n".join(module.expected_program_arguments(control, SHA))
+                    + "\n}\n"
+                ).encode()
+            )
+        if command[:2] == ("/bin/launchctl", "print"):
+            label = command[2].removeprefix("system/")
+            return Completed(
+                returncode=113,
+                stderr=(
+                    f'Could not find service "{label}" in domain for system\n'.encode()
+                ),
+            )
+        if command == ("/bin/ps", "-o", "uid=,gid=,pid=,ppid=", "-p", "99"):
+            return Completed(stdout=process_line)
+        raise AssertionError(command)
+
+    receipt = module.collect_preimage(
+        expected_release_sha=SHA,
+        expected_tree_sha=TREE,
+        filesystem=InstalledFilesystem(module),
+        commands=module.CommandAdapter(runner=runner),
+        principals=InstalledPrincipals(),
+        clock=lambda: "2026-09-09T19:00:00+00:00",
+        platform="darwin",
+        uid=0,
+        euid=0,
+    )
+    assert receipt["classification"] == classification
+
+
+def test_duplicate_projected_plist_key_is_refused():
+    module = subject()
+    payload = (
+        b'<?xml version="1.0"?><plist version="1.0"><dict>'
+        b"<key>Label</key><string>foreign</string>"
+        b"<key>Label</key><string>accepted</string></dict></plist>"
+    )
+    with pytest.raises(module.PreimageRefusal) as error:
+        module.parse_projected_plist(payload, fields={"Label": str})
+    assert error.value.code == "MALFORMED_TRUSTED_DOCUMENT"
+
+
+def test_plist_duplicate_rejection_covers_every_accepted_xml_form():
+    module = subject()
+    body = (
+        b'<plist version="1.0"><dict>'
+        b"<key>Label</key><string>foreign</string>"
+        b"<key>Label</key><string>accepted</string></dict></plist>"
+    )
+    with pytest.raises(module.PreimageRefusal) as error:
+        module.parse_projected_plist(body, fields={"Label": str})
+    assert error.value.code == "MALFORMED_TRUSTED_DOCUMENT"
+
+    unique = {"Label": "accepted"}
+    assert module.parse_projected_plist(
+        b'<plist version="1.0"><dict><key>Label</key>'
+        b"<string>accepted</string></dict></plist>",
+        fields={"Label": str},
+    ) == unique
+    assert module.parse_projected_plist(
+        plistlib.dumps(unique, fmt=plistlib.FMT_BINARY),
+        fields={"Label": str},
+    ) == unique
+
+
+def test_binary_plist_duplicate_is_rejected_before_overwrite():
+    module = subject()
+    unique = {"Label": "accepted"}
+    assert module.parse_projected_plist(
+        plistlib.dumps(unique, fmt=plistlib.FMT_BINARY),
+        fields={"Label": str},
+    ) == unique
+
+    binary_duplicate = plistlib.dumps(
+        {"Label": "foreign", "Other": "accepted"},
+        fmt=plistlib.FMT_BINARY,
+        sort_keys=False,
+    )
+    assert binary_duplicate.count(b"Other") == 1
+    binary_duplicate = binary_duplicate.replace(b"Other", b"Label")
+    with pytest.raises(module.PreimageRefusal) as error:
+        module.parse_projected_plist(binary_duplicate, fields={"Label": str})
+    assert error.value.code == "MALFORMED_TRUSTED_DOCUMENT"
+
+
+def test_active_ownership_binds_loaded_program_identity():
+    module = subject()
+    control = module.LABELS[0]
+
+    class Commands(InstalledCommands):
+        def __init__(self, program, arguments=None):
+            super().__init__()
+            self.program = program
+            self.arguments = (
+                module.expected_program_arguments(control, SHA)
+                if arguments is None
+                else arguments
+            )
+
+        def run(self, argv):
+            command = tuple(argv)
+            if command == ("/bin/launchctl", "print", f"system/{control}"):
+                program = "" if self.program is None else f"program = {self.program}\n"
+                arguments = "\n".join(self.arguments)
+                return {
+                    "status": "ok",
+                    "stdout": (
+                        f"{program}state = running\npid = 99\n"
+                        f"arguments = {{\n{arguments}\n}}\n"
+                    ),
+                }
+            if command == (
+                "/bin/ps",
+                "-o",
+                "uid=,gid=,pid=,ppid=",
+                "-p",
+                "99",
+            ):
+                return {"status": "ok", "stdout": "450 450 99 1\n"}
+            return super().run(argv)
+
+    def collect(program, arguments=None, filesystem=None):
+        return module.collect_preimage(
+            expected_release_sha=SHA,
+            expected_tree_sha=TREE,
+            filesystem=filesystem or InstalledFilesystem(module),
+            commands=Commands(program, arguments),
+            principals=InstalledPrincipals(),
+            clock=lambda: "2026-09-09T19:00:00+00:00",
+            platform="darwin",
+            uid=0,
+            euid=0,
+        )
+
+    assert collect(module.PYTHON_BINARY)["classification"] == "ACTIVE_OWNED"
+    assert collect("/synthetic/foreign-executable")["classification"] == "ACTIVE_FOREIGN"
+    foreign_arguments = module.expected_program_arguments(control, SHA)
+    foreign_arguments[4] = "/synthetic/foreign-entrypoint.py"
+    foreign = collect(module.PYTHON_BINARY, foreign_arguments)
+    assert foreign["classification"] == "ACTIVE_FOREIGN"
+    serialized = module.canonical_receipt(foreign)
+    assert b"/synthetic/foreign-entrypoint.py" not in serialized
+    assert foreign["facts"]["services"][0]["arguments_match"] is False
+    assert collect(None)["state"] == "UNSETTLED"
+
+    missing_arguments = Commands(module.PYTHON_BINARY, [])
+    receipt = module.collect_preimage(
+        expected_release_sha=SHA,
+        expected_tree_sha=TREE,
+        filesystem=InstalledFilesystem(module),
+        commands=missing_arguments,
+        principals=InstalledPrincipals(),
+        clock=lambda: "2026-09-09T19:00:00+00:00",
+        platform="darwin",
+        uid=0,
+        euid=0,
+    )
+    assert receipt["state"] == "UNSETTLED"
+
+
+def test_decoy_release_argument_and_rejected_values_never_cross_receipt():
+    module = subject()
+    filesystem = InstalledFilesystem(module)
+    sentinel = "SYNTHETIC_PRIVATE_SENTINEL"
+    for path in module.PLISTS:
+        value = plistlib.loads(filesystem.payloads[path])
+        value["ProgramArguments"] = [
+            "/bin/echo",
+            f"/untrusted/releases/{SHA}/decoy",
+        ]
+        filesystem.payloads[path] = plistlib.dumps(value)
+    invalid = json.loads(filesystem.payloads[module.CODEX_ATTESTATION])
+    invalid["schema_version"] = sentinel
+    filesystem.payloads[module.CODEX_ATTESTATION] = json.dumps(invalid).encode()
+    receipt = module.collect_preimage(
+        expected_release_sha=SHA,
+        expected_tree_sha=TREE,
+        filesystem=filesystem,
+        commands=InstalledCommands(),
+        principals=InstalledPrincipals(),
+        clock=lambda: "2026-09-09T19:00:00+00:00",
+        platform="darwin",
+        uid=0,
+        euid=0,
+    )
+    encoded = module.canonical_receipt(receipt)
+    assert receipt["classification"] == "UNSAFE"
+    assert sentinel.encode() not in encoded
+    assert b"/untrusted/" not in encoded
+
+
+def test_rejected_schema_value_is_not_serialized_even_in_unsafe_receipt():
+    module = subject()
+    filesystem = InstalledFilesystem(module)
+    sentinel = "SYNTHETIC_PRIVATE_SENTINEL"
+    invalid = json.loads(filesystem.payloads[module.CODEX_ATTESTATION])
+    invalid["schema_version"] = sentinel
+    filesystem.payloads[module.CODEX_ATTESTATION] = json.dumps(invalid).encode()
+    receipt = module.collect_preimage(
+        expected_release_sha=SHA,
+        expected_tree_sha=TREE,
+        filesystem=filesystem,
+        commands=InstalledCommands(),
+        principals=InstalledPrincipals(),
+        clock=lambda: "2026-09-09T19:00:00+00:00",
+        platform="darwin",
+        uid=0,
+        euid=0,
+    )
+    assert sentinel.encode() not in module.canonical_receipt(receipt)
+
+
+def test_filesystem_adapter_manifest_read_requires_exact_admitted_sha(monkeypatch):
+    module = subject()
+    reads = []
+    monkeypatch.setattr(
+        module,
+        "_read_anchored_content",
+        lambda path, **_kwargs: reads.append(path) or b"{}",
+    )
+    adapter = module.FilesystemAdapter(expected_release_sha=SHA)
+    adapter._validate_ancestors = lambda _path: None
+    expected = f"{module.SYSTEM_ROOT}/releases/{SHA}/.executive-release-manifest.json"
+    assert adapter.read(expected) == b"{}"
+    with pytest.raises(module.PreimageRefusal) as error:
+        adapter.read("/outside/.executive-release-manifest.json")
+    assert error.value.code == "PATH_ESCAPE"
+    assert reads == [expected]
+
+
+def test_collector_binds_initial_metadata_identity_into_content_read():
+    module = subject()
+
+    class ReplacedFilesystem(InstalledFilesystem):
+        def read(self, path, *, expected=None):
+            assert expected is not None
+            raise module.PreimageUnsettled("FILESYSTEM_TORN")
+
+    receipt = module.collect_preimage(
+        expected_release_sha=SHA,
+        expected_tree_sha=TREE,
+        filesystem=ReplacedFilesystem(module),
+        commands=InstalledCommands(),
+        principals=InstalledPrincipals(),
+        clock=lambda: "2026-09-09T19:00:00+00:00",
+        platform="darwin",
+        uid=0,
+        euid=0,
+    )
+    assert receipt["state"] == "UNSETTLED"
+    assert receipt["reason_codes"] == ["FILESYSTEM_TORN"]
+
+
+def test_content_contracts_are_path_specific():
+    module = subject()
+    assert module._content_contract(module.PLISTS[0]) == (0, 0, 0o644)
+    assert module._content_contract(module.CONTROL_CONFIG) == (0, 450, 0o440)
+    assert module._content_contract(module.WORKER_CONFIG) == (0, 451, 0o440)
+    assert module._content_contract(module.PYTHON_PROVENANCE) == (0, 0, 0o400)
+    assert module._content_contract(module.CODEX_ATTESTATION) == (0, 451, 0o440)
+
+
+def test_anchored_content_read_holds_directory_descriptors_and_final_identity(
+    monkeypatch,
+):
+    module = subject()
+    opened = []
+    closed = []
+    next_fd = iter((10, 11, 12, 13, 14, 99))
+
+    def fake_open(path, flags, **kwargs):
+        descriptor = next(next_fd)
+        opened.append((path, flags, kwargs.get("dir_fd"), descriptor))
+        return descriptor
+
+    def result(mode, *, inode, uid=0, gid=0, size=2):
+        values = [mode, inode, 1, 1, uid, gid, size, 1, 1, 1]
+        return os.stat_result(values)
+
+    def fake_fstat(descriptor):
+        if descriptor == 99:
+            return result(stat.S_IFREG | 0o440, inode=99, gid=450)
+        return result(stat.S_IFDIR | 0o755, inode=descriptor, size=0)
+
+    reads = iter((b"{}", b""))
+    monkeypatch.setattr(module.os, "open", fake_open)
+    monkeypatch.setattr(module.os, "fstat", fake_fstat)
+    monkeypatch.setattr(
+        module.os,
+        "stat",
+        lambda *_args, **_kwargs: result(stat.S_IFREG | 0o440, inode=99, gid=450),
+    )
+    monkeypatch.setattr(module.os, "read", lambda _fd, _size: next(reads))
+    monkeypatch.setattr(module.os, "close", closed.append)
+    bound = fake_fstat(99)
+    expected = {
+        "device": bound.st_dev,
+        "inode": bound.st_ino,
+        "size": bound.st_size,
+        "mtime_ns": bound.st_mtime_ns,
+        "ctime_ns": bound.st_ctime_ns,
+    }
+    assert module._read_anchored_content(
+        module.CONTROL_CONFIG, expected=expected
+    ) == b"{}"
+    assert opened[0][0] == "/"
+    assert [item[0] for item in opened[1:-1]] == [
+        "Library",
+        "Application Support",
+        "MastermindExecutive",
+        "config",
+    ]
+    assert opened[-1][0] == "control.json"
+    assert opened[-1][2] == 14
+    assert opened[-1][1] & os.O_NOFOLLOW
+    assert opened[-1][1] & os.O_NONBLOCK
+    assert closed == [99, 14, 13, 12, 11, 10]
+
+
+class FakeStream:
+    def __init__(self, descriptor):
+        self.descriptor = descriptor
+        self.closed = False
+
+    def fileno(self):
+        return self.descriptor
+
+    def close(self):
+        self.closed = True
+
+
+class FakeChild:
+    def __init__(self):
+        self.pid = 4242
+        self.stdout = FakeStream(101)
+        self.stderr = FakeStream(102)
+        self.running = True
+        self.killed = False
+
+    def wait(self, timeout):
+        assert timeout >= 0
+        self.running = False
+        return 0
+
+    def poll(self):
+        return None if self.running else 0
+
+    def kill(self):
+        self.killed = True
+        self.running = False
+
+
+@dataclass
+class SelectorKey:
+    fileobj: FakeStream
+    data: str
+
+
+class FakeSelector:
+    def __init__(self):
+        self.mapping = {}
+
+    def register(self, stream, _events, data):
+        self.mapping[stream.fileno()] = SelectorKey(stream, data)
+
+    def unregister(self, stream):
+        self.mapping.pop(stream.fileno())
+
+    def get_map(self):
+        return self.mapping
+
+    def select(self, timeout):
+        assert 0 <= timeout <= 0.1
+        return [(key, 1) for key in list(self.mapping.values())]
+
+    def close(self):
+        self.mapping.clear()
+
+
+def test_real_command_path_bounds_reads_and_reports_owned_child_settlement(monkeypatch):
+    module = subject()
+    child = FakeChild()
+    chunks = {101: [b"450 450 99 1\n", b""], 102: [b""]}
+    monkeypatch.setattr(module.os, "set_blocking", lambda _fd, _value: None)
+    monkeypatch.setattr(module.os, "read", lambda fd, _size: chunks[fd].pop(0))
+    adapter = module.CommandAdapter(
+        popen_factory=lambda *_args, **_kwargs: child,
+        selector_factory=FakeSelector,
+        monotonic=lambda: 0.0,
+    )
+    result = adapter.run(("/bin/ps", "-o", "uid=,gid=,pid=,ppid=", "-p", "99"))
+    assert result["stdout"] == "450 450 99 1\n"
+    assert result["probe"] == {
+        "child_pid": 4242,
+        "timed_out": False,
+        "terminated": False,
+        "reaped": True,
+        "partial_output_bytes": 13,
+    }
+    assert child.stdout.closed and child.stderr.closed
+
+
+def test_real_command_path_kills_only_owned_child_and_reaps_on_bound(monkeypatch):
+    module = subject()
+    child = FakeChild()
+    chunks = {101: [b"x" * 16384] * 5, 102: [b""]}
+    monkeypatch.setattr(module.os, "set_blocking", lambda _fd, _value: None)
+    def bounded_read(fd, size):
+        chunk = chunks[fd][0]
+        value, remainder = chunk[:size], chunk[size:]
+        if remainder:
+            chunks[fd][0] = remainder
+        else:
+            chunks[fd].pop(0)
+        return value
+
+    monkeypatch.setattr(module.os, "read", bounded_read)
+    adapter = module.CommandAdapter(
+        popen_factory=lambda *_args, **_kwargs: child,
+        selector_factory=FakeSelector,
+        monotonic=lambda: 0.0,
+    )
+    with pytest.raises(module.PreimageUnsettled) as error:
+        adapter.run(("/bin/ps", "-o", "uid=,gid=,pid=,ppid=", "-p", "99"))
+    assert error.value.code == "COMMAND_OUTPUT_OVERSIZED"
+    assert error.value.facts == {
+        "child_pid": 4242,
+        "timed_out": False,
+        "terminated": True,
+        "reaped": True,
+        "partial_output_bytes": 65537,
+    }
+    assert child.killed is True
+
+
+def test_real_command_timeout_preserves_partial_and_reap_facts(monkeypatch):
+    module = subject()
+    child = FakeChild()
+
+    class NoEventSelector(FakeSelector):
+        def select(self, timeout):
+            assert 0 <= timeout <= 0.1
+            return []
+
+    ticks = iter((0.0, 1.0, 2.0, 3.0, 4.0, 4.1, 4.2, 4.3))
+    monkeypatch.setattr(module.os, "set_blocking", lambda _fd, _value: None)
+    adapter = module.CommandAdapter(
+        popen_factory=lambda *_args, **_kwargs: child,
+        selector_factory=NoEventSelector,
+        monotonic=lambda: next(ticks),
+    )
+    with pytest.raises(module.PreimageUnsettled) as error:
+        adapter.run(("/bin/ps", "-o", "uid=,gid=,pid=,ppid=", "-p", "99"))
+    assert error.value.code == "COMMAND_TIMEOUT"
+    assert error.value.facts == {
+        "child_pid": 4242,
+        "timed_out": True,
+        "terminated": True,
+        "reaped": True,
+        "partial_output_bytes": 0,
+    }
+    assert child.killed is True
+
+
+def test_post_spawn_selector_failure_still_settles_owned_child(monkeypatch):
+    module = subject()
+    child = FakeChild()
+    monkeypatch.setattr(module.os, "set_blocking", lambda _fd, _value: None)
+
+    def selector_failure():
+        raise OSError("synthetic selector setup failure")
+
+    adapter = module.CommandAdapter(
+        popen_factory=lambda *_args, **_kwargs: child,
+        selector_factory=selector_failure,
+        monotonic=lambda: 0.0,
+    )
+    with pytest.raises(module.PreimageUnsettled) as error:
+        adapter.run(("/bin/ps", "-o", "uid=,gid=,pid=,ppid=", "-p", "99"))
+    assert error.value.facts == {
+        "child_pid": 4242,
+        "timed_out": False,
+        "terminated": True,
+        "reaped": True,
+        "partial_output_bytes": 0,
+    }
+    assert child.killed is True
+    assert child.stdout.closed and child.stderr.closed
+
+
+def test_post_spawn_cleanup_failure_preserves_unknown_custody(monkeypatch):
+    module = subject()
+
+    class UnsettledChild(FakeChild):
+        def kill(self):
+            raise OSError("synthetic kill failure")
+
+        def wait(self, timeout):
+            raise subprocess.TimeoutExpired("synthetic", timeout)
+
+    class RegistrationFailure(FakeSelector):
+        def register(self, stream, _events, data):
+            raise OSError("synthetic registration failure")
+
+    child = UnsettledChild()
+    monkeypatch.setattr(module.os, "set_blocking", lambda _fd, _value: None)
+    adapter = module.CommandAdapter(
+        popen_factory=lambda *_args, **_kwargs: child,
+        selector_factory=RegistrationFailure,
+        monotonic=lambda: 0.0,
+    )
+    with pytest.raises(module.PreimageUnsettled) as error:
+        adapter.run(("/bin/ps", "-o", "uid=,gid=,pid=,ppid=", "-p", "99"))
+    assert error.value.facts == {
+        "child_pid": 4242,
+        "timed_out": False,
+        "terminated": False,
+        "reaped": False,
+        "partial_output_bytes": 0,
+        "termination_unknown": True,
+        "reap_unknown": True,
+    }
+    assert child.stdout.closed and child.stderr.closed
+
+
+@pytest.mark.parametrize(
+    ("completed_at", "accepted"),
+    [(3.5, True), (5.0, True), (5.000001, False)],
+)
+def test_command_result_is_accepted_only_after_fresh_deadline_sample(
+    monkeypatch, completed_at, accepted
+):
+    module = subject()
+    now = [0.0]
+
+    class DelayedChild(FakeChild):
+        def wait(self, timeout):
+            assert timeout >= 0
+            now[0] = completed_at
+            self.running = False
+            return 0
+
+    class EmptySelector(FakeSelector):
+        def get_map(self):
+            return {}
+
+    child = DelayedChild()
+    monkeypatch.setattr(module.os, "set_blocking", lambda _fd, _value: None)
+    adapter = module.CommandAdapter(
+        popen_factory=lambda *_args, **_kwargs: child,
+        selector_factory=EmptySelector,
+        monotonic=lambda: now[0],
+    )
+    command = ("/bin/ps", "-o", "uid=,gid=,pid=,ppid=", "-p", "99")
+    if accepted:
+        assert adapter.run(command)["probe"]["reaped"] is True
+    else:
+        with pytest.raises(module.PreimageUnsettled) as error:
+            adapter.run(command)
+        assert error.value.code == "COMMAND_TIMEOUT"
+        assert error.value.facts["timed_out"] is True
+        assert error.value.facts["reaped"] is True
+        assert error.value.facts["partial_output_bytes"] == 0
+
+
+def test_error_settlement_lateness_is_reported_with_reaped_facts(monkeypatch):
+    module = subject()
+    now = [0.0]
+
+    class LateSettlementChild(FakeChild):
+        def wait(self, timeout):
+            now[0] = 5.25
+            self.running = False
+            return 0
+
+    class RegistrationFailure(FakeSelector):
+        def register(self, stream, _events, data):
+            raise OSError("synthetic registration failure")
+
+    child = LateSettlementChild()
+    monkeypatch.setattr(module.os, "set_blocking", lambda _fd, _value: None)
+    adapter = module.CommandAdapter(
+        popen_factory=lambda *_args, **_kwargs: child,
+        selector_factory=RegistrationFailure,
+        monotonic=lambda: now[0],
+    )
+    with pytest.raises(module.PreimageUnsettled) as error:
+        adapter.run(("/bin/ps", "-o", "uid=,gid=,pid=,ppid=", "-p", "99"))
+    assert error.value.code == "COMMAND_TIMEOUT"
+    assert error.value.facts["timed_out"] is True
+    assert error.value.facts["terminated"] is True
+    assert error.value.facts["reaped"] is True
+
+
+def test_stream_cleanup_failure_is_unsettled_and_deadline_checked(monkeypatch):
+    module = subject()
+    now = [0.0]
+
+    class ClosingStream(FakeStream):
+        def close(self):
+            now[0] = 5.25
+            raise OSError("synthetic close failure")
+
+    child = FakeChild()
+    child.stdout = ClosingStream(101)
+    child.stderr = ClosingStream(102)
+
+    class EmptySelector(FakeSelector):
+        def get_map(self):
+            return {}
+
+    monkeypatch.setattr(module.os, "set_blocking", lambda _fd, _value: None)
+    adapter = module.CommandAdapter(
+        popen_factory=lambda *_args, **_kwargs: child,
+        selector_factory=EmptySelector,
+        monotonic=lambda: now[0],
+    )
+    with pytest.raises(module.PreimageUnsettled) as error:
+        adapter.run(("/bin/ps", "-o", "uid=,gid=,pid=,ppid=", "-p", "99"))
+    assert error.value.code == "COMMAND_TIMEOUT"
+    assert error.value.facts["reaped"] is True
+    assert error.value.facts["cleanup_unknown"] is True
+    assert error.value.facts["timed_out"] is True
+
+
+def test_late_bounded_read_retains_known_partial_byte_count(monkeypatch):
+    module = subject()
+    now = [0.0]
+    child = FakeChild()
+
+    class ReadSelector(FakeSelector):
+        def select(self, timeout):
+            assert 0 <= timeout <= 0.1
+            return [(SelectorKey(child.stdout, "stdout"), 1)]
+
+    def late_read(_fd, size):
+        assert size == 16 * 1024
+        now[0] = 4.1
+        return b"late"
+
+    monkeypatch.setattr(module.os, "set_blocking", lambda _fd, _value: None)
+    monkeypatch.setattr(module.os, "read", late_read)
+    adapter = module.CommandAdapter(
+        popen_factory=lambda *_args, **_kwargs: child,
+        selector_factory=ReadSelector,
+        monotonic=lambda: now[0],
+    )
+    with pytest.raises(module.PreimageUnsettled) as error:
+        adapter.run(("/bin/ps", "-o", "uid=,gid=,pid=,ppid=", "-p", "99"))
+    assert error.value.code == "COMMAND_TIMEOUT"
+    assert error.value.facts["partial_output_bytes"] == 4
+    assert error.value.facts["terminated"] is True
+    assert error.value.facts["reaped"] is True
