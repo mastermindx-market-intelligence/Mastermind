@@ -345,12 +345,41 @@ class _PackageSnapshot:
         self.nodes: dict[str, _SnapshotNode] = {}
         self.errors = errors
         self._fds: list[int] = []
+        self._directories: list[tuple[int, int | None, str, str, os.stat_result, tuple[str, ...], bool]] = []
+
+    @staticmethod
+    def _same_identity(left: os.stat_result, right: os.stat_result) -> bool:
+        return (left.st_dev, left.st_ino, stat.S_IFMT(left.st_mode)) == (
+            right.st_dev, right.st_ino, stat.S_IFMT(right.st_mode)
+        )
+
+    @staticmethod
+    def _same_metadata(left: os.stat_result, right: os.stat_result) -> bool:
+        return _PackageSnapshot._same_identity(left, right) and (
+            left.st_mtime_ns, left.st_ctime_ns, left.st_size
+        ) == (right.st_mtime_ns, right.st_ctime_ns, right.st_size)
 
     def _record(self, relative: str, code: str, message: str) -> None:
         self.errors.append(_error(self.root, self.root / relative, code, message))
 
-    def _open_directory(self, name: str, parent_fd: int | None, relative: str) -> int | None:
-        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    def _filesystem_invalid(self, relative: str, message: str) -> None:
+        self._record(relative, "PACKAGE_FILESYSTEM_INVALID", message)
+
+    def _admit_capabilities(self) -> bool:
+        flags = ("O_NOFOLLOW", "O_DIRECTORY", "O_CLOEXEC", "O_NONBLOCK")
+        if (
+            not all(isinstance(getattr(os, flag, None), int) and getattr(os, flag) != 0 for flag in flags)
+            or os.open not in os.supports_dir_fd
+            or os.stat not in os.supports_dir_fd
+            or os.stat not in os.supports_follow_symlinks
+            or os.listdir not in os.supports_fd
+        ):
+            self._filesystem_invalid("", "required descriptor-safe filesystem capability is unavailable")
+            return False
+        return True
+
+    def _open_directory(self, name: str, parent_fd: int | None, relative: str, strict: bool = True) -> int | None:
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
         try:
             info = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
             if stat.S_ISLNK(info.st_mode):
@@ -360,58 +389,71 @@ class _PackageSnapshot:
                 self._record(relative, "PACKAGE_FILESYSTEM_INVALID", "package directory cannot be opened")
                 return None
             fd = os.open(name, flags, dir_fd=parent_fd)
-            if not stat.S_ISDIR(os.fstat(fd).st_mode):
-                os.close(fd)
+            self._fds.append(fd)
+            opened = os.fstat(fd)
+            if not stat.S_ISDIR(opened.st_mode) or not self._same_identity(info, opened):
                 self._record(relative, "PACKAGE_FILESYSTEM_INVALID", "package directory cannot be opened")
                 return None
-            self._fds.append(fd)
+            names = tuple(sorted(os.listdir(fd)))
+            self._directories.append((fd, parent_fd, name, relative, info, names, strict))
             return fd
         except FileNotFoundError:
             self._record(relative, "MISSING_FILE", "required file is absent")
-        except OSError as error:
-            if error.errno == errno.ELOOP:
+        except (OSError, TypeError) as error:
+            if isinstance(error, OSError) and error.errno == errno.ELOOP:
                 self._record(relative, "SYMLINK_FORBIDDEN", "package directories may not contain symbolic links")
             else:
                 self._record(relative, "PACKAGE_FILESYSTEM_INVALID", "package directory cannot be opened safely")
         return None
 
     def _capture_directory(self, fd: int, relative: str) -> None:
-        try:
-            names = sorted(os.listdir(fd))
-        except OSError:
-            self._record(relative, "PACKAGE_FILESYSTEM_INVALID", "plugin package filesystem cannot be enumerated")
-            return
-        for name in names:
-            child = f"{relative}/{name}" if relative else name
-            try:
-                info = os.stat(name, dir_fd=fd, follow_symlinks=False)
-            except OSError:
-                self._record(child, "PACKAGE_FILESYSTEM_INVALID", "plugin package node cannot be inspected")
+        pending = [(fd, relative)]
+        while pending:
+            current_fd, current_relative = pending.pop()
+            directory = next((entry for entry in self._directories if entry[0] == current_fd), None)
+            if directory is None:
                 continue
-            if stat.S_ISLNK(info.st_mode):
-                self.nodes[child] = _SnapshotNode(child, "symlink")
-                self._record(child, "SYMLINK_FORBIDDEN", "plugin packages may not contain symbolic links")
-            elif stat.S_ISDIR(info.st_mode):
-                self.nodes[child] = _SnapshotNode(child, "directory")
-                nested = self._open_directory(name, fd, child)
-                if nested is not None:
-                    self._capture_directory(nested, child)
-            elif stat.S_ISREG(info.st_mode):
-                self._capture_file(name, fd, child)
-            else:
-                self.nodes[child] = _SnapshotNode(child, "special")
-                self._record(child, "PACKAGE_FILESYSTEM_INVALID", "plugin package node must be a regular file or directory")
+            for name in directory[5]:
+                child = f"{current_relative}/{name}" if current_relative else name
+                try:
+                    info = os.stat(name, dir_fd=current_fd, follow_symlinks=False)
+                except (OSError, TypeError):
+                    self._filesystem_invalid(child, "plugin package node cannot be inspected")
+                    continue
+                if stat.S_ISLNK(info.st_mode):
+                    self.nodes[child] = _SnapshotNode(child, "symlink")
+                    self._record(child, "SYMLINK_FORBIDDEN", "plugin packages may not contain symbolic links")
+                elif stat.S_ISDIR(info.st_mode):
+                    nested = self._open_directory(name, current_fd, child)
+                    if nested is not None:
+                        self.nodes[child] = _SnapshotNode(child, "directory")
+                        pending.append((nested, child))
+                elif stat.S_ISREG(info.st_mode):
+                    self._capture_file(name, current_fd, child, info)
+                else:
+                    self.nodes[child] = _SnapshotNode(child, "special")
+                    self._filesystem_invalid(child, "plugin package node must be a regular file or directory")
 
-    def _capture_file(self, name: str, parent_fd: int, relative: str) -> None:
-        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
+    def _capture_file(self, name: str, parent_fd: int, relative: str, expected: os.stat_result) -> None:
+        flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
         try:
             fd = os.open(name, flags, dir_fd=parent_fd)
             try:
-                if not stat.S_ISREG(os.fstat(fd).st_mode):
+                opened = os.fstat(fd)
+                if not stat.S_ISREG(opened.st_mode) or not self._same_identity(expected, opened):
                     self.nodes[relative] = _SnapshotNode(relative, "invalid")
-                    self._record(relative, "PACKAGE_FILESYSTEM_INVALID", "plugin package file cannot be read")
+                    self._filesystem_invalid(relative, "plugin package file changed before open")
                     return
                 raw = b"".join(iter(lambda: os.read(fd, 65536), b""))
+                if not self._same_metadata(opened, os.fstat(fd)):
+                    self.nodes[relative] = _SnapshotNode(relative, "invalid")
+                    self._filesystem_invalid(relative, "plugin package file changed while being read")
+                    return
+                current = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+                if not self._same_metadata(opened, current):
+                    self.nodes[relative] = _SnapshotNode(relative, "invalid")
+                    self._filesystem_invalid(relative, "plugin package file changed during capture")
+                    return
                 try:
                     text = raw.decode("utf-8")
                 except UnicodeDecodeError:
@@ -421,17 +463,20 @@ class _PackageSnapshot:
                 self.nodes[relative] = _SnapshotNode(relative, "file", text)
             finally:
                 os.close(fd)
-        except OSError:
+        except (OSError, TypeError):
             self.nodes[relative] = _SnapshotNode(relative, "invalid")
-            self._record(relative, "PACKAGE_FILESYSTEM_INVALID", "plugin package file cannot be read")
+            self._filesystem_invalid(relative, "plugin package file cannot be read")
 
     def capture(self) -> None:
         # Every lexical component is opened no-follow; no Path.resolve() decision exists.
+        if not self._admit_capabilities():
+            return
         parts = self.root.parts
-        fd = os.open(parts[0], os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0))
-        self._fds.append(fd)
-        for part in parts[1:]:
-            next_fd = self._open_directory(part, fd, "")
+        fd = self._open_directory(parts[0], None, "", strict=False)
+        if fd is None:
+            return
+        for index, part in enumerate(parts[1:], start=1):
+            next_fd = self._open_directory(part, fd, "", strict=index == len(parts) - 1)
             if next_fd is None:
                 return
             fd = next_fd
@@ -440,6 +485,21 @@ class _PackageSnapshot:
             if top_fd is not None:
                 self.nodes[top] = _SnapshotNode(top, "directory")
                 self._capture_directory(top_fd, top)
+
+    def settle(self) -> None:
+        """Detect replacement, mutation, or inventory drift before admitting this snapshot."""
+        for _round in range(2):
+            for fd, parent_fd, name, relative, initial, names, strict in self._directories:
+                try:
+                    opened = os.fstat(fd)
+                    current = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+                    if not self._same_identity(initial, opened) or not self._same_identity(initial, current):
+                        self._filesystem_invalid(relative, "package directory changed during validation")
+                        continue
+                    if strict and (not self._same_metadata(initial, opened) or not self._same_metadata(initial, current) or tuple(sorted(os.listdir(fd))) != names):
+                        self._filesystem_invalid(relative, "package directory changed during validation")
+                except (OSError, TypeError):
+                    self._filesystem_invalid(relative, "package directory cannot be settled safely")
 
     def close(self) -> None:
         for fd in reversed(self._fds):
@@ -1076,14 +1136,26 @@ def _scan_files(root: Path, errors: list[dict[str, str]]) -> None:
 
 
 def validate_repository(root: Path) -> dict[str, Any]:
+    """Validate one descriptor-owned repository snapshot and always release it."""
     global _ACTIVE_SNAPSHOT
     root = root.absolute()
     errors: list[dict[str, str]] = []
     snapshot = _PackageSnapshot(root, errors)
     try:
-        snapshot.capture()
-    except OSError:
-        errors.append(_error(root, root, "PACKAGE_FILESYSTEM_INVALID", "repository root cannot be opened safely"))
+        try:
+            snapshot.capture()
+        except (OSError, TypeError):
+            errors.append(_error(root, root, "PACKAGE_FILESYSTEM_INVALID", "repository root cannot be opened safely"))
+        return _validate_repository_snapshot(root, errors, snapshot)
+    finally:
+        _ACTIVE_SNAPSHOT = None
+        snapshot.close()
+
+
+def _validate_repository_snapshot(
+    root: Path, errors: list[dict[str, str]], snapshot: _PackageSnapshot
+) -> dict[str, Any]:
+    global _ACTIVE_SNAPSHOT
     _ACTIVE_SNAPSHOT = snapshot
     marketplace_path = root / MARKETPLACE_PATH
     marketplace = _json(root, marketplace_path, errors)
@@ -1198,6 +1270,7 @@ def validate_repository(root: Path) -> dict[str, Any]:
         )
 
     _scan_files(root, errors)
+    snapshot.settle()
     errors.sort(key=lambda item: (item["path"], item["code"], item["message"]))
     result = {
         "schema": VALIDATION_SCHEMA,
@@ -1206,8 +1279,6 @@ def validate_repository(root: Path) -> dict[str, Any]:
         "plugins": plugin_rows,
         "errors": errors,
     }
-    _ACTIVE_SNAPSHOT = None
-    snapshot.close()
     return result
 
 

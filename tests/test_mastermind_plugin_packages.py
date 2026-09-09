@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import errno
 import json
 import os
 import re
@@ -149,6 +150,167 @@ def test_agents_ancestor_symlink_is_refused_before_its_marketplace_is_read(
 
     assert result["ok"] is False
     assert "SYMLINK_FORBIDDEN" in {error["code"] for error in result["errors"]}  # type: ignore[index]
+
+
+def test_descriptor_snapshot_refuses_missing_nofollow_capability_before_reading_content(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Removing a required descriptor flag must fail closed, not degrade to flag value zero."""
+    monkeypatch.delattr(plugin_validator.os, "O_NOFOLLOW", raising=False)
+
+    result = validate_repository(ROOT)
+
+    assert result["ok"] is False
+    assert "PACKAGE_FILESYSTEM_INVALID" in {error["code"] for error in result["errors"]}
+
+
+@pytest.mark.parametrize("capability", ("supports_dir_fd", "supports_fd", "supports_follow_symlinks"))
+def test_descriptor_snapshot_refuses_each_missing_descriptor_primitive(
+    monkeypatch: pytest.MonkeyPatch, capability: str
+) -> None:
+    """Capability-set loss is rejected before package bytes are admitted."""
+    monkeypatch.setattr(plugin_validator.os, capability, frozenset())
+
+    result = validate_repository(ROOT)
+
+    assert result["ok"] is False
+    assert "PACKAGE_FILESYSTEM_INVALID" in {error["code"] for error in result["errors"]}
+
+
+def test_descriptor_snapshot_handles_unavailable_nofollow_stat_as_typed_refusal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A platform without no-follow stat support returns a validator refusal, never TypeError."""
+    actual_stat = plugin_validator.os.stat
+
+    def unavailable_stat(*args: object, **kwargs: object) -> os.stat_result:
+        if kwargs.get("follow_symlinks") is False:
+            raise TypeError("follow_symlinks unsupported")
+        return actual_stat(*args, **kwargs)
+
+    monkeypatch.setattr(plugin_validator.os, "stat", unavailable_stat)
+    result = _validate_repository_twice_without_exception(ROOT)
+
+    assert result["ok"] is False
+    assert "PACKAGE_FILESYSTEM_INVALID" in {error["code"] for error in result["errors"]}
+
+
+def test_descriptor_snapshot_is_iterative_for_deep_unexpected_directories(tmp_path: Path) -> None:
+    """Unexpected nesting must be classified without recursive traversal failure."""
+    _copy_package(tmp_path)
+    nested = tmp_path / "plugins/mastermind-cortex/deep"
+    nested.mkdir()
+    fd = os.open(nested, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for _index in range(1050):
+            os.mkdir("d", dir_fd=fd)
+            next_fd = os.open("d", os.O_RDONLY | os.O_DIRECTORY, dir_fd=fd)
+            os.close(fd)
+            fd = next_fd
+    finally:
+        os.close(fd)
+
+    result = _validate_repository_twice_without_exception(tmp_path)
+
+    assert result["ok"] is False
+    assert "UNEXPECTED_PACKAGE_DIRECTORY" in {error["code"] for error in result["errors"]}
+
+
+def test_descriptor_snapshot_returns_typed_error_for_directory_fstat_failure_without_leak(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A descriptor opened before fstat failure belongs to the snapshot and is cleaned up."""
+    actual_fstat = plugin_validator.os.fstat
+    calls = 0
+
+    def fail_one_directory_fstat(fd: int) -> os.stat_result:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError(errno.EIO, "injected fstat failure")
+        return actual_fstat(fd)
+
+    monkeypatch.setattr(plugin_validator.os, "fstat", fail_one_directory_fstat)
+    try:
+        result = validate_repository(ROOT)
+    except Exception as error:
+        pytest.fail(f"repository validator raised {type(error).__name__}: {error}")
+
+    assert result["ok"] is False
+    assert "PACKAGE_FILESYSTEM_INVALID" in {error["code"] for error in result["errors"]}
+
+
+def test_descriptor_snapshot_refuses_byte_identical_file_replacement_at_open_boundary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Replacing an inspected file before its descriptor open cannot preserve trusted bytes."""
+    _copy_package(tmp_path)
+    target = tmp_path / ".agents/plugins/marketplace.json"
+    original_open = plugin_validator.os.open
+    replaced = False
+
+    def replace_before_open(name: object, flags: int, *args: object, **kwargs: object) -> int:
+        nonlocal replaced
+        if name == "marketplace.json" and not replaced:
+            replaced = True
+            replacement = target.with_name("marketplace-replacement.json")
+            target.rename(replacement)
+            target.write_bytes(replacement.read_bytes())
+        return original_open(name, flags, *args, **kwargs)
+
+    monkeypatch.setattr(plugin_validator.os, "open", replace_before_open)
+    result = validate_repository(tmp_path)
+
+    assert result["ok"] is False
+    assert "PACKAGE_FILESYSTEM_INVALID" in {error["code"] for error in result["errors"]}
+
+
+def test_descriptor_snapshot_refuses_late_directory_entry_after_fd_enumeration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A name added after the captured listing is found again during settlement."""
+    _copy_package(tmp_path)
+    original_listdir = plugin_validator.os.listdir
+    injected = False
+
+    def add_after_listdir(fd: int) -> list[str]:
+        nonlocal injected
+        names = original_listdir(fd)
+        if not injected and "marketplace.json" in names:
+            injected = True
+            created = os.open("late.txt", os.O_WRONLY | os.O_CREAT, 0o600, dir_fd=fd)
+            try:
+                os.write(created, b"late\n")
+            finally:
+                os.close(created)
+        return names
+
+    monkeypatch.setattr(plugin_validator.os, "listdir", add_after_listdir)
+    result = validate_repository(tmp_path)
+
+    assert result["ok"] is False
+    assert "PACKAGE_FILESYSTEM_INVALID" in {error["code"] for error in result["errors"]}
+
+
+def test_descriptor_snapshot_settles_agents_link_after_semantic_scan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A late .agents replacement is a descriptor-graph change even after all parsing succeeds."""
+    _copy_package(tmp_path)
+    original_scan = plugin_validator._scan_files
+
+    def replace_after_scan(root: Path, errors: list[dict[str, str]]) -> None:
+        original_scan(root, errors)
+        agents = root / ".agents"
+        moved = root / "old-agents"
+        agents.rename(moved)
+        shutil.copytree(moved, agents)
+
+    monkeypatch.setattr(plugin_validator, "_scan_files", replace_after_scan)
+    result = validate_repository(tmp_path)
+
+    assert result["ok"] is False
+    assert "PACKAGE_FILESYSTEM_INVALID" in {error["code"] for error in result["errors"]}
 
 
 @pytest.mark.parametrize("value", ([], {}))
