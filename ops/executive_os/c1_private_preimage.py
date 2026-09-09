@@ -683,6 +683,7 @@ def service_owned(
         and process.get("uid") == uid
         and process.get("gid") == gid
         and process.get("pid", 0) > 0
+        and process.get("ppid") == 1
     )
 
 
@@ -1068,17 +1069,130 @@ def parse_content_document(
     )
 
 
+def _metadata_contract(path: str) -> dict[str, int | str | None]:
+    file_contracts = {
+        **{path: (0, 0, 0o644) for path in PLISTS},
+        CONTROL_CONFIG: (0, 450, 0o440),
+        WORKER_CONFIG: (0, 451, 0o440),
+        PYTHON_PROVENANCE: (0, 0, 0o400),
+        CODEX_ATTESTATION: (0, 451, 0o440),
+        f"{SYSTEM_ROOT}/config/sol-state-relay.json": (0, 452, 0o440),
+        f"{SYSTEM_ROOT}/config/sol-state-relay.token": (452, 452, 0o400),
+        f"{SYSTEM_ROOT}/config/agent-relay.json": (457, 457, 0o400),
+        f"{SYSTEM_ROOT}/config/agent-relay.token": (457, 457, 0o400),
+        f"{SYSTEM_ROOT}/config/executive-dr-key.b64": (450, 450, 0o400),
+        f"{SYSTEM_ROOT}/config/control-env-canary": (0, 450, 0o440),
+        f"{RUNTIME_ROOT}/control/dr/executive-dr-token": (450, 450, 0o400),
+        f"{RUNTIME_ROOT}/control/canaries/secret-canary.json": (450, 450, 0o400),
+        f"{RUNTIME_ROOT}/control/canaries/control-environment-attestation.json": (
+            450,
+            450,
+            0o400,
+        ),
+        f"{RUNTIME_ROOT}/workers/codex-01/provider-home/auth.json": (451, 451, 0o600),
+    }
+    if path in file_contracts:
+        uid, gid, mode = file_contracts[path]
+        return {
+            "type": "file",
+            "uid": uid,
+            "gid": gid,
+            "mode": mode,
+            "required_mode": 0,
+            "forbidden_mode": 0,
+            "link_count": 1,
+        }
+    directory_contracts = {
+        f"{RUNTIME_ROOT}/jobs/workspaces": (450, 451, 0o710),
+        f"{RUNTIME_ROOT}/jobs/runs": (450, 451, 0o710),
+        f"{RUNTIME_ROOT}/control/launch-receipts": (450, 450, 0o700),
+        f"{RUNTIME_ROOT}/control/backups": (450, 450, 0o700),
+        f"{RUNTIME_ROOT}/control/dr-receipts": (450, 450, 0o700),
+    }
+    if path in directory_contracts:
+        uid, gid, mode = directory_contracts[path]
+        return {
+            "type": "directory",
+            "uid": uid,
+            "gid": gid,
+            "mode": mode,
+            "required_mode": 0,
+            "forbidden_mode": 0,
+            "link_count": None,
+        }
+    socket_contracts = {
+        "/var/run/mastermind-executive/ceo-ingress.sock": (450, 452, 0o660),
+        "/var/run/mastermind-dialogue-observation/dialogue-observation.sock": (
+            450,
+            457,
+            0o660,
+        ),
+        "/var/run/mastermind-agent-relay/agent-relay.sock": (457, 457, 0o660),
+    }
+    if path in socket_contracts:
+        uid, gid, mode = socket_contracts[path]
+        return {
+            "type": "socket",
+            "uid": uid,
+            "gid": gid,
+            "mode": mode,
+            "required_mode": 0,
+            "forbidden_mode": 0,
+            "link_count": None,
+        }
+    if re.fullmatch(
+        re.escape(f"{SYSTEM_ROOT}/releases/") + r"[0-9a-f]{40}", path
+    ):
+        return {
+            "type": "directory",
+            "uid": 0,
+            "gid": 0,
+            "mode": None,
+            "required_mode": 0o055,
+            "forbidden_mode": 0o022,
+            "link_count": None,
+        }
+    if re.fullmatch(
+        re.escape(f"{SYSTEM_ROOT}/releases/")
+        + r"[0-9a-f]{40}/\.executive-release-manifest\.json",
+        path,
+    ):
+        return {
+            "type": "file",
+            "uid": 0,
+            "gid": 0,
+            "mode": 0o444,
+            "required_mode": 0,
+            "forbidden_mode": 0,
+            "link_count": 1,
+        }
+    raise PreimageRefusal("PATH_ESCAPE")
+
+
 def _metadata_is_unsafe(item: dict[str, Any]) -> bool:
     if not item.get("exists"):
         return False
-    if item.get("type") in {"symlink", "other"}:
+    try:
+        contract = _metadata_contract(item.get("path"))
+    except (PreimageRefusal, TypeError):
         return True
     mode = item.get("mode")
+    exact_mode = contract["mode"]
+    required_mode = contract["required_mode"]
+    forbidden_mode = contract["forbidden_mode"]
+    expected_link_count = contract["link_count"]
     return bool(
-        item.get("uid") not in {0, 450, 451, 452, 457}
+        item.get("type") != contract["type"]
+        or item.get("uid") != contract["uid"]
+        or item.get("gid") != contract["gid"]
         or not isinstance(mode, int)
-        or mode & 0o022
-        or (item.get("type") == "file" and item.get("link_count") != 1)
+        or (exact_mode is not None and mode != exact_mode)
+        or (isinstance(required_mode, int) and mode & required_mode != required_mode)
+        or (isinstance(forbidden_mode, int) and mode & forbidden_mode)
+        or (
+            expected_link_count is not None
+            and item.get("link_count") != expected_link_count
+        )
     )
 
 
@@ -1116,13 +1230,16 @@ class FilesystemAdapter:
     def metadata(self, path: str) -> dict[str, Any]:
         if not _is_frozen_path(path):
             raise PreimageRefusal("PATH_ESCAPE")
-        self._validate_ancestors(path)
+        ancestors = self._validate_ancestors(path)
         try:
-            return project_metadata(path, os.lstat(path))
+            result = project_metadata(path, os.lstat(path))
         except FileNotFoundError:
-            return {"path": path, "exists": False}
+            result = {"path": path, "exists": False}
         except PermissionError:
             raise PreimageUnsettled("FILESYSTEM_DENIED") from None
+        if ancestors != self._validate_ancestors(path):
+            raise PreimageUnsettled("FILESYSTEM_TORN")
+        return result
 
     def read(self, path: str, *, expected: dict[str, Any] | None = None) -> bytes:
         if path not in CONTENT_PATHS and path != self._manifest_path:

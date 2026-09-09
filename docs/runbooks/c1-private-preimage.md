@@ -65,13 +65,20 @@ Private config, tokens, keys, canaries, provider auth, DR, job, backup, relay,
 and socket paths are metadata-only. Their bytes, hashes, values, prefixes, and
 suffixes are never read or emitted. Metadata is restricted to lexical path,
 existence, type, device, inode, link count, UID, GID, mode, size, `mtime_ns`,
-and `ctime_ns`.
+and `ctime_ns`. Each frozen path has a closed expected object type and the
+principal, group, and exact mode declared by its current owner. Private files
+also require one hard link. The admitted release root follows the canonical
+release-manifest rule instead of an invented duplicate verifier: root:wheel,
+no group/other write, both service traversal bits, and no ACL. Socket paths
+must be sockets, and fixed runtime directories must be directories.
 
 Filesystem reads reject final symlinks and unexpected ancestor symlinks, require
 read-only `O_NOFOLLOW|O_CLOEXEC|O_NONBLOCK`, apply path-specific descriptor
 type/owner/group/mode/link contracts, bind the metadata/ACL observation to the
 opened descriptor and post-read named identity, recheck ancestor identities,
-and reject torn observations. The exact macOS
+and reject torn observations. Metadata-only observations likewise compare the
+complete admitted ancestor identity before and after the final `lstat`, even
+when the final path is absent. The exact macOS
 `/var -> /private/var` alias is the only accepted alias. ACL checks use the
 macOS stat marker and bind pre/post device and inode.
 
@@ -134,10 +141,12 @@ this precedence:
 `ACTIVE_OWNED` binds the frozen launchd label, loaded `program` and `arguments`
 fields, exact disk ProgramArguments and working directory, the admitted expected
 release, plist user/group, and the UID/GID returned for launchd's positive PID.
+The process must also have launchd as its direct parent (`PPID == 1`).
 Loaded arguments must exactly equal the internally retained validated disk
 arguments; raw values are never projected. A different executable, entrypoint,
-argument, or release is `ACTIVE_FOREIGN`; missing or ambiguous loaded identity
-is `UNSETTLED`. None can fall through to owned.
+argument, release, principal, or settled non-launchd parent is
+`ACTIVE_FOREIGN`; missing or ambiguous loaded/process identity is `UNSETTLED`.
+None can fall through to owned.
 
 `ABSENT_CLEAN` additionally requires coherent absence of the whole frozen
 surface, all four principals, and every service. A residual socket, principal,

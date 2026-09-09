@@ -255,6 +255,10 @@ def test_launchd_and_process_parsers_are_closed_and_reject_ambiguity():
             module.parse_launchd_state(text)
     with pytest.raises(module.PreimageUnsettled):
         module.parse_process_identity("451 451 99 1\n", expected_pid=412)
+    for text in ("", "450 450 412\n", "450 450 412 nope\n"):
+        with pytest.raises(module.PreimageUnsettled) as error:
+            module.parse_process_identity(text, expected_pid=412)
+        assert error.value.code == "MALFORMED_PROCESS"
 
 
 def test_metadata_projection_contains_no_content_or_hash():
@@ -695,10 +699,22 @@ class InstalledFilesystem:
                 }
             )
         self.present = set(self.payloads) | {release_root}
+        self.metadata_overrides = {}
 
     def metadata(self, path):
+        if path in self.metadata_overrides:
+            return {"path": path, "exists": True, **self.metadata_overrides[path]}
         if path not in self.present:
             return {"path": path, "exists": False}
+        contracts = {
+            **{plist: (0, 0, 0o644) for plist in subject().PLISTS},
+            subject().CONTROL_CONFIG: (0, 450, 0o440),
+            subject().WORKER_CONFIG: (0, 451, 0o440),
+            subject().PYTHON_PROVENANCE: (0, 0, 0o400),
+            subject().CODEX_ATTESTATION: (0, 451, 0o440),
+            self.manifest_path: (0, 0, 0o444),
+        }
+        uid, gid, mode = contracts.get(path, (0, 0, 0o755))
         return {
             "path": path,
             "exists": True,
@@ -706,9 +722,9 @@ class InstalledFilesystem:
             "device": 1,
             "inode": abs(hash(path)),
             "link_count": 1,
-            "uid": 0,
-            "gid": 0,
-            "mode": 0o440 if path in self.payloads else 0o755,
+            "uid": uid,
+            "gid": gid,
+            "mode": mode,
             "size": len(self.payloads.get(path, b"")),
             "mtime_ns": 1,
             "ctime_ns": 1,
@@ -774,6 +790,90 @@ def collect_installed(*, foreign_active=False):
         uid=0,
         euid=0,
     )
+
+
+def metadata_fixture(*, kind="file", uid=452, gid=452, mode=0o400):
+    return {
+        "type": kind,
+        "device": 1,
+        "inode": 987,
+        "link_count": 1,
+        "uid": uid,
+        "gid": gid,
+        "mode": mode,
+        "size": 12,
+        "mtime_ns": 1,
+        "ctime_ns": 1,
+    }
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        metadata_fixture(mode=0o644),
+        metadata_fixture(kind="directory", mode=0o700),
+    ],
+)
+def test_metadata_contract_rejects_world_readable_or_wrong_type_relay_token(override):
+    module = subject()
+    filesystem = InstalledFilesystem(module)
+    token_path = f"{module.SYSTEM_ROOT}/config/sol-state-relay.token"
+    filesystem.metadata_overrides[token_path] = override
+    receipt = module.collect_preimage(
+        expected_release_sha=SHA,
+        expected_tree_sha=TREE,
+        filesystem=filesystem,
+        commands=InstalledCommands(),
+        principals=InstalledPrincipals(),
+        clock=lambda: "2026-09-09T19:00:00+00:00",
+        platform="darwin",
+        uid=0,
+        euid=0,
+    )
+    assert receipt["classification"] == "UNSAFE"
+    assert receipt["reason_codes"] == ["UNSAFE_METADATA"]
+
+
+def test_metadata_contract_preserves_canonical_relay_token_and_release_root():
+    module = subject()
+    filesystem = InstalledFilesystem(module)
+    token_path = f"{module.SYSTEM_ROOT}/config/sol-state-relay.token"
+    filesystem.metadata_overrides[token_path] = metadata_fixture()
+    receipt = module.collect_preimage(
+        expected_release_sha=SHA,
+        expected_tree_sha=TREE,
+        filesystem=filesystem,
+        commands=InstalledCommands(),
+        principals=InstalledPrincipals(),
+        clock=lambda: "2026-09-09T19:00:00+00:00",
+        platform="darwin",
+        uid=0,
+        euid=0,
+    )
+    assert "UNSAFE_METADATA" not in receipt["reason_codes"]
+
+
+def test_release_root_without_service_traversal_is_unsafe():
+    module = subject()
+    filesystem = InstalledFilesystem(module)
+    release_root = f"{module.SYSTEM_ROOT}/releases/{SHA}"
+    filesystem.metadata_overrides[release_root] = metadata_fixture(
+        kind="directory", uid=0, gid=0, mode=0o700
+    )
+    receipt = module.collect_preimage(
+        expected_release_sha=SHA,
+        expected_tree_sha=TREE,
+        filesystem=filesystem,
+        commands=InstalledCommands(),
+        principals=InstalledPrincipals(),
+        clock=lambda: "2026-09-09T19:00:00+00:00",
+        platform="darwin",
+        uid=0,
+        euid=0,
+    )
+    assert receipt["classification"] == "UNSAFE"
+    assert receipt["classification"] != "MATCHING_STOPPED"
+    assert receipt["reason_codes"] == ["UNSAFE_METADATA"]
 
 
 def test_collect_matching_stopped_projects_only_public_documents():
@@ -967,9 +1067,9 @@ def test_residual_socket_and_principals_only_are_never_absent_clean():
             "device": 1,
             "inode": 2,
             "link_count": 1,
-            "uid": 0,
-            "gid": 0,
-            "mode": 0o600,
+            "uid": 457,
+            "gid": 457,
+            "mode": 0o660,
             "size": 0,
             "mtime_ns": 1,
             "ctime_ns": 1,
@@ -1034,7 +1134,11 @@ def test_documented_ps_command_reaches_runner_and_wrong_uid_stays_foreign():
 
 @pytest.mark.parametrize(
     ("process_line", "classification"),
-    [(b"450 450 99 1\n", "ACTIVE_OWNED"), (b"999 999 99 1\n", "ACTIVE_FOREIGN")],
+    [
+        (b"450 450 99 1\n", "ACTIVE_OWNED"),
+        (b"450 450 99 777\n", "ACTIVE_FOREIGN"),
+        (b"999 999 99 1\n", "ACTIVE_FOREIGN"),
+    ],
 )
 def test_command_adapter_is_joined_to_active_service_ownership(
     process_line, classification
@@ -1285,6 +1389,40 @@ def test_filesystem_adapter_manifest_read_requires_exact_admitted_sha(monkeypatc
         adapter.read("/outside/.executive-release-manifest.json")
     assert error.value.code == "PATH_ESCAPE"
     assert reads == [expected]
+
+
+@pytest.mark.parametrize("present", [True, False])
+def test_metadata_observation_closes_over_var_alias_ancestor_identity(
+    monkeypatch, present
+):
+    module = subject()
+    adapter = module.FilesystemAdapter(expected_release_sha=SHA)
+    path = f"{module.RUNTIME_ROOT}/control/dr/executive-dr-token"
+    samples = iter(
+        (
+            (("/var", 1, 2, 3, 4),),
+            (("/var", 1, 999, 3, 4),),
+        )
+    )
+    validated_paths = []
+
+    def validate(candidate):
+        validated_paths.append(candidate)
+        return next(samples)
+
+    def lstat(_path):
+        if not present:
+            raise FileNotFoundError
+        return os.stat_result(
+            (stat.S_IFREG | 0o400, 12, 1, 1, 450, 450, 1, 1, 1, 1)
+        )
+
+    monkeypatch.setattr(adapter, "_validate_ancestors", validate)
+    monkeypatch.setattr(module.os, "lstat", lstat)
+    with pytest.raises(module.PreimageUnsettled) as error:
+        adapter.metadata(path)
+    assert error.value.code == "FILESYSTEM_TORN"
+    assert validated_paths == [path, path]
 
 
 def test_collector_binds_initial_metadata_identity_into_content_read():
