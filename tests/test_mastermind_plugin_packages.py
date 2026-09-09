@@ -198,16 +198,20 @@ def test_descriptor_snapshot_handles_unavailable_nofollow_stat_as_typed_refusal(
 ) -> None:
     """A platform without no-follow stat support returns a validator refusal, never TypeError."""
     actual_stat = plugin_validator.os.stat
+    calls = 0
 
     def unavailable_stat(*args: object, **kwargs: object) -> os.stat_result:
+        nonlocal calls
         if kwargs.get("follow_symlinks") is False:
+            calls += 1
             raise TypeError("follow_symlinks unsupported")
         return actual_stat(*args, **kwargs)
 
-    monkeypatch.setattr(plugin_validator.os, "stat", unavailable_stat)
+    _preserve_capability_membership(monkeypatch, "stat", unavailable_stat)
     result = _validate_repository_twice_without_exception(ROOT)
 
     assert result["ok"] is False
+    assert calls > 0
     assert "PACKAGE_FILESYSTEM_INVALID" in {error["code"] for error in result["errors"]}
 
 
@@ -334,22 +338,23 @@ def test_descriptor_snapshot_settles_agents_link_after_semantic_scan(
     assert "PACKAGE_FILESYSTEM_INVALID" in {error["code"] for error in result["errors"]}
 
 
-@pytest.mark.parametrize("target_name", ("root", "agents"))
-def test_descriptor_snapshot_final_reverse_settlement_rejects_late_symlink_replacement(
+@pytest.mark.parametrize("target_name", ("agents", "plugins"))
+def test_descriptor_snapshot_final_root_bracket_rejects_post_settlement_top_level_replacement(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target_name: str
 ) -> None:
-    """A target changed after its forward check is still checked by the final reverse bracket."""
+    """Changing a top-level link after its own strict settlement needs the root final bracket."""
     _copy_package(tmp_path)
     original_listdir = plugin_validator.os.listdir
-    enumerations = 0
+    calls: dict[int, int] = {}
     fired = False
 
     def replace_late(fd: int) -> list[str]:
-        nonlocal enumerations, fired
+        nonlocal fired
         names = original_listdir(fd)
-        enumerations += 1
-        if not fired and enumerations >= 3:
-            target = tmp_path if target_name == "root" else tmp_path / ".agents"
+        calls[fd] = calls.get(fd, 0) + 1
+        expected_names = ["plugins"] if target_name == "agents" else sorted(plugin_validator.EXPECTED_SKILLS)
+        if not fired and set(names) == set(expected_names) and calls[fd] >= 2:
+            target = tmp_path / (".agents" if target_name == "agents" else "plugins")
             moved = target.parent / f"moved-{target_name}"
             target.rename(moved)
             target.symlink_to(moved, target_is_directory=True)

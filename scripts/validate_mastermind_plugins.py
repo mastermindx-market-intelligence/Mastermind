@@ -514,8 +514,10 @@ class _PackageSnapshot:
         package_entries = [entry for entry in self._directories if entry not in self._lexical]
         for entry in sorted(package_entries, key=lambda item: (item[3].count("/"), item[3]), reverse=True):
             settle_link(entry, strict=True)
-        for entry in self._lexical:
+        for entry in self._lexical[:-1]:
             settle_link(entry, strict=False)
+        if self._lexical:
+            settle_link(self._lexical[-1], strict=True)
 
     def close(self) -> None:
         for fd in reversed(self._fds):
