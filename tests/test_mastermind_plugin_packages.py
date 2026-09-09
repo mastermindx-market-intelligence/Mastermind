@@ -10,6 +10,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import types
 from pathlib import Path
 
 import pytest
@@ -71,17 +72,41 @@ def _replace_with_owned_symlink(path: Path, sibling_name: str) -> Path:
     return sibling
 
 
+V13_VALIDATOR_BLOB = "0b7c2cebc8c30cc9b1c4aac2bdbcc44857077f00"
+V14_VALIDATOR_BLOB = "4f29a9fac3f8256993e3236ccb6102e7e94c9bd3"
+
+
+def _validator_for_blob(tmp_path: Path):
+    """Load an immutable validator blob only for the V15 historical discrimination run."""
+    blob = os.environ.get("CORTEX_VALIDATOR_BLOB")
+    if blob is None:
+        return plugin_validator
+    assert blob in {V13_VALIDATOR_BLOB, V14_VALIDATOR_BLOB}
+    source = subprocess.run(
+        ["git", "cat-file", "blob", blob],
+        check=True,
+        cwd=ROOT,
+        capture_output=True,
+    ).stdout
+    module_name = f"cortex_validator_{blob[:12]}_{tmp_path.name}"
+    module = types.ModuleType(module_name)
+    module.__file__ = f"<git:{blob}>"
+    sys.modules[module_name] = module
+    exec(compile(source, module.__file__, "exec"), module.__dict__)
+    return module
+
+
 def _preserve_capability_membership(
-    monkeypatch: pytest.MonkeyPatch, attribute: str, replacement: object
+    monkeypatch: pytest.MonkeyPatch, attribute: str, replacement: object, validator=plugin_validator
 ) -> None:
     """Install a primitive wrapper without turning strict admission into the test subject."""
-    original = getattr(plugin_validator.os, attribute)
-    monkeypatch.setattr(plugin_validator.os, attribute, replacement)
+    original = getattr(validator.os, attribute)
+    monkeypatch.setattr(validator.os, attribute, replacement)
     for capability in ("supports_dir_fd", "supports_fd", "supports_follow_symlinks"):
-        advertised = getattr(plugin_validator.os, capability)
+        advertised = getattr(validator.os, capability)
         if original in advertised:
             monkeypatch.setattr(
-                plugin_validator.os,
+                validator.os,
                 capability,
                 frozenset(replacement if item is original else item for item in advertised),
             )
@@ -172,24 +197,74 @@ def test_descriptor_snapshot_refuses_missing_nofollow_capability_before_reading_
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Removing a required descriptor flag must fail closed, not degrade to flag value zero."""
+    opened = 0
+    read = 0
+    actual_open = plugin_validator.os.open
+    actual_read = plugin_validator.os.read
+
+    def counted_open(*args: object, **kwargs: object) -> int:
+        nonlocal opened
+        opened += 1
+        return actual_open(*args, **kwargs)
+
+    def counted_read(*args: object, **kwargs: object) -> bytes:
+        nonlocal read
+        read += 1
+        return actual_read(*args, **kwargs)
+
+    _preserve_capability_membership(monkeypatch, "open", counted_open)
+    _preserve_capability_membership(monkeypatch, "read", counted_read)
     monkeypatch.delattr(plugin_validator.os, "O_NOFOLLOW", raising=False)
 
     result = validate_repository(ROOT)
 
     assert result["ok"] is False
+    assert opened == 0
+    assert read == 0
     assert "PACKAGE_FILESYSTEM_INVALID" in {error["code"] for error in result["errors"]}
 
 
-@pytest.mark.parametrize("capability", ("supports_dir_fd", "supports_fd", "supports_follow_symlinks"))
+@pytest.mark.parametrize(
+    ("capability", "required_primitive"),
+    (
+        ("supports_dir_fd", "open"),
+        ("supports_fd", "listdir"),
+        ("supports_follow_symlinks", "stat"),
+    ),
+)
 def test_descriptor_snapshot_refuses_each_missing_descriptor_primitive(
-    monkeypatch: pytest.MonkeyPatch, capability: str
+    monkeypatch: pytest.MonkeyPatch, capability: str, required_primitive: str
 ) -> None:
-    """Capability-set loss is rejected before package bytes are admitted."""
-    monkeypatch.setattr(plugin_validator.os, capability, frozenset())
+    """One missing advertised primitive fails before an open or a content read."""
+    opened = 0
+    read = 0
+    actual_open = plugin_validator.os.open
+    actual_read = plugin_validator.os.read
+
+    def counted_open(*args: object, **kwargs: object) -> int:
+        nonlocal opened
+        opened += 1
+        return actual_open(*args, **kwargs)
+
+    def counted_read(*args: object, **kwargs: object) -> bytes:
+        nonlocal read
+        read += 1
+        return actual_read(*args, **kwargs)
+
+    _preserve_capability_membership(monkeypatch, "open", counted_open)
+    _preserve_capability_membership(monkeypatch, "read", counted_read)
+    advertised = getattr(plugin_validator.os, capability)
+    monkeypatch.setattr(
+        plugin_validator.os,
+        capability,
+        frozenset(item for item in advertised if item is not getattr(plugin_validator.os, required_primitive)),
+    )
 
     result = validate_repository(ROOT)
 
     assert result["ok"] is False
+    assert opened == 0
+    assert read == 0
     assert "PACKAGE_FILESYSTEM_INVALID" in {error["code"] for error in result["errors"]}
 
 
@@ -211,7 +286,7 @@ def test_descriptor_snapshot_handles_unavailable_nofollow_stat_as_typed_refusal(
     result = _validate_repository_twice_without_exception(ROOT)
 
     assert result["ok"] is False
-    assert calls > 0
+    assert calls == 2
     assert "PACKAGE_FILESYSTEM_INVALID" in {error["code"] for error in result["errors"]}
 
 
@@ -338,35 +413,100 @@ def test_descriptor_snapshot_settles_agents_link_after_semantic_scan(
     assert "PACKAGE_FILESYSTEM_INVALID" in {error["code"] for error in result["errors"]}
 
 
-@pytest.mark.parametrize("target_name", ("agents", "plugins"))
-def test_descriptor_snapshot_final_root_bracket_rejects_post_settlement_top_level_replacement(
+def _descriptor_identity(fd: int) -> tuple[int, int]:
+    info = os.fstat(fd)
+    return (info.st_dev, info.st_ino)
+
+
+@pytest.mark.parametrize("target_name", (".agents", "plugins"))
+def test_descriptor_snapshot_phase_aware_top_level_replacement_requires_final_root_bracket(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target_name: str
 ) -> None:
-    """Changing a top-level link after its own strict settlement needs the root final bracket."""
+    """Only the third supplied-root target stat is the V13/V14 discrimination point."""
+    validator = _validator_for_blob(tmp_path)
     _copy_package(tmp_path)
-    original_listdir = plugin_validator.os.listdir
-    calls: dict[int, int] = {}
-    fired = False
+    # The test-only root descriptor is not owned by the validator.
+    root_fd = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        root_identity = _descriptor_identity(root_fd)
+    finally:
+        os.close(root_fd)
+    original_stat = validator.os.stat
+    target_calls = 0
+    hooks = 0
+    observed_parents: list[tuple[int, int]] = []
 
-    def replace_late(fd: int) -> list[str]:
-        nonlocal fired
-        names = original_listdir(fd)
-        calls[fd] = calls.get(fd, 0) + 1
-        expected_names = ["plugins"] if target_name == "agents" else sorted(plugin_validator.EXPECTED_SKILLS)
-        if not fired and set(names) == set(expected_names) and calls[fd] >= 2:
-            target = tmp_path / (".agents" if target_name == "agents" else "plugins")
-            moved = target.parent / f"moved-{target_name}"
-            target.rename(moved)
-            target.symlink_to(moved, target_is_directory=True)
-            fired = True
-        return names
+    def phase_aware_stat(name: object, *args: object, **kwargs: object) -> os.stat_result:
+        nonlocal target_calls, hooks
+        captured = original_stat(name, *args, **kwargs)
+        parent_fd = kwargs.get("dir_fd")
+        is_target = (
+            name == target_name
+            and kwargs.get("follow_symlinks") is False
+            and isinstance(parent_fd, int)
+            and _descriptor_identity(parent_fd) == root_identity
+        )
+        if is_target:
+            target_calls += 1
+            observed_parents.append(_descriptor_identity(parent_fd))
+            if target_calls == 3:
+                target = tmp_path / target_name
+                moved = tmp_path / f"moved-{target_name.lstrip('.')}"
+                target.rename(moved)
+                target.symlink_to(moved, target_is_directory=True)
+                hooks += 1
+        return captured
 
-    _preserve_capability_membership(monkeypatch, "listdir", replace_late)
-    result = validate_repository(tmp_path)
+    _preserve_capability_membership(monkeypatch, "stat", phase_aware_stat, validator)
+    result = validator.validate_repository(tmp_path)
 
-    assert fired is True
+    assert target_calls == 3
+    assert observed_parents == [root_identity, root_identity, root_identity]
+    assert hooks == 1
+    assert result["ok"] is False, result
+    assert "PACKAGE_FILESYSTEM_INVALID" in {error["code"] for error in result["errors"]}
+
+
+def test_descriptor_snapshot_final_supplied_root_bracket_rejects_replacement_after_agents_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The later lexical-root bracket rejects a root replacement after `.agents` settles."""
+    validator = _validator_for_blob(tmp_path)
+    _copy_package(tmp_path)
+    root_fd = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        root_identity = _descriptor_identity(root_fd)
+    finally:
+        os.close(root_fd)
+    original_stat = validator.os.stat
+    agents_calls = 0
+    hooks = 0
+
+    def replace_root_after_agents(name: object, *args: object, **kwargs: object) -> os.stat_result:
+        nonlocal agents_calls, hooks
+        captured = original_stat(name, *args, **kwargs)
+        parent_fd = kwargs.get("dir_fd")
+        if (
+            name == ".agents"
+            and kwargs.get("follow_symlinks") is False
+            and isinstance(parent_fd, int)
+            and _descriptor_identity(parent_fd) == root_identity
+        ):
+            agents_calls += 1
+            if agents_calls == 3:
+                moved = tmp_path.parent / "moved-supplied-root"
+                tmp_path.rename(moved)
+                tmp_path.symlink_to(moved, target_is_directory=True)
+                hooks += 1
+        return captured
+
+    _preserve_capability_membership(monkeypatch, "stat", replace_root_after_agents, validator)
+    result = validator.validate_repository(tmp_path)
+
+    assert agents_calls == 3
+    assert hooks == 1
     assert result["ok"] is False
-    assert {error["code"] for error in result["errors"]} & {"PACKAGE_FILESYSTEM_INVALID", "SYMLINK_FORBIDDEN"}
+    assert "PACKAGE_FILESYSTEM_INVALID" in {error["code"] for error in result["errors"]}
 
 
 @pytest.mark.parametrize("value", ([], {}))
