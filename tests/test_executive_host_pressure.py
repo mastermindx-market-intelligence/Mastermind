@@ -241,6 +241,68 @@ def _recording_popen(monkeypatch: pytest.MonkeyPatch) -> list[subprocess.Popen[b
     return created
 
 
+def test_terminate_probe_child_continues_after_initial_poll_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    child = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    real_poll = child.poll
+    real_kill = child.kill
+    poll_calls = 0
+
+    def fail_once() -> int | None:
+        nonlocal poll_calls
+        poll_calls += 1
+        if poll_calls == 1:
+            raise OSError("PRIVATE poll failure")
+        return real_poll()
+
+    monkeypatch.setattr(child, "poll", fail_once)
+    try:
+        assert probe_module._terminate_probe_child(child) is True
+        assert poll_calls >= 1
+        assert real_poll() is not None
+    finally:
+        if real_poll() is None:
+            real_kill()
+            child.wait(timeout=1)
+
+
+def test_terminate_probe_child_escalates_to_kill_when_term_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    child = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    real_kill = child.kill
+    kill_calls: list[str] = []
+
+    def fail_term() -> None:
+        raise PermissionError("PRIVATE term failure")
+
+    def record_kill() -> None:
+        kill_calls.append("kill")
+        real_kill()
+
+    monkeypatch.setattr(child, "terminate", fail_term)
+    monkeypatch.setattr(child, "kill", record_kill)
+    try:
+        assert probe_module._terminate_probe_child(child) is True
+        assert kill_calls == ["kill"]
+        assert child.poll() is not None
+    finally:
+        if child.poll() is None:
+            real_kill()
+            child.wait(timeout=1)
+
+
 def test_run_ps_refuses_over_limit_before_unbounded_capture_and_reaps_child(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

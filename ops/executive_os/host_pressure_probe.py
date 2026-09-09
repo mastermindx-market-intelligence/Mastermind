@@ -169,18 +169,43 @@ def _terminate_probe_child(process: subprocess.Popen[bytes]) -> bool:
     """Stop and reap only the fixed probe child, never an observed process."""
 
     try:
-        if process.poll() is None:
-            process.terminate()
-            try:
-                process.wait(timeout=0.5)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=0.5)
-        else:
+        status = process.poll()
+    except OSError:
+        status = None
+    if status is not None:
+        try:
             process.wait(timeout=0)
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+        return True
+
+    try:
+        process.terminate()
+    except OSError:
+        pass
+    else:
+        try:
+            process.wait(timeout=0.5)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        else:
+            return True
+
+    try:
+        process.kill()
+    except ProcessLookupError:
+        pass
+    except OSError:
+        try:
+            process.wait(timeout=0)
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+        return True
+    try:
+        process.wait(timeout=0.5)
     except (OSError, subprocess.TimeoutExpired):
         return False
-    return process.poll() is not None
+    return True
 
 
 def _run_ps() -> subprocess.CompletedProcess[str]:
