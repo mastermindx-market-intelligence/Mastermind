@@ -86,7 +86,8 @@ probe_forward_evaluation() {
     >>"$LOG" 2>&1
 }
 
-DIRS="app brain bot portfolio data_layer loop bridge control_plane scripts config ops .claude .codex"
+# Whole-source rsync also ships these shared Python packages; rollback must restore them.
+DIRS="app brain bot portfolio data_layer loop bridge control_plane scripts config ops common integrations .claude .codex"
 FILES="pyproject.toml DOCTRINE.md README.md AGENTS.md .deployed_git_sha"
 EXC=(
   --exclude='.git' --exclude='.github'
