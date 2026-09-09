@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import json
 import os
 import re
 import stat
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -328,6 +330,133 @@ def _error(root: Path, path: Path, code: str, message: str) -> dict[str, str]:
     return {"path": _relative(root, path), "code": code, "message": message}
 
 
+@dataclass(frozen=True)
+class _SnapshotNode:
+    relative: str
+    kind: str
+    text: str | None = None
+
+
+class _PackageSnapshot:
+    """One descriptor-pinned, no-follow view of package content and inventory."""
+
+    def __init__(self, root: Path, errors: list[dict[str, str]]) -> None:
+        self.root = root.absolute()
+        self.nodes: dict[str, _SnapshotNode] = {}
+        self.errors = errors
+        self._fds: list[int] = []
+
+    def _record(self, relative: str, code: str, message: str) -> None:
+        self.errors.append(_error(self.root, self.root / relative, code, message))
+
+    def _open_directory(self, name: str, parent_fd: int | None, relative: str) -> int | None:
+        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+        try:
+            info = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+            if stat.S_ISLNK(info.st_mode):
+                self._record(relative, "SYMLINK_FORBIDDEN", "package directories may not contain symbolic links")
+                return None
+            if not stat.S_ISDIR(info.st_mode):
+                self._record(relative, "PACKAGE_FILESYSTEM_INVALID", "package directory cannot be opened")
+                return None
+            fd = os.open(name, flags, dir_fd=parent_fd)
+            if not stat.S_ISDIR(os.fstat(fd).st_mode):
+                os.close(fd)
+                self._record(relative, "PACKAGE_FILESYSTEM_INVALID", "package directory cannot be opened")
+                return None
+            self._fds.append(fd)
+            return fd
+        except FileNotFoundError:
+            self._record(relative, "MISSING_FILE", "required file is absent")
+        except OSError as error:
+            if error.errno == errno.ELOOP:
+                self._record(relative, "SYMLINK_FORBIDDEN", "package directories may not contain symbolic links")
+            else:
+                self._record(relative, "PACKAGE_FILESYSTEM_INVALID", "package directory cannot be opened safely")
+        return None
+
+    def _capture_directory(self, fd: int, relative: str) -> None:
+        try:
+            names = sorted(os.listdir(fd))
+        except OSError:
+            self._record(relative, "PACKAGE_FILESYSTEM_INVALID", "plugin package filesystem cannot be enumerated")
+            return
+        for name in names:
+            child = f"{relative}/{name}" if relative else name
+            try:
+                info = os.stat(name, dir_fd=fd, follow_symlinks=False)
+            except OSError:
+                self._record(child, "PACKAGE_FILESYSTEM_INVALID", "plugin package node cannot be inspected")
+                continue
+            if stat.S_ISLNK(info.st_mode):
+                self.nodes[child] = _SnapshotNode(child, "symlink")
+                self._record(child, "SYMLINK_FORBIDDEN", "plugin packages may not contain symbolic links")
+            elif stat.S_ISDIR(info.st_mode):
+                self.nodes[child] = _SnapshotNode(child, "directory")
+                nested = self._open_directory(name, fd, child)
+                if nested is not None:
+                    self._capture_directory(nested, child)
+            elif stat.S_ISREG(info.st_mode):
+                self._capture_file(name, fd, child)
+            else:
+                self.nodes[child] = _SnapshotNode(child, "special")
+                self._record(child, "PACKAGE_FILESYSTEM_INVALID", "plugin package node must be a regular file or directory")
+
+    def _capture_file(self, name: str, parent_fd: int, relative: str) -> None:
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
+        try:
+            fd = os.open(name, flags, dir_fd=parent_fd)
+            try:
+                if not stat.S_ISREG(os.fstat(fd).st_mode):
+                    self.nodes[relative] = _SnapshotNode(relative, "invalid")
+                    self._record(relative, "PACKAGE_FILESYSTEM_INVALID", "plugin package file cannot be read")
+                    return
+                raw = b"".join(iter(lambda: os.read(fd, 65536), b""))
+                try:
+                    text = raw.decode("utf-8")
+                except UnicodeDecodeError:
+                    self.nodes[relative] = _SnapshotNode(relative, "invalid-utf8")
+                    self._record(relative, "INVALID_UTF8", "file is not UTF-8")
+                    return
+                self.nodes[relative] = _SnapshotNode(relative, "file", text)
+            finally:
+                os.close(fd)
+        except OSError:
+            self.nodes[relative] = _SnapshotNode(relative, "invalid")
+            self._record(relative, "PACKAGE_FILESYSTEM_INVALID", "plugin package file cannot be read")
+
+    def capture(self) -> None:
+        # Every lexical component is opened no-follow; no Path.resolve() decision exists.
+        parts = self.root.parts
+        fd = os.open(parts[0], os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0))
+        self._fds.append(fd)
+        for part in parts[1:]:
+            next_fd = self._open_directory(part, fd, "")
+            if next_fd is None:
+                return
+            fd = next_fd
+        for top in (".agents", "plugins"):
+            top_fd = self._open_directory(top, fd, top)
+            if top_fd is not None:
+                self.nodes[top] = _SnapshotNode(top, "directory")
+                self._capture_directory(top_fd, top)
+
+    def close(self) -> None:
+        for fd in reversed(self._fds):
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        self._fds.clear()
+
+    def text(self, relative: str) -> str | None:
+        node = self.nodes.get(relative)
+        return node.text if node is not None and node.kind == "file" else None
+
+
+_ACTIVE_SNAPSHOT: _PackageSnapshot | None = None
+
+
 class _InvalidJSON(ValueError):
     pass
 
@@ -352,6 +481,16 @@ def _reject_json_constant(_value: str) -> None:
 def _read_required_text(
     root: Path, path: Path, errors: list[dict[str, str]]
 ) -> str | None:
+    if _ACTIVE_SNAPSHOT is not None:
+        relative = _relative(root, path)
+        text = _ACTIVE_SNAPSHOT.text(relative)
+        if text is not None:
+            return text
+        node = _ACTIVE_SNAPSHOT.nodes.get(relative)
+        code = "REQUIRED_FILE_INVALID" if node is not None else "MISSING_FILE"
+        message = "required path must be a regular readable file" if node is not None else "required file is absent"
+        errors.append(_error(root, path, code, message))
+        return None
     try:
         mode = path.lstat().st_mode
         if stat.S_ISLNK(mode) or not stat.S_ISREG(mode):
@@ -786,6 +925,15 @@ def _directory_entries(
 
 
 def _package_tree(root: Path, errors: list[dict[str, str]]) -> tuple[list[Path], list[Path]]:
+    if _ACTIVE_SNAPSHOT is not None:
+        files = [root / node.relative for node in _ACTIVE_SNAPSHOT.nodes.values() if node.kind == "file"]
+        directories = [root / node.relative for node in _ACTIVE_SNAPSHOT.nodes.values() if node.kind == "directory"]
+        allowed_directories = _allowed_package_directories()
+        for path in directories:
+            relative = _relative(root, path)
+            if relative not in allowed_directories:
+                errors.append(_error(root, path, "UNEXPECTED_PACKAGE_DIRECTORY", "directory is outside the closed BSC-P1 package inventory"))
+        return sorted(files, key=lambda path: _relative(root, path)), sorted(directories, key=lambda path: _relative(root, path))
     files: list[Path] = []
     directories: list[Path] = []
     allowed_directories = _allowed_package_directories()
@@ -875,21 +1023,27 @@ def _scan_files(root: Path, errors: list[dict[str, str]]) -> None:
             errors.append(
                 _error(root, path, forbidden_code, f"{path.name} is forbidden in skills-only P1")
             )
-        try:
-            text = path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            errors.append(_error(root, path, "INVALID_UTF8", "file is not UTF-8"))
-            continue
-        except OSError:
-            errors.append(
-                _error(
-                    root,
-                    path,
-                    "PACKAGE_FILESYSTEM_INVALID",
-                    "plugin package file cannot be read",
+        if _ACTIVE_SNAPSHOT is not None:
+            text = _ACTIVE_SNAPSHOT.text(relative)
+            if text is None:
+                errors.append(_error(root, path, "PACKAGE_FILESYSTEM_INVALID", "plugin package file cannot be read"))
+                continue
+        else:
+            try:
+                text = path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                errors.append(_error(root, path, "INVALID_UTF8", "file is not UTF-8"))
+                continue
+            except OSError:
+                errors.append(
+                    _error(
+                        root,
+                        path,
+                        "PACKAGE_FILESYSTEM_INVALID",
+                        "plugin package file cannot be read",
+                    )
                 )
-            )
-            continue
+                continue
         lowered = text.casefold()
         if any(marker in lowered for marker in SECRET_MARKERS):
             errors.append(
@@ -922,13 +1076,20 @@ def _scan_files(root: Path, errors: list[dict[str, str]]) -> None:
 
 
 def validate_repository(root: Path) -> dict[str, Any]:
-    root = root.resolve()
+    global _ACTIVE_SNAPSHOT
+    root = root.absolute()
     errors: list[dict[str, str]] = []
+    snapshot = _PackageSnapshot(root, errors)
+    try:
+        snapshot.capture()
+    except OSError:
+        errors.append(_error(root, root, "PACKAGE_FILESYSTEM_INVALID", "repository root cannot be opened safely"))
+    _ACTIVE_SNAPSHOT = snapshot
     marketplace_path = root / MARKETPLACE_PATH
     marketplace = _json(root, marketplace_path, errors)
     if isinstance(marketplace, Mapping) and isinstance(marketplace.get("plugins"), Sequence):
         for entry in marketplace["plugins"]:
-            if isinstance(entry, Mapping) and entry.get("name") not in EXPECTED_SKILLS:
+            if isinstance(entry, Mapping) and isinstance(entry.get("name"), str) and entry["name"] not in EXPECTED_SKILLS:
                 errors.append(
                     _error(
                         root,
@@ -959,11 +1120,13 @@ def validate_repository(root: Path) -> dict[str, Any]:
             template_path = plugin_root / "references/app-bindings.template.json"
             template = _json(root, template_path, errors)
             if isinstance(template, Mapping):
-                for binding in template.get("bindings", []):
-                    if isinstance(binding, Mapping) and binding.get("app_id") is not None:
-                        errors.append(
-                            _error(root, template_path, "INSTALLED_APP_ID_FORBIDDEN", "P1 symbolic app bindings require app_id null")
-                        )
+                bindings = template.get("bindings")
+                if isinstance(bindings, list):
+                    for binding in bindings:
+                        if isinstance(binding, Mapping) and binding.get("app_id") is not None:
+                            errors.append(
+                                _error(root, template_path, "INSTALLED_APP_ID_FORBIDDEN", "P1 symbolic app bindings require app_id null")
+                            )
             _require_exact(root, template_path, template, TEMPLATES[plugin], "INVALID_APP_TEMPLATE", errors)
 
         for reference in REFERENCES[plugin]:
@@ -998,23 +1161,26 @@ def validate_repository(root: Path) -> dict[str, Any]:
                 )
 
         skills_root = plugin_root / "skills"
-        entries = _directory_entries(
-            root, skills_root, errors, "skills directory cannot be enumerated"
-        )
-        actual = []
-        for entry in entries or []:
-            try:
-                if stat.S_ISDIR(entry.stat(follow_symlinks=False).st_mode):
-                    actual.append(entry.name)
-            except OSError:
-                errors.append(
-                    _error(
-                        root,
-                        Path(entry.path),
-                        "PACKAGE_FILESYSTEM_INVALID",
-                        "skills directory node cannot be inspected",
-                    )
-                )
+        if _ACTIVE_SNAPSHOT is not None:
+            skill_prefix = _relative(root, skills_root) + "/"
+            skills_node = _ACTIVE_SNAPSHOT.nodes.get(_relative(root, skills_root))
+            if skills_node is None or skills_node.kind != "directory":
+                errors.append(_error(root, skills_root, "PACKAGE_FILESYSTEM_INVALID", "skills directory cannot be enumerated"))
+            actual = sorted(
+                relative[len(skill_prefix):].split("/", 1)[0]
+                for relative, node in _ACTIVE_SNAPSHOT.nodes.items()
+                if node.kind == "directory" and relative.startswith(skill_prefix)
+                and "/" not in relative[len(skill_prefix):]
+            )
+        else:
+            entries = _directory_entries(root, skills_root, errors, "skills directory cannot be enumerated")
+            actual = []
+            for entry in entries or []:
+                try:
+                    if stat.S_ISDIR(entry.stat(follow_symlinks=False).st_mode):
+                        actual.append(entry.name)
+                except OSError:
+                    errors.append(_error(root, Path(entry.path), "PACKAGE_FILESYSTEM_INVALID", "skills directory node cannot be inspected"))
         actual.sort()
         if actual != sorted(skills):
             errors.append(
@@ -1033,13 +1199,16 @@ def validate_repository(root: Path) -> dict[str, Any]:
 
     _scan_files(root, errors)
     errors.sort(key=lambda item: (item["path"], item["code"], item["message"]))
-    return {
+    result = {
         "schema": VALIDATION_SCHEMA,
         "ok": not errors,
         "marketplace": MARKETPLACE_PATH.as_posix(),
         "plugins": plugin_rows,
         "errors": errors,
     }
+    _ACTIVE_SNAPSHOT = None
+    snapshot.close()
+    return result
 
 
 def main(argv: Sequence[str] | None = None) -> int:

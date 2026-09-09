@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+import scripts.validate_mastermind_plugins as plugin_validator
 from scripts.validate_mastermind_plugins import VALIDATION_SCHEMA, validate_repository
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -59,6 +60,14 @@ def _validate_repository_twice_without_exception(root: Path) -> dict[str, object
 def _codes_without_exception(root: Path) -> set[str]:
     result = _validate_repository_twice_without_exception(root)
     return {error["code"] for error in result["errors"]}  # type: ignore[index]
+
+
+def _replace_with_owned_symlink(path: Path, sibling_name: str) -> Path:
+    """Move a fixture node aside and replace it with an owned sibling symlink."""
+    sibling = path.parent / sibling_name
+    path.rename(sibling)
+    path.symlink_to(sibling, target_is_directory=True)
+    return sibling
 
 
 def _closed_json_document_paths() -> tuple[str, ...]:
@@ -113,6 +122,62 @@ def test_repository_plugin_package_is_valid() -> None:
         ],
         "errors": [],
     }
+
+
+def test_symlinked_repository_root_is_refused_before_package_content_is_opened(
+    tmp_path: Path,
+) -> None:
+    """The supplied root itself is part of the no-follow trust boundary."""
+    _copy_package(tmp_path)
+    redirected_root = tmp_path.parent / "redirected-root"
+    redirected_root.symlink_to(tmp_path, target_is_directory=True)
+
+    result = _validate_repository_twice_without_exception(redirected_root)
+
+    assert result["ok"] is False
+    assert "SYMLINK_FORBIDDEN" in {error["code"] for error in result["errors"]}  # type: ignore[index]
+
+
+def test_agents_ancestor_symlink_is_refused_before_its_marketplace_is_read(
+    tmp_path: Path,
+) -> None:
+    """An owned sibling redirect is still outside the supplied lexical package tree."""
+    _copy_package(tmp_path)
+    _replace_with_owned_symlink(tmp_path / ".agents", "owned-agents")
+
+    result = _validate_repository_twice_without_exception(tmp_path)
+
+    assert result["ok"] is False
+    assert "SYMLINK_FORBIDDEN" in {error["code"] for error in result["errors"]}  # type: ignore[index]
+
+
+@pytest.mark.parametrize("value", ([], {}))
+def test_malformed_marketplace_plugin_name_is_invalid_marketplace_without_traceback(
+    tmp_path: Path, value: object
+) -> None:
+    _copy_package(tmp_path)
+    path = tmp_path / ".agents/plugins/marketplace.json"
+    marketplace = json.loads(path.read_text(encoding="utf-8"))
+    marketplace["plugins"][0]["name"] = value
+    _write_json(path, marketplace)
+
+    assert "INVALID_MARKETPLACE" in _codes_without_exception(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("plugin", "value"),
+    (("mastermind-sol", None), ("mastermind-operator", 1)),
+)
+def test_malformed_template_bindings_is_invalid_template_without_traceback(
+    tmp_path: Path, plugin: str, value: object
+) -> None:
+    _copy_package(tmp_path)
+    path = tmp_path / f"plugins/{plugin}/references/app-bindings.template.json"
+    template = json.loads(path.read_text(encoding="utf-8"))
+    template["bindings"] = value
+    _write_json(path, template)
+
+    assert "INVALID_APP_TEMPLATE" in _codes_without_exception(tmp_path)
 
 
 def test_repository_documents_match_the_closed_contract() -> None:
@@ -465,7 +530,7 @@ def test_unexpected_package_fifo_is_refused_without_opening_it(tmp_path: Path) -
 @pytest.mark.skipif(not hasattr(socket, "AF_UNIX"), reason="Unix-domain sockets are unavailable")
 def test_unexpected_package_socket_is_refused_without_opening_it() -> None:
     """A validator must classify a socket node without treating it as package text."""
-    root = Path(tempfile.mkdtemp(prefix="cortex-v9-", dir="/tmp"))
+    root = Path(tempfile.mkdtemp(prefix="cortex-v9-", dir=os.path.realpath(tempfile.gettempdir())))
     _copy_package(root)
     path = root / "plugins/mastermind-cortex/references/hidden.sock"
     listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -601,8 +666,10 @@ def test_validator_is_stdlib_only_and_has_no_action_surface() -> None:
         elif isinstance(node, ast.ImportFrom) and node.module:
             imported.add(node.module.split(".", 1)[0])
     assert imported <= {
-        "__future__",
+            "__future__",
             "argparse",
+            "dataclasses",
+            "errno",
             "json",
             "os",
             "re",
