@@ -68,6 +68,7 @@ class _Attempt:
         self._deadline = deadline
         self._clock = clock
         self._physical_done = False
+        self._wrapper_done = False
         self.task: asyncio.Task[Any] | None = None
 
     def enter(self) -> bool:
@@ -104,6 +105,14 @@ class _Attempt:
     def physical_done(self) -> bool:
         with self._gate:
             return self._physical_done
+
+    def complete_wrapper(self) -> None:
+        with self._gate:
+            self._wrapper_done = True
+
+    def wrapper_done(self) -> bool:
+        with self._gate:
+            return self._wrapper_done
 
 
 @dataclass(eq=False)
@@ -191,10 +200,9 @@ class BoundedSyncExecutor:
                 )
             ):
                 epoch.attempts.discard(attempt)
-            elif (
-                not attempt.started()
-                and attempt.task is not None
-                and attempt.task.done()
+            elif not attempt.started() and (
+                (attempt.task is not None and attempt.task.done())
+                or (epoch.loop.is_closed() and attempt.wrapper_done())
             ):
                 epoch.attempts.discard(attempt)
 
@@ -288,24 +296,31 @@ class BoundedSyncExecutor:
     ) -> _Result | object:
         # Close admission and worker entry share this one linearization gate.
         # It is released before the synchronous operation itself executes.
-        with self._state_gate:
-            if self._admission_closed:
-                attempt.abandon("closed")
-                return _NOT_STARTED
-            if not attempt.enter():
-                return _NOT_STARTED
+        entered = False
         try:
+            with self._state_gate:
+                if self._admission_closed:
+                    attempt.abandon("closed")
+                    return _NOT_STARTED
+                if not attempt.enter():
+                    return _NOT_STARTED
+                entered = True
             return operation()
         finally:
-            attempt.complete_physical()
-            try:
-                epoch.loop.call_soon_threadsafe(
-                    self._finish_started_attempt, epoch, attempt
-                )
-            except RuntimeError:
-                # A later loop may reap this attempt only after the physical
-                # completion marker above is visible.
-                pass
+            if entered:
+                attempt.complete_physical()
+                try:
+                    epoch.loop.call_soon_threadsafe(
+                        self._finish_started_attempt, epoch, attempt
+                    )
+                except RuntimeError:
+                    # A later loop may reap this attempt only after the physical
+                    # completion marker above is visible.
+                    pass
+            # A queued wrapper that is abandoned before entry still needs a
+            # durable completion marker if its event loop closes before the
+            # asyncio Task can settle.
+            attempt.complete_wrapper()
 
     def _retire_attempt(self, epoch: _LoopEpoch, attempt: _Attempt) -> None:
         with self._state_gate:

@@ -457,3 +457,66 @@ def test_foreign_close_does_not_reap_completed_attempt_from_open_owner_loop() ->
 
     asyncio.run(executor.aclose(timeout=1))
     assert executor.attempts_snapshot() == ()
+
+
+def test_close_reaps_abandoned_queued_wrapper_after_owner_loop_closes() -> None:
+    executor = BoundedSyncExecutor(max_concurrency=1)
+    pool = ThreadPoolExecutor(max_workers=1)
+    pool_entered = threading.Event()
+    release_pool = threading.Event()
+    owner_closed = threading.Event()
+    owner_errors: list[BaseException] = []
+    operation_calls: list[str] = []
+
+    def occupy_pool() -> None:
+        pool_entered.set()
+        assert release_pool.wait(5)
+
+    def forbidden_operation() -> str:
+        operation_calls.append("called")
+        return "unexpected"
+
+    blocker = pool.submit(occupy_pool)
+    assert pool_entered.wait(1)
+
+    def owner() -> None:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.set_default_executor(pool)
+        loop.set_exception_handler(lambda _loop, _context: None)
+
+        async def scenario() -> None:
+            pending = asyncio.create_task(executor.run(forbidden_operation, timeout=5))
+            for _ in range(500):
+                attempts = executor.attempts_snapshot()
+                if len(attempts) == 1 and attempts[0].task is not None:
+                    break
+                await asyncio.sleep(0.001)
+            else:
+                raise AssertionError("queued wrapper never registered")
+            assert not attempts[0].started()
+            pending.cancel()
+            result = await asyncio.gather(pending, return_exceptions=True)
+            assert isinstance(result[0], asyncio.CancelledError)
+
+        try:
+            loop.run_until_complete(scenario())
+        except BaseException as error:
+            owner_errors.append(error)
+        finally:
+            loop.close()
+            owner_closed.set()
+
+    thread = threading.Thread(target=owner)
+    thread.start()
+    assert owner_closed.wait(2)
+    thread.join(2)
+    assert not thread.is_alive() and not owner_errors
+
+    release_pool.set()
+    blocker.result(timeout=2)
+    pool.shutdown(wait=True)
+    assert operation_calls == []
+
+    asyncio.run(executor.aclose(timeout=1))
+    assert executor.attempts_snapshot() == ()
