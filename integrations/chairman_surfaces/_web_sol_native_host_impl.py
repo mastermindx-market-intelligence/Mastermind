@@ -24,6 +24,7 @@ from typing import Any, Callable
 
 from . import web_sol_instance as wsi
 from . import web_sol_protocol as wsp
+from . import web_sol_census_protocol as census
 
 NATIVE_HOST_NAME = "com.mastermind.web_sol_surface"
 EXTENSION_ID = "kmpbpccecbofdnhpcmjogofgmdodpnko"
@@ -475,8 +476,8 @@ def _is_probe_event(message: Any) -> bool:
 def _timeout_code(request: dict[str, Any]) -> str:
     return (
         "foreground_effect_unknown"
-        if request["action"] == "FOREGROUND"
-        else "inspect_timeout"
+        if request.get("action") == "FOREGROUND"
+        else "census_timeout" if request.get("schema") == census.REQUEST_SCHEMA else "inspect_timeout"
     )
 
 
@@ -484,13 +485,14 @@ def _receipt_matches(
     request: dict[str, Any],
     receipt: dict[str, Any],
 ) -> bool:
-    return all(receipt[field] == request[field] for field in _MATCH_FIELDS)
+    fields = census.IDENTITY_FIELDS if request.get("schema") == census.REQUEST_SCHEMA else _MATCH_FIELDS
+    return all(receipt.get(field) == request[field] for field in fields)
 
 
 def _untrusted_receipt_code(request: dict[str, Any], default: str) -> str:
     return (
         "foreground_effect_unknown"
-        if request["action"] == "FOREGROUND"
+        if request.get("action") == "FOREGROUND"
         else default
     )
 
@@ -517,7 +519,9 @@ def forward_request(
     """Forward one exact action once and wait for its matching receipt."""
 
     timeout = _validate_timeout_seconds(timeout_seconds)
-    accepted = wsp.validate_request(request)
+    is_census = request.get("schema") == census.REQUEST_SCHEMA if isinstance(request, dict) else False
+    accepted = census.validate_census_window(request) if is_census else wsp.validate_request(request)
+    fields = census.IDENTITY_FIELDS if is_census else _MATCH_FIELDS
     exchange_deadline = deadline or Deadline(ends_at=monotonic() + timeout)
     _remaining_or_timeout(
         exchange_deadline,
@@ -545,14 +549,14 @@ def forward_request(
             continue
         if (
             isinstance(message, dict)
-            and all(field in message for field in _MATCH_FIELDS)
+            and all(field in message for field in fields)
             and not _receipt_matches(accepted, message)
         ):
             raise ChromeChannelError(
                 _untrusted_receipt_code(accepted, "receipt_identity_mismatch")
             )
         try:
-            receipt = wsp.validate_receipt(message)
+            receipt = census.validate_census_receipt(message) if is_census else wsp.validate_receipt(message)
         except wsp.WebSolProtocolError as exc:
             raise ChromeChannelError(
                 _untrusted_receipt_code(accepted, "receipt_invalid")
@@ -561,6 +565,7 @@ def forward_request(
             raise ChromeChannelError(
                 _untrusted_receipt_code(accepted, "receipt_identity_mismatch")
             )
+        _remaining_or_timeout(exchange_deadline, monotonic, _timeout_code(accepted))
         return receipt
 
 
@@ -764,7 +769,8 @@ def _serve_client(
     monotonic: Callable[[], float] = time.monotonic,
 ) -> None:
     timeout = _validate_timeout_seconds(timeout_seconds)
-    deadline = Deadline(ends_at=monotonic() + timeout)
+    started = monotonic()
+    deadline = Deadline(ends_at=started + min(timeout, 5.0))
     with client:
         reader = client.makefile("rb", buffering=0)
         writer = client.makefile("wb", buffering=0)
@@ -783,6 +789,11 @@ def _serve_client(
                 deadline=deadline,
                 monotonic=monotonic,
             )
+            if request.get("schema") == census.REQUEST_SCHEMA:
+                request = census.validate_census_window(request)
+                if request["adapter_instance_id"] != expected_instance_id:
+                    raise NativeHostError("transport_instance_mismatch")
+                deadline = Deadline(ends_at=started + census.TOTAL_SECONDS)
             receipt = forward_request(
                 request,
                 write_chrome=lambda document: _write_chrome(

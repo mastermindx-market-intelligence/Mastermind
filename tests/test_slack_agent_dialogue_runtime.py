@@ -405,7 +405,10 @@ def _terminal_w3c_material(runtime):
             },
         ),
         thread_ts=THREAD_TS,
-        current_worker=_terminal_snapshot(),
+        current_worker=dataclasses.replace(
+            _terminal_snapshot(),
+            attempt_id=terminal.attempt_id,
+        ),
         actor=caller(),
         terminal_candidate=terminal,
         terminal_projection_receipt=receipt,
@@ -1929,6 +1932,9 @@ def test_run_relay_terminal_observation_reaches_physical_reread_and_existing_wak
             self.resolve_calls = []
             self.reconcile_requests = []
             self.submit_requests = []
+            self.source_snapshots = []
+            self.source_reconcile_requests = []
+            self.source_submit_requests = []
             type(self).instances.append(self)
 
         async def resolve(self, *, parent, thread_ts):
@@ -1963,6 +1969,34 @@ def test_run_relay_terminal_observation_reaches_physical_reread_and_existing_wak
                     operation=SUBMIT_WAKE,
                     obligation=obligation,
                     route=route,
+                )
+            )
+
+        async def reconcile_dialogue_sources(self, snapshot):
+            self.source_snapshots.append(snapshot)
+            return {
+                "state": "NOT_APPLICABLE",
+                "reason": "NONCANARY_PROFILE",
+            }
+
+        async def reconcile_from_source(self, source, obligation, route):
+            self.source_reconcile_requests.append(
+                self._wake_request(
+                    operation=RECONCILE_WAKE,
+                    obligation=obligation,
+                    route=route,
+                    source_observation=source,
+                )
+            )
+            return WakeCarrierState.MISSING
+
+        async def submit_from_source(self, source, obligation, route):
+            self.source_submit_requests.append(
+                self._wake_request(
+                    operation=SUBMIT_WAKE,
+                    obligation=obligation,
+                    route=route,
+                    source_observation=source,
                 )
             )
 
@@ -2010,8 +2044,60 @@ def test_run_relay_terminal_observation_reaches_physical_reread_and_existing_wak
     assert observation_client.resolve_calls == [
         (dict(candidate.dialogue_parent), candidate.thread_ts)
     ]
-    assert len(observation_client.reconcile_requests) == 1
-    assert len(observation_client.submit_requests) == 1
+    assert observation_client.reconcile_requests == []
+    assert observation_client.submit_requests == []
+    assert len(observation_client.source_snapshots) == 1
+    assert len(observation_client.source_reconcile_requests) == 1
+    assert len(observation_client.source_submit_requests) == 1
+    expected_physical_source = {
+        "workspace_id": terminal_engine.policy.workspace_id,
+        "channel_id": terminal_engine.policy.channel_id,
+        "thread_ts": candidate.thread_ts,
+        "parent_fingerprint": candidate.dialogue_parent["fingerprint"],
+        "operation_key": candidate.dialogue_parent["operation_key"],
+        "predecessor_message_key": terminal_message["message_key"],
+        "predecessor_message_fingerprint": terminal_message["fingerprint"],
+    }
+    source_snapshot = observation_client.source_snapshots[0]
+    snapshot_message = next(
+        message.to_dict()
+        for message in source_snapshot.messages
+        if message.to_dict()["message_key"] == terminal_message["message_key"]
+    )
+    assert {
+        "workspace_id": source_snapshot.workspace_id,
+        "channel_id": source_snapshot.channel_id,
+        "thread_ts": source_snapshot.thread_ts,
+        "parent_fingerprint": source_snapshot.parent_fingerprint,
+        "operation_key": source_snapshot.operation_key,
+        "predecessor_message_key": snapshot_message["message_key"],
+        "predecessor_message_fingerprint": snapshot_message["fingerprint"],
+    } == expected_physical_source
+    expected_source_observation = {
+        key: expected_physical_source[key]
+        for key in (
+            "workspace_id",
+            "channel_id",
+            "thread_ts",
+            "predecessor_message_key",
+            "predecessor_message_fingerprint",
+        )
+    }
+    assert observation_client.source_reconcile_requests[0][
+        "source_observation"
+    ] == expected_source_observation
+    assert observation_client.source_submit_requests[0][
+        "source_observation"
+    ] == expected_source_observation
+    for request in (
+        observation_client.source_reconcile_requests[0],
+        observation_client.source_submit_requests[0],
+    ):
+        assert {
+            **request["source_observation"],
+            "parent_fingerprint": request["parent"]["fingerprint"],
+            "operation_key": request["parent"]["operation_key"],
+        } == expected_physical_source
     assert terminal_engine.client.channel_history_call_count == 4
     assert terminal_engine.client.thread_history_call_count == 2
 

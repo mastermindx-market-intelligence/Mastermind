@@ -27,18 +27,19 @@ function mount(next, options = {}) {
   for (const id of ids) assert.ok(html.includes(`id="${id}"`), `actual HTML missing ${id}`);
   const tabs = options.tabs || Object.freeze({});
   const config = options.configured === false ? undefined : Object.freeze({instanceId: options.instanceId || INSTANCE});
-  let calls = 0, schedulingCalls = 0;
+  let calls = 0, schedulingCalls = 0; const lifecycle = {};
   const received = [];
   const context = {document: {getElementById(id) { assert.ok(nodes[id]); return nodes[id]; },
-    createElement: tag => new Element(tag)}, chrome: {tabs},
-    MMX_WEB_SOL_INSTANCE: config,
-    MMXWebSolCensus: Object.freeze({collect(api, instanceId) {
-      calls++; received.push([api, instanceId]); return next(api, instanceId);
-    }}),
+    createElement: tag => new Element(tag)}, chrome: {runtime: {sendMessage(message) {
+      assert.equal(JSON.stringify(message), JSON.stringify({kind:'MMX_WEB_SOL_CENSUS_REFRESH'}));
+      calls++; received.push([tabs, config?.instanceId]); return next(tabs, config?.instanceId);
+    }}},
+    addEventListener(name, callback) { lifecycle[name] = callback; },
     setTimeout() { schedulingCalls++; throw Error('CONTROLLER_RETRY_TIMER_FORBIDDEN'); },
     setInterval() { schedulingCalls++; throw Error('CONTROLLER_RETRY_TIMER_FORBIDDEN'); }};
+  context.self = {}; context.top = options.iframe ? {} : context.self;
   vm.runInNewContext(controller, context, {timeout: 1000, filename: path.join(EXT, 'census.js')});
-  return {nodes, received, get calls() { return calls; }, get schedulingCalls() { return schedulingCalls; },
+  return {nodes, received, pagehide() { lifecycle.pagehide(); }, get calls() { return calls; }, get schedulingCalls() { return schedulingCalls; },
     refresh() { return nodes.refresh.events.click(); }};
 }
 async function settled(ui) {
@@ -108,6 +109,10 @@ test('failed refresh cannot retain a prior successful scope', async () => {
   assert.match(ui.nodes.status.textContent, /Snapshot unavailable/);
   assert.doesNotMatch(ui.nodes.status.textContent, /PRIVATE_FAILURE/);
   assert.equal(ui.nodes.refresh.disabled, false);
+  let release;
+  const closing=mount(()=>new Promise(r=>{release=r;}));closing.pagehide();release(prior);
+  await tick();await tick();assert.equal(closing.nodes.rows.children.length,0);
+  assert.equal(closing.nodes.summary.children.length,0);assert.equal(closing.nodes.scope.textContent,'');
 });
 test('partial render failure clears all partially rendered snapshot data', async () => {
   const valid = await snapshot([tab(1)]);
@@ -140,6 +145,8 @@ test('busy refresh does not dispatch additional collection work', async () => {
   const ui = mount(() => new Promise(done => { resolve = done; }));
   await ui.refresh(); await ui.refresh();
   assert.equal(ui.calls, 1);
+  const frame=mount(()=>{throw Error('IFRAME_ACQUISITION');},{iframe:true});
+  await tick();assert.equal(frame.calls,0);assert.equal(frame.nodes.rows.children.length,0);
   resolve(prior); await settled(ui);
   assert.deepEqual(metrics(ui), ['0', '0', '0', '0']);
 });
@@ -162,7 +169,7 @@ test('successful snapshot data is not mutated by rendering', async () => {
 });
 
 // Additional assertions required by the current source coordinator.
-test('controller forwards the exact tabs object and instance on initial and manual reads', async () => {
+test('controller requests the same worker broker on initial and manual reads', async () => {
   const boundary = Object.freeze({query: async () => [], get() { throw Error('UNEXPECTED_LOOKUP'); },
     sendMessage() { throw Error('UNEXPECTED_PROBE'); }});
   const exactInstance = 'b'.repeat(64);
