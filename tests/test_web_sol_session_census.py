@@ -308,6 +308,110 @@ def test_discard_child_refuses_invalid_attempt_before_receipt_or_browser(tmp_pat
     assert not any(name.startswith("playwright") for name in imports)
 
 
+def test_discard_child_records_bound_playwright_import_failure(tmp_path, monkeypatch):
+    import builtins
+
+    receipt_path = tmp_path / "discard-probe-receipt.json"
+    receipt_path.write_text("stale-receipt")
+    proof_attempt_id = "c" * 32
+    real_import = builtins.__import__
+
+    def unavailable_playwright(name, *args, **kwargs):
+        if name == "playwright.sync_api":
+            raise ImportError("PRIVATE_IMPORT_FAILURE")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", unavailable_playwright)
+    assert run_discard_probe_child(receipt_path, proof_attempt_id) == 3
+    assert json.loads(receipt_path.read_text()) == {
+        "schema": DISCARD_RECEIPT_SCHEMA,
+        "status": "INFRA_UNAVAILABLE",
+        "proof_attempt_id": proof_attempt_id,
+        "reason": "PLAYWRIGHT_UNAVAILABLE",
+    }
+
+
+def _parent_closed_failure_fixture(tmp_path, status, reason, receipt_attempt_id):
+    # Exercise the real subprocess/parent join, not just the classifier helper.
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    proof_attempt_id = "b" * 32
+    stable = _fixture_stable_report_for(_fixture_pass_discard_receipt(proof_attempt_id))
+    receipt = {
+        "schema": DISCARD_RECEIPT_SCHEMA,
+        "status": status,
+        "proof_attempt_id": receipt_attempt_id,
+        "reason": reason,
+    }
+    command = _receipt_writer_command(tmp_path, receipt)
+    returncode = 2 if status == "ASSERTION_FAILED" else 3
+    with Path(command[1]).open("a") as child_script:
+        child_script.write(f"raise SystemExit({returncode})\n")
+    report = run_discard_probe_and_record(
+        command, tmp_path, stable, timeout_seconds=5, proof_attempt_id=proof_attempt_id,
+    )
+    assert report["proof_attempt_id"] == proof_attempt_id
+    assert report["proof_attempt_status"] == "FAILED"
+    assert report["full_matrix_pass"] is False
+    assert report["discard_probe_exit_code"] == returncode
+    assert report["discard_probe_signal"] is None
+    assert json.loads((tmp_path / "synthetic-browser-proof.json").read_text()) == report
+    return report, receipt
+
+
+def test_parent_rejects_other_attempt_assertion_failure_receipt(tmp_path):
+    report, _ = _parent_closed_failure_fixture(
+        tmp_path, "ASSERTION_FAILED", "ROW_NOT_DISCARDED", "a" * 32,
+    )
+    assert report["discard_probe_status"] == "INVALID_PROOF_RECEIPT"
+    assert report["discard_probe_receipt_valid"] is False
+    assert report["discard_probe_binding_valid"] is None
+    assert report["discard_probe_receipt"] is None
+    assert "ROW_NOT_DISCARDED" not in json.dumps(report)
+
+
+def test_parent_rejects_other_attempt_infra_failure_receipt(tmp_path):
+    report, _ = _parent_closed_failure_fixture(
+        tmp_path, "INFRA_UNAVAILABLE", "PLAYWRIGHT_UNAVAILABLE", "a" * 32,
+    )
+    assert report["discard_probe_status"] == "INVALID_PROOF_RECEIPT"
+    assert report["discard_probe_receipt_valid"] is False
+    assert report["discard_probe_binding_valid"] is None
+    assert report["discard_probe_receipt"] is None
+    assert "PLAYWRIGHT_UNAVAILABLE" not in json.dumps(report)
+
+
+def test_parent_preserves_same_attempt_assertion_failure_receipt(tmp_path):
+    report, receipt = _parent_closed_failure_fixture(
+        tmp_path, "ASSERTION_FAILED", "ROW_NOT_DISCARDED", "b" * 32,
+    )
+    assert report["discard_probe_status"] == "ASSERTION_FAILED"
+    assert report["discard_probe_receipt_valid"] is True
+    assert report["discard_probe_binding_valid"] is None
+    assert report["discard_probe_receipt"] == receipt
+
+
+def test_parent_preserves_same_attempt_infra_failure_receipt(tmp_path):
+    report, receipt = _parent_closed_failure_fixture(
+        tmp_path, "INFRA_UNAVAILABLE", "PLAYWRIGHT_UNAVAILABLE", "b" * 32,
+    )
+    assert report["discard_probe_status"] == "INFRA_UNAVAILABLE"
+    assert report["discard_probe_receipt_valid"] is True
+    assert report["discard_probe_binding_valid"] is None
+    assert report["discard_probe_receipt"] == receipt
+
+
+def test_parent_keeps_malformed_failure_receipts_distinct_from_pass_mismatch(tmp_path):
+    for status in ("ASSERTION_FAILED", "INFRA_UNAVAILABLE"):
+        report, _ = _parent_closed_failure_fixture(
+            tmp_path / status, status, "PRIVATE_INVALID_REASON", "a" * 32,
+        )
+        assert report["discard_probe_status"] == "INVALID_PROOF_RECEIPT"
+        assert report["discard_probe_receipt_valid"] is False
+        assert report["discard_probe_binding_valid"] is None
+        assert report["discard_probe_receipt"] is None
+        assert "PRIVATE_INVALID_REASON" not in json.dumps(report)
+
+
 def test_parent_reports_child_timeout_as_its_own_closed_outcome(tmp_path):
     import sys
     report = run_discard_probe_and_record(
@@ -951,8 +1055,12 @@ def classify_discard_probe_result(
         and (expected_attempt_id is None or receipt.get("proof_attempt_id") == expected_attempt_id)
     )
     exit_code = None if returncode < 0 else returncode
-    if receipt_attempt_matches and receipt["status"] == "PASS" and returncode == 0:
-        return {"status": "PASS", "exit_code": 0, "signal": None, "receipt_valid": True, "receipt": receipt}
+    if receipt is not None and receipt["status"] == "PASS" and returncode == 0:
+        # A valid PASS from another attempt is a binding mismatch, not malformed.
+        return {
+            "status": "PASS" if receipt_attempt_matches else "EVIDENCE_BINDING_MISMATCH",
+            "exit_code": 0, "signal": None, "receipt_valid": True, "receipt": receipt,
+        }
     crash_signal = _browser_signal(returncode, stderr)
     closed = (
         "TargetClosedError" in (stderr or "")
@@ -979,6 +1087,8 @@ def classify_discard_probe_result(
 
 
 def _discard_pass_binding_valid(stable_report, result, proof_attempt_id):
+    if result.get("status") == "EVIDENCE_BINDING_MISMATCH" and result.get("receipt_valid") is True:
+        return False
     if result.get("status") != "PASS" or result.get("receipt_valid") is not True:
         return None
     receipt = result["receipt"]
@@ -1105,6 +1215,7 @@ def _run_discard_probe_and_record_locked(
             stdout,
             stderr,
             receipt_path,
+            expected_attempt_id=proof_attempt_id,
         )
     binding_valid = _discard_pass_binding_valid(stable_report, result, proof_attempt_id)
     if result["status"] == "PASS" and binding_valid is not True:
@@ -1567,7 +1678,9 @@ def run_discard_probe_child(receipt_path, proof_attempt_id):
     try:
         from playwright.sync_api import expect, sync_playwright
     except ImportError:
-        _write_discard_failure(receipt_path, "INFRA_UNAVAILABLE", "PLAYWRIGHT_UNAVAILABLE")
+        _write_discard_failure(
+            receipt_path, "INFRA_UNAVAILABLE", "PLAYWRIGHT_UNAVAILABLE", proof_attempt_id
+        )
         return 3
 
     try:
