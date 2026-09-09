@@ -64,5 +64,7 @@ Establish one authorized live Notion execution path for the intended Mastermind 
 - The authorized Mac Studio is online and reachable, but the checked runtime environment still has no `NOTION_API_KEY` or `NOTION_PARENT_PAGE_ID`.
 - The ChatGPT Notion plugin remains listed but `not_installed`; this workspace still does not expose an invokable Notion tool or eligible install suggestion.
 - Executive OS read probe currently fails at the MCP tunnel with HTTP 429; no Executive lifecycle state or Job admission is inferred.
+- N0 contains five databases, not four: Programs, Decisions, Research Library, Product & Architecture, and Chairman Notes & Inputs. Stale acceptance prose saying “four database schemas” was corrected; the four *projection* databases remain a distinct subset because Chairman Notes uses the human-input schema.
+- Database creation is now fail-closed at each write boundary: every successful or effect-unknown-reconciled database must prove its reviewed schema before any later write. Focused regressions prove wrong-schema observations stop immediately, and the targeted suite is now 10/10 green locally.
 
 Capability remains `BUILT_NOT_PROVEN`. Exact next live gate remains one scoped Notion connection plus the intended parent identity, followed by remote dry-run, one apply, immediate zero-create second apply, and human-visible proof. N1/N2/N3 remain held.

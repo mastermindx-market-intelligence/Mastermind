@@ -430,6 +430,14 @@ def apply_workspace(
             reconciled = build_plan(manifest, client.list_children(parent_page_id))
             exact = next(candidate for candidate in reconciled if candidate.key == item.key)
             if exact.action == "reuse":
+                if not exact.object_id:
+                    raise BootstrapError(
+                        f"reconciled Notion child {item.key!r} has no object id"
+                    )
+                if item.kind == "database":
+                    _prove_database_schema(
+                        client, exact.object_id, child["properties"]
+                    )
                 results.append(
                     PlanItem(
                         item.key,
@@ -444,6 +452,8 @@ def apply_workspace(
         object_id = created.get("id")
         if not isinstance(object_id, str) or not object_id:
             raise NotionEffectUnknown(f"create for {item.key!r} returned no object id")
+        if item.kind == "database":
+            _prove_database_schema(client, object_id, child["properties"])
         results.append(PlanItem(item.key, item.kind, item.title, "created", object_id))
 
     final_plan = build_plan(manifest, client.list_children(parent_page_id))

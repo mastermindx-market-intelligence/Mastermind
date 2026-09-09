@@ -71,8 +71,10 @@ and the reviewed property-name/type schema. The client paces requests and never 
 retries a mutation.
 
 If a mutation response is ambiguous, the bootstrap re-reads the exact parent. It records
-`reconciled` only when the exact intended object is observed; otherwise it stops with an
-unknown effect rather than creating again.
+`reconciled` only when the exact intended object is observed; an observed database must also
+prove its reviewed schema before any later write. Otherwise it stops with an unknown effect
+or schema refusal rather than creating again. Successful database creates are likewise
+schema-proven before the bootstrap continues.
 
 ## 3. Immediate idempotency proof
 
@@ -86,7 +88,7 @@ Acceptance requires:
 
 - `created_count` is `0`;
 - every N0 child resolves to `reuse`;
-- all four databases prove their reviewed schemas again;
+- all five databases prove their reviewed schemas again;
 - no duplicate child exists.
 
 Do not continue to N1 if this proof fails.

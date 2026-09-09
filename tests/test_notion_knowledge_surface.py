@@ -104,6 +104,7 @@ def test_manifest_offline_plan_is_exact_eight_creates() -> None:
     manifest = load_manifest(MANIFEST)
     plan = build_plan(manifest, [])
     assert len(plan) == 8
+    assert sum(child["kind"] == "database" for child in manifest["children"]) == 5
     assert [item.action for item in plan] == ["create"] * 8
     assert [item.title for item in plan] == [
         child["title"] for child in manifest["children"]
@@ -181,6 +182,63 @@ def test_effect_unknown_reconciles_without_blind_retry() -> None:
     target = next(item for item in result if item.title == target_title)
     assert target.action == "reconciled"
     assert client.created.count(target_title) == 1
+
+
+def test_created_database_schema_refuses_before_later_writes() -> None:
+    manifest = load_manifest(MANIFEST)
+    programs = next(child for child in manifest["children"] if child["key"] == "programs")
+    board_book = next(child for child in manifest["children"] if child["key"] == "chairman_board_book")
+
+    class WrongSchemaCreateClient(FakeClient):
+        def create_database(self, parent_page_id: str, title: str, properties: dict) -> dict:
+            if title == programs["title"]:
+                object_id = "50000000-0000-4000-8000-000000000001"
+                self.blocks.append(_block("database", title, object_id))
+                self._register_database(object_id, {"Name": {"title": {}}})
+                self.created.append(title)
+                return {"id": object_id}
+            return super().create_database(parent_page_id, title, properties)
+
+    client = WrongSchemaCreateClient()
+    client.blocks.append(
+        _block("page", board_book["title"], "60000000-0000-4000-8000-000000000001")
+    )
+
+    with pytest.raises(SchemaMismatchError):
+        apply_workspace(client, PARENT, manifest)
+
+    assert client.created == [programs["title"]]
+
+
+def test_effect_unknown_database_schema_refuses_before_later_writes() -> None:
+    manifest = load_manifest(MANIFEST)
+    programs = next(child for child in manifest["children"] if child["key"] == "programs")
+    board_book = next(child for child in manifest["children"] if child["key"] == "chairman_board_book")
+
+    class WrongSchemaAfterUnknownClient(FakeClient):
+        def __init__(self) -> None:
+            super().__init__()
+            self._wrong_unknown_fired = False
+
+        def create_database(self, parent_page_id: str, title: str, properties: dict) -> dict:
+            if not self._wrong_unknown_fired and title == programs["title"]:
+                self._wrong_unknown_fired = True
+                object_id = "30000000-0000-4000-8000-000000000001"
+                self.blocks.append(_block("database", title, object_id))
+                self._register_database(object_id, {"Name": {"title": {}}})
+                self.created.append(title)
+                raise NotionEffectUnknown("simulated lost response with wrong observed schema")
+            return super().create_database(parent_page_id, title, properties)
+
+    client = WrongSchemaAfterUnknownClient()
+    client.blocks.append(
+        _block("page", board_book["title"], "40000000-0000-4000-8000-000000000001")
+    )
+
+    with pytest.raises(SchemaMismatchError):
+        apply_workspace(client, PARENT, manifest)
+
+    assert client.created == [programs["title"]]
 
 
 def test_create_page_uses_page_child_title_shape() -> None:

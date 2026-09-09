@@ -73,7 +73,7 @@ N0 bootstrap matching is exact and parent-scoped: `(parent_page_id, object kind,
 
 The implementation enumerates children of the exact parent page. Same-title objects under another parent do not match. A page does not match a database with the same title. Multiple exact matches under the parent are an ambiguity refusal, not an invitation to pick one.
 
-Before the first write, every database selected for reuse is schema-proven through the current Notion database → data-source boundary. After creation/reconciliation, all N0 databases are proven again. The bootstrap never repairs an unknown pre-existing schema automatically.
+Before the first write, every database selected for reuse is schema-proven through the current Notion database → data-source boundary. Every newly created or effect-unknown-reconciled database is schema-proven immediately before any later write, and all N0 databases are proven again in final reconciliation. The bootstrap never repairs an unknown pre-existing schema automatically.
 
 Later projection identity will be the canonical record ID (`WS:*`, `DEC:*`, `DSC:*`, repository artifact ID, etc.) plus its declared canonical owner. Notion page/database IDs are external addresses, not authority.
 
@@ -156,7 +156,7 @@ Repository acceptance requires:
 `PROVEN_LIVE` additionally requires real Notion evidence:
 
 1. live dry-run against the intended parent;
-2. one live apply creates/reuses exactly the eight N0 objects and proves all four database schemas;
+2. one live apply creates/reuses exactly the eight N0 objects and proves all five database schemas;
 3. immediate second live apply creates **zero** objects;
 4. human inspection confirms the workspace is usable;
 5. object IDs + parent identity are recorded in a non-secret receipt;
