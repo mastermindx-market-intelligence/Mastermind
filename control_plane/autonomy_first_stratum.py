@@ -7,7 +7,6 @@ belong to the accepted contract, independently of the source build's Git base.
 """
 from __future__ import annotations
 
-from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
@@ -498,9 +497,13 @@ def _output(raw):
     }
 
 
-def _metadata(output, capsule):
+def _metadata(output, capsule, *, evidence_validated=False):
     # Called only after all shapes (except E13's accepted budget discriminator) pass.
+    # Category is declared, not authenticated provenance. Synthetic diagnostics
+    # retain their frozen projection; owner observations need complete evidence.
     output["evidence_class"] = capsule["evidence_class"]
+    if capsule["evidence_class"] != "SYNTHETIC" and not evidence_validated:
+        return
     output["runtime_instance_epoch"] = capsule["source"]["runtime_instance_epoch"]
     output["inventory_coverage"] = capsule["inventory"]["coverage"]
     for key in ("comparability", "error_bound_ms"):
@@ -803,7 +806,7 @@ def _terminal(evidence, member, root_job, children, start, start_ms, first, cuto
     outcome = member["lifecycle_outcome"]
     allowed_subjects = {root_job["job_id"], *children}
     _require(subject is None or subject in allowed_subjects, "OUTCOME_SUBJECT_MISMATCH")
-    full, narrow, snapshots = {}, {}, []
+    full, narrow = {}, {}
     for read_id in member["lifecycle_evidence_reads"]:
         _require(read_id in evidence.reads, "LIFECYCLE_EVIDENCE_MISSING", "MISSING")
         read = evidence.reads[read_id]
@@ -814,8 +817,6 @@ def _terminal(evidence, member, root_job, children, start, start_ms, first, cuto
             full[record["command_id"]] = read_id
         elif read["reader"] == _MS:
             narrow[read["arguments"]["command_id"]] = read_id
-        elif read["reader"] == _JOB:
-            snapshots.append(record)
     terminal_types = {"FAILED": "JOB_FAILED", "CANCELLED": "JOB_CANCELLED", "LOST": "JOB_LOST"}
     terminals = []
     for command, read_id in full.items():
@@ -838,8 +839,18 @@ def _terminal(evidence, member, root_job, children, start, start_ms, first, cuto
             for event in ([read["record"]] if read["reader"] == _FULL
                           else read["record"] if read["reader"] == _EVENTS else [])
         )
-        _require(not terminals and not observed_terminal and not any(j["job_id"] == subject and j["status"] in
-                     ("FAILED", "CANCELLED", "LOST", "COMPLETED") for j in snapshots),
+        # Already-validated Job projections cannot be hidden by a favorable
+        # lifecycle selector. A current snapshot cannot date a terminal state
+        # at cutoff; only the declared subject and measured jobs are relevant.
+        snapshot_subjects = measured_subjects | {subject}
+        observed_terminal_snapshot = any(
+            job["job_id"] in snapshot_subjects
+            and job["status"] in ("FAILED", "CANCELLED", "LOST", "COMPLETED")
+            for read in evidence.reads.values() if read["record"] is not None
+            for job in ([read["record"]] if read["reader"] == _JOB
+                        else read["record"] if read["reader"] == _JOBS else [])
+        )
+        _require(not terminals and not observed_terminal and not observed_terminal_snapshot,
                  "OUTCOME_AT_CUTOFF_UNKNOWN", "UNKNOWN")
         return None
     if outcome == "UNKNOWN":
@@ -1040,7 +1051,7 @@ def _reduce(evidence, output):
 
 def reduce_first_stratum(
     capsule_bytes: bytes,
-    artifact_bytes_by_uri: Mapping[str, bytes],
+    artifact_bytes_by_uri: dict[str, bytes],
     *,
     trusted_manifest_bytes: bytes | None,
     expected_trusted_manifest_sha256: str | None,
@@ -1049,6 +1060,8 @@ def reduce_first_stratum(
 
     Limits are 16 MiB capsule, 1 MiB manifest, 4 MiB per artifact, 64 MiB
     aggregate artifacts, depth 64 and one million decoded JSON value nodes.
+    The artifact map must be an exact built-in dict with exact str keys and
+    bytes values; arbitrary container and entry protocols are not invoked.
     Resource/decoding/shape refusals precede trust and all contributions. No
     filesystem, network, clock, Runtime or provider is accessed by this function.
     """
@@ -1057,7 +1070,7 @@ def reduce_first_stratum(
     # exactly the caller's original bytes, including whitespace.
     output = _output(capsule_bytes if type(capsule_bytes) is bytes else b"")
     try:
-        _require(type(capsule_bytes) is bytes and isinstance(artifact_bytes_by_uri, Mapping), "INPUT_ARGUMENT_TYPE")
+        _require(type(capsule_bytes) is bytes and type(artifact_bytes_by_uri) is dict, "INPUT_ARGUMENT_TYPE")
         _require(len(capsule_bytes) <= 16 * _MIB, "INPUT_RESOURCE_LIMIT")
         if trusted_manifest_bytes is not None:
             _require(type(trusted_manifest_bytes) is bytes, "TRUST_ANCHOR_MISMATCH")
@@ -1078,7 +1091,9 @@ def reduce_first_stratum(
         except _Refusal as exc:
             if exc.reason == "DRAFT_ACCEPTED_BUDGET_FORBIDDEN":
                 _metadata(output, capsule)
-                output["reason_codes"].append("SYNTHETIC_INPUT")
+                if capsule["evidence_class"] == "SYNTHETIC" or any(
+                        _object(value) and value.get("synthetic") is True for value in decoded.values()):
+                    output["reason_codes"].append("SYNTHETIC_INPUT")
                 member = _member_result()
                 _mark(member, exc.reason)
                 output["member_results"] = [member]
@@ -1102,6 +1117,7 @@ def reduce_first_stratum(
         _manifest_check(capsule, capsule_bytes, manifest, trusted_manifest_bytes, expected_trusted_manifest_sha256)
         evidence = _Evidence(capsule, artifacts, decoded)
         evidence.validate()
+        _metadata(output, capsule, evidence_validated=True)
         if evidence.synthetic:
             synthetic = True
             if "SYNTHETIC_INPUT" not in output["reason_codes"]:

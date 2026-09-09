@@ -772,3 +772,428 @@ def test_inventory_only_failed_child_cannot_be_declared_active(bundle):
     result = _changed_call(bundle, change, "E16")
     _hold(result, "OUTCOME_AT_CUTOFF_UNKNOWN")
     assert result["member_results"][0]["outcome_retained"] == "UNKNOWN"
+
+
+def _job_snapshot_status(capsule, job_id, status, source):
+    """Change a new synthetic control, retaining distinct native read groups."""
+    for read in capsule["reads"].values():
+        if read["reader"] == "JobRegistry.get_job" and source in ("named", "both"):
+            records = [read["record"]]
+        elif read["reader"] == "JobRegistry.list_jobs" and source in ("inventory", "both"):
+            records = read["record"]
+        else:
+            continue
+        for job in records:
+            if job is not None and job["job_id"] == job_id:
+                job["status"] = status
+
+
+@pytest.mark.parametrize("status", ["FAILED", "CANCELLED", "LOST", "COMPLETED"])
+@pytest.mark.parametrize("source", ["named", "inventory", "both"])
+@pytest.mark.parametrize("selected", [True, False], ids=["selected", "omitted"])
+@pytest.mark.parametrize("job_id", ["JOB-001", "JOB-002"], ids=["root", "claimed-child"])
+def test_terminal_job_snapshot_selector_cannot_hide_outcome(bundle, status, source, selected, job_id):
+    def change(c):
+        _job_snapshot_status(c, job_id, status, source)
+        member = c["inventory"]["members"][0]
+        member["lifecycle_subject_job_id"] = job_id
+        member["lifecycle_evidence_reads"] = ["root-job", "child-job", "jobs"] if selected else []
+    result = _changed_call(bundle, change)
+    _hold(result, "OUTCOME_AT_CUTOFF_UNKNOWN")
+    member = result["member_results"][0]
+    assert member["outcome_retained"] == "UNKNOWN"
+    assert member["recorded_delta_ms"] is None
+    assert member["raw_difference_ms"] == 250
+
+
+@pytest.mark.parametrize("source", ["named", "inventory", "both"])
+@pytest.mark.parametrize("selected", [True, False], ids=["selected", "omitted"])
+def test_running_job_snapshot_selector_preserves_positive(bundle, source, selected):
+    def change(c):
+        _job_snapshot_status(c, "JOB-002", "RUNNING", source)
+        c["inventory"]["members"][0]["lifecycle_evidence_reads"] = (
+            ["root-job", "child-job", "jobs"] if selected else [])
+    result = _changed_call(bundle, change)
+    _ceiling(result)
+    assert result["completed_recorded_intervals"] == 1
+    assert result["member_results"][0]["recorded_delta_ms"] == 250
+    assert result["member_results"][0]["outcome_retained"] == "ACTIVE"
+
+
+@pytest.mark.parametrize("source", ["named", "inventory", "both"])
+@pytest.mark.parametrize("job_id", ["JOB-001", "JOB-002"])
+@pytest.mark.parametrize("subject", ["JOB-001", "JOB-002", None])
+def test_terminal_job_snapshot_covers_measured_jobs_despite_subject(bundle, source, job_id, subject):
+    def change(c):
+        _job_snapshot_status(c, job_id, "FAILED", source)
+        member = c["inventory"]["members"][0]
+        member["lifecycle_evidence_reads"] = []
+        member["lifecycle_subject_job_id"] = subject
+    result = _changed_call(bundle, change)
+    _hold(result, "OUTCOME_AT_CUTOFF_UNKNOWN")
+    assert result["member_results"][0]["outcome_retained"] == "UNKNOWN"
+
+
+def _later_claimed_sibling(capsule):
+    _second_child(capsule)
+    reads = capsule["reads"]
+    # The original JOB-002 claim remains Event-ID first and measures 250 ms.
+    reads["second-claim-full"]["record"]["event_id"] = 31
+    reads["second-child-events"]["record"][1] = copy.deepcopy(reads["second-claim-full"]["record"])
+    reads["second-child-events"]["observation"]["prefix_last_event_id"] = 31
+
+
+@pytest.mark.parametrize("status", ["FAILED", "CANCELLED", "LOST", "COMPLETED"])
+@pytest.mark.parametrize("source", ["named", "inventory", "both"])
+@pytest.mark.parametrize("selected", [True, False], ids=["selected", "omitted"])
+def test_terminal_job_snapshot_unrelated_sibling_does_not_poison_measurement(bundle, status, source, selected):
+    def change(c):
+        _later_claimed_sibling(c)
+        _job_snapshot_status(c, "JOB-003", status, source)
+        member = c["inventory"]["members"][0]
+        member["lifecycle_subject_job_id"] = "JOB-001"
+        member["lifecycle_evidence_reads"] = (
+            ["root-job", "child-job", "second-child-job", "jobs"] if selected else [])
+    result = _changed_call(bundle, change)
+    _ceiling(result)
+    assert result["completed_recorded_intervals"] == 1
+    assert result["member_results"][0]["recorded_delta_ms"] == 250
+    assert result["member_results"][0]["outcome_retained"] == "ACTIVE"
+    assert result["member_results"][0]["outcome_subject_job_id"] == "JOB-001"
+
+
+@pytest.mark.parametrize("source", ["named", "inventory", "both"])
+def test_terminal_job_snapshot_explicit_sibling_subject_cannot_be_declared_active(bundle, source):
+    def change(c):
+        _later_claimed_sibling(c)
+        _job_snapshot_status(c, "JOB-003", "CANCELLED", source)
+        member = c["inventory"]["members"][0]
+        member["lifecycle_subject_job_id"] = "JOB-003"
+        member["lifecycle_evidence_reads"] = []
+    _hold(_changed_call(bundle, change), "OUTCOME_AT_CUTOFF_UNKNOWN")
+
+
+@pytest.mark.parametrize("status,outcome", [
+    ("FAILED", "FAILED"), ("CANCELLED", "CANCELLED"),
+    ("LOST", "LOST"), ("COMPLETED", "TERMINAL_OTHER"),
+])
+@pytest.mark.parametrize("selected", [True, False], ids=["selected", "omitted"])
+def test_later_terminal_job_snapshot_preserves_causally_supported_interval(bundle, status, outcome, selected):
+    def change(c):
+        _job_snapshot_status(c, "JOB-002", status, "both")
+        event_type = "JOB_" + status
+        for read in c["reads"].values():
+            records = ([read["record"]] if read["reader"] in (
+                "EventRegistry.get_event_by_command_id", "RuntimeStore.find_event_by_command_id")
+                else read["record"] if read["reader"] == "EventRegistry.list_events" else [])
+            for record in records:
+                if record is not None and record["event_type"] == "JOB_FAILED":
+                    record["event_type"] = event_type
+        member = c["inventory"]["members"][0]
+        member["lifecycle_outcome"] = outcome
+        member["lifecycle_evidence_reads"] = ["terminal-full", "terminal-ms"]
+        if selected:
+            member["lifecycle_evidence_reads"] += ["child-job", "jobs"]
+    result = _changed_call(bundle, change, "E16")
+    _ceiling(result)
+    assert result["completed_recorded_intervals"] == 1
+    assert result["member_results"][0]["recorded_delta_ms"] == 250
+    assert result["member_results"][0]["outcome_retained"] == outcome
+
+
+@pytest.mark.parametrize("status", ["FAILED", "CANCELLED", "LOST", "COMPLETED"])
+@pytest.mark.parametrize("source_read", ["child-job", "jobs"])
+@pytest.mark.parametrize("selected", [True, False], ids=["selected", "omitted"])
+def test_terminal_job_snapshot_consistent_duplicate_preserves_refusal(bundle, status, source_read, selected):
+    def change(c):
+        _job_snapshot_status(c, "JOB-002", status, "both")
+        read = copy.deepcopy(c["reads"][source_read])
+        read["evidence_ref"]["uri"] = "synthetic:duplicate-terminal-snapshot-record"
+        read["invocation_ref"]["uri"] = "synthetic:duplicate-terminal-snapshot-invocation"
+        # Same declared group and consistent bytes do not create a conflict.
+        c["reads"]["duplicate-terminal-snapshot"] = read
+        c["inventory"]["members"][0]["lifecycle_evidence_reads"] = (
+            ["duplicate-terminal-snapshot"] if selected else ["root-job"])
+    result = _changed_call(bundle, change)
+    _hold(result, "OUTCOME_AT_CUTOFF_UNKNOWN")
+    assert result["member_results"][0]["outcome_retained"] == "UNKNOWN"
+
+
+@pytest.mark.parametrize("source", ["named", "inventory", "both"])
+@pytest.mark.parametrize("selected", [True, False], ids=["selected", "omitted"])
+def test_terminal_job_snapshot_role_null_sibling_is_not_a_measured_child(bundle, source, selected):
+    def change(c):
+        read = copy.deepcopy(c["reads"]["child-job"])
+        job = read["record"]
+        job.update(job_id="JOB-role-null", orchestration_role=None,
+                   orchestration_provenance=None, orchestration_provenance_digest=None,
+                   status="CANCELLED", current_attempt_id=None)
+        read["arguments"]["job_id"] = job["job_id"]
+        read["observation"]["scope"] = copy.deepcopy(read["arguments"])
+        read["observation"]["read_group"] = "role-null-sibling-snapshot"
+        read["evidence_ref"]["uri"] = "synthetic:role-null-sibling-record"
+        read["invocation_ref"]["uri"] = "synthetic:role-null-sibling-invocation"
+        if source in ("named", "both"):
+            c["reads"]["role-null-sibling"] = read
+        if source in ("inventory", "both"):
+            c["reads"]["jobs"]["record"].append(copy.deepcopy(job))
+        member = c["inventory"]["members"][0]
+        member["lifecycle_subject_job_id"] = "JOB-001"
+        member["lifecycle_evidence_reads"] = ["root-job"]
+        if selected:
+            member["lifecycle_evidence_reads"] += ["jobs"]
+            if source in ("named", "both"):
+                member["lifecycle_evidence_reads"] += ["role-null-sibling"]
+    result = _changed_call(bundle, change)
+    _ceiling(result)
+    assert result["completed_recorded_intervals"] == 1
+    assert result["member_results"][0]["recorded_delta_ms"] == 250
+    assert result["member_results"][0]["outcome_retained"] == "ACTIVE"
+
+
+@pytest.mark.parametrize("container,behavior", [(kind, behavior)
+    for kind in ("mapping", "dict-subclass") for behavior in ("empty", "one", "raising")])
+def test_artifact_map_boundary_rejects_protocols_before_hooks(container, behavior):
+    from collections.abc import Mapping
+
+    markers = []
+
+    def entered(hook):
+        markers.append(hook)
+        if behavior == "raising":
+            raise RuntimeError("CONTROLLED_ARTIFACT_CONTAINER_HOOK")
+
+    class HostileMapping(Mapping):
+        def __iter__(self):
+            entered("iter")
+            return iter(("synthetic:inert",) if behavior == "one" else ())
+
+        def __len__(self):
+            entered("len")
+            return int(behavior == "one")
+
+        def __getitem__(self, key):
+            entered("getitem")
+            return b"{}"
+
+    class HostileDict(dict):
+        def items(self):
+            entered("items")
+            return ({"synthetic:inert": b"{}"} if behavior == "one" else {}).items()
+
+    supplied = HostileMapping() if container == "mapping" else HostileDict()
+    result = None
+    escaped = None
+    try:
+        result = _call(b"{}", supplied, None, None)
+    except RuntimeError as exc:
+        escaped = exc
+    assert markers == [], (container, behavior, markers)
+    assert escaped is None
+    _hold(result, "INPUT_ARGUMENT_TYPE")
+    assert result["reason_codes"] == ["DRAFT_NOT_ACCEPTED", "INPUT_ARGUMENT_TYPE"]
+    assert result["input_sha256"] == _sha(b"{}")
+
+
+@pytest.mark.parametrize("invalid_part", ["key", "value"])
+@pytest.mark.parametrize("position", ["first", "last"])
+def test_artifact_map_boundary_rejects_entry_subclasses_without_hooks(invalid_part, position):
+    markers = []
+    armed = [False]
+
+    def entered(name):
+        if armed[0]:
+            markers.append(name)
+            raise RuntimeError("CONTROLLED_ARTIFACT_ENTRY_HOOK")
+
+    class HostileKey(str):
+        def __hash__(self):
+            entered("key-hash")
+            return str.__hash__(self)
+
+        def __bool__(self):
+            entered("key-bool")
+            return True
+
+        def __eq__(self, other):
+            entered("key-equality")
+            return str.__eq__(self, other)
+
+        def encode(self, *args, **kwargs):
+            entered("key-encode")
+            return str.encode(self, *args, **kwargs)
+
+    class HostileValue(bytes):
+        def __len__(self):
+            entered("value-len")
+            return bytes.__len__(self)
+
+        def __iter__(self):
+            entered("value-iter")
+            return bytes.__iter__(self)
+
+        def decode(self, *args, **kwargs):
+            entered("value-decode")
+            return bytes.decode(self, *args, **kwargs)
+
+    invalid = (HostileKey("synthetic:invalid"), b"{}") if invalid_part == "key" else (
+        "synthetic:invalid", HostileValue(b"{}"))
+    valid = ("synthetic:ordinary", b"{}")
+    supplied = dict([invalid, valid] if position == "first" else [valid, invalid])
+    # Building the test dictionary legitimately hashes its key; the boundary
+    # assertion starts only when the reducer receives the already-built map.
+    armed[0] = True
+    result = _call(b"{}", supplied, None, None)
+    assert markers == []
+    _hold(result, "INPUT_ARGUMENT_TYPE")
+
+
+def test_artifact_map_boundary_ordinary_dict_behavior(bundle):
+    _hold(_call(b"{}", {}, None, None), "INPUT_SHAPE_INVALID")
+    raw, artifacts, manifest, anchor, expected = _load(bundle)
+    assert type(artifacts) is dict
+    assert _call(raw, artifacts, manifest, anchor) == expected
+
+
+def _owner_metadata_boundary_input(bundle):
+    # A new synthetic diagnostic with a declared OWNER_EXPORTED category is
+    # never an owner export or an operational trust-anchor acceptance.
+    raw, artifacts, manifest, _, _ = _load(bundle)
+    capsule = json.loads(raw)
+    capsule["evidence_class"] = "OWNER_EXPORTED"
+    return capsule, artifacts, manifest
+
+
+def _assert_owner_metadata_neutral(result):
+    _hold(result)
+    assert result["evidence_class"] == "OWNER_EXPORTED"
+    assert result["runtime_instance_epoch"] is None
+    assert result["inventory_coverage"] == "UNKNOWN"
+    assert result["clock_summary"]["comparability"] == "UNKNOWN"
+    assert result["clock_summary"]["timestamp_order"] == "UNKNOWN"
+    assert result["clock_summary"]["error_bound_ms"] is None
+    assert result["read_scope_qualifiers"] == []
+
+
+@pytest.mark.parametrize("fault", ["missing_both", "missing_manifest", "missing_anchor",
+    "wrong_anchor", "manifest_bytes", "capsule_binding", "reference_binding"])
+def test_owner_metadata_boundary_anchor_refusals(bundle, fault):
+    capsule, artifacts, original_manifest = _owner_metadata_boundary_input(bundle)
+    raw = _encode(capsule)
+    manifest, anchor = _reanchor(raw, original_manifest)
+    reason = "TRUST_ANCHOR_MISMATCH"
+    if fault == "missing_both":
+        artifacts, manifest, anchor = {}, None, None
+        reason = "TRUST_ANCHOR_UNAVAILABLE"
+    elif fault == "missing_manifest":
+        manifest = None
+        reason = "TRUST_ANCHOR_UNAVAILABLE"
+    elif fault == "missing_anchor":
+        anchor = None
+        reason = "TRUST_ANCHOR_UNAVAILABLE"
+    elif fault == "wrong_anchor":
+        anchor = "0" * 64
+    elif fault == "manifest_bytes":
+        manifest += b" "
+    else:
+        value = json.loads(manifest)
+        if fault == "capsule_binding":
+            value["capsule_sha256"] = "0" * 64
+        else:
+            value["accepted_refs"][-1]["sha256"] = "0" * 64
+        manifest = _encode(value)
+        anchor = _sha(manifest)
+    result = _call(raw, artifacts, manifest, anchor)
+    assert reason in result["reason_codes"]
+    if fault == "missing_both":
+        assert result["reason_codes"] == ["DRAFT_NOT_ACCEPTED", reason]
+    _assert_owner_metadata_neutral(result)
+
+
+@pytest.mark.parametrize("position", ["first", "last"])
+@pytest.mark.parametrize("fault,reason", [
+    ("missing_artifact", "EVIDENCE_BYTES_MISSING"),
+    ("artifact_hash", "EVIDENCE_BYTES_MISMATCH"),
+    ("pointer", "EVIDENCE_POINTER_INVALID"),
+    ("record", "READ_RECORD_MISMATCH"),
+    ("invocation", "READER_INVOCATION_MISMATCH"),
+    ("window", "READ_WINDOW_UNPROVEN"),
+    ("epoch", "RUNTIME_INSTANCE_MISMATCH"),
+])
+def test_owner_metadata_boundary_evidence_refusals(bundle, position, fault, reason):
+    capsule, artifacts, original_manifest = _owner_metadata_boundary_input(bundle)
+    names = tuple(capsule["reads"])
+    name = names[0] if position == "first" else names[-1]
+    read = capsule["reads"][name]
+    if fault == "missing_artifact":
+        artifacts.pop(read["evidence_ref"]["uri"])
+    elif fault == "artifact_hash":
+        artifacts[read["evidence_ref"]["uri"]] += b" "
+    elif fault == "pointer":
+        read["evidence_ref"]["json_pointer"] = "/missing"
+    elif fault == "record":
+        _put(artifacts, read["evidence_ref"], {"different_record": True})
+    elif fault == "invocation":
+        invocation = json.loads(artifacts[read["invocation_ref"]["uri"]])
+        invocation["arguments"] = {"different_argument": True}
+        _put(artifacts, read["invocation_ref"], invocation)
+    else:
+        if fault == "window":
+            read["observation"]["read_finished_at_ms"] = read["observation"]["read_started_at_ms"] - 1
+        else:
+            read["observation"]["runtime_instance_epoch"] = "different-instance"
+        _refresh(capsule, artifacts)
+    raw = _encode(capsule)
+    manifest, anchor = _reanchor(raw, original_manifest)
+    result = _call(raw, artifacts, manifest, anchor)
+    assert reason in result["reason_codes"], (position, fault, result["reason_codes"])
+    _assert_owner_metadata_neutral(result)
+
+
+@pytest.mark.parametrize("artifacts_present", [False, True])
+def test_owner_metadata_boundary_budget_shortcut(bundle, artifacts_present):
+    raw, artifacts, manifest, _, _ = _load(bundle, "E13")
+    capsule = json.loads(raw)
+    capsule["evidence_class"] = "OWNER_EXPORTED"
+    result = _call(_encode(capsule), artifacts if artifacts_present else {}, None, None)
+    expected_reasons = ["DRAFT_NOT_ACCEPTED"] + (["SYNTHETIC_INPUT"] if artifacts_present else [])
+    assert result["reason_codes"] == expected_reasons
+    assert [m["reason_codes"] for m in result["member_results"]] == [["DRAFT_ACCEPTED_BUDGET_FORBIDDEN"]]
+    _assert_owner_metadata_neutral(result)
+
+
+@pytest.mark.parametrize("planted", ["inventory", "clock", "both"])
+def test_owner_metadata_boundary_unselected_shortcut(bundle, planted):
+    raw = _unseal(bundle["files"]["original/unselected-operational-input.template.json"])
+    capsule = json.loads(raw)
+    assert capsule["evidence_class"] == "OWNER_EXPORTED"
+    if planted in ("inventory", "both"):
+        capsule["inventory"]["coverage"] = "COMPLETE"
+    if planted in ("clock", "both"):
+        capsule["run"]["clock"]["comparability"] = "SUPPORTED_RECORDED_BASIS"
+        capsule["run"]["clock"]["error_bound_ms"] = 0
+    result = _call(_encode(capsule), {}, None, None)
+    assert result["reason_codes"] == ["DRAFT_NOT_ACCEPTED", "OPERATIONAL_PARAMETERS_UNSELECTED",
+                                      "INVENTORY_COVERAGE_UNKNOWN"]
+    _assert_owner_metadata_neutral(result)
+
+
+def test_owner_metadata_boundary_validated_laundering_retains_diagnostics(bundle):
+    raw, artifacts, manifest, anchor, expected = _load(bundle, "E14")
+    result = _call(raw, artifacts, manifest, anchor)
+    assert result == expected
+    assert result["evidence_class"] == "OWNER_EXPORTED"
+    assert result["runtime_instance_epoch"] == "SYNTHETIC-INSTANCE-EPOCH-1"
+    assert result["inventory_coverage"] == "COMPLETE"
+    assert result["clock_summary"]["comparability"] == "SUPPORTED_RECORDED_BASIS"
+    assert result["read_scope_qualifiers"]
+    assert result["member_results"][0]["reason_codes"] == ["SYNTHETIC_PROVENANCE_LAUNDERING"]
+    _ceiling(result)
+
+
+def test_owner_metadata_boundary_synthetic_and_unselected_parity(bundle):
+    raw, _, _, _, expected = _load(bundle, "E13")
+    assert _call(raw, {}, None, None) == expected
+    raw = _unseal(bundle["files"]["original/unselected-operational-input.template.json"])
+    expected = json.loads(_unseal(bundle["files"]["original/unselected-operational-input.expected.json"]))
+    assert _call(raw, {}, None, None) == expected
