@@ -1981,12 +1981,12 @@ def test_warm_cache_path_preserves_canonical_dispatch_evidence(
                 "collected_at": "2026-09-02T00:00:00Z",
                 "repositories": [],
             },
-            None,
+            "active_builds: open-PR inventory completeness unknown",
         ),
         ({}, f"active_builds: schema is None, expected {ccr.ACTIVE_BUILDS_SCHEMA!r}"),
         (["not-an-active-builds-document"], "active_builds: expected an object, got list"),
     ],
-    ids=["unavailable", "valid-empty", "malformed-object", "malformed-type"],
+    ids=["unavailable", "invalid-empty-boundary", "malformed-object", "malformed-type"],
 )
 def test_explicit_active_builds_snapshot_never_falls_back_to_the_artifact(
     monkeypatch,
@@ -3744,6 +3744,92 @@ def _coverage_document(active_builds):
         active_builds=active_builds, generated_at="2026-09-07T17:00:00Z")
 
 
+def _project_repository(active_builds, repo):
+    matches = [
+        repository
+        for repository in active_builds["repositories"]
+        if isinstance(repository, dict) and repository.get("repo") == repo
+    ]
+    assert len(matches) == 1
+    return matches[0]
+
+
+def _complete_project_active_builds(active_builds):
+    source = copy.deepcopy(active_builds)
+    assert {
+        (repository["repo"], repository["base_branch"])
+        for repository in source["repositories"]
+    } == {
+        ("mastermindx-market-intelligence/macro", "main"),
+        ("mastermindx-market-intelligence/mastermind-terminal", "master"),
+        ("mastermindx-market-intelligence/Mastermind", "master"),
+    }
+    return source
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["empty", "one_of_three", "duplicate", "foreign", "wrong_base", "malformed"],
+)
+def test_build_coverage_repository_boundary_fails_closed(active_builds, case):
+    source = _complete_project_active_builds(active_builds)
+    repositories = source["repositories"]
+    if case == "empty":
+        repositories = []
+    elif case == "one_of_three":
+        repositories = [repositories[-1]]
+    elif case == "duplicate":
+        repositories = [*repositories, copy.deepcopy(repositories[0])]
+    elif case == "foreign":
+        repositories[0]["repo"] = "PRIVATE_SENTINEL/foreign"
+    elif case == "wrong_base":
+        repositories[0]["base_branch"] = "master"
+    else:
+        repositories[0] = None
+    source["repositories"] = repositories
+
+    actual = _coverage_document(source)
+
+    assert _BUILD_OPEN_UNKNOWN in actual["degraded"]
+    assert actual["degraded"].count(_BUILD_OPEN_UNKNOWN) == 1
+    assert "PRIVATE_SENTINEL" not in json.dumps(actual)
+
+
+@pytest.mark.parametrize("case", ["one_of_three", "duplicate", "foreign", "wrong_base"])
+def test_build_coverage_invalid_boundary_preserves_observed_rows(active_builds, case):
+    source = _complete_project_active_builds(active_builds)
+    baseline = _coverage_document(source)
+    repositories = source["repositories"]
+    if case == "one_of_three":
+        repositories = [repositories[-1]]
+    elif case == "duplicate":
+        repositories = [*repositories, copy.deepcopy(repositories[0])]
+    elif case == "foreign":
+        repositories[0]["repo"] = "org/foreign"
+    else:
+        repositories[0]["base_branch"] = "master"
+    source["repositories"] = repositories
+
+    actual = _coverage_document(source)
+
+    assert actual["work"] == baseline["work"]
+    assert actual["unjoined_open_prs"] == baseline["unjoined_open_prs"]
+    assert _BUILD_OPEN_UNKNOWN in actual["degraded"]
+
+
+def test_build_coverage_exact_project_boundary_allows_empty_pr_scope(active_builds):
+    source = _complete_project_active_builds(active_builds)
+    for repository in source["repositories"]:
+        repository["open_prs"] = []
+        repository["open_prs_truncated"] = False
+
+    actual = _coverage_document(source)
+
+    assert not any(
+        warning.startswith("active_builds:") for warning in actual["degraded"]
+    )
+
+
 @pytest.mark.parametrize("field,expected", [
     ("open_prs_truncated", _BUILD_OPEN_TRUNCATED),
     ("files_truncated", _BUILD_FILES_TRUNCATED),
@@ -3751,7 +3837,9 @@ def _coverage_document(active_builds):
 def test_build_coverage_truncation_survives_without_erasing_observed_rows(active_builds, field, expected):
     baseline = _coverage_document(active_builds)
     source = copy.deepcopy(active_builds)
-    target = source["repositories"][0]
+    target = _project_repository(
+        source, "mastermindx-market-intelligence/Mastermind"
+    )
     if field == "files_truncated":
         target = target["open_prs"][0]
     target[field] = True
@@ -3770,7 +3858,9 @@ def test_build_coverage_truncation_survives_without_erasing_observed_rows(active
 @pytest.mark.parametrize("value", [None, 0, 1, "false", "PRIVATE_SENTINEL", []])
 def test_build_coverage_nonboolean_flags_remain_unknown(active_builds, field, expected, value):
     source = copy.deepcopy(active_builds)
-    target = source["repositories"][0]
+    target = _project_repository(
+        source, "mastermindx-market-intelligence/Mastermind"
+    )
     if field == "files_truncated":
         target = target["open_prs"][0]
     target[field] = value
@@ -3785,7 +3875,9 @@ def test_build_coverage_nonboolean_flags_remain_unknown(active_builds, field, ex
 ])
 def test_build_coverage_missing_flags_do_not_default_to_complete(active_builds, field, expected):
     source = copy.deepcopy(active_builds)
-    target = source["repositories"][0]
+    target = _project_repository(
+        source, "mastermindx-market-intelligence/Mastermind"
+    )
     if field == "files_truncated":
         target = target["open_prs"][0]
     del target[field]
@@ -3809,7 +3901,9 @@ def test_build_coverage_unusable_repository_collection_is_unknown(active_builds,
 ])
 def test_build_coverage_malformed_collections_do_not_imply_absence(active_builds, collection, value, expected):
     source = copy.deepcopy(active_builds)
-    target = source["repositories"][0]
+    target = _project_repository(
+        source, "mastermindx-market-intelligence/Mastermind"
+    )
     if collection == "files":
         target = target["open_prs"][0]
     target[collection] = value
@@ -3818,7 +3912,9 @@ def test_build_coverage_malformed_collections_do_not_imply_absence(active_builds
 
 def test_build_coverage_deduplicates_warnings_and_preserves_determinism(active_builds):
     source = copy.deepcopy(active_builds)
-    repo = source["repositories"][0]
+    repo = _project_repository(
+        source, "mastermindx-market-intelligence/Mastermind"
+    )
     repo["open_prs_truncated"] = True
     for pr in repo["open_prs"]:
         pr["files_truncated"] = True
@@ -3835,8 +3931,12 @@ def test_build_coverage_deduplicates_warnings_and_preserves_determinism(active_b
 
 def test_build_coverage_explicit_complete_empty_scope_adds_no_false_warning(active_builds):
     source = copy.deepcopy(active_builds)
-    source["repositories"][0]["open_prs"] = []
-    source["repositories"][0]["recently_merged_truncated"] = True
+    _project_repository(
+        source, "mastermindx-market-intelligence/Mastermind"
+    )["open_prs"] = []
+    _project_repository(
+        source, "mastermindx-market-intelligence/Mastermind"
+    )["recently_merged_truncated"] = True
     actual = _coverage_document(source)
     assert not any("inventory" in x or "file coverage" in x for x in actual["degraded"])
     assert actual["schema"] == ccr.SCHEMA

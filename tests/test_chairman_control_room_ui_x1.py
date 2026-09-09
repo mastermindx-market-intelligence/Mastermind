@@ -2989,7 +2989,13 @@ def test_build_inventory_coverage_reaches_the_shipped_browser(coverage):
     def load(name):
         return json.loads((fixtures / name).read_text())
     builds = load("active_builds_v1.json")
-    repo = builds["repositories"][0]
+    repositories = [
+        repository
+        for repository in builds["repositories"]
+        if repository.get("repo") == "mastermindx-market-intelligence/Mastermind"
+    ]
+    assert len(repositories) == 1
+    repo = repositories[0]
     if coverage == "truncated":
         repo["open_prs_truncated"] = True
         repo["open_prs"][0]["files_truncated"] = True

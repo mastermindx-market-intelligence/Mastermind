@@ -223,6 +223,15 @@ EXECUTIVE_INBOX_SCHEMA = executive_inbox.SCHEMA
 #: the Macro checkout, only a runtime file read (see ``_read_active_builds``).
 ACTIVE_BUILDS_SCHEMA = "project_active_builds.v1"
 
+#: Closed repository boundary owned by Macro's project-wide active-build
+#: producer.  This is a compatibility constant, not an independently
+#: discoverable inventory: changing the project boundary is a schema change.
+_ACTIVE_BUILDS_REPOSITORY_BOUNDARY = frozenset({
+    ("mastermindx-market-intelligence/macro", "main"),
+    ("mastermindx-market-intelligence/mastermind-terminal", "master"),
+    ("mastermindx-market-intelligence/Mastermind", "master"),
+})
+
 #: Relative path, inside a resolved Macro checkout, of the compiled snapshot.
 #: Verified against ``scripts/build_project_active_build_map.py`` line 49
 #: (``_DEFAULT_JSON_OUT = _REPO_ROOT / "data" / "governance" /
@@ -684,7 +693,22 @@ def _active_build_coverage_problems(active_builds: Mapping[str, Any]) -> list[st
     repositories = active_builds.get("repositories")
     if not rows(repositories):
         return [open_unknown]
-    # An explicit empty declared scope remains valid; it does not attest a fleet.
+
+    identities = [
+        (repository.get("repo"), repository.get("base_branch"))
+        for repository in repositories
+        if isinstance(repository, Mapping)
+        and isinstance(repository.get("repo"), str)
+        and isinstance(repository.get("base_branch"), str)
+    ]
+    if (
+        len(identities) != len(repositories)
+        or len(identities) != len(_ACTIVE_BUILDS_REPOSITORY_BOUNDARY)
+        or set(identities) != _ACTIVE_BUILDS_REPOSITORY_BOUNDARY
+    ):
+        problems.add(open_unknown)
+
+    # Empty PR lists are valid only inside the complete declared project scope.
     for repository in repositories:
         if not isinstance(repository, Mapping):
             problems.add(open_unknown)

@@ -6,9 +6,29 @@
   "merged_days": 14,
   "repositories": [
     {
+      "key": "macro",
+      "repo": "mastermindx-market-intelligence/macro",
+      "base_branch": "main",
+      "base_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "open_prs_truncated": false,
+      "recently_merged_truncated": false,
+      "open_prs": [],
+      "recently_merged": []
+    },
+    {
+      "key": "terminal",
+      "repo": "mastermindx-market-intelligence/mastermind-terminal",
+      "base_branch": "master",
+      "base_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "open_prs_truncated": false,
+      "recently_merged_truncated": false,
+      "open_prs": [],
+      "recently_merged": []
+    },
+    {
       "key": "mastermind",
       "repo": "mastermindx-market-intelligence/Mastermind",
-      "base_branch": "main",
+      "base_branch": "master",
       "base_sha": "cccccccccccccccccccccccccccccccccccccc",
       "open_prs_truncated": false,
       "recently_merged_truncated": false,
@@ -67,15 +87,35 @@
   ],
   "file_collisions": [],
   "summary": {
-    "repository_count": 1,
+    "repository_count": 3,
     "open_prs": 3,
     "conflicts": 0,
     "file_collisions": 0,
     "recently_merged": 0,
     "repositories": [
       {
-        "repo": "mastermindx-market-intelligence/Mastermind",
+        "repo": "mastermindx-market-intelligence/macro",
         "base_branch": "main",
+        "open_prs": 0,
+        "conflicts": 0,
+        "protected_prs": 0,
+        "dependency_edges": 0,
+        "file_collisions": 0,
+        "recently_merged": 0
+      },
+      {
+        "repo": "mastermindx-market-intelligence/mastermind-terminal",
+        "base_branch": "master",
+        "open_prs": 0,
+        "conflicts": 0,
+        "protected_prs": 0,
+        "dependency_edges": 0,
+        "file_collisions": 0,
+        "recently_merged": 0
+      },
+      {
+        "repo": "mastermindx-market-intelligence/Mastermind",
+        "base_branch": "master",
         "open_prs": 3,
         "conflicts": 0,
         "protected_prs": 0,
