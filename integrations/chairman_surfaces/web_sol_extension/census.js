@@ -2,6 +2,7 @@
 
 // This view owns no registry, timer-driven collection, native command or saved snapshot.
 (() => {
+  if (globalThis.top !== globalThis.self) return;
   const byId = id => document.getElementById(id);
   const REASONS = Object.freeze({
     NONE: "Inventory stable at its two sampling boundaries; this is not an atomic account total.",
@@ -23,6 +24,8 @@
     PROBE_SLOTS_EXHAUSTED: "Probe slots unavailable",
   });
   let busy = false;
+  let generation = 0;
+  if (globalThis.addEventListener) globalThis.addEventListener("pagehide", () => {generation++; clearSnapshot();});
   function element(tag, value, className) {
     const node = document.createElement(tag);
     node.textContent = value;
@@ -91,17 +94,20 @@
   }
   async function refresh() {
     if (busy) return;
+    const current = ++generation;
     busy = true; byId("refresh").disabled = true;
     byId("status").className = "status"; byId("status").textContent = "Collecting a bounded read-only snapshot…";
     clearSnapshot();
     try {
-      const instance = globalThis.MMX_WEB_SOL_INSTANCE;
-      render(await globalThis.MMXWebSolCensus.collect(chrome.tabs, instance && instance.instanceId));
+      const result = await chrome.runtime.sendMessage({kind: "MMX_WEB_SOL_CENSUS_REFRESH"});
+      if (current !== generation) return;
+      render(result);
     } catch (_) {
+      if (current !== generation) return;
       clearSnapshot();
       byId("status").className = "status error";
       byId("status").textContent = "Snapshot unavailable. No browser-control action was attempted.";
-    } finally { busy = false; byId("refresh").disabled = false; }
+    } finally { if (current === generation) {busy = false; byId("refresh").disabled = false;} }
   }
   byId("refresh").addEventListener("click", refresh);
   refresh();
