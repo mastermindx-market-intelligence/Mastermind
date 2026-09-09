@@ -41,6 +41,10 @@ From an exact checkout containing the accepted N0 source:
 python3 scripts/notion_knowledge_surface.py
 ```
 
+Live/remote operation is bound to the checked-in `config/notion_knowledge_surface_n0.json`.
+`--manifest` may be used for offline planning/tests only; when a live token+parent are present or
+`--apply` is requested, a non-default manifest is refused before any network call.
+
 With both environment values present and no `--apply`, this proves the parent identity,
 reads its current children, and prints a plan. It performs no Notion write.
 

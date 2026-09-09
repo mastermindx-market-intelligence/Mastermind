@@ -35,8 +35,14 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
-        manifest = load_manifest(args.manifest)
         token = os.environ.get("NOTION_API_KEY")
+        live_mode = bool(args.apply or (token and args.parent_page_id))
+        manifest_path = Path(args.manifest).resolve()
+        if live_mode and manifest_path != DEFAULT_MANIFEST.resolve():
+            raise BootstrapError(
+                "live N0 operations require the checked-in reviewed default manifest"
+            )
+        manifest = load_manifest(manifest_path)
         if args.apply:
             if not token or not args.parent_page_id:
                 raise BootstrapError("--apply requires NOTION_API_KEY and NOTION_PARENT_PAGE_ID/--parent-page-id")

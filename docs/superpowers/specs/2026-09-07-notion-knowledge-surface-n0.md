@@ -105,7 +105,7 @@ The client paces request starts at a conservative default interval rather than d
 
 ## 7. Deterministic method
 
-N0 is deterministic. No language model chooses names, schemas, parents, or whether an existing object is "close enough." The manifest in `config/notion_knowledge_surface_n0.json` is the reviewed workspace contract.
+N0 is deterministic. No language model chooses names, schemas, parents, or whether an existing object is "close enough." The manifest in `config/notion_knowledge_surface_n0.json` is the reviewed workspace contract. Live/remote operation is bound to that checked-in default path; alternate manifests are offline-test inputs only and are refused before network access. The validator also fixes the N0 workspace key, least-privilege capability set, eight-child count, and five-database count.
 
 A later model may summarize canonical research for human consumption, but generated prose will carry source/provenance metadata and zero lifecycle/priority/trading authority.
 

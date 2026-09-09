@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
+from scripts.notion_knowledge_surface import main as notion_cli_main
+
 from integrations.notion_knowledge_surface.bootstrap import (
     AmbiguousChildError,
+    ManifestError,
     NotionClient,
     NotionEffectUnknown,
     SchemaMismatchError,
@@ -290,3 +294,48 @@ def test_create_database_uses_initial_data_source_schema() -> None:
     assert captured["mutating"] is True
     assert captured["payload"]["is_inline"] is False
     assert captured["payload"]["initial_data_source"] == {"properties": properties}
+
+
+def test_cli_custom_manifest_is_offline_only(monkeypatch, tmp_path, capsys) -> None:
+    custom_manifest = tmp_path / "custom-n0.json"
+    custom_manifest.write_text(MANIFEST.read_text(encoding="utf-8"), encoding="utf-8")
+
+    monkeypatch.delenv("NOTION_API_KEY", raising=False)
+    monkeypatch.delenv("NOTION_PARENT_PAGE_ID", raising=False)
+    assert notion_cli_main(["--manifest", str(custom_manifest)]) == 0
+    offline = json.loads(capsys.readouterr().out)
+    assert offline["mode"] == "offline-plan"
+
+    assert notion_cli_main(["--apply", "--manifest", str(custom_manifest)]) == 2
+    refused = capsys.readouterr().err
+    assert "checked-in reviewed default manifest" in refused
+
+    monkeypatch.setenv("NOTION_API_KEY", "not-a-real-token")
+    monkeypatch.setenv("NOTION_PARENT_PAGE_ID", PARENT)
+    assert notion_cli_main(["--manifest", str(custom_manifest)]) == 2
+    refused = capsys.readouterr().err
+    assert "checked-in reviewed default manifest" in refused
+
+
+def test_manifest_rejects_workspace_capability_or_database_count_drift(tmp_path) -> None:
+    source = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    source["workspace_key"] = "other-workspace"
+    drifted = tmp_path / "workspace-drift.json"
+    drifted.write_text(json.dumps(source), encoding="utf-8")
+    with pytest.raises(ManifestError, match="workspace key"):
+        load_manifest(drifted)
+
+    source = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    source["required_capabilities"] = ["read_content", "insert_content", "update_content"]
+    drifted = tmp_path / "capability-drift.json"
+    drifted.write_text(json.dumps(source), encoding="utf-8")
+    with pytest.raises(ManifestError, match="least-privilege"):
+        load_manifest(drifted)
+
+    source = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    source["children"][1]["kind"] = "page"
+    source["children"][1].pop("properties")
+    drifted = tmp_path / "database-count-drift.json"
+    drifted.write_text(json.dumps(source), encoding="utf-8")
+    with pytest.raises(ManifestError, match="exactly 5 databases"):
+        load_manifest(drifted)

@@ -19,6 +19,9 @@ NOTION_VERSION = "2026-03-11"
 API_BASE = "https://api.notion.com/v1"
 MANIFEST_SCHEMA = "mastermind.notion_knowledge_surface_n0.v1"
 EXPECTED_CHILD_COUNT = 8
+EXPECTED_DATABASE_COUNT = 5
+EXPECTED_WORKSPACE_KEY = "mastermind-x"
+EXPECTED_REQUIRED_CAPABILITIES = ["read_content", "insert_content"]
 VALID_KINDS = {"page", "database"}
 SUPPORTED_PROPERTY_TYPES = {"title", "rich_text", "select", "date", "url"}
 DEFAULT_MIN_REQUEST_INTERVAL = 0.35
@@ -90,11 +93,16 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
         raise ManifestError("unexpected manifest schema")
     if manifest.get("notion_version") != NOTION_VERSION:
         raise ManifestError("manifest Notion version is not the reviewed version")
+    if manifest.get("workspace_key") != EXPECTED_WORKSPACE_KEY:
+        raise ManifestError("manifest workspace key is not the reviewed N0 workspace")
+    if manifest.get("required_capabilities") != EXPECTED_REQUIRED_CAPABILITIES:
+        raise ManifestError("manifest capabilities are not the reviewed least-privilege set")
     children = manifest.get("children")
     if not isinstance(children, list) or len(children) != EXPECTED_CHILD_COUNT:
         raise ManifestError(f"N0 manifest must contain exactly {EXPECTED_CHILD_COUNT} children")
     keys: set[str] = set()
     titles: set[str] = set()
+    database_count = 0
     for child in children:
         if not isinstance(child, Mapping):
             raise ManifestError("child entries must be objects")
@@ -108,6 +116,7 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
         if kind not in VALID_KINDS:
             raise ManifestError(f"unsupported child kind for {key!r}")
         if kind == "database":
+            database_count += 1
             properties = child.get("properties")
             if not isinstance(properties, Mapping) or not properties:
                 raise ManifestError(f"database {key!r} requires properties")
@@ -122,6 +131,10 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
                 raise ManifestError(f"database {key!r} must have exactly one title property")
         keys.add(key)
         titles.add(title)
+    if database_count != EXPECTED_DATABASE_COUNT:
+        raise ManifestError(
+            f"N0 manifest must contain exactly {EXPECTED_DATABASE_COUNT} databases"
+        )
 
 
 def _block_identity(block: Mapping[str, Any]) -> tuple[str, str, str] | None:
