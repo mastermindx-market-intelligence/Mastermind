@@ -346,6 +346,7 @@ class _PackageSnapshot:
         self.errors = errors
         self._fds: list[int] = []
         self._directories: list[tuple[int, int | None, str, str, os.stat_result, tuple[str, ...], bool]] = []
+        self._lexical: list[tuple[int, int | None, str, str, os.stat_result, tuple[str, ...], bool]] = []
 
     @staticmethod
     def _same_identity(left: os.stat_result, right: os.stat_result) -> bool:
@@ -476,10 +477,11 @@ class _PackageSnapshot:
         if fd is None:
             return
         for index, part in enumerate(parts[1:], start=1):
-            next_fd = self._open_directory(part, fd, "", strict=index == len(parts) - 1)
+            next_fd = self._open_directory(part, fd, "", strict=False)
             if next_fd is None:
                 return
             fd = next_fd
+        self._lexical = list(self._directories)
         for top in (".agents", "plugins"):
             top_fd = self._open_directory(top, fd, top)
             if top_fd is not None:
@@ -488,18 +490,32 @@ class _PackageSnapshot:
 
     def settle(self) -> None:
         """Detect replacement, mutation, or inventory drift before admitting this snapshot."""
-        for _round in range(2):
-            for fd, parent_fd, name, relative, initial, names, strict in self._directories:
-                try:
-                    opened = os.fstat(fd)
-                    current = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
-                    if not self._same_identity(initial, opened) or not self._same_identity(initial, current):
-                        self._filesystem_invalid(relative, "package directory changed during validation")
-                        continue
-                    if strict and (not self._same_metadata(initial, opened) or not self._same_metadata(initial, current) or tuple(sorted(os.listdir(fd))) != names):
-                        self._filesystem_invalid(relative, "package directory changed during validation")
-                except (OSError, TypeError):
-                    self._filesystem_invalid(relative, "package directory cannot be settled safely")
+        def settle_link(entry: tuple[int, int | None, str, str, os.stat_result, tuple[str, ...], bool], strict: bool) -> None:
+            fd, parent_fd, name, relative, initial, names, _ = entry
+            try:
+                before_fd = os.fstat(fd)
+                before_name = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+                if not self._same_identity(initial, before_fd) or not self._same_identity(initial, before_name):
+                    self._filesystem_invalid(relative, "package directory changed during validation")
+                    return
+                listed = tuple(sorted(os.listdir(fd))) if strict else names
+                after_fd = os.fstat(fd)
+                after_name = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+                changed = not self._same_identity(initial, after_fd) or not self._same_identity(initial, after_name)
+                if strict:
+                    changed = changed or not self._same_metadata(initial, before_fd) or not self._same_metadata(initial, before_name) or not self._same_metadata(initial, after_fd) or not self._same_metadata(initial, after_name) or listed != names
+                if changed:
+                    self._filesystem_invalid(relative, "package directory changed during validation")
+            except (OSError, TypeError):
+                self._filesystem_invalid(relative, "package directory cannot be settled safely")
+
+        for entry in self._lexical:
+            settle_link(entry, strict=False)
+        package_entries = [entry for entry in self._directories if entry not in self._lexical]
+        for entry in sorted(package_entries, key=lambda item: (item[3].count("/"), item[3]), reverse=True):
+            settle_link(entry, strict=True)
+        for entry in self._lexical:
+            settle_link(entry, strict=False)
 
     def close(self) -> None:
         for fd in reversed(self._fds):

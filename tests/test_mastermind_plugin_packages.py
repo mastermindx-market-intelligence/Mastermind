@@ -71,6 +71,22 @@ def _replace_with_owned_symlink(path: Path, sibling_name: str) -> Path:
     return sibling
 
 
+def _preserve_capability_membership(
+    monkeypatch: pytest.MonkeyPatch, attribute: str, replacement: object
+) -> None:
+    """Install a primitive wrapper without turning strict admission into the test subject."""
+    original = getattr(plugin_validator.os, attribute)
+    monkeypatch.setattr(plugin_validator.os, attribute, replacement)
+    for capability in ("supports_dir_fd", "supports_fd", "supports_follow_symlinks"):
+        advertised = getattr(plugin_validator.os, capability)
+        if original in advertised:
+            monkeypatch.setattr(
+                plugin_validator.os,
+                capability,
+                frozenset(replacement if item is original else item for item in advertised),
+            )
+
+
 def _closed_json_document_paths() -> tuple[str, ...]:
     return (
         ".agents/plugins/marketplace.json",
@@ -221,6 +237,7 @@ def test_descriptor_snapshot_returns_typed_error_for_directory_fstat_failure_wit
 ) -> None:
     """A descriptor opened before fstat failure belongs to the snapshot and is cleaned up."""
     actual_fstat = plugin_validator.os.fstat
+    before = len(os.listdir("/dev/fd"))
     calls = 0
 
     def fail_one_directory_fstat(fd: int) -> os.stat_result:
@@ -237,7 +254,9 @@ def test_descriptor_snapshot_returns_typed_error_for_directory_fstat_failure_wit
         pytest.fail(f"repository validator raised {type(error).__name__}: {error}")
 
     assert result["ok"] is False
+    assert calls >= 2
     assert "PACKAGE_FILESYSTEM_INVALID" in {error["code"] for error in result["errors"]}
+    assert len(os.listdir("/dev/fd")) == before
 
 
 def test_descriptor_snapshot_refuses_byte_identical_file_replacement_at_open_boundary(
@@ -258,10 +277,11 @@ def test_descriptor_snapshot_refuses_byte_identical_file_replacement_at_open_bou
             target.write_bytes(replacement.read_bytes())
         return original_open(name, flags, *args, **kwargs)
 
-    monkeypatch.setattr(plugin_validator.os, "open", replace_before_open)
+    _preserve_capability_membership(monkeypatch, "open", replace_before_open)
     result = validate_repository(tmp_path)
 
     assert result["ok"] is False
+    assert replaced is True
     assert "PACKAGE_FILESYSTEM_INVALID" in {error["code"] for error in result["errors"]}
 
 
@@ -285,10 +305,11 @@ def test_descriptor_snapshot_refuses_late_directory_entry_after_fd_enumeration(
                 os.close(created)
         return names
 
-    monkeypatch.setattr(plugin_validator.os, "listdir", add_after_listdir)
+    _preserve_capability_membership(monkeypatch, "listdir", add_after_listdir)
     result = validate_repository(tmp_path)
 
     assert result["ok"] is False
+    assert injected is True
     assert "PACKAGE_FILESYSTEM_INVALID" in {error["code"] for error in result["errors"]}
 
 
@@ -311,6 +332,36 @@ def test_descriptor_snapshot_settles_agents_link_after_semantic_scan(
 
     assert result["ok"] is False
     assert "PACKAGE_FILESYSTEM_INVALID" in {error["code"] for error in result["errors"]}
+
+
+@pytest.mark.parametrize("target_name", ("root", "agents"))
+def test_descriptor_snapshot_final_reverse_settlement_rejects_late_symlink_replacement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target_name: str
+) -> None:
+    """A target changed after its forward check is still checked by the final reverse bracket."""
+    _copy_package(tmp_path)
+    original_listdir = plugin_validator.os.listdir
+    enumerations = 0
+    fired = False
+
+    def replace_late(fd: int) -> list[str]:
+        nonlocal enumerations, fired
+        names = original_listdir(fd)
+        enumerations += 1
+        if not fired and enumerations >= 3:
+            target = tmp_path if target_name == "root" else tmp_path / ".agents"
+            moved = target.parent / f"moved-{target_name}"
+            target.rename(moved)
+            target.symlink_to(moved, target_is_directory=True)
+            fired = True
+        return names
+
+    _preserve_capability_membership(monkeypatch, "listdir", replace_late)
+    result = validate_repository(tmp_path)
+
+    assert fired is True
+    assert result["ok"] is False
+    assert {error["code"] for error in result["errors"]} & {"PACKAGE_FILESYSTEM_INVALID", "SYMLINK_FORBIDDEN"}
 
 
 @pytest.mark.parametrize("value", ([], {}))
