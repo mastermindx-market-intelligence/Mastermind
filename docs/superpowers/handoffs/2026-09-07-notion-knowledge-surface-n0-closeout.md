@@ -53,3 +53,16 @@ Establish one authorized live Notion execution path for the intended Mastermind 
 - N1: canonical read-only projector with provenance/freshness/correction behavior.
 - N2: Chairman input intake into quarantine/candidate-input seam; never direct runtime authority.
 - N3: governed worker Notion access only through existing capability-attestation architecture.
+
+## 2026-09-09 continuation reconciliation
+
+- Current protected Mastermind is `686af274d8ae1558f3f3ae35e0b3aae68be80a01`; the protected Skillpack remains `mastermind.sol_skillpack.v1` 1.0.1 / bootstrap major 1.
+- Protected movement is path-disjoint from all eight N0-owned files, and current master contains no competing `notion_knowledge_surface` implementation.
+- The CI workflow change since the original base only raises the timeout from 25 to 40 minutes and does not change the test contract.
+- A newly protected material source, `docs/superpowers/specs/2026-09-07-chairman-control-room-decision-first-experience-design.md`, now owns the default current Chairman act/no-act experience. N0 is amended so `00 — Chairman Board Book` is periodic strategic/narrative synthesis only and cannot become a competing live dashboard. This semantic source change requires fresh review; prior semantic review is not reused unchanged.
+- Current official Notion documentation still identifies API `2026-03-11` as latest and still supports `POST /v1/databases` with `initial_data_source`, matching the reviewed N0 request contract.
+- The authorized Mac Studio is online and reachable, but the checked runtime environment still has no `NOTION_API_KEY` or `NOTION_PARENT_PAGE_ID`.
+- The ChatGPT Notion plugin remains listed but `not_installed`; this workspace still does not expose an invokable Notion tool or eligible install suggestion.
+- Executive OS read probe currently fails at the MCP tunnel with HTTP 429; no Executive lifecycle state or Job admission is inferred.
+
+Capability remains `BUILT_NOT_PROVEN`. Exact next live gate remains one scoped Notion connection plus the intended parent identity, followed by remote dry-run, one apply, immediate zero-create second apply, and human-visible proof. N1/N2/N3 remain held.

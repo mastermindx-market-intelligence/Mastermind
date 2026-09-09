@@ -6,6 +6,8 @@ This guide operates the bounded N0 bootstrap frozen in
 N0 creates a human-facing workspace shell only. Notion is **not** an Executive OS,
 Agent OS, priority queue, source-law owner, or task dispatcher.
 
+The protected decision-first Chairman Control Room owns the current act/no-act/default executive experience. `00 — Chairman Board Book` is periodic strategic/narrative synthesis only; do not populate it as a live attention dashboard, a replacement for Control Room Today/Advanced, or a second project-management surface.
+
 ## One-time Notion setup
 
 Create or select one private Notion page to be the Mastermind root, preferably named
@@ -94,6 +96,7 @@ Do not continue to N1 if this proof fails.
 Open the Mastermind root in Notion and verify all eight children are visible and usable.
 Specifically confirm:
 
+- `00 — Chairman Board Book` is periodic strategic/narrative synthesis and is not presented as the current act/no-act/default Chairman dashboard;
 - `05 — Operating Manual` is a presentation/index page, not treated as governing procedure;
 - the four projection databases expose canonical metadata fields;
 - `06 — Chairman Notes & Inputs` is clearly a human-input surface and has no implication that

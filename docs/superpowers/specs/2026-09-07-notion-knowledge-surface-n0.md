@@ -17,6 +17,10 @@ The first useful vertical is deliberately narrow:
 
 N0 does **not** sync canonical records yet and does not accept Notion content as execution authority.
 
+### 1.1 Chairman Control Room precedence / Board Book boundary
+
+Protected master now carries `docs/superpowers/specs/2026-09-07-chairman-control-room-decision-first-experience-design.md`, which has narrow precedence over the default current Chairman experience. Therefore `00 — Chairman Board Book` is a **periodic strategic/narrative knowledge package**, not a competing live executive dashboard. It may later synthesize durable weekly/monthly progress, decisions, research, and context with explicit as-of/provenance, but it must never compute or present coverage-qualified `CLEAR`/`ATTENTION`, become the current act/no-act default, rank operational priorities, mirror Job/Worker liveness, or replace Linear project-management. Any future N1 Board Book projection must defer current-action meaning to the decision-first Control Room and the underlying canonical owners.
+
 ## 2. Canonical ownership / no-rebuild boundary
 
 | Concept | Canonical owner | Notion relationship |
@@ -26,6 +30,7 @@ N0 does **not** sync canonical records yet and does not accept Notion content as
 | implementation / PR / CI / evidence | GitHub | links + summarized projection later |
 | portfolio projection | Linear | optional links/projection only |
 | hot transport/dialogue | Slack | no mirroring by default |
+| current Chairman act/no-act/default decision compression | decision-first Chairman Control Room over existing canonical owners | `00 — Chairman Board Book` is periodic strategic/narrative synthesis only; never the live default |
 | company priority ranking | Improvement Agenda / accepted strategy owners | display only; Notion never re-ranks |
 | research/architecture governing artifacts | declared repository authority | browsable projection/index only |
 | operating procedure / source law | protected repository owners / Skillpack | `05 — Operating Manual` is an index/presentation page only |
