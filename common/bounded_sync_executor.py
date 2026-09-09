@@ -159,19 +159,7 @@ class BoundedSyncExecutor:
                 epoch = _LoopEpoch.create(loop, self.max_concurrency)
                 self._epoch = epoch
             elif epoch.loop is not loop:
-                # The async wrapper may be cancelled while its worker remains
-                # physical. Retire only attempts whose worker has really ended.
-                # With no old-loop waiters, no old asyncio primitive is touched.
-                if epoch.waiters == 0 and epoch.reservations == 0:
-                    for attempt in tuple(epoch.attempts):
-                        if attempt.started() and attempt.physical_done():
-                            epoch.attempts.discard(attempt)
-                        elif (
-                            not attempt.started()
-                            and attempt.task is not None
-                            and attempt.task.done()
-                        ):
-                            epoch.attempts.discard(attempt)
+                self._reap_detached_epoch(epoch)
                 if not epoch.idle():
                     raise SyncExecutorLoopConflict(
                         "another event-loop epoch still owns executor work"
@@ -181,6 +169,34 @@ class BoundedSyncExecutor:
             epoch.reservations += 1
             self._mark_busy(epoch)
             return epoch
+
+    def _reap_detached_epoch(self, epoch: _LoopEpoch) -> None:
+        """Forget completed work when its owning event loop cannot retire it.
+
+        This method runs under ``_state_gate`` and never touches an asyncio
+        primitive owned by the detached loop.  The old epoch is discarded only
+        after every waiter/reservation is gone and each remaining attempt has
+        either completed physically or never entered user code.
+        """
+
+        if epoch.waiters != 0 or epoch.reservations != 0:
+            return
+        for attempt in tuple(epoch.attempts):
+            if (
+                attempt.started()
+                and attempt.physical_done()
+                and (
+                    epoch.loop.is_closed()
+                    or (attempt.task is not None and attempt.task.done())
+                )
+            ):
+                epoch.attempts.discard(attempt)
+            elif (
+                not attempt.started()
+                and attempt.task is not None
+                and attempt.task.done()
+            ):
+                epoch.attempts.discard(attempt)
 
     def _mark_busy(self, epoch: _LoopEpoch) -> None:
         epoch.idle_event.clear()
@@ -385,10 +401,12 @@ class BoundedSyncExecutor:
             if self._terminal_closed:
                 return
             epoch = self._epoch
-            if epoch is not None and epoch.loop is not loop and not epoch.idle():
-                raise SyncExecutorLoopConflict(
-                    "another event-loop epoch still owns executor work"
-                )
+            if epoch is not None and epoch.loop is not loop:
+                self._reap_detached_epoch(epoch)
+                if not epoch.idle():
+                    raise SyncExecutorLoopConflict(
+                        "another event-loop epoch still owns executor work"
+                    )
             if epoch is None or epoch.loop is not loop:
                 epoch = _LoopEpoch.create(loop, self.max_concurrency)
                 self._epoch = epoch

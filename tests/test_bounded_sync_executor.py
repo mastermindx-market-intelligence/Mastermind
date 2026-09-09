@@ -348,3 +348,112 @@ def test_first_waiter_registration_is_atomic_with_loop_binding(
 
     assert observed_maximum == 1
     assert sum(isinstance(error, SyncExecutorLoopConflict) for error in errors) == 1
+
+
+def test_close_reaps_completed_attempt_after_original_loop_is_closed() -> None:
+    executor = BoundedSyncExecutor(max_concurrency=1)
+    physical = BlockingOperation("physical")
+    owner_closed = threading.Event()
+    owner_errors: list[BaseException] = []
+    pool = ThreadPoolExecutor(max_workers=1)
+
+    def owner() -> None:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.set_default_executor(pool)
+        loop.set_exception_handler(lambda _loop, _context: None)
+
+        async def scenario() -> None:
+            pending = asyncio.create_task(executor.run(physical, timeout=5))
+            while not physical.entered.is_set():
+                await asyncio.sleep(0.001)
+            with pytest.raises(SyncExecutorCloseTimeout):
+                await executor.aclose(timeout=0.01)
+            pending.cancel()
+            result = await asyncio.gather(pending, return_exceptions=True)
+            assert isinstance(result[0], asyncio.CancelledError)
+            attempts = executor.attempts_snapshot()
+            assert len(attempts) == 1 and attempts[0].task is not None
+
+        try:
+            loop.run_until_complete(scenario())
+        except BaseException as error:
+            owner_errors.append(error)
+        finally:
+            loop.close()
+            owner_closed.set()
+
+    thread = threading.Thread(target=owner)
+    thread.start()
+    assert physical.entered.wait(1)
+    assert owner_closed.wait(2)
+    thread.join(2)
+    assert not thread.is_alive() and not owner_errors
+
+    physical.release.set()
+    for _ in range(200):
+        if physical.finished == 1:
+            break
+        threading.Event().wait(0.01)
+    assert physical.finished == 1
+
+    asyncio.run(executor.aclose(timeout=1))
+    assert executor.attempts_snapshot() == ()
+
+    pool.shutdown(wait=True)
+
+
+def test_foreign_close_does_not_reap_completed_attempt_from_open_owner_loop() -> None:
+    executor = BoundedSyncExecutor(max_concurrency=1)
+    physical = BlockingOperation("physical")
+    owner_paused = threading.Event()
+    allow_owner_drain = threading.Event()
+    owner_closed = threading.Event()
+    owner_errors: list[BaseException] = []
+
+    def owner() -> None:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        async def scenario() -> None:
+            pending = asyncio.create_task(executor.run(physical, timeout=5))
+            while not physical.entered.is_set():
+                await asyncio.sleep(0.001)
+            pending.cancel()
+            result = await asyncio.gather(pending, return_exceptions=True)
+            assert isinstance(result[0], asyncio.CancelledError)
+
+        try:
+            loop.run_until_complete(scenario())
+            owner_paused.set()
+            if not allow_owner_drain.wait(5):
+                raise AssertionError("owner loop was not released")
+            loop.run_until_complete(asyncio.sleep(0.02))
+        except BaseException as error:
+            owner_errors.append(error)
+        finally:
+            loop.close()
+            owner_closed.set()
+
+    thread = threading.Thread(target=owner)
+    thread.start()
+    assert physical.entered.wait(1)
+    assert owner_paused.wait(2)
+
+    physical.release.set()
+    for _ in range(200):
+        if physical.finished == 1:
+            break
+        threading.Event().wait(0.01)
+    assert physical.finished == 1
+
+    with pytest.raises(SyncExecutorLoopConflict):
+        asyncio.run(executor.aclose(timeout=0.1))
+
+    allow_owner_drain.set()
+    assert owner_closed.wait(2)
+    thread.join(2)
+    assert not thread.is_alive() and not owner_errors
+
+    asyncio.run(executor.aclose(timeout=1))
+    assert executor.attempts_snapshot() == ()
