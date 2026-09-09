@@ -4,6 +4,8 @@ from __future__ import annotations
 import io
 import json
 import subprocess
+import sys
+import time
 from collections.abc import Callable
 
 import pytest
@@ -18,6 +20,7 @@ from control_plane.executive_host_pressure import (
     canonical_host_pressure_json,
     validate_host_pressure_snapshot,
 )
+from ops.executive_os import host_pressure_probe as probe_module
 from ops.executive_os.host_pressure_probe import (
     MAX_PROCESS_TABLE_BYTES,
     PS_COMMAND,
@@ -195,6 +198,9 @@ def test_process_table_aggregates_exact_fseventsd_basename_only() -> None:
         ("10 1 nan 2 /bin/thing", "PROCESS_CENSUS_MALFORMED"),
         ("10 1 -1.0 2 /bin/thing", "PROCESS_CENSUS_MALFORMED"),
         ("10 1 1.0 -2 /bin/thing", "PROCESS_CENSUS_MALFORMED"),
+        ("+1 0 +1.0 01 /x/fseventsd", "PROCESS_CENSUS_MALFORMED"),
+        ("01 00 1_0.0 001 /x/fseventsd", "PROCESS_CENSUS_MALFORMED"),
+        ("1 0 1e2 1 /x/fseventsd", "PROCESS_CENSUS_MALFORMED"),
         (f"10 1 {INT64_MAX}.0 2 /bin/fseventsd", "PROCESS_CENSUS_OVERFLOW"),
     ],
 )
@@ -220,6 +226,129 @@ def test_process_table_refuses_oversized_output_before_parsing() -> None:
 def test_process_table_rejects_out_of_range_identifiers_and_rss(stdout: str) -> None:
     with pytest.raises(HostPressureProbeError, match="PROCESS_CENSUS_OVERFLOW"):
         parse_fseventsd_process_table(stdout)
+
+
+def _recording_popen(monkeypatch: pytest.MonkeyPatch) -> list[subprocess.Popen[bytes]]:
+    created: list[subprocess.Popen[bytes]] = []
+    real_popen = subprocess.Popen
+
+    def recording(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
+        child = real_popen(*args, **kwargs)  # type: ignore[arg-type]
+        created.append(child)
+        return child
+
+    monkeypatch.setattr(probe_module.subprocess, "Popen", recording)
+    return created
+
+
+def test_run_ps_refuses_over_limit_before_unbounded_capture_and_reaps_child(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created = _recording_popen(monkeypatch)
+    monkeypatch.setattr(
+        probe_module,
+        "PS_COMMAND",
+        (sys.executable, "-c", "import os; os.write(1, b'x' * 8192)"),
+    )
+    monkeypatch.setattr(probe_module, "MAX_PROCESS_TABLE_BYTES", 4_096)
+
+    with pytest.raises(HostPressureProbeError, match="PROCESS_CENSUS_TOO_LARGE"):
+        probe_module._run_ps()
+
+    assert len(created) == 1
+    assert created[0].poll() is not None
+
+
+def test_run_ps_timeout_is_typed_and_reaps_probe_child(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created = _recording_popen(monkeypatch)
+    monkeypatch.setattr(
+        probe_module,
+        "PS_COMMAND",
+        (sys.executable, "-c", "import time; time.sleep(30)"),
+    )
+    monkeypatch.setattr(probe_module, "PS_TIMEOUT_SECONDS", 0.05)
+
+    with pytest.raises(HostPressureProbeError, match="PROCESS_CENSUS_TIMEOUT"):
+        probe_module._run_ps()
+
+    assert len(created) == 1
+    assert created[0].poll() is not None
+
+
+def test_run_ps_deadline_includes_process_launch_and_reaps_child(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created: list[subprocess.Popen[bytes]] = []
+    real_popen = subprocess.Popen
+
+    def delayed(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
+        time.sleep(0.08)
+        child = real_popen(*args, **kwargs)  # type: ignore[arg-type]
+        created.append(child)
+        return child
+
+    monkeypatch.setattr(probe_module.subprocess, "Popen", delayed)
+    monkeypatch.setattr(
+        probe_module,
+        "PS_COMMAND",
+        (sys.executable, "-c", "import os; os.write(1, b'ok')"),
+    )
+    monkeypatch.setattr(probe_module, "PS_TIMEOUT_SECONDS", 0.05)
+
+    with pytest.raises(HostPressureProbeError, match="PROCESS_CENSUS_TIMEOUT"):
+        probe_module._run_ps()
+
+    assert len(created) == 1
+    assert created[0].poll() is not None
+
+
+def test_run_ps_reaps_child_when_selector_setup_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created = _recording_popen(monkeypatch)
+    monkeypatch.setattr(
+        probe_module,
+        "PS_COMMAND",
+        (sys.executable, "-c", "import time; time.sleep(30)"),
+    )
+
+    def fail_selector() -> object:
+        raise OSError("PRIVATE selector setup")
+
+    monkeypatch.setattr(probe_module.selectors, "DefaultSelector", fail_selector)
+    try:
+        with pytest.raises(HostPressureProbeError, match="PROCESS_CENSUS_UNAVAILABLE"):
+            probe_module._run_ps()
+        assert len(created) == 1
+        assert created[0].poll() is not None
+    finally:
+        for child in created:
+            if child.poll() is None:
+                child.kill()
+                child.wait(timeout=1)
+
+
+def test_run_ps_discards_unbounded_stderr_instead_of_buffering_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        probe_module,
+        "PS_COMMAND",
+        (
+            sys.executable,
+            "-c",
+            "import os; os.write(2, b'e' * 1048576); os.write(1, b'ok')",
+        ),
+    )
+    monkeypatch.setattr(probe_module, "MAX_PROCESS_TABLE_BYTES", 4_096)
+
+    result = probe_module._run_ps()
+
+    assert result.returncode == 0
+    assert result.stdout == "ok"
+    assert result.stderr == ""
 
 
 def test_collect_snapshot_normalizes_core_and_process_metrics() -> None:
@@ -425,6 +554,164 @@ def test_cli_emits_only_canonical_snapshot_on_success() -> None:
     assert code == 0
     assert stdout.getvalue() == canonical_host_pressure_json(snapshot)
     assert stderr.getvalue() == ""
+
+
+def test_cli_completes_canonical_payload_across_short_stdout_writes() -> None:
+    class ShortWriter:
+        def __init__(self) -> None:
+            self.value = bytearray()
+
+        def write(self, payload: bytes) -> int:
+            chunk = bytes(payload)
+            count = max(1, len(chunk) // 2)
+            self.value.extend(chunk[:count])
+            return count
+
+        def flush(self) -> None:
+            return None
+
+    stdout = ShortWriter()
+    stderr = io.StringIO()
+    snapshot = _snapshot()
+
+    code = main(
+        ["--host-ref", HOST_REF, "--boot-ref", BOOT_REF],
+        collector=lambda **_kwargs: snapshot,
+        stdout=stdout,  # type: ignore[arg-type]
+        stderr=stderr,
+    )
+
+    assert code == 0
+    assert bytes(stdout.value) == canonical_host_pressure_json(snapshot)
+    assert stderr.getvalue() == ""
+
+
+def test_cli_closes_stdout_write_error_without_traceback() -> None:
+    class FailingWriter:
+        def write(self, _payload: bytes) -> int:
+            raise OSError("SECRET output target")
+
+        def flush(self) -> None:
+            raise AssertionError("flush must not follow a failed write")
+
+    stderr = io.StringIO()
+
+    code = main(
+        ["--host-ref", HOST_REF, "--boot-ref", BOOT_REF],
+        collector=lambda **_kwargs: _snapshot(),
+        stdout=FailingWriter(),  # type: ignore[arg-type]
+        stderr=stderr,
+    )
+
+    assert code == 65
+    assert stderr.getvalue() == "host pressure probe refused: PROBE_INTERNAL_ERROR\n"
+    assert "SECRET" not in stderr.getvalue()
+
+
+def test_cli_closes_stdout_flush_error_without_traceback() -> None:
+    class FailingFlushWriter(io.BytesIO):
+        def flush(self) -> None:
+            raise OSError("SECRET output flush")
+
+    stdout = FailingFlushWriter()
+    stderr = io.StringIO()
+
+    code = main(
+        ["--host-ref", HOST_REF, "--boot-ref", BOOT_REF],
+        collector=lambda **_kwargs: _snapshot(),
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    assert code == 65
+    assert stderr.getvalue() == "host pressure probe refused: PROBE_INTERNAL_ERROR\n"
+    assert "SECRET" not in stderr.getvalue()
+
+
+def test_cli_refuses_help_without_ambient_output(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    stdout = io.BytesIO()
+    stderr = io.StringIO()
+    calls: list[str] = []
+
+    def collector(**_kwargs: object) -> dict:
+        calls.append("called")
+        return _snapshot()
+
+    code = main(
+        ["--help"],
+        collector=collector,
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    ambient = capsys.readouterr()
+    assert code == 65
+    assert calls == []
+    assert stdout.getvalue() == b""
+    assert stderr.getvalue() == "host pressure probe refused: ARGUMENTS_INVALID\n"
+    assert ambient.out == ""
+    assert ambient.err == ""
+
+
+def test_cli_argument_errors_are_typed_and_do_not_echo_input() -> None:
+    stdout = io.BytesIO()
+    stderr = io.StringIO()
+    calls: list[str] = []
+
+    def collector(**_kwargs: object) -> dict:
+        calls.append("called")
+        return _snapshot()
+
+    code = main(
+        [
+            "--host-ref",
+            HOST_REF,
+            "--boot-ref",
+            BOOT_REF,
+            "--token",
+            "REVIEW-SECRET-CREDENTIAL",
+        ],
+        collector=collector,
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    assert code == 65
+    assert calls == []
+    assert stdout.getvalue() == b""
+    assert stderr.getvalue() == "host pressure probe refused: ARGUMENTS_INVALID\n"
+    assert "REVIEW-SECRET" not in stderr.getvalue()
+
+
+def test_cli_refuses_duplicate_identity_options_before_collection() -> None:
+    stdout = io.BytesIO()
+    stderr = io.StringIO()
+    calls: list[str] = []
+
+    def collector(**_kwargs: object) -> dict:
+        calls.append("called")
+        return _snapshot()
+
+    code = main(
+        [
+            "--host-ref",
+            HOST_REF,
+            "--host-ref",
+            "host-" + "c" * 64,
+            "--boot-ref",
+            BOOT_REF,
+        ],
+        collector=collector,
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    assert code == 65
+    assert calls == []
+    assert stdout.getvalue() == b""
+    assert stderr.getvalue() == "host pressure probe refused: ARGUMENTS_INVALID\n"
 
 
 def test_cli_refuses_noncanonical_snapshot_without_projecting_private_fields() -> None:

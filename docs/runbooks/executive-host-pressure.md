@@ -37,9 +37,11 @@ process title, network address, or caller guess.
 
 Success writes exactly one compact, sorted-key UTF-8 JSON document plus one
 newline to standard output. Failure writes one closed refusal line to standard
-error, writes no snapshot to standard output, and exits 65. The command performs
-no shell invocation, network call, file write, retry, process signal, browser or
-provider action.
+error, writes no snapshot to standard output, and exits 65. The command
+performs no shell invocation, network call, file write, retry, observed-process
+signal, browser or provider action. On a timeout or output-cap
+violation it may terminate and reap only the fixed `/bin/ps` child it created;
+it never signals a process reported by that census.
 
 ## Snapshot contract
 
@@ -81,9 +83,16 @@ The production path is Darwin-only. It reads:
 4. one bounded, headerless `/bin/ps -axo pid=,ppid=,%cpu=,rss=,comm=`
    projection.
 
-The process table is capped at 4 MiB and a three-second subprocess timeout. The
-parser validates every row, not only matching rows. It aggregates only rows
-whose executable basename is exactly `fseventsd`; similar names are excluded.
+The process table is capped before full capture: stdout is read incrementally
+through a nonblocking pipe up to 4 MiB plus one discriminator byte, while stderr
+is discarded rather than buffered. A three-second observation deadline starts
+before launch and spans stdout read plus normal child exit; timeout or overflow
+then receives at most one additional second of bounded TERM/KILL reaping. The
+whole public sample remains capped at five seconds. The parser validates every
+row, not only matching rows. PID, PPID, RSS,
+and CPU tokens use one canonical unsigned decimal grammar before conversion. It
+aggregates only rows whose executable basename is exactly `fseventsd`; similar
+names are excluded.
 Raw process rows, executable paths, PIDs, parent PIDs, arguments, environment,
 stderr, account information, provider/session data, credentials, prompts, and
 transcripts never enter the public snapshot or refusal.
@@ -97,6 +106,7 @@ refuses without retry.
 
 The emitted refusal is one of these closed codes:
 
+- `ARGUMENTS_INVALID`
 - `REFERENCE_INVALID`
 - `PLATFORM_UNAVAILABLE`
 - `UNSUPPORTED_PLATFORM`

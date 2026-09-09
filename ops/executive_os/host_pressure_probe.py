@@ -10,13 +10,15 @@ from __future__ import annotations
 import argparse
 import os
 import platform
+import re
+import selectors
 import subprocess
 import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path, PurePath
-from typing import Any, BinaryIO, TextIO
+from typing import Any, BinaryIO, NoReturn, TextIO
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -38,10 +40,13 @@ PS_COMMAND = ("/bin/ps", "-axo", "pid=,ppid=,%cpu=,rss=,comm=")
 PS_TIMEOUT_SECONDS = 3
 MAX_PROCESS_TABLE_BYTES = 4 * 1024 * 1024
 _FIXED_ENV = {"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LC_ALL": "C"}
+_UNSIGNED_INTEGER_TOKEN = re.compile(r"(?:0|[1-9][0-9]*)\Z")
+_UNSIGNED_DECIMAL_TOKEN = re.compile(r"(?:0|[1-9][0-9]*)(?:\.[0-9]+)?\Z")
 
 
 _PROBE_ERROR_CODES = frozenset(
     {
+        "ARGUMENTS_INVALID",
         "CPU_COUNT_UNAVAILABLE",
         "LOAD_AVERAGE_INVALID",
         "MONOTONIC_CLOCK_INVALID",
@@ -118,6 +123,13 @@ def parse_fseventsd_process_table(stdout: str) -> dict[str, int]:
         if len(fields) != 5:
             _refuse("PROCESS_CENSUS_MALFORMED")
         pid_text, ppid_text, cpu_text, rss_text, executable = fields
+        if (
+            _UNSIGNED_INTEGER_TOKEN.fullmatch(pid_text) is None
+            or _UNSIGNED_INTEGER_TOKEN.fullmatch(ppid_text) is None
+            or _UNSIGNED_DECIMAL_TOKEN.fullmatch(cpu_text) is None
+            or _UNSIGNED_INTEGER_TOKEN.fullmatch(rss_text) is None
+        ):
+            _refuse("PROCESS_CENSUS_MALFORMED")
         try:
             pid = int(pid_text)
             ppid = int(ppid_text)
@@ -153,16 +165,131 @@ def parse_fseventsd_process_table(stdout: str) -> dict[str, int]:
     }
 
 
+def _terminate_probe_child(process: subprocess.Popen[bytes]) -> bool:
+    """Stop and reap only the fixed probe child, never an observed process."""
+
+    try:
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=0.5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=0.5)
+        else:
+            process.wait(timeout=0)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return process.poll() is not None
+
+
 def _run_ps() -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        list(PS_COMMAND),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        check=False,
-        timeout=PS_TIMEOUT_SECONDS,
-        env=_FIXED_ENV,
-    )
+    """Run the fixed process census with a pre-buffer byte and time ceiling."""
+
+    if (
+        type(MAX_PROCESS_TABLE_BYTES) is not int
+        or MAX_PROCESS_TABLE_BYTES <= 0
+        or isinstance(PS_TIMEOUT_SECONDS, bool)
+        or not isinstance(PS_TIMEOUT_SECONDS, (int, float))
+        or PS_TIMEOUT_SECONDS <= 0
+    ):
+        _refuse("PROCESS_CENSUS_UNAVAILABLE")
+    deadline = time.monotonic() + float(PS_TIMEOUT_SECONDS)
+    try:
+        process = subprocess.Popen(
+            list(PS_COMMAND),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=False,
+            close_fds=True,
+            env=_FIXED_ENV,
+        )
+    except Exception:
+        _refuse("PROCESS_CENSUS_UNAVAILABLE")
+    if process.stdout is None:
+        if not _terminate_probe_child(process):
+            _refuse("PROCESS_CENSUS_UNAVAILABLE")
+        _refuse("PROCESS_CENSUS_UNAVAILABLE")
+
+    stdout = process.stdout
+    selector: selectors.BaseSelector | None = None
+    payload = bytearray()
+    failure: str | None = None
+    returncode: int | None = None
+    try:
+        selector = selectors.DefaultSelector()
+        descriptor = stdout.fileno()
+        os.set_blocking(descriptor, False)
+        selector.register(descriptor, selectors.EVENT_READ)
+        reached_eof = False
+        while not reached_eof:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                failure = "PROCESS_CENSUS_TIMEOUT"
+                break
+            events = selector.select(remaining)
+            if not events:
+                failure = "PROCESS_CENSUS_TIMEOUT"
+                break
+            for _key, _mask in events:
+                while True:
+                    remaining_capacity = MAX_PROCESS_TABLE_BYTES + 1 - len(payload)
+                    if remaining_capacity <= 0:
+                        failure = "PROCESS_CENSUS_TOO_LARGE"
+                        break
+                    try:
+                        chunk = os.read(descriptor, min(65_536, remaining_capacity))
+                    except BlockingIOError:
+                        break
+                    if not chunk:
+                        reached_eof = True
+                        break
+                    payload.extend(chunk)
+                    if len(payload) > MAX_PROCESS_TABLE_BYTES:
+                        failure = "PROCESS_CENSUS_TOO_LARGE"
+                        break
+                if failure is not None or reached_eof:
+                    break
+            if failure is not None:
+                break
+        if failure is None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                failure = "PROCESS_CENSUS_TIMEOUT"
+            else:
+                try:
+                    returncode = process.wait(timeout=remaining)
+                except subprocess.TimeoutExpired:
+                    failure = "PROCESS_CENSUS_TIMEOUT"
+    except Exception:
+        failure = "PROCESS_CENSUS_UNAVAILABLE"
+    finally:
+        if selector is not None:
+            try:
+                selector.close()
+            except Exception:
+                if failure is None:
+                    failure = "PROCESS_CENSUS_UNAVAILABLE"
+        try:
+            stdout.close()
+        except (OSError, ValueError):
+            if failure is None:
+                failure = "PROCESS_CENSUS_UNAVAILABLE"
+
+    if failure is not None:
+        if not _terminate_probe_child(process):
+            _refuse("PROCESS_CENSUS_UNAVAILABLE")
+        _refuse(failure)
+    if returncode is None or process.poll() is None:
+        if not _terminate_probe_child(process):
+            _refuse("PROCESS_CENSUS_UNAVAILABLE")
+        _refuse("PROCESS_CENSUS_UNAVAILABLE")
+    try:
+        decoded = bytes(payload).decode("ascii")
+    except UnicodeDecodeError:
+        _refuse("PROCESS_CENSUS_UNAVAILABLE")
+    return subprocess.CompletedProcess(PS_COMMAND, returncode, decoded, "")
 
 
 def _default_wall_time_ms() -> int:
@@ -233,6 +360,8 @@ def collect_host_pressure_snapshot(
 
     try:
         completed = runner()
+    except HostPressureProbeError:
+        raise
     except subprocess.TimeoutExpired:
         _refuse("PROCESS_CENSUS_TIMEOUT")
     except Exception:
@@ -277,12 +406,38 @@ def collect_host_pressure_snapshot(
         raise HostPressureProbeError(str(exc)) from exc
 
 
+class _ClosedArgumentParser(argparse.ArgumentParser):
+    """Reject invalid argv without echoing caller-controlled values."""
+
+    def error(self, _message: str) -> NoReturn:
+        _refuse("ARGUMENTS_INVALID")
+
+
+class _SingleOccurrenceAction(argparse.Action):
+    """Store one option value and reject duplicate option occurrences."""
+
+    def __call__(
+        self,
+        _parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: Any,
+        option_string: str | None = None,
+    ) -> None:
+        if option_string is None or type(values) is not str:
+            _refuse("ARGUMENTS_INVALID")
+        if getattr(namespace, self.dest, None) is not None:
+            _refuse("ARGUMENTS_INVALID")
+        setattr(namespace, self.dest, values)
+
+
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Emit one read-only canonical Darwin host-pressure snapshot"
+    parser = _ClosedArgumentParser(
+        description="Emit one read-only canonical Darwin host-pressure snapshot",
+        add_help=False,
+        allow_abbrev=False,
     )
-    parser.add_argument("--host-ref", required=True)
-    parser.add_argument("--boot-ref", required=True)
+    parser.add_argument("--host-ref", required=True, action=_SingleOccurrenceAction)
+    parser.add_argument("--boot-ref", required=True, action=_SingleOccurrenceAction)
     return parser
 
 
@@ -293,13 +448,20 @@ def main(
     stdout: BinaryIO | None = None,
     stderr: TextIO | None = None,
 ) -> int:
-    args = _parser().parse_args(argv)
     collect = collector or collect_host_pressure_snapshot
     out = stdout if stdout is not None else sys.stdout.buffer
     err = stderr if stderr is not None else sys.stderr
     try:
+        args = _parser().parse_args(argv)
         snapshot = collect(host_ref=args.host_ref, boot_ref=args.boot_ref)
         payload = canonical_host_pressure_json(snapshot)
+        offset = 0
+        while offset < len(payload):
+            written = out.write(payload[offset:])
+            if type(written) is not int or not 1 <= written <= len(payload) - offset:
+                raise OSError("stdout_write_failed")
+            offset += written
+        out.flush()
     except HostPressureProbeError as exc:
         print(f"host pressure probe refused: {exc}", file=err)
         return 65
@@ -309,8 +471,6 @@ def main(
     except Exception:
         print("host pressure probe refused: PROBE_INTERNAL_ERROR", file=err)
         return 65
-    out.write(payload)
-    out.flush()
     return 0
 
 
