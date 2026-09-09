@@ -1714,3 +1714,42 @@ def test_docs_exist_and_record_the_future_gates():
         assert required in doc, required
     handoff = _ROOT / "research" / "EXECUTIVE_OS_CHATGPT_MCP_GATEWAY_HANDOFF_2026-08-15.md"
     assert handoff.is_file()
+
+
+class _RecordingSingleAttemptExecutor:
+    def __init__(self) -> None:
+        self.run_timeouts: list[float] = []
+        self.close_timeouts: list[float] = []
+
+    async def run(self, operation: Any, *, timeout: float) -> Any:
+        self.run_timeouts.append(timeout)
+        return operation()
+
+    async def aclose(self, *, timeout: float) -> None:
+        self.close_timeouts.append(timeout)
+
+    def attempts_snapshot(self) -> tuple[()]:
+        return ()
+
+
+def test_task_1_gateway_delegates_to_injected_single_attempt_owner(tmp_path: Path) -> None:
+    executor = _RecordingSingleAttemptExecutor()
+    gateway = ExecutiveMcpGateway(
+        GatewayConfig(mode=ServerMode.READONLY, repo_root=tmp_path, now=_FROZEN_NOW),
+        packet_builder=lambda **_kwargs: _packet(),
+        inbox_builder=lambda **_kwargs: {"grounding": {}, "degraded": [], "attention": []},
+        transport=_forbidden_transport,
+        clock=lambda: _FROZEN_NOW,
+        read_executor=executor,
+    )
+
+    async def scenario() -> None:
+        result = await gateway.call("executive_state", {})
+        assert result["ok"] is True
+        assert executor.run_timeouts == [adapter.READ_TIMEOUT_SECONDS]
+        assert not hasattr(gateway, "_read_semaphore")
+        assert gateway._read_attempts == set()
+        await gateway.aclose()
+        assert executor.close_timeouts == [adapter._CLOSE_TIMEOUT_SECONDS]
+
+    asyncio.run(scenario())
