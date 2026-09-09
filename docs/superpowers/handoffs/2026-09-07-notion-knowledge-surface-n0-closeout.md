@@ -4,7 +4,7 @@
 **Owner:** Sol, AI CEO
 **Chairman:** Chris
 **Operation:** `notion-knowledge-surface-n0-20260907-sol-001`
-**Capability state:** `BUILT_NOT_PROVEN`
+**Capability state:** `PROVEN_LIVE`
 
 ## Mission just completed
 Create the first bounded Notion knowledge-surface bootstrap for Mastermind-X without creating a second Executive OS, Agent OS, task queue, memory system, priority authority, retry plane, identity plane, or procedure authority.
@@ -69,3 +69,54 @@ Establish one authorized live Notion execution path for the intended Mastermind 
 - Live/remote CLI use is now bound to the checked-in reviewed N0 manifest; alternate `--manifest` inputs remain offline-only and are refused before network access. The validator pins workspace key, least-privilege capabilities, eight children, and five databases. The targeted suite is now 12/12 green locally.
 
 Capability remains `BUILT_NOT_PROVEN`. Exact next live gate remains one scoped Notion connection plus the intended parent identity, followed by remote dry-run, one apply, immediate zero-create second apply, and human-visible proof. N1/N2/N3 remain held.
+
+## 2026-09-09 live acceptance — supersedes the earlier live gate
+
+N0 is now `PROVEN_LIVE` on the intended Notion workspace. This receipt supersedes the earlier `BUILT_NOT_PROVEN` / live-gate statements above without changing the N0 authority boundary.
+
+### Live connection and least privilege
+
+- Authenticated Notion workspace observed as `MastermindX`.
+- Internal connection created: `Mastermind-X Knowledge Surface` (`3d6a491a-cd7a-8169-ab1c-0027031faa9a`).
+- Connection capabilities at acceptance: **Read content + Insert content only**. Update content, comments, agent-session access, and user-information access are disabled.
+- Content access is scoped to one private parent subtree: `Mastermind-X`.
+- Parent page ID: `3d6a491a-cd7a-8015-b67a-d8044d9288ab`. The title was reloaded after edit and remained `Mastermind-X`.
+- The access token was never written to repository files, GitHub, chat, receipts, or logs. It was held transiently in one local shell process, then the environment and clipboard were cleared.
+
+### Exact live execution receipt
+
+Live execution used exact implementation head `058e3db663f09eb2b306a7ed418f20001cf6c745` from the clean isolated worktree. Hosted CI for that exact head is green, including repository `test` run `34346211082` and CodeQL/security analysis.
+
+The real remote plan proved the parent and planned exactly eight creates / five databases with zero writes. The first explicit apply returned `created_count=8`, `reconciled_count=0`. The immediate second explicit apply returned `created_count=0`, `reconciled_count=0` and `reuse` for all eight objects. No ambiguous mutation occurred.
+
+Non-secret object receipt:
+
+- `00 — Chairman Board Book`: `3d6a491a-cd7a-81c5-b69e-c6502ed179c8`
+- `01 — Programs`: `584b9581-099a-46fd-819f-3294955c5740`
+- `02 — Decisions`: `fe18648a-5b65-4124-a430-4aac4c433378`
+- `03 — Research Library`: `c7324087-3660-47f0-a164-18d485b6f59e`
+- `04 — Product & Architecture`: `3291a347-f720-4259-8d7a-03e037b54c24`
+- `05 — Operating Manual`: `3d6a491a-cd7a-8106-9d38-f506b93b2928`
+- `06 — Chairman Notes & Inputs`: `68d56917-6fc0-4c7f-b1d4-2d83eb464e79`
+- `99 — Archive`: `3d6a491a-cd7a-81c3-bdc3-f1caa20718e6`
+
+### Human-visible proof
+
+- Browser reload of the private `Mastermind-X` parent showed exactly the eight reviewed children and no task/worker-liveness/priority database.
+- `01 — Programs` visibly exposes canonical projection metadata including `As Of`, `Canonical ID`, `Canonical Source`, `Last Synced At`, and `Projection Health`.
+- `06 — Chairman Notes & Inputs` visibly exposes human-input fields including `Input State`, `Promoted Canonical ID`, and `Reviewed At`; it is not an execution or priority surface.
+- The Board Book / Control Room boundary remains unchanged: the Board Book is periodic strategic/narrative synthesis, while the protected Chairman Control Room remains the current act/no-act/default executive surface.
+
+### Current protected compatibility
+
+- Current protected Mastermind / Skillpack pin at acceptance: `f3f2d9155796876009f2d427bfdecc7ee7b63e74`, `mastermind.sol_skillpack.v1` 1.0.1 / bootstrap major 1.
+- Current protected movement remained disjoint from the N0 implementation and did not change the protected Chairman Control Room governing blob.
+- Fresh immutable local integrated candidate over protected `f3f2d915...` + semantic head `058e3db...`: commit `a64ad36a4a4a9c21f28ab641b1d263f5752d1f6d`, tree `6886522da1c80cc7e23399e28bd705f2c0dff4e8`.
+- That candidate compiled cleanly, passed `12/12` focused N0 tests, emitted offline plan `8` children / `5` databases, and left a clean worktree.
+- Executive OS read remained degraded during acceptance (MCP SSE probe 404), so no Executive Job/lifecycle admission is claimed or retroactively invented for this external workspace bootstrap.
+
+### Capability ruling and continuation
+
+N0 itself is accepted `PROVEN_LIVE`: the primary human can open the private `Mastermind-X` root and use the reviewed knowledge/collaboration structure, while the deterministic machine bootstrap is idempotent against the same live parent. This does **not** make Notion an operating plane and does **not** start N1, N2, or N3.
+
+The remaining carrier work is source-release maintenance only: publish this closeout on the same PR/branch, obtain exact-head hosted checks, refresh current-base integration proof for the resulting documentation head, and perform final Sol release review. Only then may PR #526 be made ready/merged under current protected procedure.

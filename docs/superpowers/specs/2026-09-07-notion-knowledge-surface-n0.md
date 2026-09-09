@@ -162,7 +162,7 @@ Repository acceptance requires:
 5. object IDs + parent identity are recorded in a non-secret receipt;
 6. no Executive/Agent OS/priority state changed as a side effect.
 
-Until those steps pass, capability state is `BUILT_NOT_PROVEN` at best.
+Those steps passed on 2026-09-09 against the intended live Notion workspace from exact implementation head `058e3db663f09eb2b306a7ed418f20001cf6c745`; N0 is therefore accepted as `PROVEN_LIVE`. The exact non-secret live receipt, idempotency proof, browser proof, and current-base compatibility receipt are preserved in the N0 closeout handoff. N1/N2/N3 remain separate future waves and gain no authority from N0 acceptance.
 
 ## 11. Held future waves
 

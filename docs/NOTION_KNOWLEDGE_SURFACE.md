@@ -119,6 +119,8 @@ Repository source + green CI is `BUILT_NOT_PROVEN` at best.
 N0 becomes `PROVEN_LIVE` only after the real remote plan, one apply, zero-create second apply,
 database-schema proof, and human-visible inspection above all pass on the intended workspace.
 
+**Live acceptance (2026-09-09):** those gates passed on the intended `MastermindX` workspace from exact implementation head `058e3db663f09eb2b306a7ed418f20001cf6c745`. The private `Mastermind-X` parent was proved through the real API; the first apply created exactly eight children; the immediate second apply created zero and reused all eight; all five database schemas were proved; and browser inspection confirmed the root plus the reviewed Programs and Chairman-input surfaces. The non-secret object receipt is recorded in the N0 closeout handoff.
+
 ## Held next waves
 
 - **N1:** canonical Mastermind → Notion projection for Programs, Decisions, Research,
