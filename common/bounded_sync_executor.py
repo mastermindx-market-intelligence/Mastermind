@@ -230,11 +230,33 @@ class BoundedSyncExecutor:
             epoch.waiters -= 1
             self._mark_idle_if_complete(epoch)
 
+    async def _settle_acquire_cleanup(
+        self,
+        acquire: asyncio.Task[bool],
+        closing: asyncio.Task[bool],
+    ) -> asyncio.CancelledError | None:
+        """Settle admission children despite repeated caller cancellation."""
+
+        cleanup = asyncio.gather(acquire, closing, return_exceptions=True)
+        cancellation: asyncio.CancelledError | None = None
+        current = asyncio.current_task()
+        while not cleanup.done():
+            try:
+                await asyncio.shield(cleanup)
+            except asyncio.CancelledError as error:
+                if cancellation is None:
+                    cancellation = error
+                if current is not None:
+                    current.uncancel()
+        cleanup.result()
+        return cancellation
+
     async def _acquire_permit(self, epoch: _LoopEpoch, deadline: float) -> None:
         acquire = asyncio.create_task(epoch.semaphore.acquire())
         closing = asyncio.create_task(epoch.close_event.wait())
-        keep_permit = False
         acquired = False
+        ready_to_transfer = False
+        outcome_error: BaseException | None = None
         try:
             remaining = max(0.0, deadline - epoch.loop.time())
             done, _pending = await asyncio.wait(
@@ -251,12 +273,16 @@ class BoundedSyncExecutor:
                 raise SyncExecutorClosed("executor admission is closed")
             if acquire not in done or not acquired:
                 raise SyncExecutionTimeout("timed out waiting for physical capacity")
-            keep_permit = True
+            ready_to_transfer = True
+        except BaseException as error:
+            outcome_error = error
         finally:
             for task in (acquire, closing):
                 if not task.done():
                     task.cancel()
-            await asyncio.gather(acquire, closing, return_exceptions=True)
+            cleanup_cancellation = await self._settle_acquire_cleanup(
+                acquire, closing
+            )
             # Cancellation may win immediately after the semaphore task has
             # completed but before the try body records its result. Reconcile
             # the actual task outcome before deciding whether cleanup owes the
@@ -268,10 +294,17 @@ class BoundedSyncExecutor:
                 and acquire.exception() is None
             ):
                 acquired = bool(acquire.result())
-            if acquired and not keep_permit:
+            if outcome_error is None and cleanup_cancellation is not None:
+                outcome_error = cleanup_cancellation
+            if acquired and (outcome_error is not None or not ready_to_transfer):
                 epoch.semaphore.release()
 
-    def _transition_to_attempt(self, epoch: _LoopEpoch, attempt: _Attempt) -> None:
+        if outcome_error is not None:
+            raise outcome_error
+        if not acquired or not ready_to_transfer:
+            raise RuntimeError("executor permit ownership handoff failed")
+
+    def _transition_to_attempt(self, epoch: _LoopEpoch, attempt: _Attempt) -> bool:
         with self._state_gate:
             if epoch.waiters <= 0:
                 raise RuntimeError("executor waiter accounting underflow")
@@ -279,8 +312,9 @@ class BoundedSyncExecutor:
             if self._admission_closed:
                 epoch.semaphore.release()
                 self._mark_idle_if_complete(epoch)
-                raise SyncExecutorClosed("executor admission is closed")
+                return False
             epoch.attempts.add(attempt)
+            return True
 
     def _discard_failed_attempt(self, epoch: _LoopEpoch, attempt: _Attempt) -> None:
         with self._state_gate:
@@ -361,8 +395,10 @@ class BoundedSyncExecutor:
         try:
             await self._acquire_permit(epoch, deadline)
             attempt = _Attempt(deadline=deadline, clock=loop.time)
-            self._transition_to_attempt(epoch, attempt)
+            transitioned = self._transition_to_attempt(epoch, attempt)
             waiter_registered = False
+            if not transitioned:
+                raise SyncExecutorClosed("executor admission is closed")
         except BaseException:
             if waiter_registered:
                 self._drop_waiter(epoch)

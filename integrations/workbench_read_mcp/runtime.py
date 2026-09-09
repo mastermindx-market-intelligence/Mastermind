@@ -28,6 +28,7 @@ from common.bounded_sync_executor import (
     SyncExecutorLoopConflict,
 )
 from integrations.business_mcp_auth.audit import (
+    AuditAcquisitionUncertain,
     AuditSinkPoisoned,
     DurableAuthAuditSink,
 )
@@ -71,6 +72,17 @@ class RuntimeCloseIncomplete(RuntimeError):
 
 class RuntimeCloseUncertain(RuntimeError):
     """Physical drain completed but owned descriptor release is uncertain."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        primary_error: BaseException | None = None,
+        cleanup_errors: tuple[BaseException, ...] = (),
+    ) -> None:
+        self.primary_error = primary_error
+        self.cleanup_errors = cleanup_errors
+        super().__init__(message)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -164,11 +176,26 @@ def _validate_prefixed(value: object, name: str) -> str:
 def _validate_lease(value: object, *, now_ms: int) -> StableWorkbenchLease:
     if type(value) is not StableWorkbenchLease:
         raise _configuration("lease must be an exact StableWorkbenchLease")
-    if _HEX64.fullmatch(value.expected_subject_digest) is None:
+    try:
+        value = dataclasses.replace(value)
+    except (AttributeError, TypeError) as error:
+        raise _configuration("stable lease snapshot is invalid") from error
+    if (
+        type(value.expected_subject_digest) is not str
+        or _HEX64.fullmatch(value.expected_subject_digest) is None
+    ):
         raise _configuration("expected subject digest is invalid")
-    if _HEX64.fullmatch(value.expected_client_ref) is None:
+    if (
+        type(value.expected_client_ref) is not str
+        or _HEX64.fullmatch(value.expected_client_ref) is None
+    ):
         raise _configuration("expected client reference is invalid")
-    if value.required_scopes != ("workbench.read",):
+    if (
+        type(value.required_scopes) is not tuple
+        or len(value.required_scopes) != 1
+        or type(value.required_scopes[0]) is not str
+        or value.required_scopes[0] != "workbench.read"
+    ):
         raise _configuration("lease must require exactly workbench.read")
     for name in _PREFIXES:
         _validate_prefixed(getattr(value, name), name)
@@ -270,6 +297,7 @@ def _open_owned_root(host_fd: int) -> tuple[int, os.stat_result]:
         or os.open not in os.supports_dir_fd
     ):
         raise _configuration("descriptor-relative project root is unqualified")
+    owned = -1
     try:
         host_stat = os.fstat(host_fd)
         _validate_directory(host_stat)
@@ -283,12 +311,19 @@ def _open_owned_root(host_fd: int) -> tuple[int, os.stat_result]:
         ) or os.get_inheritable(owned):
             raise _configuration("owned project root identity changed")
         return owned, owned_stat
-    except BaseException:
-        if "owned" in locals():
+    except BaseException as error:
+        cleanup_errors: list[BaseException] = []
+        if owned >= 0:
             try:
                 os.close(owned)
-            except OSError:
-                pass
+            except BaseException as cleanup_error:
+                cleanup_errors.append(cleanup_error)
+        if cleanup_errors:
+            raise RuntimeCloseUncertain(
+                "project root acquisition cleanup is uncertain",
+                primary_error=error,
+                cleanup_errors=tuple(cleanup_errors),
+            ) from cleanup_errors[0]
         raise
 
 
@@ -401,12 +436,22 @@ class WorkbenchReadRuntime:
                     os.close(root_fd)
                 except BaseException as cleanup:
                     cleanup_errors.append(cleanup)
-            if isinstance(error, RuntimeConfigurationError):
-                raise
             if cleanup_errors:
                 raise RuntimeCloseUncertain(
-                    "runtime construction failed and rollback is uncertain"
+                    "runtime construction failed and rollback is uncertain",
+                    primary_error=error,
+                    cleanup_errors=tuple(cleanup_errors),
                 ) from cleanup_errors[0]
+            if isinstance(error, RuntimeCloseUncertain):
+                raise
+            if isinstance(error, AuditAcquisitionUncertain):
+                raise RuntimeCloseUncertain(
+                    "durable audit acquisition cleanup is uncertain",
+                    primary_error=error.primary_error,
+                    cleanup_errors=error.cleanup_errors,
+                ) from error
+            if isinstance(error, RuntimeConfigurationError):
+                raise
             if isinstance(error, AuditSinkPoisoned):
                 raise RuntimeConfigurationError(
                     "durable audit acquisition refused"
@@ -422,6 +467,10 @@ class WorkbenchReadRuntime:
     ) -> ProjectReadBinding | None:
         with self._lease_gate:
             if self._revoked or self._closing or self._closed:
+                return None
+            try:
+                self._validate_live_root_locked()
+            except RuntimeClosed:
                 return None
             stable = self._lease.stable
             if (
@@ -542,6 +591,11 @@ class WorkbenchReadRuntime:
             raise
 
         release_errors: list[BaseException] = []
+        with self._lease_gate:
+            try:
+                self._validate_live_root_locked()
+            except BaseException as error:
+                release_errors.append(error)
         try:
             self._audit_sink.close()
         except BaseException as error:
@@ -556,7 +610,9 @@ class WorkbenchReadRuntime:
             self._close_in_progress = False
             if release_errors:
                 self._close_uncertain = RuntimeCloseUncertain(
-                    "runtime descriptor close is uncertain"
+                    "runtime descriptor close is uncertain",
+                    primary_error=release_errors[0],
+                    cleanup_errors=tuple(release_errors[1:]),
                 )
         if self._close_uncertain is not None:
             raise self._close_uncertain from release_errors[0]

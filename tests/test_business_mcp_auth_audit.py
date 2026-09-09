@@ -10,6 +10,7 @@ import pytest
 
 from integrations.business_mcp_auth import audit
 from integrations.business_mcp_auth.audit import (
+    AuditAcquisitionUncertain,
     AuditSinkPoisoned,
     DurableAuthAuditSink,
 )
@@ -83,7 +84,8 @@ def test_named_file_replacement_poisons_before_any_second_write(tmp_path: Path) 
         sink.emit(event())
     assert original.read_bytes() == before
     assert orphan.read_bytes() == b""
-    sink.close()
+    with pytest.raises(AuditSinkPoisoned, match="audit close is uncertain"):
+        sink.close()
     os.close(host_fd)
 
 
@@ -105,6 +107,129 @@ def test_open_refuses_unsafe_named_file(tmp_path: Path, unsafe: str) -> None:
     with pytest.raises(AuditSinkPoisoned):
         DurableAuthAuditSink.open(host_fd, policy_id=POLICY_ID)
     os.close(host_fd)
+
+
+# RS0_F7_AUDIT_ACQUISITION_REDS_20260909
+def test_owned_directory_rollback_close_failure_is_acquisition_uncertainty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    directory = tmp_path / "audit"
+    host_fd = open_directory(directory)
+    real_check_directory = DurableAuthAuditSink._check_directory_stat
+    real_close = audit.os.close
+    validations = 0
+    close_calls: list[int] = []
+
+    def refuse_owned_directory(value) -> None:
+        nonlocal validations
+        validations += 1
+        real_check_directory(value)
+        if validations == 2:
+            raise AuditSinkPoisoned(
+                "synthetic post-directory-acquisition refusal"
+            )
+
+    def close_then_fail(descriptor: int) -> None:
+        close_calls.append(descriptor)
+        real_close(descriptor)
+        raise OSError("synthetic owned-directory rollback close failure")
+
+    monkeypatch.setattr(
+        DurableAuthAuditSink,
+        "_check_directory_stat",
+        staticmethod(refuse_owned_directory),
+    )
+    monkeypatch.setattr(audit.os, "close", close_then_fail)
+    try:
+        with pytest.raises(AuditSinkPoisoned) as caught:
+            DurableAuthAuditSink.open(host_fd, policy_id=POLICY_ID)
+    finally:
+        monkeypatch.setattr(audit.os, "close", real_close)
+
+    assert type(caught.value).__name__ == "AuditAcquisitionUncertain"
+    assert isinstance(caught.value.primary_error, AuditSinkPoisoned)
+    assert len(caught.value.cleanup_errors) == 1
+    assert validations == 2 and len(close_calls) == 1
+    os.fstat(host_fd)
+    real_close(host_fd)
+
+
+def test_audit_file_rollback_close_failure_is_acquisition_uncertainty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    directory = tmp_path / "audit"
+    host_fd = open_directory(directory)
+    real_close = audit.os.close
+    close_calls: list[int] = []
+
+    def refuse_flags(_descriptor: int) -> None:
+        raise AuditSinkPoisoned("synthetic post-file-acquisition refusal")
+
+    def close_with_first_failure(descriptor: int) -> None:
+        close_calls.append(descriptor)
+        real_close(descriptor)
+        if len(close_calls) == 1:
+            raise OSError("synthetic audit-file rollback close failure")
+
+    monkeypatch.setattr(
+        DurableAuthAuditSink, "_check_file_flags", staticmethod(refuse_flags)
+    )
+    monkeypatch.setattr(audit.os, "close", close_with_first_failure)
+    try:
+        with pytest.raises(AuditSinkPoisoned) as caught:
+            DurableAuthAuditSink.open(host_fd, policy_id=POLICY_ID)
+    finally:
+        monkeypatch.setattr(audit.os, "close", real_close)
+
+    assert type(caught.value).__name__ == "AuditAcquisitionUncertain"
+    assert isinstance(caught.value.primary_error, AuditSinkPoisoned)
+    assert len(caught.value.cleanup_errors) == 1
+    assert len(close_calls) == 2 and close_calls[0] != close_calls[1]
+    os.fstat(host_fd)
+    real_close(host_fd)
+
+
+# RS0_F7_ROLLBACK_ORDER_DISCRIMINATOR_20260909
+def test_partial_acquisition_releases_file_then_directory_exactly_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    directory = tmp_path / "audit"
+    host_fd = open_directory(directory)
+    real_close = audit.os.close
+    release_kinds: list[str] = []
+
+    def refuse_after_file_acquisition(_descriptor: int) -> None:
+        raise AuditSinkPoisoned("synthetic post-file-acquisition refusal")
+
+    def classify_close_then_fail_first(descriptor: int) -> None:
+        mode = audit.os.fstat(descriptor).st_mode
+        release_kinds.append(
+            "file"
+            if stat.S_ISREG(mode)
+            else "directory"
+            if stat.S_ISDIR(mode)
+            else "other"
+        )
+        real_close(descriptor)
+        if len(release_kinds) == 1:
+            raise OSError("synthetic first rollback close failure")
+
+    monkeypatch.setattr(
+        DurableAuthAuditSink,
+        "_check_file_flags",
+        staticmethod(refuse_after_file_acquisition),
+    )
+    monkeypatch.setattr(audit.os, "close", classify_close_then_fail_first)
+    try:
+        with pytest.raises(AuditAcquisitionUncertain) as caught:
+            DurableAuthAuditSink.open(host_fd, policy_id=POLICY_ID)
+    finally:
+        monkeypatch.setattr(audit.os, "close", real_close)
+
+    assert release_kinds == ["file", "directory"]
+    assert len(caught.value.cleanup_errors) == 1
+    os.fstat(host_fd)
+    real_close(host_fd)
 
 
 def test_second_live_sink_is_refused_by_nonblocking_lock(tmp_path: Path) -> None:
@@ -137,7 +262,8 @@ def test_short_append_poisons_without_retry(tmp_path: Path, monkeypatch) -> None
     with pytest.raises(AuditSinkPoisoned):
         sink.emit(event())
     assert calls == 1
-    sink.close()
+    with pytest.raises(AuditSinkPoisoned, match="audit close is uncertain"):
+        sink.close()
     os.close(host_fd)
 
 
@@ -175,7 +301,8 @@ def test_fsync_failure_poisons_and_never_retries(tmp_path: Path, monkeypatch) ->
     with pytest.raises(AuditSinkPoisoned):
         sink.emit(event())
     assert calls == 1
-    sink.close()
+    with pytest.raises(AuditSinkPoisoned, match="audit close is uncertain"):
+        sink.close()
     os.close(host_fd)
 
 
@@ -188,7 +315,8 @@ def test_append_flag_drift_poisons_before_write(tmp_path: Path) -> None:
     with pytest.raises(AuditSinkPoisoned):
         sink.emit(event())
     assert (directory / "auth-audit.jsonl").read_bytes() == b""
-    sink.close()
+    with pytest.raises(AuditSinkPoisoned, match="audit close is uncertain"):
+        sink.close()
     os.close(host_fd)
 
 
@@ -200,7 +328,8 @@ def test_directory_security_drift_poisons_before_write(tmp_path: Path) -> None:
     with pytest.raises(AuditSinkPoisoned):
         sink.emit(event())
     assert (directory / "auth-audit.jsonl").read_bytes() == b""
-    sink.close()
+    with pytest.raises(AuditSinkPoisoned, match="audit close is uncertain"):
+        sink.close()
     os.close(host_fd)
 
 
@@ -238,7 +367,8 @@ def test_explicit_owner_unlock_poisons_before_append(tmp_path: Path) -> None:
     with pytest.raises(AuditSinkPoisoned):
         sink.emit(event())
     assert (directory / "auth-audit.jsonl").read_bytes() == b""
-    sink.close()
+    with pytest.raises(AuditSinkPoisoned, match="audit close is uncertain"):
+        sink.close()
     os.close(host_fd)
 
 
@@ -254,7 +384,8 @@ def test_unlock_through_duplicate_descriptor_poisons_before_append(tmp_path: Pat
     with pytest.raises(AuditSinkPoisoned):
         sink.emit(event())
     assert (directory / "auth-audit.jsonl").read_bytes() == b""
-    sink.close()
+    with pytest.raises(AuditSinkPoisoned, match="audit close is uncertain"):
+        sink.close()
     os.close(host_fd)
 
 
@@ -271,7 +402,8 @@ def test_foreign_holder_after_owner_loss_poisons_without_append(tmp_path: Path) 
         with pytest.raises(AuditSinkPoisoned):
             sink.emit(event())
         assert (directory / "auth-audit.jsonl").read_bytes() == b""
-        sink.close()
+        with pytest.raises(AuditSinkPoisoned, match="audit close is uncertain"):
+            sink.close()
     finally:
         fcntl.flock(foreign, fcntl.LOCK_UN)
         os.close(foreign)
@@ -305,7 +437,39 @@ def test_lock_loss_during_single_write_is_uncertain_and_never_retried(
         sink.emit(event())
     assert calls == 1
     assert len((directory / "auth-audit.jsonl").read_text().splitlines()) == 1
-    sink.close()
+    with pytest.raises(AuditSinkPoisoned, match="audit close is uncertain"):
+        sink.close()
+    os.close(host_fd)
+
+
+# RS0_F6_INDEPENDENT_REVIEW_RED_20260909
+def test_already_poisoned_sink_still_attests_final_custody(
+    tmp_path: Path,
+) -> None:
+    directory = tmp_path / "audit"
+    host_fd = open_directory(directory)
+    sink = DurableAuthAuditSink.open(host_fd, policy_id=POLICY_ID)
+    audit_fd = sink._audit_fd
+    directory_fd = sink._directory_fd
+    invalid = AuthAuditEvent(
+        schema=AUTH_AUDIT_SCHEMA,
+        policy_id=POLICY_ID,
+        code="accepted",
+        accepted=False,
+    )
+    with pytest.raises(AuditSinkPoisoned):
+        sink.emit(invalid)
+
+    fcntl.flock(audit_fd, fcntl.LOCK_UN)
+    with pytest.raises(AuditSinkPoisoned, match="audit close is uncertain"):
+        sink.close()
+    with pytest.raises(AuditSinkPoisoned, match="audit close is uncertain"):
+        sink.close()
+
+    with pytest.raises(OSError):
+        os.fstat(audit_fd)
+    with pytest.raises(OSError):
+        os.fstat(directory_fd)
     os.close(host_fd)
 
 

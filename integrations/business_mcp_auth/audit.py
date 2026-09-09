@@ -34,6 +34,21 @@ class AuditSinkPoisoned(RuntimeError):
     """The named durable audit effect is refused or uncertain."""
 
 
+class AuditAcquisitionUncertain(AuditSinkPoisoned):
+    """Partially acquired audit descriptions were not cleanly released."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        primary_error: BaseException,
+        cleanup_errors: tuple[BaseException, ...],
+    ) -> None:
+        self.primary_error = primary_error
+        self.cleanup_errors = cleanup_errors
+        super().__init__(message)
+
+
 def _identity(value: os.stat_result) -> tuple[int, int, int, int, int]:
     return (
         value.st_dev,
@@ -164,16 +179,20 @@ class DurableAuthAuditSink:
                 max_file_bytes=file_budget,
             )
         except BaseException as error:
-            if audit_fd >= 0:
+            cleanup_errors: list[BaseException] = []
+            for descriptor in (audit_fd, owned_directory):
+                if descriptor < 0:
+                    continue
                 try:
-                    os.close(audit_fd)
-                except OSError:
-                    pass
-            if owned_directory >= 0:
-                try:
-                    os.close(owned_directory)
-                except OSError:
-                    pass
+                    os.close(descriptor)
+                except BaseException as cleanup_error:
+                    cleanup_errors.append(cleanup_error)
+            if cleanup_errors:
+                raise AuditAcquisitionUncertain(
+                    "durable audit acquisition cleanup is uncertain",
+                    primary_error=error,
+                    cleanup_errors=tuple(cleanup_errors),
+                ) from cleanup_errors[0]
             if isinstance(error, AuditSinkPoisoned):
                 raise
             raise AuditSinkPoisoned("durable audit acquisition refused") from error
@@ -364,12 +383,11 @@ class DurableAuthAuditSink:
                     raise AuditSinkPoisoned("audit close is uncertain")
                 return
             errors: list[BaseException] = []
-            if not self._poisoned:
-                try:
-                    self._validate_live(expected_size=self._expected_size)
-                except BaseException as error:
-                    self._poisoned = True
-                    errors.append(error)
+            try:
+                self._validate_live(expected_size=self._expected_size)
+            except BaseException as error:
+                self._poisoned = True
+                errors.append(error)
             self._closed = True
             try:
                 fcntl.flock(self._audit_fd, fcntl.LOCK_UN)
@@ -386,4 +404,8 @@ class DurableAuthAuditSink:
                 raise AuditSinkPoisoned("audit close is uncertain") from errors[0]
 
 
-__all__ = ["AuditSinkPoisoned", "DurableAuthAuditSink"]
+__all__ = [
+    "AuditAcquisitionUncertain",
+    "AuditSinkPoisoned",
+    "DurableAuthAuditSink",
+]

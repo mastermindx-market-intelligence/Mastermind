@@ -201,6 +201,129 @@ def test_cancellation_racing_successful_permit_acquisition_does_not_leak(
     run(scenario())
 
 
+async def assert_exact_single_capacity(executor: BoundedSyncExecutor) -> None:
+    epoch = executor._epoch
+    assert epoch is not None
+    await asyncio.wait_for(epoch.semaphore.acquire(), 0.1)
+    second = asyncio.create_task(epoch.semaphore.acquire())
+    try:
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(second, 0.02)
+    finally:
+        if not second.done():
+            second.cancel()
+            await asyncio.gather(second, return_exceptions=True)
+        epoch.semaphore.release()
+
+
+# RS0_F1_F2_INDEPENDENT_REVIEW_REDS_20260909
+@pytest.mark.parametrize("cancellations", [1, 2])
+def test_post_acquisition_cleanup_cancellation_releases_unowned_permit(
+    monkeypatch: pytest.MonkeyPatch, cancellations: int
+) -> None:
+    executor = BoundedSyncExecutor(max_concurrency=1)
+    real_gather = executor_module.asyncio.gather
+    cleanup_entered = asyncio.Event()
+    allow_cleanup = asyncio.Event()
+    operation_calls = 0
+    armed = True
+
+    def gated_gather(*awaitables: Any, **kwargs: Any):
+        nonlocal armed
+        if not armed:
+            return real_gather(*awaitables, **kwargs)
+        armed = False
+
+        async def gated_cleanup():
+            cleanup_entered.set()
+            await allow_cleanup.wait()
+            return await real_gather(*awaitables, **kwargs)
+
+        return asyncio.create_task(gated_cleanup())
+
+    def forbidden_operation() -> str:
+        nonlocal operation_calls
+        operation_calls += 1
+        return "forbidden"
+
+    async def scenario() -> None:
+        monkeypatch.setattr(executor_module.asyncio, "gather", gated_gather)
+        pending = asyncio.create_task(
+            executor.run(forbidden_operation, timeout=1)
+        )
+        await asyncio.wait_for(cleanup_entered.wait(), 1)
+        assert pending.cancel()
+        await asyncio.sleep(0)
+        if cancellations == 2:
+            # A cancellation-safe owner must still be settling the same cleanup.
+            assert not pending.done()
+            assert pending.cancel()
+            await asyncio.sleep(0)
+        allow_cleanup.set()
+        outcome = await real_gather(pending, return_exceptions=True)
+        monkeypatch.undo()
+
+        assert isinstance(outcome[0], asyncio.CancelledError)
+        assert operation_calls == 0
+        epoch = executor._epoch
+        assert epoch is not None
+        assert epoch.reservations == 0
+        assert epoch.waiters == 0
+        assert epoch.attempts == set()
+
+        try:
+            await assert_exact_single_capacity(executor)
+            assert await executor.run(
+                lambda: "recovered", timeout=0.1
+            ) == "recovered"
+        finally:
+            # Keep the RED hygienic when the candidate strands the permit.
+            if epoch.semaphore.locked():
+                epoch.semaphore.release()
+            await executor.aclose(timeout=1)
+
+    run(scenario())
+
+
+def test_closed_transition_consumes_waiter_and_permit_exactly_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executor = BoundedSyncExecutor(max_concurrency=1)
+    original_transition = executor._transition_to_attempt
+    operation_calls = 0
+
+    def close_then_transition(epoch: Any, attempt: Any):
+        with executor._state_gate:
+            executor._admission_closed = True
+            epoch.close_event.set()
+        return original_transition(epoch, attempt)
+
+    def forbidden_operation() -> str:
+        nonlocal operation_calls
+        operation_calls += 1
+        return "forbidden"
+
+    async def scenario() -> None:
+        monkeypatch.setattr(
+            executor, "_transition_to_attempt", close_then_transition
+        )
+        outcome = await asyncio.gather(
+            executor.run(forbidden_operation, timeout=1),
+            return_exceptions=True,
+        )
+        epoch = executor._epoch
+        assert epoch is not None
+        assert operation_calls == 0
+        assert epoch.reservations == 0
+        assert epoch.waiters == 0
+        assert epoch.attempts == set()
+        await assert_exact_single_capacity(executor)
+        await executor.aclose(timeout=1)
+        assert isinstance(outcome[0], SyncExecutorClosed), outcome[0]
+
+    run(scenario())
+
+
 def test_loop_shutdown_keeps_started_physical_attempt_owned_until_completion() -> None:
     executor = BoundedSyncExecutor(max_concurrency=1)
     physical = BlockingOperation("physical")

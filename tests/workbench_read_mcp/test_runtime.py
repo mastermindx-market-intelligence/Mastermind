@@ -22,10 +22,12 @@ from integrations.business_mcp_auth.contracts import (
 )
 from integrations.business_mcp_auth.jwt_verifier import JwtAuthenticator
 from integrations.workbench_read_mcp import observer as observer_module
+from integrations.workbench_read_mcp import runtime as runtime_module
 from integrations.workbench_read_mcp.app import ProjectReadRefused, ReadCaller
 from integrations.workbench_read_mcp.read_port import create_descriptor_read_port
 from integrations.workbench_read_mcp.runtime import (
     RuntimeCloseIncomplete,
+    RuntimeCloseUncertain,
     RuntimeClosed,
     RuntimeConfigurationError,
     StableWorkbenchLease,
@@ -174,6 +176,270 @@ def test_policy_and_stable_identity_refuse_before_resource_acquisition(
             lease=lease(),
             allowed_hosts=("127.0.0.1",),
         )
+    os.close(project_fd)
+    os.close(audit_fd)
+
+
+# RS0_F8_INDEPENDENT_REVIEW_RED_20260909
+@pytest.mark.parametrize(
+    "field", ["expected_subject_digest", "expected_client_ref"]
+)
+@pytest.mark.parametrize(
+    "bad_value",
+    [None, b"bytes", True, 17, ("not", "a", "string")],
+    ids=["none", "bytes", "bool", "integer", "tuple"],
+)
+def test_non_string_lease_identity_is_typed_before_resource_acquisition(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    bad_value: object,
+) -> None:
+    _project, project_fd, audit_fd = open_dirs(tmp_path)
+    acquisitions = 0
+
+    from integrations.workbench_read_mcp import runtime as runtime_module
+
+    def forbidden_owned_root(_host_fd: int):
+        nonlocal acquisitions
+        acquisitions += 1
+        raise AssertionError("resource acquisition preceded typed validation")
+
+    monkeypatch.setattr(runtime_module, "_open_owned_root", forbidden_owned_root)
+    try:
+        with pytest.raises(RuntimeConfigurationError):
+            WorkbenchReadRuntime.open(
+                authenticator=authenticator(policy()),
+                policy=policy(),
+                now=lambda: NOW,
+                clock_ms=lambda: NOW * 1000,
+                project_directory_fd=project_fd,
+                audit_directory_fd=audit_fd,
+                lease=lease(**{field: bad_value}),
+                allowed_hosts=("127.0.0.1",),
+            )
+    finally:
+        os.close(project_fd)
+        os.close(audit_fd)
+    assert acquisitions == 0
+
+
+# RS0_F3_EXACT_SCOPE_CONTAINER_REVIEW_20260909
+class MutableEqualScopeTuple(tuple):
+    def __new__(cls):
+        instance = super().__new__(cls, ("workbench.read",))
+        instance.accepts = True
+        return instance
+
+    def __eq__(self, other: object) -> bool:
+        return self.accepts and tuple(self) == other
+
+
+def test_required_scopes_are_exact_types_before_owned_acquisition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from integrations.workbench_read_mcp import runtime as runtime_module
+
+    project, project_fd, audit_fd = open_dirs(tmp_path)
+    attempted: list[int] = []
+
+    def forbidden_owned_root(descriptor: int):
+        attempted.append(descriptor)
+        raise AssertionError("owned resource acquisition must not begin")
+
+    monkeypatch.setattr(runtime_module, "_open_owned_root", forbidden_owned_root)
+    candidates = (
+        MutableEqualScopeTuple(),
+        (type("ScopeString", (str,), {})("workbench.read"),),
+    )
+    try:
+        for required_scopes in candidates:
+            with pytest.raises(
+                RuntimeConfigurationError, match="require exactly workbench.read"
+            ):
+                WorkbenchReadRuntime.open(
+                    authenticator=authenticator(policy()),
+                    policy=policy(),
+                    now=lambda: NOW,
+                    clock_ms=lambda: NOW * 1000,
+                    project_directory_fd=project_fd,
+                    audit_directory_fd=audit_fd,
+                    lease=lease(required_scopes=required_scopes),
+                    allowed_hosts=("127.0.0.1",),
+                )
+        assert attempted == []
+        os.fstat(project_fd)
+        os.fstat(audit_fd)
+    finally:
+        os.close(project_fd)
+        os.close(audit_fd)
+
+
+# RS0_F3_INDEPENDENT_REVIEW_RED_20260909
+def test_runtime_owns_stable_lease_snapshot_against_caller_mutation(
+    tmp_path: Path,
+) -> None:
+    supplied_lease = lease()
+    _project, project_fd, audit_fd, runtime = create_runtime(
+        tmp_path, selected_lease=supplied_lease
+    )
+    caller = ReadCaller(
+        SUBJECT, CLIENT, RESOURCE, ("workbench.read",), NOW + 10
+    )
+    try:
+        object.__setattr__(supplied_lease, "expected_subject_digest", "f" * 64)
+        object.__setattr__(
+            supplied_lease, "project_ref", "project:" + "9" * 64
+        )
+        object.__setattr__(supplied_lease, "allowed_paths", ("not-admitted.txt",))
+
+        binding = runtime.resolve_binding(caller, PROJECT)
+        assert binding is not None
+        assert binding.project_ref == PROJECT
+        assert binding.scope.allowed_paths == ("source.txt",)
+        assert (
+            runtime.resolve_binding(
+                dataclasses.replace(caller, subject_digest="f" * 64), PROJECT
+            )
+            is None
+        )
+    finally:
+        asyncio.run(runtime.aclose(timeout=1))
+        os.close(project_fd)
+        os.close(audit_fd)
+
+
+# RS0_F7_TYPED_MAPPING_DISCRIMINATOR_20260909
+def test_outer_runtime_maps_audit_acquisition_cleanup_uncertainty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from integrations.business_mcp_auth.audit import (
+        AuditAcquisitionUncertain,
+        AuditSinkPoisoned,
+    )
+
+    _project, project_fd, audit_fd = open_dirs(tmp_path)
+    primary = AuditSinkPoisoned("synthetic audit acquisition refusal")
+    cleanup = OSError("synthetic audit descriptor cleanup failure")
+
+    def refuse_audit_open(_cls, *_args, **_kwargs):
+        raise AuditAcquisitionUncertain(
+            "synthetic audit acquisition cleanup uncertainty",
+            primary_error=primary,
+            cleanup_errors=(cleanup,),
+        )
+
+    monkeypatch.setattr(
+        runtime_module.DurableAuthAuditSink,
+        "open",
+        classmethod(refuse_audit_open),
+    )
+    try:
+        with pytest.raises(RuntimeCloseUncertain) as caught:
+            WorkbenchReadRuntime.open(
+                authenticator=authenticator(policy()),
+                policy=policy(),
+                now=lambda: NOW,
+                clock_ms=lambda: NOW * 1000,
+                project_directory_fd=project_fd,
+                audit_directory_fd=audit_fd,
+                lease=lease(),
+                allowed_hosts=("127.0.0.1",),
+            )
+
+        assert caught.value.primary_error is primary
+        assert caught.value.cleanup_errors == (cleanup,)
+        os.fstat(project_fd)
+        os.fstat(audit_fd)
+    finally:
+        os.close(project_fd)
+        os.close(audit_fd)
+
+
+# RS0_F7_RUNTIME_ACQUISITION_REDS_20260909
+def test_owned_root_rollback_close_failure_is_runtime_uncertainty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _project, project_fd, audit_fd = open_dirs(tmp_path)
+    from integrations.workbench_read_mcp import runtime as runtime_module
+
+    real_validate = runtime_module._validate_directory
+    real_close = runtime_module.os.close
+    validations = 0
+    close_calls: list[int] = []
+
+    def refuse_second_validation(value) -> None:
+        nonlocal validations
+        validations += 1
+        real_validate(value)
+        if validations == 2:
+            raise RuntimeConfigurationError(
+                "synthetic post-root-acquisition refusal"
+            )
+
+    def close_then_fail(descriptor: int) -> None:
+        close_calls.append(descriptor)
+        real_close(descriptor)
+        raise OSError("synthetic root rollback close failure")
+
+    monkeypatch.setattr(runtime_module, "_validate_directory", refuse_second_validation)
+    monkeypatch.setattr(runtime_module.os, "close", close_then_fail)
+    try:
+        with pytest.raises(RuntimeCloseUncertain) as caught:
+            runtime_module._open_owned_root(project_fd)
+    finally:
+        monkeypatch.setattr(runtime_module.os, "close", real_close)
+
+    assert isinstance(caught.value.primary_error, RuntimeConfigurationError)
+    assert len(caught.value.cleanup_errors) == 1
+    assert validations == 2 and len(close_calls) == 1
+    os.fstat(project_fd)
+    os.fstat(audit_fd)
+    real_close(project_fd)
+    real_close(audit_fd)
+
+
+def test_runtime_open_cleanup_uncertainty_outranks_configuration_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _project, project_fd, audit_fd = open_dirs(tmp_path)
+    from integrations.workbench_read_mcp import runtime as runtime_module
+
+    real_audit_close = runtime_module.DurableAuthAuditSink.close
+    close_calls = 0
+
+    def configuration_refusal(_services) -> object:
+        raise RuntimeConfigurationError(
+            "synthetic post-acquisition configuration refusal"
+        )
+
+    def close_then_report_uncertainty(sink) -> None:
+        nonlocal close_calls
+        close_calls += 1
+        real_audit_close(sink)
+        raise OSError("synthetic audit rollback close failure")
+
+    monkeypatch.setattr(runtime_module, "create_deployment", configuration_refusal)
+    monkeypatch.setattr(
+        runtime_module.DurableAuthAuditSink, "close", close_then_report_uncertainty
+    )
+    with pytest.raises(RuntimeCloseUncertain) as caught:
+        WorkbenchReadRuntime.open(
+            authenticator=authenticator(policy()),
+            policy=policy(),
+            now=lambda: NOW,
+            clock_ms=lambda: NOW * 1000,
+            project_directory_fd=project_fd,
+            audit_directory_fd=audit_fd,
+            lease=lease(),
+            allowed_hosts=("127.0.0.1",),
+        )
+
+    assert isinstance(caught.value.primary_error, RuntimeConfigurationError)
+    assert len(caught.value.cleanup_errors) == 1
+    assert close_calls == 1
+    os.fstat(project_fd)
+    os.fstat(audit_fd)
     os.close(project_fd)
     os.close(audit_fd)
 
@@ -547,6 +813,187 @@ def test_concurrent_close_has_one_descriptor_release_owner(tmp_path: Path) -> No
     os.close(audit_fd)
 
 
+# RS0_F5_RELEASE_SEQUENCE_DISCRIMINATORS_20260909
+def test_root_drift_runs_one_attest_audit_root_release_sequence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _project, project_fd, audit_host_fd, runtime = create_runtime(tmp_path)
+    root_fd = runtime.root_fd
+    original_mode = stat.S_IMODE(os.fstat(root_fd).st_mode)
+    real_drain = runtime._executor.aclose
+    real_attest = runtime._validate_live_root_locked
+    real_audit_close = runtime._audit_sink.close
+    real_os_close = runtime_module.os.close
+    events: list[str] = []
+
+    async def drain_then_drift(*, timeout: float) -> None:
+        await real_drain(timeout=timeout)
+        os.fchmod(root_fd, original_mode | 0o020)
+
+    def recording_attest() -> None:
+        events.append("root_attest")
+        real_attest()
+
+    def recording_audit_close() -> None:
+        events.append("audit_close")
+        real_audit_close()
+
+    def recording_os_close(descriptor: int) -> None:
+        if descriptor == root_fd:
+            events.append("root_close")
+        real_os_close(descriptor)
+
+    monkeypatch.setattr(runtime._executor, "aclose", drain_then_drift)
+    monkeypatch.setattr(runtime, "_validate_live_root_locked", recording_attest)
+    monkeypatch.setattr(runtime._audit_sink, "close", recording_audit_close)
+    monkeypatch.setattr(runtime_module.os, "close", recording_os_close)
+    try:
+        with pytest.raises(RuntimeCloseUncertain) as first:
+            asyncio.run(runtime.aclose(timeout=1))
+        assert isinstance(first.value.primary_error, RuntimeClosed)
+        assert first.value.cleanup_errors == ()
+        assert events == ["root_attest", "audit_close", "root_close"]
+
+        with pytest.raises(RuntimeCloseUncertain) as second:
+            asyncio.run(runtime.aclose(timeout=1))
+        assert second.value is first.value
+        assert events == ["root_attest", "audit_close", "root_close"]
+    finally:
+        monkeypatch.setattr(runtime_module.os, "close", real_os_close)
+
+    with pytest.raises(OSError):
+        os.fstat(root_fd)
+    os.fstat(project_fd)
+    os.fstat(audit_host_fd)
+    os.close(project_fd)
+    os.close(audit_host_fd)
+
+
+def test_combined_root_attestation_and_audit_release_failures_are_retained(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _project, project_fd, audit_host_fd, runtime = create_runtime(tmp_path)
+    root_fd = runtime.root_fd
+    original_mode = stat.S_IMODE(os.fstat(root_fd).st_mode)
+    real_drain = runtime._executor.aclose
+    real_audit_close = runtime._audit_sink.close
+    audit_failure = OSError("synthetic audit release uncertainty")
+    calls = 0
+
+    async def drain_then_drift(*, timeout: float) -> None:
+        await real_drain(timeout=timeout)
+        os.fchmod(root_fd, original_mode | 0o020)
+
+    def close_then_report_uncertainty() -> None:
+        nonlocal calls
+        calls += 1
+        real_audit_close()
+        raise audit_failure
+
+    monkeypatch.setattr(runtime._executor, "aclose", drain_then_drift)
+    monkeypatch.setattr(runtime._audit_sink, "close", close_then_report_uncertainty)
+
+    with pytest.raises(RuntimeCloseUncertain) as caught:
+        asyncio.run(runtime.aclose(timeout=1))
+    assert isinstance(caught.value.primary_error, RuntimeClosed)
+    assert caught.value.cleanup_errors == (audit_failure,)
+    assert calls == 1
+    with pytest.raises(OSError):
+        os.fstat(root_fd)
+    os.fstat(project_fd)
+    os.fstat(audit_host_fd)
+    os.close(project_fd)
+    os.close(audit_host_fd)
+
+
+# RS0_F5_INDEPENDENT_REVIEW_RED_20260909
+@pytest.mark.parametrize(
+    "drift", ["mode", "inheritable", "dup2", "external-close"]
+)
+def test_final_root_attestation_after_drain_is_sticky_uncertainty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, drift: str
+) -> None:
+    _project, project_fd, audit_fd, runtime = create_runtime(tmp_path)
+    root_fd = runtime.root_fd
+    original_mode = stat.S_IMODE(os.fstat(root_fd).st_mode)
+    replacement_fd = -1
+    real_drain = runtime._executor.aclose
+
+    async def drain_then_drift(*, timeout: float) -> None:
+        nonlocal replacement_fd
+        await real_drain(timeout=timeout)
+        if drift == "mode":
+            os.fchmod(root_fd, original_mode | 0o020)
+        elif drift == "inheritable":
+            os.set_inheritable(root_fd, True)
+        elif drift == "dup2":
+            replacement = tmp_path / "post-drain-replacement-root"
+            replacement.mkdir()
+            replacement_fd = os.open(
+                replacement, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC
+            )
+            os.dup2(replacement_fd, root_fd, inheritable=False)
+        else:
+            os.close(root_fd)
+
+    monkeypatch.setattr(runtime._executor, "aclose", drain_then_drift)
+    with pytest.raises(RuntimeCloseUncertain) as first:
+        asyncio.run(runtime.aclose(timeout=1))
+    assert isinstance(first.value.primary_error, RuntimeClosed)
+    with pytest.raises(RuntimeCloseUncertain) as second:
+        asyncio.run(runtime.aclose(timeout=1))
+    assert second.value is first.value
+
+    with pytest.raises(OSError):
+        os.fstat(root_fd)
+    os.fstat(project_fd)
+    os.fstat(audit_fd)
+    os.close(project_fd)
+    os.close(audit_fd)
+    if replacement_fd >= 0:
+        os.close(replacement_fd)
+
+
+# RS0_F4_INDEPENDENT_REVIEW_RED_20260909
+@pytest.mark.parametrize("drift", ["mode", "inheritable", "dup2"])
+def test_resolve_binding_attests_live_root_and_stickily_revokes(
+    tmp_path: Path, drift: str
+) -> None:
+    _project, project_fd, audit_fd, runtime = create_runtime(tmp_path)
+    caller = ReadCaller(
+        SUBJECT, CLIENT, RESOURCE, ("workbench.read",), NOW + 60
+    )
+    replacement_fd = -1
+    original_mode = stat.S_IMODE(os.fstat(runtime.root_fd).st_mode)
+    if drift == "mode":
+        os.fchmod(runtime.root_fd, original_mode | 0o020)
+    elif drift == "inheritable":
+        os.set_inheritable(runtime.root_fd, True)
+    else:
+        replacement = tmp_path / "binding-replacement-root"
+        replacement.mkdir()
+        replacement_fd = os.open(
+            replacement, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC
+        )
+        os.dup2(replacement_fd, runtime.root_fd, inheritable=False)
+
+    assert runtime.resolve_binding(caller, PROJECT) is None
+
+    if drift == "mode":
+        os.fchmod(runtime.root_fd, original_mode)
+    elif drift == "inheritable":
+        os.set_inheritable(runtime.root_fd, False)
+    else:
+        os.dup2(project_fd, runtime.root_fd, inheritable=False)
+    assert runtime.resolve_binding(caller, PROJECT) is None
+
+    asyncio.run(runtime.aclose(timeout=1))
+    os.close(project_fd)
+    os.close(audit_fd)
+    if replacement_fd >= 0:
+        os.close(replacement_fd)
+
+
 # RS0_ROOT_CONTINUITY_REDS_20260909
 @pytest.mark.parametrize("drift", ["mode", "inheritable", "dup2"])
 def test_owned_root_drift_before_worker_entry_irreversibly_revokes(
@@ -573,7 +1020,8 @@ def test_owned_root_drift_before_worker_entry_irreversibly_revokes(
     assert runtime.resolve_binding(caller, PROJECT) is None
     with pytest.raises(RuntimeClosed):
         asyncio.run(runtime.run_io(lambda: "must-never-recover"))
-    asyncio.run(runtime.aclose(timeout=1))
+    with pytest.raises(RuntimeCloseUncertain):
+        asyncio.run(runtime.aclose(timeout=1))
     os.fstat(project_fd)
     os.fstat(audit_fd)
     os.close(project_fd)
@@ -608,7 +1056,8 @@ def test_owned_root_drift_during_physical_work_withholds_result(
         release.set()
         with pytest.raises(RuntimeClosed):
             await pending
-        await runtime.aclose(timeout=1)
+        with pytest.raises(RuntimeCloseUncertain):
+            await runtime.aclose(timeout=1)
 
     asyncio.run(scenario())
     os.close(project_fd)
@@ -660,6 +1109,7 @@ def test_root_drift_postcheck_outranks_operation_failure(tmp_path: Path) -> None
 
     with pytest.raises(RuntimeClosed):
         asyncio.run(runtime.run_io(operation))
-    asyncio.run(runtime.aclose(timeout=1))
+    with pytest.raises(RuntimeCloseUncertain):
+        asyncio.run(runtime.aclose(timeout=1))
     os.close(project_fd)
     os.close(audit_fd)
