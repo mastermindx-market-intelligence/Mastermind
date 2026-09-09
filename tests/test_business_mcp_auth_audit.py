@@ -325,3 +325,23 @@ def test_lock_loss_before_close_is_reported_and_descriptors_are_closed(
     with pytest.raises(OSError):
         os.fstat(directory_fd)
     os.close(host_fd)
+
+
+def test_uncertain_close_remains_uncertain_on_later_calls(tmp_path: Path) -> None:
+    directory = tmp_path / "audit"
+    host_fd = open_directory(directory)
+    sink = DurableAuthAuditSink.open(host_fd, policy_id=POLICY_ID)
+    audit_fd = sink._audit_fd
+    directory_fd = sink._directory_fd
+    fcntl.flock(audit_fd, fcntl.LOCK_UN)
+
+    with pytest.raises(AuditSinkPoisoned, match="audit close is uncertain"):
+        sink.close()
+    with pytest.raises(AuditSinkPoisoned, match="audit close is uncertain"):
+        sink.close()
+
+    with pytest.raises(OSError):
+        os.fstat(audit_fd)
+    with pytest.raises(OSError):
+        os.fstat(directory_fd)
+    os.close(host_fd)

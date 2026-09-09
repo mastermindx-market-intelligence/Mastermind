@@ -101,6 +101,7 @@ class DurableAuthAuditSink:
         self._gate = threading.Lock()
         self._poisoned = False
         self._closed = False
+        self._close_uncertain = False
 
     @classmethod
     def open(
@@ -359,6 +360,8 @@ class DurableAuthAuditSink:
     def close(self) -> None:
         with self._gate:
             if self._closed:
+                if self._close_uncertain:
+                    raise AuditSinkPoisoned("audit close is uncertain")
                 return
             errors: list[BaseException] = []
             if not self._poisoned:
@@ -379,6 +382,7 @@ class DurableAuthAuditSink:
                     errors.append(error)
             if errors:
                 self._poisoned = True
+                self._close_uncertain = True
                 raise AuditSinkPoisoned("audit close is uncertain") from errors[0]
 
 
