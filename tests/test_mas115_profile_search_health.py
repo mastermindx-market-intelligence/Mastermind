@@ -1014,6 +1014,63 @@ def test_h2_refuses_malformed_shared_builder_result_before_any_dispatch(monkeypa
     assert raw_transport.closed == 1
 
 
+def test_h2_refuses_subclassed_builder_before_hooks_or_dispatch(monkeypatch):
+    events = []
+
+    class HostileHeaders(dict):
+        def get(self, *args, **kwargs):
+            events.append("headers_get")
+            return super().get(*args, **kwargs)
+
+        def __iter__(self):
+            events.append("headers_iter")
+            return super().__iter__()
+
+        def items(self):
+            events.append("headers_items")
+            return super().items()
+
+    class PermissiveRawTransport:
+        def __init__(self):
+            self.calls = []
+            self.closed = 0
+
+        def stream(self, method, url, *, headers=None, params=None, json=None):
+            self.calls.append((method, url, headers, params, json))
+            return _FakeWireResponse(vendors._BoundedResponse(200, _payload([], 0)))
+
+        def close(self):
+            self.closed += 1
+
+    raw_transport = PermissiveRawTransport()
+    original_builder = vendors._mlx_profile_search_request_arguments
+
+    def malicious_builder(*args, **kwargs):
+        request = list(original_builder(*args, **kwargs))
+        request[3] = HostileHeaders(request[3])
+        return tuple(request)
+
+    monkeypatch.setattr(vendors.httpx, "Client", lambda **_kwargs: raw_transport)
+    monkeypatch.setattr(
+        vendors,
+        "_mlx_profile_search_request_arguments",
+        malicious_builder,
+    )
+    out = io.StringIO()
+    result = health._run_profile_search_health(  # noqa: SLF001
+        stdout=out,
+        preflight_loader=lambda: (_provision(), None),
+        pipe_factory=SimpleNamespace,
+        credential_reader=lambda _pipe: core.Credential(_SECRET, "stdin"),
+        pipe_closer=lambda _pipe: True,
+    )
+    assert events == []
+    assert result == 2
+    assert json.loads(out.getvalue()) == health._receipt("VENDOR_ERROR")
+    assert raw_transport.calls == []
+    assert raw_transport.closed == 1
+
+
 @pytest.mark.parametrize(
     ("responses", "expected_code"),
     (
@@ -1243,6 +1300,91 @@ def test_profile_search_request_guard_refuses_non_search_shapes_before_http():
     })
     for request in attempts:
         assert invoke(request) is False
+
+
+def test_profile_search_request_guard_refuses_subclass_hooks_before_behavior():
+    events = []
+
+    class HostileText(str):
+        def __eq__(self, other):
+            events.append("text_eq")
+            return super().__eq__(other)
+
+        def __hash__(self):
+            events.append("text_hash")
+            return super().__hash__()
+
+        def startswith(self, prefix, *args):
+            events.append("text_startswith")
+            return super().startswith(prefix, *args)
+
+        def __bool__(self):
+            events.append("text_bool")
+            return super().__bool__()
+
+    class HostileDict(dict):
+        def get(self, *args, **kwargs):
+            events.append("dict_get")
+            return super().get(*args, **kwargs)
+
+        def __iter__(self):
+            events.append("dict_iter")
+            return super().__iter__()
+
+        def items(self):
+            events.append("dict_items")
+            return super().items()
+
+        def __getitem__(self, key):
+            events.append("dict_getitem")
+            return super().__getitem__(key)
+
+    canonical_body = {
+        "is_removed": False,
+        "limit": vendors._PROFILE_PAGE_SIZE,
+        "offset": 0,
+        "search_text": "",
+        "storage_type": "all",
+        "order_by": "created_at",
+        "sort": "asc",
+        "folder_id": _FOLDER,
+    }
+    canonical = {
+        "method": "POST",
+        "origin": vendors._MLX_CLOUD_ORIGIN,
+        "path": "/profile/search",
+        "headers": {"Authorization": f"Bearer {_SECRET}"},
+        "params": None,
+        "json_body": canonical_body,
+    }
+
+    def invoke(request):
+        sink = vendors._InitialPeerCensusDiagnosticSink(
+            vendors._INITIAL_PEER_CENSUS_DIAGNOSTIC_SEAL,
+        )
+        return health._is_exact_profile_search_request(  # noqa: SLF001
+            **request,
+            diagnostic_sink=sink,
+        )
+
+    hostile_header_key = HostileText("Authorization")
+    hostile_key_headers = {hostile_header_key: canonical["headers"]["Authorization"]}
+    attempts = [
+        {**canonical, "method": HostileText("POST")},
+        {**canonical, "headers": HostileDict(canonical["headers"])},
+        {**canonical, "headers": hostile_key_headers},
+        {**canonical, "headers": {"Authorization": HostileText(f"Bearer {_SECRET}")}},
+        {**canonical, "json_body": HostileDict(canonical_body)},
+        {
+            **canonical,
+            "json_body": {**canonical_body, "search_text": HostileText("")},
+        },
+    ]
+    for request in attempts:
+        events.clear()
+        refused = invoke(request)
+        assert events == []
+        assert refused is False
 
 
 def test_hermetic_run_closes_the_exact_canonical_client_once():

@@ -198,40 +198,57 @@ def _is_exact_profile_search_request(
     """Return whether a request is exactly one diagnostic Profile Search page."""
 
     body = json_body
-    authorization = headers.get("Authorization") if isinstance(headers, dict) else None
-    fixed_body_keys = {
-        "is_removed",
-        "limit",
-        "offset",
-        "search_text",
-        "storage_type",
-        "order_by",
-        "sort",
-        "folder_id",
+    fixed_body_types = {
+        "is_removed": bool,
+        "limit": int,
+        "offset": int,
+        "search_text": str,
+        "storage_type": str,
+        "order_by": str,
+        "sort": str,
+        "folder_id": str,
     }
+    if (
+        type(method) is not str
+        or type(origin) is not str
+        or type(path) is not str
+        or type(headers) is not dict
+        or type(body) is not dict
+        or params is not None
+        or type(diagnostic_sink) is not _vendors._InitialPeerCensusDiagnosticSink  # noqa: SLF001
+    ):
+        return False
+    if len(headers) != 1:
+        return False
+    authorization = None
+    for key, value in headers.items():
+        if type(key) is not str or type(value) is not str:
+            return False
+        if key != "Authorization":
+            return False
+        authorization = value
+    if len(body) != len(fixed_body_types):
+        return False
+    for key, value in body.items():
+        if type(key) is not str:
+            return False
+        expected_type = fixed_body_types.get(key)
+        if expected_type is None or type(value) is not expected_type:
+            return False
     return (
         method == "POST"
         and origin == _vendors._MLX_CLOUD_ORIGIN  # noqa: SLF001
         and path == "/profile/search"
-        and params is None
-        and isinstance(headers, dict)
-        and set(headers) == {"Authorization"}
-        and isinstance(authorization, str)
         and authorization.startswith("Bearer ")
         and len(authorization) > len("Bearer ")
-        and isinstance(body, dict)
-        and set(body) == fixed_body_keys
-        and body.get("is_removed") is False
-        and body.get("limit") == _vendors._PROFILE_PAGE_SIZE  # noqa: SLF001
-        and type(body.get("offset")) is int
+        and body["is_removed"] is False
+        and body["limit"] == _vendors._PROFILE_PAGE_SIZE  # noqa: SLF001
         and 0 <= body["offset"] < _vendors._MAX_PROFILE_CENSUS  # noqa: SLF001
-        and body.get("search_text") == ""
-        and body.get("storage_type") == "all"
-        and body.get("order_by") == "created_at"
-        and body.get("sort") == "asc"
-        and isinstance(body.get("folder_id"), str)
+        and body["search_text"] == ""
+        and body["storage_type"] == "all"
+        and body["order_by"] == "created_at"
+        and body["sort"] == "asc"
         and bool(body["folder_id"])
-        and type(diagnostic_sink) is _vendors._InitialPeerCensusDiagnosticSink  # noqa: SLF001
     )
 
 
