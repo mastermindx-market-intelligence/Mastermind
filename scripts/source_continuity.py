@@ -10,6 +10,7 @@ or runtime effect.
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
@@ -20,6 +21,7 @@ import re
 import stat
 import subprocess
 import sys
+from threading import Lock
 from time import monotonic
 from typing import Callable, Mapping, Sequence
 from urllib.error import HTTPError, URLError
@@ -57,12 +59,15 @@ _MAX_GIT_CONFIG_CENSUS_BYTES = 65_536
 _MAX_GIT_PATH_BYTES = 4_096
 _PAGE_SIZE = 100
 _MAX_PAGES = 10
+_MAX_FOREIGN_FILE_PAGES = 30
+_FOREIGN_PR_WORKERS = 4
 _MAX_COLLISION_PRS = 256
 # One invocation-local cooperative budget spans both observations, not hard preemption.
 _MAX_HTTP_CALLS = 640
 _HTTP_READ_BUDGET_SECONDS = 180.0
 _MAX_HTTP_NORMALIZED_BYTES = 32 * 1024 * 1024
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+_REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 _HOLD_LABELS = frozenset({"hold", "hold-for-sol", "hold_for_sol"})
 _PR_FILE_STATUSES = frozenset(
     {"added", "changed", "copied", "modified", "removed", "renamed", "unchanged"}
@@ -127,53 +132,193 @@ class _ReadBudgetExceeded(Exception):
     pass
 
 
+@dataclass(frozen=True)
+class _HTTPRepresentation:
+    payload: object
+    etag: str | None
+    not_modified: bool
+
+
+@dataclass(frozen=True)
+class _ConditionalObservation:
+    url: str
+    etag: str
+
+
 class _BoundedHTTPGet:
-    """Bounded, ephemeral GET accounting; no retry, cache or receipt authority.
-
-    The existing transport retains raw-body and HTTP behavior. This wrapper
-    rejects late results but cannot preempt HTTP, JSON or local Git work.
-    """
-
-    def __init__(self, transport: Callable[..., object]) -> None:
+    def __init__(self, transport: HTTPGet) -> None:
         self._transport = transport
+        self._lock = Lock()
         self._calls = 0
         self._bytes = 0
-        started = monotonic()
-        if type(started) not in (int, float) or not math.isfinite(started):
-            raise _ReadBudgetExceeded()
-        self._last = started
-        self._deadline = started + _HTTP_READ_BUDGET_SECONDS
-        if not math.isfinite(self._deadline) or self._deadline <= started:
-            raise _ReadBudgetExceeded()
+        self._conditional_observations: list[_ConditionalObservation] = []
+        self.parallel_safe = (
+            transport is _stdlib_http_get
+            or getattr(transport, "_source_continuity_parallel_safe", False) is True
+        )
+        self.conditional_validation_available = (
+            transport is _stdlib_http_get
+            or getattr(transport, "_source_continuity_conditional", False) is True
+        )
+        try:
+            started = monotonic()
+        except Exception:
+            started = None
+        if (
+            isinstance(started, bool)
+            or not isinstance(started, (int, float))
+            or not math.isfinite(started)
+            or not math.isfinite(started + _HTTP_READ_BUDGET_SECONDS)
+        ):
+            self._started = None
+            self._last_now = None
+            self._deadline = float("-inf")
+        else:
+            self._started = float(started)
+            self._last_now = float(started)
+            self._deadline = float(started) + _HTTP_READ_BUDGET_SECONDS
 
-    def check(self) -> float:
-        now = monotonic()
-        if (type(now) not in (int, float) or not math.isfinite(now)
-                or now < self._last or now >= self._deadline):
+    def _checked_now_locked(self) -> float:
+        if self._started is None or self._last_now is None:
             raise _ReadBudgetExceeded()
-        self._last = now
-        return self._deadline - now
+        try:
+            now = monotonic()
+        except Exception:
+            raise _ReadBudgetExceeded() from None
+        if (
+            isinstance(now, bool)
+            or not isinstance(now, (int, float))
+            or not math.isfinite(now)
+        ):
+            raise _ReadBudgetExceeded()
+        current = float(now)
+        if current < self._last_now or current >= self._deadline:
+            raise _ReadBudgetExceeded()
+        self._last_now = current
+        return current
+
+    def check(self) -> None:
+        with self._lock:
+            self._checked_now_locked()
+            if self._bytes > _MAX_HTTP_NORMALIZED_BYTES:
+                raise _ReadBudgetExceeded()
+
+    def _admit_call(self, timeout: float) -> float:
+        with self._lock:
+            now = self._checked_now_locked()
+            if self._calls >= _MAX_HTTP_CALLS:
+                raise _ReadBudgetExceeded()
+            self._calls += 1
+            remaining = self._deadline - now
+            call_timeout = min(float(timeout), remaining)
+            if not math.isfinite(call_timeout) or call_timeout <= 0:
+                raise _ReadBudgetExceeded()
+            return call_timeout
+
+    def _account_payload(self, payload: object) -> None:
+        try:
+            normalized = canonical_json(payload).encode("utf-8", "backslashreplace")
+        except Exception:
+            raise _RemoteProbeError() from None
+
+        with self._lock:
+            self._bytes += len(normalized)
+            self._checked_now_locked()
+            if self._bytes > _MAX_HTTP_NORMALIZED_BYTES:
+                raise _ReadBudgetExceeded()
 
     def __call__(self, url: str, *, token: str, timeout: float) -> object:
-        remaining = self.check()
-        if self._calls >= _MAX_HTTP_CALLS:
-            raise _ReadBudgetExceeded()
-        self._calls += 1
-        payload = self._transport(url, token=token, timeout=min(timeout, remaining))
-        self.check()
-        # Isolated surrogates may be escaped JSON in otherwise unused metadata.
-        # Keep malformed-path decisions with the unchanged path validator.
-        self._bytes += len(canonical_json(payload).encode("utf-8", "backslashreplace"))
-        if self._bytes > _MAX_HTTP_NORMALIZED_BYTES:
-            raise _ReadBudgetExceeded()
-        self.check()
+        call_timeout = self._admit_call(timeout)
+
+        payload = self._transport(url, token=token, timeout=call_timeout)
+        if self.conditional_validation_available:
+            if (
+                not isinstance(payload, _HTTPRepresentation)
+                or payload.not_modified is not False
+                or not _is_valid_etag(payload.etag)
+            ):
+                raise _RemoteProbeError()
+            representation = payload
+            self._account_payload(representation.payload)
+            with self._lock:
+                self._conditional_observations.append(
+                    _ConditionalObservation(url=url, etag=representation.etag)
+                )
+            return representation.payload
+
+        self._account_payload(payload)
         return payload
+
+    def validate_unchanged(self, *, token: str) -> bool:
+        if not self.conditional_validation_available:
+            raise _RemoteProbeError()
+        with self._lock:
+            observations = tuple(self._conditional_observations)
+        for observation in observations:
+            call_timeout = self._admit_call(_HTTP_TIMEOUT_SECONDS)
+            payload = self._transport(
+                observation.url,
+                token=token,
+                timeout=call_timeout,
+                if_none_match=observation.etag,
+            )
+            if not isinstance(payload, _HTTPRepresentation) or not _is_valid_etag(
+                payload.etag
+            ):
+                raise _RemoteProbeError()
+            if payload.not_modified is True:
+                if payload.payload is not None or not _etags_match_validator(
+                    observation.etag, payload.etag
+                ):
+                    raise _RemoteProbeError()
+                continue
+            if payload.not_modified is False:
+                self._account_payload(payload.payload)
+                return False
+            raise _RemoteProbeError()
+        return True
 
 
 @dataclass(frozen=True)
 class _CommandResult:
     returncode: int
     stdout: str
+
+
+@dataclass(frozen=True)
+class _GitTreeEntry:
+    mode: str
+    object_type: str
+    object_sha: str
+
+
+@dataclass(frozen=True)
+class _ForeignPullIdentity:
+    pr_number: int
+    head_repository: str
+    head_sha: str
+    base_repository: str
+    base_sha: str
+
+
+@dataclass(frozen=True)
+class _SaturatedCollisionEvidence:
+    pr_number: int
+    proof_method: str
+    head_repository: str
+    head_sha: str
+    base_repository: str
+    base_sha: str
+    merge_base_sha: str
+    owned_path_entries: tuple[
+        tuple[str, _GitTreeEntry | None, _GitTreeEntry | None], ...
+    ]
+
+
+@dataclass(frozen=True)
+class _ForeignFilesObservation:
+    paths: tuple[str, ...]
+    saturated: bool
 
 
 Runner = Callable[..., object]
@@ -222,6 +367,47 @@ def _is_safe_remote_path(value: object) -> bool:
     return str(parsed) == value
 
 
+def _is_safe_repository(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and _REPOSITORY_RE.fullmatch(value) is not None
+        and ".." not in value
+    )
+
+
+def _is_safe_tree_name(value: object) -> bool:
+    return (
+        _is_safe_remote_path(value)
+        and isinstance(value, str)
+        and "/" not in value
+    )
+
+
+def _is_valid_etag(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    opaque = value[2:] if value.startswith("W/") else value
+    if not opaque.startswith('"') or not opaque.endswith('"') or len(opaque) < 2:
+        return False
+    for character in opaque[1:-1]:
+        codepoint = ord(character)
+        if not (
+            codepoint == 0x21
+            or 0x23 <= codepoint <= 0x7E
+            or 0x80 <= codepoint <= 0xFF
+        ):
+            return False
+    return True
+
+
+def _etag_opaque(value: str) -> str:
+    return value[2:] if value.startswith("W/") else value
+
+
+def _etags_match_validator(left: str, right: str) -> bool:
+    return _etag_opaque(left) == _etag_opaque(right)
+
+
 def _invoke_git(
     runner: Runner,
     workspace: str,
@@ -257,25 +443,58 @@ def _invoke_git(
     return _CommandResult(returncode=returncode, stdout=stdout)
 
 
-def _stdlib_http_get(url: str, *, token: str, timeout: float) -> object:
+def _single_etag(headers: object) -> str:
+    try:
+        values = headers.get_all("ETag")  # type: ignore[attr-defined]
+    except Exception:
+        return ""
+    if not isinstance(values, list) or len(values) != 1:
+        return ""
+    value = values[0]
+    return value if isinstance(value, str) and _is_valid_etag(value) else ""
+
+
+def _stdlib_http_get(
+    url: str,
+    *,
+    token: str,
+    timeout: float,
+    if_none_match: str | None = None,
+) -> object:
     if not isinstance(url, str) or not url.startswith(_API_ROOT + "/"):
         raise _RemoteProbeError()
     if not isinstance(token, str) or not token:
         raise _AuthProbeError()
+    if if_none_match is not None and not _is_valid_etag(if_none_match):
+        raise _RemoteProbeError()
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": _API_VERSION,
+        "User-Agent": "mastermind-source-continuity-v1",
+    }
+    if if_none_match is not None:
+        headers["If-None-Match"] = if_none_match
     request = Request(
         url,
         method="GET",
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": _API_VERSION,
-            "User-Agent": "mastermind-source-continuity-v1",
-        },
+        headers=headers,
     )
     try:
         with urlopen(request, timeout=timeout) as response:  # noqa: S310 - fixed GitHub API root
+            etag = _single_etag(response.headers)
+            if not etag:
+                raise _RemoteProbeError()
             raw = response.read(_MAX_HTTP_BODY_BYTES + 1)
     except HTTPError as exc:
+        if exc.code == 304:
+            etag = _single_etag(exc.headers)
+            if not etag:
+                raise _RemoteProbeError()
+            raw = exc.read(_MAX_HTTP_BODY_BYTES + 1)
+            if raw:
+                raise _RemoteProbeError()
+            return _HTTPRepresentation(payload=None, etag=etag, not_modified=True)
         if exc.code in {401, 403}:
             raise _AuthProbeError() from None
         raise _RemoteProbeError() from None
@@ -284,9 +503,13 @@ def _stdlib_http_get(url: str, *, token: str, timeout: float) -> object:
     if len(raw) > _MAX_HTTP_BODY_BYTES:
         raise _RemoteProbeError()
     try:
-        return json.loads(raw.decode("utf-8"))
+        payload = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, ValueError):
         raise _RemoteProbeError() from None
+    return _HTTPRepresentation(payload=payload, etag=etag, not_modified=False)
+
+
+_stdlib_http_get._source_continuity_conditional = True  # type: ignore[attr-defined]
 
 
 def _api(http_get: HTTPGet, token: str, endpoint: str) -> object:
@@ -358,17 +581,7 @@ def _pr_identity(pr: object) -> tuple[object, ...] | None:
     )
 
 
-def _changed_paths(
-    http_get: HTTPGet,
-    token: str,
-    repository: str,
-    pr_number: int,
-) -> tuple[tuple[str, ...], bool]:
-    raw_items, complete = _paged_array(
-        http_get,
-        token,
-        lambda page: _pull_files_endpoint(repository, pr_number, page),
-    )
+def _parse_changed_path_rows(raw_items: Sequence[object]) -> tuple[str, ...]:
     paths: list[str] = []
     seen: set[str] = set()
     for item in raw_items:
@@ -399,7 +612,372 @@ def _changed_paths(
                 raise _RemoteProbeError()
             seen.add(path)
             paths.append(path)
-    return tuple(paths), complete
+    return tuple(paths)
+
+
+def _pull_files_page(
+    http_get: HTTPGet,
+    token: str,
+    repository: str,
+    pr_number: int,
+    page: int,
+) -> list[object]:
+    payload = _api(
+        http_get,
+        token,
+        _pull_files_endpoint(repository, pr_number, page),
+    )
+    if not isinstance(payload, list) or len(payload) > _PAGE_SIZE:
+        raise _RemoteProbeError()
+    return payload
+
+
+def _changed_paths(
+    http_get: HTTPGet,
+    token: str,
+    repository: str,
+    pr_number: int,
+) -> tuple[tuple[str, ...], bool]:
+    raw_items, complete = _paged_array(
+        http_get,
+        token,
+        lambda page: _pull_files_endpoint(repository, pr_number, page),
+    )
+    return _parse_changed_path_rows(raw_items), complete
+
+
+def _foreign_files_observation(
+    http_get: HTTPGet,
+    token: str,
+    repository: str,
+    pr_number: int,
+) -> _ForeignFilesObservation:
+    first = _pull_files_page(http_get, token, repository, pr_number, 1)
+    if len(first) < _PAGE_SIZE:
+        return _ForeignFilesObservation(_parse_changed_path_rows(first), False)
+
+    terminal = _pull_files_page(
+        http_get,
+        token,
+        repository,
+        pr_number,
+        _MAX_FOREIGN_FILE_PAGES,
+    )
+    if len(terminal) == _PAGE_SIZE:
+        _parse_changed_path_rows(first)
+        _parse_changed_path_rows(terminal)
+        return _ForeignFilesObservation((), True)
+
+    items = list(first)
+    for page in range(2, _MAX_FOREIGN_FILE_PAGES):
+        payload = _pull_files_page(http_get, token, repository, pr_number, page)
+        items.extend(payload)
+        if len(payload) < _PAGE_SIZE:
+            if terminal:
+                raise _RemoteProbeError()
+            return _ForeignFilesObservation(_parse_changed_path_rows(items), False)
+    items.extend(terminal)
+    return _ForeignFilesObservation(_parse_changed_path_rows(items), False)
+
+
+def _foreign_pull_identity(
+    raw_pr: object,
+    repository: str,
+) -> _ForeignPullIdentity:
+    if not isinstance(raw_pr, dict):
+        raise _RemoteProbeError()
+    number = raw_pr.get("number")
+    head = raw_pr.get("head")
+    base = raw_pr.get("base")
+    if type(number) is not int or number <= 0:
+        raise _RemoteProbeError()
+    if not isinstance(head, dict) or not isinstance(base, dict):
+        raise _RemoteProbeError()
+    head_repo = head.get("repo")
+    base_repo = base.get("repo")
+    if not isinstance(head_repo, dict) or not isinstance(base_repo, dict):
+        raise _RemoteProbeError()
+    head_repository = head_repo.get("full_name")
+    base_repository = base_repo.get("full_name")
+    head_sha = head.get("sha")
+    base_sha = base.get("sha")
+    if (
+        not _is_safe_repository(head_repository)
+        or not _is_safe_repository(base_repository)
+        or base_repository != repository
+        or not _is_sha(head_sha)
+        or not _is_sha(base_sha)
+    ):
+        raise _RemoteProbeError()
+    return _ForeignPullIdentity(
+        pr_number=number,
+        head_repository=head_repository,
+        head_sha=head_sha,
+        base_repository=base_repository,
+        base_sha=base_sha,
+    )
+
+
+def _foreign_merge_base_sha(
+    http_get: HTTPGet,
+    token: str,
+    identity: _ForeignPullIdentity,
+) -> str:
+    payload = _api(
+        http_get,
+        token,
+        f"repos/{identity.base_repository}/compare/"
+        f"{identity.base_sha}...{identity.head_sha}",
+    )
+    if not isinstance(payload, dict):
+        raise _RemoteProbeError()
+    base_commit = payload.get("base_commit")
+    merge_base = payload.get("merge_base_commit")
+    if (
+        not isinstance(base_commit, dict)
+        or base_commit.get("sha") != identity.base_sha
+        or not isinstance(merge_base, dict)
+        or not _is_sha(merge_base.get("sha"))
+    ):
+        raise _RemoteProbeError()
+    return merge_base["sha"]
+
+
+def _commit_tree_sha(
+    http_get: HTTPGet,
+    token: str,
+    repository: str,
+    commit_sha: str,
+) -> str:
+    payload = _api(
+        http_get,
+        token,
+        f"repos/{repository}/git/commits/{commit_sha}",
+    )
+    if not isinstance(payload, dict) or payload.get("sha") != commit_sha:
+        raise _RemoteProbeError()
+    tree = payload.get("tree")
+    if not isinstance(tree, dict) or not _is_sha(tree.get("sha")):
+        raise _RemoteProbeError()
+    return tree["sha"]
+
+
+_TREE_MODE_TYPES = {
+    "040000": "tree",
+    "100644": "blob",
+    "100755": "blob",
+    "120000": "blob",
+    "160000": "commit",
+}
+
+
+def _read_tree_entries(
+    http_get: HTTPGet,
+    token: str,
+    repository: str,
+    tree_sha: str,
+) -> dict[str, _GitTreeEntry]:
+    payload = _api(http_get, token, f"repos/{repository}/git/trees/{tree_sha}")
+    if (
+        not isinstance(payload, dict)
+        or payload.get("sha") != tree_sha
+        or payload.get("truncated") is not False
+    ):
+        raise _RemoteProbeError()
+    rows = payload.get("tree")
+    if not isinstance(rows, list):
+        raise _RemoteProbeError()
+    entries: dict[str, _GitTreeEntry] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            raise _RemoteProbeError()
+        name = row.get("path")
+        mode = row.get("mode")
+        object_type = row.get("type")
+        object_sha = row.get("sha")
+        size = row.get("size")
+        if (
+            not _is_safe_tree_name(name)
+            or not isinstance(mode, str)
+            or _TREE_MODE_TYPES.get(mode) != object_type
+            or not _is_sha(object_sha)
+            or name in entries
+            or (size is not None and (type(size) is not int or size < 0))
+        ):
+            raise _RemoteProbeError()
+        entries[name] = _GitTreeEntry(mode, object_type, object_sha)
+    return entries
+
+
+def _resolve_owned_path(
+    http_get: HTTPGet,
+    token: str,
+    repository: str,
+    root_tree_sha: str,
+    path: str,
+    cache: dict[tuple[str, str], dict[str, _GitTreeEntry]],
+) -> _GitTreeEntry | None:
+    if not _is_safe_remote_path(path) or not _is_sha(root_tree_sha):
+        raise _RemoteProbeError()
+    tree_sha = root_tree_sha
+    parts = PurePosixPath(path).parts
+    for index, part in enumerate(parts):
+        key = (repository, tree_sha)
+        entries = cache.get(key)
+        if entries is None:
+            entries = _read_tree_entries(http_get, token, repository, tree_sha)
+            cache[key] = entries
+        entry = entries.get(part)
+        if entry is None:
+            return None
+        if index == len(parts) - 1:
+            return entry
+        if entry.mode != "040000" or entry.object_type != "tree":
+            return None
+        tree_sha = entry.object_sha
+    raise _RemoteProbeError()
+
+
+def _saturated_collision_evidence(
+    http_get: HTTPGet,
+    token: str,
+    repository: str,
+    raw_pr: object,
+    owned_paths: tuple[str, ...],
+) -> tuple[_SaturatedCollisionEvidence, bool]:
+    identity = _foreign_pull_identity(raw_pr, repository)
+    merge_base_sha = _foreign_merge_base_sha(http_get, token, identity)
+    base_root_tree = _commit_tree_sha(
+        http_get,
+        token,
+        identity.base_repository,
+        merge_base_sha,
+    )
+    head_root_tree = _commit_tree_sha(
+        http_get,
+        token,
+        identity.head_repository,
+        identity.head_sha,
+    )
+    cache: dict[tuple[str, str], dict[str, _GitTreeEntry]] = {}
+    pairs: list[tuple[str, _GitTreeEntry | None, _GitTreeEntry | None]] = []
+    collision = False
+    for path in sorted(owned_paths):
+        base_entry = _resolve_owned_path(
+            http_get,
+            token,
+            identity.base_repository,
+            base_root_tree,
+            path,
+            cache,
+        )
+        head_entry = _resolve_owned_path(
+            http_get,
+            token,
+            identity.head_repository,
+            head_root_tree,
+            path,
+            cache,
+        )
+        pairs.append((path, base_entry, head_entry))
+        collision = collision or base_entry != head_entry
+    return (
+        _SaturatedCollisionEvidence(
+            pr_number=identity.pr_number,
+            proof_method="OWNED_PATH_TREE_DIFF",
+            head_repository=identity.head_repository,
+            head_sha=identity.head_sha,
+            base_repository=identity.base_repository,
+            base_sha=identity.base_sha,
+            merge_base_sha=merge_base_sha,
+            owned_path_entries=tuple(pairs),
+        ),
+        collision,
+    )
+
+
+def _foreign_collision_evidence(
+    http_get: HTTPGet,
+    token: str,
+    repository: str,
+    raw_pr: object,
+    pr_number: int,
+    owned_paths: tuple[str, ...],
+) -> tuple[tuple[str, ...] | _SaturatedCollisionEvidence, bool]:
+    files = _foreign_files_observation(
+        http_get,
+        token,
+        repository,
+        pr_number,
+    )
+    if not files.saturated:
+        return files.paths, bool(set(owned_paths).intersection(files.paths))
+    return _saturated_collision_evidence(
+        http_get,
+        token,
+        repository,
+        raw_pr,
+        owned_paths,
+    )
+
+
+def _foreign_observations(
+    http_get: HTTPGet,
+    token: str,
+    repository: str,
+    jobs: tuple[tuple[int, object], ...],
+    owned_paths: tuple[str, ...],
+) -> tuple[tuple[int, object, bool], ...]:
+    if not jobs:
+        return ()
+    workers = (
+        min(_FOREIGN_PR_WORKERS, len(jobs))
+        if getattr(http_get, "_parallel_safe", False)
+        else 1
+    )
+    if workers == 1:
+        return tuple(
+            (
+                number,
+                *_foreign_collision_evidence(
+                    http_get,
+                    token,
+                    repository,
+                    raw_pr,
+                    number,
+                    owned_paths,
+                ),
+            )
+            for number, raw_pr in jobs
+        )
+
+    results: list[tuple[int, object, bool]] = []
+    with ThreadPoolExecutor(
+        max_workers=workers,
+        thread_name_prefix="source-continuity",
+    ) as executor:
+        futures = {
+            executor.submit(
+                _foreign_collision_evidence,
+                http_get,
+                token,
+                repository,
+                raw_pr,
+                number,
+                owned_paths,
+            ): number
+            for number, raw_pr in jobs
+        }
+        try:
+            for future in as_completed(futures):
+                number = futures[future]
+                evidence, has_collision = future.result()
+                results.append((number, evidence, has_collision))
+        except Exception:
+            for future in futures:
+                future.cancel()
+            raise
+    return tuple(sorted(results, key=lambda item: item[0]))
 
 
 def _collision_census(
@@ -412,7 +990,7 @@ def _collision_census(
     CollisionState,
     tuple[int, ...],
     bool,
-    tuple[tuple[int, tuple[str, ...]], ...],
+    tuple[tuple[int, tuple[str, ...] | _SaturatedCollisionEvidence], ...],
 ]:
     pulls: list[object] = []
     complete = False
@@ -422,7 +1000,7 @@ def _collision_census(
             token,
             f"repos/{repository}/pulls?state=open&per_page={_PAGE_SIZE}&page={page}",
         )
-        if not isinstance(payload, list):
+        if not isinstance(payload, list) or len(payload) > _PAGE_SIZE:
             raise _RemoteProbeError()
         pulls.extend(payload)
         if len(pulls) > _MAX_COLLISION_PRS:
@@ -433,35 +1011,65 @@ def _collision_census(
     if not complete:
         return CollisionState.INCOMPLETE, (), False, ()
 
-    owned = set(owned_paths)
-    other_pr_count = 0
-    colliding: list[int] = []
     seen_numbers: set[int] = set()
-    census: list[tuple[int, tuple[str, ...]]] = []
+    target_seen = False
+    foreign: list[tuple[int, object]] = []
     for raw_pr in pulls:
         if not isinstance(raw_pr, dict):
             raise _RemoteProbeError()
         number = raw_pr.get("number")
-        if type(number) is not int or number <= 0:
-            raise _RemoteProbeError()
-        if number in seen_numbers:
+        if type(number) is not int or number <= 0 or number in seen_numbers:
             raise _RemoteProbeError()
         seen_numbers.add(number)
         if number == target_pr:
-            census.append((number, ()))
-            continue
-        other_pr_count += 1
-        paths, paths_complete = _changed_paths(http_get, token, repository, number)
-        if not paths_complete:
-            return CollisionState.INCOMPLETE, (), False, ()
-        census.append((number, paths))
-        if owned.intersection(paths):
-            colliding.append(number)
+            target_seen = True
+        else:
+            foreign.append((number, raw_pr))
+    if not target_seen:
+        raise _RemoteProbeError()
 
+    def observe(item: tuple[int, object]) -> tuple[
+        int, tuple[str, ...] | _SaturatedCollisionEvidence, bool
+    ]:
+        number, raw_pr = item
+        evidence, overlaps = _foreign_collision_evidence(
+            http_get,
+            token,
+            repository,
+            raw_pr,
+            number,
+            owned_paths,
+        )
+        return number, evidence, overlaps
+
+    observed: list[tuple[int, tuple[str, ...] | _SaturatedCollisionEvidence, bool]]
+    workers = min(4, len(foreign)) if getattr(http_get, "parallel_safe", False) else 1
+    if workers <= 1:
+        observed = [observe(item) for item in foreign]
+    else:
+        observed = []
+        executor = ThreadPoolExecutor(
+            max_workers=workers,
+            thread_name_prefix="source-continuity-read",
+        )
+        futures = [executor.submit(observe, item) for item in foreign]
+        try:
+            for future in as_completed(futures):
+                observed.append(future.result())
+        except Exception:
+            for future in futures:
+                future.cancel()
+            raise
+        finally:
+            executor.shutdown(wait=True, cancel_futures=True)
+
+    colliding = tuple(sorted(number for number, _, overlaps in observed if overlaps))
+    census = [(target_pr, ())]
+    census.extend((number, evidence) for number, evidence, _ in observed)
     snapshot = tuple(sorted(census, key=lambda item: item[0]))
     if colliding:
-        return CollisionState.OVERLAP, tuple(sorted(colliding)), True, snapshot
-    if other_pr_count:
+        return CollisionState.OVERLAP, colliding, True, snapshot
+    if foreign:
         return CollisionState.DISJOINT, (), True, snapshot
     return CollisionState.NONE, (), True, snapshot
 
@@ -482,7 +1090,7 @@ def _probe_remote_prefix(
     CollisionState,
     tuple[int, ...],
     bool,
-    tuple[tuple[int, tuple[str, ...]], ...],
+    tuple[tuple[int, object], ...],
 ] | SourceContinuityRefusal:
     pr_endpoint = f"repos/{request.repository}/pulls/{request.pr_number}"
     first_pr = _api(http_get, token, pr_endpoint)
@@ -614,14 +1222,76 @@ def _parse_ls_tree(value: str) -> tuple[RemotePathEntry, ...] | None:
     return tuple(entries)
 
 
-def _index_has_concealed_paths(value: str) -> bool | None:
+def _sparse_path_is_materialized_or_unsafe(
+    workspace: str,
+    path: str,
+    states: dict[tuple[str, ...], str],
+) -> bool:
+    parts = PurePosixPath(path).parts
+    current = Path(workspace)
+    for index, part in enumerate(parts):
+        prefix = parts[: index + 1]
+        state = states.get(prefix)
+        if state == "missing":
+            return False
+        if state == "unsafe":
+            return True
+        if state == "directory":
+            current /= part
+            continue
+
+        current /= part
+        try:
+            observed = os.lstat(current)
+        except FileNotFoundError:
+            states[prefix] = "missing"
+            return False
+        except OSError:
+            states[prefix] = "unsafe"
+            return True
+
+        if index == len(parts) - 1:
+            states[prefix] = "unsafe"
+            return True
+        if not stat.S_ISDIR(observed.st_mode):
+            states[prefix] = "unsafe"
+            return True
+        states[prefix] = "directory"
+    return True
+
+
+def _index_has_concealed_paths(
+    value: str,
+    workspace: str,
+    protected_paths: set[str],
+) -> bool | None:
+    states: dict[tuple[str, ...], str] = {}
+    root_checked = False
     for record in (item for item in value.split("\0") if item):
         if len(record) < 3 or record[1] != " ":
             return None
         tag = record[0]
-        if tag.upper() not in {"H", "S", "M", "R", "C", "K", "?"}:
+        path = record[2:]
+        if (
+            tag.upper() not in {"H", "S", "M", "R", "C", "K", "?"}
+            or not _is_safe_remote_path(path)
+        ):
             return None
-        if tag != tag.upper() or tag == "S":
+        if tag != tag.upper():
+            return True
+        if tag != "S":
+            continue
+        if path in protected_paths:
+            return True
+        if not root_checked:
+            try:
+                root_stat = os.lstat(workspace)
+            except OSError:
+                return None
+            if not stat.S_ISDIR(root_stat.st_mode):
+                return None
+            root_checked = True
+        if _sparse_path_is_materialized_or_unsafe(workspace, path, states):
             return True
     return False
 
@@ -781,18 +1451,25 @@ def _probe_local_and_entries(
     ):
         return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
 
+    protected_paths = set(request.owned_paths)
+    index_flags_before = _invoke_git(
+        runner, workspace, "ls-files", "-v", "-z"
+    )
+    if index_flags_before is None or index_flags_before.returncode != 0:
+        return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
+    concealed_before = _index_has_concealed_paths(
+        index_flags_before.stdout, workspace, protected_paths
+    )
+    if concealed_before is None or concealed_before:
+        return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
+
     unstaged = _invoke_git(runner, workspace, "diff", *diff_controls, "HEAD", "--")
     staged = _invoke_git(runner, workspace, "diff", "--cached", *diff_controls, "--")
     untracked = _invoke_git(runner, workspace, "ls-files", "--others", "-z", "--")
-    index_flags = _invoke_git(runner, workspace, "ls-files", "-v", "-z")
     if any(
         result is None or result.returncode != 0
-        for result in (unstaged, staged, untracked, index_flags)
+        for result in (unstaged, staged, untracked)
     ):
-        return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
-    assert index_flags is not None
-    concealed_paths = _index_has_concealed_paths(index_flags.stdout)
-    if concealed_paths is None or concealed_paths:
         return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
 
     local_diff = _invoke_git(
@@ -823,6 +1500,21 @@ def _probe_local_and_entries(
         return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
     path_entries = _parse_ls_tree(tree_result.stdout)
     if path_entries is None:
+        return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
+
+    index_flags_after = _invoke_git(
+        runner, workspace, "ls-files", "-v", "-z"
+    )
+    if (
+        index_flags_after is None
+        or index_flags_after.returncode != 0
+        or index_flags_after.stdout != index_flags_before.stdout
+    ):
+        return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
+    concealed_after = _index_has_concealed_paths(
+        index_flags_after.stdout, workspace, protected_paths
+    )
+    if concealed_after is None or concealed_after:
         return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
 
     second_grafts_path = _grafts_path_if_safe(runner, workspace)
@@ -859,8 +1551,13 @@ def _remote_still_matches(
     first_collision_state: CollisionState,
     first_colliding_pr_numbers: tuple[int, ...],
     first_collisions_complete: bool,
-    first_collision_snapshot: tuple[tuple[int, tuple[str, ...]], ...],
+    first_collision_snapshot: tuple[tuple[int, object], ...],
 ) -> SourceContinuityRefusal | None:
+    if getattr(http_get, "conditional_validation_available", False) is True:
+        if http_get.validate_unchanged(token=token):
+            return None
+        return _refusal(RefusalCode.REMOTE_PROOF_CHANGED, 1)
+
     pr_endpoint = f"repos/{request.repository}/pulls/{request.pr_number}"
     second_pr = _api(http_get, token, pr_endpoint)
     second_identity = _pr_identity(second_pr)
