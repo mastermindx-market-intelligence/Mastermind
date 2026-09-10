@@ -480,13 +480,6 @@ def main(
         args = _parser().parse_args(argv)
         snapshot = collect(host_ref=args.host_ref, boot_ref=args.boot_ref)
         payload = canonical_host_pressure_json(snapshot)
-        offset = 0
-        while offset < len(payload):
-            written = out.write(payload[offset:])
-            if type(written) is not int or not 1 <= written <= len(payload) - offset:
-                raise OSError("stdout_write_failed")
-            offset += written
-        out.flush()
     except HostPressureProbeError as exc:
         print(f"host pressure probe refused: {exc}", file=err)
         return 65
@@ -496,6 +489,21 @@ def main(
     except Exception:
         print("host pressure probe refused: PROBE_INTERNAL_ERROR", file=err)
         return 65
+
+    try:
+        offset = 0
+        while offset < len(payload):
+            written = out.write(payload[offset:])
+            if type(written) is not int or not 1 <= written <= len(payload) - offset:
+                raise OSError("stdout_write_failed")
+            offset += written
+        out.flush()
+    except Exception:
+        print(
+            "host pressure probe output uncertain: OUTPUT_EFFECT_UNKNOWN",
+            file=err,
+        )
+        return 74
     return 0
 
 

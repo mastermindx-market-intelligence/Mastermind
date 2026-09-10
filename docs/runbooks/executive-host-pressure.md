@@ -36,12 +36,19 @@ owner. The probe never derives organizational identity from a hostname, serial,
 process title, network address, or caller guess.
 
 Success writes exactly one compact, sorted-key UTF-8 JSON document plus one
-newline to standard output. Failure writes one closed refusal line to standard
-error, writes no snapshot to standard output, and exits 65. The command
-performs no shell invocation, network call, file write, retry, observed-process
-signal, browser or provider action. On a timeout or output-cap
-violation it may terminate and reap only the fixed `/bin/ps` child it created;
-it never signals a process reported by that census.
+newline to standard output and exits 0. A refusal before output emission begins
+writes one closed line to standard error, writes no snapshot to standard output,
+and exits 65. Once the first output write is attempted, a write sequence that
+cannot complete because a later write fails, returns an invalid/zero count, or
+raises—or because flush fails—exits 74 with exactly `OUTPUT_EFFECT_UNKNOWN`;
+every stdout byte from that invocation is then untrusted and must be discarded
+even when it looks like complete canonical JSON. Recoverable short writes are
+completed before flush and remain a normal exit-0 success.
+Output uncertainty never authorizes a retry. The command performs no shell
+invocation, network call, file write, retry, observed-process signal, browser or
+provider action. On a timeout or output-cap violation it may terminate and reap
+only the fixed `/bin/ps` child it created; it never signals a process reported by
+that census.
 
 ## Snapshot contract
 
@@ -103,6 +110,15 @@ overflow, clock reversal, unsupported platform, or invalid core telemetry
 refuses without retry.
 
 ## Closed refusal families
+
+Output delivery uncertainty is separate from probe refusal. It emits exactly:
+
+```text
+host pressure probe output uncertain: OUTPUT_EFFECT_UNKNOWN
+```
+
+and exits 74. A caller accepts a snapshot only after exit 0 plus complete
+canonical validation; every non-zero exit discards all stdout.
 
 The emitted refusal is one of these closed codes:
 

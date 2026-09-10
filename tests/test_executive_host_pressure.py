@@ -648,45 +648,64 @@ def test_cli_completes_canonical_payload_across_short_stdout_writes() -> None:
     assert stderr.getvalue() == ""
 
 
-def test_cli_closes_stdout_write_error_without_traceback() -> None:
-    class FailingWriter:
-        def write(self, _payload: bytes) -> int:
+def test_cli_reports_output_effect_unknown_after_partial_write_failure() -> None:
+    class PartiallyFailingWriter:
+        def __init__(self) -> None:
+            self.value = bytearray()
+            self.write_calls = 0
+
+        def write(self, payload: bytes) -> int:
+            self.write_calls += 1
+            if self.write_calls == 1:
+                chunk = bytes(payload)
+                count = max(1, len(chunk) // 2)
+                self.value.extend(chunk[:count])
+                return count
             raise OSError("SECRET output target")
 
         def flush(self) -> None:
             raise AssertionError("flush must not follow a failed write")
 
+    stdout = PartiallyFailingWriter()
     stderr = io.StringIO()
+    payload = canonical_host_pressure_json(_snapshot())
 
     code = main(
         ["--host-ref", HOST_REF, "--boot-ref", BOOT_REF],
         collector=lambda **_kwargs: _snapshot(),
-        stdout=FailingWriter(),  # type: ignore[arg-type]
+        stdout=stdout,  # type: ignore[arg-type]
         stderr=stderr,
     )
 
-    assert code == 65
-    assert stderr.getvalue() == "host pressure probe refused: PROBE_INTERNAL_ERROR\n"
+    assert code == 74
+    assert 0 < len(stdout.value) < len(payload)
+    assert stderr.getvalue() == (
+        "host pressure probe output uncertain: OUTPUT_EFFECT_UNKNOWN\n"
+    )
     assert "SECRET" not in stderr.getvalue()
 
 
-def test_cli_closes_stdout_flush_error_without_traceback() -> None:
+def test_cli_reports_output_effect_unknown_after_complete_flush_failure() -> None:
     class FailingFlushWriter(io.BytesIO):
         def flush(self) -> None:
             raise OSError("SECRET output flush")
 
     stdout = FailingFlushWriter()
     stderr = io.StringIO()
+    snapshot = _snapshot()
 
     code = main(
         ["--host-ref", HOST_REF, "--boot-ref", BOOT_REF],
-        collector=lambda **_kwargs: _snapshot(),
+        collector=lambda **_kwargs: snapshot,
         stdout=stdout,
         stderr=stderr,
     )
 
-    assert code == 65
-    assert stderr.getvalue() == "host pressure probe refused: PROBE_INTERNAL_ERROR\n"
+    assert code == 74
+    assert stdout.getvalue() == canonical_host_pressure_json(snapshot)
+    assert stderr.getvalue() == (
+        "host pressure probe output uncertain: OUTPUT_EFFECT_UNKNOWN\n"
+    )
     assert "SECRET" not in stderr.getvalue()
 
 
