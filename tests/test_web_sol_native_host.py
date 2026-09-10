@@ -299,9 +299,9 @@ def test_inspect_timeout_is_typed_unavailable_and_not_retried():
     assert writes == [request]
 
 
-def test_private_unix_socket_created_with_owner_only_mode(tmp_path):
+def test_private_unix_socket_created_with_owner_only_mode(short_socket_root):
     module = host()
-    private = tmp_path / "private"
+    private = short_socket_root / "private"
     private.mkdir(mode=0o700)
     os.chmod(private, 0o700)
     path = private / "web_sol_surface.sock"
@@ -329,9 +329,9 @@ def stat_is_socket(mode: int) -> bool:
 
 
 @pytest.mark.parametrize("kind", ["regular", "symlink"])
-def test_private_socket_refuses_colliding_non_socket_paths(tmp_path, kind):
+def test_private_socket_refuses_colliding_non_socket_paths(short_socket_root, kind):
     module = host()
-    private = tmp_path / "private"
+    private = short_socket_root / "private"
     private.mkdir(mode=0o700)
     os.chmod(private, 0o700)
     path = private / "web_sol_surface.sock"

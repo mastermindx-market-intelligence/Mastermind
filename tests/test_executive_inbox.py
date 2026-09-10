@@ -1843,3 +1843,46 @@ def test_classification_covers_every_job_status():
     }
     assert classified | set(mod._SUPPRESSION_BY_STATUS) == set(JobStatus)
     assert set(mod._SUPPRESSION_BY_STATUS.values()) == set(mod._SUPPRESSION_KEYS)
+
+
+def test_bound_inbox_real_projection_and_latched_return_refusal(tmp_path, frozen_git):
+    from contextlib import contextmanager
+    import threading
+    from control_plane import executive_runtime as er
+
+    assert hasattr(er, "RuntimeNamespaceCapability"), "bound-read API missing"
+
+    class Namespace(er.RuntimeNamespaceCapability):
+        def __init__(self):
+            self.lock = threading.Lock()
+            self.entries = self.exits = 0
+            self.revoke_at_exit = None
+
+        @contextmanager
+        def namespace(self, path):
+            with self.lock:
+                self.entries += 1
+                try:
+                    yield
+                finally:
+                    self.exits += 1
+                    if self.revoke_at_exit:
+                        self.revoke_at_exit()
+
+        def validate(self, path):
+            pass
+
+    writer = Runtime.at(tmp_path)
+    writer.jobs.create_job("APPROVED INBOX A")
+    provider = Namespace()
+    binding = er.RuntimeReadBinding(provider)
+    good = build_inbox(repo_root=tmp_path, include_boot_packet=False, now=_NOW,
+                       read_binding=binding)
+    assert good["runtime_counts"]["jobs"]["total"] == 1
+    assert provider.entries == provider.exits
+    provider.revoke_at_exit = binding.invalidate
+    bad = build_inbox(repo_root=tmp_path, include_boot_packet=False, now=_NOW,
+                      read_binding=binding)
+    assert bad["runtime_counts"] is None
+    assert not [x for x in bad["attention"] if x.get("source") == "runtime"]
+    assert any("bound" in x.lower() for x in bad["degraded"])
