@@ -1197,3 +1197,307 @@ def test_owner_metadata_boundary_synthetic_and_unselected_parity(bundle):
     raw = _unseal(bundle["files"]["original/unselected-operational-input.template.json"])
     expected = json.loads(_unseal(bundle["files"]["original/unselected-operational-input.expected.json"]))
     assert _call(raw, {}, None, None) == expected
+
+
+@pytest.mark.parametrize("mutation", ["add-key", "replace-value"])
+def test_b1b2_artifact_snapshot_ignores_later_caller_mutation(mutation):
+    import sys
+
+    original = {"synthetic:a": b"0", "synthetic:b": b"0"}
+    expected = _call(b"{}", original.copy(), None, None)
+    changed = False
+
+    def interleave(frame, event, _argument):
+        nonlocal changed
+        if (event == "line" and frame.f_code is reduce_first_stratum.__code__
+                and frame.f_locals.get("uri") == "synthetic:a" and not changed):
+            changed = True
+            if mutation == "add-key":
+                original["synthetic:c"] = b"0"
+            else:
+                original["synthetic:b"] = b"\xff"
+        return interleave
+
+    previous_trace = sys.gettrace()
+    sys.settrace(interleave)
+    try:
+        actual = _call(b"{}", original, None, None)
+    finally:
+        sys.settrace(previous_trace)
+    assert changed, "the deterministic interleaving must actually occur"
+    assert sys.gettrace() is previous_trace
+    assert actual == expected
+    _hold(actual, "INPUT_SHAPE_INVALID")
+
+
+def _b1b2_terminal_representation(capsule, representation):
+    """Keep one terminal representation; FULL retains its mandatory MS pair."""
+    reads = capsule["reads"]
+    if representation != "FULL":
+        reads.pop("terminal-full")
+    if representation == "EVENTS":
+        reads.pop("terminal-ms")
+    else:
+        read = reads["child-events"]
+        read["record"] = [event for event in read["record"]
+                          if event["event_type"] != "JOB_FAILED"]
+        read["observation"]["prefix_last_event_id"] = 30
+    _job_snapshot_status(capsule, "JOB-002", "RUNNING", "both")
+    member = capsule["inventory"]["members"][0]
+    member["lifecycle_outcome"] = "ACTIVE"
+    member["lifecycle_evidence_reads"] = []
+    return {"FULL": ["terminal-full", "terminal-ms"],
+            "EVENTS": ["child-events"], "MS": ["terminal-ms"]}[representation]
+
+
+def _b1b2_unknown_without_contribution(result, raw_difference):
+    _hold(result, "OUTCOME_AT_CUTOFF_UNKNOWN")
+    member = result["member_results"][0]
+    assert member["state"] == "UNKNOWN"
+    assert member["outcome_retained"] == "UNKNOWN"
+    assert member["raw_difference_ms"] == raw_difference
+    assert member["recorded_delta_ms"] is None
+    assert member["root_weight"] == 0
+
+
+@pytest.mark.parametrize("selected", [False, True], ids=["omitted", "selected"])
+@pytest.mark.parametrize("terminal_type", [
+    "JOB_FAILED", "JOB_CANCELLED", "JOB_LOST", "JOB_COMPLETED",
+])
+def test_b1b2_narrow_terminal_blocks_active_regardless_of_selector(bundle, terminal_type, selected):
+    def change(capsule):
+        selected_reads = _b1b2_terminal_representation(capsule, "MS")
+        narrow = capsule["reads"]["terminal-ms"]
+        narrow["record"]["event_type"] = terminal_type
+        narrow["record"]["payload"] = {"synthetic_outcome": terminal_type.lower()}
+        narrow["arguments"]["command_id"] = "synthetic-narrow-" + terminal_type.lower()
+        narrow["observation"]["scope"] = copy.deepcopy(narrow["arguments"])
+        member = capsule["inventory"]["members"][0]
+        member["lifecycle_subject_job_id"] = "JOB-002"
+        member["lifecycle_evidence_reads"] = selected_reads if selected else []
+
+    _b1b2_unknown_without_contribution(_changed_call(bundle, change, "E16"), 250)
+
+
+
+def _b1b2_assert_terminal_fixture(capsule, representation, subject, selected):
+    reads = capsule["reads"]
+    named = {read["record"]["job_id"]: read["record"]["status"]
+             for read in reads.values()
+             if read["reader"] == "JobRegistry.get_job" and read["record"] is not None}
+    inventory = {job["job_id"]: job["status"] for job in reads["jobs"]["record"]}
+    expected_jobs = {"JOB-001": "QUEUED", "JOB-002": "RUNNING", "JOB-003": "RUNNING"}
+    assert named == inventory == expected_jobs
+    member = capsule["inventory"]["members"][0]
+    claim_order = sorted(
+        (reads[candidate["claim"]["full_read"]]["record"]["event_id"],
+         reads[candidate["job_read"]]["record"]["job_id"])
+        for candidate in member["claim_candidates"]
+    )
+    assert claim_order == [(29, "JOB-003"), (30, "JOB-002")]
+    terminal_reads = set()
+    for read_id, read in reads.items():
+        records = ([read["record"]] if read["reader"] in (
+            "EventRegistry.get_event_by_command_id", "RuntimeStore.find_event_by_command_id")
+            else read["record"] if read["reader"] == "EventRegistry.list_events" else [])
+        for record in records:
+            if record is not None and record["event_type"] in (
+                    "JOB_FAILED", "JOB_CANCELLED", "JOB_LOST", "JOB_COMPLETED"):
+                assert record["job_id"] == "JOB-002"
+                terminal_reads.add(read_id)
+    selectors = {"FULL": ["terminal-full", "terminal-ms"],
+                 "EVENTS": ["child-events"], "MS": ["terminal-ms"]}[representation]
+    assert terminal_reads == set(selectors)
+    assert member["lifecycle_outcome"] == "ACTIVE"
+    assert member["lifecycle_subject_job_id"] == subject
+    assert member["lifecycle_evidence_reads"] == (selectors if selected else [])
+
+
+@pytest.mark.parametrize("selected", [False, True], ids=["omitted", "selected"])
+@pytest.mark.parametrize("representation", ["FULL", "EVENTS", "MS"])
+def test_b1b2_explicit_nonfirst_terminal_subject_blocks_active(bundle, representation, selected):
+    def change(capsule):
+        _second_child(capsule)
+        selected_reads = _b1b2_terminal_representation(capsule, representation)
+        _job_snapshot_status(capsule, "JOB-003", "RUNNING", "both")
+        member = capsule["inventory"]["members"][0]
+        # JOB-003 now has the first Event-ID claim; JOB-002 is still an allowed
+        # child and is the explicit lifecycle subject of the ACTIVE assertion.
+        member["lifecycle_subject_job_id"] = "JOB-002"
+        member["lifecycle_evidence_reads"] = selected_reads if selected else []
+        _b1b2_assert_terminal_fixture(capsule, representation, "JOB-002", selected)
+
+    _b1b2_unknown_without_contribution(_changed_call(bundle, change, "E16"), 800)
+
+
+@pytest.mark.parametrize("subject", ["JOB-001", "JOB-003"], ids=["root", "first-child"])
+@pytest.mark.parametrize("representation", ["FULL", "EVENTS", "MS"])
+def test_b1b2_unselected_terminal_sibling_does_not_poison_interval(bundle, representation, subject):
+    def change(capsule):
+        _second_child(capsule)
+        _b1b2_terminal_representation(capsule, representation)
+        _job_snapshot_status(capsule, "JOB-003", "RUNNING", "both")
+        capsule["inventory"]["members"][0]["lifecycle_subject_job_id"] = subject
+        _b1b2_assert_terminal_fixture(capsule, representation, subject, False)
+
+    result = _changed_call(bundle, change, "E16")
+    _ceiling(result)
+    assert result["completed_recorded_intervals"] == 1
+    member = result["member_results"][0]
+    assert member["state"] == "COMPLETE_RECORDED_INTERVAL"
+    assert member["outcome_retained"] == "ACTIVE"
+    assert member["raw_difference_ms"] == member["recorded_delta_ms"] == 800
+    assert member["root_weight"] == 1
+
+
+def _b3_same_child_claim(capsule, milliseconds=1_000_100):
+    reads = capsule["reads"]
+    member = capsule["inventory"]["members"][0]
+    original = member["claim_candidates"][0]
+    for old_name in ("claim-full", "claim-ms", "attempt"):
+        name = "b3-earlier-" + old_name
+        read = copy.deepcopy(reads[old_name])
+        read["evidence_ref"]["uri"] = "synthetic:" + name + "-record"
+        read["invocation_ref"]["uri"] = "synthetic:" + name + "-invocation"
+        read["observation"]["read_group"] = "b3-" + name
+        reads[name] = read
+    for name in ("b3-earlier-claim-full", "b3-earlier-claim-ms"):
+        read = reads[name]
+        read["arguments"]["command_id"] = "b3-earlier-claim"
+        read["observation"]["scope"] = copy.deepcopy(read["arguments"])
+        read["record"]["payload"]["cycle_command_id"] = "b3-earlier-claim"
+    earlier = reads["b3-earlier-claim-full"]["record"]
+    earlier.update(event_id=25, sequence=2, command_id="b3-earlier-claim",
+                   attempt_id="ATT-b3-earlier")
+    reads["b3-earlier-claim-ms"]["record"]["created_at_ms"] = milliseconds
+    earlier["created_at"] = (datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
+                             + datetime.timedelta(seconds=milliseconds // 1000)).isoformat(timespec="seconds")
+    attempt = reads["b3-earlier-attempt"]
+    attempt["arguments"]["attempt_id"] = "ATT-b3-earlier"
+    attempt["observation"]["scope"] = copy.deepcopy(attempt["arguments"])
+    attempt["record"].update(attempt_id="ATT-b3-earlier", status="FAILED")
+    # Preserve plausible per-Job order and historical-vs-current Attempt identity.
+    reads["claim-full"]["record"]["sequence"] = 3
+    for name in ("claim-full", "claim-ms"):
+        reads[name]["record"]["payload"]["attempt_number"] = 2
+    reads["attempt"]["record"]["attempt_number"] = 2
+    reads["child-events"]["record"][1] = copy.deepcopy(reads["claim-full"]["record"])
+    candidate = copy.deepcopy(original)
+    candidate.update(attempt_read="b3-earlier-attempt", claim={
+        "full_read": "b3-earlier-claim-full", "millisecond_read": "b3-earlier-claim-ms"})
+    assert earlier["job_id"] == reads["claim-full"]["record"]["job_id"] == "JOB-002"
+    assert 20 < earlier["event_id"] < reads["claim-full"]["record"]["event_id"]
+    return candidate
+
+
+def _b3_supplied_claim(capsule, milliseconds, representation):
+    """Retain one relevant representation without selecting its claim."""
+    candidate = _b3_same_child_claim(capsule, milliseconds)
+    reads = capsule["reads"]
+    earlier = reads["b3-earlier-claim-full"]["record"]
+    later = reads["claim-full"]["record"]
+    assert (earlier["event_id"], earlier["sequence"], later["event_id"], later["sequence"]) == (25, 2, 30, 3)
+    assert earlier["payload"] == reads["b3-earlier-claim-ms"]["record"]["payload"]
+    assert later["payload"] == reads["claim-ms"]["record"]["payload"]
+    assert earlier["payload"]["attempt_number"] == reads["b3-earlier-attempt"]["record"]["attempt_number"] == 1
+    assert later["payload"]["attempt_number"] == reads["attempt"]["record"]["attempt_number"] == 2
+    assert reads["child-job"]["record"]["current_attempt_id"] == later["attempt_id"] != earlier["attempt_id"]
+    assert all(job["status"] == ("QUEUED" if job["job_id"] == "JOB-001" else "RUNNING")
+               for job in reads["jobs"]["record"])
+    if representation == "EVENTS":
+        read = copy.deepcopy(reads["child-events"])
+        read["record"].insert(1, copy.deepcopy(earlier))
+        read["evidence_ref"]["uri"] = "synthetic:b3-all-child-events-record"
+        read["invocation_ref"]["uri"] = "synthetic:b3-all-child-events-invocation"
+        read["observation"]["read_group"] = "b3-all-child-events"
+        reads["b3-all-child-events"] = read
+        assert [event["event_id"] for event in read["record"]] == [20, 25, 30]
+    if representation != "PAIRED":
+        if representation != "FULL":
+            reads.pop("b3-earlier-claim-full")
+        if representation != "MS":
+            reads.pop("b3-earlier-claim-ms")
+        reads.pop("b3-earlier-attempt")
+    return candidate
+
+
+def _b3_unknown_without_point(result):
+    _hold(result, "FIRST_CLAIM_NOT_ESTABLISHED")
+    member = result["member_results"][0]
+    assert member["state"] == "UNKNOWN"
+    assert member["reason_codes"] == ["FIRST_CLAIM_NOT_ESTABLISHED"]
+    assert member["raw_difference_ms"] == 250
+    assert member["recorded_delta_ms"] is None
+    assert member["root_weight"] == 0
+
+
+@pytest.mark.parametrize("representation", ["PAIRED", "FULL", "MS", "EVENTS"])
+@pytest.mark.parametrize("milliseconds", [1_000_100, 1_000_800], ids=["100ms", "800ms"])
+def test_b3_supplied_omitted_same_child_claim_prevents_firstness(bundle, milliseconds, representation):
+    def change(capsule):
+        _b3_supplied_claim(capsule, milliseconds, representation)
+    _b3_unknown_without_point(_changed_call(bundle, change))
+
+
+@pytest.mark.parametrize("milliseconds", [1_000_100, 1_000_800], ids=["100ms", "800ms"])
+def test_b3_fully_reconciled_same_child_claim_uses_event_id(bundle, milliseconds):
+    def change(capsule):
+        candidate = _b3_supplied_claim(capsule, milliseconds, "PAIRED")
+        capsule["inventory"]["members"][0]["claim_candidates"].append(candidate)
+        earlier = capsule["reads"]["b3-earlier-claim-full"]["record"]
+        capsule["reads"]["child-events"]["record"].insert(1, copy.deepcopy(earlier))
+        assert [event["event_id"] for event in capsule["reads"]["child-events"]["record"]] == [20, 25, 30]
+    result = _changed_call(bundle, change)
+    _ceiling(result)
+    member = result["member_results"][0]
+    assert result["completed_recorded_intervals"] == result["distinct_contributing_roots"] == 1
+    assert member["state"] == "COMPLETE_RECORDED_INTERVAL"
+    assert member["root_weight"] == 1
+    assert member["raw_difference_ms"] == member["recorded_delta_ms"] == milliseconds - 1_000_000
+
+
+@pytest.mark.parametrize("milliseconds", [1_000_100, 1_000_800], ids=["100ms", "800ms"])
+def test_b3_supplied_inventory_selector_does_not_change_firstness(bundle, milliseconds):
+    results, supplied_reads = [], []
+    for selected in (False, True):
+        def change(capsule):
+            _b3_supplied_claim(capsule, milliseconds, "EVENTS")
+            if selected:
+                capsule["inventory"]["members"][0]["child_event_inventory_reads"].append("b3-all-child-events")
+            supplied_reads.append(_encode(capsule["reads"]))
+        results.append(_changed_call(bundle, change))
+    assert supplied_reads[0] == supplied_reads[1]
+    for result in results:
+        _b3_unknown_without_point(result)
+    assert results[0]["member_results"] == results[1]["member_results"]
+    assert results[0]["completed_sample_quantiles_ms"] == results[1]["completed_sample_quantiles_ms"]
+
+
+@pytest.mark.parametrize("representation", ["PAIRED", "FULL", "MS", "EVENTS"])
+def test_b3_unrelated_job_claim_does_not_poison_firstness(bundle, representation):
+    def change(capsule):
+        _b3_supplied_claim(capsule, 1_000_100, representation)
+        for name, read in capsule["reads"].items():
+            if not name.startswith("b3-"):
+                continue
+            if read["reader"] == "EventRegistry.list_events":
+                read["record"] = [event for event in read["record"] if event["event_id"] == 25]
+                read["arguments"] = {"job_id": "JOB-UNRELATED"}
+                read["observation"]["scope"] = copy.deepcopy(read["arguments"])
+                read["observation"]["prefix_last_event_id"] = 25
+                records = read["record"]
+            else:
+                records = [read["record"]]
+            for record in records:
+                record["job_id"] = "JOB-UNRELATED"
+                if "aggregate_id" in record:
+                    record["aggregate_id"] = "JOB-UNRELATED"
+                if "payload" in record:
+                    record["payload"]["dispatch_job_id"] = "JOB-UNRELATED"
+    result = _changed_call(bundle, change)
+    _ceiling(result)
+    member = result["member_results"][0]
+    assert result["completed_recorded_intervals"] == result["distinct_contributing_roots"] == 1
+    assert member["state"] == "COMPLETE_RECORDED_INTERVAL"
+    assert member["root_weight"] == 1
+    assert member["raw_difference_ms"] == member["recorded_delta_ms"] == 250

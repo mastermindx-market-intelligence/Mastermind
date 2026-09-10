@@ -774,6 +774,29 @@ def _coverage(evidence, member, root_job, claims, cutoff):
         _named(evidence, read_id, _EVENTS, "CHILD_EVENT_INVENTORY_MISSING")
         inventories.append(read)
     claims_by_id = {event["event_id"]: (event, ms, child) for event, ms, child in claims}
+    claims_by_command = {event["command_id"]: (event, ms, child) for event, ms, child in claims}
+    # Selectors cannot hide supplied claims of these eligible children. Only
+    # _claim's validated candidates can reconcile them; partial reads never
+    # establish eligibility, authority, Event-ID order or a point on their own.
+    for read in evidence.reads.values():
+        record, reader = read["record"], read["reader"]
+        if record is None:
+            continue
+        if reader == _MS:
+            if record["event_type"] == "JOB_CLAIMED" and record["job_id"] in children:
+                claim = claims_by_command.get(read["arguments"]["command_id"])
+                _require(claim is not None
+                         and _same(read["arguments"], read["observation"]["scope"])
+                         and all(_same(record[key], claim[0][key])
+                                 for key in ("event_type", "job_id", "payload"))
+                         and record["created_at_ms"] == claim[1],
+                         "FIRST_CLAIM_NOT_ESTABLISHED", "UNKNOWN")
+        else:
+            for event in ([record] if reader == _FULL else record if reader == _EVENTS else []):
+                if event["event_type"] == "JOB_CLAIMED" and event["job_id"] in children:
+                    claim = claims_by_id.get(event["event_id"])
+                    _require(claim is not None and _same(event, claim[0]),
+                             "FIRST_CLAIM_NOT_ESTABLISHED", "UNKNOWN")
     observed_claims = set()
     for child_id in children:
         # A filtered Attempt/prefix query cannot establish all claims of a child.
@@ -790,7 +813,7 @@ def _coverage(evidence, member, root_job, claims, cutoff):
                 if event["event_type"] == "JOB_CLAIMED":
                     _require(event["event_id"] in claims_by_id, "FIRST_CLAIM_NOT_ESTABLISHED", "UNKNOWN")
                     observed_claims.add(event["event_id"])
-        # Every supplied pre-cutoff claim must occur in a positively closed prefix.
+        # Every reconciled pre-cutoff claim must occur in a positively closed prefix.
         for event, milliseconds, job in claims:
             if job["job_id"] == child_id and milliseconds <= cutoff:
                 _require(any(any(e["event_id"] == event["event_id"] for e in r["record"])
@@ -832,11 +855,13 @@ def _terminal(evidence, member, root_job, children, start, start_ms, first, cuto
         measured_subjects = {root_job["job_id"]}
         if first is not None:
             measured_subjects.add(first[2]["job_id"])
+        if subject is not None:
+            measured_subjects.add(subject)
         observed_terminal = any(
             event["event_type"] in (*terminal_types.values(), "JOB_COMPLETED")
             and event["job_id"] in measured_subjects
             for read in evidence.reads.values() if read["record"] is not None
-            for event in ([read["record"]] if read["reader"] == _FULL
+            for event in ([read["record"]] if read["reader"] in (_FULL, _MS)
                           else read["record"] if read["reader"] == _EVENTS else [])
         )
         # Already-validated Job projections cannot be hidden by a favorable
@@ -1075,9 +1100,10 @@ def reduce_first_stratum(
         if trusted_manifest_bytes is not None:
             _require(type(trusted_manifest_bytes) is bytes, "TRUST_ANCHOR_MISMATCH")
             _require(len(trusted_manifest_bytes) <= _MIB, "INPUT_RESOURCE_LIMIT")
+        supplied_artifacts = dict.copy(artifact_bytes_by_uri)
         artifacts = {}
         total = 0
-        for uri, raw in artifact_bytes_by_uri.items():
+        for uri, raw in supplied_artifacts.items():
             _require(_text(uri) and type(raw) is bytes, "INPUT_ARGUMENT_TYPE")
             total += len(raw)
             _require(len(raw) <= 4 * _MIB and total <= 64 * _MIB, "INPUT_RESOURCE_LIMIT")
