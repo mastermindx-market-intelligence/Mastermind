@@ -67,7 +67,7 @@ class SaturatedDisjointHTTP:
                 return _bulk_rows(page)
             raise AssertionError(url)
         if parsed.path.endswith(f"/compare/{BASE}...{HEAD}"):
-            return {"base_commit": {"sha": BASE}, "merge_base_commit": {"sha": MERGE_BASE}}
+            return {"url": url, "base_commit": {"sha": BASE}, "merge_base_commit": {"sha": MERGE_BASE}}
         if parsed.path.endswith(f"/git/commits/{MERGE_BASE}"):
             return {"sha": MERGE_BASE, "tree": {"sha": BASE_ROOT}}
         if parsed.path.endswith(f"/git/commits/{HEAD}"):
@@ -1021,6 +1021,7 @@ class SaturatedForeignIdentityDriftHTTP:
             raise AssertionError(url)
         if parsed.path.endswith(f"/compare/{BASE}...{DRIFTED_FOREIGN_HEAD}"):
             return {
+                "url": url,
                 "base_commit": {"sha": BASE},
                 "merge_base_commit": {"sha": MERGE_BASE},
             }
@@ -1090,3 +1091,37 @@ def test_second_observation_rejects_saturated_foreign_identity_drift() -> None:
     )
     assert result is not None
     assert result.code.value == "REMOTE_PROOF_CHANGED"
+
+
+@pytest.mark.parametrize("bad_url", [
+    None,
+    "",
+    f"https://api.github.com/repos/{REPOSITORY}/compare/{BASE}...{BASE}",
+    f"https://api.github.com/repos/another/repository/compare/{BASE}...{HEAD}",
+    f"https://invalid.example/repos/{REPOSITORY}/compare/{BASE}...{HEAD}",
+    f"https://api.github.com/repos/{REPOSITORY}/compare/{HEAD}...{BASE}",
+])
+def test_saturated_compare_representation_binds_exact_requested_url(bad_url) -> None:
+    module = _module()
+
+    class MisboundCompareHTTP(SaturatedChangedHTTP):
+        def __call__(self, url: str, *, token: str, timeout: float) -> object:
+            payload = super().__call__(url, token=token, timeout=timeout)
+            if urlparse(url).path.endswith(f"/compare/{BASE}...{HEAD}"):
+                if bad_url is None:
+                    payload.pop("url")
+                else:
+                    payload["url"] = bad_url
+                payload["merge_base_commit"] = {"sha": HEAD}
+            return payload
+
+    control = SaturatedChangedHTTP(base_entry=_entry(), head_entry=_entry("3" * 40))
+    state, colliding, complete, _ = module._collision_census(
+        control, TOKEN, REPOSITORY, TARGET_PR, OWNED
+    )
+    assert (state, colliding, complete) == (module.CollisionState.OVERLAP, (FOREIGN_PR,), True)
+
+    hostile = MisboundCompareHTTP(base_entry=_entry(), head_entry=_entry("3" * 40))
+    with pytest.raises(module._RemoteProbeError):
+        module._collision_census(hostile, TOKEN, REPOSITORY, TARGET_PR, OWNED)
+    assert not any("/git/commits/" in url for url in hostile.calls)

@@ -166,3 +166,21 @@ Publish one Draft/HOLD source PR before the separately recorded candidate live
 consumer observation so review, full natural repository/security CI and live-scale
 qualification can proceed against one immutable source identity. This ordering
 change grants no accepted receipt, consumer release or production claim.
+
+## Independent review closure — exact comparison response identity
+
+Review of first published head `03123ffcd63dc5ba24fad0aaa260b30148eefe8b`
+identified a missing self-identity check on the foreign compare response. The
+initial proposed `head_commit` requirement was rejected after checking GitHub's
+actual schema: that top-level field is not part of Compare Two Commits.
+The same reviewer corrected its finding to the documented response `url`.
+
+The bounded repair constructs the exact immutable comparison endpoint once and
+requires the response URL to match it before using `merge_base_commit.sha`.
+The existing returned-base and merge-base SHA checks remain. No new ancestry
+proof, endpoint, query, cache, schema, pure-verifier change or budget is added.
+Six missing/misbound URL cases first failed on the old implementation with
+DID NOT RAISE; paired valid-shaped controls detected the real owned-path
+collision. After the repair, all four Source Continuity suites plus the existing
+CI policy tests pass: **282 passed in 19.69 seconds**. Current immutable-head
+re-review, natural CI and a protected real consumer observation remain required.

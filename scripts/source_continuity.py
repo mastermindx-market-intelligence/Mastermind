@@ -723,13 +723,12 @@ def _foreign_merge_base_sha(
     token: str,
     identity: _ForeignPullIdentity,
 ) -> str:
-    payload = _api(
-        http_get,
-        token,
+    endpoint = (
         f"repos/{identity.base_repository}/compare/"
-        f"{identity.base_sha}...{identity.head_sha}",
+        f"{identity.base_sha}...{identity.head_sha}"
     )
-    if not isinstance(payload, dict):
+    payload = _api(http_get, token, endpoint)
+    if not isinstance(payload, dict) or payload.get("url") != f"{_API_ROOT}/{endpoint}":
         raise _RemoteProbeError()
     base_commit = payload.get("base_commit")
     merge_base = payload.get("merge_base_commit")
