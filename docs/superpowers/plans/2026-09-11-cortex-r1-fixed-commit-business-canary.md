@@ -28,7 +28,8 @@
 - `personal_workspace_merge=false`; the irreversible Personal-to-Business merge remains forbidden.
 - Every modifying workspace action receives one attempt followed by same-surface readback. An ambiguous response is `EFFECT_UNKNOWN`, blocks retry, and stays on the same workspace/marketplace/admin/cockpit carrier.
 - Do not create a second Mastermind marketplace, duplicate plugin, plugin registry, installation state store, lifecycle, queue, retry ledger, credential store, app binding, source selector, or alternate rollout plane.
-- Keep `mastermind-sol` and `mastermind-operator` at their exact pre-canary workspace policies and member-install states.
+- When the Mastermind marketplace pre-exists, keep `mastermind-sol` and `mastermind-operator` at their exact pre-canary workspace policies and member-install states.
+- When the marketplace preimage is `ABSENT`, nonexistence is the Sol/Operator preimage: importing the marketplace necessarily creates all three entries and current platform behavior starts new plugins as `Available`. That branch is permitted only when a fresh workspace census proves the canary member is the sole member eligible to install those imported plugins, or an exact role scope provides the same one-member boundary. Sol and Operator must remain uninstalled and uninvoked, receive no separate policy change, and disappear again through the pre-staged exact-marketplace rollback. Otherwise return `ABSENT_IMPORT_SCOPE_NOT_ISOLATED / NOT_APPLIED` before import.
 - Use `Available`, not workspace-wide `Installed`, for Cortex unless the live Business surface proves an equally narrow one-member control. Business defaults never count as Mastermind authority.
 - Do not use Claude 5 or Claude 8. Provider-capacity state is not a dependency for this Business-admin/browser canary.
 - No workspace START is inherited from this plan PR, source merge, current Chairman continuation, plugin visibility, or GitHub CI. A fresh action-time START on issue #563 is required after all hard gates pass.
@@ -77,6 +78,7 @@ At plan publication, current official OpenAI documentation says:
 - repository-root `.agents/plugins/marketplace.json` uses an empty Path field;
 - an optional branch, tag, or commit may be supplied, and a fixed commit remains fixed;
 - new marketplaces have daily sync enabled, and import/sync processes every valid marketplace entry;
+- newly imported plugins currently start with `Available` installation policy, so an absent-marketplace import creates an immediate workspace-availability effect for every imported entry even before a member installs one;
 - `Sync now` is a distinct modifying action;
 - marketplace import does not grant access to referenced apps or authenticate members;
 - plugin installation policy and underlying app access are separate controls;
@@ -179,10 +181,14 @@ canary_member_ref
 canary_cockpit_ref
 control_cockpit_a_ref
 control_cockpit_b_ref
+eligible_plugin_member_count
+eligible_plugin_scope_digest
 personal_workspace_merge = false
 ```
 
 The selected canary cockpit must have no active effect-bearing or exact-session-required child, no unclosed watcher-enabled dialogue, and no unique chat-only company truth. Do not select by numbered account nickname, newest tab, profile recency, or convenience.
+
+For the `ABSENT` marketplace branch, the action-time member/role census must additionally prove that the canary member is the only member eligible to install newly imported plugins, or that one exact role scope isolates eligibility to that member. A mere promise that other members will not click Install is not isolation. If the surface cannot prove this closed eligible set, the absent branch is unavailable.
 
 - [ ] **Step 5: Inspect the actual browser/admin control surface**
 
@@ -233,6 +239,7 @@ business workspace identity = exact bound workspace
 personal workspace still visible
 personal_workspace_merge = false
 canary member role = eligible for intended plugin policy
+eligible plugin member count and role/scope digest = complete current census
 control cockpits = unchanged and outside this browser operation
 ```
 
@@ -286,7 +293,7 @@ FOREIGN_OR_DRIFTED = wrong source, unexpected plugin/app/MCP, manifest/version d
 
 - [ ] **Step 4: Capture exact plugin policy and member-install preimages**
 
-For all three expected plugins, record:
+For all three expected plugins that exist in the preimage, record:
 
 ```text
 plugin ID
@@ -298,14 +305,14 @@ current canary-member install state
 required app/setup state
 ```
 
-For Sol and Operator, these values become immutable controls. For Cortex, they become rollback preimages.
+For a pre-existing marketplace, Sol and Operator values become immutable controls and Cortex values become rollback preimages. For `ABSENT`, record explicit nonexistence for all three plus the complete eligible-member/role census; after import, the three newly created `Available` entries become operation-created state that must be removed during rollback, not fabricated as unchanged preimage policy.
 
 - [ ] **Step 5: Freeze the rollback branch before the first mutation**
 
 Select exactly one rollback branch based on the preimage:
 
 ```text
-ABSENT -> delete the exact newly imported marketplace only when no foreign consumer exists
+ABSENT -> allowed only with a one-member eligible-install scope; then delete the exact newly imported marketplace only when no foreign consumer exists and verify all three operation-created entries are removed
 EXACT_FIXED_COMMIT -> restore Cortex policy/member install only
 OLDER_FIXED_COMMIT -> restore exact prior fixed revision, policy, and member install only if in-place revision control is supported and reversible
 all other states -> no workspace mutation
@@ -357,6 +364,8 @@ Do not re-import, refresh, sync, or change the revision.
 
 - [ ] **Step 2: Handle `ABSENT` with one exact import attempt**
 
+Before opening the import form, require the complete current eligible-member/role census to prove one-member isolation for imported plugins. Current platform behavior starts every newly imported plugin as `Available`; therefore more than one eligible member, an unreadable eligible set, or a workspace-wide default that cannot be bounded returns `ABSENT_IMPORT_SCOPE_NOT_ISOLATED / NOT_APPLIED`. Do not import first and attempt to narrow exposure afterward.
+
 In `Workspace settings > Plugins`, select `Add` then `Import marketplace`. Enter:
 
 ```text
@@ -368,6 +377,8 @@ Branch, tag, or commit = 068dcc1533776672844b36ffcde30fad68a4317f
 Review the fields once, then select `Import marketplace` exactly once. Complete only the GitHub authorization necessary for the bound admin to read this public repository. Do not change provider account, workspace, source, Path, or revision after submission.
 
 If the response is lost or the browser disconnects after submission, set `marketplace_effect=EFFECT_UNKNOWN`, remain on the same carrier, and perform readback before any repeat.
+
+On successful import, immediately require all three entries to be `Available`, not `Installed`, with zero member installs and no app/auth setup. Sol and Operator may be temporarily available only inside the already-proven one-member eligible scope; do not change their policies or invoke them. Any broader availability or automatic install is `WORKSPACE_POLICY_READBACK_MISMATCH` and triggers the pre-staged rollback before Cortex installation.
 
 - [ ] **Step 3: Handle `OLDER_FIXED_COMMIT` only through a supported in-place revision control**
 
@@ -440,11 +451,13 @@ Record exact marketplace identity, action, effect, resolved commit, inventory, v
 
 **Interfaces:**
 - Consumes: exact fixed-commit marketplace readback and policy/member-install preimages.
-- Produces: Cortex installed only for the bound canary member/cockpit, with Sol/Operator controls unchanged and no app/auth setup.
+- Produces: Cortex installed only for the bound canary member/cockpit, with pre-existing Sol/Operator controls unchanged or, for `ABSENT`, with the operation-created Sol/Operator entries still `Available` but uninstalled/uninvoked inside the proven one-member eligible scope until exact marketplace rollback. No app/auth setup occurs.
 
 - [ ] **Step 1: Re-read Sol and Operator controls before policy effect**
 
-Require exact match to preimage for both plugins:
+Branch the control check on the marketplace preimage.
+
+For a pre-existing marketplace, require exact match to preimage for both plugins:
 
 ```text
 plugin ID/version
@@ -453,6 +466,8 @@ eligible roles/groups
 canary-member install state
 required app/setup state
 ```
+
+For `ABSENT`, require the import-created Sol and Operator entries to match the exact protected versions, remain `Available`, have zero installs, require no app/auth setup, and remain confined to the one-member eligible scope. No policy change to either control plugin is authorized.
 
 Any drift returns `CONTROL_PLUGIN_STATE_MOVED` before Cortex policy change.
 
@@ -751,7 +766,7 @@ For a pre-existing exact marketplace, leave source and inventory unchanged.
 
 For a pre-existing older fixed-commit marketplace changed in place, restore its exact prior immutable revision only through the same proven control and read it back.
 
-For a marketplace created from an absent preimage, delete that exact marketplace only when the complete post-import census proves it contains only the three Mastermind plugins and has zero other consumers. Confirm deletion removes those imported instances and no unrelated plugin.
+For a marketplace created from an absent preimage, delete that exact marketplace only when the complete post-import census proves it contains only the three Mastermind plugins and has zero other consumers. Confirm deletion removes all three operation-created plugin entries, including the temporarily `Available` Sol and Operator entries, removes no unrelated plugin, and restores the preimage of marketplace/plugin nonexistence.
 
 If safe deletion or exact reverse revision cannot be proved, return `ROLLBACK_INCOMPLETE`; do not claim PASS.
 
@@ -833,6 +848,7 @@ workspace/admin/cockpit identity ambiguous
 browser/admin surface disconnected
 selected cockpit has an exact-session obligation
 Personal workspace separation not proven
+absent marketplace eligible-installer scope is unreadable or broader than the canary member
 marketplace source/revision unreadable
 existing mutable or duplicate marketplace
 unsupported in-place revision update
@@ -852,7 +868,7 @@ Do not work around a stop by changing accounts, browsers, workspace, marketplace
 Acceptance requires:
 
 1. this one-path plan is protected and current;
-2. one exact Business workspace/admin/canary cockpit is deliberately bound;
+2. one exact Business workspace/admin/canary cockpit is deliberately bound, and any `ABSENT` import proves the canary member is the sole eligible installer before the first import effect;
 3. marketplace source resolves to `068dcc1533776672844b36ffcde30fad68a4317f`;
 4. the exact three-plugin inventory and manifest identities match;
 5. Cortex is web-available, skills-only, and has no app/auth requirement;
