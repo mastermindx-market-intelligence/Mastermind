@@ -38,7 +38,7 @@ def test_worker_avenue_routing_is_canonical_and_routes_by_avenue() -> None:
         assert phrase in normalized, f"missing worker avenue routing law: {phrase}"
 
 
-def test_manual_handoff_turns_default_to_non_pro_and_refuse_short_work() -> None:
+def test_manual_handoff_turns_default_to_non_pro_and_refuse_routine_work() -> None:
     skill = _normalized(_read("docs/sol_skills/WORKER_AVENUE_ROUTING.md"))
 
     required = (
@@ -49,8 +49,9 @@ def test_manual_handoff_turns_default_to_non_pro_and_refuse_short_work() -> None
         "WHY_NON_PRO_INSUFFICIENT",
         "PRO_MODE_TASK_CLASS",
         "EXPECTED_DURATION_MINUTES",
-        "at least 80 minutes",
-        "between 80 and 1440 minutes",
+        "Duration is a planning estimate, not a minimum run time",
+        "between 1 and 1440 minutes",
+        "Short substantive work is eligible under the same task-class and justification gates",
         "STOP_CONDITION",
         "legacy `CHAT_PRO_DEFAULT` is surface-only",
         "grants no Pro-mode authorization",
@@ -61,6 +62,9 @@ def test_manual_handoff_turns_default_to_non_pro_and_refuse_short_work() -> None
     )
     for phrase in required:
         assert phrase in skill, f"missing handoff-turn Pro barrier: {phrase}"
+
+    assert "at least 80 minutes" not in skill
+    assert "between 80 and 1440 minutes" not in skill
 
     for task_class in (
         "LONG_HORIZON_FRONTIER_REASONING",

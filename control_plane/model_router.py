@@ -35,7 +35,8 @@ _WORKER_TASKS = frozenset(
 _RISKS = frozenset({"routine", "elevated", "critical"})
 _AMBIGUITIES = frozenset({"low", "medium", "high"})
 _METERED_TEXT_MAX = 2048
-_PRO_MODE_MIN_DURATION_MINUTES = 80
+# Duration describes the work; it is not a minimum utilization target.
+_PRO_MODE_MIN_DURATION_MINUTES = 1
 _PRO_MODE_MAX_DURATION_MINUTES = 1440
 _PRO_MODE_REFUSAL = "PRO_MODE_REFUSED / USE_NON_PRO_MODE"
 _METERED_ROUTE_REFUSAL = "METERED_ROUTE_REFUSED / WAITING_FOR_LAWFUL_ROUTE"

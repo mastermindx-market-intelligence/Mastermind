@@ -106,10 +106,10 @@ def test_pro_receipt_rejects_a_four_minute_handoff() -> None:
         RoutingPolicyError,
         match="PRO_MODE_REFUSED / USE_NON_PRO_MODE",
     ):
-        _pro_receipt(expected_duration_minutes=4)
+        _pro_receipt(task_class="handoff", expected_duration_minutes=4)
 
 
-@pytest.mark.parametrize("duration", [True, False, 80.0, 80.5])
+@pytest.mark.parametrize("duration", [True, False, None, "11", 1.0, 80.0, 80.5])
 def test_pro_receipt_duration_must_be_an_integer_not_bool(duration: object) -> None:
     with pytest.raises(
         RoutingPolicyError,
@@ -423,3 +423,68 @@ def test_pro_lead_projection_is_json_safe_and_names_mode_and_receipt() -> None:
         "stop_condition": receipt.stop_condition,
     }
     json.dumps(payload)
+
+
+@pytest.mark.parametrize("duration", [1, 4, 11, 30, 60, 79, 80, 1440])
+def test_substantive_pro_route_preserves_honest_duration_without_runtime_authority(
+    duration: int,
+) -> None:
+    receipt = _pro_receipt(
+        task_class=ProModeTaskClass.ADVERSARIAL_JUDGMENT,
+        expected_duration_minutes=duration,
+    )
+    decision = route_work(
+        "judgment",
+        chat_reasoning_mode=ChatReasoningMode.PRO_MODE_EXCEPTION,
+        pro_mode_receipt=receipt,
+    )
+
+    assert decision.mode is RouteMode.FRONTIER_LEAD
+    assert decision.cognition_route is CognitionRoute.CHAT_INCLUDED_DEFAULT
+    assert decision.chat_reasoning_mode is ChatReasoningMode.PRO_MODE_EXCEPTION
+    payload = json.loads(json.dumps(decision.to_dict()))
+    assert payload["pro_mode_receipt"]["expected_duration_minutes"] == duration
+    assert payload["pro_mode_receipt"]["task_class"] == "ADVERSARIAL_JUDGMENT"
+    assert payload["metered_cognition_receipt"] is None
+    with pytest.raises(RoutingPolicyError, match="frontier-lead work"):
+        decision.job_constraints()
+
+
+@pytest.mark.parametrize("duration", [0, -1, 1441])
+def test_pro_duration_is_still_a_positive_bounded_planning_estimate(
+    duration: int,
+) -> None:
+    with pytest.raises(RoutingPolicyError, match="PRO_MODE_REFUSED"):
+        _pro_receipt(expected_duration_minutes=duration)
+
+
+@pytest.mark.parametrize("duration", [4, 79, 80, 1440])
+@pytest.mark.parametrize("task_kind", ["mechanical", "tests"])
+def test_pro_duration_cannot_turn_mechanical_work_into_executive_judgment(
+    duration: int,
+    task_kind: str,
+) -> None:
+    # Construction is valid; the real router must reject the actual work kind.
+    receipt = _pro_receipt(
+        task_class=ProModeTaskClass.HARD_DEBUGGING,
+        expected_duration_minutes=duration,
+    )
+    with pytest.raises(RoutingPolicyError, match="never eligible for Pro mode"):
+        ModelRouter.load().route(
+            WorkRequest(task_kind, risk="critical"),
+            chat_reasoning_mode=ChatReasoningMode.PRO_MODE_EXCEPTION,
+            pro_mode_receipt=receipt,
+        )
+
+
+@pytest.mark.parametrize("task_kind", ["implementation", "research", "review"])
+def test_short_pro_receipt_does_not_promote_an_ordinary_worker_route(
+    task_kind: str,
+) -> None:
+    receipt = _pro_receipt(expected_duration_minutes=11)
+    with pytest.raises(RoutingPolicyError, match="PRO_MODE_REFUSED"):
+        ModelRouter.load().route(
+            WorkRequest(task_kind),
+            chat_reasoning_mode=ChatReasoningMode.PRO_MODE_EXCEPTION,
+            pro_mode_receipt=receipt,
+        )

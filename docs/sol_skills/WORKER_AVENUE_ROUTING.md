@@ -58,10 +58,10 @@ ambiguous and grants no Pro-mode authorization.
 
 The following work is never Pro-eligible: `handoff / ACK / PICKUP_ACK / START / CONTINUE / STOP`;
 `status / routing / placement / watcher / monitoring / polling / foregrounding`; message relay;
-`mechanical edits / tests / simple review`; and any other short bounded work. The size or importance
-of the parent program does not upgrade one of those turns.
+`mechanical edits / tests / simple review`; and any other routine administrative work. The size or
+importance of the parent program does not upgrade one of those turns.
 
-Only a genuinely long-horizon frontier-reasoning turn may request Pro mode, and only with the
+Only a qualifying substantive reasoning turn may request Pro mode, and only with the
 complete receipt:
 
 ```text
@@ -70,7 +70,7 @@ CHAT_REASONING_MODE: PRO_MODE_EXCEPTION
 WHY_PRO_MODE: <specific frontier-reasoning advantage required by this turn>
 WHY_NON_PRO_INSUFFICIENT: <specific evidence that non-Pro reasoning cannot reliably meet the bar>
 PRO_MODE_TASK_CLASS: <one allowed class below>
-EXPECTED_DURATION_MINUTES: <integer between 80 and 1440 minutes, inclusive>
+EXPECTED_DURATION_MINUTES: <integer between 1 and 1440 minutes, inclusive>
 STOP_CONDITION: <observable completion or abort condition>
 ```
 
@@ -83,9 +83,17 @@ HARD_DEBUGGING
 ADVERSARIAL_JUDGMENT
 ```
 
-Every field is required. `EXPECTED_DURATION_MINUTES` must be an integer between 80 and 1440 minutes,
-inclusive, and therefore at least 80 minutes. Missing, stale, under-duration, over-duration, or
-ineligible receipts fail closed:
+Every field is required. `EXPECTED_DURATION_MINUTES` must be an integer between 1 and 1440 minutes,
+inclusive.
+
+Duration is a planning estimate, not a minimum run time. Short substantive work is eligible
+under the same task-class and justification gates. Do not inflate an estimate or keep a session
+generating to fill it. Complete the useful authorized work batch, then checkpoint or yield.
+Current model/account allowances and remaining capacity remain facts supplied by existing Capacity
+owners; this receipt neither reserves quota nor proves model availability. No quota constants,
+new capacity store, or provider entitlement are introduced here.
+
+Missing, stale, out-of-range, or ineligible receipts fail closed:
 
 ```text
 PRO_MODE_REFUSED / USE_NON_PRO_MODE
