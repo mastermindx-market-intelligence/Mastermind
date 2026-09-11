@@ -1,34 +1,45 @@
 {
   "status": "PASS",
   "scope": "Offline research adapter; no market, browser or production proof",
-  "adapter_sha256": "c1fd0700df0385560103431c32d2d8598fd8971a97318b8a93f6d0d777d65dbb",
+  "adapter_sha256": "3e8eeff7b55a64ef77fb4574d29e27a7b957446e7d335dd99f86d4b01de40b8f",
   "terminal_source_git_blob": "dd6abc4e177ff4870d2b64b927c73d7ea430e2a3",
   "node": "v22.16.0",
   "typescript": "Version 5.8.3",
-  "contracts_passed": 76,
-  "contracts_total": 76,
+  "contracts_passed": 78,
+  "contracts_total": 78,
   "synthetic_scenarios": 250,
   "synthetic_assertions": 1750,
-  "mutants_caught": 12,
-  "mutants_total": 12,
+  "mutants_caught": 14,
+  "mutants_total": 14,
+  "offline_runner_had_no_browser_attempt": true,
+  "offline_runner_had_no_network_or_installs": true,
   "tested_files": {
-    "source/auctionContext.ts": "c1fd0700df0385560103431c32d2d8598fd8971a97318b8a93f6d0d777d65dbb",
+    "source/auctionContext.ts": "3e8eeff7b55a64ef77fb4574d29e27a7b957446e7d335dd99f86d4b01de40b8f",
     "source/terminal_analytics_pinned.ts": "5ef4082e6c4eec5c39c989f00b22dab727ec18811529fed1969b45ec0b2d8b6e",
-    "test_context.cjs": "d5458fd42df3221a84fd6a91e1712bd04c72812f7d5256ad02eb3ed5a4f458d2",
+    "test_context.cjs": "6af92bc9f56209dba68f9c03e250651a1c78be52de73491f092b19569a3de6fb",
     "property_check.cjs": "eca6e75a7f0b9ee71ff346fd291013382d4463cffe2f043af280f1a6cedcf69d",
-    "mutation_check.py": "5b42d89be9de7b3f54e184a5f1e8586ed4878c304e37de62173fab777f13c6fa",
-    "run_verification.py": "4941afb45c01cb6be9a1f18fb85693f2b94852227f8b1354a4c35c9926a135f1"
+    "mutation_check.py": "037106e1ae14cd560120cd9816ad6e3c8abcc0861dd9d1bdbf236acd1c387d07",
+    "run_verification.py": "7d441b23888d53d8dafd17225b8f8b794fcbcb846e729ed3d6ac9bad47b0f54f"
   },
   "reports": {
-    "context_contract.json": "f4a5b80ce1698a8687b19e7e86d8cd7bbe1929b723d4d0f65e1c9822168aa6af",
-    "property_report.json": "6db649b17464ed43a38d51c1002295844689657ff51303d12ac1ae684012b9da",
-    "mutation_report.json": "92a9ddd63908ac10ce8a2ae54824330afce102e5846141da55597c9471a7e9a4",
-    "browser_contract.json": "bcaeb4a08ba478e83d3ce1202f9e5856a2333897455fc512673427fe8a8e0893",
-    "verification_receipt.json": "a84626f031eed8c640c7b4485954c7e34b1ad3aa307b0058af01aaddae80fee9"
+    "results/context_contract.json": "61df400d1dfcc246c59a24ab1370a1b9732efd0641afbf21c45f21a5a47331b3",
+    "results/property_report.json": "df88707e1c735d2416f759811b18509e87422a10338377abe6ccb9ed26d96c26",
+    "results/mutation_report.json": "c98668180c8233f86184fc1c5ff0c2438d3e0f3b348cdc294678fd06cecd116c",
+    "results/edge_red.json": "f4f469993ec7b66fab433ed552e962802200eaeec68b3614f0999ec49df1f684",
+    "results/browser_contract.json": "bcaeb4a08ba478e83d3ce1202f9e5856a2333897455fc512673427fe8a8e0893",
+    "portable_verification_final/verification_receipt.json": "fb0f2d27f48e5d64217db4a288e152d871a6ce58cd56e605ae79b848b85fbd99"
   },
-  "browser_status": "BLOCKED_OR_FAILED: net::ERR_BLOCKED_BY_ADMINISTRATOR; no browser acceptance; no alternative URL scheme or policy bypass attempted",
+  "red_first": {
+    "baseline": 76,
+    "added_failing_cases": 2,
+    "final_passing_cases": 78,
+    "repairs": [
+      "nonfinite profile output refused",
+      "fraction below existing dependency minimum refused"
+    ],
+    "dependency_changed": false
+  },
+  "browser_status": "Pre-edge diagnostic blocked: net::ERR_BLOCKED_BY_ADMINISTRATOR; no alternative URL or policy bypass. No browser acceptance for final candidate.",
   "native_readback_status": "Mini ping succeeded; file/process calls returned Not connected. Prior completed research remains recorded in PR565; July capture status is not established.",
-  "publication": "Mastermind PR565, existing research branch; no product path import or production deployment",
-  "offline_runner_had_no_browser_attempt": true,
-  "offline_runner_had_no_network_or_installs": true
+  "publication": "Mastermind PR565, existing research branch; no product-path import, merge or production deployment"
 }
