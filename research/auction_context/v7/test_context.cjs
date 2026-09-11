@@ -112,6 +112,9 @@ test('same_cutoff_different_source_vintage_is_stale',()=>{assert.equal(matches(r
 test('absent_result_cannot_match',()=>{assert.equal(matches(null,r0),false);});
 test('display_only_change_does_not_invalidate_same_analysis',()=>{assert.equal(matches(run(),{...r0,displaySeconds:3600}),true);});
 
+test('nonfinite_profile_output_refused',()=>{const f=fixture();for(const b of f.p.rows){b.open=1e308;b.low=1e308;b.high=1.1e308;b.close=1.05e308;}const s=compute(r0,f.p,null);assert.equal(s.profile.state,'invalid_input');assert.equal(s.profile.value,null);});
+test('subminimum_value_area_refused',()=>{assert.throws(()=>run(fixture(),{...r0,valueAreaFraction:.001}),TypeError);});
+
 const report={scope:'New TypeScript adapter, unchanged existing profile dependency, synthetic offline behavior tests only',
  status:tests.every(t=>t.status==='PASS')?'PASS':'FAIL',total:tests.length,passed:tests.filter(t=>t.status==='PASS').length,
  failed:tests.filter(t=>t.status==='FAIL').length,tests};
