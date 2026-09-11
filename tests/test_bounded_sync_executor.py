@@ -403,6 +403,108 @@ def test_close_retires_caller_abandoned_default_executor_queue() -> None:
     run(scenario())
 
 
+# RS0_PENDING_WRAPPER_RETIREMENT_RED_20260909
+@pytest.mark.parametrize("exit_kind", ["caller_cancel", "timeout"])
+def test_abandoned_queued_wrapper_retires_before_default_pool_release(
+    exit_kind: str,
+) -> None:
+    executor = BoundedSyncExecutor(max_concurrency=1)
+    pool = ThreadPoolExecutor(max_workers=1)
+    pool_entered = threading.Event()
+    release_pool = threading.Event()
+    forbidden_started = threading.Event()
+
+    def occupy_pool() -> None:
+        pool_entered.set()
+        assert release_pool.wait(5)
+
+    def forbidden() -> str:
+        forbidden_started.set()
+        return "forbidden"
+
+    async def scenario() -> None:
+        loop = asyncio.get_running_loop()
+        loop.set_default_executor(pool)
+        occupied = asyncio.create_task(asyncio.to_thread(occupy_pool))
+        await wait_until(pool_entered.is_set)
+        timeout = 2.0 if exit_kind == "caller_cancel" else 0.03
+        pending = asyncio.create_task(executor.run(forbidden, timeout=timeout))
+        await wait_until(lambda: len(executor.attempts_snapshot()) == 1)
+        attempt = executor.attempts_snapshot()[0]
+        assert not attempt.started()
+        assert attempt.task is not None
+
+        try:
+            if exit_kind == "caller_cancel":
+                pending.cancel()
+                outcome = await asyncio.gather(pending, return_exceptions=True)
+                assert isinstance(outcome[0], asyncio.CancelledError)
+            else:
+                with pytest.raises(SyncExecutionTimeout):
+                    await pending
+
+            await wait_until(lambda: executor.attempts_snapshot() == ())
+            assert attempt.task.cancelled()
+            await assert_exact_single_capacity(executor)
+            await executor.aclose(timeout=0.1)
+            assert not forbidden_started.is_set()
+        finally:
+            release_pool.set()
+            await occupied
+
+        assert not forbidden_started.is_set()
+
+    try:
+        run(scenario())
+    finally:
+        release_pool.set()
+        pool.shutdown(wait=True)
+
+
+@pytest.mark.parametrize("exit_kind", ["caller_cancel", "timeout"])
+def test_started_wrapper_task_is_not_cancelled_after_physical_entry(
+    exit_kind: str,
+) -> None:
+    executor = BoundedSyncExecutor(max_concurrency=1)
+    physical = BlockingOperation()
+
+    async def scenario() -> None:
+        timeout = 5.0 if exit_kind == "caller_cancel" else 0.05
+        pending = asyncio.create_task(executor.run(physical, timeout=timeout))
+        assert await asyncio.to_thread(physical.entered.wait, 1)
+        attempt = executor.attempts_snapshot()[0]
+        assert attempt.started()
+        task = attempt.task
+        assert task is not None
+
+        if exit_kind == "caller_cancel":
+            pending.cancel()
+            outcome = await asyncio.gather(pending, return_exceptions=True)
+            assert isinstance(outcome[0], asyncio.CancelledError)
+        else:
+            with pytest.raises(SyncExecutionTimeout):
+                await pending
+
+        # Logical abandonment must not cancel an async wrapper after the
+        # synchronous operation has entered. The physical attempt and permit
+        # remain owned until the worker publishes physical completion.
+        assert attempt.task is task
+        assert not task.cancelled()
+        assert executor.attempts_snapshot() == (attempt,)
+        assert physical.started == 1 and physical.finished == 0
+
+        physical.release.set()
+        await wait_until(lambda: physical.finished == 1)
+        await wait_until(lambda: executor.attempts_snapshot() == ())
+        assert await executor.run(lambda: "next", timeout=1) == "next"
+        await executor.aclose(timeout=1)
+
+    try:
+        run(scenario())
+    finally:
+        physical.release.set()
+
+
 def test_first_waiter_registration_is_atomic_with_loop_binding(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

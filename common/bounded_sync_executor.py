@@ -422,7 +422,8 @@ class BoundedSyncExecutor:
                 result = await asyncio.shield(physical)
         except asyncio.TimeoutError as error:
             if deadline_scope.expired():
-                attempt.abandon("timeout")
+                if attempt.abandon("timeout"):
+                    physical.cancel()
                 raise SyncExecutionTimeout(
                     "synchronous attempt exceeded its deadline"
                 ) from error
@@ -433,7 +434,8 @@ class BoundedSyncExecutor:
                 current is None or current.cancelling() == 0
             ):
                 raise SyncExecutorClosed("executor admission is closed")
-            attempt.abandon("caller")
+            if attempt.abandon("caller"):
+                physical.cancel()
             raise
 
         if result is _NOT_STARTED:
