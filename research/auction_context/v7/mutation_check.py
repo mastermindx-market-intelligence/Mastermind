@@ -20,7 +20,9 @@ checks=[
  ('same_cutoff_bins_change_not_stale','s.construction.bins === r.bins','true','same_cutoff_different_bins_is_stale'),
  ('same_cutoff_knowledge_change_not_stale','s.evidenceMode === r.evidenceMode','true','same_cutoff_different_knowledge_mode_is_stale'),
  ('unsafe_normalization','latestDeltaPct: 100 * (dd[dd.length - 1] / latestVolume)',
-  'latestDeltaPct: (100 * dd[dd.length - 1]) / latestVolume','normalized_delta_does_not_overflow')
+  'latestDeltaPct: (100 * dd[dd.length - 1]) / latestVolume','normalized_delta_does_not_overflow'),
+ ('nonfinite_profile_unchecked','if (!finiteProfile)','if (false)','nonfinite_profile_output_refused'),
+ ('silently_clamped_small_fraction','r.valueAreaFraction >= 0.01','r.valueAreaFraction > 0','subminimum_value_area_refused')
 ]
 results=[]
 for name,before,after,expected in checks:
@@ -39,7 +41,7 @@ for name,before,after,expected in checks:
 assert source.read_text()==original
 report={'status':'PASS'if all(x['caught_by_expected_assertion']and x['unchanged_source_control_passed']for x in results)else'FAIL',
  'mutants':len(results),'caught':sum(x['caught_by_expected_assertion']for x in results),'results':results,
- 'scope':'12 selected forbidden-behavior mutations, not exhaustive code coverage or proof of alpha.',
+ 'scope':'14 selected forbidden-behavior mutations, not exhaustive code coverage or proof of alpha.',
  'base_compiled_sha256':hashlib.sha256(source.read_bytes()).hexdigest()}
 (ROOT/'results/mutation_report.json').write_text(json.dumps(report,indent=2)+'\n')
 print(json.dumps(report,indent=2));raise SystemExit(0 if report['status']=='PASS'else 1)
