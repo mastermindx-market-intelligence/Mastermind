@@ -1,7 +1,8 @@
 # Portfolio decision outage — diagnosis and recovery
 
 **Operation:** `portfolio-bot-decision-recovery-20260909-sol-001`
-**Protected source/procedure pin:** `964bd8e7b30c91e5e83caee0ba37513ba7d07e70`, Skillpack 1.0.1 / bootstrap 1
+**Initial diagnosis pin:** `964bd8e7b30c91e5e83caee0ba37513ba7d07e70`
+**Current continuation/procedure pin:** `797cfd0b1001d9dfe6fe9030af80ecdab0e1220d`, Skillpack 1.0.1 / bootstrap 1
 **Capability state at diagnosis:** `BROKEN` for daily PM decisions; account and scheduler process remained live.
 
 ## User and machine outcome
@@ -29,15 +30,16 @@ Two observability defects extended the outage. Each daily scheduler wrapper unco
 1. Classify only the exact Codex access-token refresh failure as an authentication failure, preserving the no-replay rule for tool and runtime failures. The existing waterfall then cools Codex and advances to the existing Claude OAuth pool.
 2. Translate each Brain runner result into the existing run ledger's `ok`, `warn`, `skip`, or `error` states. Missing submissions, malformed envelopes, inconsistent accepted states, and publication failures become `FREEZE` errors with a closed safe reason; intentional cost caps and migration waits remain skips.
 3. Project `last_reason` and `last_target_status` through the existing scheduler-health consumer without exposing raw provider errors.
-4. Present `rejected_no_submission` as `DECISION MISSING — RECOVERY REQUIRED`; keep governance rejection, queued target, settled no-trade, and verified fills distinct.
+4. Apply the same semantic outcome classifier to authenticated manual US, China, and Hong Kong runs, in both wait and background modes. Wait-mode receipts expose safe lifecycle fields and tolerate a malformed runner envelope without emitting duplicate completion events.
+5. Present `rejected_no_submission` as `DECISION MISSING — RECOVERY REQUIRED`; keep governance rejection, queued target, settled no-trade, and verified fills distinct.
 
 No provider pool, scheduler, retry loop, lifecycle, account, position, execution, or state store is added. The deterministic allocator and all paper-trading authority boundaries remain unchanged.
 
 ## Acceptance and production proof
 
-Source acceptance requires the exact production error to trigger OAuth fallback; a non-provider failure must still stop without replay; all three real scheduler wrappers must project missing submissions as `error/FREEZE`; accepted queued and executed zero-fill results must remain `ok`; and the JavaScript presentation must preserve the four distinct lifecycle meanings.
+Source acceptance requires the exact production error to trigger OAuth fallback; a non-provider failure must still stop without replay; all three real scheduler wrappers and authenticated manual-run paths must project missing submissions as `error/FREEZE`; malformed manual results must produce one safe completion receipt; accepted queued and executed zero-fill results must remain `ok`; and the JavaScript presentation must preserve the four distinct lifecycle meanings.
 
-Deployment must use the exact merged protected-master SHA through the existing transactional deployer. The rollback-package prerequisite must be resolved first because current protected movement includes `common/` and `integrations/` paths not covered by the older rollback snapshot list.
+Deployment must use the exact merged protected-master SHA through the existing transactional deployer. The rollback-package prerequisite is now resolved by protected merge `797cfd0b1001d9dfe6fe9030af80ecdab0e1220d`, which restores `common/` and `integrations/` alongside the other release roots after a failed deploy.
 
 Production acceptance requires:
 
