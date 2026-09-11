@@ -69,15 +69,50 @@ def _ledger_start(job: str, book: str | None = None, trigger: str = "cron"):
         return None
 
 
-def _ledger_end(handle, status: str, *, severity: str | None = None):
+def _ledger_end(handle, status: str, *, severity: str | None = None,
+                extra: dict | None = None):
     """End a run-ledger record.  Never raises."""
     if handle is None:
         return
     try:
         from control_plane import run_ledger
-        run_ledger.end_run(handle, status, severity=severity)
+        run_ledger.end_run(handle, status, severity=severity, extra=extra)
     except Exception:  # noqa: BLE001
         pass
+
+
+def _brain_job_outcome(result: object) -> tuple[str, str | None, dict]:
+    """Translate a Brain runner result into truthful job-level health.
+
+    A function returning is not the same as the portfolio manager producing a
+    valid target.  Keep raw provider diagnostics in the private decision record;
+    the scheduler ledger receives only a closed, secret-safe reason vocabulary.
+    """
+    if not isinstance(result, dict) or not result:
+        return "error", "FREEZE", {"reason": "invalid_result"}
+
+    target = str(result.get("target_status") or "").strip().lower()
+    extra = {"target_status": target or None}
+    if any(result.get(key) for key in ("publish_error", "decision_log_error", "mark_error")):
+        return "error", "FREEZE", {**extra, "reason": "projection_failed"}
+    if result.get("cost_capped") is True:
+        return "skip", "ADVISORY_ONLY", {**extra, "reason": "cost_capped"}
+
+    skipped = str(result.get("skipped") or "").strip().lower()
+    if skipped:
+        if skipped in {"legacy_etf_migration_pending", "market_closed", "nothing_queued"}:
+            return "skip", "ADVISORY_ONLY", {**extra, "reason": skipped}
+        return "error", "FREEZE", {**extra, "reason": "runner_failed"}
+
+    if target in {"queued", "executed"}:
+        if result.get("decision_effective") is True:
+            return "ok", None, extra
+        return "error", "FREEZE", {**extra, "reason": "inconsistent_result"}
+    if target == "rejected_no_submission":
+        return "error", "FREEZE", {**extra, "reason": "missing_submission"}
+    if target.startswith("rejected_") or target.startswith("frozen_"):
+        return "warn", "FREEZE", {**extra, "reason": target}
+    return "error", "FREEZE", {**extra, "reason": "invalid_result"}
 
 
 def _step_failed_event(job: str, book: str, step: str, exc: BaseException,
@@ -470,7 +505,8 @@ def _autonomous_job():
             from bot.autonomous import run_autonomous
             _result = run_autonomous()
             _post_mark_forward_evaluation("autonomous", _result)
-        _ledger_end(handle, "ok")
+        _status, _severity, _extra = _brain_job_outcome(_result)
+        _ledger_end(handle, _status, severity=_severity, extra=_extra)
         _maybe_schedule_brain_retry("autonomous_daily", "autonomous", _started)
     except Exception as exc:  # noqa: BLE001
         _ledger_end(handle, "error")
@@ -518,7 +554,8 @@ def _china_job():
             from bot.china import run_china
             _result = run_china()
             _post_mark_forward_evaluation("china", _result)
-        _ledger_end(handle, "ok")
+        _status, _severity, _extra = _brain_job_outcome(_result)
+        _ledger_end(handle, _status, severity=_severity, extra=_extra)
         _maybe_schedule_brain_retry("china_daily", "china", _started)
     except Exception as exc:  # noqa: BLE001
         _ledger_end(handle, "error")
@@ -542,7 +579,8 @@ def _hk_job():
             from bot.hk import run_hk
             _result = run_hk()
             _post_mark_forward_evaluation("hk", _result)
-        _ledger_end(handle, "ok")
+        _status, _severity, _extra = _brain_job_outcome(_result)
+        _ledger_end(handle, _status, severity=_severity, extra=_extra)
         _maybe_schedule_brain_retry("hk_daily", "hk", _started)
     except Exception as exc:  # noqa: BLE001
         _ledger_end(handle, "error")
@@ -1870,7 +1908,8 @@ def scheduler_health() -> list[dict]:
     Each record:
       id, next_run_time (ISO or null), last_started (ISO or null),
       last_finished (ISO or null), last_skipped (ISO or null),
-      last_status (str or null), last_severity (str or null).
+      last_status (str or null), last_severity (str or null),
+      last_reason (str or null), last_target_status (str or null).
 
     Reads the tail of data/governance/run_events.jsonl.  Never raises.
     """
@@ -1938,6 +1977,9 @@ def scheduler_health() -> list[dict]:
 
         last_status = finished_ev.get("status") if finished_ev else None
         last_severity = finished_ev.get("severity") if finished_ev else None
+        finished_extra = finished_ev.get("extra") if finished_ev else {}
+        if not isinstance(finished_extra, dict):
+            finished_extra = {}
 
         records.append({
             "id": jid,
@@ -1950,6 +1992,8 @@ def scheduler_health() -> list[dict]:
             "last_skipped": skipped_ev.get("ts") if skipped_ev else None,
             "last_status": last_status,
             "last_severity": last_severity,
+            "last_reason": finished_extra.get("reason"),
+            "last_target_status": finished_extra.get("target_status"),
         })
     return records
 
