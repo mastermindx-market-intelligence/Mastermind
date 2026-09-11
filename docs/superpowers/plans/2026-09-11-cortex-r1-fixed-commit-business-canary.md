@@ -8,12 +8,14 @@
 
 **Tech Stack:** ChatGPT Business workspace plugin administration, GitHub fixed-commit marketplace import, the protected skills-only `mastermind-cortex` package, browser-visible readback/screenshots, and secret-safe evidence receipts. No new code, dependency, app, MCP server, OAuth client, database, daemon, or service is introduced.
 
-**Spec:** Mastermind issue #563; `docs/superpowers/plans/2026-08-29-business-sol-three-cockpit-canary-amendment.md`; `docs/superpowers/plans/2026-08-29-business-sol-marketplace-sync-canary-hardening.md`; protected Cortex source from PR #541.
+**Spec:** Mastermind issue #563; terminal read-only Business Sol H1 preflight issue #461 and reconciliation comment `5560633193`; `docs/superpowers/plans/2026-08-29-business-sol-three-cockpit-canary-amendment.md`; `docs/superpowers/plans/2026-08-29-business-sol-marketplace-sync-canary-hardening.md`; protected Cortex source from PR #541.
 
 ## Global Constraints
 
 - Canonical operation: `business-sol-cortex-c1-fixed-commit-canary-20260911-sol-001`.
 - Canonical GitHub carrier: Mastermind issue #563.
+- Terminal predecessor: Business Sol H1 issue #461 is closed completed as a read-only preflight; its dated workspace observations are historical evidence, not a current workspace preimage or an active competing owner.
+- This Cortex C1 wave is a downstream skills-only package canary. It does not reopen H1 or prove/waive the broader Steward, Executive, OAuth, tunnel, RuntimeBinding, or end-to-end Business Sol cockpit dependencies identified there.
 - Exact source generation: `mastermindx-market-intelligence/Mastermind@068dcc1533776672844b36ffcde30fad68a4317f`.
 - Exact source tree: `84f57a0c57387da0a3dd1fb9507302d152b28c89`.
 - Exact marketplace blob: `7ae7fcaf011be9cb3ad12ec2c92074d0650b681e`.
@@ -31,6 +33,20 @@
 - Do not use Claude 5 or Claude 8. Provider-capacity state is not a dependency for this Business-admin/browser canary.
 - No workspace START is inherited from this plan PR, source merge, current Chairman continuation, plugin visibility, or GitHub CI. A fresh action-time START on issue #563 is required after all hard gates pass.
 - Durable GitHub comments contain only pseudonymous workspace/cockpit/admin references, relative evidence bundle names, timestamps, hashes, enums, and bounded screenshots. They contain no email, token, cookie, session storage, raw profile path, unrelated chat content, or credential-bearing UI.
+
+## Relationship to Terminal Business Sol H1 Preflight
+
+Business Sol H1 issue #461 is `CLOSED / COMPLETED`. Its read-only result and later reconciliation established historical facts about one earlier ChatGPT workspace epoch: Mastermind Sol and Operator could be directory-visible without immutable source binding or member installation; an Executive development generation could be present while its real tool/runtime path remained unavailable; and the broad Sol + Steward + Executive one-cockpit journey was not ready. H1 created no plugin import, install, app publication, OAuth, tunnel, runtime, Executive, provider, or production effect.
+
+This plan consumes H1 as predecessor evidence without reviving its operation or copying its stale identities forward. In particular:
+
+- H1's plugin IDs, app IDs, installation policies, workspace/account observations, and availability states are dated evidence only; none may populate the current Cortex preimage.
+- The current Business workspace, admin principal, canary member, plugin directory, marketplace source, policies, member installs, and browser control surface must be freshly read through their owner-native UI at Cortex C1 START.
+- Cortex C1 proves only the protected skills-only Cortex package in one reversible canary cockpit. It does not claim a current Steward read, Executive app, OAuth client, tunnel/runtime binding, production admission, or full Chairman operating journey.
+- H1's broader dependency chain remains separately owned. A Cortex C1 PASS cannot close or bypass Steward #458, Executive/app/OAuth/tunnel work, or a later complete Business Sol cockpit canary.
+- H1 is not an active competing workspace-effect owner. Any newer live BSC-U1, workspace-admin, marketplace, or plugin-policy operation discovered at action time is a real collision and blocks this canary until reconciled.
+
+The consequence is a clean vertical boundary: H1 established that package visibility was insufficient; Cortex C1 tests whether one exact protected skills-only package can now be immutably imported, semantically invoked, and rolled back.
 
 ## Narrow Precedence and Supersession
 
@@ -114,6 +130,12 @@ Expected receipt fields:
 ```
 
 The `current_protected_master` field records the action-time SHA. If protected master has advanced, replace that observation with the exact action-time value after compatibility review; never change `canary_commit`. If Skillpack compatibility fails, return `SKILLPACK_INCOMPATIBLE / NOT_APPLIED`.
+
+- [ ] **Step 1A: Consume H1 as historical evidence, never as current workspace state**
+
+Read issue #461's terminal preflight and reconciliation comment `5560633193`. Record that H1 is closed, read-only, and effect-free. Carry forward only its durable falsifier: directory visibility and an installed icon do not prove immutable package binding, callable tools, current owner truth, or a complete Business cockpit.
+
+Do not copy H1's plugin/app IDs, account labels, policies, tunnel observations, or installation states into the Cortex preimage. If current owner-native workspace reads are unavailable, return `WORKSPACE_SURFACE_UNAVAILABLE / NOT_APPLIED` rather than treating H1 as current.
 
 - [ ] **Step 2: Reverify the current official platform contract**
 
@@ -847,6 +869,8 @@ Maximum PASS claim:
 ```text
 PROVEN_LIVE / ONE-CANARY-COCKPIT / SKILLS-ONLY CORTEX ORIENTATION / EXACT 068dcc15 EPOCH
 ```
+
+A PASS also leaves the terminal H1 broad product gaps untouched: it proves no Steward/Executive/OAuth/tunnel/RuntimeBinding or complete Chairman operating journey.
 
 Still unproven after PASS:
 
