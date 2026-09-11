@@ -14,7 +14,7 @@ import subprocess
 import sys
 
 PROFILE_BLOB = 'dd6abc4e177ff4870d2b64b927c73d7ea430e2a3'
-ADAPTER_SHA = 'c1fd0700df0385560103431c32d2d8598fd8971a97318b8a93f6d0d777d65dbb'
+ADAPTER_SHA = '3e8eeff7b55a64ef77fb4574d29e27a7b957446e7d335dd99f86d4b01de40b8f'
 ROOT = Path(__file__).resolve().parent
 
 def sha(path: Path) -> str:
