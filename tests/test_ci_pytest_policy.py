@@ -218,6 +218,14 @@ jobs:
     with pytest.raises(cip.PolicyError, match="positive tests/test_"):
         cip.validate_workflow(allowlist)
     comments_only = """
+on:
+  pull_request:
+  merge_group:
+    types: [checks_requested]
+  push:
+    branches:
+      - master
+  workflow_dispatch:
 name: CI
 jobs:
   test:
@@ -230,6 +238,609 @@ jobs:
 # tests/test_baz.py
 """
     cip.validate_workflow(comments_only)
+
+
+def _workflow_text(on_block: str) -> str:
+    return (
+        f"{on_block}\n"
+        "name: CI\n"
+        "jobs:\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - name: Run repository test gate\n"
+        "        run: python scripts/ci_pytest.py\n"
+    )
+
+
+def _valid_on_block() -> str:
+    return (
+        "on:\n"
+        "  pull_request:\n"
+        "  merge_group:\n"
+        "    types: [checks_requested]\n"
+        "  push:\n"
+        "    branches:\n"
+        "      - master\n"
+        "  workflow_dispatch:\n"
+    )
+
+
+def test_validate_workflow_accepts_exact_event_contract():
+    cip.validate_workflow(_workflow_text(_valid_on_block()))
+
+
+def test_validate_workflow_rejects_missing_on_key():
+    text = (
+        "name: CI\n"
+        "jobs:\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - name: Run repository test gate\n"
+        "        run: python scripts/ci_pytest.py\n"
+    )
+    with pytest.raises(cip.PolicyError, match="missing an 'on' trigger"):
+        cip.validate_workflow(text)
+
+
+@pytest.mark.parametrize(
+    "on_block",
+    [
+        "on:\n",
+        "on: push\n",
+        "on:\n  - push\n  - pull_request\n",
+    ],
+)
+def test_validate_workflow_rejects_malformed_on_shapes(on_block):
+    with pytest.raises(cip.PolicyError, match="must be a mapping"):
+        cip.validate_workflow(_workflow_text(on_block))
+
+
+def test_validate_workflow_rejects_missing_event():
+    on_block = (
+        "on:\n"
+        "  pull_request:\n"
+        "  push:\n"
+        "    branches:\n"
+        "      - master\n"
+        "  workflow_dispatch:\n"
+    )
+    with pytest.raises(cip.PolicyError, match="missing required event"):
+        cip.validate_workflow(_workflow_text(on_block))
+
+
+def test_validate_workflow_rejects_extra_event():
+    on_block = _valid_on_block() + "  schedule:\n    - cron: '0 0 * * *'\n"
+    with pytest.raises(cip.PolicyError, match="unexpected event"):
+        cip.validate_workflow(_workflow_text(on_block))
+
+
+def test_validate_workflow_unexpected_event_error_is_redacted():
+    literal_secret = "ghp_should_not_leak_1234567890abcdef"
+    # RFC 4648 SS10 base64 test vector (base64("foobar") == "Zm9vYmFy"),
+    # used as an accurately-known encoded-shaped secret stand-in alongside
+    # the literal-shaped one above, without hand-computing base64 for an
+    # arbitrary string.
+    encoded_form_secret = "Zm9vYmFy"
+    on_block = (
+        _valid_on_block()
+        + f"  {literal_secret}:\n"
+        + f"  {encoded_form_secret}:\n"
+    )
+    with pytest.raises(cip.PolicyError) as excinfo:
+        cip.validate_workflow(_workflow_text(on_block))
+    message = str(excinfo.value)
+    assert message == "workflow 'on' has unexpected event(s)"
+    assert literal_secret not in message
+    assert encoded_form_secret not in message
+
+
+def test_validate_workflow_rejects_wrong_merge_group_types():
+    on_block = (
+        "on:\n"
+        "  pull_request:\n"
+        "  merge_group:\n"
+        "    types: [checks_requested, labeled]\n"
+        "  push:\n"
+        "    branches:\n"
+        "      - master\n"
+        "  workflow_dispatch:\n"
+    )
+    with pytest.raises(cip.PolicyError, match="merge_group"):
+        cip.validate_workflow(_workflow_text(on_block))
+
+
+def test_validate_workflow_rejects_wrong_push_branches():
+    on_block = (
+        "on:\n"
+        "  pull_request:\n"
+        "  merge_group:\n"
+        "    types: [checks_requested]\n"
+        "  push:\n"
+        "    branches:\n"
+        "      - main\n"
+        "  workflow_dispatch:\n"
+    )
+    with pytest.raises(cip.PolicyError, match="push"):
+        cip.validate_workflow(_workflow_text(on_block))
+
+
+def test_validate_workflow_rejects_pull_request_with_filters():
+    on_block = (
+        "on:\n"
+        "  pull_request:\n"
+        "    types: [opened]\n"
+        "  merge_group:\n"
+        "    types: [checks_requested]\n"
+        "  push:\n"
+        "    branches:\n"
+        "      - master\n"
+        "  workflow_dispatch:\n"
+    )
+    with pytest.raises(cip.PolicyError, match="pull_request"):
+        cip.validate_workflow(_workflow_text(on_block))
+
+
+def test_validate_workflow_rejects_missing_pull_request():
+    on_block = (
+        "on:\n"
+        "  merge_group:\n"
+        "    types: [checks_requested]\n"
+        "  push:\n"
+        "    branches:\n"
+        "      - master\n"
+        "  workflow_dispatch:\n"
+    )
+    with pytest.raises(cip.PolicyError, match="missing required event"):
+        cip.validate_workflow(_workflow_text(on_block))
+
+
+def test_validate_workflow_rejects_empty_merge_group():
+    on_block = (
+        "on:\n"
+        "  pull_request:\n"
+        "  merge_group: {}\n"
+        "  push:\n"
+        "    branches:\n"
+        "      - master\n"
+        "  workflow_dispatch:\n"
+    )
+    with pytest.raises(cip.PolicyError, match="merge_group"):
+        cip.validate_workflow(_workflow_text(on_block))
+
+
+def test_validate_workflow_rejects_filtered_workflow_dispatch():
+    on_block = (
+        "on:\n"
+        "  pull_request:\n"
+        "  merge_group:\n"
+        "    types: [checks_requested]\n"
+        "  push:\n"
+        "    branches:\n"
+        "      - master\n"
+        "  workflow_dispatch:\n"
+        "    inputs:\n"
+        "      reason:\n"
+        "        required: false\n"
+        "        type: string\n"
+    )
+    with pytest.raises(cip.PolicyError, match="workflow_dispatch"):
+        cip.validate_workflow(_workflow_text(on_block))
+
+
+@pytest.mark.parametrize("keyword", ["On", "ON", "oN"])
+def test_validate_workflow_rejects_cased_on_key_variant(keyword):
+    on_block = _valid_on_block().replace("on:", f"{keyword}:", 1)
+    with pytest.raises(cip.PolicyError, match="literal lowercase 'on'"):
+        cip.validate_workflow(_workflow_text(on_block))
+
+
+@pytest.mark.parametrize("on_key_spelling", ["on", "'on'", '"on"'])
+def test_validate_workflow_accepts_lowercase_on_key_spellings(on_key_spelling):
+    # Permanent coverage that the literal lowercase "on" key is accepted
+    # regardless of quoting style: unquoted, single-quoted, and
+    # double-quoted forms all construct to the identical Python string
+    # "on" and must all be treated as the valid trigger key.
+    on_block = _valid_on_block().replace("on:", f"{on_key_spelling}:", 1)
+    cip.validate_workflow(_workflow_text(on_block))
+
+
+def test_validate_workflow_rejects_merge_key_in_on_block():
+    # Permanent regression guard: _reject_duplicate_mapping_keys replaces
+    # PyYAML's default map constructor entirely, which also replaces the
+    # default merge-key (`<<`) flattening behavior it would otherwise
+    # perform. A `<<: *anchor` entry inside `on:` must never be silently
+    # expanded (which would let an event get injected without appearing as
+    # a literal key anyone reviewing the file would see) - it must fail
+    # closed instead. The exact internal classification (generic YAML
+    # error vs. unhashable-key error) is not asserted here since it
+    # depends on unexecuted PyYAML internals; only the fail-closed
+    # PolicyError outcome is asserted.
+    text = (
+        "name: CI\n"
+        "hidden_defaults: &hidden_defaults\n"
+        "  schedule:\n"
+        "    - cron: '0 0 * * *'\n"
+        "on:\n"
+        "  <<: *hidden_defaults\n"
+        "  pull_request:\n"
+        "  merge_group:\n"
+        "    types: [checks_requested]\n"
+        "  push:\n"
+        "    branches:\n"
+        "      - master\n"
+        "  workflow_dispatch:\n"
+        "jobs:\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - name: Run repository test gate\n"
+        "        run: python scripts/ci_pytest.py\n"
+    )
+    with pytest.raises(cip.PolicyError):
+        cip.validate_workflow(text)
+
+
+def test_validate_workflow_duplicate_key_cause_chain_is_redacted():
+    sentinel = "DUPLICATE_KEY_SENTINEL_9f3ac21"
+    text = (
+        "name: CI\n"
+        f"{sentinel}: first\n"
+        f"{sentinel}: second\n"
+        + _valid_on_block()
+        + "jobs:\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - name: Run repository test gate\n"
+        "        run: python scripts/ci_pytest.py\n"
+    )
+    with pytest.raises(cip.PolicyError) as excinfo:
+        cip.validate_workflow(text)
+    assert str(excinfo.value) == "workflow YAML contains a duplicate mapping key"
+    assert sentinel not in str(excinfo.value)
+    cause = excinfo.value.__cause__
+    assert cause is not None
+    assert sentinel not in str(cause)
+
+
+def test_validate_workflow_unhashable_key_cause_chain_is_redacted():
+    sentinel = "UNHASHABLE_KEY_SENTINEL_7be04d9"
+    text = (
+        "name: CI\n"
+        f"? [{sentinel}, other]\n"
+        ": value\n"
+        + _valid_on_block()
+        + "jobs:\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - name: Run repository test gate\n"
+        "        run: python scripts/ci_pytest.py\n"
+    )
+    with pytest.raises(cip.PolicyError) as excinfo:
+        cip.validate_workflow(text)
+    assert str(excinfo.value) == "workflow YAML contains an unhashable mapping key"
+    assert sentinel not in str(excinfo.value)
+    cause = excinfo.value.__cause__
+    assert cause is not None
+    assert sentinel not in str(cause)
+
+
+def test_validate_workflow_rejects_duplicate_unquoted_on():
+    text = (
+        "name: CI\n"
+        "on:\n"
+        "  pull_request:\n"
+        "on:\n"
+        "  merge_group:\n"
+        "    types: [checks_requested]\n"
+        "  push:\n"
+        "    branches:\n"
+        "      - master\n"
+        "  workflow_dispatch:\n"
+        "jobs:\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - name: Run repository test gate\n"
+        "        run: python scripts/ci_pytest.py\n"
+    )
+    with pytest.raises(cip.PolicyError, match="duplicate"):
+        cip.validate_workflow(text)
+
+
+def test_validate_workflow_rejects_duplicate_quoted_on():
+    text = (
+        "name: CI\n"
+        '"on":\n'
+        "  pull_request:\n"
+        '"on":\n'
+        "  merge_group:\n"
+        "    types: [checks_requested]\n"
+        "  push:\n"
+        "    branches:\n"
+        "      - master\n"
+        "  workflow_dispatch:\n"
+        "jobs:\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - name: Run repository test gate\n"
+        "        run: python scripts/ci_pytest.py\n"
+    )
+    with pytest.raises(cip.PolicyError, match="duplicate"):
+        cip.validate_workflow(text)
+
+
+def test_validate_workflow_rejects_quoted_and_unquoted_on():
+    text = (
+        "name: CI\n"
+        '"on":\n'
+        "  pull_request:\n"
+        "on:\n"
+        "  merge_group:\n"
+        "    types: [checks_requested]\n"
+        "  push:\n"
+        "    branches:\n"
+        "      - master\n"
+        "  workflow_dispatch:\n"
+        "jobs:\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - name: Run repository test gate\n"
+        "        run: python scripts/ci_pytest.py\n"
+    )
+    with pytest.raises(cip.PolicyError, match="duplicate"):
+        cip.validate_workflow(text)
+
+
+def test_validate_workflow_loader_keeps_true_false_but_not_on_off_yes_no():
+    import yaml
+
+    text = (
+        "name: CI\n"
+        + _valid_on_block()
+        + "jobs:\n"
+        "  test:\n"
+        "    flag_true: true\n"
+        "    flag_false: false\n"
+        "    literal_on: on\n"
+        "    literal_off: off\n"
+        "    literal_yes: yes\n"
+        "    literal_no: no\n"
+        "    steps:\n"
+        "      - name: Run repository test gate\n"
+        "        run: python scripts/ci_pytest.py\n"
+    )
+    cip.validate_workflow(text)
+    payload = yaml.load(text, Loader=cip._WorkflowYAMLLoader)
+    job = payload["jobs"]["test"]
+    assert job["flag_true"] is True
+    assert job["flag_false"] is False
+    assert job["literal_on"] == "on"
+    assert job["literal_off"] == "off"
+    assert job["literal_yes"] == "yes"
+    assert job["literal_no"] == "no"
+
+
+@pytest.mark.parametrize("keyword", ["On", "ON", "oN"])
+def test_validate_workflow_rejects_on_alongside_case_variant(keyword):
+    text = (
+        "name: CI\n"
+        + _valid_on_block()
+        + f"{keyword}:\n"
+        "  schedule:\n"
+        "    - cron: '0 0 * * *'\n"
+        "jobs:\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - name: Run repository test gate\n"
+        "        run: python scripts/ci_pytest.py\n"
+    )
+    with pytest.raises(cip.PolicyError, match="literal lowercase 'on'"):
+        cip.validate_workflow(text)
+
+
+def test_validate_workflow_rejects_unhashable_event_level_key():
+    on_block = (
+        "on:\n"
+        "  pull_request:\n"
+        "  merge_group:\n"
+        "    types: [checks_requested]\n"
+        "  push:\n"
+        "    branches:\n"
+        "      - master\n"
+        "  workflow_dispatch:\n"
+        "  ? [a, b]\n"
+        "  : nested\n"
+    )
+    with pytest.raises(cip.PolicyError, match="unhashable"):
+        cip.validate_workflow(_workflow_text(on_block))
+
+
+def test_validate_workflow_rejects_unhashable_mapping_key():
+    text = (
+        "name: CI\n"
+        "? [1, 2]\n"
+        ": three\n"
+        + _valid_on_block()
+        + "jobs:\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - name: Run repository test gate\n"
+        "        run: python scripts/ci_pytest.py\n"
+    )
+    with pytest.raises(cip.PolicyError, match="unhashable"):
+        cip.validate_workflow(text)
+
+
+def test_validate_workflow_reports_unrecognized_tag_as_generic_not_duplicate():
+    # Regression fixture for the R3 version of this test: it replaced the
+    # entire `jobs:` value with the bad-tag node, so the raw text no longer
+    # contained the authoritative runner/step-name substrings and
+    # validate_workflow raised its "must invoke" error before ever parsing
+    # YAML - never exercising the tag-error path at all. Keep a fully valid
+    # workflow/runner body and add the unsupported tag as an unrelated
+    # extra field instead.
+    text = (
+        "name: CI\n"
+        + _valid_on_block()
+        + "extra: !!python/object:builtins.object {}\n"
+        "jobs:\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - name: Run repository test gate\n"
+        "        run: python scripts/ci_pytest.py\n"
+    )
+    with pytest.raises(cip.PolicyError, match="not valid YAML"):
+        cip.validate_workflow(text)
+
+
+def test_validate_workflow_rejects_literal_boolean_key_as_on_alias():
+    text = (
+        "name: CI\n"
+        "true:\n"
+        "  push:\n"
+        "    branches:\n"
+        "      - master\n"
+        "jobs:\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - name: Run repository test gate\n"
+        "        run: python scripts/ci_pytest.py\n"
+    )
+    with pytest.raises(cip.PolicyError, match="must be strings"):
+        cip.validate_workflow(text)
+
+
+def test_validate_workflow_rejects_boolean_scalar_on_value():
+    text = _workflow_text("on: true\n")
+    with pytest.raises(cip.PolicyError, match="must be a mapping"):
+        cip.validate_workflow(text)
+
+
+def test_validate_workflow_rejects_numeric_top_level_key():
+    text = (
+        "name: CI\n"
+        + _valid_on_block()
+        + "404: not-a-real-field\n"
+        "jobs:\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - name: Run repository test gate\n"
+        "        run: python scripts/ci_pytest.py\n"
+    )
+    with pytest.raises(cip.PolicyError, match="must be strings"):
+        cip.validate_workflow(text)
+
+
+def test_validate_workflow_non_string_key_error_is_redacted():
+    secret_like_value = "super-secret-token-should-not-leak"
+    text = (
+        "name: CI\n"
+        + _valid_on_block()
+        + f"12345: {secret_like_value}\n"
+        "jobs:\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - name: Run repository test gate\n"
+        "        run: python scripts/ci_pytest.py\n"
+    )
+    with pytest.raises(cip.PolicyError) as excinfo:
+        cip.validate_workflow(text)
+    message = str(excinfo.value)
+    assert message == "workflow top-level keys must be strings"
+    assert "12345" not in message
+    assert secret_like_value not in message
+
+
+def test_validate_workflow_rejects_decoded_binary_top_level_key_without_leaking():
+    # RFC 4648 SS10 base64 test vector: base64("foobar") == "Zm9vYmFy".
+    # !!binary decodes to bytes (hashable, non-str), so this exercises a
+    # top-level-key type distinct from the int/bool cases above, while
+    # letting both the decoded and encoded forms be asserted accurately
+    # without executing code to compute them.
+    encoded = "Zm9vYmFy"
+    decoded = "foobar"
+    text = (
+        "name: CI\n"
+        f"? !!binary {encoded}\n"
+        ": some-value\n"
+        + _valid_on_block()
+        + "jobs:\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - name: Run repository test gate\n"
+        "        run: python scripts/ci_pytest.py\n"
+    )
+    with pytest.raises(cip.PolicyError) as excinfo:
+        cip.validate_workflow(text)
+    message = str(excinfo.value)
+    assert message == "workflow top-level keys must be strings"
+    assert decoded not in message
+    assert encoded not in message
+
+
+def test_validate_workflow_rejects_explicit_bool_tag_on_key():
+    text = (
+        "name: CI\n"
+        "!!bool on:\n"
+        "  push:\n"
+        "    branches:\n"
+        "      - master\n"
+        "jobs:\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - name: Run repository test gate\n"
+        "        run: python scripts/ci_pytest.py\n"
+    )
+    with pytest.raises(cip.PolicyError, match="must be strings"):
+        cip.validate_workflow(text)
+
+
+def test_validate_workflow_rejects_valid_on_alongside_explicit_bool_tag_on():
+    text = (
+        "name: CI\n"
+        + _valid_on_block()
+        + "!!bool on:\n"
+        "  schedule:\n"
+        "    - cron: '0 0 * * *'\n"
+        "jobs:\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - name: Run repository test gate\n"
+        "        run: python scripts/ci_pytest.py\n"
+    )
+    with pytest.raises(cip.PolicyError, match="must be strings"):
+        cip.validate_workflow(text)
+
+
+def test_validate_workflow_rejects_valid_on_alongside_bareword_true():
+    text = (
+        "name: CI\n"
+        + _valid_on_block()
+        + "true:\n"
+        "  schedule:\n"
+        "    - cron: '0 0 * * *'\n"
+        "jobs:\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - name: Run repository test gate\n"
+        "        run: python scripts/ci_pytest.py\n"
+    )
+    with pytest.raises(cip.PolicyError, match="must be strings"):
+        cip.validate_workflow(text)
+
+
+def test_validate_workflow_rejects_mixed_type_extra_keys():
+    on_block = (
+        "on:\n"
+        "  pull_request:\n"
+        "  merge_group:\n"
+        "    types: [checks_requested]\n"
+        "  push:\n"
+        "    branches:\n"
+        "      - master\n"
+        "  workflow_dispatch:\n"
+        "  123: {}\n"
+    )
+    with pytest.raises(cip.PolicyError, match="event name strings"):
+        cip.validate_workflow(_workflow_text(on_block))
 
 
 def test_all_discovered_tests_are_accounted_for():
