@@ -11,6 +11,11 @@ HTML = (ROOT / "app" / "static" / "index.html").read_text()
 NODE = shutil.which("node")
 
 
+def _slice(start_marker: str, end_marker: str) -> str:
+    start = HTML.index(start_marker)
+    return HTML[start:HTML.index(end_marker, start)]
+
+
 def _presentation(payload: dict) -> dict:
     if NODE is None:
         pytest.skip("node is required for JavaScript behavior proof")
@@ -32,6 +37,14 @@ def test_missing_submission_is_not_presented_as_rejected_proposal() -> None:
     assert "no valid portfolio decision" in view["note"].lower()
     assert "carried unchanged" in view["note"].lower()
     assert view["rows"] == []
+
+
+def test_scheduler_table_surfaces_safe_decision_failure_reason() -> None:
+    render = _slice("function renderDeskScheduler()", "function renderDeskStrategist()")
+    assert "j.last_reason" in render
+    assert "j.last_target_status" in render
+    assert "replace(/_/g, ' ')" in render
+    assert "esc(detailStr)" in render
 
 
 def test_governance_rejection_remains_a_rejected_proposal() -> None:

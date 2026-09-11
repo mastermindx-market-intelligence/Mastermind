@@ -5350,10 +5350,13 @@ function renderDeskScheduler() {
     var nextStr = j.next_run_time ? j.next_run_time.replace('T', ' ').slice(0, 16) + ' UTC' : '—';
     var lastStr = j.last_finished ? j.last_finished.replace('T', ' ').slice(0, 16) + ' UTC' : (j.last_started ? j.last_started.replace('T', ' ').slice(0, 16) + ' UTC…' : '—');
     var sevStr = j.last_severity ? esc(j.last_severity) : '';
+    var reasonStr = String(j.last_reason || '').replace(/_/g, ' ').trim();
+    var targetStr = String(j.last_target_status || '').replace(/_/g, ' ').trim();
+    var detailStr = reasonStr || targetStr;
     rows += '<tr>'
       + '<td style="font-family:monospace;font-size:11px;color:var(--muted);padding:4px 8px 4px 0">' + esc(j.id) + '</td>'
       + '<td style="padding:4px 8px;text-align:center"><span style="color:' + dotColor + ';font-size:13px">' + dot + '</span></td>'
-      + '<td style="padding:4px 8px;font-size:11px;color:var(--text)">' + esc(j.last_status || '—') + (sevStr ? ' <span style="color:var(--warn);font-size:10px">(' + sevStr + ')</span>' : '') + '</td>'
+      + '<td style="padding:4px 8px;font-size:11px;color:var(--text)">' + esc(j.last_status || '—') + (sevStr ? ' <span style="color:var(--warn);font-size:10px">(' + sevStr + ')</span>' : '') + (detailStr ? '<div style="color:var(--muted);font-size:10px;margin-top:2px">' + esc(detailStr) + '</div>' : '') + '</td>'
       + '<td style="padding:4px 8px;font-size:11px;color:var(--muted)">' + esc(lastStr) + '</td>'
       + '<td style="padding:4px 8px;font-size:11px;color:var(--muted)">' + esc(nextStr) + '</td>'
       + '</tr>';
