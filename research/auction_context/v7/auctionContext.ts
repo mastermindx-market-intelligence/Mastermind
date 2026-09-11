@@ -113,7 +113,7 @@ function requestValid(r: Request): boolean {
     positiveInt(r.analysisSeconds) && r.analysisSeconds % 60 === 0 && r.analysisSeconds <= 86400 &&
     positiveInt(r.lookback) && r.lookback <= 2000 &&
     positiveInt(r.bins) && r.bins >= 4 && r.bins <= 200 &&
-    finite(r.valueAreaFraction) && r.valueAreaFraction > 0 && r.valueAreaFraction <= 1 &&
+    finite(r.valueAreaFraction) && r.valueAreaFraction >= 0.01 && r.valueAreaFraction <= 1 &&
     positiveInt(r.balancePeriods) && r.balancePeriods <= r.lookback &&
     ['selected_historical_vintage', 'observed_by_cutoff'].includes(r.evidenceMode);
 }
@@ -129,6 +129,10 @@ function profileContext(parents: Selected, r: Request): Component<ProfileContext
     h: x.high, l: x.low, c: x.close, v: x.volume }));
   const p = calculateFixedRangeVolumeProfile(input, lo, hi, r.bins, r.valueAreaFraction);
   if (!p) return failure('invalid_input', 'Existing profile function could not compute finite output.', r.lookback, b.length);
+  const finiteProfile = [p.totalVolume, p.pocPrice, p.valueAreaLow, p.valueAreaHigh,
+    ...p.bins.flatMap(x => [x.low, x.high, x.midpoint, x.volume])].every(finite);
+  if (!finiteProfile)
+    return failure('invalid_input', 'Existing profile arithmetic produced a nonfinite value.', r.lookback, b.length);
   const bin = p.bins[p.pocIndex];
   return { state: 'ready', reason: 'Candle-derived estimate, not observed trade-at-price volume.',
     expected: r.lookback, present: b.length, lastCompleteEnd: b[b.length - 1].start + r.analysisSeconds,
