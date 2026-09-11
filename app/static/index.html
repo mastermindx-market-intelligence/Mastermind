@@ -5343,9 +5343,9 @@ function renderDeskScheduler() {
   var rows = '';
   (d.jobs || []).forEach(function(j) {
     var ok = j.last_status === 'ok';
-    var skipped = j.last_status === 'skip' || j.last_skipped;
+    var skipped = j.last_status === 'skip' || (!j.last_status && j.last_skipped);
     var errored = j.last_status === 'error';
-    var dot = ok ? '●' : (skipped ? '◌' : (errored ? '✕' : '○'));
+    var dot = ok ? '●' : (errored ? '✕' : (skipped ? '◌' : '○'));
     var dotColor = ok ? 'var(--up)' : (errored ? 'var(--down)' : 'var(--muted)');
     var nextStr = j.next_run_time ? j.next_run_time.replace('T', ' ').slice(0, 16) + ' UTC' : '—';
     var lastStr = j.last_finished ? j.last_finished.replace('T', ' ').slice(0, 16) + ' UTC' : (j.last_started ? j.last_started.replace('T', ' ').slice(0, 16) + ' UTC…' : '—');

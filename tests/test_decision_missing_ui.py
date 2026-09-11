@@ -45,6 +45,8 @@ def test_scheduler_table_surfaces_safe_decision_failure_reason() -> None:
     assert "j.last_target_status" in render
     assert "replace(/_/g, ' ')" in render
     assert "esc(detailStr)" in render
+    assert "var skipped = j.last_status === 'skip' || (!j.last_status && j.last_skipped);" in render
+    assert "var dot = ok ? '●' : (errored ? '✕' : (skipped ? '◌' : '○'));" in render
 
 
 def test_governance_rejection_remains_a_rejected_proposal() -> None:

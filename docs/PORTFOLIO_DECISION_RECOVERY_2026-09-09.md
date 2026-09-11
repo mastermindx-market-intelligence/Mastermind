@@ -29,7 +29,7 @@ Two observability defects extended the outage. Each daily scheduler wrapper unco
 
 1. Classify only the exact Codex access-token refresh failure as an authentication failure, preserving the no-replay rule for tool and runtime failures. The existing waterfall then cools Codex and advances to the existing Claude OAuth pool.
 2. Translate each Brain runner result into the existing run ledger's `ok`, `warn`, `skip`, or `error` states. Missing submissions, malformed envelopes, inconsistent accepted states, and publication failures become `FREEZE` errors with a closed safe reason; intentional cost caps and migration waits remain skips.
-3. Project `last_reason` and `last_target_status` through the existing scheduler-health consumer and display the closed reason on the scheduler table without exposing raw provider errors.
+3. Project `last_reason` and `last_target_status` through the existing scheduler-health consumer and display the closed reason on the scheduler table without exposing raw provider errors. A current error outranks any older skip timestamp when the table chooses its state indicator.
 4. Apply the same semantic outcome classifier to authenticated manual US, China, and Hong Kong runs, in both wait and background modes. Wait-mode receipts expose safe lifecycle fields and tolerate a malformed runner envelope without emitting duplicate completion events.
 5. Present `rejected_no_submission` as `DECISION MISSING — RECOVERY REQUIRED`; keep governance rejection, queued target, settled no-trade, and verified fills distinct.
 
