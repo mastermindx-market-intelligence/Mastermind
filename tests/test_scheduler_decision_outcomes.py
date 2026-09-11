@@ -55,6 +55,8 @@ def _invoke(book, wrapper, runner, result, isolated_scheduler, monkeypatch):
     ({"target_status": "executed", "decision_effective": False}, "inconsistent_result"),
     ({"target_status": "queued", "decision_effective": True,
       "publish_error": "fixture-only private diagnostic"}, "projection_failed"),
+    ({"target_status": "rejected_execution_error", "decided": False,
+      "decision_effective": False}, "rejected_execution_error"),
 ])
 def test_semantic_failures_are_not_recorded_as_success(
         book, wrapper, runner, result, reason, isolated_scheduler, monkeypatch):

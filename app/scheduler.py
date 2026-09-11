@@ -110,6 +110,8 @@ def _brain_job_outcome(result: object) -> tuple[str, str | None, dict]:
         return "error", "FREEZE", {**extra, "reason": "inconsistent_result"}
     if target == "rejected_no_submission":
         return "error", "FREEZE", {**extra, "reason": "missing_submission"}
+    if target == "rejected_execution_error":
+        return "error", "FREEZE", {**extra, "reason": target}
     if target.startswith("rejected_") or target.startswith("frozen_"):
         return "warn", "FREEZE", {**extra, "reason": target}
     return "error", "FREEZE", {**extra, "reason": "invalid_result"}
