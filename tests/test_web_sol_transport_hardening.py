@@ -4,10 +4,8 @@ from dataclasses import is_dataclass
 import io
 import os
 from pathlib import Path
-import shutil
 import socket
 import struct
-import tempfile
 import threading
 import time
 
@@ -326,8 +324,8 @@ def test_guarded_client_isolates_malformed_peer_and_refuses_concurrent_peer(
         peer_two.close()
 
 
-def test_close_unlinks_only_the_exact_socket_inode_this_server_created(tmp_path):
-    private = tmp_path / "private"
+def test_close_unlinks_only_the_exact_socket_inode_this_server_created(short_socket_root):
+    private = short_socket_root / "private"
     private.mkdir(mode=0o700)
     os.chmod(private, 0o700)
     destination = private / "web_sol.sock"
@@ -363,18 +361,6 @@ def test_private_server_refuses_overlong_unix_socket_path_before_bind(tmp_path):
     with pytest.raises(native.NativeHostError, match="socket_path_too_long"):
         native.open_private_server(destination, owner_uid=os.getuid())
     assert not destination.exists()
-
-
-@pytest.fixture
-def short_socket_root():
-    # Keep the test-owned AF_UNIX root below Darwin's fixed 104-byte limit;
-    # pytest's nested tmp_path can exceed the production path budget.
-    value = Path(tempfile.mkdtemp(prefix="mmx-wsx-t1-", dir="/tmp"))
-    os.chmod(value, 0o700)
-    try:
-        yield value
-    finally:
-        shutil.rmtree(value, ignore_errors=True)
 
 
 def _run_host_with_partial_unsolicited_frame(

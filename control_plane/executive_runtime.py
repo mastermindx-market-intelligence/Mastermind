@@ -24,7 +24,10 @@ import os
 import re
 import secrets
 import sqlite3
-from contextlib import contextmanager
+import threading
+from abc import ABC, abstractmethod
+from collections.abc import Iterator as IteratorABC
+from contextlib import ExitStack, contextmanager
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
@@ -2294,6 +2297,330 @@ _PHYSICAL_RESOURCE_SCHEMA_CANDIDATE: tuple[str, ...] = (
 )
 
 
+class RuntimeReadUnavailable(PersistenceError):
+    """A bound read cannot establish or retain its trusted namespace custody."""
+
+
+class RuntimeNamespaceCapability(ABC):
+    """Server-owned contract; there is deliberately no installed implementation.
+
+    ``namespace`` must exclude replacement of every resolving path component,
+    database and sidecar through physical close. ``validate`` raises on relevant
+    observed invalidation, including after the physical scope exits. A lock that
+    other namespace writers do not honor is NOT such a capability. Python object
+    identity is an interface check, not a security boundary against hostile code.
+    """
+
+    @abstractmethod
+    def namespace(self, database_path: Path) -> Any:
+        """Return a context manager owning the actual namespace exclusion."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def validate(self, database_path: Path) -> None:
+        """Raise if this request's namespace binding is no longer valid."""
+        raise NotImplementedError
+
+
+class RuntimeReadBinding:
+    """One request, one lexical database path, and a monotonic invalidation latch.
+
+    This object does not obtain OS namespace authority itself. Only a trusted
+    server capability can supply it; callers cannot substitute a boolean grant.
+    The validation point bounds correctness, not later transport delivery or
+    unobservable external revocation. Retain it for a later adapter release check.
+    """
+
+    def __init__(self, capability: RuntimeNamespaceCapability | None) -> None:
+        if not isinstance(capability, RuntimeNamespaceCapability):
+            raise RuntimeReadUnavailable("bound read namespace capability unavailable")
+        self._capability = capability
+        self._path: Path | None = None
+        self._invalid = False
+        self._state_lock = threading.RLock()
+        self._physical_lock = threading.Lock()
+        self._owner_thread: int | None = None
+        self._namespace_stack: ExitStack | None = None
+        self._retained_namespace: ExitStack | None = None
+        self._unclosed_connection: sqlite3.Connection | None = None
+        self._unclosed_resources: Any = None
+
+    def _retain_unclosed(self, connection: sqlite3.Connection) -> None:
+        # An uncertain close cannot release the namespace. The trusted caller
+        # must retain this failed request binding for explicit reconciliation;
+        # no retry/recovery or installed custodian is manufactured here.
+        self.invalidate()
+        self._unclosed_connection = connection
+        assert self._namespace_stack is not None
+        if self._retained_namespace is None:
+            self._retained_namespace = self._namespace_stack.pop_all()
+
+    def invalidate(self) -> None:
+        """Latch an observed relevant invalidation, even if identity recovers."""
+        with self._state_lock:
+            self._invalid = True
+
+    def _validate(self) -> None:
+        with self._state_lock:
+            if self._invalid or self._path is None:
+                raise RuntimeReadUnavailable("bound read invalidated or not acquired")
+            try:
+                # No truthy return can grant custody: the interface returns None.
+                if self._capability.validate(self._path) is not None:
+                    raise RuntimeReadUnavailable("bound read validation contract violated")
+            except BaseException as exc:
+                self._invalid = True
+                if isinstance(exc, Exception) and not isinstance(exc, RuntimeReadUnavailable):
+                    raise RuntimeReadUnavailable("bound read validation unavailable") from exc
+                raise
+            if self._invalid:
+                raise RuntimeReadUnavailable("bound read invalidated")
+
+    def validate_before_core_return(self) -> None:
+        """Validate after physical close, immediately before releasing results."""
+        try:
+            with self._state_lock:
+                if self._owner_thread is not None:
+                    raise RuntimeReadUnavailable("bound read physical work not closed")
+                self._validate()
+        except Exception as exc:
+            self.invalidate()
+            if isinstance(exc, RuntimeReadUnavailable):
+                raise
+            raise RuntimeReadUnavailable("bound read validation unavailable") from exc
+
+    @contextmanager
+    def physical_read(self, database_path: Path) -> Iterator[None]:
+        # absolute() is lexical: no pathname is resolved or inspected before
+        # the provider's exclusion scope has entered.
+        path = database_path.absolute()
+        if not self._physical_lock.acquire(blocking=False):
+            self.invalidate()
+            raise RuntimeReadUnavailable("bound read already owns physical work")
+        body_error: BaseException | None = None
+        try:
+            with self._state_lock:
+                if self._invalid or (self._path is not None and self._path != path):
+                    raise RuntimeReadUnavailable("bound read path changed or invalidated")
+                self._path = path
+                self._owner_thread = threading.get_ident()
+            with ExitStack() as stack:
+                self._namespace_stack = stack
+                stack.enter_context(self._capability.namespace(path))
+                self._validate()
+                try:
+                    yield
+                except BaseException as exc:
+                    body_error = exc
+                    raise
+                self._validate()
+            if body_error is not None:
+                # A provider's __exit__ cannot erase an application failure.
+                raise body_error
+        except BaseException as exc:
+            self.invalidate()
+            if exc is not body_error and isinstance(exc, Exception) and not isinstance(exc, RuntimeProofError):
+                raise RuntimeReadUnavailable("bound read custody unavailable") from exc
+            raise
+        finally:
+            self._namespace_stack = None
+            if self._unclosed_connection is None:
+                with self._state_lock:
+                    self._owner_thread = None
+                self._physical_lock.release()
+        self.validate_before_core_return()
+
+    def _require_physical_read(self, path: Path) -> None:
+        with self._state_lock:
+            if self._owner_thread != threading.get_ident() or self._path != path.absolute():
+                raise RuntimeReadUnavailable("bound SQLite open requires namespace custody")
+            self._validate()
+
+
+class _BoundReadCursor:
+    """Owned statement view, never a native Cursor compatibility surface."""
+
+    __slots__ = ("_view", "_cursor", "_closed")
+
+    def __init__(self, view: "_BoundReadConnection", cursor: sqlite3.Cursor) -> None:
+        self._view, self._cursor, self._closed = view, cursor, False
+
+    def _require_open(self) -> None:
+        if self._closed:
+            raise RuntimeReadUnavailable("bound cursor is closed")
+        self._view._require_open()
+
+    def execute(self, sql: str, parameters: Any = ()) -> "_BoundReadCursor":
+        self._require_open()
+        self._cursor.execute(sql, parameters)
+        return self
+
+    def fetchone(self) -> Any:
+        self._require_open()
+        return self._cursor.fetchone()
+
+    def fetchmany(self, size: int | None = None) -> list[Any]:
+        self._require_open()
+        return self._cursor.fetchmany() if size is None else self._cursor.fetchmany(size)
+
+    def fetchall(self) -> list[Any]:
+        self._require_open()
+        return self._cursor.fetchall()
+
+    def __iter__(self) -> "_BoundReadCursor":
+        self._require_open()
+        return self
+
+    def __next__(self) -> Any:
+        self._require_open()
+        return next(self._cursor)
+
+    def _finalize(self) -> None:
+        if not self._closed:
+            self._cursor.close()
+            self._closed = True
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._view._require_open()
+        try:
+            self._finalize()
+        except BaseException:
+            self._view._retain_uncertain()
+            raise
+
+    @property
+    def connection(self) -> "_BoundReadConnection":
+        self._require_open()
+        return self._view
+
+    @property
+    def description(self) -> Any:
+        self._require_open()
+        return self._cursor.description
+
+    @property
+    def rowcount(self) -> int:
+        self._require_open()
+        return self._cursor.rowcount
+
+    @property
+    def lastrowid(self) -> Any:
+        self._require_open()
+        return self._cursor.lastrowid
+
+    @property
+    def arraysize(self) -> int:
+        self._require_open()
+        return self._cursor.arraysize
+
+    @property
+    def row_factory(self) -> Any:
+        self._require_open()
+        return sqlite3.Row
+
+
+class _BoundReadConnection:
+    """A finite bound query interface over the store's SAME native connection.
+
+    Private members are trusted implementation detail, not a hostile-Python
+    security boundary. No passthrough, raw-handle property or native subclass.
+    """
+
+    __slots__ = ("_native", "_store", "_binding", "_cursors", "_pending_cursor",
+                 "_closed", "_owner_control", "_drain_uncertain")
+
+    def __init__(self, connection: sqlite3.Connection, store: "RuntimeStore") -> None:
+        self._native, self._store, self._binding = connection, store, store.read_binding
+        self._cursors: list[_BoundReadCursor] = []
+        self._pending_cursor: sqlite3.Cursor | None = None
+        self._closed = self._owner_control = self._drain_uncertain = False
+        connection.set_authorizer(self._authorize)
+
+    def _authorize(self, action: int, first: Any, second: Any, database: Any, source: Any) -> int:
+        if not self._owner_control and action in (
+            sqlite3.SQLITE_TRANSACTION, sqlite3.SQLITE_SAVEPOINT,
+            sqlite3.SQLITE_ATTACH, sqlite3.SQLITE_DETACH, sqlite3.SQLITE_PRAGMA,
+            # mode=ro does not prohibit writes to a connection's TEMP schema.
+            sqlite3.SQLITE_INSERT, sqlite3.SQLITE_UPDATE, sqlite3.SQLITE_DELETE,
+        ):
+            # Authorizer action codes, not a SQL parser. Bound statement caching
+            # is disabled so internal-control authorization cannot be reused.
+            return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
+
+    def _require_open(self) -> None:
+        if self._closed or self._drain_uncertain:
+            raise RuntimeReadUnavailable("bound connection is closed or uncertain")
+        assert self._binding is not None
+        self._binding._require_physical_read(self._store.path)
+
+    def cursor(self) -> _BoundReadCursor:
+        self._require_open()
+        try:
+            self._pending_cursor = self._native.cursor()
+            cursor = _BoundReadCursor(self, self._pending_cursor)
+            self._cursors.append(cursor)  # strong ownership BEFORE execution
+            self._pending_cursor = None
+            return cursor
+        except BaseException:
+            # If registration fails, the acquired pending cursor is still owned.
+            self._retain_uncertain()
+            raise
+
+    def execute(self, sql: str, parameters: Any = ()) -> _BoundReadCursor:
+        return self.cursor().execute(sql, parameters)
+
+    def _owner_execute(self, sql: str) -> _BoundReadCursor:
+        self._owner_control = True
+        try:
+            return self.execute(sql)
+        finally:
+            self._owner_control = False
+
+    def _owner_finish(self, *, commit: bool) -> None:
+        self._owner_control = True
+        try:
+            if commit:
+                self._native.commit()
+            else:
+                self._native.rollback()
+        finally:
+            self._owner_control = False
+
+    @property
+    def in_transaction(self) -> bool:
+        return False if self._closed else self._native.in_transaction
+
+    @property
+    def row_factory(self) -> Any:
+        self._require_open()
+        return sqlite3.Row
+
+    def _retain_uncertain(self) -> None:
+        self._drain_uncertain = True
+        assert self._binding is not None
+        self._binding._unclosed_resources = self
+        self._binding._retain_unclosed(self._native)
+
+    def _drain_and_close(self) -> None:
+        if self._drain_uncertain:
+            # A failed finalization is not retried at context exit.
+            raise RuntimeReadUnavailable("bound cursor drain remains uncertain")
+        try:
+            if self._pending_cursor is not None:
+                self._pending_cursor.close()
+                self._pending_cursor = None
+            for cursor in self._cursors:
+                cursor._finalize()
+            self._native.close()
+            self._closed = True
+        except BaseException:
+            self._retain_uncertain()
+            raise
+
+
 class RuntimeStore:
     """SQLite connection, migration, transaction, and event boundary."""
 
@@ -2307,7 +2634,27 @@ class RuntimeStore:
         create: bool = True,
         existing_writable: bool = False,
         database_path: str | Path | None = None,
+        read_binding: RuntimeReadBinding | None = None,
     ) -> None:
+        self.read_binding = read_binding
+        self._bound_connections: set[_BoundReadConnection] = set()
+        if read_binding is not None:
+            if not isinstance(read_binding, RuntimeReadBinding) or create or existing_writable:
+                raise RuntimeReadUnavailable("bound reads require a read-only RuntimeStore")
+            self.root = Path(root).absolute() if root is not None else _ROOT
+            self.path = Path(database_path).absolute() if database_path is not None else self.root / _DB_RELATIVE_PATH
+            self.clock = clock
+            self.lease_seconds = int(lease_seconds)
+            self.busy_timeout_ms = int(busy_timeout_ms)
+            if self.lease_seconds <= 0 or self.busy_timeout_ms < 0:
+                raise StateConflict("invalid runtime read timing")
+            self.create = self.existing_writable = False
+            self._schema_ready = False
+            self._database_file_identity = self._fresh_file_identity = None
+            self._database_was_absent = False
+            self.upgrade_barrier_path = self.path.parent / _SCHEMA_UPGRADE_BARRIER
+            # No probe connection or filesystem access: the actual read owns both.
+            return
         self.root = Path(root).resolve() if root is not None else _ROOT
         self.path = (
             Path(database_path).resolve()
@@ -2548,6 +2895,16 @@ class RuntimeStore:
     def _assert_owned_snapshot_connection(self, connection: sqlite3.Connection) -> None:
         """Prove a supplied snapshot's ``main`` is this store's stable file."""
 
+        if self.read_binding is not None:
+            self.read_binding._require_physical_read(self.path)
+            if (not isinstance(connection, _BoundReadConnection)
+                    or connection not in self._bound_connections
+                    or connection._store is not self
+                    or connection._binding is not self.read_binding
+                    or connection._closed or connection._drain_uncertain
+                    or not connection.in_transaction):
+                raise StateConflict("supplied connection is not this bound read snapshot")
+            return
         if connection.in_transaction is not True:
             raise StateConflict(
                 "supplied connection must already own an active SQLite transaction"
@@ -2584,7 +2941,7 @@ class RuntimeStore:
                 "supplied connection is not the stable database owned by this RuntimeStore"
             )
 
-    def _open_readonly(self) -> sqlite3.Connection:
+    def _open_readonly(self) -> sqlite3.Connection | _BoundReadConnection:
         """Open an EXISTING database read-only: no create, no chmod, no migration.
 
         SQLite's ``mode=ro`` makes the guarantee structural rather than
@@ -2597,30 +2954,42 @@ class RuntimeStore:
         empty, truncated, or foreign file reads as a valid database with no rows,
         which a caller would report as "nothing is running".
         """
-        connection: sqlite3.Connection | None = None
+        if self.read_binding is not None:
+            self.read_binding._require_physical_read(self.path)
+        connection: sqlite3.Connection | _BoundReadConnection | None = None
         try:
             connection = sqlite3.connect(
                 f"{self.path.as_uri()}?mode=ro",
                 uri=True,
                 timeout=self.busy_timeout_ms / 1000,
                 isolation_level=None,
+                **({"cached_statements": 0} if self.read_binding is not None else {}),
             )
             connection.row_factory = sqlite3.Row
-            connection.execute("PRAGMA foreign_keys=ON")
-            connection.execute(f"PRAGMA busy_timeout={self.busy_timeout_ms}")
-        except (OSError, sqlite3.Error) as exc:
+            if self.read_binding is not None:
+                connection = _BoundReadConnection(connection, self)
+                connection._owner_execute("PRAGMA foreign_keys=ON")
+                connection._owner_execute(f"PRAGMA busy_timeout={self.busy_timeout_ms}")
+            else:
+                connection.execute("PRAGMA foreign_keys=ON")
+                connection.execute(f"PRAGMA busy_timeout={self.busy_timeout_ms}")
+        except BaseException as exc:
             if connection is not None:
-                connection.close()
-            raise PersistenceError(
-                f"executive runtime database at {self.path} is unavailable: {exc}"
-            ) from exc
+                self._close_read_connection(connection)
+            if isinstance(exc, (OSError, sqlite3.Error)):
+                raise PersistenceError(
+                    f"executive runtime database at {self.path} is unavailable: {exc}"
+                ) from exc
+            raise
+        if self.read_binding is not None:
+            return connection
         if not self._schema_ready:
             try:
                 connection.execute(
                     "SELECT version FROM schema_migrations LIMIT 1"
                 ).fetchone()
             except sqlite3.Error as exc:
-                connection.close()
+                self._close_read_connection(connection)
                 message = str(exc)
                 if "no such table" in message:
                     detail = "carries no Executive OS schema"
@@ -2713,6 +3082,8 @@ class RuntimeStore:
             ) from exc
 
     def _open(self) -> sqlite3.Connection:
+        if self.read_binding is not None:
+            raise RuntimeReadUnavailable("bound store opens only inside read()")
         if self.existing_writable:
             return self._open_existing_writable()
         if not self.create:
@@ -2910,8 +3281,57 @@ class RuntimeStore:
         finally:
             connection.close()
 
+    def _close_read_connection(self, connection: sqlite3.Connection | _BoundReadConnection) -> None:
+        if isinstance(connection, _BoundReadConnection):
+            connection._drain_and_close()
+            return
+        try:
+            connection.close()
+        except BaseException:
+            if self.read_binding is not None:
+                self.read_binding._retain_unclosed(connection)
+            raise
+
+    @contextmanager
+    def _read_bound(self) -> Iterator[_BoundReadConnection]:
+        binding = self.read_binding
+        assert binding is not None
+        with binding.physical_read(self.path):
+            connection: _BoundReadConnection | None = None
+            try:
+                connection = self._open_readonly()
+                assert isinstance(connection, _BoundReadConnection)
+                connection._owner_execute("BEGIN")
+                # Under real namespace exclusion this detects a wrong handle;
+                # it is explicitly not a pathname-ABA detector without custody.
+                mains = [row for row in connection._owner_execute("PRAGMA database_list") if row[1] == "main"]
+                if len(mains) != 1 or Path(mains[0][2]).resolve(strict=True) != self.path.resolve(strict=True):
+                    raise RuntimeReadUnavailable("bound read opened another database")
+                self._verify_current_schema(connection)
+                binding._validate()
+                self._bound_connections.add(connection)
+                yield connection
+                binding._validate()
+                connection._owner_finish(commit=True)
+            except sqlite3.Error as exc:
+                if connection is not None and connection.in_transaction:
+                    connection._owner_finish(commit=False)
+                raise PersistenceError("bound database read failed") from exc
+            except BaseException:
+                if connection is not None and connection.in_transaction:
+                    connection._owner_finish(commit=False)
+                raise
+            finally:
+                if connection is not None:
+                    self._bound_connections.discard(connection)
+                    self._close_read_connection(connection)
+
     @contextmanager
     def read(self) -> Iterator[sqlite3.Connection]:
+        if self.read_binding is not None:
+            with self._read_bound() as connection:
+                yield connection
+            return
         connection = self._open()
         try:
             connection.execute("BEGIN")
@@ -17034,6 +17454,7 @@ class Runtime:
         busy_timeout_ms: int = DEFAULT_BUSY_TIMEOUT_MS,
         create: bool = True,
         existing_writable: bool = False,
+        read_binding: RuntimeReadBinding | None = None,
     ) -> "Runtime":
         return cls.from_store(
             RuntimeStore(
@@ -17043,8 +17464,53 @@ class Runtime:
                 busy_timeout_ms=busy_timeout_ms,
                 create=create,
                 existing_writable=existing_writable,
+                read_binding=read_binding,
             )
         )
+
+    @classmethod
+    def read_bound(
+        cls, root: str | Path, *, binding: RuntimeReadBinding | None,
+        reader: Callable[["Runtime"], Any],
+    ) -> Any:
+        """Complete a trusted materializing callback on existing typed registries.
+
+        No runtime provider is created here. The callback must not return live
+        cursors/iterators; all physical reads must close before final validation.
+        Independent registries are not claimed to share one atomic snapshot.
+        """
+        if not isinstance(binding, RuntimeReadBinding):
+            raise RuntimeReadUnavailable("bound read namespace capability unavailable")
+        try:
+            runtime = cls.at(root, create=False, read_binding=binding)
+            result = reader(runtime)
+            def materialized(value: Any, seen: set[int]) -> None:
+                if isinstance(value, (sqlite3.Connection, sqlite3.Cursor, _BoundReadConnection, _BoundReadCursor, IteratorABC, Runtime, RuntimeStore)):
+                    raise RuntimeReadUnavailable("bound read result is not materialized")
+                if value is None or isinstance(value, (str, bytes, bool, int, float, datetime)):
+                    return
+                if isinstance(value, Enum):
+                    materialized(value.value, seen)
+                    return
+                if isinstance(value, (dict, list, tuple)) or (dataclasses.is_dataclass(value) and not isinstance(value, type)):
+                    if id(value) in seen:
+                        raise RuntimeReadUnavailable("bound read result contains a cycle")
+                    seen.add(id(value))
+                    values = tuple(value.keys()) + tuple(value.values()) if isinstance(value, dict) else (
+                        (getattr(value, field.name) for field in dataclasses.fields(value))
+                        if dataclasses.is_dataclass(value) else value
+                    )
+                    for item in values:
+                        materialized(item, seen)
+                    seen.remove(id(value))
+                    return
+                raise RuntimeReadUnavailable("bound read result is not materialized")
+            materialized(result, set())
+            binding.validate_before_core_return()
+            return result
+        except BaseException:
+            binding.invalidate()
+            raise
 
     def commit_initial_capacity_placement(
         self,

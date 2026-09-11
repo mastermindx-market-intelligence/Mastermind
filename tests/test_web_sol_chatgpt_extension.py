@@ -290,8 +290,8 @@ def test_legacy_open_surface_remains_fail_closed_and_chatgpt_module_stays_socket
     assert "AF_UNIX" not in source
 
 
-def test_derived_socket_exchange_round_trips_one_request_without_retry(tmp_path):
-    private = tmp_path / "private"
+def test_derived_socket_exchange_round_trips_one_request_without_retry(short_socket_root):
+    private = short_socket_root / "private"
     private.mkdir(mode=0o700)
     private.chmod(0o700)
     path = private / "wsx-fixture.sock"

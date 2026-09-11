@@ -2096,7 +2096,86 @@ def test_m2_begin_rechecks_freshness_and_policy_after_write_lock(m2_store):
         assert status['receipt']['commitments'][0]['state'] == ('EFFECT_MAY_HAVE_BEGUN' if mutation == 'commit_clock' else 'RESERVED')
 
 
-def test_m2_begin_replay_and_new_command_never_return_fresh_grant(m2_store):
+def _m2_timed_call(monkeypatch, samples, call, *args, **kwargs):
+    """Inject only this synchronous broker call's explicit monotonic samples.
+
+    SQLite/transaction/schema work stays real; unrelated clock callers retain
+    real time, and the process clock function is restored after every call.
+    """
+    import sys
+    import time
+    actual_monotonic = time.monotonic
+    broker_code = executive_runtime.ResourceBroker._physical_command.__code__
+    consumed = []
+
+    def monotonic():
+        if sys._getframe(1).f_code is not broker_code:
+            return actual_monotonic()
+        assert len(consumed) < len(samples), "extra broker monotonic sample"
+        value = samples[len(consumed)]
+        consumed.append(value)
+        return value
+
+    try:
+        with monkeypatch.context() as scoped:
+            scoped.setattr(time, "monotonic", monotonic)
+            return call(*args, **kwargs)
+    finally:
+        assert time.monotonic is actual_monotonic
+        assert consumed == list(samples), "missing broker monotonic sample"
+
+
+@pytest.mark.parametrize("samples,message", [
+    ((), "extra broker monotonic sample"),
+    ((0.0, 0.1), "missing broker monotonic sample"),
+])
+def test_m2_timing_input_rejects_extra_or_missing_samples(m2_store, monkeypatch, samples, message):
+    runtime, _, request, _ = m2_store()
+    # Status is a real read transaction with exactly its started sample.
+    with pytest.raises(AssertionError, match=message):
+        _m2_timed_call(monkeypatch, samples, runtime.broker.physical_status,
+                       {'reservation': request}, caller_context=None)
+
+
+@pytest.mark.parametrize("samples,code,admitted,fresh", [
+    ((0.0, 0.1, 1.001), "DECISION_DEADLINE_EXPIRED", False, False),
+    ((0.0, 0.1, 0.5, 1.001), "BEGIN_COMMITTED_DEADLINE_EXPIRED", True, False),
+    ((0.0, 0.1, 1.0, 1.0), "BEGUN", True, True),
+], ids=["precommit-1001ms", "postcommit-1001ms", "exact-1000ms"])
+def test_m2_monotonic_deadline_real_transaction_boundaries(m2_store, monkeypatch, samples, code, admitted, fresh):
+    runtime, second, request, context = m2_store()
+    assert context['policy']['freshness']['decision_to_effect_max_ms'] == 1000
+    reserved = _m2_timed_call(monkeypatch, (0.0, 0.1), _m2_reserve, runtime, request)
+    assert reserved['admitted']
+    before = _m2_rows(runtime)
+    envelope = _m2_envelope(request, reserved, 'deadline-boundary')
+    result = _m2_timed_call(monkeypatch, samples, runtime.broker.begin_physical,
+                            envelope, caller_context=None)
+    assert result['code'] == code and result['admitted'] is admitted
+    assert result['fresh_begin'] is fresh
+    if not admitted:
+        assert _m2_rows(runtime) == before  # event/header/demands all rolled back
+    else:
+        after = _m2_rows(runtime)
+        assert after != before
+        with runtime.store.read() as connection:
+            states = [row[0] for row in connection.execute('SELECT state FROM physical_resource_commitments')]
+            events = [json.loads(row[0]) for row in connection.execute(
+                "SELECT payload_json FROM events WHERE event_type='PHYSICAL_RESOURCE_BEGIN'")]
+        assert states == ['EFFECT_MAY_HAVE_BEGUN']
+        assert len(events) == 1 and events[0]['receipt'] == result['receipt']
+        assert 'fresh_begin' not in events[0]
+        assert ('start_deadline_ms' in result) is fresh
+        if fresh:
+            assert result['start_deadline_ms'] == 1100
+        replay = _m2_timed_call(monkeypatch, (0.0, 0.1), second.broker.begin_physical,
+                               envelope, caller_context=None)
+        assert replay['admitted'] and replay['fresh_begin'] is False
+        assert replay['receipt'] == result['receipt']
+        assert _m2_rows(runtime) == after  # same-command replay adds no BEGIN
+
+
+def test_m2_begin_replay_and_new_command_never_return_fresh_grant(m2_store, monkeypatch):
     import copy
     # Exercise real SQLite query order independently of insertion/phase order.
     # A20 + B10 uses exactly the available40 minus protected10 memory boundary.
@@ -2123,26 +2202,27 @@ def test_m2_begin_replay_and_new_command_never_return_fresh_grant(m2_store):
                 if co_start:
                     request['phases'].append(small_phase)
                     if reverse_insertion: request['phases'].reverse()
-                    reserved = _m2_reserve(runtime, request)
+                    reserved = _m2_timed_call(monkeypatch, (0.0, 0.1), _m2_reserve, runtime, request)
                 else:
                     pairs = [(runtime, request), (second, small)]
                     if reverse_insertion: pairs.reverse()
-                    results = {value['operation_key']: _m2_reserve(instance, value) for instance, value in pairs}
+                    results = {value['operation_key']: _m2_timed_call(monkeypatch, (0.0, 0.1), _m2_reserve, instance, value) for instance, value in pairs}
                     assert all(result['admitted'] for result in results.values()), results
                     reserved = results[request['operation_key']]
                 assert reserved['admitted'], reserved
                 envelope = _m2_envelope(request, reserved, 'begin')
-                first = runtime.broker.begin_physical(envelope, caller_context=None)
+                # started, locked, precommit, postcommit: all inside 1000ms.
+                first = _m2_timed_call(monkeypatch, (0.0, 0.1, 0.2, 0.3), runtime.broker.begin_physical, envelope, caller_context=None)
                 assert first['fresh_begin'] is True, (name, first)
                 assert first['start_deadline_ms'] == 1100
                 with runtime.store.read() as connection:
                     for row in connection.execute('SELECT payload_json FROM events'):
                         payload = json.loads(row[0])
                         assert 'fresh_begin' not in payload and 'fresh_begin' not in payload['receipt']
-                replay = second.broker.begin_physical(envelope, caller_context=None)
+                replay = _m2_timed_call(monkeypatch, (0.0, 0.1), second.broker.begin_physical, envelope, caller_context=None)
                 assert replay['receipt'] == first['receipt'] and replay['fresh_begin'] is False
                 envelope['reservation']['command_id'] = 'physical:new-begin-command'
-                reconciled = second.broker.begin_physical(envelope, caller_context=None)
+                reconciled = _m2_timed_call(monkeypatch, (0.0, 0.1), second.broker.begin_physical, envelope, caller_context=None)
                 assert reconciled['receipt'] == first['receipt'] and reconciled['fresh_begin'] is False
 
                 # A different store starts with the same pristine reservations,
@@ -2151,12 +2231,12 @@ def test_m2_begin_replay_and_new_command_never_return_fresh_grant(m2_store):
                 limited_context['policy'] = copy.deepcopy(context['policy'])
                 limited_context['at_stage'] = row_order
                 limited_request = copy.deepcopy(request)
-                limit_reserved = _m2_reserve(limited, limited_request)
+                limit_reserved = _m2_timed_call(monkeypatch, (0.0, 0.1), _m2_reserve, limited, limited_request)
                 assert limit_reserved['admitted'], limit_reserved
-                if not co_start: assert _m2_reserve(limited, small)['admitted']
+                if not co_start: assert _m2_timed_call(monkeypatch, (0.0, 0.1), _m2_reserve, limited, small)['admitted']
                 limited_context['observations']['pools']['memory']['available'] = 39
                 before = _m2_rows(limited)
-                refused = limited.broker.begin_physical(_m2_envelope(limited_request, limit_reserved, 'capacity'), caller_context=None)
+                refused = _m2_timed_call(monkeypatch, (0.0, 0.1), limited.broker.begin_physical, _m2_envelope(limited_request, limit_reserved, 'capacity'), caller_context=None)
                 assert refused['code'] == 'INSUFFICIENT_CAPACITY' and refused['fresh_begin'] is False, refused
                 assert _m2_rows(limited) == before
 
@@ -2274,3 +2354,703 @@ def test_m2_no_test_configuration_or_schema_flag_arms_production(m2_store, monke
 
 
 _M2_PRODUCTION_ADMISSION = getattr(executive_runtime.ResourceBroker, '_physical_admission', None)
+
+
+def _bound_exclusive_witness(path):
+    witness = sqlite3.connect(str(path), timeout=0, isolation_level=None)
+    try:
+        try:
+            witness.execute("BEGIN EXCLUSIVE").close()
+        except sqlite3.OperationalError as exc:
+            assert exc.sqlite_errorcode == sqlite3.SQLITE_BUSY
+            return False
+        witness.rollback()
+        return True
+    finally:
+        witness.close()
+
+
+@pytest.mark.parametrize("route", ["shortcut", "cursor"])
+@pytest.mark.parametrize("finish", ["retained", "exhausted", "closed"])
+def test_bound_managed_cursors_drain_before_namespace_release(tmp_path, route, finish):
+    writer, provider, binding = _bound_fixture(tmp_path)
+    writer.jobs.create_job("SECOND A")
+    writer.jobs.create_job("THIRD A")
+    setup = sqlite3.connect(writer.store.path, isolation_level=None)
+    try:
+        setup.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchall()
+        assert setup.execute("PRAGMA journal_mode=DELETE").fetchone()[0] == "delete"
+    finally:
+        setup.close()
+    assert _bound_exclusive_witness(writer.store.path)
+    at_release, held = [], []
+    provider.after_close = lambda: at_release.append(_bound_exclusive_witness(writer.store.path))
+
+    def reader(runtime):
+        with runtime.store.read() as connection:
+            for _ in range(2):
+                cursor = connection.execute("SELECT objective FROM jobs ORDER BY rowid") if route == "shortcut" else connection.cursor().execute("SELECT objective FROM jobs ORDER BY rowid")
+                held.append(cursor)
+                assert cursor.fetchmany(1)[0][0] == "APPROVED DATABASE A"
+                assert not _bound_exclusive_witness(writer.store.path)
+                if finish == "exhausted":
+                    assert len(cursor.fetchall()) == 2
+                elif finish == "closed":
+                    cursor.close()
+        # Cursors remain referenced in this callback and outside it, but the
+        # returned value is ordinary data. Physical drain must already be true.
+        assert _bound_exclusive_witness(writer.store.path)
+        return ["APPROVED DATABASE A"]
+
+    assert Runtime.read_bound(tmp_path, binding=binding, reader=reader) == ["APPROVED DATABASE A"]
+    assert at_release == [True]
+    for cursor in held:
+        with pytest.raises((PersistenceError, sqlite3.ProgrammingError)):
+            cursor.fetchone()
+
+
+# Bound reads exercise the real store. This cooperating namespace is ONLY a
+# synthetic contract witness; it is not an installed namespace capability.
+def _bound_fixture(tmp_path):
+    from contextlib import contextmanager
+    import threading
+
+    assert hasattr(executive_runtime, "RuntimeNamespaceCapability"), "bound-read API missing"
+
+    class Namespace(executive_runtime.RuntimeNamespaceCapability):
+        def __init__(self):
+            self.lock = threading.Lock()
+            self.valid = True
+            self.entries = 0
+            self.exits = 0
+            self.after_close = None
+
+        @contextmanager
+        def namespace(self, database_path):
+            assert self.lock.acquire(timeout=1)
+            self.entries += 1
+            try:
+                yield
+            finally:
+                self.exits += 1
+                self.lock.release()
+                if self.after_close:
+                    self.after_close()
+
+        def validate(self, database_path):
+            if not self.valid:
+                raise ValueError("namespace revoked")
+
+    writer = _runtime(tmp_path)
+    writer.jobs.create_job("APPROVED DATABASE A")
+    provider = Namespace()
+    binding = executive_runtime.RuntimeReadBinding(provider)
+    return writer, provider, binding
+
+
+def _bound_titles(root, binding):
+    return Runtime.read_bound(
+        root, binding=binding,
+        reader=lambda runtime: [job.objective for job in runtime.jobs.list_jobs()],
+    )
+
+
+def test_bound_read_real_a_and_namespace_excludes_same_schema_b(tmp_path, monkeypatch):
+    writer, provider, binding = _bound_fixture(tmp_path / "a")
+    other = _runtime(tmp_path / "b")
+    other.jobs.create_job("UNAPPROVED DATABASE B")
+    original = sqlite3.connect
+    attempts = []
+
+    def connect(*args, **kwargs):
+        # Independent competing namespace participant cannot replace A while
+        # SQLite resolves/opens it. It would swap B if exclusion were absent.
+        def substitute():
+            acquired = provider.lock.acquire(blocking=False)
+            attempts.append(acquired)
+            if acquired:
+                try:
+                    writer.store.path.write_bytes(other.store.path.read_bytes())
+                finally:
+                    provider.lock.release()
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            pool.submit(substitute).result(timeout=2)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(sqlite3, "connect", connect)
+    assert _bound_titles(tmp_path / "a", binding) == ["APPROVED DATABASE A"]
+    assert attempts == [False]
+    assert provider.entries == provider.exits == 1
+
+
+def test_bound_read_missing_capability_refuses_before_sqlite(tmp_path, monkeypatch):
+    assert hasattr(executive_runtime, "RuntimeReadBinding"), "bound-read API missing"
+    calls = []
+    monkeypatch.setattr(sqlite3, "connect", lambda *a, **k: calls.append(a))
+    with pytest.raises(PersistenceError):
+        Runtime.read_bound(tmp_path, binding=None, reader=lambda runtime: [])
+    with pytest.raises(PersistenceError):
+        executive_runtime.RuntimeReadBinding(None)
+    assert calls == []
+    assert not (tmp_path / "data").exists()
+
+
+def test_bound_read_exact_schema_on_every_actual_connection(tmp_path):
+    writer, provider, binding = _bound_fixture(tmp_path)
+    assert _bound_titles(tmp_path, binding) == ["APPROVED DATABASE A"]
+    with sqlite3.connect(writer.store.path) as connection:
+        connection.execute("CREATE INDEX unapproved_shape ON jobs(objective)")
+    with pytest.raises(PersistenceError, match="exact reviewed DDL"):
+        _bound_titles(tmp_path, binding)
+    assert provider.entries == provider.exits == 2
+
+
+def test_bound_read_foreign_same_schema_connection_is_refused(tmp_path, monkeypatch):
+    writer, provider, binding = _bound_fixture(tmp_path / "a")
+    other = _runtime(tmp_path / "b")
+    other.jobs.create_job("UNAPPROVED DATABASE B")
+    original = sqlite3.connect
+    connections = []
+
+    def connect(*args, **kwargs):
+        connection = original(f"{other.store.path.as_uri()}?mode=ro", uri=True,
+                              isolation_level=None)
+        connections.append(connection)
+        return connection
+
+    monkeypatch.setattr(sqlite3, "connect", connect)
+    with pytest.raises(PersistenceError):
+        _bound_titles(tmp_path / "a", binding)
+    assert len(connections) == 1
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        connections[0].execute("SELECT 1")
+
+
+def test_bound_read_invalid_then_valid_is_irreversibly_latched(tmp_path):
+    _, provider, binding = _bound_fixture(tmp_path)
+    provider.valid = False
+    with pytest.raises(PersistenceError):
+        _bound_titles(tmp_path, binding)
+    provider.valid = True
+    with pytest.raises(PersistenceError):
+        _bound_titles(tmp_path, binding)
+    assert provider.entries == provider.exits
+
+
+@pytest.mark.parametrize("stage", ["query", "closed", "materialized"])
+def test_bound_read_revoke_during_read_or_before_core_release(tmp_path, stage):
+    _, provider, binding = _bound_fixture(tmp_path)
+    if stage == "closed":
+        provider.after_close = binding.invalidate
+
+    def reader(runtime):
+        if stage == "query":
+            with runtime.store.read() as connection:
+                rows = connection.execute("SELECT objective FROM jobs").fetchall()
+                binding.invalidate()
+                return [row[0] for row in rows]
+        rows = [job.objective for job in runtime.jobs.list_jobs()]
+        if stage == "materialized":
+            binding.invalidate()
+        return rows
+
+    with pytest.raises(PersistenceError):
+        Runtime.read_bound(tmp_path, binding=binding, reader=reader)
+    assert provider.entries == provider.exits == 1
+
+
+def test_bound_read_closes_rolls_back_and_does_not_retry(tmp_path, monkeypatch):
+    _, provider, binding = _bound_fixture(tmp_path)
+    original = sqlite3.connect
+    calls, traces = [], []
+
+    def connect(*args, **kwargs):
+        connection = original(*args, **kwargs)
+        calls.append(connection)
+        connection.set_trace_callback(traces.append)
+        return connection
+
+    monkeypatch.setattr(sqlite3, "connect", connect)
+
+    def reader(runtime):
+        with runtime.store.read() as connection:
+            connection.execute("SELECT objective FROM jobs").fetchall()
+            raise RuntimeError("application failure")
+
+    with pytest.raises(RuntimeError, match="application failure"):
+        Runtime.read_bound(tmp_path, binding=binding, reader=reader)
+    assert len(calls) == 1
+    assert "ROLLBACK" in traces
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        calls[0].execute("SELECT 1")
+    assert provider.entries == provider.exits == 1
+
+
+@pytest.mark.parametrize("journal", ["delete", "wal"])
+def test_bound_read_database_bytes_and_bounded_sidecar_effects(tmp_path, journal):
+    import hashlib
+    writer, provider, binding = _bound_fixture(tmp_path)
+    with sqlite3.connect(writer.store.path) as connection:
+        connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        assert connection.execute(f"PRAGMA journal_mode={journal}").fetchone()[0] == journal
+    before = hashlib.sha256(writer.store.path.read_bytes()).hexdigest()
+    names_before = {p.name for p in writer.store.path.parent.iterdir()}
+    seen = []
+    provider.after_close = lambda: seen.append({p.name for p in writer.store.path.parent.iterdir()})
+    assert _bound_titles(tmp_path, binding) == ["APPROVED DATABASE A"]
+    assert hashlib.sha256(writer.store.path.read_bytes()).hexdigest() == before
+    changes = set().union(*seen) - names_before
+    assert changes <= {"executive.sqlite3-wal", "executive.sqlite3-shm"}
+    if journal == "delete":
+        assert changes == set()
+
+
+def test_unprotected_path_aba_is_not_a_connection_identity_detector(tmp_path):
+    # Explicit excluded counterexample: without namespace exclusion, restoring A
+    # makes post-open path stats look unchanged while the open handle reads B.
+    import os
+    a, b = tmp_path / "a.db", tmp_path / "b.db"
+    for path, value in [(a, "A"), (b, "B")]:
+        with sqlite3.connect(path) as connection:
+            connection.execute("CREATE TABLE example(value TEXT)")
+            connection.execute("INSERT INTO example VALUES (?)", (value,))
+    identity = a.stat().st_ino
+    saved = tmp_path / "saved-a.db"
+    os.rename(a, saved)
+    os.rename(b, a)
+    connection = sqlite3.connect(a)
+    try:
+        os.rename(a, b)
+        os.rename(saved, a)
+        assert a.stat().st_ino == identity
+        assert connection.execute("SELECT value FROM example").fetchone()[0] == "B"
+    finally:
+        connection.close()
+
+
+def test_bound_read_provider_cannot_suppress_application_error(tmp_path):
+    from contextlib import contextmanager
+    _, provider, binding = _bound_fixture(tmp_path)
+    original_scope = provider.namespace
+
+    @contextmanager
+    def suppress(path):
+        with original_scope(path):
+            try:
+                yield
+            except RuntimeError:
+                pass
+
+    provider.namespace = suppress
+
+    def reader(runtime):
+        with runtime.store.read():
+            raise RuntimeError("must survive namespace exit")
+        return ["FALSE SUCCESS"]
+
+    with pytest.raises(RuntimeError, match="must survive namespace exit"):
+        Runtime.read_bound(tmp_path, binding=binding, reader=reader)
+
+
+def test_bound_read_midquery_provider_refusal_is_typed_and_sticky(tmp_path):
+    _, provider, binding = _bound_fixture(tmp_path)
+
+    def reader(runtime):
+        with runtime.store.read() as connection:
+            connection.execute("SELECT objective FROM jobs").fetchall()
+            provider.valid = False
+        return []
+
+    with pytest.raises(executive_runtime.RuntimeReadUnavailable):
+        Runtime.read_bound(tmp_path, binding=binding, reader=reader)
+    provider.valid = True
+    with pytest.raises(executive_runtime.RuntimeReadUnavailable):
+        _bound_titles(tmp_path, binding)
+
+
+def test_bound_read_rejects_nested_unmaterialized_result(tmp_path):
+    _, _, binding = _bound_fixture(tmp_path)
+
+    def reader(runtime):
+        with runtime.store.read() as connection:
+            hidden = {connection}
+        return {"hidden": hidden}
+
+    with pytest.raises(PersistenceError, match="materialized"):
+        Runtime.read_bound(tmp_path, binding=binding, reader=reader)
+
+
+def test_bound_read_close_uncertainty_retains_namespace_without_retry(tmp_path, monkeypatch):
+    _, provider, binding = _bound_fixture(tmp_path)
+    original = sqlite3.connect
+    calls = []
+
+    class UncertainClose(sqlite3.Connection):
+        def close(self):
+            calls.append("close")
+            raise OSError("close outcome unavailable")
+
+    connections = []
+    def connect(*args, **kwargs):
+        connection = original(*args, factory=UncertainClose, **kwargs)
+        connections.append(connection)
+        return connection
+    monkeypatch.setattr(sqlite3, "connect", connect)
+    try:
+        with pytest.raises((PersistenceError, OSError)):
+            _bound_titles(tmp_path, binding)
+        assert provider.lock.locked(), "namespace must outlive uncertain physical close"
+        assert provider.exits == 0
+        assert calls == ["close"]
+        with pytest.raises(PersistenceError):
+            _bound_titles(tmp_path, binding)
+        assert calls == ["close"]
+    finally:
+        # Test-owned physical resources only. No production retry/recovery API.
+        for connection in connections:
+            sqlite3.Connection.close(connection)
+        retained = getattr(binding, "_retained_namespace", None)
+        if retained is not None:
+            retained.close()
+
+
+def test_bound_read_sqlite_query_error_is_unavailable(tmp_path):
+    _, provider, binding = _bound_fixture(tmp_path)
+    def reader(runtime):
+        with runtime.store.read() as connection:
+            connection.execute("SELECT * FROM definitely_absent_table")
+        return []
+    with pytest.raises(PersistenceError):
+        Runtime.read_bound(tmp_path, binding=binding, reader=reader)
+    assert provider.entries == provider.exits == 1
+
+
+def test_bound_read_setup_close_failure_retains_actual_connection(tmp_path, monkeypatch):
+    _, provider, binding = _bound_fixture(tmp_path)
+    original = sqlite3.connect
+    connections = []
+    class SetupCursor(sqlite3.Cursor):
+        def execute(self, sql, *args):
+            if sql.startswith("PRAGMA foreign_keys"):
+                raise sqlite3.OperationalError("setup failed")
+            return super().execute(sql, *args)
+    class SetupFailure(sqlite3.Connection):
+        def cursor(self):
+            return super().cursor(factory=SetupCursor)
+        def close(self):
+            raise OSError("close unknown")
+    def connect(*args, **kwargs):
+        connection = original(*args, factory=SetupFailure, **kwargs)
+        connections.append(connection)
+        return connection
+    monkeypatch.setattr(sqlite3, "connect", connect)
+    try:
+        with pytest.raises((PersistenceError, OSError)):
+            _bound_titles(tmp_path, binding)
+        assert provider.lock.locked()
+        assert provider.exits == 0
+        assert len(connections) == 1
+    finally:
+        for connection in connections:
+            sqlite3.Connection.close(connection)
+        retained = getattr(binding, "_retained_namespace", None)
+        if retained is not None:
+            retained.close()
+
+
+@pytest.mark.parametrize("uncertain_close", [False, True])
+def test_bound_read_setup_interrupt_closes_or_retains_namespace(tmp_path, monkeypatch, uncertain_close):
+    _, provider, binding = _bound_fixture(tmp_path)
+    original = sqlite3.connect
+    connections, events = [], []
+    provider.after_close = lambda: events.append("namespace_exit")
+
+    class InterruptedCursor(sqlite3.Cursor):
+        def execute(self, sql, *args):
+            if sql.startswith("PRAGMA foreign_keys"):
+                events.append("interrupt")
+                raise KeyboardInterrupt("post-connect setup interrupted")
+            return super().execute(sql, *args)
+
+    class InterruptedSetup(sqlite3.Connection):
+        def cursor(self):
+            return super().cursor(factory=InterruptedCursor)
+
+        def close(self):
+            assert provider.lock.locked(), "close escaped namespace custody"
+            events.append("close_attempt")
+            if uncertain_close:
+                raise OSError("close outcome unavailable")
+            super().close()
+            events.append("physically_closed")
+
+    def connect(*args, **kwargs):
+        connection = original(*args, factory=InterruptedSetup, **kwargs)
+        connections.append(connection)
+        return connection
+
+    monkeypatch.setattr(sqlite3, "connect", connect)
+    try:
+        with pytest.raises((KeyboardInterrupt, OSError)):
+            _bound_titles(tmp_path, binding)
+        assert len(connections) == 1
+        if uncertain_close:
+            assert events == ["interrupt", "close_attempt"]
+            assert binding._unclosed_connection is connections[0]
+            assert provider.lock.locked() and provider.exits == 0
+        else:
+            assert events == ["interrupt", "close_attempt", "physically_closed", "namespace_exit"]
+            with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+                connections[0].execute("SELECT 1")
+            assert not provider.lock.locked() and provider.exits == 1
+        with pytest.raises(PersistenceError):
+            _bound_titles(tmp_path, binding)
+        assert len(connections) == 1  # failed request cannot reconnect
+    finally:
+        # Reconcile only the synthetic test-owned handle/exclusion for teardown.
+        for connection in connections:
+            sqlite3.Connection.close(connection)
+        retained = getattr(binding, "_retained_namespace", None)
+        if retained is not None:
+            retained.close()
+
+
+def test_bound_read_resolution_and_schema_share_actual_handle(tmp_path, monkeypatch):
+    from pathlib import Path
+    _, provider, binding = _bound_fixture(tmp_path)
+    original_resolve, original_connect = Path.resolve, sqlite3.connect
+    connections, traces = [], []
+    def resolve(path, *args, **kwargs):
+        assert provider.lock.locked(), "runtime path resolution escaped custody"
+        return original_resolve(path, *args, **kwargs)
+    def connect(*args, **kwargs):
+        assert provider.lock.locked()
+        connection = original_connect(*args, **kwargs)
+        connections.append(connection)
+        connection.set_trace_callback(traces.append)
+        return connection
+    monkeypatch.setattr(Path, "resolve", resolve)
+    monkeypatch.setattr(sqlite3, "connect", connect)
+    assert _bound_titles(tmp_path, binding) == ["APPROVED DATABASE A"]
+    assert len(connections) == 1  # no constructor/probe connection
+    begin = traces.index("BEGIN")
+    schema = next(i for i, sql in enumerate(traces) if "version, name, checksum FROM schema_migrations" in sql)
+    jobs = next(i for i, sql in enumerate(traces) if "FROM jobs ORDER BY" in sql)
+    assert begin < schema < jobs
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        connections[0].execute("SELECT 1")
+
+
+def test_bound_read_supplied_foreign_snapshot_is_not_admitted(tmp_path):
+    writer, _, binding = _bound_fixture(tmp_path)
+    outside = sqlite3.connect(writer.store.path)
+    outside.row_factory = sqlite3.Row
+    outside.execute("BEGIN")
+    try:
+        def reader(runtime):
+            with runtime.store.read() as owned:
+                runtime.store._assert_owned_snapshot_connection(owned)
+                with pytest.raises(StateConflict):
+                    runtime.store._assert_owned_snapshot_connection(outside)
+                return owned.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+        assert Runtime.read_bound(tmp_path, binding=binding, reader=reader) == 1
+    finally:
+        outside.close()
+
+
+def test_bound_managed_surface_has_no_native_or_factory_escape(tmp_path):
+    writer, _, binding = _bound_fixture(tmp_path)
+    runtime = Runtime.at(tmp_path, create=False, read_binding=binding)
+    with runtime.store.read() as connection:
+        cursor = connection.execute("SELECT objective FROM jobs")
+        assert not isinstance(connection, sqlite3.Connection)
+        assert not isinstance(cursor, sqlite3.Cursor)
+        assert cursor.connection is connection and iter(cursor) is cursor
+        assert isinstance(next(cursor), sqlite3.Row)
+        assert cursor.row_factory is connection.row_factory is sqlite3.Row
+        assert cursor.description[0][0] == "objective"
+        for view, names in [(connection, ["commit", "rollback", "close", "executemany", "executescript", "blobopen", "backup", "serialize", "deserialize", "set_authorizer"]), (cursor, ["executemany", "executescript"])]:
+            for name in names:
+                with pytest.raises(AttributeError):
+                    getattr(view, name)
+        for view, name, value in [(connection, "row_factory", lambda *args: args), (cursor, "row_factory", lambda *args: args), (connection, "isolation_level", None), (connection, "in_transaction", False), (cursor, "connection", writer.store), (cursor, "arraysize", 200)]:
+            with pytest.raises(AttributeError):
+                setattr(view, name, value)
+        with pytest.raises(TypeError):
+            connection.cursor(factory=sqlite3.Cursor)
+        with pytest.raises(TypeError):
+            sqlite3.Cursor(connection)
+        with pytest.raises(TypeError):
+            sqlite3.Connection.execute(connection, "SELECT 1")
+        with pytest.raises(TypeError):
+            sqlite3.Cursor.execute(cursor, "SELECT 1")
+        with pytest.raises(TypeError):
+            with connection:
+                pass
+        cursor.close()
+        cursor.close()  # successful close is idempotent
+
+
+@pytest.mark.parametrize("sql", ["COMMIT", "-- owned transaction\nROLLBACK", "SAVEPOINT sneak", "ATTACH ':memory:' AS other", "PRAGMA foreign_keys=OFF", "PRAGMA writable_schema=ON", "CREATE TEMP TABLE unwanted(value)"])
+def test_bound_managed_query_cannot_change_connection_or_transaction(tmp_path, sql):
+    _, _, binding = _bound_fixture(tmp_path)
+    runtime = Runtime.at(tmp_path, create=False, read_binding=binding)
+    with runtime.store.read() as connection:
+        with pytest.raises(sqlite3.DatabaseError):
+            connection.execute(sql)
+        assert connection.in_transaction
+        assert connection.execute("SELECT count(*) FROM jobs").fetchone()[0] == 1
+
+
+def test_bound_managed_snapshot_requires_exact_active_view(tmp_path):
+    import copy
+    writer, _, binding = _bound_fixture(tmp_path)
+    first = Runtime.at(tmp_path, create=False, read_binding=binding)
+    other = Runtime.at(tmp_path, create=False, read_binding=binding)
+    raw = sqlite3.connect(writer.store.path)
+    try:
+        with first.store.read() as active:
+            first.store._assert_owned_snapshot_connection(active)
+            for foreign in [raw, copy.copy(active)]:
+                with pytest.raises(StateConflict):
+                    first.store._assert_owned_snapshot_connection(foreign)
+            with pytest.raises(StateConflict):
+                other.store._assert_owned_snapshot_connection(active)
+        with first.store.read() as newer:
+            first.store._assert_owned_snapshot_connection(newer)
+            with pytest.raises(StateConflict):
+                first.store._assert_owned_snapshot_connection(active)
+    finally:
+        raw.close()
+
+
+@pytest.mark.parametrize("kind", ["connection", "cursor"])
+def test_bound_managed_return_rejects_nested_views(tmp_path, kind):
+    _, _, binding = _bound_fixture(tmp_path)
+    def reader(runtime):
+        with runtime.store.read() as connection:
+            cursor = connection.execute("SELECT objective FROM jobs")
+        return {"nested": [connection if kind == "connection" else cursor]}
+    with pytest.raises(PersistenceError, match="materialized"):
+        Runtime.read_bound(tmp_path, binding=binding, reader=reader)
+
+
+@pytest.mark.parametrize("trigger", ["public_close", "context_exit"])
+def test_bound_managed_cursor_close_failure_retains_all_resources(tmp_path, monkeypatch, trigger):
+    _, provider, binding = _bound_fixture(tmp_path)
+    original = sqlite3.connect
+    connections, events, bad = [], [], []
+    class FaultCursor(sqlite3.Cursor):
+        fail = False
+        def execute(self, sql, *args):
+            result = super().execute(sql, *args)
+            if "SELECT objective" in sql:
+                self.fail = True
+                bad.append(self)
+            return result
+        def close(self):
+            assert provider.lock.locked()
+            events.append(("cursor_close", self.fail))
+            if self.fail:
+                raise KeyboardInterrupt("cursor finalization unknown")
+            return super().close()
+    class FaultConnection(sqlite3.Connection):
+        def cursor(self):
+            return super().cursor(factory=FaultCursor)
+        def close(self):
+            events.append(("native_close", None))
+            return super().close()
+    def connect(*args, **kwargs):
+        native = original(*args, factory=FaultConnection, **kwargs)
+        connections.append(native)
+        return native
+    monkeypatch.setattr(sqlite3, "connect", connect)
+    try:
+        runtime = Runtime.at(tmp_path, create=False, read_binding=binding)
+        with pytest.raises((KeyboardInterrupt, PersistenceError)):
+            with runtime.store.read() as connection:
+                connection.execute("SELECT 1").close()  # mixed closed/pending
+                cursor = connection.cursor().execute("SELECT objective FROM jobs")
+                if trigger == "public_close":
+                    cursor.close()
+        assert events.count(("cursor_close", True)) == 1
+        assert ("native_close", None) not in events
+        assert provider.lock.locked() and provider.exits == 0
+        assert binding._unclosed_connection is connections[0]
+        assert binding._unclosed_resources is connection
+        assert bad[0] in [item._cursor for item in connection._cursors]
+        with pytest.raises(PersistenceError):
+            _bound_titles(tmp_path, binding)
+        assert len(connections) == 1
+    finally:
+        # Only disposable fault-injected test resources, not production recovery.
+        for native in connections:
+            view = binding._unclosed_resources
+            if view is not None:
+                for item in view._cursors:
+                    sqlite3.Cursor.close(item._cursor)
+            sqlite3.Connection.close(native)
+        if binding._retained_namespace is not None:
+            binding._retained_namespace.close()
+
+
+def test_bound_managed_execute_interrupt_finalizes_registered_cursor(tmp_path, monkeypatch):
+    _, provider, binding = _bound_fixture(tmp_path)
+    original = sqlite3.connect
+    cursors, events = [], []
+    provider.after_close = lambda: events.append("namespace_exit")
+    class InterruptCursor(sqlite3.Cursor):
+        def execute(self, sql, *args):
+            if "FROM jobs" in sql:
+                events.append("interrupt")
+                raise KeyboardInterrupt("execute interrupted")
+            return super().execute(sql, *args)
+        def close(self):
+            assert provider.lock.locked()
+            events.append("cursor_close")
+            return super().close()
+    class InterruptConnection(sqlite3.Connection):
+        def cursor(self):
+            cursor = super().cursor(factory=InterruptCursor)
+            cursors.append(cursor)
+            return cursor
+        def close(self):
+            assert provider.lock.locked()
+            super().close()
+            events.append("native_close")
+    monkeypatch.setattr(sqlite3, "connect", lambda *args, **kwargs: original(*args, factory=InterruptConnection, **kwargs))
+    with pytest.raises(KeyboardInterrupt):
+        _bound_titles(tmp_path, binding)
+    assert events.index("interrupt") < events.index("cursor_close") < events.index("native_close") < events.index("namespace_exit")
+    assert events.count("cursor_close") == len(cursors)
+    assert provider.exits == 1 and not provider.lock.locked()
+
+
+def test_bound_managed_change_preserves_unbound_native_api(tmp_path):
+    writer, _, _ = _bound_fixture(tmp_path)
+    with writer.store.read() as connection:
+        assert isinstance(connection, sqlite3.Connection)
+        cursor = connection.cursor()
+        assert isinstance(cursor, sqlite3.Cursor)
+        cursor.execute("SELECT objective FROM jobs")
+        assert cursor.fetchone()[0] == "APPROVED DATABASE A"
+        cursor.close()
+
+
+def test_bound_managed_schema_cancellation_drains_acquired_connection(tmp_path, monkeypatch):
+    writer, provider, binding = _bound_fixture(tmp_path)
+    runtime = Runtime.at(tmp_path, create=False, read_binding=binding)
+    def interrupted_schema(connection):
+        cursor = connection.execute("SELECT objective FROM jobs")
+        assert cursor.fetchone()[0] == "APPROVED DATABASE A"
+        raise KeyboardInterrupt("schema phase interrupted")
+    monkeypatch.setattr(runtime.store, "_verify_current_schema", interrupted_schema)
+    with pytest.raises(KeyboardInterrupt):
+        with runtime.store.read():
+            pytest.fail("schema interruption must precede caller access")
+    assert provider.exits == 1 and not provider.lock.locked()
+    assert binding._unclosed_connection is None
+    assert _bound_exclusive_witness(writer.store.path)
+    with pytest.raises(PersistenceError):
+        with runtime.store.read():
+            pytest.fail("invalid request cannot reconnect")
