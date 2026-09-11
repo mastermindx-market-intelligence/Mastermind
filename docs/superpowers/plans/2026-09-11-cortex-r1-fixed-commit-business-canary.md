@@ -112,24 +112,22 @@ The later canary creates no repository source. Evidence lives in the existing ex
 
 Read protected `master`, record the exact SHA, then load `docs/sol_skills/INDEX.md` and every required procedure from that same SHA. Separately pin the canary package to `068dcc1533776672844b36ffcde30fad68a4317f`; later protected-master movement does not change the canary revision.
 
-Expected receipt fields:
+Required receipt contract:
 
-```json
-{
-  "schema": "mastermind.cortex_c1_preflight.v1",
-  "operation": "business-sol-cortex-c1-fixed-commit-canary-20260911-sol-001",
-  "carrier": "mastermindx-market-intelligence/Mastermind#563",
-  "current_protected_master": "068dcc1533776672844b36ffcde30fad68a4317f",
-  "skillpack_schema": "mastermind.sol_skillpack.v1",
-  "skillpack_version": "1.0.1",
-  "bootstrap_major": 1,
-  "canary_commit": "068dcc1533776672844b36ffcde30fad68a4317f",
-  "canary_tree": "84f57a0c57387da0a3dd1fb9507302d152b28c89",
-  "effect": "NOT_APPLIED"
-}
+```text
+schema = mastermind.cortex_c1_preflight.v1
+operation = business-sol-cortex-c1-fixed-commit-canary-20260911-sol-001
+carrier = mastermindx-market-intelligence/Mastermind#563
+current_protected_master = exact action-time protected 40-hex commit SHA
+skillpack_schema = mastermind.sol_skillpack.v1
+skillpack_version = exact action-time compatible version
+bootstrap_major = exact action-time compatible integer
+canary_commit = 068dcc1533776672844b36ffcde30fad68a4317f
+canary_tree = 84f57a0c57387da0a3dd1fb9507302d152b28c89
+effect = NOT_APPLIED
 ```
 
-The `current_protected_master` field records the action-time SHA. If protected master has advanced, replace that observation with the exact action-time value after compatibility review; never change `canary_commit`. If Skillpack compatibility fails, return `SKILLPACK_INCOMPATIBLE / NOT_APPLIED`.
+`current_protected_master` is always a fresh action-time observation and must not be copied from `canary_commit`. Protecting this plan necessarily advances the default branch beyond the fixed Cortex source epoch. Later unrelated protected movement is handled by current-source compatibility review; it never changes `canary_commit` or `canary_tree`. If Skillpack compatibility fails, return `SKILLPACK_INCOMPATIBLE / NOT_APPLIED`.
 
 - [ ] **Step 1A: Consume H1 as historical evidence, never as current workspace state**
 
