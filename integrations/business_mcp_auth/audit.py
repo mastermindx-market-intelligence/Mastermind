@@ -235,7 +235,7 @@ class DurableAuthAuditSink:
         witness = -1
         witness_acquired = False
         primary_error: BaseException | None = None
-        cleanup_error: BaseException | None = None
+        cleanup_errors: list[BaseException] = []
         try:
             witness = os.open(
                 _AUDIT_NAME,
@@ -279,23 +279,29 @@ class DurableAuthAuditSink:
                 try:
                     fcntl.flock(witness, fcntl.LOCK_UN)
                 except BaseException as error:
-                    cleanup_error = error
+                    cleanup_errors.append(error)
             try:
                 os.close(witness)
             except BaseException as error:
-                if cleanup_error is None:
-                    cleanup_error = error
+                cleanup_errors.append(error)
 
+        if cleanup_errors:
+            self._close_uncertain = True
+            if primary_error is not None:
+                raise AuditAcquisitionUncertain(
+                    "audit lock ownership proof cleanup is uncertain",
+                    primary_error=primary_error,
+                    cleanup_errors=tuple(cleanup_errors),
+                ) from cleanup_errors[0]
+            raise AuditSinkPoisoned(
+                "audit lock witness cleanup is uncertain"
+            ) from cleanup_errors[0]
         if primary_error is not None:
             if isinstance(primary_error, AuditSinkPoisoned):
                 raise primary_error
             raise AuditSinkPoisoned(
                 "audit lock ownership proof failed"
             ) from primary_error
-        if cleanup_error is not None:
-            raise AuditSinkPoisoned(
-                "audit lock witness cleanup is uncertain"
-            ) from cleanup_error
 
     def _validate_live(self, *, expected_size: int) -> None:
         directory = os.fstat(self._directory_fd)
@@ -382,6 +388,7 @@ class DurableAuthAuditSink:
                 if self._close_uncertain:
                     raise AuditSinkPoisoned("audit close is uncertain")
                 return
+            prior_close_uncertainty = self._close_uncertain
             errors: list[BaseException] = []
             try:
                 self._validate_live(expected_size=self._expected_size)
@@ -398,10 +405,12 @@ class DurableAuthAuditSink:
                     os.close(descriptor)
                 except BaseException as error:
                     errors.append(error)
-            if errors:
+            if errors or prior_close_uncertainty:
                 self._poisoned = True
                 self._close_uncertain = True
-                raise AuditSinkPoisoned("audit close is uncertain") from errors[0]
+                if errors:
+                    raise AuditSinkPoisoned("audit close is uncertain") from errors[0]
+                raise AuditSinkPoisoned("audit close is uncertain")
 
 
 __all__ = [

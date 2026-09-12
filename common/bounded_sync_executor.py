@@ -200,10 +200,7 @@ class BoundedSyncExecutor:
                 )
             ):
                 epoch.attempts.discard(attempt)
-            elif not attempt.started() and (
-                (attempt.task is not None and attempt.task.done())
-                or (epoch.loop.is_closed() and attempt.wrapper_done())
-            ):
+            elif self._nonstarted_attempt_is_retirable(attempt):
                 epoch.attempts.discard(attempt)
 
     def _mark_busy(self, epoch: _LoopEpoch) -> None:
@@ -368,6 +365,18 @@ class BoundedSyncExecutor:
         if attempt.physical_done():
             self._retire_attempt(epoch, attempt)
 
+    @staticmethod
+    def _nonstarted_attempt_is_retirable(attempt: _Attempt) -> bool:
+        if attempt.started():
+            return False
+        if attempt.abandonment() is not None or attempt.wrapper_done():
+            return True
+        task = attempt.task
+        # A cancelled asyncio Task does not prove its already-running executor
+        # wrapper was cancelled. A normally settled task does prove there is no
+        # latent wrapper that can still enter user code.
+        return task is not None and task.done() and not task.cancelled()
+
     def _finish_attempt(
         self, epoch: _LoopEpoch, attempt: _Attempt, task: asyncio.Task[Any]
     ) -> None:
@@ -377,7 +386,10 @@ class BoundedSyncExecutor:
             pass
         finally:
             # Started code is retired only by the worker's physical-done signal.
-            if not attempt.started():
+            # A cancelled Task may still own an already-running executor wrapper;
+            # retain capacity until abandonment fences entry or wrapper completion
+            # proves that no latent call can start.
+            if self._nonstarted_attempt_is_retirable(attempt):
                 self._retire_attempt(epoch, attempt)
 
     async def run(self, operation: Callable[[], _Result], *, timeout: float) -> _Result:
@@ -424,6 +436,7 @@ class BoundedSyncExecutor:
             if deadline_scope.expired():
                 if attempt.abandon("timeout"):
                     physical.cancel()
+                    self._retire_attempt(epoch, attempt)
                 raise SyncExecutionTimeout(
                     "synchronous attempt exceeded its deadline"
                 ) from error
@@ -436,6 +449,7 @@ class BoundedSyncExecutor:
                 raise SyncExecutorClosed("executor admission is closed")
             if attempt.abandon("caller"):
                 physical.cancel()
+                self._retire_attempt(epoch, attempt)
             raise
 
         if result is _NOT_STARTED:
@@ -466,12 +480,13 @@ class BoundedSyncExecutor:
             self._admission_closed = True
             epoch.close_event.set()
             for attempt in tuple(epoch.attempts):
-                attempt.abandon("closed")
-                if not attempt.started() and attempt.task is not None:
+                abandoned = attempt.abandon("closed")
+                if abandoned and attempt.task is not None:
                     # A queued default-executor wrapper is not a physical call.
-                    # Cancellation retires its async admission token; the shared
-                    # gate still prevents a racing worker from entering user code.
+                    # The durable abandonment fence prevents later entry even if
+                    # cancellation cannot stop an already-running wrapper.
                     attempt.task.cancel()
+                    self._retire_attempt(epoch, attempt)
             already_idle = epoch.idle()
 
         if not already_idle:

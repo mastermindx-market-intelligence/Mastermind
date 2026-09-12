@@ -335,11 +335,13 @@ class WorkbenchReadRuntime:
         audit_sink: DurableAuthAuditSink,
         executor: BoundedSyncExecutor,
         io_timeout_seconds: float,
+        clock_ms: Callable[[], int],
     ) -> None:
         self._lease = lease
         self._audit_sink = audit_sink
         self._executor = executor
         self._io_timeout_seconds = io_timeout_seconds
+        self._clock_ms = clock_ms
         self.services: RuntimeServices
         self.server: object
         self._lease_gate = threading.RLock()
@@ -410,6 +412,7 @@ class WorkbenchReadRuntime:
                 audit_sink=audit_sink,
                 executor=executor,
                 io_timeout_seconds=io_timeout,
+                clock_ms=clock_ms,
             )
             runtime.services = RuntimeServices(
                 authenticator=authenticator,
@@ -473,6 +476,14 @@ class WorkbenchReadRuntime:
             except RuntimeClosed:
                 return None
             stable = self._lease.stable
+            try:
+                current_ms = _exact_clock(self._clock_ms(), "clock_ms")
+            except Exception:
+                self._revoked = True
+                return None
+            if current_ms >= stable.lease_expires_at_ms:
+                self._revoked = True
+                return None
             if (
                 type(caller) is not ReadCaller
                 or caller.subject_digest != stable.expected_subject_digest

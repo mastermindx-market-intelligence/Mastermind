@@ -654,8 +654,59 @@ def test_real_signed_mcp_read_renew_revoke_and_audit(tmp_path: Path) -> None:
                 )
                 body = response.json()["result"]
                 assert body["isError"] is False
-                assert body["structuredContent"]["content"] == "runtime source\n"
-                assert len(body["structuredContent"]) == 22
+                structured = body["structuredContent"]
+                assert set(structured) == {
+                    "atomic_workspace_snapshot",
+                    "committed_head",
+                    "content",
+                    "content_bytes",
+                    "context_ref",
+                    "file_bytes",
+                    "file_identity_digest",
+                    "file_sha256",
+                    "generation",
+                    "index_status",
+                    "line_end",
+                    "line_start",
+                    "next_line",
+                    "observation_digest",
+                    "observed_at_ms",
+                    "owner_ref",
+                    "project_ref",
+                    "relative_path",
+                    "status",
+                    "total_lines",
+                    "truncated",
+                    "view_kind",
+                }
+                assert structured["content"] == "runtime source\n"
+                assert structured["content_bytes"] == len("runtime source\n".encode())
+                assert structured["file_bytes"] == len(
+                    "runtime source\nsecond line\n".encode()
+                )
+                assert structured["file_sha256"] == arguments["expected_sha256"]
+                assert structured["relative_path"] == "source.txt"
+                assert structured["project_ref"] == PROJECT
+                assert structured["context_ref"] == CONTEXT
+                assert structured["owner_ref"] == OWNER
+                assert structured["generation"] == GENERATION
+                assert structured["committed_head"] == "7" * 40
+                assert structured["line_start"] == 0
+                assert structured["line_end"] == 1
+                assert structured["next_line"] == 1
+                assert structured["total_lines"] == 2
+                assert structured["truncated"] is True
+                assert structured["status"] == "OK"
+                assert structured["view_kind"] == "WORKING_TREE"
+                assert structured["index_status"] == "NOT_OBSERVED"
+                assert structured["atomic_workspace_snapshot"] is False
+                assert structured["observed_at_ms"] == start * 1000
+                for digest in (
+                    structured["file_identity_digest"],
+                    structured["observation_digest"],
+                ):
+                    assert len(digest) == 64
+                    assert set(digest) <= set("0123456789abcdef")
 
             clock[0] = start + 21
             expired = await rpc(
@@ -1113,3 +1164,84 @@ def test_root_drift_postcheck_outranks_operation_failure(tmp_path: Path) -> None
         asyncio.run(runtime.aclose(timeout=1))
     os.close(project_fd)
     os.close(audit_fd)
+
+
+def test_stable_lease_expiry_after_observation_before_await_release_withholds_content(
+    tmp_path: Path,
+) -> None:
+    from contextlib import ExitStack
+
+    current_ms = [NOW * 1000]
+    selected_policy = policy()
+    with ExitStack() as host_cleanup:
+        _project, project_fd, audit_fd = open_dirs(tmp_path)
+        # LIFO callbacks preserve the original project-then-audit close order;
+        # both are attempted even if the first raises. Exception context is kept.
+        host_cleanup.callback(os.close, audit_fd)
+        host_cleanup.callback(os.close, project_fd)
+        with asyncio.Runner() as runner:
+            runtime = WorkbenchReadRuntime.open(
+                authenticator=authenticator(selected_policy),
+                policy=selected_policy,
+                now=lambda: NOW,
+                clock_ms=lambda: current_ms[0],
+                project_directory_fd=project_fd,
+                audit_directory_fd=audit_fd,
+                lease=lease(lease_expires_at_ms=NOW * 1000 + 1_000),
+                allowed_hosts=("127.0.0.1",),
+                max_concurrency=1,
+                io_timeout_seconds=1,
+            )
+            try:
+                caller = ReadCaller(
+                    SUBJECT, CLIENT, RESOURCE, ("workbench.read",), NOW + 60
+                )
+                observed = asyncio.Event()
+                release = asyncio.Event()
+
+                async def gated_run_io(operation):
+                    result = await runtime.run_io(operation)
+                    observed.set()
+                    await release.wait()
+                    return result
+
+                read = create_descriptor_read_port(
+                    resolve_binding=runtime.resolve_binding,
+                    clock_ms=lambda: current_ms[0],
+                    run_io=gated_run_io,
+                )
+
+                async def scenario() -> None:
+                    pending = asyncio.create_task(
+                        read(
+                            caller,
+                            {"project_ref": PROJECT, "relative_path": "source.txt"},
+                        )
+                    )
+                    try:
+                        await asyncio.wait_for(observed.wait(), 1)
+                        current_ms[0] = NOW * 1000 + 1_000
+                        release.set()
+                        with pytest.raises(ProjectReadRefused):
+                            await pending
+                        # An expired immutable lease cannot revive on clock rewind.
+                        current_ms[0] = NOW * 1000
+                        with pytest.raises(ProjectReadRefused):
+                            await read(
+                                caller,
+                                {"project_ref": PROJECT, "relative_path": "source.txt"},
+                            )
+                    finally:
+                        release.set()
+                        # Only this test's registered async read is settled here.
+                        # Cancelling it does not claim to interrupt physical I/O.
+                        if not pending.done():
+                            pending.cancel()
+                        await asyncio.gather(pending, return_exceptions=True)
+
+                runner.run(scenario())
+            finally:
+                # Still the SAME live loop/context, even after an assertion failure.
+                # Actual physical drain remains Runtime's responsibility. The fixed
+                # existing timeout is unchanged; a refusal is not hidden or retried.
+                runner.run(runtime.aclose(timeout=1))

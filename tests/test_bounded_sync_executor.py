@@ -745,3 +745,191 @@ def test_close_reaps_abandoned_queued_wrapper_after_owner_loop_closes() -> None:
 
     asyncio.run(executor.aclose(timeout=1))
     assert executor.attempts_snapshot() == ()
+
+
+def test_stopped_owner_loop_cannot_forget_cancelled_wrapper_before_worker_entry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executor = BoundedSyncExecutor(max_concurrency=1)
+    pool = ThreadPoolExecutor(max_workers=1)
+    owner_loop = asyncio.new_event_loop()
+    wrapper_entered = threading.Event()
+    release_wrapper = threading.Event()
+    original_operation_entered = threading.Event()
+    foreign_operation_entered = threading.Event()
+    finish_callback_seen = threading.Event()
+    state: dict[str, object] = {}
+    intercept_owner_finish = [True]
+    primary_failure: BaseException | None = None
+    cleanup_failures: list[BaseException] = []
+    executor_terminal = False
+
+    real_invoke = executor._invoke
+    real_finish_attempt = executor._finish_attempt
+
+    def gated_invoke(epoch: Any, attempt: Any, operation: Any) -> Any:
+        if epoch.loop is owner_loop:
+            # The worker Future is already running and therefore cannot be
+            # cancelled from the asyncio Task, but user code has not entered.
+            wrapper_entered.set()
+            if not release_wrapper.wait(5):
+                raise AssertionError("old executor wrapper gate was not released")
+        return real_invoke(epoch, attempt, operation)
+
+    def stop_before_caller_resumes(
+        epoch: Any, attempt: Any, task: asyncio.Task[Any]
+    ) -> None:
+        if epoch.loop is owner_loop and intercept_owner_finish[0]:
+            try:
+                task.result()
+            except asyncio.CancelledError:
+                pass
+            except BaseException as error:
+                state["unexpected_finish_error"] = error
+            finish_callback_seen.set()
+            # Stop before the outer run() Task can translate cancellation into
+            # durable attempt abandonment.
+            epoch.loop.stop()
+            return
+        real_finish_attempt(epoch, attempt, task)
+
+    def original_operation() -> str:
+        original_operation_entered.set()
+        return "original"
+
+    def foreign_operation() -> str:
+        foreign_operation_entered.set()
+        return "foreign"
+
+    async def register_owner_attempt() -> None:
+        caller = asyncio.create_task(
+            executor.run(original_operation, timeout=5)
+        )
+        state["caller"] = caller
+        for _ in range(1000):
+            attempts = executor.attempts_snapshot()
+            if (
+                len(attempts) == 1
+                and attempts[0].task is not None
+                and wrapper_entered.is_set()
+            ):
+                attempt = attempts[0]
+                state["attempt"] = attempt
+                state["owner_epoch"] = executor._epoch
+                owner_loop.call_soon(attempt.task.cancel)
+                return
+            await asyncio.sleep(0.001)
+        raise AssertionError("running-but-not-entered wrapper was not registered")
+
+    async def settle_owner_attempt() -> None:
+        caller = state.get("caller")
+        attempt = state.get("attempt")
+        if isinstance(caller, asyncio.Task):
+            if not caller.done() and attempt is None:
+                caller.cancel()
+            await asyncio.gather(caller, return_exceptions=True)
+        if attempt is not None:
+            await wait_until(attempt.wrapper_done, timeout=2)
+            if attempt.started():
+                await wait_until(attempt.physical_done, timeout=2)
+
+    async def verify_reuse() -> None:
+        if not executor._admission_closed:
+            assert await executor.run(
+                lambda: "next", timeout=1
+            ) == "next"
+
+    async def close_executor() -> None:
+        nonlocal executor_terminal
+        await executor.aclose(timeout=1)
+        executor_terminal = True
+
+    with monkeypatch.context() as patch:
+        patch.setattr(executor, "_invoke", gated_invoke)
+        patch.setattr(executor, "_finish_attempt", stop_before_caller_resumes)
+        try:
+            owner_loop.set_default_executor(pool)
+            owner_loop.set_exception_handler(
+                lambda _loop, _context: None
+            )
+            owner_loop.run_until_complete(register_owner_attempt())
+            owner_loop.run_forever()
+
+            caller = state["caller"]
+            attempt = state["attempt"]
+            owner_epoch = state["owner_epoch"]
+            assert finish_callback_seen.is_set()
+            assert "unexpected_finish_error" not in state
+            assert attempt.task is not None and attempt.task.cancelled()
+            assert not caller.done()
+            assert not attempt.started()
+            assert attempt.abandonment() is None
+            assert not attempt.wrapper_done()
+            assert attempt in owner_epoch.attempts
+
+            async def foreign_probe() -> None:
+                with pytest.raises(SyncExecutorLoopConflict):
+                    await executor.run(
+                        foreign_operation, timeout=0.2
+                    )
+
+            asyncio.run(foreign_probe())
+            assert not foreign_operation_entered.is_set()
+
+            # The old worker was already physically running before Task
+            # cancellation. It may still enter the original operation, but it
+            # must remain the sole capacity owner until real completion.
+            release_wrapper.set()
+            assert original_operation_entered.wait(1)
+            intercept_owner_finish[0] = False
+            owner_loop.run_until_complete(settle_owner_attempt())
+            owner_loop.run_until_complete(
+                wait_until(
+                    lambda: attempt not in owner_epoch.attempts,
+                    timeout=2,
+                )
+            )
+            assert caller.cancelled()
+            assert attempt.started()
+            assert attempt.physical_done()
+            assert attempt.wrapper_done()
+            assert attempt not in owner_epoch.attempts
+            asyncio.run(verify_reuse())
+        except BaseException as error:
+            primary_failure = error
+        finally:
+            # Settle every test-owned resource before monkeypatch restoration.
+            # Gate release is idempotent cleanup, not a production retry.
+            intercept_owner_finish[0] = False
+            release_wrapper.set()
+            if not owner_loop.is_closed():
+                try:
+                    owner_loop.run_until_complete(settle_owner_attempt())
+                except BaseException as error:
+                    cleanup_failures.append(error)
+            try:
+                pool.shutdown(wait=True, cancel_futures=False)
+            except BaseException as error:
+                cleanup_failures.append(error)
+            if not owner_loop.is_closed():
+                try:
+                    owner_loop.close()
+                except BaseException as error:
+                    cleanup_failures.append(error)
+            if not executor_terminal:
+                try:
+                    asyncio.run(close_executor())
+                except BaseException as error:
+                    cleanup_failures.append(error)
+
+    if primary_failure is not None:
+        if cleanup_failures:
+            raise BaseExceptionGroup(
+                "cross-loop assertion and distinct cleanup failures",
+                [primary_failure, *cleanup_failures],
+            )
+        raise primary_failure.with_traceback(primary_failure.__traceback__)
+    if cleanup_failures:
+        raise BaseExceptionGroup(
+            "cross-loop cleanup failures", cleanup_failures
+        )

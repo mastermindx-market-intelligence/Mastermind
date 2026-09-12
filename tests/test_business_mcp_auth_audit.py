@@ -509,3 +509,152 @@ def test_uncertain_close_remains_uncertain_on_later_calls(tmp_path: Path) -> Non
     with pytest.raises(OSError):
         os.fstat(directory_fd)
     os.close(host_fd)
+
+
+def test_emit_witness_close_uncertainty_stays_uncertain_through_two_closes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    directory = tmp_path / "audit"
+    host_fd = open_directory(directory)
+    sink = DurableAuthAuditSink.open(host_fd, policy_id=POLICY_ID)
+    audit_fd = sink._audit_fd
+    directory_fd = sink._directory_fd
+    real_close = audit.os.close
+    witness_fds: list[int] = []
+
+    def fail_first_witness_close(descriptor: int) -> None:
+        if descriptor not in {host_fd, audit_fd, directory_fd} and not witness_fds:
+            witness_fds.append(descriptor)
+            raise OSError("synthetic witness close uncertainty")
+        real_close(descriptor)
+
+    monkeypatch.setattr(audit.os, "close", fail_first_witness_close)
+    try:
+        with pytest.raises(AuditSinkPoisoned):
+            sink.emit(event())
+        with pytest.raises(AuditSinkPoisoned, match="audit close is uncertain"):
+            sink.close()
+        with pytest.raises(AuditSinkPoisoned, match="audit close is uncertain"):
+            sink.close()
+        with pytest.raises(OSError):
+            os.fstat(audit_fd)
+        with pytest.raises(OSError):
+            os.fstat(directory_fd)
+    finally:
+        monkeypatch.setattr(audit.os, "close", real_close)
+        for descriptor in witness_fds:
+            try:
+                real_close(descriptor)
+            except OSError:
+                pass
+        real_close(host_fd)
+
+
+def test_owner_proof_retains_unlock_and_close_failures_in_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_close = audit.os.close
+    real_flock = audit.fcntl.flock
+    host_fd = open_directory(tmp_path / "audit")
+    sink = None
+    injected_witness: list[int] = []
+    witness_close_calls = 0
+    primary_close_calls: dict[int, int] = {}
+    primary_unlock_calls = 0
+    primary_failure: BaseException | None = None
+    fixture_cleanup_failures: list[BaseException] = []
+    unlock_failure = OSError("synthetic witness unlock failure")
+    close_failure = OSError("synthetic witness close failure")
+
+    try:
+        sink = DurableAuthAuditSink.open(host_fd, policy_id=POLICY_ID)
+        audit_fd, directory_fd = sink._audit_fd, sink._directory_fd
+        protected_fds = {host_fd, audit_fd, directory_fd}
+        primary_close_calls = {audit_fd: 0, directory_fd: 0}
+        # This affects only the test-owned sink. It forces the existing owner
+        # proof to acquire its witness and record the primary proof failure.
+        real_flock(audit_fd, fcntl.LOCK_UN)
+
+        def injected_flock(descriptor: int, operation: int) -> None:
+            nonlocal primary_unlock_calls
+            if operation == fcntl.LOCK_UN and descriptor not in protected_fds:
+                if not injected_witness:
+                    injected_witness.append(descriptor)
+                if descriptor == injected_witness[0]:
+                    # Guaranteed NO syscall: fixture teardown retains ownership.
+                    raise unlock_failure
+            if descriptor == audit_fd and operation == fcntl.LOCK_UN:
+                primary_unlock_calls += 1
+            real_flock(descriptor, operation)
+
+        def injected_close(descriptor: int) -> None:
+            nonlocal witness_close_calls
+            if injected_witness and descriptor == injected_witness[0]:
+                witness_close_calls += 1
+                # Every target attempt is observed and has NO physical effect.
+                # Teardown's real_close is therefore not an uncertain retry.
+                raise close_failure
+            if descriptor in primary_close_calls:
+                primary_close_calls[descriptor] += 1
+            real_close(descriptor)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(audit.fcntl, "flock", injected_flock)
+            patch.setattr(audit.os, "close", injected_close)
+            with pytest.raises(AuditAcquisitionUncertain) as captured:
+                sink.emit(event())
+            proof_failure = captured.value
+
+            # Exercise release before asserting the new evidence tuple. The old
+            # one-error candidate should fail at the tuple assertion, after the
+            # primary descriptors have already had their one release attempt.
+            with pytest.raises(AuditSinkPoisoned, match="audit close is uncertain"):
+                sink.close()
+            with pytest.raises(AuditSinkPoisoned, match="audit close is uncertain"):
+                sink.close()
+
+            assert isinstance(proof_failure.primary_error, AuditSinkPoisoned)
+            assert "owner lock is absent" in str(proof_failure.primary_error)
+            assert proof_failure.cleanup_errors == (unlock_failure, close_failure)
+            assert proof_failure.cleanup_errors[0] is unlock_failure
+            assert proof_failure.cleanup_errors[1] is close_failure
+            assert proof_failure.__cause__ is unlock_failure
+            assert witness_close_calls == 1
+            assert primary_unlock_calls == 1
+            assert primary_close_calls == {audit_fd: 1, directory_fd: 1}
+            with pytest.raises(OSError):
+                os.fstat(audit_fd)
+            with pytest.raises(OSError):
+                os.fstat(directory_fd)
+            os.fstat(host_fd)  # The caller's descriptor remains caller-owned.
+    except BaseException as error:
+        primary_failure = error
+    finally:
+        # The local monkeypatch context has already restored the actual APIs.
+        # Only the exact descriptor whose injected close never made a syscall
+        # is cleaned here; there is no search for, adoption of, or retry of an
+        # unobserved descriptor. No unrelated process or descriptor is touched.
+        for descriptor in injected_witness:
+            try:
+                real_close(descriptor)
+            except BaseException as error:
+                fixture_cleanup_failures.append(error)
+        if sink is not None and not sink._closed:
+            try:
+                sink.close()
+            except BaseException as error:
+                fixture_cleanup_failures.append(error)
+        try:
+            real_close(host_fd)
+        except BaseException as error:
+            fixture_cleanup_failures.append(error)
+
+    if primary_failure is not None:
+        if fixture_cleanup_failures:
+            raise BaseExceptionGroup(
+                "regression failure and distinct fixture cleanup failures",
+                [primary_failure, *fixture_cleanup_failures],
+            )
+        raise primary_failure.with_traceback(primary_failure.__traceback__)
+    if fixture_cleanup_failures:
+        raise BaseExceptionGroup("fixture cleanup failures", fixture_cleanup_failures)
