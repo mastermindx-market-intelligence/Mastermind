@@ -162,14 +162,14 @@ External release artifact identities:
 ```text
 normalized oracle SHA-256 = 1530dbe663fd707e8e431df57d289af3f3bba9786ed14ed12fae34d5a82223fe
 offline verifier SHA-256 = 491a28f8637484d3f780b0203a8b9bb5bec97417da6fa11a0f5f1a8cf4b2f107
-verifier tests SHA-256 = caa4f834ddafa25b1d665ffafd0940be15b518e0b6dddb05bf2dcd63be4a7830
-canary trace validator SHA-256 = cb38c454dab2f41ac6543173c98301e67dbd8245815fa2a430bf7ba0da675048
-trace tests SHA-256 = e138e395fde55bb67d02dcc3c05be10bf9f58bb1aa81232ea6772804a41d2810
+verifier tests SHA-256 = 4175d99ecc290410f99db35eab7e857627bec1c588468332fccb8ee2e47783c7
+canary trace validator SHA-256 = 4c6ff9e692c8e43f0f1a0dc5a2688b61c5c24ea7c683d6b9d69d58212a205f0a
+trace tests SHA-256 = a92deb5b27bc1c5c27e2623c6b4be30215a93cc659b1b14ad9632a96d5f9331a
 source-evidence builder `build_cortex_c1_public_source_evidence.py` SHA-256 = 0b9b4ea5174b07f148d07fd9ae75c88a088db2d0208934568c5c49aca022147c
-source-evidence builder tests SHA-256 = 3f76dd90adf5cb697a3f8ffbcfc0a830d1249e23afba4199826a26ef42495aa6
-current `mastermind.cortex_c1_public_source_evidence_examples.v2` examples SHA-256 = c86b13b8f2147decc03097e3a062fb9f2c69902f9639f4a7ffcb4c9f998b0084
-golden structural trace SHA-256 = 1abddb394faf0e3b5baf38a70d1610c98aca07fef1ebfb175a739a343140122d
-golden action-context example SHA-256 = bca5e352545c962b7d6e4272ce69453f13a386ae0ad2d627b2c45878a2de5518
+source-evidence builder tests SHA-256 = 64d80140a247453757ff83173070a79eefbb4b9172a885e8c4d04de2200c5e73
+current `mastermind.cortex_c1_public_source_evidence_examples.v2` examples SHA-256 = a35b7b6021dadeaab721656c33d33ad15011a5944949d8d1d0cb5ab20fcfec0d
+golden structural trace SHA-256 = 87fe423a2f0583c2e86335c5cc9a333d962eb4ccab3dd3e762fc7a4328b9c9a6
+golden action-context example SHA-256 = dde1ac7ff157616d829829dce8fa3958808b273a31f710a71a2b98267fe525ba
 ```
 
 The trace declares `VALIDATION_FIXTURE_ONLY`, enforces exact event-key schemas and external example
