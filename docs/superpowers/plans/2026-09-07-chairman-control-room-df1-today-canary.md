@@ -277,7 +277,7 @@ COVERAGE_STATES = frozenset({
     "COMPLETE", "INCOMPLETE", "HISTORICAL_ONLY", "NOT_PROJECTED", "NOT_APPLICABLE"
 })
 FEATURE_GATE_KEYS_IN_ORDER = ("advanced", "programs", "ask_sol", "actions")
-FEATURE_AVAILABILITY_STATES = frozenset({"AVAILABLE", "UNAVAILABLE"})
+FEATURE_AVAILABILITY_STATES = frozenset({"AVAILABLE", "UNAVAILABLE", "READ_ONLY"})
 AFFECTS_KEYS_IN_ORDER = (
     "read_state", "headline", "decisions", "attention", "changes",
     "sol_handling", "exceptions", "programs", "feature_gates.programs",
