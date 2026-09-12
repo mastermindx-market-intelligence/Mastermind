@@ -1,0 +1,14 @@
+{
+  "schema": "mastermind.reality_catalog_fragment.v1",
+  "plugin": "mastermind-reality",
+  "package_path": "plugins/mastermind-reality",
+  "manifest_path": "plugins/mastermind-reality/.codex-plugin/plugin.json",
+  "skills": [
+    "inspect-product-journey"
+  ],
+  "capabilities": [
+    "Read"
+  ],
+  "source_state": "SOURCE_CANDIDATE",
+  "installation_state": "NOT_INSTALLED"
+}
