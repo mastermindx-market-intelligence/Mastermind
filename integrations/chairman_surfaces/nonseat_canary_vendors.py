@@ -30,6 +30,7 @@ import http.client
 import http.server
 import importlib.util
 import json
+import math
 import os
 import re
 import secrets
@@ -595,6 +596,251 @@ class _BoundedResponse:
         self.payload = payload
 
 
+_PROFILE_ITEM_COPY_MAX_DEPTH = 32
+_PROFILE_ITEM_COPY_MAX_NODES = 4096
+
+
+def _copy_exact_json(value, *, _seen=None, _nodes=None, _depth=0):
+    """Copy only non-aliased, exact built-in JSON values without hooks."""
+
+    if _depth > _PROFILE_ITEM_COPY_MAX_DEPTH:
+        raise ValueError("profile item nesting exceeded")
+    if _nodes is None:
+        _nodes = [0]
+    _nodes[0] += 1
+    if _nodes[0] > _PROFILE_ITEM_COPY_MAX_NODES:
+        raise ValueError("profile item node count exceeded")
+    value_type = type(value)
+    if value is None or value_type in (str, bool, int):
+        return value
+    if value_type is float:
+        if not math.isfinite(value):
+            raise ValueError("non-finite profile item value")
+        return value
+    if value_type not in (list, dict):
+        raise ValueError("non-json profile item value")
+    if _seen is None:
+        _seen = set()
+    value_id = id(value)
+    if value_id in _seen:
+        raise ValueError("aliased profile item value")
+    _seen.add(value_id)
+    if value_type is list:
+        return [
+            _copy_exact_json(
+                item,
+                _seen=_seen,
+                _nodes=_nodes,
+                _depth=_depth + 1,
+            )
+            for item in value
+        ]
+    copied = {}
+    for key, item in value.items():
+        if type(key) is not str:
+            raise ValueError("non-string profile item key")
+        copied[key] = _copy_exact_json(
+            item,
+            _seen=_seen,
+            _nodes=_nodes,
+            _depth=_depth + 1,
+        )
+    return copied
+
+
+def _mlx_profile_search_request_arguments(
+    credential,
+    folder_id: str,
+    *,
+    offset: int,
+    diagnostic_sink,
+):
+    """Build the one canonical Profile Search request without a transport."""
+
+    body = {
+        "is_removed": False,
+        "limit": _PROFILE_PAGE_SIZE,
+        "offset": offset,
+        "search_text": "",
+        "storage_type": "all",
+        "order_by": "created_at",
+        "sort": "asc",
+        "folder_id": folder_id,
+    }
+    return (
+        "POST",
+        _MLX_CLOUD_ORIGIN,
+        "/profile/search",
+        BoundedHttpClient._bearer(credential),
+        None,
+        body,
+        diagnostic_sink,
+    )
+
+
+class _ProfileSearchCensusState:
+    """Transport-free, one-shot parser for a bounded Profile Search census."""
+
+    __slots__ = (
+        "_folder_id",
+        "_peer_name",
+        "_offset",
+        "_expected_total",
+        "_seen_ids",
+        "_matches",
+        "_complete",
+        "_finished",
+    )
+
+    def __init__(self, *, folder_id: str, peer_name: str | None):
+        if type(folder_id) is not str or type(peer_name) not in (str, type(None)):
+            raise _core.CanaryRefusal("VENDOR_ERROR")
+        canonical_folder = _canonical_multilogin_profile_id(folder_id)
+        if canonical_folder is None:
+            raise _core.CanaryRefusal("VENDOR_ERROR")
+        self._folder_id = canonical_folder
+        self._peer_name = peer_name
+        self._offset = 0
+        self._expected_total = None
+        self._seen_ids = set()
+        self._matches = []
+        self._complete = False
+        self._finished = False
+
+    @property
+    def next_offset(self):
+        if self._finished or self._complete or type(self._offset) is not int:
+            raise _core.CanaryRefusal("VENDOR_ERROR")
+        return self._offset
+
+    @property
+    def complete(self) -> bool:
+        return self._complete is True and self._finished is False
+
+    @staticmethod
+    def _refuse(diagnostic_sink, diagnostic):
+        _record_initial_peer_census_diagnostic(diagnostic_sink, diagnostic)
+        raise _core.CanaryRefusal("VENDOR_ERROR")
+
+    def consume(self, response, *, diagnostic_sink) -> None:
+        """Validate one page completely before committing pagination state."""
+
+        if self._finished or self._complete:
+            self._refuse(diagnostic_sink, "PAGINATION_INVALID")
+        if response is None:
+            self._refuse(diagnostic_sink, "TRANSPORT_FAILURE")
+        status_code = response.status_code
+        if status_code in (401, 403):
+            raise _core.CanaryRefusal("AUTH_EXPIRED")
+        if status_code != 200:
+            if status_code == 429:
+                diagnostic = "HTTP_RATE_LIMITED"
+            elif type(status_code) is int and 400 <= status_code < 500:
+                diagnostic = "HTTP_REQUEST_REJECTED"
+            elif type(status_code) is int and 500 <= status_code < 600:
+                diagnostic = "HTTP_SERVICE_UNAVAILABLE"
+            else:
+                diagnostic = "HTTP_UNEXPECTED"
+            self._refuse(diagnostic_sink, diagnostic)
+
+        payload = response.payload
+        data = MultiloginClient._successful_envelope(payload, expected_message=None)
+        if data is None or type(payload) is not dict:
+            status = payload.get("status") if type(payload) is dict else None
+            status_valid = (
+                type(payload) is dict
+                and set(payload) == {"status", "data"}
+                and type(status) is dict
+                and set(status) == {"error_code", "http_code", "message"}
+                and status.get("error_code") == ""
+                and status.get("http_code") == 200
+                and type(status.get("message")) is str
+            )
+            self._refuse(
+                diagnostic_sink,
+                "DATA_SCHEMA_INVALID" if status_valid else "STATUS_ENVELOPE_INVALID",
+            )
+        if type(data) is not dict or set(data) != {"profiles", "total_count"}:
+            self._refuse(diagnostic_sink, "DATA_SCHEMA_INVALID")
+        profiles = data.get("profiles")
+        total = data.get("total_count")
+        if type(profiles) is not list or type(total) is not int:
+            self._refuse(diagnostic_sink, "DATA_SCHEMA_INVALID")
+        if total < 0 or total > _MAX_PROFILE_CENSUS:
+            self._refuse(diagnostic_sink, "DATA_SCHEMA_INVALID")
+
+        expected_total = total if self._expected_total is None else self._expected_total
+        if total != expected_total or len(profiles) > _PROFILE_PAGE_SIZE:
+            self._refuse(diagnostic_sink, "PAGINATION_INVALID")
+
+        seen_ids = set(self._seen_ids)
+        matches = list(self._matches)
+        for item in profiles:
+            if type(item) is not dict or not {"id", "folder_id", "name"}.issubset(item):
+                self._refuse(diagnostic_sink, "PROFILE_ITEM_INVALID")
+            raw_id = item.get("id")
+            raw_folder = item.get("folder_id")
+            item_name = item.get("name")
+            if type(raw_id) is not str or type(raw_folder) is not str or type(item_name) is not str:
+                self._refuse(diagnostic_sink, "PROFILE_ITEM_INVALID")
+            item_id = _canonical_multilogin_profile_id(raw_id)
+            item_folder = _canonical_multilogin_profile_id(raw_folder)
+            if item_id is None or item_folder is None:
+                self._refuse(diagnostic_sink, "PROFILE_ITEM_INVALID")
+            if item_id in seen_ids:
+                self._refuse(diagnostic_sink, "PAGINATION_INVALID")
+            seen_ids.add(item_id)
+            if self._peer_name is not None and item_name == self._peer_name:
+                if item_folder != self._folder_id:
+                    self._refuse(diagnostic_sink, "PROFILE_ITEM_INVALID")
+                if type(item.get("browser_type")) is not str or type(item.get("os_type")) is not str:
+                    self._refuse(diagnostic_sink, "PROFILE_ITEM_INVALID")
+                try:
+                    canonical = _copy_exact_json(item)
+                except ValueError:
+                    self._refuse(diagnostic_sink, "PROFILE_ITEM_INVALID")
+                canonical["id"] = item_id
+                canonical["folder_id"] = item_folder
+                matches.append(canonical)
+
+        offset = self._offset + len(profiles)
+        complete = offset == total
+        if not complete and (not profiles or offset > total):
+            self._refuse(diagnostic_sink, "PAGINATION_INVALID")
+
+        self._expected_total = expected_total
+        self._seen_ids = seen_ids
+        self._matches = matches
+        self._offset = offset
+        self._complete = complete
+
+    def _scrub_finished_state(self) -> None:
+        self._folder_id = None
+        self._peer_name = None
+        self._offset = None
+        self._expected_total = None
+        self._seen_ids = set()
+        self._matches = []
+        self._complete = False
+        self._finished = True
+
+    def finish(self) -> list:
+        """Return fresh per-item copies only after exact completion, then scrub."""
+
+        if self._finished or self._complete is not True:
+            raise _core.CanaryRefusal("VENDOR_ERROR")
+        try:
+            # Each retained row passed this exact per-item policy in ``consume``.
+            # Do not accidentally apply a second aggregate node/depth budget to a
+            # valid complete census merely because it contains many matches.
+            result = [_copy_exact_json(item) for item in self._matches]
+        except ValueError as exc:
+            self._scrub_finished_state()
+            raise _core.CanaryRefusal("VENDOR_ERROR") from exc
+        self._scrub_finished_state()
+        return result
+
+
 class BoundedHttpClient:
     """One fail-closed transport for cloud, launcher, and loopback calls.
 
@@ -698,20 +944,22 @@ class BoundedHttpClient:
     def _mlx_profile_search_request(
         self, credential, folder_id: str, *, offset: int, diagnostic_sink,
     ):
-        body = {
-            "is_removed": False,
-            "limit": _PROFILE_PAGE_SIZE,
-            "offset": offset,
-            "search_text": "",
-            "storage_type": "all",
-            "order_by": "created_at",
-            "sort": "asc",
-            "folder_id": folder_id,
-        }
+        method, origin, path, headers, params, body, sink = (
+            _mlx_profile_search_request_arguments(
+                credential,
+                folder_id,
+                offset=offset,
+                diagnostic_sink=diagnostic_sink,
+            )
+        )
         return self._request(
-            "POST", _MLX_CLOUD_ORIGIN, "/profile/search",
-            headers=self._bearer(credential), json_body=body,
-            diagnostic_sink=diagnostic_sink,
+            method,
+            origin,
+            path,
+            headers=headers,
+            params=params,
+            json_body=body,
+            diagnostic_sink=sink,
         )
 
     def _mlx_profile_create(self, credential, folder_id: str, name: str):
@@ -1398,11 +1646,13 @@ class MultiloginClient:
         self, *, folder_id: str, peer_name: str, diagnostic_sink,
     ) -> list:
         self._require_credential()
-        offset = 0
-        expected_total = None
-        seen_ids = set()
-        matches = []
-        while offset < _MAX_PROFILE_CENSUS:
+        state = _ProfileSearchCensusState(
+            folder_id=folder_id,
+            peer_name=peer_name,
+        )
+        while not state.complete:
+            offset = state.next_offset
+
             def _search():
                 diagnostic_call = getattr(
                     self._client, "_mlx_profile_search_with_diagnostic", None,
@@ -1419,126 +1669,8 @@ class MultiloginClient:
             resp = self._safe_call(
                 _search, diagnostic_sink=diagnostic_sink,
             )
-            if resp is None:
-                _record_initial_peer_census_diagnostic(
-                    diagnostic_sink, "TRANSPORT_FAILURE",
-                )
-                raise _core.CanaryRefusal("VENDOR_ERROR")
-            if resp.status_code in (401, 403):
-                raise _core.CanaryRefusal("AUTH_EXPIRED")
-            if resp.status_code != 200:
-                if resp.status_code == 429:
-                    diagnostic = "HTTP_RATE_LIMITED"
-                elif (
-                    isinstance(resp.status_code, int)
-                    and not isinstance(resp.status_code, bool)
-                    and 400 <= resp.status_code < 500
-                ):
-                    diagnostic = "HTTP_REQUEST_REJECTED"
-                elif (
-                    isinstance(resp.status_code, int)
-                    and not isinstance(resp.status_code, bool)
-                    and 500 <= resp.status_code < 600
-                ):
-                    diagnostic = "HTTP_SERVICE_UNAVAILABLE"
-                else:
-                    diagnostic = "HTTP_UNEXPECTED"
-                _record_initial_peer_census_diagnostic(diagnostic_sink, diagnostic)
-                raise _core.CanaryRefusal("VENDOR_ERROR")
-            data = self._successful_envelope(resp.payload, expected_message=None)
-            if data is None:
-                payload = resp.payload
-                status = payload.get("status") if isinstance(payload, dict) else None
-                status_valid = (
-                    isinstance(payload, dict)
-                    and set(payload) == {"status", "data"}
-                    and isinstance(status, dict)
-                    and set(status) == {"error_code", "http_code", "message"}
-                    and status.get("error_code") == ""
-                    and status.get("http_code") == 200
-                    and isinstance(status.get("message"), str)
-                )
-                _record_initial_peer_census_diagnostic(
-                    diagnostic_sink,
-                    "DATA_SCHEMA_INVALID" if status_valid else "STATUS_ENVELOPE_INVALID",
-                )
-                raise _core.CanaryRefusal("VENDOR_ERROR")
-            if set(data) != {"profiles", "total_count"}:
-                _record_initial_peer_census_diagnostic(
-                    diagnostic_sink, "DATA_SCHEMA_INVALID",
-                )
-                raise _core.CanaryRefusal("VENDOR_ERROR")
-            profiles = data.get("profiles")
-            total = data.get("total_count")
-            if not isinstance(profiles, list) or not isinstance(total, int) or isinstance(total, bool):
-                _record_initial_peer_census_diagnostic(
-                    diagnostic_sink, "DATA_SCHEMA_INVALID",
-                )
-                raise _core.CanaryRefusal("VENDOR_ERROR")
-            if total < 0 or total > _MAX_PROFILE_CENSUS:
-                _record_initial_peer_census_diagnostic(
-                    diagnostic_sink, "DATA_SCHEMA_INVALID",
-                )
-                raise _core.CanaryRefusal("VENDOR_ERROR")
-            if expected_total is None:
-                expected_total = total
-            if total != expected_total or len(profiles) > _PROFILE_PAGE_SIZE:
-                _record_initial_peer_census_diagnostic(
-                    diagnostic_sink, "PAGINATION_INVALID",
-                )
-                raise _core.CanaryRefusal("VENDOR_ERROR")
-            for item in profiles:
-                if not isinstance(item, dict) or not {"id", "folder_id", "name"}.issubset(item):
-                    _record_initial_peer_census_diagnostic(
-                        diagnostic_sink, "PROFILE_ITEM_INVALID",
-                    )
-                    raise _core.CanaryRefusal("VENDOR_ERROR")
-                item_id = _canonical_multilogin_profile_id(item.get("id"))
-                item_folder = _canonical_multilogin_profile_id(item.get("folder_id"))
-                item_name = item.get("name")
-                if (
-                    item_id is None
-                    or item_folder is None
-                    or not isinstance(item_name, str)
-                ):
-                    _record_initial_peer_census_diagnostic(
-                        diagnostic_sink, "PROFILE_ITEM_INVALID",
-                    )
-                    raise _core.CanaryRefusal("VENDOR_ERROR")
-                if item_id in seen_ids:
-                    _record_initial_peer_census_diagnostic(
-                        diagnostic_sink, "PAGINATION_INVALID",
-                    )
-                    raise _core.CanaryRefusal("VENDOR_ERROR")
-                seen_ids.add(item_id)
-                if item_name == peer_name:
-                    if item_folder != folder_id:
-                        _record_initial_peer_census_diagnostic(
-                            diagnostic_sink, "PROFILE_ITEM_INVALID",
-                        )
-                        raise _core.CanaryRefusal("VENDOR_ERROR")
-                    if not isinstance(item.get("browser_type"), str) or not isinstance(item.get("os_type"), str):
-                        # We cannot prove identity we cannot see.
-                        _record_initial_peer_census_diagnostic(
-                            diagnostic_sink, "PROFILE_ITEM_INVALID",
-                        )
-                        raise _core.CanaryRefusal("VENDOR_ERROR")
-                    canonical = dict(item)
-                    canonical["id"] = item_id
-                    canonical["folder_id"] = item_folder
-                    matches.append(canonical)
-            offset += len(profiles)
-            if offset == total:
-                return matches
-            if not profiles or offset > total:
-                _record_initial_peer_census_diagnostic(
-                    diagnostic_sink, "PAGINATION_INVALID",
-                )
-                raise _core.CanaryRefusal("VENDOR_ERROR")
-        _record_initial_peer_census_diagnostic(
-            diagnostic_sink, "PAGINATION_INVALID",
-        )
-        raise _core.CanaryRefusal("VENDOR_ERROR")
+            state.consume(resp, diagnostic_sink=diagnostic_sink)
+        return state.finish()
 
     @staticmethod
     def _peer_identity_matches(record, *, folder_id: str, peer_name: str, require_unowned: bool = False) -> bool:
