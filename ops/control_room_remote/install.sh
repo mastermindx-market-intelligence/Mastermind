@@ -54,6 +54,7 @@ RELEASE_TRACKED_PATHS=(
   control_plane/surface_bindings.py
   control_plane/worker_adapter.py
   control_plane/worker_browser_b1.py
+  control_plane/worker_execution_contract.py
   ops/control_room_remote/mastermind-control-room-remote.service
   scripts/__init__.py
   scripts/chairman_control_room_remote.py
