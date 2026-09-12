@@ -1,12 +1,16 @@
 # Workbench Read R0: source composition and separately admitted canary
 
-**State: BUILT_NOT_PROVEN / NOT_INSTALLED.** This source provides an inert
-composer and an explicit owner-injected launch boundary. It does not provide a
-standalone production bootstrap, a project grant, a bounded production executor,
-an installed app, a tunnel, or a real-account qualification.
+**State: BUILT_NOT_PROVEN / NOT_INSTALLED.** This source provides the inert
+composer, an explicit owner-injected launch boundary, and the source-level
+`WorkbenchReadRuntime` owner for one admitted immutable project lease. It does
+not install or start a listener, create a project grant, acquire credentials,
+open a tunnel, enroll an account, or qualify a real Business-seat canary.
 
-Source operation: `web-ceo-workbench-read-r0-production-20260907-sol-001`.
-Exact dialogue: `C0BSBM78V1N/1788790305.705269`.
+Original composition operation:
+`web-ceo-workbench-read-r0-production-20260907-sol-001` at
+`C0BSBM78V1N/1788790305.705269`. Shared runtime-services source operation:
+`workbench-read-rs0-runtime-services-20260908-sol-001` at
+`C0BSBM78V1N/1788896791.117979`.
 The source START is separate from runtime/canary admission. Sol retains acceptance
 and release authority. No READ1, file writing, shell, provider, desktop/browser
 actuation, Executive admission or installed Executive modification follows here.
@@ -35,6 +39,42 @@ The app borrows these services. Its shutdown must not close owner roots, stop a
 shared pool, remove a shared runtime registration or revoke sibling bindings.
 The deployment owner supplies service lifecycle and independently reconciles
 resource ownership. Constructed fixtures are never real binding evidence.
+
+### Source-level owning runtime
+
+`WorkbenchReadRuntime.open(...)` is the finite source composition for exactly one
+immutable stable lease. Before resource acquisition it requires the exact
+`workbench.read` policy, one allowed subject, a 64-lowercase-hex subject and
+client reference, exact `/mcp` resource, one canonical issuer, and the protected
+resource-metadata URL derived by MCP 1.28.1's
+`build_resource_metadata_url`. Project, context, owner, and generation references
+use their fixed pseudonymous prefixes plus 64 lowercase hexadecimal characters.
+It retains no bearer token, first request's `ReadCaller`, token expiry, refresh
+family, provider session, account label, or mutable current principal.
+
+After those checks, Runtime independently opens `.` relative to the supplied
+project-directory descriptor, opens and locks descriptor-relative
+`auth-audit.jsonl`, and creates one `BoundedSyncExecutor`. The host descriptors
+remain borrowed; Runtime owns only the descriptions it acquired. The executor
+uses the active event loop's existing default executor and adds no thread pool,
+retry queue, durable queue, or second lifecycle plane. Executive retry policy
+remains in `ExecutiveMcpGateway`; both consumers delegate one physical attempt
+to the shared owner.
+
+Each resolver call compares the current already-verified caller to the stable
+selector and returns a new request-local `ProjectReadBinding`. Token seconds and
+lease milliseconds remain separate. `revoke()` is irreversible. `aclose()` first
+closes admission and drains started physical work; only a successful drain may
+release audit and root descriptors. `RuntimeCloseIncomplete` retains those same
+resources for a later same-owner drain. An uncertain audit or descriptor close is
+reported explicitly and is never converted to clean shutdown.
+
+The audit sink uses only the existing `AuthAuditEvent` vocabulary. It holds one
+nonblocking exclusive lock, validates directory and named-file identity/security
+before and after one append plus `fsync`, and poisons permanently on replacement,
+link/mode/flag/size drift, short write, durability failure, or invalid event. It
+never rotates, retries an uncertain write, changes basenames, or records token,
+content, path, username, or provider-session data.
 
 ## Launcher boundary
 
@@ -84,10 +124,28 @@ Keep environment, pip/temp caches and evidence external. No system install or
 version substitution follows a setup failure.
 
 ```sh
-python -m unittest tests.workbench_read_mcp.test_deployment tests.workbench_read_mcp.test_production_composition -v
-python -m unittest discover -s tests/workbench_read_mcp -v
-python -m pytest tests/test_business_mcp_auth_*.py
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -B -m pytest -p no:cacheprovider -o addopts= -q \
+  tests/test_bounded_sync_executor.py \
+  tests/test_business_mcp_auth_audit.py \
+  tests/workbench_read_mcp/test_runtime.py
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -B -m pytest -p no:cacheprovider -o addopts= -q \
+  tests/test_executive_mcp.py tests/test_executive_mcp_e1_composition.py
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -B -m pytest -p no:cacheprovider -o addopts= -q \
+  tests/workbench_read_mcp
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -B -m pytest -p no:cacheprovider -o addopts= -q \
+  tests/test_business_mcp_auth_*.py
 ```
+
+`test_runtime.py` owns the source-level Runtime lifecycle. It proves validation
+before resource acquisition, independently owned root identity, current-caller
+renewal, adverse stable selectors, irreversible revoke, incomplete close with
+resources retained, and revocation both during a real descriptor read and after
+completed observation but before awaited release. Its signed in-process SDK flow
+performs initialize/list/call over a real temporary file, verifies the exact
+22-key result and content/hash/range, distinguishes expired token A from renewed
+token B, then reads the fixed-basename durable audit. This remains source test
+evidence; it is not installed process, filesystem-placement, provider, tunnel,
+account, or browser proof.
 
 The production-composition module uses ephemeral signed JWTs and real
 in-process ASGI initialize/list/call, the existing binding/port and real descriptor
