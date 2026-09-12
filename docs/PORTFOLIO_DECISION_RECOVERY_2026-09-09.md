@@ -2,8 +2,10 @@
 
 **Operation:** `portfolio-bot-decision-recovery-20260909-sol-001`
 **Initial diagnosis pin:** `964bd8e7b30c91e5e83caee0ba37513ba7d07e70`
-**Current continuation/procedure pin:** `797cfd0b1001d9dfe6fe9030af80ecdab0e1220d`, Skillpack 1.0.1 / bootstrap 1
+**Current continuation/procedure pin:** protected `master` `9e75a2175100564e8d2805c6f995f4b5eeb0f44e`, Skillpack 1.0.1 / bootstrap 1
 **Capability state at diagnosis:** `BROKEN` for daily PM decisions; account and scheduler process remained live.
+**US production result:** `PROVEN_LIVE` on release `e61f2951136bdc03a7ec2f5f12f960af26656a4c`.
+**Regional result:** the shared US/CN/HK repair is deployed; China and Hong Kong remain `BUILT_NOT_PROVEN` until their first lawful post-deploy decision cycles are read back.
 
 ## User and machine outcome
 
@@ -17,11 +19,11 @@ Production release `da6af515c95301377fb5fd8748e374a8948a3540` kept the FastAPI s
 
 The September 10 US decision record preserved the initiating error: `Your access token could not be refreshed. Please log out and sign in again.` No typed portfolio tools ran and no submission run ID existed. The VPS Codex state had not refreshed since August 15.
 
-A service-environment, prompt-only canary proved the configured Claude OAuth fallback is usable: six non-cooling slots were present and `claude_code_oauth_2` returned the exact expected response. No portfolio or account tool was exposed to that canary.
+A service-environment, prompt-only canary proved the configured Claude OAuth fallback was usable. No portfolio or account tool was exposed to that canary.
 
 ## Root cause
 
-The shared waterfall asks Macro's generic authentication classifier whether a failed Codex result may advance to Claude. That classifier recognizes HTTP-shaped `401`/`403` errors but not Codex's local refresh-failure sentence. The waterfall therefore classified the expired login as a non-provider execution failure and stopped before the healthy OAuth rungs.
+The shared waterfall asks Macro's generic authentication classifier whether a failed Codex result may advance to Claude. That classifier recognized HTTP-shaped `401`/`403` errors but not Codex's local refresh-failure sentence. The waterfall therefore classified the expired login as a non-provider execution failure and stopped before the healthy OAuth rungs.
 
 Two observability defects extended the outage. Each daily scheduler wrapper unconditionally ended `ok` whenever its runner returned without raising, even when the returned target status was `rejected_no_submission`. The dashboard then rendered that status as `NOT APPLIED / REJECTED`, implying a deliberate proposal rather than no proposal at all.
 
@@ -33,21 +35,90 @@ Two observability defects extended the outage. Each daily scheduler wrapper unco
 4. Apply the same semantic outcome classifier to authenticated manual US, China, and Hong Kong runs, in both wait and background modes. Wait-mode receipts expose safe lifecycle fields and tolerate a malformed runner envelope without emitting duplicate completion events.
 5. Present `rejected_no_submission` as `DECISION MISSING — RECOVERY REQUIRED`; keep governance rejection, queued target, settled no-trade, and verified fills distinct.
 
-No provider pool, scheduler, retry loop, lifecycle, account, position, execution, or state store is added. The deterministic allocator and all paper-trading authority boundaries remain unchanged.
+No provider pool, scheduler, retry loop, lifecycle, account, position, execution, or state store was added. The deterministic allocator and all paper-trading authority boundaries remain unchanged.
 
-## Acceptance and production proof
+## Source acceptance
 
-Source acceptance requires the exact production error to trigger OAuth fallback; a non-provider failure must still stop without replay; all three real scheduler wrappers and authenticated manual-run paths must project missing submissions as `error/FREEZE`; malformed manual results must produce one safe completion receipt; accepted queued and executed zero-fill results must remain `ok`; and the JavaScript presentation must preserve the four distinct lifecycle meanings.
+Implementation PR `#562` merged as protected commit `e61f2951136bdc03a7ec2f5f12f960af26656a4c`. Exact-head CI, security analysis, focused three-book scheduler/manual-path suites, and adversarial mutations passed. The source proof showed that:
 
-Deployment must use the exact merged protected-master SHA through the existing transactional deployer. The rollback-package prerequisite is now resolved by protected merge `797cfd0b1001d9dfe6fe9030af80ecdab0e1220d`, which restores `common/` and `integrations/` alongside the other release roots after a failed deploy.
+- the exact production refresh failure authorizes Codex-to-OAuth fallback;
+- non-provider failures still stop without replay;
+- all three scheduled and authenticated manual paths project missing submissions as `error / FREEZE`;
+- execution failures remain errors rather than governance warnings;
+- accepted queued and settled zero-fill outcomes remain distinct valid decisions;
+- the browser preserves queued, missing, rejected, and executed lifecycle meanings.
 
-Production acceptance requires:
+## Production acceptance — 2026-09-12
 
-- exact-SHA health and scheduler readiness after restart;
-- an actual prompt-only call through the deployed shared waterfall showing Codex success or an identified OAuth fallback;
-- one real US scheduled/manual paper PM run through the normal lock, context, submission, publication, and ledger path;
-- a submitted queued target, verified settlement, or explicit governed no-trade decision—not a forced trade;
-- decision-log and scheduler-health readback showing the true lifecycle result;
-- no replay of any prior proposal and no mutation of archived books.
+The authoritative VPS was tested through the existing `VPS_DEPLOY_KEY` operator lane. No prior proposal was replayed, no manual portfolio run was issued, and no account, holding, target, fill, or archived book was mutated.
 
-Asia books should be proven through their next lawful post-close cycles unless a safe same-date non-settling path is available. A synthetic or backdated trade is not acceptance.
+### Exact release and runtime
+
+- deployed marker: `e61f2951136bdc03a7ec2f5f12f960af26656a4c`;
+- `/health`: HTTP 200, `status=ok`;
+- reasoning policy: `codex_first_claude_oauth_fallback`, policy valid;
+- scheduler running and scheduled runtime healthy;
+- public health still reports Codex unavailable and `claude_oauth_fallback` as the active reasoning primary.
+
+### Deployed provider canary
+
+A prompt-only, no-tools, no-account call traversed the deployed shared provider waterfall and succeeded through provider `oauth` with backend `sdk`. The canary did not expose portfolio tools or publish raw provider errors.
+
+### Genuine scheduled US decision
+
+The normal `autonomous_daily` job ran on September 11 without manual intervention:
+
+- started `2026-09-11T23:10:00+00:00`;
+- finished `2026-09-11T23:16:27+00:00`;
+- ledger `last_status=ok`;
+- `last_reason=null`;
+- `last_target_status=queued`;
+- next run `2026-09-14T23:10:00+00:00`.
+
+The durable decision readback showed:
+
+- `asof=2026-09-11`;
+- `target_status=queued`;
+- `decision_effective=true`;
+- `execution_evidence_status=none`, correctly indicating that the decision is queued rather than falsely claiming a fill.
+
+This satisfies the acceptance law: the repaired real scheduler/model/submission/publication path produced an effective queued paper decision. A forced trade was not required and was not attempted.
+
+### Browser-visible proof
+
+A headless browser loaded the exact served production dashboard and consumed the real `/api/decisions`, `/api/scheduler`, and portfolio APIs through a read-only SSH fetch route. It observed:
+
+- the Daily Decision Log rendered;
+- the September 11 decision rendered as `QUEUED — NOT YET EXECUTED`;
+- scheduler and decision API readbacks matched the durable state above;
+- the shipped `DECISION MISSING — RECOVERY REQUIRED` contract remained present for historical missing submissions;
+- screenshot receipt SHA-256 `e1620cc00d2b15ea22636cf2e15c278c3312caf7cf23a6689ada543363d718ae`, 275,394 bytes.
+
+The browser receipt is GitHub Actions run `34670042191`, job `103489565893`. The earlier port-forward attempt failed before reaching the application and had no portfolio effect; it was superseded by the successful read-only fetch proof.
+
+## Capability ruling
+
+### US Mastermind Portfolio daily-decision path — `PROVEN_LIVE`
+
+The original failure mode is repaired in production. An expired Codex login no longer suppresses the healthy Claude OAuth fallback, a real scheduled decision completed and published, scheduler truth reflects the semantic outcome, and the user-visible dashboard renders the correct queued lifecycle state.
+
+### China and Hong Kong daily-decision paths — `BUILT_NOT_PROVEN`
+
+They share the repaired provider and semantic-ledger code, but their first lawful post-deploy cycles have not yet been accepted here. Do not synthesize, backdate, force a trade, or reuse the US proof as regional production proof. Their next post-close cycles are the exact continuation gate.
+
+## Recurrence prevention
+
+The repair prevents silent recurrence in four layers:
+
+1. the provider waterfall now advances on the known local Codex refresh failure;
+2. a missing submission becomes a hard `FREEZE` ledger error rather than scheduler success;
+3. scheduler health exposes the closed reason and target status;
+4. the dashboard labels missing decisions as recovery-required instead of investment rejection.
+
+A separate off-host dead-man should remain read-only and use the existing GitHub Actions/VPS operator plane; it must alert on stale or failed US/CN/HK decision cycles without introducing a second scheduler, retry plane, portfolio writer, or state store.
+
+## Exact continuation
+
+1. Accept the next lawful China and Hong Kong post-close runs only after exact release, scheduler, decision-log, and served lifecycle readbacks match the US proof standard.
+2. Add the read-only off-host decision dead-man to the existing GitHub Actions monitoring plane so future missing submissions page an operator instead of relying on dashboard inspection.
+3. Keep all manual run, replay, forced-trade, archived-book mutation, and synthetic/backdated proof paths disarmed.
