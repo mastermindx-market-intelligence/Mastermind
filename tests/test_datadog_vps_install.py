@@ -16,7 +16,7 @@ def _render(**overrides: str) -> subprocess.CompletedProcess[str]:
     assignments = " ".join(
         f"{key}={shlex.quote(value)}" for key, value in sorted(overrides.items())
     )
-    command = f"{assignments} bash scripts/install_datadog_vps.sh --render-only".strip()
+    command = f"{assignments} ./scripts/install_datadog_vps.sh --render-only".strip()
     return subprocess.run(
         ["bash", "-lc", command],
         text=True,
@@ -74,6 +74,10 @@ def test_installer_never_enables_high_authority_datadog_features() -> None:
     assert "SSI_PREEXISTING" in text
     assert "dd-host-install --uninstall" in text
     assert "launcher.preload.so" in text
+    assert "ROLLBACK_ARMED=1" in text
+    assert "rollback_on_exit" in text
+    assert "trap 'rollback_on_exit $?' EXIT" in text
+    assert "Datadog host SSI did not arm after installer success" in text
 
 
 @pytest.mark.skipif(shutil.which("bash") is None, reason="bash required")

@@ -102,13 +102,75 @@ SSI_PREEXISTING=0
 if grep -Fq '/opt/datadog/apm/inject/launcher.preload.so' /etc/ld.so.preload 2>/dev/null; then
   SSI_PREEXISTING=1
 fi
+APP_BACKUP=""
+APP_DROPIN_TOUCHED=0
+APP_RESTART_ATTEMPTED=0
+ROLLBACK_ARMED=1
+
+rollback_application_instrumentation() {
+  local rollback_failed=0
+  local rollback_healthy=0
+  log "rolling back Mastermind Datadog application instrumentation"
+  if [[ "$APP_DROPIN_TOUCHED" == "1" ]]; then
+    if [[ -n "$APP_BACKUP" && -f "$APP_BACKUP" ]]; then
+      cp -a "$APP_BACKUP" "$APP_DROPIN" || rollback_failed=1
+    else
+      rm -f "$APP_DROPIN" || rollback_failed=1
+    fi
+    systemctl daemon-reload || rollback_failed=1
+  fi
+  if [[ "$SSI_PREEXISTING" == "0" ]] && grep -Fq '/opt/datadog/apm/inject/launcher.preload.so' /etc/ld.so.preload 2>/dev/null; then
+    log "removing Single Step Instrumentation introduced by this rollout"
+    if command -v dd-host-install >/dev/null 2>&1; then
+      dd-host-install --uninstall || rollback_failed=1
+    else
+      log "dd-host-install unavailable; cannot remove newly introduced SSI"
+      rollback_failed=1
+    fi
+  fi
+  if [[ "$SSI_PREEXISTING" == "0" ]] && grep -Fq '/opt/datadog/apm/inject/launcher.preload.so' /etc/ld.so.preload 2>/dev/null; then
+    log "newly introduced SSI is still armed after rollback"
+    rollback_failed=1
+  fi
+  if [[ "$APP_RESTART_ATTEMPTED" == "1" ]]; then
+    systemctl restart "$MASTERMIND_SERVICE" || rollback_failed=1
+  fi
+  for _ in $(seq 1 10); do
+    if health_ok; then rollback_healthy=1; break; fi
+    sleep 2
+  done
+  [[ "$rollback_healthy" == "1" ]] || rollback_failed=1
+  return "$rollback_failed"
+}
+
+rollback_on_exit() {
+  local rc="$1"
+  trap - EXIT
+  if [[ "$rc" != "0" && "$ROLLBACK_ARMED" == "1" ]]; then
+    if rollback_application_instrumentation; then
+      log "rollback recovered Mastermind health"
+    else
+      log "rollback did not recover cleanly"
+      rc=70
+    fi
+  fi
+  exit "$rc"
+}
+trap 'rollback_on_exit $?' EXIT
+
 log "installing/updating Agent 7 with Python Single Step Instrumentation"
-DD_API_KEY="$DD_API_KEY" \
-DD_SITE="$DD_SITE" \
-DD_APM_INSTRUMENTATION_ENABLED=host \
-DD_APM_INSTRUMENTATION_LIBRARIES="python:${DD_PYTHON_TRACER_MAJOR}" \
-DD_ENV="$DD_ENVIRONMENT" \
-bash -c "$(curl -fsSL "$INSTALL_URL")"
+if ! DD_API_KEY="$DD_API_KEY" \
+  DD_SITE="$DD_SITE" \
+  DD_APM_INSTRUMENTATION_ENABLED=host \
+  DD_APM_INSTRUMENTATION_LIBRARIES="python:${DD_PYTHON_TRACER_MAJOR}" \
+  DD_ENV="$DD_ENVIRONMENT" \
+  bash -c "$(curl -fsSL "$INSTALL_URL")"; then
+  fail "Datadog Agent/SSI installer failed"
+fi
+if [[ "$SSI_PREEXISTING" == "0" ]] && ! grep -Fq '/opt/datadog/apm/inject/launcher.preload.so' /etc/ld.so.preload 2>/dev/null; then
+  fail "Datadog host SSI did not arm after installer success"
+fi
+
 log "enabling host log collection and Mastermind journald intake"
 if grep -Eq '^[[:space:]]*logs_enabled:' "$DATADOG_YAML"; then
   sed -i -E 's/^[[:space:]]*logs_enabled:.*/logs_enabled: true/' "$DATADOG_YAML"
@@ -133,68 +195,29 @@ datadog-agent configcheck >/dev/null
 datadog-agent status >/dev/null
 
 install -d -m 0755 "$(dirname "$APP_DROPIN")"
-APP_BACKUP=""
 if [[ -f "$APP_DROPIN" ]]; then
   APP_BACKUP="$(mktemp /tmp/mastermind-datadog-app-dropin.XXXXXX)"
   cp -a "$APP_DROPIN" "$APP_BACKUP"
 fi
+APP_DROPIN_TOUCHED=1
 render_app_dropin > "$APP_DROPIN"
 chmod 0644 "$APP_DROPIN"
-rollback_datadog_instrumentation() {
-  local rollback_failed=0
-  local rollback_healthy=0
-  log "rolling back Mastermind Datadog instrumentation"
-  if [[ -n "$APP_BACKUP" && -f "$APP_BACKUP" ]]; then
-    cp -a "$APP_BACKUP" "$APP_DROPIN" || rollback_failed=1
-  else
-    rm -f "$APP_DROPIN" || rollback_failed=1
-  fi
-  if [[ "$SSI_PREEXISTING" == "0" ]] && grep -Fq '/opt/datadog/apm/inject/launcher.preload.so' /etc/ld.so.preload 2>/dev/null; then
-    log "removing Single Step Instrumentation introduced by this rollout"
-    if command -v dd-host-install >/dev/null 2>&1; then
-      dd-host-install --uninstall || rollback_failed=1
-    else
-      log "dd-host-install unavailable; cannot remove newly introduced SSI"
-      rollback_failed=1
-    fi
-  fi
-  if grep -Fq '/opt/datadog/apm/inject/launcher.preload.so' /etc/ld.so.preload 2>/dev/null && [[ "$SSI_PREEXISTING" == "0" ]]; then
-    log "newly introduced SSI is still armed after rollback"
-    rollback_failed=1
-  fi
-  systemctl daemon-reload || rollback_failed=1
-  systemctl restart "$MASTERMIND_SERVICE" || rollback_failed=1
-  for _ in $(seq 1 10); do
-    if health_ok; then rollback_healthy=1; break; fi
-    sleep 2
-  done
-  [[ "$rollback_healthy" == "1" ]] || rollback_failed=1
-  return "$rollback_failed"
-}
-
 systemctl daemon-reload
 
 log "restarting ${MASTERMIND_SERVICE} so SSI can instrument Python"
-if ! systemctl restart "$MASTERMIND_SERVICE"; then
-  if rollback_datadog_instrumentation; then
-    fail "Mastermind restart failed after Datadog instrumentation; rollback recovered"
-  fi
-  fail "Mastermind restart failed after Datadog instrumentation and rollback did not recover cleanly"
-fi
+APP_RESTART_ATTEMPTED=1
+systemctl restart "$MASTERMIND_SERVICE" || fail "Mastermind restart failed after Datadog instrumentation"
 
 APP_HEALTHY=0
 for _ in $(seq 1 20); do
   if health_ok; then APP_HEALTHY=1; break; fi
   sleep 2
 done
-if [[ "$APP_HEALTHY" != "1" ]]; then
-  if rollback_datadog_instrumentation; then
-    fail "Mastermind health did not recover after Datadog instrumentation; rollback recovered"
-  fi
-  fail "Mastermind health did not recover after Datadog instrumentation and rollback did not recover cleanly"
-fi
+[[ "$APP_HEALTHY" == "1" ]] || fail "Mastermind health did not recover after Datadog instrumentation"
 
 [[ -z "$APP_BACKUP" ]] || rm -f "$APP_BACKUP"
+ROLLBACK_ARMED=0
+trap - EXIT
 log "local setup proof passed"
 printf 'MASTERMIND_DATADOG_SETUP_OK service=%s env=%s unit=%s\n' \
   "$DD_SERVICE_NAME" "$DD_ENVIRONMENT" "$MASTERMIND_SERVICE"

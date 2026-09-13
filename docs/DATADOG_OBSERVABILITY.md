@@ -44,10 +44,12 @@ in Git, a systemd drop-in, `/etc/macro-api.env`, or deployment logs.
 The installer first requires the existing Mastermind health endpoint to pass. It then installs or
 updates the Datadog Agent using Datadog's official Agent 7 installer, enables host-level Python SSI,
 configures log collection, restarts the Agent, and finally restarts `mastermind.service` so the
-injected tracer is loaded. If Mastermind health does not recover, the application systemd override
-is rolled back. When this rollout introduced host SSI, rollback also runs Datadog's supported
-`dd-host-install --uninstall` path before restarting and rechecking Mastermind; pre-existing SSI is
-left intact. Future deployments refresh the Datadog version tag from the exact release SHA before
+injected tracer is loaded. Once the Datadog installer begins, an exit guard protects the
+application-side rollout: any later setup failure restores a touched Mastermind systemd override,
+removes host SSI only when this rollout introduced it using Datadog's supported
+`dd-host-install --uninstall` path, and rechecks Mastermind health. Pre-existing SSI is left intact.
+The Agent package/config may remain for an idempotent repair rerun; it is not another application
+control plane. Future deployments refresh the Datadog version tag from the exact release SHA before
 restart, and rollback restores the previous tag.
 ## Production proof
 
