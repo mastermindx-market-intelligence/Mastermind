@@ -39,6 +39,9 @@ class AdapterDescriptor:
 
 ADAPTER_DESCRIPTORS: dict[str, AdapterDescriptor] = {
     "codex-cli": AdapterDescriptor(adapter_id="codex-cli", implemented=True),
+    "claude-compatible-subscription": AdapterDescriptor(
+        adapter_id="claude-compatible-subscription", implemented=True
+    ),
     # Clean, deliberately unarmed seams for later provider work.  A routing
     # policy cannot bind a live worker through an unimplemented descriptor.
     "openai-compatible": AdapterDescriptor(
