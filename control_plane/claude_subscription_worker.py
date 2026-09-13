@@ -48,6 +48,12 @@ from control_plane.codex_worker import (
     _utc_now,
     validate_json_schema,
 )
+from control_plane.subscription_harness_bindings import (
+    HarnessBindingError,
+    SubscriptionHarnessBinding,
+    bindings_for_profile,
+    get_binding,
+)
 from control_plane.subscription_provider_profiles import SubscriptionProviderProfile
 from control_plane.worker_execution_contract import (
     BinaryAttestation,
@@ -80,6 +86,24 @@ _SHELL_NAMES = frozenset({"bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "z
 
 class ClaudeSubscriptionWorkerError(RuntimeError):
     pass
+
+
+def _claude_code_binding(profile: SubscriptionProviderProfile) -> SubscriptionHarnessBinding:
+    matches = tuple(
+        binding
+        for binding in bindings_for_profile(profile.profile_id)
+        if binding.harness_id == "claude-code"
+    )
+    if len(matches) != 1:
+        raise ClaudeSubscriptionWorkerError(
+            "subscription profile has no unique Claude Code harness binding"
+        )
+    try:
+        return get_binding(matches[0].binding_id)
+    except HarnessBindingError as exc:
+        raise ClaudeSubscriptionWorkerError(
+            "subscription profile has no reviewed Claude Code harness binding"
+        ) from exc
 
 
 @dataclasses.dataclass
@@ -215,9 +239,10 @@ class ClaudeSubscriptionWorkerAdapter:
         binary_attestation: BinaryAttestation | None = None,
         inspector: ProcessInspector | None = None,
     ) -> None:
-        if profile.autonomous_allowed:
+        binding = _claude_code_binding(profile)
+        if profile.autonomous_allowed or binding.autonomous_allowed:
             raise ClaudeSubscriptionWorkerError("subscription profile may not self-arm autonomous routing")
-        if profile.protocol != "anthropic" or not profile.base_url.startswith("https://"):
+        if binding.protocol != "anthropic" or not binding.effective_base_url.startswith("https://"):
             raise ClaudeSubscriptionWorkerError("subscription profile is not Claude-compatible")
         if execution_mode not in {"interactive_canary", "executive_worker"}:
             raise ClaudeSubscriptionWorkerError("execution mode is unsupported")
@@ -234,7 +259,13 @@ class ClaudeSubscriptionWorkerAdapter:
             )
         self.execution_mode = execution_mode
         self.profile = profile
-        self.selected_model = profile.model_for(model_class)
+        self.binding = binding
+        try:
+            self.selected_model = binding.model_for(profile, model_class)
+        except HarnessBindingError as exc:
+            raise ClaudeSubscriptionWorkerError(
+                "subscription binding does not support the requested model class"
+            ) from exc
         self.model_class = model_class
         self.credential_loader = credential_loader
         path = Path(binary_path)
@@ -333,20 +364,24 @@ class ClaudeSubscriptionWorkerAdapter:
         ]
         return tuple(values)
 
+    def _bound_model(self, model_class: str) -> str:
+        if model_class not in self.binding.model_classes:
+            return self.selected_model
+        return self.binding.model_for(self.profile, model_class)
+
     def _environment(self, *, home: Path, tmp: Path, credential: str) -> dict[str, str]:
-        models = self.profile.models
         return {
             "HOME": str(home), "TMPDIR": str(tmp), "PATH": _SAFE_PATH,
             "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "TZ": "UTC",
             "CLAUDE_CODE_MAX_RETRIES": "0", "MAX_STRUCTURED_OUTPUT_RETRIES": "0",
             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "DISABLE_AUTOUPDATER": "1",
             "ANTHROPIC_AUTH_TOKEN": credential,
-            "ANTHROPIC_BASE_URL": self.profile.base_url,
+            "ANTHROPIC_BASE_URL": self.binding.effective_base_url,
             "ANTHROPIC_MODEL": self.selected_model,
-            "ANTHROPIC_DEFAULT_HAIKU_MODEL": models.get("fast", self.selected_model),
-            "ANTHROPIC_DEFAULT_SONNET_MODEL": models.get("routine", self.selected_model),
-            "ANTHROPIC_DEFAULT_OPUS_MODEL": models.get("hard", self.selected_model),
-            "CLAUDE_CODE_SUBAGENT_MODEL": models.get("subagent", self.selected_model),
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": self._bound_model("fast"),
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": self._bound_model("routine"),
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": self._bound_model("hard"),
+            "CLAUDE_CODE_SUBAGENT_MODEL": self._bound_model("subagent"),
         }
 
     def _identity_matches(self, ref: WorkerProcessRef) -> bool:
@@ -407,7 +442,7 @@ class ClaudeSubscriptionWorkerAdapter:
         )
         attestation = {
             "schema_version": "mastermind.claude_subscription_launch/v1",
-            "adapter_id": "claude-compatible-subscription",
+            "adapter_id": self.binding.adapter_id,
             "profile_id": self.profile.profile_id,
             "provider": self.profile.provider,
             "product": self.profile.product,

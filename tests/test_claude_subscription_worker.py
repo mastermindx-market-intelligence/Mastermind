@@ -14,6 +14,7 @@ from control_plane.claude_subscription_worker import (
     attest_claude_binary,
 )
 from control_plane.codex_worker import LaunchValidationError
+from control_plane.subscription_harness_bindings import get_binding
 from control_plane.subscription_provider_profiles import get_profile
 from control_plane.worker_adapter import adapter_descriptor
 from control_plane.worker_execution_contract import WorkerLaunchSpec, WorkerRunStatus
@@ -114,9 +115,32 @@ def _adapter(tmp_path: Path, profile_id: str = "glm-coding-plan") -> ClaudeSubsc
 
 
 def test_common_adapter_descriptor_is_implemented_only_after_vertical_exists():
-    descriptor = adapter_descriptor("claude-compatible-subscription")
+    binding = get_binding("glm-coding-plan.claude-code-anthropic")
+    descriptor = adapter_descriptor(binding.adapter_id)
     assert descriptor.implemented is True
     assert descriptor.structured_output is True
+
+
+def test_worker_takes_adapter_endpoint_and_models_from_binding_catalog(tmp_path: Path):
+    adapter = _adapter(tmp_path)
+    binding = get_binding("glm-coding-plan.claude-code-anthropic")
+    assert adapter.binding.binding_id == binding.binding_id
+    assert adapter.binding.adapter_id == binding.adapter_id
+    assert adapter.binding.effective_base_url == binding.effective_base_url
+    assert adapter.binding.autonomous_allowed is False
+    assert adapter.selected_model == binding.model_for(adapter.profile)
+    env = adapter._environment(home=tmp_path / "h", tmp=tmp_path / "t", credential=_FAKE_SECRET)
+    assert env["ANTHROPIC_BASE_URL"] == binding.effective_base_url
+    assert env["ANTHROPIC_MODEL"] == binding.model_for(adapter.profile, "routine")
+    assert env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] == binding.model_for(adapter.profile, "fast")
+    assert env["ANTHROPIC_DEFAULT_SONNET_MODEL"] == binding.model_for(adapter.profile, "routine")
+    assert env["ANTHROPIC_DEFAULT_OPUS_MODEL"] == binding.model_for(adapter.profile, "hard")
+    assert env["CLAUDE_CODE_SUBAGENT_MODEL"] == binding.model_for(adapter.profile, "subagent")
+    worker_source = (Path("control_plane") / "claude_subscription_worker.py").read_text(encoding="utf-8")
+    test_source = Path(__file__).read_text(encoding="utf-8")
+    pinned = "-".join(("claude", "compatible", "subscription"))
+    assert pinned not in worker_source
+    assert pinned not in test_source
 
 
 def test_current_subscription_profiles_cannot_be_composed_as_unattended_executive_workers(tmp_path: Path):
@@ -139,12 +163,12 @@ def test_command_is_fixed_profile_secret_free_and_bash_free(tmp_path: Path):
     schema = json.loads(Path(spec.result_schema_path).read_text(encoding="utf-8"))
     argv = adapter._command(spec, schema=schema)
     env = adapter._environment(home=tmp_path / "h", tmp=tmp_path / "t", credential=_FAKE_SECRET)
-    assert adapter.profile.base_url not in argv
+    assert adapter.binding.effective_base_url not in argv
     assert _FAKE_SECRET not in "\n".join(argv)
     assert "Bash" not in tuple(argv[argv.index("--tools") + 1 : argv.index("--allowedTools")])
     assert "Bash" in argv
     assert env["ANTHROPIC_AUTH_TOKEN"] == _FAKE_SECRET
-    assert env["ANTHROPIC_BASE_URL"] == adapter.profile.base_url
+    assert env["ANTHROPIC_BASE_URL"] == adapter.binding.effective_base_url
     assert env["CLAUDE_CODE_MAX_RETRIES"] == "0"
 
 
@@ -178,3 +202,4 @@ def test_fake_provider_executes_one_read_only_common_worker_receipt_without_secr
     assert _FAKE_SECRET not in Path(ref.stdout_path).read_text(encoding="utf-8")
     assert adapter.launch_attestation(ref)["retry_policy"] == "zero"
     assert adapter.launch_attestation(ref)["execution_mode"] == "interactive_canary"
+    assert adapter.launch_attestation(ref)["adapter_id"] == adapter.binding.adapter_id
