@@ -21,7 +21,6 @@ from control_plane.worker_execution_contract import (
     ValidationReceipt,
     WorkerLaunchSpec,
     WorkerProcessRef,
-    WorkerRunStatus,
 )
 
 
@@ -66,8 +65,6 @@ class WorkerExecutionAdapter(Protocol):
     inspector: ProcessInspector
 
     async def start(self, spec: WorkerLaunchSpec) -> WorkerProcessRef: ...
-
-    async def status(self, ref: WorkerProcessRef) -> WorkerRunStatus: ...
 
     async def collect_result(self, ref: WorkerProcessRef) -> CollectionReceipt: ...
 
