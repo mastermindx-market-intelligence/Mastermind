@@ -184,6 +184,24 @@ def test_base_url_rejects_query_fragment_userinfo_and_malformed_forms(base_url):
         validate_profiles(catalog)
 
 
+def test_base_url_rejects_empty_query_suffix():
+    _reject_base_url("https://api.z.ai/api/anthropic?")
+
+
+def test_base_url_rejects_empty_fragment_suffix():
+    _reject_base_url("https://api.z.ai/api/anthropic#")
+
+
+def test_base_url_rejects_empty_params_suffix():
+    _reject_base_url("https://api.z.ai/api/anthropic;")
+
+
+def test_base_url_accepts_unsuffixed_allowlisted_url():
+    catalog = _catalog()
+    catalog["profiles"]["glm-coding-plan"]["base_url"] = "https://api.z.ai/api/anthropic"
+    validate_profiles(catalog)
+
+
 def _reject_base_url(base_url: str) -> None:
     catalog = _catalog()
     catalog["profiles"]["glm-coding-plan"]["base_url"] = base_url
