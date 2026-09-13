@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import dataclasses
 import importlib
+from control_plane.codex_worker import _CONSTRUCTED_CODEX_ADAPTERS
 from typing import Protocol, Sequence, runtime_checkable
 
 from control_plane.worker_execution_contract import (
@@ -149,17 +150,6 @@ def _is_caller_supplied_adapter(
     )
 
 
-def _was_constructed(adapter: object) -> bool:
-    """True only after the reviewed class ``__init__`` populated instance state.
-
-    ``object.__new__(ReviewedClass)`` yields the exact type with an empty
-    instance dict and is therefore not bindable.
-    """
-
-    state = getattr(adapter, "__dict__", None)
-    return isinstance(state, dict) and bool(state)
-
-
 def construct_reviewed_adapter(adapter_id: str, *args: object, **kwargs: object) -> object:
     """Construct the reviewed implementation. Never accepts a caller-supplied instance."""
 
@@ -199,7 +189,7 @@ def bind_reviewed_adapter(adapter: object, adapter_id: str) -> AdapterDescriptor
                 f"{implementation.__module__}.{implementation.__qualname__} "
                 f"for {descriptor.adapter_id!r}"
             )
-        if not _was_constructed(adapter):
+        if adapter not in _CONSTRUCTED_CODEX_ADAPTERS:
             raise AdapterBindingError(
                 f"{implementation.__qualname__} instance was not constructed "
                 f"by the reviewed class for {descriptor.adapter_id!r}"

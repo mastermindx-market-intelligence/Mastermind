@@ -27,6 +27,7 @@ from control_plane.codex_worker import (
     GitPreflightTimeout,
     LaunchValidationError,
     LaunchValidationStageError,
+    ProcessInspector,
     ProcessRef,
     ValidationReceipt,
     WorkerResult,
@@ -483,13 +484,23 @@ def test_factory_and_bind_refuse_foreign_subclass_and_rebox(tmp_path: Path):
     subclass_instance = ClaimSubclass(kwargs.pop("binary_path"), **kwargs)
     foreign = Spoof()
     rebox = object.__new__(CodexWorkerAdapter)
+    rebox.__dict__.update(
+        {
+            "binary": None,
+            "_codex_home": None,
+            "inspector": ProcessInspector(),
+            "_runs": {},
+        }
+    )
     claimants = (foreign, subclass_instance, rebox)
 
     for claimant in claimants:
         with pytest.raises(AdapterBindingError, match="does not accept a caller-supplied"):
             construct_reviewed_adapter("codex-cli", claimant)
-        with pytest.raises(AdapterBindingError):
+        with pytest.raises(AdapterBindingError) as binding_refused:
             bind_reviewed_adapter(claimant, "codex-cli")
+        if claimant is rebox:
+            assert "was not constructed by the reviewed class" in str(binding_refused.value)
         with pytest.raises(WorkerBrokerError) as refused:
             ExecutiveWorkerBroker(
                 claimant, broker.policy, sweeper, adapter_id="codex-cli"

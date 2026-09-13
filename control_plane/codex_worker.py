@@ -38,6 +38,7 @@ import re
 import signal
 import stat
 import subprocess
+import weakref
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterator, Mapping, Sequence
@@ -1836,6 +1837,9 @@ async def _hash_validation_stream(
     return digest.hexdigest(), total
 
 
+_CONSTRUCTED_CODEX_ADAPTERS: weakref.WeakSet["CodexWorkerAdapter"] = weakref.WeakSet()
+
+
 class CodexWorkerAdapter:
     """One-host, one-shot Codex process adapter with no queue/runtime authority."""
 
@@ -1871,6 +1875,7 @@ class CodexWorkerAdapter:
         self._codex_home = Path(codex_home) if codex_home is not None else None
         self.inspector = inspector or ProcessInspector()
         self._runs: dict[str, _RunState] = {}
+        _CONSTRUCTED_CODEX_ADAPTERS.add(self)
 
     @property
     def codex_home(self) -> Path:
