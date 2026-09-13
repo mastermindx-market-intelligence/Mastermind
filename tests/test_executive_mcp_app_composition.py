@@ -129,8 +129,9 @@ def test_read_token_gets_submit_scope_challenge_before_socket_effect(settings, r
     asyncio.run(exercise())
 
 
+@pytest.mark.parametrize("installed", [False, True])
 def test_real_mcp_admission_duplicate_conflict_and_same_request_status(
-    settings, rsa_key, tmp_path, short_socket_root
+    settings, rsa_key, tmp_path, short_socket_root, installed
 ):
     """The transport must preserve one real Job and the existing status path."""
     async def exercise():
@@ -138,9 +139,29 @@ def test_real_mcp_admission_duplicate_conflict_and_same_request_status(
             tmp_path, socket_root=short_socket_root,
             mastermind_root=Path(settings.mastermind_root), macro_root=Path(settings.macro_root_flag),
         )
+        if installed:
+            import os
+            from control_plane.executive_service import ExecutiveControlService, CeoIngressAppBinding
+            from integrations.executive_mcp.installed import InstalledExecutiveReaders
+            readers = InstalledExecutiveReaders(
+                repo_root=Path(settings.mastermind_root), macro_root=Path(settings.macro_root_flag),
+                runtime_root=service.config.runtime_root,
+            )
+            service = ExecutiveControlService(
+                service.config, supervisor_factory=lambda runtime: fixture._NoExecutionSupervisor(),
+                ceo_ingress_socket_path=settings.ceo_ingress_socket_path,
+                ceo_ingress_peer_uid=os.geteuid()+1000,
+                ceo_ingress_grounding_provider=readers, ceo_ingress_armed=False,
+                ceo_ingress_app_binding=CeoIngressAppBinding(
+                    peer_uid=os.geteuid(), armed=True, grounding_provider=readers, read_provider=readers,
+                ),
+            )
         await service.start()
         try:
-            bound = dataclasses.replace(settings, runtime_root=tmp_path / "runtime")
+            bound = (dataclasses.replace(
+                settings, read_from_ceo_ingress=True,
+                mastermind_root=tmp_path/'no-network-process-checkout', macro_root_flag=None,
+            ) if installed else dataclasses.replace(settings, runtime_root=tmp_path / "runtime"))
             async with connection(bound) as client:
                 token = fixture._submit_token(rsa_key)
                 _, body = await call(client, token, "submit_ceo_intent", PAYLOAD)

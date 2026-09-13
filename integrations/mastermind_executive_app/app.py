@@ -62,6 +62,7 @@ from integrations.mastermind_executive_app.gateway import (
     AppPolicies,
     CeoIngressClient,
     build_read_gateway,
+    CeoIngressReadGateway,
     make_jwt_authenticators,
 )
 
@@ -130,6 +131,8 @@ class AppSettings:
     #: policy. This opt-in verifies that policy in full on reader routes;
     #: legacy HTTP and temporary E1 retain their exact read-only policy.
     allow_submit_authorized_reads: bool = False
+    #: Installed composition reads only through the existing CeoIngress.
+    read_from_ceo_ingress: bool = False
     #: E1's temporary runtime projection root.  It is required only for the
     #: read-only capability and never comes from a request body.
     runtime_root: "Path | str | None" = None
@@ -148,6 +151,10 @@ class AppSettings:
             raise ValueError("allow_submit_authorized_reads must be a bool")
         if self.read_only and self.allow_submit_authorized_reads:
             raise ValueError("read_only app refuses submit-authorized reads")
+        if type(self.read_from_ceo_ingress) is not bool:
+            raise ValueError("read_from_ceo_ingress must be a bool")
+        if self.read_from_ceo_ingress and (self.read_only or self.runtime_root is not None):
+            raise ValueError("installed reads refuse temporary E1/runtime configuration")
         if self.read_only:
             if self.ceo_ingress_socket_path is not None:
                 raise ValueError("read_only app refuses an ingress socket path")
@@ -334,15 +341,18 @@ def create_app(settings: AppSettings) -> Any:
     read_authenticator, submit_authenticator = make_jwt_authenticators(
         settings.policies, jwks_cache=settings.jwks_cache
     )
-    read_gateway = build_read_gateway(
-        settings.mastermind_root,
-        macro_root_flag=settings.macro_root_flag,
-        runtime_root=settings.runtime_root,
-    )
     ceo_ingress_client = None
     if not settings.read_only:
         ceo_ingress_client = CeoIngressClient(
             connect_timeout=settings.connect_timeout, read_timeout=settings.read_timeout
+        )
+    if settings.read_from_ceo_ingress:
+        read_gateway = CeoIngressReadGateway(settings.ceo_ingress_socket_path, ceo_ingress_client)
+    else:
+        read_gateway = build_read_gateway(
+            settings.mastermind_root,
+            macro_root_flag=settings.macro_root_flag,
+            runtime_root=settings.runtime_root,
         )
 
     async def call_read_tool(request: Request) -> JSONResponse:
@@ -382,6 +392,7 @@ def create_app(settings: AppSettings) -> Any:
             macro_root_flag=settings.macro_root_flag,
             environ=settings.environ,
             client=ceo_ingress_client,
+            read_grounding_from_ingress=settings.read_from_ceo_ingress,
         )
         try:
             outcome = await compose_admission(admission_request)

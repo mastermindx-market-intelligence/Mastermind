@@ -21,6 +21,7 @@ import hashlib
 import inspect
 import json
 import os
+import pwd
 import re
 import signal
 import socket
@@ -1594,6 +1595,31 @@ class _ModuleBackupBackend:
         return function(database_path, manifest_path)
 
 
+CEO_APP_READ_SCHEMA = ceo_ingress.APP_READ_SCHEMA
+
+
+@dataclasses.dataclass(frozen=True)
+class CeoIngressAppBinding:
+    """Host-owned capability for one App peer on the existing ingress.
+
+    It neither changes C1's peer nor arms C1. The App can send v2 frames
+    only; the existing admission owner still validates every request.
+    """
+
+    peer_uid: int
+    armed: bool
+    grounding_provider: ceo_ingress.GroundingProvider
+    read_provider: Any | None = None
+
+    def __post_init__(self) -> None:
+        if type(self.peer_uid) is not int or self.peer_uid < 0:
+            raise ValueError("App peer uid must be a nonnegative integer")
+        if type(self.armed) is not bool:
+            raise ValueError("App admission arming must be boolean")
+        if not callable(getattr(self.grounding_provider, "observe", None)):
+            raise ValueError("App binding requires a grounding provider")
+
+
 class ExecutiveControlService:
     """One private AF_UNIX service around one durable Executive runtime."""
 
@@ -1620,6 +1646,7 @@ class ExecutiveControlService:
             CeoIngressDialogueSourceProvider | None
         ) = None,
         ceo_ingress_armed: bool = False,
+        ceo_ingress_app_binding: CeoIngressAppBinding | None = None,
         ceo_ingress_activated_socket: socket.socket | None = None,
         terminal_return_projector: TerminalReturnProjector | None = None,
         terminal_return_projector_factory: (
@@ -1807,6 +1834,14 @@ class ExecutiveControlService:
                         "ceo_ingress_activated_socket must already be listening"
                     ) from exc
             self._ceo_ingress_socket_path = resolved_ceo_ingress_path
+        if ceo_ingress_app_binding is not None:
+            if type(ceo_ingress_app_binding) is not CeoIngressAppBinding:
+                raise ValueError("App binding must be a CeoIngressAppBinding")
+            if self._ceo_ingress_socket_path is None:
+                raise ValueError("App binding requires the existing CeoIngress socket")
+            if ceo_ingress_app_binding.peer_uid == ceo_ingress_peer_uid:
+                raise ValueError("App and C1 must have distinct peer uids")
+        self._ceo_ingress_app_binding = ceo_ingress_app_binding
         self._ceo_ingress_peer_uid = ceo_ingress_peer_uid
         self._ceo_ingress_grounding_provider = ceo_ingress_grounding_provider
         if (
@@ -2340,6 +2375,42 @@ class ExecutiveControlService:
             if mode & 0o007:
                 raise ServiceError("launchd control socket must not be world-accessible")
 
+    def _grant_app_socket_access(self) -> None:
+        """One named-user ACL; C1 ownership, modes and groups stay intact.
+
+        Reapply after launchd recreates its socket. The control uid owns both
+        nodes; no root subprocess, broad group, or Runtime ACL is needed.
+        """
+        binding = self._ceo_ingress_app_binding
+        if binding is None or binding.peer_uid == os.geteuid():
+            return
+        if sys.platform != "darwin":
+            raise ServiceError("installed App socket permissions require macOS")
+        name = pwd.getpwuid(binding.peer_uid).pw_name
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]*", name) is None:
+            raise ServiceError("App service identity is invalid")
+        path = self._ceo_ingress_socket_path
+        assert path is not None
+        for node, permissions, directory in (
+            (path.parent, "search", True), (path, "read,write", False),
+        ):
+            before = node.lstat()
+            if (before.st_uid != os.geteuid() or stat.S_ISLNK(before.st_mode)
+                    or before.st_mode & 0o007
+                    or not (stat.S_ISDIR(before.st_mode) if directory else stat.S_ISSOCK(before.st_mode))):
+                raise ServiceError("App socket custody is unavailable")
+            rule = f"user:{name} allow {permissions}"
+            observed = subprocess.run(
+                ["/bin/ls", "-lde", str(node)], check=True, capture_output=True, text=True,
+            ).stdout
+            if not any(line.strip().split(": ", 1)[-1] == rule for line in observed.splitlines()[1:]):
+                subprocess.run(["/bin/chmod", "+a", rule, str(node)], check=True, capture_output=True)
+            after = node.lstat()
+            if (after.st_dev, after.st_ino, after.st_mode, after.st_uid, after.st_gid) != (
+                before.st_dev, before.st_ino, before.st_mode, before.st_uid, before.st_gid,
+            ):
+                raise ServiceError("App socket identity changed while applying access")
+
     async def _bind_ceo_ingress_server(self, *, start_serving: bool) -> None:
         """Construct (bind) the dedicated CeoIngress listener; see ``_bind_operator_server``."""
 
@@ -2368,6 +2439,9 @@ class ExecutiveControlService:
                 start_serving=start_serving,
                 **activated_options,
             )
+
+        if self._ceo_ingress_launchd_activated:
+            self._grant_app_socket_access()
 
     def _prepare_dialogue_observation_socket_path(self) -> None:
         """Prepare only the exact dedicated W3C directory and stale inode."""
@@ -2709,6 +2783,10 @@ class ExecutiveControlService:
         if ceo_ingress_tasks:
             await asyncio.gather(*ceo_ingress_tasks, return_exceptions=True)
         self._ceo_ingress_tasks.clear()
+        if self._ceo_ingress_app_binding is not None:
+            read_provider = self._ceo_ingress_app_binding.read_provider
+            if read_provider is not None:
+                await read_provider.aclose()
         observation_task_set = getattr(self, "_dialogue_observation_tasks", None)
         observation_tasks = [
             task
@@ -3581,14 +3659,11 @@ class ExecutiveControlService:
     ) -> None:
         """The dedicated CeoIngress protocol handler (§7, §8, R1 §2).
 
-        Peer identity is authenticated against the ONE exact configured
-        ingress peer uid — separate from the generic Operator
-        ``allowed_peer_uids`` set — before any body read/parsing.  There is no
-        generic dispatcher on this path: everything past peer authentication
-        and the startup-readiness gate is delegated to
-        ``executive_ceo_ingress.handle_frame``, which owns the three closed
-        submit/status/state frame validators and typed error law.  Exactly one
-        frame is read and one response is written per connection (§7.3).
+        Kernel identity selects the exact C1 or optional App capability before
+        any body read. Neither uses the generic Operator allowlist. The App's
+        closed read frames project existing canonical state; all admission
+        remains with ``executive_ceo_ingress.handle_frame`` and its existing
+        validators. Exactly one bounded frame and response use each connection.
         """
 
         task = asyncio.current_task()
@@ -3623,7 +3698,9 @@ class ExecutiveControlService:
                     "platform exposes no trusted local peer uid",
                 )
                 return
-            if peer != self._ceo_ingress_peer_uid:
+            app_binding = self._ceo_ingress_app_binding
+            app_peer = app_binding is not None and peer == app_binding.peer_uid
+            if peer != self._ceo_ingress_peer_uid and not app_peer:
                 await self._send_ceo_ingress_error(
                     writer, "peer_denied", "peer uid is not authorized"
                 )
@@ -3682,6 +3759,59 @@ class ExecutiveControlService:
                     writer, "invalid_json", "request is not valid JSON"
                 )
                 return
+            if app_peer and isinstance(parsed, Mapping) and parsed.get("schema") in {
+                ceo_ingress.APP_READ_SCHEMA, ceo_ingress.APP_GROUNDING_SCHEMA,
+            }:
+                try:
+                    if parsed["schema"] == ceo_ingress.APP_GROUNDING_SCHEMA:
+                        if set(parsed) != {"schema"}:
+                            raise ValueError("invalid grounding frame")
+                        result = await ceo_ingress._observe_trusted_grounding(
+                            app_binding.grounding_provider
+                        )
+                    else:
+                        if set(parsed) != {"schema", "tool", "arguments"}:
+                            raise ValueError("invalid read frame")
+                        if parsed["tool"] not in {
+                            "executive_state", "executive_inbox",
+                            "executive_job", "ceo_intent_status",
+                        } or not isinstance(parsed["arguments"], dict):
+                            raise ValueError("invalid read operation")
+                        if app_binding.read_provider is None:
+                            await self._send_ceo_ingress_error(
+                                writer, "ingress_unavailable", "installed readers are unavailable"
+                            )
+                            return
+                        result = await app_binding.read_provider.call(
+                            parsed["tool"], parsed["arguments"]
+                        )
+                    await self._send_ceo_ingress_response(writer, {"ok": True, "result": result})
+                except ceo_ingress.CeoIngressError as exc:
+                    await self._send_ceo_ingress_error(writer, exc.code, exc.message)
+                except Exception:
+                    await self._send_ceo_ingress_error(
+                        writer, "invalid_input", "installed read was refused"
+                    )
+                return
+            if app_peer and (
+                not isinstance(parsed, Mapping)
+                or parsed.get("schema") not in {
+                    ceo_ingress.SUBMIT_SCHEMA_V2, ceo_ingress.STATUS_SCHEMA_V2,
+                }
+            ):
+                await self._send_ceo_ingress_error(
+                    writer, "peer_denied", "frame is not authorized for this peer"
+                )
+                return
+            if app_peer and (
+                not app_binding.armed
+                or self._service_state not in {"READY", "AWAITING_CANARY"}
+            ):
+                await self._send_ceo_ingress_error(
+                    writer, "ingress_unavailable",
+                    "Executive CEO ingress is not currently admitting requests",
+                )
+                return
             if (
                 isinstance(parsed, Mapping)
                 and parsed.get("schema")
@@ -3698,10 +3828,12 @@ class ExecutiveControlService:
                 result = await ceo_ingress.handle_frame(
                     parsed,
                     runtime=self._require_runtime(),
-                    grounding_provider=self._ceo_ingress_grounding_provider,
+                    grounding_provider=(app_binding.grounding_provider if app_peer
+                                        else self._ceo_ingress_grounding_provider),
                     workspace_root=self.config.proof_workspace_root,
                     service_state=self._service_state,
-                    ceo_ingress_armed=self._ceo_ingress_armed,
+                    ceo_ingress_armed=(app_binding.armed if app_peer
+                                       else self._ceo_ingress_armed),
                     # Strict-v2 selection is trusted host composition.  The
                     # source-free public frame cannot opt itself into (or out
                     # of) the terminal-return admission path.

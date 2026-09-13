@@ -284,36 +284,37 @@ successful ChatGPT call.
 
 ### Production binding decision required
 
-For operation
-`executive-plugin-transport-five-tool-closure-20260913-sol-001`, the source
-composition is separate from the remaining installed host binding. No new
-production launcher or activation path is supplied by this change.
+The installed composition gives the network MCP process its own non-login
+service identity. `ceo_ingress_app_peer_uid`, `ceo_ingress_app_armed`, and
+`ceo_ingress_app_macro_root` must be supplied together in the existing protected
+control configuration. Its peer must differ from control, Operator, worker,
+and C1 identities. C1 retains its existing peer, grounding provider and arming
+setting.
 
-The existing production admission service authorizes one exact kernel peer
-identity. That identity belongs to the dedicated C1 relay. A separately owned
-MCP process therefore needs an explicit reviewed peer configuration and
-canonical Runtime read binding before activation. Current host observations
-and deployment coordinates are retained in the private operation evidence,
-not in this public source runbook.
+The App peer can use existing v2 submit/status frames and two closed internal
+read frames on the same CeoIngress socket. The four public tools and schemas
+remain unchanged. `InstalledExecutiveReaders` runs inside the control process,
+using the existing gateway projections and read-only Runtime handle. The
+network App receives canonical envelopes and freshly observed grounding over
+the socket; it has no filesystem access to the Runtime database or worker
+leases. The admission owner independently rechecks grounding before effect.
+Temporary E1/fixture roots and all their production-path refusals remain intact.
 
-The commission preserves C1 ownership and explicitly stops at a required
-change to CeoIngress semantics. Proposed bounded extension for the holding
-authority to approve:
+On macOS, the control process applies one named-user ACL for socket read/write
+and parent-directory traversal. Socket ownership, group and POSIX mode remain
+unchanged, and a normal restart does not duplicate the ACL. The App identity is
+not added to the C1 group or the general Operator allowlist.
 
-1. Give the Executive MCP process its own non-login service principal after a
-   fresh identity census; preserve the dedicated C1 principal and credentials.
-2. Extend the existing CeoIngress kernel-peer configuration to admit that one
-   reviewed principal while preserving C1's authorization. Keep the same
-   socket, frame protocols, admission predicates, operation identity and
-   idempotency rules. Introduce no new ingress or direct Runtime mutation.
-3. Bind the four readers to the same installed canonical Runtime through
-   narrowly scoped read access and an explicit installed configuration.
-   Preserve all temporary-profile production-root refusals.
-4. Add the MCP process to the existing exact-release installation and service
-   ownership path, then qualify its Auth0 policy, existing Business tunnel,
-   ChatGPT app generation and separately confirmed harmless admission canary.
+`ops/executive_os/executive_mcp_entry.py` is the installed network-process
+launcher. It requires an explicit root-owned configuration, the matching sealed
+release directory, dedicated process uid, loopback port, real A1 policies and
+separate directories for the existing read/submit durable authentication audit
+sinks. It refuses user-writable installation configuration. Run it under a
+separately provisioned network Python environment with `-I -B`; the sealed
+Executive control Python remains SDK-free.
 
-This extension is not authorized by the transport-only source change. Until
-that scope decision and provider qualification are settled, the production
-capability remains `BUILT_NOT_PROVEN`; the existing listener, host principals,
-C1 activation, tenant objects, grants and Business app are unchanged.
+Deployment evidence belongs in the private operation receipt. Source tests do
+not establish an installed generation, accepted identity provider, live tunnel,
+or real ChatGPT canary. Production qualification still requires all five tools
+through the actual registered app, one separately confirmed harmless admission,
+same-operation duplicate/conflict checks, and zero Attempts or Workers.
