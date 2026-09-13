@@ -261,7 +261,12 @@ def _b64decode(value: str) -> bytes:
     try:
         encoded = value.encode("ascii")
         padding = b"=" * (-len(encoded) % 4)
-        return base64.urlsafe_b64decode(encoded + padding)
+        decoded = base64.urlsafe_b64decode(encoded + padding)
+        if _b64encode(decoded) != value:
+            raise ActionContractError("invalid action reference")
+        return decoded
+    except ActionContractError:
+        raise
     except Exception as error:
         raise ActionContractError("invalid action reference") from error
 
