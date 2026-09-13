@@ -17,7 +17,8 @@ from urllib.parse import urlparse
 _REALM_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 _ENV_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 _SECRET_SHAPE_RE = re.compile(r"(?i)(?:sk-[a-z0-9_-]{12,}|bearer\s+[a-z0-9._-]{12,})")
-_WIRE_APIS = frozenset({"responses", "chat"})
+CODEX_WIRE_API_RESPONSES = "responses"
+_WIRE_APIS = frozenset({CODEX_WIRE_API_RESPONSES})
 
 
 class ProviderRealmError(ValueError):
@@ -59,7 +60,9 @@ class CodexProviderRealm:
         object.__setattr__(self, "env_key", env_key)
         wire_api = str(self.wire_api or "").strip().lower()
         if wire_api not in _WIRE_APIS:
-            raise ProviderRealmError("wire_api is unsupported")
+            raise ProviderRealmError(
+                'wire_api is unsupported: Codex requires wire_api = "responses"'
+            )
         object.__setattr__(self, "wire_api", wire_api)
         for field_name in ("request_max_retries", "stream_max_retries"):
             value = getattr(self, field_name)
@@ -100,7 +103,7 @@ MINIMAX_TOKEN_PLAN = CodexProviderRealm(
     display_name="MiniMax Token Plan",
     base_url="https://api.minimax.io/v1",
     env_key="MINIMAX_TOKEN_PLAN_KEY",
-    wire_api="chat",
+    wire_api="responses",
 )
 
 ALIBABA_TOKEN_PLAN = CodexProviderRealm(
@@ -113,14 +116,25 @@ ALIBABA_TOKEN_PLAN = CodexProviderRealm(
 )
 
 REVIEWED_CODEX_PROVIDER_REALMS = {
-    realm.realm_id: realm for realm in (MINIMAX_TOKEN_PLAN, ALIBABA_TOKEN_PLAN)
+    realm.realm_id: realm for realm in (ALIBABA_TOKEN_PLAN,)
 }
+
+CANDIDATE_CODEX_PROVIDER_REALMS_SPEC_ONLY = {
+    realm.realm_id: realm for realm in (MINIMAX_TOKEN_PLAN,)
+}
+
+# Kit-side Responses transport was observed with Codex 0.147 against MiniMax's
+# OpenAI-compatible base, but it is not officially documented. Promotion to the
+# reviewed registry requires an exact-head native execution proof. No worker
+# binding is authorized from this candidate collection.
 
 ProviderCredentialLoader = Callable[[], str]
 
 __all__ = [
     "ALIBABA_TOKEN_PLAN",
     "MINIMAX_TOKEN_PLAN",
+    "CANDIDATE_CODEX_PROVIDER_REALMS_SPEC_ONLY",
+    "CODEX_WIRE_API_RESPONSES",
     "REVIEWED_CODEX_PROVIDER_REALMS",
     "CodexProviderRealm",
     "ProviderCredentialLoader",
