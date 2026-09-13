@@ -26,6 +26,18 @@ def chunk(session="fixture-1", text="useful result"):
         "sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": text}}}
 
 
+def permission_request(request_id=700, session="fixture-1"):
+    return {"jsonrpc": "2.0", "id": request_id, "method": "session/request_permission",
+            "params": {"sessionId": session, "toolCall": {"toolCallId": "fixture-tool"},
+                       "options": [{"optionId": "allow", "kind": "allow_always", "name": "Allow"}]}}
+
+
+def update_notification(session="fixture-1", text="x"):
+    return {"jsonrpc": "2.0", "method": "session/update", "params": {
+        "sessionId": session, "update": {"sessionUpdate": "agent_message_chunk",
+                                        "content": {"type": "text", "text": text}}}}
+
+
 class FrameTests(unittest.TestCase):
     def read(self, data, *, limit=256, eof=True):
         async def run():
@@ -98,8 +110,10 @@ class FrameTests(unittest.TestCase):
         async def run():
             client = ProbeClient(ProbeLimits(frames=2))
             source = asyncio.StreamReader(limit=client.limits.frame_bytes)
-            data = wire({"jsonrpc": "2.0", "id": 1, "result": {}})
-            source.feed_data(data * 3)
+            source.feed_data(
+                wire({"jsonrpc": "2.0", "id": 1, "result": {}})
+                + wire({"jsonrpc": "2.0", "id": 2, "result": {}})
+                + wire({"jsonrpc": "2.0", "id": 3, "result": {}}))
             reader = StrictFrameReader(source, client)
             await reader.readuntil(); await reader.readuntil()
             with self.assertRaisesRegex(BoundaryViolation, "FRAME_BUDGET_EXCEEDED"):
@@ -170,6 +184,88 @@ class FrameTests(unittest.TestCase):
     def test_unknown_rpc_method_cannot_be_silently_ignored(self):
         with self.assertRaisesRegex(BoundaryViolation, "TOOL_NOT_GRANTED"):
             self.read(wire({"jsonrpc": "2.0", "method": "_new_tool", "params": {}}))
+
+    def test_duplicate_response_ids_are_rejected(self):
+        async def run():
+            client = ProbeClient()
+            source = asyncio.StreamReader(limit=client.limits.frame_bytes)
+            frame = wire({"jsonrpc": "2.0", "id": 1, "result": {"stopReason": "end_turn"}})
+            source.feed_data(frame + frame)
+            reader = StrictFrameReader(source, client)
+            self.assertEqual(await reader.readuntil(), frame)
+            self.assertIsNone(client.violation)
+            with self.assertRaisesRegex(BoundaryViolation, "DUPLICATE_RPC_ID"):
+                await reader.readuntil()
+            self.assertEqual(client.violation, "DUPLICATE_RPC_ID")
+            with self.assertRaisesRegex(BoundaryViolation, "DUPLICATE_RPC_ID"):
+                await reader.readuntil()
+        execute(run())
+
+    def test_duplicate_request_ids_are_rejected(self):
+        async def run():
+            client = ProbeClient()
+            client.bind_session("fixture-1")
+            client.begin_prompt()
+            source = asyncio.StreamReader(limit=client.limits.frame_bytes)
+            frame = wire(permission_request(700))
+            source.feed_data(frame + frame)
+            reader = StrictFrameReader(source, client)
+            self.assertEqual(await reader.readuntil(), frame)
+            self.assertIsNone(client.violation)
+            with self.assertRaisesRegex(BoundaryViolation, "DUPLICATE_RPC_ID"):
+                await reader.readuntil()
+            self.assertEqual(client.violation, "DUPLICATE_RPC_ID")
+        execute(run())
+
+    def test_notification_without_id_does_not_collide_with_request_id(self):
+        # SDK 0.12.1 treats method-without-id as a notification (no RPC id).
+        # The 0.12.1 fixture emits session/update then session/request_permission.
+        async def run():
+            client = ProbeClient()
+            client.bind_session("fixture-1")
+            client.begin_prompt()
+            source = asyncio.StreamReader(limit=client.limits.frame_bytes)
+            note, req = wire(update_notification()), wire(permission_request(700))
+            source.feed_data(note + req + req)
+            reader = StrictFrameReader(source, client)
+            self.assertEqual(await reader.readuntil(), note)
+            self.assertEqual(await reader.readuntil(), req)
+            self.assertIsNone(client.violation)
+            with self.assertRaisesRegex(BoundaryViolation, "DUPLICATE_RPC_ID"):
+                await reader.readuntil()
+            self.assertEqual(client.violation, "DUPLICATE_RPC_ID")
+        execute(run())
+
+    def test_typed_rpc_ids_keep_int_and_string_distinct(self):
+        async def run():
+            client = ProbeClient()
+            source = asyncio.StreamReader(limit=client.limits.frame_bytes)
+            source.feed_data(wire({"jsonrpc": "2.0", "id": 1, "result": {}})
+                             + wire({"jsonrpc": "2.0", "id": "1", "result": {}}))
+            reader = StrictFrameReader(source, client)
+            await reader.readuntil()
+            await reader.readuntil()
+            self.assertIsNone(client.violation)
+        execute(run())
+
+    def test_seen_rpc_id_bound_refuses_further_ids_without_evicting(self):
+        async def run():
+            client = ProbeClient(ProbeLimits(rpc_ids=2))
+            source = asyncio.StreamReader(limit=client.limits.frame_bytes)
+            source.feed_data(
+                wire({"jsonrpc": "2.0", "id": 1, "result": {}})
+                + wire({"jsonrpc": "2.0", "id": 2, "result": {}})
+                + wire({"jsonrpc": "2.0", "id": 3, "result": {}})
+                + wire({"jsonrpc": "2.0", "id": 1, "result": {}}))
+            reader = StrictFrameReader(source, client)
+            await reader.readuntil()
+            await reader.readuntil()
+            with self.assertRaisesRegex(BoundaryViolation, "RPC_ID_BUDGET_EXCEEDED"):
+                await reader.readuntil()
+            self.assertEqual(client.violation, "RPC_ID_BUDGET_EXCEEDED")
+            with self.assertRaisesRegex(BoundaryViolation, "RPC_ID_BUDGET_EXCEEDED"):
+                await reader.readuntil()
+        execute(run())
 
 
 class CallbackTests(unittest.TestCase):
