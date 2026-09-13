@@ -245,3 +245,78 @@ socket.
   the MCP SDK anywhere in this app, no reference to `send_control_request`
   or a `.submit_intent(` call site, the frozen schema digest, and zero diff
   on `control_plane/executive_service.py`.
+
+## Native five-tool MCP composition
+
+`integrations.executive_mcp.server.build_executive_mcp_app(settings,
+audit_sink=...)` composes the frozen five-tool contract over stateless
+Streamable HTTP `POST /mcp`. It owns one existing Executive App instance;
+readers use its canonical gateway and submit uses its existing dedicated
+CeoIngress client. It adds no admission queue, token store or retry service.
+
+The builder accepts the exact read policy or the exact two-scope submit
+policy through two unchanged A1 adapters. A token upgraded for submission can
+also read through an explicit App setting, with the full submit policy
+independently verified by the App. The default direct HTTP App and temporary
+`e1-read` profile retain their original policy boundaries. Tool OAuth metadata
+and the insufficient-scope challenge use the existing A1 helpers; the input
+schemas and annotations remain unchanged.
+
+Both request and inner response buffering reuse the existing bounded ASGI
+boundary. The final escaped MCP result has its own budget, reserving space
+for the admitted JSON-RPC request ID. Literal routes refuse query strings,
+encoded aliases and trailing-slash redirects. The MCP backend accepts loopback
+Host values and is intended for the existing Secure MCP Tunnel.
+
+The composition also exposes the existing authenticated
+`POST /v1/tools/submit_ceo_intent/reconcile` status route. This is an operator
+status endpoint, not a sixth MCP tool. A lost, oversized, malformed or
+identity-mismatched reply after possible admission returns `effect_unknown`
+with the original `request_ref`; reconcile that same reference before taking
+another modifying action. No transport retry is performed.
+
+Focused proof lives in `tests/test_executive_mcp_app_composition.py`: real
+A1-signed test tokens, real temporary repositories, a real temporary
+CeoIngress/Runtime with execution disabled, exact tool scan, authorization
+upgrade, one queued Job, duplicate/conflict behavior and loss-after-admission
+reconciliation. These tests do not establish production installation or a
+successful ChatGPT call.
+
+### Production binding decision required
+
+For operation
+`executive-plugin-transport-five-tool-closure-20260913-sol-001`, the source
+composition is separate from the remaining installed host binding. No new
+production launcher or activation path is supplied by this change.
+
+The attended Studio configuration projection identified installed release
+`a6fde00413979ede525033053bc09a495d6e5fbd`, runtime
+`/var/db/mastermind-executive/control/db`, and the dedicated socket
+`/var/run/mastermind-executive/ceo-ingress.sock`, with
+`ceo_ingress_peer_uid=452`. Current protected `ExecutiveControlService`
+authorizes one exact kernel peer UID. UID 452 is the dedicated
+`_mastermind_sol_relay` principal, and C1 preparation explicitly keeps that
+principal out of the broad Executive/worker groups. Running a separate MCP
+service does not satisfy this installed peer contract.
+
+The commission preserves C1 ownership and explicitly stops at a required
+change to CeoIngress semantics. Proposed bounded extension for the holding
+authority to approve:
+
+1. Give the Executive MCP process its own non-login service principal after a
+   fresh identity census; preserve the dedicated C1 principal and credentials.
+2. Extend the existing CeoIngress kernel-peer configuration to admit that one
+   reviewed principal while preserving C1's authorization. Keep the same
+   socket, frame protocols, admission predicates, operation identity and
+   idempotency rules. Introduce no new ingress or direct Runtime mutation.
+3. Bind the four readers to the same installed canonical Runtime through
+   narrowly scoped read access and an explicit installed configuration.
+   Preserve all temporary-profile production-root refusals.
+4. Add the MCP process to the existing exact-release installation and service
+   ownership path, then qualify its Auth0 policy, existing Business tunnel,
+   ChatGPT app generation and separately confirmed harmless admission canary.
+
+This extension is not authorized by the transport-only source change. Until
+that scope decision and provider qualification are settled, the production
+capability remains `BUILT_NOT_PROVEN`; the existing listener, host principals,
+C1 activation, tenant objects, grants and Business app are unchanged.
