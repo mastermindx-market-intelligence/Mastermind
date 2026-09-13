@@ -9,7 +9,7 @@ ResourcePolicy + StableWorkbenchLease contracts.
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 import dataclasses
 import enum
 import json
@@ -634,6 +634,30 @@ async def run_service(config: ServiceConfig) -> int:
         app = build_service_app(runtime, config, state)
         import uvicorn
 
+        class _ServiceServer(uvicorn.Server):
+            @contextmanager
+            def capture_signals(self):
+                # Uvicorn 0.52.x intentionally re-raises captured signals after
+                # graceful shutdown. P0 owns a closed process-exit vocabulary,
+                # so preserve Uvicorn's cooperative handling/force-exit behavior
+                # during serve and restore prior handlers without replaying the
+                # signal after Runtime/socket cleanup has established the result.
+                import signal
+                import threading
+
+                if threading.current_thread() is not threading.main_thread():
+                    yield
+                    return
+                handled = [signal.SIGINT, signal.SIGTERM]
+                if sys.platform == "win32" and hasattr(signal, "SIGBREAK"):
+                    handled.append(signal.SIGBREAK)
+                originals = {sig: signal.signal(sig, self.handle_exit) for sig in handled}
+                try:
+                    yield
+                finally:
+                    for sig, handler in originals.items():
+                        signal.signal(sig, handler)
+
         uvicorn_config = uvicorn.Config(
             app,
             host=config.bind_host,
@@ -644,7 +668,7 @@ async def run_service(config: ServiceConfig) -> int:
             lifespan="on",
             timeout_graceful_shutdown=config.close_timeout_seconds,
         )
-        server = uvicorn.Server(uvicorn_config)
+        server = _ServiceServer(uvicorn_config)
         try:
             await server.serve(sockets=[sock])
         except (RuntimeCloseIncomplete, RuntimeCloseUncertain):
