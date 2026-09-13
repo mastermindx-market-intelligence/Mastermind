@@ -1303,10 +1303,6 @@ class ExecutiveWorkerBroker:
         descriptor = adapter_descriptor(adapter_id)
         if not descriptor.implemented:
             raise WorkerBrokerError(f"worker adapter {adapter_id!r} is not implemented")
-        if not callable(getattr(adapter, "status", None)):
-            raise WorkerBrokerError(
-                f"worker adapter {adapter_id!r} does not expose broker status()"
-            )
         self.adapter = adapter
         self.adapter_id = descriptor.adapter_id
         self.policy = policy
@@ -2765,7 +2761,12 @@ class ExecutiveWorkerBroker:
             elif state.terminal_error is not None:
                 status = "ERROR"
             else:
-                status = await self.adapter.status(state.process_ref)
+                status_method = getattr(self.adapter, "status", None)
+                if not callable(status_method):
+                    raise BrokerStateError(
+                        f"worker adapter {self.adapter_id!r} does not expose status for an active run"
+                    )
+                status = await status_method(state.process_ref)
             result["run"] = {
                 "run_id": run_id,
                 "status": status,
