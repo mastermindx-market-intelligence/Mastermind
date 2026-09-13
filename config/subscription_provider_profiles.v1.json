@@ -1,0 +1,47 @@
+{
+  "schema": "mastermind.subscription_provider_profiles/v1",
+  "verified_at": "2026-09-13T06:12:00Z",
+  "adapter_id": "claude-compatible-subscription",
+  "profiles": {
+    "glm-coding-plan": {
+      "provider": "glm",
+      "product": "coding_plan",
+      "protocol": "anthropic",
+      "base_url": "https://api.z.ai/api/anthropic",
+      "models": {"routine": "GLM-4.7", "hard": "GLM-5.1", "fast": "GLM-4.5-Air"},
+      "default_model_class": "routine",
+      "supported_tool_only": true,
+      "credential_binding": "adapter_private_provider_realm",
+      "quota_profile": {"provider": "glm", "product": "coding_plan", "tier": null},
+      "autonomous_allowed": false,
+      "activation_gate": "provider_realm_enrolled_and_capacity_known"
+    },
+    "alibaba-token-plan-personal": {
+      "provider": "alibaba",
+      "product": "token_plan_personal",
+      "protocol": "anthropic",
+      "base_url": "https://token-plan.ap-southeast-1.maas.aliyuncs.com/apps/anthropic",
+      "models": {"routine": "qwen3.8-max", "hard": "qwen3.8-max", "fast": "qwen3.6-flash", "subagent": "qwen3.7-max"},
+      "default_model_class": "routine",
+      "supported_tool_only": false,
+      "credential_binding": "adapter_private_provider_realm",
+      "quota_profile": {"provider": "alibaba", "product": "token_plan_personal", "tier": null},
+      "autonomous_allowed": false,
+      "activation_gate": "provider_realm_enrolled_and_capacity_known"
+    },
+    "minimax-token-plan": {
+      "provider": "minimax",
+      "product": "token_plan_current_or_legacy",
+      "protocol": "anthropic",
+      "base_url": "https://api.minimax.io/anthropic",
+      "models": {"routine": "MiniMax-M2.7", "hard": "MiniMax-M2.7", "fast": "MiniMax-M2.7"},
+      "default_model_class": "routine",
+      "supported_tool_only": false,
+      "credential_binding": "adapter_private_provider_realm",
+      "quota_profile": {"provider": "minimax", "product": null, "tier": null},
+      "autonomous_allowed": false,
+      "activation_gate": "provider_realm_enrolled_and_capacity_known",
+      "notes": ["MiniMax M3 is sold in current Token Plan packaging, but the documented Anthropic compatibility endpoint currently lists M2.7-family models; do not advertise M3 on this adapter until provider documentation supports it."]
+    }
+  }
+}
