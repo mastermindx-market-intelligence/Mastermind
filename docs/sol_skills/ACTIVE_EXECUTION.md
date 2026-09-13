@@ -91,7 +91,9 @@ preflight, exact release qualification, or a disjoint implementation dependency 
 The authentication gate stops installation only; it does not terminate the CEO turn.
 
 Never route around a denial or `EFFECT_UNKNOWN` mutation by changing carriers, devices, providers, or
-tools. Lane switching is for genuinely independent permitted work.
+tools. Lane switching is for genuinely independent permitted work. An `EFFECT_UNKNOWN` in one lane
+does not itself permit finalization while another useful lane is provably independent of the unknown
+effect; freeze the uncertain lane and continue only work whose safety and result cannot depend on it.
 
 ## Step 5 — Bound reconciliation and concurrent-session churn
 
@@ -148,8 +150,9 @@ Before ending a substantial active-execution turn, classify the state into exact
 * `PROVEN_OUTCOME` — the requested capability meets its declared completion/proof law;
 * `EXACT_HUMAN_GATE` — the only remaining critical action requires a specific human/admin ceremony
   that this session cannot lawfully perform, and every other useful in-scope lane is exhausted;
-* `EFFECT_UNKNOWN` — an unresolved modifying effect requires same-carrier reconciliation before any
-  continuation can be safe;
+* `EFFECT_UNKNOWN` — an unresolved modifying effect makes every remaining useful in-scope action
+  unsafe or dependent on that unknown effect; same-carrier reconciliation is required before any
+  further scoped continuation can be safe;
 * `ALL_SCOPED_LANES_BLOCKED` — every materially useful authorized lane is blocked, with exact blockers
   and next owners known;
 * `PLATFORM_FAILURE` — the required platform/tool substrate is unavailable and no independent useful
@@ -225,6 +228,8 @@ A substantial CEO continuation passes this skill when:
 * tool degradation is recorded once per stable generation rather than rediscovered repeatedly;
 * unrelated concurrent movement does not trigger global archaeology;
 * no effect-unknown modification changes carrier or gets blind-retried;
+* effect uncertainty in one lane does not become a global stop while a useful lane is provably
+  independent of that uncertainty;
 * no background continuation is claimed without a real durable owner and return path;
 * Sol never finalizes while the truthful state is `MORE_WORK_EXISTS`;
 * the final stop classification and exact next action are recoverable by a fresh session; and
