@@ -289,15 +289,12 @@ For operation
 composition is separate from the remaining installed host binding. No new
 production launcher or activation path is supplied by this change.
 
-The attended Studio configuration projection identified installed release
-`a6fde00413979ede525033053bc09a495d6e5fbd`, runtime
-`/var/db/mastermind-executive/control/db`, and the dedicated socket
-`/var/run/mastermind-executive/ceo-ingress.sock`, with
-`ceo_ingress_peer_uid=452`. Current protected `ExecutiveControlService`
-authorizes one exact kernel peer UID. UID 452 is the dedicated
-`_mastermind_sol_relay` principal, and C1 preparation explicitly keeps that
-principal out of the broad Executive/worker groups. Running a separate MCP
-service does not satisfy this installed peer contract.
+The existing production admission service authorizes one exact kernel peer
+identity. That identity belongs to the dedicated C1 relay. A separately owned
+MCP process therefore needs an explicit reviewed peer configuration and
+canonical Runtime read binding before activation. Current host observations
+and deployment coordinates are retained in the private operation evidence,
+not in this public source runbook.
 
 The commission preserves C1 ownership and explicitly stops at a required
 change to CeoIngress semantics. Proposed bounded extension for the holding
