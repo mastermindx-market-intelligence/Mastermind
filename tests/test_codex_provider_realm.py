@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-import os
-import shutil
+import json
 import stat
 import subprocess
 from pathlib import Path
@@ -18,6 +17,9 @@ from control_plane.codex_provider_realm import (
     CodexProviderRealm,
     ProviderRealmError,
 )
+
+EXECUTIVE_SYSTEM_ROOT = Path("/Library/Application Support/MastermindExecutive")
+EXECUTIVE_CODEX_BINARY = EXECUTIVE_SYSTEM_ROOT / "bin/codex-0.147.0"
 
 
 def _binary(tmp_path: Path) -> tuple[Path, cw.BinaryAttestation]:
@@ -99,9 +101,19 @@ def test_provider_realm_refuses_unsafe_identity_endpoint_and_retry() -> None:
 def test_current_codex_native_config_rejects_chat_and_loads_responses(
     tmp_path: Path,
 ) -> None:
-    binary_path = shutil.which("codex")
-    if binary_path is None:
-        pytest.skip("codex binary is unavailable")
+    if not EXECUTIVE_SYSTEM_ROOT.exists():
+        pytest.skip("MastermindExecutive system root is unavailable (hosted CI)")
+    assert EXECUTIVE_SYSTEM_ROOT.is_dir()
+    assert EXECUTIVE_CODEX_BINARY.is_file()
+
+    version_result = subprocess.run(
+        [str(EXECUTIVE_CODEX_BINARY), "--version"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert version_result.returncode == 0
+    assert version_result.stdout.strip() == "codex-cli 0.147.0"
 
     def run(realm: CodexProviderRealm) -> subprocess.CompletedProcess[str]:
         home = tmp_path / f"codex-home-{realm.realm_id}"
@@ -110,12 +122,9 @@ def test_current_codex_native_config_rejects_chat_and_loads_responses(
         workspace.mkdir()
         process = subprocess.run(
             [
-                binary_path,
-                "exec",
-                "--skip-git-repo-check",
-                "-C",
-                str(workspace),
-                "x",
+                str(EXECUTIVE_CODEX_BINARY),
+                "debug",
+                "models",
                 *(
                     argument
                     for override in realm.config_overrides()
@@ -123,10 +132,20 @@ def test_current_codex_native_config_rejects_chat_and_loads_responses(
                 ),
             ],
             env={
-                **os.environ,
+                "PATH": "/usr/bin:/bin",
+                "HOME": str(home),
                 "CODEX_HOME": str(home),
+                "HTTP_PROXY": "http://127.0.0.1:9",
+                "HTTPS_PROXY": "http://127.0.0.1:9",
+                "ALL_PROXY": "http://127.0.0.1:9",
+                "http_proxy": "http://127.0.0.1:9",
+                "https_proxy": "http://127.0.0.1:9",
+                "all_proxy": "http://127.0.0.1:9",
+                "NO_PROXY": "",
+                "no_proxy": "",
                 realm.env_key: "native-proof-unused",
             },
+            cwd=workspace,
             capture_output=True,
             text=True,
             timeout=20,
@@ -147,6 +166,9 @@ def test_current_codex_native_config_rejects_chat_and_loads_responses(
     combined_chat_output = chat_result.stdout + chat_result.stderr
     assert '`wire_api = "chat"` is no longer supported' in combined_chat_output
     assert "responses" in combined_chat_output
+    assert "connect failed" not in combined_chat_output.lower()
+    assert "connection refused" not in combined_chat_output.lower()
+    assert "error sending request" not in combined_chat_output.lower()
 
     responses_realm = CodexProviderRealm(
         realm_id="responses-native-proof", provider_alias="provider",
@@ -156,13 +178,14 @@ def test_current_codex_native_config_rejects_chat_and_loads_responses(
     )
     object.__setattr__(responses_realm, "base_url", "http://127.0.0.1:9/v1")
     responses_result = run(responses_realm)
-    assert responses_result.returncode != 0
+    assert responses_result.returncode == 0
     combined_responses_output = responses_result.stdout + responses_result.stderr
     assert "no longer supported" not in combined_responses_output
-    assert any(
-        marker in combined_responses_output.lower()
-        for marker in ("connection refused", "connection error", "error sending request")
-    )
+    assert "connect failed" not in combined_responses_output.lower()
+    assert "connection refused" not in combined_responses_output.lower()
+    assert "error sending request" not in combined_responses_output.lower()
+    assert "https://provider.invalid/v1" not in combined_responses_output.lower()
+    assert isinstance(json.loads(responses_result.stdout), dict)
 
 
 def test_external_realm_home_needs_no_openai_auth_marker(tmp_path: Path) -> None:
