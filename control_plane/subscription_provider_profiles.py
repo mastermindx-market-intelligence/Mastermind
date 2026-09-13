@@ -29,6 +29,9 @@ _FORBIDDEN_HARNESS_FIELDS = frozenset({"adapter_id", "harness_id"})
 _MAX_STRING_CHARS = 256
 _MAX_MAP_KEYS = 32
 _MAX_BASE_URL_PATH_CHARS = 128
+_MAX_BASE_URL_PATH_GRAMMAR_CHARS = 256
+_MAX_BASE_URL_PATH_SEGMENTS = 8
+_PATH_SEGMENT_RE = re.compile(r"^[A-Za-z0-9._~-]{1,64}$")
 
 _DOCUMENT_REQUIRED = frozenset({"schema", "verified_at", "profiles"})
 _DOCUMENT_ALLOWED = _DOCUMENT_REQUIRED | frozenset({"metadata"})
@@ -170,6 +173,24 @@ def _verified_at(value: Any, path: str) -> str:
     return token
 
 
+def _allowlisted_base_url_path(raw_path: str) -> bool:
+    if raw_path in {"", "/"}:
+        return True
+    if len(raw_path) > _MAX_BASE_URL_PATH_GRAMMAR_CHARS:
+        return False
+    if not raw_path.startswith("/") or raw_path.endswith("/"):
+        return False
+    segments = raw_path.split("/")[1:]
+    if not (1 <= len(segments) <= _MAX_BASE_URL_PATH_SEGMENTS):
+        return False
+    for segment in segments:
+        if not segment or set(segment) <= {"."}:
+            return False
+        if _PATH_SEGMENT_RE.fullmatch(segment) is None:
+            return False
+    return True
+
+
 def _validate_base_url(value: Any, path: str) -> str:
     token = _exact_string(value, path)
     if any(ch.isspace() for ch in token):
@@ -202,6 +223,12 @@ def _validate_base_url(value: Any, path: str) -> str:
         or parsed.params
         or len(normalized) > _MAX_BASE_URL_PATH_CHARS
     ):
+        _raise(f"{path} has invalid base URL")
+    if not token.isascii() or "\\" in token:
+        _raise(f"{path} has invalid base URL")
+    if "%" in raw_path or "%" in (parsed.hostname or "") or "%" in parsed.netloc:
+        _raise(f"{path} has invalid base URL")
+    if not _allowlisted_base_url_path(raw_path):
         _raise(f"{path} has invalid base URL")
     return token
 

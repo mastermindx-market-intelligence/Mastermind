@@ -184,6 +184,44 @@ def test_base_url_rejects_query_fragment_userinfo_and_malformed_forms(base_url):
         validate_profiles(catalog)
 
 
+def _reject_base_url(base_url: str) -> None:
+    catalog = _catalog()
+    catalog["profiles"]["glm-coding-plan"]["base_url"] = base_url
+    with pytest.raises(ProviderProfileError, match="invalid base URL"):
+        validate_profiles(catalog)
+
+
+def test_base_url_rejects_encoded_backslash():
+    _reject_base_url("https://api.z.ai/a%5Cb")
+
+
+def test_base_url_rejects_literal_backslash():
+    _reject_base_url("https://api.z.ai/a\\b")
+
+
+def test_base_url_rejects_unicode_dot_aliases():
+    _reject_base_url("https://api.z.ai/\u2024")
+    _reject_base_url("https://api.z.ai/\uff0e")
+
+
+def test_base_url_rejects_double_encoded_dots():
+    _reject_base_url("https://api.z.ai/%252e%252e")
+
+
+def test_base_url_rejects_empty_non_root_segment():
+    _reject_base_url("https://api.z.ai/a/")
+    _reject_base_url("https://api.z.ai//a")
+
+
+def test_base_url_rejects_non_ascii_host_or_path():
+    _reject_base_url("https://ex\u00e4mple.com/api/anthropic")
+    _reject_base_url("https://api.z.ai/caf\u00e9")
+
+
+def test_base_url_rejects_percent_in_path():
+    _reject_base_url("https://api.z.ai/api%41")
+
+
 @pytest.mark.parametrize("flag", [1, 0, "true", "false", None])
 def test_supported_tool_only_rejects_non_bool(flag):
     catalog = _catalog()
