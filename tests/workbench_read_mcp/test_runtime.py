@@ -22,6 +22,7 @@ from integrations.business_mcp_auth.contracts import (
 )
 from integrations.business_mcp_auth.jwt_verifier import JwtAuthenticator
 from integrations.workbench_read_mcp import observer as observer_module
+from integrations.workbench_read_mcp import read_port as read_port_module
 from integrations.workbench_read_mcp import runtime as runtime_module
 from integrations.workbench_read_mcp.app import ProjectReadRefused, ReadCaller
 from integrations.workbench_read_mcp.read_port import create_descriptor_read_port
@@ -1245,3 +1246,1446 @@ def test_stable_lease_expiry_after_observation_before_await_release_withholds_co
                 # Actual physical drain remains Runtime's responsibility. The fixed
                 # existing timeout is unchanged; a refusal is not hidden or retried.
                 runner.run(runtime.aclose(timeout=1))
+
+
+
+async def _rs0_one_call_lifetime(
+    active_runtime,
+    project_root: Path,
+    *,
+    bearer_token: str,
+    mutate,
+    events: list,
+    observed: threading.Event,
+    gate_final: threading.Event,
+    release_final: threading.Event,
+    state: dict,
+    fail_at: str | None = None,
+    close_runtime: bool = False,
+    caller_fds: tuple[int, ...] = (),
+    force_duplicate_fd_close: bool = False,
+    inject_runtime_close: bool = False,
+    invocation_id: object | None = None,
+) -> tuple[object | None, dict]:
+    """Shared RS0 fixture lifetime used by gated cases and bounded fault injection.
+
+    Fresh public create_deployment per separately entered lifespan (T1).
+    Registers pending before fallible gate/mutation waits; settles every
+    registered request (including done) inside the client context; lifespan
+    settlement is unconditional. Optional Runtime/FD close runs through this
+    same helper so cleanup proof cannot pass if real cleanup is removed.
+
+    R5: publish settlement on raised and returned paths; capture body primary
+    before independent cleanup; cleanup-only fails when no primary; inject one
+    FD-close failure then still attempt the other FD; Runtime-close inject at
+    the real aclose boundary with call evidence.
+    """
+    # Clear stale last-success receipt before this invocation.
+    # R7-LOCAL-1: stamp per-invocation id so recovery cannot adopt a prior receipt.
+    bound_invocation_id = invocation_id if invocation_id is not None else object()
+    _rs0_one_call_lifetime.last_settlement = {}  # type: ignore[attr-defined]
+    events.clear()
+    observed.clear()
+    gate_final.clear()
+    release_final.clear()
+    state["tools_call"] = False
+    state["final_key_calls"] = 0
+    state["resolve_during_tools"] = 0
+    _create_deployment = __import__(
+        "integrations.workbench_read_mcp.deployment", fromlist=["create_deployment"]
+    ).create_deployment
+    server = _create_deployment(active_runtime.services)
+    app = server.streamable_http_app()
+    ready, stop = asyncio.Event(), asyncio.Event()
+    life: asyncio.Task | None = None
+    pending: asyncio.Task | None = None
+    client: httpx.AsyncClient | None = None
+    local_cleanup: list[BaseException] = []
+    settlement_note: dict = {
+        "_invocation_id": bound_invocation_id,
+        "request_settled": False,
+        "lifespan_settled": False,
+        "pending_outcomes": (),
+        "requests_registered": 0,
+        "no_request_owed": False,
+        "runtime_close_attempted": False,
+        "runtime_close_called": False,
+        "runtime_close_ok": None,
+        "runtime_close_error": None,
+        "runtime_close_witness_count": 0,
+        "runtime_physically_closed": None,
+        "fd_attempts": (),
+        "successfully_closed_fds": (),
+        "fd_dispositions": (),
+        "final_fd_outcomes": (),
+        "cleanup_errors": (),
+        "body_error": None,
+    }
+    body: object | None = None
+    body_error: BaseException | None = None
+    fd_attempts: list[tuple] = []
+    successfully_closed: list[int] = []
+    fd_dispositions: list[tuple] = []
+    inject_close = inject_runtime_close or (fail_at == "runtime_close")
+
+    async def lifespan() -> None:
+        async with app.router.lifespan_context(app):
+            ready.set()
+            await stop.wait()
+
+    try:
+        # Register lifespan under its cleanup try before readiness wait.
+        life = asyncio.create_task(lifespan())
+        if fail_at == "readiness":
+            raise RuntimeError("INJECTED_READINESS_FAILURE")
+        await asyncio.wait_for(ready.wait(), 5)
+        headers = {
+            "Accept": "application/json, text/event-stream",
+            "MCP-Protocol-Version": "2025-03-26",
+        }
+        client = httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://127.0.0.1",
+        )
+        try:
+            async def rpc(method: str, params: dict):
+                return await client.post(
+                    "/mcp",
+                    headers={
+                        **headers,
+                        "Authorization": "Bearer " + bearer_token,
+                    },
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": method,
+                        "params": params,
+                    },
+                )
+
+            hello = await rpc(
+                "initialize",
+                {
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {},
+                    "clientInfo": {"name": "s1-gate", "version": "1"},
+                },
+            )
+            assert hello.status_code == 200, hello.text
+            await rpc("tools/list", {})
+            state["tools_call"] = True
+            arguments = {
+                "project_ref": PROJECT,
+                "relative_path": "source.txt",
+                "line_count": 1,
+                "expected_sha256": hashlib.sha256(
+                    (project_root / "source.txt").read_bytes()
+                ).hexdigest(),
+            }
+            # Register pending BEFORE any failing gate/mutation wait.
+            pending = asyncio.create_task(
+                rpc(
+                    "tools/call",
+                    {"name": "read_project_file", "arguments": arguments},
+                )
+            )
+            settlement_note["requests_registered"] = 1
+            if fail_at == "gate":
+                raise RuntimeError("INJECTED_GATE_FAILURE")
+            if fail_at == "body_primary":
+                raise RuntimeError("INJECTED_PRIMARY_FAILURE")
+            assert await asyncio.to_thread(gate_final.wait, 5)
+            assert observed.is_set()
+            assert "observation_complete" in events
+            assert "final_key_entry" in events
+            if fail_at == "mutation":
+                raise RuntimeError("INJECTED_MUTATION_FAILURE")
+            mutate()
+            events.append("mutation")
+            release_final.set()
+            response = await pending
+            # Keep pending set so inner finally still gathers the done task.
+            assert "release_resumption" in events
+            assert "final_revalidation" in events, events
+            assert state["final_key_calls"] >= 2
+            assert events.index("observation_complete") < events.index(
+                "final_key_entry"
+            )
+            assert events.index("final_key_entry") < events.index("mutation")
+            assert events.index("mutation") < events.index("release_resumption")
+            assert events.index("release_resumption") < events.index(
+                "final_revalidation"
+            )
+            body = response.json()["result"]
+        except BaseException as error:
+            # Capture body primary BEFORE client close / independent cleanup.
+            body_error = error
+        finally:
+            # Request settlement INSIDE active client context (before aclose).
+            release_final.set()
+            if pending is not None:
+                owned = pending
+                pending = None
+                if not owned.done():
+                    owned.cancel()
+                # Consume every registered outcome including already-done.
+                settled = await asyncio.gather(owned, return_exceptions=True)
+                settlement_note["pending_outcomes"] = tuple(settled)
+                settlement_note["request_settled"] = True
+                for item in settled:
+                    if isinstance(item, BaseException) and not isinstance(
+                        item, asyncio.CancelledError
+                    ):
+                        local_cleanup.append(item)
+            # else: leave request_settled False until vacuous settle below
+    except BaseException as error:
+        if body_error is None:
+            body_error = error
+        elif error is not body_error:
+            local_cleanup.append(error)
+    finally:
+        # Independent client close — cleanup, never replaces body primary.
+        if client is not None:
+            try:
+                await client.aclose()
+            except BaseException as error:
+                local_cleanup.append(error)
+        # Lifespan settlement; always release gate.
+        release_final.set()
+        stop.set()
+        if life is not None:
+            try:
+                await asyncio.wait_for(life, 5)
+                settlement_note["lifespan_settled"] = True
+            except BaseException as error:
+                local_cleanup.append(error)
+                # done()/nonempty error list is NOT successful physical settlement.
+                settlement_note["lifespan_settled"] = False
+        else:
+            settlement_note["lifespan_settled"] = True
+        # No registered request => vacuously settled / no request owed.
+        if settlement_note["requests_registered"] == 0:
+            settlement_note["no_request_owed"] = True
+            settlement_note["request_settled"] = True
+            settlement_note["pending_outcomes"] = ()
+        # Optional Runtime physical close through THIS helper at real aclose.
+        if close_runtime:
+            settlement_note["runtime_close_attempted"] = True
+            original_aclose = active_runtime.aclose
+            try:
+                if inject_close:
+                    async def _injected_aclose(*, timeout: float):
+                        settlement_note["runtime_close_called"] = True
+                        settlement_note["runtime_close_witness_count"] = (
+                            int(settlement_note.get("runtime_close_witness_count") or 0)
+                            + 1
+                        )
+                        raise RuntimeError("INJECTED_RUNTIME_CLOSE_FAILURE")
+
+                    active_runtime.aclose = _injected_aclose  # type: ignore[method-assign]
+                    try:
+                        await active_runtime.aclose(timeout=1)
+                    finally:
+                        active_runtime.aclose = original_aclose  # type: ignore[method-assign]
+                else:
+                    # Independent witness: flags/count advance only inside the
+                    # delegated original aclose. Deleting this await must fail
+                    # the successful-close control (R5-LOCAL-2).
+                    async def _witnessed_aclose(*, timeout: float):
+                        settlement_note["runtime_close_called"] = True
+                        settlement_note["runtime_close_witness_count"] = (
+                            int(settlement_note.get("runtime_close_witness_count") or 0)
+                            + 1
+                        )
+                        await original_aclose(timeout=timeout)
+
+                    active_runtime.aclose = _witnessed_aclose  # type: ignore[method-assign]
+                    try:
+                        await active_runtime.aclose(timeout=1)
+                        settlement_note["runtime_close_ok"] = True
+                        settlement_note["runtime_physically_closed"] = bool(
+                            getattr(active_runtime, "_closed", False)
+                        )
+                    finally:
+                        active_runtime.aclose = original_aclose  # type: ignore[method-assign]
+            except BaseException as error:
+                settlement_note["runtime_close_ok"] = False
+                settlement_note["runtime_close_error"] = error
+                settlement_note["runtime_physically_closed"] = bool(
+                    getattr(active_runtime, "_closed", False)
+                )
+                if not settlement_note["runtime_close_called"]:
+                    # Entered the close site even if wrapper failed before flag.
+                    settlement_note["runtime_close_called"] = True
+                local_cleanup.append(error)
+        # Optional caller-FD close: inject ONE failure, still attempt other FDs.
+        if caller_fds:
+            injected_fd_once = False
+            for fd in caller_fds:
+                try:
+                    if fail_at == "fd_close" and not injected_fd_once:
+                        injected_fd_once = True
+                        raise OSError(9, "INJECTED_FD_CLOSE_FAILURE")
+                    os.close(fd)
+                    successfully_closed.append(fd)
+                    fd_attempts.append((fd, "ok", None))
+                    fd_dispositions.append((fd, "closed"))
+                    if force_duplicate_fd_close:
+                        # Expected duplicate only with prior successful-close evidence.
+                        try:
+                            os.close(fd)
+                            fd_attempts.append((fd, "unexpected_second_ok", None))
+                        except BaseException as dup_error:
+                            errno = getattr(dup_error, "errno", None)
+                            fd_attempts.append((fd, "duplicate_error", errno))
+                            # Duplicate after proven successful close is expected.
+                            if not (
+                                isinstance(dup_error, OSError)
+                                and errno == 9
+                                and fd in successfully_closed
+                            ):
+                                local_cleanup.append(dup_error)
+                except BaseException as error:
+                    errno = getattr(error, "errno", None)
+                    fd_attempts.append((fd, "error", errno))
+                    # First-close EBADF / injected failure is a real cleanup failure.
+                    local_cleanup.append(error)
+                    if (
+                        fail_at == "fd_close"
+                        and isinstance(error, OSError)
+                        and "INJECTED_FD_CLOSE_FAILURE" in str(error)
+                    ):
+                        # Explicit unresolved ownership — do not blindly retry close.
+                        fd_dispositions.append((fd, "unresolved_injected_failure"))
+                    else:
+                        fd_dispositions.append((fd, "error"))
+        settlement_note["fd_attempts"] = tuple(fd_attempts)
+        settlement_note["successfully_closed_fds"] = tuple(successfully_closed)
+        settlement_note["fd_dispositions"] = tuple(fd_dispositions)
+        settlement_note["cleanup_errors"] = tuple(local_cleanup)
+        settlement_note["body_error"] = body_error
+        # Publish for raised AND returned paths (same receipt; no stale reuse).
+        _rs0_one_call_lifetime.last_settlement = dict(settlement_note)  # type: ignore[attr-defined]
+
+    if body_error is not None:
+        # Preserve exact body primary; cleanup already recorded independently.
+        if local_cleanup:
+            try:
+                body_error.add_note(
+                    "cleanup_errors="
+                    + ",".join(
+                        f"{type(err).__name__}:{err!r}" for err in local_cleanup
+                    )
+                )
+            except Exception:
+                pass
+        raise body_error
+    if local_cleanup:
+        # Cleanup-only failure when no primary.
+        raise AssertionError(
+            "cleanup_only_failures="
+            + ",".join(f"{type(err).__name__}:{err!r}" for err in local_cleanup)
+        )
+    return body, settlement_note
+
+
+def test_final_key_for_gate_after_observation_withholds_on_lease_expiry_and_revoke(
+    tmp_path: Path,
+) -> None:
+    """S1 gated-key-provider regression on the real Runtime→app→verifier path.
+
+    Gate key_for only during the FINAL post-observation verify_token. While held:
+    advance clock_ms to EXACT lease expiry (JWT still valid), then on a separate
+    fresh lifetime revoke the same binding. Release the original key. Require
+    sanitized refusal and no buffered file content. Positive control returns the
+    attributed observation. Assert the final check ran after key lookup resumed.
+
+    R1: pending is registered before any failing wait; gate release + cancel-and-
+    gather happen while client/lifespan remain valid; Runtime closes inside its
+    owning async lifetime; FD cleanup attempts retain primary+cleanup errors.
+    Compact injected readiness/gate/mutation/cleanup discriminators are included.
+    R2: ordered recorder covers port completion, final-key entry, mutation,
+    release/resumption, and synchronous final revalidation.
+    """
+    signing_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    public = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(signing_key.public_key()))
+    public.update(kid="runtime-key", alg="RS256", use="sig")
+    selected_policy = policy()
+    project, project_fd, audit_fd = open_dirs(tmp_path)
+    start = int(time.time())
+    lease_deadline_ms = (start + 600) * 1000
+    # T1: construct/open strictly before deadline; equality is exercised later.
+    jwt_now = [start]
+    lease_ms = [lease_deadline_ms - 1]
+    observed = threading.Event()
+    gate_final = threading.Event()
+    release_final = threading.Event()
+    state = {"tools_call": False, "final_key_calls": 0, "resolve_during_tools": 0}
+    events: list[str] = []
+    runtime = None
+    runtime2 = None
+    project_fd2 = None
+    audit_fd2 = None
+    original_observe = read_port_module.observe_file
+    primary_error: BaseException | None = None
+    cleanup_errors: list[BaseException] = []
+
+    class GatedKeys(Keys):
+        async def key_for(self, kid: str):
+            value = await super().key_for(kid)
+            if not state["tools_call"]:
+                return value
+            state["final_key_calls"] += 1
+            if state["final_key_calls"] == 2:
+                assert await asyncio.to_thread(observed.wait, 5), (
+                    "observation/port return missing before final key_for"
+                )
+                events.append("final_key_entry")
+                gate_final.set()
+                # T4: yield the event loop while waiting for mutate/release.
+                assert await asyncio.to_thread(release_final.wait, 5), (
+                    "final key_for gate not released"
+                )
+                events.append("release_resumption")
+            return value
+
+    def witnessing_observe(*args, **kwargs):
+        # T3: patch the read_port binding actually invoked by the port.
+        result = original_observe(*args, **kwargs)
+        events.append("observation_complete")
+        observed.set()
+        return result
+
+    read_port_module.observe_file = witnessing_observe  # type: ignore[assignment]
+    try:
+        auth = JwtAuthenticator(policy=selected_policy, jwks_cache=GatedKeys(public))
+        runtime = WorkbenchReadRuntime.open(
+            authenticator=auth,
+            policy=selected_policy,
+            now=lambda: jwt_now[0],
+            clock_ms=lambda: lease_ms[0],
+            project_directory_fd=project_fd,
+            audit_directory_fd=audit_fd,
+            lease=lease(lease_expires_at_ms=lease_deadline_ms),
+            allowed_hosts=("127.0.0.1",),
+            max_concurrency=1,
+            io_timeout_seconds=2,
+        )
+        original_resolve = runtime.resolve_binding
+
+        def recording_resolve(caller, project_ref):
+            binding = original_resolve(caller, project_ref)
+            if state["tools_call"]:
+                state["resolve_during_tools"] += 1
+                # After final-key gate resumes, make_final_authorization.revalidate
+                # snapshots again — that is the synchronous final fence.
+                if (
+                    state["final_key_calls"] >= 2
+                    and release_final.is_set()
+                    and "final_revalidation" not in events
+                ):
+                    events.append("final_revalidation")
+            return binding
+
+        runtime.resolve_binding = recording_resolve  # type: ignore[method-assign]
+        # Keep services/deployment resolver view consistent with the wrapper.
+        runtime.services = dataclasses.replace(
+            runtime.services, resolve_binding=recording_resolve
+        )
+        runtime.server = __import__(
+            "integrations.workbench_read_mcp.deployment", fromlist=["create_deployment"]
+        ).create_deployment(runtime.services)
+
+        def token() -> str:
+            # T2: lifetime == max_token_lifetime_seconds (3600), not 3601.
+            return jwt.encode(
+                {
+                    "iss": ISSUER,
+                    "sub": SUBJECT_RAW,
+                    "aud": RESOURCE,
+                    "iat": start,
+                    "exp": start + 3600,
+                    "scope": "workbench.read",
+                    "client_id": CLIENT_RAW,
+                },
+                signing_key,
+                algorithm="RS256",
+                headers={"kid": "runtime-key"},
+            )
+
+        async def one_call(
+            active_runtime,
+            project_root: Path,
+            *,
+            mutate,
+            fail_at: str | None = None,
+            close_runtime: bool = False,
+            caller_fds: tuple[int, ...] = (),
+            force_duplicate_fd_close: bool = False,
+            inject_runtime_close: bool = False,
+        ) -> dict:
+            # Delegate to the shared fixture lifetime helper (R3-LOCAL-5 / R5 receipt).
+            # R7-LOCAL-1: invalidate/bind BEFORE fallible token() preparation.
+            inv_id = object()
+            one_call.last_settlement = {}  # type: ignore[attr-defined]
+            _rs0_one_call_lifetime.last_settlement = {}  # type: ignore[attr-defined]
+            bearer_token = token()
+            try:
+                body, settlement_note = await _rs0_one_call_lifetime(
+                    active_runtime,
+                    project_root,
+                    bearer_token=bearer_token,
+                    mutate=mutate,
+                    events=events,
+                    observed=observed,
+                    gate_final=gate_final,
+                    release_final=release_final,
+                    state=state,
+                    fail_at=fail_at,
+                    close_runtime=close_runtime,
+                    caller_fds=caller_fds,
+                    force_duplicate_fd_close=force_duplicate_fd_close,
+                    inject_runtime_close=inject_runtime_close,
+                    invocation_id=inv_id,
+                )
+            except BaseException:
+                recovered = getattr(_rs0_one_call_lifetime, "last_settlement", {}) or {}
+                # Identity match only — do not adopt a prior invocation receipt.
+                if (
+                    isinstance(recovered, dict)
+                    and recovered.get("_invocation_id") is inv_id
+                ):
+                    settlement_note = dict(recovered)
+                else:
+                    settlement_note = {"_invocation_id": inv_id}
+                one_call.last_settlement = settlement_note  # type: ignore[attr-defined]
+                cleanup_errors.extend(settlement_note.get("cleanup_errors") or ())
+                raise
+            one_call.last_settlement = dict(settlement_note)  # type: ignore[attr-defined]
+            cleanup_errors.extend(settlement_note.get("cleanup_errors") or ())
+            if body is None and fail_at is None:
+                raise AssertionError("one_call returned no body")
+            return body  # type: ignore[return-value]
+
+        async def exercise() -> None:
+            # Capture body exception BEFORE owning Runtime close (R3-LOCAL-4).
+            body_error: BaseException | None = None
+            try:
+                # Compact readiness / gate / mutation failure-path discriminators
+                # against the actual shared helper settlement path.
+                for injected in ("readiness", "gate", "mutation"):
+                    try:
+                        await one_call(
+                            runtime, project, mutate=lambda: None, fail_at=injected
+                        )
+                    except RuntimeError as error:
+                        assert f"INJECTED_{injected.upper()}_FAILURE" in str(error)
+                        settled = getattr(one_call, "last_settlement", {})
+                        assert settled.get("lifespan_settled") is True, settled
+                        assert settled.get("request_settled") is True, settled
+                        if injected == "readiness":
+                            assert settled.get("requests_registered") == 0, settled
+                            assert settled.get("no_request_owed") is True, settled
+                            assert settled.get("pending_outcomes") == (), settled
+                        else:
+                            assert settled.get("requests_registered") == 1, settled
+                            assert len(settled.get("pending_outcomes") or ()) == 1, settled
+                    else:
+                        raise AssertionError(f"expected injected {injected} failure")
+
+                body = await one_call(runtime, project, mutate=lambda: None)
+                assert body.get("isError") is False, body
+                assert body["structuredContent"]["content"] == "runtime source\n"
+                assert body["structuredContent"]["project_ref"] == PROJECT
+                assert "final_revalidation" in events
+
+                body = await one_call(
+                    runtime,
+                    project,
+                    mutate=lambda: lease_ms.__setitem__(0, lease_deadline_ms),
+                )
+                assert body.get("isError") is True, body
+                dumped = json.dumps(body)
+                assert "runtime source" not in dumped
+                assert "PRIVATE" not in dumped
+                # Intended sanitized refusal code with observation/guard witnesses.
+                assert "PROJECT_READ_REFUSED" in dumped, dumped
+                assert "observation_complete" in events
+                assert "final_key_entry" in events
+            except BaseException as error:
+                body_error = error
+            # Collect Runtime-close errors independently; retain physical uncertainty.
+            try:
+                await runtime.aclose(timeout=1)
+            except BaseException as close_error:
+                cleanup_errors.append(close_error)
+            if body_error is not None:
+                raise body_error
+
+        asyncio.run(exercise())
+
+        # Separate revoke scenario on a fresh runtime lifetime.
+        observed.clear()
+        gate_final.clear()
+        release_final.clear()
+        state["tools_call"] = False
+        state["final_key_calls"] = 0
+        lease_ms[0] = lease_deadline_ms - 1
+        project2, project_fd2, audit_fd2 = open_dirs(tmp_path / "revoke")
+        auth2 = JwtAuthenticator(policy=selected_policy, jwks_cache=GatedKeys(public))
+        runtime2 = WorkbenchReadRuntime.open(
+            authenticator=auth2,
+            policy=selected_policy,
+            now=lambda: jwt_now[0],
+            clock_ms=lambda: lease_ms[0],
+            project_directory_fd=project_fd2,
+            audit_directory_fd=audit_fd2,
+            lease=lease(lease_expires_at_ms=lease_deadline_ms),
+            allowed_hosts=("127.0.0.1",),
+            max_concurrency=1,
+            io_timeout_seconds=2,
+        )
+        original_resolve2 = runtime2.resolve_binding
+
+        def recording_resolve2(caller, project_ref):
+            binding = original_resolve2(caller, project_ref)
+            if state["tools_call"]:
+                if (
+                    state["final_key_calls"] >= 2
+                    and release_final.is_set()
+                    and "final_revalidation" not in events
+                ):
+                    events.append("final_revalidation")
+            return binding
+
+        runtime2.resolve_binding = recording_resolve2  # type: ignore[method-assign]
+        runtime2.services = dataclasses.replace(
+            runtime2.services, resolve_binding=recording_resolve2
+        )
+        runtime2.server = __import__(
+            "integrations.workbench_read_mcp.deployment", fromlist=["create_deployment"]
+        ).create_deployment(runtime2.services)
+
+        async def revoke_case() -> None:
+            body_error: BaseException | None = None
+            try:
+                body = await one_call(
+                    runtime2, project2, mutate=lambda: runtime2.revoke()
+                )
+                assert body.get("isError") is True, body
+                dumped = json.dumps(body)
+                assert "runtime source" not in dumped
+                assert "PRIVATE" not in dumped
+                assert "PROJECT_READ_REFUSED" in dumped, dumped
+                assert "final_revalidation" in events
+                assert "observation_complete" in events
+            except BaseException as error:
+                body_error = error
+            try:
+                await runtime2.aclose(timeout=1)
+            except BaseException as close_error:
+                cleanup_errors.append(close_error)
+            if body_error is not None:
+                raise body_error
+
+        asyncio.run(revoke_case())
+
+    except BaseException as error:
+        primary_error = error
+        raise
+    finally:
+        # T5/R1: release gate, restore patch, settle runtimes, close fds.
+        # Attempt every FD cleanup; retain primary and cleanup errors.
+        # No blanket EBADF suppression: caller FDs are first-close owned and
+        # distinct from Runtime's separately opened root descriptor (R3-LOCAL-4).
+        release_final.set()
+        read_port_module.observe_file = original_observe  # type: ignore[assignment]
+        successfully_closed_fds: set[int] = set()
+        for active in (runtime, runtime2):
+            if active is None:
+                continue
+            try:
+                # Prefer no second-loop close when already closed in-lifetime;
+                # still attempt if a prior failure skipped owning-lifetime close.
+                # Physical-close uncertainty is retained (not inferred).
+                asyncio.run(active.aclose(timeout=1))
+            except BaseException as cleanup_error:
+                cleanup_errors.append(cleanup_error)
+        for fd in (project_fd2, audit_fd2, project_fd, audit_fd):
+            if fd is None:
+                continue
+            try:
+                os.close(fd)
+                successfully_closed_fds.add(fd)
+            except BaseException as cleanup_error:
+                # First-close EBADF is a cleanup failure without prior evidence.
+                cleanup_errors.append(cleanup_error)
+        # Compact cleanup discriminator: retained errors must not hide primary.
+        if primary_error is not None and cleanup_errors:
+            try:
+                primary_error.add_note(
+                    "cleanup_errors="
+                    + ",".join(f"{type(err).__name__}:{err!r}" for err in cleanup_errors)
+                )
+            except Exception:
+                pass
+        elif primary_error is None and cleanup_errors:
+            # Propagate ALL cleanup-only failures (including first-close EBADF).
+            # Expected duplicate close requires exact prior successful-close evidence
+            # recorded above — not errno filtering alone.
+            raise AssertionError(
+                "cleanup_only_failures="
+                + ",".join(f"{type(err).__name__}:{err!r}" for err in cleanup_errors)
+                + f"; successfully_closed_fds={sorted(successfully_closed_fds)}"
+            )
+
+
+def test_injected_cleanup_failure_path_retains_primary_and_cleanup_evidence(
+    tmp_path: Path,
+) -> None:
+    """R3-LOCAL-5: bounded faults through the ACTUAL shared one_call lifetime helper.
+
+    Uses _rs0_one_call_lifetime (same helper as the gated Runtime cases). Injects
+    readiness/gate/mutation/Runtime-close/FD-close through that helper. Requires
+    registered-task/lifespan outcomes, Runtime physical disposition, each FD
+    attempt, cleanup-only failure and primary-plus-cleanup preservation. No
+    copied miniature helper that could pass if real cleanup were removed.
+    """
+    signing_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    public = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(signing_key.public_key()))
+    public.update(kid="runtime-key", alg="RS256", use="sig")
+    selected_policy = policy()
+    project, project_fd, audit_fd = open_dirs(tmp_path)
+    start_ts = int(time.time())
+    lease_deadline_ms = (start_ts + 600) * 1000
+    jwt_now = [start_ts]
+    lease_ms = [lease_deadline_ms - 1]
+    observed = threading.Event()
+    gate_final = threading.Event()
+    release_final = threading.Event()
+    state = {"tools_call": False, "final_key_calls": 0, "resolve_during_tools": 0}
+    events: list[str] = []
+    original_observe = read_port_module.observe_file
+    primary_error: BaseException | None = None
+    cleanup_errors: list[BaseException] = []
+
+    class GatedKeys(Keys):
+        async def key_for(self, kid: str):
+            value = await super().key_for(kid)
+            if not state["tools_call"]:
+                return value
+            state["final_key_calls"] += 1
+            if state["final_key_calls"] == 2:
+                assert await asyncio.to_thread(observed.wait, 5)
+                events.append("final_key_entry")
+                gate_final.set()
+                assert await asyncio.to_thread(release_final.wait, 5)
+                events.append("release_resumption")
+            return value
+
+    def witnessing_observe(*args, **kwargs):
+        result = original_observe(*args, **kwargs)
+        events.append("observation_complete")
+        observed.set()
+        return result
+
+    def token() -> str:
+        return jwt.encode(
+            {
+                "iss": ISSUER,
+                "sub": SUBJECT_RAW,
+                "aud": RESOURCE,
+                "iat": start_ts,
+                "exp": start_ts + 3600,
+                "scope": "workbench.read",
+                "client_id": CLIENT_RAW,
+            },
+            signing_key,
+            algorithm="RS256",
+            headers={"kid": "runtime-key"},
+        )
+
+    read_port_module.observe_file = witnessing_observe  # type: ignore[assignment]
+    runtime = None
+    try:
+        auth = JwtAuthenticator(policy=selected_policy, jwks_cache=GatedKeys(public))
+        runtime = WorkbenchReadRuntime.open(
+            authenticator=auth,
+            policy=selected_policy,
+            now=lambda: jwt_now[0],
+            clock_ms=lambda: lease_ms[0],
+            project_directory_fd=project_fd,
+            audit_directory_fd=audit_fd,
+            lease=lease(lease_expires_at_ms=lease_deadline_ms),
+            allowed_hosts=("127.0.0.1",),
+            max_concurrency=1,
+            io_timeout_seconds=2,
+        )
+        original_resolve = runtime.resolve_binding
+
+        def recording_resolve(caller, project_ref):
+            binding = original_resolve(caller, project_ref)
+            if state["tools_call"]:
+                state["resolve_during_tools"] += 1
+                if (
+                    state["final_key_calls"] >= 2
+                    and release_final.is_set()
+                    and "final_revalidation" not in events
+                ):
+                    events.append("final_revalidation")
+            return binding
+
+        runtime.resolve_binding = recording_resolve  # type: ignore[method-assign]
+        runtime.services = dataclasses.replace(
+            runtime.services, resolve_binding=recording_resolve
+        )
+        runtime.server = __import__(
+            "integrations.workbench_read_mcp.deployment", fromlist=["create_deployment"]
+        ).create_deployment(runtime.services)
+
+        async def call_helper(
+            fail_at: str | None = None,
+            *,
+            mutate=None,
+            close_runtime: bool = False,
+            caller_fds: tuple[int, ...] = (),
+            force_duplicate_fd_close: bool = False,
+            inject_runtime_close: bool = False,
+        ):
+            # R7-LOCAL-1: bind/invalidate BEFORE fallible token() preparation.
+            inv_id = object()
+            _rs0_one_call_lifetime.last_settlement = {}  # type: ignore[attr-defined]
+            bearer_token = token()
+            return await _rs0_one_call_lifetime(
+                runtime,
+                project,
+                bearer_token=bearer_token,
+                mutate=mutate or (lambda: None),
+                events=events,
+                observed=observed,
+                gate_final=gate_final,
+                release_final=release_final,
+                state=state,
+                fail_at=fail_at,
+                close_runtime=close_runtime,
+                caller_fds=caller_fds,
+                force_duplicate_fd_close=force_duplicate_fd_close,
+                inject_runtime_close=inject_runtime_close,
+                invocation_id=inv_id,
+            )
+
+        def _recover_invocation_receipt(note: dict) -> dict:
+            """R6-LOCAL-1 / R7-LOCAL-1: recover only a receipt for THIS invocation.
+
+            Bind/invalidate happens before fallible token() preparation. Recovery
+            requires identity match on _invocation_id. Absence of a matching
+            current receipt retains fresh caller ownership of newly opened FDs
+            (including when the OS reuses FD numbers after a prior close).
+            Entered-helper raised paths still recover their published receipt.
+            Genuine prior close-error no-retry remains in _owner_finalize_fds.
+            """
+            recovered = getattr(_rs0_one_call_lifetime, "last_settlement", None)
+            if not isinstance(recovered, dict) or not recovered:
+                return note
+            expected = note.get("_invocation_id")
+            if expected is None:
+                # No current invocation bound — do not adopt a foreign/prior
+                # settlement (would suppress close of reused FD numbers).
+                return note
+            if recovered.get("_invocation_id") is not expected:
+                return note
+            note.update(recovered)
+            return note
+
+        def _owner_finalize_fds(
+            owned_fds: list[int],
+            settlement: dict,
+            *,
+            allow_first_close_of_unresolved: bool = True,
+        ) -> dict[int, str]:
+            """R5-LOCAL-1 / R6-LOCAL-1: independently attempt each owned FD cleanup.
+
+            - Suppress duplicate only with exact earlier successful-close evidence
+              (successfully_closed_fds or disposition "closed").
+            - Known-before-close injection permits one actual first close.
+            - Genuine prior close error ("error") retains uncertainty — no retry.
+            - First close only for never-attempted owned FDs or allowed injection.
+            - Record final physical outcomes; propagate unexpected errors.
+            - Independent sibling outcomes/primary errors remain recorded.
+            """
+            closed_ok = set(settlement.get("successfully_closed_fds") or ())
+            prior_disp = dict(settlement.get("fd_dispositions") or ())
+            finals: dict[int, str] = {}
+            for fd in list(owned_fds):
+                prior = prior_disp.get(fd)
+                if fd in closed_ok or prior == "closed":
+                    finals[fd] = "suppressed_duplicate_prior_success"
+                    continue
+                # Genuine prior close failure: retain uncertainty without replay.
+                if prior == "error":
+                    finals[fd] = "retained_prior_close_error_no_retry"
+                    continue
+                if prior == "unresolved_injected_failure" and not allow_first_close_of_unresolved:
+                    finals[fd] = "retained_unresolved_no_retry"
+                    continue
+                # First close: never-attempted owned FD, or explicitly proven
+                # before-close injection when allow_first_close_of_unresolved.
+                try:
+                    os.close(fd)
+                    finals[fd] = "owner_closed"
+                    if prior == "unresolved_injected_failure":
+                        prior_disp[fd] = "owner_closed_after_injected_skip"
+                except OSError as err:
+                    finals[fd] = f"owner_close_error:{getattr(err, 'errno', None)}"
+                    cleanup_errors.append(err)
+                    if prior == "unresolved_injected_failure":
+                        prior_disp[fd] = "owner_close_failed_after_injected_skip"
+                    # Do not retry after this failed first/owner attempt.
+            settlement["fd_dispositions"] = tuple(prior_disp.items())
+            settlement["final_fd_outcomes"] = tuple(finals.items())
+            return finals
+
+        def _require_exact_cleanup(
+            note: dict,
+            *,
+            expected_substrings: tuple[str, ...] = (),
+            allow_empty: bool = False,
+        ) -> None:
+            """R5-LOCAL-3: exact cleanup set; reject every extra failure."""
+            errors = tuple(note.get("cleanup_errors") or ())
+            if allow_empty:
+                if errors:
+                    cleanup_errors.extend(errors)
+                    raise AssertionError(
+                        "unexpected_cleanup_errors="
+                        + ",".join(f"{type(e).__name__}:{e!r}" for e in errors)
+                    )
+                return
+            if len(errors) != len(expected_substrings):
+                cleanup_errors.extend(errors)
+                raise AssertionError(
+                    "cleanup_error_set_mismatch="
+                    + ",".join(f"{type(e).__name__}:{e!r}" for e in errors)
+                    + f"; expected_substrings={expected_substrings!r}"
+                )
+            for err, needle in zip(errors, expected_substrings):
+                if needle not in str(err):
+                    cleanup_errors.extend(errors)
+                    raise AssertionError(
+                        "cleanup_error_content_mismatch="
+                        + f"{err!r} missing {needle!r}"
+                    )
+
+        async def via_actual_helper() -> None:
+            # readiness: zero registrations / vacuous settle / lifespan settled
+            try:
+                await call_helper(fail_at="readiness")
+            except RuntimeError as error:
+                assert "INJECTED_READINESS_FAILURE" in str(error)
+                note = getattr(_rs0_one_call_lifetime, "last_settlement", {})
+                assert note.get("lifespan_settled") is True, note
+                assert note.get("request_settled") is True, note
+                assert note.get("requests_registered") == 0, note
+                assert note.get("no_request_owed") is True, note
+                assert note.get("pending_outcomes") == (), note
+                assert note.get("body_error") is error, (note, error)
+                _require_exact_cleanup(note, allow_empty=True)
+            else:
+                raise AssertionError("expected readiness failure via actual helper")
+
+            # gate: one registered + settled outcome
+            try:
+                await call_helper(fail_at="gate")
+            except RuntimeError as error:
+                assert "INJECTED_GATE_FAILURE" in str(error)
+                note = getattr(_rs0_one_call_lifetime, "last_settlement", {})
+                assert note.get("lifespan_settled") is True, note
+                assert note.get("request_settled") is True, note
+                assert note.get("requests_registered") == 1, note
+                assert len(note.get("pending_outcomes") or ()) == 1, note
+                assert note.get("body_error") is error, (note, error)
+                _require_exact_cleanup(note, allow_empty=True)
+            else:
+                raise AssertionError("expected gate failure via actual helper")
+
+            # mutation: one registered + settled outcome
+            try:
+                await call_helper(fail_at="mutation")
+            except RuntimeError as error:
+                assert "INJECTED_MUTATION_FAILURE" in str(error)
+                note = getattr(_rs0_one_call_lifetime, "last_settlement", {})
+                assert note.get("lifespan_settled") is True, note
+                assert note.get("request_settled") is True, note
+                assert note.get("requests_registered") == 1, note
+                assert len(note.get("pending_outcomes") or ()) == 1, note
+                assert note.get("body_error") is error, (note, error)
+                _require_exact_cleanup(note, allow_empty=True)
+            else:
+                raise AssertionError("expected mutation failure via actual helper")
+
+            # Successful same-helper Runtime-close control on a disposable runtime.
+            # Independent witness + physical closed postcondition (R5-LOCAL-2).
+            # R6-LOCAL-2/3: persistent receipt, custody before fallible asserts,
+            # and physical Runtime-owned audit FD disposition (not caller ctrl_audit).
+            # Closing caller FDs is NOT Runtime-owned root/audit closure.
+            ctrl_project, ctrl_fd, ctrl_audit = open_dirs(tmp_path / "close-control")
+            ctrl_owned = [ctrl_fd, ctrl_audit]
+            ctrl_runtime = None
+            # One persistent receipt — never replaced by a temporary dict.
+            ctrl_inv = object()
+            ctrl_note: dict = {
+                "_invocation_id": ctrl_inv,
+                "successfully_closed_fds": (),
+                "fd_dispositions": (),
+                "final_fd_outcomes": (),
+                "cleanup_errors": (),
+                "body_error": None,
+                "runtime_custody": None,
+                "root_fd_ebadf": None,
+                "audit_fds_ebadf": None,
+            }
+            ctrl_close_ok = False
+            ctrl_primary: BaseException | None = None
+            ctrl_owned_audit_fd: int | None = None
+            ctrl_owned_directory_fd: int | None = None
+            try:
+                ctrl_auth = JwtAuthenticator(
+                    policy=selected_policy, jwks_cache=GatedKeys(public)
+                )
+                ctrl_runtime = WorkbenchReadRuntime.open(
+                    authenticator=ctrl_auth,
+                    policy=selected_policy,
+                    now=lambda: jwt_now[0],
+                    clock_ms=lambda: lease_ms[0],
+                    project_directory_fd=ctrl_fd,
+                    audit_directory_fd=ctrl_audit,
+                    lease=lease(lease_expires_at_ms=lease_deadline_ms),
+                    allowed_hosts=("127.0.0.1",),
+                    max_concurrency=1,
+                    io_timeout_seconds=2,
+                )
+                # R6-LOCAL-3: capture Runtime-owned audit sink FDs BEFORE close.
+                # Caller ctrl_audit is a separate host directory FD.
+                ctrl_owned_audit_fd = ctrl_runtime._audit_sink._audit_fd
+                ctrl_owned_directory_fd = ctrl_runtime._audit_sink._directory_fd
+                ctrl_note["captured_runtime_audit_fd"] = ctrl_owned_audit_fd
+                ctrl_note["captured_runtime_directory_fd"] = ctrl_owned_directory_fd
+                # R7-LOCAL-1: invalidate BEFORE fallible token() preparation.
+                _rs0_one_call_lifetime.last_settlement = {}  # type: ignore[attr-defined]
+                ctrl_bearer = token()
+                try:
+                    await _rs0_one_call_lifetime(
+                        ctrl_runtime,
+                        ctrl_project,
+                        bearer_token=ctrl_bearer,
+                        mutate=lambda: None,
+                        events=events,
+                        observed=observed,
+                        gate_final=gate_final,
+                        release_final=release_final,
+                        state=state,
+                        fail_at="readiness",
+                        close_runtime=True,
+                        inject_runtime_close=False,
+                        invocation_id=ctrl_inv,
+                    )
+                except RuntimeError as error:
+                    assert "INJECTED_READINESS_FAILURE" in str(error), error
+                    _recover_invocation_receipt(ctrl_note)
+                    assert ctrl_note.get("runtime_close_attempted") is True, ctrl_note
+                    assert ctrl_note.get("runtime_close_called") is True, ctrl_note
+                    assert ctrl_note.get("runtime_close_ok") is True, ctrl_note
+                    assert ctrl_note.get("runtime_close_witness_count") == 1, ctrl_note
+                    assert ctrl_note.get("runtime_physically_closed") is True, ctrl_note
+                    assert ctrl_note.get("lifespan_settled") is True, ctrl_note
+                    assert ctrl_note.get("runtime_close_error") is None, ctrl_note
+                    _require_exact_cleanup(ctrl_note, allow_empty=True)
+                    # Independent of helper-written flags: production Runtime closed.
+                    assert getattr(ctrl_runtime, "_closed", False) is True, ctrl_runtime
+                    # Sticky uncertainty is distinct from successful physical close.
+                    assert getattr(ctrl_runtime, "_close_uncertain", None) is None, (
+                        ctrl_runtime
+                    )
+                    try:
+                        os.fstat(ctrl_runtime._lease.root_fd)
+                    except OSError as root_err:
+                        assert getattr(root_err, "errno", None) == 9, root_err
+                        ctrl_note["root_fd_ebadf"] = True
+                    else:
+                        ctrl_note["root_fd_ebadf"] = False
+                        raise AssertionError(
+                            "runtime-owned root_fd still open after successful close"
+                        )
+                    # R6-LOCAL-3: physical closed disposition of owned audit FDs.
+                    audit_ok = True
+                    for label, owned_fd in (
+                        ("_audit_fd", ctrl_owned_audit_fd),
+                        ("_directory_fd", ctrl_owned_directory_fd),
+                    ):
+                        try:
+                            os.fstat(owned_fd)
+                        except OSError as audit_err:
+                            assert getattr(audit_err, "errno", None) == 9, (
+                                label,
+                                audit_err,
+                            )
+                        else:
+                            audit_ok = False
+                            raise AssertionError(
+                                f"runtime-owned audit {label} still open after "
+                                "successful close"
+                            )
+                    ctrl_note["audit_fds_ebadf"] = audit_ok
+                    ctrl_close_ok = True
+                    ctrl_note["runtime_custody"] = "physically_closed_settled_no_replay"
+                else:
+                    raise AssertionError(
+                        "expected readiness primary on close-control helper"
+                    )
+            except BaseException as error:
+                # Capture original body/test primary before finalization.
+                ctrl_primary = error
+                _recover_invocation_receipt(ctrl_note)
+                if ctrl_note.get("body_error") is None:
+                    ctrl_note["body_error"] = error
+                raise
+            finally:
+                # Caller FDs are distinct from Runtime-owned root/audit.
+                _recover_invocation_receipt(ctrl_note)
+                _owner_finalize_fds(ctrl_owned, ctrl_note)
+                # R6-LOCAL-2 / R7-LOCAL-2: classify runtime custody BEFORE fallible
+                # assertions. Carry current-invocation runtime_close_attempted and
+                # exact error/physical evidence. Attempted incomplete/error remains
+                # unresolved and must NOT replay aclose. _closed alone cannot prove
+                # physical settlement after an owned audit/directory FD probe fails.
+                if ctrl_runtime is not None and not ctrl_close_ok:
+                    sticky = getattr(ctrl_runtime, "_close_uncertain", None)
+                    closed_flag = bool(getattr(ctrl_runtime, "_closed", False))
+                    attempted = bool(ctrl_note.get("runtime_close_attempted"))
+                    close_ok = ctrl_note.get("runtime_close_ok")
+                    root_ebadf = ctrl_note.get("root_fd_ebadf")
+                    audit_ebadf = ctrl_note.get("audit_fds_ebadf")
+                    if attempted and close_ok is not True:
+                        # Attempted incomplete/failed close — unresolved, no replay.
+                        ctrl_note["runtime_custody"] = (
+                            "attempted_incomplete_or_error_no_replay"
+                        )
+                    elif sticky is not None:
+                        ctrl_note["runtime_custody"] = (
+                            "sticky_close_uncertain_no_replay"
+                        )
+                    elif (
+                        closed_flag
+                        and root_ebadf is True
+                        and audit_ebadf is True
+                    ):
+                        ctrl_note["runtime_custody"] = (
+                            "physically_closed_settled_no_replay"
+                        )
+                    elif closed_flag:
+                        # _closed alone is insufficient without physical evidence.
+                        ctrl_note["runtime_custody"] = (
+                            "closed_flag_insufficient_without_physical_evidence"
+                        )
+                    elif not attempted:
+                        # Proven never-attempted owned Runtime may receive FIRST close.
+                        ctrl_note["runtime_custody"] = (
+                            "never_attempted_owned_first_close"
+                        )
+                        try:
+                            await ctrl_runtime.aclose(timeout=1)
+                            ctrl_note["runtime_custody"] = "owner_first_closed"
+                        except BaseException as first_close_err:
+                            cleanup_errors.append(first_close_err)
+                            ctrl_note["runtime_first_close_error"] = repr(
+                                first_close_err
+                            )
+                            # Preserve original primary — do not convert retry/
+                            # first-close result into ownership evidence that
+                            # replaces the outward primary.
+                    else:
+                        # Attempted with close_ok True but control incomplete —
+                        # still no aclose replay.
+                        ctrl_note["runtime_custody"] = (
+                            "attempted_unconfirmed_no_replay"
+                        )
+                # Fallible post-cleanup assertions after custody classification.
+                # If an original primary exists, append assertion failures to
+                # cleanup_errors instead of replacing the primary.
+                try:
+                    assert dict(ctrl_note.get("final_fd_outcomes") or {}), (
+                        "close-control must record final caller-FD outcomes"
+                    )
+                    assert ctrl_note.get("runtime_custody") is not None or ctrl_close_ok, (
+                        "close-control must classify runtime custody",
+                        ctrl_note,
+                    )
+                except BaseException as assert_err:
+                    if ctrl_primary is not None:
+                        cleanup_errors.append(assert_err)
+                    else:
+                        raise
+
+            # Primary INSIDE helper body + Runtime-close inject at real aclose boundary.
+            try:
+                await call_helper(
+                    fail_at="body_primary",
+                    close_runtime=True,
+                    inject_runtime_close=True,
+                )
+            except RuntimeError as error:
+                assert "INJECTED_PRIMARY_FAILURE" in str(error), error
+                note = getattr(_rs0_one_call_lifetime, "last_settlement", {})
+                assert note.get("body_error") is error, (note, error)
+                assert note.get("runtime_close_attempted") is True, note
+                assert note.get("runtime_close_called") is True, note
+                assert note.get("runtime_close_ok") is False, note
+                assert note.get("runtime_close_error") is not None, note
+                assert "INJECTED_RUNTIME_CLOSE_FAILURE" in str(
+                    note.get("runtime_close_error")
+                ), note
+                assert note.get("lifespan_settled") is True, note
+                _require_exact_cleanup(
+                    note,
+                    expected_substrings=("INJECTED_RUNTIME_CLOSE_FAILURE",),
+                )
+                assert note.get("runtime_close_error") is (
+                    note.get("cleanup_errors") or (None,)
+                )[0], note
+            else:
+                raise AssertionError("primary failure was not raised")
+
+            # FD-close through actual helper; inject one failure, close the other;
+            # owning cleanup records final physical disposition (R5-LOCAL-1).
+            probe_project, probe_fd, probe_audit = open_dirs(tmp_path / "cleanup-probe")
+            probe_owned = [probe_fd, probe_audit]
+            probe_inv = object()
+            note: dict = {"_invocation_id": probe_inv}
+            # R7-LOCAL-1: invalidate BEFORE fallible token() preparation.
+            _rs0_one_call_lifetime.last_settlement = {}  # type: ignore[attr-defined]
+            try:
+                try:
+                    probe_bearer = token()
+                    _body, returned_note = await _rs0_one_call_lifetime(
+                        runtime,
+                        probe_project,
+                        bearer_token=probe_bearer,
+                        mutate=lambda: None,
+                        events=events,
+                        observed=observed,
+                        gate_final=gate_final,
+                        release_final=release_final,
+                        state=state,
+                        fail_at="fd_close",
+                        caller_fds=(probe_fd, probe_audit),
+                        invocation_id=probe_inv,
+                    )
+                    note.update(returned_note)
+                except AssertionError as error:
+                    # cleanup-only path if body succeeded then FD cleanup failed
+                    _recover_invocation_receipt(note)
+                    assert "cleanup_only_failures" in str(error), error
+                    assert note.get("body_error") is None, note
+                except BaseException as error:
+                    _recover_invocation_receipt(note)
+                    cleanup_errors.append(error)
+                    raise
+                _recover_invocation_receipt(note)
+                assert note.get("fd_attempts"), note
+                assert len(note.get("fd_attempts") or ()) == 2, note
+                dispositions = dict(note.get("fd_dispositions") or ())
+                assert len(dispositions) == 2, note
+                assert sum(1 for d in dispositions.values() if d == "closed") == 1, note
+                assert (
+                    sum(
+                        1
+                        for d in dispositions.values()
+                        if d == "unresolved_injected_failure"
+                    )
+                    == 1
+                ), note
+                assert note.get("cleanup_errors"), note
+                _require_exact_cleanup(
+                    note,
+                    expected_substrings=("INJECTED_FD_CLOSE_FAILURE",),
+                )
+                assert any(
+                    attempt[1] == "error" for attempt in note.get("fd_attempts") or ()
+                ), note
+                assert any(
+                    attempt[1] == "ok" for attempt in note.get("fd_attempts") or ()
+                ), note
+            finally:
+                _recover_invocation_receipt(note)
+                _owner_finalize_fds(probe_owned, note)
+            # Assert final dispositions AFTER owning finally (R5-LOCAL-1).
+            finals = dict(note.get("final_fd_outcomes") or ())
+            assert len(finals) == 2, note
+            assert sum(
+                1 for v in finals.values() if v == "suppressed_duplicate_prior_success"
+            ) == 1, note
+            assert sum(1 for v in finals.values() if v == "owner_closed") == 1, note
+            assert any(
+                d == "owner_closed_after_injected_skip"
+                for d in dict(note.get("fd_dispositions") or ()).values()
+            ), note
+
+            # Cleanup-only FD failure (no primary): must surface outward failure.
+            only_project, only_fd, only_audit = open_dirs(tmp_path / "cleanup-only")
+            only_owned = [only_fd, only_audit]
+            only_inv = object()
+            note: dict = {"_invocation_id": only_inv}
+            raised_cleanup = None
+            # R7-LOCAL-1: invalidate BEFORE fallible token() preparation.
+            _rs0_one_call_lifetime.last_settlement = {}  # type: ignore[attr-defined]
+            try:
+                try:
+                    only_bearer = token()
+                    _body, returned_note = await _rs0_one_call_lifetime(
+                        runtime,
+                        only_project,
+                        bearer_token=only_bearer,
+                        mutate=lambda: None,
+                        events=events,
+                        observed=observed,
+                        gate_final=gate_final,
+                        release_final=release_final,
+                        state=state,
+                        fail_at="fd_close",
+                        caller_fds=(only_fd, only_audit),
+                        invocation_id=only_inv,
+                    )
+                    note.update(returned_note)
+                except AssertionError as error:
+                    raised_cleanup = error
+                    _recover_invocation_receipt(note)
+                    assert "cleanup_only_failures" in str(error), error
+                except BaseException as error:
+                    _recover_invocation_receipt(note)
+                    cleanup_errors.append(error)
+                    raise
+                assert raised_cleanup is not None, "cleanup-only must fail outward"
+                assert isinstance(raised_cleanup, AssertionError), raised_cleanup
+                assert "cleanup_only_failures" in str(raised_cleanup), raised_cleanup
+                assert note.get("body_error") is None, note
+                assert note.get("cleanup_errors"), note
+                _require_exact_cleanup(
+                    note,
+                    expected_substrings=("INJECTED_FD_CLOSE_FAILURE",),
+                )
+                assert note.get("fd_attempts"), note
+                dispositions = dict(note.get("fd_dispositions") or ())
+                assert len(dispositions) == 2, note
+                assert sum(1 for d in dispositions.values() if d == "closed") == 1, note
+                assert (
+                    sum(
+                        1
+                        for d in dispositions.values()
+                        if d == "unresolved_injected_failure"
+                    )
+                    == 1
+                ), note
+            finally:
+                _recover_invocation_receipt(note)
+                _owner_finalize_fds(only_owned, note)
+            finals = dict(note.get("final_fd_outcomes") or ())
+            assert len(finals) == 2, note
+            assert sum(
+                1 for v in finals.values() if v == "suppressed_duplicate_prior_success"
+            ) == 1, note
+            assert sum(1 for v in finals.values() if v == "owner_closed") == 1, note
+
+            # Duplicate close after proven successful close (evidence-gated).
+            # R6-LOCAL-1: persistent receipt; recover on every raised path before
+            # owner finalization (empty initial note is not never-closed proof).
+            dup_project, dup_fd, dup_audit = open_dirs(tmp_path / "dup-close")
+            dup_owned = [dup_fd, dup_audit]
+            dup_inv = object()
+            note: dict = {
+                "_invocation_id": dup_inv,
+                "successfully_closed_fds": (),
+                "fd_dispositions": (),
+                "final_fd_outcomes": (),
+                "cleanup_errors": (),
+                "body_error": None,
+            }
+            # R7-LOCAL-1: invalidate BEFORE fallible token() preparation so a
+            # pre-entry failure cannot recover cleanup-only FD settlement and
+            # suppress first close of OS-reused FD numbers.
+            _rs0_one_call_lifetime.last_settlement = {}  # type: ignore[attr-defined]
+            try:
+                try:
+                    dup_bearer = token()
+                    _body, returned_note = await _rs0_one_call_lifetime(
+                        runtime,
+                        dup_project,
+                        bearer_token=dup_bearer,
+                        mutate=lambda: None,
+                        events=events,
+                        observed=observed,
+                        gate_final=gate_final,
+                        release_final=release_final,
+                        state=state,
+                        fail_at=None,
+                        caller_fds=(dup_fd, dup_audit),
+                        force_duplicate_fd_close=True,
+                        invocation_id=dup_inv,
+                    )
+                    note.update(returned_note)
+                except BaseException as dup_primary:
+                    _recover_invocation_receipt(note)
+                    if note.get("body_error") is None:
+                        note["body_error"] = dup_primary
+                    raise
+                assert note.get("successfully_closed_fds"), note
+                assert len(note.get("successfully_closed_fds") or ()) == 2, note
+                for attempt in note.get("fd_attempts") or ():
+                    if attempt[1] == "duplicate_error":
+                        assert attempt[0] in note.get("successfully_closed_fds"), note
+                _require_exact_cleanup(note, allow_empty=True)
+                dup_owned = []  # both successfully closed by helper
+            finally:
+                _recover_invocation_receipt(note)
+                _owner_finalize_fds(dup_owned, note)
+            finals = dict(note.get("final_fd_outcomes") or ())
+            # When helper closed both, owner finalize sees empty owned list → empty finals
+            # or suppressed entries only if somehow still listed.
+            if dup_owned:
+                assert all(
+                    v == "suppressed_duplicate_prior_success" for v in finals.values()
+                ), note
+
+        asyncio.run(via_actual_helper())
+    except BaseException as error:
+        primary_error = error
+        raise
+    finally:
+        read_port_module.observe_file = original_observe  # type: ignore[assignment]
+        release_final.set()
+        if runtime is not None:
+            try:
+                asyncio.run(runtime.aclose(timeout=1))
+            except BaseException as cleanup_error:
+                cleanup_errors.append(cleanup_error)
+        successfully_closed: set[int] = set()
+        for fd in (project_fd, audit_fd):
+            try:
+                os.close(fd)
+                successfully_closed.add(fd)
+            except BaseException as cleanup_error:
+                cleanup_errors.append(cleanup_error)
+        if primary_error is not None and cleanup_errors:
+            try:
+                primary_error.add_note(
+                    "cleanup_errors="
+                    + ",".join(f"{type(err).__name__}:{err!r}" for err in cleanup_errors)
+                )
+            except Exception:
+                pass
+        elif primary_error is None and cleanup_errors:
+            raise AssertionError(
+                "cleanup_only_failures="
+                + ",".join(f"{type(err).__name__}:{err!r}" for err in cleanup_errors)
+                + f"; successfully_closed_fds={sorted(successfully_closed)}"
+            )
+
