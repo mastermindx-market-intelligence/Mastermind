@@ -1,0 +1,129 @@
+{
+  "schema": "mastermind.craft_authoring_evidence.v1",
+  "observed_date": "2026-09-13",
+  "procedure_repository": "mastermindx-market-intelligence/Mastermind",
+  "procedure_commit": "9ed16bf0fcc5b47e870350ff2413ff5c8c73b447",
+  "skillpack_version": "1.0.1",
+  "python_tested": "3.13.5",
+  "python_39_compatibility": "intended syntax baseline; Python 3.9 execution not tested",
+  "test_command": "python -B -m unittest discover -s tests -v",
+  "test_result": {
+    "tests": 29,
+    "passed": 29,
+    "failed": 0,
+    "roles_exercised": 8,
+    "real_cli_success_paths": 2,
+    "real_cli_failure_paths": 1,
+    "log_sha256": "da70394261839f4f557c8dadce765c91b9347e32d47661a8ddc10ec5cf117019"
+  },
+  "useful_output": "Complete method-enriched brief produced by the real compiler CLI from supplied source-authoring and illustrative design inputs.",
+  "source_state": "BUILT_NOT_PROVEN",
+  "proof_scope": "Local deterministic authoring/CLI behavior only. No fleet or provider proof.",
+  "runtime_admission": "NOT_REQUESTED",
+  "execution_authority": false,
+  "native_skill_installation": "NOT_PERFORMED",
+  "provider_or_model_calls": 0,
+  "external_tool_calls_by_compiler": 0,
+  "studio_worker_mutations": 0,
+  "integration_tests_against_full_mastermind_repository": "NOT_RUN; source-only additive scope, full checkout unavailable in this sandbox",
+  "independent_semantic_review": "NOT_PERFORMED",
+  "observed_runtime_gate": "Executive read-only state transport returned HTTP 429; underlying runtime health unknown.",
+  "observed_host_gate": "Studio ping responded; later bounded file read timed out. Earlier compound shell request was blocked by platform safety checks and was not replayed.",
+  "files_excluding_this_evidence_file": [
+    {
+      "path": "MASTER_PLAN.md",
+      "bytes": 26331,
+      "sha256": "8a3b8dd231679a7c801780f725f5f242e60a22c29726432ce2ec7048e13be2e8"
+    },
+    {
+      "path": "README.md",
+      "bytes": 3277,
+      "sha256": "eaa7e77931237b1945f13958217ede4a25045f8b15b7bc043fb03e014c160968"
+    },
+    {
+      "path": "examples/design-brief.json",
+      "bytes": 4097,
+      "sha256": "1ba3c85eef2601c31284ec814c51807049009457b344c42e2a6f6eddaf47a7b6"
+    },
+    {
+      "path": "examples/program-brief.json",
+      "bytes": 4653,
+      "sha256": "c7e0226fd2f8704ef8b7ae97a5846f751611027f05e6a7dc8897b79f62242379"
+    },
+    {
+      "path": "mastermind-craft/SKILL.md",
+      "bytes": 2420,
+      "sha256": "334db198936192c6a361317c7a928378a13534c29923d21a78fb3565d6e99165"
+    },
+    {
+      "path": "mastermind-craft/agents/openai.yaml",
+      "bytes": 276,
+      "sha256": "92977de5d1497363724d8f5a0eef0c2193b76a17b1692488ea1ae41fdbd87c4d"
+    },
+    {
+      "path": "mastermind-craft/references/adoption.md",
+      "bytes": 3146,
+      "sha256": "28182534fb26cf2bdfef936af7a8eb8377371ad6723227b9e5b99406f314aeaa"
+    },
+    {
+      "path": "mastermind-craft/references/backend.md",
+      "bytes": 2586,
+      "sha256": "a5e81551955eac28b7167c52ac33c5f14632165cb0c9da2241746fd8b37f50e1"
+    },
+    {
+      "path": "mastermind-craft/references/brief-format.md",
+      "bytes": 3404,
+      "sha256": "e74a9b9266259ff1f5e4f2dae28393ffd7c89ebd25fa8883a7e4e0a16f163562"
+    },
+    {
+      "path": "mastermind-craft/references/common.md",
+      "bytes": 3022,
+      "sha256": "48e8c7b74d8925c54db4ff40b704d63111bf9e3e7ff492f1ccc3561181b5bf60"
+    },
+    {
+      "path": "mastermind-craft/references/data-scientist.md",
+      "bytes": 2434,
+      "sha256": "1ed83b65ca925cf6dc8dcb9b7eb6404a9fb9d7a401761c13611fe508901f0760"
+    },
+    {
+      "path": "mastermind-craft/references/designer.md",
+      "bytes": 3003,
+      "sha256": "c0cc44c994521aa8ee81d215e90dda499b0b7533b434308d34248d6e1ee97f0c"
+    },
+    {
+      "path": "mastermind-craft/references/frontend.md",
+      "bytes": 2492,
+      "sha256": "a705cc43828e4e927378fd5e7be23b44afb9136a1178c3a7302b0fb60ef6f678"
+    },
+    {
+      "path": "mastermind-craft/references/orchestrator.md",
+      "bytes": 2645,
+      "sha256": "fe788fe7506affe6be8bcfbd4e3d3a98b35b8a7eca14e3121d527789f6f70aec"
+    },
+    {
+      "path": "mastermind-craft/references/researcher.md",
+      "bytes": 2375,
+      "sha256": "269cb1d9f5256de5a85d181471976a6767f9c4898b8fb005bd9c434d8223185e"
+    },
+    {
+      "path": "mastermind-craft/references/reviewer.md",
+      "bytes": 2402,
+      "sha256": "ed22eccc8ee016044af90a92e2cc744e1950a887ebfd7cecfa5811c3768ce363"
+    },
+    {
+      "path": "mastermind-craft/references/verifier.md",
+      "bytes": 2549,
+      "sha256": "65c78130f17ec6c50e795da8bd2b854a70bb9fa631fd6fef3ede39a745f6e6ab"
+    },
+    {
+      "path": "mastermind-craft/scripts/brief.py",
+      "bytes": 11618,
+      "sha256": "6d9007885b0b353383d261c32801a3e1b3c355a8b4c344d5c6161d1dd61026f3"
+    },
+    {
+      "path": "tests/test_brief.py",
+      "bytes": 11836,
+      "sha256": "da4cdbfcca4b0610a57560381ea23f3447994dc9dcb48eee66b1ea46f89fa7ee"
+    }
+  ]
+}
