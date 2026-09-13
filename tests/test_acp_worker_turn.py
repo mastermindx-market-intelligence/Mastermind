@@ -10,7 +10,9 @@ except ImportError:
     acp = None
 
 from control_plane.worker_execution_contract import WorkerLaunchSpec
+from integrations.acp_worker.adapter import _TurnFrameGuard
 from integrations.acp_worker.turn import AcpProfile, AcpReadOnlyTurn
+from scripts.ohf.acp_probe_boundary import ProbeClient
 
 
 @unittest.skipIf(acp is None, "optional ACP SDK absent; ACP capability is NOT qualified")
@@ -141,6 +143,118 @@ class AcpTurnTests(unittest.IsolatedAsyncioTestCase):
         result, _ = await self.exercise("duplicate-json")
         self.assertIsNotNone(result.error)
         self.assertIsNone(result.output_json)
+
+    async def test_guarded_sdk_roundtrip_admits_harmless_setup_updates(self):
+        from acp.schema import (
+            AgentMessageChunk, AvailableCommand, AvailableCommandsUpdate,
+            ConfigOptionUpdate, InitializeResponse, Implementation,
+            NewSessionResponse, PromptResponse, SessionConfigOptionSelect,
+            SessionConfigSelectOption, TextContentBlock, UserMessageChunk,
+        )
+        stopped = asyncio.Event()
+        handlers = set()
+
+        class Peer:
+            def on_connect(self, client):
+                self.client = client
+
+            async def initialize(self, **kwargs):
+                return InitializeResponse(protocol_version=acp.PROTOCOL_VERSION,
+                    agent_info=Implementation(name="fixture", version="1"))
+
+            async def new_session(self, **kwargs):
+                return NewSessionResponse(session_id="session-1", config_options=[
+                    SessionConfigOptionSelect(id="model", name="Model", category="model",
+                        type="select", current_value="model-a", options=[
+                            SessionConfigSelectOption(value="model-a", name="Model A")])])
+
+            async def set_config_option(self, session_id, config_id, value, **kwargs):
+                await self.client.session_update(session_id=session_id,
+                    update=AvailableCommandsUpdate(available_commands=[
+                        AvailableCommand(name="noop", description="No operator effect")]))
+                return ConfigOptionUpdate(config_options=[
+                    SessionConfigOptionSelect(id="model", name="Model", category="model",
+                        type="select", current_value="model-a", options=[
+                            SessionConfigSelectOption(value="model-a", name="Model A")])])
+
+            async def prompt(self, session_id, prompt, **kwargs):
+                await self.client.session_update(session_id=session_id,
+                    update=UserMessageChunk(session_update="user_message_chunk",
+                        content=TextContentBlock(type="text", text="Return an answer.")))
+                await self.client.session_update(session_id=session_id,
+                    update=AgentMessageChunk(session_update="agent_message_chunk",
+                        content=TextContentBlock(type="text", text='{"answer":42}')))
+                return PromptResponse(stop_reason="end_turn")
+
+            async def cancel(self, session_id, **kwargs):
+                stopped.set()
+
+        async def handle(reader, writer):
+            task = asyncio.current_task()
+            handlers.add(task)
+            try:
+                await acp.run_agent(Peer(), writer, reader)
+            finally:
+                writer.close()
+                try:
+                    await writer.wait_closed()
+                except ConnectionResetError:
+                    pass
+                handlers.discard(task)
+
+        server = await asyncio.start_server(handle, "127.0.0.1", 0, limit=65536)
+        reader, writer = await asyncio.open_connection(
+            "127.0.0.1", server.sockets[0].getsockname()[1], limit=65536)
+        spec = WorkerLaunchSpec(run_id="run-1", job_id="JOB-1", worker_id="worker-1",
+            workspace_path=Path("/fixture"), run_dir=Path("/fixture-run"),
+            prompt="Return an answer.", result_schema_path=Path("/fixture-schema"),
+            authorities=("READ", "RESEARCH"), model="model-a", timeout_seconds=2,
+            cancel_grace_seconds=1)
+        driver = AcpReadOnlyTurn(AcpProfile(agent_name="fixture", agent_version="1"))
+        guard = _TurnFrameGuard(driver)
+
+        def validate(value):
+            if value != {"answer": 42}:
+                raise ValueError("invalid result")
+
+        try:
+            result = await asyncio.wait_for(driver.run(spec, writer, reader,
+                cancelled=asyncio.Event(), validate_output=validate, frame_guard=guard), 4)
+            self.assertEqual(result.error, None)
+            self.assertEqual(json.loads(result.output_json), {"answer": 42})
+            self.assertEqual(guard.violation, None)
+            self.assertFalse(driver.unsettled_tasks)
+        finally:
+            stopped.set()
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except ConnectionResetError:
+                pass
+            server.close()
+            await server.wait_closed()
+            if handlers:
+                await asyncio.wait_for(asyncio.gather(*tuple(handlers), return_exceptions=True), 1)
+
+    async def test_guarded_reader_rejects_unadmitted_and_wrong_session_traffic(self):
+        from acp.schema import PlanUpdate, PlanUpdateMarkdown, ToolCallUpdate
+
+        async def refused(update, *, session_id="session-1", phase="prompt"):
+            guard = ProbeClient()
+            guard.bind_session("session-1")
+            if phase == "prompt":
+                guard.begin_prompt()
+            before = guard.violation
+            await guard.session_update(session_id=session_id, update=update)
+            self.assertIsNotNone(guard.violation)
+            return guard.violation != before
+
+        self.assertTrue(await refused(ToolCallUpdate(tool_call_id="tool-1", kind="read", status="pending")))
+        self.assertTrue(await refused(PlanUpdate(plan=PlanUpdateMarkdown(
+            type="markdown", plan_id="plan-1", content="unadmitted"))))
+        self.assertTrue(await refused({"sessionUpdate": "extension_update"},
+            phase="setup"))
+        self.assertTrue(await refused(None, session_id="wrong-session"))
 
 
 if __name__ == "__main__":

@@ -43,6 +43,14 @@ class _TurnFrameGuard(ProbeClient):
         super().poison(reason)
         self._turn._refuse("ACP_FRAME_BOUNDARY_REFUSED")
 
+    def admit_update(self, update: Any) -> int:
+        # Structural bounds remain in StrictFrameReader. The typed production
+        # turn applies the phase/session-aware read-only policy below.
+        self._turn.session_update(session_id=self.session_id or "", update=update)
+        if self._turn._error:
+            raise ValueError(self._turn._error)
+        return 0
+
 
 @dataclasses.dataclass(frozen=True)
 class AcpProcessCompletion:

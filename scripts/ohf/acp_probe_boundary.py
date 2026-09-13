@@ -78,6 +78,12 @@ class ProbeClient:
         if self.violation is None:
             self.violation = reason
 
+    def admit_update(self, update: Any) -> int:
+        """Apply this client's semantic update policy and return its text size."""
+        text = _update_text(update)
+        self._digest.update(text)
+        return len(text)
+
     def bind_session(self, session_id: str) -> None:
         if self.session_id is not None:
             self.poison("SESSION_REBIND")
@@ -113,16 +119,15 @@ class ProbeClient:
             self.poison("UPDATE_BUDGET_EXCEEDED")
             return
         try:
-            raw = _update_text(update)
+            size = self.admit_update(update)
         except (ValueError, TypeError, UnicodeError):
             self.poison("UPDATE_NOT_ADMITTED")
             return
-        if self._text_bytes + len(raw) > self.limits.text_bytes:
+        if self._text_bytes + size > self.limits.text_bytes:
             self.poison("TEXT_BUDGET_EXCEEDED")
             return
         self._updates += 1
-        self._text_bytes += len(raw)
-        self._digest.update(raw)
+        self._text_bytes += size
 
     async def request_permission(self, session_id: str, tool_call: Any, options: Any, **kwargs: Any) -> dict:
         if self._callback_allowed(session_id):
@@ -274,7 +279,7 @@ class StrictFrameReader:
                 if method == "session/update":
                     if set(params) != {"sessionId", "update"}:
                         raise BoundaryViolation("UPDATE_NOT_ADMITTED")
-                    _update_text(params["update"])
+                    self.client.admit_update(params["update"])
                 else:
                     if (set(params) != {"sessionId", "toolCall", "options"}
                             or not isinstance(params["toolCall"], dict)

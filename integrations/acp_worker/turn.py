@@ -203,12 +203,15 @@ class AcpReadOnlyTurn:
                 self._chunks.append(text)
             elif kind == "config_option_update":
                 option = _model_option(data.get("configOptions"), self.profile.model_option_id)
+                if self._phase == "setup" and option.get("currentValue") != self._model:
+                    raise _Refused("ACP_MODEL_DRIFT")
                 if self._phase == "prompt" and option.get("currentValue") != self._model:
                     raise _Refused("ACP_MODEL_DRIFT")
             elif kind == "current_mode_update":
                 if self.profile.required_mode is None or data.get("currentModeId") != self.profile.required_mode:
                     raise _Refused("ACP_MODE_DRIFT")
-            elif kind not in {"agent_thought_chunk", "available_commands_update", "session_info_update", "usage_update"}:
+            elif kind not in {"user_message_chunk", "agent_thought_chunk",
+                              "available_commands_update", "session_info_update", "usage_update"}:
                 # Tool calls/plans/compaction are not silently elevated into grants.
                 raise _Refused("ACP_UNADMITTED_UPDATE")
         except (_Refused, UnicodeError, AttributeError) as exc:
