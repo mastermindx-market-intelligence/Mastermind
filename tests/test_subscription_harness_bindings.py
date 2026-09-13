@@ -86,6 +86,41 @@ class SubscriptionHarnessBindingsTest(unittest.TestCase):
         self.assertEqual(binding.protocol, ALIBABA_TOKEN_PLAN.wire_api)
         self.assertEqual(binding.effective_base_url, ALIBABA_TOKEN_PLAN.base_url)
 
+    def test_codex_cli_binding_must_resolve_reviewed_responses_realm(self) -> None:
+        mutated = copy.deepcopy(self.raw)
+        row = mutated["bindings"]["alibaba-token-plan-personal.codex-responses"]
+        row["endpoint"]["base_url"] = "https://api.minimax.io/v1"
+        with self.assertRaisesRegex(
+            HarnessBindingError, "no exact reviewed Codex realm"
+        ):
+            validate_bindings(mutated, profiles_document=self.profiles)
+
+        row["protocol"] = "openai-chat"
+        row["endpoint"]["base_url"] = (
+            "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"
+        )
+        with self.assertRaisesRegex(
+            HarnessBindingError, "not a reviewed Codex Responses lane"
+        ):
+            validate_bindings(mutated, profiles_document=self.profiles)
+
+        row["protocol"] = "responses"
+        row["implementation_state"] = "SPEC_ONLY"
+        with self.assertRaisesRegex(
+            HarnessBindingError, "not a reviewed Codex Responses lane"
+        ):
+            validate_bindings(mutated, profiles_document=self.profiles)
+
+    def test_codex_cli_identity_must_agree(self) -> None:
+        mutated = copy.deepcopy(self.raw)
+        mutated["bindings"]["alibaba-token-plan-personal.codex-responses"][
+            "harness_id"
+        ] = "openai-compatible-coding-tool"
+        with self.assertRaisesRegex(
+            HarnessBindingError, "codex harness identity disagrees"
+        ):
+            validate_bindings(mutated, profiles_document=self.profiles)
+
     def test_built_alibaba_codex_lane_can_reach_canary_gate_only(self) -> None:
         binding = get_binding(
             "alibaba-token-plan-personal.codex-responses",
