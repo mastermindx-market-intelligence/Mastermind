@@ -2378,8 +2378,10 @@ class ExecutiveControlService:
     def _grant_app_socket_access(self) -> None:
         """One named-user ACL; C1 ownership, modes and groups stay intact.
 
-        Reapply after launchd recreates its socket. The control uid owns both
-        nodes; no root subprocess, broad group, or Runtime ACL is needed.
+        Reapply after launchd recreates its socket. The existing bootstrap's
+        root-owned 0755 parent already allows traversal and stays untouched.
+        A private service-owned parent receives only a traversal ACL. No root
+        subprocess, broad group, or Runtime ACL is needed.
         """
         binding = self._ceo_ingress_app_binding
         if binding is None or binding.peer_uid == os.geteuid():
@@ -2395,6 +2397,12 @@ class ExecutiveControlService:
             (path.parent, "search", True), (path, "read,write", False),
         ):
             before = node.lstat()
+            if directory and (stat.S_ISDIR(before.st_mode)
+                    and before.st_uid == 0
+                    and stat.S_IMODE(before.st_mode) == 0o755):
+                # bootstrap-host.sh owns this shared parent. All peers can
+                # traverse it already; each socket retains its own authority.
+                continue
             if (before.st_uid != os.geteuid() or stat.S_ISLNK(before.st_mode)
                     or before.st_mode & 0o007
                     or not (stat.S_ISDIR(before.st_mode) if directory else stat.S_ISSOCK(before.st_mode))):

@@ -79,3 +79,68 @@ def test_installed_auth_audit_retains_both_policy_facts(tmp_path):
         rows=[json.loads(line) for line in (tmp_path/name/'auth-audit.jsonl').read_text().splitlines()]
         assert len(rows)==1 and rows[0]['policy_id']==policy.policy_id
         assert rows[0]['accepted'] is True
+
+
+@pytest.mark.parametrize('parent_uid,parent_mode,accepted', [
+    (0, 0o755, True),
+    (0, 0o777, False),
+    (0, 0o775, False),
+    (123456, 0o755, False),
+])
+def test_app_acl_respects_bootstrap_root_owned_socket_directory(
+    tmp_path, short_socket_root, monkeypatch, parent_uid, parent_mode, accepted,
+):
+    """The existing bootstrap owns the shared parent; only the socket needs an ACL."""
+    from types import SimpleNamespace
+    from control_plane.executive_service import ServiceError
+    import control_plane.executive_service as service_module
+
+    service = ExecutiveControlService(
+        _config(tmp_path, socket_root=short_socket_root),
+        ceo_ingress_socket_path=short_socket_root/'ceo.sock',
+        ceo_ingress_peer_uid=os.geteuid()+1000,
+        ceo_ingress_grounding_provider=_FakeGrounding(),
+        ceo_ingress_app_binding=CeoIngressAppBinding(
+            peer_uid=os.geteuid()+2000, armed=False, grounding_provider=_FakeGrounding(),
+        ),
+    )
+    short_socket_root.chmod(parent_mode)
+    listener = socket.socket(socket.AF_UNIX)
+    listener.bind(str(service.ceo_ingress_socket_path))
+    service.ceo_ingress_socket_path.chmod(0o660)
+    real_lstat = Path.lstat
+    socket_parent = service.ceo_ingress_socket_path.parent
+    calls = []
+
+    def observed_lstat(path, *args, **kwargs):
+        info = real_lstat(path, *args, **kwargs)
+        if path == socket_parent:
+            fields = list(info)
+            fields[4] = parent_uid
+            return os.stat_result(fields)
+        return info
+
+    def command(argv, **kwargs):
+        calls.append(argv)
+        return SimpleNamespace(stdout='')
+
+    monkeypatch.setattr(service_module.sys, 'platform', 'darwin')
+    monkeypatch.setattr(service_module.pwd, 'getpwuid',
+                        lambda uid: SimpleNamespace(pw_name='_mastermind_executive_mcp'))
+    monkeypatch.setattr(Path, 'lstat', observed_lstat)
+    monkeypatch.setattr(service_module.subprocess, 'run', command)
+    try:
+        if not accepted:
+            with pytest.raises(ServiceError, match='custody'):
+                service._grant_app_socket_access()
+            assert calls == []
+            return
+        service._grant_app_socket_access()
+        assert all(str(socket_parent) != argv[-1] for argv in calls)
+        assert [argv for argv in calls if argv[0] == '/bin/chmod'] == [[
+            '/bin/chmod', '+a', 'user:_mastermind_executive_mcp allow read,write',
+            str(service.ceo_ingress_socket_path),
+        ]]
+        assert service.ceo_ingress_socket_path.stat().st_mode & 0o777 == 0o660
+    finally:
+        listener.close()

@@ -305,10 +305,14 @@ the socket; it has no filesystem access to the Runtime database or worker
 leases. The admission owner independently rechecks grounding before effect.
 Temporary E1/fixture roots and all their production-path refusals remain intact.
 
-On macOS, the control process applies one named-user ACL for socket read/write
-and parent-directory traversal. Socket ownership, group and POSIX mode remain
-unchanged, and a normal restart does not duplicate the ACL. The App identity is
-not added to the C1 group or the general Operator allowlist.
+On macOS, the control process applies one named-user ACL for socket read/write.
+The existing bootstrap's root-owned 0755 socket directory already permits
+traversal and remains untouched. A private control-owned parent receives only
+a traversal ACL. Socket ownership, group and POSIX mode remain unchanged, and a
+normal restart does not duplicate the ACL. The App identity is not added to the
+C1 group or the general Operator allowlist. Before activation, the host installer
+must establish the socket directory using the existing bootstrap's ownership
+and mode; the network process cannot create it.
 
 `ops/executive_os/executive_mcp_entry.py` is the installed network-process
 launcher. It requires an explicit root-owned configuration, the matching sealed
