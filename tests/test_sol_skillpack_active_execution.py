@@ -77,6 +77,13 @@ def test_blocked_lane_does_not_end_turn_while_independent_work_exists():
     assert "every materially useful in-scope lane is blocked" in text
 
 
+def test_effect_unknown_is_terminal_only_when_no_safe_independent_lane_remains():
+    text = _read(ACTIVE)
+    assert "does not itself permit finalization while another useful lane is provably independent" in text
+    assert "makes every remaining useful in-scope action" in text
+    assert "independent of that uncertainty" in text
+
+
 def test_tool_reprobe_requires_a_material_capability_reason():
     text = _read(ACTIVE)
     assert "discover the needed schema/capability once" in text
