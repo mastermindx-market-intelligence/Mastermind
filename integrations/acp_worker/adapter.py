@@ -43,10 +43,23 @@ class _TurnFrameGuard(ProbeClient):
         super().poison(reason)
         self._turn._refuse("ACP_FRAME_BOUNDARY_REFUSED")
 
+    def _callback_allowed(self, session_id: str) -> bool:
+        if self.violation is not None:
+            return False
+        if session_id != self.session_id:
+            self.poison("SESSION_MISMATCH")
+            return False
+        if self._turn._phase == "setup":
+            return True
+        if not self._active:
+            self.poison("CALLBACK_OUTSIDE_PROMPT")
+            return False
+        return True
+
     def admit_update(self, update: Any) -> int:
         # Structural bounds remain in StrictFrameReader. The typed production
         # turn applies the phase/session-aware read-only policy below.
-        self._turn.session_update(session_id=self.session_id or "", update=update)
+        self._turn.validate_update(update)
         if self._turn._error:
             raise ValueError(self._turn._error)
         return 0

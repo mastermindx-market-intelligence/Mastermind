@@ -165,17 +165,20 @@ class AcpTurnTests(unittest.IsolatedAsyncioTestCase):
             async def new_session(self, **kwargs):
                 return NewSessionResponse(session_id="session-1", config_options=[
                     SessionConfigOptionSelect(id="model", name="Model", category="model",
-                        type="select", current_value="model-a", options=[
+                        type="select", current_value="model-b", options=[
                             SessionConfigSelectOption(value="model-a", name="Model A")])])
 
-            async def set_config_option(self, session_id, config_id, value, **kwargs):
+            async def set_config_option(self, config_id, session_id, value, **kwargs):
                 await self.client.session_update(session_id=session_id,
-                    update=AvailableCommandsUpdate(available_commands=[
-                        AvailableCommand(name="noop", description="No operator effect")]))
-                return ConfigOptionUpdate(config_options=[
-                    SessionConfigOptionSelect(id="model", name="Model", category="model",
-                        type="select", current_value="model-a", options=[
-                            SessionConfigSelectOption(value="model-a", name="Model A")])])
+                    update=AvailableCommandsUpdate(session_update="available_commands_update",
+                        available_commands=[AvailableCommand(name="noop", description="No operator effect")]))
+                await self.client.session_update(session_id=session_id,
+                    update={"sessionUpdate": "config_option_update", "configOptions": [{
+                        "id": "model", "name": "Model", "category": "model", "type": "select",
+                        "currentValue": "model-a", "options": [{"value": "model-a", "name": "Model A"}]}]})
+                return {"configOptions": [{
+                    "id": "model", "name": "Model", "category": "model", "type": "select",
+                    "currentValue": "model-a", "options": [{"value": "model-a", "name": "Model A"}]}]}
 
             async def prompt(self, session_id, prompt, **kwargs):
                 await self.client.session_update(session_id=session_id,
@@ -222,6 +225,7 @@ class AcpTurnTests(unittest.IsolatedAsyncioTestCase):
                 cancelled=asyncio.Event(), validate_output=validate, frame_guard=guard), 4)
             self.assertEqual(result.error, None)
             self.assertEqual(json.loads(result.output_json), {"answer": 42})
+            self.assertEqual(result.observed_model, "model-a")
             self.assertEqual(guard.violation, None)
             self.assertFalse(driver.unsettled_tasks)
         finally:

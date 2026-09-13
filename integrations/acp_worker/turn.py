@@ -187,12 +187,15 @@ class AcpReadOnlyTurn:
         if self._updates > _MAX_UPDATES:
             self._refuse("ACP_UPDATE_LIMIT")
             return
+        self.validate_update(update)
+
+    def validate_update(self, update: Any) -> None:
         try:
             data = _document(update)
             kind = data.get("sessionUpdate")
             if kind == "agent_message_chunk":
                 content = data.get("content", {})
-                if self._phase != "prompt" or content.get("type") != "text":
+                if content.get("type") != "text":
                     raise _Refused("ACP_UNEXPECTED_CONTENT")
                 text = content.get("text")
                 if not isinstance(text, str):
@@ -203,8 +206,6 @@ class AcpReadOnlyTurn:
                 self._chunks.append(text)
             elif kind == "config_option_update":
                 option = _model_option(data.get("configOptions"), self.profile.model_option_id)
-                if self._phase == "setup" and option.get("currentValue") != self._model:
-                    raise _Refused("ACP_MODEL_DRIFT")
                 if self._phase == "prompt" and option.get("currentValue") != self._model:
                     raise _Refused("ACP_MODEL_DRIFT")
             elif kind == "current_mode_update":
@@ -214,6 +215,11 @@ class AcpReadOnlyTurn:
                               "available_commands_update", "session_info_update", "usage_update"}:
                 # Tool calls/plans/compaction are not silently elevated into grants.
                 raise _Refused("ACP_UNADMITTED_UPDATE")
+            elif kind == "user_message_chunk":
+                content = data.get("content", {})
+                if (self._phase != "prompt" or content.get("type") != "text"
+                        or not isinstance(content.get("text"), str)):
+                    raise _Refused("ACP_UNEXPECTED_CONTENT")
         except (_Refused, UnicodeError, AttributeError) as exc:
             self._refuse(str(exc) if isinstance(exc, _Refused) else "ACP_SCHEMA_DRIFT")
 
@@ -368,7 +374,7 @@ class AcpReadOnlyTurn:
                 raise _Refused("ACP_NON_SUCCESS_TERMINAL")
             if loop.time() > deadline or cancelled.is_set():
                 raise _Refused("ACP_LATE_TERMINAL")
-            text = "".join(self._chunks)
+            text = "".join(self._chunks[-1:])
             value = json.loads(text, object_pairs_hook=_object_pairs, parse_constant=_nonfinite)
             if not isinstance(value, dict):
                 raise _Refused("ACP_RESULT_NOT_OBJECT")
