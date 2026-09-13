@@ -282,7 +282,7 @@ upgrade, one queued Job, duplicate/conflict behavior and loss-after-admission
 reconciliation. These tests do not establish production installation or a
 successful ChatGPT call.
 
-### Production binding decision required
+### Installed production binding
 
 The installed composition gives the network MCP process its own non-login
 service identity. `ceo_ingress_app_peer_uid`, `ceo_ingress_app_armed`, and
@@ -290,6 +290,11 @@ service identity. `ceo_ingress_app_peer_uid`, `ceo_ingress_app_armed`, and
 control configuration. Its peer must differ from control, Operator, worker,
 and C1 identities. C1 retains its existing peer, grounding provider and arming
 setting.
+
+The full-schema `control.json.template` includes an unarmed App binding and an
+explicit Macro snapshot placeholder. Supply the actual sealed snapshot when
+provisioning the App, or omit all three App fields when installing control
+without it. The base installer does not add these optional fields by default.
 
 The App peer can use existing v2 submit/status frames and two closed internal
 read frames on the same CeoIngress socket. The four public tools and schemas
