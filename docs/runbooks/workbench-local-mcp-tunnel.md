@@ -3,8 +3,10 @@
 **State: BUILT_NOT_PROVEN.** The Personal-Pro-safe local MCP source exists and a
 real SDK stdio initialize/list/call sequence passed on Mac Studio on 2026-09-13.
 A new OpenAI Secure MCP Tunnel has **not** been registered for this surface and
-no ChatGPT app/plugin has been created from it. Remote canary completion remains
-blocked on an approved OpenAI Admin API key for tunnel creation.
+no ChatGPT app/plugin has been created from it. The Studio CLI creation path is
+currently blocked on a missing OpenAI Admin API key, but that is not an
+architecture blocker: a Platform organization owner/RBAC admin with Tunnels
+Read + Manage can create the tunnel directly in Platform tunnel settings.
 
 This carrier does not replace Executive OS, Agent OS, RuntimeBinding, Capacity,
 Workbench Read, Code Intelligence, process ownership, or effect reconciliation.
@@ -127,15 +129,23 @@ production longevity.
 ## Secure MCP Tunnel registration gate
 
 Mac Studio already has official `tunnel-client` 0.0.14 and healthy existing
-Mastermind Executive tunnel runtimes. Creating a **new** remote tunnel requires
-an OpenAI Admin API key. The current Studio and MacBook admin profiles reference
-`env:OPENAI_ADMIN_KEY`, but that environment variable was not present during
-this canary. Do not copy an Admin key into source, command history, chat, or the
-MCP config merely to clear this gate.
+Mastermind Executive tunnel runtimes. The CLI route for creating a **new**
+remote tunnel requires an OpenAI Admin API key; the current Studio and MacBook
+admin profiles reference `env:OPENAI_ADMIN_KEY`, but that environment variable
+was not present during this canary. Do not copy an Admin key into source,
+command history, chat, or the MCP config merely to clear this gate.
 
-Once an approved Admin key is available to the local operator environment,
-create a new tunnel scoped only to the intended workspace. Do not reuse or
-retarget either live Executive tunnel:
+There are two approved ways to clear tunnel registration:
+
+1. **Preferred one-time UI path:** in Platform tunnel settings, an organization
+   owner/RBAC admin with **Tunnels Read + Manage** creates `Mastermind Workbench
+   - Personal` and associates it with the intended Personal ChatGPT workspace.
+   Record the resulting `tunnel_id`. No Admin API key needs to be copied to the
+   Studio for this path.
+2. **CLI/admin path:** make an approved Admin API key available to the local
+   operator environment, then create the workspace-scoped tunnel below.
+
+For the CLI/admin path, do not reuse or retarget either live Executive tunnel:
 
 ```sh
 tunnel-client runtimes create \
@@ -145,8 +155,11 @@ tunnel-client runtimes create \
   --workspace-id <INTENDED_CHATGPT_WORKSPACE_ID>
 ```
 
-Then connect the new tunnel to the local stdio command using a workspace-valid
-runtime API key **by file/env reference**, not inline secret text:
+After either path produces the new `tunnel_id`, connect that tunnel to the
+local stdio command using a workspace-valid runtime API key **by file/env
+reference**, not inline secret text. If the tunnel was created in Platform UI,
+use `tunnel-client init`/`runtimes connect` with that exact new `tunnel_id` rather
+than creating another remote tunnel:
 
 ```sh
 tunnel-client runtimes connect \
