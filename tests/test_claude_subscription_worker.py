@@ -16,6 +16,7 @@ from control_plane.claude_subscription_worker import (
 from control_plane.codex_worker import LaunchValidationError
 from control_plane.subscription_provider_profiles import get_profile
 from control_plane.worker_adapter import adapter_descriptor
+from control_plane.worker_craft import CraftWorkerAdapter
 from control_plane.worker_execution_contract import WorkerLaunchSpec, WorkerRunStatus
 
 
@@ -178,3 +179,40 @@ def test_fake_provider_executes_one_read_only_common_worker_receipt_without_secr
     assert _FAKE_SECRET not in Path(ref.stdout_path).read_text(encoding="utf-8")
     assert adapter.launch_attestation(ref)["retry_policy"] == "zero"
     assert adapter.launch_attestation(ref)["execution_mode"] == "interactive_canary"
+
+
+def test_craft_prompt_method_reaches_real_claude_canary_adapter(tmp_path: Path):
+    underlying = _adapter(tmp_path)
+    spec, workspace = _spec(tmp_path / "case")
+    packet = {
+        "schema_version": "mastermind.executive_job_packet/v1",
+        "job_id": spec.job_id,
+        "run_id": spec.run_id,
+        "worker_id": spec.worker_id,
+        "objective": "Inspect the assigned frontend fixture and return the result.",
+        "department": "frontend",
+        "task_kind": "implementation",
+        "authorities": ["READ"],
+        "allowed_write_paths": [],
+        "validation_commands": [],
+    }
+    sealed = WorkerLaunchSpec(**{**spec.__dict__, "prompt": json.dumps(packet, sort_keys=True)})
+    wrapper = CraftWorkerAdapter(underlying)
+
+    async def scenario():
+        ref = await wrapper.start(sealed)
+        receipt = await wrapper.collect_result(ref)
+        return ref, receipt
+
+    ref, receipt = asyncio.run(scenario())
+    application = wrapper.craft_application(sealed.run_id)
+    assert application.receipt.role == "frontend"
+    assert application.receipt.native_skill_attested is False
+    assert "# Frontend engineer" in underlying._runs[sealed.run_id].spec.prompt
+    assert receipt.result.status is WorkerRunStatus.SUCCEEDED
+    assert receipt.result.structured_output == {"decision": "PASS", "artifacts": ()}
+    assert receipt.result.provider_session_id == "fixture-session"
+    assert _git(workspace, "status", "--porcelain") == ""
+    evidence = json.dumps(underlying.launch_attestation(ref), sort_keys=True)
+    assert _FAKE_SECRET not in evidence
+    assert _FAKE_SECRET not in underlying._runs[sealed.run_id].spec.prompt
