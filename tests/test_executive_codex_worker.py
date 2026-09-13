@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import pwd
+import signal
 import stat
 import subprocess
 import sys
@@ -63,7 +64,13 @@ result = {
     "artifacts": [],
 }
 
-if mode in {"sleep", "sleep-stubborn"}:
+if mode == "exit-escaped-pipe-holder":
+    child = subprocess.Popen(["/bin/sleep", "60"], start_new_session=True)
+    with open(os.path.join(os.path.dirname(result_path), "child.pid"), "w") as handle:
+        handle.write(str(child.pid))
+    raise SystemExit(0)
+
+if mode in {"sleep", "sleep-stubborn", "sleep-escaped-pipe-holder"}:
     if mode == "sleep-stubborn":
         ready_path = os.path.join(os.path.dirname(result_path), "child.ready")
         child = subprocess.Popen([
@@ -80,6 +87,8 @@ if mode in {"sleep", "sleep-stubborn"}:
             time.sleep(0.01)
         else:
             raise SystemExit(98)
+    elif mode == "sleep-escaped-pipe-holder":
+        child = subprocess.Popen(["/bin/sleep", "60"], start_new_session=True)
     else:
         child = subprocess.Popen(["/bin/sleep", "60"])
     with open(os.path.join(os.path.dirname(result_path), "child.pid"), "w") as handle:
@@ -1531,7 +1540,16 @@ def test_cancel_signals_verified_process_group_and_kills_descendant(tmp_path: Pa
         pytest.fail("cancelled Codex descendant survived its process group")
 
 
-def test_cancel_sigkills_descendant_that_ignores_sigterm(tmp_path: Path):
+def test_cancel_sigkills_descendant_that_ignores_sigterm(tmp_path: Path, monkeypatch):
+    original_killpg = cw.os.killpg
+    kill_calls: list[tuple[int, int]] = []
+
+    def traced_killpg(pgid: int, sig: int):
+        kill_calls.append((pgid, sig))
+        return original_killpg(pgid, sig)
+
+    monkeypatch.setattr(cw.os, "killpg", traced_killpg)
+
     async def exercise():
         adapter, spec, _workspace_path, run_dir = _fixture(
             tmp_path, prompt="sleep-stubborn", timeout=30, grace=0.1
@@ -1550,11 +1568,14 @@ def test_cancel_sigkills_descendant_that_ignores_sigterm(tmp_path: Path):
         assert os.getpgid(child_pid) == ref.pgid
         cancel = await adapter.cancel(ref, "operator requested")
         receipt = await adapter.collect_result(ref)
-        return cancel, receipt, child_pid
+        return cancel, receipt, child_pid, ref.pgid
 
-    cancel, receipt, child_pid = asyncio.run(exercise())
+    cancel, receipt, child_pid, original_pgid = asyncio.run(exercise())
     assert cancel.signal_sent is True
     assert cancel.escalated_to_sigkill is True
+    assert [
+        (pgid, sig) for pgid, sig in kill_calls if sig == signal.SIGKILL
+    ] == [(original_pgid, signal.SIGKILL)]
     assert receipt.result.status is cw.WorkerRunStatus.CANCELLED
     for _ in range(100):
         try:
@@ -1606,6 +1627,932 @@ def test_cancel_refuses_pid_reuse_identity_mismatch(tmp_path: Path):
         await adapter.cancel(ref, "cleanup")
         receipt = await adapter.collect_result(ref)
         assert receipt.result.status is cw.WorkerRunStatus.CANCELLED
+
+    asyncio.run(exercise())
+
+
+def test_cancel_retires_local_transport_after_original_group_absence(tmp_path: Path, monkeypatch):
+    original_killpg = cw.os.killpg
+    original_group_exists = cw._process_group_exists
+    kill_calls: list[tuple[int, int]] = []
+    group_probes: list[int] = []
+
+    def traced_killpg(pgid: int, sig: int):
+        kill_calls.append((pgid, sig))
+        return original_killpg(pgid, sig)
+
+    def traced_group_exists(pgid: int) -> bool:
+        group_probes.append(pgid)
+        return original_group_exists(pgid)
+
+    monkeypatch.setattr(cw.os, "killpg", traced_killpg)
+    monkeypatch.setattr(cw, "_process_group_exists", traced_group_exists)
+
+    async def exercise():
+        adapter, spec, _workspace_path, run_dir = _fixture(
+            tmp_path, prompt="sleep-escaped-pipe-holder", timeout=30, grace=0.1
+        )
+        ref = await adapter.start(spec)
+        state = adapter._runs[ref.run_id]
+        popen = getattr(state.finalization.transport, "_proc", None)
+        assert popen is not None
+
+        def forbidden_underlying_kill():
+            raise AssertionError("local transport close called underlying Popen.kill")
+
+        monkeypatch.setattr(popen, "kill", forbidden_underlying_kill)
+        child_path = run_dir / "output" / "child.pid"
+        child_pid = None
+        for _ in range(100):
+            try:
+                child_pid = int(child_path.read_text())
+            except (FileNotFoundError, ValueError):
+                await asyncio.sleep(0.02)
+                continue
+            break
+        assert child_pid is not None
+        child_pgid = os.getpgid(child_pid)
+        assert child_pgid != ref.pgid
+        try:
+            cancel = await asyncio.wait_for(adapter.cancel(ref, "operator requested"), 3.0)
+            assert cancel.signal_sent is True
+            assert cancel.escalated_to_sigkill is False
+            assert original_killpg(child_pgid, 0) is None
+            assert all(pgid != child_pgid for pgid, _sig in kill_calls)
+            probes_after_cancel = len(group_probes)
+
+            class ForbiddenInspector(cw.ProcessInspector):
+                def boot_session_id(self):
+                    raise AssertionError("post-latch boot probe")
+
+                def identity(self, pid):
+                    raise AssertionError("post-latch pid probe")
+
+            adapter.inspector = ForbiddenInspector()
+            receipt = await adapter.collect_result(ref)
+            assert len(group_probes) == probes_after_cancel
+            assert receipt.result.status is cw.WorkerRunStatus.CANCELLED
+        finally:
+            try:
+                original_killpg(child_pgid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+    asyncio.run(exercise())
+
+
+def test_validation_retires_local_transport_after_original_group_absence(tmp_path: Path, monkeypatch):
+    original_killpg = cw.os.killpg
+    original_group_exists = cw._process_group_exists
+    kill_calls: list[tuple[int, int]] = []
+    group_probes: list[tuple[int, bool]] = []
+    absence_seen = False
+
+    def traced_killpg(pgid: int, sig: int):
+        kill_calls.append((pgid, sig))
+        return original_killpg(pgid, sig)
+
+    def traced_group_exists(pgid: int) -> bool:
+        nonlocal absence_seen
+        if absence_seen:
+            raise AssertionError("post-latch process-group probe")
+        result = original_group_exists(pgid)
+        group_probes.append((pgid, result))
+        if result is False:
+            absence_seen = True
+        return result
+
+    monkeypatch.setattr(cw.os, "killpg", traced_killpg)
+    monkeypatch.setattr(cw, "_process_group_exists", traced_group_exists)
+
+    async def exercise():
+        adapter, spec, _workspace_path, run_dir = _fixture(tmp_path, grace=0.1)
+        child_path = run_dir / "validation-escaped.pid"
+        child_program = (
+            "import pathlib,subprocess,sys,time; "
+            "p=subprocess.Popen(['/bin/sleep','60'], start_new_session=True); "
+            "pathlib.Path(sys.argv[1]).write_text(str(p.pid)); time.sleep(60)"
+        )
+        task = asyncio.create_task(adapter.run_validation_argv(
+            spec,
+            ("/usr/bin/python3", "-c", child_program, str(child_path)),
+            timeout_seconds=1.0,
+        ))
+        child_pid = None
+        for _ in range(100):
+            try:
+                child_pid = int(child_path.read_text())
+            except (FileNotFoundError, ValueError):
+                await asyncio.sleep(0.02)
+                continue
+            break
+        assert child_pid is not None
+        child_pgid = os.getpgid(child_pid)
+        try:
+            receipt = await asyncio.wait_for(task, 3.0)
+            assert receipt.timed_out is True
+            assert receipt.error is not None
+            assert receipt.exit_code is not None
+            assert absence_seen is True
+            assert group_probes
+            assert original_killpg(child_pgid, 0) is None
+            assert all(pgid != child_pgid for pgid, _sig in kill_calls)
+        finally:
+            try:
+                original_killpg(child_pgid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+    asyncio.run(exercise())
+
+
+
+def test_validation_absence_latch_retires_transport_when_wait_already_done():
+    class FakeTransport:
+        def __init__(self):
+            self.pipes = (object(), object(), object())
+            self.close_calls = 0
+
+        def get_pipe_transport(self, fd):
+            return self.pipes[fd]
+
+        def get_returncode(self):
+            return 0
+
+        def close(self):
+            self.close_calls += 1
+
+    class FakeProcess:
+        def __init__(self, transport):
+            self._transport = transport
+            self.returncode = 0
+
+    async def exercise():
+        transport = FakeTransport()
+        process = FakeProcess(transport)
+        finalization = cw._capture_process_finalization(process)
+        finalization.group_proven_absent = True
+        wait_task = asyncio.create_task(asyncio.sleep(0, result=0))
+        await wait_task
+        adapter = object.__new__(cw.CodexWorkerAdapter)
+        kwargs = dict(
+            pid=424242,
+            pgid=424242,
+            start_identity="captured",
+            boot_id="captured",
+            grace_seconds=0.01,
+        )
+        await adapter._terminate_validation_process(
+            process, wait_task, finalization, **kwargs
+        )
+        assert transport.close_calls == 1
+        assert finalization.transport_close_completed is True
+        await adapter._terminate_validation_process(
+            process, wait_task, finalization, **kwargs
+        )
+        assert transport.close_calls == 1
+
+    asyncio.run(exercise())
+
+
+
+def test_cancel_wait_done_refuses_boot_change_before_residual_probe(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class FakeTransport:
+        def __init__(self):
+            self.pipes = (object(), object(), object())
+        def get_pipe_transport(self, fd):
+            return self.pipes[fd]
+        def get_returncode(self):
+            return 0
+        def close(self):
+            raise AssertionError("transport must not close after boot drift")
+    class FakeProcess:
+        def __init__(self, transport):
+            self._transport = transport
+            self.returncode = 0
+    class FakeRef:
+        pid = 424242
+        pgid = 424242
+        boot_session_id = "captured-boot"
+        process_start_identity = "captured-start"
+    class FakeSpec:
+        cancel_grace_seconds = 0.01
+    class ChangedBootInspector:
+        def boot_session_id(self):
+            return "changed-boot"
+        def identity(self, _pid):
+            raise AssertionError("PID identity must not be probed after boot drift")
+    def forbidden_group_probe(_pgid: int) -> bool:
+        raise AssertionError("process group must not be probed after boot drift")
+    monkeypatch.setattr(cw, "_process_group_exists", forbidden_group_probe)
+    async def exercise():
+        transport = FakeTransport()
+        process = FakeProcess(transport)
+        finalization = cw._capture_process_finalization(process)
+        wait_task = asyncio.create_task(asyncio.sleep(0, result=0))
+        await wait_task
+        state = type("State", (), {})()
+        state.process = process
+        state.process_wait_task = wait_task
+        state.finalization = finalization
+        state.ref = FakeRef()
+        state.spec = FakeSpec()
+        state.termination_lock = asyncio.Lock()
+        state.stdout_task = None
+        state.stderr_task = None
+        state.stream_errors = []
+        state.violation = asyncio.Event()
+        state.escalated = False
+        adapter = object.__new__(cw.CodexWorkerAdapter)
+        adapter.inspector = ChangedBootInspector()
+        with pytest.raises(cw.ProcessIdentityError, match="boot identity changed"):
+            await adapter._terminate(state)
+    asyncio.run(exercise())
+
+
+def test_validation_wait_done_refuses_boot_change_before_group_probe(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class FakeTransport:
+        def __init__(self):
+            self.pipes = (object(), object(), object())
+            self.close_calls = 0
+
+        def get_pipe_transport(self, fd):
+            return self.pipes[fd]
+
+        def get_returncode(self):
+            return 0
+
+        def close(self):
+            self.close_calls += 1
+
+    class FakeProcess:
+        def __init__(self, transport):
+            self._transport = transport
+            self.returncode = 0
+
+    class ChangedBootInspector:
+        def boot_session_id(self):
+            return "changed"
+
+        def identity(self, _pid):
+            raise AssertionError("PID identity must not be probed after boot drift")
+
+    def forbidden_group_probe(_pgid: int) -> bool:
+        raise AssertionError("process group must not be probed after boot drift")
+
+    monkeypatch.setattr(cw, "_process_group_exists", forbidden_group_probe)
+
+    async def exercise():
+        transport = FakeTransport()
+        process = FakeProcess(transport)
+        finalization = cw._capture_process_finalization(process)
+        wait_task = asyncio.create_task(asyncio.sleep(0, result=0))
+        await wait_task
+        adapter = object.__new__(cw.CodexWorkerAdapter)
+        adapter.inspector = ChangedBootInspector()
+        with pytest.raises(cw.ProcessIdentityError, match="boot identity changed"):
+            await adapter._terminate_validation_process(
+                process,
+                wait_task,
+                finalization,
+                pid=424242,
+                pgid=424242,
+                start_identity="captured",
+                boot_id="captured",
+                grace_seconds=0.01,
+            )
+        assert transport.close_calls == 0
+
+    asyncio.run(exercise())
+
+def test_validation_wait_done_requires_leader_unresolved_before_group_probe(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class FakeTransport:
+        def __init__(self):
+            self.pipes = (object(), object(), object())
+            self.close_calls = 0
+        def get_pipe_transport(self, fd):
+            return self.pipes[fd]
+        def get_returncode(self):
+            return 0
+        def close(self):
+            self.close_calls += 1
+    class FakeProcess:
+        def __init__(self, transport):
+            self._transport = transport
+            self.returncode = 0
+    class ResolvedInspector:
+        def boot_session_id(self):
+            return "captured-boot"
+        def identity(self, _pid):
+            return "captured-start", 424242
+    def forbidden_group_probe(_pgid: int) -> bool:
+        raise AssertionError("group probe before leader-unresolved proof")
+    monkeypatch.setattr(cw, "_process_group_exists", forbidden_group_probe)
+    async def exercise():
+        transport = FakeTransport()
+        process = FakeProcess(transport)
+        finalization = cw._capture_process_finalization(process)
+        wait_task = asyncio.create_task(asyncio.sleep(0, result=0))
+        await wait_task
+        adapter = object.__new__(cw.CodexWorkerAdapter)
+        adapter.inspector = ResolvedInspector()
+        with pytest.raises(cw.ProcessIdentityError, match="remained resolvable"):
+            await adapter._terminate_validation_process(
+                process, wait_task, finalization,
+                pid=424242, pgid=424242,
+                start_identity="captured-start", boot_id="captured-boot",
+                grace_seconds=0.01,
+            )
+        assert transport.close_calls == 0
+    asyncio.run(exercise())
+
+
+def test_cancel_wait_done_requires_leader_unresolved_before_group_probe(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class FakeTransport:
+        def __init__(self):
+            self.pipes = (object(), object(), object())
+        def get_pipe_transport(self, fd):
+            return self.pipes[fd]
+        def get_returncode(self):
+            return 0
+        def close(self):
+            raise AssertionError("transport must not close before leader-unresolved proof")
+    class FakeProcess:
+        def __init__(self, transport):
+            self._transport = transport
+            self.returncode = 0
+    class FakeRef:
+        pid = 424242
+        pgid = 424242
+        boot_session_id = "captured-boot"
+        process_start_identity = "captured-start"
+    class FakeSpec:
+        cancel_grace_seconds = 0.01
+    class ResolvedInspector:
+        def boot_session_id(self):
+            return "captured-boot"
+        def identity(self, _pid):
+            return "captured-start", 424242
+    def forbidden_group_probe(_pgid: int) -> bool:
+        raise AssertionError("group probe before leader-unresolved proof")
+    monkeypatch.setattr(cw, "_process_group_exists", forbidden_group_probe)
+    async def exercise():
+        transport = FakeTransport()
+        process = FakeProcess(transport)
+        finalization = cw._capture_process_finalization(process)
+        wait_task = asyncio.create_task(asyncio.sleep(0, result=0))
+        await wait_task
+        state = type("State", (), {})()
+        state.process = process
+        state.process_wait_task = wait_task
+        state.finalization = finalization
+        state.ref = FakeRef()
+        state.spec = FakeSpec()
+        state.termination_lock = asyncio.Lock()
+        state.stdout_task = None
+        state.stderr_task = None
+        state.stream_errors = []
+        state.violation = asyncio.Event()
+        state.escalated = False
+        adapter = object.__new__(cw.CodexWorkerAdapter)
+        adapter.inspector = ResolvedInspector()
+        with pytest.raises(cw.ProcessIdentityError, match="remained resolvable"):
+            await adapter._terminate(state)
+    asyncio.run(exercise())
+
+
+def test_local_transport_retirement_requires_known_returncode():
+    class FakeTransport:
+        def __init__(self):
+            self.pipes = (object(), object(), object())
+            self.close_calls = 0
+
+        def get_pipe_transport(self, fd):
+            return self.pipes[fd]
+
+        def get_returncode(self):
+            return None
+
+        def close(self):
+            self.close_calls += 1
+
+    class FakeProcess:
+        def __init__(self, transport):
+            self._transport = transport
+            self.returncode = None
+
+    transport = FakeTransport()
+    finalization = cw._capture_process_finalization(FakeProcess(transport))
+    finalization.group_proven_absent = True
+    with pytest.raises(cw.ProcessIdentityError, match="requires known return code"):
+        cw._retire_process_transport(finalization, label="test")
+    assert transport.close_calls == 0
+
+
+def test_local_transport_retirement_rejects_replaced_transport():
+    class FakeTransport:
+        def __init__(self):
+            self.pipes = (object(), object(), object())
+            self.close_calls = 0
+
+        def get_pipe_transport(self, fd):
+            return self.pipes[fd]
+
+        def get_returncode(self):
+            return 0
+
+        def close(self):
+            self.close_calls += 1
+
+    class FakeProcess:
+        def __init__(self, transport):
+            self._transport = transport
+            self.returncode = 0
+
+    original = FakeTransport()
+    process = FakeProcess(original)
+    finalization = cw._capture_process_finalization(process)
+    replacement = FakeTransport()
+    process._transport = replacement
+    finalization.group_proven_absent = True
+    with pytest.raises(cw.ProcessIdentityError, match="transport identity changed"):
+        cw._retire_process_transport(finalization, label="test")
+    assert original.close_calls == 0
+    assert replacement.close_calls == 0
+
+
+def test_local_transport_retirement_rejects_missing_output_pipe():
+    class FakeTransport:
+        def __init__(self):
+            self.pipes = [object(), object(), object()]
+            self.close_calls = 0
+
+        def get_pipe_transport(self, fd):
+            return self.pipes[fd]
+
+        def get_returncode(self):
+            return 0
+
+        def close(self):
+            self.close_calls += 1
+
+    class FakeProcess:
+        def __init__(self, transport):
+            self._transport = transport
+            self.returncode = 0
+
+    transport = FakeTransport()
+    process = FakeProcess(transport)
+    finalization = cw._capture_process_finalization(process)
+    finalization.group_proven_absent = True
+    transport.pipes[1] = None
+    with pytest.raises(cw.ProcessIdentityError, match="pipe 1 disappeared"):
+        cw._retire_process_transport(finalization, label="test")
+    assert transport.close_calls == 0
+
+
+def test_local_transport_close_failure_is_not_retried():
+    class FakeTransport:
+        def __init__(self):
+            self.pipes = (object(), object(), object())
+            self.close_calls = 0
+
+        def get_pipe_transport(self, fd):
+            return self.pipes[fd]
+
+        def get_returncode(self):
+            return 0
+
+        def close(self):
+            self.close_calls += 1
+            raise RuntimeError("close failed")
+
+    class FakeProcess:
+        def __init__(self, transport):
+            self._transport = transport
+            self.returncode = 0
+
+    transport = FakeTransport()
+    finalization = cw._capture_process_finalization(FakeProcess(transport))
+    finalization.group_proven_absent = True
+    for _ in range(2):
+        with pytest.raises(cw.ProcessIdentityError, match="transport close failed"):
+            cw._retire_process_transport(finalization, label="test")
+    assert transport.close_calls == 1
+
+
+def test_local_transport_requires_transport_returncode_accessor():
+    class FakeTransport:
+        def __init__(self):
+            self.pipes = (object(), object(), object())
+            self.close_calls = 0
+
+        def get_pipe_transport(self, fd):
+            return self.pipes[fd]
+
+        def close(self):
+            self.close_calls += 1
+
+    class FakeProcess:
+        def __init__(self, transport):
+            self._transport = transport
+            self.returncode = 0
+
+    transport = FakeTransport()
+    finalization = cw._capture_process_finalization(FakeProcess(transport))
+    finalization.group_proven_absent = True
+    with pytest.raises(cw.ProcessIdentityError, match="return code"):
+        cw._retire_process_transport(finalization, label="test")
+    assert transport.close_calls == 0
+
+
+def test_local_transport_rejects_replaced_stderr_stream_object():
+    class FakeTransport:
+        def __init__(self):
+            self.pipes = (object(), object(), object())
+            self.close_calls = 0
+
+        def get_pipe_transport(self, fd):
+            return self.pipes[fd]
+
+        def get_returncode(self):
+            return 0
+
+        def close(self):
+            self.close_calls += 1
+
+    class FakeStream:
+        def __init__(self, transport):
+            self._transport = transport
+
+    class FakeProcess:
+        def __init__(self, transport):
+            self._transport = transport
+            self.returncode = 0
+            self.stdin = FakeStream(transport.pipes[0])
+            self.stdout = FakeStream(transport.pipes[1])
+            self.stderr = FakeStream(transport.pipes[2])
+
+    transport = FakeTransport()
+    process = FakeProcess(transport)
+    finalization = cw._capture_process_finalization(process)
+    finalization.group_proven_absent = True
+    process.stderr = FakeStream(transport.pipes[2])
+    with pytest.raises(cw.ProcessIdentityError, match="stream 2"):
+        cw._retire_process_transport(finalization, label="test")
+    assert transport.close_calls == 0
+
+
+def test_validation_allows_short_stream_drain_after_wait(tmp_path: Path, monkeypatch):
+    original = cw._hash_validation_stream
+
+    async def delayed(*args, **kwargs):
+        result = await original(*args, **kwargs)
+        await asyncio.sleep(0.05)
+        return result
+
+    monkeypatch.setattr(cw, "_hash_validation_stream", delayed)
+
+    async def exercise():
+        adapter, spec, _workspace_path, _run_dir = _fixture(tmp_path)
+        return await adapter.run_validation_argv(
+            spec, ("/usr/bin/true",), timeout_seconds=5
+        )
+
+    receipt = asyncio.run(exercise())
+    assert receipt.exit_code == 0
+    assert receipt.timed_out is False
+    assert receipt.error is None
+
+
+def test_cancel_reconciles_already_exited_original_group_without_signal(
+    tmp_path: Path, monkeypatch
+):
+    original_killpg = cw.os.killpg
+    kill_calls: list[tuple[int, int]] = []
+
+    def traced_killpg(pgid: int, sig: int):
+        kill_calls.append((pgid, sig))
+        return original_killpg(pgid, sig)
+
+    monkeypatch.setattr(cw.os, "killpg", traced_killpg)
+
+    async def exercise():
+        adapter, spec, _workspace_path, run_dir = _fixture(
+            tmp_path, prompt="exit-escaped-pipe-holder", timeout=30, grace=0.1
+        )
+        ref = await adapter.start(spec)
+        child_path = run_dir / "output" / "child.pid"
+        child_pid = None
+        for _ in range(200):
+            try:
+                child_pid = int(child_path.read_text())
+            except (FileNotFoundError, ValueError):
+                await asyncio.sleep(0.01)
+                continue
+            break
+        assert child_pid is not None
+        child_pgid = os.getpgid(child_pid)
+        await asyncio.sleep(0.1)
+        try:
+            cancel = await asyncio.wait_for(
+                adapter.cancel(ref, "operator requested"), 3.0
+            )
+            receipt = await adapter.collect_result(ref)
+            return ref, child_pid, child_pgid, cancel, receipt
+        except BaseException:
+            try:
+                original_killpg(child_pgid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            raise
+
+    ref, child_pid, child_pgid, cancel, receipt = asyncio.run(exercise())
+    try:
+        assert cancel.signal_sent is False
+        assert cancel.already_exited is True
+        assert receipt.result.status is cw.WorkerRunStatus.CANCELLED
+        assert all(
+            not (pgid == ref.pgid and sig in {signal.SIGTERM, signal.SIGKILL})
+            for pgid, sig in kill_calls
+        )
+        assert original_killpg(child_pgid, 0) is None
+    finally:
+        try:
+            original_killpg(child_pgid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+def test_validation_reconciles_already_exited_group_without_signal(
+    tmp_path: Path, monkeypatch
+):
+    original_killpg = cw.os.killpg
+    kill_calls: list[tuple[int, int]] = []
+
+    def traced_killpg(pgid: int, sig: int):
+        kill_calls.append((pgid, sig))
+        return original_killpg(pgid, sig)
+
+    monkeypatch.setattr(cw.os, "killpg", traced_killpg)
+
+    async def exercise():
+        adapter, spec, _workspace_path, run_dir = _fixture(tmp_path, grace=0.1)
+        child_path = run_dir / "validation-exited-child.pid"
+        program = (
+            "import pathlib,subprocess,sys; "
+            "p=subprocess.Popen(['/bin/sleep','60'], start_new_session=True); "
+            "pathlib.Path(sys.argv[1]).write_text(str(p.pid))"
+        )
+        task = asyncio.create_task(
+            adapter.run_validation_argv(
+                spec,
+                ("/usr/bin/python3", "-c", program, str(child_path)),
+                timeout_seconds=1.0,
+            )
+        )
+        child_pid = None
+        for _ in range(200):
+            try:
+                child_pid = int(child_path.read_text())
+            except (FileNotFoundError, ValueError):
+                await asyncio.sleep(0.01)
+                continue
+            break
+        assert child_pid is not None
+        child_pgid = os.getpgid(child_pid)
+        try:
+            receipt = await asyncio.wait_for(task, 3.0)
+            return child_pid, child_pgid, receipt
+        except BaseException:
+            try:
+                original_killpg(child_pgid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            raise
+
+    child_pid, child_pgid, receipt = asyncio.run(exercise())
+    try:
+        assert receipt.error is not None
+        assert receipt.exit_code == 0
+        assert all(
+            sig not in {signal.SIGTERM, signal.SIGKILL}
+            for _pgid, sig in kill_calls
+        )
+        assert original_killpg(child_pgid, 0) is None
+    finally:
+        try:
+            original_killpg(child_pgid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+
+def test_worker_normal_exit_foreign_pipe_holder_fails_boundedly_not_success(
+    tmp_path: Path
+):
+    original_killpg = cw.os.killpg
+
+    async def exercise():
+        adapter, spec, _workspace_path, run_dir = _fixture(
+            tmp_path, prompt="exit-escaped-pipe-holder", timeout=30, grace=0.1
+        )
+        ref = await adapter.start(spec)
+        child_path = run_dir / "output" / "child.pid"
+        child_pid = None
+        for _ in range(200):
+            try:
+                child_pid = int(child_path.read_text())
+            except (FileNotFoundError, ValueError):
+                await asyncio.sleep(0.01)
+                continue
+            break
+        assert child_pid is not None
+        child_pgid = os.getpgid(child_pid)
+        try:
+            receipt = await asyncio.wait_for(adapter.collect_result(ref), 3.0)
+            return child_pid, child_pgid, receipt
+        except BaseException:
+            try:
+                original_killpg(child_pgid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            raise
+
+    child_pid, child_pgid, receipt = asyncio.run(exercise())
+    try:
+        assert receipt.result.status is cw.WorkerRunStatus.INVALID_RESULT
+        assert "forced local retirement" in (receipt.result.error or "")
+        assert original_killpg(child_pgid, 0) is None
+    finally:
+        try:
+            original_killpg(child_pgid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+def test_validation_normal_exit_foreign_pipe_holder_fails_boundedly_not_success(
+    tmp_path: Path
+):
+    original_killpg = cw.os.killpg
+
+    async def exercise():
+        adapter, spec, _workspace_path, run_dir = _fixture(tmp_path, grace=0.1)
+        child_path = run_dir / "validation-normal-exit-child.pid"
+        program = (
+            "import pathlib,subprocess,sys; "
+            "p=subprocess.Popen(['/bin/sleep','60'], start_new_session=True); "
+            "pathlib.Path(sys.argv[1]).write_text(str(p.pid))"
+        )
+        task = asyncio.create_task(
+            adapter.run_validation_argv(
+                spec,
+                ("/usr/bin/python3", "-c", program, str(child_path)),
+                timeout_seconds=5.0,
+            )
+        )
+        child_pid = None
+        for _ in range(200):
+            try:
+                child_pid = int(child_path.read_text())
+            except (FileNotFoundError, ValueError):
+                await asyncio.sleep(0.01)
+                continue
+            break
+        assert child_pid is not None
+        child_pgid = os.getpgid(child_pid)
+        try:
+            receipt = await asyncio.wait_for(task, 3.0)
+            return child_pid, child_pgid, receipt
+        except BaseException:
+            try:
+                original_killpg(child_pgid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            raise
+
+    child_pid, child_pgid, receipt = asyncio.run(exercise())
+    try:
+        assert receipt.exit_code == 0
+        assert receipt.timed_out is False
+        assert "forced local stream finalization" in (receipt.error or "")
+        assert original_killpg(child_pgid, 0) is None
+    finally:
+        try:
+            original_killpg(child_pgid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+
+def test_validation_absence_latch_concurrent_entries_close_transport_once():
+    class FakeTransport:
+        def __init__(self):
+            self.pipes = (object(), object(), object())
+            self.close_calls = 0
+
+        def get_pipe_transport(self, fd):
+            return self.pipes[fd]
+
+        def get_returncode(self):
+            return 0
+
+        def close(self):
+            self.close_calls += 1
+
+    class FakeProcess:
+        def __init__(self, transport):
+            self._transport = transport
+            self.returncode = 0
+
+    async def exercise():
+        transport = FakeTransport()
+        process = FakeProcess(transport)
+        finalization = cw._capture_process_finalization(process)
+        finalization.group_proven_absent = True
+        wait_task = asyncio.create_task(asyncio.sleep(0, result=0))
+        await wait_task
+        adapter = object.__new__(cw.CodexWorkerAdapter)
+        kwargs = dict(pid=424242, pgid=424242, start_identity='captured', boot_id='captured', grace_seconds=0.01)
+        await asyncio.gather(
+            adapter._terminate_validation_process(process, wait_task, finalization, **kwargs),
+            adapter._terminate_validation_process(process, wait_task, finalization, **kwargs),
+        )
+        assert transport.close_calls == 1
+        assert finalization.transport_close_completed is True
+
+    asyncio.run(exercise())
+
+
+def test_validation_finalization_state_survives_cancellation_after_transport_close():
+    class FakeTransport:
+        def __init__(self, closed: asyncio.Event):
+            self.pipes = (object(), object(), object())
+            self.closed = closed
+            self.close_calls = 0
+
+        def get_pipe_transport(self, fd):
+            return self.pipes[fd]
+
+        def get_returncode(self):
+            return 0
+
+        def close(self):
+            self.close_calls += 1
+            self.closed.set()
+
+    class FakeProcess:
+        def __init__(self, transport):
+            self._transport = transport
+            self.returncode = 0
+
+    async def exercise():
+        closed = asyncio.Event()
+        release = asyncio.Event()
+        transport = FakeTransport(closed)
+        process = FakeProcess(transport)
+        finalization = cw._capture_process_finalization(process)
+        finalization.group_proven_absent = True
+
+        async def gated_wait():
+            await release.wait()
+            return 0
+
+        wait_task = asyncio.create_task(gated_wait())
+        adapter = object.__new__(cw.CodexWorkerAdapter)
+        kwargs = dict(
+            pid=424242,
+            pgid=424242,
+            start_identity="captured",
+            boot_id="captured",
+            grace_seconds=0.01,
+        )
+        first = asyncio.create_task(
+            adapter._terminate_validation_process(
+                process, wait_task, finalization, **kwargs
+            )
+        )
+        await asyncio.wait_for(closed.wait(), 1.0)
+        first.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await first
+        assert transport.close_calls == 1
+        assert finalization.transport_close_completed is True
+
+        release.set()
+        await adapter._terminate_validation_process(
+            process, wait_task, finalization, **kwargs
+        )
+        assert transport.close_calls == 1
+        assert finalization.transport_close_count == 1
 
     asyncio.run(exercise())
 
