@@ -115,6 +115,8 @@ def _binding_key(value: ProjectActionBinding) -> tuple[object, ...]:
         scope.root_device,
         scope.root_inode,
         scope.context_ref,
+        scope.responsibility_ref,
+        scope.operation_ref,
         scope.owner_ref,
         scope.generation,
         scope.allowed_paths,
@@ -166,6 +168,8 @@ def _assert_action_binding(
         or caller.resource != prepared.resource
         or binding.project_ref != prepared.project_ref
         or scope.context_ref != prepared.context_ref
+        or scope.responsibility_ref != prepared.responsibility_ref
+        or scope.operation_ref != prepared.operation_ref
         or scope.owner_ref != prepared.owner_ref
         or scope.generation != prepared.generation
         or scope.root_device != prepared.root_device
@@ -572,6 +576,8 @@ def create_text_patch_port(
             resource=caller.resource,
             project_ref=project_ref,
             context_ref=final.scope.context_ref,
+            responsibility_ref=final.scope.responsibility_ref,
+            operation_ref=final.scope.operation_ref,
             owner_ref=final.scope.owner_ref,
             generation=final.scope.generation,
             root_device=final.scope.root_device,
@@ -591,6 +597,8 @@ def create_text_patch_port(
             "status": "PREPARED",
             "action_ref": action_ref,
             "project_ref": project_ref,
+            "responsibility_ref": prepared.responsibility_ref,
+            "operation_ref": prepared.operation_ref,
             "relative_path": relative_path,
             "preimage_sha256": prepared.preimage_sha256,
             "postimage_sha256": prepared.postimage_sha256,
@@ -682,6 +690,8 @@ def create_text_patch_port(
             "status": "OK",
             "effect_state": result["effect_state"],
             "project_ref": prepared.project_ref,
+            "responsibility_ref": prepared.responsibility_ref,
+            "operation_ref": prepared.operation_ref,
             "relative_path": prepared.relative_path,
             "preimage_sha256": prepared.preimage_sha256,
             "postimage_sha256": prepared.postimage_sha256,
@@ -726,6 +736,8 @@ def create_text_patch_port(
             "status": "OK",
             "effect_state": result["effect_state"],
             "project_ref": prepared.project_ref,
+            "responsibility_ref": prepared.responsibility_ref,
+            "operation_ref": prepared.operation_ref,
             "relative_path": prepared.relative_path,
             "preimage_sha256": prepared.preimage_sha256,
             "postimage_sha256": prepared.postimage_sha256,

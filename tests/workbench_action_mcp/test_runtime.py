@@ -75,10 +75,12 @@ def test_runtime_executes_patch_through_shared_bounded_executor(tmp_path: Path) 
         required_scopes=("workbench.action",),
         project_ref="project:" + "1" * 64,
         context_ref="context:" + "2" * 64,
-        owner_ref="owner:" + "3" * 64,
-        generation="generation:" + "4" * 64,
+        responsibility_ref="responsibility:" + "3" * 64,
+        operation_ref="operation:" + "4" * 64,
+        owner_ref="owner:" + "5" * 64,
+        generation="generation:" + "6" * 64,
         allowed_paths=("sample.py",),
-        committed_head="5" * 40,
+        committed_head="7" * 40,
         lease_expires_at_ms=now_ms + 300_000,
     )
     project_fd = os.open(project, os.O_RDONLY | os.O_DIRECTORY)

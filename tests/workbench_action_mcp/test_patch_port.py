@@ -41,6 +41,8 @@ class Harness:
             root_device=root_stat.st_dev,
             root_inode=root_stat.st_ino,
             context_ref="context:alpha",
+            responsibility_ref="responsibility:alpha",
+            operation_ref="operation:alpha",
             owner_ref="owner:alpha",
             generation="generation:alpha",
             allowed_paths=allowed_paths,

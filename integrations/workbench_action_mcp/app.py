@@ -73,6 +73,8 @@ _PREPARE_OUTPUT_SCHEMA: dict[str, Any] = {
         "status": {"const": "PREPARED"},
         "action_ref": {"type": "string", "minLength": 16, "maxLength": MAX_ACTION_REF_BYTES},
         "project_ref": {"type": "string", "minLength": 1, "maxLength": 256},
+        "responsibility_ref": {"type": "string", "minLength": 1, "maxLength": 256},
+        "operation_ref": {"type": "string", "minLength": 1, "maxLength": 256},
         "relative_path": {"type": "string", "minLength": 1, "maxLength": 512},
         "preimage_sha256": {
             "anyOf": [
@@ -87,6 +89,8 @@ _PREPARE_OUTPUT_SCHEMA: dict[str, Any] = {
         "status",
         "action_ref",
         "project_ref",
+        "responsibility_ref",
+        "operation_ref",
         "relative_path",
         "preimage_sha256",
         "postimage_sha256",
@@ -103,6 +107,8 @@ _EFFECT_OUTPUT_SCHEMA: dict[str, Any] = {
             "enum": ["NOT_APPLIED", "APPLIED", "EFFECT_UNKNOWN"],
         },
         "project_ref": {"type": "string", "minLength": 1, "maxLength": 256},
+        "responsibility_ref": {"type": "string", "minLength": 1, "maxLength": 256},
+        "operation_ref": {"type": "string", "minLength": 1, "maxLength": 256},
         "relative_path": {"type": "string", "minLength": 1, "maxLength": 512},
         "preimage_sha256": {
             "anyOf": [
@@ -122,6 +128,8 @@ _EFFECT_OUTPUT_SCHEMA: dict[str, Any] = {
         "status",
         "effect_state",
         "project_ref",
+        "responsibility_ref",
+        "operation_ref",
         "relative_path",
         "preimage_sha256",
         "postimage_sha256",

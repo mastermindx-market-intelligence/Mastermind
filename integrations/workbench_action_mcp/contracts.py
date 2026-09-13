@@ -43,6 +43,8 @@ class ActionScope:
     root_device: int
     root_inode: int
     context_ref: str
+    responsibility_ref: str
+    operation_ref: str
     owner_ref: str
     generation: str
     allowed_paths: tuple[str, ...]
@@ -66,6 +68,8 @@ class PreparedTextPatch:
     resource: str
     project_ref: str
     context_ref: str
+    responsibility_ref: str
+    operation_ref: str
     owner_ref: str
     generation: str
     root_device: int
@@ -127,7 +131,7 @@ def validate_action_scope(value: object, *, now_ms: int) -> ActionScope:
         or value.expires_at_ms >= 2**63
     ):
         raise ActionContractError("invalid action scope")
-    for name in ("context_ref", "owner_ref", "generation"):
+    for name in ("context_ref", "responsibility_ref", "operation_ref", "owner_ref", "generation"):
         selected = getattr(value, name)
         if type(selected) is not str or _REF.fullmatch(selected) is None:
             raise ActionContractError("invalid action scope")
@@ -187,6 +191,10 @@ def validate_prepared(value: object, *, now_ms: int) -> PreparedTextPatch:
         or _REF.fullmatch(value.project_ref) is None
         or type(value.context_ref) is not str
         or _REF.fullmatch(value.context_ref) is None
+        or type(value.responsibility_ref) is not str
+        or _REF.fullmatch(value.responsibility_ref) is None
+        or type(value.operation_ref) is not str
+        or _REF.fullmatch(value.operation_ref) is None
         or type(value.owner_ref) is not str
         or _REF.fullmatch(value.owner_ref) is None
         or type(value.generation) is not str

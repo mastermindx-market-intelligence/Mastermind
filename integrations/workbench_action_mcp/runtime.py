@@ -48,6 +48,8 @@ _HEX40 = re.compile(r"^[0-9a-f]{40}$")
 _REF_PREFIXES = {
     "project_ref": "project:",
     "context_ref": "context:",
+    "responsibility_ref": "responsibility:",
+    "operation_ref": "operation:",
     "owner_ref": "owner:",
     "generation": "generation:",
 }
@@ -61,6 +63,8 @@ class StableWorkbenchActionLease:
     required_scopes: tuple[str, ...]
     project_ref: str
     context_ref: str
+    responsibility_ref: str
+    operation_ref: str
     owner_ref: str
     generation: str
     allowed_paths: tuple[str, ...]
@@ -470,6 +474,8 @@ class WorkbenchActionRuntime:
                 root_device=self._lease.root_device,
                 root_inode=self._lease.root_inode,
                 context_ref=stable.context_ref,
+                responsibility_ref=stable.responsibility_ref,
+                operation_ref=stable.operation_ref,
                 owner_ref=stable.owner_ref,
                 generation=stable.generation,
                 allowed_paths=stable.allowed_paths,
