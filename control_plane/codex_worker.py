@@ -2780,6 +2780,14 @@ class CodexWorkerAdapter:
                     finalization.sigkill_sent = True
                 except ProcessLookupError:
                     group_exists = False
+            if group_exists and not wait_task.done():
+                try:
+                    await asyncio.wait_for(
+                        asyncio.shield(wait_task),
+                        timeout=_LOCAL_TRANSPORT_FINALIZATION_SECONDS,
+                    )
+                except asyncio.TimeoutError:
+                    pass
             if group_exists and not await _wait_for_process_group_exit(pgid):
                 raise ProcessIdentityError(
                     "validation process group survived SIGKILL"
@@ -3505,6 +3513,14 @@ class CodexWorkerAdapter:
                         state.escalated = True
                     except ProcessLookupError:
                         group_exists = False
+                if group_exists and not state.process_wait_task.done():
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.shield(state.process_wait_task),
+                            timeout=_LOCAL_TRANSPORT_FINALIZATION_SECONDS,
+                        )
+                    except asyncio.TimeoutError:
+                        pass
                 if group_exists and not await _wait_for_process_group_exit(
                     state.ref.pgid
                 ):

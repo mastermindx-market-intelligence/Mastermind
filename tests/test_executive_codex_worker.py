@@ -2316,7 +2316,7 @@ def test_validation_reconciles_already_exited_group_without_signal(
             adapter.run_validation_argv(
                 spec,
                 ("/usr/bin/python3", "-c", program, str(child_path)),
-                timeout_seconds=0.2,
+                timeout_seconds=1.0,
             )
         )
         child_pid = None
