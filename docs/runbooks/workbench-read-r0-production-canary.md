@@ -1,19 +1,22 @@
-# Workbench Read R0: source composition and separately admitted canary
+# Workbench Read R0: runnable loopback source and separately admitted canary
 
 **State: BUILT_NOT_PROVEN / NOT_INSTALLED.** This source provides the inert
-composer, an explicit owner-injected launch boundary, and the source-level
-`WorkbenchReadRuntime` owner for one admitted immutable project lease. It does
-not install or start a listener, create a project grant, acquire credentials,
-open a tunnel, enroll an account, or qualify a real Business-seat canary.
+composer, source-level `WorkbenchReadRuntime` owner and a concrete configured
+loopback process boundary for one admitted immutable project lease. It does not
+install or start a service, create a project grant, acquire credentials, open a
+tunnel, enroll an account, or qualify a real Business-seat canary.
 
 Original composition operation:
 `web-ceo-workbench-read-r0-production-20260907-sol-001` at
 `C0BSBM78V1N/1788790305.705269`. Shared runtime-services source operation:
 `workbench-read-rs0-runtime-services-20260908-sol-001` at
-`C0BSBM78V1N/1788896791.117979`.
-The source START is separate from runtime/canary admission. Sol retains acceptance
-and release authority. No READ1, file writing, shell, provider, desktop/browser
-actuation, Executive admission or installed Executive modification follows here.
+`C0BSBM78V1N/1788896791.117979`. Concrete service-process P0 operation:
+`web-ceo-workbench-read-service-process-p0-20260907-sol-001` at
+`C0BSBM78V1N/1789277137.919909`.
+Source START is separate from installation/canary admission. Sol retains
+acceptance and release authority. No READ1, file writing, shell, provider,
+desktop/browser actuation, Executive admission or installed Executive
+modification follows from source construction.
 
 ## Existing services and ownership
 
@@ -35,10 +38,12 @@ and current admission evidence:
 | `run_io` | Existing node's bounded admission/deadline executor. No inline/default-pool fallback. Callable shape is not proof of its capacity or deadline behavior. |
 | `allowed_hosts`, `allowed_origins` | Explicit exact transport allowlists, no wildcard. Include the actual admitted transport's host values; do not disable rebinding protection to make a tunnel work. |
 
-The app borrows these services. Its shutdown must not close owner roots, stop a
-shared pool, remove a shared runtime registration or revoke sibling bindings.
-The deployment owner supplies service lifecycle and independently reconciles
-resource ownership. Constructed fixtures are never real binding evidence.
+The authenticated app borrows these services. A generic composer must not close
+owner roots, stop a shared pool, remove a shared runtime registration or revoke
+sibling bindings. The concrete P0 process instead owns exactly one
+`WorkbenchReadRuntime`, which in turn owns exactly one FastMCP server, one project
+root description, one durable audit sink and one bounded executor generation.
+Constructed fixtures are never real binding evidence.
 
 ### Source-level owning runtime
 
@@ -76,7 +81,7 @@ link/mode/flag/size drift, short write, durability failure, or invalid event. It
 never rotates, retries an uncertain write, changes basenames, or records token,
 content, path, username, or provider-session data.
 
-## Launcher boundary
+## Concrete P0 service and launcher boundary
 
 For inert description, including without optional SDK installation:
 
@@ -84,46 +89,150 @@ For inert description, including without optional SDK installation:
 python3 -S scripts/mastermind_workbench_read_server.py --describe
 ```
 
-Standalone serving returns `RUNTIME_SERVICES_REQUIRED` before importing the SDK
-or attempting bind. No `--root`, dynamic import factory, credential, tunnel or
-automatic service-discovery flag exists. The parser accepts only a loopback host
-and an explicit port in 1..65535 for the serving boundary.
+The descriptor is intentionally non-live and reports the source capability as
+`BUILT_NOT_PROVEN`, mode `configured-loopback-service`, tool
+`read_project_file`, config schema `mastermind.workbench_read_service.v1`, and
+`installed=false`.
 
-After separate runtime admission, the **existing trusted host bootstrap** may
-call `main(argv, runtime_services=services, serve=owner_serve,
-incoming_authority=owner_qualified_authority)`. The `serve`
-callback receives the constructed ASGI application plus exact host and port.
-Source tests use only a launch spy and in-process ASGI transport, never a listener.
-The concrete production bootstrap, service binding and process owner remain
-UNKNOWN until qualified. An executable Python entry point is not an installed
-production system.
+The only serving entrance is:
 
-The trusted `incoming_authority` is the exact HTTP `Host` the admitted transport
-will send, including an explicit port; it is not a CLI/model parameter or derived
-from the listener bind tuple. This launcher supports one qualified authority and
-requires `services.allowed_hosts == (incoming_authority,)` before `serve`. Missing,
-malformed, wildcard, portless or mismatched values refuse before the callback.
-For example, a loopback bind at127.0.0.1:8765 may receive either that exact Host or
-an independently qualified tunnel-facing `read0.example:443`; the owner must prove
-which one the transport actually sends. A transport using an implicit/default-port
-Host is not qualified by this explicit-port launcher contract. No DNS-rebinding
-protection is disabled, and an otherwise valid string is not runtime identity proof.
+```sh
+python3 scripts/mastermind_workbench_read_server.py --config /absolute/path/workbench-read.json
+```
 
-Missing services or pre-bind configuration refusal returns status2. Once the
-explicit owner's `serve` callback begins, exceptions propagate: they are not
-misreported as harmless pre-bind refusals, caught for retry, or converted to a
-fallback listener. The host must reconcile any ambiguous launch effect on the
-same carrier before another action.
+There is no serving `--host`, `--port`, `--root`, dynamic factory, credential,
+tunnel, environment fallback or automatic service-discovery flag. Missing
+`--config` returns `SERVICE_CONFIGURATION_REQUIRED` / exit 2 before the optional
+serving stack is imported.
+
+The service document is exact and closed. Top-level keys are only:
+
+```text
+schema
+policy_file
+project_root
+audit_directory
+bind_host
+bind_port
+incoming_authority
+max_concurrency
+io_timeout_seconds
+close_timeout_seconds
+lease
+```
+
+`schema` is exactly `mastermind.workbench_read_service.v1`; `bind_host` is
+literal `127.0.0.1`; `bind_port` is an explicit integer 1..65535;
+`incoming_authority` has an explicit port and is independently validated against
+the existing deployment authority contract. `max_concurrency` is 1..32 and both
+timeouts are finite positive values at most 60 seconds. Unknown/missing fields,
+bool-as-int, wildcard/nonloopback host, implicit port and nonfinite/overbound
+limits refuse closed.
+
+The nested `lease` is also exact and contains only the existing
+`StableWorkbenchLease` projection:
+
+```text
+expected_subject_digest
+expected_client_ref
+resource
+required_scopes
+project_ref
+context_ref
+owner_ref
+generation
+allowed_paths
+committed_head
+lease_expires_at_ms
+```
+
+The service document never carries bearer/refresh tokens, OAuth secrets, signing
+keys, account labels, tunnel credentials, provider sessions, a mutable project
+registry, retry state, JWKS payload/cache state or an audit filename. The
+`policy_file` remains the canonical closed Business resource policy; issuer/JWKS
+and token rules are not duplicated into the service document.
+
+Config and policy files are bounded, nofollow descriptor reads with stable
+lstat/open/fstat metadata and duplicate-key/nonfinite JSON refusal. Project root
+and audit directory are absolute, real, same-effective-UID directories opened
+with `O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC`; group/world-writable roots refuse.
+These bootstrap descriptors are closed after exactly one Runtime has acquired
+its independent owned descriptions. Any uncertain bootstrap cleanup prevents
+socket admission and is not converted to clean startup.
+
+P0 reserves exactly one `AF_INET` loopback socket before serving, marks it
+non-inheritable, does not enable `SO_REUSEPORT`, and passes only that socket to
+one `uvicorn.Server.serve(sockets=[...])`. There is no alternate port, worker
+fan-out, reload, proxy inference or bind retry. The Runtime's FastMCP
+`streamable_http_app()` is materialized once; a tiny top-level Starlette app adds
+`/healthz` and `/readyz` before delegating all other paths to the SDK app. The
+top-level lifespan enters the Runtime-owned FastMCP session manager exactly once.
+It never calls `create_deployment()` a second time.
+
+`/healthz` is process/event-loop liveness only. `/readyz` is a non-authorizing
+service-local projection: config/runtime/lifespan/socket must be admitted and not
+stopping, then one ephemeral `ReadCaller` built only from the already-validated
+stable lease calls public `runtime.resolve_binding(...)`. The synthetic seconds
+value is rounded down from lease milliseconds, never passed through JWT auth,
+never leaves the process and grants no request. Binding mismatch, expiry, root
+drift, revoke or shutdown produces 503. Latent audit poison is not falsely
+claimed observable through readiness; a real auth/read discovers it fail-closed.
+
+Shutdown truth is fixed:
+
+```text
+mark stopping / ready=false
+-> Uvicorn stops network admission and drains HTTP work under its bounded timeout
+-> lifespan irreversibly runtime.revoke()
+-> runtime.aclose(close_timeout_seconds)
+-> exit one MCP session-manager lifespan
+-> close/read back the service socket
+```
+
+A clean shutdown is exit 0. `RuntimeCloseIncomplete` is exit 3.
+`RuntimeCloseUncertain` is exit 4. Pre-bind/config refusal is exit 2. Unexpected
+post-bind/server or startup-cleanup failure uses bounded nonzero exit 5. No close
+uncertainty, Uvicorn-contained lifespan exception, socket-close failure or
+cancelled physical read may be rewritten as clean success, retried or rebound.
+The Uvicorn HTTP graceful bound and Runtime physical-I/O close bound are
+sequential owner bounds and may together approach twice the configured timeout.
+
+## Dedicated source environment
+
+P0 owns a dedicated macOS-arm64 / CPython 3.12 dependency input and generated
+hash lock; it must not copy/install the broad repository gate lock. Direct roots
+are exactly:
+
+```text
+mcp==1.28.1
+PyJWT[crypto]==2.13.0
+httpx==0.28.1
+jsonschema==4.26.0
+pydantic==2.13.5
+starlette==1.6.0
+uvicorn[standard]==0.52.4
+```
+
+Generate `requirements/workbench-read-macos-arm64-py312.lock` with pip-tools
+7.6.1 on an organization-authorized Darwin arm64 CPython 3.12 environment using
+`--generate-hashes`. The lock owns every transitive package/hash. Resolver
+movement from the frozen direct identities or missing binary support is a HOLD,
+not permission to substitute versions. Acceptance installs the generated lock
+into a fresh validation environment with `pip --require-hashes
+--only-binary=:all:`; no system/editable install.
 
 ## Source validation and independent review
 
-Use an isolated external worktree and environment with the repository's declared
-`business-mcp` and `dev` profiles. The protected profiles pin MCP1.28.1 and
-PyJWT2.13.0; retain the actual Python and complete resolved dependency versions.
-Keep environment, pip/temp caches and evidence external. No system install or
-version substitution follows a setup failure.
+Use an isolated external worktree and environment. Keep environment, pip/temp
+caches and evidence external. No system install or version substitution follows a
+setup failure.
 
 ```sh
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -B -m pytest -p no:cacheprovider -o addopts= -q \
+  tests/workbench_read_mcp/test_service.py \
+  tests/workbench_read_mcp/test_service_process.py \
+  tests/workbench_read_mcp/test_deployment.py \
+  tests/workbench_read_mcp/test_production_composition.py
 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -B -m pytest -p no:cacheprovider -o addopts= -q \
   tests/test_bounded_sync_executor.py \
   tests/test_business_mcp_auth_audit.py \
@@ -147,52 +256,52 @@ token B, then reads the fixed-basename durable audit. This remains source test
 evidence; it is not installed process, filesystem-placement, provider, tunnel,
 account, or browser proof.
 
-The production-composition module uses ephemeral signed JWTs and real
-in-process ASGI initialize/list/call, the existing binding/port and real descriptor
-observer. Its disposable bounded executor, signing key and fixture project map
-belong only to tests. The complete production output schema must remain in parity
-with the observer and port: source/content/hash identities, context/owner/generation,
-working-tree view, explicit committed baseline or null, returned ranges and cursor,
-`NOT_OBSERVED` index state and `atomic_workspace_snapshot=false`. All three digest
-strings require exactly64 lowercase hex characters; a non-null committed baseline
-requires exactly40. Real-read terminal-LF regressions omit expected_sha256 so the
-output schema is independently tested; valid64, valid40 and null controls remain.
-Real-lifespan launch tests prove initialize200 at the exact incoming Host, including
-a Host distinct from the bind tuple, and no serve call for invalid owner policy.
+The production-composition module uses ephemeral signed JWTs and real in-process
+ASGI initialize/list/call, the existing binding/port and real descriptor observer.
+Its disposable bounded executor, signing key and fixture project map belong only
+to tests. The complete production output schema must remain in parity with the
+observer and port: source/content/hash identities, context/owner/generation,
+working-tree view, explicit committed baseline or null, returned ranges and
+cursor, `NOT_OBSERVED` index state and `atomic_workspace_snapshot=false`. All
+three digest strings require exactly 64 lowercase hex characters; a non-null
+committed baseline requires exactly 40. Real-read terminal-LF regressions omit
+`expected_sha256` so the output schema is independently tested; valid64, valid40
+and null controls remain. Concrete-service launch tests must prove exact incoming
+Host enforcement before network admission and the real subprocess matrix must
+use the reserved listener, not a launch spy.
 
 Retain RED/GREEN command, cwd, timestamps, output, exit, exact source hashes and
-dependency identities. The mutation test runs identical baseline/adverse requests
-and identical assertions against process-local controls for fake observer,
-synchronous execution, cross-project binding, removed post-await binding check,
-bypassed post-read auth check, model-supplied authority and forged observer hash.
-Five additional pairs remove each digest/baseline length guard and the incoming
-request-authority guard, preserving the same successful baseline and refusal
-assertion. These24 nested baseline/mutant executions are not added to top-level
-suite counts.
-Each control must produce an intended assertion failure with no setup/runtime
-error. Successful-response and completed-I/O preconditions are outside expected
-failure handling. The forged-hash control deliberately corrupts both observer
-hash enforcement and its reported hash; it is not a claim that removing one of
-the several hash checks alone bypasses the application.
+dependency identities. Mutation tests keep identical baseline/adverse requests
+and assertions while killing fake observer, synchronous execution, cross-project
+binding, removed post-await binding check, bypassed post-read auth, model-supplied
+authority, forged observer hash, digest/baseline length guards, incoming-authority
+validation, config closure, loopback-only bind and truthful drain/exit behavior.
+A kill requires the intended assertion failure with no setup/runtime error.
 
 No source file is modified by a mutation test. Future tests must not substitute a
-fake port for positive read proof, accept unrelated refusals as kills, use different
-baseline/mutant security assertions, or claim cancellation stopped kernel I/O.
-The fixture capacity/deadline test proves waiter timeout while shielded work drains;
-it does not qualify production executor deadlines or suppression of its late results.
+fake port for positive listener proof, accept unrelated refusals as kills, use
+different baseline/mutant security assertions, or claim cancellation stopped
+kernel I/O. Source tests are not Darwin acceptance or production proof.
 
 Before long CI/review, retain CHECKPOINT_VERIFIED for the actual source branch,
 Draft/HOLD PR, exact remote head/tree/base/owned blobs, local cleanliness and
 known effects. Root commissions independent semantic review; the builder never
-self-approves. Use the ordinary current integration/security campaign, preserve
-review reuse qualifications, and do not join a branch merely for ancestry.
-WBR529's independently accepted full composition is separately required before
-canary; this source does not edit or supersede its test file.
+self-approves. Use ordinary current integration/security proof and do not create
+an ancestry-only commit merely because protected master moves disjointly.
+
+P0 source acceptance additionally requires one organization-authorized Darwin
+arm64/CPython3.12 real subprocess proof from the generated dedicated lock:
+pre-reserve the real loopback socket, start one configured service, perform signed
+MCP initialize/list/call against one harmless temporary selected-project file,
+verify exact output/audit behavior, then exercise clean and bounded adverse
+shutdown. This is source qualification only; the exact Mac Studio remains the
+separate P1 deployment target.
 
 ## Canary admission: no values may be guessed
 
-Before a real account, listener, app, tunnel, credential, binding or host action,
-Sol must separately admit the finite canary and its exact effect ceiling. Record:
+Before a real account, installed listener, app, tunnel, credential, binding or
+host action, Sol must separately admit the finite canary and its exact effect
+ceiling. Record:
 
 1. Immutable reviewed source/release and dependency/tool/output-schema hashes.
 2. One approved Business seat, workspace/account association and separately
@@ -202,7 +311,7 @@ Sol must separately admit the finite canary and its exact effect ceiling. Record
    in existing approved custody, outside source and public receipts.
 4. Selected-project binding issuer, generation, descriptor identity, baseline,
    relative-path allowlist and expiry; approved harmless real file and independently
-   known hash. A supplied project_ref alone grants nothing.
+   known hash. A supplied `project_ref` alone grants nothing.
 5. Actual process/bootstrap/executor/audit owners, concurrency/admission limit,
    deadline, output and upstream frame/aggregate limits, supported local filesystem,
    test budget and real draining/cleanup procedure.
@@ -227,10 +336,11 @@ excerpt; public transport prose must not replace an unavailable source grant.
 | Disconnect | Exact canary tunnel/app disconnect produces unavailable/refused behavior; no empty success, stale cached content or alternate endpoint. |
 | Audit/cleanup | Closed audit with no secret/root/content leakage; canary-owned descriptors/tasks/listener cleaned while borrowed shared services remain intact. |
 
-Source tests qualify synthetic ASGI and filesystem behavior only. The real
-disconnect, installed executor/transport limits, account enrollment and canary
-rollback rows remain NOT_RUN until their separate admission. A healthy tunnel,
-green CI, fixture token or merged source alone remains BUILT_NOT_PROVEN.
+Source tests and P0 Darwin subprocess qualification remain source evidence only.
+The real disconnect, installed executor/transport limits, account enrollment and
+canary rollback rows remain NOT_RUN until their separate admission. A healthy
+loopback service, green CI, generated lock, fixture token or merged source alone
+remains BUILT_NOT_PROVEN / NOT_INSTALLED.
 
 ## Rollback and stop
 
