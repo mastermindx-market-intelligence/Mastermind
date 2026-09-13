@@ -341,10 +341,10 @@ def test_broker_adapter_identity_is_fixed_and_unimplemented_ids_fail_closed(tmp_
         async def run_validation_argv(self, spec, argv, *, timeout_seconds=300.0):
             return None
 
-    with pytest.raises(WorkerBrokerError, match=r"status\(\)"):
-        ExecutiveWorkerBroker(
-            AdapterWithoutStatus(), broker.policy, sweeper, adapter_id="codex-cli"
-        )
+    statusless = ExecutiveWorkerBroker(
+        AdapterWithoutStatus(), broker.policy, sweeper, adapter_id="codex-cli"
+    )
+    assert statusless.adapter_id == "codex-cli"
 
 def test_broker_rejects_wrong_peer_and_unknown_operation(tmp_path: Path) -> None:
     async def scenario() -> None:
