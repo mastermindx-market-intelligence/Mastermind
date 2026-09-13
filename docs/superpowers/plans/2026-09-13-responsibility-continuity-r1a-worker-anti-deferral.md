@@ -124,7 +124,7 @@ class WorkerResponsibilityContinuityContractTests(unittest.TestCase):
             self.assertIn(token, contract)
         self.assertIn("no receiver assignment edge", contract)
         self.assertIn("exact live action target", contract)
-        self.assertIn("current authorized writer/target", contract)
+        self.assertIn("this session is already authorized and capable", contract)
 
 
 if __name__ == "__main__":
