@@ -508,27 +508,33 @@ def _start_sync(
     python_executable: str,
     clock_ms: Callable[[], int],
 ) -> dict[str, Any]:
-    existing = _inspect(state_root_fd, prepared)
-    if existing["process_state"] != "NOT_STARTED":
-        return existing
-    state_fd = _open_state_dir(state_root_fd, prepared.command_id, create=True)
-    if state_fd is None:
-        raise ProcessActionRefused("PROCESS_STATE_UNAVAILABLE")
-    start_lock_fd = -1
+    # The root-level lock linearizes creation of the deterministic per-command
+    # state directory as well as runner start. Keeping the lock outside the
+    # directory avoids exposing a partially-created directory to a competing
+    # same-ref caller before the lock file itself exists.
+    start_lock_fd = _open_file(
+        state_root_fd,
+        f".{prepared.command_id}.start.lock",
+        os.O_RDWR,
+        create=True,
+    )
+    state_fd = -1
     try:
-        # One file lock is the same-command start linearization point across
-        # concurrent tool calls and ordinary service restart.
-        start_lock_fd = _open_file(
-            state_fd, "start.lock", os.O_RDWR, create=True
-        )
         fcntl.flock(start_lock_fd, fcntl.LOCK_EX)
-        # Re-inspect after acquiring the deterministic directory lock. Another
-        # same-ref call may have populated it while this call was waiting.
+        existing = _inspect(state_root_fd, prepared)
+        if existing["process_state"] != "NOT_STARTED":
+            return existing
+
+        opened = _open_state_dir(state_root_fd, prepared.command_id, create=True)
+        if opened is None:
+            raise ProcessActionRefused("PROCESS_STATE_UNAVAILABLE")
+        state_fd = opened
         current_start = _read_json(state_fd, "start.json")
         if current_start is not None:
             os.close(state_fd)
             state_fd = -1
             return _inspect(state_root_fd, prepared)
+
         now_ms = _now(clock_ms)
         _write_json(
             state_fd,
@@ -602,14 +608,13 @@ def _start_sync(
             os.close(root_dup)
             os.close(state_dup)
     finally:
-        if start_lock_fd >= 0:
-            try:
-                fcntl.flock(start_lock_fd, fcntl.LOCK_UN)
-            except OSError:
-                pass
-            os.close(start_lock_fd)
         if state_fd >= 0:
             os.close(state_fd)
+        try:
+            fcntl.flock(start_lock_fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        os.close(start_lock_fd)
 
     deadline = time.monotonic() + 2.0
     while time.monotonic() < deadline:
@@ -620,19 +625,21 @@ def _start_sync(
         time.sleep(0.02)
     return _inspect(state_root_fd, prepared)
 
-
 def _binding_for_prepared(
     prepared: PreparedCommand,
     caller: ActionCaller,
     resolve_binding: ActionBindingResolver,
     clock_ms: Callable[[], int],
 ) -> ProjectActionBinding:
-    binding = _current_binding(
-        caller=caller,
-        project_ref=prepared.project_ref,
-        resolve_binding=resolve_binding,
-        clock_ms=clock_ms,
-    )
+    try:
+        binding = _current_binding(
+            caller=caller,
+            project_ref=prepared.project_ref,
+            resolve_binding=resolve_binding,
+            clock_ms=clock_ms,
+        )
+    except ProjectActionRefused as error:
+        raise ProcessActionRefused("PROCESS_BINDING_CHANGED") from error
     if not prepared_matches_authority(prepared, caller, binding.scope, binding.project_ref):
         raise ProcessActionRefused("PROCESS_BINDING_CHANGED")
     return binding
