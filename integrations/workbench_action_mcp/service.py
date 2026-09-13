@@ -6,10 +6,10 @@ and FastMCP server. It creates no credential/account, project registry, generic
 shell, Git publication path, Executive lifecycle, provider session, retry plane,
 or browser/desktop authority.
 
-The action-token signing key is process-ephemeral. A restart invalidates every
-old prepared action reference rather than persisting another secret or replay
-store. Lost responses reconcile only while their original service generation is
-alive; after a restart the old reference is refused, never replayed.
+The action-token signing key is one owner-provisioned generation key loaded from
+a fixed same-euid ``0600`` file. Ordinary service restart therefore preserves
+reconciliation for still-live prepared actions without creating a replay store.
+Key rotation is a generation boundary and must not strand an unresolved effect.
 """
 from __future__ import annotations
 
