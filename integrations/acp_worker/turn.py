@@ -222,6 +222,10 @@ class AcpReadOnlyTurn:
         return task
 
     async def _bounded(self, awaitable: Any, deadline: float) -> Any:
+        if asyncio.get_running_loop().time() >= deadline:
+            if asyncio.iscoroutine(awaitable):
+                awaitable.close()
+            raise _Refused("ACP_RPC_DEADLINE")
         task = self._task(awaitable)
         try:
             done, _ = await asyncio.wait({task}, timeout=max(0.0, deadline - asyncio.get_running_loop().time()))
@@ -235,17 +239,9 @@ class AcpReadOnlyTurn:
             self._rpc_uncertain = True
             raise
 
-    async def run(self, spec: WorkerLaunchSpec, writer: asyncio.StreamWriter,
-                  reader: asyncio.StreamReader, *, cancelled: asyncio.Event,
-                  validate_output: Callable[[dict[str, Any]], None]) -> AcpCandidate:
-        """Consume only caller-owned streams; return an unaccepted candidate.
-
-        The caller must fence one actual process/Attempt and call its existing
-        cleanup/reconciliation on EVERY outcome, including cancellation and errors.
-        """
-        if self._used:
-            raise ValueError("an ACP turn cannot be replayed")
-        self._used = True
+    @staticmethod
+    def validate_spec(spec: WorkerLaunchSpec) -> None:
+        """Effect-free checks shared with the common-worker binding."""
         grants = set(spec.authorities) | ({spec.authority} if spec.authority else set())
         if not grants or not grants <= {"READ", "RESEARCH"}:
             raise ValueError("ACP first profile is read-only")
@@ -259,11 +255,27 @@ class AcpReadOnlyTurn:
             raise ValueError("invalid ACP cancellation grace")
         if version("agent-client-protocol") != SDK_VERSION:
             raise ValueError("ACP SDK version is not qualified")
+
+    async def run(self, spec: WorkerLaunchSpec, writer: asyncio.StreamWriter,
+                  reader: asyncio.StreamReader, *, cancelled: asyncio.Event,
+                  validate_output: Callable[[dict[str, Any]], None],
+                  frame_guard: Any | None = None) -> AcpCandidate:
+        """Consume only caller-owned streams; return an unaccepted candidate.
+
+        The caller must fence one actual process/Attempt and call its existing
+        cleanup/reconciliation on EVERY outcome, including cancellation and errors.
+        """
+        if self._used:
+            raise ValueError("an ACP turn cannot be replayed")
+        self._used = True
+        self.validate_spec(spec)
         from acp import PROTOCOL_VERSION, connect_to_agent
         from acp.schema import ClientCapabilities, Implementation, TextContentBlock
         loop = asyncio.get_running_loop()
         deadline = loop.time() + spec.timeout_seconds
         conn = None
+        sender_tasks = None
+        terminal_observed = False
         prompt_task = None
         stop_reason = None
         output = None
@@ -274,7 +286,19 @@ class AcpReadOnlyTurn:
         try:
             if cancelled.is_set():
                 raise _Refused("ACP_CANCELLED_BEFORE_START")
-            conn = connect_to_agent(self, writer, reader)
+            if frame_guard is None:
+                conn = connect_to_agent(self, writer, reader)
+            else:
+                # Reuse the existing ACP framing owner, not a second decoder.
+                from scripts.ohf.acp_probe_boundary import ProbeClient, StrictFrameReader
+                from acp._transport import NdjsonTransport
+                from acp.task import MessageSender, TaskSupervisor
+                if not isinstance(frame_guard, ProbeClient):
+                    raise _Refused("ACP_FRAME_GUARD_UNQUALIFIED")
+                sender_tasks = TaskSupervisor(source="mastermind-acp-worker")
+                transport = NdjsonTransport(StrictFrameReader(reader, frame_guard),
+                    MessageSender(writer, sender_tasks), receive_timeout=spec.timeout_seconds)
+                conn = connect_to_agent(self, transport)
             init = _document(await self._bounded(conn.initialize(
                 protocol_version=PROTOCOL_VERSION,
                 client_capabilities=ClientCapabilities(),
@@ -292,6 +316,8 @@ class AcpReadOnlyTurn:
             self._session = session.get("sessionId")
             if not self._session_matches(self._session) or self._early_sessions - {self._session}:
                 raise _Refused("ACP_SESSION_MISMATCH")
+            if frame_guard is not None:
+                frame_guard.bind_session(self._session)
             if self.profile.required_mode is not None and session.get("modes", {}).get("currentModeId") != self.profile.required_mode:
                 raise _Refused("ACP_MODE_MISMATCH")
             option = _model_option(session.get("configOptions"), self.profile.model_option_id)
@@ -307,6 +333,10 @@ class AcpReadOnlyTurn:
             self._model = spec.model
             if self._error or cancelled.is_set():
                 raise _Refused(self._error or "ACP_CANCELLED_BEFORE_PROMPT")
+            if loop.time() >= deadline:
+                raise _Refused("ACP_DEADLINE_BEFORE_PROMPT")
+            if frame_guard is not None:
+                frame_guard.begin_prompt()
             self._phase = "prompt"
             prompt_task = self._task(conn.prompt(session_id=self._session,
                 prompt=[TextContentBlock(type="text", text=spec.prompt)]))
@@ -327,6 +357,7 @@ class AcpReadOnlyTurn:
                     raise _Refused("ACP_TERMINAL_UNOBSERVED")
             response = _document(prompt_task.result())
             stop_reason = response.get("stopReason")
+            terminal_observed = stop_reason in {"end_turn", "cancelled", "refusal", "max_tokens", "max_turn_requests"}
             cancelled_terminal = stop_reason == "cancelled"
             if self._error:
                 raise _Refused(self._error)
@@ -352,7 +383,7 @@ class AcpReadOnlyTurn:
         except asyncio.CancelledError:
             propagate_cancel = True
             self._refuse("ACP_CALLER_CANCELLED")
-            unknown = prompt_task is not None and not prompt_task.done()
+            unknown = prompt_task is not None and not terminal_observed
             if conn is not None and self._session is not None and unknown:
                 try:
                     grace = loop.time() + spec.cancel_grace_seconds
@@ -360,8 +391,9 @@ class AcpReadOnlyTurn:
                     done, _ = await asyncio.wait({prompt_task}, timeout=max(0.0, grace - loop.time()))
                     if done:
                         stop_reason = _document(prompt_task.result()).get("stopReason")
+                        terminal_observed = stop_reason in {"end_turn", "cancelled", "refusal", "max_tokens", "max_turn_requests"}
                         cancelled_terminal = stop_reason == "cancelled"
-                        unknown = False
+                        unknown = not terminal_observed
                 except (Exception, asyncio.CancelledError):
                     unknown = True
         except _Refused as exc:
@@ -369,15 +401,25 @@ class AcpReadOnlyTurn:
             unknown = unknown or str(exc) in {"ACP_RPC_DEADLINE", "ACP_TERMINAL_UNOBSERVED"}
         except Exception:
             self._refuse("ACP_PROTOCOL_OR_RESULT_ERROR")
-            unknown = prompt_task is not None and not prompt_task.done()
+            unknown = prompt_task is not None and not terminal_observed
         finally:
             self._phase = "closed"
+            if frame_guard is not None:
+                frame_guard.seal()
             if conn is not None:
                 try:
                     await self._bounded(conn.close(), loop.time() + spec.cancel_grace_seconds)
                 except (Exception, asyncio.CancelledError):
                     self._refuse("ACP_CONNECTION_CLOSE_UNCERTAIN")
                     unknown = True
+            if sender_tasks is not None:
+                try:
+                    await self._bounded(sender_tasks.shutdown(), loop.time() + spec.cancel_grace_seconds)
+                except (Exception, asyncio.CancelledError):
+                    self._refuse("ACP_SENDER_CLOSE_UNCERTAIN")
+                    unknown = True
+            if frame_guard is not None and frame_guard.violation:
+                self._refuse("ACP_FRAME_BOUNDARY_REFUSED")
             if self.unsettled_tasks:
                 self._refuse("ACP_TASK_SETTLEMENT_UNCERTAIN")
                 unknown = True
