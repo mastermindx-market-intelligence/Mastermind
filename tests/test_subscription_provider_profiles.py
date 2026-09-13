@@ -18,15 +18,19 @@ def test_all_three_subscription_providers_are_reviewed_and_inert_by_default():
 
 
 def test_official_anthropic_compatibility_profiles_pin_supported_models():
-    assert get_profile("glm-coding-plan").model_for("routine") == "GLM-4.7"
-    assert get_profile("glm-coding-plan").model_for("hard") == "GLM-5.1"
+    assert get_profile("glm-coding-plan").model_for("routine") == "GLM-5.3"
+    assert get_profile("glm-coding-plan").model_for("fast") == "GLM-5.3-Flash"
     assert get_profile("alibaba-token-plan-personal").model_for() == "qwen3.8-max"
-    assert get_profile("minimax-token-plan").model_for() == "MiniMax-M2.7"
+    assert get_profile("alibaba-token-plan-personal").model_for("subagent") == "qwen3.7-max"
+    assert get_profile("minimax-token-plan").model_for() == "MiniMax-M3"
 
 
-def test_minimax_m3_is_not_advertised_on_anthropic_adapter_before_provider_support():
-    profile = get_profile("minimax-token-plan")
-    assert all("M3" not in model for model in profile.models.values())
+def test_purchased_subscription_profiles_are_not_eligible_for_unattended_production():
+    for profile_id in ("glm-coding-plan", "alibaba-token-plan-personal", "minimax-token-plan"):
+        profile = get_profile(profile_id)
+        assert profile.usage_policy["interactive_only"] is True
+        assert profile.usage_policy["unattended_background_allowed"] is False
+        assert profile.usage_policy["production_backend_allowed"] is False
 
 
 def test_profiles_cannot_self_arm_or_embed_credential_authority():

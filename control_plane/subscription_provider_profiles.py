@@ -35,6 +35,7 @@ class SubscriptionProviderProfile:
     autonomous_allowed: bool
     activation_gate: str
     quota_profile: Mapping[str, Any]
+    usage_policy: Mapping[str, bool]
 
     def model_for(self, model_class: str | None = None) -> str:
         key = model_class or self.default_model_class
@@ -96,6 +97,19 @@ def validate_profiles(document: Any) -> Mapping[str, Any]:
         quota = row.get("quota_profile")
         if not isinstance(quota, Mapping) or quota.get("provider") != row.get("provider"):
             raise ProviderProfileError(f"profile {profile_id!r} quota identity disagrees")
+        usage_policy = row.get("usage_policy")
+        allowed_policy = {
+            "supported_harness_required", "interactive_only",
+            "unattended_background_allowed", "production_backend_allowed",
+            "single_user_only", "payg_recommended_for_production",
+        }
+        if (
+            not isinstance(usage_policy, Mapping)
+            or not usage_policy
+            or set(usage_policy) - allowed_policy
+            or any(type(value) is not bool for value in usage_policy.values())
+        ):
+            raise ProviderProfileError(f"profile {profile_id!r} has invalid usage policy")
     return document
 
 
@@ -121,6 +135,7 @@ def get_profile(profile_id: str, *, document: Mapping[str, Any] | None = None) -
         autonomous_allowed=bool(row["autonomous_allowed"]),
         activation_gate=row["activation_gate"],
         quota_profile=dict(row["quota_profile"]),
+        usage_policy=dict(row["usage_policy"]),
     )
 
 
