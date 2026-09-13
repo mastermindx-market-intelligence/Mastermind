@@ -127,7 +127,7 @@ from control_plane.worker_browser_b1 import (
 BROKER_REQUEST_SCHEMA_VERSION = "mastermind.executive_worker_broker_request/v1"
 BROKER_RESPONSE_SCHEMA_VERSION = "mastermind.executive_worker_broker_response/v1"
 UID_SWEEP_SCHEMA_VERSION = "mastermind.executive_uid_sweep/v2"
-UID_SWEEP_TERMINAL_REASONS = frozenset({"run_terminal"})
+UID_SWEEP_TERMINAL_REASONS = frozenset({"run_terminal", "devbox_terminal"})
 _AMBIENT_ATTRIBUTIONS = frozenset({"attested", "absent", "failed_closed"})
 _AMBIENT_IDENTITY_FIELDS = frozenset(
     {
@@ -156,6 +156,11 @@ BROKER_UNAVAILABLE_ERROR_CODE = "BrokerUnavailableError"
 
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+_DEVBOX_OPERATIONS = frozenset(
+    {"devbox-status", "devbox-start", "devbox-read", "devbox-cancel"}
+)
+_DEVBOX_GENERATION_RE = re.compile(r"^generation:[0-9a-f]{64}$")
+_DEVBOX_PROCESS_RE = re.compile(r"^process:[0-9a-f]{64}$")
 _OHF_OPERATIONS = frozenset(
     {
         "ohf-validate",
@@ -175,7 +180,7 @@ _OHF_OPERATIONS = frozenset(
 )
 _ALLOWED_OPERATIONS = frozenset(
     {"start", "status", "collect", "cancel", "validate", "autonomy-canary"}
-) | _OHF_OPERATIONS
+) | _OHF_OPERATIONS | _DEVBOX_OPERATIONS
 _MAX_REQUEST_BYTES = 1024 * 1024
 _MAX_OPERATOR_PROMPT_BYTES = 512 * 1024
 _MAX_VALIDATION_COMMANDS = 32
@@ -391,6 +396,32 @@ def uid_sweep_receipt_is_passing(value: Any) -> bool:
 class ResidualSweeper(Protocol):
     def sweep(self, reason: str) -> UIDSweepReceipt:
         """Terminate and prove absence of every other process for the worker UID."""
+
+
+class DevBoxCommandAdapter(Protocol):
+    """Worker-local command executor subordinate to this broker generation."""
+
+    async def status(self) -> Mapping[str, Any]: ...
+
+    async def start(
+        self,
+        *,
+        process_ref: str,
+        command_text: str,
+        timeout_seconds: int,
+        output_limit_bytes: int,
+    ) -> Mapping[str, Any]: ...
+
+    async def read(
+        self,
+        *,
+        process_ref: str,
+        stdout_cursor: int,
+        stderr_cursor: int,
+        max_bytes: int,
+    ) -> Mapping[str, Any]: ...
+
+    async def cancel(self, *, process_ref: str, reason: str) -> Mapping[str, Any]: ...
 
 
 class OperatorAdapter(Protocol):
@@ -905,6 +936,17 @@ class _BrokerRun:
 
 
 @dataclasses.dataclass
+class _BrokerDevBoxRun:
+    operation_key: str
+    request_digest: str
+    process_ref: str
+    effect_state: str = "EFFECT_UNKNOWN"
+    terminal: bool = False
+    terminal_swept: bool = False
+    terminal_error: str | None = None
+
+
+@dataclasses.dataclass
 class _BrokerOperatorRun:
     """Process-local handle for one Runtime-owned OHF generation."""
 
@@ -1285,11 +1327,14 @@ class ExecutiveWorkerBroker:
 
     def __init__(
         self,
-        adapter: CodexWorkerAdapter,
+        adapter: CodexWorkerAdapter | None,
         policy: BrokerPolicy,
         sweeper: ResidualSweeper,
         *,
         peer_resolver: Callable[[socket.socket], PeerCredentials] = get_peer_credentials,
+        allowed_operations: frozenset[str] | None = None,
+        devbox_adapter: DevBoxCommandAdapter | None = None,
+        devbox_generation: str | None = None,
         operator_adapter_factory: OperatorAdapterFactory | None = None,
         operator_resource_factory: OperatorResourceFactory | None = None,
         operator_harness_armed: bool = False,
@@ -1303,6 +1348,24 @@ class ExecutiveWorkerBroker:
         self.policy = policy
         self.sweeper = sweeper
         self.peer_resolver = peer_resolver
+        selected_operations = (
+            (_ALLOWED_OPERATIONS - _DEVBOX_OPERATIONS)
+            if allowed_operations is None
+            else frozenset(allowed_operations)
+        )
+        if not selected_operations or not selected_operations.issubset(_ALLOWED_OPERATIONS):
+            raise WorkerBrokerError("broker operation profile is invalid")
+        normal_operations = {"start", "status", "collect", "cancel", "validate"}
+        if selected_operations.intersection(normal_operations) and adapter is None:
+            raise WorkerBrokerError("worker operations require the reviewed worker adapter")
+        if selected_operations.intersection(_DEVBOX_OPERATIONS):
+            if devbox_adapter is None or not isinstance(devbox_generation, str) or _DEVBOX_GENERATION_RE.fullmatch(devbox_generation) is None:
+                raise WorkerBrokerError("DevBox operations require an exact adapter and generation")
+        elif devbox_adapter is not None or devbox_generation is not None:
+            raise WorkerBrokerError("DevBox adapter/generation cannot exist outside its operation profile")
+        self.allowed_operations = selected_operations
+        self.devbox_adapter = devbox_adapter
+        self.devbox_generation = devbox_generation
         self.operator_adapter_factory = operator_adapter_factory
         self.operator_resource_factory = operator_resource_factory
         self.operator_harness_armed = bool(operator_harness_armed)
@@ -1324,6 +1387,9 @@ class ExecutiveWorkerBroker:
             )
         self._runs: OrderedDict[str, _BrokerRun] = OrderedDict()
         self._active_run_id: str | None = None
+        self._devbox_runs: OrderedDict[str, _BrokerDevBoxRun] = OrderedDict()
+        self._devbox_processes: dict[str, _BrokerDevBoxRun] = {}
+        self._active_devbox_process_ref: str | None = None
         self._operator_run: _BrokerOperatorRun | None = None
         self._operator_terminal: OrderedDict[
             str,
@@ -1407,6 +1473,8 @@ class ExecutiveWorkerBroker:
         operation = request.get("operation")
         if operation not in _ALLOWED_OPERATIONS:
             raise BrokerProtocolError("operation is not allowed")
+        if operation not in self.allowed_operations:
+            raise BrokerProtocolError("operation is not enabled by this broker profile")
         payload = request.get("payload")
         if not isinstance(payload, dict):
             raise BrokerProtocolError("payload must be an object")
@@ -1420,6 +1488,14 @@ class ExecutiveWorkerBroker:
         }
 
     async def _dispatch(self, operation: str, payload: dict[str, Any]) -> Any:
+        if operation == "devbox-status":
+            return await self._devbox_status(payload)
+        if operation == "devbox-start":
+            return await self._devbox_start(payload)
+        if operation == "devbox-read":
+            return await self._devbox_read(payload)
+        if operation == "devbox-cancel":
+            return await self._devbox_cancel(payload)
         if operation == "start":
             return await self._start(payload)
         if operation == "status":
@@ -1459,6 +1535,222 @@ class ExecutiveWorkerBroker:
         if operation == "ohf-reconcile-absence":
             return await self._ohf_reconcile_absence(payload)
         raise AssertionError(operation)  # pragma: no cover
+
+    def _require_devbox_generation(self, value: Any) -> str:
+        if value != self.devbox_generation:
+            raise BrokerProtocolError("DevBox generation does not match this broker")
+        assert isinstance(value, str)
+        return value
+
+    def _devbox_run_for_process(self, process_ref: Any) -> _BrokerDevBoxRun:
+        if not isinstance(process_ref, str) or _DEVBOX_PROCESS_RE.fullmatch(process_ref) is None:
+            raise BrokerProtocolError("DevBox process_ref is invalid")
+        try:
+            return self._devbox_processes[process_ref]
+        except KeyError as exc:
+            raise BrokerStateError("DevBox process is unknown to this broker generation") from exc
+
+    async def _devbox_status(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if payload:
+            raise BrokerProtocolError("devbox-status payload must be empty")
+        if self.devbox_adapter is None or self.devbox_generation is None:
+            raise BrokerStateError("DevBox profile is not armed")
+        observed = await self.devbox_adapter.status()
+        if not isinstance(observed, Mapping):
+            raise BrokerStateError("DevBox adapter status is invalid")
+        return {
+            "generation": self.devbox_generation,
+            "worker_uid": os.geteuid(),
+            "worker_gid": os.getegid(),
+            "active_process_ref": self._active_devbox_process_ref,
+            "workspace_source": observed.get("workspace_source"),
+            "working_tree_dirty": observed.get("working_tree_dirty"),
+        }
+
+    async def _devbox_start(self, payload: dict[str, Any]) -> dict[str, Any]:
+        allowed = {
+            "generation",
+            "operation_key",
+            "command_text",
+            "timeout_seconds",
+            "output_limit_bytes",
+        }
+        if set(payload) != allowed:
+            raise BrokerProtocolError("devbox-start payload fields are invalid")
+        generation = self._require_devbox_generation(payload.get("generation"))
+        operation_key = payload.get("operation_key")
+        command_text = payload.get("command_text")
+        timeout = payload.get("timeout_seconds")
+        output_limit = payload.get("output_limit_bytes")
+        if not isinstance(operation_key, str) or not _ID_RE.fullmatch(operation_key):
+            raise BrokerProtocolError("DevBox operation_key is invalid")
+        if (
+            not isinstance(command_text, str)
+            or not command_text
+            or len(command_text) > 16384
+            or "\x00" in command_text
+        ):
+            raise BrokerProtocolError("DevBox command_text is invalid")
+        if type(timeout) is not int or not 1 <= timeout <= 1800:
+            raise BrokerProtocolError("DevBox timeout_seconds is invalid")
+        if type(output_limit) is not int or not 1024 <= output_limit <= 262144:
+            raise BrokerProtocolError("DevBox output_limit_bytes is invalid")
+        request_digest = hashlib.sha256(
+            json.dumps(
+                {
+                    "generation": generation,
+                    "operation_key": operation_key,
+                    "command_text": command_text,
+                    "timeout_seconds": timeout,
+                    "output_limit_bytes": output_limit,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
+            ).encode("utf-8")
+        ).hexdigest()
+        existing = self._devbox_runs.get(operation_key)
+        if existing is not None:
+            if existing.request_digest != request_digest:
+                raise BrokerStateError("DevBox operation key has a different payload")
+            return {
+                "process_ref": existing.process_ref,
+                "effect_state": existing.effect_state,
+                "terminal": existing.terminal,
+                "reconciled": True,
+            }
+        if self._active_devbox_process_ref is not None:
+            raise BrokerStateError("another DevBox command is active")
+        process_ref = "process:" + hashlib.sha256(
+            (generation + "\0" + operation_key).encode("utf-8")
+        ).hexdigest()
+        state = _BrokerDevBoxRun(
+            operation_key=operation_key,
+            request_digest=request_digest,
+            process_ref=process_ref,
+        )
+        self._devbox_runs[operation_key] = state
+        self._devbox_processes[process_ref] = state
+        self._active_devbox_process_ref = process_ref
+        while len(self._devbox_runs) > _MAX_HISTORY:
+            oldest_key, oldest = next(iter(self._devbox_runs.items()))
+            if oldest.process_ref == self._active_devbox_process_ref:
+                break
+            self._devbox_runs.pop(oldest_key)
+            self._devbox_processes.pop(oldest.process_ref, None)
+        assert self.devbox_adapter is not None
+        try:
+            started = await self.devbox_adapter.start(
+                process_ref=process_ref,
+                command_text=command_text,
+                timeout_seconds=timeout,
+                output_limit_bytes=output_limit,
+            )
+        except Exception:
+            # The adapter is worker-local, but an exception can still follow a
+            # successful OS spawn. Preserve uncertainty and never retry this key.
+            state.effect_state = "EFFECT_UNKNOWN"
+            raise
+        if not isinstance(started, Mapping) or started.get("process_ref") != process_ref:
+            state.effect_state = "EFFECT_UNKNOWN"
+            raise BrokerStateError("DevBox adapter start identity is invalid")
+        effect = started.get("effect_state")
+        if effect not in {"APPLIED", "EFFECT_UNKNOWN"}:
+            state.effect_state = "EFFECT_UNKNOWN"
+            raise BrokerStateError("DevBox adapter start effect is invalid")
+        state.effect_state = str(effect)
+        state.terminal = started.get("terminal") is True
+        return {
+            "process_ref": process_ref,
+            "effect_state": state.effect_state,
+            "terminal": state.terminal,
+            "reconciled": False,
+        }
+
+    async def _devbox_finalize_terminal(self, state: _BrokerDevBoxRun) -> None:
+        if state.terminal_swept:
+            return
+        sweep = await asyncio.to_thread(self.sweeper.sweep, "devbox_terminal")
+        state.terminal_swept = True
+        if self._active_devbox_process_ref == state.process_ref:
+            self._active_devbox_process_ref = None
+        self.last_sweep = sweep
+        if sweep.found_residuals:
+            state.terminal_error = "DevBox command left a detached same-UID process"
+            raise BrokerStateError(state.terminal_error)
+
+    async def _devbox_read(self, payload: dict[str, Any]) -> dict[str, Any]:
+        allowed = {
+            "generation",
+            "process_ref",
+            "stdout_cursor",
+            "stderr_cursor",
+            "max_bytes",
+        }
+        if set(payload) != allowed:
+            raise BrokerProtocolError("devbox-read payload fields are invalid")
+        self._require_devbox_generation(payload.get("generation"))
+        state = self._devbox_run_for_process(payload.get("process_ref"))
+        stdout_cursor = payload.get("stdout_cursor")
+        stderr_cursor = payload.get("stderr_cursor")
+        maximum = payload.get("max_bytes")
+        if type(stdout_cursor) is not int or stdout_cursor < 0:
+            raise BrokerProtocolError("DevBox stdout_cursor is invalid")
+        if type(stderr_cursor) is not int or stderr_cursor < 0:
+            raise BrokerProtocolError("DevBox stderr_cursor is invalid")
+        if type(maximum) is not int or not 1024 <= maximum <= 262144:
+            raise BrokerProtocolError("DevBox max_bytes is invalid")
+        assert self.devbox_adapter is not None
+        observed = await self.devbox_adapter.read(
+            process_ref=state.process_ref,
+            stdout_cursor=stdout_cursor,
+            stderr_cursor=stderr_cursor,
+            max_bytes=maximum,
+        )
+        if not isinstance(observed, Mapping) or observed.get("process_ref") != state.process_ref:
+            raise BrokerStateError("DevBox adapter read identity is invalid")
+        if observed.get("terminal") is True:
+            state.terminal = True
+            await self._devbox_finalize_terminal(state)
+        return dict(observed)
+
+    async def _devbox_cancel(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if set(payload) != {"generation", "process_ref", "reason"}:
+            raise BrokerProtocolError("devbox-cancel payload fields are invalid")
+        self._require_devbox_generation(payload.get("generation"))
+        state = self._devbox_run_for_process(payload.get("process_ref"))
+        reason = payload.get("reason")
+        if not isinstance(reason, str) or not reason.strip() or len(reason) > 256:
+            raise BrokerProtocolError("DevBox cancel reason is invalid")
+        if self._active_devbox_process_ref != state.process_ref and not state.terminal:
+            raise BrokerStateError("only the active DevBox command can be cancelled")
+        assert self.devbox_adapter is not None
+        adapter_error: Exception | None = None
+        result: Mapping[str, Any] | None = None
+        try:
+            result = await self.devbox_adapter.cancel(
+                process_ref=state.process_ref,
+                reason=reason.strip(),
+            )
+        except Exception as exc:
+            adapter_error = exc
+        try:
+            sweep = await asyncio.to_thread(self.sweeper.sweep, "devbox_terminal")
+            self.last_sweep = sweep
+            state.terminal_swept = True
+            state.terminal = True
+            if self._active_devbox_process_ref == state.process_ref:
+                self._active_devbox_process_ref = None
+        except Exception:
+            state.terminal_error = "DevBox cancellation cleanup could not be proven"
+            raise
+        if adapter_error is not None:
+            state.terminal_error = "DevBox adapter cancellation failed"
+            raise BrokerStateError(state.terminal_error) from adapter_error
+        if not isinstance(result, Mapping) or result.get("process_ref") != state.process_ref:
+            raise BrokerStateError("DevBox adapter cancellation identity is invalid")
+        return dict(result)
 
     async def _autonomy_canary(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Issue one fixed, non-provider boot canary while the broker is idle."""
@@ -3762,6 +4054,7 @@ __all__ = [
     "BrokerStateError",
     "DedicatedUIDError",
     "DedicatedUIDSweeper",
+    "DevBoxCommandAdapter",
     "ExecutiveWorkerBroker",
     "PeerAuthorizationError",
     "PeerCredentials",
