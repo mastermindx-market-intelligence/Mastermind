@@ -63,6 +63,7 @@ from control_plane.subscription_harness_bindings import (
     get_binding,
 )
 from control_plane.worker_adapter import adapter_descriptor
+from control_plane.worker_craft import CraftWorkerAdapter
 from control_plane.worker_browser_b1 import BrowserGenerationResource
 
 
@@ -516,14 +517,16 @@ def _build_broker(
         if provider_realm is not None
         else None
     )
-    adapter = CodexWorkerAdapter(
-        Path(config["codex_binary"]),
-        codex_home=policy.provider_home,
-        binary_attestation=binary_attestation,
-        allowed_versions=frozenset(config["allowed_codex_versions"]),
-        required_team_identifier=str(config["required_team_identifier"]),
-        provider_realm=provider_realm,
-        provider_credential_loader=credential_loader,
+    adapter = CraftWorkerAdapter(
+        CodexWorkerAdapter(
+            Path(config["codex_binary"]),
+            codex_home=policy.provider_home,
+            binary_attestation=binary_attestation,
+            allowed_versions=frozenset(config["allowed_codex_versions"]),
+            required_team_identifier=str(config["required_team_identifier"]),
+            provider_realm=provider_realm,
+            provider_credential_loader=credential_loader,
+        )
     )
     sweeper = DedicatedUIDSweeper(
         policy.worker_uid,
