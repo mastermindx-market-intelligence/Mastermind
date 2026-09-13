@@ -10,7 +10,8 @@ import subprocess
 import sys
 import time
 
-from integrations.workbench_action_mcp.contracts import ActionCaller
+from integrations.workbench_action_mcp.contracts import ActionCaller, ActionTokenCodec
+from integrations.workbench_action_mcp.patch_port import create_text_patch_port
 from integrations.workbench_action_mcp.service import (
     SERVICE_SCHEMA,
     ServiceState,
@@ -50,11 +51,15 @@ def _document(tmp_path: Path) -> tuple[dict[str, object], Path, Path]:
     policy_file = tmp_path / "policy.json"
     policy_file.write_text(json.dumps(policy))
     os.chmod(policy_file, 0o600)
+    action_key_file = tmp_path / "action-key.hex"
+    action_key_file.write_text("9" * 64 + "\n")
+    os.chmod(action_key_file, 0o600)
     document: dict[str, object] = {
         "schema": SERVICE_SCHEMA,
         "policy_file": str(policy_file),
         "project_root": str(project),
         "audit_directory": str(audit),
+        "action_key_file": str(action_key_file),
         "bind_host": "127.0.0.1",
         "bind_port": 19443,
         "incoming_authority": "127.0.0.1:19443",
@@ -150,6 +155,53 @@ def test_loopback_socket_owner_never_binds_non_loopback(tmp_path: Path) -> None:
         assert sock.get_inheritable() is False
     finally:
         sock.close()
+
+
+def test_action_key_is_stable_across_runtime_restart_for_reconciliation(tmp_path: Path) -> None:
+    document, _, _ = _document(tmp_path)
+    config = parse_service_config(document)
+    stable = config.lease
+    caller = ActionCaller(
+        subject_digest=stable.expected_subject_digest,
+        client_ref=stable.expected_client_ref,
+        resource=stable.resource,
+        scopes=stable.required_scopes,
+        expires_at=max(1, stable.lease_expires_at_ms // 1000),
+    )
+
+    async def exercise() -> None:
+        first = await create_runtime(config)
+        prepare, _, _ = create_text_patch_port(
+            resolve_binding=first.resolve_binding,
+            clock_ms=lambda: int(time.time() * 1000),
+            run_io=first.run_io,
+            token_codec=ActionTokenCodec(bytes.fromhex("9" * 64)),
+            action_ttl_ms=config.action_ttl_ms,
+        )
+        prepared = await prepare(
+            caller,
+            {
+                "project_ref": stable.project_ref,
+                "relative_path": "sample.py",
+                "mode": "CREATE",
+                "new_text": "hello\n",
+            },
+        )
+        await first.aclose(timeout=5.0)
+
+        second = await create_runtime(config)
+        _, _, reconcile = create_text_patch_port(
+            resolve_binding=second.resolve_binding,
+            clock_ms=lambda: int(time.time() * 1000),
+            run_io=second.run_io,
+            token_codec=ActionTokenCodec(bytes.fromhex("9" * 64)),
+            action_ttl_ms=config.action_ttl_ms,
+        )
+        observed = await reconcile(caller, prepared["action_ref"])
+        assert observed["effect_state"] == "NOT_APPLIED"
+        await second.aclose(timeout=5.0)
+
+    asyncio.run(exercise())
 
 
 def test_launcher_describe_is_dependency_free_and_truthful() -> None:

@@ -22,7 +22,6 @@ import math
 import os
 from pathlib import Path
 import re
-import secrets
 import socket
 import stat
 import sys
@@ -53,6 +52,7 @@ _CONFIG_KEYS = frozenset(
         "policy_file",
         "project_root",
         "audit_directory",
+        "action_key_file",
         "bind_host",
         "bind_port",
         "incoming_authority",
@@ -111,6 +111,7 @@ class ServiceConfig:
     policy_file: str
     project_root: str
     audit_directory: str
+    action_key_file: str
     bind_host: str
     bind_port: int
     incoming_authority: str
@@ -262,6 +263,7 @@ def parse_service_config(value: object) -> ServiceConfig:
         policy_file=_absolute_path(value.get("policy_file")),
         project_root=_absolute_path(value.get("project_root")),
         audit_directory=_absolute_path(value.get("audit_directory")),
+        action_key_file=_absolute_path(value.get("action_key_file")),
         bind_host="127.0.0.1",
         bind_port=_bounded_int(value.get("bind_port"), minimum=1, maximum=65535),
         incoming_authority=_incoming_authority(value.get("incoming_authority")),
@@ -364,6 +366,79 @@ def _secure_json(path: str, *, maximum: int) -> dict[str, object]:
 
 def load_service_config(path: str) -> ServiceConfig:
     return parse_service_config(_secure_json(path, maximum=MAX_CONFIG_BYTES))
+
+
+def _secure_action_key(path: str) -> bytes:
+    selected = Path(_absolute_path(path))
+    try:
+        before = selected.lstat()
+    except OSError:
+        _refuse()
+    if (
+        stat.S_ISLNK(before.st_mode)
+        or not stat.S_ISREG(before.st_mode)
+        or before.st_nlink != 1
+        or before.st_uid != os.geteuid()
+        or stat.S_IMODE(before.st_mode) != 0o600
+        or before.st_size not in (64, 65)
+    ):
+        _refuse()
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    nonblock = getattr(os, "O_NONBLOCK", 0)
+    cloexec = getattr(os, "O_CLOEXEC", 0)
+    if not nofollow or not nonblock or not cloexec:
+        _refuse()
+    fd = -1
+    try:
+        fd = os.open(selected, os.O_RDONLY | nofollow | nonblock | cloexec)
+        opened = os.fstat(fd)
+        if (
+            opened.st_dev != before.st_dev
+            or opened.st_ino != before.st_ino
+            or not stat.S_ISREG(opened.st_mode)
+            or opened.st_nlink != 1
+            or opened.st_uid != os.geteuid()
+            or stat.S_IMODE(opened.st_mode) != 0o600
+            or os.get_inheritable(fd)
+        ):
+            _refuse()
+        raw = b""
+        while len(raw) <= 65:
+            chunk = os.read(fd, 66 - len(raw))
+            if not chunk:
+                break
+            raw += chunk
+        if len(raw) > 65:
+            _refuse()
+    except ServiceConfigurationError:
+        raise
+    except (OSError, TypeError, ValueError):
+        _refuse()
+    finally:
+        if fd >= 0:
+            try:
+                os.close(fd)
+            except OSError as error:
+                raise ServiceConfigurationError(
+                    "SERVICE_STARTUP_CLEANUP_UNCERTAIN"
+                ) from error
+    try:
+        after = selected.lstat()
+    except OSError:
+        _refuse()
+    if (
+        after.st_dev != before.st_dev
+        or after.st_ino != before.st_ino
+        or after.st_mode != before.st_mode
+        or after.st_nlink != before.st_nlink
+        or after.st_uid != before.st_uid
+    ):
+        _refuse()
+    if raw.endswith(b"\n"):
+        raw = raw[:-1]
+    if len(raw) != 64 or any(byte not in b"0123456789abcdef" for byte in raw):
+        _refuse()
+    return bytes.fromhex(raw.decode("ascii"))
 
 
 def _open_safe_directory(path: str) -> int:
@@ -547,6 +622,7 @@ async def create_runtime(config: ServiceConfig) -> WorkbenchActionRuntime:
         monotonic=time.monotonic,
     )
     authenticator = JwtAuthenticator(policy=policy, jwks_cache=cache)
+    action_token_key = _secure_action_key(config.action_key_file)
     project_fd = -1
     audit_fd = -1
     runtime: WorkbenchActionRuntime | None = None
@@ -563,7 +639,7 @@ async def create_runtime(config: ServiceConfig) -> WorkbenchActionRuntime:
             project_directory_fd=project_fd,
             audit_directory_fd=audit_fd,
             lease=config.lease,
-            action_token_key=secrets.token_bytes(32),
+            action_token_key=action_token_key,
             allowed_hosts=config.allowed_hosts,
             call_receipt_sink=_call_receipt_sink,
             allowed_origins=config.allowed_origins,
