@@ -76,6 +76,8 @@ class FakeSweeper:
 
 
 class FakeAdapter:
+    adapter_id = "codex-cli"
+
     def __init__(self) -> None:
         self.spec = None
         self.ref = None
@@ -319,16 +321,8 @@ def _request(operation: str, payload: dict, *, suffix: str = "1") -> dict:
 
 
 
-def test_broker_adapter_identity_is_fixed_and_unimplemented_ids_fail_closed(tmp_path: Path):
-    broker, adapter, sweeper, peer, spec = _fixture(tmp_path)
-    assert broker.adapter is adapter
-    assert broker.adapter_id == "codex-cli"
-    with pytest.raises(WorkerBrokerError, match="not implemented"):
-        ExecutiveWorkerBroker(
-            adapter, broker.policy, sweeper, adapter_id="openai-compatible"
-        )
-
-    class AdapterWithoutStatus:
+def _protocol_stub(adapter_id: str):
+    class _Stub:
         async def start(self, spec):
             return None
 
@@ -341,10 +335,108 @@ def test_broker_adapter_identity_is_fixed_and_unimplemented_ids_fail_closed(tmp_
         async def run_validation_argv(self, spec, argv, *, timeout_seconds=300.0):
             return None
 
-    statusless = ExecutiveWorkerBroker(
-        AdapterWithoutStatus(), broker.policy, sweeper, adapter_id="codex-cli"
+        async def status(self, ref):
+            return WorkerRunStatus.RUNNING
+
+    _Stub.adapter_id = adapter_id
+    return _Stub()
+
+
+def test_broker_adapter_identity_is_fixed_and_unimplemented_ids_fail_closed(tmp_path: Path):
+    broker, adapter, sweeper, peer, spec = _fixture(tmp_path)
+    assert broker.adapter is adapter
+    assert broker.adapter_id == "codex-cli"
+    assert adapter.adapter_id == "codex-cli"
+    with pytest.raises(WorkerBrokerError, match="not implemented"):
+        ExecutiveWorkerBroker(
+            _protocol_stub("openai-compatible"),
+            broker.policy,
+            sweeper,
+            adapter_id="openai-compatible",
+        )
+
+
+def test_broker_refuses_adapter_identity_mismatch(tmp_path: Path):
+    broker, _adapter, sweeper, _peer, _spec = _fixture(tmp_path)
+    with pytest.raises(WorkerBrokerError, match="does not match descriptor"):
+        ExecutiveWorkerBroker(
+            _protocol_stub("openai-compatible"),
+            broker.policy,
+            sweeper,
+            adapter_id="codex-cli",
+        )
+
+
+def test_broker_refuses_statusless_adapter(tmp_path: Path):
+    broker, _adapter, sweeper, _peer, _spec = _fixture(tmp_path)
+
+    class AdapterWithoutStatus:
+        adapter_id = "codex-cli"
+
+        async def start(self, spec):
+            return None
+
+        async def collect_result(self, ref):
+            return None
+
+        async def cancel(self, ref, reason):
+            return None
+
+        async def run_validation_argv(self, spec, argv, *, timeout_seconds=300.0):
+            return None
+
+    with pytest.raises(WorkerBrokerError, match="does not expose status"):
+        ExecutiveWorkerBroker(
+            AdapterWithoutStatus(), broker.policy, sweeper, adapter_id="codex-cli"
+        )
+
+
+def test_broker_refuses_caller_label_versus_object_identity(tmp_path: Path):
+    broker, adapter, sweeper, _peer, _spec = _fixture(tmp_path)
+    assert adapter.adapter_id == "codex-cli"
+    with pytest.raises(WorkerBrokerError, match="does not match descriptor"):
+        ExecutiveWorkerBroker(
+            adapter, broker.policy, sweeper, adapter_id="openai-compatible"
+        )
+
+
+def test_broker_binds_real_codex_adapter_identity(tmp_path: Path):
+    from control_plane.codex_worker import BinaryAttestation, CodexWorkerAdapter
+
+    broker, _adapter, sweeper, _peer, _spec = _fixture(tmp_path)
+    binary = tmp_path / "fake-codex"
+    binary.write_text("#!/bin/sh\n", encoding="utf-8")
+    binary.chmod(0o700)
+    info = binary.lstat()
+    attestation = BinaryAttestation(
+        path=str(binary),
+        real_path=str(binary.resolve()),
+        version="test-0",
+        sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
+        team_identifier=None,
+        size=info.st_size,
+        device=info.st_dev,
+        inode=info.st_ino,
+        mode=stat.S_IMODE(info.st_mode),
+        uid=info.st_uid,
+        gid=info.st_gid,
+        mtime_ns=info.st_mtime_ns,
     )
-    assert statusless.adapter_id == "codex-cli"
+    codex_home = tmp_path / "real-codex-home"
+    codex_home.mkdir(mode=0o700)
+    adapter = CodexWorkerAdapter(
+        binary,
+        codex_home=codex_home,
+        binary_attestation=attestation,
+        allowed_versions=frozenset({"test-0"}),
+        required_team_identifier=None,
+    )
+    bound = ExecutiveWorkerBroker(adapter, broker.policy, sweeper)
+    assert bound.adapter is adapter
+    assert bound.adapter_id == "codex-cli"
+    assert adapter.adapter_id == "codex-cli"
+    assert callable(adapter.status)
+
 
 def test_broker_rejects_wrong_peer_and_unknown_operation(tmp_path: Path) -> None:
     async def scenario() -> None:

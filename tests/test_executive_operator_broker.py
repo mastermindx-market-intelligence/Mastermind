@@ -89,6 +89,8 @@ class _Sweeper:
 
 
 class _SealedAdapter:
+    adapter_id = "codex-cli"
+
     def __init__(self) -> None:
         self.binary = BinaryAttestation(
             path="/fixture/codex",
@@ -104,6 +106,9 @@ class _SealedAdapter:
             gid=0,
             mtime_ns=1,
         )
+
+    async def status(self, ref):
+        raise AssertionError("sealed adapter status should not run")
 
 
 class _OperatorAdapter:

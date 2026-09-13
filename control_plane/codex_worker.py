@@ -1839,6 +1839,8 @@ async def _hash_validation_stream(
 class CodexWorkerAdapter:
     """One-host, one-shot Codex process adapter with no queue/runtime authority."""
 
+    adapter_id = "codex-cli"
+
     def __init__(
         self,
         binary_path: str | os.PathLike[str],
