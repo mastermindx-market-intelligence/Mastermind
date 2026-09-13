@@ -601,7 +601,7 @@ def test_loaded_program_expectation_covers_every_frozen_label():
     } == expected
 
 
-def test_disabled_state_parser_requires_one_closed_boolean_per_frozen_label():
+def test_disabled_state_parser_preserves_legacy_boolean_values():
     module = subject()
     lines = ["disabled services = {"]
     for index, label in enumerate(module.LABELS):
@@ -612,9 +612,104 @@ def test_disabled_state_parser_requires_one_closed_boolean_per_frozen_label():
     assert set(parsed) == set(module.LABELS)
     assert parsed[module.LABELS[0]] is False
     with pytest.raises(module.PreimageUnsettled):
-        module.parse_disabled_state("disabled services = {\n}\n")
-    with pytest.raises(module.PreimageUnsettled):
         module.parse_disabled_state("\n".join(lines + [f'"{module.LABELS[0]}" => true']) + "\n")
+
+
+def test_disabled_state_parser_accepts_native_macos_words_and_ignores_other_services():
+    module = subject()
+    output = '''
+    disabled services = {
+        "com.mastermind.executive.control" => disabled
+        "com.mastermind.executive.worker.codex" => enabled
+        "com.mastermind.executive.worker.codex-pro-01" => disabled
+        "com.apple.example" => enabled
+    }
+'''
+    observed = module.parse_disabled_state(output)
+    assert set(observed) == set(module.LABELS)
+    assert observed[module.LABELS[0]] is True
+    assert observed[module.LABELS[1]] is False
+    assert all(observed[label] is None for label in module.LABELS[2:])
+
+
+def test_disabled_state_parser_keeps_absent_overrides_unknown():
+    module = subject()
+    assert module.parse_disabled_state("disabled services = {\n}\n") == {
+        label: None for label in module.LABELS
+    }
+
+
+@pytest.mark.parametrize("output", [
+    "",
+    "unrelated = {\n}\n",
+    "disabled services = {\n",
+    'disabled services = {\n"com.mastermind.executive.control" => maybe\n}\n',
+    'disabled services = {\n"com.mastermind.executive.control" => disabled\n'
+    '"com.mastermind.executive.control" => true\n}\n',
+    'disabled services = {\n"com.mastermind.executive.control" => disabled\n}\nextra',
+])
+def test_disabled_state_parser_refuses_malformed_or_duplicate_state(output):
+    module = subject()
+    with pytest.raises(module.PreimageUnsettled) as error:
+        module.parse_disabled_state(output)
+    assert error.value.code == "MALFORMED_LAUNCHD"
+
+
+@pytest.mark.parametrize("document", ["worker", "attestation"])
+def test_installed_codex_document_uses_the_installer_destination(document):
+    module = subject()
+    filesystem = InstalledFilesystem(module)
+    path = module.WORKER_CONFIG if document == "worker" else module.CODEX_ATTESTATION
+    value = json.loads(filesystem.payloads[path])
+    field = "codex_binary" if document == "worker" else "path"
+    value[field] = "/Library/Application Support/MastermindExecutive/bin/codex-0.147.0"
+    _, observed = module.parse_content_document(
+        path, json.dumps(value).encode(), manifest_path=filesystem.manifest_path,
+        expected_release_sha=SHA, expected_tree_sha=TREE,
+    )
+    assert observed[field] == value[field]
+
+
+@pytest.mark.parametrize("document", ["worker", "attestation"])
+@pytest.mark.parametrize("wrong_binary", [
+    "/opt/homebrew/lib/node_modules/@openai/codex/node_modules/"
+    "@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex",
+    "/Library/Application Support/MastermindExecutive/bin/codex-0.146.0",
+])
+def test_codex_document_rejects_source_or_wrong_version_binary(document, wrong_binary):
+    module = subject()
+    filesystem = InstalledFilesystem(module)
+    path = module.WORKER_CONFIG if document == "worker" else module.CODEX_ATTESTATION
+    value = json.loads(filesystem.payloads[path])
+    value["codex_binary" if document == "worker" else "path"] = wrong_binary
+    with pytest.raises(module.PreimageRefusal) as error:
+        module.parse_content_document(
+            path, json.dumps(value).encode(), manifest_path=filesystem.manifest_path,
+            expected_release_sha=SHA, expected_tree_sha=TREE,
+        )
+    assert error.value.code == "MALFORMED_TRUSTED_DOCUMENT"
+
+
+def test_missing_disable_overrides_return_facts_without_admitting_installation():
+    module = subject()
+
+    class MissingOverrides(InstalledCommands):
+        def run(self, argv):
+            if tuple(argv) == ("/bin/launchctl", "print-disabled", "system"):
+                return {"status": "ok", "stdout": "disabled services = {\n}\n"}
+            return super().run(argv)
+
+    receipt = module.collect_preimage(
+        expected_release_sha=SHA, expected_tree_sha=TREE,
+        filesystem=InstalledFilesystem(module), commands=MissingOverrides(),
+        principals=InstalledPrincipals(), clock=lambda: "2026-09-13T19:18:27+00:00",
+        platform="darwin", uid=0, euid=0,
+    )
+    assert receipt["state"] == "FACTS"
+    assert receipt["classification"] == "EFFECT_UNKNOWN"
+    assert receipt["facts"]["documents"]
+    assert all(service["disabled"] is None for service in receipt["facts"]["services"])
+    assert receipt["mutation_count"] == 0
 
 
 class InstalledFilesystem:
