@@ -1303,6 +1303,10 @@ class ExecutiveWorkerBroker:
         descriptor = adapter_descriptor(adapter_id)
         if not descriptor.implemented:
             raise WorkerBrokerError(f"worker adapter {adapter_id!r} is not implemented")
+        if not callable(getattr(adapter, "status", None)):
+            raise WorkerBrokerError(
+                f"worker adapter {adapter_id!r} does not expose broker status()"
+            )
         self.adapter = adapter
         self.adapter_id = descriptor.adapter_id
         self.policy = policy
