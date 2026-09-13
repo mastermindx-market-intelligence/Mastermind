@@ -446,3 +446,54 @@ class CeoIngressClient:
                 await writer.wait_closed()
             except (OSError, asyncio.TimeoutError):
                 pass
+
+
+class CeoIngressReadGateway:
+    """Network-only access to the installed control process's four readers."""
+
+    def __init__(self, socket_path: Path | str, client: CeoIngressClient) -> None:
+        self._socket_path = socket_path
+        self._client = client
+
+    async def aclose(self) -> None:
+        # Each request owns and closes its socket. No local state to drain.
+        return None
+
+    async def call(self, name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        from datetime import datetime, timezone
+        from integrations.executive_mcp.schemas import (
+            GatewayError, RESULT_SCHEMA, ServerMode, error_envelope, validate_tool_arguments,
+        )
+        try:
+            if name not in READ_TOOL_NAMES:
+                raise GatewayError("authority_refused", "installed reader is read-only")
+            validated = validate_tool_arguments(name, arguments)
+            response = await self._client.send_frame(self._socket_path, {
+                "schema": ceo_ingress.APP_READ_SCHEMA,
+                "tool": name, "arguments": validated,
+            })
+            result = response.result
+            if (response.transport == TRANSPORT_SENT_OK and response.ok is True
+                    and isinstance(result, dict) and result.get("schema") == RESULT_SCHEMA
+                    and result.get("tool") == name and type(result.get("ok")) is bool):
+                return result
+            raise GatewayError("backend_unavailable", "installed Executive reader is unavailable")
+        except GatewayError as exc:
+            return error_envelope(
+                name, mode=ServerMode.READONLY,
+                generated_at=datetime.now(timezone.utc).isoformat(),
+                code=exc.code, message=exc.message,
+            )
+
+
+async def observe_ingress_grounding(
+    client: CeoIngressClient, socket_path: Path | str,
+) -> dict[str, str]:
+    """Read the host-bound source identities from the existing trusted ingress."""
+    response = await client.send_frame(socket_path, {"schema": ceo_ingress.APP_GROUNDING_SCHEMA})
+    if response.transport != TRANSPORT_SENT_OK or response.ok is not True:
+        raise GroundingUnavailable("installed grounding is unavailable")
+    result = ceo_ingress._coerce_grounding_shape(response.result)
+    if result is None:
+        raise GroundingUnavailable("installed grounding is unavailable")
+    return result
