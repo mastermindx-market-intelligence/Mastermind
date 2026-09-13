@@ -2,7 +2,7 @@
 
 This module composes existing Business auth, Workbench runtime and FastMCP owners.
 It creates no credential, project registry, retry plane, tunnel, account, provider
-session, Executive lifecycle, or installation claim.  Configuration is a closed
+session, Executive lifecycle, or installation claim. Configuration is a closed
 owner-supplied projection and never grants more authority than the existing
 ResourcePolicy + StableWorkbenchLease contracts.
 """
@@ -20,7 +20,6 @@ import socket
 import stat
 import sys
 import time
-from typing import Any
 from urllib.parse import urlsplit
 
 from integrations.business_mcp_auth.contracts import load_resource_policy
@@ -239,9 +238,7 @@ def parse_service_config(value: object) -> ServiceConfig:
 
     if not isinstance(value, dict) or set(value) != _CONFIG_KEYS:
         _refuse()
-    if value.get("schema") != SERVICE_SCHEMA:
-        _refuse()
-    if value.get("bind_host") != "127.0.0.1":
+    if value.get("schema") != SERVICE_SCHEMA or value.get("bind_host") != "127.0.0.1":
         _refuse()
     return ServiceConfig(
         schema=SERVICE_SCHEMA,
@@ -278,10 +275,12 @@ def _secure_json(path: str, *, maximum: int) -> dict[str, object]:
     nofollow = getattr(os, "O_NOFOLLOW", 0)
     if not nofollow:
         _refuse()
-    flags |= nofollow
     descriptor = -1
+    chunks: list[bytes] = []
+    read_error: BaseException | None = None
+    close_error: BaseException | None = None
     try:
-        descriptor = os.open(selected, flags)
+        descriptor = os.open(selected, flags | nofollow)
         opened = os.fstat(descriptor)
         if (
             opened.st_dev != before.st_dev
@@ -293,7 +292,6 @@ def _secure_json(path: str, *, maximum: int) -> dict[str, object]:
             or os.get_inheritable(descriptor)
         ):
             _refuse()
-        chunks: list[bytes] = []
         total = 0
         while True:
             chunk = os.read(descriptor, min(4096, maximum + 1 - total))
@@ -303,16 +301,20 @@ def _secure_json(path: str, *, maximum: int) -> dict[str, object]:
             total += len(chunk)
             if total > maximum:
                 _refuse()
-    except ServiceConfigurationError:
-        raise
-    except OSError:
-        _refuse()
+    except BaseException as error:
+        read_error = error
     finally:
         if descriptor >= 0:
             try:
                 os.close(descriptor)
-            except OSError:
-                _refuse("SERVICE_STARTUP_CLEANUP_UNCERTAIN")
+            except BaseException as error:
+                close_error = error
+    if close_error is not None:
+        raise ServiceConfigurationError("SERVICE_STARTUP_CLEANUP_UNCERTAIN") from close_error
+    if read_error is not None:
+        if isinstance(read_error, ServiceConfigurationError):
+            raise read_error
+        _refuse()
     try:
         after = selected.lstat()
     except OSError:
@@ -377,13 +379,16 @@ def _open_safe_directory(path: str) -> int:
         ):
             _refuse()
         return descriptor
-    except ServiceConfigurationError:
+    except BaseException as error:
         if descriptor >= 0:
-            os.close(descriptor)
-        raise
-    except OSError:
-        if descriptor >= 0:
-            os.close(descriptor)
+            try:
+                os.close(descriptor)
+            except BaseException as cleanup_error:
+                raise ServiceConfigurationError(
+                    "SERVICE_STARTUP_CLEANUP_UNCERTAIN"
+                ) from cleanup_error
+        if isinstance(error, ServiceConfigurationError):
+            raise
         _refuse()
     raise AssertionError("unreachable")
 
@@ -462,8 +467,11 @@ def shutdown_exit_code(outcome: ShutdownOutcome) -> int:
     }[outcome]
 
 
-async def _close_runtime(runtime: WorkbenchReadRuntime, config: ServiceConfig, state: ServiceState) -> None:
+async def _close_runtime(
+    runtime: WorkbenchReadRuntime, config: ServiceConfig, state: ServiceState
+) -> None:
     state.stopping = True
+    previous = state.shutdown_outcome
     runtime.revoke()
     try:
         await runtime.aclose(timeout=config.close_timeout_seconds)
@@ -474,7 +482,8 @@ async def _close_runtime(runtime: WorkbenchReadRuntime, config: ServiceConfig, s
         state.shutdown_outcome = ShutdownOutcome.RUNTIME_CLOSE_UNCERTAIN
         raise
     else:
-        state.shutdown_outcome = ShutdownOutcome.CLEAN
+        if previous is None:
+            state.shutdown_outcome = ShutdownOutcome.CLEAN
 
 
 async def create_runtime(config: ServiceConfig) -> WorkbenchReadRuntime:
@@ -489,11 +498,13 @@ async def create_runtime(config: ServiceConfig) -> WorkbenchReadRuntime:
         monotonic=time.monotonic,
     )
     authenticator = JwtAuthenticator(policy=policy, jwks_cache=cache)
-    project_fd = _open_safe_directory(config.project_root)
+    project_fd = -1
     audit_fd = -1
     runtime: WorkbenchReadRuntime | None = None
-    cleanup_error: BaseException | None = None
+    primary_error: BaseException | None = None
+    cleanup_errors: list[BaseException] = []
     try:
+        project_fd = _open_safe_directory(config.project_root)
         audit_fd = _open_safe_directory(config.audit_directory)
         runtime = WorkbenchReadRuntime.open(
             authenticator=authenticator,
@@ -508,23 +519,27 @@ async def create_runtime(config: ServiceConfig) -> WorkbenchReadRuntime:
             max_concurrency=config.max_concurrency,
             io_timeout_seconds=config.io_timeout_seconds,
         )
-    except BaseException:
-        raise
+    except BaseException as error:
+        primary_error = error
     finally:
         for descriptor in (audit_fd, project_fd):
             if descriptor >= 0:
                 try:
                     os.close(descriptor)
                 except BaseException as error:
-                    cleanup_error = cleanup_error or error
-    if cleanup_error is not None:
+                    cleanup_errors.append(error)
+    if cleanup_errors:
         if runtime is not None:
             runtime.revoke()
             try:
                 await runtime.aclose(timeout=config.close_timeout_seconds)
             except BaseException:
                 pass
-        _refuse("SERVICE_STARTUP_CLEANUP_UNCERTAIN")
+        raise ServiceConfigurationError(
+            "SERVICE_STARTUP_CLEANUP_UNCERTAIN"
+        ) from cleanup_errors[0]
+    if primary_error is not None:
+        raise primary_error
     if runtime is None:
         _refuse()
     return runtime
@@ -571,23 +586,36 @@ def build_service_app(
     )
 
 
+async def _rollback_unserved_runtime(
+    runtime: WorkbenchReadRuntime, config: ServiceConfig, state: ServiceState
+) -> ShutdownOutcome | None:
+    if state.stopping:
+        return state.shutdown_outcome
+    try:
+        await _close_runtime(runtime, config, state)
+    except (RuntimeCloseIncomplete, RuntimeCloseUncertain):
+        pass
+    return state.shutdown_outcome
+
+
 async def run_service(config: ServiceConfig) -> int:
     """Run exactly one pre-bound loopback Uvicorn server and reconcile exit truth."""
 
     runtime = await create_runtime(config)
     state = ServiceState()
     sock: socket.socket | None = None
-    server = None
     try:
         try:
             sock = reserve_loopback_socket(config)
         except ServiceConfigurationError:
-            runtime.revoke()
-            try:
-                await runtime.aclose(timeout=config.close_timeout_seconds)
-            except BaseException:
-                pass
+            outcome = await _rollback_unserved_runtime(runtime, config, state)
+            if outcome in (
+                ShutdownOutcome.RUNTIME_CLOSE_INCOMPLETE,
+                ShutdownOutcome.RUNTIME_CLOSE_UNCERTAIN,
+            ):
+                return shutdown_exit_code(outcome)
             raise
+
         state.socket_owned = True
         app = build_service_app(runtime, config, state)
         import uvicorn
@@ -606,28 +634,24 @@ async def run_service(config: ServiceConfig) -> int:
         try:
             await server.serve(sockets=[sock])
         except (RuntimeCloseIncomplete, RuntimeCloseUncertain):
-            # Uvicorn normally contains lifespan errors. Preserve direct test seams too.
             pass
         except BaseException:
             state.shutdown_outcome = ShutdownOutcome.SERVER_FAILED
-        finally:
-            state.socket_owned = False
-        if state.shutdown_outcome is None:
-            state.shutdown_outcome = ShutdownOutcome.SERVER_FAILED
-        return shutdown_exit_code(state.shutdown_outcome)
     finally:
+        state.socket_owned = False
+        socket_close_failed = False
         if sock is not None and sock.fileno() >= 0:
             try:
                 sock.close()
             except OSError:
-                if state.shutdown_outcome is ShutdownOutcome.CLEAN:
-                    state.shutdown_outcome = ShutdownOutcome.SERVER_FAILED
-        if not state.stopping and state.shutdown_outcome is not ShutdownOutcome.CLEAN:
-            runtime.revoke()
-            try:
-                await runtime.aclose(timeout=config.close_timeout_seconds)
-            except BaseException:
-                pass
+                socket_close_failed = True
+        if not state.stopping:
+            await _rollback_unserved_runtime(runtime, config, state)
+        if socket_close_failed and state.shutdown_outcome in (None, ShutdownOutcome.CLEAN):
+            state.shutdown_outcome = ShutdownOutcome.SERVER_FAILED
+        if state.shutdown_outcome is None:
+            state.shutdown_outcome = ShutdownOutcome.SERVER_FAILED
+    return shutdown_exit_code(state.shutdown_outcome)
 
 
 def run_configured_service(path: str) -> int:
@@ -636,7 +660,7 @@ def run_configured_service(path: str) -> int:
         return asyncio.run(run_service(config))
     except ServiceConfigurationError as error:
         print(error.code, file=sys.stderr, flush=True)
-        return 2
+        return 5 if error.code == "SERVICE_STARTUP_CLEANUP_UNCERTAIN" else 2
     except BaseException:
         print("SERVICE_RUNTIME_FAILED", file=sys.stderr, flush=True)
         return 5
