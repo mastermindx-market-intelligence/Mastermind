@@ -41,8 +41,10 @@ The installer first requires the existing Mastermind health endpoint to pass. It
 updates the Datadog Agent using Datadog's official Agent 7 installer, enables host-level Python SSI,
 configures log collection, restarts the Agent, and finally restarts `mastermind.service` so the
 injected tracer is loaded. If Mastermind health does not recover, the application systemd override
-is rolled back and the service is restarted without the override. Future deployments refresh the
-Datadog version tag from the exact release SHA before restart, and rollback restores the previous tag.
+is rolled back. When this rollout introduced host SSI, rollback also runs Datadog's supported
+`dd-host-install --uninstall` path before restarting and rechecking Mastermind; pre-existing SSI is
+left intact. Future deployments refresh the Datadog version tag from the exact release SHA before
+restart, and rollback restores the previous tag.
 ## Production proof
 
 A successful installer exit proves only the host-local configuration. Do not call Datadog

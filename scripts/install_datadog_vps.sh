@@ -98,6 +98,10 @@ health_ok() {
 }
 
 health_ok || fail "Mastermind health preflight failed at $MASTERMIND_HEALTH"
+SSI_PREEXISTING=0
+if grep -Fq '/opt/datadog/apm/inject/launcher.preload.so' /etc/ld.so.preload 2>/dev/null; then
+  SSI_PREEXISTING=1
+fi
 log "installing/updating Agent 7 with Python Single Step Instrumentation"
 DD_API_KEY="$DD_API_KEY" \
 DD_SITE="$DD_SITE" \
@@ -136,23 +140,46 @@ if [[ -f "$APP_DROPIN" ]]; then
 fi
 render_app_dropin > "$APP_DROPIN"
 chmod 0644 "$APP_DROPIN"
-rollback_app_dropin() {
-  log "rolling back Mastermind systemd observability override"
+rollback_datadog_instrumentation() {
+  local rollback_failed=0
+  local rollback_healthy=0
+  log "rolling back Mastermind Datadog instrumentation"
   if [[ -n "$APP_BACKUP" && -f "$APP_BACKUP" ]]; then
-    cp -a "$APP_BACKUP" "$APP_DROPIN"
+    cp -a "$APP_BACKUP" "$APP_DROPIN" || rollback_failed=1
   else
-    rm -f "$APP_DROPIN"
+    rm -f "$APP_DROPIN" || rollback_failed=1
   fi
-  systemctl daemon-reload || true
-  systemctl restart "$MASTERMIND_SERVICE" || true
+  if [[ "$SSI_PREEXISTING" == "0" ]] && grep -Fq '/opt/datadog/apm/inject/launcher.preload.so' /etc/ld.so.preload 2>/dev/null; then
+    log "removing Single Step Instrumentation introduced by this rollout"
+    if command -v dd-host-install >/dev/null 2>&1; then
+      dd-host-install --uninstall || rollback_failed=1
+    else
+      log "dd-host-install unavailable; cannot remove newly introduced SSI"
+      rollback_failed=1
+    fi
+  fi
+  if grep -Fq '/opt/datadog/apm/inject/launcher.preload.so' /etc/ld.so.preload 2>/dev/null && [[ "$SSI_PREEXISTING" == "0" ]]; then
+    log "newly introduced SSI is still armed after rollback"
+    rollback_failed=1
+  fi
+  systemctl daemon-reload || rollback_failed=1
+  systemctl restart "$MASTERMIND_SERVICE" || rollback_failed=1
+  for _ in $(seq 1 10); do
+    if health_ok; then rollback_healthy=1; break; fi
+    sleep 2
+  done
+  [[ "$rollback_healthy" == "1" ]] || rollback_failed=1
+  return "$rollback_failed"
 }
 
 systemctl daemon-reload
 
 log "restarting ${MASTERMIND_SERVICE} so SSI can instrument Python"
 if ! systemctl restart "$MASTERMIND_SERVICE"; then
-  rollback_app_dropin
-  fail "Mastermind restart failed after Datadog instrumentation"
+  if rollback_datadog_instrumentation; then
+    fail "Mastermind restart failed after Datadog instrumentation; rollback recovered"
+  fi
+  fail "Mastermind restart failed after Datadog instrumentation and rollback did not recover cleanly"
 fi
 
 APP_HEALTHY=0
@@ -161,8 +188,10 @@ for _ in $(seq 1 20); do
   sleep 2
 done
 if [[ "$APP_HEALTHY" != "1" ]]; then
-  rollback_app_dropin
-  fail "Mastermind health did not recover after Datadog instrumentation"
+  if rollback_datadog_instrumentation; then
+    fail "Mastermind health did not recover after Datadog instrumentation; rollback recovered"
+  fi
+  fail "Mastermind health did not recover after Datadog instrumentation and rollback did not recover cleanly"
 fi
 
 [[ -z "$APP_BACKUP" ]] || rm -f "$APP_BACKUP"

@@ -71,6 +71,9 @@ def test_installer_never_enables_high_authority_datadog_features() -> None:
     assert "install_script_agent7.sh" in text
     assert "DD_APM_INSTRUMENTATION_ENABLED=host" in text
     assert "DD_APM_INSTRUMENTATION_LIBRARIES" in text
+    assert "SSI_PREEXISTING" in text
+    assert "dd-host-install --uninstall" in text
+    assert "launcher.preload.so" in text
 
 
 @pytest.mark.skipif(shutil.which("bash") is None, reason="bash required")
