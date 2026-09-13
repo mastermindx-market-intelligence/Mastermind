@@ -23,8 +23,9 @@ Run only on the authoritative VPS, as root, with an API key from the canonical D
 DD_API_KEY='<runtime secret>' ./scripts/install_datadog_vps.sh
 ```
 
-The key must be supplied in the process environment. It must not be committed, pasted into a
-systemd drop-in, added to `/etc/macro-api.env`, or recorded in deployment logs.
+The key is supplied to Datadog's official installer through the process environment. The Agent
+necessarily persists it in Datadog's own root-owned configuration; Mastermind must not duplicate it
+in Git, a systemd drop-in, `/etc/macro-api.env`, or deployment logs.
 
 The installer first requires the existing Mastermind health endpoint to pass. It then installs or
 updates the Datadog Agent using Datadog's official Agent 7 installer, enables host-level Python SSI,

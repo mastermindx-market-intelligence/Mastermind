@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Install/configure Datadog on the authoritative Mastermind VPS.
-# Requires DD_API_KEY at runtime; never stores or prints the key itself.
+# Requires DD_API_KEY at runtime; never prints or duplicates it into Mastermind config.
 set -euo pipefail
 
 DD_SITE="${DD_SITE:-datadoghq.com}"
