@@ -1425,6 +1425,125 @@ def test_metadata_observation_closes_over_var_alias_ancestor_identity(
     assert validated_paths == [path, path]
 
 
+def _runtime_parent_filesystem(
+    monkeypatch, *, parent_uid=0, parent_gid=1, parent_mode=0o775,
+    child_mode=0o755, parent_type=stat.S_IFDIR, replacement_inode=None,
+):
+    """Model the macOS 26.5 runtime parent without changing real host paths."""
+    module = subject()
+    socket_roots = (
+        "/var/run/mastermind-executive",
+        "/var/run/mastermind-dialogue-observation",
+        "/var/run/mastermind-agent-relay",
+        "/var/run/unapproved",
+    )
+
+    def info(mode, inode, uid=0, gid=0):
+        return os.stat_result((mode, inode, 1, 1, uid, gid, 0, 1, 1, 1))
+
+    directories = {
+        "/private/var": info(stat.S_IFDIR | 0o755, 10),
+        "/private/var/run": info(
+            parent_type | parent_mode, 11, parent_uid, parent_gid
+        ),
+    }
+    for inode, path in enumerate(socket_roots, 12):
+        directories["/private" + path] = info(stat.S_IFDIR | child_mode, inode)
+    descriptors = {}
+
+    def lstat(path):
+        path = os.fspath(path)
+        if path == "/var":
+            return info(stat.S_IFLNK | 0o755, 9)
+        physical = "/private" + path if path.startswith("/var/") else path
+        if physical not in directories:
+            raise FileNotFoundError(path)
+        return directories[physical]
+
+    def open_directory(path, flags):
+        assert flags & os.O_NOFOLLOW and flags & os.O_DIRECTORY
+        descriptor = len(descriptors) + 100
+        descriptors[descriptor] = directories[os.fspath(path)]
+        if os.fspath(path) == "/private/var/run" and replacement_inode is not None:
+            descriptors[descriptor] = info(
+                parent_type | parent_mode, replacement_inode, parent_uid, parent_gid
+            )
+        return descriptor
+
+    monkeypatch.setattr(module.os, "lstat", lstat)
+    monkeypatch.setattr(module.os, "readlink", lambda path: "private/var")
+    monkeypatch.setattr(module.os, "open", open_directory)
+    monkeypatch.setattr(module.os, "fstat", lambda fd: descriptors[fd])
+    monkeypatch.setattr(module.os, "close", lambda fd: None)
+    return module.FilesystemAdapter(expected_release_sha=SHA)
+
+
+@pytest.mark.parametrize("path", [
+    "/var/run/mastermind-executive/ceo-ingress.sock",
+    "/var/run/mastermind-dialogue-observation/dialogue-observation.sock",
+    "/var/run/mastermind-agent-relay/agent-relay.sock",
+])
+def test_frozen_socket_metadata_accepts_macos_runtime_parent(monkeypatch, path):
+    # Rejecting the installed root:daemon 0775 parent must not prevent even
+    # metadata-only observation of these fixed, separately owned socket roots.
+    with monkeypatch.context() as patch:
+        adapter = _runtime_parent_filesystem(patch)
+        observed = adapter.metadata(path)
+    assert observed == {"path": path, "exists": False}
+
+
+@pytest.mark.parametrize("changes", [
+    {"parent_uid": 501},
+    {"parent_gid": 20},
+    {"parent_mode": 0o777},
+    {"parent_mode": 0o1775},
+    {"child_mode": 0o775},
+    {"parent_type": stat.S_IFLNK},
+    {"parent_type": stat.S_IFREG},
+])
+def test_runtime_parent_compatibility_does_not_admit_unsafe_metadata(
+    monkeypatch, changes
+):
+    module = subject()
+    with monkeypatch.context() as patch:
+        adapter = _runtime_parent_filesystem(patch, **changes)
+        with pytest.raises(module.PreimageRefusal) as error:
+            adapter.metadata("/var/run/mastermind-executive/ceo-ingress.sock")
+    assert error.value.code == "UNSAFE_ANCESTOR"
+
+
+def test_runtime_parent_compatibility_rejects_replaced_directory(monkeypatch):
+    module = subject()
+    with monkeypatch.context() as patch:
+        adapter = _runtime_parent_filesystem(patch, replacement_inode=99)
+        with pytest.raises(module.PreimageUnsettled) as error:
+            adapter.metadata("/var/run/mastermind-executive/ceo-ingress.sock")
+    assert error.value.code == "FILESYSTEM_TORN"
+
+
+@pytest.mark.parametrize("path", [
+    "/var/run/mastermind-executive/ceo-ingress.sock",
+    "/var/run/mastermind-dialogue-observation/dialogue-observation.sock",
+    "/var/run/mastermind-agent-relay/agent-relay.sock",
+])
+def test_runtime_parent_compatibility_does_not_allow_socket_content(monkeypatch, path):
+    module = subject()
+    with monkeypatch.context() as patch:
+        adapter = _runtime_parent_filesystem(patch)
+        with pytest.raises(module.PreimageRefusal) as error:
+            adapter.read(path)
+    assert error.value.code == "PATH_ESCAPE"
+
+
+def test_runtime_parent_compatibility_is_not_a_generic_path_exception(monkeypatch):
+    module = subject()
+    with monkeypatch.context() as patch:
+        adapter = _runtime_parent_filesystem(patch)
+        with pytest.raises(module.PreimageRefusal) as error:
+            adapter._validate_ancestors("/var/run/unapproved/content.json")
+    assert error.value.code == "UNSAFE_ANCESTOR"
+
+
 def test_collector_binds_initial_metadata_identity_into_content_read():
     module = subject()
 
