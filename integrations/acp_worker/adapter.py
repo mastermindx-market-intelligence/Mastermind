@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import hashlib
+import inspect
 import json
 import re
 from collections.abc import Awaitable, Callable
@@ -49,17 +50,26 @@ class _TurnFrameGuard(ProbeClient):
         if session_id != self.session_id:
             self.poison("SESSION_MISMATCH")
             return False
-        if self._turn._phase == "setup":
-            return True
         if not self._active:
-            self.poison("CALLBACK_OUTSIDE_PROMPT")
-            return False
+            caller = inspect.currentframe()
+            caller = caller.f_back if caller is not None else None
+            setup_update = (
+                self._turn._phase == "setup"
+                and caller is not None
+                and (
+                    caller.f_code.co_name == "session_update"
+                    or caller.f_locals.get("method") == "session/update"
+                )
+            )
+            if not setup_update:
+                self.poison("CALLBACK_OUTSIDE_PROMPT")
+                return False
         return True
 
     def admit_update(self, update: Any) -> int:
         # Structural bounds remain in StrictFrameReader. The typed production
         # turn applies the phase/session-aware read-only policy below.
-        self._turn.validate_update(update)
+        self._turn.validate_update(update, commit=False)
         if self._turn._error:
             raise ValueError(self._turn._error)
         return 0

@@ -189,21 +189,23 @@ class AcpReadOnlyTurn:
             return
         self.validate_update(update)
 
-    def validate_update(self, update: Any) -> None:
+    def validate_update(self, update: Any, *, commit: bool = True) -> None:
         try:
             data = _document(update)
             kind = data.get("sessionUpdate")
             if kind == "agent_message_chunk":
                 content = data.get("content", {})
-                if content.get("type") != "text":
+                if self._phase != "prompt" or content.get("type") != "text":
                     raise _Refused("ACP_UNEXPECTED_CONTENT")
                 text = content.get("text")
                 if not isinstance(text, str):
                     raise _Refused("ACP_UNEXPECTED_CONTENT")
-                self._bytes += len(text.encode("utf-8"))
-                if self._bytes > _MAX_OUTPUT:
+                size = len(text.encode("utf-8"))
+                if self._bytes + size > _MAX_OUTPUT:
                     raise _Refused("ACP_OUTPUT_LIMIT")
-                self._chunks.append(text)
+                if commit:
+                    self._bytes += size
+                    self._chunks.append(text)
             elif kind == "config_option_update":
                 option = _model_option(data.get("configOptions"), self.profile.model_option_id)
                 if self._phase == "prompt" and option.get("currentValue") != self._model:
@@ -374,7 +376,7 @@ class AcpReadOnlyTurn:
                 raise _Refused("ACP_NON_SUCCESS_TERMINAL")
             if loop.time() > deadline or cancelled.is_set():
                 raise _Refused("ACP_LATE_TERMINAL")
-            text = "".join(self._chunks[-1:])
+            text = "".join(self._chunks)
             value = json.loads(text, object_pairs_hook=_object_pairs, parse_constant=_nonfinite)
             if not isinstance(value, dict):
                 raise _Refused("ACP_RESULT_NOT_OBJECT")
