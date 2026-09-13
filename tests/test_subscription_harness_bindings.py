@@ -15,7 +15,17 @@ from control_plane.subscription_harness_bindings import (
     load_bindings,
     validate_bindings,
 )
-from control_plane.subscription_provider_profiles import get_profile, load_profiles
+from control_plane.provider_protocols import (
+    PROVIDER_PROTOCOLS,
+    validate_provider_protocol,
+    ProviderProtocolError,
+)
+from control_plane.subscription_provider_profiles import (
+    ProviderProfileError,
+    get_profile,
+    load_profiles,
+    validate_profiles,
+)
 from control_plane.worker_adapter import adapter_descriptor
 
 
@@ -155,6 +165,43 @@ class SubscriptionHarnessBindingsTest(unittest.TestCase):
         row["model_classes"].append("nonexistent")
         with self.assertRaisesRegex(HarnessBindingError, "model classes disagree"):
             validate_bindings(mutated, profiles_document=self.profiles)
+
+    def test_openai_protocol_profile_binds_through_get_binding(self) -> None:
+        self.assertEqual(PROVIDER_PROTOCOLS, {"anthropic", "openai-chat", "responses"})
+        with self.assertRaises(ProviderProtocolError):
+            validate_provider_protocol("openai-compatible")
+        with self.assertRaises(ProviderProtocolError):
+            validate_provider_protocol("unknown-wire")
+
+        profiles = copy.deepcopy(self.profiles)
+        profiles["profiles"]["minimax-token-plan"]["protocol"] = "unknown-wire"
+        with self.assertRaisesRegex(ProviderProfileError, "unsupported protocol"):
+            validate_profiles(profiles)
+
+        profiles = copy.deepcopy(self.profiles)
+        openai_row = copy.deepcopy(profiles["profiles"]["minimax-token-plan"])
+        openai_row["protocol"] = "openai-chat"
+        openai_row["base_url"] = "https://api.minimax.io/v1"
+        profiles["profiles"]["minimax-openai-chat-plan"] = openai_row
+        validate_profiles(profiles)
+        bindings = copy.deepcopy(self.raw)
+        row = copy.deepcopy(bindings["bindings"]["minimax-token-plan.openai-compatible"])
+        row["profile_id"] = "minimax-openai-chat-plan"
+        row["protocol"] = "openai-chat"
+        row["endpoint"] = {"source": "profile"}
+        bindings["bindings"]["minimax-openai-chat-plan.openai-chat"] = row
+        binding = get_binding(
+            "minimax-openai-chat-plan.openai-chat",
+            document=bindings,
+            profiles_document=profiles,
+        )
+        profile = get_profile("minimax-openai-chat-plan", document=profiles)
+        self.assertEqual(binding.protocol, "openai-chat")
+        self.assertEqual(binding.effective_base_url, profile.base_url)
+
+        row["protocol"] = "unknown-wire"
+        with self.assertRaisesRegex(HarnessBindingError, "protocol is unsupported"):
+            validate_bindings(bindings, profiles_document=profiles)
 
     def test_catalog_is_source_disarmed(self) -> None:
         for binding_id in self.catalog["bindings"]:

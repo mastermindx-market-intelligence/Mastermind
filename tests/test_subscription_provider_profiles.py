@@ -59,8 +59,11 @@ def test_profile_document_carrying_adapter_id_is_rejected():
 
 def test_profile_protocols_are_plan_declared_and_fail_closed():
     catalog = copy.deepcopy(load_profiles())
-    catalog["profiles"]["glm-coding-plan"]["protocol"] = "openai-compatible"
+    catalog["profiles"]["glm-coding-plan"]["protocol"] = "openai-chat"
     validate_profiles(catalog)
+    catalog["profiles"]["glm-coding-plan"]["protocol"] = "openai-compatible"
+    with pytest.raises(ProviderProfileError, match="unsupported protocol"):
+        validate_profiles(catalog)
     catalog["profiles"]["glm-coding-plan"]["protocol"] = "unknown-wire"
     with pytest.raises(ProviderProfileError, match="unsupported protocol"):
         validate_profiles(catalog)

@@ -14,9 +14,10 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
+from control_plane.provider_protocols import PROVIDER_PROTOCOLS as _ALLOWED_PROTOCOLS
+
 SCHEMA = "mastermind.subscription_provider_profiles/v1"
 DEFAULT_PROFILES_PATH = Path(__file__).resolve().parents[1] / "config" / "subscription_provider_profiles.v1.json"
-_ALLOWED_PROTOCOLS = {"anthropic", "openai-compatible"}
 _ALLOWED_MODEL_CLASSES = {"routine", "hard", "fast", "subagent"}
 _FORBIDDEN_HARNESS_FIELDS = frozenset({"adapter_id", "harness_id"})
 

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import urlparse
 
+from control_plane.provider_protocols import PROVIDER_PROTOCOLS as _ALLOWED_PROTOCOLS
 from control_plane.subscription_provider_profiles import (
     SubscriptionProviderProfile,
     get_profile,
@@ -25,7 +26,6 @@ DEFAULT_BINDINGS_PATH = (
     / "config"
     / "subscription_harness_bindings.v1.json"
 )
-_ALLOWED_PROTOCOLS = {"anthropic", "responses", "openai-chat"}
 _ALLOWED_STATES = {"SPEC_ONLY", "BUILT_NOT_PROVEN", "PROVEN_LIVE"}
 _REQUIRED_GATES = (
     "adapter_implemented",
