@@ -121,11 +121,11 @@ class WorkerCraftTest(unittest.TestCase):
     def test_role_resolution_uses_structured_fields_not_objective(self) -> None:
         self.assertEqual(resolve_craft_role({"department": "product-design", "task_kind": "implementation"}), "designer")
         self.assertEqual(resolve_craft_role({"department": "frontend", "task_kind": "implementation"}), "frontend")
-        self.assertEqual(resolve_craft_nole({"department": "x", "task_kind": "research"}), "researcher")
-        self.assertEqual(resolve_craft_nole({"department": "x", "task_kind": "tests"}), "verifier")
+        self.assertEqual(resolve_craft_role({"department": "x", "task_kind": "research"}), "researcher")
+        self.assertEqual(resolve_craft_role({"department": "x", "task_kind": "tests"}), "verifier")
         self.assertEqual(resolve_craft_role({"department": "x", "task_kind": "implementation"}), "backend")
         self.assertEqual(resolve_craft_role({"department": "frontend", "task_kind": "implementation", "orchestration": {"role": "plan"}}), "orchestrator")
-        self.assertEqual(resolve_craft_nole({"department": "frontend", "task_kind": "implementation"}, fixed_role="reviewer"), "reviewer")
+        self.assertEqual(resolve_craft_role({"department": "frontend", "task_kind": "implementation"}, fixed_role="reviewer"), "reviewer")
         with self.assertRaisesRegex(CraftPromptError, "craft_role_invalid"):
             resolve_craft_role({"department": "frontend"}, fixed_role="anything")
 
