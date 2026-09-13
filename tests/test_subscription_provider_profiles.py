@@ -53,11 +53,22 @@ def test_profile_document_carrying_adapter_id_is_rejected():
     catalog = load_profiles()
     assert "adapter_id" not in catalog
     catalog = copy.deepcopy(catalog)
-    catalog["adapter_id"] = "claude-compatible-subscription"
+    catalog["adapter_id"] = "example-adapter"
     with pytest.raises(ProviderProfileError, match="must not name an adapter"):
         validate_profiles(catalog)
     catalog = _catalog()
-    catalog["profiles"]["glm-coding-plan"]["adapter_id"] = "claude-compatible-subscription"
+    catalog["profiles"]["glm-coding-plan"]["adapter_id"] = "example-adapter"
+    with pytest.raises(ProviderProfileError, match="must not name an adapter"):
+        validate_profiles(catalog)
+
+
+def test_harness_id_is_rejected_at_document_and_row_levels():
+    catalog = _catalog()
+    catalog["harness_id"] = "example-harness"
+    with pytest.raises(ProviderProfileError, match="must not name an adapter"):
+        validate_profiles(catalog)
+    catalog = _catalog()
+    catalog["profiles"]["glm-coding-plan"]["harness_id"] = "example-harness"
     with pytest.raises(ProviderProfileError, match="must not name an adapter"):
         validate_profiles(catalog)
 
@@ -85,6 +96,7 @@ def test_profile_protocols_are_plan_declared_and_fail_closed():
         (lambda catalog: catalog["profiles"]["glm-coding-plan"].__setitem__("api_key", "sk-test"), r"profiles\.glm-coding-plan\.api_key: unknown key"),
         (lambda catalog: catalog["profiles"]["glm-coding-plan"].__setitem__("account", "acct-1"), r"profiles\.glm-coding-plan\.account: unknown key"),
         (lambda catalog: catalog["profiles"]["glm-coding-plan"].__setitem__("authority", "override"), r"profiles\.glm-coding-plan\.authority: unknown key"),
+        (lambda catalog: catalog["profiles"]["glm-coding-plan"].__setitem__("notes", ["plan note"]), r"profiles\.glm-coding-plan\.notes: unknown key"),
         (lambda catalog: catalog["profiles"]["glm-coding-plan"]["quota_profile"].__setitem__("api_key", "sk-test"), r"profiles\.glm-coding-plan\.quota_profile\.api_key: unknown key"),
         (lambda catalog: catalog["profiles"]["glm-coding-plan"]["quota_profile"].__setitem__("account", "acct-1"), r"profiles\.glm-coding-plan\.quota_profile\.account: unknown key"),
         (lambda catalog: catalog["profiles"]["glm-coding-plan"]["quota_profile"].__setitem__("authority", "quota-admin"), r"profiles\.glm-coding-plan\.quota_profile\.authority: unknown key"),
@@ -142,6 +154,10 @@ def test_usage_policy_cannot_omit_or_weaken_baseline_fences():
     catalog["profiles"]["glm-coding-plan"]["usage_policy"]["production_backend_allowed"] = True
     with pytest.raises(ProviderProfileError, match=r"production_backend_allowed is unsafe"):
         validate_profiles(catalog)
+    catalog = _catalog()
+    catalog["profiles"]["glm-coding-plan"]["usage_policy"]["supported_harness_required"] = False
+    with pytest.raises(ProviderProfileError, match=r"supported_harness_required is unsafe"):
+        validate_profiles(catalog)
 
 
 @pytest.mark.parametrize(
@@ -156,6 +172,9 @@ def test_usage_policy_cannot_omit_or_weaken_baseline_fences():
         "not-a-url",
         "https://api.z.ai/foo/../anthropic",
         "https://api.z.ai/foo/%2e%2e/anthropic",
+        "https://api.z.ai/./anthropic",
+        "https://api.z.ai//anthropic",
+        "https://api.z.ai/api%2Fanthropic",
     ],
 )
 def test_base_url_rejects_query_fragment_userinfo_and_malformed_forms(base_url):
@@ -185,8 +204,25 @@ def test_oversized_strings_are_rejected():
     with pytest.raises(ProviderProfileError, match="invalid"):
         validate_profiles(catalog)
     catalog = _catalog()
-    catalog["profiles"]["glm-coding-plan"]["notes"] = ["n" * 257]
+    catalog["profiles"]["glm-coding-plan"]["protocol"] = "p" * 257
     with pytest.raises(ProviderProfileError, match="exceeds string bounds"):
+        validate_profiles(catalog)
+
+
+@pytest.mark.parametrize("flag", [1, 0, "true", "false", None])
+def test_autonomous_allowed_rejects_non_bool(flag):
+    catalog = _catalog()
+    catalog["profiles"]["glm-coding-plan"]["autonomous_allowed"] = flag
+    with pytest.raises(ProviderProfileError, match=r"autonomous_allowed must be a bool"):
+        validate_profiles(catalog)
+
+
+@pytest.mark.parametrize("key", ["single_user_only", "payg_recommended_for_production"])
+@pytest.mark.parametrize("flag", [1, 0, "true", "false", None])
+def test_optional_policy_flags_reject_non_bool(key, flag):
+    catalog = _catalog()
+    catalog["profiles"]["glm-coding-plan"]["usage_policy"][key] = flag
+    with pytest.raises(ProviderProfileError, match=rf"{key} must be a bool"):
         validate_profiles(catalog)
 
 

@@ -28,7 +28,6 @@ _FORBIDDEN_HARNESS_FIELDS = frozenset({"adapter_id", "harness_id"})
 
 _MAX_STRING_CHARS = 256
 _MAX_MAP_KEYS = 32
-_MAX_LIST_ITEMS = 32
 _MAX_BASE_URL_PATH_CHARS = 128
 
 _DOCUMENT_REQUIRED = frozenset({"schema", "verified_at", "profiles"})
@@ -48,7 +47,7 @@ _PROFILE_REQUIRED = frozenset({
     "activation_gate",
     "usage_policy",
 })
-_PROFILE_ALLOWED = _PROFILE_REQUIRED | frozenset({"notes", "metadata"})
+_PROFILE_ALLOWED = _PROFILE_REQUIRED | frozenset({"metadata"})
 
 _QUOTA_ALLOWED = frozenset({"provider", "product", "tier"})
 _MODEL_ENTRY_ALLOWED = frozenset({"id"})
@@ -182,11 +181,18 @@ def _validate_base_url(value: Any, path: str) -> str:
         raise ProviderProfileError(f"{path} has invalid base URL") from exc
     userinfo = parsed.username is not None or parsed.password is not None or "@" in parsed.netloc
     raw_path = parsed.path or ""
-    if any(unquote(segment) == ".." for segment in raw_path.split("/")):
+    segments = raw_path.split("/")
+    if any(unquote(segment) == ".." for segment in segments):
+        _raise(f"{path} has invalid base URL")
+    if any(unquote(segment) == "." for segment in segments):
+        _raise(f"{path} has invalid base URL")
+    if "//" in raw_path or "%2F" in raw_path.upper():
         _raise(f"{path} has invalid base URL")
     normalized = "" if not raw_path else posixpath.normpath(raw_path)
     if normalized == ".":
         normalized = ""
+    if raw_path != normalized:
+        _raise(f"{path} has invalid base URL")
     if (
         parsed.scheme != "https"
         or not parsed.hostname
@@ -202,14 +208,6 @@ def _validate_base_url(value: Any, path: str) -> str:
 
 def _validate_metadata(value: Any, path: str) -> Mapping[str, Any]:
     return _closed_mapping(value, path, _METADATA_ALLOWED, required=frozenset())
-
-
-def _validate_notes(value: Any, path: str) -> list[str]:
-    if type(value) is not list:
-        _raise(f"{path} must be a list")
-    if not value or len(value) > _MAX_LIST_ITEMS:
-        _raise(f"{path} exceeds list bounds")
-    return [_exact_string(item, f"{path}[{index}]") for index, item in enumerate(value)]
 
 
 def _model_identifier(value: Any, path: str) -> str:
@@ -291,8 +289,6 @@ def _validate_row(profile_id: str, row: Any) -> Mapping[str, Any]:
         product=product,
     )
     _validate_usage_policy(mapping.get("usage_policy"), f"{path}.usage_policy")
-    if "notes" in mapping:
-        _validate_notes(mapping.get("notes"), f"{path}.notes")
     if "metadata" in mapping:
         _validate_metadata(mapping.get("metadata"), f"{path}.metadata")
     return mapping
