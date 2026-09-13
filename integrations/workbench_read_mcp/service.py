@@ -16,6 +16,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import socket
 import stat
 import sys
@@ -26,6 +27,7 @@ from integrations.business_mcp_auth.contracts import load_resource_policy
 from integrations.business_mcp_auth.jwks import BoundedJwksCache, HttpxJwksFetcher
 from integrations.business_mcp_auth.jwt_verifier import JwtAuthenticator
 from .app import ReadCaller
+from .deployment import validate_incoming_authority
 from .observer import ReadScope
 from .read_port import ProjectReadBinding
 from .runtime import (
@@ -40,6 +42,7 @@ MAX_CONFIG_BYTES = 64 * 1024
 MAX_POLICY_BYTES = 64 * 1024
 MAX_CONCURRENCY = 32
 MAX_TIMEOUT_SECONDS = 60.0
+_HOST_LABEL = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?")
 _CONFIG_KEYS = frozenset(
     {
         "schema",
@@ -176,8 +179,9 @@ def _incoming_authority(value: object) -> str:
         port = parsed.port
     except (TypeError, ValueError):
         _refuse()
+    hostname = parsed.hostname
     if (
-        not parsed.hostname
+        not hostname
         or port is None
         or not 1 <= port <= 65535
         or parsed.username is not None
@@ -185,6 +189,10 @@ def _incoming_authority(value: object) -> str:
         or parsed.path
         or parsed.query
         or parsed.fragment
+    ):
+        _refuse()
+    if ":" not in hostname and any(
+        _HOST_LABEL.fullmatch(label) is None for label in hostname.rstrip(".").split(".")
     ):
         _refuse()
     return value
@@ -486,6 +494,15 @@ async def _close_runtime(
             state.shutdown_outcome = ShutdownOutcome.CLEAN
 
 
+async def _rollback_runtime(
+    runtime: WorkbenchReadRuntime, config: ServiceConfig, state: ServiceState
+) -> None:
+    try:
+        await _close_runtime(runtime, config, state)
+    except (RuntimeCloseIncomplete, RuntimeCloseUncertain):
+        pass
+
+
 async def create_runtime(config: ServiceConfig) -> WorkbenchReadRuntime:
     policy_document = _secure_json(config.policy_file, maximum=MAX_POLICY_BYTES)
     try:
@@ -519,6 +536,7 @@ async def create_runtime(config: ServiceConfig) -> WorkbenchReadRuntime:
             max_concurrency=config.max_concurrency,
             io_timeout_seconds=config.io_timeout_seconds,
         )
+        validate_incoming_authority(runtime.services, config.incoming_authority)
     except BaseException as error:
         primary_error = error
     finally:
@@ -530,16 +548,24 @@ async def create_runtime(config: ServiceConfig) -> WorkbenchReadRuntime:
                     cleanup_errors.append(error)
     if cleanup_errors:
         if runtime is not None:
-            runtime.revoke()
-            try:
-                await runtime.aclose(timeout=config.close_timeout_seconds)
-            except BaseException:
-                pass
+            await _rollback_runtime(runtime, config, ServiceState())
         raise ServiceConfigurationError(
             "SERVICE_STARTUP_CLEANUP_UNCERTAIN"
         ) from cleanup_errors[0]
     if primary_error is not None:
-        raise primary_error
+        if runtime is not None:
+            rollback_state = ServiceState()
+            await _rollback_runtime(runtime, config, rollback_state)
+            if rollback_state.shutdown_outcome in (
+                ShutdownOutcome.RUNTIME_CLOSE_INCOMPLETE,
+                ShutdownOutcome.RUNTIME_CLOSE_UNCERTAIN,
+            ):
+                raise ServiceConfigurationError(
+                    "SERVICE_STARTUP_CLEANUP_UNCERTAIN"
+                ) from primary_error
+        if isinstance(primary_error, ServiceConfigurationError):
+            raise primary_error
+        _refuse()
     if runtime is None:
         _refuse()
     return runtime
@@ -586,18 +612,6 @@ def build_service_app(
     )
 
 
-async def _rollback_unserved_runtime(
-    runtime: WorkbenchReadRuntime, config: ServiceConfig, state: ServiceState
-) -> ShutdownOutcome | None:
-    if state.stopping:
-        return state.shutdown_outcome
-    try:
-        await _close_runtime(runtime, config, state)
-    except (RuntimeCloseIncomplete, RuntimeCloseUncertain):
-        pass
-    return state.shutdown_outcome
-
-
 async def run_service(config: ServiceConfig) -> int:
     """Run exactly one pre-bound loopback Uvicorn server and reconcile exit truth."""
 
@@ -608,12 +622,12 @@ async def run_service(config: ServiceConfig) -> int:
         try:
             sock = reserve_loopback_socket(config)
         except ServiceConfigurationError:
-            outcome = await _rollback_unserved_runtime(runtime, config, state)
-            if outcome in (
+            await _rollback_runtime(runtime, config, state)
+            if state.shutdown_outcome in (
                 ShutdownOutcome.RUNTIME_CLOSE_INCOMPLETE,
                 ShutdownOutcome.RUNTIME_CLOSE_UNCERTAIN,
             ):
-                return shutdown_exit_code(outcome)
+                return shutdown_exit_code(state.shutdown_outcome)
             raise
 
         state.socket_owned = True
@@ -646,7 +660,7 @@ async def run_service(config: ServiceConfig) -> int:
             except OSError:
                 socket_close_failed = True
         if not state.stopping:
-            await _rollback_unserved_runtime(runtime, config, state)
+            await _rollback_runtime(runtime, config, state)
         if socket_close_failed and state.shutdown_outcome in (None, ShutdownOutcome.CLEAN):
             state.shutdown_outcome = ShutdownOutcome.SERVER_FAILED
         if state.shutdown_outcome is None:
