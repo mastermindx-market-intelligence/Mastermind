@@ -32,8 +32,16 @@ BLOCK / RETURN_TO_CHAIRMAN
 STOP WITHOUT ACCEPTANCE
 ```
 
-7. When current authority permits, issue one explicit continuation, repair, or STOP edge on the same canonical carrier. Silence is never terminal.
-8. On terminal STOP, require reciprocal watcher shutdown and preserve `WATCH_STOP_FAILED` honestly.
+7. Fresh-read the exact carrier after the latest evidence-producing action and consume unseen opposite-side edges before adjudication. Watcher silence does not satisfy this read. When current authority permits, issue one explicit continuation, repair, or STOP edge on the same canonical carrier. Silence is never terminal.
+8. After terminal STOP, where a continuation source exists, remove only this side's exact child operation + carrier source from its approved continuation path. Require the counterpart to remove its own exact source and return any receipt required by the current contract; do not claim its cleanup without evidence. Do not directly mutate another session's continuation resource. If a watcher also serves a seat, principal, or sibling source, keep the aggregate resource active. If cleanup fails, report `WATCH_STOP_FAILED`, keep the child terminal, and suppress only the leftover terminal source within this side's authority. This STOP does not authorize a new child.
+
+## Evidence-to-decision boundary
+
+Inspect the evidence for the exact reviewed artifact, not only the returning worker's description. A `PASS` word, status label, or model summary is not independent proof. Missing or contradictory evidence is not acceptance: identify the missing fact and request the smallest in-scope repair or report the actual blocker. Preserve known effects and do not retry an `EFFECT_UNKNOWN` action to obtain a cleaner return.
+
+Apply the current protected review-reuse rule to reuse eligible immutable review evidence. A moving default branch alone does not require a new semantic review; current material-source comparison and integration proof remain separate obligations.
+
+When the child's work is finished but Sol still owns final review or release, explicitly STOP that child before continuing CEO-only work. The parent program may remain active. These checks summarize the loaded protected rules; they create no new verdict, authority, parser, lifecycle, or proof exemption.
 
 ## Output
 
@@ -44,10 +52,11 @@ capability delta
 major findings
 verdict
 same-carrier semantic edge or exact reason withheld
+exact child-source cleanup and independently active watcher sources
 next action / stop condition
 durable record updates owed
 ```
 
 ## Stop conditions
 
-Stop when exact head, carrier, current Attempt or writer, effect state, source law, or action-authoritative Sol target is ambiguous.
+Stop the affected action when exact head, carrier, current Attempt or writer, effect state, source law, or action-authoritative Sol target is ambiguous. Separately authorized, path-disjoint work may continue without changing the blocked operation, its owner, or an uncertain effect.
