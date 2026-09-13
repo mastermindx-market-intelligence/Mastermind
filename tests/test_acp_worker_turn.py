@@ -12,7 +12,6 @@ except ImportError:
 from control_plane.worker_execution_contract import WorkerLaunchSpec
 from integrations.acp_worker.adapter import _TurnFrameGuard
 from integrations.acp_worker.turn import AcpProfile, AcpReadOnlyTurn
-from scripts.ohf.acp_probe_boundary import ProbeClient
 
 
 @unittest.skipIf(acp is None, "optional ACP SDK absent; ACP capability is NOT qualified")
@@ -240,11 +239,116 @@ class AcpTurnTests(unittest.IsolatedAsyncioTestCase):
             if handlers:
                 await asyncio.wait_for(asyncio.gather(*tuple(handlers), return_exceptions=True), 1)
 
+    async def test_guarded_reader_streams_split_agent_message_json_object(self):
+        from acp.schema import (
+            AgentMessageChunk, InitializeResponse, Implementation,
+            NewSessionResponse, PromptResponse, SessionConfigOptionSelect,
+            SessionConfigSelectOption, TextContentBlock,
+        )
+        stopped = asyncio.Event()
+        handlers = set()
+
+        class Peer:
+            def on_connect(self, client):
+                self.client = client
+
+            async def initialize(self, **kwargs):
+                return InitializeResponse(protocol_version=acp.PROTOCOL_VERSION,
+                    agent_info=Implementation(name="fixture", version="1"))
+
+            async def new_session(self, **kwargs):
+                return NewSessionResponse(session_id="session-1", config_options=[
+                    SessionConfigOptionSelect(id="model", name="Model", category="model",
+                        type="select", current_value="model-a", options=[
+                            SessionConfigSelectOption(value="model-a", name="Model A")])])
+
+            async def prompt(self, session_id, prompt, **kwargs):
+                await self.client.session_update(session_id=session_id,
+                    update=AgentMessageChunk(session_update="agent_message_chunk",
+                        content=TextContentBlock(type="text", text='{"answer":')))
+                await self.client.session_update(session_id=session_id,
+                    update=AgentMessageChunk(session_update="agent_message_chunk",
+                        content=TextContentBlock(type="text", text="42}")))
+                return PromptResponse(stop_reason="end_turn")
+
+            async def cancel(self, session_id, **kwargs):
+                stopped.set()
+
+        async def handle(reader, writer):
+            task = asyncio.current_task()
+            handlers.add(task)
+            try:
+                await acp.run_agent(Peer(), writer, reader)
+            finally:
+                writer.close()
+                try:
+                    await writer.wait_closed()
+                except ConnectionResetError:
+                    pass
+                handlers.discard(task)
+
+        server = await asyncio.start_server(handle, "127.0.0.1", 0, limit=65536)
+        reader, writer = await asyncio.open_connection(
+            "127.0.0.1", server.sockets[0].getsockname()[1], limit=65536)
+        spec = WorkerLaunchSpec(run_id="run-1", job_id="JOB-1", worker_id="worker-1",
+            workspace_path=Path("/fixture"), run_dir=Path("/fixture-run"),
+            prompt="Return an answer.", result_schema_path=Path("/fixture-schema"),
+            authorities=("READ", "RESEARCH"), model="model-a", timeout_seconds=2,
+            cancel_grace_seconds=1)
+        driver = AcpReadOnlyTurn(AcpProfile(agent_name="fixture", agent_version="1"))
+        guard = _TurnFrameGuard(driver)
+
+        def validate(value):
+            if value != {"answer": 42}:
+                raise ValueError("invalid result")
+
+        try:
+            result = await asyncio.wait_for(driver.run(spec, writer, reader,
+                cancelled=asyncio.Event(), validate_output=validate, frame_guard=guard), 4)
+            self.assertEqual(result.error, None)
+            self.assertEqual(json.loads(result.output_json), {"answer": 42})
+            self.assertEqual(guard.violation, None)
+            self.assertFalse(driver.unsettled_tasks)
+        finally:
+            stopped.set()
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except ConnectionResetError:
+                pass
+            server.close()
+            await server.wait_closed()
+            if handlers:
+                await asyncio.wait_for(asyncio.gather(*tuple(handlers), return_exceptions=True), 1)
+
+    async def test_guarded_setup_agent_message_chunk_is_refused(self):
+        from acp.schema import AgentMessageChunk, TextContentBlock
+
+        turn = AcpReadOnlyTurn(AcpProfile(agent_name="fixture", agent_version="1"))
+        guard = _TurnFrameGuard(turn)
+        guard.bind_session("session-1")
+        await guard.session_update(session_id="session-1",
+            update=AgentMessageChunk(session_update="agent_message_chunk",
+                content=TextContentBlock(type="text", text="setup-preamble")))
+        self.assertIsNotNone(guard.violation or turn._error)
+        self.assertEqual(turn._chunks, [])
+
+    async def test_guarded_setup_request_permission_is_callback_outside_prompt(self):
+        turn = AcpReadOnlyTurn(AcpProfile(agent_name="fixture", agent_version="1"))
+        guard = _TurnFrameGuard(turn)
+        guard.bind_session("session-1")
+        response = await guard.request_permission(
+            session_id="session-1", tool_call={"toolCallId": "tool-1"},
+            options=[{"optionId": "allow", "kind": "allow_always", "name": "Allow"}])
+        self.assertEqual(response, {"outcome": {"outcome": "cancelled"}})
+        self.assertEqual(guard.violation, "CALLBACK_OUTSIDE_PROMPT")
+
     async def test_guarded_reader_rejects_unadmitted_and_wrong_session_traffic(self):
         from acp.schema import PlanUpdate, PlanUpdateMarkdown, ToolCallUpdate
 
         async def refused(update, *, session_id="session-1", phase="prompt"):
-            guard = ProbeClient()
+            guard = _TurnFrameGuard(AcpReadOnlyTurn(
+                AcpProfile(agent_name="fixture", agent_version="1")))
             guard.bind_session("session-1")
             if phase == "prompt":
                 guard.begin_prompt()
