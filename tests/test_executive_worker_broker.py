@@ -31,6 +31,7 @@ from control_plane.codex_worker import (
     WorkerResult,
     WorkerRunStatus,
 )
+from control_plane.worker_adapter import AdapterBindingError, close_reviewed_adapter
 from control_plane.worker_execution_contract import WorkerLaunchSpec
 from control_plane.executive_worker_broker import (
     BROKER_REQUEST_SCHEMA_VERSION,
@@ -236,7 +237,7 @@ def _fixture(tmp_path: Path):
             set(os.getgroups()) - {worker_gid}
         ),
     )
-    adapter = FakeAdapter()
+    adapter = close_reviewed_adapter(FakeAdapter(), "codex-cli")
     sweeper = FakeSweeper()
     broker = ExecutiveWorkerBroker(adapter, policy, sweeper)
     peer = PeerCredentials(uid=control_uid, gid=worker_gid, pid=100)
@@ -400,6 +401,58 @@ def test_broker_refuses_caller_label_versus_object_identity(tmp_path: Path):
         )
 
 
+def test_broker_refuses_foreign_class_claiming_reviewed_identity(tmp_path: Path):
+    broker, _adapter, sweeper, _peer, _spec = _fixture(tmp_path)
+
+    class Spoof:
+        adapter_id = "codex-cli"
+
+        def status(self, ref=None):
+            return None
+
+    with pytest.raises(WorkerBrokerError) as refused:
+        ExecutiveWorkerBroker(Spoof(), broker.policy, sweeper, adapter_id="codex-cli")
+    assert type(refused.value.__cause__) is AdapterBindingError
+    assert "reviewed implementation" in str(refused.value)
+
+
+def test_broker_reports_raising_binding_attribute_access_as_worker_broker_error(
+    tmp_path: Path,
+):
+    broker, _adapter, sweeper, _peer, _spec = _fixture(tmp_path)
+
+    class RaisingAdapterId:
+        @property
+        def adapter_id(self):
+            raise RuntimeError("adapter-id-boom")
+
+        def status(self, ref=None):
+            return None
+
+    with pytest.raises(WorkerBrokerError) as refused_id:
+        ExecutiveWorkerBroker(
+            RaisingAdapterId(), broker.policy, sweeper, adapter_id="codex-cli"
+        )
+    assert type(refused_id.value.__cause__) is AdapterBindingError
+    assert type(refused_id.value.__cause__.__cause__) is RuntimeError
+    assert "adapter-id-boom" in str(refused_id.value.__cause__.__cause__)
+
+    class RaisingStatus:
+        adapter_id = "codex-cli"
+
+        @property
+        def status(self):
+            raise RuntimeError("status-boom")
+
+    with pytest.raises(WorkerBrokerError) as refused_status:
+        ExecutiveWorkerBroker(
+            RaisingStatus(), broker.policy, sweeper, adapter_id="codex-cli"
+        )
+    assert type(refused_status.value.__cause__) is AdapterBindingError
+    assert type(refused_status.value.__cause__.__cause__) is RuntimeError
+    assert "status-boom" in str(refused_status.value.__cause__.__cause__)
+
+
 def test_broker_binds_real_codex_adapter_identity(tmp_path: Path):
     from control_plane.codex_worker import BinaryAttestation, CodexWorkerAdapter
 
@@ -433,6 +486,7 @@ def test_broker_binds_real_codex_adapter_identity(tmp_path: Path):
     )
     bound = ExecutiveWorkerBroker(adapter, broker.policy, sweeper)
     assert bound.adapter is adapter
+    assert type(bound.adapter) is CodexWorkerAdapter
     assert bound.adapter_id == "codex-cli"
     assert adapter.adapter_id == "codex-cli"
     assert callable(adapter.status)

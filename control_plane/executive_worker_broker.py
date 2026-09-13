@@ -1308,6 +1308,10 @@ class ExecutiveWorkerBroker:
             descriptor = bind_reviewed_adapter(adapter, adapter_id)
         except AdapterBindingError as exc:
             raise WorkerBrokerError(str(exc)) from exc
+        except Exception as exc:
+            raise WorkerBrokerError(
+                f"worker adapter {adapter_id!r} failed to bind"
+            ) from exc
         self.adapter = adapter
         self.adapter_id = descriptor.adapter_id
         self.policy = policy

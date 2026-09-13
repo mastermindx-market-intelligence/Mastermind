@@ -13,6 +13,7 @@ import pytest
 
 from control_plane import executive_worker_broker as broker_module
 from control_plane.codex_worker import BinaryAttestation
+from control_plane.worker_adapter import close_reviewed_adapter
 from control_plane.executive_orchestration_principal import (
     OSProcessCredentialObservation,
     ProviderHomeIdentityObservation,
@@ -348,7 +349,7 @@ def _fixture(tmp_path: Path, *, armed: bool = True, autonomy_guard=None):
 
     sweeper = _Sweeper()
     broker = ExecutiveWorkerBroker(
-        _SealedAdapter(),  # type: ignore[arg-type]
+        close_reviewed_adapter(_SealedAdapter(), "codex-cli"),  # type: ignore[arg-type]
         policy,
         sweeper,
         operator_adapter_factory=factory,
