@@ -52,7 +52,11 @@ from control_plane.codex_worker import (
     LaunchValidationStageError,
     ProcessIdentityError,
 )
-from control_plane.worker_adapter import WorkerExecutionAdapter, adapter_descriptor
+from control_plane.worker_adapter import (
+    AdapterBindingError,
+    WorkerExecutionAdapter,
+    bind_reviewed_adapter,
+)
 from control_plane.executive_orchestration_principal import (
     OSProcessCredentialObservation,
     ProviderHomeIdentityObservation,
@@ -1300,9 +1304,14 @@ class ExecutiveWorkerBroker:
         ]
         | None = None,
     ) -> None:
-        descriptor = adapter_descriptor(adapter_id)
-        if not descriptor.implemented:
-            raise WorkerBrokerError(f"worker adapter {adapter_id!r} is not implemented")
+        try:
+            descriptor = bind_reviewed_adapter(adapter, adapter_id)
+        except AdapterBindingError as exc:
+            raise WorkerBrokerError(str(exc)) from exc
+        except Exception as exc:
+            raise WorkerBrokerError(
+                f"worker adapter {adapter_id!r} failed to bind"
+            ) from exc
         self.adapter = adapter
         self.adapter_id = descriptor.adapter_id
         self.policy = policy
@@ -2761,12 +2770,7 @@ class ExecutiveWorkerBroker:
             elif state.terminal_error is not None:
                 status = "ERROR"
             else:
-                status_method = getattr(self.adapter, "status", None)
-                if not callable(status_method):
-                    raise BrokerStateError(
-                        f"worker adapter {self.adapter_id!r} does not expose status for an active run"
-                    )
-                status = await status_method(state.process_ref)
+                status = await self.adapter.status(state.process_ref)
             result["run"] = {
                 "run_id": run_id,
                 "status": status,
@@ -3440,6 +3444,8 @@ def _launch_spec_to_json(spec: WorkerLaunchSpec) -> dict[str, Any]:
 
 class RemoteCodexWorkerAdapter:
     """Control-side Codex adapter facade backed by the distinct-UID broker."""
+
+    adapter_id = "codex-cli"
 
     def __init__(
         self,
