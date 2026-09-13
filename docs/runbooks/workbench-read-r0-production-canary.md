@@ -194,8 +194,27 @@ A clean shutdown is exit 0. `RuntimeCloseIncomplete` is exit 3.
 post-bind/server or startup-cleanup failure uses bounded nonzero exit 5. No close
 uncertainty, Uvicorn-contained lifespan exception, socket-close failure or
 cancelled physical read may be rewritten as clean success, retried or rebound.
-The Uvicorn HTTP graceful bound and Runtime physical-I/O close bound are
-sequential owner bounds and may together approach twice the configured timeout.
+The Uvicorn HTTP graceful bound and Runtime physical-I/O close-classification
+bound are sequential owner bounds. They do **not** bound process lifetime.
+After `RuntimeCloseIncomplete`, CPython 3.12's `asyncio.run()` still drains its
+default executor and interpreter shutdown joins surviving threads. Exit 3 is
+therefore delivered only if physical work eventually finishes; a stuck read can
+prevent that exit indefinitely. No automatic kill, retry, replacement process,
+or claim that cancellation interrupted physical I/O follows from this source.
+
+Runtime-close-attempted and whole-lifespan-completed are separate service facts.
+SDK entry failure still closes the acquired Runtime; SDK exit failure and
+Uvicorn's force-exit/failed-lifespan flags cannot produce clean exit 0. Fallback
+close runs once, and socket closure requires descriptor readback. Runtime or
+socket acquisition with uncertain cleanup produces
+`SERVICE_STARTUP_CLEANUP_UNCERTAIN` / exit 5, never an ordinary pre-effect refusal.
+
+**P1 operational gate: NOT_ESTABLISHED.** Before installed/production acceptance,
+qualify the admitted supervisor's bounded stop/escalation behavior, actual process
+completion, no-orphan result, audit/root cleanup, and rollback owner. A missing
+process reply or close deadline is not a stopped process. Preserve and reconcile
+the same owner/process until its effect is known. This P0 limitation does not
+amend any higher-authority bounded-process acceptance requirement.
 
 ## Dedicated source environment
 
@@ -294,8 +313,67 @@ arm64/CPython3.12 real subprocess proof from the generated dedicated lock:
 pre-reserve the real loopback socket, start one configured service, perform signed
 MCP initialize/list/call against one harmless temporary selected-project file,
 verify exact output/audit behavior, then exercise clean and bounded adverse
-shutdown. This is source qualification only; the exact Mac Studio remains the
-separate P1 deployment target.
+shutdown. The adverse physical-read fixture retains an actual admitted
+descriptor operation until the real close attempt returns/raises, then releases
+its own finite hold. It proves incomplete classification and eventual exit 3,
+not a process deadline for stuck I/O. Real audit-file mode drift proves exit 4;
+clean shutdown proves exit 0; each completed child leaves its listener closed.
+The actual launcher is exercised, and an additional `python -I` subprocess from
+outside the checkout proves direct-script imports do not depend on `PYTHONPATH`.
+This is source qualification only; the exact Mac Studio remains the separate
+P1 deployment target.
+
+## Darwin dependency and repair qualification — September 13, 2026
+
+The dedicated lock was generated once by pip-tools 7.6.1 / pip 26.1.2 on the
+organization-authorized Admin-Mini, Darwin arm64 / CPython 3.12.13, after the
+previous ENOSPC attempt was reconciled. The new attempt finished exit 0 at
+16:44:19Z: 34 pinned packages, 825 SHA-256 hashes, and all seven frozen direct
+versions unchanged. Input SHA-256:
+`4939a866ca8afb5b70b56b134195df3975b0787cf005afc20e0dde0152a50315`.
+Lock: 72,656 bytes, SHA-256
+`16fe1dc1c7c7eb2af39d28c040e0b76149fe185520a214cf2e00a70ff7b9e496`.
+The generated header's `--no-index` rendering is a pip-tools comment artifact;
+the recorded resolver invocation used the explicit PyPI index and emitted no
+index/trusted-host directives. The immutable carrier retains the actual argv.
+
+The exact transferred bytes then passed a fresh `--require-hashes
+--only-binary=:all:` install and `pip check` on Mac-Studio at 16:48:58Z,
+Darwin arm64 / CPython 3.12.13, boot
+`ED37CEED-BE01-42EA-8F94-04A4C6C2C85F`. Worktree, environment and receipts were
+placed through the required external-SSD policy (volume UUID
+`7EE5D196-8BB6-4E6D-B1D7-AFEA5DEB172A`). The runtime environment stayed separate
+from the five-package pytest tooling overlay extracted with hashes from the
+repository gate lock; no broad repository or system package install occurred.
+
+Independent semantic review identified acquisition-cleanup uncertainty,
+SDK entry/exit and force-exit reconciliation, and the direct-script import
+boundary. Six discriminating regressions failed for those specific defects
+before repair. After repair, the complete service/process group passed 31 tests
+at 17:19:29Z, including real listener/JWT/MCP/read/audit/exit 0/3/4 checks.
+The complete repaired-source validation then passed in separate prescribed groups
+at 17:22:26Z: Executive 136 tests; Workbench 242 tests plus 86 subtests; shared
+authentication/executor 414 tests. All three commands exited 0. Earlier failed
+qualification logs remain retained: the long Unix-socket path setup, one
+non-reproduced readiness deadline, and a monolithic Executive 30 ms scheduling
+assumption. No production timeout was widened to make those checks pass.
+
+The tested implementation hashes are:
+
+| Path | SHA-256 |
+|---|---|
+| `integrations/workbench_read_mcp/service.py` | `380d8b62734eacc8a54b6ff128898b471fd895e84a9a4e820e1b774d48563e7d` |
+| `scripts/mastermind_workbench_read_server.py` | `7264fb1e78476ee28196305c10e575606cf7eac4082b2d76d0711a66b0500d25` |
+| `tests/workbench_read_mcp/test_service.py` | `c52436be12405e9c06ccf48ccfaa8d77537579552d0d5689b001311af09ac59a` |
+| `tests/workbench_read_mcp/test_service_process.py` | `b08e2ad2c905bdb318f6677defc4e356d28e85b64cd7c20d1538281068bd5895` |
+
+Qualification uses the dedicated interpreter, disables plugin autoload/cache and
+portfolio-only root conftest, and supplies the isolated test-tool overlay.
+Temporary Unix-socket fixtures use a short real directory on the same approved
+SSD to respect Darwin's pathname limit; no internal worktree fallback is used.
+These receipts establish source qualification only. Installation, actual approved
+seat/principal/app binding, bounded supervised process stop and production canary
+remain separate gates below.
 
 ## Canary admission: no values may be guessed
 

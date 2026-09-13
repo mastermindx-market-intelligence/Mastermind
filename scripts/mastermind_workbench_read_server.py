@@ -14,7 +14,14 @@ import sys
 
 def _run_configured_service(path: str) -> int:
     # Keep --describe usable under `python -S` without importing the optional
-    # MCP/auth serving stack.
+    # MCP/auth serving stack. Direct script execution (including python -I)
+    # must resolve only this launcher's own immutable checkout, not the cwd or
+    # a caller-supplied PYTHONPATH.
+    from pathlib import Path
+
+    source_root = str(Path(__file__).resolve().parents[1])
+    if not sys.path or sys.path[0] != source_root:
+        sys.path.insert(0, source_root)
     from integrations.workbench_read_mcp.service import run_configured_service
 
     return run_configured_service(path)

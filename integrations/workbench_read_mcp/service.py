@@ -126,6 +126,8 @@ class ServiceConfig:
 @dataclasses.dataclass
 class ServiceState:
     lifespan_started: bool = False
+    lifespan_completed: bool = False
+    runtime_close_attempted: bool = False
     socket_owned: bool = False
     stopping: bool = False
     shutdown_outcome: ShutdownOutcome | None = None
@@ -421,10 +423,15 @@ def reserve_loopback_socket(
     except BaseException as error:
         try:
             sock.close()
-        finally:
-            if isinstance(error, ServiceConfigurationError):
-                raise
-            raise ServiceConfigurationError("SERVICE_BIND_REFUSED") from None
+            if sock.fileno() != -1:
+                raise OSError("socket close was not established")
+        except BaseException as cleanup_error:
+            raise ServiceConfigurationError(
+                "SERVICE_STARTUP_CLEANUP_UNCERTAIN"
+            ) from cleanup_error
+        if isinstance(error, ServiceConfigurationError):
+            raise
+        raise ServiceConfigurationError("SERVICE_BIND_REFUSED") from None
 
 
 def is_ready(runtime: object, config: ServiceConfig, state: ServiceState) -> bool:
@@ -479,6 +486,9 @@ async def _close_runtime(
     runtime: WorkbenchReadRuntime, config: ServiceConfig, state: ServiceState
 ) -> None:
     state.stopping = True
+    if state.runtime_close_attempted:
+        return
+    state.runtime_close_attempted = True
     previous = state.shutdown_outcome
     runtime.revoke()
     try:
@@ -553,6 +563,10 @@ async def create_runtime(config: ServiceConfig) -> WorkbenchReadRuntime:
             "SERVICE_STARTUP_CLEANUP_UNCERTAIN"
         ) from cleanup_errors[0]
     if primary_error is not None:
+        if isinstance(primary_error, RuntimeCloseUncertain):
+            raise ServiceConfigurationError(
+                "SERVICE_STARTUP_CLEANUP_UNCERTAIN"
+            ) from primary_error
         if runtime is not None:
             rollback_state = ServiceState()
             await _rollback_runtime(runtime, config, rollback_state)
@@ -599,8 +613,15 @@ def build_service_app(
                     yield
                 finally:
                     await _close_runtime(runtime, config, state)
+            state.lifespan_completed = True
+        except BaseException:
+            if state.shutdown_outcome in (None, ShutdownOutcome.CLEAN):
+                state.shutdown_outcome = ShutdownOutcome.SERVER_FAILED
+            raise
         finally:
             state.stopping = True
+            if not state.runtime_close_attempted:
+                await _close_runtime(runtime, config, state)
 
     return Starlette(
         routes=[
@@ -618,6 +639,7 @@ async def run_service(config: ServiceConfig) -> int:
     runtime = await create_runtime(config)
     state = ServiceState()
     sock: socket.socket | None = None
+    server = None
     try:
         try:
             sock = reserve_loopback_socket(config)
@@ -674,16 +696,30 @@ async def run_service(config: ServiceConfig) -> int:
         except (RuntimeCloseIncomplete, RuntimeCloseUncertain):
             pass
         except BaseException:
-            state.shutdown_outcome = ShutdownOutcome.SERVER_FAILED
+            if state.shutdown_outcome in (None, ShutdownOutcome.CLEAN):
+                state.shutdown_outcome = ShutdownOutcome.SERVER_FAILED
     finally:
+        # Uvicorn can contain ASGI lifespan failures or skip shutdown on a
+        # second signal. Neither stopping admission nor Runtime close alone
+        # establishes successful completion of the whole SDK lifespan.
+        lifespan = getattr(server, "lifespan", None)
+        lifecycle_failed = (
+            not state.lifespan_completed
+            or bool(getattr(server, "force_exit", False))
+            or any(bool(getattr(lifespan, flag, False)) for flag in
+                   ("startup_failed", "shutdown_failed", "error_occurred"))
+        )
+        if lifecycle_failed and state.shutdown_outcome in (None, ShutdownOutcome.CLEAN):
+            state.shutdown_outcome = ShutdownOutcome.SERVER_FAILED
         state.socket_owned = False
         socket_close_failed = False
         if sock is not None and sock.fileno() >= 0:
             try:
                 sock.close()
+                socket_close_failed = sock.fileno() != -1
             except OSError:
                 socket_close_failed = True
-        if not state.stopping:
+        if not state.runtime_close_attempted:
             await _rollback_runtime(runtime, config, state)
         if socket_close_failed and state.shutdown_outcome in (None, ShutdownOutcome.CLEAN):
             state.shutdown_outcome = ShutdownOutcome.SERVER_FAILED

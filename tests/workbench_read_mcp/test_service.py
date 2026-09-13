@@ -172,3 +172,113 @@ def test_shutdown_outcomes_map_to_fixed_exit_truth() -> None:
     assert service.shutdown_exit_code(service.ShutdownOutcome.RUNTIME_CLOSE_INCOMPLETE) == 3
     assert service.shutdown_exit_code(service.ShutdownOutcome.RUNTIME_CLOSE_UNCERTAIN) == 4
     assert service.shutdown_exit_code(service.ShutdownOutcome.SERVER_FAILED) == 5
+
+
+def _configured_fixture(tmp_path):
+    import json
+    import time
+    project = tmp_path / "project"
+    audit = tmp_path / "audit"
+    project.mkdir(mode=0o700)
+    audit.mkdir(mode=0o700)
+    policy = {
+        "schema": "mastermind.business_mcp_auth_policy.v1",
+        "policy_id": "service.lifecycle.fixture",
+        "resource": "https://read.example.test/mcp",
+        "resource_metadata_url": "https://read.example.test/.well-known/oauth-protected-resource/mcp",
+        "issuer": "https://identity.read.example.test",
+        "authorization_servers": ["https://identity.read.example.test"],
+        "jwks_uri": "https://identity.read.example.test/jwks",
+        "required_scopes": ["workbench.read"],
+        "allowed_subject_digests": [HEX_A],
+        "allowed_algorithms": ["RS256"],
+        "clock_skew_seconds": 0,
+        "max_token_lifetime_seconds": 3600,
+        "jwks_cache_ttl_seconds": 60,
+        "unknown_kid_refresh_cooldown_seconds": 1,
+        "fetch_failure_backoff_seconds": 1,
+    }
+    policy_path = tmp_path / "policy.json"
+    policy_path.write_text(json.dumps(policy), encoding="ascii")
+    policy_path.chmod(0o600)
+    value = document()
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as candidate:
+        candidate.bind(("127.0.0.1", 0))
+        port = candidate.getsockname()[1]
+    value.update(policy_file=str(policy_path), project_root=str(project),
+                 audit_directory=str(audit), bind_port=port,
+                 incoming_authority=f"127.0.0.1:{port}", close_timeout_seconds=1.0)
+    value["lease"]["lease_expires_at_ms"] = (int(time.time()) + 600) * 1000
+    return service.parse_service_config(value)
+
+
+def test_runtime_acquisition_cleanup_uncertainty_is_not_configuration_refusal(monkeypatch, tmp_path):
+    import asyncio
+    selected = _configured_fixture(tmp_path)
+    def uncertain_open(**_kwargs):
+        raise service.RuntimeCloseUncertain("fixture acquisition cleanup")
+    monkeypatch.setattr(service.WorkbenchReadRuntime, "open", uncertain_open)
+    with pytest.raises(service.ServiceConfigurationError, match="^SERVICE_STARTUP_CLEANUP_UNCERTAIN$"):
+        asyncio.run(service.create_runtime(selected))
+
+
+def test_socket_acquisition_cleanup_uncertainty_is_not_bind_refusal(monkeypatch):
+    class UncertainSocket:
+        def set_inheritable(self, _value): pass
+        def get_inheritable(self): return False
+        def bind(self, _address): raise OSError("fixture bind refusal")
+        def close(self): raise OSError("fixture uncertain close")
+    monkeypatch.setattr(service.socket, "socket", lambda *_args: UncertainSocket())
+    with pytest.raises(service.ServiceConfigurationError, match="^SERVICE_STARTUP_CLEANUP_UNCERTAIN$"):
+        service.reserve_loopback_socket(service.parse_service_config(document()))
+
+
+@pytest.mark.parametrize("phase", ["enter", "exit", "force-exit"])
+def test_full_lifespan_failure_closes_runtime_once_and_never_reports_clean(monkeypatch, tmp_path, phase):
+    import asyncio
+    import os
+    from contextlib import asynccontextmanager
+    import uvicorn
+    selected = _configured_fixture(tmp_path)
+    real_create = service.create_runtime
+    real_build = service.build_service_app
+    acquired = {}
+    async def create_with_lifespan_failure(config):
+        runtime = await real_create(config)
+        acquired.update(runtime=runtime, fd=runtime.root_fd, closes=0)
+        real_close = runtime.aclose
+        async def counted_close(*, timeout):
+            acquired["closes"] += 1
+            await real_close(timeout=timeout)
+        monkeypatch.setattr(runtime, "aclose", counted_close)
+        return runtime
+    def build_with_lifespan_failure(runtime, config, state):
+        app = real_build(runtime, config, state)
+        real_run = runtime.server.session_manager.run
+        @asynccontextmanager
+        async def failing_lifespan():
+            if phase == "enter":
+                raise RuntimeError("fixture SDK entry failure")
+            async with real_run():
+                yield
+            if phase == "exit":
+                raise RuntimeError("fixture SDK exit failure")
+        monkeypatch.setattr(runtime.server.session_manager, "run", failing_lifespan)
+        return app
+    async def stop_after_start(server):
+        if phase == "force-exit":
+            server.force_exit = True
+    monkeypatch.setattr(service, "create_runtime", create_with_lifespan_failure)
+    monkeypatch.setattr(service, "build_service_app", build_with_lifespan_failure)
+    monkeypatch.setattr(uvicorn.Server, "main_loop", stop_after_start)
+    try:
+        result = asyncio.run(service.run_service(selected))
+        assert result == 5
+        assert acquired["closes"] == 1
+        with pytest.raises(OSError):
+            os.fstat(acquired["fd"])
+    finally:
+        # A RED entry-failure test still owns and must close its fixture runtime.
+        runtime = acquired.get("runtime")
+        if runtime is not None:
+            asyncio.run(runtime.aclose(timeout=1.0))

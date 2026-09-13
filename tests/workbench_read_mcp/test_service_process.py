@@ -25,20 +25,59 @@ SCRIPT = Path(__file__).resolve().parents[2] / "scripts/mastermind_workbench_rea
 
 
 CHILD_JWKS_FETCHER_SOURCE = (
-    "import base64\n"
-    "import sys\n"
-    "from integrations.business_mcp_auth.jwks import JWKS_TIMEOUT_SECONDS, MAX_JWKS_BYTES\n"
-    "from integrations.workbench_read_mcp import service\n"
-    "payload = base64.b64decode(sys.argv[2].encode('ascii'), validate=True)\n"
-    "class StaticFetcher:\n"
-    "    def __init__(self, policy): self.policy = policy\n"
-    "    async def fetch(self, *, url, timeout_seconds, max_bytes):\n"
-    "        if (url != self.policy.jwks_uri or timeout_seconds != JWKS_TIMEOUT_SECONDS\n"
-    "                or max_bytes != MAX_JWKS_BYTES):\n"
+    'import asyncio\n'
+    'import base64\n'
+    'import os\n'
+    'import runpy\n'
+    'import sys\n'
+    'import threading\n'
+    'from pathlib import Path\n'
+    'from integrations.business_mcp_auth.jwks import JWKS_TIMEOUT_SECONDS, MAX_JWKS_BYTES\n'
+    'from integrations.workbench_read_mcp import service\n'
+    'config_path, encoded_jwks, launcher_path, shutdown_case = sys.argv[1:]\n'
+    "payload = base64.b64decode(encoded_jwks.encode('ascii'), validate=True)\n"
+    'fixture_root = Path(config_path).parent\n'
+    'class StaticFetcher:\n'
+    '    def __init__(self, policy): self.policy = policy\n'
+    '    async def fetch(self, *, url, timeout_seconds, max_bytes):\n'
+    '        if (url != self.policy.jwks_uri or timeout_seconds != JWKS_TIMEOUT_SECONDS\n'
+    '                or max_bytes != MAX_JWKS_BYTES):\n'
     "            raise RuntimeError('fixture fetch contract mismatch')\n"
-    "        return payload\n"
-    "service.HttpxJwksFetcher = StaticFetcher\n"
-    "raise SystemExit(service.run_configured_service(sys.argv[1]))\n"
+    '        return payload\n'
+    'service.HttpxJwksFetcher = StaticFetcher\n'
+    "if shutdown_case == 'incomplete':\n"
+    '    close_attempt_finished = threading.Event()\n'
+    '    real_close_runtime = service._close_runtime\n'
+    '    async def close_runtime_with_completion(runtime, config, state):\n'
+    '        try:\n'
+    '            await real_close_runtime(runtime, config, state)\n'
+    '        finally:\n'
+    '            close_attempt_finished.set()\n'
+    '    service._close_runtime = close_runtime_with_completion\n'
+    '    real_create_runtime = service.create_runtime\n'
+    '    async def create_runtime_with_physical_work(config):\n'
+    '        runtime = await real_create_runtime(config)\n'
+    '        def physical_read():\n'
+    "            fd = os.open('source.txt', os.O_RDONLY | os.O_NOFOLLOW, dir_fd=runtime.root_fd)\n"
+    '            try:\n'
+    "                assert os.read(fd, 1024) == b'p0 subprocess sentinel\\n'\n"
+    "                (fixture_root / 'physical-started').write_text('started')\n"
+    '                # Retain actual descriptor work until the real close attempt ends.\n'
+    '                # A bounded backstop fails the fixture if shutdown never arrives.\n'
+    "                assert close_attempt_finished.wait(5), 'close attempt did not finish'\n"
+    '            finally:\n'
+    '                os.close(fd)\n'
+    "                (fixture_root / 'physical-finished').write_text('finished')\n"
+    '        async def await_trigger():\n'
+    "            while not (fixture_root / 'start-physical').exists():\n"
+    '                await asyncio.sleep(0.01)\n'
+    '            await runtime.run_io(physical_read)\n'
+    '        task = asyncio.create_task(await_trigger())\n'
+    '        task.add_done_callback(lambda done: None if done.cancelled() else done.exception())\n'
+    '        return runtime\n'
+    '    service.create_runtime = create_runtime_with_physical_work\n'
+    "sys.argv = [launcher_path, '--config', config_path]\n"
+    "runpy.run_path(launcher_path, run_name='__main__')\n"
 )
 
 
@@ -107,7 +146,13 @@ def test_launcher_delegates_exact_config_path_and_preserves_service_exit(monkeyp
 
 
 
-def test_real_subprocess_listener_signed_initialize_list_call_and_clean_shutdown(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("shutdown_case", "expected_exit"),
+    [("clean", 0), ("incomplete", 3), ("audit-drift", 4)],
+)
+def test_real_subprocess_launcher_signed_initialize_list_call_and_shutdown(
+    tmp_path: Path, shutdown_case: str, expected_exit: int
+) -> None:
     if os.name == "nt":
         pytest.skip("P0 service target and graceful signal proof are POSIX/Darwin")
 
@@ -169,7 +214,7 @@ def test_real_subprocess_listener_signed_initialize_list_call_and_clean_shutdown
         "incoming_authority": f"127.0.0.1:{port}",
         "max_concurrency": 2,
         "io_timeout_seconds": 5.0,
-        "close_timeout_seconds": 5.0,
+        "close_timeout_seconds": 0.1 if shutdown_case == "incomplete" else 5.0,
         "lease": {
             "expected_subject_digest": subject_digest,
             "expected_client_ref": client_ref,
@@ -195,13 +240,15 @@ def test_real_subprocess_listener_signed_initialize_list_call_and_clean_shutdown
     child.write_text(CHILD_JWKS_FETCHER_SOURCE, encoding="ascii")
     encoded_jwks = base64.b64encode(jwks_payload).decode("ascii")
     process = subprocess.Popen(
-        [sys.executable, "-B", str(child), str(config_path), encoded_jwks],
+        [sys.executable, "-B", str(child), str(config_path), encoded_jwks, str(SCRIPT), shutdown_case],
         cwd=repo_root,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
     )
     client = httpx.Client(base_url=f"http://127.0.0.1:{port}", timeout=1.0)
+    failure: BaseException | None = None
+    last_ready_status: int | None = None
     try:
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
@@ -209,7 +256,8 @@ def test_real_subprocess_listener_signed_initialize_list_call_and_clean_shutdown
                 stdout, stderr = process.communicate()
                 pytest.fail(f"service exited before ready: {process.returncode}\n{stdout}\n{stderr}")
             try:
-                if client.get("/readyz").status_code == 200:
+                last_ready_status = client.get("/readyz").status_code
+                if last_ready_status == 200:
                     break
             except httpx.TransportError:
                 pass
@@ -305,6 +353,20 @@ def test_real_subprocess_listener_signed_initialize_list_call_and_clean_shutdown
         )
         for private_value in (token, sentinel, str(project), subject, client_id):
             assert private_value not in audit_text
+
+        if shutdown_case == "incomplete":
+            (tmp_path / "start-physical").write_text("start", encoding="ascii")
+            deadline = time.monotonic() + 5
+            while not (tmp_path / "physical-started").exists():
+                assert process.poll() is None, "process exited before physical read started"
+                assert time.monotonic() < deadline, "physical read did not start"
+                time.sleep(0.01)
+        elif shutdown_case == "audit-drift":
+            audit_path.chmod(0o640)
+        shutdown_started = time.monotonic()
+    except BaseException as error:
+        failure = error
+        raise
     finally:
         client.close()
         if process.poll() is None:
@@ -315,5 +377,28 @@ def test_real_subprocess_listener_signed_initialize_list_call_and_clean_shutdown
             process.kill()
             stdout, stderr = process.communicate(timeout=5)
             pytest.fail(f"service failed to drain after SIGTERM\n{stdout}\n{stderr}")
-    assert process.returncode == 0, f"stdout={stdout}\nstderr={stderr}"
+        if failure is not None:
+            failure.add_note(
+                f"last_ready_status={last_ready_status}; exit={process.returncode}\n"
+                f"stdout={stdout}\nstderr={stderr}"
+            )
+    assert process.returncode == expected_exit, f"stdout={stdout}\nstderr={stderr}"
+    assert time.monotonic() - shutdown_started < 10
     assert token not in stdout + stderr
+    if shutdown_case == "incomplete":
+        assert (tmp_path / "physical-finished").read_text() == "finished"
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as disconnected:
+        disconnected.settimeout(1)
+        assert disconnected.connect_ex(("127.0.0.1", port)) != 0
+
+
+def test_direct_launcher_imports_owned_source_without_pythonpath(tmp_path: Path) -> None:
+    environment = {name: value for name, value in os.environ.items()
+                   if name not in {"PYTHONPATH", "PYTHONHOME"}}
+    completed = subprocess.run(
+        [sys.executable, "-I", "-B", str(SCRIPT), "--config", str(tmp_path / "absent.json")],
+        cwd=tmp_path, env=environment, capture_output=True, text=True, timeout=10,
+    )
+    assert completed.returncode == 2, completed.stderr
+    assert completed.stderr.strip() == "SERVICE_CONFIGURATION_REFUSED"
+    assert completed.stdout == ""
