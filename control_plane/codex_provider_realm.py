@@ -12,6 +12,8 @@ import json
 import os
 import re
 import stat
+import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import urlparse
@@ -98,6 +100,26 @@ class CodexProviderRealm:
         return credential
 
 
+def _has_macos_acl(path: Path) -> bool:
+    if sys.platform != "darwin":
+        return False
+    try:
+        completed = subprocess.run(
+            ["/usr/bin/stat", "-f", "%Sp", os.fspath(path)],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        raise ProviderRealmError("provider credential is unavailable") from None
+    if completed.returncode != 0:
+        raise ProviderRealmError("provider credential is unavailable")
+    return completed.stdout.strip().endswith("+")
+
+
 def load_private_provider_credential(
     provider_home: Path | str,
     *,
@@ -110,7 +132,11 @@ def load_private_provider_credential(
     path = home / PROVIDER_CREDENTIAL_FILENAME
     try:
         before = path.lstat()
-        if stat.S_ISLNK(before.st_mode) or not stat.S_ISREG(before.st_mode):
+        if (
+            stat.S_ISLNK(before.st_mode)
+            or not stat.S_ISREG(before.st_mode)
+            or _has_macos_acl(path)
+        ):
             raise ProviderRealmError("provider credential is unavailable")
         flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
         descriptor = os.open(path, flags)
