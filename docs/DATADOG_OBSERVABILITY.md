@@ -20,11 +20,15 @@ The host installer is `scripts/install_datadog_vps.sh`; it configures:
 - Single Step Instrumentation for Python APM;
 - journald collection scoped to `mastermind.service`;
 - unified `env`, `service`, `team`, and `role` tags;
-- log/trace correlation for `service:mastermind-api`;
+- shared `service` / `env` identity across APM and journald logs;
 - release correlation through `DD_VERSION=<exact deployed Git SHA>`.
 
 It deliberately does not enable AppSec, IAST, profiling, or another control plane.
 Observability remains telemetry/advisory and must not affect portfolio execution.
+
+This slice does **not** claim per-request trace-to-log correlation. The current Uvicorn/journald
+format does not emit `dd.trace_id` / `dd.span_id`; adding those fields is a separate application
+logging capability and must be proven on real request logs before being called live.
 ## Installation
 
 Run only on the authoritative VPS, as root, with an API key from the canonical Datadog org:
