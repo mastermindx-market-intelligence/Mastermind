@@ -24,6 +24,28 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts/mastermind_workbench_read_server.py"
 
 
+CHILD_JWKS_FETCHER_SOURCE = (
+    "import base64\n"
+    "import sys\n"
+    "from integrations.business_mcp_auth.jwks import JWKS_TIMEOUT_SECONDS, MAX_JWKS_BYTES\n"
+    "from integrations.workbench_read_mcp import service\n"
+    "payload = base64.b64decode(sys.argv[2].encode('ascii'), validate=True)\n"
+    "class StaticFetcher:\n"
+    "    def __init__(self, policy): self.policy = policy\n"
+    "    async def fetch(self, *, url, timeout_seconds, max_bytes):\n"
+    "        if (url != self.policy.jwks_uri or timeout_seconds != JWKS_TIMEOUT_SECONDS\n"
+    "                or max_bytes != MAX_JWKS_BYTES):\n"
+    "            raise RuntimeError('fixture fetch contract mismatch')\n"
+    "        return payload\n"
+    "service.HttpxJwksFetcher = StaticFetcher\n"
+    "raise SystemExit(service.run_configured_service(sys.argv[1]))\n"
+)
+
+
+def test_child_jwks_fixture_source_compiles() -> None:
+    compile(CHILD_JWKS_FETCHER_SOURCE, "<workbench-process-jwks-fixture>", "exec")
+
+
 def test_describe_remains_dependency_free_and_truthful() -> None:
     completed = subprocess.run(
         [sys.executable, "-S", str(SCRIPT), "--describe"],
@@ -170,23 +192,7 @@ def test_real_subprocess_listener_signed_initialize_list_call_and_clean_shutdown
     # the real cache/JWT/policy path while avoiding privileged port 443 or a
     # provider/tunnel merely to host a source-test JWKS fixture.
     child = tmp_path / "run_service_fixture.py"
-    child.write_text(
-        """import base64\n"
-        "import sys\n"
-        "from integrations.business_mcp_auth.jwks import JWKS_TIMEOUT_SECONDS, MAX_JWKS_BYTES\n"
-        "from integrations.workbench_read_mcp import service\n"
-        "payload = base64.b64decode(sys.argv[2].encode('ascii'), validate=True)\n"
-        "class StaticFetcher:\n"
-        "    def __init__(self, policy): self.policy = policy\n"
-        "    async def fetch(self, *, url, timeout_seconds, max_bytes):\n"
-        "        if (url != self.policy.jwks_uri or timeout_seconds != JWKS_TIMEOUT_SECONDS\n"
-        "                or max_bytes != MAX_JWKS_BYTES):\n"
-        "            raise RuntimeError('fixture fetch contract mismatch')\n"
-        "        return payload\n"
-        "service.HttpxJwksFetcher = StaticFetcher\n"
-        "raise SystemExit(service.run_configured_service(sys.argv[1]))\n""",
-        encoding="ascii",
-    )
+    child.write_text(CHILD_JWKS_FETCHER_SOURCE, encoding="ascii")
     encoded_jwks = base64.b64encode(jwks_payload).decode("ascii")
     process = subprocess.Popen(
         [sys.executable, "-B", str(child), str(config_path), encoded_jwks],
