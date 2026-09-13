@@ -1,4 +1,4 @@
-# Cortex R1 Fixed-Commit Business Canary V5.1 Implementation Plan
+# Cortex R1 Fixed-Commit Business Canary V5.4 Implementation Plan
 
 > **For agentic workers:** use `superpowers:subagent-driven-development` or
 > `superpowers:executing-plans` task by task. Checkboxes record evidence; they do not grant
@@ -56,21 +56,28 @@ preparation evidence only.
 ```text
 active_business_member_count = 1
 assigned_business_member_count = 1
-paid_seat_count >= 2
+paid_seat_capacity_count >= 2
 unassigned_paid_seat_count >= 1
 pending_invitation_count = 0
 pending_join_request_count = 0
 workspace_discovery_enabled = false
-verified_domain_auto_join_enabled = false
+automatically_accept_join_requests = false
+automatic_account_creation_state in {DISABLED, NOT_CONFIGURED}
+standalone_business_scim_or_tenant_provisioning_state = NOT_AVAILABLE_IN_STANDALONE_BUSINESS
 personal_workspace_merge = false
 ```
 
+- Every census predicate above is a separate owner-native observation. Discovery never proves join-
+  request acceptance; active members never prove assigned members; paid capacity never proves unused
+  seats; automatic account creation is separate from standalone-Business SCIM availability. A required
+  fact that the authenticated owner UI cannot expose is `NOT_OBSERVABLE / NOT_APPLIED`; do not infer it.
 - The owner/admin/canary principal identity digests must be identical. Two control cockpits must be
   distinct, outside the target Business workspace, and never receive marketplace effects.
-- Before START, seal `mastermind.cortex_c1_expected_action_context.v2` containing exact current
+- Before START, seal `mastermind.cortex_c1_expected_action_context.v3` containing exact current
   procedure, Skillpack, product/model, `workspace_identity_sha256`,
   `owner_principal_identity_sha256`, admin/canary/cockpit identities,
-  `control_cockpit_identity_sha256s`, and `browser_binding_identity_sha256`. The live trace embeds
+  `control_cockpit_identity_sha256s`, `browser_binding_identity_sha256`, and the exact owner-native
+  observation-contract canonical JSON digest. The live trace embeds
   it unchanged; the validator receives an independent file through `--expected-action-context` and
   returns `action_context_sha256`.
 - Every modifying action gets one attempt and same-surface readback. Lost response means
@@ -85,7 +92,13 @@ personal_workspace_merge = false
   `Installed` is forbidden. Every `CAPABILITY_READBACK` uses distinct
   `screenshot_capture_sha256` and `dom_capture_sha256` with provenance
   `OWNER_NATIVE_UI_CAPTURE` and `OWNER_NATIVE_ACCESSIBILITY_CAPTURE`.
-- Sol and Operator are Disabled, uninstalled, non-installable, and non-invokable before and after each probe.
+- Negative capability proof binds directly observed per-plugin policy/status, the sole-principal
+  installation state, installation affordance, invocation affordance, and included-app access/auth
+  state where applicable. App disablement never substitutes for plugin or skill unreachability.
+- Record only operation-owned install/invocation attempts. Do not invent organization-wide install,
+  invocation, non-canary, or automatic-install counts when the owner UI exposes no such counter.
+- Sol and Operator are Disabled, uninstalled, non-installable, and non-invokable before and after each
+  probe. Any required plugin fact that is unreadable is `NOT_OBSERVABLE / NOT_APPLIED`.
 - at most one operation-owned chat is permitted at every observable instant.
 - Each response uses public-web GitHub retrieval and exactly three references; autonomous private-repository access remains unproven.
 - Four bounded inference effects and four create/delete chat micro-transactions are real effects.
@@ -119,8 +132,11 @@ all valid entries are processed; imported plugins may begin `Available`; `Availa
 `Installed`; app access/authentication remains separate; skills-only plugins may need no app;
 marketplace deletion removes its imported entries; chat archive retains chats; per-chat deletion
 removes visible history and starts backend retention handling; MCP can create Desktop-only state.
-Accept either live label `Admin > Plugins` or `Workspace settings > Plugins`. A label difference is
-not authority. Material drift is `PLATFORM_CONTRACT_CHANGED / NOT_APPLIED`.
+Accept either live label `Admin > Plugins` or `Workspace settings > Plugins`. Separately read
+workspace discovery, automatic join-request acceptance, automatic account creation, and standalone-
+Business SCIM/tenant-provisioning availability; no one field aliases another. A label difference is
+not authority. Missing owner-native observability is `NOT_OBSERVABLE / NOT_APPLIED`; material drift is
+`PLATFORM_CONTRACT_CHANGED / NOT_APPLIED`.
 
 ## Protected Four-Selection Fixture and Normalized Live Oracle
 
@@ -163,13 +179,14 @@ External release artifact identities:
 normalized oracle SHA-256 = 1530dbe663fd707e8e431df57d289af3f3bba9786ed14ed12fae34d5a82223fe
 offline verifier SHA-256 = 491a28f8637484d3f780b0203a8b9bb5bec97417da6fa11a0f5f1a8cf4b2f107
 verifier tests SHA-256 = 4175d99ecc290410f99db35eab7e857627bec1c588468332fccb8ee2e47783c7
-canary trace validator SHA-256 = 4c6ff9e692c8e43f0f1a0dc5a2688b61c5c24ea7c683d6b9d69d58212a205f0a
-trace tests SHA-256 = a92deb5b27bc1c5c27e2623c6b4be30215a93cc659b1b14ad9632a96d5f9331a
+canary trace validator SHA-256 = 33d2c293645f591e9caaebc01f9d33afd19d7b4b54edb61c21ba2ad4d0416102
+trace tests SHA-256 = 701aa8d44b84cce9322a4c527c6fe526a725a271c2aea400286fd43e5cd8045a
 source-evidence builder `build_cortex_c1_public_source_evidence.py` SHA-256 = 0b9b4ea5174b07f148d07fd9ae75c88a088db2d0208934568c5c49aca022147c
 source-evidence builder tests SHA-256 = 64d80140a247453757ff83173070a79eefbb4b9172a885e8c4d04de2200c5e73
 current `mastermind.cortex_c1_public_source_evidence_examples.v2` examples SHA-256 = a35b7b6021dadeaab721656c33d33ad15011a5944949d8d1d0cb5ab20fcfec0d
-golden structural trace SHA-256 = 87fe423a2f0583c2e86335c5cc9a333d962eb4ccab3dd3e762fc7a4328b9c9a6
-golden action-context example SHA-256 = dde1ac7ff157616d829829dce8fa3958808b273a31f710a71a2b98267fe525ba
+golden structural trace SHA-256 = 5641f8b91b9ebd60604fe81d8166084dabf8cee21f3d1c67fc5a53f6cdc39341
+golden action-context example SHA-256 = 7e428796388aff9a78ce4b9cf6252977d9fb5f9107730d77a2bde10a8efbf708
+owner-native observation contract file SHA-256 = faa546de9072d0d41dec87b3fb9ec0f8141c801797af0ae90f6b63b83f504203
 ```
 
 The trace declares `VALIDATION_FIXTURE_ONLY`, enforces exact event-key schemas and external example
@@ -199,8 +216,11 @@ hidden mapping, or credential material. External evidence uses the already appro
   package commit/tree/manifests/fixture and absence of app, OAuth, MCP, hooks, agents, or credentials.
 - [ ] Reverify official platform predicates and actual owner UI; material drift fails closed.
 - [ ] Seal the independent expected action context and its `action_context_sha256`.
-- [ ] Prove the full single-user seat/member/invite/join/discovery/auto-join census, owner/admin/canary
-  equality, two outside controls, Personal workspace separation, browser binding, product, and model.
+- [ ] Prove separate owner-native active-member, assigned-member, paid-capacity, unassigned-seat,
+  invitation, join-request, discovery, automatic-acceptance, automatic-account-creation, and standalone-
+  Business SCIM/tenant-provisioning observations; then prove owner/admin/canary equality, two outside
+  controls, Personal workspace separation, browser binding, product, and model. Any unreadable required
+  observation is `NOT_OBSERVABLE / NOT_APPLIED`.
 - [ ] Read exact marketplace/source/policy/install/capability state and run a same-effect collision
   census. Missing authenticated browser surface is `WORKSPACE_SURFACE_UNAVAILABLE / NOT_APPLIED`.
 - [ ] Only after all gates pass, publish action-time START on issue #563. First authorized action is
@@ -208,8 +228,10 @@ hidden mapping, or credential material. External evidence uses the already appro
 
 ### Task 2: Capture complete workspace and marketplace preimage
 
-- [ ] Read workspace/account separation, membership capacity and assignments, pending invites/requests,
-  discovery/auto-join, control locations, Personal workspace, and all plausible Mastermind marketplaces.
+- [ ] Read workspace/account separation; active and assigned membership; paid capacity and unassigned
+  paid seats; pending invites/requests; discovery; automatic join-request acceptance; automatic account
+  creation; standalone-Business SCIM/tenant provisioning; control locations; Personal workspace; and
+  all plausible Mastermind marketplaces. Do not collapse, infer, or substitute these observations.
 - [ ] Classify exactly one state: `ABSENT`, `EXACT_FIXED_COMMIT`, `OLDER_FIXED_COMMIT`,
   `MUTABLE_BRANCH_OR_TAG`, `READBACK_INSUFFICIENT`, `DUPLICATE_AMBIGUOUS`, or `FOREIGN_OR_DRIFTED`.
   `OLDER_FIXED_COMMIT` returns `MARKETPLACE_REVISION_MIGRATION_OUT_OF_SCOPE / NOT_APPLIED`.
@@ -222,9 +244,11 @@ hidden mapping, or credential material. External evidence uses the already appro
   versions, sync state, and negative Sol/Operator capability with zero mutation.
 - [ ] `ABSENT`: after single-user isolation, import repository root at exact commit once. Lost response
   is `EFFECT_UNKNOWN`; read back on the same surface before anything else.
-- [ ] Immediately apply `CONTROL_POLICY_RECONCILE` once if needed, then require Sol and Operator
-  Disabled/uninstalled/non-installable/non-invokable. Wider availability, auto-install, app/auth setup,
-  unreadable state, or control-policy uncertainty stops and triggers only the pre-staged rollback.
+- [ ] Immediately apply `CONTROL_POLICY_RECONCILE` once if needed, then require owner-native Sol and
+  Operator policy `Disabled`, sole-principal installation `Uninstalled`, installation affordance
+  unavailable, and invocation affordance unavailable. Read included-app access/auth separately where
+  applicable. Wider availability, inferred app-to-plugin state, unreadable state, or policy uncertainty
+  stops as `NOT_OBSERVABLE / NOT_APPLIED` and triggers only the pre-staged rollback.
 - [ ] Refuse mutable, duplicate, foreign, unreadable, or older-fixed states. Never delete/re-import,
   create a second marketplace, change source selector, or press `Sync now`.
 
@@ -234,8 +258,10 @@ hidden mapping, or credential material. External evidence uses the already appro
 - [ ] Keep Cortex at the least-wide `Available` policy and install exactly once in the sole canary
   member context. Reject app connection, OAuth, external data, MCP, Desktop-only, or workspace-wide
   installation. Lost response is `EFFECT_UNKNOWN` on the same plugin/member.
-- [ ] Read back exact Cortex version/skill/web state and zero control-cockpit installation. Publish
-  installation evidence without claiming invocation or production proof.
+- [ ] Read back exact Cortex version/skill/web state plus directly observed per-control policy,
+  sole-principal installation state, installation affordance, invocation affordance, and included-app
+  access/auth state. Publish operation-owned attempt counts and installation evidence without inventing
+  global counters or claiming invocation or production proof.
 
 ### Task 5: Execute the primary case as one closed micro-transaction
 
@@ -264,8 +290,9 @@ averaging. Each case must close, delete, and pass post-cleanup readback before t
 - [ ] Reverse only operation-applied Cortex install/policy/control-policy effects; preserve pre-existing
   state. For `ABSENT`, delete only the sole operation-created exact marketplace after zero-consumer
   proof. Any overreach or uncertainty is `ROLLBACK_INCOMPLETE`.
-- [ ] Prove final marketplace, policies, installations, negative controls, membership/discoverability,
-  Personal workspace, control cockpits, and visible conversation state equal preimage.
+- [ ] Prove final marketplace, policies, sole-principal installations and affordances, included-app
+  state, active/assigned membership, paid/unassigned seats, each admission control, Personal workspace,
+  control cockpits, operation-owned attempt ledger, and visible conversation state equal preimage.
 - [ ] A non-effecting reviewer recomputes action context, all hashes, source gates, effect classifications,
   conversation lifecycle, exact event schemas, rollback, and claim ceiling without repeating effects.
 - [ ] Owner closeout may exceed the structural ceiling only after independent raw-artifact and
@@ -273,9 +300,12 @@ averaging. Each case must close, delete, and pass post-cleanup readback before t
 
 ## Deterministic and Model-Dependent Boundaries
 
-Deterministic: package/source/fixture identities; action context; owner/admin/canary equality; seats,
-members, invites, join requests, discovery, auto-join, controls, Personal workspace; marketplace and
-plugin states; product/model binding; exact input/candidate/capture/evidence/verifier hashes;
+Deterministic: package/source/fixture identities; action context; owner/admin/canary equality;
+separate active/assigned-member and paid/unassigned-seat observations; invites; join requests;
+discovery; automatic join-request acceptance; automatic account creation; standalone-Business SCIM/
+tenant-provisioning availability; directly observed plugin policy/install/affordance/app state;
+operation-owned attempt counts; Personal workspace; marketplace state; product/model binding; exact
+input/candidate/capture/evidence/verifier hashes;
 current-source gate; capability screenshot/DOM provenance; effect classification; conversation IDs,
 ordering, deletion; rollback; and structural schemas. Model-dependent: selecting one normalized code
 from the case-independent envelope. Model prose owns no authority, source, lifecycle, retry, effect,
@@ -284,7 +314,9 @@ or completion.
 ## Stop Conditions
 
 Stop before the next effect on incompatible Skillpack; unprotected plan; platform drift; missing
-workspace/admin/browser identity; action-context mismatch; any census predicate failure; owner/admin/
+workspace/admin/browser identity; action-context mismatch; any required `NOT_OBSERVABLE` fact; any
+active/assigned-member, paid/unassigned-seat, admission-control, plugin policy/install/affordance/app-
+state, or operation-attempt-ledger failure; owner/admin/
 canary mismatch; control inside Business; Personal separation failure; exact-session collision;
 duplicate/mutable/unreadable/foreign/older marketplace; source/manifest/skill drift; unexpected app,
 OAuth, data, MCP, or Desktop state; Sol/Operator reachability; non-canary install/invocation; stale or
