@@ -51,10 +51,18 @@ from control_plane.codex_worker import (
 from control_plane.subscription_harness_bindings import (
     HarnessBindingError,
     SubscriptionHarnessBinding,
-    bindings_for_profile,
+    autonomous_activation_blockers,
+    canary_blockers,
     get_binding,
 )
-from control_plane.subscription_provider_profiles import SubscriptionProviderProfile
+from control_plane.subscription_provider_profiles import (
+    ProviderProfileError,
+    SubscriptionProviderProfile,
+    get_profile,
+    load_profiles,
+    validate_profiles,
+)
+from control_plane.worker_adapter import adapter_descriptor
 from control_plane.worker_execution_contract import (
     BinaryAttestation,
     CancelReceipt,
@@ -88,22 +96,50 @@ class ClaudeSubscriptionWorkerError(RuntimeError):
     pass
 
 
-def _claude_code_binding(profile: SubscriptionProviderProfile) -> SubscriptionHarnessBinding:
-    matches = tuple(
-        binding
-        for binding in bindings_for_profile(profile.profile_id)
-        if binding.harness_id == "claude-code"
-    )
-    if len(matches) != 1:
-        raise ClaudeSubscriptionWorkerError(
-            "subscription profile has no unique Claude Code harness binding"
-        )
+def _profiles_document(document: Mapping[str, Any] | None) -> Mapping[str, Any]:
+    return validate_profiles(document) if document is not None else load_profiles()
+
+
+def _adapter_implemented(adapter_id: str) -> bool:
     try:
-        return get_binding(matches[0].binding_id)
-    except HarnessBindingError as exc:
+        return adapter_descriptor(adapter_id).implemented
+    except ValueError:
+        return False
+
+
+def _usage_policy_satisfied(profile: SubscriptionProviderProfile, execution_mode: str) -> bool:
+    policy = profile.usage_policy
+    if policy.get("interactive_only") is True and execution_mode != "interactive_canary":
+        return False
+    if (
+        execution_mode == "executive_worker"
+        and policy.get("unattended_background_allowed") is not True
+    ):
+        return False
+    return True
+
+
+def _resolve_catalog_pair(
+    binding_id: str,
+    *,
+    bindings_document: Mapping[str, Any] | None = None,
+    profiles_document: Mapping[str, Any] | None = None,
+) -> tuple[SubscriptionHarnessBinding, SubscriptionProviderProfile, Mapping[str, Any]]:
+    if not isinstance(binding_id, str) or not binding_id or binding_id != binding_id.strip():
+        raise ClaudeSubscriptionWorkerError("subscription harness binding id is invalid")
+    profiles = _profiles_document(profiles_document)
+    try:
+        binding = get_binding(
+            binding_id,
+            document=bindings_document,
+            profiles_document=profiles,
+        )
+        profile = get_profile(binding.profile_id, document=profiles)
+    except (HarnessBindingError, ProviderProfileError) as exc:
         raise ClaudeSubscriptionWorkerError(
-            "subscription profile has no reviewed Claude Code harness binding"
+            "subscription harness binding is not reviewed"
         ) from exc
+    return binding, profile, profiles
 
 
 @dataclasses.dataclass
@@ -231,42 +267,26 @@ class ClaudeSubscriptionWorkerAdapter:
         self,
         binary_path: str | os.PathLike[str],
         *,
-        profile: SubscriptionProviderProfile,
+        binding_id: str,
         credential_loader: CredentialLoader,
         model_class: str = "routine",
         execution_mode: str,
         allowed_versions: frozenset[str] | None = None,
         binary_attestation: BinaryAttestation | None = None,
         inspector: ProcessInspector | None = None,
+        bindings_document: Mapping[str, Any] | None = None,
+        profiles_document: Mapping[str, Any] | None = None,
     ) -> None:
-        binding = _claude_code_binding(profile)
-        if profile.autonomous_allowed or binding.autonomous_allowed:
-            raise ClaudeSubscriptionWorkerError("subscription profile may not self-arm autonomous routing")
-        if binding.protocol != "anthropic" or not binding.effective_base_url.startswith("https://"):
-            raise ClaudeSubscriptionWorkerError("subscription profile is not Claude-compatible")
-        if execution_mode not in {"interactive_canary", "executive_worker"}:
-            raise ClaudeSubscriptionWorkerError("execution mode is unsupported")
-        if profile.usage_policy.get("interactive_only") is True and execution_mode != "interactive_canary":
-            raise ClaudeSubscriptionWorkerError(
-                "interactive-only subscription may run only as an explicitly initiated canary"
-            )
-        if (
-            execution_mode == "executive_worker"
-            and profile.usage_policy.get("unattended_background_allowed") is not True
-        ):
-            raise ClaudeSubscriptionWorkerError(
-                "subscription profile is not eligible for unattended Executive work"
-            )
+        binding, profile, profiles = _resolve_catalog_pair(
+            binding_id,
+            bindings_document=bindings_document,
+            profiles_document=profiles_document,
+        )
+        self._bindings_document = bindings_document
+        self._profiles_document = profiles
         self.execution_mode = execution_mode
-        self.profile = profile
-        self.binding = binding
-        try:
-            self.selected_model = binding.model_for(profile, model_class)
-        except HarnessBindingError as exc:
-            raise ClaudeSubscriptionWorkerError(
-                "subscription binding does not support the requested model class"
-            ) from exc
         self.model_class = model_class
+        self._apply_resolved_pair(binding, profile, refuse_blockers=False)
         self.credential_loader = credential_loader
         path = Path(binary_path)
         self.binary = binary_attestation or attest_claude_binary(path, allowed_versions=allowed_versions)
@@ -276,6 +296,86 @@ class ClaudeSubscriptionWorkerAdapter:
             raise ClaudeSubscriptionWorkerError("injected Claude version is not allowlisted")
         self.inspector = inspector or LocalProcessInspector()
         self._runs: dict[str, _RunState] = {}
+
+    def _apply_resolved_pair(
+        self,
+        binding: SubscriptionHarnessBinding,
+        profile: SubscriptionProviderProfile,
+        *,
+        refuse_blockers: bool,
+    ) -> None:
+        if profile.autonomous_allowed or binding.autonomous_allowed:
+            raise ClaudeSubscriptionWorkerError("subscription profile may not self-arm autonomous routing")
+        if binding.protocol != "anthropic" or not binding.effective_base_url.startswith("https://"):
+            raise ClaudeSubscriptionWorkerError("subscription profile is not Claude-compatible")
+        if self.execution_mode not in {"interactive_canary", "executive_worker"}:
+            raise ClaudeSubscriptionWorkerError("execution mode is unsupported")
+        if profile.usage_policy.get("interactive_only") is True and self.execution_mode != "interactive_canary":
+            raise ClaudeSubscriptionWorkerError(
+                "interactive-only subscription may run only as an explicitly initiated canary"
+            )
+        if (
+            self.execution_mode == "executive_worker"
+            and profile.usage_policy.get("unattended_background_allowed") is not True
+        ):
+            raise ClaudeSubscriptionWorkerError(
+                "subscription profile is not eligible for unattended Executive work"
+            )
+        self.profile = profile
+        self.binding = binding
+        try:
+            self.selected_model = binding.model_for(profile, self.model_class)
+        except HarnessBindingError as exc:
+            raise ClaudeSubscriptionWorkerError(
+                "subscription binding does not support the requested model class"
+            ) from exc
+        self._record_catalog_blockers(binding, profile, refuse_blockers=refuse_blockers)
+
+    def _catalog_gate_facts(
+        self,
+        binding: SubscriptionHarnessBinding,
+        profile: SubscriptionProviderProfile,
+    ) -> dict[str, bool]:
+        return {
+            "adapter_implemented": _adapter_implemented(binding.adapter_id),
+            "provider_realm_enrolled": False,
+            "capacity_known": False,
+            "usage_policy_satisfied": _usage_policy_satisfied(profile, self.execution_mode),
+        }
+
+    def _record_catalog_blockers(
+        self,
+        binding: SubscriptionHarnessBinding,
+        profile: SubscriptionProviderProfile,
+        *,
+        refuse_blockers: bool,
+    ) -> None:
+        facts = self._catalog_gate_facts(binding, profile)
+        canary = canary_blockers(binding, **facts)
+        autonomous = autonomous_activation_blockers(
+            binding,
+            real_canary_passed=False,
+            **facts,
+        )
+        self.canary_blockers = canary
+        self.autonomous_activation_blockers = autonomous
+        if not refuse_blockers:
+            return
+        blockers = tuple(dict.fromkeys((*canary, *autonomous)))
+        if blockers:
+            raise ClaudeSubscriptionWorkerError(
+                "subscription harness binding is blocked: " + ",".join(blockers)
+            )
+
+    def _refresh_catalog_pair(self) -> tuple[SubscriptionHarnessBinding, SubscriptionProviderProfile]:
+        binding, profile, profiles = _resolve_catalog_pair(
+            self.binding.binding_id,
+            bindings_document=self._bindings_document,
+            profiles_document=self._profiles_document,
+        )
+        self._profiles_document = profiles
+        self._apply_resolved_pair(binding, profile, refuse_blockers=True)
+        return binding, profile
 
     @staticmethod
     def _validate_ids(spec: WorkerLaunchSpec) -> None:
@@ -400,6 +500,7 @@ class ClaudeSubscriptionWorkerAdapter:
         )
 
     async def start(self, spec: WorkerLaunchSpec) -> WorkerProcessRef:
+        self._refresh_catalog_pair()
         workspace, run_dir, home, tmp, baseline, schema = self._validate_spec(spec)
         _assert_binary_unchanged(self.binary)
         credential = _safe_credential(self.credential_loader)

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
+import inspect
 import json
 import os
 import subprocess
@@ -17,10 +19,11 @@ from control_plane.codex_worker import LaunchValidationError
 from control_plane.subscription_harness_bindings import get_binding
 from control_plane.subscription_provider_profiles import get_profile
 from control_plane.worker_adapter import adapter_descriptor
-from control_plane.worker_execution_contract import WorkerLaunchSpec, WorkerRunStatus
+from control_plane.worker_execution_contract import WorkerLaunchSpec
 
 
 _FAKE_SECRET = "fixture-provider-secret-never-serialize"
+_GLM_BINDING = "glm-coding-plan.claude-code-anthropic"
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -73,7 +76,7 @@ print(json.dumps({
     return binary
 
 
-def _spec(tmp_path: Path, profile_id: str = "glm-coding-plan") -> tuple[WorkerLaunchSpec, Path]:
+def _spec(tmp_path: Path, binding_id: str = _GLM_BINDING) -> tuple[WorkerLaunchSpec, Path]:
     workspace, head = _workspace(tmp_path)
     run_dir = tmp_path / "run"
     run_dir.mkdir(mode=0o700)
@@ -89,22 +92,23 @@ def _spec(tmp_path: Path, profile_id: str = "glm-coding-plan") -> tuple[WorkerLa
         },
         "additionalProperties": False,
     }), encoding="utf-8")
-    profile = get_profile(profile_id)
+    binding = get_binding(binding_id)
+    profile = get_profile(binding.profile_id)
     return WorkerLaunchSpec(
         run_id="run-1", job_id="job-1", worker_id="worker-1",
         workspace_path=workspace, run_dir=run_dir,
         prompt="Read the assigned workspace and return the requested structured result.",
-        result_schema_path=schema, authorities=("READ",), model=profile.model_for(),
+        result_schema_path=schema, authorities=("READ",), model=binding.model_for(profile),
         expected_base_sha=head,
     ), workspace
 
 
-def _adapter(tmp_path: Path, profile_id: str = "glm-coding-plan") -> ClaudeSubscriptionWorkerAdapter:
+def _adapter(tmp_path: Path, binding_id: str = _GLM_BINDING) -> ClaudeSubscriptionWorkerAdapter:
     binary = _fake_claude(tmp_path)
     attestation = attest_claude_binary(binary, allowed_versions=frozenset({"2.1.239"}))
     return ClaudeSubscriptionWorkerAdapter(
         binary,
-        profile=get_profile(profile_id),
+        binding_id=binding_id,
         credential_loader=lambda: _FAKE_SECRET,
         execution_mode="interactive_canary",
         allowed_versions=frozenset({"2.1.239"}),
@@ -112,22 +116,21 @@ def _adapter(tmp_path: Path, profile_id: str = "glm-coding-plan") -> ClaudeSubsc
     )
 
 
-
-
-def test_common_adapter_descriptor_is_implemented_only_after_vertical_exists():
-    binding = get_binding("glm-coding-plan.claude-code-anthropic")
-    descriptor = adapter_descriptor(binding.adapter_id)
-    assert descriptor.implemented is True
-    assert descriptor.structured_output is True
+def test_common_adapter_descriptor_is_not_implemented_without_receipt():
+    binding = get_binding(_GLM_BINDING)
+    with pytest.raises(ValueError, match="unknown worker adapter"):
+        adapter_descriptor(binding.adapter_id)
 
 
 def test_worker_takes_adapter_endpoint_and_models_from_binding_catalog(tmp_path: Path):
     adapter = _adapter(tmp_path)
-    binding = get_binding("glm-coding-plan.claude-code-anthropic")
+    binding = get_binding(_GLM_BINDING)
+    profile = get_profile(binding.profile_id)
     assert adapter.binding.binding_id == binding.binding_id
     assert adapter.binding.adapter_id == binding.adapter_id
     assert adapter.binding.effective_base_url == binding.effective_base_url
     assert adapter.binding.autonomous_allowed is False
+    assert adapter.profile == profile
     assert adapter.selected_model == binding.model_for(adapter.profile)
     env = adapter._environment(home=tmp_path / "h", tmp=tmp_path / "t", credential=_FAKE_SECRET)
     assert env["ANTHROPIC_BASE_URL"] == binding.effective_base_url
@@ -141,16 +144,85 @@ def test_worker_takes_adapter_endpoint_and_models_from_binding_catalog(tmp_path:
     pinned = "-".join(("claude", "compatible", "subscription"))
     assert pinned not in worker_source
     assert pinned not in test_source
+    assert "_claude_code_binding" not in worker_source
+    assert 'harness_id == "claude-code"' not in worker_source
+
+
+def test_caller_supplied_profile_cannot_bypass_catalog(tmp_path: Path):
+    catalog_profile = get_profile("glm-coding-plan")
+    fabricated = dataclasses.replace(
+        catalog_profile,
+        autonomous_allowed=True,
+        usage_policy={
+            **catalog_profile.usage_policy,
+            "interactive_only": False,
+            "unattended_background_allowed": True,
+        },
+    )
+    binary = _fake_claude(tmp_path)
+    attestation = attest_claude_binary(binary)
+    signature = inspect.signature(ClaudeSubscriptionWorkerAdapter.__init__)
+    assert "profile" not in signature.parameters
+    assert "binding_id" in signature.parameters
+    with pytest.raises(TypeError):
+        ClaudeSubscriptionWorkerAdapter(
+            binary,
+            profile=fabricated,
+            credential_loader=lambda: _FAKE_SECRET,
+            execution_mode="executive_worker",
+            binary_attestation=attestation,
+        )
+    with pytest.raises(TypeError):
+        ClaudeSubscriptionWorkerAdapter(
+            binary,
+            binding_id=_GLM_BINDING,
+            profile=fabricated,
+            credential_loader=lambda: _FAKE_SECRET,
+            execution_mode="interactive_canary",
+            binary_attestation=attestation,
+        )
+    with pytest.raises(ClaudeSubscriptionWorkerError, match="interactive-only|not eligible"):
+        ClaudeSubscriptionWorkerAdapter(
+            binary,
+            binding_id=_GLM_BINDING,
+            credential_loader=lambda: _FAKE_SECRET,
+            execution_mode="executive_worker",
+            binary_attestation=attestation,
+        )
+    adapter = ClaudeSubscriptionWorkerAdapter(
+        binary,
+        binding_id=_GLM_BINDING,
+        credential_loader=lambda: _FAKE_SECRET,
+        execution_mode="interactive_canary",
+        binary_attestation=attestation,
+    )
+    assert adapter.profile == catalog_profile
+    assert adapter.profile != fabricated
+    assert adapter.profile.autonomous_allowed is False
+    assert adapter.profile.usage_policy.get("unattended_background_allowed") is not True
+    adapter.profile = fabricated
+    adapter.binding = dataclasses.replace(adapter.binding, autonomous_allowed=True)
+    spec, _workspace_path = _spec(tmp_path / "case")
+    with pytest.raises(ClaudeSubscriptionWorkerError, match="blocked|self-arm"):
+        asyncio.run(adapter.start(spec))
+    refreshed = get_profile(get_binding(_GLM_BINDING).profile_id)
+    assert adapter.profile == refreshed
+    assert adapter.profile.autonomous_allowed is False
+    assert adapter.binding.autonomous_allowed is False
 
 
 def test_current_subscription_profiles_cannot_be_composed_as_unattended_executive_workers(tmp_path: Path):
     binary = _fake_claude(tmp_path)
     attestation = attest_claude_binary(binary)
-    for profile_id in ("glm-coding-plan", "alibaba-token-plan-personal", "minimax-token-plan"):
+    for binding_id in (
+        "glm-coding-plan.claude-code-anthropic",
+        "alibaba-token-plan-personal.claude-code-anthropic",
+        "minimax-token-plan.claude-code-anthropic",
+    ):
         with pytest.raises(ClaudeSubscriptionWorkerError, match="interactive-only|not eligible"):
             ClaudeSubscriptionWorkerAdapter(
                 binary,
-                profile=get_profile(profile_id),
+                binding_id=binding_id,
                 credential_loader=lambda: _FAKE_SECRET,
                 execution_mode="executive_worker",
                 binary_attestation=attestation,
@@ -180,26 +252,19 @@ def test_model_mismatch_is_refused_before_credential_load(tmp_path: Path):
         adapter._validate_spec(bad)
 
 
-def test_fake_provider_executes_one_read_only_common_worker_receipt_without_secret_leak(tmp_path: Path):
+def test_turn_refuses_catalog_canary_and_autonomous_blockers(tmp_path: Path):
     adapter = _adapter(tmp_path)
     spec, workspace = _spec(tmp_path / "case")
+    assert adapter.canary_blockers
+    assert "implementation_not_built" in adapter.canary_blockers
+    assert adapter.autonomous_activation_blockers
+    assert "source_policy_disarmed" in adapter.autonomous_activation_blockers
+    assert adapter.binding.autonomous_allowed is False
+    assert adapter.profile.autonomous_allowed is False
 
     async def scenario():
-        ref = await adapter.start(spec)
-        assert await adapter.status(ref) in {WorkerRunStatus.RUNNING, WorkerRunStatus.FAILED}
-        receipt = await adapter.collect_result(ref)
-        return ref, receipt
+        return await adapter.start(spec)
 
-    ref, receipt = asyncio.run(scenario())
-    assert receipt.result.status is WorkerRunStatus.SUCCEEDED
-    assert receipt.result.structured_output == {"decision": "PASS", "artifacts": ()}
-    assert receipt.result.provider_session_id == "fixture-session"
-    assert receipt.result.usage == {"input_tokens": 11, "output_tokens": 7}
-    assert receipt.result.git_manifest["changed_paths"] == ()
+    with pytest.raises(ClaudeSubscriptionWorkerError, match="blocked"):
+        asyncio.run(scenario())
     assert _git(workspace, "status", "--porcelain") == ""
-    evidence = json.dumps(adapter.launch_attestation(ref), sort_keys=True)
-    assert _FAKE_SECRET not in evidence
-    assert _FAKE_SECRET not in Path(ref.stdout_path).read_text(encoding="utf-8")
-    assert adapter.launch_attestation(ref)["retry_policy"] == "zero"
-    assert adapter.launch_attestation(ref)["execution_mode"] == "interactive_canary"
-    assert adapter.launch_attestation(ref)["adapter_id"] == adapter.binding.adapter_id
