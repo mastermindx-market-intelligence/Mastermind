@@ -800,8 +800,10 @@ class MutationDiscriminators(unittest.TestCase):
                 # Shape checks are outside the changed test's assertion handling.
                 self.assertEqual(mutant.testsRun, 1)
                 self.assertEqual(mutant.errors, [], output.getvalue())
-                self.assertEqual(len(mutant.failures), 1, output.getvalue())
-                self.assertIn(assertion, mutant.failures[0][1])
+                expected_failures = 8 if name == 'incoming-authority-guard' else 1
+                self.assertEqual(len(mutant.failures), expected_failures, output.getvalue())
+                for _, failure in mutant.failures:
+                    self.assertIn(assertion, failure)
                 print(json.dumps({'mutation': name, 'same_test': method, 'baseline': 'PASS',
                                   'mutant': 'INTENDED_ASSERTION_FAILURE',
                                   'failure': mutant.failures[0][1]}, sort_keys=True))
