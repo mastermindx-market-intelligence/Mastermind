@@ -4,6 +4,7 @@ import copy
 import json
 import unittest
 
+from control_plane.codex_provider_realm import ALIBABA_TOKEN_PLAN
 from control_plane.subscription_harness_bindings import (
     DEFAULT_BINDINGS_PATH,
     HarnessBindingError,
@@ -15,6 +16,7 @@ from control_plane.subscription_harness_bindings import (
     validate_bindings,
 )
 from control_plane.subscription_provider_profiles import get_profile, load_profiles
+from control_plane.worker_adapter import adapter_descriptor
 
 
 class SubscriptionHarnessBindingsTest(unittest.TestCase):
@@ -61,6 +63,18 @@ class SubscriptionHarnessBindingsTest(unittest.TestCase):
             "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1",
         )
         self.assertEqual(codex.model_for(profile, "hard"), "qwen3.8-max")
+
+    def test_alibaba_codex_binding_matches_reviewed_runtime_realm(self) -> None:
+        binding = get_binding(
+            "alibaba-token-plan-personal.codex-responses",
+            document=self.catalog,
+            profiles_document=self.profiles,
+        )
+        descriptor = adapter_descriptor(binding.adapter_id)
+        self.assertTrue(descriptor.implemented)
+        self.assertEqual(binding.provider, ALIBABA_TOKEN_PLAN.provider_alias)
+        self.assertEqual(binding.protocol, ALIBABA_TOKEN_PLAN.wire_api)
+        self.assertEqual(binding.effective_base_url, ALIBABA_TOKEN_PLAN.base_url)
 
     def test_built_alibaba_codex_lane_can_reach_canary_gate_only(self) -> None:
         binding = get_binding(

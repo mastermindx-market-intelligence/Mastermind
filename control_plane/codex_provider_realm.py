@@ -9,8 +9,11 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
 import re
+import stat
 from collections.abc import Callable
+from pathlib import Path
 from urllib.parse import urlparse
 
 
@@ -18,6 +21,7 @@ _REALM_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 _ENV_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 _SECRET_SHAPE_RE = re.compile(r"(?i)(?:sk-[a-z0-9_-]{12,}|bearer\s+[a-z0-9._-]{12,})")
 _WIRE_APIS = frozenset({"responses", "chat"})
+PROVIDER_CREDENTIAL_FILENAME = "provider-credential"
 
 
 class ProviderRealmError(ValueError):
@@ -94,6 +98,78 @@ class CodexProviderRealm:
         return credential
 
 
+def load_private_provider_credential(
+    provider_home: Path | str,
+    *,
+    expected_uid: int,
+    expected_gid: int,
+) -> str:
+    """Read one worker-private opaque provider key from the existing provider home."""
+
+    home = Path(provider_home)
+    path = home / PROVIDER_CREDENTIAL_FILENAME
+    try:
+        before = path.lstat()
+        if stat.S_ISLNK(before.st_mode) or not stat.S_ISREG(before.st_mode):
+            raise ProviderRealmError("provider credential is unavailable")
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(path, flags)
+    except (OSError, ProviderRealmError):
+        raise ProviderRealmError("provider credential is unavailable") from None
+    try:
+        observed = os.fstat(descriptor)
+        if (
+            observed.st_dev != before.st_dev
+            or observed.st_ino != before.st_ino
+            or observed.st_nlink != 1
+            or observed.st_uid != int(expected_uid)
+            or observed.st_gid != int(expected_gid)
+            or stat.S_IMODE(observed.st_mode) != 0o600
+            or observed.st_size < 1
+            or observed.st_size > 4096
+        ):
+            raise ProviderRealmError("provider credential is unavailable")
+        try:
+            raw = os.read(descriptor, 4097)
+        except OSError:
+            raise ProviderRealmError("provider credential is unavailable") from None
+        if len(raw) != observed.st_size:
+            raise ProviderRealmError("provider credential is unavailable")
+    finally:
+        os.close(descriptor)
+    try:
+        credential = raw.decode("utf-8", errors="strict")
+    except UnicodeDecodeError:
+        raise ProviderRealmError("provider credential is unavailable") from None
+    if (
+        not credential
+        or credential != credential.strip()
+        or any(ch in credential for ch in "\r\n\x00")
+    ):
+        raise ProviderRealmError("provider credential is unavailable")
+    return credential
+
+
+def provider_home_credential_loader(
+    provider_home: Path | str,
+    realm: CodexProviderRealm,
+    *,
+    expected_uid: int,
+    expected_gid: int,
+) -> ProviderCredentialLoader:
+    """Bind a reviewed realm to the canonical worker-private provider-home secret."""
+
+    home = Path(provider_home)
+
+    def load() -> str:
+        value = load_private_provider_credential(
+            home, expected_uid=expected_uid, expected_gid=expected_gid
+        )
+        return realm.validate_credential(value)
+
+    return load
+
+
 MINIMAX_TOKEN_PLAN = CodexProviderRealm(
     realm_id="minimax-token-plan",
     provider_alias="minimax",
@@ -123,6 +199,9 @@ __all__ = [
     "MINIMAX_TOKEN_PLAN",
     "REVIEWED_CODEX_PROVIDER_REALMS",
     "CodexProviderRealm",
+    "PROVIDER_CREDENTIAL_FILENAME",
     "ProviderCredentialLoader",
     "ProviderRealmError",
+    "load_private_provider_credential",
+    "provider_home_credential_loader",
 ]
