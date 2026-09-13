@@ -8,6 +8,7 @@ SCRIPT_DIR="$(cd -P "$(/usr/bin/dirname "$0")" && /bin/pwd)"
 CONTROL_LABEL="com.mastermind.executive.control"
 WORKER_LABEL="com.mastermind.executive.worker.codex"
 BACKUP_LABEL="com.mastermind.executive.backup"
+RELAY_LABEL="com.mastermind.executive.sol-state-relay"
 CONTROL_USER="_mastermind_exec"
 CONTROL_GROUP="_mastermind_exec"
 WORKER_USER="_mastermind_worker"
@@ -648,13 +649,16 @@ case "$(/usr/bin/stat -f '%Sp' "$AUTH_PATH")" in
 esac
 
 # Cross the mutation boundary only after the identity, runtime, source, auth,
-# and exact-SHA preflight above. From here to process exit the trap keeps both
-# old and new daemon definitions disabled and booted out, including on error.
+# and exact-SHA preflight above. From here to process exit the trap keeps all
+# install-owned daemons, including a separately prepared C1 Relay, disabled
+# and booted out across generation mutation and rollback.
 STAGING=""
 leave_installed_services_stopped() {
+  /bin/launchctl disable "system/$RELAY_LABEL" >/dev/null 2>&1 || true
   /bin/launchctl disable "system/$CONTROL_LABEL" >/dev/null 2>&1 || true
   /bin/launchctl disable "system/$WORKER_LABEL" >/dev/null 2>&1 || true
   /bin/launchctl disable "system/$BACKUP_LABEL" >/dev/null 2>&1 || true
+  /bin/launchctl bootout "system/$RELAY_LABEL" >/dev/null 2>&1 || true
   /bin/launchctl bootout "system/$CONTROL_LABEL" >/dev/null 2>&1 || true
   /bin/launchctl bootout "system/$WORKER_LABEL" >/dev/null 2>&1 || true
   /bin/launchctl bootout "system/$BACKUP_LABEL" >/dev/null 2>&1 || true
@@ -663,12 +667,18 @@ leave_installed_services_stopped() {
   fi
 }
 trap leave_installed_services_stopped EXIT
+/bin/launchctl disable "system/$RELAY_LABEL"
 /bin/launchctl disable "system/$CONTROL_LABEL"
 /bin/launchctl disable "system/$WORKER_LABEL"
 /bin/launchctl disable "system/$BACKUP_LABEL"
+/bin/launchctl bootout "system/$RELAY_LABEL" >/dev/null 2>&1 || true
 /bin/launchctl bootout "system/$CONTROL_LABEL" >/dev/null 2>&1 || true
 /bin/launchctl bootout "system/$WORKER_LABEL" >/dev/null 2>&1 || true
 /bin/launchctl bootout "system/$BACKUP_LABEL" >/dev/null 2>&1 || true
+if /bin/launchctl print "system/$RELAY_LABEL" >/dev/null 2>&1; then
+  /bin/echo "relay LaunchDaemon remained loaded after bootout" >&2
+  exit 65
+fi
 if /bin/launchctl print "system/$CONTROL_LABEL" >/dev/null 2>&1; then
   /bin/echo "control LaunchDaemon remained loaded after bootout" >&2
   exit 65
