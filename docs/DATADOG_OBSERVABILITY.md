@@ -4,6 +4,15 @@ Mastermind has one Datadog destination: the Chris Wong organization on the GitHu
 That organization is hosted on Datadog US5 (`us5.datadoghq.com`); US1 is not its intake site.
 The MastermindX trial organization is not a production observability authority.
 
+## ChatGPT transport boundary
+
+As of 2026-09-13, Datadog's packaged ChatGPT Preview app is US1-only. It cannot be
+used to query or prove the canonical US5 Student organization. Never dual-ship or move
+production telemetry to US1 just to satisfy that app. Datadog's official regional MCP
+service has a US5 endpoint; any future Mastermind/Workbench exposure must remain a thin
+transport to that existing US5 authority, with no second telemetry store, auth database,
+queue, lifecycle, or retry plane.
+
 The first production slice is the authoritative VPS running `mastermind.service`.
 The host installer is `scripts/install_datadog_vps.sh`; it configures:
 
