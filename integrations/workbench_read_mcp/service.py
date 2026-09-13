@@ -283,14 +283,15 @@ def _secure_json(path: str, *, maximum: int) -> dict[str, object]:
         _refuse()
     flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
     nofollow = getattr(os, "O_NOFOLLOW", 0)
-    if not nofollow:
+    nonblocking = getattr(os, "O_NONBLOCK", 0)
+    if not nofollow or not nonblocking:
         _refuse()
     descriptor = -1
     chunks: list[bytes] = []
     read_error: BaseException | None = None
     close_error: BaseException | None = None
     try:
-        descriptor = os.open(selected, flags | nofollow)
+        descriptor = os.open(selected, flags | nofollow | nonblocking)
         opened = os.fstat(descriptor)
         if (
             opened.st_dev != before.st_dev

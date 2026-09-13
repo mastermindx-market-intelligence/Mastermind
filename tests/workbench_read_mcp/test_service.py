@@ -100,6 +100,39 @@ def test_service_config_refuses_authority_widening(mutation) -> None:
         service.parse_service_config(value)
 
 
+def test_bootstrap_json_opens_regular_file_nonblocking(tmp_path, monkeypatch) -> None:
+    source = tmp_path / "owner.json"
+    source.write_text('{"owned":true}', encoding="ascii")
+    source.chmod(0o600)
+    original_open = service.os.open
+    observed_flags = []
+
+    def observe_open(path, flags, *args, **kwargs):
+        observed_flags.append(flags)
+        return original_open(path, flags, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(service.os, "open", observe_open)
+        assert service._secure_json(str(source), maximum=128) == {"owned": True}
+    assert len(observed_flags) == 1
+    assert observed_flags[0] & service.os.O_NONBLOCK
+    assert observed_flags[0] & service.os.O_NOFOLLOW
+
+
+@pytest.mark.parametrize("missing_value", [None, 0])
+def test_bootstrap_json_requires_nonblocking_primitive(tmp_path, monkeypatch, missing_value) -> None:
+    source = tmp_path / "owner.json"
+    source.write_text('{}', encoding="ascii")
+    source.chmod(0o600)
+    with monkeypatch.context() as patch:
+        if missing_value is None:
+            patch.delattr(service.os, "O_NONBLOCK")
+        else:
+            patch.setattr(service.os, "O_NONBLOCK", missing_value)
+        with pytest.raises(service.ServiceConfigurationError, match="^SERVICE_CONFIGURATION_REFUSED$"):
+            service._secure_json(str(source), maximum=128)
+
+
 def test_reserved_socket_is_exact_loopback_noninheritable_and_occupied_port_refuses() -> None:
     selected = dataclasses.replace(service.parse_service_config(document()), bind_port=0)
     # Port zero is forbidden by the wire, but this lower-level helper accepts an

@@ -358,13 +358,24 @@ qualification logs remain retained: the long Unix-socket path setup, one
 non-reproduced readiness deadline, and a monolithic Executive 30 ms scheduling
 assumption. No production timeout was widened to make those checks pass.
 
+The final review also required a nonblocking bootstrap open before descriptor
+validation. Three regular-file/primitive-contract regressions failed before the
+repair; the complete Workbench suite then passed 245 tests plus 86 subtests,
+exit 0 at 17:35:51Z. Config and policy reads now require `O_NONBLOCK` together
+with `O_NOFOLLOW` and retain all descriptor and pathname identity checks. The
+Executive and shared authentication/executor owners remain byte-identical to
+the earlier green receipts. Protected base movement to
+`d6eccb0d81c9db3d009eafa7b37ea97a4dc99bc8` adds only four disjoint evaluation
+harness paths; the governing procedure and Workbench dependency owners did not
+change. Hosted latest-base integration remains a separate release gate.
+
 The tested implementation hashes are:
 
 | Path | SHA-256 |
 |---|---|
-| `integrations/workbench_read_mcp/service.py` | `380d8b62734eacc8a54b6ff128898b471fd895e84a9a4e820e1b774d48563e7d` |
+| `integrations/workbench_read_mcp/service.py` | `0476c15551fc6855364b62e7b291eb3bd633f6304ae9c7e0a5e75ed2b461ff4a` |
 | `scripts/mastermind_workbench_read_server.py` | `7264fb1e78476ee28196305c10e575606cf7eac4082b2d76d0711a66b0500d25` |
-| `tests/workbench_read_mcp/test_service.py` | `c52436be12405e9c06ccf48ccfaa8d77537579552d0d5689b001311af09ac59a` |
+| `tests/workbench_read_mcp/test_service.py` | `57bbf76fa844f98db78740cafb6727a50a8db83a3158abba3d25a2c23e66a4b8` |
 | `tests/workbench_read_mcp/test_service_process.py` | `b08e2ad2c905bdb318f6677defc4e356d28e85b64cd7c20d1538281068bd5895` |
 
 Qualification uses the dedicated interpreter, disables plugin autoload/cache and
