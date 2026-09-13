@@ -42,3 +42,25 @@ def test_profiles_cannot_self_arm_or_embed_credential_authority():
     catalog["profiles"]["glm-coding-plan"]["credential_binding"] = "request_payload"
     with pytest.raises(ProviderProfileError, match="credential authority"):
         validate_profiles(catalog)
+
+
+def test_profile_document_carrying_adapter_id_is_rejected():
+    catalog = load_profiles()
+    assert "adapter_id" not in catalog
+    catalog = copy.deepcopy(catalog)
+    catalog["adapter_id"] = "claude-compatible-subscription"
+    with pytest.raises(ProviderProfileError, match="must not name an adapter"):
+        validate_profiles(catalog)
+    catalog = copy.deepcopy(load_profiles())
+    catalog["profiles"]["glm-coding-plan"]["adapter_id"] = "claude-compatible-subscription"
+    with pytest.raises(ProviderProfileError, match="must not name an adapter"):
+        validate_profiles(catalog)
+
+
+def test_profile_protocols_are_plan_declared_and_fail_closed():
+    catalog = copy.deepcopy(load_profiles())
+    catalog["profiles"]["glm-coding-plan"]["protocol"] = "openai-compatible"
+    validate_profiles(catalog)
+    catalog["profiles"]["glm-coding-plan"]["protocol"] = "unknown-wire"
+    with pytest.raises(ProviderProfileError, match="unsupported protocol"):
+        validate_profiles(catalog)

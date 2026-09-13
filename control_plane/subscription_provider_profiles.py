@@ -1,4 +1,7 @@
-"""Reviewed subscription-backed provider profiles for the common worker harness.
+"""Reviewed subscription-backed provider profiles.
+
+MIGRATION NOTE: harness/adapter selection lives in subscription_harness_bindings
+(PR #583). This layer describes the purchased plan only.
 
 Profiles are non-secret routing/configuration metadata. They never contain API keys,
 provider-account identity, or live capacity. Credentials remain adapter-private and
@@ -12,10 +15,10 @@ from pathlib import Path
 from typing import Any, Mapping
 
 SCHEMA = "mastermind.subscription_provider_profiles/v1"
-ADAPTER_ID = "claude-compatible-subscription"
 DEFAULT_PROFILES_PATH = Path(__file__).resolve().parents[1] / "config" / "subscription_provider_profiles.v1.json"
-_ALLOWED_PROTOCOLS = {"anthropic"}
+_ALLOWED_PROTOCOLS = {"anthropic", "openai-compatible"}
 _ALLOWED_MODEL_CLASSES = {"routine", "hard", "fast", "subagent"}
+_FORBIDDEN_HARNESS_FIELDS = frozenset({"adapter_id", "harness_id"})
 
 
 class ProviderProfileError(ValueError):
@@ -60,8 +63,11 @@ def _identifier(value: Any, label: str) -> str:
 def validate_profiles(document: Any) -> Mapping[str, Any]:
     if not isinstance(document, Mapping) or document.get("schema") != SCHEMA:
         raise ProviderProfileError("unsupported provider-profile schema")
-    if document.get("adapter_id") != ADAPTER_ID:
-        raise ProviderProfileError("subscription profiles must bind the common reviewed adapter")
+    if _FORBIDDEN_HARNESS_FIELDS.intersection(document):
+        raise ProviderProfileError(
+            "profile document must not name an adapter or harness; "
+            "harness/adapter selection lives in subscription_harness_bindings"
+        )
     profiles = document.get("profiles")
     if not isinstance(profiles, Mapping) or not profiles:
         raise ProviderProfileError("profiles are required")
@@ -69,6 +75,10 @@ def validate_profiles(document: Any) -> Mapping[str, Any]:
         _identifier(profile_id, "profile id")
         if not isinstance(row, Mapping):
             raise ProviderProfileError(f"profile {profile_id!r} must be a mapping")
+        if _FORBIDDEN_HARNESS_FIELDS.intersection(row):
+            raise ProviderProfileError(
+                f"profile {profile_id!r} must not name an adapter or harness"
+            )
         _identifier(row.get("provider"), "provider")
         _identifier(row.get("product"), "product")
         if row.get("protocol") not in _ALLOWED_PROTOCOLS:
@@ -139,4 +149,4 @@ def get_profile(profile_id: str, *, document: Mapping[str, Any] | None = None) -
     )
 
 
-__all__ = ["ADAPTER_ID", "DEFAULT_PROFILES_PATH", "ProviderProfileError", "SubscriptionProviderProfile", "get_profile", "load_profiles", "validate_profiles"]
+__all__ = ["DEFAULT_PROFILES_PATH", "ProviderProfileError", "SubscriptionProviderProfile", "get_profile", "load_profiles", "validate_profiles"]
