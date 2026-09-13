@@ -82,6 +82,17 @@ when the final path is absent. The exact macOS
 `/var -> /private/var` alias is the only accepted alias. ACL checks use the
 macOS stat marker and bind pre/post device and inode.
 
+For the three frozen socket metadata paths only, the exact `/var/run`
+ancestor may be root:daemon (UID 0, GID 1), mode `0775`, matching the installed
+macOS 26.5 `com.apple.files.data-template` package receipt. This explicitly
+trusts the OS daemon group at that parent for metadata observation. The parent
+must still be a directory with matching named/descriptor identity; descendant
+directories retain the existing owner and no-group/other-write checks, and the
+entire ancestor chain is rechecked after observation. Other groups, owners,
+write modes, aliases, and non-frozen paths receive no exception. Content reads
+retain their strict descriptor-walk policy. The collector neither opens these
+sockets nor changes OS directory permissions.
+
 The command adapter permits only:
 
 ```text
