@@ -50,6 +50,14 @@ The current inspected COO path enforces root plus direct children, exact budget 
 
 The first useful implemented journey remains one qualified managed mission: readable nonterminal output and retained history, source-derived children, exact-recipient communication and parent return. Broader orchestration can advance as a separately scoped dependency while the lawful smaller path is proven.
 
+## First live-content connection: the actual producer seam
+
+Further source inspection located an existing continuous receiver rather than a need for another reader process: `scripts/ohf/laboratory.py`, blob `e5592bbc66d97db9bf44873b9bb7fe718cbf0637` at the procedural SHA, starts one `_read_stdout` thread. It already parses incoming frames and routes redacted notifications to the existing condition-protected notification list. The richer adapter's later `read_events` projection waits for completion and strips ordinary content; those are different stages.
+
+The first provider-owner design must therefore add a qualified, non-blocking spectator projection alongside the existing receiver/controller path, not run another App Server or let a GUI drain `notifications`. Keep lifecycle/control delivery intact. Do not call network subscribers while holding `_notification_condition`, pass raw private-turn responses to viewers, or treat general redaction as sufficient content authorization. Before a native turn is exactly joined to its admitted Attempt, withhold unqualified content rather than guess the association. A slow, failed or revoked viewer must not delay or suppress terminal/control events.
+
+The source-level acceptance test must hold terminal completion back, deliver a safe visible message, observe it in the spectator consumer, then allow the original controller to receive its exact terminal event once. A history read must cause no start/resume/turn and must preserve page/correction/scope limits. Actual provider-version fixtures, configured owner identity and the finite authenticated resource mapping are still required before this becomes an executable production commission; no new observer was installed by the inspection.
+
 ## Proof status
 
 The deterministic-topology pass ran 33 sandbox source/design checks successfully, including all 24 input orders for four synthetic rows. It used the exact copied COO policy and the recorded-lane graph-validator excerpt with a disposable reference projection. It did not execute the Runtime database, authenticated network app, provider, installed supervisor or the SQL reader. Classification: `OFFLINE_SOURCE_AND_DESIGN_CHECKS_NOT_RUNTIME_PROOF`.
