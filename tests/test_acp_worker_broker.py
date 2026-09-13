@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import sys
 import unittest
 
 try:
@@ -19,9 +20,10 @@ except ImportError:
 
 from control_plane.codex_worker import ProcessInspector
 from control_plane.executive_worker_broker import BrokerEffectUnknownError, BrokerStateError
-from control_plane.worker_execution_contract import CancelReceipt, WorkerRunStatus
+from control_plane.worker_execution_contract import BinaryAttestation, CancelReceipt, WorkerLaunchSpec, WorkerRunStatus
 from integrations.acp_worker.adapter import AcpProcessCompletion, AcpRunResources, AcpWorkerAdapter
 from integrations.acp_worker.turn import AcpProfile
+from integrations.acp_worker.native import AcpNativeProcessOwner, AcpNativeProfile
 
 
 @unittest.skipIf(acp is None, "optional ACP SDK absent; no ACP qualification")
@@ -203,6 +205,56 @@ class AcpBrokerTests(unittest.IsolatedAsyncioTestCase):
         await self.exercise("cleanup-unknown")
     async def test_malformed_frame_never_becomes_known_success(self):
         await self.exercise("malformed-frame")
+
+
+    async def test_native_process_owner_executes_real_stdio_generation(self):
+        tmp = tempfile.TemporaryDirectory(prefix="mmx-acp-native-", dir="/private/tmp" if os.uname().sysname == "Darwin" else None)
+        root = Path(tmp.name).resolve()
+        workspace, run_dir = root / "workspace", root / "run"
+        workspace.mkdir(mode=0o700)
+        run_dir.mkdir(mode=0o700)
+        (run_dir / "input").mkdir(mode=0o700)
+        env = {"PATH": os.defpath, "HOME": str(root), "GIT_CONFIG_GLOBAL": os.devnull,
+               "GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0"}
+        def git(*args):
+            return subprocess.run(["git", *args], cwd=workspace, env=env,
+                capture_output=True, text=True, timeout=10, check=True).stdout.strip()
+        git("init", "--template=", "-q")
+        git("-c", "user.name=ACP Native", "-c", "user.email=native@example.invalid",
+            "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-qm", "fixture base")
+        schema_path = run_dir / "input" / "result.schema.json"
+        schema_path.write_text(json.dumps({"type": "object", "properties": {"answer": {"type": "integer"}},
+            "required": ["answer"]}), encoding="utf-8")
+        binary = Path(sys.executable).resolve(strict=True)
+        info = binary.stat()
+        digest = hashlib.sha256(binary.read_bytes()).hexdigest()
+        attestation = BinaryAttestation(
+            str(binary), str(binary), f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+            digest, None, info.st_size, info.st_dev, info.st_ino, info.st_mode & 0o7777,
+            info.st_uid, info.st_gid, info.st_mtime_ns)
+        peer = Path(__file__).parent / "fixtures" / "acp_native_peer.py"
+        native_profile = AcpNativeProfile("fixture-native", attestation,
+            (str(binary), "-B", str(peer)))
+        owner = AcpNativeProcessOwner(native_profile,
+            environment_loader=lambda: {"PATH": os.defpath, "HOME": str(root), "PYTHONDONTWRITEBYTECODE": "1", "PYTHONNOUSERSITE": "1", "PYTHONPATH": str(Path(acp.__file__).resolve().parents[1])})
+        spec = WorkerLaunchSpec(
+            "run-native", "job-native", "worker-native", workspace, run_dir,
+            "Return the required answer.", schema_path, authorities=("READ",), model="model-a",
+            timeout_seconds=3.0, cancel_grace_seconds=1.0, expected_base_sha=git("rev-parse", "HEAD"),
+            expected_worker_uid=os.geteuid(), expected_worker_gid=os.getegid())
+        adapter = AcpWorkerAdapter(AcpProfile("fixture-native", "1"), inspector=owner.inspector, open_run=owner.open_run)
+        try:
+            ref = await adapter.start(spec)
+            receipt = await asyncio.wait_for(adapter.collect_result(ref), 5)
+            self.assertIs(receipt.result.status, WorkerRunStatus.SUCCEEDED)
+            self.assertEqual(dict(receipt.result.structured_output), {"answer": 42})
+            self.assertEqual(receipt.result.provider_session_id, "native-session")
+            self.assertNotEqual(receipt.stdout_sha256, hashlib.sha256(b"").hexdigest())
+            self.assertEqual(receipt.stderr_sha256, hashlib.sha256(b"").hexdigest())
+            self.assertIsNone(owner._active)
+            self.assertFalse(adapter.unsettled_tasks)
+        finally:
+            tmp.cleanup()
 
 
 if __name__ == "__main__":
