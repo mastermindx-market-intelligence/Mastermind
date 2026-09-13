@@ -599,6 +599,26 @@ class MutationDiscriminators(unittest.TestCase):
         namespace = dict(read_port.__dict__)
         exec(compile(source.replace(target, '', 1), '<read0-post-await-control>', 'exec'), namespace)
 
+        original_final_authorization = deployment.make_final_authorization
+
+        def without_final_binding_revalidation(*, resolve_binding, clock_ms):
+            factory = original_final_authorization(
+                resolve_binding=resolve_binding, clock_ms=clock_ms)
+
+            def capture_without_revalidation(caller, request):
+                factory(caller, request)
+                return lambda: None
+
+            return capture_without_revalidation
+
+        @contextlib.contextmanager
+        def post_await_binding_bypass():
+            with patch.object(deployment, 'create_descriptor_read_port',
+                              namespace['create_descriptor_read_port']), \
+                 patch.object(deployment, 'make_final_authorization',
+                              without_final_binding_revalidation):
+                yield
+
         cached = {}
         async def bypass_post_auth(verifier, token):
             access = await original_verify(verifier, token)
@@ -632,7 +652,7 @@ class MutationDiscriminators(unittest.TestCase):
              lambda: patch.object(CompositionTests, 'resolve', crosswired),
              "'beta source\\n' != 'alpha source\\nsecond line\\n'"),
             ('post-await-binding', 'test_post_read_binding_revocation_withholds_completed_observation',
-             lambda: patch.object(deployment, 'create_descriptor_read_port', namespace['create_descriptor_read_port']),
+             post_await_binding_bypass,
              'False is not true'),
             ('post-read-auth', 'test_post_read_auth_policy_change_has_independent_withholding_fence',
              lambda: patch.object(MastermindTokenVerifier, 'verify_token', bypass_post_auth),
