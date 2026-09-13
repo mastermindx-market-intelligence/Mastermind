@@ -1,7 +1,13 @@
 """Process-boundary tests for the concrete Workbench Read service launcher."""
 from __future__ import annotations
 
+import base64
 import contextlib
+import hashlib
+import os
+import signal
+import socket
+import time
 import importlib
 import io
 import json
@@ -9,7 +15,10 @@ from pathlib import Path
 import subprocess
 import sys
 
+import httpx
+import jwt
 import pytest
+from cryptography.hazmat.primitives.asymmetric import rsa
 
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts/mastermind_workbench_read_server.py"
@@ -73,3 +82,232 @@ def test_launcher_delegates_exact_config_path_and_preserves_service_exit(monkeyp
     monkeypatch.setattr(launcher, "_run_configured_service", fake)
     assert launcher.main(["--config", str(path)]) == 4
     assert calls == [str(path)]
+
+
+
+def test_real_subprocess_listener_signed_initialize_list_call_and_clean_shutdown(tmp_path: Path) -> None:
+    if os.name == "nt":
+        pytest.skip("P0 service target and graceful signal proof are POSIX/Darwin")
+
+    repo_root = Path(__file__).resolve().parents[2]
+    project = tmp_path / "project"
+    audit = tmp_path / "audit"
+    project.mkdir(mode=0o700)
+    audit.mkdir(mode=0o700)
+    source = project / "source.txt"
+    sentinel = "p0 subprocess sentinel\n"
+    source.write_text(sentinel, encoding="utf-8")
+    source.chmod(0o600)
+
+    issuer = "https://identity.read0.example"
+    resource = "https://read0.example/mcp"
+    subject = "process-reader"
+    client_id = "read0-process-client"
+    now = int(time.time())
+    subject_digest = hashlib.sha256(f"{issuer}\n{subject}".encode()).hexdigest()
+    client_ref = hashlib.sha256(f"{issuer}\nclient\n{client_id}".encode()).hexdigest()
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    public = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(private_key.public_key()))
+    public = {name: public[name] for name in ("kty", "n", "e")}
+    public.update(kid="p0-process", use="sig", alg="RS256")
+    jwks_payload = json.dumps({"keys": [public]}, separators=(",", ":")).encode("ascii")
+
+    policy = {
+        "schema": "mastermind.business_mcp_auth_policy.v1",
+        "policy_id": "read0.process.fixture",
+        "resource": resource,
+        "resource_metadata_url": "https://read0.example/.well-known/oauth-protected-resource/mcp",
+        "issuer": issuer,
+        "authorization_servers": [issuer],
+        "jwks_uri": issuer + "/jwks",
+        "required_scopes": ["workbench.read"],
+        "allowed_subject_digests": [subject_digest],
+        "allowed_algorithms": ["RS256"],
+        "clock_skew_seconds": 0,
+        "max_token_lifetime_seconds": 3600,
+        "jwks_cache_ttl_seconds": 60,
+        "unknown_kid_refresh_cooldown_seconds": 1,
+        "fetch_failure_backoff_seconds": 1,
+    }
+    policy_path = tmp_path / "policy.json"
+    policy_path.write_text(json.dumps(policy, separators=(",", ":")), encoding="ascii")
+    policy_path.chmod(0o600)
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as candidate:
+        candidate.bind(("127.0.0.1", 0))
+        port = candidate.getsockname()[1]
+    stable = lambda prefix, label: prefix + hashlib.sha256(label.encode()).hexdigest()
+    config = {
+        "schema": "mastermind.workbench_read_service.v1",
+        "policy_file": str(policy_path),
+        "project_root": str(project),
+        "audit_directory": str(audit),
+        "bind_host": "127.0.0.1",
+        "bind_port": port,
+        "incoming_authority": f"127.0.0.1:{port}",
+        "max_concurrency": 2,
+        "io_timeout_seconds": 5.0,
+        "close_timeout_seconds": 5.0,
+        "lease": {
+            "expected_subject_digest": subject_digest,
+            "expected_client_ref": client_ref,
+            "resource": resource,
+            "required_scopes": ["workbench.read"],
+            "project_ref": stable("project:", "process-project"),
+            "context_ref": stable("context:", "process-context"),
+            "owner_ref": stable("owner:", "process-owner"),
+            "generation": stable("generation:", "process-generation"),
+            "allowed_paths": ["source.txt"],
+            "committed_head": "1" * 40,
+            "lease_expires_at_ms": (now + 600) * 1000,
+        },
+    }
+    config_path = tmp_path / "service.json"
+    config_path.write_text(json.dumps(config, separators=(",", ":")), encoding="ascii")
+    config_path.chmod(0o600)
+
+    # The production fetcher remains untouched.  A child-process-only patch keeps
+    # the real cache/JWT/policy path while avoiding privileged port 443 or a
+    # provider/tunnel merely to host a source-test JWKS fixture.
+    child = tmp_path / "run_service_fixture.py"
+    child.write_text(
+        """import base64\n"
+        "import sys\n"
+        "from integrations.business_mcp_auth.jwks import JWKS_TIMEOUT_SECONDS, MAX_JWKS_BYTES\n"
+        "from integrations.workbench_read_mcp import service\n"
+        "payload = base64.b64decode(sys.argv[2].encode('ascii'), validate=True)\n"
+        "class StaticFetcher:\n"
+        "    def __init__(self, policy): self.policy = policy\n"
+        "    async def fetch(self, *, url, timeout_seconds, max_bytes):\n"
+        "        if (url != self.policy.jwks_uri or timeout_seconds != JWKS_TIMEOUT_SECONDS\n"
+        "                or max_bytes != MAX_JWKS_BYTES):\n"
+        "            raise RuntimeError('fixture fetch contract mismatch')\n"
+        "        return payload\n"
+        "service.HttpxJwksFetcher = StaticFetcher\n"
+        "raise SystemExit(service.run_configured_service(sys.argv[1]))\n""",
+        encoding="ascii",
+    )
+    encoded_jwks = base64.b64encode(jwks_payload).decode("ascii")
+    process = subprocess.Popen(
+        [sys.executable, "-B", str(child), str(config_path), encoded_jwks],
+        cwd=repo_root,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    client = httpx.Client(base_url=f"http://127.0.0.1:{port}", timeout=1.0)
+    try:
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            if process.poll() is not None:
+                stdout, stderr = process.communicate()
+                pytest.fail(f"service exited before ready: {process.returncode}\n{stdout}\n{stderr}")
+            try:
+                if client.get("/readyz").status_code == 200:
+                    break
+            except httpx.TransportError:
+                pass
+            time.sleep(0.05)
+        else:
+            pytest.fail("service did not become ready")
+
+        token = jwt.encode(
+            {
+                "iss": issuer,
+                "sub": subject,
+                "aud": resource,
+                "iat": now - 1,
+                "exp": now + 300,
+                "scope": "workbench.read",
+                "client_id": client_id,
+            },
+            private_key,
+            algorithm="RS256",
+            headers={"kid": "p0-process"},
+        )
+        base_headers = {
+            "Accept": "application/json, text/event-stream",
+            "MCP-Protocol-Version": "2025-03-26",
+            "Authorization": "Bearer " + token,
+        }
+        initialize = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-03-26",
+                "capabilities": {},
+                "clientInfo": {"name": "read0-process-fixture", "version": "1"},
+            },
+        }
+        refused = client.post(
+            "/mcp", headers={**base_headers, "Host": "wrong.example:443"}, json=initialize
+        )
+        assert refused.status_code != 200
+
+        headers = {**base_headers, "Host": f"127.0.0.1:{port}"}
+        hello = client.post("/mcp", headers=headers, json=initialize)
+        assert hello.status_code == 200, hello.text
+        assert "serverInfo" in hello.json()["result"]
+
+        listed = client.post(
+            "/mcp",
+            headers=headers,
+            json={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+        )
+        assert listed.status_code == 200, listed.text
+        tools = listed.json()["result"]["tools"]
+        assert [tool["name"] for tool in tools] == ["read_project_file"]
+        assert tools[0]["annotations"]["readOnlyHint"] is True
+
+        expected_hash = hashlib.sha256(sentinel.encode()).hexdigest()
+        called = client.post(
+            "/mcp",
+            headers=headers,
+            json={
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {
+                    "name": "read_project_file",
+                    "arguments": {
+                        "project_ref": config["lease"]["project_ref"],
+                        "relative_path": "source.txt",
+                        "expected_sha256": expected_hash,
+                    },
+                },
+            },
+        )
+        assert called.status_code == 200, called.text
+        result = called.json()["result"]
+        assert result["isError"] is False
+        observed = result["structuredContent"]
+        assert observed["content"] == sentinel
+        assert observed["file_sha256"] == expected_hash
+        assert observed["project_ref"] == config["lease"]["project_ref"]
+        assert str(project) not in called.text
+
+        audit_path = audit / "auth-audit.jsonl"
+        assert audit_path.is_file()
+        audit_text = audit_path.read_text(encoding="ascii")
+        audit_events = [json.loads(line) for line in audit_text.splitlines() if line]
+        assert audit_events
+        assert any(event["accepted"] is True for event in audit_events)
+        assert all(
+            set(event) == {"schema", "policy_id", "code", "accepted"}
+            for event in audit_events
+        )
+        for private_value in (token, sentinel, str(project), subject, client_id):
+            assert private_value not in audit_text
+    finally:
+        client.close()
+        if process.poll() is None:
+            process.send_signal(signal.SIGTERM)
+        try:
+            stdout, stderr = process.communicate(timeout=15)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            stdout, stderr = process.communicate(timeout=5)
+            pytest.fail(f"service failed to drain after SIGTERM\n{stdout}\n{stderr}")
+    assert process.returncode == 0, f"stdout={stdout}\nstderr={stderr}"
+    assert token not in stdout + stderr
