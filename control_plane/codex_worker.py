@@ -49,6 +49,11 @@ from control_plane.executive_workspace import (
     git_observation_env,
     observe_launch_cleanliness,
 )
+from control_plane.codex_provider_realm import (
+    CodexProviderRealm,
+    ProviderCredentialLoader,
+    ProviderRealmError,
+)
 from control_plane.worker_execution_contract import (
     MAX_ARTIFACTS,
     MAX_ARTIFACT_BYTES,
@@ -1848,6 +1853,8 @@ class CodexWorkerAdapter:
         allowed_versions: frozenset[str] | None = None,
         required_team_identifier: str | None = _OPENAI_TEAM_IDENTIFIER,
         inspector: ProcessInspector | None = None,
+        provider_realm: CodexProviderRealm | None = None,
+        provider_credential_loader: ProviderCredentialLoader | None = None,
     ) -> None:
         path = Path(binary_path)
         if not path.is_absolute():
@@ -1867,6 +1874,12 @@ class CodexWorkerAdapter:
         ):
             raise BinaryAttestationError("injected Codex signer is not allowlisted")
         self._codex_home = Path(codex_home) if codex_home is not None else None
+        self.provider_realm = provider_realm
+        self.provider_credential_loader = provider_credential_loader
+        if (provider_realm is None) != (provider_credential_loader is None):
+            raise ProviderRealmError(
+                "provider realm and credential loader must be configured together"
+            )
         self.inspector = inspector or ProcessInspector()
         self._runs: dict[str, _RunState] = {}
 
@@ -1879,7 +1892,19 @@ class CodexWorkerAdapter:
     def _validated_codex_home(self) -> Path:
         """Re-open the adapter-private provider home at each execution edge."""
 
-        return _validate_codex_home(self.codex_home)
+        if self.provider_realm is None or self.provider_realm.requires_codex_auth_file:
+            return _validate_codex_home(self.codex_home)
+        path = self.codex_home
+        try:
+            info = path.lstat()
+            resolved = path.resolve(strict=True)
+        except OSError as exc:
+            raise LaunchValidationError("CODEX_HOME is unavailable") from exc
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+            raise LaunchValidationError("CODEX_HOME must be a real directory")
+        if stat.S_IMODE(info.st_mode) & 0o077:
+            raise LaunchValidationError("CODEX_HOME must be mode 0700 or narrower")
+        return resolved
 
     def _bind_legacy_codex_home(self, _codex_home: str | os.PathLike[str]) -> None:
         """Reject every attempt to inject a second provider-home authority."""
@@ -1970,10 +1995,10 @@ class CodexWorkerAdapter:
                 raise LaunchValidationError("configured worker account does not exist") from exc
             if worker_account.pw_uid != expected_uid or worker_account.pw_gid != expected_gid:
                 raise LaunchValidationError("configured worker account UID/GID does not match")
-            for label, protected_path in (
-                ("provider home", codex_home),
-                ("provider auth", codex_home / "auth.json"),
-            ):
+            protected_paths = [("provider home", codex_home)]
+            if self.provider_realm is None or self.provider_realm.requires_codex_auth_file:
+                protected_paths.append(("provider auth", codex_home / "auth.json"))
+            for label, protected_path in protected_paths:
                 if protected_path.lstat().st_uid != expected_uid:
                     raise LaunchValidationError(
                         f"{label} is not owned by the configured worker principal"
@@ -2411,14 +2436,18 @@ class CodexWorkerAdapter:
                 codex_home=codex_home,
             )
         )
+        if self.provider_realm is not None:
+            for override in self.provider_realm.config_overrides():
+                argv.extend(["-c", override])
         for feature in _DISABLED_FEATURES:
             argv.extend(["--disable", feature])
         argv.append("-")
         return argv
 
-    @staticmethod
-    def _environment(spec: LaunchSpec, home: Path, tmp: Path, codex_home: Path) -> dict[str, str]:
-        return {
+    def _environment(
+        self, spec: LaunchSpec, home: Path, tmp: Path, codex_home: Path
+    ) -> dict[str, str]:
+        environment = {
             "HOME": str(home),
             "USER": spec.worker_user,
             "LOGNAME": spec.worker_user,
@@ -2436,6 +2465,17 @@ class CodexWorkerAdapter:
             "GIT_CONFIG_NOSYSTEM": "1",
             "GIT_OPTIONAL_LOCKS": "0",
         }
+        if self.provider_realm is not None:
+            loader = self.provider_credential_loader
+            if loader is None:
+                raise LaunchValidationError("provider credential loader is unavailable")
+            try:
+                credential = loader()
+                credential = self.provider_realm.validate_credential(credential)
+            except Exception:
+                raise LaunchValidationError("provider credential is unavailable") from None
+            environment[self.provider_realm.env_key] = credential
+        return environment
 
     @staticmethod
     def _validation_environment(spec: LaunchSpec, home: Path, tmp: Path) -> dict[str, str]:
