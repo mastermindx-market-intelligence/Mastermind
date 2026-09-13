@@ -2,20 +2,41 @@
 set -eu
 
 repo="$(git -C "$(dirname "$0")/.." rev-parse --show-toplevel)"
-target="${MASTERMIND_WORKSPACE_CLI_INSTALL:-$HOME/.local/bin/mmx-workspace}"
-mkdir -p "$(dirname "$target")"
+release_sha="$(git -C "$repo" rev-parse HEAD)"
+common_dir="$(git -C "$repo" rev-parse --git-common-dir)"
+case "$common_dir" in
+  /*) common_abs="$common_dir" ;;
+  *) common_abs="$repo/$common_dir" ;;
+esac
+common_abs="$(cd "$(dirname "$common_abs")" && pwd -P)/$(basename "$common_abs")"
+if [ "$(basename "$common_abs")" != ".git" ]; then
+  echo "unsupported non-worktree Git common directory: $common_abs" >&2
+  exit 2
+fi
+source_repo="$(dirname "$common_abs")"
 
-cat > "$target" <<EOF
+target="${MASTERMIND_WORKSPACE_CLI_INSTALL:-$HOME/.local/bin/mmx-workspace}"
+payload_root="${MASTERMIND_WORKSPACE_CLI_PAYLOAD_ROOT:-$HOME/.local/share/mastermind/workspace-cli/$release_sha}"
+mkdir -p "$(dirname "$target")" "$payload_root/scripts" "$payload_root/control_plane"
+cp "$repo/scripts/mastermind_workspace.py" "$payload_root/scripts/mastermind_workspace.py"
+cp "$repo/control_plane/executive_workspace.py" "$payload_root/control_plane/executive_workspace.py"
+cp "$repo/control_plane/__init__.py" "$payload_root/control_plane/__init__.py"
+chmod 0755 "$payload_root/scripts/mastermind_workspace.py"
+chmod 0644 "$payload_root/control_plane/executive_workspace.py" "$payload_root/control_plane/__init__.py"
+
+wrapper_tmp="$target.tmp.$$"
+cat > "$wrapper_tmp" <<EOF
 #!/bin/sh
 set -eu
-export MASTERMIND_SOURCE_REPO='$repo'
+export MASTERMIND_SOURCE_REPO='$source_repo'
 if [ -n "\${MASTERMIND_PYTHON:-}" ]; then
-  exec "\$MASTERMIND_PYTHON" '$repo/scripts/mastermind_workspace.py' "\$@"
+  exec "\$MASTERMIND_PYTHON" '$payload_root/scripts/mastermind_workspace.py' "\$@"
 elif [ -x /opt/homebrew/bin/python3 ]; then
-  exec /opt/homebrew/bin/python3 '$repo/scripts/mastermind_workspace.py' "\$@"
+  exec /opt/homebrew/bin/python3 '$payload_root/scripts/mastermind_workspace.py' "\$@"
 else
-  exec python3 '$repo/scripts/mastermind_workspace.py' "\$@"
+  exec python3 '$payload_root/scripts/mastermind_workspace.py' "\$@"
 fi
 EOF
-chmod 0755 "$target"
+chmod 0755 "$wrapper_tmp"
+mv "$wrapper_tmp" "$target"
 printf '%s\n' "$target"
