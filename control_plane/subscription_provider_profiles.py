@@ -10,6 +10,7 @@ capacity remains owned by shared Provider Control.
 from __future__ import annotations
 
 import dataclasses
+import ipaddress
 import json
 import posixpath
 import re
@@ -31,7 +32,12 @@ _MAX_MAP_KEYS = 32
 _MAX_BASE_URL_PATH_CHARS = 128
 _MAX_BASE_URL_PATH_GRAMMAR_CHARS = 256
 _MAX_BASE_URL_PATH_SEGMENTS = 8
+_MAX_BASE_URL_CHARS = 512
 _PATH_SEGMENT_RE = re.compile(r"^[A-Za-z0-9._~-]{1,64}$")
+_DNS_HOST_RE = re.compile(
+    r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$"
+)
+_IPV4_LITERAL_RE = re.compile(r"^[0-9]+(\.[0-9]+){3}$")
 
 _DOCUMENT_REQUIRED = frozenset({"schema", "verified_at", "profiles"})
 _DOCUMENT_ALLOWED = _DOCUMENT_REQUIRED | frozenset({"metadata"})
@@ -192,8 +198,8 @@ def _allowlisted_base_url_path(raw_path: str) -> bool:
 
 
 def _validate_base_url(value: Any, path: str) -> str:
-    token = _exact_string(value, path)
-    if any(ch.isspace() for ch in token):
+    token = _exact_string(value, path, max_chars=_MAX_BASE_URL_CHARS)
+    if any(ch.isspace() or ord(ch) <= 0x1F or ord(ch) == 0x7F for ch in token):
         _raise(f"{path} has invalid base URL")
     try:
         parsed = urlparse(token)
@@ -214,17 +220,34 @@ def _validate_base_url(value: Any, path: str) -> str:
         normalized = ""
     if raw_path != normalized:
         _raise(f"{path} has invalid base URL")
+    hostname = parsed.hostname or ""
     if (
-        parsed.scheme != "https"
-        or not parsed.hostname
+        not token.startswith("https://")
+        or parsed.scheme != "https"
+        or not hostname
         or userinfo
+        or parsed.netloc != hostname
+        or parsed.port is not None
         or parsed.query
         or parsed.fragment
         or parsed.params
         or len(normalized) > _MAX_BASE_URL_PATH_CHARS
     ):
         _raise(f"{path} has invalid base URL")
-    if not token.isascii() or "\\" in token:
+    if (
+        not token.isascii()
+        or "\\" in token
+        or len(hostname) > 253
+        or _DNS_HOST_RE.fullmatch(hostname) is None
+        or _IPV4_LITERAL_RE.fullmatch(hostname) is not None
+        or any(label.startswith("xn--") for label in hostname.split("."))
+    ):
+        _raise(f"{path} has invalid base URL")
+    try:
+        ipaddress.ip_address(hostname)
+    except ValueError:
+        pass
+    else:
         _raise(f"{path} has invalid base URL")
     if "%" in raw_path or "%" in (parsed.hostname or "") or "%" in parsed.netloc:
         _raise(f"{path} has invalid base URL")

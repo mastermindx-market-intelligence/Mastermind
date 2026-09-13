@@ -222,6 +222,84 @@ def test_base_url_rejects_percent_in_path():
     _reject_base_url("https://api.z.ai/api%41")
 
 
+def test_base_url_rejects_uppercase_scheme():
+    _reject_base_url("HTTPS://api.z.ai/api/anthropic")
+
+
+def test_base_url_rejects_uppercase_host():
+    _reject_base_url("https://API.Z.AI/api/anthropic")
+
+
+def test_base_url_rejects_trailing_dot_host():
+    _reject_base_url("https://api.z.ai./api/anthropic")
+
+
+def test_base_url_rejects_default_port():
+    _reject_base_url("https://api.z.ai:443/api/anthropic")
+
+
+def test_base_url_rejects_nonstandard_port():
+    _reject_base_url("https://api.z.ai:8443/api/anthropic")
+
+
+def test_base_url_rejects_empty_port():
+    _reject_base_url("https://api.z.ai:/api/anthropic")
+
+
+def test_base_url_rejects_userinfo():
+    _reject_base_url("https://user@api.z.ai/api/anthropic")
+    _reject_base_url("https://user:pass@api.z.ai/api/anthropic")
+
+
+def test_base_url_rejects_punycode_label():
+    _reject_base_url("https://xn--fiqs8s.example/api/anthropic")
+
+
+def test_base_url_rejects_ipv6_literal():
+    _reject_base_url("https://[2606:4700::6810:85e5]/api/anthropic")
+
+
+def test_base_url_rejects_ipv4_literal():
+    _reject_base_url("https://1.1.1.1/api/anthropic")
+
+
+def test_base_url_rejects_tab_control_character():
+    _reject_base_url("https://api.z.ai/api\t/anthropic")
+
+
+def test_base_url_rejects_carriage_return_control_character():
+    _reject_base_url("https://api.z.ai/api\r/anthropic")
+
+
+def test_base_url_rejects_nul_control_character():
+    _reject_base_url("https://api\x00.z.ai/api/anthropic")
+
+
+def test_base_url_rejects_urls_over_512_characters():
+    catalog = _catalog()
+    catalog["profiles"]["glm-coding-plan"]["base_url"] = (
+        "https://api.z.ai/" + "a" * (513 - len("https://api.z.ai/"))
+    )
+    with pytest.raises(
+        ProviderProfileError,
+        match=r"base_url exceeds string bounds",
+    ):
+        validate_profiles(catalog)
+
+
+def test_catalog_base_urls_use_canonical_dns_authorities():
+    catalog = _catalog()
+    validate_profiles(catalog)
+    assert {
+        profile["base_url"]
+        for profile in catalog["profiles"].values()
+    } == {
+        "https://api.z.ai/api/anthropic",
+        "https://token-plan.ap-southeast-1.maas.aliyuncs.com/apps/anthropic",
+        "https://api.minimax.io/anthropic",
+    }
+
+
 @pytest.mark.parametrize("flag", [1, 0, "true", "false", None])
 def test_supported_tool_only_rejects_non_bool(flag):
     catalog = _catalog()
