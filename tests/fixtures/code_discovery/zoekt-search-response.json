@@ -1,0 +1,64 @@
+{
+  "result": {
+    "Last": {
+      "Query": "SENTINEL",
+      "Num": 3,
+      "Ctx": 1,
+      "AutoFocus": true,
+      "Debug": false
+    },
+    "QueryStr": "SENTINEL",
+    "Query": "SENTINEL",
+    "Stats": {
+      "ContentBytesLoaded": 10,
+      "IndexBytesLoaded": 20,
+      "Crashes": 0,
+      "Duration": 1000,
+      "FileCount": 1,
+      "ShardFilesConsidered": 1,
+      "FilesConsidered": 1,
+      "FilesLoaded": 1,
+      "FilesSkipped": 0,
+      "FilesSkippedDueToCancellation": 0,
+      "ShardsScanned": 1,
+      "ShardsSkipped": 0,
+      "ShardsSkippedFilter": 0,
+      "MatchCount": 1,
+      "NgramMatches": 1,
+      "NgramLookups": 1,
+      "Wait": 0,
+      "MatchTreeConstruction": 0,
+      "MatchTreeSearch": 0,
+      "RegexpsConsidered": 0,
+      "FlushReason": 0
+    },
+    "Duration": 1000,
+    "FileMatches": [
+      {
+        "FileName": "engine/core.py",
+        "Repo": "mastermindx-market-intelligence/Mastermind",
+        "ResultID": "engine/core.py",
+        "Language": "Python",
+        "DuplicateID": "",
+        "Branches": ["master"],
+        "Matches": [
+          {
+            "URL": "",
+            "FileName": "engine/core.py",
+            "LineNum": 3,
+            "Fragments": [
+              {
+                "Pre": "VALUE = '",
+                "Match": "SENTINEL",
+                "Post": "'"
+              }
+            ],
+            "Before": "from __future__ import annotations",
+            "After": ""
+          }
+        ],
+        "URL": ""
+      }
+    ]
+  }
+}
