@@ -50,6 +50,7 @@ from control_plane.executive_worker_broker import (
     UIDSweepReceipt,
     UID_SWEEP_SCHEMA_VERSION,
     WorkerBrokerClient,
+    WorkerBrokerError,
     _ps_pids_for_uid,
 )
 
@@ -316,6 +317,16 @@ def _request(operation: str, payload: dict, *, suffix: str = "1") -> dict:
         "payload": payload,
     }
 
+
+
+def test_broker_adapter_identity_is_fixed_and_unimplemented_ids_fail_closed(tmp_path: Path):
+    broker, adapter, sweeper, peer, spec = _fixture(tmp_path)
+    assert broker.adapter is adapter
+    assert broker.adapter_id == "codex-cli"
+    with pytest.raises(WorkerBrokerError, match="not implemented"):
+        ExecutiveWorkerBroker(
+            adapter, broker.policy, sweeper, adapter_id="openai-compatible"
+        )
 
 def test_broker_rejects_wrong_peer_and_unknown_operation(tmp_path: Path) -> None:
     async def scenario() -> None:
