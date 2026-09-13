@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mastermind Craft"
+  short_description: "Focused role methods and complete worker briefs"
+  default_prompt: "Use mastermind-craft with the single role appropriate to this bounded assignment. Preserve current source law and actual tool permissions."
