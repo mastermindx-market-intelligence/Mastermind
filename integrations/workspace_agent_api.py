@@ -84,7 +84,8 @@ def _conversation(value: object) -> str:
         raise InvalidObservation("INVALID_CONVERSATION_URL") from None
     if (parsed.scheme != "https" or parsed.netloc != "chatgpt.com"
             or parsed.query or parsed.fragment
-            or _CONVERSATION.fullmatch(parsed.path) is None):
+            or _CONVERSATION.fullmatch(parsed.path) is None
+            or value != "https://chatgpt.com" + parsed.path):
         raise InvalidObservation("INVALID_CONVERSATION_URL")
     return value
 

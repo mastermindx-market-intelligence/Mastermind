@@ -134,6 +134,18 @@ class RunTests(unittest.TestCase):
                 self.assertEqual(observe({**BODY, "conversation_url": url}).reason,
                                  "INVALID_CONVERSATION_URL")
 
+    def test_noncanonical_url_spellings_are_rejected_before_correlation(self):
+        for url in (URL + "?", URL + "#", URL.replace("https:", "HTTPS:")):
+            with self.subTest(url=url):
+                self.assertEqual(observe({**BODY, "conversation_url": url}).reason,
+                                 "INVALID_CONVERSATION_URL")
+                trigger = decode_trigger(202, encode({"conversation_url": url,
+                                                      "agent_trigger_run_id": RUN}))
+                self.assertEqual(trigger.disposition, "accepted")
+                self.assertFalse(trigger.correlation_available)
+                with self.assertRaises(InvalidObservation):
+                    observe(expected_conversation_url=url)
+
     def test_error_category_is_closed_and_error_prose_not_retained(self):
         for code in ("dispatch_failed", "run_failed", "SECRET_TOKEN"):
             result = observe({**BODY, "status": "failed", "error": {"code": code, "message": "SECRET_TOKEN"}})
