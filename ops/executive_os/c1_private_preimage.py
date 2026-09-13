@@ -89,6 +89,11 @@ CODEX_BINARY = (
     "@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"
 )
 CONTENT_PATHS = (*PLISTS, CONTROL_CONFIG, WORKER_CONFIG, PYTHON_PROVENANCE, CODEX_ATTESTATION)
+SOCKET_METADATA_PATHS = (
+    "/var/run/mastermind-executive/ceo-ingress.sock",
+    "/var/run/mastermind-dialogue-observation/dialogue-observation.sock",
+    "/var/run/mastermind-agent-relay/agent-relay.sock",
+)
 METADATA_PATHS = (
     f"{SYSTEM_ROOT}/config/sol-state-relay.json",
     f"{SYSTEM_ROOT}/config/sol-state-relay.token",
@@ -105,9 +110,7 @@ METADATA_PATHS = (
     f"{RUNTIME_ROOT}/control/launch-receipts",
     f"{RUNTIME_ROOT}/control/backups",
     f"{RUNTIME_ROOT}/control/dr-receipts",
-    "/var/run/mastermind-executive/ceo-ingress.sock",
-    "/var/run/mastermind-dialogue-observation/dialogue-observation.sock",
-    "/var/run/mastermind-agent-relay/agent-relay.sock",
+    *SOCKET_METADATA_PATHS,
 )
 PRINCIPALS = {
     "_mastermind_exec": {
@@ -1308,9 +1311,20 @@ class FilesystemAdapter:
                 info.st_ino,
             ):
                 raise PreimageUnsettled("FILESYSTEM_TORN")
-            if bound.st_uid not in {0, 450, 451, 452, 457} or stat.S_IMODE(
-                bound.st_mode
-            ) & 0o022:
+            # macOS 26.5 installs /private/var/run as root:daemon 0775.
+            # Admit that exact parent only for the frozen metadata-only sockets;
+            # descendants and all content paths retain the strict write guard.
+            macos_runtime_parent = (
+                current == Path("/var/run")
+                and path in SOCKET_METADATA_PATHS
+                and bound.st_uid == 0
+                and bound.st_gid == 1
+                and stat.S_IMODE(bound.st_mode) == 0o775
+            )
+            if not macos_runtime_parent and (
+                bound.st_uid not in {0, 450, 451, 452, 457}
+                or stat.S_IMODE(bound.st_mode) & 0o022
+            ):
                 raise PreimageRefusal("UNSAFE_ANCESTOR")
             identities.append(
                 (
