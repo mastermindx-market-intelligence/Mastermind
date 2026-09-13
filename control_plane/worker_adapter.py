@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import dataclasses
 import importlib
-import weakref
 from typing import Protocol, Sequence, runtime_checkable
 
 from control_plane.worker_execution_contract import (
@@ -98,9 +97,6 @@ def adapter_implementation(adapter_id: str) -> type:
     return implementation
 
 
-_FACTORY_CLOSED: weakref.WeakKeyDictionary[object, str] = weakref.WeakKeyDictionary()
-
-
 def _implementation_adapter_id(adapter: object) -> str:
     """Read the immutable identity from the implementation, never a caller label."""
 
@@ -135,26 +131,49 @@ def _require_status(adapter: object) -> object:
         ) from exc
 
 
-def close_reviewed_adapter(adapter: object, adapter_id: str) -> object:
-    """Seal one instance as factory-closed for a reviewed descriptor.
+def _is_caller_supplied_adapter(
+    value: object, implementation: type, adapter_id: str
+) -> bool:
+    """True when a value is already an adapter instance, not a constructor argument."""
 
-    Bind still requires matching identity and callable status. An unclosed
-    foreign class that only copies those attributes is refused. This is the
-    factory-closed equivalent of ``type(adapter) is adapter_implementation(...)``.
+    if isinstance(value, (str, bytes, type)):
+        return False
+    value_type = type(value)
+    try:
+        if value_type is implementation or issubclass(value_type, implementation):
+            return True
+    except TypeError:
+        return False
+    return getattr(value_type, "adapter_id", None) == adapter_id and callable(
+        getattr(value, "status", None)
+    )
+
+
+def _was_constructed(adapter: object) -> bool:
+    """True only after the reviewed class ``__init__`` populated instance state.
+
+    ``object.__new__(ReviewedClass)`` yields the exact type with an empty
+    instance dict and is therefore not bindable.
     """
 
-    try:
-        descriptor = adapter_descriptor(adapter_id)
-    except ValueError as exc:
-        raise AdapterBindingError(str(exc)) from exc
-    if not descriptor.implemented:
-        raise AdapterBindingError(f"worker adapter {adapter_id!r} is not implemented")
-    _FACTORY_CLOSED[adapter] = descriptor.adapter_id
-    return adapter
+    state = getattr(adapter, "__dict__", None)
+    return isinstance(state, dict) and bool(state)
+
+
+def construct_reviewed_adapter(adapter_id: str, *args: object, **kwargs: object) -> object:
+    """Construct the reviewed implementation. Never accepts a caller-supplied instance."""
+
+    implementation = adapter_implementation(adapter_id)
+    for value in (*args, *kwargs.values()):
+        if _is_caller_supplied_adapter(value, implementation, adapter_id):
+            raise AdapterBindingError(
+                "construct_reviewed_adapter does not accept a caller-supplied adapter"
+            )
+    return implementation(*args, **kwargs)
 
 
 def bind_reviewed_adapter(adapter: object, adapter_id: str) -> AdapterDescriptor:
-    """Prove exact reviewed class, identity, and that status() is live."""
+    """Prove exact reviewed class, constructed identity, and that status() is live."""
 
     try:
         descriptor = adapter_descriptor(adapter_id)
@@ -174,14 +193,16 @@ def bind_reviewed_adapter(adapter: object, adapter_id: str) -> AdapterDescriptor
                 f"worker adapter {descriptor.adapter_id!r} does not expose status"
             )
         implementation = adapter_implementation(descriptor.adapter_id)
-        if (
-            type(adapter) is not implementation
-            and _FACTORY_CLOSED.get(adapter) != descriptor.adapter_id
-        ):
+        if type(adapter) is not implementation:
             raise AdapterBindingError(
                 f"{type(adapter).__name__} is not the reviewed implementation "
                 f"{implementation.__module__}.{implementation.__qualname__} "
                 f"for {descriptor.adapter_id!r}"
+            )
+        if not _was_constructed(adapter):
+            raise AdapterBindingError(
+                f"{implementation.__qualname__} instance was not constructed "
+                f"by the reviewed class for {descriptor.adapter_id!r}"
             )
         return descriptor
     except AdapterBindingError:
@@ -225,5 +246,5 @@ __all__ = [
     "adapter_descriptor",
     "adapter_implementation",
     "bind_reviewed_adapter",
-    "close_reviewed_adapter",
+    "construct_reviewed_adapter",
 ]

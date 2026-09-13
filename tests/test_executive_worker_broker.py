@@ -21,6 +21,7 @@ import pytest
 from control_plane.codex_worker import (
     BinaryAttestation,
     CancelReceipt,
+    CodexWorkerAdapter,
     CollectionReceipt,
     GitPreflightFailed,
     GitPreflightTimeout,
@@ -31,7 +32,11 @@ from control_plane.codex_worker import (
     WorkerResult,
     WorkerRunStatus,
 )
-from control_plane.worker_adapter import AdapterBindingError, close_reviewed_adapter
+from control_plane.worker_adapter import (
+    AdapterBindingError,
+    bind_reviewed_adapter,
+    construct_reviewed_adapter,
+)
 from control_plane.worker_execution_contract import WorkerLaunchSpec
 from control_plane.executive_worker_broker import (
     BROKER_REQUEST_SCHEMA_VERSION,
@@ -209,6 +214,47 @@ class FakeAdapter:
         )
 
 
+def _reviewed_codex_kwargs(root: Path) -> dict:
+    root.mkdir(parents=True, exist_ok=True)
+    binary = root / "fake-codex"
+    if not binary.exists():
+        binary.write_text("#!/bin/sh\n", encoding="utf-8")
+        binary.chmod(0o700)
+    info = binary.lstat()
+    attestation = BinaryAttestation(
+        path=str(binary),
+        real_path=str(binary.resolve()),
+        version="test-0",
+        sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
+        team_identifier=None,
+        size=info.st_size,
+        device=info.st_dev,
+        inode=info.st_ino,
+        mode=stat.S_IMODE(info.st_mode),
+        uid=info.st_uid,
+        gid=info.st_gid,
+        mtime_ns=info.st_mtime_ns,
+    )
+    codex_home = root / "codex-home"
+    codex_home.mkdir(mode=0o700, exist_ok=True)
+    return {
+        "binary_path": binary,
+        "codex_home": codex_home,
+        "binary_attestation": attestation,
+        "allowed_versions": frozenset({"test-0"}),
+        "required_team_identifier": None,
+    }
+
+
+def _reviewed_codex_adapter(root: Path) -> CodexWorkerAdapter:
+    kwargs = _reviewed_codex_kwargs(root)
+    return construct_reviewed_adapter(  # type: ignore[return-value]
+        "codex-cli",
+        kwargs.pop("binary_path"),
+        **kwargs,
+    )
+
+
 def _fixture(tmp_path: Path):
     worker_uid = os.geteuid()
     worker_gid = os.getegid()
@@ -237,9 +283,11 @@ def _fixture(tmp_path: Path):
             set(os.getgroups()) - {worker_gid}
         ),
     )
-    adapter = close_reviewed_adapter(FakeAdapter(), "codex-cli")
+    reviewed = _reviewed_codex_adapter(tmp_path / "reviewed-adapter")
+    adapter = FakeAdapter()
     sweeper = FakeSweeper()
-    broker = ExecutiveWorkerBroker(adapter, policy, sweeper)
+    broker = ExecutiveWorkerBroker(reviewed, policy, sweeper)
+    broker.adapter = adapter
     peer = PeerCredentials(uid=control_uid, gid=worker_gid, pid=100)
     spec = {
         "run_id": "run-1",
@@ -416,6 +464,39 @@ def test_broker_refuses_foreign_class_claiming_reviewed_identity(tmp_path: Path)
     assert "reviewed implementation" in str(refused.value)
 
 
+def test_factory_and_bind_refuse_foreign_subclass_and_rebox(tmp_path: Path):
+    import inspect
+
+    broker, _adapter, sweeper, _peer, _spec = _fixture(tmp_path)
+    assert "adapter" not in inspect.signature(construct_reviewed_adapter).parameters
+
+    class Spoof:
+        adapter_id = "codex-cli"
+
+        def status(self, ref=None):
+            return None
+
+    class ClaimSubclass(CodexWorkerAdapter):
+        pass
+
+    kwargs = _reviewed_codex_kwargs(tmp_path / "claim-subclass")
+    subclass_instance = ClaimSubclass(kwargs.pop("binary_path"), **kwargs)
+    foreign = Spoof()
+    rebox = object.__new__(CodexWorkerAdapter)
+    claimants = (foreign, subclass_instance, rebox)
+
+    for claimant in claimants:
+        with pytest.raises(AdapterBindingError, match="does not accept a caller-supplied"):
+            construct_reviewed_adapter("codex-cli", claimant)
+        with pytest.raises(AdapterBindingError):
+            bind_reviewed_adapter(claimant, "codex-cli")
+        with pytest.raises(WorkerBrokerError) as refused:
+            ExecutiveWorkerBroker(
+                claimant, broker.policy, sweeper, adapter_id="codex-cli"
+            )
+        assert type(refused.value.__cause__) is AdapterBindingError
+
+
 def test_broker_reports_raising_binding_attribute_access_as_worker_broker_error(
     tmp_path: Path,
 ):
@@ -454,36 +535,9 @@ def test_broker_reports_raising_binding_attribute_access_as_worker_broker_error(
 
 
 def test_broker_binds_real_codex_adapter_identity(tmp_path: Path):
-    from control_plane.codex_worker import BinaryAttestation, CodexWorkerAdapter
-
     broker, _adapter, sweeper, _peer, _spec = _fixture(tmp_path)
-    binary = tmp_path / "fake-codex"
-    binary.write_text("#!/bin/sh\n", encoding="utf-8")
-    binary.chmod(0o700)
-    info = binary.lstat()
-    attestation = BinaryAttestation(
-        path=str(binary),
-        real_path=str(binary.resolve()),
-        version="test-0",
-        sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
-        team_identifier=None,
-        size=info.st_size,
-        device=info.st_dev,
-        inode=info.st_ino,
-        mode=stat.S_IMODE(info.st_mode),
-        uid=info.st_uid,
-        gid=info.st_gid,
-        mtime_ns=info.st_mtime_ns,
-    )
-    codex_home = tmp_path / "real-codex-home"
-    codex_home.mkdir(mode=0o700)
-    adapter = CodexWorkerAdapter(
-        binary,
-        codex_home=codex_home,
-        binary_attestation=attestation,
-        allowed_versions=frozenset({"test-0"}),
-        required_team_identifier=None,
-    )
+    kwargs = _reviewed_codex_kwargs(tmp_path / "real-codex")
+    adapter = CodexWorkerAdapter(kwargs.pop("binary_path"), **kwargs)
     bound = ExecutiveWorkerBroker(adapter, broker.policy, sweeper)
     assert bound.adapter is adapter
     assert type(bound.adapter) is CodexWorkerAdapter

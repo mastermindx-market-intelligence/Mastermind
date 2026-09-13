@@ -12,8 +12,8 @@ from pathlib import Path
 import pytest
 
 from control_plane import executive_worker_broker as broker_module
-from control_plane.codex_worker import BinaryAttestation
-from control_plane.worker_adapter import close_reviewed_adapter
+from control_plane.codex_worker import BinaryAttestation, CodexWorkerAdapter
+from control_plane.worker_adapter import construct_reviewed_adapter
 from control_plane.executive_orchestration_principal import (
     OSProcessCredentialObservation,
     ProviderHomeIdentityObservation,
@@ -89,27 +89,37 @@ class _Sweeper:
         )
 
 
-class _SealedAdapter:
-    adapter_id = "codex-cli"
-
-    def __init__(self) -> None:
-        self.binary = BinaryAttestation(
-            path="/fixture/codex",
-            real_path="/fixture/codex",
-            version="0.147.0",
-            sha256="a" * 64,
-            team_identifier="2DC432GLL2",
-            size=1,
-            device=1,
-            inode=1,
-            mode=0o555,
-            uid=0,
-            gid=0,
-            mtime_ns=1,
-        )
-
-    async def status(self, ref):
-        raise AssertionError("sealed adapter status should not run")
+def _reviewed_codex_adapter(root: Path) -> CodexWorkerAdapter:
+    root.mkdir(parents=True, exist_ok=True)
+    binary = root / "fake-codex"
+    if not binary.exists():
+        binary.write_text("#!/bin/sh\n", encoding="utf-8")
+        binary.chmod(0o700)
+    info = binary.lstat()
+    attestation = BinaryAttestation(
+        path=str(binary),
+        real_path=str(binary.resolve()),
+        version="test-0",
+        sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
+        team_identifier=None,
+        size=info.st_size,
+        device=info.st_dev,
+        inode=info.st_ino,
+        mode=stat.S_IMODE(info.st_mode),
+        uid=info.st_uid,
+        gid=info.st_gid,
+        mtime_ns=info.st_mtime_ns,
+    )
+    codex_home = root / "codex-home"
+    codex_home.mkdir(mode=0o700, exist_ok=True)
+    return construct_reviewed_adapter(  # type: ignore[return-value]
+        "codex-cli",
+        binary,
+        codex_home=codex_home,
+        binary_attestation=attestation,
+        allowed_versions=frozenset({"test-0"}),
+        required_team_identifier=None,
+    )
 
 
 class _OperatorAdapter:
@@ -349,7 +359,7 @@ def _fixture(tmp_path: Path, *, armed: bool = True, autonomy_guard=None):
 
     sweeper = _Sweeper()
     broker = ExecutiveWorkerBroker(
-        close_reviewed_adapter(_SealedAdapter(), "codex-cli"),  # type: ignore[arg-type]
+        _reviewed_codex_adapter(tmp_path / "reviewed-adapter"),
         policy,
         sweeper,
         operator_adapter_factory=factory,
