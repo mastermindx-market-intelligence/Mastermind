@@ -60,7 +60,8 @@ async def one_case(scenario: str) -> dict:
         try:
             transport = NdjsonTransport(
                 StrictFrameReader(process.stdout, client),
-                MessageSender(process.stdin, sender_tasks), receive_timeout=2.0)
+                # Keep transport loss distinct from the 1s prompt + 1s cancel semantic budget.
+                MessageSender(process.stdin, sender_tasks), receive_timeout=4.0)
             conn = connect_to_agent(client, transport)
             init = await asyncio.wait_for(conn.initialize(
                 protocol_version=1, client_capabilities={
@@ -88,9 +89,10 @@ async def one_case(scenario: str) -> dict:
             try:
                 await asyncio.wait_for(process.wait(), timeout=1)
             except TimeoutError:
-                # Fixture cleanup only; any forced exit fails this qualification.
-                clean = False
+                # A deadline race is not a dirty exit when returncode is already
+                # observed. Only a still-live fixture requires force and fails.
                 if process.returncode is None:
+                    clean = False
                     process.kill()
                 await asyncio.wait_for(process.wait(), timeout=1)
             stderr = await asyncio.wait_for(stderr_task, timeout=1)

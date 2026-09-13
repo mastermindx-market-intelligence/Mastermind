@@ -48,9 +48,14 @@ def main() -> int:
         if method == "initialize":
             assert not initialized
             assert params["protocolVersion"] == 1
-            assert params["clientCapabilities"]["terminal"] is False
-            fs = params["clientCapabilities"]["fs"]
-            assert fs["readTextFile"] is False and fs["writeTextFile"] is False
+            # SDK 0.12.1 excludes all-default ClientCapabilities from the wire.
+            # Omission therefore means no client capability, not an unknown grant.
+            capabilities = params.get("clientCapabilities", {})
+            assert set(capabilities) <= {"fs", "terminal"}
+            assert capabilities.get("terminal", False) is False
+            fs = capabilities.get("fs", {})
+            assert fs.get("readTextFile", False) is False
+            assert fs.get("writeTextFile", False) is False
             initialized = True
             response(message["id"], {
                 "protocolVersion": 2 if scenario == "wrong_protocol" else 1,
