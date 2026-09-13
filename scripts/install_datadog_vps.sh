@@ -3,7 +3,7 @@
 # Requires DD_API_KEY at runtime; never prints or duplicates it into Mastermind config.
 set -euo pipefail
 
-DD_SITE="${DD_SITE:-datadoghq.com}"
+DD_SITE="${DD_SITE:-us5.datadoghq.com}"
 DD_ENVIRONMENT="${DD_ENVIRONMENT:-production}"
 DD_SERVICE_NAME="${DD_SERVICE_NAME:-mastermind-api}"
 DD_TEAM="${DD_TEAM:-mastermind}"

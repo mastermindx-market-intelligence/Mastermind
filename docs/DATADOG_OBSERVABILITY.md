@@ -1,6 +1,7 @@
 # Datadog production observability
 
 Mastermind has one Datadog destination: the Chris Wong organization on the GitHub Student plan.
+That organization is hosted on Datadog US5 (`us5.datadoghq.com`); US1 is not its intake site.
 The MastermindX trial organization is not a production observability authority.
 
 The first production slice is the authoritative VPS running `mastermind.service`.

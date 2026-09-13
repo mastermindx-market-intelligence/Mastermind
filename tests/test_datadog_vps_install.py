@@ -30,6 +30,7 @@ def test_rendered_config_correlates_host_logs_and_apm() -> None:
     result = _render()
     assert result.returncode == 0, result.stderr
     assert "Environment=DD_SERVICE=mastermind-api" in result.stdout
+    assert 'DD_SITE="${DD_SITE:-us5.datadoghq.com}"' in SCRIPT.read_text(encoding="utf-8")
     assert "Environment=DD_ENV=production" in result.stdout
     assert "Environment=DD_LOGS_INJECTION=true" in result.stdout
     assert "service:mastermind-api" in result.stdout
