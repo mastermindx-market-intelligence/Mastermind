@@ -8,6 +8,7 @@ credential, host selector, shell string, Git push, or browser instruction.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections.abc import Awaitable, Callable, Mapping
@@ -141,6 +142,8 @@ _EFFECT_OUTPUT_SCHEMA: dict[str, Any] = {
 PatchPrepare = Callable[[ActionCaller, Mapping[str, Any]], Awaitable[Mapping[str, Any]]]
 PatchCommit = Callable[[ActionCaller, object], Awaitable[Mapping[str, Any]]]
 PatchReconcile = Callable[[ActionCaller, object], Awaitable[Mapping[str, Any]]]
+CallReceiptSink = Callable[[Mapping[str, Any]], None]
+CALL_RECEIPT_SCHEMA = "mastermind.workbench_action_call_receipt.v1"
 
 
 def _snapshot(value: object, maximum: int) -> object:
@@ -196,6 +199,7 @@ def create_authenticated_action_server(
     commit_port: PatchCommit,
     reconcile_port: PatchReconcile,
     allowed_hosts: tuple[str, ...],
+    call_receipt_sink: CallReceiptSink | None = None,
     allowed_origins: tuple[str, ...] = (),
 ) -> FastMCP:
     selected_policy = validate_resource_policy(policy)
@@ -206,6 +210,7 @@ def create_authenticated_action_server(
         or not callable(prepare_port)
         or not callable(commit_port)
         or not callable(reconcile_port)
+        or (call_receipt_sink is not None and not callable(call_receipt_sink))
         or type(allowed_hosts) is not tuple
         or not allowed_hosts
     ):
@@ -299,6 +304,41 @@ def create_authenticated_action_server(
             ),
         ]
 
+    def emit_call_receipt(
+        *, name: str, request: object, caller: ActionCaller
+    ) -> None:
+        if call_receipt_sink is None:
+            return
+        try:
+            canonical = json.dumps(
+                request,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
+            ).encode("utf-8")
+            call_ref = hashlib.sha256(
+                caller.subject_digest.encode("ascii")
+                + b"\0"
+                + name.encode("ascii")
+                + b"\0"
+                + canonical
+            ).hexdigest()
+            call_receipt_sink(
+                {
+                    "schema": CALL_RECEIPT_SCHEMA,
+                    "phase": "RECEIVED",
+                    "tool": name,
+                    "call_ref": call_ref,
+                    "subject_digest": caller.subject_digest,
+                    "client_ref": caller.client_ref,
+                }
+            )
+        except Exception:
+            # Diagnostic telemetry is not an authority/effect owner. A sink
+            # outage must never mutate action semantics or trigger a retry.
+            return
+
     @server._mcp_server.call_tool(validate_input=False)
     async def call_tool(name: str, arguments: dict[str, Any] | None) -> CallToolResult:
         access = get_access_token()
@@ -317,6 +357,7 @@ def create_authenticated_action_server(
         except Exception:
             return _error("INVALID_REQUEST")
 
+        emit_call_receipt(name=name, request=request, caller=caller)
         try:
             if name == PREPARE_TOOL:
                 observed = await prepare_port(caller, request)
@@ -371,6 +412,7 @@ def create_authenticated_action_server(
 
 
 __all__ = [
+    "CALL_RECEIPT_SCHEMA",
     "COMMIT_TOOL",
     "PREPARE_TOOL",
     "RECONCILE_TOOL",

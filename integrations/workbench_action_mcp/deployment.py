@@ -7,7 +7,8 @@ root, listener, credential, executor, lifecycle, queue, or retry plane itself.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from typing import Any
 from dataclasses import dataclass
 
 from integrations.business_mcp_auth.contracts import (
@@ -33,6 +34,7 @@ class RuntimeServices:
     run_io: ActionExecutor
     action_token_key: bytes
     allowed_hosts: tuple[str, ...]
+    call_receipt_sink: Callable[[Mapping[str, Any]], None] | None = None
     allowed_origins: tuple[str, ...] = ()
     action_ttl_ms: int = MAX_ACTION_TTL_MS
 
@@ -92,6 +94,7 @@ def create_deployment(services: RuntimeServices):
         commit_port=commit,
         reconcile_port=reconcile,
         allowed_hosts=services.allowed_hosts,
+        call_receipt_sink=services.call_receipt_sink,
         allowed_origins=services.allowed_origins,
     )
 

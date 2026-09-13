@@ -516,6 +516,23 @@ async def _rollback_runtime(
         pass
 
 
+def _call_receipt_sink(event: object) -> None:
+    # Stable process telemetry only. It is deliberately not another action
+    # ledger or retry owner. No patch text, action token, path, credential, or
+    # absolute project location is emitted.
+    try:
+        if not isinstance(event, dict):
+            return
+        print(
+            "MMX_WORKBENCH_ACTION_CALL_RECEIVED "
+            + json.dumps(event, sort_keys=True, separators=(",", ":")),
+            file=sys.stderr,
+            flush=True,
+        )
+    except Exception:
+        return
+
+
 async def create_runtime(config: ServiceConfig) -> WorkbenchActionRuntime:
     policy_document = _secure_json(config.policy_file, maximum=MAX_POLICY_BYTES)
     try:
@@ -548,6 +565,7 @@ async def create_runtime(config: ServiceConfig) -> WorkbenchActionRuntime:
             lease=config.lease,
             action_token_key=secrets.token_bytes(32),
             allowed_hosts=config.allowed_hosts,
+            call_receipt_sink=_call_receipt_sink,
             allowed_origins=config.allowed_origins,
             max_concurrency=config.max_concurrency,
             io_timeout_seconds=config.io_timeout_seconds,

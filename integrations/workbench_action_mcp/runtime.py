@@ -14,7 +14,8 @@ import os
 import re
 import stat
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from typing import Any
 from urllib.parse import urlsplit
 
 from mcp.server.auth.routes import build_resource_metadata_url
@@ -317,6 +318,7 @@ class WorkbenchActionRuntime:
         action_token_key: bytes,
         allowed_hosts: tuple[str, ...],
         allowed_origins: tuple[str, ...] = (),
+        call_receipt_sink: Callable[[Mapping[str, Any]], None] | None = None,
         max_concurrency: int = 2,
         io_timeout_seconds: float = 5.0,
         action_ttl_ms: int = 5 * 60 * 1000,
@@ -379,6 +381,7 @@ class WorkbenchActionRuntime:
                 run_io=runtime.run_io,
                 action_token_key=bytes(action_token_key),
                 allowed_hosts=allowed_hosts,
+                call_receipt_sink=call_receipt_sink,
                 allowed_origins=allowed_origins,
                 action_ttl_ms=action_ttl_ms,
             )

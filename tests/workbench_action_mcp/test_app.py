@@ -80,6 +80,7 @@ class WorkbenchActionAppTests(unittest.IsolatedAsyncioTestCase):
         self.auth = JwtAuthenticator(policy=self.policy, jwks_cache=Keys(public))
         self.audit = Audit()
         self.calls = []
+        self.receipts = []
         self.refuse_commit = False
 
         async def prepare(caller, request):
@@ -135,6 +136,7 @@ class WorkbenchActionAppTests(unittest.IsolatedAsyncioTestCase):
             commit_port=commit,
             reconcile_port=reconcile,
             allowed_hosts=("127.0.0.1", "127.0.0.1:*"),
+            call_receipt_sink=self.receipts.append,
         )
         self.app = self.server.streamable_http_app()
         self.ready = asyncio.Event()
@@ -241,6 +243,13 @@ class WorkbenchActionAppTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(committed["structuredContent"]["effect_state"], "APPLIED")
         self.assertEqual([row[0] for row in self.calls], ["prepare", "commit"])
         self.assertEqual(self.calls[0][1].subject_digest, self.subject)
+        self.assertEqual([row["phase"] for row in self.receipts], ["RECEIVED", "RECEIVED"])
+        self.assertEqual([row["tool"] for row in self.receipts], [PREPARE_TOOL, COMMIT_TOOL])
+        self.assertTrue(all(len(row["call_ref"]) == 64 for row in self.receipts))
+        serialized = json.dumps(self.receipts, sort_keys=True)
+        self.assertNotIn("old_text", serialized)
+        self.assertNotIn("new_text", serialized)
+        self.assertNotIn(ref, serialized)
 
     async def test_wrong_scope_is_rejected_before_action_port(self):
         response = await self.rpc(
