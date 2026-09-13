@@ -523,6 +523,17 @@ def _start_sync(
         fcntl.flock(start_lock_fd, fcntl.LOCK_EX)
         existing = _inspect(state_root_fd, prepared)
         if existing["process_state"] != "NOT_STARTED":
+            if existing["process_state"] in {"STARTING", "OWNER_LOST"}:
+                # A same-ref contender can acquire the start lock immediately
+                # after the launcher Popen but before the runner publishes its
+                # liveness/child receipt. Settle that micro-race without ever
+                # issuing a second launch.
+                settle_deadline = time.monotonic() + 2.0
+                while time.monotonic() < settle_deadline:
+                    existing = _inspect(state_root_fd, prepared)
+                    if existing["process_state"] not in {"STARTING", "OWNER_LOST"}:
+                        break
+                    time.sleep(0.02)
             return existing
 
         opened = _open_state_dir(state_root_fd, prepared.command_id, create=True)
