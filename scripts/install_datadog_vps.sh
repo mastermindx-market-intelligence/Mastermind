@@ -11,6 +11,8 @@ DD_ROLE="${DD_ROLE:-authoritative-vps}"
 DD_PYTHON_TRACER_MAJOR="${DD_PYTHON_TRACER_MAJOR:-4}"
 MASTERMIND_SERVICE="${MASTERMIND_SERVICE:-mastermind.service}"
 MASTERMIND_HEALTH="${MASTERMIND_HEALTH:-http://127.0.0.1:8001/health}"
+MASTERMIND_ROOT="${MASTERMIND_ROOT:-/opt/mastermind}"
+DD_RELEASE_SHA="${DD_RELEASE_SHA:-}"
 APP_DROPIN="/etc/systemd/system/${MASTERMIND_SERVICE}.d/80-datadog.conf"
 AGENT_DROPIN="/etc/systemd/system/datadog-agent.service.d/80-mastermind-tags.conf"
 JOURNAL_CONF="/etc/datadog-agent/conf.d/journald.d/conf.yaml"
@@ -22,8 +24,18 @@ log() { printf '[mastermind-datadog] %s\n' "$*"; }
 valid_token() {
   [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]
 }
+resolve_release_sha() {
+  local value="$DD_RELEASE_SHA"
+  if [[ -z "$value" && -r "$MASTERMIND_ROOT/.deployed_git_sha" ]]; then
+    value="$(tr -d "\r\n" < "$MASTERMIND_ROOT/.deployed_git_sha")"
+  fi
+  [[ "$value" =~ ^[0-9a-f]{40}$ ]] || return 1
+  printf "%s" "$value"
+}
 
 render_app_dropin() {
+  local release_sha=""
+  release_sha="$(resolve_release_sha 2>/dev/null || true)"
   cat <<EOF
 [Service]
 Environment=DD_SERVICE=${DD_SERVICE_NAME}
@@ -34,6 +46,7 @@ Environment=DD_RUNTIME_METRICS_ENABLED=true
 Environment="DD_TAGS=team:${DD_TEAM} role:${DD_ROLE}"
 SyslogIdentifier=${DD_SERVICE_NAME}
 EOF
+  [[ -z "$release_sha" ]] || printf "Environment=DD_VERSION=%s\n" "$release_sha"
 }
 
 render_agent_dropin() {
@@ -76,6 +89,7 @@ fi
 
 [[ "$(id -u)" == "0" ]] || fail "run as root on the authoritative VPS"
 [[ -n "${DD_API_KEY:-}" ]] || fail "DD_API_KEY is required in the process environment"
+DD_RELEASE_SHA="$(resolve_release_sha)" || fail "valid deployed Git SHA is required at $MASTERMIND_ROOT/.deployed_git_sha"
 command -v curl >/dev/null || fail "curl is required"
 command -v systemctl >/dev/null || fail "systemd is required"
 
