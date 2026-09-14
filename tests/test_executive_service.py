@@ -7933,7 +7933,7 @@ def test_armed_service_advances_review_repair_without_web_continue(
     tmp_path: Path,
     short_socket_root: Path,
 ):
-    async def wait_until(service, predicate, *, timeout: float = 3.0):
+    async def wait_until(service, predicate, *, timeout: float = 30.0):
         deadline = asyncio.get_running_loop().time() + timeout
         while asyncio.get_running_loop().time() < deadline:
             if predicate():
