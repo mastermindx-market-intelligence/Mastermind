@@ -671,7 +671,10 @@ def _mlx_profile_search_request_arguments(
         "POST",
         _MLX_CLOUD_ORIGIN,
         "/profile/search",
-        BoundedHttpClient._bearer(credential),
+        {
+            **BoundedHttpClient._bearer(credential),
+            "Accept": "application/json",
+        },
         None,
         body,
         diagnostic_sink,
@@ -897,6 +900,8 @@ class BoundedHttpClient:
                 diagnostic_sink, "TRANSPORT_FAILURE",
             )
             return None
+        if diagnostic_sink is not None and status_code != 200:
+            return _BoundedResponse(status_code, None)
         try:
             payload = json.loads(b"".join(chunks)) if chunks else None
         except UnicodeDecodeError:

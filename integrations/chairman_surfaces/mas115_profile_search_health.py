@@ -218,15 +218,12 @@ def _is_exact_profile_search_request(
         or type(diagnostic_sink) is not _vendors._InitialPeerCensusDiagnosticSink  # noqa: SLF001
     ):
         return False
-    if len(headers) != 1:
+    if set(headers) != {"Authorization", "Accept"}:
         return False
-    authorization = None
-    for key, value in headers.items():
-        if type(key) is not str or type(value) is not str:
-            return False
-        if key != "Authorization":
-            return False
-        authorization = value
+    authorization = headers["Authorization"]
+    accept = headers["Accept"]
+    if type(authorization) is not str or type(accept) is not str:
+        return False
     if len(body) != len(fixed_body_types):
         return False
     for key, value in body.items():
@@ -241,6 +238,7 @@ def _is_exact_profile_search_request(
         and path == "/profile/search"
         and authorization.startswith("Bearer ")
         and len(authorization) > len("Bearer ")
+        and accept == "application/json"
         and body["is_removed"] is False
         and body["limit"] == _vendors._PROFILE_PAGE_SIZE  # noqa: SLF001
         and 0 <= body["offset"] < _vendors._MAX_PROFILE_CENSUS  # noqa: SLF001
