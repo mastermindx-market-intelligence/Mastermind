@@ -385,7 +385,7 @@ class TestDarwinACLBoundary:
         for target in (path.parent, path):
             with mock.patch.object(
                 fs_security,
-                "_acl_get_file",
+                "_acl_get_fd",
                 return_value=None,
             ) as observer, mock.patch.object(
                 ctypes,
@@ -419,7 +419,7 @@ class TestDarwinACLBoundary:
                         expected_uid=os.getuid(),
                         expected_gid=os.getgid(),
             )
-            assert os.fsencode(target) in {call.args[0] for call in observer.call_args_list}
+            assert observer.call_count >= 1
 
     def test_acl_observer_native_semantics_and_error_classification(
         self,
@@ -439,7 +439,7 @@ class TestDarwinACLBoundary:
         with pytest.raises(FilesystemSecurityError):
             fs_security.has_macos_acl(missing)
 
-        with mock.patch.object(fs_security, "_acl_get_file", return_value=None), mock.patch.object(
+        with mock.patch.object(fs_security, "_acl_get_fd", return_value=None), mock.patch.object(
             ctypes,
             "get_errno",
             return_value=errno.EACCES,
@@ -456,6 +456,62 @@ class TestDarwinACLBoundary:
             with pytest.raises(FilesystemSecurityError, match="enumeration failed"):
                 fs_security.has_macos_acl(path)
         observer.assert_called_once()
+
+    @pytest.mark.skipif(os.geteuid() == 0, reason="non-root traversal denial")
+    def test_acl_observer_fails_closed_for_non_traversable_parent(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        parent = tmp_path / "untraversable-parent"
+        parent.mkdir(mode=0o700)
+        path = parent / "observer-fixture"
+        path.write_text("fixture", encoding="utf-8")
+        path.chmod(0o600)
+        os.chmod(parent, 0)
+        try:
+            with pytest.raises(
+                FilesystemSecurityError,
+                match=f"errno={errno.EACCES}",
+            ):
+                fs_security.has_macos_acl(path)
+        finally:
+            os.chmod(parent, 0o700)
+
+    def test_acl_observer_fails_closed_when_target_disappears_before_open(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        path = tmp_path / "observer-fixture"
+        path.write_text("fixture", encoding="utf-8")
+
+        def unlink_then_open(*args: object, **kwargs: object) -> int:
+            path.unlink()
+            raise OSError(errno.ENOENT, "target removed between lstat and open")
+
+        monkeypatch.setattr(fs_security.os, "open", unlink_then_open)
+        with pytest.raises(FilesystemSecurityError, match="macOS ACL open failed"):
+            fs_security.has_macos_acl(path)
+
+    def test_acl_observer_fails_closed_when_target_identity_changes_before_open(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        path = tmp_path / "observer-fixture"
+        path.write_text("before", encoding="utf-8")
+        replacement = tmp_path / "observer-replacement"
+        replacement.write_text("after", encoding="utf-8")
+        real_open = fs_security.os.open
+
+        def replace_then_open(*args: object, **kwargs: object) -> int:
+            os.replace(path, tmp_path / "observer-old")
+            os.replace(replacement, path)
+            return real_open(*args, **kwargs)
+
+        monkeypatch.setattr(fs_security.os, "open", replace_then_open)
+        with pytest.raises(FilesystemSecurityError, match="identity changed"):
+            fs_security.has_macos_acl(path)
 
     def test_old_stat_probe_does_not_observe_the_acl_fixture(self, tmp_path: Path) -> None:
         _, path = _installed_config(tmp_path)

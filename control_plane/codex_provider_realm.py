@@ -103,9 +103,18 @@ class CodexProviderRealm:
         return credential
 
 
-def _has_macos_acl(path: Path) -> bool:
+def _has_macos_acl(
+    path: Path,
+    *,
+    expected_identity: os.stat_result | None = None,
+    descriptor: int | None = None,
+) -> bool:
     try:
-        return has_macos_acl(path)
+        return has_macos_acl(
+            path,
+            expected_identity=expected_identity,
+            descriptor=descriptor,
+        )
     except FilesystemSecurityError:
         raise ProviderRealmError("provider credential is unavailable")
 
@@ -116,23 +125,37 @@ def _require_provider_home(
     expected_uid: int,
     expected_gid: int,
 ) -> None:
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+        | os.O_DIRECTORY
+    )
     try:
         info = home.lstat()
     except OSError:
         raise ProviderRealmError("provider credential is unavailable") from None
+    descriptor = os.open(home, flags)
     try:
-        acl_present = _has_macos_acl(home)
+        if (
+            stat.S_ISLNK(info.st_mode)
+            or not stat.S_ISDIR(info.st_mode)
+            or info.st_uid != int(expected_uid)
+            or info.st_gid != int(expected_gid)
+            or stat.S_IMODE(info.st_mode) != 0o700
+            or _has_macos_acl(
+                home,
+                expected_identity=info,
+                descriptor=descriptor,
+            )
+        ):
+            raise ProviderRealmError("provider credential is unavailable")
+    except OSError:
+        raise ProviderRealmError("provider credential is unavailable") from None
     except ProviderRealmError:
         raise
-    if (
-        stat.S_ISLNK(info.st_mode)
-        or not stat.S_ISDIR(info.st_mode)
-        or info.st_uid != int(expected_uid)
-        or info.st_gid != int(expected_gid)
-        or stat.S_IMODE(info.st_mode) != 0o700
-        or acl_present
-    ):
-        raise ProviderRealmError("provider credential is unavailable")
+    finally:
+        os.close(descriptor)
 
 
 def load_private_provider_credential(
@@ -148,12 +171,6 @@ def load_private_provider_credential(
     try:
         _require_provider_home(home, expected_uid=expected_uid, expected_gid=expected_gid)
         before = path.lstat()
-        if (
-            stat.S_ISLNK(before.st_mode)
-            or not stat.S_ISREG(before.st_mode)
-            or _has_macos_acl(path)
-        ):
-            raise ProviderRealmError("provider credential is unavailable")
         flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
         descriptor = os.open(path, flags)
     except (OSError, ProviderRealmError):
@@ -169,6 +186,11 @@ def load_private_provider_credential(
             or stat.S_IMODE(observed.st_mode) != 0o600
             or observed.st_size < 1
             or observed.st_size > 4096
+            or _has_macos_acl(
+                path,
+                expected_identity=before,
+                descriptor=descriptor,
+            )
         ):
             raise ProviderRealmError("provider credential is unavailable")
         try:

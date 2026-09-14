@@ -35,9 +35,18 @@ class SubscriptionCredentialEffectUnknown(SubscriptionCredentialError):
     """The credential replacement may have landed and must be reconciled."""
 
 
-def _has_macos_acl(path: Path) -> bool:
+def _has_macos_acl(
+    path: Path,
+    *,
+    expected_identity: os.stat_result | None = None,
+    descriptor: int | None = None,
+) -> bool:
     try:
-        return has_macos_acl(path)
+        return has_macos_acl(
+            path,
+            expected_identity=expected_identity,
+            descriptor=descriptor,
+        )
     except SubscriptionCredentialError:
         raise
     except FilesystemSecurityError:
@@ -46,47 +55,73 @@ def _has_macos_acl(path: Path) -> bool:
 
 def _require_provider_home(config: Mapping[str, Any]) -> Path:
     home = Path(str(config["provider_home"]))
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+        | os.O_DIRECTORY
+    )
     try:
         info = home.lstat()
     except OSError:
         raise SubscriptionCredentialError("provider home is unavailable") from None
+    descriptor = os.open(home, flags)
     try:
-        acl_present = _has_macos_acl(home)
-    except SubscriptionCredentialError:
-        raise
-    if (
-        stat.S_ISLNK(info.st_mode)
-        or not stat.S_ISDIR(info.st_mode)
-        or info.st_uid != int(config["worker_uid"])
-        or info.st_gid != int(config["worker_gid"])
-        or stat.S_IMODE(info.st_mode) != 0o700
-        or acl_present
-    ):
-        raise SubscriptionCredentialError("provider home metadata is unsafe")
+        if (
+            stat.S_ISLNK(info.st_mode)
+            or not stat.S_ISDIR(info.st_mode)
+            or info.st_uid != int(config["worker_uid"])
+            or info.st_gid != int(config["worker_gid"])
+            or stat.S_IMODE(info.st_mode) != 0o700
+            or _has_macos_acl(
+                home,
+                expected_identity=info,
+                descriptor=descriptor,
+            )
+        ):
+            raise SubscriptionCredentialError("provider home metadata is unsafe")
+    except (OSError, SubscriptionCredentialError) as exc:
+        if isinstance(exc, SubscriptionCredentialError):
+            raise
+        raise SubscriptionCredentialError("provider home metadata is unsafe") from None
+    finally:
+        os.close(descriptor)
     return home
 
 
 def _credential_metadata(path: Path, *, worker_uid: int, worker_gid: int) -> os.stat_result:
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
     try:
         info = path.lstat()
     except OSError:
         raise SubscriptionCredentialError("provider credential is unavailable") from None
     try:
-        acl_present = _has_macos_acl(path)
-    except SubscriptionCredentialError:
-        raise
-    if (
-        stat.S_ISLNK(info.st_mode)
-        or not stat.S_ISREG(info.st_mode)
-        or info.st_uid != int(worker_uid)
-        or info.st_gid != int(worker_gid)
-        or stat.S_IMODE(info.st_mode) != 0o600
-        or info.st_nlink != 1
-        or info.st_size < 1
-        or info.st_size > MAX_CREDENTIAL_BYTES
-        or acl_present
-    ):
-        raise SubscriptionCredentialError("provider credential metadata is unsafe")
+        descriptor = os.open(path, flags)
+    except OSError:
+        raise SubscriptionCredentialError("provider credential is unavailable") from None
+    try:
+        if (
+            stat.S_ISLNK(info.st_mode)
+            or not stat.S_ISREG(info.st_mode)
+            or info.st_uid != int(worker_uid)
+            or info.st_gid != int(worker_gid)
+            or stat.S_IMODE(info.st_mode) != 0o600
+            or info.st_nlink != 1
+            or info.st_size < 1
+            or info.st_size > MAX_CREDENTIAL_BYTES
+            or _has_macos_acl(
+                path,
+                expected_identity=info,
+                descriptor=descriptor,
+            )
+        ):
+            raise SubscriptionCredentialError("provider credential metadata is unsafe")
+    except (OSError, SubscriptionCredentialError) as exc:
+        if isinstance(exc, SubscriptionCredentialError):
+            raise
+        raise SubscriptionCredentialError("provider credential metadata is unsafe") from None
+    finally:
+        os.close(descriptor)
     return info
 
 
