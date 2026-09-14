@@ -559,7 +559,6 @@ class VisibleTurnProjection:
                     existing
                     for existing in reversed(record.items)
                     if existing.source_item_id == item.source_item_id
-                    and existing.state == "partial"
                 ),
                 None,
             )
