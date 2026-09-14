@@ -4,6 +4,7 @@ import asyncio
 import io
 import json
 import os
+import shlex
 import stat
 import subprocess
 import time
@@ -783,19 +784,21 @@ def test_midflight_stream_accounting_reports_produced_and_dropped_bytes(
 ) -> None:
     async def exercise() -> None:
         runtime = _open(repo, tmp_path / "state")
+        release = tmp_path / "release-midflight"
         started = await runtime.start_command(
             {
                 "operation_key": "midflight-accounting",
                 "command_text": (
-                    "python3 -c \"import sys,time; "
-                    "sys.stdout.write('x'*5000); sys.stdout.flush(); time.sleep(1.5)\""
+                    "python3 -c \"import sys; "
+                    "sys.stdout.write('x'*5000); sys.stdout.flush()\"; "
+                    f"while [ ! -e {shlex.quote(str(release))} ]; do sleep 0.02; done"
                 ),
-                "timeout_seconds": 5,
+                "timeout_seconds": 10,
                 "output_limit_bytes": 2048,
             }
         )
         latest: dict = {}
-        deadline = time.monotonic() + 1.0
+        deadline = time.monotonic() + 5.0
         try:
             while time.monotonic() < deadline:
                 latest = await runtime.read_process(
@@ -816,13 +819,7 @@ def test_midflight_stream_accounting_reports_produced_and_dropped_bytes(
             assert latest["stdout"]["truncated"] is True
             assert latest["stdout"]["gap_ranges"] == [[2048, 5000]]
         finally:
-            observed = await runtime.read_process(
-                {"process_ref": started["process_ref"], "max_bytes": 65536}
-            )
-            if not observed["terminal"]:
-                await runtime.cancel_process(
-                    {"process_ref": started["process_ref"], "reason": "test cleanup"}
-                )
+            release.touch()
             await _terminal(runtime, started["process_ref"], timeout=6)
 
     asyncio.run(exercise())
