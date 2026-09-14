@@ -45,14 +45,59 @@ from control_plane.executive_ambient_process import (
     AmbientProcessIdentity,
     NullAmbientClassifier,
 )
-from control_plane.codex_worker import (
-    GitPreflightFailed,
-    GitPreflightTimeout,
-    ISOLATION_MANIFEST_SCHEMA_VERSION,
-    LaunchValidationStageError,
-    ProcessIdentityError,
+from control_plane.worker_adapter import (
+    AdapterBindingError,
+    WorkerExecutionAdapter,
+    bind_reviewed_adapter,
 )
-from control_plane.worker_adapter import WorkerExecutionAdapter, adapter_descriptor
+
+LAUNCH_ATTESTATION_SCHEMA_VERSION = "mastermind.executive_launch_attestation/v1"
+ISOLATION_MANIFEST_SCHEMA_VERSION = "mastermind.executive_isolation_manifest/v1"
+
+
+class _BrokerWorkerError(RuntimeError):
+    pass
+
+
+def _codex_worker_errors():
+    import control_plane.codex_worker
+
+    return (
+        control_plane.codex_worker.LaunchValidationStageError,
+        control_plane.codex_worker.GitPreflightFailed,
+        control_plane.codex_worker.GitPreflightTimeout,
+    )
+
+
+
+class LaunchValidationStageError(_BrokerWorkerError):
+    code = "launch_validation_stage"
+
+    def __init__(self, *, stage: str):
+        self.stage = str(stage)
+        super().__init__(f"Launch validation failed at stage: {self.stage}")
+
+
+class GitPreflightTimeout(_BrokerWorkerError):
+    code = "git_preflight_timeout"
+
+    def __init__(self, *, operation: str, timeout_seconds: float):
+        self.operation = operation
+        self.timeout_seconds = timeout_seconds
+        super().__init__(f"Git preflight timed out after {timeout_seconds:g}s: {operation}")
+
+
+class GitPreflightFailed(_BrokerWorkerError):
+    code = "git_preflight_failed"
+
+    def __init__(self, *, operation: str, exit_code: int):
+        self.operation = operation
+        self.exit_code = exit_code
+        super().__init__(f"Git preflight failed: {operation} (exit {exit_code})")
+
+
+class ProcessIdentityError(_BrokerWorkerError):
+    pass
 from control_plane.executive_orchestration_principal import (
     OSProcessCredentialObservation,
     ProviderHomeIdentityObservation,
@@ -1300,9 +1345,14 @@ class ExecutiveWorkerBroker:
         ]
         | None = None,
     ) -> None:
-        descriptor = adapter_descriptor(adapter_id)
-        if not descriptor.implemented:
-            raise WorkerBrokerError(f"worker adapter {adapter_id!r} is not implemented")
+        try:
+            descriptor = bind_reviewed_adapter(adapter, adapter_id)
+        except AdapterBindingError as exc:
+            raise WorkerBrokerError(str(exc)) from exc
+        except Exception as exc:
+            raise WorkerBrokerError(
+                f"worker adapter {adapter_id!r} failed to bind"
+            ) from exc
         self.adapter = adapter
         self.adapter_id = descriptor.adapter_id
         self.policy = policy
@@ -2761,12 +2811,7 @@ class ExecutiveWorkerBroker:
             elif state.terminal_error is not None:
                 status = "ERROR"
             else:
-                status_method = getattr(self.adapter, "status", None)
-                if not callable(status_method):
-                    raise BrokerStateError(
-                        f"worker adapter {self.adapter_id!r} does not expose status for an active run"
-                    )
-                status = await status_method(state.process_ref)
+                status = await self.adapter.status(state.process_ref)
             result["run"] = {
                 "run_id": run_id,
                 "status": status,
@@ -3068,7 +3113,7 @@ class ExecutiveWorkerBroker:
                     # earlier -- pin it with a test if that changes.
                     identity_known = bool(parsed_id and parsed_operation)
                 response = await self.execute(request, peer=peer)
-            except LaunchValidationStageError as exc:
+            except _codex_worker_errors()[0] as exc:
                 response = {
                     "schema_version": BROKER_RESPONSE_SCHEMA_VERSION,
                     "request_id": request_id,
@@ -3080,7 +3125,7 @@ class ExecutiveWorkerBroker:
                         "stage": exc.stage,
                     },
                 }
-            except GitPreflightFailed as exc:
+            except _codex_worker_errors()[1] as exc:
                 response = {
                     "schema_version": BROKER_RESPONSE_SCHEMA_VERSION,
                     "request_id": request_id,
@@ -3096,7 +3141,7 @@ class ExecutiveWorkerBroker:
                         "exit_code": exc.exit_code,
                     },
                 }
-            except GitPreflightTimeout as exc:
+            except _codex_worker_errors()[2] as exc:
                 # These exceptions deliberately expose only audited fields:
                 # an allowlisted validation stage or Git operation, a bounded
                 # exit code, and the fixed timeout. Other adapter failures stay
@@ -3440,6 +3485,8 @@ def _launch_spec_to_json(spec: WorkerLaunchSpec) -> dict[str, Any]:
 
 class RemoteCodexWorkerAdapter:
     """Control-side Codex adapter facade backed by the distinct-UID broker."""
+
+    adapter_id = "codex-cli"
 
     def __init__(
         self,
