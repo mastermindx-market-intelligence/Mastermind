@@ -43,6 +43,7 @@ function /bin/launchctl() {
   case "$verb" in
     disable)
       [ "${TEST_DISABLE_FAIL:-}" != "$label" ] || return 5
+      [ "${TEST_DISABLE_SILENT:-}" != "$label" ] || return 0
       command /usr/bin/touch "$TEST_HOST/disabled/$label" ;;
     bootout)
       [ "${TEST_STUBBORN:-}" != "$label" ] || return 5
@@ -52,9 +53,11 @@ function /bin/launchctl() {
     print)
       if [ "${TEST_UNKNOWN:-}" = "$label" ]; then printf 'Permission denied\n' >&2; return 5; fi
       if [ -e "$TEST_HOST/loaded/$label" ]; then printf 'state = running\n'; return 0; fi
+      if [ "${TEST_PRINT_NOISE:-}" = "$label" ]; then printf 'unexpected absent-service message\n' >&2; return 113; fi
       printf 'Bad request.\nCould not find service "%s" in domain for system\n' "$label" >&2
       return 113 ;;
     print-disabled)
+      [ "${TEST_DISABLED_QUERY_FAIL:-}" != "1" ] || return 5
       printf 'disabled services = {\n'
       local path item value
       for path in "$TEST_HOST"/disabled/*; do
@@ -102,6 +105,12 @@ def test_default_uninstall_revokes_privileged_service_and_preserves_evidence(hos
     assert not (host / "plists" / f"{PRIVILEGED}.plist").exists()
     assert (host / "disabled" / PRIVILEGED).exists()
     assert calls.index(f"disable system/{PRIVILEGED}") < calls.index(f"remove {PRIVILEGED}.plist")
+    for label in LABELS:
+        assert not (host / "loaded" / label).exists()
+        assert not (host / "plists" / f"{label}.plist").exists()
+        assert (host / "disabled" / label).exists()
+        assert calls.index(f"bootout system/{label}") < calls.index(f"remove {PRIVILEGED}.plist")
+    assert calls.index(f"bootout system/{PRIVILEGED}") < calls.index(f"bootout system/{CONTROL}") < calls.index(f"bootout system/{WORKER}")
     assert (host / "runtime/privileged-actions/receipts/completed.json").read_text() == '{"evidence":"retain"}\n'
     assert (host / "runtime/auth-sentinel").read_text() == "fixture-not-a-secret\n"
 
@@ -191,3 +200,26 @@ def test_symlinked_receipt_namespace_is_refused_without_following_it(host):
     assert "UNINSTALL_RECEIPT_PATH_UNSAFE" in result.stderr
     assert (outside / "retained").exists()
     assert not any(call.startswith("remove ") for call in calls)
+
+
+@pytest.mark.parametrize("change,reason", [
+    ({"TEST_PRINT_NOISE": PRIVILEGED}, "UNINSTALL_SERVICE_STATE_UNKNOWN"),
+    ({"TEST_DISABLE_SILENT": PRIVILEGED}, "UNINSTALL_DISABLED_STATE_UNPROVEN"),
+    ({"TEST_DISABLED_QUERY_FAIL": "1"}, "UNINSTALL_DISABLED_STATE_UNKNOWN"),
+])
+def test_exact_native_observation_is_required_before_removal(host, change, reason):
+    result, calls = run_uninstall(host, "--privileged-only", **change)
+    assert result.returncode == 65
+    assert reason in result.stderr
+    assert (host / "plists" / f"{PRIVILEGED}.plist").exists()
+    assert not any(call.startswith("remove ") for call in calls)
+
+
+@pytest.mark.parametrize("stubborn", [CONTROL, WORKER])
+def test_default_scope_failure_keeps_all_registration_files(host, stubborn):
+    result, calls = run_uninstall(host, TEST_STUBBORN=stubborn)
+    assert result.returncode == 65
+    assert "UNINSTALL_SERVICE_STILL_LOADED" in result.stderr
+    assert all((host / "plists" / f"{label}.plist").exists() for label in LABELS)
+    assert not any(call.startswith("remove ") for call in calls)
+    assert "services removed" not in result.stdout
