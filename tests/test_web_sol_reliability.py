@@ -154,7 +154,7 @@ const chrome = {
     async get(id) { return {id, focused}; },
     async update(id, change) {
       activatedWindows.push(id);
-      focused = scenario !== "false-focus";
+      focused = scenario !== "false-focus" && scenario !== "typed-reentry-false-focus-blocker";
       return {id, focused};
     },
   },
@@ -217,12 +217,19 @@ const typedReentry = Object.assign({}, request, {
     assert.equal(blocked.status, "CONVERSATION_CLOSED");
     assert.equal(blocked.conversation_fingerprint, A);
     assert.equal(activationCount, 0);
+    console.log(JSON.stringify(blocked));
   } else if (scenario === "typed-reentry-composer-unavailable") {
     composerAvailable = false;
     const blocked = await context.handleNativeRequest(typedReentry, port);
     assert.equal(blocked.status, "NOT_CONSUMED");
     assert.equal(blocked.conversation_fingerprint, A);
     assert.equal(activationCount, 0);
+    console.log(JSON.stringify(blocked));
+  } else if (scenario === "typed-reentry-false-focus-blocker") {
+    const blocked = await context.handleNativeRequest(typedReentry, port);
+    assert.notEqual(blocked.status, "FOREGROUNDED_VERIFIED");
+    assert.equal(blocked.conversation_fingerprint, A);
+    console.log(JSON.stringify(blocked));
   } else if (scenario === "typed-reentry-unknown-schema") {
     const changed = {...typedReentry, extra: "forbidden"};
     const result = await context.handleNativeRequest(changed, port);
@@ -245,6 +252,7 @@ const typedReentry = Object.assign({}, request, {
         "typed-reentry-consumed-once",
         "typed-reentry-closed-conversation-blocker",
         "typed-reentry-composer-unavailable",
+        "typed-reentry-false-focus-blocker",
         "typed-reentry-unknown-schema",
     ],
 )
@@ -265,3 +273,59 @@ def test_actual_extension_reliability_behaviors(scenario):
         check=False,
     )
     assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+DIGEST_FIELDS = ("operation_id", "result_digest", "obligation_digest")
+
+
+def _run_extension_scenario(scenario: str) -> subprocess.CompletedProcess:
+    node = shutil.which("node")
+    assert (
+        node is not None
+    ), "Node is required for real extension behavior tests; do not skip this gate"
+    background = (
+        ROOT
+        / "integrations/chairman_surfaces/web_sol_extension/background.js"
+    )
+    return subprocess.run(
+        [node, "-e", NODE_HARNESS, scenario, str(background)],
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+
+
+def _extension_built_document(scenario: str):
+    completed = _run_extension_scenario(scenario)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    return json.loads(completed.stdout)
+
+
+def test_typed_reentry_extension_receipts_pass_host_validate_receipt():
+    consumed_docs = _extension_built_document("typed-reentry-consumed-once")
+    by_kind = {
+        "CONSUMED": consumed_docs[0],
+        "TYPED_REENTRY_BLOCKED": consumed_docs[1],
+        "CONVERSATION_CLOSED": _extension_built_document(
+            "typed-reentry-closed-conversation-blocker"
+        ),
+        "NOT_CONSUMED": _extension_built_document(
+            "typed-reentry-composer-unavailable"
+        ),
+    }
+    for kind, document in by_kind.items():
+        assert document["status"] == kind
+        accepted = wsp.validate_receipt(document)
+        for field in DIGEST_FIELDS:
+            assert field in accepted
+            assert accepted[field] == document[field]
+
+
+def test_typed_reentry_failed_foreground_receipt_is_host_legal():
+    document = _extension_built_document("typed-reentry-false-focus-blocker")
+    accepted = wsp.validate_receipt(document)
+    assert accepted["status"] in {"TYPED_REENTRY_BLOCKED", "NOT_CONSUMED"}
+    for field in DIGEST_FIELDS:
+        assert field in accepted
+        assert accepted[field] == document[field]

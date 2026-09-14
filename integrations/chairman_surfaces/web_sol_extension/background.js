@@ -345,13 +345,13 @@ async function handleTypedReentry(request) {
   if (resolved.status) return typedReentryBlocker(request, resolved.status);
   const before = await freshProbe(resolved.tabId, request.conversation_fingerprint);
   if (!before || before.conversation_fingerprint !== request.conversation_fingerprint) {
-    return receipt(request, "CONVERSATION_CLOSED", before ? before.observation : unknownObservation());
+    return receipt(request, "CONVERSATION_CLOSED", unknownObservation());
   }
   if (before.observation.composer_available !== true || before.observation.generation_state !== "idle") {
     return receipt(request, "NOT_CONSUMED", before.observation);
   }
   const result = await handleForeground(request);
-  if (result.status !== "FOREGROUNDED_VERIFIED") return result;
+  if (result.status !== "FOREGROUNDED_VERIFIED") return typedReentryBlocker(request);
   typedReentryEffects.push({
     conversation_fingerprint: request.conversation_fingerprint,
     operation_id: request.operation_id,
