@@ -188,19 +188,27 @@ if /bin/launchctl print "system/$RELAY_LABEL" >/dev/null 2>&1; then
 fi
 
 read_attribute() {
-  local record="$1" attribute="$2"
-  /usr/bin/dscl . -read "$record" "$attribute" 2>/dev/null \
-    | /usr/bin/awk -v key="$attribute" '
+  local record="$1"
+  local attribute="$2"
+  LC_ALL=C LANG=C /usr/bin/dscl . -read "$record" "$attribute" 2>/dev/null \
+    | /usr/bin/awk -v attribute="$attribute" '
         NR == 1 {
-          prefix=key ":"
-          if (index($0, prefix) != 1) exit 65
-          value=substr($0, length(prefix) + 1)
+          standard=attribute ":"
+          native="dsAttrTypeNative:" attribute ":"
+          if (index($0, standard) == 1) {
+            value=substr($0, length(standard) + 1)
+          } else if (index($0, native) == 1) {
+            value=substr($0, length(native) + 1)
+          } else {
+            malformed=1
+            next
+          }
           sub(/^[[:space:]]*/, "", value)
           next
         }
         {value=value " " $0}
         END {
-          if (NR == 0) exit 65
+          if (NR == 0 || malformed) exit 65
           gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
           print value
         }
