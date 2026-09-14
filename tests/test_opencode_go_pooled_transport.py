@@ -24,7 +24,8 @@ def error_response(status: int, error_type: str) -> UpstreamResponse:
     return UpstreamResponse(
         status=status,
         headers={},
-        body=json.dumps({"type": "error", "error": {"type": error_type, "message": "x"}}).encode(),
+        body=json.dumps({"type": "error", "error": {"type": error_type, "message": "x"},
+                         "metadata": {"workspace": "synthetic-workspace", "limitName": "5 hour"}}).encode(),
     )
 
 
@@ -47,9 +48,9 @@ def request() -> ProviderRequest:
     )
 
 
-def test_only_go_limit_and_auth_are_pre_effect_rollover_signals():
+def test_only_go_quota_refusal_is_a_rollover_signal():
     assert classify_pre_effect_refusal(error_response(429, "GoUsageLimitError")) == "usage_limit"
-    assert classify_pre_effect_refusal(error_response(401, "AuthError")) == "auth"
+    assert classify_pre_effect_refusal(error_response(401, "AuthError")) is None
     assert classify_pre_effect_refusal(error_response(429, "RateLimitError")) is None
     assert classify_pre_effect_refusal(error_response(401, "CreditsError")) is None
     assert classify_pre_effect_refusal(error_response(403, "RegionError")) is None
@@ -148,11 +149,12 @@ def test_three_exhausted_members_return_last_real_429_without_hidden_fourth_retr
     receipt = transport.execute(request())
     assert sent == ["acct-a", "acct-b", "acct-c"]
     assert receipt.response.status == 429
-    assert receipt.pool_exhausted is True
+    assert receipt.pool_exhausted is False
+    assert receipt.stop_reason == "rollover_budget_exhausted"
     assert receipt.rollover_count == 2
 
 
-def test_auth_refusal_can_switch_account_but_other_401_cannot():
+def test_auth_refusal_and_other_401_never_switch_accounts():
     accounts = iter(("acct-a", "acct-b"))
     transport = OpenCodeGoPooledTransport(
         pool_id="opencode-go",
@@ -161,7 +163,7 @@ def test_auth_refusal_can_switch_account_but_other_401_cannot():
         sender=lambda value: error_response(401, "AuthError") if value.account_id == "acct-a" else ok_response(),
         max_rollovers=1,
     )
-    assert transport.execute(request()).account_id == "acct-b"
+    assert transport.execute(request()).account_id == "acct-a"
 
     calls = []
     transport = OpenCodeGoPooledTransport(

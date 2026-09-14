@@ -16,16 +16,16 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, Mapping, Optional
 from urllib.parse import urljoin
+from types import MappingProxyType
 
 OPENCODE_GO_BASE_URL = "https://opencode.ai/zen/go/v1/"
 _ALLOWED_PATHS = frozenset({"chat/completions", "responses", "messages"})
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9._:-]{0,127}$")
 _SAFE_ERROR_TYPES = {
     (429, "GoUsageLimitError"): "usage_limit",
-    (401, "AuthError"): "auth",
 }
 
 
@@ -70,15 +70,15 @@ class AccountChoice:
 class ProviderRequest:
     path: str
     session_id: str
-    headers: Mapping[str, str]
-    body: bytes
+    headers: Mapping[str, str] = field(repr=False)
+    body: bytes = field(repr=False)
 
 
 @dataclass(frozen=True)
 class UpstreamRequest:
     url: str
-    headers: Mapping[str, str]
-    body: bytes
+    headers: Mapping[str, str] = field(repr=False)
+    body: bytes = field(repr=False)
     account_id: str
     pool_generation: str
 
@@ -86,8 +86,8 @@ class UpstreamRequest:
 @dataclass(frozen=True)
 class UpstreamResponse:
     status: int
-    headers: Mapping[str, str]
-    body: bytes
+    headers: Mapping[str, str] = field(repr=False)
+    body: bytes = field(repr=False)
 
 
 @dataclass(frozen=True)
@@ -98,6 +98,7 @@ class TransportReceipt:
     attempted_accounts: tuple[str, ...]
     rollover_count: int
     pool_exhausted: bool
+    stop_reason: str = "response"
 
 
 Resolver = Callable[[ResolveRequest], Optional[AccountChoice]]
@@ -106,7 +107,9 @@ Sender = Callable[[UpstreamRequest], UpstreamResponse]
 
 
 def _identifier(value: object, field: str) -> str:
-    text = str(value or "").strip().lower()
+    if not isinstance(value, str):
+        raise OpenCodeGoTransportContractError(f"invalid {field}")
+    text = value.strip().lower()
     if _ID_RE.fullmatch(text) is None:
         raise OpenCodeGoTransportContractError(f"invalid {field}")
     return text
@@ -116,7 +119,7 @@ def _session_id(value: object) -> str:
     if not isinstance(value, str):
         raise OpenCodeGoTransportContractError("invalid session_id")
     text = value.strip()
-    if not text or len(text) > 512 or any(ord(ch) < 32 for ch in text):
+    if value != text or not text or len(text) > 512 or any(ord(ch) < 33 or ord(ch) > 126 for ch in text):
         raise OpenCodeGoTransportContractError("invalid session_id")
     return text
 
@@ -157,7 +160,7 @@ def _error_type(response: UpstreamResponse) -> str | None:
         return None
     try:
         body = json.loads(response.body.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError):
         return None
     if not isinstance(body, Mapping):
         return None
@@ -171,12 +174,95 @@ def _error_type(response: UpstreamResponse) -> str | None:
 def classify_pre_effect_refusal(response: UpstreamResponse) -> str | None:
     """Classify only OpenCode refusals that happen before upstream inference.
 
-    Current OpenCode Go validates API-key auth and Go rolling/weekly/monthly
-    allowance before constructing the upstream model request. Other 4xx/429
-    classes are intentionally not generalized into replay permission.
+    The reviewed source checks Go allowance before inference. A live binding
+    must separately verify gateway behavior. AuthError also represents account
+    suspension, and is deliberately never treated as rollover permission.
     """
 
-    return _SAFE_ERROR_TYPES.get((response.status, _error_type(response)))
+    refusal = _SAFE_ERROR_TYPES.get((response.status, _error_type(response)))
+    if refusal is None:
+        return None
+    try:
+        payload = json.loads(response.body, object_pairs_hook=_unique_object)
+    except (ValueError, UnicodeDecodeError, RecursionError):
+        return None
+    metadata = payload.get("metadata")
+    if (payload.get("type") != "error" or not isinstance(metadata, dict)
+            or metadata.get("limitName") not in {"5 hour", "weekly", "monthly"}
+            or not isinstance(metadata.get("workspace"), str) or not metadata["workspace"]):
+        return None
+    return refusal
+
+
+_FORWARDED_HEADERS = frozenset({
+    "content-type", "accept", "user-agent", "anthropic-version", "anthropic-beta",
+    "x-opencode-request", "x-opencode-client", "x-opencode-project",
+})
+_HEADER_RE = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
+_MAX_REQUEST_BYTES = 16 * 1024 * 1024
+
+
+def _unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON field")
+        result[key] = value
+    return result
+
+
+def _reject_json_constant(value):
+    raise ValueError("nonfinite JSON number")
+
+
+def _freeze_request(request: ProviderRequest, *, replayable: bool) -> ProviderRequest:
+    if not isinstance(request, ProviderRequest):
+        raise OpenCodeGoTransportContractError("invalid provider request")
+    path, session = _path(request.path), _session_id(request.session_id)
+    if not isinstance(request.body, (bytes, bytearray)):
+        raise OpenCodeGoTransportContractError("request body must be bytes")
+    body = bytes(request.body)
+    if not body or len(body) > _MAX_REQUEST_BYTES:
+        raise OpenCodeGoTransportContractError("request body outside size bound")
+    try:
+        payload = json.loads(body, object_pairs_hook=_unique_object,
+                             parse_constant=_reject_json_constant)
+    except (ValueError, UnicodeDecodeError, RecursionError):
+        raise OpenCodeGoTransportContractError("request body must be valid JSON") from None
+    if not isinstance(payload, dict) or not isinstance(payload.get("model"), str) or not payload["model"].strip():
+        raise OpenCodeGoTransportContractError("request requires explicit model")
+    if replayable:
+        # Inspect protocol context, not function parameter schemas named e.g. file_id.
+        if any(payload.get(key) is not None for key in
+               ("previous_response_id", "conversation", "container")):
+            raise OpenCodeGoTransportContractError("account-scoped context is not replayable")
+        pending = [payload.get("input"), payload.get("messages")]
+        while pending:
+            item = pending.pop()
+            if isinstance(item, dict):
+                if (any(item.get(key) is not None for key in
+                        ("file_id", "encrypted_content"))
+                        or item.get("type") == "item_reference"):
+                    raise OpenCodeGoTransportContractError("account-scoped context is not replayable")
+                pending.extend(item.values())
+            elif isinstance(item, list):
+                pending.extend(item)
+    if not isinstance(request.headers, Mapping):
+        raise OpenCodeGoTransportContractError("invalid request headers")
+    headers = {}
+    seen = set()
+    for key, value in request.headers.items():
+        if (not isinstance(key, str) or not _HEADER_RE.fullmatch(key)
+                or not isinstance(value, str)
+                or any(ord(ch) < 32 or ord(ch) == 127 for ch in value)):
+            raise OpenCodeGoTransportContractError("invalid request header")
+        lowered = key.lower()
+        if lowered in seen:
+            raise OpenCodeGoTransportContractError("duplicate request header")
+        seen.add(lowered)
+        if lowered in _FORWARDED_HEADERS:
+            headers[key] = value
+    return ProviderRequest(path, session, MappingProxyType(headers), body)
 
 
 def prepare_upstream_request(
@@ -187,10 +273,9 @@ def prepare_upstream_request(
 ) -> UpstreamRequest:
     """Inject one account credential while preserving session and request body."""
 
-    path = _path(request.path)
-    session = _session_id(request.session_id)
-    if not isinstance(request.body, (bytes, bytearray)):
-        raise OpenCodeGoTransportContractError("request body must be bytes")
+    request = _freeze_request(request, replayable=False)
+    path = request.path
+    session = request.session_id
     headers: dict[str, str] = {}
     seen_headers: set[str] = set()
     for raw_key, raw_value in request.headers.items():
@@ -211,7 +296,7 @@ def prepare_upstream_request(
         headers["User-Agent"] = "Mastermind-X/1.0"
     return UpstreamRequest(
         url=urljoin(OPENCODE_GO_BASE_URL, path),
-        headers=headers,
+        headers=MappingProxyType(headers),
         body=bytes(request.body),
         account_id=choice.account_id,
         pool_generation=choice.pool_generation,
@@ -245,12 +330,17 @@ class OpenCodeGoPooledTransport:
         request: ProviderRequest,
         *,
         sticky_account_id: str | None = None,
+        expected_pool_generation: str | None = None,
     ) -> TransportReceipt:
-        session = _session_id(request.session_id)
+        request = _freeze_request(request, replayable=self.max_rollovers > 0)
+        if expected_pool_generation is not None and (not isinstance(expected_pool_generation, str)
+                or not re.fullmatch(r"[0-9a-f]{64}", expected_pool_generation)):
+            raise OpenCodeGoTransportContractError("invalid expected pool generation")
+        session = request.session_id
         sticky = _identifier(sticky_account_id, "sticky_account_id") if sticky_account_id else None
         excluded: list[str] = []
         attempted: list[str] = []
-        generation: str | None = None
+        generation: str | None = expected_pool_generation
         reason = "initial"
         last_refusal: tuple[AccountChoice, UpstreamResponse] | None = None
 
@@ -266,7 +356,7 @@ class OpenCodeGoPooledTransport:
                     )
                 )
             except Exception as exc:
-                raise OpenCodeGoTransportContractError("provider account resolution failed") from exc
+                raise OpenCodeGoTransportContractError("provider account resolution failed") from None
             if raw_choice is None:
                 if last_refusal is not None:
                     last_choice, last_response = last_refusal
@@ -277,6 +367,7 @@ class OpenCodeGoPooledTransport:
                         attempted_accounts=tuple(attempted),
                         rollover_count=max(0, len(attempted) - 1),
                         pool_exhausted=True,
+                        stop_reason="no_eligible_account",
                     )
                 raise OpenCodeGoPoolUnavailable("no eligible OpenCode Go account")
             choice = _choice(raw_choice, pool_id=self.pool_id)
@@ -292,13 +383,13 @@ class OpenCodeGoPooledTransport:
             except OpenCodeGoTransportContractError:
                 raise
             except Exception as exc:
-                raise OpenCodeGoTransportContractError("provider credential unavailable") from exc
+                raise OpenCodeGoTransportContractError("provider credential unavailable") from None
             upstream = prepare_upstream_request(request, choice=choice, credential=credential)
             attempted.append(choice.account_id)
             try:
                 response = self.sender(upstream)
             except Exception as exc:
-                raise OpenCodeGoEffectUnknown(choice.account_id, tuple(attempted)) from exc
+                raise OpenCodeGoEffectUnknown(choice.account_id, tuple(attempted)) from None
             if (
                 not isinstance(response, UpstreamResponse)
                 or isinstance(response.status, bool)
@@ -330,7 +421,8 @@ class OpenCodeGoPooledTransport:
                     pool_generation=choice.pool_generation,
                     attempted_accounts=tuple(attempted),
                     rollover_count=len(attempted) - 1,
-                    pool_exhausted=True,
+                    pool_exhausted=False,
+                    stop_reason="rollover_budget_exhausted",
                 )
             excluded.append(choice.account_id)
             sticky = None
