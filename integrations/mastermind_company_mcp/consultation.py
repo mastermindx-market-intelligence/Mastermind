@@ -333,19 +333,32 @@ def company_consultation_tool_schema_digest() -> str:
 COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST = company_consultation_tool_schema_digest()
 
 
-def _result(tool: str, data: Any) -> dict[str, Any]:
-    envelope = {
+def _capped_envelope(envelope: dict[str, Any]) -> dict[str, Any]:
+    if len(canonical_company_consultation_json(envelope)) <= COMPANY_CONSULTATION_MAX_RESPONSE_BYTES:
+        return envelope
+    return {
         "schema": COMPANY_CONSULTATION_RESULT_SCHEMA,
-        "tool": tool,
-        "ok": True,
+        "tool": envelope["tool"],
+        "ok": False,
         "server_identity": COMPANY_CONSULTATION_SERVER_IDENTITY,
         "server_version": COMPANY_CONSULTATION_SERVER_VERSION,
-        "data": data,
-        "error": None,
+        "data": None,
+        "error": {"code": "INTERNAL_ERROR", "message": "INTERNAL_ERROR"},
     }
-    if len(canonical_company_consultation_json(envelope)) > COMPANY_CONSULTATION_MAX_RESPONSE_BYTES:
-        return _error(tool, "INTERNAL_ERROR")
-    return envelope
+
+
+def _result(tool: str, data: Any) -> dict[str, Any]:
+    return _capped_envelope(
+        {
+            "schema": COMPANY_CONSULTATION_RESULT_SCHEMA,
+            "tool": tool,
+            "ok": True,
+            "server_identity": COMPANY_CONSULTATION_SERVER_IDENTITY,
+            "server_version": COMPANY_CONSULTATION_SERVER_VERSION,
+            "data": data,
+            "error": None,
+        }
+    )
 
 
 def _error(tool: str, code: str, data: Any = None) -> dict[str, Any]:
@@ -353,15 +366,17 @@ def _error(tool: str, code: str, data: Any = None) -> dict[str, Any]:
         code = "INTERNAL_ERROR"
     if code == "AMBIGUOUS" and data is None:
         data = {"peers": []}
-    return {
-        "schema": COMPANY_CONSULTATION_RESULT_SCHEMA,
-        "tool": tool,
-        "ok": False,
-        "server_identity": COMPANY_CONSULTATION_SERVER_IDENTITY,
-        "server_version": COMPANY_CONSULTATION_SERVER_VERSION,
-        "data": data,
-        "error": {"code": code, "message": code},
-    }
+    return _capped_envelope(
+        {
+            "schema": COMPANY_CONSULTATION_RESULT_SCHEMA,
+            "tool": tool,
+            "ok": False,
+            "server_identity": COMPANY_CONSULTATION_SERVER_IDENTITY,
+            "server_version": COMPANY_CONSULTATION_SERVER_VERSION,
+            "data": data,
+            "error": {"code": code, "message": code},
+        }
+    )
 
 
 class CompanyConsultationGateway:

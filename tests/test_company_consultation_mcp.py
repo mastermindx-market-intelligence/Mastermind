@@ -12,9 +12,13 @@ from control_plane.executive_agent_capabilities import (
     CompanyConsultationGrantProfile,
     build_company_consultation_grant_profile,
 )
+from control_plane.runtime_binding_projection import project_runtime_binding
+from control_plane.operator_harness_contract import runtime_binding_id_for
 from integrations.mastermind_company_mcp.consultation import (
     COMPANY_CONSULTATION_CAPABILITY,
     COMPANY_CONSULTATION_ERROR_CODES,
+    COMPANY_CONSULTATION_MAX_RESPONSE_BYTES,
+    COMPANY_CONSULTATION_RESULT_SCHEMA,
     COMPANY_CONSULTATION_SERVER_IDENTITY,
     COMPANY_CONSULTATION_SERVER_NAME,
     COMPANY_CONSULTATION_SERVER_VERSION,
@@ -22,6 +26,8 @@ from integrations.mastermind_company_mcp.consultation import (
     COMPANY_CONSULTATION_TOOL_SPECS,
     CompanyConsultationGateway,
     CompanyConsultationToolError,
+    _result,
+    canonical_company_consultation_json,
     validate_company_consultation_tool_arguments,
 )
 from integrations.slack_agent_dialogue.company_consultation_peer_resolver import (
@@ -45,6 +51,10 @@ from integrations.slack_agent_dialogue.company_dialogue_runtime_binding import (
     CurrentWorkerDialogueSnapshot,
     WorkerDialogueCaller,
 )
+from common.agent_dialogue_consultation_contract import validate_consultation
+from integrations.slack_agent_dialogue.contract import DialogueContractError
+from tests.test_agent_dialogue_consultation_contract import raw_consultation
+from tests.test_runtime_binding_projection import _admitted_runtime, _target
 
 
 class _Dispatcher:
@@ -331,6 +341,135 @@ def test_alias_ambiguous_puts_closed_public_facts_in_data() -> None:
     assert sink.calls == []
 
 
+def _synthetic_closed_facts(count: int) -> list[dict[str, str]]:
+    return [
+        {"peer_ref": f"peer-{index:032x}", "display_name": f"Peer {index:04x}"}
+        for index in range(count)
+    ]
+
+
+def test_oversized_ambiguous_error_encodes_within_response_cap() -> None:
+    facts = _synthetic_closed_facts(1500)
+    uncapped = {
+        "schema": COMPANY_CONSULTATION_RESULT_SCHEMA,
+        "tool": "company.consult",
+        "ok": False,
+        "server_identity": COMPANY_CONSULTATION_SERVER_IDENTITY,
+        "server_version": COMPANY_CONSULTATION_SERVER_VERSION,
+        "data": {"peers": facts},
+        "error": {"code": "AMBIGUOUS", "message": "AMBIGUOUS"},
+    }
+    assert (
+        len(canonical_company_consultation_json(uncapped))
+        > COMPANY_CONSULTATION_MAX_RESPONSE_BYTES
+    )
+
+    class _OversizedAmbiguousResolver:
+        peers = []
+
+        def resolve(self, alias: str, *, program_ref: str):
+            raise ConsultationPeerRefused("AMBIGUOUS", {"peers": facts})
+
+    sink = _Dispatcher()
+    gateway = CompanyConsultationGateway(
+        peer_resolver=_OversizedAmbiguousResolver(),  # type: ignore[arg-type]
+        dispatcher=sink,
+        observed_tool_schema_digest=COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST,
+        utc_now=lambda: "2026-09-14T00:00:00Z",
+    )
+    response = _run(
+        gateway.call(
+            "company.consult",
+            {
+                "to": _peer().peer_ref,
+                "question": "?",
+                "evidence_refs": [],
+                "artifact_revisions": [],
+            },
+        )
+    )
+
+    encoded = canonical_company_consultation_json(response)
+    assert len(encoded) <= COMPANY_CONSULTATION_MAX_RESPONSE_BYTES
+    assert response["ok"] is False
+    assert response["error"]["code"] in COMPANY_CONSULTATION_ERROR_CODES
+    assert sink.calls == []
+
+
+def test_small_ambiguous_still_carries_closed_facts_in_data() -> None:
+    second = dataclasses.replace(
+        _peer("peer-8bdf4a6f9a664bbcf1a93d67a41ba51d"),
+        display_name="Peer 7bdf",
+        actor_ref={
+            "kind": "worker_attempt",
+            "job_id": "JOB-201",
+            "attempt_id": "ATT-201",
+            "worker_id": "codex-att-201",
+        },
+    )
+    closed = {
+        "peers": [
+            {"peer_ref": _peer().peer_ref, "display_name": "Peer 7bdf"},
+            {"peer_ref": second.peer_ref, "display_name": "Peer 7bdf"},
+        ]
+    }
+
+    class _SmallAmbiguousResolver:
+        peers = [_peer(), second]
+
+        def resolve(self, alias: str, *, program_ref: str):
+            raise ConsultationPeerRefused("AMBIGUOUS", closed)
+
+    sink = _Dispatcher()
+    gateway = CompanyConsultationGateway(
+        peer_resolver=_SmallAmbiguousResolver(),  # type: ignore[arg-type]
+        dispatcher=sink,
+        observed_tool_schema_digest=COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST,
+        utc_now=lambda: "2026-09-14T00:00:00Z",
+    )
+    response = _run(
+        gateway.call(
+            "company.consult",
+            {
+                "to": _peer().peer_ref,
+                "question": "?",
+                "evidence_refs": [],
+                "artifact_revisions": [],
+            },
+        )
+    )
+
+    encoded = canonical_company_consultation_json(response)
+    assert len(encoded) <= COMPANY_CONSULTATION_MAX_RESPONSE_BYTES
+    assert response["ok"] is False
+    assert response["error"]["code"] == "AMBIGUOUS"
+    assert response["data"] == closed
+    assert sink.calls == []
+
+
+def test_result_envelope_at_response_byte_boundary_still_passes() -> None:
+    overhead = len(
+        canonical_company_consultation_json(
+            {
+                "schema": COMPANY_CONSULTATION_RESULT_SCHEMA,
+                "tool": "company.peers",
+                "ok": True,
+                "server_identity": COMPANY_CONSULTATION_SERVER_IDENTITY,
+                "server_version": COMPANY_CONSULTATION_SERVER_VERSION,
+                "data": {"pad": ""},
+                "error": None,
+            }
+        )
+    )
+    pad = COMPANY_CONSULTATION_MAX_RESPONSE_BYTES - overhead
+    envelope = _result("company.peers", {"pad": "x" * pad})
+    encoded = canonical_company_consultation_json(envelope)
+    assert len(encoded) == COMPANY_CONSULTATION_MAX_RESPONSE_BYTES
+    assert envelope["ok"] is True
+    assert envelope["error"] is None
+    assert envelope["data"] == {"pad": "x" * pad}
+
+
 def test_company_consultation_mcp_server_advertises_only_four_tools() -> None:
     pytest.importorskip("mcp")
     from mcp.server.lowlevel import NotificationOptions
@@ -477,6 +616,62 @@ def test_existing_company_dialogue_resolver_derives_only_public_peer_facts() -> 
         "peer_ref": "peer-7bdf4a6f9a664bbcf1a93d67a41ba51d",
         "display_name": "Peer 7bdf",
     }
+
+
+def test_real_runtime_binding_composes_through_peer_into_envelope_validator(tmp_path) -> None:
+    runtime, _dispatch, sealed, epoch, _generation, _process, _profile_value = _admitted_runtime(tmp_path)
+    runtime_binding = project_runtime_binding(
+        runtime, sealed.attempt_id, _target()
+    )
+    current = dataclasses.replace(
+        _current_snapshot(),
+        attempt_id=sealed.attempt_id,
+        runtime_binding=runtime_binding,
+    )
+    actor = dataclasses.replace(
+        _caller(),
+        attempt_id=sealed.attempt_id,
+        runtime_binding=runtime_binding,
+    )
+    resolution = peer_from_company_dialogue(
+        peer_ref="peer-7bdf4a6f9a664bbcf1a93d67a41ba51d",
+        display_name="Peer 7bdf",
+        program_ref="JOB-100/agent-fabric-end-to-end-fable-integration",
+        delegation_identity=_delegation_identity(),
+        dialogue_parent=_dialogue_parent(),
+        thread_ts="1787896128.625239",
+        current=current,
+        actor=actor,
+    )
+
+    assert resolution.state.value == "RESOLVED"
+    assert resolution.peer is not None
+    assert resolution.peer.binding["binding_id"] == runtime_binding_id_for(
+        sealed.attempt_id, epoch.session_epoch_id
+    )
+    assert resolution.peer.binding["binding_id"] == runtime_binding.binding_id
+
+    envelope = raw_consultation()
+    envelope["recipient_binding"] = resolution.peer.binding
+    validated = validate_consultation(envelope)
+    assert validated["recipient_binding"] == resolution.peer.binding
+    assert validated["schema"] == "mastermind.agent_dialogue_consultation.v1"
+    assert validated["response_budget"] == {
+        "max_answers": 1,
+        "max_evidence_reads": 2,
+        "max_forward_hops": 0,
+        "max_payload_bytes": 32768,
+    }
+
+    canonical_hex = runtime_binding.binding_id.removeprefix("bind-")
+    for noncanonical in ("bind-" + "a" * 32, runtime_binding.binding_id + "0"):
+        envelope["recipient_binding"] = {
+            **resolution.peer.binding,
+            "binding_id": noncanonical,
+        }
+        with pytest.raises(DialogueContractError):
+            validate_consultation(envelope)
+    assert canonical_hex
 
 
 def test_stale_generation_or_forged_actor_refuses_before_dispatch() -> None:

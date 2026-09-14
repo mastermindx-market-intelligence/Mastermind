@@ -5,6 +5,7 @@ import copy
 import pytest
 
 from common.agent_dialogue_consultation_contract import (
+    _BINDING_ID_RE,
     CONSULTATION_PURPOSES,
     RECEIPT_KEYS,
     RESPONSE_BUDGET_MAXIMA,
@@ -15,6 +16,7 @@ from common.agent_dialogue_consultation_contract import (
     consultation_semantic_fingerprint,
     validate_consultation,
 )
+from control_plane.operator_harness_contract import runtime_binding_id_for
 from integrations.slack_agent_dialogue.contract import DialogueContractError
 
 
@@ -37,7 +39,7 @@ def raw_consultation(**overrides) -> dict:
         "recipient_actor_ref": worker(job="JOB-200", attempt="ATT-200"),
         "recipient_peer_ref": "peer-6bdf4a6f9a664bbcf1a93d67a41ba51d",
         "recipient_binding": {
-            "binding_id": "bind-6bdf4a6f9a664bbcf1a93d67a41ba51d",
+            "binding_id": runtime_binding_id_for("ATT-100", "EPOCH-0001"),
             "binding_generation": 1,
             "reasoning_surface": "codex",
         },
@@ -95,6 +97,16 @@ def test_consultation_contract_freezes_exact_closed_shape_and_semantics() -> Non
     }
     expected = consultation_semantic_fingerprint(frame)
     assert consultation_semantic_fingerprint(changed) == expected
+
+
+def test_binding_id_shape_matches_real_runtime_binding_producer() -> None:
+    binding_id = runtime_binding_id_for("ATT-0001", "EPOCH-0001")
+
+    assert binding_id.startswith("bind-")
+    assert len(binding_id.removeprefix("bind-")) == 40
+    assert _BINDING_ID_RE.fullmatch(binding_id) is not None
+    assert _BINDING_ID_RE.fullmatch("bind-" + "a" * 32) is None
+    assert _BINDING_ID_RE.fullmatch(binding_id + "0") is None
 
 
 @pytest.mark.parametrize(
