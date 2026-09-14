@@ -871,7 +871,7 @@ def _fits_maximum_mcp_response(result: CallToolResult) -> bool:
 
     response = mcp_types.JSONRPCResponse(
         jsonrpc="2.0",
-        id="\U0010ffff" * 256,
+        id="\x01" * 256,
         result=result.model_dump(mode="json", by_alias=True, exclude_none=True),
     )
     return (

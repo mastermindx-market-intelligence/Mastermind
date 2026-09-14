@@ -467,6 +467,51 @@ def test_valid_large_escaped_preview_fits_exact_mcp_wire_envelope(tmp_path) -> N
         process.assert_exit(0)
 
 
+def test_control_character_request_id_gets_closed_preview_limit_error(tmp_path) -> None:
+    document, project, _, _ = _command_document(tmp_path)
+    old_text = "UNIQUE!!"
+    new_text = '"' * 16384
+    content = "\\" * 6704 + old_text + "\\" * 6704
+    (project / "sample.py").write_text(content, encoding="utf-8")
+    config_path = tmp_path / "tunnel.json"
+    config_path.write_text(json.dumps(document), encoding="utf-8")
+    os.chmod(config_path, 0o600)
+    launcher = (
+        Path(__file__).resolve().parents[2]
+        / "scripts"
+        / "mastermind_workbench_action_stdio.py"
+    )
+
+    with child([sys.executable, str(launcher), "--config", str(config_path)]) as process:
+        initialize(process)
+        request_id = "\x01" * 256
+        process.send(
+            {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "method": "tools/call",
+                "params": {
+                    "name": "preview_text_replace",
+                    "arguments": {
+                        "relative_path": "sample.py",
+                        "expected_sha256": hashlib.sha256(content.encode()).hexdigest(),
+                        "old_text": old_text,
+                        "new_text": new_text,
+                    },
+                },
+            }
+        )
+        response = process.receive()
+        assert response["id"] == request_id
+        assert "error" not in response
+        assert response["result"]["isError"] is True
+        assert json.loads(response["result"]["content"][0]["text"]) == {
+            "code": "PREVIEW_TOO_LARGE"
+        }
+        process.assert_exit(0)
+        assert b"WORKBENCH_MCP_OUTPUT_LIMIT" not in process.stderr()
+
+
 def test_oversized_escaped_preview_returns_closed_preview_error(tmp_path) -> None:
     document, project, _, _ = _command_document(tmp_path)
     old_text = "UNIQUE"
