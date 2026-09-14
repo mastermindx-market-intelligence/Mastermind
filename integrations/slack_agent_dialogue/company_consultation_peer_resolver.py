@@ -19,10 +19,11 @@ from integrations.slack_agent_dialogue.company_dialogue_runtime_binding import (
 class ConsultationPeerRefused(RuntimeError):
     """A typed peer-resolution refusal."""
 
-    def __init__(self, code: str) -> None:
+    def __init__(self, code: str, data: Any = None) -> None:
         if code not in {"UNAVAILABLE", "AMBIGUOUS", "BINDING_UNAVAILABLE"}:
             raise ValueError("unknown consultation peer refusal code")
         self.code = code
+        self.data = data
         super().__init__(code)
 
 
@@ -66,7 +67,10 @@ class CompanyConsultationPeerResolver:
         if not matches:
             raise ConsultationPeerRefused("UNAVAILABLE")
         if len({peer.peer_ref for peer in matches}) > 1:
-            raise ConsultationPeerRefused("AMBIGUOUS")
+            raise ConsultationPeerRefused(
+                "AMBIGUOUS",
+                {"peers": [peer.public_projection() for peer in matches]},
+            )
         peer = matches[0]
         self._validate(peer)
         if self.expected_actor_ref is not None and dict(peer.actor_ref) != dict(self.expected_actor_ref):

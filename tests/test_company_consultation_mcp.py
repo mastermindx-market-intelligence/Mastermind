@@ -202,6 +202,135 @@ def test_company_peers_returns_only_opaque_refs_and_display_facts() -> None:
     assert sink.calls == []
 
 
+def test_company_peers_returns_two_same_program_public_projections() -> None:
+    second = ConsultationPeer(
+        peer_ref="peer-8bdf4a6f9a664bbcf1a93d67a41ba51d",
+        display_name="Peer 8bdf",
+        program_ref="JOB-100/agent-fabric-end-to-end-fable-integration",
+        actor_ref={
+            "kind": "worker_attempt",
+            "job_id": "JOB-201",
+            "attempt_id": "ATT-201",
+            "worker_id": "codex-att-201",
+        },
+        binding={
+            "binding_id": "bind-8bdf4a6f9a664bbcf1a93d67a41ba51d",
+            "binding_generation": 1,
+            "reasoning_surface": "codex",
+        },
+    )
+    gateway, sink = _gateway([_peer(), second])
+
+    response = _run(gateway.call("company.peers", {}))
+
+    assert response["ok"] is True
+    assert response["error"] is None
+    assert response["data"]["peers"] == [
+        {"peer_ref": _peer().peer_ref, "display_name": "Peer 7bdf"},
+        {"peer_ref": second.peer_ref, "display_name": "Peer 8bdf"},
+    ]
+    assert sink.calls == []
+
+
+def test_consult_malformed_to_is_invalid_request() -> None:
+    gateway, sink = _gateway()
+
+    response = _run(
+        gateway.call(
+            "company.consult",
+            {
+                "to": "codex-att-200",
+                "question": "What fields are forbidden?",
+                "evidence_refs": [],
+                "artifact_revisions": [_artifact()],
+            },
+        )
+    )
+
+    assert response["ok"] is False
+    assert response["error"]["code"] == "INVALID_REQUEST"
+    assert sink.calls == []
+    with pytest.raises(CompanyConsultationToolError) as exc_info:
+        validate_company_consultation_tool_arguments(
+            "company.consult",
+            {
+                "to": "Peer 7bdf",
+                "question": "?",
+                "evidence_refs": [],
+                "artifact_revisions": [],
+            },
+        )
+    assert exc_info.value.code == "INVALID_REQUEST"
+
+
+def test_alias_ambiguous_puts_closed_public_facts_in_data() -> None:
+    second = dataclasses.replace(
+        _peer("peer-8bdf4a6f9a664bbcf1a93d67a41ba51d"),
+        display_name="Peer 7bdf",
+        actor_ref={
+            "kind": "worker_attempt",
+            "job_id": "JOB-201",
+            "attempt_id": "ATT-201",
+            "worker_id": "codex-att-201",
+        },
+    )
+    resolver = CompanyConsultationPeerResolver([_peer(), second])
+
+    with pytest.raises(ConsultationPeerRefused) as exc_info:
+        resolver.resolve("Peer 7bdf", program_ref=_peer().program_ref)
+
+    assert exc_info.value.code == "AMBIGUOUS"
+    assert exc_info.value.data == {
+        "peers": [
+            {"peer_ref": _peer().peer_ref, "display_name": "Peer 7bdf"},
+            {"peer_ref": second.peer_ref, "display_name": "Peer 7bdf"},
+        ]
+    }
+
+    class _AmbiguousResolver:
+        peers = [_peer(), second]
+
+        def resolve(self, alias: str, *, program_ref: str):
+            raise ConsultationPeerRefused(
+                "AMBIGUOUS",
+                {
+                    "peers": [
+                        {"peer_ref": _peer().peer_ref, "display_name": "Peer 7bdf"},
+                        {"peer_ref": second.peer_ref, "display_name": "Peer 7bdf"},
+                    ]
+                },
+            )
+
+    sink = _Dispatcher()
+    gateway = CompanyConsultationGateway(
+        peer_resolver=_AmbiguousResolver(),  # type: ignore[arg-type]
+        dispatcher=sink,
+        observed_tool_schema_digest=COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST,
+        utc_now=lambda: "2026-09-14T00:00:00Z",
+    )
+    response = _run(
+        gateway.call(
+            "company.consult",
+            {
+                "to": _peer().peer_ref,
+                "question": "?",
+                "evidence_refs": [],
+                "artifact_revisions": [],
+            },
+        )
+    )
+
+    assert response["ok"] is False
+    assert response["error"]["code"] == "AMBIGUOUS"
+    assert response["data"] == {
+        "peers": [
+            {"peer_ref": _peer().peer_ref, "display_name": "Peer 7bdf"},
+            {"peer_ref": second.peer_ref, "display_name": "Peer 7bdf"},
+        ]
+    }
+    assert sink.calls == []
+
+
 def test_company_consultation_mcp_server_advertises_only_four_tools() -> None:
     pytest.importorskip("mcp")
     from mcp.server.lowlevel import NotificationOptions
@@ -252,15 +381,20 @@ def test_company_consult_valid_input_reaches_hermetic_dispatcher_once() -> None:
 @pytest.mark.parametrize(
     ("peers", "arguments", "code"),
     [
-        ([], {"to": "peer-none", "question": "?", "evidence_refs": [], "artifact_revisions": []}, "UNAVAILABLE"),
+        ([], {"to": "peer-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "question": "?", "evidence_refs": [], "artifact_revisions": []}, "UNAVAILABLE"),
         (
             [_peer(), _peer("peer-8bdf4a6f9a664bbcf1a93d67a41ba51d")],
             {"to": "Peer 7bdf", "question": "?", "evidence_refs": [], "artifact_revisions": []},
-            "AMBIGUOUS",
+            "INVALID_REQUEST",
         ),
         (
-            [_peer("peer-outside")],
-            {"to": "peer-outside", "question": "?", "evidence_refs": [], "artifact_revisions": []},
+            [
+                dataclasses.replace(
+                    _peer("peer-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+                    actor_ref={"kind": "executive_surface"},
+                )
+            ],
+            {"to": "peer-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "question": "?", "evidence_refs": [], "artifact_revisions": []},
             "BINDING_UNAVAILABLE",
         ),
         (

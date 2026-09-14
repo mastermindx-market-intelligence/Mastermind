@@ -299,6 +299,9 @@ def validate_consultation(value: Any) -> dict[str, Any]:
         not isinstance(fingerprint, str) or _SHA64_RE.fullmatch(fingerprint) is None
     ):
         raise DialogueContractError("MESSAGE_INVALID")
+    expected = consultation_semantic_fingerprint(item)
+    if fingerprint not in {"", None} and fingerprint != expected:
+        raise DialogueContractError("MESSAGE_INVALID")
     item["fingerprint"] = fingerprint if fingerprint else ""
     return item
 
@@ -335,7 +338,10 @@ def _validated_budget(value: Any) -> dict[str, int]:
     for key, maximum in RESPONSE_BUDGET_MAXIMA.items():
         if type(budget[key]) is not int or not 0 <= budget[key] <= maximum:
             raise DialogueContractError("MESSAGE_INVALID")
-        budget[key] = min(budget[key], maximum)
+        if key in {"max_evidence_reads", "max_payload_bytes"}:
+            budget[key] = min(budget[key], maximum)
+    if budget["max_answers"] != 1 or budget["max_forward_hops"] != 0:
+        raise DialogueContractError("MESSAGE_INVALID")
     return budget
 
 

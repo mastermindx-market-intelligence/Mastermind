@@ -144,6 +144,21 @@ def test_consultation_enforces_purpose_and_frozen_budget_bounds() -> None:
             validate_consultation(too_large)
 
 
+def test_consultation_refuses_budget_zero_answers_and_lying_fingerprint() -> None:
+    zero_answers = raw_consultation()
+    zero_answers["response_budget"]["max_answers"] = 0
+    with pytest.raises(DialogueContractError) as budget_info:
+        validate_consultation(zero_answers)
+    assert budget_info.value.code == "MESSAGE_INVALID"
+
+    lying = raw_consultation(fingerprint="a" * 64)
+    with pytest.raises(DialogueContractError) as fingerprint_info:
+        validate_consultation(lying)
+    assert fingerprint_info.value.code == "MESSAGE_INVALID"
+    built = build_consultation(raw_consultation())
+    assert validate_consultation(built)["fingerprint"] == built["fingerprint"]
+
+
 def test_duplicate_key_classifier_is_idempotent_only_for_equivalent_semantics() -> None:
     original = build_consultation(raw_consultation())
     replay = copy.deepcopy(original)
@@ -158,6 +173,9 @@ def test_duplicate_key_classifier_is_idempotent_only_for_equivalent_semantics() 
     conflict = copy.deepcopy(original)
     conflict["correlation"]["request_message_key"] = "asd-consultation-0000000000000002"
     conflict["message_key"] = "asd-consultation-0000000000000002"
+    original["fingerprint"] = ""
+    replay["fingerprint"] = ""
+    conflict["fingerprint"] = ""
 
     assert classify_duplicate(original, replay) is DuplicateClassification.IDEMPOTENT
     assert classify_duplicate(original, conflict) is DuplicateClassification.CONFLICT

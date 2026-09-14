@@ -230,6 +230,8 @@ def validate_company_consultation_tool_arguments(
     if tool_name == "company.peers":
         return {}
     if tool_name == "company.consult":
+        if _PEER_REF_RE.fullmatch(raw["to"] if isinstance(raw.get("to"), str) else "") is None:
+            raise CompanyConsultationToolError("INVALID_REQUEST")
         _validated_text(raw["question"])
         _validated_evidence_refs(raw["evidence_refs"])
         _validated_artifact_revisions(raw["artifact_revisions"])
@@ -346,16 +348,18 @@ def _result(tool: str, data: Any) -> dict[str, Any]:
     return envelope
 
 
-def _error(tool: str, code: str) -> dict[str, Any]:
+def _error(tool: str, code: str, data: Any = None) -> dict[str, Any]:
     if code not in COMPANY_CONSULTATION_ERROR_CODES:
         code = "INTERNAL_ERROR"
+    if code == "AMBIGUOUS" and data is None:
+        data = {"peers": []}
     return {
         "schema": COMPANY_CONSULTATION_RESULT_SCHEMA,
         "tool": tool,
         "ok": False,
         "server_identity": COMPANY_CONSULTATION_SERVER_IDENTITY,
         "server_version": COMPANY_CONSULTATION_SERVER_VERSION,
-        "data": None,
+        "data": data,
         "error": {"code": code, "message": code},
     }
 
@@ -392,8 +396,6 @@ class CompanyConsultationGateway:
                     for peer in self.peer_resolver.peers
                     if peer.program_ref == self.program_ref
                 ]
-                if len(peers) > 1:
-                    raise ConsultationPeerRefused("AMBIGUOUS")
                 if not peers:
                     raise ConsultationPeerRefused("UNAVAILABLE")
                 return _result(tool_name, {"peers": peers})
@@ -422,7 +424,7 @@ class CompanyConsultationGateway:
             response = await self.dispatcher(tool_name, request)
             return _result(tool_name, self._service_data(response))
         except ConsultationPeerRefused as exc:
-            return _error(tool_name, exc.code)
+            return _error(tool_name, exc.code, data=exc.data)
         except Exception:
             return _error(tool_name, "EFFECT_UNKNOWN")
 
