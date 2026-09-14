@@ -216,6 +216,18 @@ def _read_bounded_json(path: Path) -> dict[str, Any]:
     return value
 
 
+def _read_optional_bounded_json(path: Path) -> dict[str, Any] | None:
+    # exists() follows symlinks and hides malformed state as apparent absence.
+    # Only a genuine missing directory entry permits the no-record path.
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise BrokerTrustError(f"broker state is unreadable: {path.name}") from exc
+    return _read_bounded_json(path)
+
+
 def _validate_stored_release_sha(value: Any) -> str:
     if not isinstance(value, str) or _SHA40_RE.fullmatch(value) is None:
         raise BrokerTrustError("stored release_sha is not an exact Git commit")
@@ -376,9 +388,9 @@ class PrivilegedActionBroker:
 
     def _existing_terminal(self, request: PrivilegedActionRequest, digest: str) -> dict[str, Any] | None:
         path = self.receipt_path(request.request_id)
-        if not path.exists():
+        value = _read_optional_bounded_json(path)
+        if value is None:
             return None
-        value = _read_bounded_json(path)
         if value.get("schema") != RECEIPT_SCHEMA or value.get("request_id") != request.request_id:
             raise BrokerTrustError("terminal receipt identity is invalid")
         if value.get("release_sha") != self.config.release_root.name:
@@ -389,9 +401,9 @@ class PrivilegedActionBroker:
 
     def _check_inflight(self, request: PrivilegedActionRequest, digest: str) -> None:
         path = self.inflight_path(request.request_id)
-        if not path.exists():
+        value = _read_optional_bounded_json(path)
+        if value is None:
             return
-        value = _read_bounded_json(path)
         if value.get("schema") != INFLIGHT_SCHEMA or value.get("request_id") != request.request_id:
             raise BrokerTrustError("in-flight marker identity is invalid")
         if value.get("release_sha") != self.config.release_root.name:
@@ -500,9 +512,9 @@ class PrivilegedActionBroker:
 
     def _read_terminal_for_status(self, request_id: str) -> dict[str, Any] | None:
         path = self.receipt_path(request_id)
-        if not path.exists():
+        value = _read_optional_bounded_json(path)
+        if value is None:
             return None
-        value = _read_bounded_json(path)
         if value.get("schema") != RECEIPT_SCHEMA or value.get("request_id") != request_id:
             raise BrokerTrustError("terminal receipt identity is invalid")
         _validate_stored_release_sha(value.get("release_sha"))
@@ -520,9 +532,9 @@ class PrivilegedActionBroker:
 
     def _read_inflight_for_status(self, request_id: str) -> dict[str, Any] | None:
         path = self.inflight_path(request_id)
-        if not path.exists():
+        value = _read_optional_bounded_json(path)
+        if value is None:
             return None
-        value = _read_bounded_json(path)
         if value.get("schema") != INFLIGHT_SCHEMA or value.get("request_id") != request_id:
             raise BrokerTrustError("in-flight marker identity is invalid")
         _validate_stored_release_sha(value.get("release_sha"))

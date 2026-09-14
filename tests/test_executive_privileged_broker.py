@@ -630,3 +630,22 @@ def test_status_rejects_corrupt_terminal_metadata(tmp_path: Path, field: str, va
     with pytest.raises(BrokerTrustError):
         broker.query_status(_status(), peer_uid=501)
     assert len(executor.calls) == 1
+
+
+@pytest.mark.parametrize("state_kind", ["receipt", "inflight"])
+@pytest.mark.parametrize("entry_kind", ["dangling", "loop"])
+@pytest.mark.parametrize("query", [True, False])
+def test_malformed_state_entry_never_becomes_absence_or_reexecution(
+    tmp_path: Path, state_kind: str, entry_kind: str, query: bool
+) -> None:
+    executor = FakeExecutor()
+    broker = _broker(tmp_path, executor)
+    path = (broker.receipt_path if state_kind == "receipt" else broker.inflight_path)("req-001")
+    path.symlink_to(path if entry_kind == "loop" else tmp_path / "missing-state.json")
+    with pytest.raises(BrokerTrustError):
+        if query:
+            broker.query_status(_status(), peer_uid=501)
+        else:
+            broker.handle(_raw(), peer_uid=501)
+    assert executor.calls == []
+    assert path.is_symlink()
