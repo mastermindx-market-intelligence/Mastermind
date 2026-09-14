@@ -257,7 +257,88 @@ class SubscriptionProviderCredentialTest(unittest.TestCase):
         )
 
 
-@pytest.mark.skipif(sys.platform != "darwin", reason="macOS ACL observer")
+class TestCredentialOpenDiscriminators(unittest.TestCase):
+    @pytest.mark.timeout(5)
+    def test_regular_to_fifo_swap_refuses_before_read_without_blocking(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            config, _ = _installed_config(root)
+            credential_path = (
+                Path(str(config["provider_home"])) / PROVIDER_CREDENTIAL_FILENAME
+            )
+            regular = root / "regular"
+            regular.write_bytes(credential_path.read_bytes())
+            real_open = credential.os.open
+            swap_occurred = False
+
+            def swap_then_open(*args: object, **kwargs: object) -> int:
+                nonlocal swap_occurred
+                if Path(args[0]) != credential_path:
+                    return real_open(*args, **kwargs)
+                credential_path.unlink()
+                regular.replace(credential_path)
+                credential_path.unlink()
+                os.mkfifo(credential_path, 0o600)
+                os.chown(credential_path, os.getuid(), os.getgid())
+                swap_occurred = True
+                return real_open(*args, **kwargs)
+
+            def refuse_wait(*_args: object, **_kwargs: object) -> int:
+                raise AssertionError("non-regular credential open must not read or block")
+
+            with (
+                mock.patch.object(credential.os, "open", side_effect=swap_then_open),
+                mock.patch.object(credential.os, "read", side_effect=refuse_wait),
+                mock.patch.object(credential, "_has_macos_acl", return_value=False),
+            ):
+                with pytest.raises(
+                    credential.SubscriptionCredentialError,
+                    match="provider credential metadata is unsafe",
+                ):
+                    credential.verify_provider_credential(config)
+            assert swap_occurred
+
+    @pytest.mark.timeout(5)
+    def test_credential_opens_require_nonblocking_nofollow_cloexec(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            config, path = _installed_config(Path(raw))
+            expected_flags = (
+                os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
+            )
+            opens: list[tuple[object, int]] = []
+            real_credential_open = credential.os.open
+            real_realm_open = codex_provider_realm.os.open
+
+            def credential_open(target: object, flags: int, *args: object) -> int:
+                opens.append((target, int(flags)))
+                return real_credential_open(target, flags, *args)
+
+            def realm_open(target: object, flags: int, *args: object) -> int:
+                opens.append((target, int(flags)))
+                return real_realm_open(target, flags, *args)
+
+            with (
+                mock.patch.object(credential.os, "open", side_effect=credential_open),
+                mock.patch.object(codex_provider_realm.os, "open", side_effect=realm_open),
+            ):
+                assert credential.verify_provider_credential(config) == path
+                assert (
+                    load_private_provider_credential(
+                        path.parent,
+                        expected_uid=os.getuid(),
+                        expected_gid=os.getgid(),
+                    )
+                    == "opaque-subscription-key"
+                )
+
+            credential_opens = [
+                flags
+                for target, flags in opens
+                if Path(str(target)).name == PROVIDER_CREDENTIAL_FILENAME
+            ]
+            assert credential_opens == [expected_flags, expected_flags]
+
+
 class TestDarwinACLBoundary:
     @pytest.mark.skipif(sys.platform != "darwin", reason="Darwin credential metadata boundary")
     def test_nonregular_credentials_refuse_before_read_without_blocking(
@@ -574,7 +655,7 @@ class TestDarwinACLBoundary:
             mock.patch.object(
                 ctypes,
                 "get_errno",
-                side_effect=[0, errno.EIO, errno.EACCES],
+                side_effect=[errno.EIO, errno.EIO, errno.EACCES],
             ),
         ):
             with pytest.raises(
@@ -583,6 +664,13 @@ class TestDarwinACLBoundary:
             ):
                 fs_security.has_macos_acl(path)
         enumeration_observer.assert_called_once()
+
+    def test_acl_observer_raises_when_entry_pointer_is_absent(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        path = tmp_path / "observer-fixture"
+        path.write_text("fixture", encoding="utf-8")
 
         with (
             mock.patch.object(fs_security, "_acl_get_fd", return_value=1001),
@@ -593,6 +681,29 @@ class TestDarwinACLBoundary:
             with pytest.raises(
                 FilesystemSecurityError,
                 match="macOS ACL object has no enumerable entries",
+            ):
+                fs_security.has_macos_acl(path)
+
+    def test_acl_enumeration_error_survives_cleanup_errno_clobber(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        path = tmp_path / "observer-fixture"
+        path.write_text("fixture", encoding="utf-8")
+
+        def clobbering_free(*_args: object, **_kwargs: object) -> int:
+            ctypes.set_errno(errno.EACCES)
+            return 0
+
+        with (
+            mock.patch.object(fs_security, "_acl_get_fd", return_value=1001),
+            mock.patch.object(fs_security, "_acl_get_entry", return_value=-1),
+            mock.patch.object(fs_security, "_acl_free", side_effect=clobbering_free),
+        ):
+            ctypes.set_errno(errno.EIO)
+            with pytest.raises(
+                FilesystemSecurityError,
+                match="macOS ACL enumeration failed: errno=5",
             ):
                 fs_security.has_macos_acl(path)
 
