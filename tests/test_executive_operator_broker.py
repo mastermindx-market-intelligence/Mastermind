@@ -2123,6 +2123,70 @@ def test_ohf_prebind_items_get_distinct_monotonic_sequences() -> None:
     assert second.resync_required is False
 
 
+def test_ohf_prebind_completion_replays_without_duplicate_item() -> None:
+    projection = VisibleTurnProjection()
+    key = TurnKey(
+        "ATT-REPLAY", "epoch-replay", "generation-replay", 1, "codex-01",
+        "turn-replay", "native-replay",
+    )
+    grant = projection.mint_grant(key)
+    projection.arm_prebind(7)
+
+    def params(method: str, text: str) -> dict[str, object]:
+        return {
+            "turnId": key.native_turn_id,
+            "item": {
+                "id": "item-one",
+                "type": "agentMessage",
+                "sequence": 1,
+                "text": text,
+            },
+            "method_sentinel": method,
+        }
+
+    projection.prebind_frame(
+        7,
+        method="item/updated",
+        params=params("item/updated", "partial one"),
+    )
+    projection.prebind_frame(
+        7,
+        method="item/completed",
+        params=params("item/completed", "final one"),
+    )
+    assert projection.commit_prebind(
+        7, key, native_turn_id=key.native_turn_id
+    ) is None
+    partial = projection.read(
+        key, reader_grant=grant, cursor=None, max_items=64
+    )
+    projection.publish_demultiplexed(
+        8,
+        payload={
+            "method": "item/updated",
+            "params": params("item/updated", "partial one"),
+        },
+    )
+    projection.publish_demultiplexed(
+        8,
+        payload={
+            "method": "item/completed",
+            "params": params("item/completed", "final one"),
+        },
+    )
+    replayed = projection.read(
+        key, reader_grant=grant, cursor=None, max_items=64
+    )
+    assert [(item.text, item.state) for item in replayed.items] == [
+        ("final one", "completed"),
+    ]
+    assert replayed.next_cursor != partial.next_cursor
+    assert (
+        partial.items[0].publication_sequence
+        < replayed.items[0].publication_sequence
+    )
+
+
 def test_ohf_complete_page_without_gap_does_not_require_resync() -> None:
     projection = VisibleTurnProjection()
     key = TurnKey(

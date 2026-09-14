@@ -722,6 +722,14 @@ def test_lc1_gate_held_visible_turn_projection(tmp_path: Path) -> None:
             if notification.get("method")
             in {"item/updated", "item/completed", "turn/completed"}
         ]
+        native_visible_notifications.sort(
+            key=lambda notification: (
+                notification.get("params", {})
+                .get("item", {})
+                .get("sequence", -1),
+                0 if notification.get("method") == "item/updated" else 1,
+            )
+        )
         harness.adapter._ingest_turn_notifications(
             harness.adapter._state(harness.generation),
             turn,
@@ -740,6 +748,29 @@ def test_lc1_gate_held_visible_turn_projection(tmp_path: Path) -> None:
                 "LC1 final two",
             ]:
                 break
+            replayed_notifications = harness.adapter._state(
+                harness.generation
+            ).client.drain_notifications()
+            replayed_visible_notifications = [
+                notification
+                for notification in replayed_notifications
+                if notification.get("method")
+                in {"item/updated", "item/completed", "turn/completed"}
+            ]
+            replayed_visible_notifications.sort(
+                key=lambda notification: (
+                    notification.get("params", {})
+                    .get("item", {})
+                    .get("sequence", -1),
+                    0 if notification.get("method") == "item/updated" else 1,
+                )
+            )
+            if replayed_visible_notifications:
+                harness.adapter._ingest_turn_notifications(
+                    harness.adapter._state(harness.generation),
+                    turn,
+                    replayed_visible_notifications,
+                )
             assert time.monotonic() < visible_deadline, (
                 "visible updates were not published while the terminal gate was held: "
                 f"{[item.text for item in nonterminal.items]}; "
