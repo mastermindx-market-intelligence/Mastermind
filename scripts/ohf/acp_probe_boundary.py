@@ -27,14 +27,12 @@ class ProbeLimits:
     text_bytes: int = 32 * 1024
     updates: int = 128
     permission_requests: int = 32
-    rpc_ids: int = 256
 
     def __post_init__(self) -> None:
         for name, lower, upper in (
             ("frame_bytes", 64, 1024 * 1024), ("frames", 1, 4096),
             ("text_bytes", 1, 1024 * 1024),
-            ("updates", 1, 4096), ("permission_requests", 1, 256),
-            ("rpc_ids", 1, 4096)):
+            ("updates", 1, 4096), ("permission_requests", 1, 256)):
             value = getattr(self, name)
             if type(value) is not int or not lower <= value <= upper:
                 raise ValueError("INVALID_PROBE_LIMIT")
@@ -80,6 +78,12 @@ class ProbeClient:
         if self.violation is None:
             self.violation = reason
 
+    def admit_update(self, update: Any) -> int:
+        """Apply this client's semantic update policy and return its text size."""
+        text = _update_text(update)
+        self._digest.update(text)
+        return len(text)
+
     def bind_session(self, session_id: str) -> None:
         if self.session_id is not None:
             self.poison("SESSION_REBIND")
@@ -115,16 +119,15 @@ class ProbeClient:
             self.poison("UPDATE_BUDGET_EXCEEDED")
             return
         try:
-            raw = _update_text(update)
+            size = self.admit_update(update)
         except (ValueError, TypeError, UnicodeError):
             self.poison("UPDATE_NOT_ADMITTED")
             return
-        if self._text_bytes + len(raw) > self.limits.text_bytes:
+        if self._text_bytes + size > self.limits.text_bytes:
             self.poison("TEXT_BUDGET_EXCEEDED")
             return
         self._updates += 1
-        self._text_bytes += len(raw)
-        self._digest.update(raw)
+        self._text_bytes += size
 
     async def request_permission(self, session_id: str, tool_call: Any, options: Any, **kwargs: Any) -> dict:
         if self._callback_allowed(session_id):
@@ -218,15 +221,6 @@ def _validate_rpc_frame(message: Any) -> None:
     _validate_json_structure(message)
 
 
-def _rpc_id_key(value: Any) -> tuple[str, int | str]:
-    # JSON-RPC 2.0 / SDK 0.12.1 keep int and string IDs in distinct spaces.
-    if type(value) is int:
-        return ("int", value)
-    if isinstance(value, str):
-        return ("str", value)
-    raise BoundaryViolation("INVALID_FRAME")
-
-
 class StrictFrameReader:
     """Borrowed byte reader guarding SDK NDJSON parsing, not a JSON-RPC stack.
 
@@ -239,26 +233,10 @@ class StrictFrameReader:
     def __init__(self, reader: asyncio.StreamReader, client: ProbeClient):
         self.reader, self.client = reader, client
         self._frames = 0
-        self._seen_rpc_ids: set[tuple[str, int | str]] = set()
         # asyncio exposes no public getter for its configured frame limit. This
         # probe binds that implementation seam explicitly, not by optimistic default.
         if type(getattr(reader, "_limit", None)) is not int or not 0 < reader._limit <= client.limits.frame_bytes:
             raise BoundaryViolation("READER_LIMIT_UNQUALIFIED")
-
-    def _admit_rpc_id(self, message: dict[str, Any]) -> None:
-        # SDK 0.12.1: method without id is a notification and does not occupy
-        # the request/response ID space. Reuse and bound exhaustion refuse with
-        # a sticky reason; the set never evicts, so an old ID cannot re-enter.
-        if "id" not in message:
-            return
-        key = _rpc_id_key(message["id"])
-        if key in self._seen_rpc_ids:
-            self.client.poison("DUPLICATE_RPC_ID")
-            raise BoundaryViolation("DUPLICATE_RPC_ID")
-        if len(self._seen_rpc_ids) >= self.client.limits.rpc_ids:
-            self.client.poison("RPC_ID_BUDGET_EXCEEDED")
-            raise BoundaryViolation("RPC_ID_BUDGET_EXCEEDED")
-        self._seen_rpc_ids.add(key)
 
     async def readuntil(self, separator: bytes = b"\n") -> bytes:
         if separator != b"\n":
@@ -288,7 +266,6 @@ class StrictFrameReader:
         except (ValueError, TypeError, UnicodeError, RecursionError):
             self.client.poison("INVALID_FRAME")
             raise BoundaryViolation("INVALID_FRAME") from None
-        self._admit_rpc_id(obj)
         self._frames += 1
         params = obj.get("params", {})
         method = obj.get("method")
@@ -302,7 +279,7 @@ class StrictFrameReader:
                 if method == "session/update":
                     if set(params) != {"sessionId", "update"}:
                         raise BoundaryViolation("UPDATE_NOT_ADMITTED")
-                    _update_text(params["update"])
+                    self.client.admit_update(params["update"])
                 else:
                     if (set(params) != {"sessionId", "toolCall", "options"}
                             or not isinstance(params["toolCall"], dict)
