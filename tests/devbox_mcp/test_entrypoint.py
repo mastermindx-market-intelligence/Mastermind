@@ -4,6 +4,7 @@ import json
 import os
 import stat
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -227,6 +228,8 @@ def test_config_file_symlink_or_world_writable_refuses(repo: Path, tmp_path: Pat
 
 
 def test_service_reexec_environment_is_strict_allowlist() -> None:
+    import ops.devbox.run_codespace_devbox as service_module
+
     source = _env()
     source.update({
         "PATH": "/safe/bin",
@@ -246,10 +249,15 @@ def test_service_reexec_environment_is_strict_allowlist() -> None:
     assert cleaned["CODESPACE_NAME"] == CODESPACE
     assert cleaned["GITHUB_REPOSITORY"] == REPOSITORY
     assert cleaned["MASTERMIND_DEVBOX_ENV_SANITIZED"] == "1"
+    assert cleaned["PYTHONPATH"] == str(
+        Path(service_module.__file__).resolve().parents[2]
+    )
+    assert cleaned["PYTHONSAFEPATH"] == "1"
+    assert cleaned["PYTHONNOUSERSITE"] == "1"
     rendered = json.dumps(cleaned, sort_keys=True)
     for forbidden in (
         "GITHUB_TOKEN", "GH_TOKEN", "OPENAI_API_KEY", "AWS_SECRET_ACCESS_KEY",
-        "MY_RANDOM_SECRET", "SSH_AUTH_SOCK", "PYTHONPATH",
+        "MY_RANDOM_SECRET", "SSH_AUTH_SOCK", "/unsafe/injected",
         "ambient-codespace-token", "gh-secret", "openai-secret", "aws-secret", "other-secret",
     ):
         assert forbidden not in rendered
@@ -287,10 +295,141 @@ def test_main_reexecs_before_service_build_with_sanitized_environment(monkeypatc
         service_module.main(["--policy-file", "/tmp/policy", "--lease-file", "/tmp/lease"])
 
     assert captured["executable"] == service_module.sys.executable
-    assert captured["argv"][1:3] == ["-m", "ops.devbox.run_codespace_devbox"]
+    assert captured["argv"][1:4] == [
+        "-P",
+        "-m",
+        "ops.devbox.run_codespace_devbox",
+    ]
     assert captured["env"]["MASTERMIND_DEVBOX_ENV_SANITIZED"] == "1"
     assert captured["env"]["CODESPACE_NAME"] == CODESPACE
+    assert captured["env"]["PYTHONPATH"] == str(
+        Path(service_module.__file__).resolve().parents[2]
+    )
+    assert captured["env"]["PYTHONSAFEPATH"] == "1"
+    assert captured["env"]["PYTHONNOUSERSITE"] == "1"
     rendered = json.dumps(captured["env"], sort_keys=True)
     for forbidden in ("GITHUB_TOKEN", "GH_TOKEN", "SSH_AUTH_SOCK", "OPENAI_API_KEY",
                       "ambient-token", "ambient-gh-token", "ambient-openai"):
         assert forbidden not in rendered
+
+
+def test_main_refuses_forged_sanitized_marker_with_ambient_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import ops.devbox.run_codespace_devbox as service_module
+
+    source = _env()
+    source.update(
+        {
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+            "HOME": os.environ.get("HOME", "/tmp"),
+            "LANG": "C.UTF-8",
+            "MASTERMIND_DEVBOX_ENV_SANITIZED": "1",
+            "GITHUB_TOKEN": "forged-marker-token",
+            "GH_TOKEN": "forged-marker-gh",
+            "SSH_AUTH_SOCK": "/tmp/forged-agent",
+            "PYTHONPATH": "/tmp/forged-pythonpath",
+        }
+    )
+    for key in list(os.environ):
+        monkeypatch.delenv(key, raising=False)
+    for key, value in source.items():
+        monkeypatch.setenv(key, value)
+
+    monkeypatch.setattr(
+        service_module.os,
+        "execve",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("forged marker must not re-exec or reach service construction")
+        ),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "build_codespace_service",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("forged marker reached service construction")
+        ),
+    )
+
+    with pytest.raises(
+        DevBoxServiceConfigurationError,
+        match="service environment sanitization was not proven",
+    ):
+        service_module.main(
+            ["--policy-file", "/tmp/policy", "--lease-file", "/tmp/lease"]
+        )
+
+
+def test_exact_sanitized_marker_environment_is_accepted_without_reexec(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import ops.devbox.run_codespace_devbox as service_module
+
+    source = _env()
+    source.update(
+        {
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+            "HOME": os.environ.get("HOME", "/tmp"),
+            "LANG": "C.UTF-8",
+        }
+    )
+    cleaned = service_module.build_sanitized_service_environment(source)
+    for key in list(os.environ):
+        monkeypatch.delenv(key, raising=False)
+    for key, value in cleaned.items():
+        monkeypatch.setenv(key, value)
+
+    class FakeServer:
+        @staticmethod
+        def streamable_http_app():
+            return object()
+
+    class FakeService:
+        server = FakeServer()
+        preflight = type(
+            "Preflight", (), {"forwarded_mcp_url": RESOURCE}
+        )()
+
+        def __init__(self) -> None:
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    fake_service = FakeService()
+    observed: dict[str, object] = {}
+    monkeypatch.setattr(
+        service_module.os,
+        "execve",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("exact sanitized environment must not re-exec")
+        ),
+    )
+
+    def fake_build_codespace_service(**kwargs):
+        observed["build"] = kwargs
+        return fake_service
+
+    monkeypatch.setattr(
+        service_module,
+        "build_codespace_service",
+        fake_build_codespace_service,
+    )
+
+    class FakeUvicorn:
+        @staticmethod
+        def run(app, **kwargs):
+            observed["app"] = app
+            observed["uvicorn"] = kwargs
+
+    monkeypatch.setitem(sys.modules, "uvicorn", FakeUvicorn())
+    assert (
+        service_module.main(
+            ["--policy-file", "/tmp/policy", "--lease-file", "/tmp/lease"]
+        )
+        == 0
+    )
+    assert observed["build"]["policy_file"] == "/tmp/policy"
+    assert observed["build"]["lease_file"] == "/tmp/lease"
+    assert observed["uvicorn"]["host"] == "127.0.0.1"
+    assert fake_service.closed is True

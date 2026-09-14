@@ -149,7 +149,7 @@ python -m ops.devbox.run_codespace_devbox \
 
 The service binds `127.0.0.1` inside the Codespace. GitHub's forwarding agent supplies the external TLS URL. The service prints the derived `DEVBOX_MCP` URL but no credential or raw identity.
 
-Before opening the listener, the launcher re-execs itself under a strict environment allowlist. `GITHUB_TOKEN`, `GH_TOKEN`, `SSH_AUTH_SOCK`, API/cloud secrets, `PYTHONPATH`, and other ambient variables do not survive into the long-lived DevBox service process. This prevents recovery of those ambient values through the parent service environment; it does not establish filesystem or process-memory isolation between same-UID processes.
+Before opening the listener, the launcher re-execs itself with Python safe-path mode under a strict environment allowlist. Ambient `GITHUB_TOKEN`, `GH_TOKEN`, `SSH_AUTH_SOCK`, API/cloud secrets, `PYTHONPATH`, and unrelated variables do not survive: the launcher installs only its exact reviewed-source `PYTHONPATH`, `PYTHONSAFEPATH=1`, `PYTHONNOUSERSITE=1`, the bounded Codespace facts, and a private re-exec marker. On the post-exec path it reconstructs that projection and refuses unless the entire environment matches exactly, so pre-setting the marker cannot bypass sanitization. This prevents recovery of those ambient values through the parent service environment; it does not establish filesystem or process-memory isolation between same-UID processes.
 
 ## 7. Expose only the exact MCP port
 

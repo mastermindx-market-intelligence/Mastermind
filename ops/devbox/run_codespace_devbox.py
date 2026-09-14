@@ -36,6 +36,7 @@ from ops.devbox.codespace_preflight import (
 _LEASE_SCHEMA = "mastermind.devbox_lease.v1"
 _MAX_CONFIG_BYTES = 64 * 1024
 _SERVICE_ENV_MARKER = "MASTERMIND_DEVBOX_ENV_SANITIZED"
+_SERVICE_SOURCE_ROOT = str(Path(__file__).resolve().parents[2])
 _SERVICE_ENV_ALLOWLIST = (
     "PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "TERM", "COLORTERM",
     "CODESPACES", "CODESPACE_NAME",
@@ -67,6 +68,9 @@ def build_sanitized_service_environment(source: Mapping[str, str]) -> dict[str, 
         raise DevBoxServiceConfigurationError("required Codespace service environment is absent")
     if selected["CODESPACES"] != "true":
         raise DevBoxServiceConfigurationError("qualified Codespace service environment is required")
+    selected["PYTHONPATH"] = _SERVICE_SOURCE_ROOT
+    selected["PYTHONSAFEPATH"] = "1"
+    selected["PYTHONNOUSERSITE"] = "1"
     selected[_SERVICE_ENV_MARKER] = "1"
     return selected
 
@@ -327,14 +331,24 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     effective_argv = list(sys.argv[1:] if argv is None else argv)
+    clean_environment = build_sanitized_service_environment(os.environ)
     if os.environ.get(_SERVICE_ENV_MARKER) != "1":
-        clean_environment = build_sanitized_service_environment(os.environ)
         os.execve(
             sys.executable,
-            [sys.executable, "-m", "ops.devbox.run_codespace_devbox", *effective_argv],
+            [
+                sys.executable,
+                "-P",
+                "-m",
+                "ops.devbox.run_codespace_devbox",
+                *effective_argv,
+            ],
             clean_environment,
         )
         raise AssertionError("os.execve unexpectedly returned")
+    if dict(os.environ) != clean_environment:
+        raise DevBoxServiceConfigurationError(
+            "service environment sanitization was not proven"
+        )
     args = _parser().parse_args(effective_argv)
     if args.host != "127.0.0.1":
         raise SystemExit("DevBox V1 binds loopback; use GitHub Codespaces port forwarding")

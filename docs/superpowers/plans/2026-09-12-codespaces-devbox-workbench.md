@@ -59,11 +59,11 @@
 - Create `docs/runbooks/codespaces-devbox-canary.md`
 - Test `tests/devbox_mcp/test_codespace_preflight.py`
 
-**RED:** preflight requires Linux, `/bin/bash`, a real Git worktree, exact committed baseline, writable private state root outside `.git`, no unsafe env inheritance, exact policy/resource host binding and explicit allowed host; no wildcard/public unauthenticated configuration.
+**RED:** preflight requires Linux, `/bin/bash`, a real Git worktree, exact committed baseline, writable private state root outside `.git`, no unsafe env inheritance, exact policy/resource host binding and explicit allowed host; no wildcard/public unauthenticated configuration. The launcher must reject a forged sanitized marker, replace ambient import paths with the reviewed source root, use Python safe-path mode, and accept only the exact reconstructed post-exec environment.
 
-**GREEN:** entrypoint consumes only operator/deployment configuration, opens the runtime, composes MCP, and serves Streamable HTTP. It does not create/start/stop Codespaces or mint OAuth credentials.
+**GREEN:** entrypoint consumes only operator/deployment configuration, sanitizes and re-execs from the reviewed source under `-P`, proves exact post-exec environment equality, opens the runtime, composes MCP, and serves Streamable HTTP. It does not create/start/stop Codespaces or mint OAuth credentials.
 
-**Verify:** targeted pytest plus `python -m compileall integrations/devbox_mcp ops/devbox` and `git diff --check`.
+**Verify:** targeted entrypoint/preflight pytest, mutation controls for marker bypass, ambient import-root selection and removal of `-P`, plus `python -m compileall integrations/devbox_mcp ops/devbox` and `git diff --check`.
 
 ## Task 5 — Prove the local contract before spending a Codespace
 
