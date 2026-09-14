@@ -415,6 +415,233 @@ def test_consultation_runtime_restart_effect_unknown_and_late_answer(
     ]
 
 
+def test_b1_intent_only_restart_is_not_dispatched_and_may_redispatch(
+    tmp_path: Path,
+) -> None:
+    runtime = Runtime.at(tmp_path)
+    consultations = ConsultationRuntime(runtime, repository_root=tmp_path)
+    (requester_job, requester_attempt, _requester_binding), (
+        recipient_job,
+        recipient_attempt,
+        recipient_binding,
+    ), _root = _workers(runtime)
+    frame, semantic_bundle = _frame(
+        tmp_path,
+        requester=(requester_job, requester_attempt, "requester", _requester_binding),
+        recipient=(recipient_job, recipient_attempt, "recipient", recipient_binding),
+    )
+    consultations.intent(
+        frame,
+        requester_attempt_id=requester_attempt,
+        carrier_ref="dialogue://fixture/consultation",
+        observed_at="2026-09-14T00:00:00Z",
+        repository_root=semantic_bundle[1],
+    )
+    reopened = ConsultationRuntime(Runtime.at(tmp_path), repository_root=tmp_path)
+
+    assert reopened.resolve_restart(frame) == "NOT_DISPATCHED"
+    dispatch = reopened.dispatch_attempt(
+        frame,
+        wake_obligation_id="WAKE-" + "1" * 32,
+        wake_attempt_command_id="WAKE-" + "1" * 32 + ":delivery:1",
+        observed_at="2026-09-14T00:01:00Z",
+    )
+
+    assert dispatch.inserted is True
+    assert dispatch.event.event_type == "DISPATCH_ATTEMPT"
+    assert reopened.resolve_restart(frame) == "EFFECT_UNKNOWN"
+
+
+def test_b2_native_acceptance_requires_dispatch_attempt(tmp_path: Path) -> None:
+    runtime = Runtime.at(tmp_path)
+    consultations = ConsultationRuntime(runtime, repository_root=tmp_path)
+    (requester_job, requester_attempt, _requester_binding), (
+        recipient_job,
+        recipient_attempt,
+        recipient_binding,
+    ), _root = _workers(runtime)
+    frame, semantic_bundle = _frame(
+        tmp_path,
+        requester=(requester_job, requester_attempt, "requester", _requester_binding),
+        recipient=(recipient_job, recipient_attempt, "recipient", recipient_binding),
+    )
+    consultations.intent(
+        frame,
+        requester_attempt_id=requester_attempt,
+        carrier_ref="dialogue://fixture/consultation",
+        observed_at="2026-09-14T00:00:00Z",
+        repository_root=semantic_bundle[1],
+    )
+
+    with pytest.raises(StateConflict, match="DISPATCH_ATTEMPT"):
+        consultations.native_accepted(
+            frame,
+            native_thread_id="thread-recipient",
+            native_turn_id="turn-recipient",
+            observed_at="2026-09-14T00:01:00Z",
+        )
+
+    assert [event.event_type for event in consultations.events(frame)] == ["INTENT"]
+
+
+def _drifted_frame(
+    frame: dict,
+    *,
+    field: str,
+    value: object,
+) -> dict:
+    changed = copy.deepcopy(frame)
+    changed[field] = value
+    changed["fingerprint"] = ""
+    return build_consultation(changed)
+
+
+def _changed_frame(frame: dict, field: str, value: object) -> dict:
+    changed = copy.deepcopy(frame)
+    changed[field] = value
+    changed["fingerprint"] = ""
+    return build_consultation(changed)
+
+
+def test_b3_dispatch_refuses_changed_stale_frame_and_current_binding(
+    tmp_path: Path,
+) -> None:
+    runtime = Runtime.at(tmp_path)
+    consultations = ConsultationRuntime(runtime, repository_root=tmp_path)
+    (requester_job, requester_attempt, requester_binding), (
+        recipient_job,
+        recipient_attempt,
+        recipient_binding,
+    ), _root = _workers(runtime)
+    frame, semantic_bundle = _frame(
+        tmp_path,
+        requester=(requester_job, requester_attempt, "requester", requester_binding),
+        recipient=(recipient_job, recipient_attempt, "recipient", recipient_binding),
+    )
+    fixture_repo = semantic_bundle[1]
+    consultations.intent(
+        frame,
+        requester_attempt_id=requester_attempt,
+        carrier_ref="dialogue://fixture/consultation",
+        observed_at="2026-09-14T00:00:00Z",
+        repository_root=fixture_repo,
+    )
+    stale = copy.deepcopy(recipient_binding)
+    stale["binding_generation"] = 2
+    changed_requester_actor = copy.deepcopy(frame["requester_actor_ref"])
+    changed_requester_actor["worker_id"] = "changed-requester"
+    changed_recipient_actor = copy.deepcopy(frame["recipient_actor_ref"])
+    changed_recipient_actor["worker_id"] = "changed-recipient"
+    changed_revision = copy.deepcopy(frame["artifact_revisions"])
+    changed_revision[0]["content_sha256"] = "b" * 64
+    drifted_frames = {
+        "semantic": _changed_frame(frame, "question", QUESTION + " changed"),
+        "requester_actor_ref": _changed_frame(
+            frame, "requester_actor_ref", changed_requester_actor
+        ),
+        "recipient_actor_ref": _changed_frame(
+            frame, "recipient_actor_ref", changed_recipient_actor
+        ),
+        "artifact_revision_digest": _changed_frame(
+            frame, "artifact_revisions", changed_revision
+        ),
+        "recipient_binding": _changed_frame(frame, "recipient_binding", stale),
+    }
+
+    for changed in drifted_frames.values():
+        with pytest.raises(StateConflict, match="frame identity drifted"):
+            consultations.dispatch_attempt(
+                changed,
+                wake_obligation_id="WAKE-" + "1" * 32,
+                wake_attempt_command_id="WAKE-" + "1" * 32 + ":delivery:1",
+                observed_at="2026-09-14T00:01:00Z",
+            )
+
+    _release_recipient_writer(runtime)
+    with pytest.raises(StateConflict, match="current Runtime binding"):
+        consultations.dispatch_attempt(
+            frame,
+            wake_obligation_id="WAKE-" + "1" * 32,
+            wake_attempt_command_id="WAKE-" + "1" * 32 + ":delivery:1",
+            observed_at="2026-09-14T00:02:00Z",
+        )
+
+    assert consultations.events(frame) == [
+        event for event in consultations.events(frame) if event.event_type == "INTENT"
+    ]
+
+
+def test_b4_recipient_consumption_refuses_changed_stale_frame_and_current_binding(
+    tmp_path: Path,
+) -> None:
+    runtime = Runtime.at(tmp_path)
+    consultations = ConsultationRuntime(runtime, repository_root=tmp_path)
+    (requester_job, requester_attempt, requester_binding), (
+        recipient_job,
+        recipient_attempt,
+        recipient_binding,
+    ), _root = _workers(runtime)
+    frame, semantic_bundle = _frame(
+        tmp_path,
+        requester=(requester_job, requester_attempt, "requester", requester_binding),
+        recipient=(recipient_job, recipient_attempt, "recipient", recipient_binding),
+    )
+    fixture_repo = semantic_bundle[1]
+    consultations.intent(
+        frame,
+        requester_attempt_id=requester_attempt,
+        carrier_ref="dialogue://fixture/consultation",
+        observed_at="2026-09-14T00:00:00Z",
+        repository_root=fixture_repo,
+    )
+    consultations.dispatch_attempt(
+        frame,
+        wake_obligation_id="WAKE-" + "1" * 32,
+        wake_attempt_command_id="WAKE-" + "1" * 32 + ":delivery:1",
+        observed_at="2026-09-14T00:01:00Z",
+    )
+    consultations.native_accepted(
+        frame,
+        native_thread_id="thread-recipient",
+        native_turn_id="turn-recipient",
+        observed_at="2026-09-14T00:02:00Z",
+    )
+    stale = copy.deepcopy(recipient_binding)
+    stale["binding_generation"] = 2
+    changed = _drifted_frame(frame, field="recipient_binding", value=stale)
+
+    with pytest.raises(StateConflict, match="frame identity drifted"):
+        consultations.consumed_by_recipient(
+            changed,
+            native_thread_id="thread-recipient",
+            native_turn_id="turn-recipient",
+            observed_at="2026-09-14T00:03:00Z",
+        )
+
+    _release_recipient_writer(runtime)
+    with pytest.raises(StateConflict, match="current Runtime binding"):
+        consultations.consumed_by_recipient(
+            frame,
+            native_thread_id="thread-recipient",
+            native_turn_id="turn-recipient",
+            observed_at="2026-09-14T00:04:00Z",
+        )
+
+    assert "CONSUMED_BY_RECIPIENT" not in {
+        event.event_type for event in consultations.events(frame)
+    }
+
+
+def _release_recipient_writer(runtime: Runtime) -> None:
+    with runtime.store.transaction() as connection:
+        connection.execute(
+            """
+            UPDATE process_generations SET executive_writer_held=0
+            WHERE process_generation_id='ohf-generation-recipient'
+            """
+        )
+
+
 def _answer_frame(frame: dict, suffix: str, semantic: dict) -> dict:
     raw = copy.deepcopy(frame)
     raw["message_key"] = f"asd-consultation-answer-{suffix}"

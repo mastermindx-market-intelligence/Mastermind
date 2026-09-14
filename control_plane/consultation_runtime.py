@@ -160,6 +160,7 @@ class ConsultationRuntime:
         intent = self._intent_event(item)
         if intent is None:
             raise StateConflict("consultation INTENT must precede dispatch")
+        self._require_intent_identity(item, intent)
         if self._event(item, "DISPATCH_ATTEMPT") is not None:
             if self._terminal_dispatch_state(item) is None:
                 self._append(
@@ -177,6 +178,7 @@ class ConsultationRuntime:
                 raise StateConflict(
                     "restart DISPATCH_ATTEMPT has no terminal receipt: EFFECT_UNKNOWN"
                 )
+        self._require_current_recipient(item)
         return self._append(
             item,
             "DISPATCH_ATTEMPT",
@@ -204,6 +206,10 @@ class ConsultationRuntime:
             self._context, consultation_id=item["consultation_id"]
         )
         self._require_fact_order(item, "NATIVE_ACCEPTED")
+        intent = self._intent_event(item)
+        if intent is None:
+            raise StateConflict("NATIVE_ACCEPTED requires consultation INTENT")
+        self._require_intent_identity(item, intent)
         binding = self._require_current_recipient(item)
         thread_id = self._current_recipient_thread(item)
         if native_thread_id != thread_id:
@@ -239,6 +245,11 @@ class ConsultationRuntime:
         self._context = replace(
             self._context, consultation_id=item["consultation_id"]
         )
+        intent = self._intent_event(item)
+        if intent is None:
+            raise StateConflict("recipient consumption requires consultation INTENT")
+        self._require_intent_identity(item, intent)
+        self._require_current_recipient(item)
         accepted = self._event(item, "NATIVE_ACCEPTED")
         if accepted is None:
             raise StateConflict("recipient consumption requires native acceptance")
@@ -436,6 +447,8 @@ class ConsultationRuntime:
         )
         if self._intent_event(item) is None:
             return "NOT_STARTED"
+        if self._event(item, "DISPATCH_ATTEMPT") is None:
+            return "NOT_DISPATCHED"
         if self._terminal_dispatch_state(item) is None:
             return "EFFECT_UNKNOWN"
         return "RESOLVED"
@@ -517,6 +530,28 @@ class ConsultationRuntime:
     def _require_fact_order(self, item: Mapping[str, Any], fact: str) -> None:
         if self._intent_event(item) is None:
             raise StateConflict(f"{fact} requires consultation INTENT")
+        if fact == "NATIVE_ACCEPTED" and self._event(item, "DISPATCH_ATTEMPT") is None:
+            raise StateConflict(f"{fact} requires consultation DISPATCH_ATTEMPT")
+
+    def _require_intent_identity(
+        self, item: Mapping[str, Any], intent: Event
+    ) -> None:
+        payload = intent.payload
+        request = self._intent_from_event(intent)
+        if (
+            item["message_key"] != payload["message_key"]
+            or item["consultation_id"] != payload["consultation_id"]
+            or item["fingerprint"] != payload["semantic_fingerprint"]
+            or item["requester_actor_ref"] != request["requester_actor_ref"]
+            or item["recipient_actor_ref"] != request["recipient_actor_ref"]
+            or item["recipient_binding"] != request["recipient_binding"]
+            or item["correlation"] != request["correlation"]
+            or item["artifact_revisions"] != request["artifact_revisions"]
+            or item["valid_until"] != request["valid_until"]
+            or item["deadline_ms"] != request["deadline_ms"]
+            or item["response_budget"] != request["response_budget"]
+        ):
+            raise StateConflict("dispatch frame identity drifted from INTENT")
 
     def _require_requester(
         self, item: Mapping[str, Any], requester_attempt_id: str
