@@ -25,7 +25,7 @@ _CODES = frozenset({'INVALID_REQUEST','SCOPE_UNAVAILABLE','SCOPE_EXPIRED','SCOPE
     'ROOT_IDENTITY_CHANGED','PATH_NOT_ALLOWED','PLATFORM_UNQUALIFIED','UNSAFE_DIRECTORY',
     'UNSAFE_FILE_TYPE','FILE_UNAVAILABLE','FILE_IDENTITY_CHANGED','FILE_CHANGED',
     'ANCESTRY_CHANGED','FILE_TOO_LARGE','TEXT_UNREPRESENTABLE','PREIMAGE_MISMATCH',
-    'RANGE_OUT_OF_BOUNDS','LINE_TOO_LARGE','CLOCK_UNAVAILABLE'})
+    'RANGE_OUT_OF_BOUNDS','LINE_TOO_LARGE','CLOCK_UNAVAILABLE','CLEANUP_UNCERTAIN'})
 
 @dataclass(frozen=True)
 class ReadScope:
@@ -123,6 +123,7 @@ def _digest(value:object) -> str:
     return hashlib.sha256(json.dumps(value,sort_keys=True,separators=(',',':'),ensure_ascii=False,allow_nan=False).encode('utf-8')).hexdigest()
 
 def observe_file(arguments:dict, resolve_scope:Callable[[],ReadScope], *, clock_ms:Callable[[],int],
+                 on_cleanup_uncertain:Callable[[],None]|None=None,
                  _before_file_open=None,_between_chunks=None,_before_final=None) -> dict:
     """Read one allowed file; return only after source and scope fences pass.
 
@@ -220,6 +221,12 @@ def observe_file(arguments:dict, resolve_scope:Callable[[],ReadScope], *, clock_
     except ReadRefusal:raise
     except (OSError,TypeError,ValueError,OverflowError):_refuse('FILE_UNAVAILABLE')
     finally:
+        cleanup_uncertain=False
         for fd in reversed(fds):
             try:os.close(fd)
-            except OSError:pass
+            except OSError:cleanup_uncertain=True
+        if cleanup_uncertain:
+            if on_cleanup_uncertain is not None:
+                try:on_cleanup_uncertain()
+                except Exception:pass
+            raise ReadRefusal('CLEANUP_UNCERTAIN') from None

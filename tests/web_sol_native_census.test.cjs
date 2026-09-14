@@ -25,7 +25,7 @@ function source(name) {
  return text;
 }
 const cap = {schema:'mastermind.web_sol_transport_capabilities.v1',protocol_major:1,
- package_version:'0.2.0',roles:['client','extension'],actions:['FOREGROUND','INSPECT'],
+ package_version:'0.2.0',roles:['client','extension'],actions:['FOREGROUND','INSPECT','TYPED_REENTRY'],
  schemas:['mastermind.web_sol_surface_action.v1','mastermind.web_sol_transport_hello_ack.v1',
  'mastermind.web_sol_transport_hello.v1','mastermind.web_sol_instance_config.v1',
  'mastermind.web_sol_surface_probe.v1','mastermind.web_sol_surface_receipt.v1',

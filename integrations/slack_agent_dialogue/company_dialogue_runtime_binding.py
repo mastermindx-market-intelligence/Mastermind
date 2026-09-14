@@ -14,20 +14,18 @@ import json
 import re
 from enum import Enum
 from types import MappingProxyType
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
 
 from control_plane.executive_delegation_identity import ExecutiveDelegationIdentity
 from control_plane.executive_runtime import AttemptStatus, WorkerStatus
 from control_plane.session_targets import RuntimeBinding
 from control_plane.wake_events import ATTEMPT_ID_RE, JOB_ID_RE
-from integrations.mastermind_company_mcp.adapter import DialogueBinding
-from integrations.mastermind_company_mcp.schemas import (
-    SERVER_IDENTITY,
-    SERVER_VERSION,
-    TOOL_SCHEMA_DIGEST,
-)
 from integrations.slack_agent_dialogue.contract import DialogueContractError
 from integrations.slack_agent_dialogue.contract_v2 import validate_parent_v2
+
+
+if TYPE_CHECKING:
+    from integrations.mastermind_company_mcp.adapter import DialogueBinding
 
 
 BINDING_SCHEMA = "mastermind.company_dialogue_runtime_binding.v1"
@@ -252,6 +250,13 @@ def resolve_company_dialogue_binding(
     actor: WorkerDialogueCaller,
 ) -> CompanyDialogueBindingResolution:
     """Resolve one exact current worker to the existing dialogue parent."""
+
+    from integrations.mastermind_company_mcp.adapter import DialogueBinding
+    from integrations.mastermind_company_mcp.schemas import (
+        SERVER_IDENTITY,
+        SERVER_VERSION,
+        TOOL_SCHEMA_DIGEST,
+    )
 
     if current is None:
         return _result(

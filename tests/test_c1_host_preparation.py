@@ -1,13 +1,64 @@
 from __future__ import annotations
 
 import plistlib
+import subprocess
 from pathlib import Path
 
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 OPS = ROOT / "ops" / "executive_os"
 PREP = OPS / "prepare-c1-sol-state-relay.sh"
 PLIST = OPS / "com.mastermind.executive.sol-state-relay.plist.template"
+
+
+@pytest.mark.parametrize(
+    ("attribute", "output", "status", "expected"),
+    [
+        ("IsHidden", "IsHidden: 1\n", 0, "1\n"),
+        ("IsHidden", "dsAttrTypeNative:IsHidden: 1\n", 0, "1\n"),
+        ("UniqueID", "UniqueID: 452\n", 0, "452\n"),
+        ("RealName", "RealName:\n _mastermind_sol_relay service account\n", 0,
+         "_mastermind_sol_relay service account\n"),
+        ("IsHidden", "dsAttrTypeNative:IsHidden: 0\n", 0, "0\n"),
+        ("IsHidden", "", 65, ""),
+        ("IsHidden", "Other: 1\n", 65, ""),
+        ("IsHidden", "dsAttrTypeNative:Other: 1\n", 65, ""),
+        ("IsHidden", "IsHiddenExtra: 1\n", 65, ""),
+        ("IsHidden", "unexpected\nIsHidden: 1\n", 65, ""),
+    ],
+)
+def test_c1_directory_attribute_parser(attribute, output, status, expected):
+    # Execute the actual preparation function while replacing only the dscl
+    # read. This cannot run the host preparation or mutate a service account.
+    text = PREP.read_text(encoding="utf-8")
+    function = "read_attribute() {" + text.split("read_attribute() {", 1)[1].split(
+        "\n}\n", 1
+    )[0] + "\n}\n"
+    function = function.replace("/usr/bin/dscl", "mock_dscl")
+    script = "set -euo pipefail\nmock_dscl() { cat; }\n" + function
+    completed = subprocess.run(
+        ["/bin/bash", "-c", script + '\nread_attribute /Users/test "$1"',
+         "parser-test", attribute],
+        input=output, capture_output=True, text=True, check=False,
+    )
+    assert completed.returncode == status, completed.stderr
+    assert completed.stdout == expected
+
+
+def test_c1_directory_attribute_read_failure_is_not_success():
+    text = PREP.read_text(encoding="utf-8")
+    function = "read_attribute() {" + text.split("read_attribute() {", 1)[1].split(
+        "\n}\n", 1
+    )[0] + "\n}\n"
+    function = function.replace("/usr/bin/dscl", "mock_dscl")
+    completed = subprocess.run(
+        ["/bin/bash", "-c", "set -euo pipefail\n"
+         "mock_dscl() { printf 'IsHidden: 1\\n'; return 42; }\n"
+         + function + "\nread_attribute /Users/test IsHidden"],
+        capture_output=True, text=True, check=False,
+    )
+    assert completed.returncode == 42
 
 
 def test_c1_host_preparation_is_fixed_credential_free_and_non_arming():
