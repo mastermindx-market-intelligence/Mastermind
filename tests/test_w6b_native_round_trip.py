@@ -6,6 +6,7 @@ import gc
 import hashlib
 import json
 import os
+import stat
 import subprocess
 import sys
 import tempfile
@@ -16,7 +17,8 @@ import pytest
 
 from control_plane.ceo_intent import INTENT_SCHEMA_V2, submit_intent
 from control_plane.codex_operator_adapter import CodexOperatorAdapter
-from control_plane.codex_worker import BinaryAttestation
+from control_plane.codex_worker import BinaryAttestation, CodexWorkerAdapter
+from control_plane.worker_adapter import construct_reviewed_adapter
 from control_plane.executive_agent_capabilities import (
     app_server_security_config_digest,
     ExecutionCapabilityRegistry,
@@ -113,22 +115,38 @@ class _PassingSweeper:
         )
 
 
-class _SealedWorker:
-    def __init__(self) -> None:
-        self.binary = BinaryAttestation(
-            path="/fixture/codex",
-            real_path="/fixture/codex",
-            version="0.147.0",
-            sha256="a" * 64,
-            team_identifier="2DC432GLL2",
-            size=1,
-            device=1,
-            inode=1,
-            mode=0o555,
-            uid=0,
-            gid=0,
-            mtime_ns=1,
-        )
+def _reviewed_codex_adapter(root: Path) -> CodexWorkerAdapter:
+    """Construct the reviewed sealed adapter the broker now binds at init."""
+
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "codex-home").mkdir(mode=0o700, exist_ok=True)
+    binary = root / "reviewed-codex"
+    if not binary.exists():
+        binary.write_text("#!/bin/sh\n", encoding="utf-8")
+        binary.chmod(0o700)
+    info = binary.lstat()
+    attestation = BinaryAttestation(
+        path=str(binary),
+        real_path=str(binary.resolve()),
+        version="test-0",
+        sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
+        team_identifier=None,
+        size=info.st_size,
+        device=info.st_dev,
+        inode=info.st_ino,
+        mode=stat.S_IMODE(info.st_mode),
+        uid=info.st_uid,
+        gid=info.st_gid,
+        mtime_ns=info.st_mtime_ns,
+    )
+    return construct_reviewed_adapter(  # type: ignore[return-value]
+        "codex-cli",
+        binary,
+        codex_home=root / "codex-home",
+        binary_attestation=attestation,
+        allowed_versions=frozenset({"test-0"}),
+        required_team_identifier=None,
+    )
 
 
 @dataclass
@@ -267,7 +285,7 @@ def _build_broker(
     )
     sweeper = _PassingSweeper()
     broker = ExecutiveWorkerBroker(
-        _SealedWorker(),
+        _reviewed_codex_adapter(provider_home.parent / "reviewed-codex-adapter"),
         policy,
         sweeper,
         operator_adapter_factory=operator_factory,
