@@ -1575,6 +1575,76 @@ def test_diagnostic_initial_census_classifies_bounded_html_5xx_before_json_decod
     assert http.search_calls == 1
 
 
+def test_generic_diagnostic_profile_search_keeps_html_5xx_decode_first():
+    sink = vendors._InitialPeerCensusDiagnosticSink(
+        vendors._INITIAL_PEER_CENSUS_DIAGNOSTIC_SEAL,
+    )
+    http = _FakeHttp([
+        _RawWireResponse(503, b"<html>private</html>", "text/html"),
+    ])
+    client = vendors.BoundedHttpClient(client=http)
+
+    try:
+        response = client._mlx_profile_search_with_diagnostic(  # noqa: SLF001
+            core.Credential(_SECRET, "stdin"),
+            _FOLDER,
+            offset=0,
+            diagnostic_sink=sink,
+        )
+    finally:
+        client.close()
+
+    assert response is None
+    assert sink.value == "RESPONSE_DECODE_FAILURE"
+    assert sink.decode_context == {
+        "status_class": "HTTP_5XX",
+        "declared_media_type_class": "HTML",
+        "decoder_class": "JSON_VALUE_REJECTED",
+    }
+    assert http.search_calls == 1
+
+
+def test_foreign_h2_status_handoff_keeps_html_5xx_decode_first():
+    sink = vendors._InitialPeerCensusDiagnosticSink(
+        vendors._INITIAL_PEER_CENSUS_DIAGNOSTIC_SEAL,
+    )
+    http = _FakeHttp([
+        _RawWireResponse(503, b"<html>private</html>", "text/html"),
+    ])
+    client = vendors.BoundedHttpClient(client=http)
+    method, origin, path, headers, params, body, request_sink = (
+        vendors._mlx_profile_search_request_arguments(  # noqa: SLF001
+            core.Credential(_SECRET, "stdin"),
+            _FOLDER,
+            offset=0,
+            diagnostic_sink=sink,
+        )
+    )
+
+    try:
+        response = client._request(  # noqa: SLF001
+            method,
+            origin,
+            path,
+            headers=headers,
+            params=params,
+            json_body=body,
+            diagnostic_sink=request_sink,
+            status_handoff=object(),
+        )
+    finally:
+        client.close()
+
+    assert response is None
+    assert sink.value == "RESPONSE_DECODE_FAILURE"
+    assert sink.decode_context == {
+        "status_class": "HTTP_5XX",
+        "declared_media_type_class": "HTML",
+        "decoder_class": "JSON_VALUE_REJECTED",
+    }
+    assert http.search_calls == 1
+
+
 def test_live_wrapper_fixes_all_dependency_owners(monkeypatch):
     observed = {}
     monkeypatch.setattr(health, "_run_profile_search_health", lambda **kwargs: observed.update(kwargs) or 2)

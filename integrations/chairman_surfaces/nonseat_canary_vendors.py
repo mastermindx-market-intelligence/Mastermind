@@ -372,6 +372,7 @@ _INITIAL_PEER_CENSUS_DECODE_CONTEXT_KEYS = (
 )
 _INITIAL_PEER_CENSUS_DECODE_CONTEXT_NONE = ("NONE", "NONE", "NONE")
 _INITIAL_PEER_CENSUS_DIAGNOSTIC_SEAL = object()
+_H2_PROFILE_SEARCH_STATUS_HANDOFF_SEAL = object()
 
 
 def _initial_peer_census_decode_context_tuple(value) -> tuple[str, str, str]:
@@ -499,6 +500,17 @@ class _InitialPeerCensusDiagnosticSink:
         # One immutable observation assignment binds the first failure and its
         # optional decode context together for this invocation.
         self._observation = (diagnostic, context)
+
+
+class _H2ProfileSearchStatusHandoff:
+    """Private capability for the H2-only non-200 status handoff."""
+
+    __slots__ = ("_seal",)
+
+    def __init__(self, seal):
+        if seal is not _H2_PROFILE_SEARCH_STATUS_HANDOFF_SEAL:
+            raise TypeError("H2 profile-search status handoff is private")
+        self._seal = seal
 
 
 def _record_initial_peer_census_diagnostic(
@@ -869,7 +881,7 @@ class BoundedHttpClient:
 
     def _request(
         self, method, origin, path, *, headers=None, params=None, json_body=None,
-        diagnostic_sink=None,
+        diagnostic_sink=None, status_handoff=None,
     ):
         chunks = []
         size = 0
@@ -900,7 +912,13 @@ class BoundedHttpClient:
                 diagnostic_sink, "TRANSPORT_FAILURE",
             )
             return None
-        if diagnostic_sink is not None and status_code != 200:
+        if (
+            type(status_handoff) is _H2ProfileSearchStatusHandoff
+            and status_handoff._seal is _H2_PROFILE_SEARCH_STATUS_HANDOFF_SEAL  # noqa: SLF001
+            and type(diagnostic_sink) is _InitialPeerCensusDiagnosticSink
+            and diagnostic_sink._seal is _INITIAL_PEER_CENSUS_DIAGNOSTIC_SEAL  # noqa: SLF001
+            and status_code != 200
+        ):
             return _BoundedResponse(status_code, None)
         try:
             payload = json.loads(b"".join(chunks)) if chunks else None
