@@ -775,6 +775,40 @@ def test_operator_broker_runs_one_exact_generation_and_cleans_uid(tmp_path: Path
         )
         assert collected["result"]["candidate"]["complete_job_permitted"] is False
         assert adapters[-1].prompts == ["Produce one bounded read-only plan."]
+        # LC1 provisional handoff: only the exact bound local/native turn can
+        # mint the first ephemeral observer grant, and observation never acquires
+        # the busy operation lane.
+        from control_plane.visible_turn_projection import TurnKey, VisibleTurnProjection
+
+        key = TurnKey(
+            "ATT-1", "epoch-1", "generation-1", 1, "codex-01", "turn-1",
+            "native-turn-1",
+        )
+        projection = VisibleTurnProjection()
+        adapters[-1].visible_turn_projection = projection
+        adapters[-1]._generations = {
+            "generation-1": type("State", (), {"turns": {"turn-1": "native-turn-1"}})()
+        }
+        grant = projection.mint_grant(key)
+        observed = await broker.execute(
+            _request(
+                "ohf-observe-turn",
+                {
+                    "attempt": "ATT-1",
+                    "epoch": "epoch-1",
+                    "generation": "generation-1",
+                    "turn": "turn-1",
+                    "reader_grant": grant,
+                    "cursor": None,
+                    "max_items": 64,
+                },
+                "observe",
+            ),
+            peer=peer,
+        )
+        assert observed["result"]["items"] == []
+        assert observed["result"]["terminal"] is False
+        assert adapters[-1].lifecycle == ["provider_start"]
         stopped = await broker.execute(
             _request(
                 "ohf-stop",
