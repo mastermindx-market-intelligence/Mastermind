@@ -30,7 +30,15 @@ from control_plane.codex_worker import ProcessInspector
 from jsonschema import Draft202012Validator
 import mcp.types as mcp_types
 from mcp.server.lowlevel import NotificationOptions, Server
-from integrations.workbench_stdio_boundary import MAX_WIRE_BYTES, private_stdio_server
+from integrations.workbench_stdio_boundary import (
+    MAX_WIRE_BYTES,
+    MODERN_PROTOCOL_VERSION,
+    is_modern_protocol_request,
+    parse_modern_protocol_request,
+    private_stdio_server,
+    read_bounded_stdio_line,
+    write_bounded_stdio_json,
+)
 from mcp.types import CallToolResult, ServerResult, TextContent, Tool, ToolAnnotations
 
 from common.bounded_sync_executor import SyncExecutionTimeout
@@ -1323,6 +1331,151 @@ def create_tunnel_action_server(runtime: WorkbenchActionRuntime) -> Server:
     return server
 
 
+_MODERN_SERVER_INFO_KEY = "io.modelcontextprotocol/serverInfo"
+
+
+def _modern_server_meta() -> dict[str, object]:
+    return {
+        _MODERN_SERVER_INFO_KEY: {"name": SERVER_NAME, "version": SERVER_VERSION}
+    }
+
+
+def _modern_response(request_id: str | int, result: dict[str, object]) -> dict[str, object]:
+    result["resultType"] = "complete"
+    result["_meta"] = _modern_server_meta()
+    return {"jsonrpc": "2.0", "id": request_id, "result": result}
+
+
+def _modern_error(
+    request_id: str | int | None, code: int, message: str
+) -> dict[str, object]:
+    return {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "error": {"code": code, "message": message},
+    }
+
+
+def _modern_model_dump(value: object) -> dict[str, object]:
+    dump = getattr(value, "model_dump", None)
+    if not callable(dump):
+        raise TypeError("MODERN_MCP_RESULT_REQUIRED")
+    selected = dump(by_alias=True, mode="json", exclude_none=True)
+    if type(selected) is not dict:
+        raise TypeError("MODERN_MCP_RESULT_REQUIRED")
+    return dict(selected)
+
+
+async def _serve_modern_stdio(server: Server, first_line: str) -> None:
+    """Serve the bounded 2026 tool envelope without creating another effect plane."""
+
+    line: str | None = first_line
+    while line is not None:
+        request_id: str | int | None = None
+        try:
+            request = parse_modern_protocol_request(line)
+            if "id" not in request:
+                # Modern notifications carry no response.  Workbench currently
+                # advertises no notification-driven capability.
+                line = await read_bounded_stdio_line()
+                continue
+            request_id = request["id"]  # validated by the boundary
+            method = request["method"]
+            params = request.get("params") or {}
+            if type(params) is not dict:
+                raise ValueError("PROTOCOL_PARAMS")
+
+            if method == "server/discover":
+                if set(params) - {"_meta"}:
+                    await write_bounded_stdio_json(
+                        _modern_error(request_id, -32602, "invalid params")
+                    )
+                else:
+                    await write_bounded_stdio_json(
+                        _modern_response(
+                            request_id,
+                            {
+                                "ttlMs": 0,
+                                "cacheScope": "public",
+                                "supportedVersions": [MODERN_PROTOCOL_VERSION],
+                                "capabilities": {"tools": {"listChanged": False}},
+                            },
+                        )
+                    )
+            elif method == "tools/list":
+                cursor = params.get("cursor")
+                if set(params) - {"_meta", "cursor"} or cursor not in (None, ""):
+                    await write_bounded_stdio_json(
+                        _modern_error(request_id, -32602, "invalid params")
+                    )
+                else:
+                    handler = server.request_handlers[mcp_types.ListToolsRequest]
+                    response = await handler(None)
+                    tools = [
+                        _modern_model_dump(tool) for tool in response.root.tools
+                    ]
+                    await write_bounded_stdio_json(
+                        _modern_response(
+                            request_id,
+                            {
+                                "ttlMs": 0,
+                                "cacheScope": "public",
+                                "tools": tools,
+                            },
+                        )
+                    )
+            elif method == "tools/call":
+                if set(params) - {"_meta", "name", "arguments"}:
+                    await write_bounded_stdio_json(
+                        _modern_error(request_id, -32602, "invalid params")
+                    )
+                else:
+                    name = params.get("name")
+                    arguments = params.get("arguments")
+                    if type(name) is not str or (
+                        arguments is not None and type(arguments) is not dict
+                    ):
+                        await write_bounded_stdio_json(
+                            _modern_error(request_id, -32602, "invalid params")
+                        )
+                    else:
+                        handler = server.request_handlers[mcp_types.CallToolRequest]
+                        response = await handler(
+                            mcp_types.CallToolRequest(
+                                params=mcp_types.CallToolRequestParams(
+                                    name=name, arguments=arguments
+                                )
+                            )
+                        )
+                        await write_bounded_stdio_json(
+                            _modern_response(
+                                request_id, _modern_model_dump(response.root)
+                            )
+                        )
+            elif method == "ping":
+                if set(params) - {"_meta"}:
+                    await write_bounded_stdio_json(
+                        _modern_error(request_id, -32602, "invalid params")
+                    )
+                else:
+                    await write_bounded_stdio_json(
+                        _modern_response(request_id, {})
+                    )
+            else:
+                await write_bounded_stdio_json(
+                    _modern_error(request_id, -32601, "method not found")
+                )
+        except (ValueError, TypeError, RecursionError, UnicodeError):
+            await write_bounded_stdio_json(
+                _modern_error(request_id, -32600, "WORKBENCH_MCP_INVALID_REQUEST")
+            )
+        except Exception:
+            await write_bounded_stdio_json(
+                _modern_error(request_id, -32603, "WORKBENCH_MCP_INTERNAL_ERROR")
+            )
+        line = await read_bounded_stdio_line()
+
+
 async def run_stdio(runtime: WorkbenchActionRuntime, *, close_timeout_seconds: float) -> None:
     """Serve one fixed channel over stdio and always close the runtime owner."""
 
@@ -1335,8 +1488,14 @@ async def run_stdio(runtime: WorkbenchActionRuntime, *, close_timeout_seconds: f
             notification_options=NotificationOptions(),
             experimental_capabilities={},
         )
-        async with private_stdio_server() as (read_stream, write_stream):
-            await server.run(read_stream, write_stream, options)
+        first_line = await read_bounded_stdio_line()
+        if first_line is None:
+            return
+        if is_modern_protocol_request(first_line):
+            await _serve_modern_stdio(server, first_line)
+        else:
+            async with private_stdio_server(initial_line=first_line) as (read_stream, write_stream):
+                await server.run(read_stream, write_stream, options)
     except BaseException as error:
         primary = error
         raise
