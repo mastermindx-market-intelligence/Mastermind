@@ -28,7 +28,7 @@ JWKS_TIMEOUT_SECONDS = 5.0
 MAX_JWKS_BYTES = 256 * 1024
 MAX_JWKS_KEYS = 16
 
-_KID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+_KID_RE = re.compile(r"^[A-Za-z0-9_-][A-Za-z0-9._:-]{0,127}$")
 _BASE64URL_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
 _ALLOWED_JWK_KEYS = frozenset(
