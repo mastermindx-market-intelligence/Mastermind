@@ -33,16 +33,16 @@ The model never supplies an absolute root, machine, worktree, branch, account, c
 
 ## Owner-bound action
 
-One runtime owns one already-authorized selected project descriptor and consumes an existing Business authentication policy with exactly `workbench.action` scope. The owner-issued lease binds:
+One runtime owns one already-authorized selected project descriptor. The ten-tool stdio profile derives authority from the host-selected Secure MCP Tunnel channel. The separate three-tool HTTP patch profile uses the existing Business JWT/OAuth policy. Both use an internal `workbench.action` lease scope; this is not the tunnel client's `main` channel name or the ChatGPT app's `noAuth` setting. The owner-issued lease binds:
 
-- pseudonymous subject and OAuth client;
+- pseudonymous channel subject/client references, or the verified OAuth subject/client for the HTTP profile;
 - project, attended context, responsibility, operation, owner and capability generation;
 - exact project root device/inode;
 - explicit relative-path allowlist;
 - committed baseline when known;
 - expiry.
 
-Patch and command preparation capture that authority plus the exact preimage and intended operation into a short-lived HMAC-signed action reference. The service reads one owner-provisioned generation key from a fixed `0600` file; the model never receives or selects it. Keeping that key stable across ordinary child restart lets the original signed action remain reconcilable until its own lease/TTL expires, without creating an action registry or replay database. Key rotation is therefore a generation/reconciliation event and must not strand an unresolved `EFFECT_UNKNOWN` action.
+Patch and command preparation capture that authority plus the exact preimage and intended operation into a short-lived HMAC-signed action reference. The service reads one owner-provisioned generation key from a fixed `0600` file; the model never receives or selects it. Apply/run requires an unexpired reference. Evidence decoding can accept an expired reference, but current matching authority still gates reconciliation and result access. Ordinary child restart must retain the key, canonical artifact store, and required host/project/channel/generation bindings. Preparation is stateless; execution evidence is durable. Key rotation is therefore a generation/reconciliation event and must not strand an unresolved `EFFECT_UNKNOWN` action.
 
 Every prepare/commit/reconcile re-resolves current binding. A prepared action cannot be remapped to another project, operation, responsibility, root, generation or caller.
 
@@ -58,15 +58,17 @@ NOT_APPLIED | APPLIED | EFFECT_UNKNOWN
 
 Commit and reconcile also return `cleanup_state: CLEAN | UNCERTAIN`. This reports physical descriptor/lock release separately from the action effect. A qualified historical `APPLIED` receipt may coexist with `UNCERTAIN`; that uncertainty is sticky for the runtime owner and never authorizes replay.
 
-Same-action replay observes an already matching postimage and returns `APPLIED` without issuing a second write. Changed/foreign source is not overwritten intentionally; it returns or reconciles to `EFFECT_UNKNOWN`. A lost client response is never permission to prepare another action or fail over to another actuator.
+Same-action replay requires matching qualified evidence and postimage to return `APPLIED` without issuing a second write. A matching postimage alone is insufficient. Changed/foreign source is not overwritten intentionally; it returns or reconciles to `EFFECT_UNKNOWN`. A lost client response is never permission to prepare another action or fail over to another actuator.
 
 Command execution accepts only `canary_checksum` and `canary_refuse`, each bound to a source-pinned SHA-256 recipe. The host pins an absolute Python executable and its SHA-256, the recipe root, and a deadline of at most 15 seconds. The child receives a closed environment and descriptor-bound project/file inputs. Exit `0` and intentional exit `7` are completed MCP results, not transport failures. Stdout/stderr are retained in the same Action artifact store and paged without replay. Process identity, cleanup state, and effect state remain separate facts.
+
+Command input is limited to 65,536 bytes; each retained output stream is limited to 65,536 bytes. A result page contains at most 128 lines and 8,192 UTF-8 bytes. The configured process deadline must be greater than zero and no more than 15 seconds.
 
 F0 depends on the owner-issued project binding to exclude concurrent authorized writers. It does not claim a kernel-level compare-and-swap primitive against an uncooperative process that mutates the same path in the final filesystem publication window. Production admission therefore requires an isolated or otherwise writer-fenced disposable workspace for the first canary, and a stronger local-source fence before any unattended mutation claim.
 
 ## Platform-dispatch receipt
 
-The MCP adapter emits one privacy-safe process telemetry line **after successful auth/schema admission and before invoking the action port**:
+The HTTP adapter emits one privacy-safe process telemetry line **after successful auth/schema admission and before invoking the action port**:
 
 ```text
 MMX_WORKBENCH_ACTION_CALL_RECEIVED { ... }
@@ -74,12 +76,14 @@ MMX_WORKBENCH_ACTION_CALL_RECEIVED { ... }
 
 The payload contains only a schema, `RECEIVED` phase, tool name, pseudonymous subject/client refs and a SHA-256 `call_ref`. It contains no patch text, action token, path, credential or absolute project location. This telemetry is diagnostic evidence, not an action ledger or retry authority.
 
-For a canary whose service/log channel is independently healthy:
+The configured stdio launcher does not supply this optional telemetry sink. Its actual dispatch evidence is the durable `ChannelAuditEvent` described below: every recognized tool name records accepted or refused channel admission before dispatch. An accepted row establishes admission, not completion or effect. Missing optional stderr telemetry must never be interpreted as a C1 platform block.
 
-- ChatGPT reports a block **and no receipt exists**: classify the attempted MCP dispatch as `PRE_DISPATCH_BLOCKED / NOT_APPLIED` for this server path;
+For a canary whose service and applicable receipt channel are independently healthy:
+
+- ChatGPT reports a block and no corresponding admission receipt exists: report that server admission was not observed; establish a platform pre-dispatch block only from separate platform evidence;
 - a receipt exists and Workbench refuses: diagnose Workbench auth/binding/source policy;
 - Workbench returns and postimage matches: `APPLIED`;
-- receipt/effect may have occurred but the response is lost: `EFFECT_UNKNOWN` until `reconcile_text_patch` resolves it.
+- receipt/effect may have occurred but the response is lost: `EFFECT_UNKNOWN` until `reconcile_text_patch` or `reconcile_action` resolves that original action.
 
 Absence of a receipt is not meaningful when the service or its log channel is itself unavailable.
 
@@ -189,7 +193,9 @@ Run: `/path/to/python scripts/mastermind_workbench_action_stdio.py --config /srv
 
 The first product target is the existing C1 Personal account, its dedicated private Workbench tunnel, and its single associated Personal workspace. Current user evidence says that surface offers custom change/write capability; the canary must measure honest modifying annotations and calls directly. No Business-only condition is assumed, and results from another account, workspace, model, plugin, or Studio Direct route do not qualify this Workbench path.
 
-The real canary must use a disposable writer-fenced project and the actual intended ChatGPT app/tunnel/auth principal. It must prove, in order:
+The initial rollout retains its already assigned external-SSD helper worktree; this source integration does not claim a new workspace acquisition. Future attended Web workspace acquisition, reuse, and release follow the canonical `mmx-workspace` custody contract and external storage policy. Preserve the existing checkout and any unresolved action evidence; do not create another custody registry.
+
+The real canary must use a disposable writer-fenced project and the actual intended ChatGPT app/tunnel/channel binding. It must prove, in order:
 
 1. app connection and `tools/list` exposes exactly the final reviewed ten-tool bounded inventory for that installed generation;
 2. `prepare_text_patch` reaches the service and returns `PREPARED` with zero source effect;
@@ -199,7 +205,7 @@ The real canary must use a disposable writer-fenced project and the actual inten
 6. replaying the same prepared patch action produces no second write;
 7. simulated/lost responses are recovered with the appropriate reconcile tool, never replayed blindly;
 8. an outside-allowlist, stale-preimage, unknown-recipe, or model-supplied environment/executable request is refused with zero unauthorized source effect;
-9. service logs distinguish platform pre-dispatch absence from Workbench receipt/refusal;
+9. the configured profile's actual admission audit distinguishes observed Workbench admission/refusal from an unobserved call; optional telemetry absence is not platform proof;
 10. exact source/app/channel/host/project/store generation and rollback/disarm are recorded.
 
 Run controls on other model/mode routes when useful, but do not infer C1 Workbench admission or effect from them. Each route's capability posture changes only from direct evidence on that route.
@@ -211,7 +217,7 @@ This branch has source and local/adjacent test evidence only. Before any `PROVEN
 - current-base hosted CI/security and independent exact-head review;
 - protected source release under ordinary repository protection;
 - reviewed installation/supervision/rollback on the selected host;
-- Secure MCP Tunnel / ChatGPT app enrollment with the dedicated `workbench.action` resource;
+- the exact dedicated Secure MCP Tunnel / ChatGPT app association, using its selected `main` channel and no additional application OAuth;
 - actual selected-project/attended-Web channel binding;
 - the C1 Personal Web-seat canary above;
 - post-canary disarm/rollback proof and a final Sol acceptance decision.
