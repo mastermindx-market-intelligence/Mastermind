@@ -61,13 +61,13 @@ run of a suite that cannot observe the change.
 
 ### Astra project-delivery economics
 
-This subsection applies to Executive-owned Astra/Codex **project delivery**, not to the
+This subsection defines **External Fabric delegation** for Executive-owned Astra/Codex **project delivery**, not to the
 daily portfolio-reasoning model/provider policy below. Astra is the **principal, not the default worker**.
 It retains Chairman-intent recovery, decomposition, architecture, cross-return judgment,
 material exception handling, and final acceptance.
 
 For bounded repository archaeology, implementation, testing, repair, independent review,
-and similarly separable execution, use the **existing five-tool Executive MCP** and route
+and similarly separable execution, use `submit_ceo_intent` on the **existing five-tool Executive MCP** and route
 through the existing Executive/COO/Capacity worker fabric: **external Fabric first** when a
 qualified lane is currently eligible. Internal Codex agents are fallback capacity only when
 the Fabric cannot satisfy the required capability **before any effect begins**; preserve the

@@ -44,3 +44,49 @@ def test_internal_codex_fallback_remains_bounded_terra_medium_three_threads():
     assert 'max_concurrent_threads_per_session = 3' in config
     assert 'default_subagent_model = "gpt-5.6-terra"' in config
     assert 'default_subagent_reasoning_effort = "medium"' in config
+
+RUNBOOK = ROOT / "docs" / "runbooks" / "codex-astra-fabric-delegation.md"
+
+
+def test_astra_policy_names_canonical_external_fabric_delegation_phrase():
+    section = _astra_section()
+    assert "External Fabric delegation" in section
+    assert "submit_ceo_intent" in section
+
+
+def test_runbook_records_real_client_auth_and_dcr_effect_unknown_boundaries():
+    text = RUNBOOK.read_text(encoding="utf-8")
+    required = (
+        "Codex CLI 0.154.0 or newer",
+        "mastermind-executive",
+        "http_headers_helper",
+        "macOS Keychain",
+        "codex mcp login",
+        "resource identity mismatch",
+        "DCR_EFFECT_UNKNOWN",
+        "must not retry",
+        "must not delete the pending registration marker",
+        "Mastermind Codex Astra",
+        "offline_access",
+        "must not request `openid`",
+    )
+    for phrase in required:
+        assert phrase in text
+
+
+def test_runbook_preserves_exact_parent_and_capacity_ownership():
+    text = RUNBOOK.read_text(encoding="utf-8")
+    required = (
+        "exact current RuntimeBinding",
+        "process generation",
+        "provider-native handle",
+        "manually opened arbitrary Codex tab",
+        "Capacity owns provider/account/host placement",
+        "alibaba-token-plan-personal.codex-responses",
+        "BUILT_NOT_PROVEN",
+        "autonomous_allowed=false",
+        "effect_unknown",
+        "same request_ref",
+    )
+    for phrase in required:
+        assert phrase in text
