@@ -9,6 +9,7 @@ state.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -59,6 +60,7 @@ _PROBE_KEYS = frozenset(
 )
 _SERVER_SOCKET_IDENTITIES: dict[int, tuple[int, int]] = {}
 _TYPED_REENTRY_NONCES: set[str] = set()
+MAX_TYPED_REENTRY_NONCES = 256
 
 
 class NativeHostError(RuntimeError):
@@ -508,11 +510,6 @@ def _validate_timeout_seconds(timeout_seconds: float) -> float:
     return float(timeout_seconds)
 
 
-def _release_typed_reentry_nonce(request: dict[str, Any]) -> None:
-    if request.get("action") == wsp.SurfaceAction.TYPED_REENTRY.value:
-        _TYPED_REENTRY_NONCES.discard(request["nonce"])
-
-
 def forward_request(
     request: dict[str, Any],
     *,
@@ -527,11 +524,21 @@ def forward_request(
     timeout = _validate_timeout_seconds(timeout_seconds)
     is_census = request.get("schema") == census.REQUEST_SCHEMA if isinstance(request, dict) else False
     accepted = census.validate_census_window(request) if is_census else wsp.validate_request(request)
+    if not is_census:
+        accepted = wsp.validate_action_window(accepted, now=datetime.now(timezone.utc))
     if (
         accepted.get("action") == wsp.SurfaceAction.TYPED_REENTRY.value
         and accepted["nonce"] in _TYPED_REENTRY_NONCES
     ):
         raise NativeHostError("nonce_reused")
+    if (
+        accepted.get("action") == wsp.SurfaceAction.TYPED_REENTRY.value
+        and len(_TYPED_REENTRY_NONCES) >= MAX_TYPED_REENTRY_NONCES
+    ):
+        raise wsp._error(
+            "$.nonce",
+            "nonce ledger full; TYPED_REENTRY is closed",
+        )
     if accepted.get("action") == wsp.SurfaceAction.TYPED_REENTRY.value:
         _TYPED_REENTRY_NONCES.add(accepted["nonce"])
     fields = census.IDENTITY_FIELDS if is_census else _MATCH_FIELDS
@@ -582,7 +589,6 @@ def forward_request(
             _remaining_or_timeout(exchange_deadline, monotonic, _timeout_code(accepted))
             return receipt
     except BaseException:
-        _release_typed_reentry_nonce(accepted)
         raise
 
 

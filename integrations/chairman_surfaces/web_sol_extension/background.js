@@ -130,7 +130,11 @@ function validActionRequest(request) {
 function validTypedReentryRequest(request) {
   if (!exactKeys(request, TYPED_REENTRY_KEYS) || request.schema !== ACTION_SCHEMA) return false;
   if (request.action !== "TYPED_REENTRY") return false;
-  if (!validActionRequest({...request, action: "FOREGROUND"})) return false;
+  const foreground = {};
+  for (const key of ["schema", "binding_id", "conversation_fingerprint", "binding_fingerprint",
+    "operation_key", "issued_at", "expires_at", "nonce"]) foreground[key] = request[key];
+  foreground.action = "FOREGROUND";
+  if (!validActionRequest(foreground)) return false;
   return isHex64(request.operation_id) && isHex64(request.result_digest) &&
     isHex64(request.obligation_digest);
 }
@@ -187,13 +191,19 @@ function unknownObservation() {
 }
 
 function receipt(request, status, observation) {
-  return {
+  const result = {
     schema: RECEIPT_SCHEMA, binding_id: request.binding_id,
     conversation_fingerprint: request.conversation_fingerprint,
     binding_fingerprint: request.binding_fingerprint,
     action: request.action, operation_key: request.operation_key, nonce: request.nonce,
     status, observed_at: new Date().toISOString(), observation,
   };
+  if (request.action === "TYPED_REENTRY") {
+    result.operation_id = request.operation_id;
+    result.result_digest = request.result_digest;
+    result.obligation_digest = request.obligation_digest;
+  }
+  return result;
 }
 
 function foregroundEffectUnknown(request, observation) {
@@ -328,6 +338,9 @@ function typedReentryBlocker(request, status = "TYPED_REENTRY_BLOCKED") {
 }
 
 async function handleTypedReentry(request) {
+  if (typedReentryEffects.some((effect) => effect.nonce === request.nonce)) {
+    return typedReentryBlocker(request);
+  }
   const resolved = resolveExactTarget(request.conversation_fingerprint);
   if (resolved.status) return typedReentryBlocker(request, resolved.status);
   const before = await freshProbe(resolved.tabId, request.conversation_fingerprint);
@@ -339,9 +352,6 @@ async function handleTypedReentry(request) {
   }
   const result = await handleForeground(request);
   if (result.status !== "FOREGROUNDED_VERIFIED") return result;
-  if (typedReentryEffects.some((effect) => effect.nonce === request.nonce)) {
-    return typedReentryBlocker(request);
-  }
   typedReentryEffects.push({
     conversation_fingerprint: request.conversation_fingerprint,
     operation_id: request.operation_id,
@@ -440,6 +450,7 @@ async function handleNativeRequest(request, port) {
     : accepted.action === "FOREGROUND" ? await handleForeground(accepted)
     : typedReentry ? await handleTypedReentry(accepted) : null;
   if (result) port.postMessage(result);
+  return result;
 }
 
 function randomChallengeNonce() {

@@ -161,7 +161,7 @@ const chrome = {
   alarms: {onAlarm: event(), create() {}, async clear() {}},
 };
 const context = vm.createContext({chrome, Date, Map, Set, Number, Array, Object, String,
-  Promise, URL, TextEncoder, crypto: webcrypto, console, setTimeout, clearTimeout,
+  Boolean, RegExp, Promise, URL, TextEncoder, crypto: webcrypto, console, setTimeout, clearTimeout,
   importScripts() {}});
 vm.runInContext(source, context, {filename: "background.js"});
 const request = {
@@ -173,13 +173,12 @@ const request = {
   expires_at: new Date(Date.now() + 30000).toISOString(),
   nonce: "fixture-nonce-0123456789",
 };
-const typedReentry = {
-  ...request,
+const typedReentry = Object.assign({}, request, {
   action: "TYPED_REENTRY",
   operation_id: "e".repeat(64),
   result_digest: "f".repeat(64),
   obligation_digest: "1".repeat(64),
-};
+});
 (async () => {
   context.recordProbe(probe(), {tab: {id: 7, windowId: 10}});
   if (scenario === "false-focus") {
@@ -203,22 +202,24 @@ const typedReentry = {
     assert.equal(activationCount, 0, "expired foreground performed a browser effect");
     assert.equal(results.at(-1).status, "REQUEST_EXPIRED");
   } else if (scenario === "typed-reentry-consumed-once") {
-    const first = await context.handleTypedReentry(typedReentry);
+    const first = await context.handleNativeRequest(typedReentry, port);
     assert.equal(first.status, "CONSUMED");
     assert.equal(first.conversation_fingerprint, A);
-    const second = await context.handleTypedReentry(typedReentry);
+    const second = await context.handleNativeRequest(typedReentry, port);
     assert.equal(second.status, "TYPED_REENTRY_BLOCKED");
     assert.equal(second.conversation_fingerprint, A);
-    assert.equal(activationCount, 2);
+    assert.equal(activationCount, 1);
+    const documents = results.filter((document) => document.schema === "mastermind.web_sol_surface_receipt.v1");
+    console.log(JSON.stringify(documents));
   } else if (scenario === "typed-reentry-closed-conversation-blocker") {
     actualFingerprint = B;
-    const blocked = await context.handleTypedReentry(typedReentry);
+    const blocked = await context.handleNativeRequest(typedReentry, port);
     assert.equal(blocked.status, "CONVERSATION_CLOSED");
     assert.equal(blocked.conversation_fingerprint, A);
     assert.equal(activationCount, 0);
   } else if (scenario === "typed-reentry-composer-unavailable") {
     composerAvailable = false;
-    const blocked = await context.handleTypedReentry(typedReentry);
+    const blocked = await context.handleNativeRequest(typedReentry, port);
     assert.equal(blocked.status, "NOT_CONSUMED");
     assert.equal(blocked.conversation_fingerprint, A);
     assert.equal(activationCount, 0);
