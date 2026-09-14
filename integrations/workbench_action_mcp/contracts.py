@@ -16,6 +16,12 @@ import json
 import re
 from typing import Any
 
+from .command_contracts import (
+    COMMAND_HMAC_PURPOSE,
+    PreparedClosedCommand,
+    validate_prepared_command,
+)
+
 ACTION_TOKEN_SCHEMA = "mastermind.workbench_text_patch.v2"
 ACTION_TOKEN_SCHEMA_V1 = "mastermind.workbench_text_patch.v1"
 ACTION_TOKEN_PURPOSE = "text_patch"
@@ -317,6 +323,10 @@ class ActionTokenCodec:
             raise ValueError("action token key must contain at least 32 bytes")
         self._key = bytes(key)
 
+    def _mac(self, payload: bytes, *, purpose: bytes | None = None) -> bytes:
+        signed = payload if purpose is None else purpose + b"\x00" + payload
+        return hmac.new(self._key, signed, hashlib.sha256).digest()
+
     def encode(self, value: PreparedTextPatch) -> str:
         validate_prepared(value, now_ms=value.issued_at_ms)
         payload = json.dumps(
@@ -328,7 +338,7 @@ class ActionTokenCodec:
         ).encode("utf-8")
         if len(payload) > MAX_ACTION_REF_BYTES // 2:
             raise ActionContractError("prepared action is too large")
-        signature = hmac.new(self._key, payload, hashlib.sha256).digest()
+        signature = self._mac(payload)
         token = f"{_b64encode(payload)}.{_b64encode(signature)}"
         if len(token.encode("ascii")) > MAX_ACTION_REF_BYTES:
             raise ActionContractError("prepared action is too large")
@@ -352,7 +362,7 @@ class ActionTokenCodec:
             raise ActionContractError("invalid action reference")
         payload = _b64decode(parts[0])
         supplied = _b64decode(parts[1])
-        expected = hmac.new(self._key, payload, hashlib.sha256).digest()
+        expected = self._mac(payload)
         if len(supplied) != len(expected) or not hmac.compare_digest(supplied, expected):
             raise ActionContractError("invalid action reference")
         try:
@@ -366,6 +376,86 @@ class ActionTokenCodec:
         except Exception as error:
             raise ActionContractError("invalid action reference") from error
         return validate_prepared(value, now_ms=now_ms, require_fresh=require_fresh)
+
+    def encode_command(self, value: PreparedClosedCommand) -> str:
+        validate_prepared_command(
+            value, now_ms=value.issued_at_ms, require_fresh=True
+        )
+        payload = json.dumps(
+            dataclasses.asdict(value),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+        if len(payload) > MAX_ACTION_REF_BYTES // 2:
+            raise ActionContractError("prepared command is too large")
+        signature = self._mac(payload, purpose=COMMAND_HMAC_PURPOSE)
+        token = f"{_b64encode(payload)}.{_b64encode(signature)}"
+        if len(token.encode("ascii")) > MAX_ACTION_REF_BYTES:
+            raise ActionContractError("prepared command is too large")
+        return token
+
+    def decode_command(
+        self, token: object, *, now_ms: int
+    ) -> PreparedClosedCommand:
+        return self._decode_command(token, now_ms=now_ms, require_fresh=True)
+
+    def decode_command_evidence(
+        self, token: object, *, now_ms: int
+    ) -> PreparedClosedCommand:
+        """Integrity-only command decode; a current grant still gates evidence."""
+
+        return self._decode_command(token, now_ms=now_ms, require_fresh=False)
+
+    def _decode_command(
+        self, token: object, *, now_ms: int, require_fresh: bool
+    ) -> PreparedClosedCommand:
+        try:
+            if (
+                type(token) is not str
+                or not token
+                or len(token.encode("utf-8")) > MAX_ACTION_REF_BYTES
+            ):
+                raise ActionContractError("invalid command reference")
+            parts = token.split(".")
+            if len(parts) != 2:
+                raise ActionContractError("invalid command reference")
+            payload = _b64decode(parts[0])
+            supplied = _b64decode(parts[1])
+            expected = self._mac(payload, purpose=COMMAND_HMAC_PURPOSE)
+            if len(supplied) != len(expected) or not hmac.compare_digest(
+                supplied, expected
+            ):
+                raise ActionContractError("invalid command reference")
+
+            def pairs(items: list[tuple[str, Any]]) -> dict[str, Any]:
+                selected: dict[str, Any] = {}
+                for key, item in items:
+                    if key in selected:
+                        raise ActionContractError("invalid command reference")
+                    selected[key] = item
+                return selected
+
+            def constant(_value: str) -> None:
+                raise ActionContractError("invalid command reference")
+
+            raw: Any = json.loads(
+                payload.decode("utf-8"),
+                object_pairs_hook=pairs,
+                parse_constant=constant,
+            )
+            names = {field.name for field in dataclasses.fields(PreparedClosedCommand)}
+            if type(raw) is not dict or set(raw) != names:
+                raise ActionContractError("invalid command reference")
+            value = PreparedClosedCommand(**raw)
+            return validate_prepared_command(
+                value, now_ms=now_ms, require_fresh=require_fresh
+            )
+        except ActionContractError:
+            raise
+        except Exception as error:
+            raise ActionContractError("invalid command reference") from error
 
 
 __all__ = [
