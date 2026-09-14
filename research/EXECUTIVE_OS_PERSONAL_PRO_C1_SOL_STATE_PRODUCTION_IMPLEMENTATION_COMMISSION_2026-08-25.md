@@ -46,11 +46,12 @@ No new lifecycle authority is required.
 Use, in descending order:
 
 1. current protected Sol Skillpack at the pickup above;
-2. `research/MASTERMIND_EXECUTIVE_AUTONOMY_V1_CLOSURE_2026-08-25.md`;
-3. `research/EXECUTIVE_OS_PERSONAL_PRO_RELAY_STATE_TRANSPORT_AMENDMENT_2026-08-20.md`;
-4. accepted PR-A/R0/B1 CeoIngress/hot-state/publisher source law and landed implementation;
-5. current `control_plane/executive_ceo_ingress.py`, `control_plane/executive_service.py`, `control_plane/executive_hot_state.py`, `common/executive_hot_state_contract.py`, and `integrations/slack_executive/sol_state.py`;
-6. current host/launchd/bootstrap law under `ops/executive_os/`.
+2. `research/EXECUTIVE_OS_PERSONAL_PRO_C1_TRUSTED_TEAM_AND_PROPORTIONAL_SECURITY_AMENDMENT_2026-09-14.md`;
+3. `research/MASTERMIND_EXECUTIVE_AUTONOMY_V1_CLOSURE_2026-08-25.md`;
+4. `research/EXECUTIVE_OS_PERSONAL_PRO_RELAY_STATE_TRANSPORT_AMENDMENT_2026-08-20.md`;
+5. accepted PR-A/R0/B1 CeoIngress/hot-state/publisher source law and landed implementation;
+6. current `control_plane/executive_ceo_ingress.py`, `control_plane/executive_service.py`, `control_plane/executive_hot_state.py`, `common/executive_hot_state_contract.py`, and `integrations/slack_executive/sol_state.py`;
+7. current host/launchd/bootstrap law under `ops/executive_os/`.
 
 A newer protected security/ingress/service law landing during implementation returns to Sol before merge-through.
 
@@ -184,7 +185,7 @@ channel:   C0BSGABKBFY  (#sol-runtime)
 bot user:  <native action-time verified Executive Relay bot user id>
 ```
 
-The bot must be a member of `#sol-runtime`; after enrollment membership must be exactly Chairman + ChatGPT1/2/3 + Executive Relay bot. Any extra automated integration/principal is a production-proof failure.
+The bot must be a member of `#sol-runtime`. Chairman-approved Mastermind team principals, including Grok Secretary, may coexist in the channel. Membership is a production-proof failure only when the configured Executive Relay bot is absent, an unknown or explicitly revoked principal creates a credible interference risk, or another principal publishes a conflicting `MMX/SOL_STATE_V1` document. Channel membership alone grants no C1, Runtime, lifecycle, credential, or publication authority.
 
 The configured workspace/channel/bot identity is root-owned configuration, not request/model input.
 
@@ -344,7 +345,7 @@ invalid/oversize Executive state
 stale Executive state
 SOL_STATE oversize
 service restart during create/update
-unexpected channel membership/integration
+unknown/revoked principal or conflicting SOL_STATE publisher
 ```
 
 None authorizes a second Relay app/principal, SQLite state store or fallback transport.
@@ -419,7 +420,7 @@ On the real primary Executive host and real Slack workspace:
 
 1. exact C1 release installed under the dedicated Relay principal;
 2. dedicated Executive Relay app/bot native identity and exact scopes verified without exposing token;
-3. `#sol-runtime` membership verified as Chairman + ChatGPT1/2/3 + Relay bot only;
+3. Executive Relay bot membership is verified; Chairman-approved team principals may coexist, and no other principal publishes a conflicting `MMX/SOL_STATE_V1` document;
 4. service starts with zero state messages and creates exactly one `MMX/SOL_STATE_V1`;
 5. all three Personal-Pro Sol seats independently read the same message/document identity;
 6. a real Executive state semantic change updates the same Slack message promptly;
@@ -441,7 +442,7 @@ Stop rather than widen if:
 - current Executive service cannot expose the accepted state frame to a dedicated peer without another listener/service;
 - Slack C1 requires scopes broader than private history + own message write;
 - token secrecy would require env/model-visible configuration;
-- exact channel membership cannot be constrained;
+- configured Relay bot identity/membership cannot be verified or a conflicting SOL_STATE publisher cannot be excluded;
 - one-message recovery cannot be bounded without persistence;
 - C1 implementation collides with a newer B2/Relay source law;
 - production proof requires inbound Socket Mode.
