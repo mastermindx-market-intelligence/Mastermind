@@ -41,6 +41,19 @@ def valid_request(action: str = "INSPECT") -> dict:
     }
 
 
+def typed_reentry_request(**overrides) -> dict:
+    request = valid_request("TYPED_REENTRY")
+    request.update(
+        {
+            "operation_id": "e" * 64,
+            "result_digest": "c" * 64,
+            "obligation_digest": "d" * 64,
+        }
+    )
+    request.update(overrides)
+    return request
+
+
 def observation(*, exact: bool = True) -> dict:
     return {
         "schema": wsp.PROBE_SCHEMA,
@@ -63,7 +76,7 @@ def valid_receipt(request: dict, *, status: str | None = None) -> dict:
             if request["action"] == "FOREGROUND"
             else "INSPECTED"
         )
-    return {
+    result = {
         "schema": wsp.RECEIPT_SCHEMA,
         "binding_id": request["binding_id"],
         "conversation_fingerprint": request["conversation_fingerprint"],
@@ -75,6 +88,15 @@ def valid_receipt(request: dict, *, status: str | None = None) -> dict:
         "observed_at": "2026-08-29T05:00:01Z",
         "observation": observation(),
     }
+    if request["action"] == "TYPED_REENTRY":
+        result.update(
+            {
+                "operation_id": request["operation_id"],
+                "result_digest": request["result_digest"],
+                "obligation_digest": request["obligation_digest"],
+            }
+        )
+    return result
 
 
 def test_module_is_initially_missing_red():
@@ -212,6 +234,87 @@ def test_forward_ignores_bounded_probe_event_and_accepts_one_exact_receipt():
     )
     assert writes == [request]
     assert result == receipt
+
+
+def test_typed_reentry_forwards_one_closed_request_and_closed_conversation_receipt():
+    module = host()
+    request = typed_reentry_request()
+    receipt = valid_receipt(request, status="CONVERSATION_CLOSED")
+    receipt["observation"] = observation(exact=False)
+    writes: list[dict] = []
+
+    result = module.forward_request(
+        request,
+        write_chrome=writes.append,
+        read_chrome=lambda _timeout: receipt,
+        timeout_seconds=1.0,
+    )
+    assert writes == [request]
+    assert result == receipt
+
+
+def test_typed_reentry_duplicate_nonce_is_refused_before_transport_or_retry():
+    module = host()
+    request = typed_reentry_request()
+    writes: list[dict] = []
+    module._TYPED_REENTRY_NONCES.clear()
+
+    module.forward_request(
+        request,
+        write_chrome=writes.append,
+        read_chrome=lambda _timeout: valid_receipt(request, status="CONSUMED"),
+        timeout_seconds=1.0,
+    )
+    with pytest.raises(module.NativeHostError, match="nonce_reused") as caught:
+        module.forward_request(
+            request,
+            write_chrome=writes.append,
+            read_chrome=lambda _timeout: valid_receipt(request, status="CONSUMED"),
+            timeout_seconds=1.0,
+        )
+    assert caught.value.code == "nonce_reused"
+    assert len(writes) == 1
+
+
+def test_typed_reentry_timeout_releases_duplicate_nonce_admission():
+    module = host()
+    module._TYPED_REENTRY_NONCES.clear()
+    request = typed_reentry_request(nonce="timeout-nonce-0000000001")
+    writes: list[dict] = []
+
+    with pytest.raises(module.NativeHostError, match="typed_reentry_timeout"):
+        module.forward_request(
+            request,
+            write_chrome=writes.append,
+            read_chrome=lambda _timeout: None,
+            timeout_seconds=0.01,
+        )
+    with pytest.raises(module.NativeHostError, match="typed_reentry_timeout"):
+        module.forward_request(
+            request,
+            write_chrome=writes.append,
+            read_chrome=lambda _timeout: None,
+            timeout_seconds=0.01,
+        )
+    assert len(writes) == 2
+
+
+def test_typed_reentry_fingerprint_mismatch_receipt_never_retries():
+    module = host()
+    module._TYPED_REENTRY_NONCES.clear()
+    request = typed_reentry_request()
+    receipt = valid_receipt(request, status="CONSUMED")
+    receipt["conversation_fingerprint"] = "e" * 64
+    writes: list[dict] = []
+
+    with pytest.raises(module.NativeHostError, match="typed_reentry_effect_unknown"):
+        module.forward_request(
+            request,
+            write_chrome=writes.append,
+            read_chrome=lambda _timeout: receipt,
+            timeout_seconds=1.0,
+        )
+    assert len(writes) == 1
 
 
 @pytest.mark.parametrize(

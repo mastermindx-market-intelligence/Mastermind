@@ -166,7 +166,6 @@ def test_background_uses_generated_exact_native_host_and_no_generic_action_vocab
     assert 'connectNative("com.mastermind.web_sol_surface")' not in source
     for forbidden in (
         "CLICK",
-        "TYPE",
         "SEND",
         "NAVIGATE",
         "RELOAD",

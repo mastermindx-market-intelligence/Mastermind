@@ -121,6 +121,7 @@ let actualFingerprint = A;
 let currentWindow = 10;
 let active = false;
 let focused = false;
+let composerAvailable = true;
 let activationCount = 0;
 let activatedWindows = [];
 let results = [];
@@ -134,7 +135,7 @@ function probe() {
       schema: "mastermind.web_sol_surface_probe.v1",
       target_present: true, exact_conversation_loaded: true,
       page_responsive: true, document_ready_state: "complete", visibility: "visible",
-      composer_available: true, generation_state: "idle", auth_required: false,
+      composer_available: composerAvailable, generation_state: "idle", auth_required: false,
       provider_error_present: false,
     },
   };
@@ -172,6 +173,13 @@ const request = {
   expires_at: new Date(Date.now() + 30000).toISOString(),
   nonce: "fixture-nonce-0123456789",
 };
+const typedReentry = {
+  ...request,
+  action: "TYPED_REENTRY",
+  operation_id: "e".repeat(64),
+  result_digest: "f".repeat(64),
+  obligation_digest: "1".repeat(64),
+};
 (async () => {
   context.recordProbe(probe(), {tab: {id: 7, windowId: 10}});
   if (scenario === "false-focus") {
@@ -194,6 +202,31 @@ const request = {
     await context.handleNativeRequest(request, port);
     assert.equal(activationCount, 0, "expired foreground performed a browser effect");
     assert.equal(results.at(-1).status, "REQUEST_EXPIRED");
+  } else if (scenario === "typed-reentry-consumed-once") {
+    const first = await context.handleTypedReentry(typedReentry);
+    assert.equal(first.status, "CONSUMED");
+    assert.equal(first.conversation_fingerprint, A);
+    const second = await context.handleTypedReentry(typedReentry);
+    assert.equal(second.status, "TYPED_REENTRY_BLOCKED");
+    assert.equal(second.conversation_fingerprint, A);
+    assert.equal(activationCount, 2);
+  } else if (scenario === "typed-reentry-closed-conversation-blocker") {
+    actualFingerprint = B;
+    const blocked = await context.handleTypedReentry(typedReentry);
+    assert.equal(blocked.status, "CONVERSATION_CLOSED");
+    assert.equal(blocked.conversation_fingerprint, A);
+    assert.equal(activationCount, 0);
+  } else if (scenario === "typed-reentry-composer-unavailable") {
+    composerAvailable = false;
+    const blocked = await context.handleTypedReentry(typedReentry);
+    assert.equal(blocked.status, "NOT_CONSUMED");
+    assert.equal(blocked.conversation_fingerprint, A);
+    assert.equal(activationCount, 0);
+  } else if (scenario === "typed-reentry-unknown-schema") {
+    const changed = {...typedReentry, extra: "forbidden"};
+    const result = await context.handleNativeRequest(changed, port);
+    assert.equal(result, undefined);
+    assert.equal(results.length, 0);
   } else {
     throw new Error("unknown test scenario");
   }
@@ -203,7 +236,16 @@ const request = {
 
 @pytest.mark.parametrize(
     "scenario",
-    ["false-focus", "moved-window", "route-change", "expired-action"],
+    [
+        "false-focus",
+        "moved-window",
+        "route-change",
+        "expired-action",
+        "typed-reentry-consumed-once",
+        "typed-reentry-closed-conversation-blocker",
+        "typed-reentry-composer-unavailable",
+        "typed-reentry-unknown-schema",
+    ],
 )
 def test_actual_extension_reliability_behaviors(scenario):
     node = shutil.which("node")

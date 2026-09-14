@@ -58,6 +58,7 @@ _PROBE_KEYS = frozenset(
     }
 )
 _SERVER_SOCKET_IDENTITIES: dict[int, tuple[int, int]] = {}
+_TYPED_REENTRY_NONCES: set[str] = set()
 
 
 class NativeHostError(RuntimeError):
@@ -474,11 +475,11 @@ def _is_probe_event(message: Any) -> bool:
 
 
 def _timeout_code(request: dict[str, Any]) -> str:
-    return (
-        "foreground_effect_unknown"
-        if request.get("action") == "FOREGROUND"
-        else "census_timeout" if request.get("schema") == census.REQUEST_SCHEMA else "inspect_timeout"
-    )
+    if request.get("action") == "FOREGROUND":
+        return "foreground_effect_unknown"
+    if request.get("action") == "TYPED_REENTRY":
+        return "typed_reentry_timeout"
+    return "census_timeout" if request.get("schema") == census.REQUEST_SCHEMA else "inspect_timeout"
 
 
 def _receipt_matches(
@@ -490,11 +491,11 @@ def _receipt_matches(
 
 
 def _untrusted_receipt_code(request: dict[str, Any], default: str) -> str:
-    return (
-        "foreground_effect_unknown"
-        if request.get("action") == "FOREGROUND"
-        else default
-    )
+    if request.get("action") == "FOREGROUND":
+        return "foreground_effect_unknown"
+    if request.get("action") == "TYPED_REENTRY":
+        return "typed_reentry_effect_unknown"
+    return default
 
 
 def _validate_timeout_seconds(timeout_seconds: float) -> float:
@@ -505,6 +506,11 @@ def _validate_timeout_seconds(timeout_seconds: float) -> float:
     ):
         raise NativeHostError("timeout_invalid")
     return float(timeout_seconds)
+
+
+def _release_typed_reentry_nonce(request: dict[str, Any]) -> None:
+    if request.get("action") == wsp.SurfaceAction.TYPED_REENTRY.value:
+        _TYPED_REENTRY_NONCES.discard(request["nonce"])
 
 
 def forward_request(
@@ -521,6 +527,13 @@ def forward_request(
     timeout = _validate_timeout_seconds(timeout_seconds)
     is_census = request.get("schema") == census.REQUEST_SCHEMA if isinstance(request, dict) else False
     accepted = census.validate_census_window(request) if is_census else wsp.validate_request(request)
+    if (
+        accepted.get("action") == wsp.SurfaceAction.TYPED_REENTRY.value
+        and accepted["nonce"] in _TYPED_REENTRY_NONCES
+    ):
+        raise NativeHostError("nonce_reused")
+    if accepted.get("action") == wsp.SurfaceAction.TYPED_REENTRY.value:
+        _TYPED_REENTRY_NONCES.add(accepted["nonce"])
     fields = census.IDENTITY_FIELDS if is_census else _MATCH_FIELDS
     exchange_deadline = deadline or Deadline(ends_at=monotonic() + timeout)
     _remaining_or_timeout(
@@ -530,43 +543,47 @@ def forward_request(
     )
     write_chrome(accepted)
     ignored = 0
-    while True:
-        remaining = _remaining_or_timeout(
-            exchange_deadline,
-            monotonic,
-            _timeout_code(accepted),
-        )
-        assert remaining is not None
-        message = read_chrome(remaining)
-        if message is None:
-            raise NativeHostError(_timeout_code(accepted))
-        if _is_probe_event(message):
-            ignored += 1
-            if ignored > 32:
+    try:
+        while True:
+            remaining = _remaining_or_timeout(
+                exchange_deadline,
+                monotonic,
+                _timeout_code(accepted),
+            )
+            assert remaining is not None
+            message = read_chrome(remaining)
+            if message is None:
+                raise NativeHostError(_timeout_code(accepted))
+            if _is_probe_event(message):
+                ignored += 1
+                if ignored > 32:
+                    raise ChromeChannelError(
+                        _untrusted_receipt_code(accepted, "probe_event_limit")
+                    )
+                continue
+            if (
+                isinstance(message, dict)
+                and all(field in message for field in fields)
+                and not _receipt_matches(accepted, message)
+            ):
                 raise ChromeChannelError(
-                    _untrusted_receipt_code(accepted, "probe_event_limit")
+                    _untrusted_receipt_code(accepted, "receipt_identity_mismatch")
                 )
-            continue
-        if (
-            isinstance(message, dict)
-            and all(field in message for field in fields)
-            and not _receipt_matches(accepted, message)
-        ):
-            raise ChromeChannelError(
-                _untrusted_receipt_code(accepted, "receipt_identity_mismatch")
-            )
-        try:
-            receipt = census.validate_census_receipt(message) if is_census else wsp.validate_receipt(message)
-        except wsp.WebSolProtocolError as exc:
-            raise ChromeChannelError(
-                _untrusted_receipt_code(accepted, "receipt_invalid")
-            ) from exc
-        if not _receipt_matches(accepted, receipt):
-            raise ChromeChannelError(
-                _untrusted_receipt_code(accepted, "receipt_identity_mismatch")
-            )
-        _remaining_or_timeout(exchange_deadline, monotonic, _timeout_code(accepted))
-        return receipt
+            try:
+                receipt = census.validate_census_receipt(message) if is_census else wsp.validate_receipt(message)
+            except wsp.WebSolProtocolError as exc:
+                raise ChromeChannelError(
+                    _untrusted_receipt_code(accepted, "receipt_invalid")
+                ) from exc
+            if not _receipt_matches(accepted, receipt):
+                raise ChromeChannelError(
+                    _untrusted_receipt_code(accepted, "receipt_identity_mismatch")
+                )
+            _remaining_or_timeout(exchange_deadline, monotonic, _timeout_code(accepted))
+            return receipt
+    except BaseException:
+        _release_typed_reentry_nonce(accepted)
+        raise
 
 
 def _private_parent(path: Path, owner_uid: int) -> None:
