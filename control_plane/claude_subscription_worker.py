@@ -426,6 +426,8 @@ class ClaudeSubscriptionWorkerAdapter:
 
     def _validate_spec(self, spec: WorkerLaunchSpec) -> tuple[Path, Path, Path, Path, Any, Any]:
         self._validate_ids(spec)
+        if spec.worker_id != self.admission.worker_id:
+            raise LaunchValidationError("worker_id does not match admission")
         if spec.run_id in self._runs:
             raise LaunchValidationError("run_id is already known")
         authorities = _authority_set(spec)

@@ -14,6 +14,8 @@ import re
 from typing import Any, Mapping
 
 from control_plane.executive_steward import CapacityState, SourceOwner
+from ops.executive_os.capacity_owner_facts import CapacityOwnerFact
+from ops.executive_os.provider_realm_facts import ProviderRealmEnrollmentReceipt
 from control_plane.subscription_harness_bindings import (
     HarnessBindingError,
     get_binding,
@@ -42,22 +44,10 @@ _BOOLEAN_ACTIVATION_KEYS = frozenset(
 )
 _FACTORY_KEYS = frozenset(
     {
-        "worker_id",
-        "binding_id",
-        "execution_mode",
-        "capacity_state",
-        "capacity_source",
-        "capacity_generation",
-        "current_capacity_generation",
-        "realm_receipt_id",
-        "realm_receipt_digest",
-        "realm_generation",
-        "current_realm_generation",
+        "capacity_fact",
+        "realm_receipt",
         "bindings_document",
         "profiles_document",
-        "profile_id",
-        "adapter_id",
-        "catalog_digest",
     }
 )
 
@@ -120,18 +110,16 @@ def compose_realm_receipt_digest(
     generation: int,
     catalog_digest: str,
 ) -> str:
-    return hashlib.sha256(
-        _canonical_json(
-            {
-                "adapter_id": adapter_id,
-                "binding_id": binding_id,
-                "catalog_digest": catalog_digest,
-                "generation": generation,
-                "profile_id": profile_id,
-                "receipt_id": receipt_id,
-            }
-        ).encode("utf-8")
-    ).hexdigest()
+    from ops.executive_os.provider_realm_facts import compose_realm_receipt_digest
+
+    return compose_realm_receipt_digest(
+        receipt_id=receipt_id,
+        binding_id=binding_id,
+        profile_id=profile_id,
+        adapter_id=adapter_id,
+        generation=generation,
+        catalog_digest=catalog_digest,
+    )
 
 
 def _public_fields(admission: "SubscriptionCanaryAdmission") -> dict[str, Any]:
@@ -187,48 +175,25 @@ class SubscriptionCanaryAdmission:
 
 def seal_subscription_canary_admission(
     *,
-    worker_id: str,
-    binding_id: str,
-    execution_mode: str,
-    capacity_state: str,
-    capacity_source: str,
-    capacity_generation: int,
-    current_capacity_generation: int,
-    realm_receipt_id: str,
-    realm_generation: int,
-    current_realm_generation: int,
+    capacity_fact: CapacityOwnerFact,
+    realm_receipt: ProviderRealmEnrollmentReceipt,
     bindings_document: Mapping[str, Any] | None = None,
     profiles_document: Mapping[str, Any] | None = None,
-    profile_id: str | None = None,
-    adapter_id: str | None = None,
-    catalog_digest: str | None = None,
-    realm_receipt_digest: str | None = None,
     **kwargs: Any,
 ) -> SubscriptionCanaryAdmission:
     """Seal one admission from existing Capacity and catalog/realm facts."""
 
     _reject_raw_booleans(kwargs)
-    worker = _require_token(worker_id, "worker_id")
-    bound_id = _require_token(binding_id, "binding_id")
-    if type(execution_mode) is not str or execution_mode != "interactive_canary":
-        raise CanaryAdmissionError("execution mode must be interactive_canary")
-    if type(capacity_source) is not str or capacity_source != SourceOwner.CAPACITY.value:
-        raise CanaryAdmissionError("capacity source owner must be capacity")
-    if type(capacity_state) is not str or capacity_state != CapacityState.AVAILABLE.value:
-        raise CanaryAdmissionError("capacity is not known")
-    observed_capacity = _require_generation(capacity_generation, "capacity_generation")
-    current_capacity = _require_generation(
-        current_capacity_generation, "current_capacity_generation"
-    )
-    if observed_capacity != current_capacity:
-        raise CanaryAdmissionError("stale capacity source generation")
-    observed_realm = _require_generation(realm_generation, "realm_generation")
-    current_realm = _require_generation(current_realm_generation, "current_realm_generation")
-    if observed_realm != current_realm:
-        raise CanaryAdmissionError("stale realm source generation")
-    if not isinstance(realm_receipt_id, str) or not realm_receipt_id.strip():
-        raise CanaryAdmissionError("provider realm is unenrolled")
-    receipt_id = _require_token(realm_receipt_id, "realm receipt id")
+    if type(capacity_fact) is not CapacityOwnerFact:
+        raise CanaryAdmissionError("typed capacity fact exported by the Capacity owner is required")
+    if type(realm_receipt) is not ProviderRealmEnrollmentReceipt:
+        raise CanaryAdmissionError("issued provider-realm receipt is required")
+    worker = _require_token(capacity_fact.worker_id, "worker_id")
+    bound_id = _require_token(realm_receipt.binding_id, "binding_id")
+    if capacity_fact.worker_id != worker:
+        raise CanaryAdmissionError("capacity fact worker identity does not match")
+    if realm_receipt.enrollment_state != "enrolled":
+        raise CanaryAdmissionError("provider realm enrollment state is not enrolled")
     try:
         profiles = (
             validate_profiles(profiles_document)
@@ -242,10 +207,6 @@ def seal_subscription_canary_admission(
         )
     except (HarnessBindingError, ProviderProfileError) as exc:
         raise CanaryAdmissionError("subscription harness binding is not reviewed") from exc
-    if profile_id is not None and profile_id != binding.profile_id:
-        raise CanaryAdmissionError("profile identity does not match the reviewed binding")
-    if adapter_id is not None and adapter_id != binding.adapter_id:
-        raise CanaryAdmissionError("adapter identity does not match the reviewed binding")
     if binding.implementation_state == "SPEC_ONLY":
         raise CanaryAdmissionError("implementation_state is SPEC_ONLY")
     if binding.autonomous_allowed is not False:
@@ -254,37 +215,35 @@ def seal_subscription_canary_admission(
         bindings_document=bindings_document,
         profiles_document=profiles,
     )
-    if catalog_digest is not None:
-        if type(catalog_digest) is not str or not _DIGEST_RE.fullmatch(catalog_digest):
-            raise CanaryAdmissionError("catalog digest is invalid")
-        if catalog_digest != digest:
-            raise CanaryAdmissionError("catalog digest does not match the reviewed documents")
+    if (
+        realm_receipt.binding_id != binding.binding_id
+        or realm_receipt.profile_id != binding.profile_id
+        or realm_receipt.adapter_id != binding.adapter_id
+    ):
+        raise CanaryAdmissionError("issued realm receipt identity does not match")
     expected_realm_digest = compose_realm_receipt_digest(
-        receipt_id=receipt_id,
+        receipt_id=realm_receipt.receipt_id,
         binding_id=binding.binding_id,
         profile_id=binding.profile_id,
         adapter_id=binding.adapter_id,
-        generation=observed_realm,
+        generation=realm_receipt.generation,
         catalog_digest=digest,
     )
-    if realm_receipt_digest is not None:
-        if type(realm_receipt_digest) is not str or not _DIGEST_RE.fullmatch(realm_receipt_digest):
-            raise CanaryAdmissionError("realm receipt digest is invalid")
-        if realm_receipt_digest != expected_realm_digest:
-            raise CanaryAdmissionError("forged or stale realm receipt digest")
+    if realm_receipt.receipt_digest != expected_realm_digest:
+        raise CanaryAdmissionError("issued realm receipt digest does not match the binding")
     fields = {
         "adapter_id": binding.adapter_id,
         "binding_id": binding.binding_id,
-        "capacity_generation": observed_capacity,
-        "capacity_source": capacity_source,
-        "capacity_state": capacity_state,
+        "capacity_generation": capacity_fact.generation,
+        "capacity_source": capacity_fact.source.value,
+        "capacity_state": capacity_fact.state.value,
         "catalog_digest": digest,
-        "execution_mode": execution_mode,
+        "execution_mode": "interactive_canary",
         "implementation_state": binding.implementation_state,
         "profile_id": binding.profile_id,
-        "realm_generation": observed_realm,
-        "realm_receipt_digest": expected_realm_digest,
-        "realm_receipt_id": receipt_id,
+        "realm_generation": realm_receipt.generation,
+        "realm_receipt_digest": realm_receipt.receipt_digest,
+        "realm_receipt_id": realm_receipt.receipt_id,
         "schema": SCHEMA,
         "worker_id": worker,
     }
@@ -293,13 +252,13 @@ def seal_subscription_canary_admission(
         binding_id=binding.binding_id,
         profile_id=binding.profile_id,
         adapter_id=binding.adapter_id,
-        execution_mode=execution_mode,
-        capacity_state=capacity_state,
-        capacity_source=capacity_source,
-        capacity_generation=observed_capacity,
-        realm_receipt_id=receipt_id,
-        realm_receipt_digest=expected_realm_digest,
-        realm_generation=observed_realm,
+        execution_mode="interactive_canary",
+        capacity_state=capacity_fact.state.value,
+        capacity_source=capacity_fact.source.value,
+        capacity_generation=capacity_fact.generation,
+        realm_receipt_id=realm_receipt.receipt_id,
+        realm_receipt_digest=realm_receipt.receipt_digest,
+        realm_generation=realm_receipt.generation,
         catalog_digest=digest,
         implementation_state=binding.implementation_state,
         seal_digest=_seal_digest(fields),
