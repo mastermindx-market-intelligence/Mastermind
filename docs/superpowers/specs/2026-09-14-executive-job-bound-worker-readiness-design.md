@@ -85,7 +85,7 @@ The control request arguments are exactly:
 
 No caller field may name an action, worker, slot, executable, path, host, release, request ID, credential kind, credential material, expiry, retry instruction or force flag. `fence_generation` must be a positive JSON integer, never boolean/string/float.
 
-The command is available only when the control service is `READY` and through its existing peer-authenticated Unix socket. Worker UIDs do not gain access to the privileged broker. The installer publishes one fixed non-root `mmx-control` wrapper to the exact installed release and control socket so attended Codex/Claude orchestrators running as the approved operator UID can invoke the command for a named Executive Job/Attempt without discovering a mutable source path. This first consumer is acting on behalf of the selected durable Job; it does not prove that an arbitrary dedicated worker can invoke the command itself. The wrapper accepts no socket/path/action override. A later bounded dedicated-worker tool must bind the caller to its own current Attempt before submitting the same typed request through the current control owner.
+The command is available only when the control service is `READY`, `privileged_readiness_armed` is true in the root-installed control config, and the request arrives through its existing peer-authenticated Unix socket. Worker UIDs do not gain access to the privileged broker. The installer publishes one fixed non-root `mmx-control` wrapper to the exact installed release and control socket so attended Codex/Claude orchestrators running as the approved operator UID can invoke the command for a named Executive Job/Attempt without discovering a mutable source path. This first consumer is acting on behalf of the selected durable Job; it does not prove that an arbitrary dedicated worker can invoke the command itself. The wrapper accepts no socket/path/action override. A later bounded dedicated-worker tool must bind the caller to its own current Attempt before submitting the same typed request through the current control owner.
 
 ## 6. Deterministic current-attempt admission
 
@@ -108,6 +108,17 @@ The transaction refuses unless all of the following are simultaneously true:
 11. assigned `worker_id` resolves through `get_slot(worker_id)` and the returned exact `slot_id` equals that worker; the caller cannot override either value.
 12. effective-grant validation reuses one canonical pure helper factored from `ExecutiveSupervisor._effective_grant`; the supervisor and P2-1 both call it. An orchestration Attempt missing or failing that grant refuses. Role-null legacy Jobs may use the freshly re-authorized Job grant.
 13. the preflight release, boot UUID and policy digest still equal the immutable service/policy facts observed by the transaction.
+
+The root-installed control config gains two closed host-composition fields:
+
+```json
+{
+  "privileged_readiness_armed": true,
+  "privileged_broker_socket_path": "/var/run/mastermind-executive/privileged.sock"
+}
+```
+
+Both default false/absent for backward compatibility. Production composition accepts the socket path only when it equals the fixed reviewed path, requires an injected readiness controller when armed, and refuses a controller injection when unarmed. The installer sets the arm only as part of the existing explicit `--arm-privileged-broker` ceremony; there is no request-, environment-, model-, or CLI-controlled arming override.
 
 The controller derives, rather than accepts:
 
@@ -260,13 +271,13 @@ P2-1 changes only these responsibilities:
 - `control_plane/executive_supervisor.py`: factor/reuse canonical effective-grant validation and filter controller-only authority from model packets.
 - `control_plane/executive_privileged_client.py`: reusable one-send broker client.
 - `control_plane/executive_privileged_authority.py`: exact binding, Runtime/Event admission, singleflight and phase/reconciliation controller.
-- `control_plane/executive_service.py`: one closed command and injected controller.
+- `control_plane/executive_service.py`: closed config fields, one command and injected default-off controller.
 - `scripts/mmx_admin.py`: consume shared broker client without behavior drift.
 - `scripts/executive_os_phase1c.py`: one thin CLI subcommand and production composition.
-- `ops/executive_os/install.sh`: fixed exact-release `mmx-control` wrapper only; no new service or socket.
+- `ops/executive_os/install.sh`: arm the controller only with the existing broker bootstrap flag and install a fixed exact-release `mmx-control` wrapper; no new service or socket.
 - focused owning tests and this design/implementation plan.
 
-No Runtime database migration is expected. Event types remain on the existing unwhitelisted Event plane. If implementation proves a new table/token/lease/schema migration necessary, stop and return for architecture review rather than improvising.
+No Runtime database migration is expected. Event types remain on the existing unwhitelisted Event plane. The reviewed control-config schema is extended with the two default-off host-composition fields above; that is an installer/config contract change, not a second authority or Runtime state store. If implementation proves a new table/token/lease/schema migration necessary, stop and return for architecture review rather than improvising.
 
 Changing `authority_map.yml` changes the global policy digest and therefore invalidates active Attempts carrying the prior digest. Production rollout must first prove zero active Attempts (or deliberately terminate/requeue them under existing law), install the new exact release, and only then admit Jobs requesting the new capability. A source merge is not an in-place policy migration for living work.
 
@@ -275,20 +286,21 @@ Changing `authority_map.yml` changes the global policy digest and therefore inva
 Source acceptance requires:
 
 1. policy refuses YAML-only expansion, missing scope, mandatory-deny drift and all direct root effect names;
-2. current-attempt admission positive test plus wrong Job, Attempt, fence, worker, slot, policy, grant, status, expiry and cancellation negatives;
-3. invalid boot UUID/PID fallback refuses before operation creation;
-4. token-free current-attempt helper and legacy `_leased_row` share the same lease/fence/current-link checks;
-5. OPERATOR_HARNESS and stale/abandoned modes refuse;
-6. model-visible worker packet omits the controller-only capability;
-7. per-operation singleflight proof: concurrent callers produce exactly one `ATTEMPTED` and one broker effect call;
-8. lost response -> status terminal reconciliation with one total effect call;
-9. marker and `NOT_FOUND` after `ATTEMPTED` both remain durable `EFFECT_UNKNOWN`, no retry/no no-effect assertion;
-10. repeated identical status observations append no duplicate Event;
-11. an Attempt may become terminal/requeued and a new controller instance still reconciles the old family from Runtime Events plus broker status without requiring current authority;
-12. release/boot/policy movement cannot create a second family for the same Job/Attempt/fence/action;
-13. controller admission errors and broker refusals are structurally distinguishable and validated;
-14. CLI/controller result contains no lease token/credential/path secret;
-15. current protected-base integration tests and independent privilege-boundary review.
+2. unarmed/missing/wrong privileged socket configuration refuses startup or command dispatch, while the existing non-privileged service remains backward compatible;
+3. current-attempt admission positive test plus wrong Job, Attempt, fence, worker, slot, policy, grant, status, expiry and cancellation negatives;
+4. invalid boot UUID/PID fallback refuses before operation creation;
+5. token-free current-attempt helper and legacy `_leased_row` share the same lease/fence/current-link checks;
+6. OPERATOR_HARNESS and stale/abandoned modes refuse;
+7. model-visible worker packet omits the controller-only capability;
+8. per-operation singleflight proof: concurrent callers produce exactly one `ATTEMPTED` and one broker effect call;
+9. lost response -> status terminal reconciliation with one total effect call;
+10. marker and `NOT_FOUND` after `ATTEMPTED` both remain durable `EFFECT_UNKNOWN`, no retry/no no-effect assertion;
+11. repeated identical status observations append no duplicate Event;
+12. an Attempt may become terminal/requeued and a new controller instance still reconciles the old family from Runtime Events plus broker status without requiring current authority;
+13. release/boot/policy movement cannot create a second family for the same Job/Attempt/fence/action;
+14. controller admission errors and broker refusals are structurally distinguishable and validated;
+15. CLI/controller result contains no lease token/credential/path secret;
+16. current protected-base integration tests and independent privilege-boundary review.
 
 Production proof is separate and occurs only after PR #613 is merged and the exact protected release is installed on the Studio. Before installing the revised authority policy, the current Runtime must prove zero living Attempts or explicitly terminate/requeue them under existing law; otherwise the policy-hash transition is held:
 
