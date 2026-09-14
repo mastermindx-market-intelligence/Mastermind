@@ -818,6 +818,94 @@ def test_preclaim_descriptor_close_failure_poisons_shared_cleanup_state(
         harness.close()
 
 
+def test_selector_close_failure_is_sticky_after_actual_reap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    harness = Harness(tmp_path)
+    original_selector = command_port.selectors.DefaultSelector
+    original_popen = command_port.subprocess.Popen
+    event_read = command_port.selectors.EVENT_READ
+    observed_process = None
+
+    class ClosedThenRaisedSelector(original_selector):
+        def close(self):
+            super().close()
+            raise OSError("injected selector close failure")
+
+    class SelectorModuleProxy:
+        DefaultSelector = ClosedThenRaisedSelector
+        EVENT_READ = event_read
+
+    def wrapped_popen(*args, **kwargs):
+        nonlocal observed_process
+        observed_process = original_popen(*args, **kwargs)
+        return observed_process
+
+    monkeypatch.setattr(command_port, "selectors", SelectorModuleProxy)
+    monkeypatch.setattr(command_port.subprocess, "Popen", wrapped_popen)
+    try:
+        prepared = harness.prepare_command()
+        result = asyncio.run(harness.run(harness.caller, prepared["action_ref"]))
+        assert result["effect_state"] == "APPLIED"
+        assert result["exit_code"] == 0
+        assert result["cleanup_state"] == "UNCERTAIN"
+        assert "command_selector_close" in harness.store.cleanup_reasons
+        assert observed_process is not None
+        assert observed_process.stdout.closed is True
+        assert observed_process.stderr.closed is True
+        with pytest.raises(ProcessLookupError):
+            os.kill(result["process_identity"]["pid"], 0)
+    finally:
+        harness.close()
+
+
+def test_barrier_closed_then_raise_is_sticky_and_never_retried(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    harness = Harness(tmp_path)
+    original_popen = command_port.subprocess.Popen
+    close_calls = 0
+
+    class ClosedThenRaisedStdin:
+        def __init__(self, inner) -> None:
+            self.inner = inner
+
+        @property
+        def closed(self):
+            return self.inner.closed
+
+        def write(self, value):
+            return self.inner.write(value)
+
+        def flush(self):
+            return self.inner.flush()
+
+        def close(self):
+            nonlocal close_calls
+            close_calls += 1
+            self.inner.close()
+            raise OSError("injected barrier close failure")
+
+    def wrapped_popen(*args, **kwargs):
+        process = original_popen(*args, **kwargs)
+        process.stdin = ClosedThenRaisedStdin(process.stdin)
+        return process
+
+    monkeypatch.setattr(command_port.subprocess, "Popen", wrapped_popen)
+    try:
+        prepared = harness.prepare_command()
+        result = asyncio.run(harness.run(harness.caller, prepared["action_ref"]))
+        assert close_calls == 1
+        assert result["effect_state"] == "APPLIED"
+        assert result["exit_code"] == 0
+        assert result["cleanup_state"] == "UNCERTAIN"
+        assert "command_barrier_close" in harness.store.cleanup_reasons
+        with pytest.raises(ProcessLookupError):
+            os.kill(result["process_identity"]["pid"], 0)
+    finally:
+        harness.close()
+
+
 @pytest.mark.parametrize("damage", ["process_missing", "result_missing", "stdout_missing", "stdout_corrupt"])
 def test_missing_or_corrupt_command_evidence_stays_unknown(
     tmp_path: Path, damage: str

@@ -678,7 +678,11 @@ def _capture_process(
             timed_out,
         )
     finally:
-        selector.close()
+        try:
+            selector.close()
+        except OSError:
+            cleanup_uncertain = True
+            store.mark_cleanup_uncertain("command_selector_close")
         for stream, _limit in streams:
             try:
                 stream.close()
@@ -1055,7 +1059,12 @@ def create_command_port(
                     raise OSError("missing launch barrier")
                 process.stdin.write(b"\x01")
                 process.stdin.flush()
-                process.stdin.close()
+                try:
+                    process.stdin.close()
+                except OSError:
+                    store.mark_cleanup_uncertain("command_barrier_close")
+                finally:
+                    process.stdin = None
                 result = _capture_process(
                     process,
                     deadline_seconds=float(host_binding.process_deadline_seconds),
