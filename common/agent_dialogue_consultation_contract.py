@@ -91,7 +91,7 @@ RECEIPT_KEYS = frozenset(
 RECEIPT_KEYS_BY_INDEX = tuple(sorted(RECEIPT_KEYS))
 _PEER_REF_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._:-]{7,127}\Z")
 _CONSULTATION_ID_RE = re.compile(r"\Aconsult-[0-9a-f]{32}\Z")
-_BINDING_ID_RE = re.compile(r"\Abind-[0-9a-f]{32}\Z")
+_BINDING_ID_RE = re.compile(r"\Abind-[0-9a-f]{32,40}\Z")
 _REPOSITORY_RE = re.compile(r"\A[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\Z")
 _PATH_RE = re.compile(r"\A[A-Za-z0-9_][A-Za-z0-9_./-]{0,254}\Z")
 _COMMIT_RE = re.compile(r"\A[0-9a-f]{40}\Z")
@@ -248,7 +248,10 @@ def validate_consultation(value: Any) -> dict[str, Any]:
     for key in ("request_message_key", "consultation_id"):
         if not isinstance(correlation[key], str):
             raise DialogueContractError("MESSAGE_INVALID")
-    if correlation["request_message_key"] != item["message_key"]:
+    if (
+        item["purpose"] == "QUESTION"
+        and correlation["request_message_key"] != item["message_key"]
+    ):
         raise DialogueContractError("MESSAGE_INVALID")
     if correlation["consultation_id"] != item["consultation_id"]:
         raise DialogueContractError("MESSAGE_INVALID")

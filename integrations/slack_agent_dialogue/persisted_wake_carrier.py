@@ -18,8 +18,10 @@ from control_plane.dialogue_wake_canary_activation import (
 
 from control_plane.executive_runtime import StateConflict
 from control_plane.dialogue_source_resolution import (
+    ConsultationSourceIdentity,
     DialogueSourceObservation,
     PhysicalDialogueSourceIdentity,
+    peer_attention_source_ref,
 )
 from control_plane.session_targets import (
     RuntimeBinding,
@@ -566,6 +568,70 @@ def _canary_effective_route(
     return expected
 
 
+@dataclasses.dataclass(frozen=True)
+class ConsultationWakeExtension:
+    """Mint one peer consultation obligation through the existing Wake ledger."""
+
+    repository: WakeLedgerRepository
+    requester_job_id: str
+    requester_attempt_id: str
+    root_job_id: str
+    recipient_job_id: str
+    recipient_attempt_id: str
+    consultation_id: str
+    message_key: str
+    semantic_fingerprint: str
+    current_binding: RuntimeBinding
+    declared_target_seat: str = "coo"
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.repository, WakeLedgerRepository):
+            raise TypeError("repository must be WakeLedgerRepository")
+        if not isinstance(self.current_binding, RuntimeBinding):
+            raise TypeError("current_binding must be RuntimeBinding")
+        if self.current_binding.reasoning_surface != "codex":
+            raise StateConflict("consultation Wake supports only managed Codex")
+
+    def identity(self) -> ConsultationSourceIdentity:
+        return ConsultationSourceIdentity.create(
+            consultation_id=self.consultation_id,
+            message_key=self.message_key,
+            semantic_fingerprint=self.semantic_fingerprint,
+            root_job_id=self.root_job_id,
+            requester_job_id=self.requester_job_id,
+            requester_attempt_id=self.requester_attempt_id,
+            recipient_job_id=self.recipient_job_id,
+            recipient_attempt_id=self.recipient_attempt_id,
+            binding_id=self.current_binding.binding_id,
+            binding_generation=self.current_binding.binding_generation,
+        )
+
+    def obligation(self):
+        from control_plane.wake_events import SourceKind, WakeKind, mint_obligation
+
+        return mint_obligation(
+            wake_kind=WakeKind.DIALOGUE_TURN_PENDING,
+            source_kind=SourceKind.AGENT_DIALOGUE_ATTENTION,
+            source_ref=peer_attention_source_ref(self.identity()),
+            declared_target_seat=self.declared_target_seat,
+            root_job_id=self.root_job_id,
+        )
+
+    def current_binding_matches(self) -> bool:
+        obligation = self.obligation()
+        persisted = self.repository.list_records(obligation.obligation_id)
+        if not persisted:
+            raise StateConflict(
+                "peer consultation stale generation resolves a different Wake request"
+            )
+        persisted_source = persisted[0].event.payload.get("source_ref")
+        if persisted_source == peer_attention_source_ref(self.identity()):
+            return True
+        raise StateConflict(
+            "peer consultation stale generation cannot receive or authorize"
+        )
+
+
 def _assert_pair(obligation: WakeObligation, route: WakeRoute) -> None:
     if route.obligation_id != obligation.obligation_id:
         raise ValueError("Wake route obligation_id does not match the obligation")
@@ -614,6 +680,7 @@ def _assert_current_binding(
 
 __all__ = [
     "CanaryWakeHistoryError",
+    "ConsultationWakeExtension",
     "HistoricalWakeContext",
     "PersistedWakeCarrier",
 ]
