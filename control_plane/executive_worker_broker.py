@@ -46,13 +46,13 @@ from control_plane.executive_ambient_process import (
     NullAmbientClassifier,
 )
 from control_plane.codex_worker import (
-    CodexWorkerAdapter,
     GitPreflightFailed,
     GitPreflightTimeout,
     ISOLATION_MANIFEST_SCHEMA_VERSION,
     LaunchValidationStageError,
     ProcessIdentityError,
 )
+from control_plane.worker_adapter import WorkerExecutionAdapter, adapter_descriptor
 from control_plane.executive_orchestration_principal import (
     OSProcessCredentialObservation,
     ProviderHomeIdentityObservation,
@@ -1285,10 +1285,11 @@ class ExecutiveWorkerBroker:
 
     def __init__(
         self,
-        adapter: CodexWorkerAdapter,
+        adapter: WorkerExecutionAdapter,
         policy: BrokerPolicy,
         sweeper: ResidualSweeper,
         *,
+        adapter_id: str = "codex-cli",
         peer_resolver: Callable[[socket.socket], PeerCredentials] = get_peer_credentials,
         operator_adapter_factory: OperatorAdapterFactory | None = None,
         operator_resource_factory: OperatorResourceFactory | None = None,
@@ -1299,7 +1300,11 @@ class ExecutiveWorkerBroker:
         ]
         | None = None,
     ) -> None:
+        descriptor = adapter_descriptor(adapter_id)
+        if not descriptor.implemented:
+            raise WorkerBrokerError(f"worker adapter {adapter_id!r} is not implemented")
         self.adapter = adapter
+        self.adapter_id = descriptor.adapter_id
         self.policy = policy
         self.sweeper = sweeper
         self.peer_resolver = peer_resolver
@@ -2756,7 +2761,12 @@ class ExecutiveWorkerBroker:
             elif state.terminal_error is not None:
                 status = "ERROR"
             else:
-                status = await self.adapter.status(state.process_ref)
+                status_method = getattr(self.adapter, "status", None)
+                if not callable(status_method):
+                    raise BrokerStateError(
+                        f"worker adapter {self.adapter_id!r} does not expose status for an active run"
+                    )
+                status = await status_method(state.process_ref)
             result["run"] = {
                 "run_id": run_id,
                 "status": status,
