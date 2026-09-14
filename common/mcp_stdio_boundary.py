@@ -73,6 +73,10 @@ class _ProtocolOutput:
 
     async def write(self, text: str):
         # SDK output and fixed protocol refusals share this single line writer.
+        if len(text.encode("utf-8")) > MAX_WIRE_BYTES:
+            logging.getLogger(__name__).warning("WORKBENCH_MCP_OUTPUT_LIMIT")
+            text = ('{"jsonrpc":"2.0","id":null,"error":{"code":-32603,'
+                    '"message":"WORKBENCH_MCP_OUTPUT_LIMIT"}}\n')
         async with self._lock:
             await self._output.write(text)
             await self._output.flush()
@@ -88,22 +92,36 @@ def _validated_protocol_line(line: str) -> str:
     raw = json.loads(line, object_pairs_hook=_closed_object, parse_constant=_reject_constant)
     if type(raw) is not dict or raw.get("jsonrpc") != "2.0":
         raise ValueError("PROTOCOL_ENVELOPE")
-    if not set(raw) <= {"jsonrpc", "id", "method", "params"}:
-        raise ValueError("PROTOCOL_ENVELOPE")
-    if type(raw.get("method")) is not str:
-        raise ValueError("PROTOCOL_METHOD")
-    if "params" in raw and type(raw["params"]) is not dict:
-        raise ValueError("PROTOCOL_PARAMS")
     if "id" in raw:
         request_id = raw["id"]
         if type(request_id) not in {str, int} or (type(request_id) is str and len(request_id) > 256):
             raise ValueError("PROTOCOL_ID")
-        parsed = mcp_types.ClientRequest.model_validate(raw, strict=True)
-        if isinstance(parsed.root, mcp_types.CallToolRequest):
-            if not set(raw.get("params", {})) <= {"name", "arguments", "_meta", "task"}:
-                raise ValueError("PROTOCOL_PARAMS")
+    if "method" not in raw:
+        # Responses must reach the SDK's existing response waiters (send_ping,
+        # etc.). A closed response shape is not a client request/notification.
+        if set(raw) == {"jsonrpc", "id", "result"}:
+            mcp_types.JSONRPCResponse.model_validate(raw, strict=True)
+        elif set(raw) == {"jsonrpc", "id", "error"}:
+            error = raw["error"]
+            if type(error) is not dict or not set(error) <= {"code", "message", "data"}:
+                raise ValueError("PROTOCOL_ERROR")
+            mcp_types.JSONRPCError.model_validate(raw, strict=True)
+        else:
+            raise ValueError("PROTOCOL_ENVELOPE")
     else:
-        mcp_types.ClientNotification.model_validate(raw, strict=True)
+        if not set(raw) <= {"jsonrpc", "id", "method", "params"}:
+            raise ValueError("PROTOCOL_ENVELOPE")
+        if type(raw["method"]) is not str:
+            raise ValueError("PROTOCOL_METHOD")
+        if "params" in raw and type(raw["params"]) is not dict:
+            raise ValueError("PROTOCOL_PARAMS")
+        if "id" in raw:
+            parsed = mcp_types.ClientRequest.model_validate(raw, strict=True)
+            if isinstance(parsed.root, mcp_types.CallToolRequest):
+                if not set(raw.get("params", {})) <= {"name", "arguments", "_meta", "task"}:
+                    raise ValueError("PROTOCOL_PARAMS")
+        else:
+            mcp_types.ClientNotification.model_validate(raw, strict=True)
     # Validate both layers before the SDK can construct value-bearing errors.
     mcp_types.JSONRPCMessage.model_validate(raw, strict=True)
     return json.dumps(raw, ensure_ascii=False, allow_nan=False, separators=(",", ":")) + "\n"

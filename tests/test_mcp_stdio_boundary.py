@@ -179,3 +179,78 @@ def test_scoped_sdk_filter_preserves_other_sessions_and_diagnostics(caplog):
     assert "WORKBENCH_MCP_SDK_DIAGNOSTIC" in caplog.text
     assert "useful-local-diagnostic" in caplog.text
     assert "outside-before" in caplog.text and "outside-after" in caplog.text
+
+
+@pytest.mark.parametrize("response_kind", ["result", "error"])
+def test_server_initiated_ping_receives_native_response(response_kind):
+    code = '''
+import asyncio, logging
+import anyio
+from mcp.server.lowlevel import Server
+from mcp.types import Tool
+from mcp.shared.exceptions import McpError
+from common.mcp_stdio_boundary import private_stdio_server
+logging.basicConfig(level=logging.DEBUG)
+async def main():
+    server = Server("server-ping-test")
+    @server.list_tools()
+    async def listed():
+        with anyio.fail_after(2):
+            try:
+                await server.request_context.session.send_ping()
+                name = "pong"
+            except McpError:
+                name = "refused"
+        return [Tool(name=name, inputSchema={})]
+    async with private_stdio_server() as (read, write):
+        await server.run(read, write, server.create_initialization_options())
+asyncio.run(main())
+'''
+    with child([sys.executable, "-c", code]) as process:
+        initialize(process)
+        process.send({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+        ping = process.receive()
+        assert ping["method"] == "ping"
+        reply = {"jsonrpc": "2.0", "id": ping["id"], response_kind: {}}
+        if response_kind == "error":
+            reply["error"] = {"code": -32000, "message": "test refusal"}
+        process.send(reply)
+        listed = process.receive()
+        assert listed["id"] == 2
+        assert listed["result"]["tools"][0]["name"] == ("pong" if response_kind == "result" else "refused")
+        process.assert_exit(0)
+        assert b"WORKBENCH_MCP_INVALID_REQUEST" not in process.stderr()
+
+
+def test_oversized_native_output_is_refused_and_next_request_survives():
+    from common.mcp_stdio_boundary import MAX_WIRE_BYTES
+
+    code = '''
+import asyncio, logging
+from mcp.server.lowlevel import Server
+from mcp.types import Tool
+from common.mcp_stdio_boundary import private_stdio_server, MAX_WIRE_BYTES
+logging.basicConfig(level=logging.DEBUG)
+async def main():
+    server = Server("output-limit-test")
+    @server.list_tools()
+    async def listed():
+        return [Tool(name="oversized", description="WORKBENCH_REJECTED_SECRET_7b927c" + "界" * MAX_WIRE_BYTES, inputSchema={})]
+    async with private_stdio_server() as (read, write):
+        await server.run(read, write, server.create_initialization_options())
+asyncio.run(main())
+'''
+    with child([sys.executable, "-c", code]) as process:
+        initialize(process)
+        before = len(process.wire)
+        process.send({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+        reply = process.receive()
+        assert reply == {"jsonrpc": "2.0", "id": None, "error": {
+            "code": -32603, "message": "WORKBENCH_MCP_OUTPUT_LIMIT",
+        }}
+        assert len(process.wire) - before < MAX_WIRE_BYTES
+        process.send({"jsonrpc": "2.0", "id": 3, "method": "ping"})
+        assert process.receive()["result"] == {}
+        process.assert_exit(0)
+        assert SENTINEL.encode() not in process.wire + process.stderr()
+        assert b"WORKBENCH_MCP_OUTPUT_LIMIT" in process.stderr()
