@@ -1542,3 +1542,31 @@ def test_installer_stops_old_daemons_before_first_release_or_policy_mutation() -
     assert "trap leave_installed_services_stopped EXIT" in source
     tail_after_plists = source[plist_install:]
     assert '/bin/launchctl bootstrap' not in tail_after_plists
+
+
+@pytest.mark.skipif(sys.platform != 'darwin', reason='macOS plutil installer rendering')
+def test_installer_renders_every_control_socket_path(tmp_path):
+    """Exercise the installer's real socket substitutions without root or launchd."""
+    import shlex
+
+    destination = tmp_path / 'control.plist'
+    destination.write_bytes(CONTROL.read_bytes())
+    replacements = {
+        '$CONTROL_PLIST': str(destination),
+        '$CONTROL_UID': '450',
+        '$OPS_GID': '453',
+    }
+    for line in (OPS / 'install.sh').read_text().splitlines():
+        if (line.startswith('/usr/bin/plutil -replace Sockets.')
+                and line.endswith('"$CONTROL_PLIST"')):
+            argv = [replacements.get(part, part) for part in shlex.split(line)]
+            subprocess.run(argv, check=True, capture_output=True, text=True)
+
+    sockets = plistlib.loads(destination.read_bytes())['Sockets']
+    assert sockets['CeoIngress'] == {
+        'SockPathName': '/var/run/mastermind-executive/ceo-ingress.sock',
+        'SockType': 'stream', 'SockPassive': True,
+        'SockPathOwner': 450, 'SockPathGroup': 452, 'SockPathMode': 0o660,
+    }
+    assert all(Path(row['SockPathName']).is_absolute() for row in sockets.values())
+    assert all('__' not in row['SockPathName'] for row in sockets.values())
