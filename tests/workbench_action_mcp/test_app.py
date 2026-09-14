@@ -104,6 +104,7 @@ class WorkbenchActionAppTests(unittest.IsolatedAsyncioTestCase):
             return {
                 "status": "OK",
                 "effect_state": "APPLIED",
+                "cleanup_state": "UNCERTAIN",
                 "project_ref": "project:alpha",
                 "responsibility_ref": "responsibility:alpha",
                 "operation_ref": "operation:alpha",
@@ -118,6 +119,7 @@ class WorkbenchActionAppTests(unittest.IsolatedAsyncioTestCase):
             return {
                 "status": "OK",
                 "effect_state": "NOT_APPLIED",
+                "cleanup_state": "CLEAN",
                 "project_ref": "project:alpha",
                 "responsibility_ref": "responsibility:alpha",
                 "operation_ref": "operation:alpha",
@@ -241,6 +243,7 @@ class WorkbenchActionAppTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(committed.get("isError", False), committed)
         self.assertEqual(committed["structuredContent"]["effect_state"], "APPLIED")
+        self.assertEqual(committed["structuredContent"]["cleanup_state"], "UNCERTAIN")
         self.assertEqual([row[0] for row in self.calls], ["prepare", "commit"])
         self.assertEqual(self.calls[0][1].subject_digest, self.subject)
         self.assertEqual([row["phase"] for row in self.receipts], ["RECEIVED", "RECEIVED"])

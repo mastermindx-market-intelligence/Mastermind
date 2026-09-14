@@ -18,6 +18,11 @@ from integrations.business_mcp_auth.contracts import (
 )
 from integrations.business_mcp_auth.jwt_verifier import JwtAuthenticator
 
+from .action_artifacts import (
+    ActionArtifactStore,
+    ActionHostBinding,
+    validate_host_binding,
+)
 from .app import create_authenticated_action_server
 from .contracts import ActionTokenCodec, MAX_ACTION_TTL_MS
 from .patch_port import ActionBindingResolver, ActionExecutor, create_text_patch_port
@@ -30,6 +35,8 @@ class RuntimeServices:
     now: Callable[[], int]
     clock_ms: Callable[[], int]
     audit_sink: AuthAuditSink
+    artifact_store: ActionArtifactStore
+    host_binding: ActionHostBinding
     resolve_binding: ActionBindingResolver
     run_io: ActionExecutor
     action_token_key: bytes
@@ -56,6 +63,12 @@ def create_deployment(services: RuntimeServices):
         )
     ):
         raise ValueError("RUNTIME_SERVICES_INVALID")
+    if type(services.artifact_store) is not ActionArtifactStore:
+        raise ValueError("RUNTIME_SERVICES_INVALID")
+    try:
+        validate_host_binding(services.host_binding)
+    except Exception as error:
+        raise ValueError("RUNTIME_SERVICES_INVALID") from error
     policy = validate_resource_policy(services.policy)
     if policy != validate_resource_policy(services.authenticator.policy):
         raise ValueError("AUTH_POLICY_BINDING_MISMATCH")
@@ -83,6 +96,8 @@ def create_deployment(services: RuntimeServices):
         clock_ms=services.clock_ms,
         run_io=services.run_io,
         token_codec=codec,
+        artifact_store=services.artifact_store,
+        host=services.host_binding,
         action_ttl_ms=services.action_ttl_ms,
     )
     return create_authenticated_action_server(
