@@ -391,3 +391,53 @@ def test_invalid_dcr_success_payload_keeps_effect_unknown_marker(tmp_path: Path)
             attempt_ref_fn=lambda: "c" * 64,
         )
     assert isinstance(store.load_state(), enroll.PendingRegistration)
+
+
+def test_reconcile_pending_registration_accepts_exact_public_client_without_new_dcr(tmp_path: Path):
+    import ops.codex_fabric.enroll_executive_mcp as enroll
+
+    policy = _policy(tmp_path)
+    api = BlobApi()
+    store = KeychainRegistrationStore(api=api)
+    store.save_pending(enroll.PendingRegistration("d" * 64, CALLBACK_URL, policy.policy_digest))
+
+    reconciled = enroll.reconcile_pending_registration(
+        policy,
+        store=store,
+        observed_client_id="tpc_reconciled123",
+    )
+    assert reconciled == ClientRegistration(
+        "tpc_reconciled123", CALLBACK_URL, policy.policy_digest
+    )
+    assert store.load_state() == reconciled
+
+
+def test_reconcile_pending_registration_refuses_absent_completed_stale_or_non_tpc(tmp_path: Path):
+    import ops.codex_fabric.enroll_executive_mcp as enroll
+
+    policy = _policy(tmp_path)
+
+    with pytest.raises(EnrollmentError):
+        enroll.reconcile_pending_registration(
+            policy, store=KeychainRegistrationStore(api=BlobApi()), observed_client_id="tpc_x"
+        )
+
+    completed_api = BlobApi()
+    completed = KeychainRegistrationStore(api=completed_api)
+    completed.save(ClientRegistration("tpc_existing", CALLBACK_URL, policy.policy_digest))
+    with pytest.raises(EnrollmentError):
+        enroll.reconcile_pending_registration(policy, store=completed, observed_client_id="tpc_other")
+
+    stale_api = BlobApi()
+    stale = KeychainRegistrationStore(api=stale_api)
+    stale.save_pending(enroll.PendingRegistration("e" * 64, CALLBACK_URL, "f" * 64))
+    with pytest.raises(EnrollmentError):
+        enroll.reconcile_pending_registration(policy, store=stale, observed_client_id="tpc_x")
+
+    pending_api = BlobApi()
+    pending = KeychainRegistrationStore(api=pending_api)
+    pending.save_pending(enroll.PendingRegistration("a" * 64, CALLBACK_URL, policy.policy_digest))
+    for bad in ("client123", "", " tpc_bad", "tpc_bad "):
+        with pytest.raises(EnrollmentError):
+            enroll.reconcile_pending_registration(policy, store=pending, observed_client_id=bad)
+    assert isinstance(pending.load_state(), enroll.PendingRegistration)

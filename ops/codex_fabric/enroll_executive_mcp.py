@@ -252,6 +252,44 @@ def ensure_client_registration(
     return registration
 
 
+def reconcile_pending_registration(
+    policy: ExecutiveAuthPolicy,
+    *,
+    store: KeychainRegistrationStore,
+    observed_client_id: str,
+) -> ClientRegistration:
+    """Bind one admin-observed DCR client to the exact pending operation.
+
+    This is reconciliation only: it never calls Auth0 and never clears an
+    absent or stale pending state.
+    """
+
+    state = store.load_state()
+    if not isinstance(state, PendingRegistration):
+        raise EnrollmentError("Executive public client registration is not pending")
+    if (
+        state.policy_digest != policy.policy_digest
+        or state.redirect_uri != CALLBACK_URL
+        or not isinstance(observed_client_id, str)
+        or observed_client_id != observed_client_id.strip()
+        or not observed_client_id.startswith("tpc_")
+        or len(observed_client_id) > 512
+    ):
+        raise EnrollmentError("pending Executive public client registration cannot be reconciled")
+    registration = ClientRegistration(
+        client_id=observed_client_id,
+        redirect_uri=CALLBACK_URL,
+        policy_digest=policy.policy_digest,
+    )
+    try:
+        store.save(registration)
+    except Exception:
+        raise EnrollmentEffectUnknown(
+            "Executive public client registration reconciliation effect is unknown"
+        ) from None
+    return registration
+
+
 def build_authorize_url(
     policy: ExecutiveAuthPolicy,
     metadata: OidcMetadata,
