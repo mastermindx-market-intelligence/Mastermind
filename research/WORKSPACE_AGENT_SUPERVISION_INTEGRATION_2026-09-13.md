@@ -1,5 +1,7 @@
 # Workspace Agent supervision: integration delta and first proof
 
+**Status: SOURCE RECORD — not an implementation contract.** Adopted with change by the Fable seat (W6-A intake, 2026-09-14). Workspace Agents are supervisory attention/read/candidate-return clients only. No publish or trigger step may be taken until the bounded candidate-return ingress (W6-C) and the run-observation qualification (W6-D) are accepted; `control_plane/wake_transport.py:transport_implemented` remains false for Workspace. Executive OS stays the sole Job/Attempt/Worker/Event authority; Capacity/Router owns placement; Agent OS owns continuity; Relay/Wake/Slack are transport and attention only.
+
 Date: 2026-09-13. Owner: Sol, for Chairman Chris.
 
 **Status: PROPOSAL / SOURCE RECORD ONLY. Workspace Agent integration is NOT_BUILT and NOT_PROVEN.** This document does not admit a runtime operation, assign a receiver, publish an agent, change credentials or spending, amend production-deployment authority, or certify an autonomous organization.
@@ -54,7 +56,7 @@ Macro `agentos/README.md` is controlling for record authorship. Its non-ranked r
 
 ### A. Browser-independent continuity path
 
-An existing Executive responsibility produces an attention event. Current routing chooses a qualified native supervisory surface or, after qualification, a Workspace Agent. The supervisor reads fresh canonical context, adjudicates the bounded question, and returns its result through existing owners. Approved child work reaches Fable only when principal ambiguity requires it; ordinary frozen work goes directly to an eligible bounded worker.
+An existing Executive responsibility produces an attention event. Nothing routes to a Workspace Agent today; current placement remains with Capacity/Router and qualified native supervisory surfaces. A Workspace Agent may become eligible only after the bounded candidate-return ingress (W6-C) and run-observation qualification (W6-D) are accepted; then the supervisor reads fresh canonical context, adjudicates the bounded question, and returns its result through existing owners. Approved child work reaches Fable only when principal ambiguity requires it; ordinary frozen work goes directly to an eligible bounded worker.
 
 Do not require `Sol -> Workspace Agent -> Fable -> operator -> worker` for every edit. Each extra reasoning layer must earn its coordination cost. Parent responsibilities and independent children remain explicit; ephemeral read-only helpers can remain inside an already-admitted parent grant.
 
@@ -181,7 +183,7 @@ Learning must compare predicted user/machine benefit with observed results, not 
 | --- | --- | --- |
 | Executive app closure | Current #599 owner; unchanged five tools and installed ingress | A real seat obtains fresh canonical state; bounded admission returns exactly one Job with execution still reported separately. No parallel tunnel/source repair. |
 | Native return and next child | Existing RET1/Wake/ACK, RuntimeBinding, Capacity and selected provider owner | An actual bounded worker result reaches its responsible supervisor, is consumed/reviewed, and produces the next lawful child without Chris carrying a message. This does not wait on Workspace Agents. |
-| Workspace read-only canary | Existing app/auth owner plus Wake/binding/result owners; one reviewed remote-supervisor delta | One actual API event, current-context read, authenticated candidate return and visible review. No fictitious ACK/cancel/session support; no production write. |
+| Workspace read-only canary | Existing app/auth, Wake/binding/result, secret-custody, and Capacity/Router owners; a governed W6-E act only after W6-C and W6-D acceptance | Requires a Chairman-published channel, an owner-provisioned Workspace-scoped token, and a finite economic envelope; then one actual API event, current-context read, authenticated candidate return and visible review. No fictitious ACK/cancel/session support; no production write. |
 | Qualified bounded continuation | Same owners after lower proof and current delegation/economic gates | Two independent approved responsibilities progress with one current action owner each; injected stale/duplicate/suspended returns remain safe and visible. |
 | Workbench and browser leverage | Existing Workbench and Chrome owners, path-disjoint | Read then scoped write proof; browser experiments never become a prerequisite for native continuation. |
 | Strategic cycle and Chairman surface | Existing cognition, agenda, learning and Control Room/Today owners | A source-attributed new proposal becomes approved bounded work, measured outcome, durable learning and a better next decision. Show only real exceptions and decisions to Chris. |
