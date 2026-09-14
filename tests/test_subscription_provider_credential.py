@@ -318,6 +318,33 @@ class TestDarwinACLBoundary:
                 expected_gid=os.getgid(),
             )
 
+    def test_provider_home_open_failure_is_typed_at_each_boundary(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        config, _ = _installed_config(tmp_path)
+
+        def refuse_open(*_args: object, **_kwargs: object) -> int:
+            raise OSError(errno.EACCES, "provider-home traversal refused")
+
+        monkeypatch.setattr(credential.os, "open", refuse_open)
+        with pytest.raises(
+            credential.SubscriptionCredentialError,
+            match="provider home is unavailable",
+        ):
+            credential.install_provider_credential(
+                config,
+                ALIBABA_TOKEN_PLAN,
+                credential=b"replacement-provider-key",
+                replace_existing=True,
+            )
+        with pytest.raises(
+            credential.SubscriptionCredentialError,
+            match="provider home is unavailable",
+        ):
+            credential.verify_provider_credential(config)
+
     def test_file_acl_is_refused_at_read_while_provider_home_is_clean(
         self,
         tmp_path: Path,
@@ -456,6 +483,71 @@ class TestDarwinACLBoundary:
             with pytest.raises(FilesystemSecurityError, match="enumeration failed"):
                 fs_security.has_macos_acl(path)
         observer.assert_called_once()
+
+    def test_acl_observer_raises_for_native_enumeration_eio(self, tmp_path: Path) -> None:
+        path = tmp_path / "observer-fixture"
+        path.write_text("fixture", encoding="utf-8")
+
+        with (
+            mock.patch.object(fs_security, "_acl_get_fd", return_value=object()),
+            mock.patch.object(
+                fs_security,
+                "_acl_get_entry",
+                return_value=-1,
+            ) as enumeration_observer,
+            mock.patch.object(fs_security, "_acl_free", return_value=0),
+            mock.patch.object(ctypes, "get_errno", return_value=errno.EIO),
+        ):
+            with pytest.raises(
+                FilesystemSecurityError,
+                match="macOS ACL enumeration failed: errno=5",
+            ):
+                fs_security.has_macos_acl(path)
+        enumeration_observer.assert_called_once()
+
+        with (
+            mock.patch.object(
+                fs_security,
+                "_acl_get_entry",
+                return_value=-1,
+            ),
+            mock.patch.object(ctypes, "get_errno", return_value=errno.ENOENT),
+        ):
+            assert fs_security.has_macos_acl(path) is False
+
+    def test_acl_observer_closes_its_descriptor_when_observation_is_refused(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        path = tmp_path / "observer-fixture"
+        path.write_text("fixture", encoding="utf-8")
+        real_open = fs_security.os.open
+        real_close = fs_security.os.close
+        opened: list[int] = []
+
+        def tracked_open(*args: object, **kwargs: object) -> int:
+            descriptor = real_open(*args, **kwargs)
+            opened.append(descriptor)
+            return descriptor
+
+        def tracked_close(descriptor: int) -> None:
+            opened.remove(descriptor)
+            real_close(descriptor)
+
+        def refuse_enumeration(*_args: object, **_kwargs: object) -> int:
+            raise FilesystemSecurityError("observer fixture refused")
+
+        monkeypatch.setattr(fs_security.os, "open", tracked_open)
+        monkeypatch.setattr(fs_security.os, "close", tracked_close)
+        monkeypatch.setattr(fs_security, "_acl_get_fd", refuse_enumeration)
+
+        descriptors_before = set(os.listdir("/dev/fd"))
+
+        with pytest.raises(FilesystemSecurityError, match="observer fixture refused"):
+            fs_security.has_macos_acl(path)
+        assert opened == []
+        assert set(os.listdir("/dev/fd")) == descriptors_before
 
     @pytest.mark.skipif(os.geteuid() == 0, reason="non-root traversal denial")
     def test_acl_observer_fails_closed_for_non_traversable_parent(

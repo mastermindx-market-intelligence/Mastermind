@@ -48,6 +48,7 @@ RELEASE_TRACKED_PATHS=(
   control_plane/executive_worker_broker.py
   control_plane/executive_workspace.py
   control_plane/flags.py
+  control_plane/fs_security.py
   control_plane/operator_harness_contract.py
   control_plane/operator_harness_wire.py
   control_plane/operator_materialization_receipt.py

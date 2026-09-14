@@ -85,13 +85,14 @@ def has_macos_acl(
         ) from exc
 
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    close_descriptor = False
     if descriptor is None:
         try:
             descriptor = os.open(path, flags)
         except OSError as exc:
             raise FilesystemSecurityError("macOS ACL open failed") from exc
+        close_descriptor = True
     opened_descriptor = descriptor
-    close_descriptor = descriptor is None
     try:
         try:
             observed = os.fstat(opened_descriptor)
@@ -118,7 +119,12 @@ def has_macos_acl(
         if result == 0:
             return bool(entry)
         if result == -1:
-            return False
+            error_number = ctypes.get_errno()
+            if error_number == errno.ENOENT:
+                return False
+            raise FilesystemSecurityError(
+                f"macOS ACL enumeration failed: errno={error_number}"
+            )
         raise FilesystemSecurityError(
             f"macOS ACL enumeration failed: errno={ctypes.get_errno()}"
         )

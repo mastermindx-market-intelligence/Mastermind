@@ -65,7 +65,10 @@ def _require_provider_home(config: Mapping[str, Any]) -> Path:
         info = home.lstat()
     except OSError:
         raise SubscriptionCredentialError("provider home is unavailable") from None
-    descriptor = os.open(home, flags)
+    try:
+        descriptor = os.open(home, flags)
+    except OSError:
+        raise SubscriptionCredentialError("provider home is unavailable") from None
     try:
         if (
             stat.S_ISLNK(info.st_mode)
