@@ -10,6 +10,10 @@ import uuid
 from pathlib import Path
 from typing import Sequence
 
+_RELEASE_ROOT = Path(__file__).resolve().parents[1]
+if str(_RELEASE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_RELEASE_ROOT))
+
 from control_plane.executive_privileged_action import REQUEST_SCHEMA, validate_request
 
 

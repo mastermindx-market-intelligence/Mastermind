@@ -1570,3 +1570,68 @@ def test_installer_renders_every_control_socket_path(tmp_path):
     }
     assert all(Path(row['SockPathName']).is_absolute() for row in sockets.values())
     assert all('__' not in row['SockPathName'] for row in sockets.values())
+def test_privileged_broker_launchd_template_is_root_socket_activated_and_closed() -> None:
+    path = OPS / "com.mastermind.executive.privileged.plist.template"
+    value = _plist(path)
+    assert value["Label"] == "com.mastermind.executive.privileged"
+    assert value["UserName"] == "root"
+    assert value["GroupName"] == "wheel"
+    assert "RunAtLoad" not in value
+    assert "KeepAlive" not in value
+    assert value["ProcessType"] == "Background"
+    assert value["Umask"] == 0o77
+    assert value["ProgramArguments"] == [
+        "__PYTHON_BINARY__",
+        "-I",
+        "-S",
+        "-B",
+        "__PRIVILEGED_ENTRYPOINT__",
+        "serve",
+        "--config",
+        "__PRIVILEGED_CONFIG__",
+    ]
+    assert not any(
+        item in {"/bin/sh", "/bin/bash", "/usr/bin/env"}
+        for item in value["ProgramArguments"]
+    )
+    assert set(value["Sockets"]) == {"PrivilegedActions"}
+    _assert_private_unix_socket(value["Sockets"]["PrivilegedActions"], mode=0o660)
+    assert value["Sockets"]["PrivilegedActions"]["SockPathOwner"] == 450
+    assert value["Sockets"]["PrivilegedActions"]["SockPathGroup"] == 453
+    assert set(value["EnvironmentVariables"]) == {
+        "HOME", "LANG", "LC_ALL", "NO_COLOR", "PATH", "PYTHONUNBUFFERED", "TZ"
+    }
+    assert not any(
+        token in key.upper()
+        for key in value["EnvironmentVariables"]
+        for token in ("KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL")
+    )
+
+
+def test_installer_privileged_broker_is_explicitly_armed_and_never_edits_sudoers() -> None:
+    text = (OPS / "install.sh").read_text(encoding="utf-8")
+    assert 'PRIVILEGED_LABEL="com.mastermind.executive.privileged"' in text
+    assert 'ARM_PRIVILEGED_BROKER="0"' in text
+    assert '--arm-privileged-broker) ARM_PRIVILEGED_BROKER="1"; shift ;;' in text
+    assert 'PRIVILEGED_CONFIG="$SYSTEM_ROOT/config/privileged-broker.json"' in text
+    assert 'PRIVILEGED_RECEIPT_ROOT="$RUNTIME_ROOT/privileged-actions/receipts"' in text
+    assert 'PRIVILEGED_SOCKET="/var/run/mastermind-executive/privileged.sock"' in text
+    assert '/etc/sudoers' not in text
+    assert 'NOPASSWD' not in text
+    arm = text.index('if [ "$ARM_PRIVILEGED_BROKER" = "1" ]; then')
+    enable = text.index('/bin/launchctl enable "system/$PRIVILEGED_LABEL"', arm)
+    bootstrap = text.index('/bin/launchctl bootstrap system "$PRIVILEGED_PLIST"', enable)
+    live = text.index('PRIVILEGED_BROKER_LIVE="1"', bootstrap)
+    assert arm < enable < bootstrap < live
+    assert '/usr/bin/stat -f' in text[live - 1800 : live]
+
+
+def test_privileged_client_and_broker_entrypoints_are_in_release_manifest_surface() -> None:
+    install = (OPS / "install.sh").read_text(encoding="utf-8")
+    for relative in (
+        "scripts/executive_os_privileged_broker.py",
+        "scripts/mmx_admin.py",
+        "control_plane/executive_privileged_action.py",
+        "control_plane/executive_privileged_broker.py",
+    ):
+        assert relative in install or "release_manifest.py" in install

@@ -6,8 +6,13 @@ import argparse
 import json
 import os
 import stat
+import sys
 from pathlib import Path
 from typing import Sequence
+
+_RELEASE_ROOT = Path(__file__).resolve().parents[1]
+if str(_RELEASE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_RELEASE_ROOT))
 
 from control_plane.executive_privileged_broker import PrivilegedBrokerConfig, run_broker
 

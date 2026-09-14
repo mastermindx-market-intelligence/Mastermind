@@ -508,8 +508,25 @@ A Homebrew, Conda, or user-owned Python tree does not meet this boundary. The
 installer does not copy or re-sign an ambient runtime because that would turn a
 mutable, pre-check object into production execution authority.
 
+Before the one administrator install, standardize the Chairman-owned interactive
+provider clients so their own confirmation UI cannot become the next autonomy
+blocker. This changes only the reviewed permission keys, creates one
+`.mastermind-backup` before the first mutation, and never prints provider
+credentials:
+
+```bash
+python3 "$SOURCE_REPO/ops/executive_os/provider_autonomy_profile.py" apply \
+  --codex-config "$HOME/.codex/config.toml" \
+  --claude-settings "$HOME/.claude/settings.json"
+python3 "$SOURCE_REPO/ops/executive_os/provider_autonomy_profile.py" verify \
+  --codex-config "$HOME/.codex/config.toml" \
+  --claude-settings "$HOME/.claude/settings.json"
+```
+
 Install with the exact immutable values that the just-completed provisioner
-printed and re-verified:
+printed and re-verified. `--arm-privileged-broker` is the one-time bridge from
+interactive administrator authority to the typed unattended broker; it does not
+grant a passwordless shell or edit sudoers:
 
 ```bash
 PYTHON_RUNTIME_ROOT='/Library/Frameworks/Python.framework/Versions/3.12'
@@ -522,21 +539,28 @@ sudo /bin/bash "$SOURCE_REPO/ops/executive_os/install.sh" \
   --operator-user "$OPERATOR_USER" \
   --python-runtime-root "$PYTHON_RUNTIME_ROOT" \
   --python-binary "$PYTHON_BINARY" \
-  --python-team-identifier "$PYTHON_TEAM_IDENTIFIER"
+  --python-team-identifier "$PYTHON_TEAM_IDENTIFIER" \
+  --arm-privileged-broker
 ```
 
-Installation leaves both LaunchDaemons disabled and stopped. Run the installed
-release's auth helper exactly once to cross the provider-readiness gate:
+Installation still leaves the ordinary Executive control/worker/backup daemons
+disabled and stopped. With the explicit arm flag, only the root privileged
+broker is socket-activated. From this point onward, reviewed host effects use
+the stable non-root client; no administrator password is involved:
 
 ```bash
+MMX_ADMIN='/Library/Application Support/MastermindExecutive/bin/mmx-admin'
 CREDENTIAL_EXPIRES_AT='YYYY-MM-DDTHH:MM:SSZ'
-sudo /bin/bash \
-  "/Library/Application Support/MastermindExecutive/releases/$MERGE_SHA/ops/executive_os/provision-worker-auth.sh" \
-  --verify-ready \
+"$MMX_ADMIN" executive.worker_auth.verify_ready \
+  --request-id initial-company-readiness \
   --expected-credential-kind service-account \
   --workspace-binding-class company-workspace-admin-attested \
   --credential-expires-at "$CREDENTIAL_EXPIRES_AT"
 ```
+
+A repeated request with the same id and identical content returns the stored
+receipt without re-executing. The same id with changed content refuses, and a
+stale in-flight marker returns `EFFECT_UNKNOWN` rather than retrying blindly.
 
 ### Three isolated Personal Pro readiness slots
 
