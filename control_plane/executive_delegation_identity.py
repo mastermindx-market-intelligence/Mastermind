@@ -135,6 +135,7 @@ def _validate_orchestration_child(job: Job) -> None:
     if job.orchestration_role == _ROOT_ROLE:
         if (
             job.job_id != job.root_job_id
+            or job.parent_job_id is not None
             or isinstance(job.depth, bool)
             or not isinstance(job.depth, int)
             or job.depth != 0

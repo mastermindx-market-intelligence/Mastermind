@@ -130,6 +130,15 @@ def _replace_provenance(job: Job, **updates: object) -> Job:
     )
 
 
+def _parented_aggregation_job(depth: int) -> Job:
+    job = dataclasses.replace(
+        _job(job_id="JOB-001", role="aggregation"),
+        parent_job_id="JOB-002",
+        depth=depth,
+    )
+    return _replace_provenance(job, parent_job_id=job.parent_job_id)
+
+
 def _remove_provenance_key(job: Job, key: str) -> Job:
     provenance = dict(job.orchestration_provenance or {})
     provenance.pop(key)
@@ -232,16 +241,11 @@ def test_canonical_aggregation_root_projects_to_stable_company_identity() -> Non
     "invalid_job",
     [
         pytest.param(
-            lambda: dataclasses.replace(
-                _job(job_id="JOB-001", role="aggregation"), depth=1
-            ),
-            id="aggregation-depth-one",
+            lambda: _parented_aggregation_job(depth=1),
+            id="aggregation-depth-1-root",
         ),
         pytest.param(
-            lambda: dataclasses.replace(
-                _job(job_id="JOB-001", role="aggregation"),
-                parent_job_id="JOB-001",
-            ),
+            lambda: _parented_aggregation_job(depth=0),
             id="aggregation-parented-root",
         ),
         pytest.param(
