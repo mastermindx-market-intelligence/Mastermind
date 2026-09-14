@@ -80,6 +80,8 @@ class SubscriptionHarnessBindingsTest(unittest.TestCase):
             document=self.catalog,
             profiles_document=self.profiles,
         )
+        self.assertEqual(binding.harness_id, "codex-cli")
+        self.assertEqual(binding.adapter_id, "codex-cli")
         descriptor = adapter_descriptor(binding.adapter_id)
         self.assertTrue(descriptor.implemented)
         self.assertEqual(binding.provider, ALIBABA_TOKEN_PLAN.provider_alias)
@@ -121,11 +123,42 @@ class SubscriptionHarnessBindingsTest(unittest.TestCase):
         ):
             validate_bindings(mutated, profiles_document=self.profiles)
 
+    def test_mixed_case_codex_cli_identity_agrees_and_normalizes(self) -> None:
+        mutated = copy.deepcopy(self.raw)
+        row = mutated["bindings"]["alibaba-token-plan-personal.codex-responses"]
+        row["harness_id"] = "Codex-CLI"
+        row["adapter_id"] = "codex-cli"
+        validate_bindings(mutated, profiles_document=self.profiles)
+        binding = get_binding(
+            "alibaba-token-plan-personal.codex-responses",
+            document=mutated,
+            profiles_document=self.profiles,
+        )
+        self.assertEqual(binding.harness_id, "codex-cli")
+        self.assertEqual(binding.adapter_id, "codex-cli")
+
+    def test_cased_codex_identity_disagreement_is_rejected(self) -> None:
+        mutated = copy.deepcopy(self.raw)
+        row = mutated["bindings"]["alibaba-token-plan-personal.codex-responses"]
+        row["harness_id"] = "CODEX-CLI"
+        row["adapter_id"] = "openai-compatible-coding-tool"
+        with self.assertRaisesRegex(
+            HarnessBindingError, "codex harness identity disagrees"
+        ):
+            validate_bindings(mutated, profiles_document=self.profiles)
+
+        row["harness_id"] = "openai-compatible-coding-tool"
+        row["adapter_id"] = "CODEX-CLI"
+        with self.assertRaisesRegex(
+            HarnessBindingError, "codex harness identity disagrees"
+        ):
+            validate_bindings(mutated, profiles_document=self.profiles)
+
     def test_cased_codex_cli_openai_chat_binding_is_refused(self) -> None:
         mutated = copy.deepcopy(self.raw)
         row = mutated["bindings"]["alibaba-token-plan-personal.codex-responses"]
         row["harness_id"] = "Codex-cli"
-        row["adapter_id"] = "Codex-cli"
+        row["adapter_id"] = "CODEX-CLI"
         row["protocol"] = "openai-chat"
         with self.assertRaisesRegex(
             HarnessBindingError, "not a reviewed Codex Responses lane"
@@ -136,7 +169,7 @@ class SubscriptionHarnessBindingsTest(unittest.TestCase):
         mutated = copy.deepcopy(self.raw)
         row = mutated["bindings"]["alibaba-token-plan-personal.codex-responses"]
         row["harness_id"] = "Codex-cli"
-        row["adapter_id"] = "Codex-cli"
+        row["adapter_id"] = "CODEX-CLI"
         row["implementation_state"] = "SPEC_ONLY"
         with self.assertRaisesRegex(
             HarnessBindingError, "not a reviewed Codex Responses lane"
@@ -193,6 +226,13 @@ class SubscriptionHarnessBindingsTest(unittest.TestCase):
         row = mutated["bindings"]["minimax-token-plan.claude-code-anthropic"]
         row["provider"] = "alibaba"
         with self.assertRaisesRegex(HarnessBindingError, "provider disagrees"):
+            validate_bindings(mutated, profiles_document=self.profiles)
+
+    def test_extra_binding_key_is_rejected(self) -> None:
+        mutated = copy.deepcopy(self.raw)
+        row = mutated["bindings"]["alibaba-token-plan-personal.codex-responses"]
+        row["realm_id"] = "minimax-token-plan"
+        with self.assertRaisesRegex(HarnessBindingError, "has invalid fields"):
             validate_bindings(mutated, profiles_document=self.profiles)
 
     def test_credential_bearing_endpoint_is_rejected(self) -> None:

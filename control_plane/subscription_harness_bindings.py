@@ -31,6 +31,20 @@ DEFAULT_BINDINGS_PATH = (
     / "subscription_harness_bindings.v1.json"
 )
 _ALLOWED_STATES = {"SPEC_ONLY", "BUILT_NOT_PROVEN", "PROVEN_LIVE"}
+_REQUIRED_KEYS = frozenset(
+    {
+        "profile_id",
+        "provider",
+        "harness_id",
+        "adapter_id",
+        "protocol",
+        "endpoint",
+        "model_classes",
+        "implementation_state",
+        "autonomous_allowed",
+        "activation_gates",
+    }
+)
 _REQUIRED_GATES = (
     "adapter_implemented",
     "provider_realm_enrolled",    "capacity_known",
@@ -76,7 +90,7 @@ def _identifier(value: Any, label: str) -> str:
     allowed = set("abcdefghijklmnopqrstuvwxyz0123456789-_.")
     if any(ch not in allowed for ch in value.lower()):
         raise HarnessBindingError(f"invalid {label}: {value!r}")
-    return value
+    return value.lower()
 
 
 def _safe_https(value: Any) -> str:
@@ -141,6 +155,8 @@ def validate_bindings(
         _identifier(binding_id, "binding id")
         if not isinstance(row, Mapping):
             raise HarnessBindingError(f"binding {binding_id!r} must be a mapping")
+        if set(row) != _REQUIRED_KEYS:
+            raise HarnessBindingError(f"binding {binding_id!r} has invalid fields")
         profile_id = _identifier(row.get("profile_id"), "profile id")
         profile = get_profile(profile_id, document=profiles)
         provider = _identifier(row.get("provider"), "provider")
@@ -237,12 +253,14 @@ def get_binding(
         raise HarnessBindingError(f"unknown harness binding {binding_id!r}")
     profile = get_profile(row["profile_id"], document=_profiles(profiles_document))
     effective_base_url = _effective_base_url(row, profile)
+    harness_id = _identifier(row["harness_id"], "harness id")
+    adapter_id = _identifier(row["adapter_id"], "adapter id")
     return SubscriptionHarnessBinding(
         binding_id=binding_id,
         profile_id=row["profile_id"],
         provider=row["provider"],
-        harness_id=row["harness_id"],
-        adapter_id=row["adapter_id"],
+        harness_id=harness_id,
+        adapter_id=adapter_id,
         protocol=row["protocol"],
         effective_base_url=effective_base_url,
         model_classes=tuple(row["model_classes"]),
