@@ -189,6 +189,22 @@ class Harness:
         os.close(self.store_fd)
 
 
+def _is_recipe_child_argv(
+    harness: Harness, argv: object, recipe_id: str
+) -> bool:
+    return (
+        isinstance(argv, (list, tuple))
+        and len(argv) >= 4
+        and list(argv[:4])
+        == [
+            harness.python,
+            "-I",
+            "-S",
+            os.path.join(RECIPE_ROOT, f"{recipe_id}.py"),
+        ]
+    )
+
+
 @pytest.mark.parametrize(
     "recipe_id,exit_code,first_line,stderr",
     [
@@ -379,6 +395,26 @@ def test_prepare_rejects_recipe_or_launch_overrides(tmp_path: Path, arguments) -
         harness.close()
 
 
+def test_recipe_launch_classification_excludes_linux_process_observer(
+    tmp_path: Path,
+) -> None:
+    harness = Harness(tmp_path)
+    try:
+        recipe_argv = [
+            harness.python,
+            "-I",
+            "-S",
+            os.path.join(RECIPE_ROOT, "canary_checksum.py"),
+        ]
+        observer_argv = ["/bin/ps", "-o", "lstart=,uid=,gid=", "-p", "85753"]
+        assert _is_recipe_child_argv(harness, recipe_argv, "canary_checksum")
+        assert not _is_recipe_child_argv(
+            harness, observer_argv, "canary_checksum"
+        )
+    finally:
+        harness.close()
+
+
 def test_launch_shape_is_fixed_and_same_ref_spawns_exactly_once(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -387,7 +423,8 @@ def test_launch_shape_is_fixed_and_same_ref_spawns_exactly_once(
     original_popen = command_port.subprocess.Popen
 
     def recording_popen(argv, **kwargs):
-        calls.append((list(argv), dict(kwargs)))
+        if _is_recipe_child_argv(harness, argv, "canary_checksum"):
+            calls.append((list(argv), dict(kwargs)))
         return original_popen(argv, **kwargs)
 
     monkeypatch.setattr(command_port.subprocess, "Popen", recording_popen)
@@ -405,7 +442,12 @@ def test_launch_shape_is_fixed_and_same_ref_spawns_exactly_once(
         assert {item["effect_state"] for item in results} <= {
             "APPLIED", "EFFECT_UNKNOWN"
         }
-        assert any(item["effect_state"] == "APPLIED" for item in results)
+        applied = next(
+            item for item in results if item["effect_state"] == "APPLIED"
+        )
+        assert applied["exit_code"] == 0
+        with pytest.raises(ProcessLookupError):
+            os.kill(applied["process_identity"]["pid"], 0)
         argv, kwargs = calls[0]
         assert argv[:4] == [harness.python, "-I", "-S", os.path.join(RECIPE_ROOT, "canary_checksum.py")]
         assert argv[-2:] == [_sha(harness.target.read_bytes()), "canary.txt"]
@@ -687,8 +729,10 @@ def test_timed_out_run_does_not_probe_evidence_on_event_loop_or_replay(
 
     def recording_popen(*args, **kwargs):
         nonlocal popen_calls
-        popen_calls += 1
-        launched.set()
+        argv = args[0] if args else kwargs.get("args")
+        if _is_recipe_child_argv(harness, argv, "canary_checksum"):
+            popen_calls += 1
+            launched.set()
         return original_popen(*args, **kwargs)
 
     def thread_guarded_qualified(*args, **kwargs):
@@ -733,6 +777,9 @@ def test_timed_out_run_does_not_probe_evidence_on_event_loop_or_replay(
             harness.reconcile(harness.caller, prepared["action_ref"])
         )
         assert reconciled["effect_state"] == "APPLIED"
+        assert reconciled["exit_code"] == 0
+        with pytest.raises(ProcessLookupError):
+            os.kill(reconciled["process_identity"]["pid"], 0)
         assert popen_calls == 1
     finally:
         harness.close()
@@ -898,7 +945,10 @@ def test_barrier_closed_then_raise_is_sticky_and_never_retried(
 
     def wrapped_popen(*args, **kwargs):
         process = original_popen(*args, **kwargs)
-        process.stdin = ClosedThenRaisedStdin(process.stdin)
+        argv = args[0] if args else kwargs.get("args")
+        if _is_recipe_child_argv(harness, argv, "canary_checksum"):
+            assert process.stdin is not None
+            process.stdin = ClosedThenRaisedStdin(process.stdin)
         return process
 
     monkeypatch.setattr(command_port.subprocess, "Popen", wrapped_popen)
