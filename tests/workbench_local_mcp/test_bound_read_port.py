@@ -178,6 +178,55 @@ class BoundReadPortTests(unittest.TestCase):
         self.assertFalse(refused["ok"])
         self.assertEqual(self._error_code(refused), "PROJECT_READ_REFUSED")
 
+    def test_cleanup_uncertainty_is_sticky_and_forwarded_once(self) -> None:
+        callbacks: list[str] = []
+        port = create_bound_read_port(
+            "action-project",
+            PROFILE_PRO_READ_PREPARE,
+            ("README.md",),
+            self.resolve_scope,
+            lambda: NOW_MS,
+            on_cleanup_uncertain=lambda: callbacks.append("persisted"),
+        )
+        original_close = os.close
+        close_attempts: list[int] = []
+
+        def close_first_then_fail(descriptor: int) -> None:
+            close_attempts.append(descriptor)
+            original_close(descriptor)
+            if len(close_attempts) == 1:
+                raise OSError("PRIVATE_CLOSE_DETAIL")
+
+        with mock.patch.object(
+            adapter.os, "close", side_effect=close_first_then_fail
+        ):
+            first = port.call(
+                "read_project_file", {"relative_path": "README.md"}
+            )
+        self.assertFalse(first["ok"])
+        self.assertEqual(self._error_code(first), "PROJECT_CLEANUP_UNCERTAIN")
+        self.assertEqual(callbacks, ["persisted"])
+        attempts_after_read = list(close_attempts)
+
+        for name, arguments in (
+            ("workspace_manifest", {}),
+            ("preview_project_command", {"recipe": "git_diff_check"}),
+            ("read_project_file", {"relative_path": "README.md"}),
+        ):
+            with self.subTest(tool=name):
+                refused = port.call(name, arguments)
+                self.assertFalse(refused["ok"])
+                self.assertEqual(
+                    self._error_code(refused), "PROJECT_CLEANUP_UNCERTAIN"
+                )
+        self.assertEqual(callbacks, ["persisted"])
+        self.assertEqual(close_attempts, attempts_after_read)
+        with self.assertRaisesRegex(
+            LocalProfileError, "^PROJECT_CLEANUP_UNCERTAIN$"
+        ):
+            port.close()
+        os.fstat(self.root_fd)
+
     def test_tool_arguments_cannot_supply_scope_profile_caller_or_root(self) -> None:
         attempts = (
             ("workspace_manifest", {"profile": "other"}),

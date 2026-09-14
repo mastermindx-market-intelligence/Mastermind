@@ -74,15 +74,33 @@ class _ReadOperations:
         allowed_paths: tuple[str, ...],
         resolve_scope: Callable[[], ReadScope],
         clock_ms: Callable[[], int],
+        on_cleanup_uncertain: Callable[[], None] | None = None,
     ) -> None:
         self._project_ref = project_ref
         self._profile = profile
         self._allowed_paths = allowed_paths
         self._resolve_scope = resolve_scope
         self._clock_ms = clock_ms
+        self._on_cleanup_uncertain = on_cleanup_uncertain
+        self._cleanup_uncertainty: LocalProfileError | None = None
         self._port_closed = False
 
+    def _record_cleanup_uncertainty(self) -> None:
+        if self._cleanup_uncertainty is not None:
+            return
+        self._cleanup_uncertainty = LocalProfileError("PROJECT_CLEANUP_UNCERTAIN")
+        if self._on_cleanup_uncertain is not None:
+            try:
+                self._on_cleanup_uncertain()
+            except Exception:
+                pass
+
+    def _raise_if_cleanup_uncertain(self) -> None:
+        if self._cleanup_uncertainty is not None:
+            raise self._cleanup_uncertainty
+
     def _scope(self) -> ReadScope:
+        self._raise_if_cleanup_uncertain()
         if self._port_closed:
             raise LocalProfileError("PROJECT_READ_REFUSED")
         try:
@@ -145,6 +163,7 @@ class _ReadOperations:
         """Revoke this local port without assuming ownership of a descriptor."""
 
         self._port_closed = True
+        self._raise_if_cleanup_uncertain()
 
     def _result(self, tool: str, data: dict[str, Any]) -> dict[str, Any]:
         payload = {
@@ -192,6 +211,7 @@ class _ReadOperations:
         if name not in TOOL_NAMES:
             return self._error("unknown", "TOOL_NOT_AVAILABLE")
         try:
+            self._raise_if_cleanup_uncertain()
             request = self._snapshot_arguments(arguments)
             scope = self._scope()
             if name == "workspace_manifest":
@@ -253,8 +273,16 @@ class _ReadOperations:
         if "expected_sha256" in request:
             selected["expected_sha256"] = request["expected_sha256"]
         try:
-            return observe_file(selected, self._scope, clock_ms=self._clock_ms)
+            return observe_file(
+                selected,
+                self._scope,
+                clock_ms=self._clock_ms,
+                on_cleanup_uncertain=self._record_cleanup_uncertainty,
+            )
         except ReadRefusal as error:
+            if error.code == "CLEANUP_UNCERTAIN":
+                self._record_cleanup_uncertainty()
+                raise self._cleanup_uncertainty from None
             if error.code == "PREIMAGE_MISMATCH":
                 raise LocalProfileError("PREIMAGE_MISMATCH") from None
             if error.code in {
@@ -411,7 +439,7 @@ class LocalWorkbenchGateway(_ReadOperations):
             canonical_json({"fingerprint": digest, "started_at_ns": time.time_ns()})
         ).hexdigest()
         self._closed = False
-        self._close_uncertainty: LocalProfileError | None = None
+        self._root_close_attempted = False
         super().__init__(
             project_ref=config.project_ref,
             profile=config.profile,
@@ -476,18 +504,20 @@ class LocalWorkbenchGateway(_ReadOperations):
 
     def close(self) -> None:
         if self._closed:
+            self._raise_if_cleanup_uncertain()
             return
-        if self._close_uncertainty is not None:
-            raise self._close_uncertainty
-        uncertainty = LocalProfileError("PROJECT_CLEANUP_UNCERTAIN")
-        self._close_uncertainty = uncertainty
+        if self._root_close_attempted:
+            self._record_cleanup_uncertainty()
+            self._raise_if_cleanup_uncertain()
+        self._root_close_attempted = True
         self._port_closed = True
         try:
             os.close(self._project.fd)
         except OSError as error:
-            raise uncertainty from error
+            self._record_cleanup_uncertainty()
+            raise self._cleanup_uncertainty from error
         self._closed = True
-        self._close_uncertainty = None
+        self._raise_if_cleanup_uncertain()
 
     def __enter__(self) -> "LocalWorkbenchGateway":
         return self
@@ -537,6 +567,7 @@ class BoundWorkbenchReadPort(_ReadOperations):
         allowed_paths: tuple[str, ...],
         resolve_scope: Callable[[], ReadScope],
         clock_ms: Callable[[], int],
+        on_cleanup_uncertain: Callable[[], None] | None = None,
     ) -> None:
         if (
             type(project_ref) is not str
@@ -548,6 +579,10 @@ class BoundWorkbenchReadPort(_ReadOperations):
             or any(not _valid_bound_path(path) for path in allowed_paths)
             or not callable(resolve_scope)
             or not callable(clock_ms)
+            or (
+                on_cleanup_uncertain is not None
+                and not callable(on_cleanup_uncertain)
+            )
         ):
             raise LocalProfileError("CONFIGURATION_REFUSED")
         super().__init__(
@@ -556,6 +591,7 @@ class BoundWorkbenchReadPort(_ReadOperations):
             allowed_paths=allowed_paths,
             resolve_scope=resolve_scope,
             clock_ms=clock_ms,
+            on_cleanup_uncertain=on_cleanup_uncertain,
         )
 
 
@@ -590,6 +626,8 @@ def create_bound_read_port(
     allowed_paths: tuple[str, ...],
     resolve_scope: Callable[[], ReadScope],
     clock_ms: Callable[[], int],
+    *,
+    on_cleanup_uncertain: Callable[[], None] | None = None,
 ) -> BoundWorkbenchReadPort:
     """Bind pure operations to a current external scope without taking ownership."""
 
@@ -599,4 +637,5 @@ def create_bound_read_port(
         allowed_paths=allowed_paths,
         resolve_scope=resolve_scope,
         clock_ms=clock_ms,
+        on_cleanup_uncertain=on_cleanup_uncertain,
     )

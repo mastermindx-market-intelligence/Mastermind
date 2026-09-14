@@ -394,7 +394,7 @@ class LocalWorkbenchProfileTests(unittest.TestCase):
             self.assertEqual(close_attempts, [descriptor])
             os.fstat(descriptor)
             with self.assertRaisesRegex(
-                LocalProfileError, "^PROJECT_READ_REFUSED$"
+                LocalProfileError, "^PROJECT_CLEANUP_UNCERTAIN$"
             ):
                 other._scope()
         finally:
@@ -423,6 +423,47 @@ class LocalWorkbenchProfileTests(unittest.TestCase):
         self.assertEqual(close_attempts, [descriptor])
         with self.assertRaises(OSError):
             os.fstat(descriptor)
+
+    def test_read_cleanup_uncertainty_still_closes_owned_root_once(self) -> None:
+        other = LocalWorkbenchGateway.open(self.config)
+        descriptor = other._project.fd
+        original_close = os.close
+        close_attempts: list[int] = []
+
+        def close_first_then_fail(selected: int) -> None:
+            close_attempts.append(selected)
+            original_close(selected)
+            if len(close_attempts) == 1:
+                raise OSError("PRIVATE_CLOSE_DETAIL")
+
+        try:
+            with mock.patch.object(
+                profile_schemas.os, "close", side_effect=close_first_then_fail
+            ):
+                result = other.call(
+                    "read_project_file", {"relative_path": "README.md"}
+                )
+                self.assertFalse(result["ok"])
+                self.assertEqual(
+                    result["error"]["code"], "PROJECT_CLEANUP_UNCERTAIN"
+                )
+                os.fstat(descriptor)
+                with self.assertRaises(LocalProfileError) as first_close:
+                    other.close()
+                with self.assertRaises(LocalProfileError) as repeated_close:
+                    other.close()
+            self.assertEqual(first_close.exception.code, "PROJECT_CLEANUP_UNCERTAIN")
+            self.assertIs(repeated_close.exception, first_close.exception)
+            self.assertEqual(close_attempts.count(descriptor), 1)
+            with self.assertRaises(OSError):
+                os.fstat(descriptor)
+        finally:
+            try:
+                os.fstat(descriptor)
+            except OSError:
+                pass
+            else:
+                original_close(descriptor)
 
     def test_expired_profile_fails_closed(self) -> None:
         expired = parse_config({**self.payload, "lease_expires_at_ms": int(time.time() * 1000) - 1})
