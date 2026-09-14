@@ -6,6 +6,9 @@ import importlib
 import pytest
 
 from control_plane.executive_orchestration_principal import digest
+from control_plane.executive_delegation_identity import (
+    ExecutiveDelegationIdentityError,
+)
 from control_plane.executive_runtime import Job, JobStatus
 
 
@@ -28,6 +31,36 @@ def _job(
         "role": role,
     }
     lineage: dict[str, object] = {}
+    if role == "aggregation":
+        parent_job_id = None
+        root_job_id = job_id
+        provenance.update(
+            creator="ceo_intent",
+            parent_job_id=parent_job_id,
+            root_job_id=root_job_id,
+        )
+        return Job(
+            job_id=job_id,
+            objective="Aggregate the bounded Executive child results.",
+            department="executive-infrastructure",
+            priority=9,
+            status=JobStatus.QUEUED,
+            assigned_worker_id=None,
+            assigned_quota_class=None,
+            authority_level="A0",
+            branch=None,
+            worktree=None,
+            checkpoint=None,
+            result=None,
+            created_at="2026-08-29T00:00:00Z",
+            updated_at="2026-08-29T00:00:00Z",
+            parent_job_id=parent_job_id,
+            root_job_id=root_job_id,
+            depth=0,
+            orchestration_role=role,
+            orchestration_provenance=provenance,
+            orchestration_provenance_digest=digest(provenance),
+        )
     if role in {"work", "review", "repair"}:
         lineage.update(
             plan_attempt_id="ATT-001",
@@ -95,6 +128,15 @@ def _replace_provenance(job: Job, **updates: object) -> Job:
         orchestration_provenance=provenance,
         orchestration_provenance_digest=digest(provenance),
     )
+
+
+def _parented_aggregation_job(depth: int) -> Job:
+    job = dataclasses.replace(
+        _job(job_id="JOB-001", role="aggregation"),
+        parent_job_id="JOB-002",
+        depth=depth,
+    )
+    return _replace_provenance(job, parent_job_id=job.parent_job_id)
 
 
 def _remove_provenance_key(job: Job, key: str) -> Job:
@@ -182,6 +224,49 @@ def test_projected_identifiers_are_valid_dialogue_v2_parent_identity() -> None:
     assert parent["session_ref"] == "asd-session-exec-job-123"
 
 
+def test_canonical_aggregation_root_projects_to_stable_company_identity() -> None:
+    identity = _identity_module().derive_delegation_identity(
+        _job(job_id="JOB-001", role="aggregation")
+    )
+
+    assert dataclasses.asdict(identity) == {
+        "job_id": "JOB-001",
+        "root_job_id": "JOB-001",
+        "operation_key": "exec-job-001",
+        "session_ref": "asd-session-exec-job-001",
+    }
+
+
+@pytest.mark.parametrize(
+    "invalid_job",
+    [
+        pytest.param(
+            lambda: _parented_aggregation_job(depth=1),
+            id="aggregation-depth-1-root",
+        ),
+        pytest.param(
+            lambda: _parented_aggregation_job(depth=0),
+            id="aggregation-parented-root",
+        ),
+        pytest.param(
+            lambda: _replace_provenance(
+                _job(job_id="JOB-001", role="aggregation"), creator="coo_cycle"
+            ),
+            id="aggregation-wrong-creator",
+        ),
+        pytest.param(
+            lambda: dataclasses.replace(
+                _job(job_id="JOB-001", role="aggregation"), plan_digest="b" * 64
+            ),
+            id="aggregation-malformed-child-lineage",
+        ),
+    ],
+)
+def test_malformed_aggregation_root_is_refused(invalid_job) -> None:
+    with pytest.raises(ExecutiveDelegationIdentityError):
+        _identity_module().derive_delegation_identity(invalid_job())
+
+
 def test_runtime_round_boundaries_remain_projectable() -> None:
     module = _identity_module()
 
@@ -196,7 +281,6 @@ def test_runtime_round_boundaries_remain_projectable() -> None:
     "invalid_job",
     [
         pytest.param(lambda: _job(role=None), id="legacy-role-null"),
-        pytest.param(lambda: _job(role="aggregation"), id="aggregation-root"),
         pytest.param(lambda: _job(role="foreign"), id="unknown-role"),
         pytest.param(lambda: _job(parent_job_id=None), id="missing-parent"),
         pytest.param(

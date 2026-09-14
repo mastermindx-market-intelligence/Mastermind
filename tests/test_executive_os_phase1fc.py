@@ -60,7 +60,10 @@ from control_plane.operator_harness_contract import (
     TurnStartObservation,
     WorkspaceIdentity,
 )
-from scripts.executive_os_phase1fc_acceptance import run_acceptance
+from scripts.executive_os_phase1fc_acceptance import (
+    run_acceptance,
+    run_web_ceo_offline_delivery_acceptance,
+)
 
 
 def _v2_intent(**overrides):
@@ -2935,3 +2938,19 @@ def test_offline_acceptance_receipt_is_deterministic_and_proves_tx9_quarantine()
         "host_install_or_migration_calls": 0,
         "production_armed": False,
     }
+
+
+def test_web_ceo_offline_delivery_reject_repair_re_review_reaches_handoff_without_sol_turn(
+    tmp_path: Path,
+) -> None:
+    receipt = run_web_ceo_offline_delivery_acceptance(tmp_path)
+    assert receipt["acceptance_id"] == "WEB-CEO-OFFLINE-DELIVERY-V1"
+    assert receipt["web_sol_turns_between_admission_and_handoff"] == 0
+    assert receipt["review_verdicts"] == ["reject", "approve"]
+    assert receipt["repair_rounds"] == [1]
+    assert receipt["aggregation_handoff_ready"] is True
+    assert receipt["production_accepted"] is False
+    assert receipt["manual_continue_edges"] == 0
+    assert receipt["sol_final_acceptance_pending"] is True
+    assert receipt["production_deploy_authority"] is False
+    assert receipt["new_control_planes_created"] == 0
