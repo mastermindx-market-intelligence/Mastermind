@@ -1,4 +1,18 @@
-"""In-memory, bounded projection of explicitly visible App Server turn items."""
+"""In-memory, bounded hot-window projection of explicitly visible turn items.
+
+``VisibleItem.source_item_id`` is the stable identity of the source item and
+``source_sequence`` carries its display position. ``publication_sequence`` is
+instead a monotonically advancing change order: a partial-to-completed update is
+an UPSERT of that same source item and emits another publication sequence to an
+existing reader. A normal short page advances the returned cursor until more
+retained items are available; only a retained gap or publication-epoch change
+reports ``RESYNC_REQUIRED`` (an actual cursor reset).
+
+Viewer grants are internal, projection-scoped reader handles. They are not user
+or authentication tokens and confer no permission to send anything to the
+provider. When the last viewer for a turn is revoked, its bounded in-memory
+hot-window state is discarded; it is not history.
+"""
 from __future__ import annotations
 
 import base64

@@ -292,6 +292,17 @@ class AppServerStopProof:
     termination_outcome: str
 
 
+@dataclass(frozen=True, slots=True)
+class ObserverFault:
+    """Bounded metadata for an observer-local extraction failure."""
+
+    operation: str
+    exception_type: str
+
+
+MAX_OBSERVER_FAULTS = 16
+
+
 class AppServerClient:
     """Line-delimited JSON-RPC client.  Codex omits the jsonrpc header on the wire."""
 
@@ -326,6 +337,7 @@ class AppServerClient:
         self._private_pgid: int | None = None
         self.last_termination_outcome: str | None = None
         self.visible_projection = None
+        self.observer_faults: tuple[ObserverFault, ...] = ()
 
     def start(self) -> None:
         self.proc = subprocess.Popen(
@@ -383,12 +395,18 @@ class AppServerClient:
             if isinstance(payload, dict):
                 prebind_request_id: int | None = None
                 if self.visible_projection is not None:
-                    prebind_request_id = self.visible_projection.active_prebind_request_id()
-                    self.visible_projection.prebind_frame(
-                        prebind_request_id,
-                        method=payload.get("method"),
-                        params=payload.get("params"),
-                    )
+                    try:
+                        prebind_request_id = (
+                            self.visible_projection.active_prebind_request_id()
+                        )
+                        self.visible_projection.prebind_frame(
+                            prebind_request_id,
+                            method=payload.get("method"),
+                            params=payload.get("params"),
+                        )
+                    except Exception as exc:
+                        prebind_request_id = None
+                        self._record_observer_fault("prebind_frame", exc)
                 with self._notification_condition:
                     response_id = payload.get("id")
                     raw_target = (
@@ -430,10 +448,13 @@ class AppServerClient:
                         self.notifications.append(observed)
                         self._notification_condition.notify_all()
                 if self.visible_projection is not None:
-                    self.visible_projection.publish_demultiplexed(
-                        prebind_request_id,
-                        payload=payload,
-                    )
+                    try:
+                        self.visible_projection.publish_demultiplexed(
+                            prebind_request_id,
+                            payload=payload,
+                        )
+                    except Exception as exc:
+                        self._record_observer_fault("publish_demultiplexed", exc)
         with self._notification_condition:
             self._transport_closed = True
             for target in self._responses.values():
@@ -441,6 +462,10 @@ class AppServerClient:
             for target in self._raw_responses.values():
                 target.put(None)
             self._notification_condition.notify_all()
+
+    def _record_observer_fault(self, operation: str, exc: Exception) -> None:
+        fault = ObserverFault(operation, type(exc).__name__)
+        self.observer_faults = (*self.observer_faults, fault)[-MAX_OBSERVER_FAULTS:]
 
     def _compromise_transport(self) -> None:
         """Fail every waiter without retaining or echoing a compromised frame."""
