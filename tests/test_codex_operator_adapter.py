@@ -67,6 +67,8 @@ from scripts.ohf.fixtures import OHF_PROBE_MCP_SERVER
 from scripts.ohf.laboratory import AppServerClient, PrivateRawTurnPage
 from scripts.ohf.redaction import REDACTED
 
+from control_plane.visible_turn_projection import ProjectionError
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 _CREATED_ADAPTERS: list[CodexOperatorAdapter] = []
 
@@ -697,9 +699,55 @@ def test_lc1_gate_held_visible_turn_projection(tmp_path: Path) -> None:
     projection = harness.adapter.visible_turn_projection
     key = projection.check_grant(grant)
     assert key is not None
-    nonterminal = projection.read(
-        key, reader_grant=grant, cursor=None, max_items=64
-    )
+    turn_deadline = time.monotonic() + 5.0
+    while True:
+        try:
+            nonterminal = projection.read(
+                key, reader_grant=grant, cursor=None, max_items=64
+            )
+        except ProjectionError:
+            if time.monotonic() >= turn_deadline:
+                raise AssertionError(
+                    "visible turn projection was not bound before the "
+                    "terminal gate was held"
+                ) from None
+            time.sleep(0.01)
+            continue
+        native_notifications = harness.adapter._state(
+            harness.generation
+        ).client.drain_notifications()
+        native_visible_notifications = [
+            notification
+            for notification in native_notifications
+            if notification.get("method")
+            in {"item/updated", "item/completed", "turn/completed"}
+        ]
+        harness.adapter._ingest_turn_notifications(
+            harness.adapter._state(harness.generation),
+            turn,
+            native_visible_notifications,
+        )
+        visible_deadline = time.monotonic() + 5.0
+        while True:
+            nonterminal = projection.read(
+                key, reader_grant=grant, cursor=None, max_items=64
+            )
+            assert nonterminal.terminal is False
+            if [item.text for item in nonterminal.items] == [
+                "LC1 partial one",
+                "LC1 final one",
+                "LC1 partial two",
+                "LC1 final two",
+            ]:
+                break
+            assert time.monotonic() < visible_deadline, (
+                "visible updates were not published while the terminal gate was held: "
+                f"{[item.text for item in nonterminal.items]}; "
+                f"gate_held={(tmp_path / 'gate').exists()}, "
+                f"controller_alive={thread.is_alive()}"
+            )
+            time.sleep(0.01)
+        break
     assert [item.text for item in nonterminal.items] == [
         "LC1 partial one",
         "LC1 final one",
