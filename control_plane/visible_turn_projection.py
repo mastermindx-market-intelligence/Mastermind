@@ -1,0 +1,575 @@
+"""In-memory, bounded projection of explicitly visible App Server turn items."""
+from __future__ import annotations
+
+import base64
+import binascii
+import hashlib
+import json
+import threading
+import time
+import uuid
+from dataclasses import dataclass, field
+from typing import Mapping
+
+
+MAX_ITEMS_PER_TURN = 256
+MAX_ITEM_BYTES = 16_384
+MAX_RETAINED_TURNS = 4
+MAX_RETAINED_TURN_BYTES = 1024 * 1024
+MAX_ENCODED_READ_BYTES = 512 * 1024
+MAX_READ_ITEMS = 64
+MAX_PREBIND_ITEMS = 8
+MAX_PREBIND_BYTES = 64 * 1024
+PREBIND_TTL_SECONDS = 2.0
+MAX_VIEWERS = 2
+
+_ID_BYTES = 18
+_MAX_ID_LENGTH = 256
+_MAX_REASON_LENGTH = 128
+
+
+class ProjectionError(ValueError):
+    """A projection request or input violated the frozen read-model contract."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+@dataclass(frozen=True, slots=True)
+class TurnKey:
+    attempt_id: str
+    session_epoch_id: str
+    process_generation_id: str
+    generation_number: int
+    worker_id: str
+    local_turn_id: str
+    native_turn_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class VisibleItem:
+    source_item_id: str
+    source_sequence: int
+    state: str
+    text: str
+    byte_length: int
+    publication_sequence: int
+
+
+@dataclass(frozen=True, slots=True)
+class GapRecord:
+    from_publication_sequence: int
+    to_publication_sequence: int
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class ReadResult:
+    items: tuple[VisibleItem, ...]
+    next_cursor: str
+    gaps: tuple[GapRecord, ...]
+    terminal: bool
+    publication_epoch: str
+    retained_scope: tuple[str, str]
+    resync_required: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _TurnRecord:
+    projection_id: str
+    publication_epoch: str
+    key: TurnKey
+    items: tuple[VisibleItem, ...]
+    gaps: tuple[GapRecord, ...]
+    terminal: bool
+    retained_bytes: int
+    next_publication_sequence: int
+
+
+@dataclass(frozen=True, slots=True)
+class PrebindItem:
+    source_item_id: str
+    source_sequence: int
+    state: str
+    text: str
+    byte_length: int
+
+
+@dataclass
+class _Prebind:
+    request_id: int
+    armed_at: float
+    items: list[PrebindItem] = field(default_factory=list)
+    retained_bytes: int = 0
+    gap_from: int = 1
+
+    def record(self, reason: str) -> GapRecord:
+        return GapRecord(self.gap_from, max(self.gap_from, len(self.items)), reason)
+
+
+@dataclass(frozen=True, slots=True)
+class _Grant:
+    key: TurnKey
+    viewer_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class _Cursor:
+    projection_id: str
+    publication_epoch: str
+    publication_sequence: int
+
+
+def _identity(value: object, name: str) -> str:
+    if not isinstance(value, str) or not value or len(value) > _MAX_ID_LENGTH:
+        raise ProjectionError("TURN_NOT_BOUND", f"{name} is invalid")
+    return value
+
+
+def _reason(value: str) -> str:
+    return value[:_MAX_REASON_LENGTH]
+
+
+def _decode_cursor(value: object) -> _Cursor:
+    if not isinstance(value, str) or not value:
+        raise ProjectionError("CURSOR_STALE", "cursor is missing")
+    try:
+        raw = json.loads(base64.urlsafe_b64decode(value.encode("ascii"), validate=True))
+        projection_id = raw["p"]
+        publication_epoch = raw["e"]
+        publication_sequence = raw["s"]
+    except (ValueError, TypeError, KeyError, UnicodeError, binascii.Error):
+        raise ProjectionError("CURSOR_STALE", "cursor is invalid") from None
+    if (
+        not isinstance(projection_id, str)
+        or not isinstance(publication_epoch, str)
+        or type(publication_sequence) is not int
+        or publication_sequence < 0
+    ):
+        raise ProjectionError("CURSOR_STALE", "cursor fields are invalid")
+    return _Cursor(projection_id, publication_epoch, publication_sequence)
+
+
+def _encode_cursor(record: _TurnRecord, sequence: int) -> str:
+    payload = json.dumps(
+        {
+            "p": record.projection_id,
+            "e": record.publication_epoch,
+            "s": sequence,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return base64.urlsafe_b64encode(payload).decode("ascii")
+
+
+class VisibleTurnProjection:
+    """Thread-safe projection owner; performs no controller or network I/O."""
+
+    def __init__(self, *, clock=time.monotonic) -> None:
+        self._lock = threading.RLock()
+        self._turns: dict[str, _TurnRecord] = {}
+        self._prebind: _Prebind | None = None
+        self._grants: dict[str, _Grant] = {}
+        self._viewers_by_turn: dict[TurnKey, set[str]] = {}
+        self._refusals: list[tuple[TurnKey | None, str, float]] = []
+        self._clock = clock
+
+    def attach(self) -> None:
+        """Compatibility lifecycle hook for an App Server publication owner."""
+
+    def detach(self) -> None:
+        with self._lock:
+            self._prebind = None
+
+    def arm_prebind(self, request_id: int) -> None:
+        with self._lock:
+            self._prebind = _Prebind(request_id, self._clock())
+
+    def prebind(
+        self,
+        request_id: int,
+        *,
+        method: object,
+        params: object,
+        native_turn_id: object = None,
+    ) -> None:
+        with self._lock:
+            buffer = self._prebind
+            if buffer is None or buffer.request_id != request_id:
+                return
+            if (
+                method == "turn/completed"
+                and isinstance(native_turn_id, str)
+                and native_turn_id
+            ):
+                return
+            try:
+                item = _parse_visible_item(method, params)
+            except ProjectionError:
+                buffer.items.append(
+                    PrebindItem("", buffer.gap_from + len(buffer.items), "gap", "", 0)
+                )
+                self._drop_prebind_locked("parser_failure")
+                return
+            if item is None:
+                return
+            if len(buffer.items) >= MAX_PREBIND_ITEMS:
+                self._drop_prebind_locked("prebind_item_overflow")
+                return
+            item_bytes = item.byte_length
+            if buffer.retained_bytes + item_bytes > MAX_PREBIND_BYTES:
+                self._drop_prebind_locked("prebind_byte_overflow")
+                return
+            if self._clock() - buffer.armed_at >= PREBIND_TTL_SECONDS:
+                self._drop_prebind_locked("prebind_expired")
+                return
+            buffer.items.append(item)
+            buffer.retained_bytes += item_bytes
+
+    def drop_prebind(self, reason: str) -> GapRecord | None:
+        with self._lock:
+            return self._drop_prebind_locked(reason)
+
+    def commit_prebind(
+        self,
+        request_id: int,
+        key: TurnKey,
+        *,
+        native_turn_id: str,
+    ) -> GapRecord | None:
+        with self._lock:
+            buffer = self._prebind
+            self._prebind = None
+            if buffer is None:
+                return None
+            if (
+                buffer.request_id != request_id
+                or key.native_turn_id != native_turn_id
+            ):
+                return buffer.record("prebind_identity_mismatch")
+            record = self._create_turn_locked(key)
+            for item in buffer.items:
+                self._append_locked(record, item, gap_on_bounds=False)
+            return None
+
+    def publish(
+        self,
+        key: TurnKey,
+        *,
+        method: object,
+        params: object,
+        native_turn_id: object = None,
+    ) -> None:
+        with self._lock:
+            if not self._viewers_by_turn.get(key):
+                return
+            record = self._turns.get(_identity(key.native_turn_id, "native turn"))
+            if record is None or record.key != key:
+                return
+            if (
+                method == "turn/completed"
+                and isinstance(native_turn_id, str)
+                and native_turn_id == key.native_turn_id
+            ):
+                self._turns[record.key.native_turn_id] = _TurnRecord(
+                    record.projection_id,
+                    record.publication_epoch,
+                    record.key,
+                    record.items,
+                    record.gaps,
+                    True,
+                    record.retained_bytes,
+                    record.next_publication_sequence,
+                )
+                return
+            try:
+                item = _parse_visible_item(method, params)
+                if item is None:
+                    return
+                self._append_locked(record, item, gap_on_bounds=True)
+            except ProjectionError:
+                self._add_gap_locked(record, _reason("parser_failure"))
+
+    def mint_grant(self, key: TurnKey) -> str:
+        with self._lock:
+            existing = self._viewers_by_turn.get(key, set())
+            if len(existing) >= MAX_VIEWERS:
+                raise ProjectionError("OVER_BUDGET", "turn viewer budget is full")
+            grant = str(uuid.uuid4())
+            self._grants[grant] = _Grant(key, grant)
+            existing.add(grant)
+            self._viewers_by_turn[key] = existing
+            self._create_turn_locked(key)
+            return grant
+
+    def revoke_grant(self, reader_grant: str) -> None:
+        with self._lock:
+            grant = self._grants.pop(reader_grant, None)
+            if grant is None:
+                return
+            viewers = self._viewers_by_turn.get(grant.key)
+            if viewers is not None:
+                viewers.discard(reader_grant)
+                if not viewers:
+                    self._viewers_by_turn.pop(grant.key, None)
+                    self._turns.pop(grant.key.native_turn_id, None)
+                    self._prebind = None
+
+    def check_grant(self, reader_grant: object) -> TurnKey | None:
+        if not isinstance(reader_grant, str):
+            return None
+        with self._lock:
+            grant = self._grants.get(reader_grant)
+            return grant.key if grant is not None else None
+
+    def read(
+        self,
+        key: TurnKey,
+        *,
+        reader_grant: object,
+        cursor: object,
+        max_items: object,
+    ) -> ReadResult:
+        grant_key = self.check_grant(reader_grant)
+        if grant_key is None:
+            self._refuse(key, "READER_REVOKED")
+        if grant_key != key:
+            self._refuse(key, "GENERATION_INVALID")
+        if type(max_items) is not int or not 1 <= max_items <= MAX_READ_ITEMS:
+            self._refuse(key, "OVER_BUDGET")
+        decoded = _decode_cursor(cursor) if cursor is not None else None
+        with self._lock:
+            record = self._turns.get(key.native_turn_id)
+            if record is None or record.key != key:
+                self._refuse(key, "TURN_NOT_BOUND")
+            if decoded is not None and decoded.projection_id != record.projection_id:
+                self._refuse(key, "CURSOR_STALE")
+            if decoded is not None and decoded.publication_epoch != record.publication_epoch:
+                self._refuse(key, "RESYNC_REQUIRED")
+            sequence = 0 if decoded is None else decoded.publication_sequence
+            if sequence > record.next_publication_sequence:
+                self._refuse(key, "CURSOR_OUT_OF_RANGE")
+            eligible = [item for item in record.items if item.publication_sequence > sequence]
+            gaps = [
+                gap
+                for gap in record.gaps
+                if gap.to_publication_sequence > sequence
+            ]
+            page = tuple(eligible[:max_items])
+            response_size = sum(len(item.text.encode("utf-8")) for item in page)
+            if response_size > MAX_ENCODED_READ_BYTES:
+                self._refuse(key, "OVER_BUDGET")
+            last = page[-1].publication_sequence if page else sequence
+            return ReadResult(
+                page,
+                _encode_cursor(record, last),
+                tuple(gaps),
+                record.terminal,
+                record.publication_epoch,
+                (record.key.process_generation_id, record.key.native_turn_id),
+                False,
+            )
+
+    def invalidate_generation(self, key: TurnKey, reason: str = "generation_invalid") -> None:
+        with self._lock:
+            self._turns.pop(key.native_turn_id, None)
+            self._viewers_by_turn.pop(key, None)
+            self._prebind = None
+
+    def refusal_receipts(self) -> tuple[tuple[str, str, int], ...]:
+        with self._lock:
+            return tuple(
+                (
+                    receipt_key.to_wire()
+                    if hasattr(receipt_key, "to_wire")
+                    else str(receipt_key),
+                    code,
+                    int(timestamp),
+                )
+                for receipt_key, code, timestamp in self._refusals
+            )
+
+    def _refuse(self, key: TurnKey, code: str) -> None:
+        with self._lock:
+            self._refusals.append((key, code, self._clock()))
+        raise ProjectionError(code, code)
+
+    def _create_turn_locked(self, key: TurnKey) -> _TurnRecord:
+        record = self._turns.get(key.native_turn_id)
+        if record is not None and record.key == key:
+            return record
+        identity_material = json.dumps(
+            {
+                "attempt": key.attempt_id,
+                "epoch": key.session_epoch_id,
+                "generation": key.process_generation_id,
+                "generation_number": key.generation_number,
+                "worker": key.worker_id,
+                "local_turn": key.local_turn_id,
+                "native_turn": key.native_turn_id,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        projection_id = hashlib.sha256(identity_material).hexdigest()
+        publication_epoch = str(uuid.uuid4())
+        record = _TurnRecord(
+            projection_id,
+            publication_epoch,
+            key,
+            (),
+            (),
+            False,
+            0,
+            0,
+        )
+        self._turns[key.native_turn_id] = record
+        while len(self._turns) > MAX_RETAINED_TURNS:
+            self._turns.pop(next(iter(self._turns)), None)
+        return record
+
+    def _append_locked(
+        self,
+        record: _TurnRecord,
+        item: PrebindItem,
+        *,
+        gap_on_bounds: bool,
+    ) -> None:
+        if item.state == "gap":
+            self._add_gap_locked(record, _reason("prebind_dropped"))
+            return
+        if item.byte_length > MAX_ITEM_BYTES:
+            if gap_on_bounds:
+                self._add_gap_locked(record, "item_byte_overflow")
+            return
+        replacement = None
+        if item.state == "completed":
+            replacement = next(
+                (
+                    existing
+                    for existing in record.items
+                    if existing.source_item_id == item.source_item_id
+                    and existing.state == "partial"
+                ),
+                None,
+            )
+        if replacement is not None:
+            updated = VisibleItem(
+                item.source_item_id,
+                item.source_sequence,
+                "completed",
+                item.text,
+                item.byte_length,
+                replacement.publication_sequence,
+            )
+            items = tuple(
+                updated if existing is replacement else existing for existing in record.items
+            )
+            retained = record.retained_bytes - replacement.byte_length + item.byte_length
+            self._turns[record.key.native_turn_id] = _TurnRecord(
+                record.projection_id,
+                record.publication_epoch,
+                record.key,
+                items,
+                record.gaps,
+                record.terminal,
+                retained,
+                record.next_publication_sequence,
+            )
+            return
+        if len(record.items) >= MAX_ITEMS_PER_TURN:
+            if gap_on_bounds:
+                self._add_gap_locked(record, "turn_item_overflow")
+            return
+        sequence = record.next_publication_sequence + 1
+        visible = VisibleItem(
+            item.source_item_id,
+            item.source_sequence,
+            item.state,
+            item.text,
+            item.byte_length,
+            sequence,
+        )
+        retained = record.retained_bytes + item.byte_length
+        while retained > MAX_RETAINED_TURN_BYTES and record.items:
+            oldest = record.items[0]
+            retained -= oldest.byte_length
+            record = self._turns[record.key.native_turn_id] = _TurnRecord(
+                record.projection_id,
+                record.publication_epoch,
+                record.key,
+                record.items[1:],
+                record.gaps,
+                record.terminal,
+                retained,
+                record.next_publication_sequence,
+            )
+            self._add_gap_locked(record, "turn_byte_overflow")
+        record = self._turns[record.key.native_turn_id]
+        self._turns[record.key.native_turn_id] = _TurnRecord(
+            record.projection_id,
+            record.publication_epoch,
+            record.key,
+            (*record.items, visible),
+            record.gaps,
+            record.terminal,
+            record.retained_bytes + item.byte_length,
+            sequence,
+        )
+
+    def _add_gap_locked(self, record: _TurnRecord, reason: str) -> None:
+        from_sequence = record.next_publication_sequence + 1
+        to_sequence = from_sequence
+        self._turns[record.key.native_turn_id] = _TurnRecord(
+            record.projection_id,
+            record.publication_epoch,
+            record.key,
+            record.items,
+            (*record.gaps, GapRecord(from_sequence, to_sequence, _reason(reason))),
+            record.terminal,
+            record.retained_bytes,
+            to_sequence,
+        )
+
+    def _drop_prebind_locked(self, reason: str) -> GapRecord | None:
+        buffer = self._prebind
+        self._prebind = None
+        return buffer.record(_reason(reason)) if buffer is not None else None
+
+
+def _parse_visible_item(method: object, params: object) -> PrebindItem | None:
+    if method not in {"item/updated", "item/completed"} or not isinstance(params, Mapping):
+        return None
+    item = params.get("item")
+    if not isinstance(item, Mapping) or item.get("type") != "agentMessage":
+        return None
+    source_item_id = _identity(item.get("id"), "source item identity")
+    source_sequence = item.get("sequence")
+    text = item.get("text")
+    if (
+        type(source_sequence) is not int
+        or source_sequence < 0
+        or not isinstance(text, str)
+    ):
+        raise ProjectionError("parser_failure", "visible item fields are unsupported")
+    byte_length = len(text.encode("utf-8"))
+    if byte_length > MAX_ITEM_BYTES:
+        raise ProjectionError("parser_failure", "visible item exceeds byte bound")
+    state = "partial" if method == "item/updated" else "completed"
+    return PrebindItem(source_item_id, source_sequence, state, text, byte_length)
+
+
+__all__ = [
+    "GapRecord",
+    "MAX_READ_ITEMS",
+    "MAX_VIEWERS",
+    "PrebindItem",
+    "ProjectionError",
+    "ReadResult",
+    "TurnKey",
+    "VisibleItem",
+    "VisibleTurnProjection",
+]
