@@ -15,6 +15,7 @@ import sys
 import anyio
 import mcp.types as mcp_types
 from mcp.server.stdio import stdio_server
+from mcp.shared.message import SessionMessage
 
 MAX_WIRE_BYTES = 262144
 _PROTOCOL_SCOPE = ContextVar("workbench_stdio_diagnostics", default=False)
@@ -75,8 +76,9 @@ class _ProtocolOutput:
         # SDK output and fixed protocol refusals share this single line writer.
         if len(text.encode("utf-8")) > MAX_WIRE_BYTES:
             logging.getLogger(__name__).warning("WORKBENCH_MCP_OUTPUT_LIMIT")
-            text = ('{"jsonrpc":"2.0","id":null,"error":{"code":-32603,'
-                    '"message":"WORKBENCH_MCP_OUTPUT_LIMIT"}}\n')
+            # All SDK messages pass the typed writer below first. Never emit
+            # an uncorrelated error for an unexpected oversized raw write.
+            raise RuntimeError("WORKBENCH_MCP_OUTPUT_LIMIT")
         async with self._lock:
             await self._output.write(text)
             await self._output.flush()
@@ -84,6 +86,47 @@ class _ProtocolOutput:
     async def flush(self):
         # write already flushes under the same lock.
         return None
+
+
+class _BoundedSessionWriter:
+    """Bound the SDK message while its typed response ID is still available."""
+
+    def __init__(self, stream):
+        self._stream = stream
+
+    async def send(self, message: SessionMessage) -> None:
+        raw = message.message.model_dump_json(by_alias=True, exclude_none=True)
+        if len(raw.encode("utf-8")) + 1 > MAX_WIRE_BYTES:
+            logging.getLogger(__name__).warning("WORKBENCH_MCP_OUTPUT_LIMIT")
+            root = message.message.root
+            request_id = getattr(root, "id", None)
+            if (
+                not isinstance(root, (mcp_types.JSONRPCResponse, mcp_types.JSONRPCError))
+                or type(request_id) not in {int, str}
+                or (type(request_id) is str and len(request_id.encode("utf-8")) > 1024)
+                or (type(request_id) is int and not -(2**63) <= request_id < 2**63)
+            ):
+                raise RuntimeError("WORKBENCH_MCP_OUTPUT_LIMIT")
+            # A closed fixed error completes the ORIGINAL SDK request. The
+            # oversized body and arbitrary/huge IDs are never reflected.
+            message = SessionMessage(mcp_types.JSONRPCMessage(mcp_types.JSONRPCError(
+                jsonrpc="2.0", id=request_id,
+                error=mcp_types.ErrorData(code=-32603, message="WORKBENCH_MCP_OUTPUT_LIMIT"),
+            )))
+        await self._stream.send(message)
+
+    async def aclose(self) -> None:
+        await self._stream.aclose()
+
+    async def __aenter__(self):
+        await self._stream.__aenter__()
+        return self
+
+    async def __aexit__(self, *args):
+        return await self._stream.__aexit__(*args)
+
+    def clone(self):
+        return _BoundedSessionWriter(self._stream.clone())
 
 
 def _validated_protocol_line(line: str) -> str:
@@ -94,7 +137,11 @@ def _validated_protocol_line(line: str) -> str:
         raise ValueError("PROTOCOL_ENVELOPE")
     if "id" in raw:
         request_id = raw["id"]
-        if type(request_id) not in {str, int} or (type(request_id) is str and len(request_id) > 256):
+        if (
+            type(request_id) not in {str, int}
+            or (type(request_id) is str and len(request_id) > 256)
+            or (type(request_id) is int and not -(2**63) <= request_id < 2**63)
+        ):
             raise ValueError("PROTOCOL_ID")
     if "method" not in raw:
         # Responses must reach the SDK's existing response waiters (send_ping,
@@ -170,8 +217,8 @@ async def private_stdio_server():
     source = _ProtocolInput(source_wrapper, output)
     try:
         with _protocol_diagnostics():
-            async with stdio_server(stdin=source, stdout=output) as streams:
-                yield streams
+            async with stdio_server(stdin=source, stdout=output) as (read, write):
+                yield read, _BoundedSessionWriter(write)
     finally:
         # Do not let temporary wrappers close the process's borrowed handles.
         source_wrapper.detach()
