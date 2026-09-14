@@ -8,7 +8,7 @@ import json
 import threading
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Mapping
 
 
@@ -246,7 +246,35 @@ class VisibleTurnProjection:
         self.prebind(request_id, method=method, params=params)
 
     def publish_demultiplexed(self, request_id: int, *, payload: object) -> None:
-        del request_id, payload
+        del request_id
+        if not isinstance(payload, Mapping):
+            return
+        method = payload.get("method")
+        params = payload.get("params")
+        native_turn_id = None
+        if method == "turn/completed":
+            turn = params.get("turn") if isinstance(params, Mapping) else None
+            native_turn_id = (
+                turn.get("id") if isinstance(turn, Mapping) else None
+            )
+        if not isinstance(native_turn_id, str) or not native_turn_id:
+            return
+        with self._lock:
+            key = next(
+                (
+                    candidate
+                    for candidate in self._viewers_by_turn
+                    if candidate.native_turn_id == native_turn_id
+                ),
+                None,
+            )
+        if key is not None:
+            self.publish(
+                key,
+                method=method,
+                params=params,
+                native_turn_id=native_turn_id,
+            )
 
     def record_parser_failure(self) -> None:
         # Parser failures intentionally do not touch controller transport state.
@@ -290,6 +318,7 @@ class VisibleTurnProjection:
                 return buffer.record("prebind_identity_mismatch")
             record = self._create_turn_locked(key)
             for item in buffer.items:
+                record = self._turns[record.key.native_turn_id]
                 self._append_locked(record, item, gap_on_bounds=False)
             return None
 
@@ -336,12 +365,12 @@ class VisibleTurnProjection:
             existing = self._viewers_by_turn.get(key, set())
             if len(existing) >= MAX_VIEWERS:
                 raise ProjectionError("OVER_BUDGET", "turn viewer budget is full")
-            grant = str(uuid.uuid4())
-            self._grants[grant] = _Grant(key, grant)
-            existing.add(grant)
-            self._viewers_by_turn[key] = existing
-            self._create_turn_locked(key)
-            return grant
+        grant = str(uuid.uuid4())
+        self._grants[grant] = _Grant(key, grant)
+        existing.add(grant)
+        self._viewers_by_turn[key] = existing
+        self._create_turn_locked(key)
+        return grant
 
     def revoke_grant(self, reader_grant: str) -> None:
         with self._lock:
@@ -396,26 +425,38 @@ class VisibleTurnProjection:
                 for gap in record.gaps
                 if gap.to_publication_sequence > sequence
             ]
-            selected = []
-            response_size = 0
-            for item in eligible:
-                item_size = len(item.text.encode("utf-8"))
-                if selected and response_size + item_size > MAX_ENCODED_READ_BYTES:
+            page: tuple[VisibleItem, ...] = ()
+            for index in range(min(max_items, len(eligible))):
+                candidate = tuple(eligible[: index + 1])
+                candidate_result = ReadResult(
+                    candidate,
+                    _encode_cursor(record, candidate[-1].publication_sequence),
+                    tuple(gaps),
+                    record.terminal,
+                    record.publication_epoch,
+                    (record.key.process_generation_id, record.key.native_turn_id),
+                    False,
+                )
+                encoded_size = len(
+                    json.dumps(
+                        asdict(candidate_result), separators=(",", ":")
+                    ).encode("utf-8")
+                )
+                if encoded_size > MAX_ENCODED_READ_BYTES:
                     break
-                selected.append(item)
-                response_size += item_size
-                if response_size >= MAX_ENCODED_READ_BYTES:
-                    break
-            page = tuple(selected[:max_items])
-            last = page[-1].publication_sequence if page else sequence
+                page = candidate
+            if eligible and not page:
+                self._refuse(key, "OVER_BUDGET")
             return ReadResult(
                 page,
-                _encode_cursor(record, last),
+                _encode_cursor(
+                    record, page[-1].publication_sequence if page else sequence
+                ),
                 tuple(gaps),
                 record.terminal,
                 record.publication_epoch,
                 (record.key.process_generation_id, record.key.native_turn_id),
-                len(page) < len(eligible),
+                bool(gaps),
             )
 
     def invalidate_generation(self, key: TurnKey, reason: str = "generation_invalid") -> None:
@@ -442,7 +483,9 @@ class VisibleTurnProjection:
             self._refusals.append((key, code, self._clock()))
         raise ProjectionError(code, code)
 
-    def _create_turn_locked(self, key: TurnKey) -> _TurnRecord:
+    def _create_turn_locked(
+        self, key: TurnKey, *, reuse_empty: bool = False
+    ) -> _TurnRecord:
         record = self._turns.get(key.native_turn_id)
         if record is not None and record.key == key:
             return record
@@ -491,24 +534,25 @@ class VisibleTurnProjection:
                 self._add_gap_locked(record, "item_byte_overflow")
             return
         replacement = None
-        if item.state == "completed":
+        if item.state in {"partial", "completed"}:
             replacement = next(
                 (
                     existing
-                    for existing in record.items
+                    for existing in reversed(record.items)
                     if existing.source_item_id == item.source_item_id
                     and existing.state == "partial"
                 ),
                 None,
             )
         if replacement is not None:
+            sequence = record.next_publication_sequence + 1
             updated = VisibleItem(
                 item.source_item_id,
                 item.source_sequence,
-                "completed",
+                item.state,
                 item.text,
                 item.byte_length,
-                replacement.publication_sequence,
+                sequence,
             )
             items = tuple(
                 updated if existing is replacement else existing for existing in record.items
@@ -522,7 +566,7 @@ class VisibleTurnProjection:
                 record.gaps,
                 record.terminal,
                 retained,
-                record.next_publication_sequence,
+                sequence,
             )
             return
         sequence = record.next_publication_sequence + 1

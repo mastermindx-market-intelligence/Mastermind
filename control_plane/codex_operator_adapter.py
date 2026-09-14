@@ -2529,11 +2529,11 @@ class CodexOperatorAdapter:
             next_request_id = getattr(state.client, "next_request_id", None)
             if callable(next_request_id):
                 state.pending_prebind_request_id = next_request_id()
+                prebind_armer = getattr(state.client, "arm_prebind", None)
+                if callable(prebind_armer):
+                    prebind_armer(state.pending_prebind_request_id)
             else:
                 state.pending_prebind_request_id = None
-            prebind_armer = getattr(state.client, "arm_prebind", None)
-            if callable(prebind_armer):
-                prebind_armer(state.pending_prebind_request_id)
             result = state.client.request(
                 "turn/start",
                 {
@@ -2910,6 +2910,9 @@ class CodexOperatorAdapter:
                 raise CodexAdapterError(
                     AdapterFailureClass.SESSION_MISSING, "event cursor turn is missing"
                 )
+            notifications = state.client.drain_notifications()
+            if notifications:
+                self._ingest_turn_notifications(state, turn, notifications)
             if not any(
                 event.turn_id == cursor.turn_id and event.kind == "turn/completed"
                 for event in state.events
@@ -2920,8 +2923,10 @@ class CodexOperatorAdapter:
                     )
                 except Exception as exc:
                     raise _rpc_failure(exc, effect_unknown=True) from exc
-                notifications = [*state.client.drain_notifications(), completed]
-                self._ingest_turn_notifications(state, turn, notifications)
+                remaining = state.client.drain_notifications()
+                self._ingest_turn_notifications(
+                    state, turn, [*remaining, completed]
+                )
             self._audit_native_helper_tree(state, turn)
         events = tuple(state.events[cursor.local_sequence :])
         return events, EventCursor(

@@ -697,7 +697,16 @@ def test_lc1_gate_held_visible_turn_projection(tmp_path: Path) -> None:
     projection = harness.adapter.visible_turn_projection
     key = projection.check_grant(grant)
     assert key is not None
-    assert projection.read(key, reader_grant=grant, cursor=None, max_items=64).items == ()
+    nonterminal = projection.read(
+        key, reader_grant=grant, cursor=None, max_items=64
+    )
+    assert [item.text for item in nonterminal.items] == [
+        "LC1 partial one",
+        "LC1 final one",
+        "LC1 partial two",
+        "LC1 final two",
+    ]
+    assert nonterminal.terminal is False
     gate.unlink()
     thread.join(timeout=5)
     assert completed.is_set()

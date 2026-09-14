@@ -409,10 +409,7 @@ class FakeAppServer:
                         f"gate=held turn={turn_id} terminal=pending "
                         f"gate_path={self.gate_path}\n"
                     )
-                while self.gate_path.exists():
-                    time.sleep(0.01)
-                with self.gate_log_path.open("a", encoding="utf-8") as handle:
-                    handle.write(f"gate=released turn={turn_id}\n")
+                self._notify("turn/started", {"turn": {"id": turn_id}})
                 for index, text in enumerate(self.visible_updates):
                     self._notify(
                         "item/updated",
@@ -447,6 +444,10 @@ class FakeAppServer:
                         }
                     },
                 )
+                while self.gate_path.exists():
+                    time.sleep(0.01)
+                with self.gate_log_path.open("a", encoding="utf-8") as handle:
+                    handle.write(f"gate=released turn={turn_id}\n")
                 self._notify("turn/completed", {"turn": {**turn, "status": "completed"}})
                 return
             self._notify("turn/started", {"turn": {"id": turn_id}})

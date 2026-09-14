@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import hashlib
 import json
 import os
+import sys
 import stat
 import threading
 import time
@@ -12,9 +14,13 @@ from pathlib import Path
 
 import pytest
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
 from control_plane import executive_worker_broker as broker_module
+from control_plane import visible_turn_projection as visible_turn_projection_module
 from control_plane.codex_worker import BinaryAttestation, CodexWorkerAdapter
 from control_plane.worker_adapter import construct_reviewed_adapter
+from control_plane.codex_operator_adapter import CodexOperatorAdapter
 from control_plane.executive_orchestration_principal import (
     OSProcessCredentialObservation,
     ProviderHomeIdentityObservation,
@@ -65,6 +71,8 @@ from control_plane.operator_materialization_receipt import (
 )
 from control_plane.worker_browser_b1 import BrowserReviewReceipt
 from control_plane.visible_turn_projection import (
+    MAX_ENCODED_READ_BYTES,
+    MAX_ITEM_BYTES,
     MAX_ITEMS_PER_TURN,
     MAX_PREBIND_ITEMS,
     ProjectionError,
@@ -422,6 +430,64 @@ def _fixture(tmp_path: Path, *, armed: bool = True, autonomy_guard=None):
     )
     peer = PeerCredentials(policy.control_uid, policy.worker_gid, 100)
     return broker, peer, profile, sweeper, adapters
+
+
+def _real_lc1_broker_turn(
+    tmp_path: Path, gate: Path
+):
+    broker, peer, profile, _sweeper, adapters = _fixture(tmp_path)
+    python = Path(sys.executable).resolve()
+    provider_home = tmp_path / "provider-home"
+    provider_home.chmod(0o700)
+    (provider_home / "auth.json").write_text(
+        "fixture credential bytes", encoding="utf-8"
+    )
+    (provider_home / "auth.json").chmod(0o600)
+    gate_log = tmp_path / "gate.log"
+    effect_log = tmp_path / "effects.log"
+    adapter = CodexOperatorAdapter(
+        binary_path=python,
+        codex_home=provider_home,
+        workspace_root=Path(profile.workspace.workspace_path),
+        worker_id="codex-01",
+        app_server_argv=(str(python), "-m", "scripts.ohf.fake_app_server"),
+        expected_harness_version="ohf-fake-app-server/p0b",
+        network_policy="disabled",
+        turn_input_loader=lambda _turn: "LC1 real nonterminal turn",
+        base_sha_resolver=lambda _path: profile.workspace.base_sha,
+        process_identity_observer=lambda pid: ProcessIdentityObservation(
+            pid, pid, f"start-{pid}", "boot"
+        ),
+        extra_env={
+            "PYTHONPATH": str(REPO_ROOT),
+            "OHF_FAKE_STATE": str(tmp_path / "fake-state.json"),
+            "OHF_FAKE_WORKSPACE": str(Path(profile.workspace.workspace_path)),
+            "OHF_FAKE_SKILL_ROOT": str(
+                Path(profile.workspace.workspace_path) / ".agents" / "skills"
+            ),
+            "OHF_FAKE_MODEL": profile.requested_model,
+            "OHF_FAKE_MCP_GONE": "1",
+            "OHF_FAKE_BUNDLED_DISABLED": "1",
+            "OHF_FAKE_GATE_MODE": "held",
+            "OHF_FAKE_GATE_PATH": str(gate),
+            "OHF_FAKE_GATE_LOG": str(gate_log),
+            "OHF_FAKE_EFFECT_COUNTERS": str(effect_log),
+            "OHF_FAKE_TURN_REPLY": '{"r623-r3":"complete"}',
+            "OHF_FAKE_VISIBLE_UPDATES": ";".join(
+                ("LC1 real partial", "LC1 real final")
+            ),
+        },
+    )
+    profile = dataclasses.replace(
+        profile,
+        harness_binary_digest=adapter.binary_digest,
+        harness_version="ohf-fake-app-server/p0b",
+    )
+    adapters.append(adapter)
+    broker.operator_adapter_factory = (
+        lambda _workspace, _turn_loader, requested: adapter
+    )
+    return broker, peer, profile, adapter
 
 
 def test_armed_operator_broker_requires_runtime_autonomy_guard(tmp_path: Path) -> None:
@@ -1552,6 +1618,126 @@ def test_lc1_fixture_stays_busy_until_gate_released(tmp_path: Path) -> None:
     asyncio.run(scenario())
 
 
+def test_ohf_real_chain_publishes_visible_items_while_controller_nonterminal(
+    tmp_path: Path,
+) -> None:
+    gate = tmp_path / "terminal-gate"
+    gate.touch()
+    broker, peer, profile, adapter = _real_lc1_broker_turn(tmp_path, gate)
+    epoch = SessionEpochRef(
+        "epoch-r623-r3", "ATT-R623-R3", "codex-01", 1
+    )
+    generation = ProcessGenerationRef(
+        "generation-r623-r3", "epoch-r623-r3", 1, "codex-01"
+    )
+
+    async def scenario() -> None:
+        await broker.execute(
+            _request(
+                "ohf-start",
+                _materialization_payload(profile, epoch, generation),
+                "r623-r3-start",
+            ),
+            peer=peer,
+        )
+        turn = TurnRef(
+            "turn-r623-r3",
+            "epoch-r623-r3",
+            "generation-r623-r3",
+            "ATT-R623-R3",
+        )
+        await broker.execute(
+            _request(
+                "ohf-begin-turn",
+                {
+                    "operation_id": to_wire(
+                        OperationId("ohf-op:r623-r3-turn")
+                    ),
+                    "turn": to_wire(turn),
+                    "generation": to_wire(generation),
+                    "launch": to_wire(compare_launch(profile, adapter.observed_attestation(generation))),
+                    "prompt": "LC1 real nonterminal turn",
+                },
+                "r623-r3-turn",
+            ),
+            peer=peer,
+        )
+        grant = adapter.mint_observer_grant(turn)
+        collecting = asyncio.Event()
+
+        async def collect_controller_terminal():
+            collecting.set()
+            return await broker.execute(
+                _request(
+                    "ohf-collect-turn",
+                    {
+                        "turn": to_wire(turn),
+                        "cursor": to_wire(
+                            EventCursor(
+                                turn.attempt_id,
+                                turn.session_epoch_id,
+                                turn.process_generation_id,
+                                turn_id=turn.turn_id,
+                            )
+                        ),
+                        "timeout_seconds": 5.0,
+                    },
+                    "r623-r3-collect",
+                ),
+                peer=peer,
+            )
+
+        collector = asyncio.create_task(collect_controller_terminal())
+        await asyncio.wait_for(collecting.wait(), timeout=1)
+        await asyncio.sleep(0)
+        assert broker._operator_run is not None and broker._operator_run.busy
+        nonterminal_read = None
+        for attempt in range(100):
+            candidate_read = await broker.execute(
+                _request(
+                    "ohf-observe-turn",
+                    _observer_payload(turn, grant),
+                    f"r623-r3-nonterminal-read-{attempt}",
+                ),
+                peer=peer,
+            )
+            if candidate_read["result"]["items"]:
+                nonterminal_read = candidate_read
+                break
+            assert not collector.done()
+            await asyncio.sleep(0.01)
+        assert nonterminal_read is not None
+        assert [
+            item["text"] for item in nonterminal_read["result"]["items"]
+        ] == ["LC1 real partial", "LC1 real final"]
+        assert nonterminal_read["result"]["terminal"] is False
+        assert not collector.done()
+
+        gate.unlink()
+        collected = await collector
+        assert [
+            event["kind"] for event in collected["result"]["events"]
+        ][-1:] == ["turn/completed"]
+        terminal_read = await broker.execute(
+            _request(
+                "ohf-observe-turn",
+                _observer_payload(
+                    turn,
+                    grant,
+                    cursor=nonterminal_read["result"]["next_cursor"],
+                ),
+                "r623-r3-terminal-read",
+            ),
+            peer=peer,
+        )
+        assert terminal_read["result"]["items"] == []
+        assert terminal_read["result"]["terminal"] is True
+        assert adapter._state(generation).client._next_id > 0
+        adapter.graceful_stop(generation, operation_id=OperationId("ohf-op:r623-r3-stop"))
+
+    asyncio.run(scenario())
+
+
 def test_ohf_observer_sees_items_while_controller_waits_then_terminal_once(
     tmp_path: Path,
 ) -> None:
@@ -1816,6 +2002,300 @@ def test_ohf_parser_failure_records_gap_without_blocking_controller(
     dropped = expired.drop_expired_prebind()
     assert dropped is not None and dropped.reason == "prebind_timeout"
     assert expired.active_prebind_request_id() is None
+
+
+def test_ohf_completed_replacement_gets_new_publication_sequence() -> None:
+    projection = VisibleTurnProjection()
+    key = TurnKey(
+        "ATT-REPLACE", "epoch-replace", "generation-replace", 1, "codex-01",
+        "turn-replace", "native-replace",
+    )
+    grant = projection.mint_grant(key)
+
+    def emit(method: str, sequence: int, text: str) -> None:
+        projection.publish(
+            key,
+            method=method,
+            params={
+                "item": {
+                    "id": "A",
+                    "type": "agentMessage",
+                    "sequence": sequence,
+                    "text": text,
+                }
+            },
+        )
+
+    emit("item/updated", 1, "draft")
+    partial = projection.read(
+        key, reader_grant=grant, cursor=None, max_items=64
+    )
+    emit("item/completed", 2, "final")
+    completed = projection.read(
+        key,
+        reader_grant=grant,
+        cursor=partial.next_cursor,
+        max_items=64,
+    )
+    assert [(item.text, item.state) for item in completed.items] == [
+        ("final", "completed")
+    ]
+    assert projection.read(
+        key, reader_grant=grant, cursor=None, max_items=64
+    ).items == completed.items
+
+
+def test_ohf_two_partial_replacements_retain_only_final_item() -> None:
+    projection = VisibleTurnProjection()
+    key = TurnKey(
+        "ATT-REPLACE-TWICE", "epoch-replace", "generation-replace", 1, "codex-01",
+        "turn-replace", "native-replace",
+    )
+    grant = projection.mint_grant(key)
+
+    def emit(method: str, text: str) -> None:
+        projection.publish(
+            key,
+            method=method,
+            params={
+                "item": {
+                    "id": "A",
+                    "type": "agentMessage",
+                    "sequence": 1,
+                    "text": text,
+                }
+            },
+        )
+
+    emit("item/updated", "draft-one")
+    emit("item/updated", "draft-two")
+    emit("item/completed", "final")
+    observed = projection.read(
+        key, reader_grant=grant, cursor=None, max_items=64
+    )
+    assert [(item.text, item.state) for item in observed.items] == [
+        ("final", "completed")
+    ]
+
+
+def test_ohf_prebind_items_get_distinct_monotonic_sequences() -> None:
+    projection = VisibleTurnProjection()
+    key = TurnKey(
+        "ATT-PREBIND", "epoch-prebind", "generation-prebind", 1, "codex-01",
+        "turn-prebind", "native-prebind",
+    )
+    grant = projection.mint_grant(key)
+    projection.arm_prebind(7)
+    for index in (1, 2):
+        projection.prebind_frame(
+            7,
+            method="item/updated",
+            params={
+                "item": {
+                    "id": f"item-{index}",
+                    "type": "agentMessage",
+                    "sequence": index,
+                    "text": f"prebind-{index}",
+                }
+            },
+        )
+    assert projection.commit_prebind(7, key, native_turn_id="native-prebind") is None
+    first = projection.read(
+        key, reader_grant=grant, cursor=None, max_items=1
+    )
+    second = projection.read(
+        key, reader_grant=grant, cursor=first.next_cursor, max_items=1
+    )
+    assert [item.text for item in first.items] == ["prebind-1"]
+    assert [item.text for item in second.items] == ["prebind-2"]
+    assert (
+        first.items[0].publication_sequence
+        < second.items[0].publication_sequence
+    )
+    assert second.resync_required is False
+
+
+def test_ohf_complete_page_without_gap_does_not_require_resync() -> None:
+    projection = VisibleTurnProjection()
+    key = TurnKey(
+        "ATT-PAGE", "epoch-page", "generation-page", 1, "codex-01",
+        "turn-page", "native-page",
+    )
+    grant = projection.mint_grant(key)
+    for index in (1, 2):
+        projection.publish(
+            key,
+            method="item/updated",
+            params={
+                "item": {
+                    "id": f"item-{index}",
+                    "type": "agentMessage",
+                    "sequence": index,
+                    "text": f"page-{index}",
+                }
+            },
+        )
+    first = projection.read(
+        key, reader_grant=grant, cursor=None, max_items=1
+    )
+    second = projection.read(
+        key, reader_grant=grant, cursor=first.next_cursor, max_items=1
+    )
+    assert [item.text for item in first.items] == ["page-1"]
+    assert [item.text for item in second.items] == ["page-2"]
+    assert first.resync_required is False
+    assert second.resync_required is False
+
+
+def test_ohf_encoded_read_bound_covers_serialized_result() -> None:
+    projection = VisibleTurnProjection()
+    key = TurnKey(
+        "ATT-ENCODED", "epoch-encoded", "generation-encoded", 1, "codex-01",
+        "turn-encoded", "native-encoded",
+    )
+    grant = projection.mint_grant(key)
+    for index in range(40):
+        projection.publish(
+            key,
+            method="item/updated",
+            params={
+                "item": {
+                    "id": f"item-{index}",
+                    "type": "agentMessage",
+                    "sequence": index,
+                    "text": '"' * 16_384,
+                }
+            },
+        )
+    result = projection.read(
+        key, reader_grant=grant, cursor=None, max_items=64
+    )
+    encoded_size = len(
+        json.dumps(dataclasses.asdict(result), separators=(",", ":")).encode()
+    )
+    assert encoded_size <= MAX_ENCODED_READ_BYTES
+    assert len(result.items) < 40
+
+
+def test_ohf_single_item_above_encoded_bound_is_typed_refusal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    projection = VisibleTurnProjection()
+    key = TurnKey(
+        "ATT-ENCODED-ONE", "epoch-encoded-one", "generation-encoded-one", 1,
+        "codex-01", "turn-encoded-one", "native-encoded-one",
+    )
+    grant = projection.mint_grant(key)
+    projection.publish(
+        key,
+        method="item/updated",
+        params={
+            "item": {
+                "id": "oversized",
+                "type": "agentMessage",
+                "sequence": 1,
+                "text": '"' * MAX_ITEM_BYTES,
+            }
+        },
+    )
+    monkeypatch.setattr(
+        visible_turn_projection_module,
+        "MAX_ENCODED_READ_BYTES",
+        MAX_ITEM_BYTES,
+    )
+    with pytest.raises(ProjectionError, match="OVER_BUDGET"):
+        projection.read(key, reader_grant=grant, cursor=None, max_items=1)
+    assert projection.refusal_receipts()[-1][1] == "OVER_BUDGET"
+
+
+def test_ohf_retention_eviction_past_cursor_requires_resync() -> None:
+    projection = VisibleTurnProjection()
+    key = TurnKey(
+        "ATT-RESYNC", "epoch-resync", "generation-resync", 1, "codex-01",
+        "turn-resync", "native-resync",
+    )
+    grant = projection.mint_grant(key)
+    for index in range(MAX_ITEMS_PER_TURN + 1):
+        projection.publish(
+            key,
+            method="item/updated",
+            params={
+                "item": {
+                    "id": f"item-{index}",
+                    "type": "agentMessage",
+                    "sequence": index,
+                    "text": str(index % 10),
+                }
+            },
+        )
+    first = projection.read(
+        key, reader_grant=grant, cursor=None, max_items=1
+    )
+    resumed = projection.read(
+        key, reader_grant=grant, cursor=first.next_cursor, max_items=64
+    )
+    assert resumed.resync_required is True
+    assert [gap.reason for gap in resumed.gaps] == ["turn_item_overflow"]
+
+
+def test_ohf_publication_epoch_change_requires_resync() -> None:
+    projection = VisibleTurnProjection()
+    key = TurnKey(
+        "ATT-EPOCH", "epoch-change", "generation-change", 1, "codex-01",
+        "turn-change", "native-change",
+    )
+    grant = projection.mint_grant(key)
+    projection.publish(
+        key,
+        method="item/updated",
+        params={
+            "item": {
+                "id": "item",
+                "type": "agentMessage",
+                "sequence": 1,
+                "text": "before epoch change",
+            }
+        },
+    )
+    first = projection.read(
+        key, reader_grant=grant, cursor=None, max_items=64
+    )
+    projection.invalidate_generation(key)
+    with projection._lock:
+        projection._turns.pop(key.native_turn_id, None)
+        projection._viewers_by_turn[key] = {grant}
+        projection._create_turn_locked(key)
+    with pytest.raises(ProjectionError, match="RESYNC_REQUIRED"):
+        projection.read(
+            key, reader_grant=grant, cursor=first.next_cursor, max_items=64
+        )
+    assert projection.refusal_receipts()[-1][1] == "RESYNC_REQUIRED"
+
+
+def test_ohf_demultiplexed_completion_matches_only_native_turn() -> None:
+    projection = VisibleTurnProjection()
+    bound_key = TurnKey(
+        "ATT-DEMUX", "epoch-demux", "generation-demux", 1, "codex-01",
+        "turn-demux", "native-demux",
+    )
+    foreign_key = TurnKey(
+        "ATT-OTHER", "epoch-other", "generation-other", 1, "codex-01",
+        "turn-other", "native-other",
+    )
+    bound_grant = projection.mint_grant(bound_key)
+    foreign_grant = projection.mint_grant(foreign_key)
+    projection.publish_demultiplexed(
+        1,
+        payload={"method": "turn/completed", "params": {"turn": {"id": "native-other"}}},
+    )
+    bound = projection.read(
+        bound_key, reader_grant=bound_grant, cursor=None, max_items=64
+    )
+    foreign = projection.read(
+        foreign_key, reader_grant=foreign_grant, cursor=None, max_items=64
+    )
+    assert bound.terminal is False
+    assert foreign.terminal is True
 
 
 def test_ohf_reader_revocation_stops_publication_and_clears_unsent_buffer(
