@@ -14,14 +14,11 @@ import json
 import re
 from typing import Any, Mapping
 
-from control_plane.executive_steward import CapacityState, SourceOwner
-from ops.executive_os.capacity_owner_facts import CapacityOwnerFact
-from ops.executive_os.provider_realm_facts import ProviderRealmEnrollmentReceipt
 from control_plane.subscription_harness_bindings import (
     HarnessBindingError,
-    get_binding,
     load_bindings,
     validate_bindings,
+    get_binding,
 )
 from control_plane.subscription_provider_profiles import (
     ProviderProfileError,
@@ -161,6 +158,9 @@ def _require_owner_facts(capacity_fact: Any, realm_receipt: Any) -> None:
     )
     from control_plane.model_router import verify_capacity_owner_fact
 
+    from ops.executive_os.capacity_owner_facts import CapacityOwnerFact
+    from ops.executive_os.provider_realm_facts import ProviderRealmEnrollmentReceipt
+
     if type(capacity_fact) is not CapacityOwnerFact:
         raise CanaryAdmissionError(
             "capacity_fact: typed capacity fact exported by the Capacity owner is required"
@@ -296,6 +296,8 @@ def verify_subscription_canary_admission(
         raise CanaryAdmissionError("execution mode must be interactive_canary")
     if admission.implementation_state == "SPEC_ONLY":
         raise CanaryAdmissionError("implementation_state is SPEC_ONLY")
+    from control_plane.executive_steward import CapacityState, SourceOwner
+
     if admission.capacity_source != SourceOwner.CAPACITY.value:
         raise CanaryAdmissionError("capacity source owner must be capacity")
     if admission.capacity_state != CapacityState.AVAILABLE.value:
