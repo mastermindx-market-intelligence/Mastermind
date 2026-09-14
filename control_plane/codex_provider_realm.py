@@ -17,6 +17,7 @@ import stat
 import subprocess
 import sys
 from collections.abc import Callable
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import urlparse
@@ -235,39 +236,107 @@ CANDIDATE_CODEX_PROVIDER_REALMS_SPEC_ONLY = {
 
 ProviderCredentialLoader = Callable[[], str]
 
-# Realm-receipt mint/verify lives on this existing provider-realm owner.
-# The test-key / enrollment slots are injection seams, not a realm store.
-_PROVIDER_REALM_TEST_KEY: bytes | None = None
-_PROVIDER_REALM_TEST_ENROLLMENT: str | None = None
+
+def _make_provider_realm_owner_seam() -> Any:
+    """Build a closure-held realm-owner HMAC and enrollment seam.
+
+    The keyed seal protects realm receipts from cross-boundary substitution
+    and accidental mutation. It is not a boundary against an attacker already
+    executing arbitrary Python in this process; a real owner boundary would
+    require a separate process or OS capability.
+    """
+
+    key_bytes: bytes | None = None
+    enrollment_state: str | None = None
+
+    class _OwnerSeam:
+        __slots__ = ()
+
+        @staticmethod
+        def enrollment() -> str | None:
+            return enrollment_state
+
+        @staticmethod
+        def seal(payload: Mapping[str, Any]) -> bytes:
+            canonical = json.dumps(
+                dict(payload),
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+                allow_nan=False,
+            ).encode("utf-8")
+            if key_bytes is None:
+                raise ProviderRealmError("provider-realm owner key is not available")
+            return hmac.new(key_bytes, canonical, hashlib.sha256).digest()
+
+        @staticmethod
+        def verify(payload: Mapping[str, Any], digest: bytes) -> bool:
+            try:
+                return isinstance(digest, bytes) and hmac.compare_digest(
+                    _OwnerSeam.seal(payload), digest
+                )
+            except (TypeError, ValueError):
+                return False
+
+        @staticmethod
+        @contextmanager
+        def install_test_key(key: bytes | None):
+            """Install fixture HMAC state only while pytest owns this test."""
+
+            nonlocal key_bytes
+            if "pytest" not in sys.modules or os.environ.get(
+                "PYTEST_CURRENT_TEST"
+            ) is None:
+                raise ProviderRealmError("provider-realm owner test key is test-only")
+            if key is not None and (
+                not isinstance(key, (bytes, bytearray)) or len(key) < 16
+            ):
+                raise ProviderRealmError("provider-realm owner test key is invalid")
+            previous = key_bytes
+            key_bytes = bytes(key) if key is not None else None
+            try:
+                yield
+            finally:
+                key_bytes = previous
+
+        @staticmethod
+        @contextmanager
+        def install_test_enrollment(value: str | None):
+            """Install fixture enrollment only while pytest owns this test."""
+
+            nonlocal enrollment_state
+            if "pytest" not in sys.modules or os.environ.get(
+                "PYTEST_CURRENT_TEST"
+            ) is None:
+                raise ProviderRealmError("provider-realm test enrollment is test-only")
+            if value is not None and value not in _VALID_ENROLLMENT_STATES:
+                raise ProviderRealmError("enrollment_state is invalid")
+            previous = enrollment_state
+            enrollment_state = value
+            try:
+                yield
+            finally:
+                enrollment_state = previous
+
+    return _OwnerSeam()
+
+
 _VALID_ENROLLMENT_STATES = frozenset({"enrolled", "unenrolled"})
+_PROVIDER_REALM_OWNER_SEAM = _make_provider_realm_owner_seam()
 
 
 def set_provider_realm_test_key(key: bytes | None) -> None:
-    """Test-only. Injects the owner HMAC key; refused outside pytest."""
+    """Refuse direct injection; use the fixture-only closure seam instead."""
 
-    if os.environ.get("PYTEST_CURRENT_TEST") is None:
-        raise ProviderRealmError("provider-realm owner test key is test-only")
-    if key is not None and (not isinstance(key, (bytes, bytearray)) or len(key) < 16):
-        raise ProviderRealmError("provider-realm owner test key is invalid")
-    global _PROVIDER_REALM_TEST_KEY
-    _PROVIDER_REALM_TEST_KEY = bytes(key) if key is not None else None
+    del key
+    raise ProviderRealmError("provider-realm owner test key is test-only")
 
 
 def set_provider_realm_test_enrollment(enrollment_state: str | None) -> None:
-    """Test-only. Injects the owner's current enrollment observation."""
+    """Refuse direct injection; use the fixture-only closure seam instead."""
 
-    if os.environ.get("PYTEST_CURRENT_TEST") is None:
-        raise ProviderRealmError("provider-realm test enrollment is test-only")
-    if enrollment_state is not None and enrollment_state not in _VALID_ENROLLMENT_STATES:
-        raise ProviderRealmError("enrollment_state is invalid")
-    global _PROVIDER_REALM_TEST_ENROLLMENT
-    _PROVIDER_REALM_TEST_ENROLLMENT = enrollment_state
-
-
-def _provider_realm_owner_key() -> bytes:
-    if _PROVIDER_REALM_TEST_KEY is not None:
-        return _PROVIDER_REALM_TEST_KEY
-    raise ProviderRealmError("provider-realm owner key is not available")
+    del enrollment_state
+    raise ProviderRealmError("provider-realm test enrollment is test-only")
 
 
 def _realm_receipt_payload(
@@ -292,18 +361,7 @@ def _realm_receipt_payload(
 
 
 def _realm_receipt_seal(payload: Mapping[str, Any]) -> str:
-    canonical = json.dumps(
-        dict(payload),
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=True,
-        allow_nan=False,
-    )
-    return hmac.new(
-        _provider_realm_owner_key(),
-        canonical.encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()
+    return _PROVIDER_REALM_OWNER_SEAM.seal(payload).hex()
 
 
 def issue_provider_realm_enrollment_receipt(
@@ -324,7 +382,7 @@ def issue_provider_realm_enrollment_receipt(
 
     if type(generation) is not int or generation < 1:
         raise ProviderRealmFactError("realm generation is invalid")
-    enrollment_state = _PROVIDER_REALM_TEST_ENROLLMENT
+    enrollment_state = _PROVIDER_REALM_OWNER_SEAM.enrollment()
     if enrollment_state not in _VALID_ENROLLMENT_STATES:
         raise ProviderRealmFactError(
             "enrollment_state is not observed by the provider-realm owner"
@@ -348,7 +406,7 @@ def issue_provider_realm_enrollment_receipt(
         enrollment_state=enrollment_state,
         catalog_digest=catalog_digest,
     )
-    digest = _realm_receipt_seal(payload)
+    digest = _PROVIDER_REALM_OWNER_SEAM.seal(payload).hex()
     return ProviderRealmEnrollmentReceipt(
         receipt_id=receipt_id,
         receipt_digest=digest,
@@ -375,21 +433,27 @@ def verify_provider_realm_enrollment_receipt(receipt: Any) -> None:
     expected_id = f"provider-realm:{receipt.binding_id}:{receipt.generation}"
     if receipt.receipt_id != expected_id:
         raise ProviderRealmFactError("receipt_id is not owner-issued")
-    expected = _realm_receipt_seal(
-        _realm_receipt_payload(
-            receipt_id=receipt.receipt_id,
-            binding_id=receipt.binding_id,
-            profile_id=receipt.profile_id,
-            adapter_id=receipt.adapter_id,
-            generation=receipt.generation,
-            enrollment_state=receipt.enrollment_state,
-            catalog_digest=receipt.catalog_digest,
-        )
+    payload = _realm_receipt_payload(
+        receipt_id=receipt.receipt_id,
+        binding_id=receipt.binding_id,
+        profile_id=receipt.profile_id,
+        adapter_id=receipt.adapter_id,
+        generation=receipt.generation,
+        enrollment_state=receipt.enrollment_state,
+        catalog_digest=receipt.catalog_digest,
     )
     digest = receipt.receipt_digest
-    seal = object.__getattribute__(receipt, "_seal")
-    digest_ok = isinstance(digest, str) and hmac.compare_digest(digest, expected)
-    seal_ok = isinstance(seal, str) and hmac.compare_digest(seal, expected)
+    try:
+        digest_ok = isinstance(digest, str) and _PROVIDER_REALM_OWNER_SEAM.verify(
+            payload, bytes.fromhex(digest)
+        )
+        seal = object.__getattribute__(receipt, "_seal")
+        seal_ok = isinstance(seal, str) and _PROVIDER_REALM_OWNER_SEAM.verify(
+            payload, bytes.fromhex(seal)
+        )
+    except (TypeError, ValueError):
+        digest_ok = False
+        seal_ok = False
     if not digest_ok or not seal_ok:
         raise ProviderRealmFactError(
             "realm_receipt seal does not match receipt_id, receipt_digest, "

@@ -19,13 +19,12 @@ from control_plane.codex_worker import LaunchValidationError
 from control_plane.executive_worker_broker import ExecutiveWorkerBroker, WorkerBrokerError
 from control_plane.executive_steward import CapacityState, SourceOwner
 from control_plane.codex_provider_realm import (
+    _PROVIDER_REALM_OWNER_SEAM,
     issue_provider_realm_enrollment_receipt,
-    set_provider_realm_test_enrollment,
-    set_provider_realm_test_key,
 )
 from control_plane.model_router import (
+    _CAPACITY_OWNER_SEAM,
     export_capacity_owner_fact,
-    set_capacity_owner_test_key,
 )
 from control_plane.subscription_canary_admission import (
     CanaryAdmissionError,
@@ -143,13 +142,12 @@ _REALM_TEST_KEY = b"r581-test-provider-realm-owner-key"
 
 @pytest.fixture(autouse=True)
 def _inject_owner_test_keys():
-    set_capacity_owner_test_key(_CAPACITY_TEST_KEY)
-    set_provider_realm_test_key(_REALM_TEST_KEY)
-    set_provider_realm_test_enrollment("enrolled")
-    yield
-    set_provider_realm_test_enrollment(None)
-    set_capacity_owner_test_key(None)
-    set_provider_realm_test_key(None)
+    with _CAPACITY_OWNER_SEAM.install_test_key(
+        _CAPACITY_TEST_KEY
+    ), _PROVIDER_REALM_OWNER_SEAM.install_test_key(
+        _REALM_TEST_KEY
+    ), _PROVIDER_REALM_OWNER_SEAM.install_test_enrollment("enrolled"):
+        yield
 
 
 def _documents(*, implementation_state: str = "BUILT_NOT_PROVEN"):
@@ -171,15 +169,15 @@ def _capacity_fact(**changes):
 
 def _realm_receipt(bindings, profiles, **changes):
     enrollment = changes.pop("enrollment_state", "enrolled")
-    set_provider_realm_test_enrollment(enrollment)
-    values = {
-        "binding_id": _GLM_BINDING,
-        "bindings_document": bindings,
-        "profiles_document": profiles,
-        "generation": _REALM_GENERATION,
-    }
-    values.update(changes)
-    return issue_provider_realm_enrollment_receipt(**values)
+    with _PROVIDER_REALM_OWNER_SEAM.install_test_enrollment(enrollment):
+        values = {
+            "binding_id": _GLM_BINDING,
+            "bindings_document": bindings,
+            "profiles_document": profiles,
+            "generation": _REALM_GENERATION,
+        }
+        values.update(changes)
+        return issue_provider_realm_enrollment_receipt(**values)
 
 
 def _owner_seal(*, capacity_fact=None, realm_receipt=None, bindings=None, profiles=None):
@@ -810,13 +808,13 @@ def test_attack_e_replace_unenrolled_to_enrolled_is_refused() -> None:
     """(e) dataclasses.replace must not turn an unenrolled receipt into enrolled."""
 
     bindings, profiles = _documents()
-    set_provider_realm_test_enrollment("unenrolled")
-    unenrolled = issue_provider_realm_enrollment_receipt(
-        binding_id=_GLM_BINDING,
-        bindings_document=bindings,
-        profiles_document=profiles,
-        generation=_REALM_GENERATION,
-    )
+    with _PROVIDER_REALM_OWNER_SEAM.install_test_enrollment("unenrolled"):
+        unenrolled = issue_provider_realm_enrollment_receipt(
+            binding_id=_GLM_BINDING,
+            bindings_document=bindings,
+            profiles_document=profiles,
+            generation=_REALM_GENERATION,
+        )
     assert unenrolled.enrollment_state == "unenrolled"
     with pytest.raises(
         (CanaryAdmissionError, ProviderRealmFactError),
