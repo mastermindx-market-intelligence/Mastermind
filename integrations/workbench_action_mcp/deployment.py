@@ -21,6 +21,13 @@ from integrations.business_mcp_auth.jwt_verifier import JwtAuthenticator
 from .app import create_authenticated_action_server
 from .contracts import ActionTokenCodec, MAX_ACTION_TTL_MS
 from .patch_port import ActionBindingResolver, ActionExecutor, create_text_patch_port
+from .process_contracts import (
+    MAX_COMMAND_TTL_MS,
+    CommandTokenCodec,
+    ValidationRecipe,
+    validate_recipe_set,
+)
+from .process_port import create_attended_process_ports
 
 
 @dataclass(frozen=True)
@@ -34,6 +41,9 @@ class RuntimeServices:
     run_io: ActionExecutor
     action_token_key: bytes
     allowed_hosts: tuple[str, ...]
+    process_directory_fd: int | None = None
+    validation_recipes: tuple[ValidationRecipe, ...] = ()
+    command_ttl_ms: int = MAX_COMMAND_TTL_MS
     call_receipt_sink: Callable[[Mapping[str, Any]], None] | None = None
     allowed_origins: tuple[str, ...] = ()
     action_ttl_ms: int = MAX_ACTION_TTL_MS
@@ -85,6 +95,21 @@ def create_deployment(services: RuntimeServices):
         token_codec=codec,
         action_ttl_ms=services.action_ttl_ms,
     )
+    process_ports = None
+    if services.process_directory_fd is None:
+        if services.validation_recipes:
+            raise ValueError("PROCESS_STATE_OWNER_REQUIRED")
+    else:
+        recipes = validate_recipe_set(services.validation_recipes)
+        process_ports = create_attended_process_ports(
+            resolve_binding=services.resolve_binding,
+            clock_ms=services.clock_ms,
+            run_io=services.run_io,
+            token_codec=CommandTokenCodec(services.action_token_key),
+            recipes=recipes,
+            command_ttl_ms=services.command_ttl_ms,
+            process_directory_fd=services.process_directory_fd,
+        )
     return create_authenticated_action_server(
         authenticator=services.authenticator,
         policy=policy,
@@ -93,6 +118,7 @@ def create_deployment(services: RuntimeServices):
         prepare_port=prepare,
         commit_port=commit,
         reconcile_port=reconcile,
+        process_ports=process_ports,
         allowed_hosts=services.allowed_hosts,
         call_receipt_sink=services.call_receipt_sink,
         allowed_origins=services.allowed_origins,

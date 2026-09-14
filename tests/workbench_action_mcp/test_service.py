@@ -26,8 +26,10 @@ from integrations.workbench_action_mcp.service import (
 def _document(tmp_path: Path) -> tuple[dict[str, object], Path, Path]:
     project = tmp_path / "project"
     audit = tmp_path / "audit"
+    process = tmp_path / "process"
     project.mkdir(mode=0o700)
     audit.mkdir(mode=0o700)
+    process.mkdir(mode=0o700)
     subject = "a" * 64
     client = "b" * 64
     now_ms = int(time.time() * 1000)
@@ -60,6 +62,16 @@ def _document(tmp_path: Path) -> tuple[dict[str, object], Path, Path]:
         "project_root": str(project),
         "audit_directory": str(audit),
         "action_key_file": str(action_key_file),
+        "process_directory": str(process),
+        "validation_recipes": [
+            {
+                "recipe_id": "git.diff-check",
+                "description": "Validate whitespace errors in the selected project.",
+                "argv": ["/usr/bin/git", "diff", "--check"],
+                "timeout_seconds": 20,
+                "max_output_bytes": 65536,
+            }
+        ],
         "bind_host": "127.0.0.1",
         "bind_port": 19443,
         "incoming_authority": "127.0.0.1:19443",
@@ -96,6 +108,7 @@ def test_closed_service_config_loads_from_secure_file(tmp_path: Path) -> None:
     assert loaded.allowed_hosts == ("127.0.0.1:19443",)
     assert loaded.lease.required_scopes == ("workbench.action",)
     assert loaded.lease.operation_ref.startswith("operation:")
+    assert [recipe.recipe_id for recipe in loaded.validation_recipes] == ["git.diff-check"]
 
 
 def test_service_config_rejects_read_scope_and_extra_keys(tmp_path: Path) -> None:
@@ -108,6 +121,15 @@ def test_service_config_rejects_read_scope_and_extra_keys(tmp_path: Path) -> Non
         assert getattr(error, "code", None) == "SERVICE_CONFIGURATION_REFUSED"
     else:
         raise AssertionError("read scope was accepted")
+    shell_recipe = json.loads(json.dumps(document))
+    shell_recipe["validation_recipes"][0]["argv"] = ["/bin/zsh", "-c", "true"]
+    try:
+        parse_service_config(shell_recipe)
+    except Exception as error:
+        assert getattr(error, "code", None) == "SERVICE_CONFIGURATION_REFUSED"
+    else:
+        raise AssertionError("shell validation recipe was accepted")
+
     extra = dict(document)
     extra["shell"] = "/bin/zsh"
     try:
@@ -230,6 +252,11 @@ def test_launcher_describe_is_dependency_free_and_truthful() -> None:
             "prepare_text_patch",
             "commit_text_patch",
             "reconcile_text_patch",
+            "list_validation_recipes",
+            "prepare_attended_command",
+            "start_attended_command",
+            "reconcile_attended_command_start",
+            "read_process",
         ],
     }
 

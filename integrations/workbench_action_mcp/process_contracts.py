@@ -73,6 +73,7 @@ class PreparedCommand:
     committed_head: str | None
     recipe_id: str
     recipe_digest: str
+    runner_digest: str
     timeout_seconds: int
     max_output_bytes: int
     issued_at_ms: int
@@ -149,7 +150,9 @@ def validate_recipe_set(value: object) -> tuple[ValidationRecipe, ...]:
     return selected
 
 
-def validate_prepared_command(value: object, *, now_ms: int) -> PreparedCommand:
+def validate_prepared_command(
+    value: object, *, now_ms: int, allow_expired: bool = False
+) -> PreparedCommand:
     if type(value) is not PreparedCommand:
         raise ProcessContractError("invalid prepared command")
     if (
@@ -184,6 +187,8 @@ def validate_prepared_command(value: object, *, now_ms: int) -> PreparedCommand:
         or _RECIPE.fullmatch(value.recipe_id) is None
         or type(value.recipe_digest) is not str
         or _HEX64.fullmatch(value.recipe_digest) is None
+        or type(value.runner_digest) is not str
+        or _HEX64.fullmatch(value.runner_digest) is None
     ):
         raise ProcessContractError("invalid prepared command")
     if value.committed_head is not None and (
@@ -200,7 +205,7 @@ def validate_prepared_command(value: object, *, now_ms: int) -> PreparedCommand:
         or value.issued_at_ms < 0
         or value.expires_at_ms <= value.issued_at_ms
         or value.expires_at_ms - value.issued_at_ms > MAX_COMMAND_TTL_MS
-        or value.expires_at_ms <= now_ms
+        or (not allow_expired and value.expires_at_ms <= now_ms)
         or value.expires_at_ms >= 2**63
     ):
         raise ProcessContractError("prepared command expired or invalid")
@@ -270,7 +275,9 @@ class CommandTokenCodec:
             raise ProcessContractError("prepared command is too large")
         return token
 
-    def decode(self, token: object, *, now_ms: int) -> PreparedCommand:
+    def decode(
+        self, token: object, *, now_ms: int, allow_expired: bool = False
+    ) -> PreparedCommand:
         if type(token) is not str or not token or len(token.encode("utf-8")) > MAX_COMMAND_REF_BYTES:
             raise ProcessContractError("invalid command reference")
         parts = token.split(".")
@@ -291,7 +298,9 @@ class CommandTokenCodec:
             raise
         except Exception as error:
             raise ProcessContractError("invalid command reference") from error
-        return validate_prepared_command(value, now_ms=now_ms)
+        return validate_prepared_command(
+            value, now_ms=now_ms, allow_expired=allow_expired
+        )
 
 
 __all__ = [

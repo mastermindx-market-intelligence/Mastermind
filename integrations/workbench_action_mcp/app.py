@@ -31,6 +31,8 @@ from integrations.business_mcp_auth.mcp_adapter import MastermindTokenVerifier
 
 from .contracts import ActionCaller, MAX_ACTION_REF_BYTES, MAX_PATCH_TEXT_BYTES
 from .patch_port import ProjectActionRefused
+from .process_mcp import ProcessMcpSurface
+from .process_port import AttendedProcessPorts, ProcessActionRefused
 
 PREPARE_TOOL = "prepare_text_patch"
 COMMIT_TOOL = "commit_text_patch"
@@ -198,6 +200,7 @@ def create_authenticated_action_server(
     prepare_port: PatchPrepare,
     commit_port: PatchCommit,
     reconcile_port: PatchReconcile,
+    process_ports: AttendedProcessPorts | None = None,
     allowed_hosts: tuple[str, ...],
     call_receipt_sink: CallReceiptSink | None = None,
     allowed_origins: tuple[str, ...] = (),
@@ -230,6 +233,9 @@ def create_authenticated_action_server(
         now=now,
         audit_sink=audit_sink,
     )
+    process_surface = (
+        ProcessMcpSurface(process_ports) if process_ports is not None else None
+    )
 
     server = FastMCP(
         name="Mastermind Workbench Action",
@@ -255,7 +261,7 @@ def create_authenticated_action_server(
 
     @server._mcp_server.list_tools()
     async def list_tools() -> list[Tool]:
-        return [
+        tools = [
             Tool(
                 name=PREPARE_TOOL,
                 description=(
@@ -303,6 +309,9 @@ def create_authenticated_action_server(
                 ),
             ),
         ]
+        if process_surface is not None:
+            tools.extend(process_surface.tools())
+        return tools
 
     def emit_call_receipt(
         *, name: str, request: object, caller: ActionCaller
@@ -344,14 +353,19 @@ def create_authenticated_action_server(
         access = get_access_token()
         if access is None:
             return _error("AUTHENTICATION_REQUIRED")
-        if name not in (PREPARE_TOOL, COMMIT_TOOL, RECONCILE_TOOL):
+        patch_names = (PREPARE_TOOL, COMMIT_TOOL, RECONCILE_TOOL)
+        process_name = process_surface is not None and name in process_surface.names
+        if name not in patch_names and not process_name:
             return _error("TOOL_NOT_AVAILABLE")
         try:
             request = _snapshot(arguments, MAX_ARGUMENT_BYTES)
             if name == PREPARE_TOOL:
                 prepare_validator.validate(request)
-            else:
+            elif name in (COMMIT_TOOL, RECONCILE_TOOL):
                 ref_validator.validate(request)
+            else:
+                assert process_surface is not None
+                request = process_surface.validate_input(name, request)
             caller = _caller_from_access(access, selected_policy)
             original_token = access.token
         except Exception:
@@ -363,31 +377,52 @@ def create_authenticated_action_server(
                 observed = await prepare_port(caller, request)
             elif name == COMMIT_TOOL:
                 observed = await commit_port(caller, request["action_ref"])
-            else:
+            elif name == RECONCILE_TOOL:
                 observed = await reconcile_port(caller, request["action_ref"])
+            else:
+                assert process_surface is not None
+                observed = await process_surface.call(name, caller, request)
         except ProjectActionRefused as error:
             return _error(error.code)
+        except ProcessActionRefused as error:
+            return _error(error.code)
         except Exception:
-            return _error("ACTION_UNAVAILABLE")
+            if process_surface is not None and process_surface.effect_unknown_on_post_auth(name):
+                return _error("PROCESS_EFFECT_UNKNOWN")
+            return _error("PROCESS_UNAVAILABLE" if process_name else "ACTION_UNAVAILABLE")
 
-        # A response loss after commit may hide an already-applied effect. Never
-        # convert post-action auth uncertainty into an invitation to retry.
+        def post_auth_error() -> str:
+            if name == COMMIT_TOOL:
+                return "ACTION_EFFECT_UNKNOWN"
+            if process_surface is not None and process_surface.effect_unknown_on_post_auth(name):
+                return "PROCESS_EFFECT_UNKNOWN"
+            return "AUTHENTICATION_CHANGED"
+
+        def result_error() -> str:
+            if name == COMMIT_TOOL:
+                return "ACTION_EFFECT_UNKNOWN"
+            if process_surface is not None and process_surface.effect_unknown_on_post_auth(name):
+                return "PROCESS_EFFECT_UNKNOWN"
+            return "PROCESS_RESULT_UNVERIFIED" if process_name else "ACTION_RESULT_UNVERIFIED"
+
+        # A response loss after a modifying effect may hide an already-applied
+        # file publication or process start. Post-effect auth/result uncertainty
+        # therefore reconciles the same prepared reference; it never invites retry.
         try:
             current_access = await verifier.verify_token(original_token)
             if current_access is None:
-                return _error(
-                    "ACTION_EFFECT_UNKNOWN" if name == COMMIT_TOOL else "AUTHENTICATION_CHANGED"
-                )
+                return _error(post_auth_error())
             current_caller = _caller_from_access(current_access, selected_policy)
             if current_caller != caller:
-                return _error(
-                    "ACTION_EFFECT_UNKNOWN" if name == COMMIT_TOOL else "AUTHENTICATION_CHANGED"
-                )
+                return _error(post_auth_error())
             data = _snapshot(dict(observed), MAX_RESULT_BYTES // 2)
             if name == PREPARE_TOOL:
                 prepare_output_validator.validate(data)
-            else:
+            elif name in (COMMIT_TOOL, RECONCILE_TOOL):
                 effect_output_validator.validate(data)
+            else:
+                assert process_surface is not None
+                data = process_surface.validate_output(name, data)
             result = CallToolResult(
                 content=[
                     TextContent(
@@ -404,9 +439,7 @@ def create_authenticated_action_server(
             )
             return result
         except Exception:
-            return _error(
-                "ACTION_EFFECT_UNKNOWN" if name == COMMIT_TOOL else "ACTION_RESULT_UNVERIFIED"
-            )
+            return _error(result_error())
 
     return server
 

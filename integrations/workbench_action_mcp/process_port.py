@@ -209,6 +209,11 @@ def _read_json(state_fd: int, name: str) -> dict[str, Any] | None:
     try:
         fd = _open_file(state_fd, name, os.O_RDONLY)
     except ProcessActionRefused as error:
+        # A durable receipt may be atomically published between a missing open
+        # and a follow-up stat. Preserve the snapshot semantics of this read:
+        # ENOENT at the actual open is simply "not published yet".
+        if isinstance(error.__cause__, FileNotFoundError):
+            return None
         try:
             os.stat(name, dir_fd=state_fd, follow_symlinks=False)
         except FileNotFoundError:
@@ -347,7 +352,11 @@ def _inspect(state_root_fd: int, prepared: PreparedCommand) -> dict[str, Any]:
                 "stderr_bytes": 0,
             }
         _validate_receipt_identity(start, prepared.command_id)
-        if start.get("schema") != _START_SCHEMA or start.get("recipe_digest") != prepared.recipe_digest:
+        if (
+            start.get("schema") != _START_SCHEMA
+            or start.get("recipe_digest") != prepared.recipe_digest
+            or start.get("runner_digest") != prepared.runner_digest
+        ):
             raise ProcessActionRefused("PROCESS_STATE_UNAVAILABLE")
         if start.get("state") == "START_FAILED":
             return {
@@ -371,21 +380,44 @@ def _inspect(state_root_fd: int, prepared: PreparedCommand) -> dict[str, Any]:
             _validate_receipt_identity(terminal, prepared.command_id)
             state = terminal.get("terminal_state")
             exit_code = terminal.get("exit_code")
+            terminal_effect = terminal.get("effect_state")
             if (
                 terminal.get("schema") != _TERMINAL_SCHEMA
                 or state not in {"EXITED", "TIMED_OUT", "CANCELLED", "OUTPUT_LIMIT", "RUNNER_FAILED"}
+                or terminal_effect not in _EFFECTS
                 or (exit_code is not None and type(exit_code) is not int)
                 or type(terminal.get("stdout_bytes")) is not int
                 or type(terminal.get("stderr_bytes")) is not int
             ):
                 raise ProcessActionRefused("PROCESS_STATE_UNAVAILABLE")
-            effect = "APPLIED" if child is not None else "NOT_APPLIED"
+            if state != "RUNNER_FAILED" and terminal_effect != "APPLIED":
+                raise ProcessActionRefused("PROCESS_STATE_UNAVAILABLE")
+            if terminal_effect == "APPLIED" and child is None:
+                raise ProcessActionRefused("PROCESS_STATE_UNAVAILABLE")
+            if terminal_effect == "NOT_APPLIED" and child is not None:
+                raise ProcessActionRefused("PROCESS_STATE_UNAVAILABLE")
+            stdout_bytes = terminal["stdout_bytes"]
+            stderr_bytes = terminal["stderr_bytes"]
+            actual_stdout = _bounded_output_size(
+                state_fd, "stdout.log", prepared.max_output_bytes
+            )
+            actual_stderr = _bounded_output_size(
+                state_fd, "stderr.log", prepared.max_output_bytes
+            )
+            if (
+                not 0 <= stdout_bytes <= prepared.max_output_bytes
+                or not 0 <= stderr_bytes <= prepared.max_output_bytes
+                or stdout_bytes != actual_stdout
+                or stderr_bytes != actual_stderr
+            ):
+                raise ProcessActionRefused("PROCESS_STATE_UNAVAILABLE")
+            effect = "APPLIED" if child is not None else terminal_effect
             return {
                 "effect_state": effect,
                 "process_state": state,
                 "exit_code": exit_code,
-                "stdout_bytes": terminal["stdout_bytes"],
-                "stderr_bytes": terminal["stderr_bytes"],
+                "stdout_bytes": stdout_bytes,
+                "stderr_bytes": stderr_bytes,
             }
         held = _liveness_held(state_fd)
         if child is not None:
@@ -394,22 +426,22 @@ def _inspect(state_root_fd: int, prepared: PreparedCommand) -> dict[str, Any]:
                     "effect_state": "APPLIED",
                     "process_state": "RUNNING",
                     "exit_code": None,
-                    "stdout_bytes": _output_size(state_fd, "stdout.log"),
-                    "stderr_bytes": _output_size(state_fd, "stderr.log"),
+                    "stdout_bytes": _bounded_output_size(state_fd, "stdout.log", prepared.max_output_bytes),
+                    "stderr_bytes": _bounded_output_size(state_fd, "stderr.log", prepared.max_output_bytes),
                 }
             return {
                 "effect_state": "EFFECT_UNKNOWN",
                 "process_state": "OWNER_LOST",
                 "exit_code": None,
-                "stdout_bytes": _output_size(state_fd, "stdout.log"),
-                "stderr_bytes": _output_size(state_fd, "stderr.log"),
+                "stdout_bytes": _bounded_output_size(state_fd, "stdout.log", prepared.max_output_bytes),
+                "stderr_bytes": _bounded_output_size(state_fd, "stderr.log", prepared.max_output_bytes),
             }
         return {
             "effect_state": "EFFECT_UNKNOWN",
             "process_state": "STARTING" if held is True or ready is not None else "OWNER_LOST",
             "exit_code": None,
-            "stdout_bytes": _output_size(state_fd, "stdout.log"),
-            "stderr_bytes": _output_size(state_fd, "stderr.log"),
+            "stdout_bytes": _bounded_output_size(state_fd, "stdout.log", prepared.max_output_bytes),
+            "stderr_bytes": _bounded_output_size(state_fd, "stderr.log", prepared.max_output_bytes),
         }
     finally:
         os.close(state_fd)
@@ -433,6 +465,13 @@ def _output_size(state_fd: int, name: str) -> int:
     return value.st_size
 
 
+def _bounded_output_size(state_fd: int, name: str, maximum: int) -> int:
+    size = _output_size(state_fd, name)
+    if size > maximum:
+        raise ProcessActionRefused("PROCESS_STATE_UNAVAILABLE")
+    return size
+
+
 def _read_output_page(state_fd: int, name: str, offset: int, maximum: int) -> dict[str, Any]:
     if type(offset) is not int or offset < 0 or type(maximum) is not int or not 1 <= maximum <= _MAX_READ_PAGE_BYTES:
         raise ProcessActionRefused("PROCESS_COMMAND_INVALID")
@@ -447,6 +486,7 @@ def _read_output_page(state_fd: int, name: str, offset: int, maximum: int) -> di
                 "offset_end": 0,
                 "retained_start": 0,
                 "retained_end": 0,
+                "gap_ranges": [],
                 "content": "",
                 "truncated": False,
                 "next_offset": None,
@@ -459,8 +499,9 @@ def _read_output_page(state_fd: int, name: str, offset: int, maximum: int) -> di
         raw = os.read(fd, min(maximum, size - start))
     finally:
         os.close(fd)
-    # Process output is evidence, not an instruction stream. Preserve arbitrary
-    # bytes losslessly without OCR/locale assumptions.
+    # Process output is evidence, not an instruction stream. Byte offsets and
+    # byte counts stay authoritative; the text projection is UTF-8 with explicit
+    # replacement for invalid byte sequences.
     content = raw.decode("utf-8", errors="replace")
     end = start + len(raw)
     return {
@@ -468,33 +509,83 @@ def _read_output_page(state_fd: int, name: str, offset: int, maximum: int) -> di
         "offset_end": end,
         "retained_start": 0,
         "retained_end": size,
+        "gap_ranges": [],
         "content": content,
         "truncated": end < size,
         "next_offset": end if end < size else None,
     }
 
 
-def _runner_identity(path: str) -> str:
+def _open_verified_runner(
+    path: str, *, expected_digest: str | None = None
+) -> tuple[int, str]:
+    """Open and hash the exact runner bytes that will be executed.
+
+    The returned descriptor is reset to offset zero and may be passed to a
+    Python child as /dev/fd/<n>. Re-opening on every start prevents a pathname
+    swap between owner qualification and physical launch.
+    """
     selected = Path(path)
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    cloexec = getattr(os, "O_CLOEXEC", 0)
+    if not nofollow or not cloexec:
+        raise ProcessActionRefused("PROCESS_STATE_UNAVAILABLE")
     try:
         before = selected.lstat()
-        raw = selected.read_bytes()
-        after = selected.lstat()
+        fd = os.open(str(selected), os.O_RDONLY | nofollow | cloexec)
     except OSError as error:
         raise ProcessActionRefused("PROCESS_STATE_UNAVAILABLE") from error
-    if (
-        stat.S_ISLNK(before.st_mode)
-        or not stat.S_ISREG(before.st_mode)
-        or before.st_uid != os.geteuid()
-        or stat.S_IMODE(before.st_mode) & 0o022
-        or before.st_dev != after.st_dev
-        or before.st_ino != after.st_ino
-        or before.st_size != after.st_size
-        or before.st_mtime_ns != after.st_mtime_ns
-        or len(raw) > 1024 * 1024
-    ):
-        raise ProcessActionRefused("PROCESS_STATE_UNAVAILABLE")
-    return hashlib.sha256(raw).hexdigest()
+    try:
+        opened = os.fstat(fd)
+        if (
+            stat.S_ISLNK(before.st_mode)
+            or not stat.S_ISREG(before.st_mode)
+            or not stat.S_ISREG(opened.st_mode)
+            or before.st_uid != os.geteuid()
+            or opened.st_uid != os.geteuid()
+            or stat.S_IMODE(before.st_mode) & 0o022
+            or stat.S_IMODE(opened.st_mode) & 0o022
+            or before.st_dev != opened.st_dev
+            or before.st_ino != opened.st_ino
+            or before.st_size != opened.st_size
+            or before.st_mtime_ns != opened.st_mtime_ns
+            or opened.st_nlink != 1
+            or opened.st_size > 1024 * 1024
+            or os.get_inheritable(fd)
+        ):
+            raise ProcessActionRefused("PROCESS_STATE_UNAVAILABLE")
+        digest = hashlib.sha256()
+        total = 0
+        while True:
+            raw = os.read(fd, min(65536, 1024 * 1024 + 1 - total))
+            if not raw:
+                break
+            total += len(raw)
+            if total > 1024 * 1024:
+                raise ProcessActionRefused("PROCESS_STATE_UNAVAILABLE")
+            digest.update(raw)
+        after = os.fstat(fd)
+        if (
+            opened.st_dev != after.st_dev
+            or opened.st_ino != after.st_ino
+            or opened.st_size != after.st_size
+            or opened.st_mtime_ns != after.st_mtime_ns
+        ):
+            raise ProcessActionRefused("PROCESS_STATE_UNAVAILABLE")
+        actual = digest.hexdigest()
+        if expected_digest is not None and actual != expected_digest:
+            raise ProcessActionRefused("PROCESS_STATE_UNAVAILABLE")
+        os.lseek(fd, 0, os.SEEK_SET)
+        return fd, actual
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def _runner_identity(path: str) -> str:
+    fd, digest = _open_verified_runner(path)
+    os.close(fd)
+    return digest
 
 
 def _start_sync(
@@ -536,88 +627,96 @@ def _start_sync(
                     time.sleep(0.02)
             return existing
 
-        opened = _open_state_dir(state_root_fd, prepared.command_id, create=True)
-        if opened is None:
-            raise ProcessActionRefused("PROCESS_STATE_UNAVAILABLE")
-        state_fd = opened
-        current_start = _read_json(state_fd, "start.json")
-        if current_start is not None:
-            os.close(state_fd)
-            state_fd = -1
-            return _inspect(state_root_fd, prepared)
-
-        now_ms = _now(clock_ms)
-        _write_json(
-            state_fd,
-            "start.json",
-            {
-                "schema": _START_SCHEMA,
-                "command_id": prepared.command_id,
-                "state": "STARTING",
-                "recipe_digest": prepared.recipe_digest,
-                "runner_digest": runner_digest,
-                "requested_at_ms": now_ms,
-            },
+        # Re-open and verify the exact runner bytes before creating any command
+        # state. The descriptor itself is what the child Python executes.
+        runner_fd, current_runner_digest = _open_verified_runner(
+            runner_path, expected_digest=runner_digest
         )
-        root_dup = os.dup(scope.root_fd)
-        state_dup = os.dup(state_fd)
         try:
-            command = [
-                python_executable,
-                runner_path,
-                "--root-fd",
-                str(root_dup),
-                "--state-fd",
-                str(state_dup),
-                "--timeout-seconds",
-                str(prepared.timeout_seconds),
-                "--max-output-bytes",
-                str(prepared.max_output_bytes),
-                "--command-id",
-                prepared.command_id,
-                "--",
-                *recipe.argv,
-            ]
+            opened = _open_state_dir(state_root_fd, prepared.command_id, create=True)
+            if opened is None:
+                raise ProcessActionRefused("PROCESS_STATE_UNAVAILABLE")
+            state_fd = opened
+            current_start = _read_json(state_fd, "start.json")
+            if current_start is not None:
+                os.close(state_fd)
+                state_fd = -1
+                return _inspect(state_root_fd, prepared)
+
+            now_ms = _now(clock_ms)
+            _write_json(
+                state_fd,
+                "start.json",
+                {
+                    "schema": _START_SCHEMA,
+                    "command_id": prepared.command_id,
+                    "state": "STARTING",
+                    "recipe_digest": prepared.recipe_digest,
+                    "runner_digest": current_runner_digest,
+                    "requested_at_ms": now_ms,
+                },
+            )
+            root_dup = os.dup(scope.root_fd)
+            state_dup = os.dup(state_fd)
             try:
-                subprocess.Popen(
-                    command,
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    env={
-                        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
-                        "HOME": "/var/empty",
-                        "LC_ALL": "C",
-                        "LANG": "C",
-                        "PYTHONNOUSERSITE": "1",
-                    },
-                    close_fds=True,
-                    pass_fds=(root_dup, state_dup),
-                    start_new_session=True,
-                )
-            except (OSError, ValueError, subprocess.SubprocessError):
-                _write_json(
-                    state_fd,
-                    "start.json",
-                    {
-                        "schema": _START_SCHEMA,
-                        "command_id": prepared.command_id,
-                        "state": "START_FAILED",
-                        "recipe_digest": prepared.recipe_digest,
-                        "runner_digest": runner_digest,
-                        "requested_at_ms": now_ms,
-                    },
-                )
-                return {
-                    "effect_state": "NOT_APPLIED",
-                    "process_state": "START_FAILED",
-                    "exit_code": None,
-                    "stdout_bytes": 0,
-                    "stderr_bytes": 0,
-                }
+                command = [
+                    python_executable,
+                    f"/dev/fd/{runner_fd}",
+                    "--root-fd",
+                    str(root_dup),
+                    "--state-fd",
+                    str(state_dup),
+                    "--timeout-seconds",
+                    str(prepared.timeout_seconds),
+                    "--max-output-bytes",
+                    str(prepared.max_output_bytes),
+                    "--command-id",
+                    prepared.command_id,
+                    "--",
+                    *recipe.argv,
+                ]
+                try:
+                    subprocess.Popen(
+                        command,
+                        stdin=subprocess.DEVNULL,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        env={
+                            "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+                            "HOME": "/var/empty",
+                            "LC_ALL": "C",
+                            "LANG": "C",
+                            "PYTHONNOUSERSITE": "1",
+                        },
+                        close_fds=True,
+                        pass_fds=(runner_fd, root_dup, state_dup),
+                        start_new_session=True,
+                    )
+                except (OSError, ValueError, subprocess.SubprocessError):
+                    _write_json(
+                        state_fd,
+                        "start.json",
+                        {
+                            "schema": _START_SCHEMA,
+                            "command_id": prepared.command_id,
+                            "state": "START_FAILED",
+                            "recipe_digest": prepared.recipe_digest,
+                            "runner_digest": current_runner_digest,
+                            "requested_at_ms": now_ms,
+                        },
+                    )
+                    return {
+                        "effect_state": "NOT_APPLIED",
+                        "process_state": "START_FAILED",
+                        "exit_code": None,
+                        "stdout_bytes": 0,
+                        "stderr_bytes": 0,
+                    }
+            finally:
+                os.close(root_dup)
+                os.close(state_dup)
         finally:
-            os.close(root_dup)
-            os.close(state_dup)
+            os.close(runner_fd)
     finally:
         if state_fd >= 0:
             os.close(state_fd)
@@ -656,9 +755,17 @@ def _binding_for_prepared(
     return binding
 
 
-def _decode(codec: CommandTokenCodec, token: object, clock_ms: Callable[[], int]) -> PreparedCommand:
+def _decode(
+    codec: CommandTokenCodec,
+    token: object,
+    clock_ms: Callable[[], int],
+    *,
+    allow_expired: bool = False,
+) -> PreparedCommand:
     try:
-        return codec.decode(token, now_ms=_now(clock_ms))
+        return codec.decode(
+            token, now_ms=_now(clock_ms), allow_expired=allow_expired
+        )
     except ProcessContractError as error:
         message = str(error).lower()
         code = "PROCESS_COMMAND_EXPIRED" if "expired" in message else "PROCESS_COMMAND_INVALID"
@@ -674,7 +781,12 @@ def _recipe_for(prepared: PreparedCommand, recipes: Mapping[str, ValidationRecip
     return recipe
 
 
-def _public_state(prepared: PreparedCommand, observed: Mapping[str, Any]) -> dict[str, Any]:
+def _public_state(
+    prepared: PreparedCommand,
+    observed: Mapping[str, Any],
+    *,
+    observed_at_ms: int,
+) -> dict[str, Any]:
     effect = observed.get("effect_state")
     state = observed.get("process_state")
     if effect not in _EFFECTS or state not in _PROCESS_STATES:
@@ -687,7 +799,11 @@ def _public_state(prepared: PreparedCommand, observed: Mapping[str, Any]) -> dic
         "project_ref": prepared.project_ref,
         "responsibility_ref": prepared.responsibility_ref,
         "operation_ref": prepared.operation_ref,
+        "generation": prepared.generation,
         "recipe_id": prepared.recipe_id,
+        "recipe_digest": prepared.recipe_digest,
+        "runner_digest": prepared.runner_digest,
+        "observed_at_ms": observed_at_ms,
         "exit_code": observed.get("exit_code"),
         "stdout_bytes": int(observed.get("stdout_bytes", 0)),
         "stderr_bytes": int(observed.get("stderr_bytes", 0)),
@@ -729,7 +845,7 @@ def create_attended_process_ports(
 
     async def list_recipes(caller: ActionCaller, project_ref: str) -> Mapping[str, Any]:
         try:
-            _current_binding(
+            binding = _current_binding(
                 caller=caller,
                 project_ref=project_ref,
                 resolve_binding=resolve_binding,
@@ -737,9 +853,12 @@ def create_attended_process_ports(
             )
         except ProjectActionRefused as error:
             raise ProcessActionRefused("PROCESS_BINDING_CHANGED") from error
+        observed_at_ms = _now(clock_ms)
         return {
             "status": "OK",
             "project_ref": project_ref,
+            "generation": binding.scope.generation,
+            "observed_at_ms": observed_at_ms,
             "recipes": [
                 {
                     "recipe_id": recipe.recipe_id,
@@ -809,6 +928,7 @@ def create_attended_process_ports(
             committed_head=binding.scope.committed_head,
             recipe_id=recipe.recipe_id,
             recipe_digest=recipe.digest,
+            runner_digest=runner_digest,
             timeout_seconds=timeout,
             max_output_bytes=maximum,
             issued_at_ms=now_ms,
@@ -825,8 +945,10 @@ def create_attended_process_ports(
             "project_ref": project_ref,
             "responsibility_ref": prepared.responsibility_ref,
             "operation_ref": prepared.operation_ref,
+            "generation": prepared.generation,
             "recipe_id": prepared.recipe_id,
             "recipe_digest": prepared.recipe_digest,
+            "runner_digest": prepared.runner_digest,
             "timeout_seconds": prepared.timeout_seconds,
             "max_output_bytes": prepared.max_output_bytes,
             "expires_at_ms": prepared.expires_at_ms,
@@ -843,7 +965,7 @@ def create_attended_process_ports(
             prepared=prepared,
             recipe=recipe,
             runner_path=runner_path,
-            runner_digest=runner_digest,
+            runner_digest=prepared.runner_digest,
             python_executable=python_executable,
             clock_ms=clock_ms,
         )
@@ -868,12 +990,22 @@ def create_attended_process_ports(
                 raise
             observed = dict(observed)
             observed["effect_state"] = "EFFECT_UNKNOWN"
-        return _public_state(prepared, observed)
+        return _public_state(prepared, observed, observed_at_ms=_now(clock_ms))
 
     async def reconcile_start(caller: ActionCaller, token: object) -> Mapping[str, Any]:
-        prepared = _decode(token_codec, token, clock_ms)
-        _binding_for_prepared(prepared, caller, resolve_binding, clock_ms)
-        _recipe_for(prepared, recipe_map)
+        # Effect reconciliation is deliberately separable from current action
+        # authority. Expiry, revocation, recipe rotation, or lease removal must
+        # never erase whether the original modifying start took effect. The
+        # current authenticated principal must still be the original principal,
+        # but no live selected-project binding or current recipe grant is needed
+        # to inspect durable effect metadata. Output remains gated by read().
+        prepared = _decode(token_codec, token, clock_ms, allow_expired=True)
+        if (
+            caller.subject_digest != prepared.subject_digest
+            or caller.client_ref != prepared.client_ref
+            or caller.resource != prepared.resource
+        ):
+            raise ProcessActionRefused("PROCESS_BINDING_CHANGED")
         pending = run_io(lambda: _inspect(process_directory_fd, prepared))
         if not inspect.isawaitable(pending):
             raise ProcessActionRefused("PROCESS_STATE_UNAVAILABLE")
@@ -881,7 +1013,7 @@ def create_attended_process_ports(
             observed = await pending
         except Exception as error:
             raise ProcessActionRefused("PROCESS_STATE_UNAVAILABLE") from error
-        return _public_state(prepared, observed)
+        return _public_state(prepared, observed, observed_at_ms=_now(clock_ms))
 
     async def read(caller: ActionCaller, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
         try:
@@ -929,7 +1061,9 @@ def create_attended_process_ports(
             raise
         except Exception as error:
             raise ProcessActionRefused("PROCESS_STATE_UNAVAILABLE") from error
-        public = _public_state(prepared, result["state"])
+        public = _public_state(
+            prepared, result["state"], observed_at_ms=_now(clock_ms)
+        )
         public["stdout"] = result["stdout"]
         public["stderr"] = result["stderr"]
         return public
@@ -949,6 +1083,7 @@ def _read_output_page_placeholder() -> dict[str, Any]:
         "offset_end": 0,
         "retained_start": 0,
         "retained_end": 0,
+        "gap_ranges": [],
         "content": "",
         "truncated": False,
         "next_offset": None,

@@ -46,6 +46,7 @@ def prepared(now: int = 1_000_000) -> PreparedCommand:
         committed_head="3" * 40,
         recipe_id=selected.recipe_id,
         recipe_digest=recipe_digest(selected),
+        runner_digest="4" * 64,
         timeout_seconds=10,
         max_output_bytes=32768,
         issued_at_ms=now,
@@ -113,3 +114,19 @@ def test_command_token_domain_is_not_patch_token_domain() -> None:
         ActionTokenCodec(key).decode(command, now_ms=1_000_001)
     with pytest.raises(ProcessContractError):
         CommandTokenCodec(key).decode(patch_token, now_ms=1_000_001)
+
+
+def test_expired_command_ref_can_be_verified_only_when_reconciliation_requests_it() -> None:
+    codec = CommandTokenCodec(b"r" * 32)
+    value = prepared()
+    token = codec.encode(value)
+    with pytest.raises(ProcessContractError):
+        codec.decode(token, now_ms=value.expires_at_ms)
+    assert (
+        codec.decode(
+            token,
+            now_ms=value.expires_at_ms + 999_999,
+            allow_expired=True,
+        )
+        == value
+    )
