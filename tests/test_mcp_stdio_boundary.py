@@ -248,7 +248,7 @@ asyncio.run(main())
         before = len(process.wire)
         process.send({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
         reply = process.receive()
-        assert reply == {"jsonrpc": "2.0", "id": None, "error": {
+        assert reply == {"jsonrpc": "2.0", "id": 2, "error": {
             "code": -32603, "message": "WORKBENCH_MCP_OUTPUT_LIMIT",
         }}
         assert len(process.wire) - before < MAX_WIRE_BYTES
@@ -257,3 +257,72 @@ asyncio.run(main())
         process.assert_exit(0)
         assert SENTINEL.encode() not in process.wire + process.stderr()
         assert b"WORKBENCH_MCP_OUTPUT_LIMIT" in process.stderr()
+
+
+def test_official_client_original_oversized_request_completes_without_timeout(monkeypatch):
+    """Observe the original SDK waiter and exact child, not a second raw ping."""
+    import asyncio
+    from datetime import timedelta
+    import importlib
+    import anyio
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.shared.exceptions import McpError
+
+    stdio = importlib.import_module("mcp.client.stdio")
+    handles, fallback = [], []
+    real_create = stdio._create_platform_compatible_process
+    real_terminate = stdio._terminate_process_tree
+
+    async def create(**kwargs):
+        process = await real_create(**kwargs)
+        handles.append(process)
+        return process
+
+    async def terminate(process):
+        fallback.append(process)
+        await real_terminate(process)
+
+    monkeypatch.setattr(stdio, "_create_platform_compatible_process", create)
+    monkeypatch.setattr(stdio, "_terminate_process_tree", terminate)
+    code = '''
+import asyncio
+from mcp.server.lowlevel import Server
+from mcp.types import Tool
+from common.mcp_stdio_boundary import private_stdio_server, MAX_WIRE_BYTES
+async def main():
+    server = Server("original-response-test")
+    @server.list_tools()
+    async def listed():
+        return [Tool(name="oversized", description="WORKBENCH_REJECTED_SECRET_7b927c" + "x" * MAX_WIRE_BYTES, inputSchema={})]
+    async with private_stdio_server() as (read, write):
+        await server.run(read, write, server.create_initialization_options())
+asyncio.run(main())
+'''
+    with tempfile.TemporaryFile(mode="w+") as errors:
+        async def exercise():
+            params = StdioServerParameters(command=sys.executable, args=["-c", code], cwd="/",
+                                            env={"PYTHONPATH": str(REPO), "PYTHONUNBUFFERED": "1"})
+            async with stdio.stdio_client(params, errlog=errors) as (read, write):
+                async with ClientSession(read, write, read_timeout_seconds=timedelta(seconds=30)) as session:
+                    with anyio.fail_after(STARTUP_TIMEOUT_SECONDS):
+                        await session.initialize()
+                    # The client's 30-second timeout cannot explain this result.
+                    with anyio.fail_after(RESPONSE_TIMEOUT_SECONDS):
+                        with pytest.raises(McpError) as caught:
+                            await session.list_tools()
+                    assert caught.value.error.code == -32603
+                    assert caught.value.error.message == "WORKBENCH_MCP_OUTPUT_LIMIT"
+        asyncio.run(exercise())
+        assert len(handles) == 1
+        assert handles[0].returncode == 0
+        assert not fallback
+        errors.seek(0)
+        assert SENTINEL not in errors.read()
+
+
+@pytest.mark.parametrize("request_id", [True, 2**64, SENTINEL + "x" * 1024])
+def test_uncorrelatable_request_id_is_refused_before_sdk(request_id):
+    from common.mcp_stdio_boundary import _validated_protocol_line
+
+    with pytest.raises(ValueError, match="PROTOCOL_ID"):
+        _validated_protocol_line(json.dumps({"jsonrpc": "2.0", "id": request_id, "method": "ping"}))
