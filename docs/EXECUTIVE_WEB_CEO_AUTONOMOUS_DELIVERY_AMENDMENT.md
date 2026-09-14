@@ -5,6 +5,7 @@
 **Operation:** `mastermind-web-ceo-autonomous-delivery-canon-20260913-sol-001`.  
 **Skillpack:** `mastermind.sol_skillpack.v1` 1.0.1 / bootstrap-major 1.  
 **Source observation at authoring:** protected Mastermind `ef4682c8b998a9ca522b4690fadf938aa57029ad`.  
+**Compatibility observation at canon review:** protected Mastermind `e8f755d1db35f29a227aaac7335caa86fa2b02c4` includes the later #606 identity-probe repair, protected #576/#575 source, and #605 canonical Web workspace custody. Those changes do not alter this amendment's authority split; #605 specifically governs any attended Web/host modifying workspace used to execute the later plan.  
 **Status on this candidate branch:** `ARCHITECTURE_SOURCE_LAW_CANDIDATE / SPEC_ONLY / PRODUCTION_INERT` until protected review/merge and separately proven implementation.
 
 ## 1. Narrow precedence and purpose
@@ -182,6 +183,11 @@ that surface/responsibility and no other authorized decision path exists.
 Supported platform tasks/wake/provisioning mechanisms may be qualified as attention or reasoning
 entry points, but none is presumed to provide exact model/mode, tool permission, current binding or
 write authority before real proof.
+
+Attended Web/host source modification also follows the protected workspace-custody owner: use the
+installed `mmx-workspace` route when that host capability is available. A missing/uninstalled launcher
+is a serviceability blocker for host-workspace modification, not permission to create an unmanaged
+raw worktree or clone. This workspace rule changes no Executive worker workspace or lifecycle owner.
 
 The operating system must not depend on unofficial personal-Web inference automation. Do not use:
 
