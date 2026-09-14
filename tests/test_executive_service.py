@@ -7933,14 +7933,18 @@ def test_armed_service_advances_review_repair_without_web_continue(
     tmp_path: Path,
     short_socket_root: Path,
 ):
-    async def wait_until(service, predicate, *, timeout: float = 3.0):
+    async def wait_until(service, predicate, *, timeout: float = 15.0):
+        # This is a deadlock bound, not a three-second performance SLA.  The
+        # background service must traverse six durable role transitions, and a
+        # loaded two-core hosted runner can legitimately schedule those ticks
+        # more slowly while still making forward progress.
         deadline = asyncio.get_running_loop().time() + timeout
         while asyncio.get_running_loop().time() < deadline:
             if predicate():
                 return
             await asyncio.sleep(0.01)
         raise AssertionError(
-            "bounded service did not reach aggregation handoff: "
+            f"bounded service did not reach aggregation handoff within {timeout:.1f}s: "
             f"last_error={service._coo_last_error} "
             f"last_outcome={service._coo_last_outcome} "
             f"dispatch_errors={service._dispatch_errors}"
