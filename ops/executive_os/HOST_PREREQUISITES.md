@@ -19,18 +19,66 @@ Before a period without a human at the keyboard, prove each home Mac recovers
 on its own instead of remembering that it was set up. This is a read-only
 observation, so it needs no install stage, no administrator password, and no
 service state change. Run it as the ordinary operator on Studio, M1, and any
-future host being enrolled:
+future host being enrolled — but you must say which **role** you are proving,
+because the two roles have different requirements.
+
+`--profile` is mandatory and has exactly two accepted values. There is no
+default, and the checker never infers the role from which services happen to
+be installed: a Studio whose Executive control plane has stopped looks exactly
+like a worker host that never had one, and guessing the weaker profile there
+would turn a real outage into a pass.
+
+| Host | Command profile | What a `READY` proves |
+|---|---|---|
+| Studio (canonical Executive control host) | `executive-control-host/v1` | physical recovery **and** the installed Executive control, MCP, and sol-state-relay daemons running |
+| M1, future M6, any other home Mac | `home-mac-recovery-base/v1` | physical/local recovery of that Mac only |
+
+On Studio:
 
 ```bash
 /usr/bin/python3 -I -S -B \
-  "$SOURCE_REPO/ops/executive_os/host_recovery_readiness.py"
+  "$SOURCE_REPO/ops/executive_os/host_recovery_readiness.py" \
+  --profile executive-control-host/v1
+```
+
+On M1, M6, or any other physical host being recovered or enrolled:
+
+```bash
+/usr/bin/python3 -I -S -B \
+  "$SOURCE_REPO/ops/executive_os/host_recovery_readiness.py" \
+  --profile home-mac-recovery-base/v1
 ```
 
 It emits one canonical `mastermind.host_recovery_readiness/v1` JSON report on
-stdout and exits `0`. `--host-ref host-<64-lower-hex>` optionally stamps an
-opaque host reference; any other value is refused without echoing it. A typed
-refusal exits `65` and writes only a closed code to stderr. Reruns are free and
-create no effect.
+stdout and exits `0`. The report stamps the exact `profile` you named, and a
+report produced under one profile is refused if it is later validated as the
+other. `--host-ref host-<64-lower-hex>` optionally stamps an opaque host
+reference; any other value is refused without echoing it. A typed refusal exits
+`65` and writes only a closed code to stderr — an omitted profile is
+`ARGUMENTS_INVALID` and an unrecognized one is `PROFILE_INVALID`, both refused
+before the host is observed at all. Reruns are free and create no effect.
+
+Both profiles collect the same fixed superset of observations with the same
+fixed argv. The profile changes classification requirements only; it is never
+command authority and never widens what the checker reads.
+
+### `home-mac-recovery-base/v1` is not worker or fabric acceptance
+
+The base profile proves exactly one thing: that this physical Mac comes back on
+its own after a power loss or reboot, and can be reached over Remote Login
+without a human at the keyboard. It is **not** evidence that the host can
+execute Agent Fabric / worker work. Worker-runtime and fabric acceptance are
+defined and gated by their current owners (Fable/Codex autonomy and Agent
+Fabric), and that gate is a separate journey with its own evidence; this
+checker neither performs it nor substitutes for it.
+
+Studio remains the canonical Executive control host. Do **not** install the
+Executive control, MCP, or sol-state-relay daemons on a worker or capacity host
+in order to turn this checker green — that would stand up a duplicate Executive
+control plane, which the strategic state prohibits. On those hosts, the absent
+control daemons are reported as `ADVISORY` visibility only and cannot make the
+base profile `NOT_READY` or `UNKNOWN`. Equally, a green base-profile report on
+Studio is not control-host acceptance: use `executive-control-host/v1` there.
 
 Read `recovery_state` first: `READY`, `NOT_READY`, or `UNKNOWN`. Unknown
 load-bearing evidence — a missing command, a permission refusal, or malformed
@@ -47,10 +95,26 @@ the overall state:
 | Requirement | Load-bearing | Meaning |
 |---|---|---|
 | `REQUIRED` | yes | Unattended recovery depends on it. |
-| `REQUIRED_RUNNING` | yes | An already-installed critical system LaunchDaemon must be running. |
+| `REQUIRED_RUNNING` | yes | An already-installed critical system LaunchDaemon must be running. Control profile only. |
 | `OPTIONAL` | no | Reviewed as preferable, but it does not decide readiness. |
-| `DISARMED_EXPECTED` | no | The current gates intend this service to be absent or disabled. |
+| `DISARMED_EXPECTED` | no | The current gates intend this service to be absent or disabled. Control profile only. |
 | `ADVISORY` | no | Reported because the operator must know it. |
+
+Every physical predicate — platform, power policy, Remote Login, preboot
+unlock, disk headroom — carries the same requirement in both profiles. The only
+difference is the Executive system LaunchDaemons:
+
+| Label group | `executive-control-host/v1` | `home-mac-recovery-base/v1` |
+|---|---|---|
+| control, MCP, sol-state-relay | `REQUIRED_RUNNING` | `ADVISORY` |
+| worker, backup, privileged broker | `DISARMED_EXPECTED` | `ADVISORY` |
+
+Under the base profile those labels are reported with their truthful observed
+state (`DAEMON_NOT_INSTALLED`, `DAEMON_DISABLED`, `DAEMON_LOADED_NOT_RUNNING`,
+`DAEMON_RUNNING`) and no load-bearing requirement. They are deliberately not
+called `DAEMON_INTENTIONALLY_DISARMED` there, because a worker host is not a
+host where the Executive control plane was gated off — it is a host the control
+plane does not belong to.
 
 These semantics are deliberate and should not be "fixed" later without a
 decision:
@@ -69,7 +133,8 @@ decision:
   that plist ships with macOS whether or not the listener is on. An installed
   label launchd will not describe is `UNKNOWN`, never `NOT_INSTALLED`.
 - **Unloaded worker, backup, and privileged-broker daemons are not defects.**
-  They are `DISARMED_EXPECTED`, and the report distinguishes
+  Under the control profile they are `DISARMED_EXPECTED`, and the report
+  distinguishes
   `DAEMON_NOT_INSTALLED` from `DAEMON_INTENTIONALLY_DISARMED` so the current
   gates do not read as failures. A disarmed service found running is `ADVISORY`
   (`DAEMON_UNEXPECTEDLY_RUNNING`), not a readiness failure.

@@ -2,7 +2,7 @@
 
 This module answers exactly one question about one already-observed Mastermind
 home Mac: after an unattended power loss or reboot, does the host come back far
-enough for Executive work to resume without a human at the keyboard?
+enough for the *caller-named role* to resume without a human at the keyboard?
 
 It validates and classifies one bounded observation produced elsewhere.  It does
 not sample hosts, invoke commands, mutate power/service/encryption state, keep a
@@ -10,7 +10,23 @@ registry of hosts, schedule or gate execution, or persist anything.  Collection
 and command invocation belong to ``ops/executive_os/host_recovery_readiness.py``;
 privileged remediation remains with the reviewed broker owner.
 
-Profile semantics (``always-on-executive-host/v1``) are deliberately explicit:
+There are exactly two closed profiles, and the caller must name one.  Nothing
+here infers a profile from what happens to be installed: inferring the weaker
+profile from missing daemons would let a broken Executive control host pass.
+
+``home-mac-recovery-base/v1``
+    Physical/local recoverability of one home Mac only: platform, power policy,
+    Remote Login, preboot-unlock eligibility, and disk headroom.  It claims
+    nothing about worker runtime or Executive control-plane readiness, so no
+    Executive daemon predicate is load-bearing under it.
+``executive-control-host/v1``
+    Everything in the base profile plus the already-installed Studio Executive
+    control, MCP, and sol-state-relay LaunchDaemons running.
+
+Both profiles classify the same fixed superset of observations; the profile
+changes classification requirements only, never what the collector may run.
+
+Requirement semantics are deliberately explicit:
 
 ``REQUIRED`` / ``REQUIRED_RUNNING``
     Load-bearing.  An unsatisfied or unknown predicate changes the overall
@@ -32,7 +48,14 @@ from typing import Any
 
 
 READINESS_SCHEMA = "mastermind.host_recovery_readiness/v1"
-READINESS_PROFILE = "always-on-executive-host/v1"
+
+# Physical/local recoverability of one home Mac.  Explicitly NOT a claim that
+# the host can execute Agent Fabric / worker work, and explicitly not Executive
+# control-host acceptance.
+BASE_RECOVERY_PROFILE = "home-mac-recovery-base/v1"
+# The base profile plus the canonical Studio Executive control plane running.
+EXECUTIVE_CONTROL_PROFILE = "executive-control-host/v1"
+READINESS_PROFILES = (BASE_RECOVERY_PROFILE, EXECUTIVE_CONTROL_PROFILE)
 
 # Reviewed floor: the preboot recovery profile below is only reviewed against
 # macOS 14+ on Apple silicon.  Raise it deliberately, never infer it.
@@ -85,7 +108,10 @@ DAEMON_OBSERVATIONS = frozenset(
 )
 
 # Already-installed critical Executive system LaunchDaemons that must be running
-# for an unattended host to be useful after boot.
+# for the canonical Executive control host to be useful after boot.  They are
+# load-bearing under ``executive-control-host/v1`` only: a worker or capacity
+# host must not run a duplicate Executive control plane, so their absence there
+# is not a defect and installing them to turn this checker green is wrong.
 REQUIRED_RUNNING_DAEMON_LABELS = (
     "com.mastermind.executive.control",
     "com.mastermind.executive.mcp",
@@ -100,6 +126,11 @@ DISARMED_EXPECTED_DAEMON_LABELS = (
     "com.mastermind.executive.worker.codex-pro-01",
     "com.mastermind.executive.worker.codex-pro-02",
     "com.mastermind.executive.worker.codex-pro-03",
+)
+# Both profiles observe the same fixed superset of system labels; only the
+# requirement attached to each one differs.
+ALL_DAEMON_LABELS = tuple(
+    sorted(REQUIRED_RUNNING_DAEMON_LABELS + DISARMED_EXPECTED_DAEMON_LABELS)
 )
 # User-session surfaces. These are LaunchAgents: they cannot exist before a
 # console login, so they are reported separately and never claim boot readiness.
@@ -223,49 +254,6 @@ _BASE_PREDICATES: dict[str, tuple[str, str, frozenset[str]]] = {
 }
 
 
-class _PredicateProfile:
-    """The frozen requirement/evidence table for one readiness profile."""
-
-    def __init__(self) -> None:
-        self.required_running_labels = REQUIRED_RUNNING_DAEMON_LABELS
-        self.disarmed_expected_labels = DISARMED_EXPECTED_DAEMON_LABELS
-        self.all_daemon_labels = tuple(
-            sorted(REQUIRED_RUNNING_DAEMON_LABELS + DISARMED_EXPECTED_DAEMON_LABELS)
-        )
-        table: dict[str, tuple[str, str, frozenset[str]]] = dict(_BASE_PREDICATES)
-        for label in REQUIRED_RUNNING_DAEMON_LABELS:
-            table[DAEMON_PREDICATE_PREFIX + label] = (
-                "REQUIRED_RUNNING",
-                "SYSTEM_SERVICE_STATE",
-                _DAEMON_CODES,
-            )
-        for label in DISARMED_EXPECTED_DAEMON_LABELS:
-            table[DAEMON_PREDICATE_PREFIX + label] = (
-                "DISARMED_EXPECTED",
-                "SYSTEM_SERVICE_STATE",
-                _DAEMON_CODES,
-            )
-        self._table = table
-
-    def requirement(self, predicate_id: str) -> str:
-        return self._entry(predicate_id)[0]
-
-    def evidence_class(self, predicate_id: str) -> str:
-        return self._entry(predicate_id)[1]
-
-    def codes(self, predicate_id: str) -> frozenset[str]:
-        return self._entry(predicate_id)[2]
-
-    def predicate_ids(self) -> tuple[str, ...]:
-        return tuple(sorted(self._table))
-
-    def _entry(self, predicate_id: str) -> tuple[str, str, frozenset[str]]:
-        entry = self._table.get(predicate_id)
-        if entry is None:
-            _refuse("PREDICATE_UNKNOWN")
-        return entry
-
-
 class RecoveryReadinessContractError(ValueError):
     """A closed, non-secret recovery-readiness contract refusal."""
 
@@ -274,11 +262,111 @@ def _refuse(code: str) -> Any:
     raise RecoveryReadinessContractError(code)
 
 
-PREDICATE_PROFILE = _PredicateProfile()
-PREDICATE_CODES = {
-    predicate_id: PREDICATE_PROFILE.codes(predicate_id)
-    for predicate_id in PREDICATE_PROFILE.predicate_ids()
+class _PredicateProfile:
+    """The frozen requirement table for exactly one closed readiness profile.
+
+    Requirements are decided here, once, from the profile string the caller
+    named.  Nothing about this table depends on later caller state, and the
+    evidence class and code vocabulary of a predicate are identical in every
+    profile, so only ``requirement`` can differ between two reports.
+    """
+
+    def __init__(self, profile: str, *, executive_control_required: bool) -> None:
+        self.profile = profile
+        self.executive_control_required = executive_control_required
+        self.required_running_labels = (
+            REQUIRED_RUNNING_DAEMON_LABELS if executive_control_required else ()
+        )
+        self.disarmed_expected_labels = (
+            DISARMED_EXPECTED_DAEMON_LABELS if executive_control_required else ()
+        )
+        # Under the physical base profile every Executive system label is
+        # reported for operator visibility with its truthful observed state and
+        # no load-bearing requirement.  It is deliberately not called
+        # "intentionally disarmed": a worker or capacity host is not a host
+        # where these services were gated off, it is a host they do not belong
+        # to at all.
+        self.advisory_daemon_labels = (
+            () if executive_control_required else ALL_DAEMON_LABELS
+        )
+        self.all_daemon_labels = ALL_DAEMON_LABELS
+        table: dict[str, str] = {
+            predicate_id: entry[0] for predicate_id, entry in _BASE_PREDICATES.items()
+        }
+        for label in ALL_DAEMON_LABELS:
+            table[DAEMON_PREDICATE_PREFIX + label] = self._daemon_requirement(label)
+        self._requirements = table
+
+    def _daemon_requirement(self, label: str) -> str:
+        if label in self.required_running_labels:
+            return "REQUIRED_RUNNING"
+        if label in self.disarmed_expected_labels:
+            return "DISARMED_EXPECTED"
+        return "ADVISORY"
+
+    def requirement(self, predicate_id: str) -> str:
+        requirement = self._requirements.get(predicate_id)
+        if requirement is None:
+            _refuse("PREDICATE_UNKNOWN")
+        return requirement
+
+    def evidence_class(self, predicate_id: str) -> str:
+        return _evidence_class(predicate_id)
+
+    def codes(self, predicate_id: str) -> frozenset[str]:
+        return _predicate_codes(predicate_id)
+
+    def predicate_ids(self) -> tuple[str, ...]:
+        return PREDICATE_IDS
+
+
+PREDICATE_CODES: dict[str, frozenset[str]] = {
+    predicate_id: entry[2] for predicate_id, entry in _BASE_PREDICATES.items()
+} | {DAEMON_PREDICATE_PREFIX + label: _DAEMON_CODES for label in ALL_DAEMON_LABELS}
+PREDICATE_EVIDENCE_CLASSES: dict[str, str] = {
+    predicate_id: entry[1] for predicate_id, entry in _BASE_PREDICATES.items()
+} | {
+    DAEMON_PREDICATE_PREFIX + label: "SYSTEM_SERVICE_STATE"
+    for label in ALL_DAEMON_LABELS
 }
+PREDICATE_IDS = tuple(sorted(PREDICATE_CODES))
+
+
+def _evidence_class(predicate_id: str) -> str:
+    evidence_class = PREDICATE_EVIDENCE_CLASSES.get(predicate_id)
+    if evidence_class is None:
+        _refuse("PREDICATE_UNKNOWN")
+    return evidence_class
+
+
+def _predicate_codes(predicate_id: str) -> frozenset[str]:
+    codes = PREDICATE_CODES.get(predicate_id)
+    if codes is None:
+        _refuse("PREDICATE_UNKNOWN")
+    return codes
+
+
+RECOVERY_PROFILES: dict[str, _PredicateProfile] = {
+    BASE_RECOVERY_PROFILE: _PredicateProfile(
+        BASE_RECOVERY_PROFILE, executive_control_required=False
+    ),
+    EXECUTIVE_CONTROL_PROFILE: _PredicateProfile(
+        EXECUTIVE_CONTROL_PROFILE, executive_control_required=True
+    ),
+}
+
+
+def recovery_profile(profile: Any) -> _PredicateProfile:
+    """Return the closed requirement table for one exact profile string."""
+
+    if type(profile) is not str:
+        _refuse("PROFILE_UNKNOWN")
+    table = RECOVERY_PROFILES.get(profile)
+    if table is None:
+        _refuse("PROFILE_UNKNOWN")
+    return table
+
+
 PREDICATE_FIELDS = frozenset(
     {"requirement", "status", "code", "evidence_class", "measurement"}
 )
@@ -328,11 +416,16 @@ def _predicate(
     code: str,
     measurement: int | None = None,
 ) -> dict[str, Any]:
+    """Build one profile-independent observation verdict.
+
+    The ``requirement`` field is stamped later, from the profile the caller
+    named, so no classifier can silently read requirements out of global state.
+    """
+
     return {
-        "requirement": PREDICATE_PROFILE.requirement(predicate_id),
         "status": status,
         "code": code,
-        "evidence_class": PREDICATE_PROFILE.evidence_class(predicate_id),
+        "evidence_class": _evidence_class(predicate_id),
         "measurement": measurement,
     }
 
@@ -396,7 +489,7 @@ def _validate_observation(value: Mapping[str, Any]) -> dict[str, Any]:
         _refuse("DAEMON_OBSERVATION_INVALID")
     normalized_daemons: dict[str, str] = {}
     for label, state in daemons.items():
-        if label not in PREDICATE_PROFILE.all_daemon_labels:
+        if label not in ALL_DAEMON_LABELS:
             _refuse("DAEMON_LABEL_UNKNOWN")
         if state not in DAEMON_OBSERVATIONS:
             _refuse("DAEMON_OBSERVATION_INVALID")
@@ -662,29 +755,45 @@ def _classify_preboot_remote_unlock(observation: Mapping[str, Any]) -> dict[str,
     )
 
 
-def _classify_daemons(observation: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+_REQUIRED_RUNNING_DAEMON_VERDICTS = {
+    "RUNNING": ("OK", "DAEMON_RUNNING"),
+    "LOADED_NOT_RUNNING": ("NOT_READY", "DAEMON_LOADED_NOT_RUNNING"),
+    "DISABLED": ("NOT_READY", "DAEMON_DISABLED"),
+    "NOT_INSTALLED": ("NOT_READY", "DAEMON_NOT_INSTALLED"),
+    "UNKNOWN": ("UNKNOWN", "DAEMON_STATE_UNKNOWN"),
+}
+_DISARMED_EXPECTED_DAEMON_VERDICTS = {
+    "RUNNING": ("ADVISORY", "DAEMON_UNEXPECTEDLY_RUNNING"),
+    "LOADED_NOT_RUNNING": ("OK", "DAEMON_INTENTIONALLY_DISARMED"),
+    "DISABLED": ("OK", "DAEMON_INTENTIONALLY_DISARMED"),
+    "NOT_INSTALLED": ("OK", "DAEMON_NOT_INSTALLED"),
+    "UNKNOWN": ("UNKNOWN", "DAEMON_STATE_UNKNOWN"),
+}
+# Visibility-only under the physical base profile: every state is reported
+# truthfully and none of them can decide, or fail to decide, recoverability.
+_ADVISORY_DAEMON_VERDICTS = {
+    "RUNNING": ("OK", "DAEMON_RUNNING"),
+    "LOADED_NOT_RUNNING": ("ADVISORY", "DAEMON_LOADED_NOT_RUNNING"),
+    "DISABLED": ("ADVISORY", "DAEMON_DISABLED"),
+    "NOT_INSTALLED": ("ADVISORY", "DAEMON_NOT_INSTALLED"),
+    "UNKNOWN": ("UNKNOWN", "DAEMON_STATE_UNKNOWN"),
+}
+_DAEMON_VERDICTS = {
+    "REQUIRED_RUNNING": _REQUIRED_RUNNING_DAEMON_VERDICTS,
+    "DISARMED_EXPECTED": _DISARMED_EXPECTED_DAEMON_VERDICTS,
+    "ADVISORY": _ADVISORY_DAEMON_VERDICTS,
+}
+
+
+def _classify_daemons(
+    profile: _PredicateProfile, observation: Mapping[str, Any]
+) -> dict[str, dict[str, Any]]:
     observed = observation["system_daemons"]
     predicates: dict[str, dict[str, Any]] = {}
-    for label in PREDICATE_PROFILE.all_daemon_labels:
+    for label in ALL_DAEMON_LABELS:
         predicate_id = DAEMON_PREDICATE_PREFIX + label
         state = observed.get(label, "UNKNOWN")
-        requirement = PREDICATE_PROFILE.requirement(predicate_id)
-        if requirement == "REQUIRED_RUNNING":
-            status, code = {
-                "RUNNING": ("OK", "DAEMON_RUNNING"),
-                "LOADED_NOT_RUNNING": ("NOT_READY", "DAEMON_LOADED_NOT_RUNNING"),
-                "DISABLED": ("NOT_READY", "DAEMON_DISABLED"),
-                "NOT_INSTALLED": ("NOT_READY", "DAEMON_NOT_INSTALLED"),
-                "UNKNOWN": ("UNKNOWN", "DAEMON_STATE_UNKNOWN"),
-            }[state]
-        else:
-            status, code = {
-                "RUNNING": ("ADVISORY", "DAEMON_UNEXPECTEDLY_RUNNING"),
-                "LOADED_NOT_RUNNING": ("OK", "DAEMON_INTENTIONALLY_DISARMED"),
-                "DISABLED": ("OK", "DAEMON_INTENTIONALLY_DISARMED"),
-                "NOT_INSTALLED": ("OK", "DAEMON_NOT_INSTALLED"),
-                "UNKNOWN": ("UNKNOWN", "DAEMON_STATE_UNKNOWN"),
-            }[state]
+        status, code = _DAEMON_VERDICTS[profile.requirement(predicate_id)][state]
         predicates[predicate_id] = _predicate(predicate_id, status=status, code=code)
     return predicates
 
@@ -749,9 +858,18 @@ def resolve_recovery_state(
     return "READY", blocking, unknown
 
 
-def classify_recovery_readiness(observation: Mapping[str, Any]) -> dict[str, Any]:
-    """Classify one validated observation into the closed readiness report."""
+def classify_recovery_readiness(
+    observation: Mapping[str, Any], *, profile: Any
+) -> dict[str, Any]:
+    """Classify one validated observation under one caller-named profile.
 
+    ``profile`` is mandatory and must be one of :data:`READINESS_PROFILES`.  It
+    is never inferred from the observation: a Studio whose control plane has
+    stopped looks exactly like a worker host that never had one, and guessing
+    the weaker profile there would turn a real outage into a pass.
+    """
+
+    selected = recovery_profile(profile)
     normalized = _validate_observation(observation)
 
     predicates: dict[str, dict[str, Any]] = {
@@ -764,31 +882,53 @@ def classify_recovery_readiness(observation: Mapping[str, Any]) -> dict[str, Any
         "disk_free_floor": _classify_disk(normalized),
     }
     predicates.update(_classify_power(normalized))
-    predicates.update(_classify_daemons(normalized))
+    predicates.update(_classify_daemons(selected, normalized))
 
-    recovery_state, blocking, unknown = resolve_recovery_state(predicates)
+    stamped = {
+        predicate_id: {
+            "requirement": selected.requirement(predicate_id),
+            "status": predicate["status"],
+            "code": predicate["code"],
+            "evidence_class": predicate["evidence_class"],
+            "measurement": predicate["measurement"],
+        }
+        for predicate_id, predicate in sorted(predicates.items())
+    }
+
+    recovery_state, blocking, unknown = resolve_recovery_state(stamped)
     report = {
         "schema": READINESS_SCHEMA,
-        "profile": READINESS_PROFILE,
+        "profile": selected.profile,
         "host_ref": normalized["host_ref"],
         "observed_at_ms": normalized["observed_at_ms"],
-        "predicates": predicates,
+        "predicates": stamped,
         "recovery_state": recovery_state,
         "blocking_predicates": blocking,
         "unknown_predicates": unknown,
     }
-    return validate_recovery_readiness_report(report)
+    return validate_recovery_readiness_report(report, expected_profile=selected.profile)
 
 
-def validate_recovery_readiness_report(value: Mapping[str, Any]) -> dict[str, Any]:
-    """Return a defensive canonical-value copy or refuse the closed contract."""
+def validate_recovery_readiness_report(
+    value: Mapping[str, Any], *, expected_profile: Any = None
+) -> dict[str, Any]:
+    """Return a defensive canonical-value copy or refuse the closed contract.
+
+    The report's own ``profile`` must be a known closed profile, and every
+    requirement must be exactly the one that profile derives.  A caller that
+    knows which profile it asked for passes ``expected_profile``, so a report
+    produced under one profile can never be accepted as the other.
+    """
 
     if not isinstance(value, Mapping) or set(value) != REPORT_FIELDS:
         _refuse("REPORT_FIELDS_INVALID")
     if value.get("schema") != READINESS_SCHEMA:
         _refuse("REPORT_SCHEMA_INVALID")
-    if value.get("profile") != READINESS_PROFILE:
-        _refuse("REPORT_PROFILE_INVALID")
+    profile = recovery_profile(value.get("profile"))
+    if expected_profile is not None and profile is not recovery_profile(
+        expected_profile
+    ):
+        _refuse("REPORT_PROFILE_MISMATCH")
 
     host_ref = value.get("host_ref")
     if host_ref is not None and (
@@ -810,11 +950,9 @@ def validate_recovery_readiness_report(value: Mapping[str, Any]) -> dict[str, An
         if not isinstance(predicate, Mapping) or set(predicate) != PREDICATE_FIELDS:
             _refuse("PREDICATE_FIELDS_INVALID")
         requirement = predicate.get("requirement")
-        if requirement != PREDICATE_PROFILE.requirement(predicate_id):
+        if requirement != profile.requirement(predicate_id):
             _refuse("PREDICATE_REQUIREMENT_MISMATCH")
-        if predicate.get("evidence_class") != PREDICATE_PROFILE.evidence_class(
-            predicate_id
-        ):
+        if predicate.get("evidence_class") != _evidence_class(predicate_id):
             _refuse("PREDICATE_EVIDENCE_CLASS_MISMATCH")
         status = predicate.get("status")
         if status not in STATUSES or status not in _ALLOWED_STATUSES[requirement]:
@@ -850,7 +988,7 @@ def validate_recovery_readiness_report(value: Mapping[str, Any]) -> dict[str, An
 
     return {
         "schema": READINESS_SCHEMA,
-        "profile": READINESS_PROFILE,
+        "profile": profile.profile,
         "host_ref": host_ref,
         "observed_at_ms": observed_at_ms,
         "predicates": normalized_predicates,
@@ -860,10 +998,14 @@ def validate_recovery_readiness_report(value: Mapping[str, Any]) -> dict[str, An
     }
 
 
-def canonical_recovery_readiness_json(value: Mapping[str, Any]) -> bytes:
+def canonical_recovery_readiness_json(
+    value: Mapping[str, Any], *, expected_profile: Any = None
+) -> bytes:
     """Render one validated report as bounded canonical UTF-8 JSON."""
 
-    normalized = validate_recovery_readiness_report(value)
+    normalized = validate_recovery_readiness_report(
+        value, expected_profile=expected_profile
+    )
     try:
         rendered = json.dumps(
             normalized,
@@ -878,11 +1020,14 @@ def canonical_recovery_readiness_json(value: Mapping[str, Any]) -> bytes:
 
 
 __all__ = [
+    "ALL_DAEMON_LABELS",
+    "BASE_RECOVERY_PROFILE",
     "DAEMON_OBSERVATIONS",
     "DAEMON_PREDICATE_PREFIX",
     "DISARMED_EXPECTED_DAEMON_LABELS",
     "DISK_FREE_FLOOR_BYTES",
     "EVIDENCE_CLASSES",
+    "EXECUTIVE_CONTROL_PROFILE",
     "FILEVAULT_CODES",
     "HOST_REF_RE",
     "LOAD_BEARING_REQUIREMENTS",
@@ -890,10 +1035,12 @@ __all__ = [
     "MIN_SUPPORTED_MACOS_MAJOR",
     "OBSERVATION_FIELDS",
     "PREDICATE_CODES",
+    "PREDICATE_EVIDENCE_CLASSES",
     "PREDICATE_FIELDS",
-    "PREDICATE_PROFILE",
-    "READINESS_PROFILE",
+    "PREDICATE_IDS",
+    "READINESS_PROFILES",
     "READINESS_SCHEMA",
+    "RECOVERY_PROFILES",
     "REMOTE_LOGIN_OBSERVATIONS",
     "REPORT_FIELDS",
     "REQUIRED_RUNNING_DAEMON_LABELS",
@@ -904,6 +1051,7 @@ __all__ = [
     "RecoveryReadinessContractError",
     "canonical_recovery_readiness_json",
     "classify_recovery_readiness",
+    "recovery_profile",
     "resolve_recovery_state",
     "validate_recovery_readiness_report",
 ]

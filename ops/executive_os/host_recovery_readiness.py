@@ -6,6 +6,11 @@ call is a fixed, absolute, read-only macOS system tool, and every filesystem
 read is an existence check on a fixed, absolute path derived from the reviewed
 label set — never a caller-supplied path and never a directory scan.
 
+The mandatory ``--profile`` argument selects which closed requirement table
+classifies the result.  It is deliberately not command authority: both profiles
+collect the same fixed superset of observations with the same fixed argv, so
+naming a profile can never widen what this module runs or reads.
+
 This module never mutates power policy, launchd state, disk encryption, remote
 login, network routes, accounts, credentials, or services; never escalates
 privilege; never opens a socket; and never persists anything.  Remediation of a
@@ -31,8 +36,9 @@ if __package__ in {None, ""} and str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from control_plane.executive_recovery_readiness import (  # noqa: E402
+    ALL_DAEMON_LABELS,
     HOST_REF_RE,
-    PREDICATE_PROFILE,
+    READINESS_PROFILES,
     USER_SESSION_CRITICAL_LABELS,
     RecoveryReadinessContractError,
     canonical_recovery_readiness_json,
@@ -81,6 +87,7 @@ _PROBE_ERROR_CODES = frozenset(
         "PLATFORM_UNAVAILABLE",
         "POWER_POLICY_MALFORMED",
         "PROBE_INTERNAL_ERROR",
+        "PROFILE_INVALID",
         "REFERENCE_INVALID",
         "UNSUPPORTED_PLATFORM",
         "WALL_CLOCK_INVALID",
@@ -108,7 +115,7 @@ def _refuse(code: str) -> NoReturn:
 def launchctl_print_command(label: str) -> tuple[str, ...]:
     """Return the fixed read-only service-state query for one known label."""
 
-    if label not in PREDICATE_PROFILE.all_daemon_labels and label != SSHD_LABEL:
+    if label not in ALL_DAEMON_LABELS and label != SSHD_LABEL:
         _refuse("REFERENCE_INVALID")
     return ("/bin/launchctl", "print", f"system/{label}")
 
@@ -116,7 +123,7 @@ def launchctl_print_command(label: str) -> tuple[str, ...]:
 def system_daemon_plist_path(label: str) -> Path:
     """Return the fixed install path of one known Executive system LaunchDaemon."""
 
-    if label not in PREDICATE_PROFILE.all_daemon_labels:
+    if label not in ALL_DAEMON_LABELS:
         _refuse("REFERENCE_INVALID")
     return SYSTEM_DAEMON_PLIST_DIR / f"{label}.plist"
 
@@ -371,7 +378,7 @@ def _observe_services(
 
     daemons = {
         label: _observe_daemon(runner, plist_exists, overrides, label)
-        for label in PREDICATE_PROFILE.all_daemon_labels
+        for label in ALL_DAEMON_LABELS
     }
     return daemons, _observe_remote_login(runner, plist_exists, overrides)
 
@@ -482,6 +489,25 @@ class _OpaqueHostRefAction(argparse.Action):
         setattr(namespace, self.dest, values)
 
 
+class _ProfileAction(argparse.Action):
+    """Accept exactly one of the two closed profile strings, and never guess."""
+
+    def __call__(
+        self,
+        _parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: Any,
+        option_string: str | None = None,
+    ) -> None:
+        if option_string is None or type(values) is not str:
+            _refuse("ARGUMENTS_INVALID")
+        if getattr(namespace, self.dest, None) is not None:
+            _refuse("ARGUMENTS_INVALID")
+        if values not in READINESS_PROFILES:
+            _refuse("PROFILE_INVALID")
+        setattr(namespace, self.dest, values)
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = _ClosedArgumentParser(
         description="Emit one read-only canonical host recovery-readiness report",
@@ -489,6 +515,10 @@ def _parser() -> argparse.ArgumentParser:
         allow_abbrev=False,
     )
     parser.add_argument("--host-ref", required=False, action=_OpaqueHostRefAction)
+    # Mandatory and never defaulted: the host's role is an operator statement,
+    # not something this observer may infer from which services happen to be
+    # installed.  See the module docstring of the contract for why.
+    parser.add_argument("--profile", required=True, action=_ProfileAction)
     return parser
 
 
@@ -503,10 +533,13 @@ def main(
     out = stdout if stdout is not None else sys.stdout.buffer
     err = stderr if stderr is not None else sys.stderr
     try:
+        # Argument refusals happen before the first observation, so an omitted
+        # or unknown profile never reads or touches host state.
         args = _parser().parse_args(argv)
         observation = collect(host_ref=args.host_ref)
         payload = canonical_recovery_readiness_json(
-            classify_recovery_readiness(observation)
+            classify_recovery_readiness(observation, profile=args.profile),
+            expected_profile=args.profile,
         )
     except RecoveryReadinessProbeError as exc:
         print(f"host recovery readiness refused: {exc}", file=err)

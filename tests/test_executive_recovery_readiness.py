@@ -1,6 +1,7 @@
 """Model-free tests for the read-only host recovery-readiness vertical."""
 from __future__ import annotations
 
+import inspect
 import io
 import json
 import subprocess
@@ -10,20 +11,27 @@ from typing import Any
 import pytest
 
 from control_plane.executive_recovery_readiness import (
+    ALL_DAEMON_LABELS,
+    BASE_RECOVERY_PROFILE,
+    DISARMED_EXPECTED_DAEMON_LABELS,
     DISK_FREE_FLOOR_BYTES,
     EVIDENCE_CLASSES,
+    EXECUTIVE_CONTROL_PROFILE,
     LOAD_BEARING_REQUIREMENTS,
     MIN_PREBOOT_REMOTE_UNLOCK_MACOS_MAJOR,
     MIN_SUPPORTED_MACOS_MAJOR,
     PREDICATE_CODES,
-    PREDICATE_PROFILE,
-    READINESS_PROFILE,
+    PREDICATE_EVIDENCE_CLASSES,
+    PREDICATE_IDS,
+    READINESS_PROFILES,
     READINESS_SCHEMA,
     REPORT_FIELDS,
+    REQUIRED_RUNNING_DAEMON_LABELS,
     USER_SESSION_CRITICAL_LABELS,
     RecoveryReadinessContractError,
     canonical_recovery_readiness_json,
     classify_recovery_readiness,
+    recovery_profile,
     validate_recovery_readiness_report,
 )
 from ops.executive_os import host_recovery_readiness as probe_module
@@ -92,11 +100,19 @@ LAUNCHCTL_DISABLED_STUDIO = """disabled services = {
 
 
 def _studio_daemons() -> dict[str, str]:
-    states = {label: "DISABLED" for label in PREDICATE_PROFILE.disarmed_expected_labels}
+    states = {label: "DISABLED" for label in DISARMED_EXPECTED_DAEMON_LABELS}
     states["com.mastermind.executive.privileged"] = "NOT_INSTALLED"
-    for label in PREDICATE_PROFILE.required_running_labels:
+    for label in REQUIRED_RUNNING_DAEMON_LABELS:
         states[label] = "RUNNING"
     return states
+
+
+def _classify(
+    observation: dict[str, Any], profile: str = EXECUTIVE_CONTROL_PROFILE
+) -> dict[str, Any]:
+    """Classify under the Executive control-host profile unless asked otherwise."""
+
+    return classify_recovery_readiness(observation, profile=profile)
 
 
 def _observation(**overrides: Any) -> dict[str, Any]:
@@ -110,11 +126,11 @@ def _observation(**overrides: Any) -> dict[str, Any]:
         "filevault_code": "FILEVAULT_OFF",
         "remote_login": "ENABLED",
         "system_daemons": {
-            label: "RUNNING" for label in PREDICATE_PROFILE.required_running_labels
+            label: "RUNNING" for label in REQUIRED_RUNNING_DAEMON_LABELS
         }
         | {
             label: "NOT_INSTALLED"
-            for label in PREDICATE_PROFILE.disarmed_expected_labels
+            for label in DISARMED_EXPECTED_DAEMON_LABELS
         },
         "user_session_agents_present": len(USER_SESSION_CRITICAL_LABELS),
         "root_free_bytes": DISK_FREE_FLOOR_BYTES * 4,
@@ -151,6 +167,20 @@ def _m1_observation(**overrides: Any) -> dict[str, Any]:
     return _observation(**m1)
 
 
+def _m1_worker_observation(**overrides: Any) -> dict[str, Any]:
+    """An M1-like host with safe physical state and no Executive control plane.
+
+    A worker or capacity host must not run a duplicate Executive control plane,
+    so every Executive system label is legitimately absent here.
+    """
+
+    worker: dict[str, Any] = {
+        "system_daemons": {label: "NOT_INSTALLED" for label in ALL_DAEMON_LABELS},
+    }
+    worker.update(overrides)
+    return _m1_observation(**worker)
+
+
 def _completed(
     command: tuple[str, ...],
     *,
@@ -168,11 +198,11 @@ def _blocking(report: dict[str, Any]) -> list[str]:
 
 
 def test_report_contract_is_closed_and_canonical() -> None:
-    report = classify_recovery_readiness(_observation())
+    report = _classify(_observation())
 
     assert set(report) == REPORT_FIELDS
     assert report["schema"] == READINESS_SCHEMA
-    assert report["profile"] == READINESS_PROFILE
+    assert report["profile"] == EXECUTIVE_CONTROL_PROFILE
     assert set(report["predicates"]) == set(PREDICATE_CODES)
 
     normalized = validate_recovery_readiness_report(report)
@@ -196,18 +226,17 @@ def test_report_contract_is_closed_and_canonical() -> None:
 
 
 def test_every_predicate_declares_reviewed_requirement_and_evidence_class() -> None:
-    report = classify_recovery_readiness(_observation())
+    report = _classify(_observation())
 
+    profile = recovery_profile(EXECUTIVE_CONTROL_PROFILE)
     for predicate_id, predicate in report["predicates"].items():
-        assert predicate["requirement"] == PREDICATE_PROFILE.requirement(predicate_id)
-        assert predicate["evidence_class"] == PREDICATE_PROFILE.evidence_class(
-            predicate_id
-        )
+        assert predicate["requirement"] == profile.requirement(predicate_id)
+        assert predicate["evidence_class"] == PREDICATE_EVIDENCE_CLASSES[predicate_id]
         assert predicate["code"] in PREDICATE_CODES[predicate_id]
 
 
 def test_unclosed_report_field_is_refused() -> None:
-    report = classify_recovery_readiness(_observation())
+    report = _classify(_observation())
     report["extra_field"] = 1
 
     with pytest.raises(RecoveryReadinessContractError) as excinfo:
@@ -216,7 +245,7 @@ def test_unclosed_report_field_is_refused() -> None:
 
 
 def test_derived_recovery_state_mismatch_is_refused() -> None:
-    report = classify_recovery_readiness(_studio_observation())
+    report = _classify(_studio_observation())
     assert report["recovery_state"] == "NOT_READY"
     report["recovery_state"] = "READY"
 
@@ -226,18 +255,251 @@ def test_derived_recovery_state_mismatch_is_refused() -> None:
 
 
 def test_host_ref_must_be_opaque_or_absent() -> None:
-    report = classify_recovery_readiness(_observation(host_ref=None))
+    report = _classify(_observation(host_ref=None))
     assert report["host_ref"] is None
 
     with pytest.raises(RecoveryReadinessContractError):
-        classify_recovery_readiness(_observation(host_ref="studio.local"))
+        _classify(_observation(host_ref="studio.local"))
+
+
+# --------------------------------------------------------- host-role profiles
+
+
+def test_worker_host_is_ready_under_base_profile_without_any_executive_daemon() -> None:
+    report = _classify(_m1_worker_observation(), BASE_RECOVERY_PROFILE)
+
+    assert report["profile"] == BASE_RECOVERY_PROFILE
+    assert report["recovery_state"] == "READY"
+    assert _blocking(report) == []
+    assert report["unknown_predicates"] == []
+
+    for label in ALL_DAEMON_LABELS:
+        predicate = report["predicates"][f"system_daemon.{label}"]
+        assert predicate["requirement"] == "ADVISORY"
+        assert predicate["requirement"] not in LOAD_BEARING_REQUIREMENTS
+        assert predicate["status"] == "ADVISORY"
+        # Truthful: the service is not installed.  It is deliberately not
+        # called "intentionally disarmed", which would imply it belongs here.
+        assert predicate["code"] == "DAEMON_NOT_INSTALLED"
+
+
+def test_same_worker_observation_is_not_ready_under_control_profile() -> None:
+    observation = _m1_worker_observation()
+
+    base = _classify(observation, BASE_RECOVERY_PROFILE)
+    control = _classify(observation, EXECUTIVE_CONTROL_PROFILE)
+
+    assert base["recovery_state"] == "READY"
+    assert control["recovery_state"] == "NOT_READY"
+    assert _blocking(control) == [
+        f"system_daemon.{label}" for label in sorted(REQUIRED_RUNNING_DAEMON_LABELS)
+    ]
+    assert control["unknown_predicates"] == []
+    for label in REQUIRED_RUNNING_DAEMON_LABELS:
+        predicate = control["predicates"][f"system_daemon.{label}"]
+        assert predicate["requirement"] == "REQUIRED_RUNNING"
+        assert predicate["code"] == "DAEMON_NOT_INSTALLED"
+
+
+@pytest.mark.parametrize("state", ["NOT_INSTALLED", "DISABLED", "LOADED_NOT_RUNNING"])
+def test_absent_or_stopped_executive_daemons_never_move_the_base_profile(
+    state: str,
+) -> None:
+    report = _classify(
+        _m1_worker_observation(
+            system_daemons={label: state for label in ALL_DAEMON_LABELS}
+        ),
+        BASE_RECOVERY_PROFILE,
+    )
+
+    assert report["recovery_state"] == "READY"
+    assert _blocking(report) == []
+    assert report["unknown_predicates"] == []
+
+
+def test_unknown_executive_daemon_state_cannot_make_the_base_profile_unknown() -> None:
+    report = _classify(
+        _m1_worker_observation(system_daemons={}), BASE_RECOVERY_PROFILE
+    )
+
+    assert report["recovery_state"] == "READY"
+    assert report["unknown_predicates"] == []
+    for label in ALL_DAEMON_LABELS:
+        predicate = report["predicates"][f"system_daemon.{label}"]
+        assert predicate["status"] == "UNKNOWN"
+        assert predicate["code"] == "DAEMON_STATE_UNKNOWN"
+
+
+def test_base_profile_still_reports_real_physical_defects_on_a_worker_host() -> None:
+    """The current live M1: no autorestart, Remote Login off, no Executive daemons."""
+
+    report = _classify(
+        _m1_worker_observation(
+            ac_power_settings={"sleep": 0, "autorestart": 0, "autorestartatconnect": 0},
+            remote_login="DISABLED",
+        ),
+        BASE_RECOVERY_PROFILE,
+    )
+
+    assert report["recovery_state"] == "NOT_READY"
+    assert _blocking(report) == [
+        "auto_restart_after_power_loss",
+        "remote_login_listener",
+    ]
+    assert not any(
+        predicate_id.startswith("system_daemon.")
+        for predicate_id in _blocking(report)
+    )
+
+
+def test_base_profile_on_studio_reports_physical_defect_but_is_not_control_acceptance(
+) -> None:
+    observation = _studio_observation()
+
+    base = _classify(observation, BASE_RECOVERY_PROFILE)
+    control = _classify(observation, EXECUTIVE_CONTROL_PROFILE)
+
+    assert base["recovery_state"] == "NOT_READY"
+    assert _blocking(base) == ["auto_restart_after_power_loss"]
+    # The base report says nothing about the Executive control plane, so it can
+    # never be read as control-host acceptance even when it is otherwise green.
+    green_base = _classify(
+        _studio_observation(
+            ac_power_settings={"sleep": 0, "autorestart": 1, "autorestartatconnect": 0}
+        ),
+        BASE_RECOVERY_PROFILE,
+    )
+    assert green_base["recovery_state"] == "READY"
+    for label in REQUIRED_RUNNING_DAEMON_LABELS:
+        assert (
+            green_base["predicates"][f"system_daemon.{label}"]["requirement"]
+            == "ADVISORY"
+        )
+        assert (
+            control["predicates"][f"system_daemon.{label}"]["requirement"]
+            == "REQUIRED_RUNNING"
+        )
+
+
+def test_a_stopped_studio_control_plane_cannot_pass_under_the_control_profile() -> None:
+    """The reason no profile is inferred: a broken Studio looks like a worker."""
+
+    daemons = _studio_daemons()
+    daemons["com.mastermind.executive.control"] = "LOADED_NOT_RUNNING"
+    report = _classify(
+        _studio_observation(
+            ac_power_settings={"sleep": 0, "autorestart": 1, "autorestartatconnect": 0},
+            system_daemons=daemons,
+        )
+    )
+
+    assert report["recovery_state"] == "NOT_READY"
+    assert _blocking(report) == ["system_daemon.com.mastermind.executive.control"]
+
+
+def test_unknown_profile_is_refused_with_a_closed_code() -> None:
+    for profile in (None, "", "always-on-executive-host/v1", 1, BASE_RECOVERY_PROFILE.upper()):
+        with pytest.raises(RecoveryReadinessContractError) as excinfo:
+            classify_recovery_readiness(_observation(), profile=profile)
+        assert str(excinfo.value) == "PROFILE_UNKNOWN"
+
+
+def test_profile_is_mandatory_and_never_positional() -> None:
+    with pytest.raises(TypeError):
+        classify_recovery_readiness(_observation())  # type: ignore[call-arg]
+
+
+def test_gated_services_keep_disarmed_semantics_under_the_control_profile() -> None:
+    report = _classify(_studio_observation())
+
+    for label in DISARMED_EXPECTED_DAEMON_LABELS:
+        predicate = report["predicates"][f"system_daemon.{label}"]
+        assert predicate["requirement"] == "DISARMED_EXPECTED"
+        assert predicate["status"] == "OK"
+
+
+# --------------------------------------------------- cross-profile validation
+
+
+def test_report_produced_under_one_profile_is_not_valid_as_the_other() -> None:
+    observation = _m1_worker_observation()
+    base = _classify(observation, BASE_RECOVERY_PROFILE)
+    control = _classify(observation, EXECUTIVE_CONTROL_PROFILE)
+
+    assert validate_recovery_readiness_report(
+        base, expected_profile=BASE_RECOVERY_PROFILE
+    ) == base
+    assert validate_recovery_readiness_report(
+        control, expected_profile=EXECUTIVE_CONTROL_PROFILE
+    ) == control
+
+    for report, wrong_profile in (
+        (base, EXECUTIVE_CONTROL_PROFILE),
+        (control, BASE_RECOVERY_PROFILE),
+    ):
+        with pytest.raises(RecoveryReadinessContractError) as excinfo:
+            validate_recovery_readiness_report(report, expected_profile=wrong_profile)
+        assert str(excinfo.value) == "REPORT_PROFILE_MISMATCH"
+
+
+def test_profile_field_tampering_is_refused_by_the_validator() -> None:
+    base = _classify(_m1_worker_observation(), BASE_RECOVERY_PROFILE)
+    base["profile"] = EXECUTIVE_CONTROL_PROFILE
+
+    with pytest.raises(RecoveryReadinessContractError) as excinfo:
+        validate_recovery_readiness_report(base)
+    assert str(excinfo.value) == "PREDICATE_REQUIREMENT_MISMATCH"
+
+
+def test_cross_profile_requirement_substitution_is_refused() -> None:
+    """Relabelling one control daemon as advisory cannot buy a Studio a pass."""
+
+    report = _classify(_studio_observation())
+    predicate = report["predicates"]["system_daemon.com.mastermind.executive.control"]
+    predicate["requirement"] = "ADVISORY"
+    predicate["status"] = "ADVISORY"
+
+    with pytest.raises(RecoveryReadinessContractError) as excinfo:
+        validate_recovery_readiness_report(report)
+    assert str(excinfo.value) == "PREDICATE_REQUIREMENT_MISMATCH"
+
+
+@pytest.mark.parametrize("profile", [None, "", "always-on-executive-host/v1"])
+def test_unknown_report_profile_is_refused(profile: Any) -> None:
+    report = _classify(_observation())
+    report["profile"] = profile
+
+    with pytest.raises(RecoveryReadinessContractError) as excinfo:
+        validate_recovery_readiness_report(report)
+    assert str(excinfo.value) == "PROFILE_UNKNOWN"
+
+
+def test_canonical_json_is_deterministic_and_profile_stamped() -> None:
+    observation = _m1_worker_observation()
+
+    for profile in READINESS_PROFILES:
+        report = _classify(observation, profile)
+        payload = canonical_recovery_readiness_json(
+            report, expected_profile=profile
+        )
+        assert payload == canonical_recovery_readiness_json(report)
+        decoded = json.loads(payload)
+        assert decoded["profile"] == profile
+        assert tuple(decoded["predicates"]) == PREDICATE_IDS
+        assert tuple(decoded) == tuple(sorted(REPORT_FIELDS))
+
+    with pytest.raises(RecoveryReadinessContractError):
+        canonical_recovery_readiness_json(
+            _classify(observation, BASE_RECOVERY_PROFILE),
+            expected_profile=EXECUTIVE_CONTROL_PROFILE,
+        )
 
 
 # ------------------------------------------------------------- Studio-like
 
 
 def test_studio_like_host_is_not_ready_only_for_autorestart() -> None:
-    report = classify_recovery_readiness(_studio_observation())
+    report = _classify(_studio_observation())
     predicates = report["predicates"]
 
     assert report["recovery_state"] == "NOT_READY"
@@ -255,7 +517,7 @@ def test_studio_like_host_is_not_ready_only_for_autorestart() -> None:
 
 
 def test_autorestart_at_connect_is_optional_and_never_blocking() -> None:
-    report = classify_recovery_readiness(_studio_observation())
+    report = _classify(_studio_observation())
     predicate = report["predicates"]["auto_restart_on_power_connect"]
 
     assert predicate["requirement"] == "OPTIONAL"
@@ -266,7 +528,7 @@ def test_autorestart_at_connect_is_optional_and_never_blocking() -> None:
 
 
 def test_autorestart_at_connect_absent_key_is_not_applicable() -> None:
-    report = classify_recovery_readiness(
+    report = _classify(
         _observation(ac_power_settings={"sleep": 0, "autorestart": 1})
     )
     predicate = report["predicates"]["auto_restart_on_power_connect"]
@@ -280,7 +542,7 @@ def test_autorestart_at_connect_absent_key_is_not_applicable() -> None:
 
 
 def test_fully_ready_host_is_ready() -> None:
-    report = classify_recovery_readiness(_observation())
+    report = _classify(_observation())
 
     assert report["recovery_state"] == "READY"
     assert _blocking(report) == []
@@ -288,7 +550,7 @@ def test_fully_ready_host_is_ready() -> None:
 
 
 def test_ac_sleep_enabled_blocks_always_on_profile() -> None:
-    report = classify_recovery_readiness(
+    report = _classify(
         _observation(
             ac_power_settings={"sleep": 15, "autorestart": 1, "autorestartatconnect": 1}
         )
@@ -300,17 +562,17 @@ def test_ac_sleep_enabled_blocks_always_on_profile() -> None:
 
 
 def test_intel_and_unsupported_os_fail_the_preboot_profile() -> None:
-    intel = classify_recovery_readiness(_observation(apple_silicon=False))
+    intel = _classify(_observation(apple_silicon=False))
     assert intel["recovery_state"] == "NOT_READY"
     assert intel["predicates"]["cpu_architecture"]["code"] == "ARCHITECTURE_UNSUPPORTED"
 
-    old = classify_recovery_readiness(
+    old = _classify(
         _observation(macos_product_version=f"{MIN_SUPPORTED_MACOS_MAJOR - 1}.7")
     )
     assert old["recovery_state"] == "NOT_READY"
     assert old["predicates"]["os_identity"]["code"] == "OS_UNSUPPORTED_VERSION"
 
-    linux = classify_recovery_readiness(
+    linux = _classify(
         _observation(os_name="Linux", macos_product_version=None)
     )
     assert linux["recovery_state"] == "NOT_READY"
@@ -318,7 +580,7 @@ def test_intel_and_unsupported_os_fail_the_preboot_profile() -> None:
 
 
 def test_remote_login_disabled_blocks_without_touching_sockets() -> None:
-    report = classify_recovery_readiness(_observation(remote_login="DISABLED"))
+    report = _classify(_observation(remote_login="DISABLED"))
 
     assert report["recovery_state"] == "NOT_READY"
     assert _blocking(report) == ["remote_login_listener"]
@@ -335,7 +597,7 @@ def test_remote_login_disabled_blocks_without_touching_sockets() -> None:
 
 
 def test_unknown_load_bearing_evidence_fails_closed_to_unknown() -> None:
-    report = classify_recovery_readiness(_observation(ac_power_settings=None))
+    report = _classify(_observation(ac_power_settings=None))
 
     assert report["recovery_state"] == "UNKNOWN"
     assert _blocking(report) == []
@@ -350,7 +612,7 @@ def test_unknown_load_bearing_evidence_fails_closed_to_unknown() -> None:
 
 
 def test_definite_defect_dominates_unknown_evidence() -> None:
-    report = classify_recovery_readiness(
+    report = _classify(
         _observation(remote_login="UNKNOWN", apple_silicon=False)
     )
 
@@ -360,7 +622,7 @@ def test_definite_defect_dominates_unknown_evidence() -> None:
 
 
 def test_unknown_architecture_is_never_inferred_as_pass() -> None:
-    report = classify_recovery_readiness(_observation(apple_silicon=None))
+    report = _classify(_observation(apple_silicon=None))
 
     assert report["recovery_state"] == "UNKNOWN"
     assert report["predicates"]["cpu_architecture"]["code"] == "ARCHITECTURE_UNKNOWN"
@@ -370,7 +632,7 @@ def test_unknown_architecture_is_never_inferred_as_pass() -> None:
 
 
 def test_filevault_on_is_advisory_preboot_dependency_not_a_defect() -> None:
-    report = classify_recovery_readiness(_studio_observation())
+    report = _classify(_studio_observation())
     predicate = report["predicates"]["disk_encryption_state"]
 
     assert predicate["requirement"] == "ADVISORY"
@@ -394,7 +656,7 @@ def test_filevault_on_is_advisory_preboot_dependency_not_a_defect() -> None:
 def test_filevault_states_are_classified_without_recovery_material(
     filevault_code: str, expected_status: str, expected_state: str
 ) -> None:
-    report = classify_recovery_readiness(_observation(filevault_code=filevault_code))
+    report = _classify(_observation(filevault_code=filevault_code))
     predicate = report["predicates"]["disk_encryption_state"]
 
     assert predicate["status"] == expected_status
@@ -415,7 +677,7 @@ def test_filevault_recovery_key_text_is_never_carried_into_the_report() -> None:
     assert parse_fdesetup_status(stdout) == "FILEVAULT_ON"
 
     payload = canonical_recovery_readiness_json(
-        classify_recovery_readiness(_observation(filevault_code="FILEVAULT_ON"))
+        _classify(_observation(filevault_code="FILEVAULT_ON"))
     )
     assert b"ABCD" not in payload
     assert b"Recovery" not in payload
@@ -425,7 +687,7 @@ def test_filevault_recovery_key_text_is_never_carried_into_the_report() -> None:
 
 
 def test_filevault_off_needs_no_local_preboot_unlock() -> None:
-    report = classify_recovery_readiness(_observation(filevault_code="FILEVAULT_OFF"))
+    report = _classify(_observation(filevault_code="FILEVAULT_OFF"))
     predicate = report["predicates"]["preboot_remote_unlock"]
 
     assert predicate["requirement"] == "REQUIRED"
@@ -437,7 +699,7 @@ def test_filevault_off_needs_no_local_preboot_unlock() -> None:
 
 
 def test_m1_like_host_passes_preboot_predicate_despite_macos_below_26() -> None:
-    report = classify_recovery_readiness(_m1_observation())
+    report = _classify(_m1_observation())
     predicate = report["predicates"]["preboot_remote_unlock"]
 
     assert int(_m1_observation()["macos_product_version"].split(".")[0]) < (
@@ -451,7 +713,7 @@ def test_m1_like_host_passes_preboot_predicate_despite_macos_below_26() -> None:
 
 
 def test_filevault_on_macos_15_cannot_satisfy_remote_preboot_unlock() -> None:
-    report = classify_recovery_readiness(
+    report = _classify(
         _m1_observation(filevault_code="FILEVAULT_ON")
     )
     predicate = report["predicates"]["preboot_remote_unlock"]
@@ -469,7 +731,7 @@ def test_filevault_on_macos_15_cannot_satisfy_remote_preboot_unlock() -> None:
 
 
 def test_filevault_on_macos_26_with_remote_login_supports_preboot_unlock() -> None:
-    report = classify_recovery_readiness(
+    report = _classify(
         _observation(
             filevault_code="FILEVAULT_ON",
             macos_product_version=f"{MIN_PREBOOT_REMOTE_UNLOCK_MACOS_MAJOR}.0",
@@ -494,7 +756,7 @@ def test_filevault_on_macos_26_with_remote_login_supports_preboot_unlock() -> No
 def test_filevault_on_requires_remote_login_for_preboot_unlock(
     remote_login: str, expected_status: str, expected_code: str
 ) -> None:
-    report = classify_recovery_readiness(
+    report = _classify(
         _observation(filevault_code="FILEVAULT_ON", remote_login=remote_login)
     )
     predicate = report["predicates"]["preboot_remote_unlock"]
@@ -525,7 +787,7 @@ def test_filevault_on_requires_remote_login_for_preboot_unlock(
 def test_filevault_on_preboot_unlock_fails_closed_without_apple_silicon(
     apple_silicon: bool | None, expected_status: str, expected_code: str
 ) -> None:
-    report = classify_recovery_readiness(
+    report = _classify(
         _observation(filevault_code="FILEVAULT_ON", apple_silicon=apple_silicon)
     )
     predicate = report["predicates"]["preboot_remote_unlock"]
@@ -541,7 +803,7 @@ def test_filevault_on_preboot_unlock_fails_closed_without_apple_silicon(
 def test_transitional_filevault_is_unknown_for_preboot_unlock(
     filevault_code: str,
 ) -> None:
-    report = classify_recovery_readiness(_observation(filevault_code=filevault_code))
+    report = _classify(_observation(filevault_code=filevault_code))
     predicate = report["predicates"]["preboot_remote_unlock"]
 
     assert predicate["status"] == "UNKNOWN"
@@ -551,7 +813,7 @@ def test_transitional_filevault_is_unknown_for_preboot_unlock(
 
 
 def test_unknown_filevault_state_is_unknown_for_preboot_unlock() -> None:
-    report = classify_recovery_readiness(
+    report = _classify(
         _observation(filevault_code="FILEVAULT_STATE_UNKNOWN")
     )
     predicate = report["predicates"]["preboot_remote_unlock"]
@@ -573,11 +835,11 @@ def test_malformed_os_version_never_guesses_a_preboot_pass(
     )
     if macos_product_version == "":
         with pytest.raises(RecoveryReadinessContractError) as excinfo:
-            classify_recovery_readiness(observation)
+            _classify(observation)
         assert str(excinfo.value) == "OBSERVATION_TEXT_INVALID"
         return
 
-    report = classify_recovery_readiness(observation)
+    report = _classify(observation)
     predicate = report["predicates"]["preboot_remote_unlock"]
 
     assert predicate["status"] == "UNKNOWN"
@@ -586,7 +848,7 @@ def test_malformed_os_version_never_guesses_a_preboot_pass(
 
 
 def test_non_darwin_host_never_claims_preboot_unlock_support() -> None:
-    report = classify_recovery_readiness(
+    report = _classify(
         _observation(
             os_name="Linux",
             macos_product_version=None,
@@ -601,10 +863,43 @@ def test_non_darwin_host_never_claims_preboot_unlock_support() -> None:
     assert _blocking(report) == ["os_identity"]
 
 
+@pytest.mark.parametrize("profile", list(READINESS_PROFILES))
+@pytest.mark.parametrize(
+    "filevault_code,macos_product_version,expected_code",
+    [
+        ("FILEVAULT_OFF", "15.6", "PREBOOT_UNLOCK_NOT_REQUIRED"),
+        ("FILEVAULT_ON", "15.6", "PREBOOT_UNLOCK_OS_GENERATION_UNSUPPORTED"),
+        ("FILEVAULT_ON", "26.0", "PREBOOT_UNLOCK_SUPPORTED"),
+        ("FILEVAULT_STATE_UNKNOWN", "26.0", "PREBOOT_UNLOCK_STATE_UNKNOWN"),
+    ],
+)
+def test_filevault_and_macos_26_law_is_identical_under_both_profiles(
+    profile: str,
+    filevault_code: str,
+    macos_product_version: str,
+    expected_code: str,
+) -> None:
+    report = _classify(
+        _m1_worker_observation(
+            filevault_code=filevault_code,
+            macos_product_version=macos_product_version,
+        ),
+        profile,
+    )
+    predicate = report["predicates"]["preboot_remote_unlock"]
+
+    assert predicate["requirement"] == "REQUIRED"
+    assert predicate["requirement"] in LOAD_BEARING_REQUIREMENTS
+    assert predicate["code"] == expected_code
+    assert report["predicates"]["disk_encryption_state"]["requirement"] == "ADVISORY"
+    assert report["predicates"]["disk_encryption_state"]["code"] == filevault_code
+    assert MIN_PREBOOT_REMOTE_UNLOCK_MACOS_MAJOR == 26
+
+
 def test_preboot_unlock_predicate_is_independent_of_auto_restart() -> None:
     """The current Studio fixture must still block on exactly one predicate."""
 
-    report = classify_recovery_readiness(_studio_observation())
+    report = _classify(_studio_observation())
 
     assert report["recovery_state"] == "NOT_READY"
     assert _blocking(report) == ["auto_restart_after_power_loss"]
@@ -641,18 +936,21 @@ def test_predicate_set_is_closed_and_canonically_ordered() -> None:
         "user_session_surfaces",
     )
 
-    assert PREDICATE_PROFILE.predicate_ids() == expected_ids
+    assert PREDICATE_IDS == expected_ids
     assert expected_ids == tuple(sorted(expected_ids))
+    # The predicate set, its ordering, its evidence classes and its code
+    # vocabulary are profile-independent; only requirements differ.
+    for profile in READINESS_PROFILES:
+        assert recovery_profile(profile).predicate_ids() == expected_ids
 
-    report = classify_recovery_readiness(_studio_observation())
+    report = _classify(_studio_observation())
     payload = canonical_recovery_readiness_json(report).decode("ascii")
     decoded = json.loads(payload)
 
     assert tuple(decoded["predicates"]) == expected_ids
     assert tuple(decoded) == tuple(sorted(REPORT_FIELDS))
     assert {
-        PREDICATE_PROFILE.evidence_class(predicate_id)
-        for predicate_id in expected_ids
+        PREDICATE_EVIDENCE_CLASSES[predicate_id] for predicate_id in expected_ids
     } <= EVIDENCE_CLASSES
     assert "PREBOOT_RECOVERY_DEPENDENCY" in EVIDENCE_CLASSES
     assert (
@@ -671,7 +969,7 @@ def test_predicate_set_is_closed_and_canonically_ordered() -> None:
 
 
 def test_out_of_vocabulary_preboot_code_is_refused() -> None:
-    report = classify_recovery_readiness(_observation())
+    report = _classify(_observation())
     report["predicates"]["preboot_remote_unlock"]["code"] = "PREBOOT_UNLOCK_ASSUMED_OK"
 
     with pytest.raises(RecoveryReadinessContractError) as excinfo:
@@ -683,9 +981,9 @@ def test_out_of_vocabulary_preboot_code_is_refused() -> None:
 
 
 def test_intentionally_disarmed_daemons_are_not_defects() -> None:
-    report = classify_recovery_readiness(_studio_observation())
+    report = _classify(_studio_observation())
 
-    for label in PREDICATE_PROFILE.disarmed_expected_labels:
+    for label in DISARMED_EXPECTED_DAEMON_LABELS:
         predicate = report["predicates"][f"system_daemon.{label}"]
         assert predicate["requirement"] == "DISARMED_EXPECTED"
         assert predicate["status"] == "OK"
@@ -713,7 +1011,7 @@ def test_disarmed_daemon_found_running_is_advisory_not_blocking() -> None:
     label = "com.mastermind.executive.backup"
     daemons = _studio_daemons()
     daemons[label] = "RUNNING"
-    report = classify_recovery_readiness(_studio_observation(system_daemons=daemons))
+    report = _classify(_studio_observation(system_daemons=daemons))
     predicate = report["predicates"][f"system_daemon.{label}"]
 
     assert predicate["status"] == "ADVISORY"
@@ -737,7 +1035,7 @@ def test_required_running_daemon_states(
     label = "com.mastermind.executive.sol-state-relay"
     daemons = _studio_daemons()
     daemons[label] = state
-    report = classify_recovery_readiness(_studio_observation(system_daemons=daemons))
+    report = _classify(_studio_observation(system_daemons=daemons))
     predicate = report["predicates"][f"system_daemon.{label}"]
 
     assert predicate["requirement"] == "REQUIRED_RUNNING"
@@ -746,9 +1044,9 @@ def test_required_running_daemon_states(
 
 
 def test_missing_daemon_observation_is_unknown_not_absent() -> None:
-    report = classify_recovery_readiness(_studio_observation(system_daemons={}))
+    report = _classify(_studio_observation(system_daemons={}))
 
-    for label in PREDICATE_PROFILE.required_running_labels:
+    for label in REQUIRED_RUNNING_DAEMON_LABELS:
         predicate = report["predicates"][f"system_daemon.{label}"]
         assert predicate["status"] == "UNKNOWN"
         assert predicate["code"] == "DAEMON_STATE_UNKNOWN"
@@ -758,7 +1056,7 @@ def test_missing_daemon_observation_is_unknown_not_absent() -> None:
 
 
 def test_user_session_surfaces_are_reported_separately_and_never_load_bearing() -> None:
-    report = classify_recovery_readiness(_observation())
+    report = _classify(_observation())
     predicate = report["predicates"]["user_session_surfaces"]
 
     assert predicate["requirement"] == "ADVISORY"
@@ -782,7 +1080,7 @@ def test_user_session_surfaces_are_reported_separately_and_never_load_bearing() 
 
 
 def test_absent_user_agents_are_advisory_not_ready_false() -> None:
-    report = classify_recovery_readiness(_observation(user_session_agents_present=0))
+    report = _classify(_observation(user_session_agents_present=0))
     predicate = report["predicates"]["user_session_surfaces"]
 
     assert predicate["status"] == "ADVISORY"
@@ -792,7 +1090,7 @@ def test_absent_user_agents_are_advisory_not_ready_false() -> None:
 
 
 def test_unreadable_user_agent_directory_is_unknown_but_not_blocking() -> None:
-    report = classify_recovery_readiness(_observation(user_session_agents_present=None))
+    report = _classify(_observation(user_session_agents_present=None))
     predicate = report["predicates"]["user_session_surfaces"]
 
     assert predicate["status"] == "UNKNOWN"
@@ -807,7 +1105,7 @@ def test_unreadable_user_agent_directory_is_unknown_but_not_blocking() -> None:
 def test_disk_free_floor_uses_reviewed_threshold() -> None:
     assert DISK_FREE_FLOOR_BYTES == 25 * 1024**3
 
-    at_floor = classify_recovery_readiness(
+    at_floor = _classify(
         _observation(root_free_bytes=DISK_FREE_FLOOR_BYTES)
     )
     assert at_floor["predicates"]["disk_free_floor"]["status"] == "OK"
@@ -817,7 +1115,7 @@ def test_disk_free_floor_uses_reviewed_threshold() -> None:
         == DISK_FREE_FLOOR_BYTES
     )
 
-    below = classify_recovery_readiness(
+    below = _classify(
         _observation(root_free_bytes=DISK_FREE_FLOOR_BYTES - 1)
     )
     assert below["recovery_state"] == "NOT_READY"
@@ -826,7 +1124,7 @@ def test_disk_free_floor_uses_reviewed_threshold() -> None:
 
 
 def test_unknown_disk_free_space_is_unknown_not_pass() -> None:
-    report = classify_recovery_readiness(_observation(root_free_bytes=None))
+    report = _classify(_observation(root_free_bytes=None))
 
     assert report["recovery_state"] == "UNKNOWN"
     assert report["unknown_predicates"] == ["disk_free_floor"]
@@ -939,7 +1237,7 @@ STUDIO_PLISTS = frozenset(
     {SSHD_SYSTEM_PLIST}
     | {
         system_daemon_plist_path(label)
-        for label in PREDICATE_PROFILE.all_daemon_labels
+        for label in ALL_DAEMON_LABELS
         if label != UNINSTALLED_STUDIO_LABEL
     }
 )
@@ -969,7 +1267,7 @@ def _runner_for(
     running = (
         running_labels
         if running_labels is not None
-        else frozenset(PREDICATE_PROFILE.required_running_labels)
+        else frozenset(REQUIRED_RUNNING_DAEMON_LABELS)
     )
 
     def runner(command: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
@@ -989,7 +1287,7 @@ def _runner_for(
                     command, stdout="\tstate = waiting\n\tsockets = {\n\t}\n"
                 )
             return _completed(command, returncode=113, stdout="")
-        for label in PREDICATE_PROFILE.all_daemon_labels:
+        for label in ALL_DAEMON_LABELS:
             if command == launchctl_print_command(label):
                 if label in running:
                     return _completed(
@@ -1025,7 +1323,7 @@ def test_collector_reproduces_studio_like_unsafe_state(tmp_path: Path) -> None:
     observation = _collect(
         runner=_runner_for(), launch_agents_dir=tmp_path, host_ref=HOST_REF
     )
-    report = classify_recovery_readiness(observation)
+    report = _classify(observation)
 
     assert observation["ac_power_settings"]["autorestart"] == 0
     assert observation["filevault_code"] == "FILEVAULT_ON"
@@ -1043,7 +1341,7 @@ def test_collector_reproduces_ready_state(tmp_path: Path) -> None:
         launch_agents_dir=tmp_path,
         host_ref=HOST_REF,
     )
-    report = classify_recovery_readiness(observation)
+    report = _classify(observation)
 
     assert report["recovery_state"] == "READY"
     assert _blocking(report) == []
@@ -1077,7 +1375,7 @@ def test_collector_maps_unavailable_commands_to_unknown(tmp_path: Path) -> None:
         free_bytes=lambda: None,
         wall_time_ms=lambda: 1_789_000_000_000,
     )
-    report = classify_recovery_readiness(observation)
+    report = _classify(observation)
 
     assert observation["ac_power_settings"] is None
     assert observation["apple_silicon"] is None
@@ -1096,9 +1394,9 @@ def test_permission_refusal_is_unknown_not_pass(tmp_path: Path) -> None:
     observation = _collect(runner=runner, launch_agents_dir=tmp_path)
 
     assert observation["remote_login"] == "UNKNOWN"
-    report = classify_recovery_readiness(observation)
+    report = _classify(observation)
     assert report["predicates"]["remote_login_listener"]["status"] == "UNKNOWN"
-    for label in PREDICATE_PROFILE.required_running_labels:
+    for label in REQUIRED_RUNNING_DAEMON_LABELS:
         assert observation["system_daemons"][label] == "UNKNOWN"
 
 
@@ -1115,9 +1413,9 @@ def test_missing_disable_override_row_never_means_not_installed(
         launch_agents_dir=tmp_path,
     )
 
-    for label in PREDICATE_PROFILE.required_running_labels:
+    for label in REQUIRED_RUNNING_DAEMON_LABELS:
         assert observation["system_daemons"][label] == "RUNNING"
-    report = classify_recovery_readiness(observation)
+    report = _classify(observation)
     assert _blocking(report) == ["auto_restart_after_power_loss"]
 
 
@@ -1135,7 +1433,7 @@ def test_installed_daemon_unreadable_by_launchd_is_unknown_not_not_installed(
 
     assert state != "NOT_INSTALLED"
     assert state == "UNKNOWN"
-    report = classify_recovery_readiness(observation)
+    report = _classify(observation)
     predicate = report["predicates"][f"system_daemon.{REQUIRED_LABEL}"]
     assert predicate["status"] == "UNKNOWN"
     assert predicate["code"] == "DAEMON_STATE_UNKNOWN"
@@ -1154,7 +1452,7 @@ def test_absent_daemon_plist_is_not_installed(tmp_path: Path) -> None:
     )
 
     assert observation["system_daemons"][REQUIRED_LABEL] == "NOT_INSTALLED"
-    report = classify_recovery_readiness(observation)
+    report = _classify(observation)
     assert (
         report["predicates"][f"system_daemon.{REQUIRED_LABEL}"]["code"]
         == "DAEMON_NOT_INSTALLED"
@@ -1166,7 +1464,7 @@ def test_present_disabled_worker_stays_intentionally_disarmed(tmp_path: Path) ->
     observation = _collect(runner=_runner_for(), launch_agents_dir=tmp_path)
 
     assert observation["system_daemons"][label] == "DISABLED"
-    predicate = classify_recovery_readiness(observation)["predicates"][
+    predicate = _classify(observation)["predicates"][
         f"system_daemon.{label}"
     ]
     assert predicate["status"] == "OK"
@@ -1200,7 +1498,7 @@ def test_remote_login_explicit_disabled_override_is_disabled(tmp_path: Path) -> 
     )
 
     assert observation["remote_login"] == "DISABLED"
-    report = classify_recovery_readiness(observation)
+    report = _classify(observation)
     assert "remote_login_listener" in _blocking(report)
 
 
@@ -1213,7 +1511,7 @@ def test_remote_login_without_system_plist_is_not_installed(tmp_path: Path) -> N
 
     assert observation["remote_login"] == "NOT_INSTALLED"
     assert (
-        classify_recovery_readiness(observation)["predicates"][
+        _classify(observation)["predicates"][
             "remote_login_listener"
         ]["code"]
         == "REMOTE_LOGIN_NOT_INSTALLED"
@@ -1238,7 +1536,7 @@ def test_main_emits_canonical_json_and_exits_zero(tmp_path: Path) -> None:
     observation = _studio_observation()
 
     exit_code = main(
-        ["--host-ref", HOST_REF],
+        ["--host-ref", HOST_REF, "--profile", EXECUTIVE_CONTROL_PROFILE],
         collector=lambda **_kwargs: observation,
         stdout=stdout,
         stderr=stderr,
@@ -1249,13 +1547,31 @@ def test_main_emits_canonical_json_and_exits_zero(tmp_path: Path) -> None:
     payload = json.loads(stdout.getvalue())
     assert payload["recovery_state"] == "NOT_READY"
     assert payload["schema"] == READINESS_SCHEMA
+    assert payload["profile"] == EXECUTIVE_CONTROL_PROFILE
     assert stdout.getvalue().endswith(b"\n")
+
+
+def test_main_emits_the_caller_named_base_profile() -> None:
+    stdout = io.BytesIO()
+    observation = _m1_worker_observation()
+
+    exit_code = main(
+        ["--profile", BASE_RECOVERY_PROFILE],
+        collector=lambda **_kwargs: observation,
+        stdout=stdout,
+        stderr=io.StringIO(),
+    )
+
+    assert exit_code == 0
+    payload = json.loads(stdout.getvalue())
+    assert payload["profile"] == BASE_RECOVERY_PROFILE
+    assert payload["recovery_state"] == "READY"
 
 
 def test_main_refuses_invalid_arguments_without_echoing_them() -> None:
     stderr = io.StringIO()
     exit_code = main(
-        ["--host-ref", "secret-value"],
+        ["--host-ref", "secret-value", "--profile", BASE_RECOVERY_PROFILE],
         stdout=io.BytesIO(),
         stderr=stderr,
     )
@@ -1270,10 +1586,64 @@ def test_main_refuses_unsupported_platform() -> None:
     def collector(**_kwargs: Any) -> dict[str, Any]:
         raise RecoveryReadinessProbeError("UNSUPPORTED_PLATFORM")
 
-    exit_code = main([], collector=collector, stdout=io.BytesIO(), stderr=stderr)
+    exit_code = main(
+        ["--profile", EXECUTIVE_CONTROL_PROFILE],
+        collector=collector,
+        stdout=io.BytesIO(),
+        stderr=stderr,
+    )
 
     assert exit_code == 65
     assert "UNSUPPORTED_PLATFORM" in stderr.getvalue()
+
+
+# ------------------------------------------------------- explicit profile CLI
+
+
+def _refusing_collector(**_kwargs: Any) -> dict[str, Any]:
+    raise AssertionError("no host state may be observed before --profile is accepted")
+
+
+@pytest.mark.parametrize(
+    "argv,expected_code",
+    [
+        ([], "ARGUMENTS_INVALID"),
+        (["--host-ref", HOST_REF], "ARGUMENTS_INVALID"),
+        (["--profile"], "ARGUMENTS_INVALID"),
+        (["--profile", "always-on-executive-host/v1"], "PROFILE_INVALID"),
+        (["--profile", "home-mac-recovery-base"], "PROFILE_INVALID"),
+        (["--profile", ""], "PROFILE_INVALID"),
+        (
+            ["--profile", BASE_RECOVERY_PROFILE, "--profile", EXECUTIVE_CONTROL_PROFILE],
+            "ARGUMENTS_INVALID",
+        ),
+    ],
+)
+def test_main_requires_one_known_profile_before_observing_anything(
+    argv: list[str], expected_code: str
+) -> None:
+    stdout = io.BytesIO()
+    stderr = io.StringIO()
+
+    exit_code = main(
+        argv, collector=_refusing_collector, stdout=stdout, stderr=stderr
+    )
+
+    assert exit_code == 65
+    assert expected_code in stderr.getvalue()
+    assert stdout.getvalue() == b""
+
+
+def test_cli_exposes_exactly_two_profiles_and_no_default() -> None:
+    assert READINESS_PROFILES == (BASE_RECOVERY_PROFILE, EXECUTIVE_CONTROL_PROFILE)
+
+    action = next(
+        action
+        for action in probe_module._parser()._actions
+        if action.dest == "profile"
+    )
+    assert action.required is True
+    assert action.default is None
 
 
 # -------------------------------------------------------------- safety fences
@@ -1308,7 +1678,7 @@ def test_every_command_is_absolute_fixed_and_read_only() -> None:
     )
     commands = list(READ_ONLY_COMMANDS) + [
         launchctl_print_command(label)
-        for label in PREDICATE_PROFILE.all_daemon_labels + (SSHD_LABEL,)
+        for label in ALL_DAEMON_LABELS + (SSHD_LABEL,)
     ]
 
     assert commands
@@ -1325,6 +1695,35 @@ def test_every_command_is_absolute_fixed_and_read_only() -> None:
         FDESETUP_STATUS_COMMAND,
         LAUNCHCTL_PRINT_DISABLED_COMMAND,
     }
+
+
+def test_profile_is_not_command_authority(tmp_path: Path) -> None:
+    """Naming a profile may change classification, never what the host observes."""
+
+    invoked: list[tuple[str, ...]] = []
+
+    def recording_runner(command: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
+        invoked.append(command)
+        return _runner_for()(command)
+
+    observation = _collect(runner=recording_runner, launch_agents_dir=tmp_path)
+    argv = list(invoked)
+
+    assert argv
+    for command in argv:
+        assert command in set(READ_ONLY_COMMANDS) | {
+            launchctl_print_command(label)
+            for label in ALL_DAEMON_LABELS + (SSHD_LABEL,)
+        }
+
+    # The collector takes no profile at all, so the same observation feeds both.
+    assert "profile" not in observation
+    assert "profile" not in inspect.signature(collect_recovery_observation).parameters
+
+    for profile in READINESS_PROFILES:
+        report = _classify(observation, profile)
+        assert report["profile"] == profile
+    assert list(invoked) == argv
 
 
 def test_source_contains_no_mutation_or_privilege_escalation() -> None:
@@ -1363,7 +1762,7 @@ def test_source_contains_no_mutation_or_privilege_escalation() -> None:
 
 def test_report_carries_no_host_identifying_or_secret_material() -> None:
     payload = canonical_recovery_readiness_json(
-        classify_recovery_readiness(_studio_observation())
+        _classify(_studio_observation())
     ).decode("ascii")
 
     for leak in ("chriswong", "/Users/", "192.168.", "token", "password", "key ="):
