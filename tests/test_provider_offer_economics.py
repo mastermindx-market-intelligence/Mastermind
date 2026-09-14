@@ -95,6 +95,15 @@ def test_context_and_time_bands_compose():
     assert quote(offer(*rates), context_tokens=200001, now='2026-09-14T02:00:00Z').rate_id == 'long-peak'
 
 
+def test_refuses_context_rates_that_overlap_at_the_same_instant():
+    value = offer(
+        rate('first', windows=((0, 120),)),
+        rate('second', lo=500, windows=((60, 180),)),
+    )
+    with pytest.raises(ModelEconomicsError, match='overlapping time/context rate variants'):
+        quote(value)
+
+
 def test_explicit_promotion_cutover_not_guessed_from_prose():
     cutover = '2026-09-20T04:00:00Z'  # Fictional reviewed fixture, not vendor time.
     value = offer(rate('promo', end=cutover), rate('baseline', '.3', '1.2', start=cutover))

@@ -58,6 +58,13 @@ def test_refuses_lower_tier_promotion():
         project_quota_preference(TIERS, doc)
 
 
+def test_refuses_later_tier_selection_while_option_remains_in_first_tier():
+    doc = preview()
+    doc["selected_tier"] = "implementation.routine.fallback"
+    with pytest.raises(CapacityEconomicsProjectionError, match="first lawful suitability tier"):
+        project_quota_preference(TIERS, doc)
+
+
 def test_refuses_preview_that_claims_live_admission_or_skips_revalidation():
     doc = preview()
     doc["live_admission"] = True
