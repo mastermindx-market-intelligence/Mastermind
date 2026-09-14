@@ -604,17 +604,15 @@ def test_control_wrapper_post_exec_argv_contains_no_canary_name(
 def test_installer_replaces_whole_program_argument_arrays() -> None:
     install = (OPS / "install.sh").read_text(encoding="utf-8")
     assert "render_launchd_program_arguments.py" in install
-    # DR-B1 (off-host disaster recovery) added a third rendered daemon,
-    # com.mastermind.executive.backup -- extending this pin rather than
-    # dropping it, per the same discipline the control/worker pair already
-    # enforced: install.sh must keep replacing ProgramArguments wholesale via
-    # the reviewed renderer, never piecemeal via `plutil -replace
-    # ProgramArguments.N`.
-    assert install.count("render_launchd_program_arguments.py") == 3
+    # DR-B1 added backup and the privileged-action wave adds one socket-activated
+    # root broker. All four still replace ProgramArguments wholesale via the
+    # reviewed renderer, never piecemeal via `plutil -replace ProgramArguments.N`.
+    assert install.count("render_launchd_program_arguments.py") == 4
     assert "plutil -replace ProgramArguments." not in install
     assert '"$CONTROL_PLIST" --' in install
     assert '"$WORKER_PLIST" --' in install
     assert '"$BACKUP_PLIST" --' in install
+    assert '"$PRIVILEGED_PLIST" --' in install
     assert 'scripts/executive_os_phase1c_worker.py"' in install
     assert 'ops/executive_os/run_nightly_backup.sh"' in install
     assert 'plutil -replace UserName -string "$WORKER_USER" "$WORKER_PLIST"' in install
@@ -1541,4 +1539,143 @@ def test_installer_stops_old_daemons_before_first_release_or_policy_mutation() -
     assert stop < control_absent < worker_absent < archive < config_write < plist_install
     assert "trap leave_installed_services_stopped EXIT" in source
     tail_after_plists = source[plist_install:]
-    assert '/bin/launchctl bootstrap' not in tail_after_plists
+    # Normal Executive daemons stay inert. The only bootstrap is the explicitly
+    # armed privileged broker, after exact-release verification.
+    assert '/bin/launchctl bootstrap system "$CONTROL_PLIST"' not in tail_after_plists
+    assert '/bin/launchctl bootstrap system "$WORKER_PLIST"' not in tail_after_plists
+    assert '/bin/launchctl bootstrap system "$BACKUP_PLIST"' not in tail_after_plists
+    assert tail_after_plists.count('/bin/launchctl bootstrap') == 1
+    arm = tail_after_plists.index('if [ "$ARM_PRIVILEGED_BROKER" = "1" ]; then')
+    bootstrap = tail_after_plists.index('/bin/launchctl bootstrap system "$PRIVILEGED_PLIST"')
+    manifest_verify = tail_after_plists.rindex('release_manifest.py" verify', 0, arm)
+    assert manifest_verify < arm < bootstrap
+
+
+@pytest.mark.skipif(sys.platform != 'darwin', reason='macOS plutil installer rendering')
+def test_installer_renders_every_control_socket_path(tmp_path):
+    """Exercise the installer's real socket substitutions without root or launchd."""
+    import shlex
+
+    destination = tmp_path / 'control.plist'
+    destination.write_bytes(CONTROL.read_bytes())
+    replacements = {
+        '$CONTROL_PLIST': str(destination),
+        '$CONTROL_UID': '450',
+        '$OPS_GID': '453',
+    }
+    for line in (OPS / 'install.sh').read_text().splitlines():
+        if (line.startswith('/usr/bin/plutil -replace Sockets.')
+                and line.endswith('"$CONTROL_PLIST"')):
+            argv = [replacements.get(part, part) for part in shlex.split(line)]
+            subprocess.run(argv, check=True, capture_output=True, text=True)
+
+    sockets = plistlib.loads(destination.read_bytes())['Sockets']
+    assert sockets['CeoIngress'] == {
+        'SockPathName': '/var/run/mastermind-executive/ceo-ingress.sock',
+        'SockType': 'stream', 'SockPassive': True,
+        'SockPathOwner': 450, 'SockPathGroup': 452, 'SockPathMode': 0o660,
+    }
+    assert all(Path(row['SockPathName']).is_absolute() for row in sockets.values())
+    assert all('__' not in row['SockPathName'] for row in sockets.values())
+def test_privileged_broker_launchd_template_is_root_socket_activated_and_closed() -> None:
+    path = OPS / "com.mastermind.executive.privileged.plist.template"
+    value = _plist(path)
+    assert value["Label"] == "com.mastermind.executive.privileged"
+    assert value["UserName"] == "root"
+    assert value["GroupName"] == "wheel"
+    assert "RunAtLoad" not in value
+    assert "KeepAlive" not in value
+    assert value["ProcessType"] == "Background"
+    assert value["Umask"] == 0o77
+    assert value["ProgramArguments"] == [
+        "__PYTHON_BINARY__",
+        "-I",
+        "-S",
+        "-B",
+        "__PRIVILEGED_ENTRYPOINT__",
+        "serve",
+        "--config",
+        "__PRIVILEGED_CONFIG__",
+    ]
+    assert not any(
+        item in {"/bin/sh", "/bin/bash", "/usr/bin/env"}
+        for item in value["ProgramArguments"]
+    )
+    assert set(value["Sockets"]) == {"PrivilegedActions"}
+    _assert_private_unix_socket(value["Sockets"]["PrivilegedActions"], mode=0o660)
+    assert value["Sockets"]["PrivilegedActions"]["SockPathOwner"] == 450
+    assert value["Sockets"]["PrivilegedActions"]["SockPathGroup"] == 453
+    assert set(value["EnvironmentVariables"]) == {
+        "HOME", "LANG", "LC_ALL", "NO_COLOR", "PATH", "PYTHONUNBUFFERED", "TZ"
+    }
+    assert not any(
+        token in key.upper()
+        for key in value["EnvironmentVariables"]
+        for token in ("KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL")
+    )
+
+
+def test_installer_privileged_broker_is_explicitly_armed_and_never_edits_sudoers() -> None:
+    text = (OPS / "install.sh").read_text(encoding="utf-8")
+    assert 'PRIVILEGED_LABEL="com.mastermind.executive.privileged"' in text
+    assert 'ARM_PRIVILEGED_BROKER="0"' in text
+    assert '--arm-privileged-broker) ARM_PRIVILEGED_BROKER="1"; shift ;;' in text
+    assert 'PRIVILEGED_CONFIG="$SYSTEM_ROOT/config/privileged-broker.json"' in text
+    assert 'PRIVILEGED_RECEIPT_ROOT="$RUNTIME_ROOT/privileged-actions/receipts"' in text
+    assert 'PRIVILEGED_SOCKET="/var/run/mastermind-executive/privileged.sock"' in text
+    assert '/etc/sudoers' not in text
+    assert 'NOPASSWD' not in text
+    arm = text.index('if [ "$ARM_PRIVILEGED_BROKER" = "1" ]; then')
+    enable = text.index('/bin/launchctl enable "system/$PRIVILEGED_LABEL"', arm)
+    bootstrap = text.index('/bin/launchctl bootstrap system "$PRIVILEGED_PLIST"', enable)
+    live = text.index('PRIVILEGED_BROKER_LIVE="1"', bootstrap)
+    assert arm < enable < bootstrap < live
+    assert '/usr/bin/stat -f' in text[live - 1800 : live]
+
+
+def test_failed_privileged_arm_cleanup_proves_the_root_daemon_is_absent() -> None:
+    text = (OPS / "install.sh").read_text(encoding="utf-8")
+    start = text.index("leave_installed_services_stopped() {")
+    end = text.index("trap leave_installed_services_stopped EXIT", start)
+    cleanup = text[start:end]
+    assert 'if /bin/launchctl print "system/$PRIVILEGED_LABEL" >/dev/null 2>&1; then' in cleanup
+    assert "privileged LaunchDaemon remained loaded after cleanup" in cleanup
+
+
+def test_privileged_broker_budget_exceeds_provider_inference_canary_budget() -> None:
+    install = (OPS / "install.sh").read_text(encoding="utf-8")
+    canary = (OPS / "provider_inference_canary.py").read_text(encoding="utf-8")
+    assert '"timeout_seconds": 600' in install
+    assert 'timeout_seconds: float = 180.0' in canary
+
+
+def test_privileged_client_and_broker_entrypoints_are_in_release_manifest_surface() -> None:
+    install = (OPS / "install.sh").read_text(encoding="utf-8")
+    for relative in (
+        "scripts/executive_os_privileged_broker.py",
+        "scripts/mmx_admin.py",
+        "control_plane/executive_privileged_action.py",
+        "control_plane/executive_privileged_broker.py",
+    ):
+        assert relative in install or "release_manifest.py" in install
+
+
+def test_privileged_broker_cli_rejects_unknown_command_without_traceback(tmp_path: Path) -> None:
+    target = ROOT / "scripts" / "executive_os_privileged_broker.py"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-S",
+            "-B",
+            str(target),
+            "--definitely-not-a-real-subcommand",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 2
+    assert "arguments are required: command" in result.stderr
+    assert "Traceback" not in result.stderr

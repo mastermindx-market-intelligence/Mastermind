@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import fnmatch
 import hmac
 import importlib
 import json
@@ -39,6 +40,7 @@ from common.commission_ref import (
     CommissionRefError,
     normalize_commission_ref,
 )
+
 from control_plane.executive_authority import (
     AuthorityDenied,
     AuthorityPolicyError,
@@ -91,6 +93,34 @@ from control_plane.operator_harness_contract import (
 from scripts.ohf.redaction import redact_evidence, redact_evidence_text
 
 SCHEMA_VERSION = 4
+
+
+def _path_matches_patterns(value: str, patterns: Sequence[str]) -> bool:
+    value_parts = value.split("/")
+
+    def _matches(pattern: str) -> bool:
+        pattern_parts = pattern.split("/")
+
+        def _walk(pattern_index: int, value_index: int) -> bool:
+            if pattern_index == len(pattern_parts):
+                return value_index == len(value_parts)
+            part = pattern_parts[pattern_index]
+            if part == "**":
+                return any(
+                    _walk(pattern_index + 1, candidate)
+                    for candidate in range(value_index, len(value_parts) + 1)
+                )
+            return (
+                value_index < len(value_parts)
+                and fnmatch.fnmatchcase(value_parts[value_index], part)
+                and _walk(pattern_index + 1, value_index + 1)
+            )
+
+        return _walk(0, 0)
+
+    return any(_matches(pattern) for pattern in patterns)
+
+
 OHF_INTERNAL_GENERATION_OPERATION_SCHEMA_VERSION = (
     "mastermind.operator_harness_internal_generation_operation/v1"
 )
@@ -5799,7 +5829,26 @@ def _sealed_worker_result_payload(
         != evidence["assignment_seal_receipt_digest"]
     ):
         raise StateConflict("sealed-worker receipt digests are invalid")
-    from control_plane.executive_worker_broker import uid_sweep_receipt_is_passing
+
+
+    def uid_sweep_receipt_is_passing(value: Any) -> bool:
+        before = value.get("residual_pids_before") if isinstance(value, Mapping) else None
+        after = value.get("residual_pids_after") if isinstance(value, Mapping) else None
+        return (
+            isinstance(value, Mapping)
+            and value.get("schema_version") == "mastermind.executive_uid_sweep/v2"
+            and value.get("passed") is True
+            and isinstance(before, list)
+            and isinstance(after, list)
+            and after == []
+            and all(
+                type(item) is int
+                and item > 0
+                and str(item) == str(item).strip()
+                for item in before
+            )
+            and value.get("found_residuals") is bool(before)
+        )
 
     if (
         not uid_sweep_receipt_is_passing(collection_receipt["uid_sweep"])
@@ -6023,8 +6072,6 @@ def _sealed_worker_result_payload(
         artifacts_match = artifact_manifest == []
     else:
         try:
-            from control_plane.codex_worker import _path_matches_patterns
-
             artifacts_match = (
                 isinstance(declared_artifacts, list)
                 and [
@@ -6039,7 +6086,7 @@ def _sealed_worker_result_payload(
                     for item in artifact_manifest
                 )
             )
-        except (ImportError, KeyError, TypeError):
+        except (KeyError, TypeError):
             artifacts_match = False
     if (
         not isinstance(role_result, dict)
@@ -17871,7 +17918,7 @@ class Runtime:
                 )
             role = str(job_row["orchestration_role"] or "")
             if (
-                role not in {"plan", "work", "review", "repair"}
+                role not in {"plan", "work", "review", "repair", "aggregation"}
                 or job_row["current_attempt_id"] != attempt_token
             ):
                 raise StateConflict("terminal completion binding is not current")

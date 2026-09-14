@@ -344,11 +344,14 @@ def _launchd_disabled(label: str) -> bool:
         return False
     if completed.returncode != 0:
         return False
-    return re.search(
-        rf'^\s*"{re.escape(label)}"\s*=>\s*true\s*$',
+    # macOS emits enabled/disabled; retain the legacy boolean form as well.
+    # An absent, unknown, or repeated override cannot prove a stopped boundary.
+    states = re.findall(
+        rf'^\s*"{re.escape(label)}"\s*=>\s*(\S+)\s*$',
         completed.stdout,
         re.MULTILINE,
-    ) is not None
+    )
+    return states in (["true"], ["disabled"])
 
 
 def _launchd_loaded(label: str) -> bool:
