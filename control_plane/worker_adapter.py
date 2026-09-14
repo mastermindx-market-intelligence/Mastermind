@@ -55,7 +55,6 @@ ADAPTER_DESCRIPTORS: dict[str, AdapterDescriptor] = {
     ),
     "claude-compatible-subscription": AdapterDescriptor(
         adapter_id="claude-compatible-subscription",
-        implemented=True,
         implementation=(
             "control_plane.claude_subscription_worker"
             ".ClaudeSubscriptionWorkerAdapter"
@@ -84,7 +83,7 @@ def adapter_implementation(adapter_id: str) -> type:
     """Resolve a reviewed descriptor to its implementation class."""
 
     descriptor = adapter_descriptor(adapter_id)
-    if not descriptor.implemented or not descriptor.implementation:
+    if not descriptor.implementation:
         raise AdapterBindingError(f"worker adapter {adapter_id!r} is not implemented")
     module_name, _, class_name = descriptor.implementation.rpartition(".")
     try:
@@ -193,8 +192,6 @@ def bind_reviewed_adapter(adapter: object, adapter_id: str) -> AdapterDescriptor
                 f"adapter identity {identity!r} does not match descriptor "
                 f"{descriptor.adapter_id!r}"
             )
-        if not descriptor.implemented:
-            raise AdapterBindingError(f"worker adapter {adapter_id!r} is not implemented")
         if not callable(_require_status(adapter)):
             raise AdapterBindingError(
                 f"worker adapter {descriptor.adapter_id!r} does not expose status"

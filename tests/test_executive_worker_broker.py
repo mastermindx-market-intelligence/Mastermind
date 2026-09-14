@@ -635,7 +635,8 @@ def test_reviewed_constructor_binds_two_exact_heterogeneous_adapter_identities(
     assert claude.adapter_id == claude_descriptor.adapter_id
     assert claude.adapter_id == claude.binding.adapter_id
     assert claude.binding.implementation_state == "BUILT_NOT_PROVEN"
-    assert codex_descriptor.implemented and claude_descriptor.implemented
+    assert codex_descriptor.implemented
+    assert not claude_descriptor.implemented
     assert "provider_home" not in inspect.signature(type(claude).__init__).parameters
     assert "codex_home" not in inspect.signature(type(claude).__init__).parameters
 

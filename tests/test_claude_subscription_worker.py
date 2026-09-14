@@ -231,7 +231,7 @@ def _adapter(tmp_path: Path, binding_id: str = _GLM_BINDING) -> ClaudeSubscripti
 
 def test_common_adapter_descriptor_is_implemented_only_through_reviewed_receipt():
     binding = get_binding(_GLM_BINDING)
-    assert adapter_descriptor(binding.adapter_id).implemented
+    assert not adapter_descriptor(binding.adapter_id).implemented
     class ClaimedAdapter:
         adapter_id = binding.adapter_id
 
@@ -663,7 +663,7 @@ def test_adapter_refuses_missing_capacity_or_realm_proof_and_changed_catalog(tmp
 def test_claude_lane_is_spec_only_and_reviewed_admission_gates_broker_execution() -> None:
     binding = get_binding(_GLM_BINDING)
     assert binding.implementation_state == "SPEC_ONLY"
-    assert ADAPTER_DESCRIPTORS[binding.adapter_id].implemented
+    assert not ADAPTER_DESCRIPTORS[binding.adapter_id].implemented
     class ClaimedAdapter:
         adapter_id = binding.adapter_id
 

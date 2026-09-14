@@ -2059,7 +2059,6 @@ def _cycle_through_completed_work(
     }
     _complete_ohf_role(runtime, planner, plan_body, identity_seed=3201)
     admission = cycle.run_once(root.job_id)
-    print(admission.to_dict())
     assert admission.action == "PLAN_ADMITTED"
     assert cycle.run_once(root.job_id).action == "DISPATCHED"
     work = dispatches[-1]
