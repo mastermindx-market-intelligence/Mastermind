@@ -594,18 +594,49 @@ class CommandAdapter:
                 facts["cleanup_unknown"] = True
 
 
+def _launchd_service_fields(output: str) -> tuple[str, list[list[str]]]:
+    """Project direct service fields, excluding nested launchd dictionaries."""
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    if lines and re.fullmatch(r"system/[^\s{}]+\s*=\s*\{", lines[0]):
+        if lines[-1] != "}":
+            raise PreimageUnsettled("MALFORMED_LAUNCHD")
+        lines = lines[1:-1]
+    depth = 0
+    fields: list[str] = []
+    argument_blocks: list[list[str]] = []
+    arguments: list[str] | None = None
+    for line in lines:
+        if line == "}":
+            if depth == 0:
+                raise PreimageUnsettled("MALFORMED_LAUNCHD")
+            depth -= 1
+            if depth == 0 and arguments is not None:
+                argument_blocks.append(arguments)
+                arguments = None
+            continue
+        if depth == 0:
+            fields.append(line)
+            if re.fullmatch(r"arguments\s*=\s*\{", line):
+                arguments = []
+        elif depth == 1 and arguments is not None:
+            arguments.append(line)
+        if re.fullmatch(r".+?\s*=\s*\{", line):
+            depth += 1
+    if depth != 0:
+        raise PreimageUnsettled("MALFORMED_LAUNCHD")
+    return "\n".join(fields), argument_blocks
+
+
 def parse_launchd_state(
     output: str,
     *,
     expected_program: str | None = None,
     expected_arguments: Sequence[str] | None = None,
 ) -> dict[str, Any]:
-    states = re.findall(r"(?m)^\s*state\s*=\s*([a-z]+)\s*$", output)
-    pids = re.findall(r"(?m)^\s*pid\s*=\s*([^\s]+)\s*$", output)
-    programs = re.findall(r"(?m)^\s*program\s*=\s*(\S+)\s*$", output)
-    argument_blocks = re.findall(
-        r"(?ms)^\s*arguments\s*=\s*\{\s*\n(.*?)^\s*\}\s*$", output
-    )
+    service_fields, argument_blocks = _launchd_service_fields(output)
+    states = re.findall(r"(?m)^state\s*=\s*([a-z]+)\s*$", service_fields)
+    pids = re.findall(r"(?m)^pid\s*=\s*([^\s]+)\s*$", service_fields)
+    programs = re.findall(r"(?m)^program\s*=\s*(.+?)\s*$", service_fields)
     if len(states) != 1 or len(pids) > 1:
         raise PreimageUnsettled("MALFORMED_LAUNCHD")
     state_value = states[0]
@@ -629,9 +660,7 @@ def parse_launchd_state(
     if active and expected_arguments is not None:
         if len(argument_blocks) != 1:
             raise PreimageUnsettled("MALFORMED_LAUNCHD")
-        loaded_arguments = [
-            line.strip() for line in argument_blocks[0].splitlines() if line.strip()
-        ]
+        loaded_arguments = argument_blocks[0]
         if not loaded_arguments:
             raise PreimageUnsettled("MALFORMED_LAUNCHD")
         result["arguments_match"] = loaded_arguments == list(expected_arguments)

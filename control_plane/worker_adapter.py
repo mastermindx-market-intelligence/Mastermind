@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import dataclasses
 import importlib
-from control_plane.codex_worker import _CONSTRUCTED_CODEX_ADAPTERS
 from typing import Protocol, Sequence, runtime_checkable
 
 from control_plane.worker_execution_contract import (
@@ -166,6 +165,8 @@ def bind_reviewed_adapter(adapter: object, adapter_id: str) -> AdapterDescriptor
     """Prove exact reviewed class, constructed identity, and that status() is live."""
 
     try:
+        from control_plane.codex_worker import _CONSTRUCTED_CODEX_ADAPTERS
+
         descriptor = adapter_descriptor(adapter_id)
     except ValueError as exc:
         raise AdapterBindingError(str(exc)) from exc

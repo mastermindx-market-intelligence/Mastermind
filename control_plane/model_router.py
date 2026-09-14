@@ -8,10 +8,15 @@ lease path.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
+import hmac
 import json
 import math
+import os
 import re
+import sys
 from enum import Enum
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -985,6 +990,150 @@ def route_work(
     )
 
 
+def _make_capacity_owner_seam() -> Any:
+    """Build a closure-held capacity-owner HMAC seam.
+
+    The keyed seal protects owner artifacts from cross-boundary substitution
+    and accidental mutation. It is not a boundary against an attacker already
+    executing arbitrary Python in this process; a real owner boundary would
+    require a separate process or OS capability.
+    """
+
+    key_bytes: bytes | None = None
+
+    class _OwnerSeam:
+        __slots__ = ()
+
+        @staticmethod
+        def seal(payload: Mapping[str, Any]) -> bytes:
+            if key_bytes is None:
+                raise RoutingPolicyError("capacity owner key is not available")
+            canonical = json.dumps(
+                dict(payload),
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+                allow_nan=False,
+            ).encode("utf-8")
+            return hmac.new(key_bytes, canonical, hashlib.sha256).digest()
+
+        @staticmethod
+        def verify(payload: Mapping[str, Any], digest: bytes) -> bool:
+            try:
+                return isinstance(digest, bytes) and hmac.compare_digest(
+                    _OwnerSeam.seal(payload), digest
+                )
+            except (TypeError, ValueError):
+                return False
+
+        @staticmethod
+        @contextmanager
+        def install_test_key(key: bytes | None):
+            """Install fixture HMAC state only while pytest owns this test."""
+
+            nonlocal key_bytes
+            if "pytest" not in sys.modules or os.environ.get(
+                "PYTEST_CURRENT_TEST"
+            ) is None:
+                raise RoutingPolicyError("capacity owner test key is test-only")
+            if key is not None and (
+                not isinstance(key, (bytes, bytearray)) or len(key) < 16
+            ):
+                raise RoutingPolicyError("capacity owner test key is invalid")
+            previous = key_bytes
+            key_bytes = bytes(key) if key is not None else None
+            try:
+                yield
+            finally:
+                key_bytes = previous
+
+    return _OwnerSeam()
+
+
+_CAPACITY_OWNER_SEAM = _make_capacity_owner_seam()
+
+
+def set_capacity_owner_test_key(key: bytes | None) -> None:
+    """Refuse direct injection; use the fixture-only closure seam instead."""
+
+    del key
+    raise RoutingPolicyError("capacity owner test key is test-only")
+
+
+def _capacity_fact_payload(
+    *,
+    worker_id: str,
+    state: Any,
+    source: Any,
+    generation: int,
+) -> dict[str, Any]:
+    return {
+        "generation": generation,
+        "source": getattr(source, "value", source),
+        "state": getattr(state, "value", state),
+        "worker_id": worker_id,
+    }
+
+
+def _capacity_fact_seal(payload: Mapping[str, Any]) -> str:
+    return _CAPACITY_OWNER_SEAM.seal(payload).hex()
+
+
+def export_capacity_owner_fact(
+    *,
+    worker_id: str,
+    state: Any,
+    generation: int,
+) -> Any:
+    """Mint one keyed-sealed capacity fact. This is the only lawful mint."""
+
+    from control_plane.executive_steward import SourceOwner
+    from ops.executive_os.capacity_owner_facts import CapacityOwnerFact
+
+    payload = _capacity_fact_payload(
+        worker_id=worker_id,
+        state=state,
+        source=SourceOwner.CAPACITY,
+        generation=generation,
+    )
+    return CapacityOwnerFact(
+        worker_id=worker_id,
+        state=state,
+        source=SourceOwner.CAPACITY,
+        generation=generation,
+        _seal=_capacity_fact_seal(payload),
+    )
+
+
+def verify_capacity_owner_fact(fact: Any) -> None:
+    """Re-verify the owner HMAC over the fact's canonical public fields."""
+
+    from ops.executive_os.capacity_owner_facts import (
+        CapacityOwnerFact,
+        CapacityOwnerFactError,
+    )
+
+    if type(fact) is not CapacityOwnerFact:
+        raise CapacityOwnerFactError("capacity_fact is not an owner-minted instance")
+    seal = object.__getattribute__(fact, "_seal")
+    try:
+        verified = isinstance(seal, str) and _CAPACITY_OWNER_SEAM.verify(
+            _capacity_fact_payload(
+                worker_id=fact.worker_id,
+                state=fact.state,
+                source=fact.source,
+                generation=fact.generation,
+            ),
+            bytes.fromhex(seal),
+        )
+    except (TypeError, ValueError):
+        verified = False
+    if not verified:
+        raise CapacityOwnerFactError(
+            "capacity_fact seal does not match worker_id, generation"
+        )
+
+
 __all__ = [
     "ChatReasoningMode",
     "CognitionRoute",
@@ -1001,5 +1150,8 @@ __all__ = [
     "RoutingPolicyError",
     "SuitabilityTier",
     "WorkRequest",
+    "export_capacity_owner_fact",
     "route_work",
+    "set_capacity_owner_test_key",
+    "verify_capacity_owner_fact",
 ]

@@ -82,19 +82,21 @@ from pathlib import Path
 from typing import Any
 
 from control_plane import ceo_boot_packet
-from control_plane.executive_runtime import (
-    RuntimeReadBinding,
-    RuntimeReadUnavailable,
-    Attempt,
-    AttemptStatus,
-    Job,
-    JobPayload,
-    JobStatus,
-    Runtime,
-    RuntimeProofError,
-    WorkerStatus,
-    orchestration_digest,
-)
+
+
+def __getattr__(name: str):
+    if name in {"JobStatus", "AttemptStatus", "WorkerStatus"}:
+        from control_plane import executive_runtime
+
+        return getattr(executive_runtime, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+RuntimeReadBinding = Any
+RuntimeReadUnavailable = RuntimeError
+Attempt = Any
+Job = Any
+JobPayload = Any
+Runtime = Any
 
 #: Schema version of the document this module emits.  A bump means a migration.
 SCHEMA = "mastermind.executive_inbox.v2"
@@ -138,11 +140,11 @@ _TARGET_RANK = {name: index for index, name in enumerate(TARGETS)}
 #: job lands in exactly one of these buckets or in exactly one attention item —
 #: that arithmetic is asserted in-module (see ``_reconciliation_gap``).
 _SUPPRESSION_BY_STATUS = {
-    JobStatus.COMPLETED: "clean_completed",
-    JobStatus.QUEUED: "queued",
-    JobStatus.RUNNING: "running",
-    JobStatus.CHECKPOINTED: "checkpointed",
-    JobStatus.CANCELLED: "cancelled",
+    "COMPLETED": "clean_completed",
+    "QUEUED": "queued",
+    "RUNNING": "running",
+    "CHECKPOINTED": "checkpointed",
+    "CANCELLED": "cancelled",
 }
 _SUPPRESSION_KEYS = ("clean_completed", "queued", "running", "checkpointed", "cancelled")
 
@@ -276,6 +278,8 @@ def _payload_or_error(value: Any) -> tuple[JobPayload | None, str | None]:
     stored object is the payload itself).  Using a second, local notion of
     "well-formed" here would let the inbox call healthy state malformed.
     """
+    from control_plane.executive_runtime import JobPayload, RuntimeProofError
+
     if value is None:
         return None, None
     try:
@@ -314,6 +318,8 @@ def _is_independent_approval(
     child: Job,
     attempts_by_job: Mapping[str, Attempt],
 ) -> bool:
+    from control_plane.executive_runtime import JobStatus
+
     if candidate.reviews_job_id != child.job_id or candidate.status is not JobStatus.COMPLETED:
         return False
     payload, error = _payload_or_error(candidate.result)
@@ -351,6 +357,8 @@ def classify_job(
     disables it rather than inventing an instant: a lease comparison against an
     unstated clock is not evidence.
     """
+    from control_plane.executive_runtime import JobStatus
+
     used, limit = int(job.attempt_count), int(job.attempt_limit)
     exhausted = used >= limit
     status = job.status
@@ -642,6 +650,8 @@ def ceo_intent_provenance(
     than nothing: after a ``ceo_intent`` schema bump, silently dropping the
     evidence would turn every CEO-submitted job anonymous without a sound.
     """
+    from control_plane.executive_runtime import orchestration_digest
+
     events = runtime.events.list_events(job_id=job_id)
     for event in events:
         if event.event_type != "JOB_CREATED":
@@ -814,11 +824,13 @@ def project_runtime(
     """Project via the existing registry reader; discard any invalid bound result."""
     if read_binding is None:
         return _project_runtime(root, now)
+    from control_plane.executive_runtime import Runtime, RuntimeReadUnavailable
+
     try:
         result = _project_runtime(root, now, read_binding=read_binding)
         read_binding.validate_before_core_return()
         return result
-    except (RuntimeProofError, OSError, ValueError, KeyError) as exc:
+    except (RuntimeReadUnavailable, OSError, ValueError, KeyError) as exc:
         read_binding.invalidate()
         failed = _RuntimeProjection()
         failed.degraded.append(f"bound runtime unavailable: {_first_line(exc)}")
@@ -840,6 +852,15 @@ def _project_runtime(
             f"executive runtime database missing at {db_path}; runtime not projected"
         )
         return projection
+
+    from control_plane.executive_runtime import (
+        AttemptStatus,
+        JobStatus,
+        Runtime,
+        RuntimeProofError,
+        WorkerStatus,
+    )
+    globals()["AttemptStatus"] = AttemptStatus
 
     try:
         # `create=False`: read-only, no migration, no chmod, no journal-mode write,
@@ -1219,6 +1240,8 @@ def build_inbox(
         "degraded": degraded,
     }
     if read_binding is not None:
+        from control_plane.executive_runtime import RuntimeProofError
+
         try:
             with read_binding.physical_read(projection_root / DB_RELATIVE_PATH):
                 present = (projection_root / DB_RELATIVE_PATH).is_file()
@@ -1275,6 +1298,8 @@ def _fleet_line(counts: Any) -> str:
     nothing can be claimed — so a dead fleet is invisible in the attention list
     and would otherwise read as a quiet, healthy company.
     """
+    from control_plane.executive_runtime import WorkerStatus
+
     if not isinstance(counts, Mapping):
         return "runtime: not projected"
 

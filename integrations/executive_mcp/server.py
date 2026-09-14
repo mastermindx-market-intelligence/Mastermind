@@ -48,6 +48,7 @@ from integrations.executive_mcp.e1_http import (
     BoundedE1App,
     BoundedRequestApp,
     E1_READ_PATHS,
+    PreAuthMcpBodyApp,
     build_e1_app,
 )
 from integrations.executive_mcp.schemas import (
@@ -265,7 +266,9 @@ def build_e1_mcp_app(settings: Any, *, audit_sink: Any) -> Any:
         required_scopes=list(settings.policies.read.required_scopes),
         resource_metadata_url=settings.policies.read.resource_metadata_url,
     )
-    authenticated = AuthenticationMiddleware(protected, backend=BearerAuthBackend(verifier))
+    authenticated = PreAuthMcpBodyApp(
+        AuthenticationMiddleware(protected, backend=BearerAuthBackend(verifier))
+    )
 
     @asynccontextmanager
     async def lifespan(_app: Any):
@@ -495,11 +498,13 @@ def build_executive_mcp_app(settings: Any, *, audit_sink: Any) -> Any:
             allowed_hosts=["127.0.0.1", "127.0.0.1:*", "localhost", "localhost:*", "::1", "[::1]", "[::1]:*"],
             allowed_origins=[],
         ))
-    authenticated = AuthenticationMiddleware(
-        RequireAuthMiddleware(BoundedRequestApp(manager.handle_request),
-            required_scopes=list(configured.policies.read.required_scopes),
-            resource_metadata_url=configured.policies.read.resource_metadata_url),
-        backend=BearerAuthBackend(verifier),
+    authenticated = PreAuthMcpBodyApp(
+        AuthenticationMiddleware(
+            RequireAuthMiddleware(BoundedRequestApp(manager.handle_request),
+                required_scopes=list(configured.policies.read.required_scopes),
+                resource_metadata_url=configured.policies.read.resource_metadata_url),
+            backend=BearerAuthBackend(verifier),
+        )
     )
 
     @asynccontextmanager

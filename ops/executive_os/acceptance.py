@@ -27,6 +27,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+_RELEASE_ROOT = Path(__file__).resolve().parents[2]
+if os.fspath(_RELEASE_ROOT) not in sys.path:
+    sys.path.insert(0, os.fspath(_RELEASE_ROOT))
+
 from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
 
 

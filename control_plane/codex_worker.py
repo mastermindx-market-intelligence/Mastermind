@@ -50,11 +50,6 @@ from control_plane.executive_workspace import (
     git_observation_env,
     observe_launch_cleanliness,
 )
-from control_plane.codex_provider_realm import (
-    CodexProviderRealm,
-    ProviderCredentialLoader,
-    ProviderRealmError,
-)
 from control_plane.worker_execution_contract import (
     MAX_ARTIFACTS,
     MAX_ARTIFACT_BYTES,
@@ -1859,8 +1854,8 @@ class CodexWorkerAdapter:
         allowed_versions: frozenset[str] | None = None,
         required_team_identifier: str | None = _OPENAI_TEAM_IDENTIFIER,
         inspector: ProcessInspector | None = None,
-        provider_realm: CodexProviderRealm | None = None,
-        provider_credential_loader: ProviderCredentialLoader | None = None,
+        provider_realm: Any | None = None,
+        provider_credential_loader: Any | None = None,
     ) -> None:
         path = Path(binary_path)
         if not path.is_absolute():
@@ -1883,6 +1878,8 @@ class CodexWorkerAdapter:
         self.provider_realm = provider_realm
         self.provider_credential_loader = provider_credential_loader
         if (provider_realm is None) != (provider_credential_loader is None):
+            from control_plane.codex_provider_realm import ProviderRealmError
+
             raise ProviderRealmError(
                 "provider realm and credential loader must be configured together"
             )
