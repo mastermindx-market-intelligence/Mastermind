@@ -269,3 +269,91 @@ def test_invalid_local_credential_fails_before_provider_effect():
     with pytest.raises(OpenCodeGoTransportContractError, match="credential unavailable"):
         transport.execute(request())
     assert touched == []
+
+
+def test_no_next_member_after_safe_refusal_preserves_last_real_response():
+    calls = []
+
+    def resolver(value):
+        calls.append(value)
+        if len(calls) == 1:
+            return AccountChoice("opencode-go", GENERATION, "acct-a")
+        return None
+
+    transport = OpenCodeGoPooledTransport(
+        pool_id="opencode-go",
+        resolver=resolver,
+        credential_loader=lambda _account: "secret",
+        sender=lambda _value: error_response(429, "GoUsageLimitError"),
+        max_rollovers=2,
+    )
+    receipt = transport.execute(request())
+    assert receipt.response.status == 429
+    assert receipt.account_id == "acct-a"
+    assert receipt.attempted_accounts == ("acct-a",)
+    assert receipt.pool_exhausted is True
+
+
+def test_resolver_failure_is_pre_effect_contract_error():
+    transport = OpenCodeGoPooledTransport(
+        pool_id="opencode-go",
+        resolver=lambda _value: (_ for _ in ()).throw(RuntimeError("capacity unavailable")),
+        credential_loader=lambda _account: "secret",
+        sender=lambda _value: ok_response(),
+        max_rollovers=2,
+    )
+    with pytest.raises(OpenCodeGoTransportContractError, match="resolution failed"):
+        transport.execute(request())
+
+
+def test_credential_loader_exception_is_pre_effect_and_does_not_send():
+    touched = []
+    transport = OpenCodeGoPooledTransport(
+        pool_id="opencode-go",
+        resolver=lambda _value: AccountChoice("opencode-go", GENERATION, "acct-a"),
+        credential_loader=lambda _account: (_ for _ in ()).throw(OSError("missing")),
+        sender=lambda _value: touched.append("send") or ok_response(),
+        max_rollovers=2,
+    )
+    with pytest.raises(OpenCodeGoTransportContractError, match="credential unavailable"):
+        transport.execute(request())
+    assert touched == []
+
+
+def test_duplicate_case_insensitive_header_is_rejected_before_send():
+    value = request()
+    bad = ProviderRequest(
+        value.path,
+        value.session_id,
+        {"User-Agent": "one", "user-agent": "two"},
+        value.body,
+    )
+    with pytest.raises(OpenCodeGoTransportContractError, match="duplicate request header"):
+        prepare_upstream_request(
+            bad,
+            choice=AccountChoice("opencode-go", GENERATION, "acct-a"),
+            credential="secret",
+        )
+
+def test_malformed_sender_response_is_effect_unknown_and_never_replayed():
+    calls = []
+    transport = OpenCodeGoPooledTransport(
+        pool_id="opencode-go",
+        resolver=lambda value: calls.append(value) or AccountChoice("opencode-go", GENERATION, "acct-a"),
+        credential_loader=lambda _account: "secret",
+        sender=lambda _value: UpstreamResponse(200, {}, "not-bytes"),
+        max_rollovers=2,
+    )
+    with pytest.raises(OpenCodeGoEffectUnknown):
+        transport.execute(request())
+    assert len(calls) == 1
+
+
+def test_non_bytes_request_body_is_rejected_before_send():
+    value = ProviderRequest("chat/completions", "session-1", {}, "not-bytes")
+    with pytest.raises(OpenCodeGoTransportContractError, match="request body must be bytes"):
+        prepare_upstream_request(
+            value,
+            choice=AccountChoice("opencode-go", GENERATION, "acct-a"),
+            credential="secret",
+        )
