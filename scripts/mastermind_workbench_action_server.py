@@ -2,8 +2,9 @@
 """Describe or launch one explicitly configured Workbench Action loopback service.
 
 `--describe` is dependency-free. Serving accepts only one absolute owner config
-path; host, port, project root, action token key, credential, tunnel authority,
-and patch target are not CLI inputs. The service owner performs all admission.
+path; host, port, project/process roots, action token key, credential, tunnel
+authority, patch target, executable and shell are not CLI inputs. The service
+owner performs all admission.
 """
 from __future__ import annotations
 
@@ -43,6 +44,11 @@ def main(argv=None) -> int:
                         "prepare_text_patch",
                         "commit_text_patch",
                         "reconcile_text_patch",
+                        "list_validation_recipes",
+                        "prepare_attended_command",
+                        "start_attended_command",
+                        "reconcile_attended_command_start",
+                        "read_process",
                     ],
                     "config_schema": "mastermind.workbench_action_service.v1",
                     "scope": "workbench.action",

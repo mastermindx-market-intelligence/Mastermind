@@ -37,6 +37,7 @@ from integrations.workbench_read_mcp.runtime import (
 )
 
 from .contracts import ActionCaller
+from .process_contracts import ValidationRecipe, validate_recipe_set
 from .runtime import StableWorkbenchActionLease, WorkbenchActionRuntime
 
 SERVICE_SCHEMA = "mastermind.workbench_action_service.v1"
@@ -53,6 +54,8 @@ _CONFIG_KEYS = frozenset(
         "project_root",
         "audit_directory",
         "action_key_file",
+        "process_directory",
+        "validation_recipes",
         "bind_host",
         "bind_port",
         "incoming_authority",
@@ -63,6 +66,7 @@ _CONFIG_KEYS = frozenset(
         "lease",
     }
 )
+_RECIPE_KEYS = frozenset({"recipe_id", "description", "argv", "timeout_seconds", "max_output_bytes"})
 _LEASE_KEYS = frozenset(
     {
         "expected_subject_digest",
@@ -112,6 +116,8 @@ class ServiceConfig:
     project_root: str
     audit_directory: str
     action_key_file: str
+    process_directory: str
+    validation_recipes: tuple[ValidationRecipe, ...]
     bind_host: str
     bind_port: int
     incoming_authority: str
@@ -252,6 +258,34 @@ def _lease(value: object) -> StableWorkbenchActionLease:
     raise AssertionError("unreachable")
 
 
+
+def _validation_recipes(value: object) -> tuple[ValidationRecipe, ...]:
+    if not isinstance(value, list) or not value:
+        _refuse()
+    recipes: list[ValidationRecipe] = []
+    for row in value:
+        if not isinstance(row, dict) or set(row) != _RECIPE_KEYS:
+            _refuse()
+        argv = row.get("argv")
+        if not isinstance(argv, list) or not argv:
+            _refuse()
+        try:
+            recipe = ValidationRecipe(
+                recipe_id=row["recipe_id"],  # type: ignore[arg-type]
+                description=row["description"],  # type: ignore[arg-type]
+                argv=tuple(argv),
+                timeout_seconds=row["timeout_seconds"],  # type: ignore[arg-type]
+                max_output_bytes=row["max_output_bytes"],  # type: ignore[arg-type]
+            )
+        except (KeyError, TypeError, ValueError):
+            _refuse()
+        recipes.append(recipe)
+    try:
+        return validate_recipe_set(tuple(recipes))
+    except Exception:
+        _refuse()
+    raise AssertionError("unreachable")
+
 def parse_service_config(value: object) -> ServiceConfig:
     if not isinstance(value, dict) or set(value) != _CONFIG_KEYS:
         _refuse()
@@ -264,6 +298,8 @@ def parse_service_config(value: object) -> ServiceConfig:
         project_root=_absolute_path(value.get("project_root")),
         audit_directory=_absolute_path(value.get("audit_directory")),
         action_key_file=_absolute_path(value.get("action_key_file")),
+        process_directory=_absolute_path(value.get("process_directory")),
+        validation_recipes=_validation_recipes(value.get("validation_recipes")),
         bind_host="127.0.0.1",
         bind_port=_bounded_int(value.get("bind_port"), minimum=1, maximum=65535),
         incoming_authority=_incoming_authority(value.get("incoming_authority")),
@@ -441,7 +477,7 @@ def _secure_action_key(path: str) -> bytes:
     return bytes.fromhex(raw.decode("ascii"))
 
 
-def _open_safe_directory(path: str) -> int:
+def _open_safe_directory(path: str, *, required_mode: int | None = None) -> int:
     selected = Path(_absolute_path(path))
     try:
         before = selected.lstat()
@@ -452,6 +488,7 @@ def _open_safe_directory(path: str) -> int:
         or not stat.S_ISDIR(before.st_mode)
         or before.st_uid != os.geteuid()
         or stat.S_IMODE(before.st_mode) & 0o022
+        or (required_mode is not None and stat.S_IMODE(before.st_mode) != required_mode)
     ):
         _refuse()
     directory = getattr(os, "O_DIRECTORY", 0)
@@ -469,6 +506,7 @@ def _open_safe_directory(path: str) -> int:
             or not stat.S_ISDIR(opened.st_mode)
             or opened.st_uid != os.geteuid()
             or stat.S_IMODE(opened.st_mode) & 0o022
+            or (required_mode is not None and stat.S_IMODE(opened.st_mode) != required_mode)
             or os.get_inheritable(fd)
         ):
             _refuse()
@@ -625,12 +663,14 @@ async def create_runtime(config: ServiceConfig) -> WorkbenchActionRuntime:
     action_token_key = _secure_action_key(config.action_key_file)
     project_fd = -1
     audit_fd = -1
+    process_fd = -1
     runtime: WorkbenchActionRuntime | None = None
     primary_error: BaseException | None = None
     cleanup_errors: list[BaseException] = []
     try:
         project_fd = _open_safe_directory(config.project_root)
         audit_fd = _open_safe_directory(config.audit_directory)
+        process_fd = _open_safe_directory(config.process_directory, required_mode=0o700)
         runtime = WorkbenchActionRuntime.open(
             authenticator=authenticator,
             policy=policy,
@@ -641,6 +681,9 @@ async def create_runtime(config: ServiceConfig) -> WorkbenchActionRuntime:
             lease=config.lease,
             action_token_key=action_token_key,
             allowed_hosts=config.allowed_hosts,
+            process_directory_fd=process_fd,
+            validation_recipes=config.validation_recipes,
+            command_ttl_ms=config.action_ttl_ms,
             call_receipt_sink=_call_receipt_sink,
             allowed_origins=config.allowed_origins,
             max_concurrency=config.max_concurrency,
@@ -652,7 +695,7 @@ async def create_runtime(config: ServiceConfig) -> WorkbenchActionRuntime:
     except BaseException as error:
         primary_error = error
     finally:
-        for descriptor in (audit_fd, project_fd):
+        for descriptor in (process_fd, audit_fd, project_fd):
             if descriptor >= 0:
                 try:
                     os.close(descriptor)

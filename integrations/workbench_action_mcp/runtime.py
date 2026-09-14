@@ -43,6 +43,11 @@ from integrations.workbench_read_mcp.runtime import (
 
 from .contracts import ActionCaller, ActionScope, ProjectActionBinding
 from .deployment import RuntimeServices, create_deployment
+from .process_contracts import (
+    MAX_COMMAND_TTL_MS,
+    ValidationRecipe,
+    validate_recipe_set,
+)
 
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _HEX40 = re.compile(r"^[0-9a-f]{40}$")
@@ -76,6 +81,15 @@ class StableWorkbenchActionLease:
 @dataclasses.dataclass(frozen=True)
 class _OwnedLease:
     stable: StableWorkbenchActionLease
+    root_fd: int
+    root_device: int
+    root_inode: int
+    root_uid: int
+    root_mode: int
+
+
+@dataclasses.dataclass(frozen=True)
+class _OwnedProcessRoot:
     root_fd: int
     root_device: int
     root_inode: int
@@ -280,6 +294,54 @@ def _open_owned_root(host_fd: int) -> tuple[int, os.stat_result]:
         raise
 
 
+def _open_owned_process_root(host_fd: int) -> tuple[int, os.stat_result]:
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    directory = getattr(os, "O_DIRECTORY", 0)
+    cloexec = getattr(os, "O_CLOEXEC", 0)
+    if (
+        type(host_fd) is not int
+        or host_fd < 0
+        or not nofollow
+        or not directory
+        or not cloexec
+        or os.open not in os.supports_dir_fd
+    ):
+        raise _configuration("descriptor-relative process state root is unqualified")
+    owned = -1
+    try:
+        host_stat = os.fstat(host_fd)
+        if (
+            not stat.S_ISDIR(host_stat.st_mode)
+            or host_stat.st_uid != os.geteuid()
+            or stat.S_IMODE(host_stat.st_mode) != 0o700
+        ):
+            raise _configuration("process state directory security refused")
+        owned = os.open(
+            ".", os.O_RDONLY | directory | nofollow | cloexec, dir_fd=host_fd
+        )
+        owned_stat = os.fstat(owned)
+        if (
+            not stat.S_ISDIR(owned_stat.st_mode)
+            or owned_stat.st_uid != os.geteuid()
+            or stat.S_IMODE(owned_stat.st_mode) != 0o700
+            or _directory_identity(host_stat) != _directory_identity(owned_stat)
+            or os.get_inheritable(owned)
+        ):
+            raise _configuration("owned process state root identity changed")
+        return owned, owned_stat
+    except BaseException as error:
+        if owned >= 0:
+            try:
+                os.close(owned)
+            except BaseException as cleanup_error:
+                raise RuntimeCloseUncertain(
+                    "process state root acquisition cleanup is uncertain",
+                    primary_error=error,
+                    cleanup_errors=(cleanup_error,),
+                ) from cleanup_error
+        raise
+
+
 class WorkbenchActionRuntime:
     def __init__(
         self,
@@ -289,8 +351,10 @@ class WorkbenchActionRuntime:
         executor: BoundedSyncExecutor,
         io_timeout_seconds: float,
         clock_ms: Callable[[], int],
+        process_root: _OwnedProcessRoot | None = None,
     ) -> None:
         self._lease = lease
+        self._process_root = process_root
         self._audit_sink = audit_sink
         self._executor = executor
         self._io_timeout_seconds = io_timeout_seconds
@@ -317,6 +381,9 @@ class WorkbenchActionRuntime:
         lease: StableWorkbenchActionLease,
         action_token_key: bytes,
         allowed_hosts: tuple[str, ...],
+        process_directory_fd: int | None = None,
+        validation_recipes: tuple[ValidationRecipe, ...] = (),
+        command_ttl_ms: int = MAX_COMMAND_TTL_MS,
         allowed_origins: tuple[str, ...] = (),
         call_receipt_sink: Callable[[Mapping[str, Any]], None] | None = None,
         max_concurrency: int = 2,
@@ -349,10 +416,25 @@ class WorkbenchActionRuntime:
         io_timeout = _positive_float(io_timeout_seconds, "io_timeout_seconds")
         if type(action_ttl_ms) is not int or not 1000 <= action_ttl_ms <= 5 * 60 * 1000:
             raise _configuration("action ttl is invalid")
+        selected_recipes: tuple[ValidationRecipe, ...] = ()
+        if process_directory_fd is None:
+            if validation_recipes:
+                raise _configuration("process recipes require a process state owner")
+        else:
+            try:
+                selected_recipes = validate_recipe_set(validation_recipes)
+            except Exception as error:
+                raise _configuration("validation recipes refused") from error
+            if type(command_ttl_ms) is not int or not 1000 <= command_ttl_ms <= MAX_COMMAND_TTL_MS:
+                raise _configuration("command ttl is invalid")
         root_fd = -1
+        process_fd = -1
+        process_stat: os.stat_result | None = None
         audit_sink: DurableAuthAuditSink | None = None
         try:
             root_fd, root_stat = _open_owned_root(project_directory_fd)
+            if process_directory_fd is not None:
+                process_fd, process_stat = _open_owned_process_root(process_directory_fd)
             audit_sink = DurableAuthAuditSink.open(
                 audit_directory_fd, policy_id=selected_policy.policy_id
             )
@@ -370,6 +452,17 @@ class WorkbenchActionRuntime:
                 executor=executor,
                 io_timeout_seconds=io_timeout,
                 clock_ms=clock_ms,
+                process_root=(
+                    _OwnedProcessRoot(
+                        root_fd=process_fd,
+                        root_device=process_stat.st_dev,
+                        root_inode=process_stat.st_ino,
+                        root_uid=process_stat.st_uid,
+                        root_mode=stat.S_IMODE(process_stat.st_mode),
+                    )
+                    if process_stat is not None
+                    else None
+                ),
             )
             runtime.services = RuntimeServices(
                 authenticator=authenticator,
@@ -381,6 +474,9 @@ class WorkbenchActionRuntime:
                 run_io=runtime.run_io,
                 action_token_key=bytes(action_token_key),
                 allowed_hosts=allowed_hosts,
+                process_directory_fd=process_fd if process_stat is not None else None,
+                validation_recipes=selected_recipes,
+                command_ttl_ms=command_ttl_ms,
                 call_receipt_sink=call_receipt_sink,
                 allowed_origins=allowed_origins,
                 action_ttl_ms=action_ttl_ms,
@@ -394,9 +490,11 @@ class WorkbenchActionRuntime:
                     audit_sink.close()
                 except BaseException as cleanup_error:
                     cleanup_errors.append(cleanup_error)
-            if root_fd >= 0:
+            for descriptor in (process_fd, root_fd):
+                if descriptor < 0:
+                    continue
                 try:
-                    os.close(root_fd)
+                    os.close(descriptor)
                 except BaseException as cleanup_error:
                     cleanup_errors.append(cleanup_error)
             if cleanup_errors:
@@ -445,6 +543,31 @@ class WorkbenchActionRuntime:
             self._revoked = True
             raise RuntimeClosed("runtime project root is unavailable") from error
 
+    def _validate_process_root_locked(self) -> None:
+        process_root = self._process_root
+        if process_root is None:
+            return
+        try:
+            current = os.fstat(process_root.root_fd)
+            current_mode = stat.S_IMODE(current.st_mode)
+            if (
+                not stat.S_ISDIR(current.st_mode)
+                or current.st_dev != process_root.root_device
+                or current.st_ino != process_root.root_inode
+                or current.st_uid != process_root.root_uid
+                or current.st_uid != os.geteuid()
+                or current_mode != process_root.root_mode
+                or current_mode != 0o700
+                or os.get_inheritable(process_root.root_fd)
+            ):
+                raise RuntimeClosed("runtime process state root identity changed")
+        except RuntimeClosed:
+            self._revoked = True
+            raise
+        except (OSError, TypeError, ValueError) as error:
+            self._revoked = True
+            raise RuntimeClosed("runtime process state root is unavailable") from error
+
     def resolve_binding(
         self, caller: ActionCaller, project_ref: str
     ) -> ProjectActionBinding | None:
@@ -453,6 +576,7 @@ class WorkbenchActionRuntime:
                 return None
             try:
                 self._validate_root_locked()
+                self._validate_process_root_locked()
                 current_ms = _clock(self._clock_ms(), "clock_ms")
             except Exception:
                 self._revoked = True
@@ -492,17 +616,20 @@ class WorkbenchActionRuntime:
             if self._revoked or self._closing or self._closed:
                 raise RuntimeClosed("runtime admission is closed")
             self._validate_root_locked()
+            self._validate_process_root_locked()
         try:
             result = operation()
         except BaseException as operation_error:
             try:
                 with self._gate:
                     self._validate_root_locked()
+                    self._validate_process_root_locked()
             except RuntimeClosed as root_error:
                 raise root_error from operation_error
             raise
         with self._gate:
             self._validate_root_locked()
+            self._validate_process_root_locked()
         return result
 
     async def run_io(self, operation: Callable[[], object]) -> object:
@@ -512,6 +639,7 @@ class WorkbenchActionRuntime:
             if self._revoked or self._closing or self._closed:
                 raise RuntimeClosed("runtime admission is closed")
             self._validate_root_locked()
+            self._validate_process_root_locked()
         try:
             return await self._executor.run(
                 lambda: self._guarded_operation(operation),
@@ -557,12 +685,18 @@ class WorkbenchActionRuntime:
         with self._gate:
             try:
                 self._validate_root_locked()
+                self._validate_process_root_locked()
             except BaseException as error:
                 release_errors.append(error)
         try:
             self._audit_sink.close()
         except BaseException as error:
             release_errors.append(error)
+        if self._process_root is not None:
+            try:
+                os.close(self._process_root.root_fd)
+            except BaseException as error:
+                release_errors.append(error)
         try:
             os.close(self._lease.root_fd)
         except BaseException as error:
