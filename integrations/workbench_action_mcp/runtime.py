@@ -9,6 +9,7 @@ session, Git publication path, Executive lifecycle, retry plane, or shell.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import math
 import os
 import re
@@ -55,6 +56,65 @@ _REF_PREFIXES = {
     "generation": "generation:",
 }
 
+CHANNEL_AUTHORITY_KIND = "secure_mcp_tunnel_channel"
+_CHANNEL_DOMAIN = "mastermind.secure_mcp_tunnel_channel.v1"
+_CHANNEL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+
+
+@dataclasses.dataclass(frozen=True)
+class FixedTunnelChannel:
+    """One host-selected exact tunnel/organization/workspace binding.
+
+    The triple names a Secure MCP Tunnel association, not an end user.  A
+    channel therefore never carries a principal claim of its own; its only
+    authority is the digest the host lease already pins.
+    """
+
+    tunnel_id: str
+    organization_id: str
+    workspace_id: str
+
+
+def validate_fixed_tunnel_channel(value: object) -> FixedTunnelChannel:
+    if type(value) is not FixedTunnelChannel:
+        raise _configuration("channel must be an exact FixedTunnelChannel")
+    for identifier in (value.tunnel_id, value.organization_id, value.workspace_id):
+        if type(identifier) is not str or _CHANNEL_ID.fullmatch(identifier) is None:
+            raise _configuration("fixed tunnel channel identity is invalid")
+    return value
+
+
+def _channel_digest(purpose: str, channel: FixedTunnelChannel) -> str:
+    return hashlib.sha256(
+        "\x00".join(
+            (
+                _CHANNEL_DOMAIN,
+                purpose,
+                channel.tunnel_id,
+                channel.organization_id,
+                channel.workspace_id,
+            )
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def channel_subject_digest(channel: FixedTunnelChannel) -> str:
+    """Domain-separated opaque channel digest for ``ActionCaller.subject_digest``."""
+
+    return _channel_digest("subject", validate_fixed_tunnel_channel(channel))
+
+
+def channel_client_ref(channel: FixedTunnelChannel) -> str:
+    """Domain-separated opaque channel digest for ``ActionCaller.client_ref``."""
+
+    return _channel_digest("client", validate_fixed_tunnel_channel(channel))
+
+
+def channel_binding_ref(channel: FixedTunnelChannel) -> str:
+    """Opaque bounded channel reference for receipts and channel audit events."""
+
+    return _channel_digest("binding", validate_fixed_tunnel_channel(channel))
+
 
 @dataclasses.dataclass(frozen=True)
 class StableWorkbenchActionLease:
@@ -81,6 +141,29 @@ class _OwnedLease:
     root_inode: int
     root_uid: int
     root_mode: int
+
+
+@dataclasses.dataclass(frozen=True)
+class ChannelRuntimeServices:
+    """Fixed-channel entry-point services owned by one runtime composition.
+
+    Everything here is host-selected: the exact channel triple, its derived
+    ``ActionCaller`` projection, the bound project reference, the runtime
+    clock, the durable channel audit identity and sink, and the stable action
+    key.  The channel authenticates the transport association only; it is
+    never a cryptographically attested end user.
+    """
+
+    channel: FixedTunnelChannel
+    channel_ref: str
+    caller: ActionCaller
+    project_ref: str
+    audit_policy_id: str
+    clock_ms: Callable[[], int]
+    audit_sink: DurableAuthAuditSink
+    action_token_key: bytes
+    action_ttl_ms: int
+    call_receipt_sink: Callable[[Mapping[str, Any]], None] | None
 
 
 def _configuration(message: str) -> RuntimeConfigurationError:
@@ -303,6 +386,7 @@ class WorkbenchActionRuntime:
         self._close_uncertain: RuntimeCloseUncertain | None = None
         self.services: RuntimeServices
         self.server: object
+        self.channel_services: ChannelRuntimeServices
 
     @classmethod
     def open(
@@ -349,12 +433,147 @@ class WorkbenchActionRuntime:
         io_timeout = _positive_float(io_timeout_seconds, "io_timeout_seconds")
         if type(action_ttl_ms) is not int or not 1000 <= action_ttl_ms <= 5 * 60 * 1000:
             raise _configuration("action ttl is invalid")
+
+        def wire_oauth(
+            runtime: "WorkbenchActionRuntime", audit_sink: DurableAuthAuditSink
+        ) -> None:
+            runtime.services = RuntimeServices(
+                authenticator=authenticator,
+                policy=selected_policy,
+                now=now,
+                clock_ms=clock_ms,
+                audit_sink=audit_sink,
+                resolve_binding=runtime.resolve_binding,
+                run_io=runtime.run_io,
+                action_token_key=bytes(action_token_key),
+                allowed_hosts=allowed_hosts,
+                call_receipt_sink=call_receipt_sink,
+                allowed_origins=allowed_origins,
+                action_ttl_ms=action_ttl_ms,
+            )
+            runtime.server = create_deployment(runtime.services)
+
+        return cls._acquire(
+            selected_lease=selected_lease,
+            clock_ms=clock_ms,
+            project_directory_fd=project_directory_fd,
+            audit_directory_fd=audit_directory_fd,
+            audit_policy_id=selected_policy.policy_id,
+            capacity=capacity,
+            io_timeout=io_timeout,
+            wire=wire_oauth,
+        )
+
+    @classmethod
+    def open_channel(
+        cls,
+        *,
+        channel: FixedTunnelChannel,
+        clock_ms: Callable[[], int],
+        project_directory_fd: int,
+        audit_directory_fd: int,
+        audit_policy_id: str,
+        lease: StableWorkbenchActionLease,
+        action_token_key: bytes,
+        call_receipt_sink: Callable[[Mapping[str, Any]], None] | None = None,
+        max_concurrency: int = 2,
+        io_timeout_seconds: float = 5.0,
+        action_ttl_ms: int = 5 * 60 * 1000,
+    ) -> "WorkbenchActionRuntime":
+        """Open the fixed-channel stdio entry point over the same ownership.
+
+        No ``JwtAuthenticator``, ``ResourcePolicy``, token verifier, or OAuth
+        acceptance is constructed here: the tunnel association authenticates
+        one host-selected channel whose derived digests must already be the
+        stable host lease's pinned references.  Root descriptor, revoke,
+        ``run_io``, physical drain, and audit closure remain owned by this
+        single runtime class for both entry points.
+        """
+
+        if not callable(clock_ms):
+            raise _configuration("runtime clocks must be callable")
+        now_ms = _clock(clock_ms(), "clock_ms")
+        selected_channel = validate_fixed_tunnel_channel(channel)
+        selected_lease = _validate_lease(lease, now_ms=now_ms)
+        if (
+            type(audit_policy_id) is not str
+            or not audit_policy_id
+            or len(audit_policy_id) > 96
+        ):
+            raise _configuration("channel audit identity is invalid")
+        if (
+            channel_subject_digest(selected_channel)
+            != selected_lease.expected_subject_digest
+            or channel_client_ref(selected_channel)
+            != selected_lease.expected_client_ref
+        ):
+            raise _configuration("fixed channel does not match the stable host lease")
+        if type(action_token_key) is not bytes or len(action_token_key) < 32:
+            raise _configuration("runtime action/transport configuration refused")
+        capacity = _positive_integer(max_concurrency, "max_concurrency")
+        io_timeout = _positive_float(io_timeout_seconds, "io_timeout_seconds")
+        if type(action_ttl_ms) is not int or not 1000 <= action_ttl_ms <= 5 * 60 * 1000:
+            raise _configuration("action ttl is invalid")
+
+        def wire_channel(
+            runtime: "WorkbenchActionRuntime", audit_sink: DurableAuthAuditSink
+        ) -> None:
+            runtime.channel_services = ChannelRuntimeServices(
+                channel=selected_channel,
+                channel_ref=channel_binding_ref(selected_channel),
+                caller=ActionCaller(
+                    subject_digest=selected_lease.expected_subject_digest,
+                    client_ref=selected_lease.expected_client_ref,
+                    resource=selected_lease.resource,
+                    scopes=selected_lease.required_scopes,
+                    expires_at=max(1, selected_lease.lease_expires_at_ms // 1000),
+                ),
+                project_ref=selected_lease.project_ref,
+                audit_policy_id=audit_policy_id,
+                clock_ms=clock_ms,
+                audit_sink=audit_sink,
+                action_token_key=bytes(action_token_key),
+                action_ttl_ms=action_ttl_ms,
+                call_receipt_sink=call_receipt_sink,
+            )
+
+        return cls._acquire(
+            selected_lease=selected_lease,
+            clock_ms=clock_ms,
+            project_directory_fd=project_directory_fd,
+            audit_directory_fd=audit_directory_fd,
+            audit_policy_id=audit_policy_id,
+            capacity=capacity,
+            io_timeout=io_timeout,
+            wire=wire_channel,
+        )
+
+    @classmethod
+    def _acquire(
+        cls,
+        *,
+        selected_lease: StableWorkbenchActionLease,
+        clock_ms: Callable[[], int],
+        project_directory_fd: int,
+        audit_directory_fd: int,
+        audit_policy_id: str,
+        capacity: int,
+        io_timeout: float,
+        wire: Callable[["WorkbenchActionRuntime", DurableAuthAuditSink], None],
+    ) -> "WorkbenchActionRuntime":
+        """One shared acquisition path for both entry points.
+
+        This method owns the project-root descriptor, the durable audit sink,
+        and the bounded executor, applies the entry-point ``wire`` projection,
+        and preserves the single fail-closed rollback contract.
+        """
+
         root_fd = -1
         audit_sink: DurableAuthAuditSink | None = None
         try:
             root_fd, root_stat = _open_owned_root(project_directory_fd)
             audit_sink = DurableAuthAuditSink.open(
-                audit_directory_fd, policy_id=selected_policy.policy_id
+                audit_directory_fd, policy_id=audit_policy_id
             )
             executor = BoundedSyncExecutor(max_concurrency=capacity)
             runtime = cls(
@@ -371,21 +590,7 @@ class WorkbenchActionRuntime:
                 io_timeout_seconds=io_timeout,
                 clock_ms=clock_ms,
             )
-            runtime.services = RuntimeServices(
-                authenticator=authenticator,
-                policy=selected_policy,
-                now=now,
-                clock_ms=clock_ms,
-                audit_sink=audit_sink,
-                resolve_binding=runtime.resolve_binding,
-                run_io=runtime.run_io,
-                action_token_key=bytes(action_token_key),
-                allowed_hosts=allowed_hosts,
-                call_receipt_sink=call_receipt_sink,
-                allowed_origins=allowed_origins,
-                action_ttl_ms=action_ttl_ms,
-            )
-            runtime.server = create_deployment(runtime.services)
+            wire(runtime, audit_sink)
             return runtime
         except BaseException as error:
             cleanup_errors: list[BaseException] = []
@@ -582,6 +787,13 @@ class WorkbenchActionRuntime:
 
 
 __all__ = [
+    "CHANNEL_AUTHORITY_KIND",
+    "ChannelRuntimeServices",
+    "FixedTunnelChannel",
     "StableWorkbenchActionLease",
     "WorkbenchActionRuntime",
+    "channel_binding_ref",
+    "channel_client_ref",
+    "channel_subject_digest",
+    "validate_fixed_tunnel_channel",
 ]

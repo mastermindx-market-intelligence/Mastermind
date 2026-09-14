@@ -78,6 +78,56 @@ The closed service configuration is `mastermind.workbench_action_service.v1` and
 
 `--describe` is dependency-free and reports `BUILT_NOT_PROVEN`; it never claims installation.
 
+## Fixed-channel stdio tunnel entry point
+
+Status: **BUILT_NOT_PROVEN / TRANSPORT SEAM ONLY / NOT INSTALLED / NOT ENROLLED**.
+
+The HTTP/OAuth service above stays exactly as it is. The tunnel entry point is a second composition of the *same* runtime: one host-selected Secure MCP Tunnel channel → one stdio child (`scripts/mastermind_workbench_action_stdio.py`) → `WorkbenchActionRuntime.open_channel(...)` → the existing text patch port. It exists so a tunnel-terminated client can reach the identical three-tool surface without a second authentication service being invented on this path.
+
+**Authority model.** The tunnel association authenticates a *channel*, not a cryptographically attested end user. Admission therefore never claims a `VerifiedPrincipal`, JWT, token verification, or an OAuth-accepted audit row. The channel is an exact `FixedTunnelChannel` triple (tunnel/organization/workspace) selected by the host; `channel_subject_digest`/`channel_client_ref` derive domain-separated opaque digests (`mastermind.secure_mcp_tunnel_channel.v1`) that must already be the stable lease's pinned `expected_subject_digest`/`expected_client_ref`, and `WorkbenchActionRuntime` re-checks them live on every tool call. Receipts and audit expose `authority_kind = "secure_mcp_tunnel_channel"` plus the opaque `channel_ref`. There is no end-user identity claim. One tunnel per account and one workspace per account are separate host compositions; they are not interchangeable here.
+
+**Durable channel admission.** Every recognized tool call persists one `ChannelAuditEvent` (`mastermind.business_mcp_auth_channel_audit.v1`) in the same `auth-audit.jsonl` mechanics (same descriptor/lock/append/fsync/poison/close discipline; the OAuth event encoding is unchanged byte-for-byte) **before** dispatch; an audit failure blocks the effect (`CHANNEL_AUDIT_UNAVAILABLE`). The event carries only `accepted`, `code` (`accepted` | `channel_refused` | `request_refused`), the sink's `policy_id`, `schema`, opaque `channel_ref`, the fixed `tool` name, and an optional `action_digest` (SHA-256 of the action reference — never the token itself). No path, patch content, or credential is ever audited. Unknown tool names are not channel admissions and are not audited.
+
+**Configuration.** The closed document is `mastermind.workbench_action_tunnel.v1`, loaded with the same secure acquisition pattern as the loopback service (absolute same-euid paths, duplicate-key rejection, exact schema, `O_NONBLOCK|O_NOFOLLOW|O_CLOEXEC`, `nlink=1`, regular-file/final identity re-check, bounded bytes; `0600` 64-hex-char action key; root/audit directories same-owner and not group/world-writable). Example without secrets:
+
+```json
+{
+  "schema": "mastermind.workbench_action_tunnel.v1",
+  "tunnel_id": "c1-personal-tunnel",
+  "organization_id": "org-example-01",
+  "workspace_id": "ws-disposable-01",
+  "audit_policy_id": "workbench-action-tunnel-c1",
+  "project_root": "/srv/mastermind/workbench/disposable-01",
+  "audit_directory": "/srv/mastermind/workbench/audit-c1",
+  "action_key_file": "/srv/mastermind/workbench/keys/action-c1.hex",
+  "max_concurrency": 2,
+  "io_timeout_seconds": 5.0,
+  "close_timeout_seconds": 5.0,
+  "action_ttl_ms": 60000,
+  "lease": {
+    "expected_subject_digest": "<channel_subject_digest of the triple>",
+    "expected_client_ref": "<channel_client_ref of the triple>",
+    "resource": "https://workbench-action.example/mcp",
+    "required_scopes": ["workbench.action"],
+    "project_ref": "project:<hex64>",
+    "context_ref": "context:<hex64>",
+    "responsibility_ref": "responsibility:<hex64>",
+    "operation_ref": "operation:<hex64>",
+    "owner_ref": "owner:<hex64>",
+    "generation": "generation:<hex64>",
+    "allowed_paths": ["sample.py"],
+    "committed_head": null,
+    "lease_expires_at_ms": 1800000300000
+  }
+}
+```
+
+Run: `/path/to/python scripts/mastermind_workbench_action_stdio.py --config /srv/mastermind/workbench/tunnel-c1.json` (stdio MCP on stdin/stdout; diagnostics on stderr). `--describe` is dependency-free and never claims installation. The lease's digest fields are derived by the host from the exact channel triple — the model can never supply the channel, lease, key, or locations.
+
+**Patch/reconcile guarantees preserved.** Both entry points share one runtime ownership (root descriptor, revoke, `run_io`, physical drain, audit closure) and one text patch port. Tool schemas and honest annotations are identical (`commit_text_patch` stays `readOnlyHint=false`/`destructiveHint=true`); stdio dispatch uses bounded full-schema validation with `validate_input=False`, fixed sanitized error payloads (`{"code": ...}`, never reflected rejected values), and explicit `CallToolResult.isError`. The same stable action key across ordinary restarts keeps an already-prepared action reconcilable until its own lease/TTL expiry; key rotation remains a generation boundary and must not strand an unresolved `EFFECT_UNKNOWN`.
+
+**Not claimed by this seam.** No tunnel enrollment, native account admission, ChatGPT app connection, command execution (`run_project_command` is a later task), install, supervisor, or `PROVEN_LIVE`. Honest write admission on the C1 Personal account is the parent rollout's next step.
+
 ## Required Astra Pro Web-seat canary
 
 The product target is to restore useful modifying CEO work specifically on the affected **Business Premium Astra Pro** path where generic external writes have shown pre-dispatch safety refusals. This is a qualification of that model/mode/tool route, not a restriction on other Web CEO modes.

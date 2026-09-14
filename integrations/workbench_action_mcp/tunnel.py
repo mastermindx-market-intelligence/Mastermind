@@ -1,0 +1,876 @@
+"""Fixed-channel stdio composition for Workbench Action.
+
+This module is the transport seam only: one host-selected Secure MCP Tunnel
+channel becomes one stdio child that reuses the existing
+``WorkbenchActionRuntime`` root/lease/executor ownership and the existing text
+patch port.  The tunnel association authenticates the channel, never a
+cryptographically attested end user, so no ``JwtAuthenticator``,
+``ResourcePolicy``, token verifier, or OAuth-accepted audit row exists on this
+path.  Channel admission is durably audited before dispatch, and an audit
+failure blocks the effect.  It creates no new auth service, credential,
+process/lifecycle registry, queue, or retry state, and the model can never
+supply the channel, lease, key, or any location bound here.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import dataclasses
+import hashlib
+import json
+import math
+import os
+from pathlib import Path
+import re
+import stat
+import sys
+import time
+
+from jsonschema import Draft202012Validator
+from mcp.server.lowlevel import NotificationOptions, Server
+from mcp.server.stdio import stdio_server
+from mcp.types import CallToolResult, TextContent, Tool, ToolAnnotations
+
+from integrations.business_mcp_auth.audit import AuditSinkPoisoned, DurableAuthAuditSink
+from integrations.business_mcp_auth.contracts import CHANNEL_AUDIT_SCHEMA, ChannelAuditEvent
+from integrations.workbench_read_mcp.runtime import (
+    RuntimeCloseIncomplete,
+    RuntimeCloseUncertain,
+)
+
+from .app import (
+    COMMIT_TOOL,
+    PREPARE_TOOL,
+    RECONCILE_TOOL,
+    _ACTION_REF_SCHEMA,
+    _EFFECT_OUTPUT_SCHEMA,
+    _PREPARE_OUTPUT_SCHEMA,
+    _PREPARE_SCHEMA,
+)
+from .contracts import ActionTokenCodec
+from .patch_port import ProjectActionRefused, create_text_patch_port
+from .runtime import (
+    CHANNEL_AUTHORITY_KIND,
+    ChannelRuntimeServices,
+    FixedTunnelChannel,
+    StableWorkbenchActionLease,
+    WorkbenchActionRuntime,
+    channel_binding_ref,
+    validate_fixed_tunnel_channel,
+)
+from .service import ShutdownOutcome, shutdown_exit_code
+
+TUNNEL_SCHEMA = "mastermind.workbench_action_tunnel.v1"
+TUNNEL_RECEIPT_SCHEMA = "mastermind.workbench_action_tunnel_receipt.v1"
+SERVER_NAME = "Mastermind Workbench Action Tunnel"
+SERVER_VERSION = "0.1.0"
+MAX_CONFIG_BYTES = 64 * 1024
+MAX_CONCURRENCY = 8
+MAX_TIMEOUT_SECONDS = 60.0
+MAX_ACTION_TTL_MS = 5 * 60 * 1000
+MAX_ARGUMENT_BYTES = 65536
+MAX_RESULT_BYTES = 131072
+_AUDIT_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{2,95}$")
+# Deliberately the same closed input/output schemas as the OAuth adapter so the
+# two entry points can never drift; the private names are the single source.
+_PREPARE_INPUT = _PREPARE_SCHEMA
+_ACTION_REF_INPUT = _ACTION_REF_SCHEMA
+_PREPARE_OUTPUT = _PREPARE_OUTPUT_SCHEMA
+_EFFECT_OUTPUT = _EFFECT_OUTPUT_SCHEMA
+_CONFIG_KEYS = frozenset(
+    {
+        "schema",
+        "tunnel_id",
+        "organization_id",
+        "workspace_id",
+        "audit_policy_id",
+        "project_root",
+        "audit_directory",
+        "action_key_file",
+        "max_concurrency",
+        "io_timeout_seconds",
+        "close_timeout_seconds",
+        "action_ttl_ms",
+        "lease",
+    }
+)
+_LEASE_KEYS = frozenset(
+    {
+        "expected_subject_digest",
+        "expected_client_ref",
+        "resource",
+        "required_scopes",
+        "project_ref",
+        "context_ref",
+        "responsibility_ref",
+        "operation_ref",
+        "owner_ref",
+        "generation",
+        "allowed_paths",
+        "committed_head",
+        "lease_expires_at_ms",
+    }
+)
+
+
+class TunnelConfigurationError(RuntimeError):
+    _CODES = frozenset(
+        {
+            "TUNNEL_CONFIGURATION_REFUSED",
+            "TUNNEL_STARTUP_CLEANUP_UNCERTAIN",
+        }
+    )
+
+    def __init__(self, code: str = "TUNNEL_CONFIGURATION_REFUSED") -> None:
+        if code not in self._CODES:
+            raise ValueError("unknown Workbench Action tunnel error code")
+        self.code = code
+        super().__init__(code)
+
+
+@dataclasses.dataclass(frozen=True)
+class TunnelConfig:
+    """One closed host-selected fixed-channel composition document."""
+
+    schema: str
+    channel: FixedTunnelChannel
+    audit_policy_id: str
+    project_root: str
+    audit_directory: str
+    action_key_file: str
+    max_concurrency: int
+    io_timeout_seconds: float
+    close_timeout_seconds: float
+    action_ttl_ms: int
+    lease: StableWorkbenchActionLease
+
+
+def _refuse(code: str = "TUNNEL_CONFIGURATION_REFUSED") -> None:
+    raise TunnelConfigurationError(code)
+
+
+def _closed_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            _refuse()
+        result[key] = value
+    return result
+
+
+def _reject_constant(_value: str) -> object:
+    _refuse()
+
+
+def _absolute_path(value: object) -> str:
+    if type(value) is not str or not value or not value.startswith("/") or "\x00" in value:
+        _refuse()
+    return value
+
+
+def _bounded_int(value: object, *, minimum: int, maximum: int) -> int:
+    if type(value) is not int or not minimum <= value <= maximum:
+        _refuse()
+    return value
+
+
+def _bounded_timeout(value: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        _refuse()
+    selected = float(value)
+    if not math.isfinite(selected) or not 0 < selected <= MAX_TIMEOUT_SECONDS:
+        _refuse()
+    return selected
+
+
+def _channel_identifier(value: object) -> str:
+    if type(value) is not str or not value or len(value) > 512:
+        _refuse()
+    if any(ord(character) <= 32 or ord(character) == 127 for character in value):
+        _refuse()
+    return value
+
+
+def _audit_policy_id(value: object) -> str:
+    if type(value) is not str or _AUDIT_ID.fullmatch(value) is None:
+        _refuse()
+    return value
+
+
+def _lease(value: object) -> StableWorkbenchActionLease:
+    if not isinstance(value, dict) or set(value) != _LEASE_KEYS:
+        _refuse()
+    scopes = value.get("required_scopes")
+    paths = value.get("allowed_paths")
+    if scopes != ["workbench.action"]:
+        _refuse()
+    if (
+        not isinstance(paths, list)
+        or not 1 <= len(paths) <= 64
+        or any(type(item) is not str or not item for item in paths)
+        or len(paths) != len(set(paths))
+    ):
+        _refuse()
+    committed = value.get("committed_head")
+    if committed is not None and (
+        type(committed) is not str
+        or len(committed) != 40
+        or any(character not in "0123456789abcdef" for character in committed)
+    ):
+        _refuse()
+    expiry = value.get("lease_expires_at_ms")
+    if type(expiry) is not int or not 0 <= expiry < 2**63:
+        _refuse()
+    try:
+        return StableWorkbenchActionLease(
+            expected_subject_digest=value["expected_subject_digest"],  # type: ignore[arg-type]
+            expected_client_ref=value["expected_client_ref"],  # type: ignore[arg-type]
+            resource=value["resource"],  # type: ignore[arg-type]
+            required_scopes=("workbench.action",),
+            project_ref=value["project_ref"],  # type: ignore[arg-type]
+            context_ref=value["context_ref"],  # type: ignore[arg-type]
+            responsibility_ref=value["responsibility_ref"],  # type: ignore[arg-type]
+            operation_ref=value["operation_ref"],  # type: ignore[arg-type]
+            owner_ref=value["owner_ref"],  # type: ignore[arg-type]
+            generation=value["generation"],  # type: ignore[arg-type]
+            allowed_paths=tuple(paths),
+            committed_head=committed,
+            lease_expires_at_ms=expiry,
+        )
+    except (KeyError, TypeError, ValueError):
+        _refuse()
+    raise AssertionError("unreachable")
+
+
+def parse_tunnel_config(value: object) -> TunnelConfig:
+    if not isinstance(value, dict) or set(value) != _CONFIG_KEYS:
+        _refuse()
+    if value.get("schema") != TUNNEL_SCHEMA:
+        _refuse()
+    try:
+        channel = validate_fixed_tunnel_channel(
+            FixedTunnelChannel(
+                tunnel_id=_channel_identifier(value.get("tunnel_id")),
+                organization_id=_channel_identifier(value.get("organization_id")),
+                workspace_id=_channel_identifier(value.get("workspace_id")),
+            )
+        )
+    except TunnelConfigurationError:
+        raise
+    except Exception:
+        _refuse()
+    ttl = _bounded_int(value.get("action_ttl_ms"), minimum=1000, maximum=MAX_ACTION_TTL_MS)
+    return TunnelConfig(
+        schema=TUNNEL_SCHEMA,
+        channel=channel,
+        audit_policy_id=_audit_policy_id(value.get("audit_policy_id")),
+        project_root=_absolute_path(value.get("project_root")),
+        audit_directory=_absolute_path(value.get("audit_directory")),
+        action_key_file=_absolute_path(value.get("action_key_file")),
+        max_concurrency=_bounded_int(
+            value.get("max_concurrency"), minimum=1, maximum=MAX_CONCURRENCY
+        ),
+        io_timeout_seconds=_bounded_timeout(value.get("io_timeout_seconds")),
+        close_timeout_seconds=_bounded_timeout(value.get("close_timeout_seconds")),
+        action_ttl_ms=ttl,
+        lease=_lease(value.get("lease")),
+    )
+
+
+def _secure_json(path: str, *, maximum: int) -> dict[str, object]:
+    selected = Path(_absolute_path(path))
+    try:
+        before = selected.lstat()
+    except OSError:
+        _refuse()
+    if (
+        stat.S_ISLNK(before.st_mode)
+        or not stat.S_ISREG(before.st_mode)
+        or before.st_nlink != 1
+        or before.st_uid != os.geteuid()
+        or stat.S_IMODE(before.st_mode) & 0o022
+    ):
+        _refuse()
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    nonblock = getattr(os, "O_NONBLOCK", 0)
+    cloexec = getattr(os, "O_CLOEXEC", 0)
+    if not nofollow or not nonblock or not cloexec:
+        _refuse()
+    fd = -1
+    chunks: list[bytes] = []
+    primary: BaseException | None = None
+    cleanup: BaseException | None = None
+    try:
+        fd = os.open(selected, os.O_RDONLY | nofollow | nonblock | cloexec)
+        opened = os.fstat(fd)
+        if (
+            opened.st_dev != before.st_dev
+            or opened.st_ino != before.st_ino
+            or not stat.S_ISREG(opened.st_mode)
+            or opened.st_nlink != 1
+            or opened.st_uid != os.geteuid()
+            or stat.S_IMODE(opened.st_mode) & 0o022
+            or os.get_inheritable(fd)
+        ):
+            _refuse()
+        total = 0
+        while True:
+            chunk = os.read(fd, min(4096, maximum + 1 - total))
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > maximum:
+                _refuse()
+            chunks.append(chunk)
+    except BaseException as error:
+        primary = error
+    finally:
+        if fd >= 0:
+            try:
+                os.close(fd)
+            except BaseException as error:
+                cleanup = error
+    if cleanup is not None:
+        raise TunnelConfigurationError("TUNNEL_STARTUP_CLEANUP_UNCERTAIN") from cleanup
+    if primary is not None:
+        if isinstance(primary, TunnelConfigurationError):
+            raise primary
+        _refuse()
+    try:
+        after = selected.lstat()
+    except OSError:
+        _refuse()
+    if (
+        after.st_dev != before.st_dev
+        or after.st_ino != before.st_ino
+        or after.st_uid != before.st_uid
+        or after.st_mode != before.st_mode
+        or after.st_nlink != before.st_nlink
+    ):
+        _refuse()
+    try:
+        decoded = b"".join(chunks).decode("ascii", errors="strict")
+        result = json.loads(
+            decoded,
+            object_pairs_hook=_closed_object,
+            parse_constant=_reject_constant,
+        )
+    except TunnelConfigurationError:
+        raise
+    except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
+        _refuse()
+    if not isinstance(result, dict):
+        _refuse()
+    return result
+
+
+def load_tunnel_config(path: str) -> TunnelConfig:
+    return parse_tunnel_config(_secure_json(path, maximum=MAX_CONFIG_BYTES))
+
+
+def _secure_action_key(path: str) -> bytes:
+    selected = Path(_absolute_path(path))
+    try:
+        before = selected.lstat()
+    except OSError:
+        _refuse()
+    if (
+        stat.S_ISLNK(before.st_mode)
+        or not stat.S_ISREG(before.st_mode)
+        or before.st_nlink != 1
+        or before.st_uid != os.geteuid()
+        or stat.S_IMODE(before.st_mode) != 0o600
+        or before.st_size not in (64, 65)
+    ):
+        _refuse()
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    nonblock = getattr(os, "O_NONBLOCK", 0)
+    cloexec = getattr(os, "O_CLOEXEC", 0)
+    if not nofollow or not nonblock or not cloexec:
+        _refuse()
+    fd = -1
+    try:
+        fd = os.open(selected, os.O_RDONLY | nofollow | nonblock | cloexec)
+        opened = os.fstat(fd)
+        if (
+            opened.st_dev != before.st_dev
+            or opened.st_ino != before.st_ino
+            or not stat.S_ISREG(opened.st_mode)
+            or opened.st_nlink != 1
+            or opened.st_uid != os.geteuid()
+            or stat.S_IMODE(opened.st_mode) != 0o600
+            or os.get_inheritable(fd)
+        ):
+            _refuse()
+        raw = b""
+        while len(raw) <= 65:
+            chunk = os.read(fd, 66 - len(raw))
+            if not chunk:
+                break
+            raw += chunk
+        if len(raw) > 65:
+            _refuse()
+    except TunnelConfigurationError:
+        raise
+    except (OSError, TypeError, ValueError):
+        _refuse()
+    finally:
+        if fd >= 0:
+            try:
+                os.close(fd)
+            except OSError as error:
+                raise TunnelConfigurationError(
+                    "TUNNEL_STARTUP_CLEANUP_UNCERTAIN"
+                ) from error
+    try:
+        after = selected.lstat()
+    except OSError:
+        _refuse()
+    if (
+        after.st_dev != before.st_dev
+        or after.st_ino != before.st_ino
+        or after.st_mode != before.st_mode
+        or after.st_nlink != before.st_nlink
+        or after.st_uid != before.st_uid
+    ):
+        _refuse()
+    if raw.endswith(b"\n"):
+        raw = raw[:-1]
+    if len(raw) != 64 or any(byte not in b"0123456789abcdef" for byte in raw):
+        _refuse()
+    return bytes.fromhex(raw.decode("ascii"))
+
+
+def _open_safe_directory(path: str) -> int:
+    selected = Path(_absolute_path(path))
+    try:
+        before = selected.lstat()
+    except OSError:
+        _refuse()
+    if (
+        stat.S_ISLNK(before.st_mode)
+        or not stat.S_ISDIR(before.st_mode)
+        or before.st_uid != os.geteuid()
+        or stat.S_IMODE(before.st_mode) & 0o022
+    ):
+        _refuse()
+    directory = getattr(os, "O_DIRECTORY", 0)
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    cloexec = getattr(os, "O_CLOEXEC", 0)
+    if not directory or not nofollow or not cloexec:
+        _refuse()
+    fd = -1
+    try:
+        fd = os.open(selected, os.O_RDONLY | directory | nofollow | cloexec)
+        opened = os.fstat(fd)
+        if (
+            opened.st_dev != before.st_dev
+            or opened.st_ino != before.st_ino
+            or not stat.S_ISDIR(opened.st_mode)
+            or opened.st_uid != os.geteuid()
+            or stat.S_IMODE(opened.st_mode) & 0o022
+            or os.get_inheritable(fd)
+        ):
+            _refuse()
+        return fd
+    except BaseException as error:
+        if fd >= 0:
+            try:
+                os.close(fd)
+            except BaseException as cleanup_error:
+                raise TunnelConfigurationError(
+                    "TUNNEL_STARTUP_CLEANUP_UNCERTAIN"
+                ) from cleanup_error
+        if isinstance(error, TunnelConfigurationError):
+            raise
+        _refuse()
+    raise AssertionError("unreachable")
+
+
+async def create_runtime_channel(
+    config: TunnelConfig,
+    *,
+    call_receipt_sink=None,
+) -> WorkbenchActionRuntime:
+    """Compose the fixed-channel entry point from one closed configuration."""
+
+    if not isinstance(config, TunnelConfig):
+        _refuse()
+    action_token_key = _secure_action_key(config.action_key_file)
+    project_fd = -1
+    audit_fd = -1
+    runtime: WorkbenchActionRuntime | None = None
+    primary_error: BaseException | None = None
+    cleanup_errors: list[BaseException] = []
+    try:
+        project_fd = _open_safe_directory(config.project_root)
+        audit_fd = _open_safe_directory(config.audit_directory)
+        runtime = WorkbenchActionRuntime.open_channel(
+            channel=config.channel,
+            clock_ms=lambda: int(time.time() * 1000),
+            project_directory_fd=project_fd,
+            audit_directory_fd=audit_fd,
+            audit_policy_id=config.audit_policy_id,
+            lease=config.lease,
+            action_token_key=action_token_key,
+            call_receipt_sink=call_receipt_sink,
+            max_concurrency=config.max_concurrency,
+            io_timeout_seconds=config.io_timeout_seconds,
+            action_ttl_ms=config.action_ttl_ms,
+        )
+    except BaseException as error:
+        primary_error = error
+    finally:
+        for descriptor in (audit_fd, project_fd):
+            if descriptor >= 0:
+                try:
+                    os.close(descriptor)
+                except BaseException as error:
+                    cleanup_errors.append(error)
+    if cleanup_errors:
+        if runtime is not None:
+            try:
+                await runtime.aclose(timeout=config.close_timeout_seconds)
+            except BaseException:
+                pass
+        raise TunnelConfigurationError("TUNNEL_STARTUP_CLEANUP_UNCERTAIN") from cleanup_errors[0]
+    if primary_error is not None:
+        if runtime is not None:
+            try:
+                await runtime.aclose(timeout=config.close_timeout_seconds)
+            except (RuntimeCloseIncomplete, RuntimeCloseUncertain):
+                raise TunnelConfigurationError(
+                    "TUNNEL_STARTUP_CLEANUP_UNCERTAIN"
+                ) from primary_error
+        if isinstance(primary_error, TunnelConfigurationError):
+            raise primary_error
+        _refuse()
+    if runtime is None:
+        _refuse()
+    return runtime
+
+
+def _snapshot(value: object, maximum: int) -> object:
+    text = json.dumps(
+        value,
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+    )
+    raw = text.encode("utf-8", errors="strict")
+    if len(raw) > maximum:
+        raise ValueError("payload too large")
+    return json.loads(text)
+
+
+def _error(code: str) -> CallToolResult:
+    return CallToolResult(
+        content=[
+            TextContent(
+                type="text",
+                text=json.dumps({"code": code}, separators=(",", ":")),
+            )
+        ],
+        isError=True,
+    )
+
+
+def _action_digest(value: object) -> str | None:
+    if type(value) is not str:
+        return None
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def create_tunnel_action_server(runtime: WorkbenchActionRuntime) -> Server:
+    """One low-level MCP server for the fixed channel, or a typed refusal.
+
+    Exactly two request handlers are registered (``tools/list`` and
+    ``tools/call``), reusing the OAuth adapter's closed input/output schemas
+    and the existing text patch port behind the same runtime ownership.
+    """
+
+    if not isinstance(runtime, WorkbenchActionRuntime):
+        raise ValueError("WORKBENCH_ACTION_RUNTIME_REQUIRED")
+    services = getattr(runtime, "channel_services", None)
+    if (
+        type(services) is not ChannelRuntimeServices
+        or type(services.channel) is not FixedTunnelChannel
+        or not isinstance(services.audit_sink, DurableAuthAuditSink)
+        or services.channel_ref != channel_binding_ref(services.channel)
+    ):
+        raise ValueError("FIXED_CHANNEL_SERVICES_REQUIRED")
+    caller = services.caller
+    project_ref = services.project_ref
+    prepare, commit, reconcile = create_text_patch_port(
+        resolve_binding=runtime.resolve_binding,
+        clock_ms=services.clock_ms,
+        run_io=runtime.run_io,
+        token_codec=ActionTokenCodec(services.action_token_key),
+        action_ttl_ms=services.action_ttl_ms,
+    )
+    prepare_validator = Draft202012Validator(_PREPARE_INPUT)
+    ref_validator = Draft202012Validator(_ACTION_REF_INPUT)
+    prepare_output_validator = Draft202012Validator(_PREPARE_OUTPUT)
+    effect_output_validator = Draft202012Validator(_EFFECT_OUTPUT)
+
+    def emit_channel_audit(
+        *, code: str, accepted: bool, tool: str, action_digest: str | None
+    ) -> None:
+        # One durable admission fact per tool call.  Any failure poisons the
+        # sink and must block the effect rather than degrade to memory.
+        services.audit_sink.emit(
+            ChannelAuditEvent(
+                schema=CHANNEL_AUDIT_SCHEMA,
+                policy_id=services.audit_policy_id,
+                code=code,
+                accepted=accepted,
+                channel_ref=services.channel_ref,
+                tool=tool,
+                action_digest=action_digest,
+            )
+        )
+
+    def emit_call_receipt(*, name: str, request: object) -> None:
+        sink = services.call_receipt_sink
+        if sink is None:
+            return
+        try:
+            canonical = json.dumps(
+                request,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
+            ).encode("utf-8")
+            call_ref = hashlib.sha256(
+                caller.subject_digest.encode("ascii")
+                + b"\0"
+                + services.channel_ref.encode("ascii")
+                + b"\0"
+                + name.encode("ascii")
+                + b"\0"
+                + canonical
+            ).hexdigest()
+            sink(
+                {
+                    "schema": TUNNEL_RECEIPT_SCHEMA,
+                    "phase": "RECEIVED",
+                    "authority_kind": CHANNEL_AUTHORITY_KIND,
+                    "channel_ref": services.channel_ref,
+                    "tool": name,
+                    "call_ref": call_ref,
+                }
+            )
+        except Exception:
+            # Diagnostic telemetry is not an authority/effect owner. A sink
+            # outage must never mutate action semantics or trigger a retry.
+            return
+
+    server: Server = Server(SERVER_NAME, version=SERVER_VERSION)
+
+    @server.list_tools()
+    async def list_tools() -> list[Tool]:
+        return [
+            Tool(
+                name=PREPARE_TOOL,
+                description=(
+                    "Prepare exactly one bounded CREATE or unique-text REPLACE "
+                    "against the fixed channel's approved project path. This "
+                    "does not write."
+                ),
+                inputSchema=_PREPARE_INPUT,
+                outputSchema=_PREPARE_OUTPUT,
+                annotations=ToolAnnotations(
+                    readOnlyHint=True,
+                    destructiveHint=False,
+                    idempotentHint=True,
+                    openWorldHint=False,
+                ),
+            ),
+            Tool(
+                name=COMMIT_TOOL,
+                description=(
+                    "Commit exactly one previously prepared text patch. The only "
+                    "input is its signed action reference. Safe replay reconciles "
+                    "the same postimage; never substitute another path or payload."
+                ),
+                inputSchema=_ACTION_REF_INPUT,
+                outputSchema=_EFFECT_OUTPUT,
+                annotations=ToolAnnotations(
+                    readOnlyHint=False,
+                    destructiveHint=True,
+                    idempotentHint=True,
+                    openWorldHint=False,
+                ),
+            ),
+            Tool(
+                name=RECONCILE_TOOL,
+                description=(
+                    "Read current source state for one prepared action and classify "
+                    "NOT_APPLIED, APPLIED, or EFFECT_UNKNOWN without writing."
+                ),
+                inputSchema=_ACTION_REF_INPUT,
+                outputSchema=_EFFECT_OUTPUT,
+                annotations=ToolAnnotations(
+                    readOnlyHint=True,
+                    destructiveHint=False,
+                    idempotentHint=True,
+                    openWorldHint=False,
+                ),
+            ),
+        ]
+
+    @server.call_tool(validate_input=False)
+    async def call_tool(name: str, arguments: dict[str, object] | None) -> CallToolResult:
+        if name not in (PREPARE_TOOL, COMMIT_TOOL, RECONCILE_TOOL):
+            return _error("TOOL_NOT_AVAILABLE")
+        action_digest: str | None = None
+        try:
+            request = _snapshot(arguments, MAX_ARGUMENT_BYTES)
+            if name == PREPARE_TOOL:
+                prepare_validator.validate(request)
+            else:
+                ref_validator.validate(request)
+                action_digest = _action_digest(request["action_ref"])
+        except Exception:
+            try:
+                emit_channel_audit(
+                    code="request_refused",
+                    accepted=False,
+                    tool=name,
+                    action_digest=None,
+                )
+            except AuditSinkPoisoned:
+                return _error("CHANNEL_AUDIT_UNAVAILABLE")
+            return _error("INVALID_REQUEST")
+
+        # The fixed channel is the only admission authority on this path.  It
+        # is re-resolved live: expiry, root identity, or lease revocation
+        # refuses here, before any durable acceptance is written.
+        if runtime.resolve_binding(caller, project_ref) is None:
+            try:
+                emit_channel_audit(
+                    code="channel_refused",
+                    accepted=False,
+                    tool=name,
+                    action_digest=action_digest,
+                )
+            except AuditSinkPoisoned:
+                return _error("CHANNEL_AUDIT_UNAVAILABLE")
+            return _error("CHANNEL_ADMISSION_REFUSED")
+        try:
+            emit_channel_audit(
+                code="accepted",
+                accepted=True,
+                tool=name,
+                action_digest=action_digest,
+            )
+        except AuditSinkPoisoned:
+            # Custody precedes effect: without the durable admission fact the
+            # tool call is refused, never silently un-audited.
+            return _error("CHANNEL_AUDIT_UNAVAILABLE")
+
+        emit_call_receipt(name=name, request=request)
+        try:
+            if name == PREPARE_TOOL:
+                observed = await prepare(caller, request)
+            elif name == COMMIT_TOOL:
+                observed = await commit(caller, request["action_ref"])
+            else:
+                observed = await reconcile(caller, request["action_ref"])
+        except ProjectActionRefused as error:
+            return _error(error.code)
+        except Exception:
+            return _error("ACTION_UNAVAILABLE")
+
+        # A response loss after commit may hide an already-applied effect.
+        # Never convert post-action admission uncertainty into an invitation
+        # to retry.
+        if runtime.resolve_binding(caller, project_ref) is None:
+            return _error(
+                "ACTION_EFFECT_UNKNOWN" if name == COMMIT_TOOL else "CHANNEL_ADMISSION_CHANGED"
+            )
+        try:
+            data = _snapshot(dict(observed), MAX_RESULT_BYTES // 2)
+            if name == PREPARE_TOOL:
+                prepare_output_validator.validate(data)
+            else:
+                effect_output_validator.validate(data)
+            result = CallToolResult(
+                content=[
+                    TextContent(
+                        type="text",
+                        text=json.dumps(data, ensure_ascii=False, separators=(",", ":")),
+                    )
+                ],
+                structuredContent=data,
+                isError=False,
+            )
+            _snapshot(
+                result.model_dump(mode="json", by_alias=True, exclude_none=True),
+                MAX_RESULT_BYTES,
+            )
+            return result
+        except Exception:
+            return _error(
+                "ACTION_EFFECT_UNKNOWN" if name == COMMIT_TOOL else "ACTION_RESULT_UNVERIFIED"
+            )
+
+    return server
+
+
+async def run_stdio(runtime: WorkbenchActionRuntime, *, close_timeout_seconds: float) -> None:
+    """Serve one fixed channel over stdio and always close the runtime owner."""
+
+    server = create_tunnel_action_server(runtime)
+    options = server.create_initialization_options(
+        notification_options=NotificationOptions(),
+        experimental_capabilities={},
+    )
+    try:
+        async with stdio_server() as (read_stream, write_stream):
+            await server.run(read_stream, write_stream, options)
+    finally:
+        runtime.revoke()
+        await runtime.aclose(timeout=close_timeout_seconds)
+
+
+async def _serve(config: TunnelConfig) -> int:
+    runtime = await create_runtime_channel(config)
+    try:
+        await run_stdio(runtime, close_timeout_seconds=config.close_timeout_seconds)
+    except RuntimeCloseIncomplete:
+        return shutdown_exit_code(ShutdownOutcome.RUNTIME_CLOSE_INCOMPLETE)
+    except RuntimeCloseUncertain:
+        return shutdown_exit_code(ShutdownOutcome.RUNTIME_CLOSE_UNCERTAIN)
+    except BaseException:
+        return shutdown_exit_code(ShutdownOutcome.SERVER_FAILED)
+    return shutdown_exit_code(ShutdownOutcome.CLEAN)
+
+
+def run_configured_stdio(path: str) -> int:
+    try:
+        config = load_tunnel_config(path)
+        return asyncio.run(_serve(config))
+    except TunnelConfigurationError as error:
+        print(error.code, file=sys.stderr, flush=True)
+        return 5 if error.code == "TUNNEL_STARTUP_CLEANUP_UNCERTAIN" else 2
+    except BaseException:
+        print("TUNNEL_RUNTIME_FAILED", file=sys.stderr, flush=True)
+        return 5
+
+
+__all__ = [
+    "SERVER_NAME",
+    "SERVER_VERSION",
+    "TUNNEL_RECEIPT_SCHEMA",
+    "TUNNEL_SCHEMA",
+    "TunnelConfig",
+    "TunnelConfigurationError",
+    "create_runtime_channel",
+    "create_tunnel_action_server",
+    "load_tunnel_config",
+    "parse_tunnel_config",
+    "run_configured_stdio",
+    "run_stdio",
+]
