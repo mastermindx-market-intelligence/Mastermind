@@ -17918,7 +17918,7 @@ class Runtime:
                 )
             role = str(job_row["orchestration_role"] or "")
             if (
-                role not in {"plan", "work", "review", "repair"}
+                role not in {"plan", "work", "review", "repair", "aggregation"}
                 or job_row["current_attempt_id"] != attempt_token
             ):
                 raise StateConflict("terminal completion binding is not current")

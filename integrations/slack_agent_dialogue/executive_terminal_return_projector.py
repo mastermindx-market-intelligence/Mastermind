@@ -99,6 +99,7 @@ class RuntimeTerminalReturnBindingResolver:
             identity.operation_key != candidate.operation_key
             or identity.session_ref != candidate.session_ref
             or identity.root_job_id != candidate.root_job_id
+            or identity.job_id != candidate.job_id
         ):
             raise ValueError("terminal-return delegation identity drifted")
         return ResolvedTerminalReturnBinding(
@@ -283,7 +284,7 @@ def _build_message(
         or _DIGEST_RE.fullmatch(candidate.terminal_evidence_digest) is None
         or candidate.message_key
         != f"asd-exec-result-{candidate.terminal_evidence_digest}"
-        or candidate.role not in {"plan", "work", "review", "repair"}
+        or candidate.role not in {"plan", "work", "review", "repair", "aggregation"}
         or any(
             not isinstance(value, str) or _DIGEST_RE.fullmatch(value) is None
             for value in (
