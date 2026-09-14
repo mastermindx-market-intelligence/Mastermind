@@ -122,9 +122,6 @@ from control_plane.worker_browser_b1 import (
     BrowserReviewError,
     browser_review_receipt,
 )
-from control_plane.visible_turn_projection import ProjectionError, TurnKey
-
-
 BROKER_REQUEST_SCHEMA_VERSION = "mastermind.executive_worker_broker_request/v1"
 BROKER_RESPONSE_SCHEMA_VERSION = "mastermind.executive_worker_broker_response/v1"
 UID_SWEEP_SCHEMA_VERSION = "mastermind.executive_uid_sweep/v2"
@@ -1341,7 +1338,7 @@ class ExecutiveWorkerBroker:
             ],
         ] = OrderedDict()
         self._operator_session_attempts: OrderedDict[str, str] = OrderedDict()
-        self._observer_refusals: list[tuple[TurnKey, str]] = []
+        self._observer_refusals: list[tuple[Any, str]] = []
         self._state_lock = asyncio.Lock()
         self._starting = False
         self._validation_busy = False
@@ -2170,15 +2167,7 @@ class ExecutiveWorkerBroker:
         if exact_local is None or native_turn is None:
             self._observer_refusals.append((None, "TURN_NOT_BOUND"))
             raise BrokerStateError("TURN_NOT_BOUND")
-        key = TurnKey(
-            active.epoch.attempt_id,
-            active.epoch.session_epoch_id,
-            active.generation.process_generation_id,
-            generation_number,
-            worker_id,
-            exact_local,
-            native_turn,
-        )
+        key = grant_key
         if grant_key != key:
             self._observer_refusals.append((key, "GENERATION_INVALID"))
             raise BrokerStateError("GENERATION_INVALID")
@@ -2189,9 +2178,12 @@ class ExecutiveWorkerBroker:
                 cursor=payload["cursor"],
                 max_items=payload["max_items"],
             )
-        except ProjectionError as exc:
-            self._observer_refusals.append((key, exc.code))
-            raise BrokerStateError(exc.code) from None
+        except Exception as exc:
+            code = getattr(exc, "code", None)
+            if not isinstance(code, str):
+                raise
+            self._observer_refusals.append((key, code))
+            raise BrokerStateError(code) from None
         return {
             "items": [
                 {
