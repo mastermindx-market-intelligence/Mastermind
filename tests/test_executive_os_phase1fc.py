@@ -1773,34 +1773,35 @@ def test_t2v2_exact_root_refuses_claude_step_before_child_creation(tmp_path):
     ] == []
 
 
-@pytest.mark.parametrize(
-    ("field", "value"),
-    [
+def test_t2v2_placement_refuses_concrete_identity_keys():
+    concrete_identities = [
         ("worker_id", "worker-a"),
         ("session_id", "session-a"),
         ("credential_home", "/credential/home"),
         ("native_task_id", "task-a"),
         ("lease_token", "lease-a"),
         ("host", "host-a"),
-    ],
-)
-def test_t2v2_placement_refuses_concrete_identity_keys(field, value):
-    envelope = _result_envelope("plan", _plan_body())
-    envelope["role_result"]["schema_version"] = "mastermind.execution_plan/v2"
-    envelope["role_result"]["steps"][0]["placement"] = {
-        "provider_realm": "codex",
-        "quota_class": "codex-hf1q-step",
-        field: value,
-    }
-    with pytest.raises(OrchestrationResultError, match="does not match its closed schema"):
-        validate_envelope(
-            envelope,
-            expected_job_id="JOB-100",
-            expected_run_id="ATT-100",
-            expected_worker_id="worker-1",
-            expected_role="plan",
-            expected_root_job_id="JOB-001",
-        )
+    ]
+    for field, value in concrete_identities:
+        envelope = _result_envelope("plan", _plan_body())
+        envelope["role_result"]["schema_version"] = "mastermind.execution_plan/v2"
+        envelope["role_result"]["steps"][0]["placement"] = {
+            "provider_realm": "codex",
+            "quota_class": "codex-hf1q-step",
+            field: value,
+        }
+        with pytest.raises(
+            OrchestrationResultError,
+            match="does not match its closed schema",
+        ):
+            validate_envelope(
+                envelope,
+                expected_job_id="JOB-100",
+                expected_run_id="ATT-100",
+                expected_worker_id="worker-1",
+                expected_role="plan",
+                expected_root_job_id="JOB-001",
+            )
 
 
 def test_t2v2_admission_replay_preserves_exact_step_requirements(tmp_path):
