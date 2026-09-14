@@ -111,6 +111,47 @@ def build_receipt(
         and job.job_id != root_job_id
         and job.orchestration_role
     ]
+    child_roles = {job.orchestration_role for job in children}
+    if not child_roles <= {"plan", "work", "review", "repair"}:
+        raise CanaryReaderError("CHILD_LINEAGE_INVALID")
+
+    current_ids = {item["current_job_id"] for item in aggregation_body["revisions"]}
+    if any(job.attempt_count != 1 for job in children):
+        raise CanaryReaderError("REVISION_CURRENT_AMBIGUOUS")
+    current_jobs = {
+        job.job_id
+        for job in children
+        if job.orchestration_role in {"work", "repair"} and job.job_id in current_ids
+    }
+    if len(current_jobs) != len(current_ids):
+        raise CanaryReaderError("REVISION_CURRENT_AMBIGUOUS")
+    superseded_ids = {
+        job.supersedes_job_id
+        for job in children
+        if job.orchestration_role == "repair" and job.supersedes_job_id is not None
+    }
+    if current_jobs & superseded_ids:
+        raise CanaryReaderError("REVISION_NOT_CURRENT")
+    work_revision_ids = {
+        job.job_id
+        for job in children
+        if job.orchestration_role in {"work", "repair"}
+    }
+    if any(
+        job.supersedes_job_id is not None
+        and job.supersedes_job_id not in work_revision_ids
+        for job in children
+    ):
+        raise CanaryReaderError("REVISION_CHAIN_INVALID")
+    review_jobs = {
+        job.job_id: job for job in children if job.orchestration_role == "review"
+    }
+    if any(
+        not isinstance(job.reviews_job_id, str)
+        or job.reviews_job_id not in current_jobs | superseded_ids
+        for job in review_jobs.values()
+    ):
+        raise CanaryReaderError("INDEPENDENT_REVIEW_INCOMPLETE")
 
     revisions: dict[str, list[dict[str, Any]]] = {
         "work": [],
@@ -119,7 +160,44 @@ def build_receipt(
     }
     for job in children:
         if job.current_attempt_id is None or job.status is not JobStatus.COMPLETED:
-            continue
+            raise CanaryReaderError("CHILD_LINEAGE_INCOMPLETE")
+        if job.parent_job_id != root_job_id or job.depth != 1:
+            raise CanaryReaderError("CHILD_LINEAGE_INVALID")
+        if job.orchestration_role == "plan" and any(
+            value is not None
+            for value in (
+                job.plan_attempt_id,
+                job.plan_digest,
+                job.plan_step_id,
+                job.repair_round,
+                job.reviews_job_id,
+                job.supersedes_job_id,
+            )
+        ):
+            raise CanaryReaderError("CHILD_LINEAGE_INVALID")
+        if job.orchestration_role == "work" and (
+            job.repair_round != 0
+            or job.reviews_job_id is not None
+            or job.supersedes_job_id is not None
+        ):
+            raise CanaryReaderError("CHILD_LINEAGE_INVALID")
+        if job.orchestration_role == "repair" and (
+            not job.supersedes_job_id or job.reviews_job_id is not None
+        ):
+            raise CanaryReaderError("CHILD_LINEAGE_INVALID")
+        if job.orchestration_role == "review" and (
+            not job.reviews_job_id or job.supersedes_job_id is not None
+        ):
+            raise CanaryReaderError("CHILD_LINEAGE_INVALID")
+        if job.orchestration_role == "repair":
+            predecessor_ids = {
+                item.job_id
+                for item in children
+                if item.orchestration_role in {"work", "repair"}
+                and item.supersedes_job_id is None
+            }
+            if job.supersedes_job_id not in predecessor_ids:
+                raise CanaryReaderError("REVISION_CHAIN_INVALID")
         try:
             child = runtime.validated_role_completion(
                 job.job_id,
@@ -146,7 +224,6 @@ def build_receipt(
                 }
             )
 
-    current_ids = {item["current_job_id"] for item in aggregation_body["revisions"]}
     qualifying_ids = {
         item["qualifying_review_job_id"] for item in aggregation_body["revisions"]
     }
@@ -172,6 +249,9 @@ def build_receipt(
         )
     ]
     event_types = [event.event_type for event in terminal_events]
+    applied_count = event_types.count("EXECUTIVE_TERMINAL_RETURN_APPLIED")
+    if applied_count > 1:
+        raise CanaryReaderError("TERMINAL_PROJECTION_AMBIGUOUS")
     projection = (
         "APPLIED"
         if "EXECUTIVE_TERMINAL_RETURN_APPLIED" in event_types
@@ -181,9 +261,6 @@ def build_receipt(
         if "EXECUTIVE_TERMINAL_RETURN_ATTEMPTED" in event_types
         else "NOT_ATTEMPTED"
     )
-    if event_types.count("EXECUTIVE_TERMINAL_RETURN_APPLIED") != 1:
-        if projection == "APPLIED":
-            raise CanaryReaderError("TERMINAL_PROJECTION_AMBIGUOUS")
     if projection == "APPLIED":
         projection_state = "DELIVERED_NOT_CONSUMED"
     elif projection == "EFFECT_UNKNOWN":

@@ -5,7 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from control_plane.executive_runtime import Runtime
+from control_plane.executive_runtime import JobStatus, Runtime
+from control_plane.executive_orchestration_principal import digest
 from scripts.web_ceo_offline_delivery_canary import (
     RECEIPT_SCHEMA,
     build_receipt,
@@ -229,6 +230,291 @@ def test_canary_receipt_is_finite_deterministic_secret_safe_and_refuses_bad_inpu
         build_receipt(runtime, root_job_id="JOB-999", expected_release_sha=release_sha)
     with pytest.raises(ValueError, match="EXPECTED_RELEASE_MISMATCH"):
         build_receipt(runtime, root_job_id=root_id, expected_release_sha="b" * 40)
+
+
+def test_canary_rejects_unresolved_terminal_effect_unknown(tmp_path: Path) -> None:
+    runtime, root_id, *_args, release_sha = _offline_delivery_runtime(
+        tmp_path / "runtime"
+    )
+    material = runtime.validated_role_completion(
+        root_id, expected_attempt_id=runtime.jobs.get_job(root_id).current_attempt_id
+    )
+    with runtime.store.transaction() as connection:
+        runtime.store.append_event(
+            connection,
+            aggregate_type="terminal_return_projection",
+            aggregate_id=material.attempt.attempt_id,
+            event_type="EXECUTIVE_TERMINAL_RETURN_EFFECT_UNKNOWN",
+            attempt_id=material.attempt.attempt_id,
+        )
+
+    with pytest.raises(ValueError, match="EFFECT_UNKNOWN_UNRESOLVED"):
+        build_receipt(
+            runtime,
+            root_job_id=root_id,
+            expected_release_sha=release_sha,
+            observed_at="2026-09-14T01:02:03Z",
+        )
+
+
+def test_canary_rejects_ambiguous_terminal_projection(tmp_path: Path) -> None:
+    runtime, root_id, *_args, release_sha = _offline_delivery_runtime(
+        tmp_path / "runtime"
+    )
+    material = runtime.validated_role_completion(
+        root_id, expected_attempt_id=runtime.jobs.get_job(root_id).current_attempt_id
+    )
+    for _ in range(2):
+        with runtime.store.transaction() as connection:
+            runtime.store.append_event(
+                connection,
+                aggregate_type="terminal_return_projection",
+                aggregate_id=material.attempt.attempt_id,
+                event_type="EXECUTIVE_TERMINAL_RETURN_APPLIED",
+                attempt_id=material.attempt.attempt_id,
+            )
+
+    with pytest.raises(ValueError, match="TERMINAL_PROJECTION_AMBIGUOUS"):
+        build_receipt(
+            runtime,
+            root_job_id=root_id,
+            expected_release_sha=release_sha,
+            observed_at="2026-09-14T01:02:03Z",
+        )
+
+
+def test_canary_rejects_incomplete_non_current_or_incomplete_child_lineage(
+    tmp_path: Path,
+) -> None:
+    runtime, root_id, *_args, release_sha = _offline_delivery_runtime(
+        tmp_path / "runtime"
+    )
+    child = next(
+        job
+        for job in runtime.jobs.list_jobs()
+        if job.root_job_id == root_id
+        and job.orchestration_role == "work"
+        and job.status is JobStatus.COMPLETED
+    )
+    with runtime.store.transaction() as connection:
+        connection.execute(
+            "UPDATE jobs SET status='QUEUED',current_attempt_id=NULL,"
+            "assigned_worker_id=NULL,assigned_quota_class=NULL WHERE job_id=?",
+            (child.job_id,),
+        )
+
+    with pytest.raises(ValueError, match="CHILD_LINEAGE_INCOMPLETE"):
+        build_receipt(
+            runtime,
+            root_job_id=root_id,
+            expected_release_sha=release_sha,
+            observed_at="2026-09-14T01:02:03Z",
+        )
+
+
+def test_canary_rejects_non_current_child_attempt(tmp_path: Path) -> None:
+    runtime, root_id, *_args, release_sha = _offline_delivery_runtime(
+        tmp_path / "runtime"
+    )
+    child = next(
+        job
+        for job in runtime.jobs.list_jobs()
+        if job.root_job_id == root_id
+        and job.orchestration_role == "work"
+    )
+    with runtime.store.transaction() as connection:
+        row = dict(
+            connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?", (child.job_id,)
+            ).fetchone()
+        )
+        row["job_id"] = "JOB-996"
+        row["plan_step_id"] = "step-non-current-attempt"
+        row["current_attempt_id"] = None
+        row["assigned_worker_id"] = None
+        row["assigned_quota_class"] = None
+        row["status"] = "QUEUED"
+        row["attempt_count"] = 2
+        provenance = dict(json.loads(row["orchestration_provenance_json"]))
+        provenance["job_id"] = row["job_id"]
+        row["orchestration_provenance_json"] = json.dumps(
+            provenance, sort_keys=True, separators=(",", ":")
+        )
+        row["orchestration_provenance_digest"] = digest(provenance)
+        columns = ",".join("?" for _ in row)
+        connection.execute(
+            f"INSERT INTO jobs({','.join(row)}) VALUES ({columns})",
+            tuple(row.values()),
+        )
+
+    with pytest.raises(ValueError, match="REVISION_CURRENT_AMBIGUOUS"):
+        build_receipt(
+            runtime,
+            root_job_id=root_id,
+            expected_release_sha=release_sha,
+            observed_at="2026-09-14T01:02:03Z",
+        )
+
+
+def test_canary_rejects_non_completed_child_attempt(tmp_path: Path) -> None:
+    runtime, root_id, *_args, release_sha = _offline_delivery_runtime(
+        tmp_path / "runtime"
+    )
+    child = next(
+        job
+        for job in runtime.jobs.list_jobs()
+        if job.root_job_id == root_id
+        and job.orchestration_role == "work"
+    )
+    with runtime.store.transaction() as connection:
+        connection.execute(
+            "UPDATE jobs SET status='QUEUED',current_attempt_id=NULL,"
+            "assigned_worker_id=NULL,assigned_quota_class=NULL WHERE job_id=?",
+            (child.job_id,),
+        )
+
+    with pytest.raises(ValueError, match="CHILD_LINEAGE_INCOMPLETE"):
+        build_receipt(
+            runtime,
+            root_job_id=root_id,
+            expected_release_sha=release_sha,
+            observed_at="2026-09-14T01:02:03Z",
+        )
+
+
+def _revision_job(runtime: Runtime, root_id: str, role: str) -> object:
+    return next(
+        job
+        for job in runtime.jobs.list_jobs()
+        if job.root_job_id == root_id and job.orchestration_role == role
+    )
+
+
+def test_canary_rejects_duplicate_current_revision(tmp_path: Path) -> None:
+    runtime, root_id, *_args, release_sha = _offline_delivery_runtime(
+        tmp_path / "runtime"
+    )
+    work = _revision_job(runtime, root_id, "work")
+    with runtime.store.transaction() as connection:
+        row = dict(
+            connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?", (work.job_id,)
+            ).fetchone()
+        )
+        row["job_id"] = "JOB-999"
+        row["plan_step_id"] = "step-duplicate-current"
+        provenance = dict(json.loads(row["orchestration_provenance_json"]))
+        provenance["job_id"] = row["job_id"]
+        row["orchestration_provenance_json"] = json.dumps(
+            provenance, sort_keys=True, separators=(",", ":")
+        )
+        row["orchestration_provenance_digest"] = digest(provenance)
+        row["current_attempt_id"] = None
+        row["assigned_worker_id"] = None
+        row["assigned_quota_class"] = None
+        row["status"] = "QUEUED"
+        columns = ",".join("?" for _ in row)
+        connection.execute(
+            f"INSERT INTO jobs({','.join(row)}) VALUES ({columns})",
+            tuple(row.values()),
+        )
+
+    with pytest.raises(ValueError, match="CHILD_LINEAGE_INCOMPLETE"):
+        build_receipt(
+            runtime,
+            root_job_id=root_id,
+            expected_release_sha=release_sha,
+            observed_at="2026-09-14T01:02:03Z",
+        )
+
+
+def test_canary_rejects_non_current_repair_revision(tmp_path: Path) -> None:
+    runtime, root_id, *_args, release_sha = _offline_delivery_runtime(
+        tmp_path / "runtime"
+    )
+    repair = _revision_job(runtime, root_id, "repair")
+    assert repair.supersedes_job_id is not None
+    prior = runtime.jobs.get_job(str(repair.supersedes_job_id))
+    assert prior is not None and prior.current_attempt_id is not None
+    with runtime.store.transaction() as connection:
+        row = dict(
+            connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?", (repair.job_id,)
+            ).fetchone()
+        )
+        row["job_id"] = "JOB-998"
+        provenance = dict(json.loads(row["orchestration_provenance_json"]))
+        provenance["job_id"] = row["job_id"]
+        row["orchestration_provenance_json"] = json.dumps(
+            provenance, sort_keys=True, separators=(",", ":")
+        )
+        row["orchestration_provenance_digest"] = digest(provenance)
+        row["supersedes_job_id"] = repair.job_id
+        row["repair_round"] = 2
+        row["plan_step_id"] = "step-non-current-repair"
+        row["current_attempt_id"] = None
+        row["assigned_worker_id"] = None
+        row["assigned_quota_class"] = None
+        row["status"] = "QUEUED"
+        columns = ",".join("?" for _ in row)
+        connection.execute(
+            f"INSERT INTO jobs({','.join(row)}) VALUES ({columns})",
+            tuple(row.values()),
+        )
+
+    with pytest.raises(ValueError, match="REVISION_NOT_CURRENT"):
+        build_receipt(
+            runtime,
+            root_job_id=root_id,
+            expected_release_sha=release_sha,
+            observed_at="2026-09-14T01:02:03Z",
+        )
+
+
+def test_canary_rejects_review_sequence_that_does_not_qualify_current_repair(
+    tmp_path: Path,
+) -> None:
+    runtime, root_id, *_args, release_sha = _offline_delivery_runtime(
+        tmp_path / "runtime"
+    )
+    reviews = [
+        job
+        for job in runtime.jobs.list_jobs()
+        if job.root_job_id == root_id and job.orchestration_role == "review"
+    ]
+    approving_review = reviews[-1]
+    assert approving_review.current_attempt_id is not None
+    with runtime.store.transaction() as connection:
+        row = dict(
+            connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?", (approving_review.job_id,)
+            ).fetchone()
+        )
+        row["job_id"] = "JOB-997"
+        row["reviews_job_id"] = _revision_job(runtime, root_id, "plan").job_id
+        provenance = dict(json.loads(row["orchestration_provenance_json"]))
+        provenance["job_id"] = row["job_id"]
+        row["orchestration_provenance_json"] = json.dumps(
+            provenance, sort_keys=True, separators=(",", ":")
+        )
+        row["orchestration_provenance_digest"] = digest(provenance)
+        row["current_attempt_id"] = None
+        row["assigned_worker_id"] = None
+        row["assigned_quota_class"] = None
+        row["status"] = "QUEUED"
+        columns = ",".join("?" for _ in row)
+        connection.execute(
+            f"INSERT INTO jobs({','.join(row)}) VALUES ({columns})",
+            tuple(row.values()),
+        )
+
+    with pytest.raises(ValueError, match="INDEPENDENT_REVIEW_INCOMPLETE"):
+        build_receipt(
+            runtime,
+            root_job_id=root_id,
+            expected_release_sha=release_sha,
+            observed_at="2026-09-14T01:02:03Z",
+        )
 
 
 def test_cli_emits_receipt_and_closed_errors(tmp_path: Path, capsys) -> None:
