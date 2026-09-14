@@ -1,4 +1,4 @@
-"""Typed, immutable facts exported by the existing Capacity owner."""
+"""Typed, immutable capacity facts. Minting is owned by the Capacity/Model Router."""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ import re
 
 from control_plane.executive_steward import CapacityState, SourceOwner
 
-_SEAL = object()
 _WORKER_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 
 
@@ -24,8 +23,6 @@ class CapacityOwnerFact:
     _seal: object = dataclasses.field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        if self._seal is not _SEAL:
-            raise CapacityOwnerFactError("capacity fact must be exported by the Capacity owner")
         if (
             not isinstance(self.worker_id, str)
             or not self.worker_id
@@ -39,20 +36,15 @@ class CapacityOwnerFact:
             raise CapacityOwnerFactError("capacity source owner is invalid")
         if type(self.generation) is not int or self.generation < 1:
             raise CapacityOwnerFactError("capacity generation is invalid")
+        from control_plane.model_router import verify_capacity_owner_fact
+
+        verify_capacity_owner_fact(self)
 
 
-def export_capacity_fact(
-    *,
-    worker_id: str,
-    state: CapacityState,
-    generation: int,
-) -> CapacityOwnerFact:
-    return CapacityOwnerFact(
-        worker_id=worker_id,
-        state=state,
-        source=SourceOwner.CAPACITY,
-        generation=generation,
-        _seal=_SEAL,
+def export_capacity_fact(**_kwargs):
+    raise CapacityOwnerFactError(
+        "capacity_fact must be minted by the Capacity owner "
+        "(control_plane.model_router.export_capacity_owner_fact)"
     )
 
 

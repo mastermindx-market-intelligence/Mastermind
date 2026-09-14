@@ -18,6 +18,15 @@ from control_plane.claude_subscription_worker import (
 from control_plane.codex_worker import LaunchValidationError
 from control_plane.executive_worker_broker import ExecutiveWorkerBroker, WorkerBrokerError
 from control_plane.executive_steward import CapacityState, SourceOwner
+from control_plane.codex_provider_realm import (
+    issue_provider_realm_enrollment_receipt,
+    set_provider_realm_test_enrollment,
+    set_provider_realm_test_key,
+)
+from control_plane.model_router import (
+    export_capacity_owner_fact,
+    set_capacity_owner_test_key,
+)
 from control_plane.subscription_canary_admission import (
     CanaryAdmissionError,
     SubscriptionCanaryAdmission,
@@ -27,11 +36,11 @@ from control_plane.subscription_canary_admission import (
 from ops.executive_os.capacity_owner_facts import (
     CapacityOwnerFact,
     CapacityOwnerFactError,
-    export_capacity_fact,
 )
 from ops.executive_os.provider_realm_facts import (
     ProviderRealmEnrollmentReceipt,
-    issue_provider_realm_enrollment_receipt,
+    ProviderRealmFactError,
+    compose_realm_receipt_digest,
 )
 from control_plane.subscription_harness_bindings import (
     DEFAULT_BINDINGS_PATH,
@@ -128,6 +137,19 @@ def _spec(tmp_path: Path, binding_id: str = _GLM_BINDING) -> tuple[WorkerLaunchS
 _WORKER_ID = "worker-1"
 _CAPACITY_GENERATION = 7
 _REALM_GENERATION = 3
+_CAPACITY_TEST_KEY = b"r581-test-capacity-owner-key"
+_REALM_TEST_KEY = b"r581-test-provider-realm-owner-key"
+
+
+@pytest.fixture(autouse=True)
+def _inject_owner_test_keys():
+    set_capacity_owner_test_key(_CAPACITY_TEST_KEY)
+    set_provider_realm_test_key(_REALM_TEST_KEY)
+    set_provider_realm_test_enrollment("enrolled")
+    yield
+    set_provider_realm_test_enrollment(None)
+    set_capacity_owner_test_key(None)
+    set_provider_realm_test_key(None)
 
 
 def _documents(*, implementation_state: str = "BUILT_NOT_PROVEN"):
@@ -138,26 +160,26 @@ def _documents(*, implementation_state: str = "BUILT_NOT_PROVEN"):
 
 
 def _capacity_fact(**changes):
-    return export_capacity_fact(
-        worker_id=_WORKER_ID,
-        state=CapacityState.AVAILABLE,
-        generation=_CAPACITY_GENERATION,
-        **changes,
-    )
+    values = {
+        "worker_id": _WORKER_ID,
+        "state": CapacityState.AVAILABLE,
+        "generation": _CAPACITY_GENERATION,
+    }
+    values.update(changes)
+    return export_capacity_owner_fact(**values)
 
 
 def _realm_receipt(bindings, profiles, **changes):
+    enrollment = changes.pop("enrollment_state", "enrolled")
+    set_provider_realm_test_enrollment(enrollment)
     values = {
         "binding_id": _GLM_BINDING,
         "bindings_document": bindings,
         "profiles_document": profiles,
         "generation": _REALM_GENERATION,
-        "enrollment_state": "enrolled",
     }
     values.update(changes)
-    return issue_provider_realm_enrollment_receipt(
-        **values
-    )
+    return issue_provider_realm_enrollment_receipt(**values)
 
 
 def _owner_seal(*, capacity_fact=None, realm_receipt=None, bindings=None, profiles=None):
@@ -386,7 +408,7 @@ def test_seal_refuses_raw_boolean_activation_inputs():
 
 def test_seal_refuses_wrong_ids():
     with pytest.raises(ValueError, match="worker identity is invalid"):
-        export_capacity_fact(
+        export_capacity_owner_fact(
             worker_id="worker:1",
             state=CapacityState.AVAILABLE,
             generation=_CAPACITY_GENERATION,
@@ -411,7 +433,7 @@ def test_seal_refuses_wrong_ids():
 
 def test_seal_refuses_owner_selected_generation_primitives():
     with pytest.raises(TypeError, match="unexpected keyword argument"):
-        export_capacity_fact(
+        export_capacity_owner_fact(
             worker_id=_WORKER_ID,
             state=CapacityState.AVAILABLE,
             generation=_CAPACITY_GENERATION,
@@ -636,3 +658,175 @@ def test_claude_lane_is_spec_only_and_admits_no_broker_execution() -> None:
         adapter_descriptor(binding.adapter_id)
     with pytest.raises(WorkerBrokerError, match="unknown worker adapter"):
         ExecutiveWorkerBroker(object(), object(), object(), adapter_id=binding.adapter_id)
+
+
+def test_attack_a_primitive_kwarg_construction_is_typed_field_refusal() -> None:
+    """(a) Residual TypeError surface: primitives must name capacity_fact/realm_receipt."""
+
+    with pytest.raises(CanaryAdmissionError, match="capacity_fact") as capacity_exc:
+        seal_subscription_canary_admission(
+            worker_id=_WORKER_ID,
+            binding_id=_GLM_BINDING,
+            capacity_state=CapacityState.AVAILABLE.value,
+            capacity_source=SourceOwner.CAPACITY.value,
+            capacity_generation=999,
+            current_capacity_generation=999,
+            realm_receipt_id="provider-realm:glm-coding-plan.claude-code-anthropic:42",
+            realm_generation=42,
+            current_realm_generation=42,
+        )
+    assert "capacity_fact" in str(capacity_exc.value)
+    with pytest.raises(CanaryAdmissionError, match="realm_receipt") as realm_exc:
+        seal_subscription_canary_admission(
+            capacity_fact=_capacity_fact(),
+            worker_id=_WORKER_ID,
+            binding_id=_GLM_BINDING,
+            capacity_generation=999,
+            current_capacity_generation=999,
+            realm_receipt_id="provider-realm:glm-coding-plan.claude-code-anthropic:42",
+            realm_generation=42,
+            current_realm_generation=42,
+        )
+    assert "realm_receipt" in str(realm_exc.value)
+
+
+def test_attack_b_forged_realm_id_is_refused() -> None:
+    """(b) Forged receipt_id provider-realm:caller-forged:99 must be refused."""
+
+    bindings, profiles = _documents()
+    honest = _realm_receipt(bindings, profiles)
+    stolen = object.__getattribute__(honest, "_seal")
+    from control_plane.subscription_canary_admission import compose_catalog_digest
+
+    forged_id = "provider-realm:caller-forged:99"
+    catalog_digest = compose_catalog_digest(
+        bindings_document=bindings,
+        profiles_document=profiles,
+    )
+    public_digest = compose_realm_receipt_digest(
+        receipt_id=forged_id,
+        binding_id=honest.binding_id,
+        profile_id=honest.profile_id,
+        adapter_id=honest.adapter_id,
+        generation=99,
+        catalog_digest=catalog_digest,
+    )
+    with pytest.raises(
+        (CanaryAdmissionError, ProviderRealmFactError),
+        match="receipt_id",
+    ) as exc:
+        forged = ProviderRealmEnrollmentReceipt(
+            receipt_id=forged_id,
+            receipt_digest=public_digest,
+            binding_id=honest.binding_id,
+            profile_id=honest.profile_id,
+            adapter_id=honest.adapter_id,
+            generation=99,
+            enrollment_state="enrolled",
+            _seal=stolen,
+        )
+        seal_subscription_canary_admission(
+            capacity_fact=_capacity_fact(),
+            realm_receipt=forged,
+            bindings_document=bindings,
+            profiles_document=profiles,
+        )
+    assert "receipt_id" in str(exc.value)
+
+
+def test_attack_c_public_input_digest_is_refused() -> None:
+    """(c) A caller-computed public digest is not an owner-issued receipt seal."""
+
+    bindings, profiles = _documents()
+    honest = _realm_receipt(bindings, profiles)
+    stolen = object.__getattribute__(honest, "_seal")
+    from control_plane.subscription_canary_admission import compose_catalog_digest
+
+    catalog_digest = compose_catalog_digest(
+        bindings_document=bindings,
+        profiles_document=profiles,
+    )
+    public_digest = compose_realm_receipt_digest(
+        receipt_id=honest.receipt_id,
+        binding_id=honest.binding_id,
+        profile_id=honest.profile_id,
+        adapter_id=honest.adapter_id,
+        generation=honest.generation,
+        catalog_digest=catalog_digest,
+    )
+    with pytest.raises(
+        (CanaryAdmissionError, ProviderRealmFactError),
+        match="receipt_digest",
+    ) as exc:
+        forged = ProviderRealmEnrollmentReceipt(
+            receipt_id=honest.receipt_id,
+            receipt_digest=public_digest,
+            binding_id=honest.binding_id,
+            profile_id=honest.profile_id,
+            adapter_id=honest.adapter_id,
+            generation=honest.generation,
+            enrollment_state=honest.enrollment_state,
+            _seal=stolen,
+        )
+        seal_subscription_canary_admission(
+            capacity_fact=_capacity_fact(),
+            realm_receipt=forged,
+            bindings_document=bindings,
+            profiles_document=profiles,
+        )
+    assert "receipt_digest" in str(exc.value)
+
+
+def test_attack_d_stolen_seal_on_different_content_is_refused() -> None:
+    """(d) A stolen owner seal must not attest different capacity content."""
+
+    honest = _capacity_fact()
+    stolen = object.__getattribute__(honest, "_seal")
+    bindings, profiles = _documents()
+    with pytest.raises(
+        (CanaryAdmissionError, CapacityOwnerFactError),
+        match="capacity_fact|_seal|generation|worker_id",
+    ) as exc:
+        forged = CapacityOwnerFact(
+            worker_id="attacker-9",
+            state=CapacityState.AVAILABLE,
+            source=SourceOwner.CAPACITY,
+            generation=12345,
+            _seal=stolen,
+        )
+        seal_subscription_canary_admission(
+            capacity_fact=forged,
+            realm_receipt=_realm_receipt(bindings, profiles),
+            bindings_document=bindings,
+            profiles_document=profiles,
+        )
+    assert any(
+        name in str(exc.value)
+        for name in ("capacity_fact", "_seal", "generation", "worker_id")
+    )
+
+
+def test_attack_e_replace_unenrolled_to_enrolled_is_refused() -> None:
+    """(e) dataclasses.replace must not turn an unenrolled receipt into enrolled."""
+
+    bindings, profiles = _documents()
+    set_provider_realm_test_enrollment("unenrolled")
+    unenrolled = issue_provider_realm_enrollment_receipt(
+        binding_id=_GLM_BINDING,
+        bindings_document=bindings,
+        profiles_document=profiles,
+        generation=_REALM_GENERATION,
+    )
+    assert unenrolled.enrollment_state == "unenrolled"
+    with pytest.raises(
+        (CanaryAdmissionError, ProviderRealmFactError),
+        match="enrollment_state",
+    ) as exc:
+        mutated = dataclasses.replace(unenrolled, enrollment_state="enrolled")
+        seal_subscription_canary_admission(
+            capacity_fact=_capacity_fact(),
+            realm_receipt=mutated,
+            bindings_document=bindings,
+            profiles_document=profiles,
+        )
+    assert "enrollment_state" in str(exc.value)

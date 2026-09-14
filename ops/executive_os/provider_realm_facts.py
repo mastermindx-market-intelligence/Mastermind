@@ -1,10 +1,11 @@
-"""Typed, issued receipts exported by the existing provider-realm owner."""
+"""Typed, immutable provider-realm receipts. Minting is owned by the realm owner."""
 
 from __future__ import annotations
 
 import dataclasses
+import hashlib
+import json
 
-_SEAL = object()
 _VALID_ENROLLMENT_STATES = frozenset({"enrolled", "unenrolled"})
 
 
@@ -21,55 +22,25 @@ class ProviderRealmEnrollmentReceipt:
     adapter_id: str
     generation: int
     enrollment_state: str
+    catalog_digest: str = ""
     _seal: object = dataclasses.field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        if self._seal is not _SEAL:
-            raise ProviderRealmFactError("realm receipt must be issued by the provider-realm owner")
+        if self.enrollment_state not in _VALID_ENROLLMENT_STATES:
+            raise ProviderRealmFactError("enrollment_state is invalid")
+        if type(self.generation) is not int or self.generation < 1:
+            raise ProviderRealmFactError("realm generation is invalid")
+        from control_plane.codex_provider_realm import (
+            verify_provider_realm_enrollment_receipt,
+        )
+
+        verify_provider_realm_enrollment_receipt(self)
 
 
-def issue_provider_realm_enrollment_receipt(
-    *,
-    binding_id: str,
-    bindings_document=None,
-    profiles_document=None,
-    generation: int,
-    enrollment_state: str,
-) -> ProviderRealmEnrollmentReceipt:
-    from control_plane.subscription_canary_admission import compose_catalog_digest
-    from control_plane.subscription_harness_bindings import get_binding
-
-    if enrollment_state not in _VALID_ENROLLMENT_STATES:
-        raise ProviderRealmFactError("realm enrollment state is invalid")
-    if type(generation) is not int or generation < 1:
-        raise ProviderRealmFactError("realm generation is invalid")
-    binding = get_binding(
-        binding_id,
-        document=bindings_document,
-        profiles_document=profiles_document,
-    )
-    digest = compose_catalog_digest(
-        bindings_document=bindings_document,
-        profiles_document=profiles_document,
-    )
-    receipt_id = f"provider-realm:{binding.binding_id}:{generation}"
-    receipt_digest = compose_realm_receipt_digest(
-        receipt_id=receipt_id,
-        binding_id=binding.binding_id,
-        profile_id=binding.profile_id,
-        adapter_id=binding.adapter_id,
-        generation=generation,
-        catalog_digest=digest,
-    )
-    return ProviderRealmEnrollmentReceipt(
-        receipt_id=receipt_id,
-        receipt_digest=receipt_digest,
-        binding_id=binding.binding_id,
-        profile_id=binding.profile_id,
-        adapter_id=binding.adapter_id,
-        generation=generation,
-        enrollment_state=enrollment_state,
-        _seal=_SEAL,
+def issue_provider_realm_enrollment_receipt(**_kwargs):
+    raise ProviderRealmFactError(
+        "realm_receipt must be issued by the provider-realm owner "
+        "(control_plane.codex_provider_realm.issue_provider_realm_enrollment_receipt)"
     )
 
 
@@ -82,8 +53,7 @@ def compose_realm_receipt_digest(
     generation: int,
     catalog_digest: str,
 ) -> str:
-    import hashlib
-    import json
+    """Public SHA-256 over caller inputs. Not an owner seal and not accepted as one."""
 
     value = json.dumps(
         {
@@ -105,5 +75,6 @@ def compose_realm_receipt_digest(
 __all__ = [
     "ProviderRealmEnrollmentReceipt",
     "ProviderRealmFactError",
+    "compose_realm_receipt_digest",
     "issue_provider_realm_enrollment_receipt",
 ]

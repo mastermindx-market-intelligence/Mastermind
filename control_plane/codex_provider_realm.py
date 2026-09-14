@@ -8,6 +8,8 @@ boundary.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
+import hmac
 import json
 import os
 import re
@@ -16,6 +18,7 @@ import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any, Mapping
 from urllib.parse import urlparse
 
 
@@ -232,6 +235,168 @@ CANDIDATE_CODEX_PROVIDER_REALMS_SPEC_ONLY = {
 
 ProviderCredentialLoader = Callable[[], str]
 
+# Realm-receipt mint/verify lives on this existing provider-realm owner.
+# The test-key / enrollment slots are injection seams, not a realm store.
+_PROVIDER_REALM_TEST_KEY: bytes | None = None
+_PROVIDER_REALM_TEST_ENROLLMENT: str | None = None
+_VALID_ENROLLMENT_STATES = frozenset({"enrolled", "unenrolled"})
+
+
+def set_provider_realm_test_key(key: bytes | None) -> None:
+    """Test-only. Injects the owner HMAC key; refused outside pytest."""
+
+    if os.environ.get("PYTEST_CURRENT_TEST") is None:
+        raise ProviderRealmError("provider-realm owner test key is test-only")
+    if key is not None and (not isinstance(key, (bytes, bytearray)) or len(key) < 16):
+        raise ProviderRealmError("provider-realm owner test key is invalid")
+    global _PROVIDER_REALM_TEST_KEY
+    _PROVIDER_REALM_TEST_KEY = bytes(key) if key is not None else None
+
+
+def set_provider_realm_test_enrollment(enrollment_state: str | None) -> None:
+    """Test-only. Injects the owner's current enrollment observation."""
+
+    if os.environ.get("PYTEST_CURRENT_TEST") is None:
+        raise ProviderRealmError("provider-realm test enrollment is test-only")
+    if enrollment_state is not None and enrollment_state not in _VALID_ENROLLMENT_STATES:
+        raise ProviderRealmError("enrollment_state is invalid")
+    global _PROVIDER_REALM_TEST_ENROLLMENT
+    _PROVIDER_REALM_TEST_ENROLLMENT = enrollment_state
+
+
+def _provider_realm_owner_key() -> bytes:
+    if _PROVIDER_REALM_TEST_KEY is not None:
+        return _PROVIDER_REALM_TEST_KEY
+    raise ProviderRealmError("provider-realm owner key is not available")
+
+
+def _realm_receipt_payload(
+    *,
+    receipt_id: str,
+    binding_id: str,
+    profile_id: str,
+    adapter_id: str,
+    generation: int,
+    enrollment_state: str,
+    catalog_digest: str,
+) -> dict[str, Any]:
+    return {
+        "adapter_id": adapter_id,
+        "binding_id": binding_id,
+        "catalog_digest": catalog_digest,
+        "enrollment_state": enrollment_state,
+        "generation": generation,
+        "profile_id": profile_id,
+        "receipt_id": receipt_id,
+    }
+
+
+def _realm_receipt_seal(payload: Mapping[str, Any]) -> str:
+    canonical = json.dumps(
+        dict(payload),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    )
+    return hmac.new(
+        _provider_realm_owner_key(),
+        canonical.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def issue_provider_realm_enrollment_receipt(
+    *,
+    binding_id: str,
+    bindings_document: Mapping[str, Any] | None = None,
+    profiles_document: Mapping[str, Any] | None = None,
+    generation: int,
+) -> Any:
+    """Mint one keyed-sealed realm receipt. Enrollment is owner-observed."""
+
+    from control_plane.subscription_canary_admission import compose_catalog_digest
+    from control_plane.subscription_harness_bindings import get_binding
+    from ops.executive_os.provider_realm_facts import (
+        ProviderRealmEnrollmentReceipt,
+        ProviderRealmFactError,
+    )
+
+    if type(generation) is not int or generation < 1:
+        raise ProviderRealmFactError("realm generation is invalid")
+    enrollment_state = _PROVIDER_REALM_TEST_ENROLLMENT
+    if enrollment_state not in _VALID_ENROLLMENT_STATES:
+        raise ProviderRealmFactError(
+            "enrollment_state is not observed by the provider-realm owner"
+        )
+    binding = get_binding(
+        binding_id,
+        document=bindings_document,
+        profiles_document=profiles_document,
+    )
+    catalog_digest = compose_catalog_digest(
+        bindings_document=bindings_document,
+        profiles_document=profiles_document,
+    )
+    receipt_id = f"provider-realm:{binding.binding_id}:{generation}"
+    payload = _realm_receipt_payload(
+        receipt_id=receipt_id,
+        binding_id=binding.binding_id,
+        profile_id=binding.profile_id,
+        adapter_id=binding.adapter_id,
+        generation=generation,
+        enrollment_state=enrollment_state,
+        catalog_digest=catalog_digest,
+    )
+    digest = _realm_receipt_seal(payload)
+    return ProviderRealmEnrollmentReceipt(
+        receipt_id=receipt_id,
+        receipt_digest=digest,
+        binding_id=binding.binding_id,
+        profile_id=binding.profile_id,
+        adapter_id=binding.adapter_id,
+        generation=generation,
+        enrollment_state=enrollment_state,
+        catalog_digest=catalog_digest,
+        _seal=digest,
+    )
+
+
+def verify_provider_realm_enrollment_receipt(receipt: Any) -> None:
+    """Re-verify the owner HMAC and the owner-composed receipt_id."""
+
+    from ops.executive_os.provider_realm_facts import (
+        ProviderRealmEnrollmentReceipt,
+        ProviderRealmFactError,
+    )
+
+    if type(receipt) is not ProviderRealmEnrollmentReceipt:
+        raise ProviderRealmFactError("realm_receipt is not an owner-minted instance")
+    expected_id = f"provider-realm:{receipt.binding_id}:{receipt.generation}"
+    if receipt.receipt_id != expected_id:
+        raise ProviderRealmFactError("receipt_id is not owner-issued")
+    expected = _realm_receipt_seal(
+        _realm_receipt_payload(
+            receipt_id=receipt.receipt_id,
+            binding_id=receipt.binding_id,
+            profile_id=receipt.profile_id,
+            adapter_id=receipt.adapter_id,
+            generation=receipt.generation,
+            enrollment_state=receipt.enrollment_state,
+            catalog_digest=receipt.catalog_digest,
+        )
+    )
+    digest = receipt.receipt_digest
+    seal = object.__getattribute__(receipt, "_seal")
+    digest_ok = isinstance(digest, str) and hmac.compare_digest(digest, expected)
+    seal_ok = isinstance(seal, str) and hmac.compare_digest(seal, expected)
+    if not digest_ok or not seal_ok:
+        raise ProviderRealmFactError(
+            "realm_receipt seal does not match receipt_id, receipt_digest, "
+            "enrollment_state, generation"
+        )
+
+
 __all__ = [
     "ALIBABA_TOKEN_PLAN",
     "MINIMAX_TOKEN_PLAN",
@@ -242,6 +407,10 @@ __all__ = [
     "PROVIDER_CREDENTIAL_FILENAME",
     "ProviderCredentialLoader",
     "ProviderRealmError",
+    "issue_provider_realm_enrollment_receipt",
     "load_private_provider_credential",
     "provider_home_credential_loader",
+    "set_provider_realm_test_enrollment",
+    "set_provider_realm_test_key",
+    "verify_provider_realm_enrollment_receipt",
 ]

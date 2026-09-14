@@ -8,8 +8,11 @@ lease path.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
+import hmac
 import json
 import math
+import os
 import re
 from enum import Enum
 from pathlib import Path
@@ -985,6 +988,109 @@ def route_work(
     )
 
 
+# Capacity-fact mint/verify lives on this existing Capacity/Model Router
+# boundary. The test-key slot is an injection seam, not a capacity store.
+_CAPACITY_OWNER_TEST_KEY: bytes | None = None
+
+
+def set_capacity_owner_test_key(key: bytes | None) -> None:
+    """Test-only. Injects the owner HMAC key; refused outside pytest."""
+
+    if os.environ.get("PYTEST_CURRENT_TEST") is None:
+        raise RoutingPolicyError("capacity owner test key is test-only")
+    if key is not None and (not isinstance(key, (bytes, bytearray)) or len(key) < 16):
+        raise RoutingPolicyError("capacity owner test key is invalid")
+    global _CAPACITY_OWNER_TEST_KEY
+    _CAPACITY_OWNER_TEST_KEY = bytes(key) if key is not None else None
+
+
+def _capacity_owner_key() -> bytes:
+    if _CAPACITY_OWNER_TEST_KEY is not None:
+        return _CAPACITY_OWNER_TEST_KEY
+    raise RoutingPolicyError("capacity owner key is not available")
+
+
+def _capacity_fact_payload(
+    *,
+    worker_id: str,
+    state: Any,
+    source: Any,
+    generation: int,
+) -> dict[str, Any]:
+    return {
+        "generation": generation,
+        "source": getattr(source, "value", source),
+        "state": getattr(state, "value", state),
+        "worker_id": worker_id,
+    }
+
+
+def _capacity_fact_seal(payload: Mapping[str, Any]) -> str:
+    canonical = json.dumps(
+        dict(payload),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    )
+    return hmac.new(
+        _capacity_owner_key(),
+        canonical.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def export_capacity_owner_fact(
+    *,
+    worker_id: str,
+    state: Any,
+    generation: int,
+) -> Any:
+    """Mint one keyed-sealed capacity fact. This is the only lawful mint."""
+
+    from control_plane.executive_steward import SourceOwner
+    from ops.executive_os.capacity_owner_facts import CapacityOwnerFact
+
+    payload = _capacity_fact_payload(
+        worker_id=worker_id,
+        state=state,
+        source=SourceOwner.CAPACITY,
+        generation=generation,
+    )
+    return CapacityOwnerFact(
+        worker_id=worker_id,
+        state=state,
+        source=SourceOwner.CAPACITY,
+        generation=generation,
+        _seal=_capacity_fact_seal(payload),
+    )
+
+
+def verify_capacity_owner_fact(fact: Any) -> None:
+    """Re-verify the owner HMAC over the fact's canonical public fields."""
+
+    from ops.executive_os.capacity_owner_facts import (
+        CapacityOwnerFact,
+        CapacityOwnerFactError,
+    )
+
+    if type(fact) is not CapacityOwnerFact:
+        raise CapacityOwnerFactError("capacity_fact is not an owner-minted instance")
+    expected = _capacity_fact_seal(
+        _capacity_fact_payload(
+            worker_id=fact.worker_id,
+            state=fact.state,
+            source=fact.source,
+            generation=fact.generation,
+        )
+    )
+    seal = object.__getattribute__(fact, "_seal")
+    if not isinstance(seal, str) or not hmac.compare_digest(seal, expected):
+        raise CapacityOwnerFactError(
+            "capacity_fact seal does not match worker_id, generation"
+        )
+
+
 __all__ = [
     "ChatReasoningMode",
     "CognitionRoute",
@@ -1001,5 +1107,8 @@ __all__ = [
     "RoutingPolicyError",
     "SuitabilityTier",
     "WorkRequest",
+    "export_capacity_owner_fact",
     "route_work",
+    "set_capacity_owner_test_key",
+    "verify_capacity_owner_fact",
 ]

@@ -101,27 +101,6 @@ def compose_catalog_digest(
     ).hexdigest()
 
 
-def compose_realm_receipt_digest(
-    *,
-    receipt_id: str,
-    binding_id: str,
-    profile_id: str,
-    adapter_id: str,
-    generation: int,
-    catalog_digest: str,
-) -> str:
-    from ops.executive_os.provider_realm_facts import compose_realm_receipt_digest
-
-    return compose_realm_receipt_digest(
-        receipt_id=receipt_id,
-        binding_id=binding_id,
-        profile_id=profile_id,
-        adapter_id=adapter_id,
-        generation=generation,
-        catalog_digest=catalog_digest,
-    )
-
-
 def _public_fields(admission: "SubscriptionCanaryAdmission") -> dict[str, Any]:
     return {
         "adapter_id": admission.adapter_id,
@@ -164,6 +143,8 @@ class SubscriptionCanaryAdmission:
     implementation_state: str
     seal_digest: str
     _seal: object = dataclasses.field(default=None, repr=False, compare=False)
+    _capacity_fact: Any = dataclasses.field(default=None, repr=False, compare=False)
+    _realm_receipt: Any = dataclasses.field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if self._seal is not _SEAL:
@@ -173,21 +154,36 @@ class SubscriptionCanaryAdmission:
             raise CanaryAdmissionError("forged or unsealed canary admission")
 
 
+def _require_owner_facts(capacity_fact: Any, realm_receipt: Any) -> None:
+    from control_plane.codex_provider_realm import (
+        verify_provider_realm_enrollment_receipt,
+    )
+    from control_plane.model_router import verify_capacity_owner_fact
+
+    if type(capacity_fact) is not CapacityOwnerFact:
+        raise CanaryAdmissionError(
+            "capacity_fact: typed capacity fact exported by the Capacity owner is required"
+        )
+    if type(realm_receipt) is not ProviderRealmEnrollmentReceipt:
+        raise CanaryAdmissionError(
+            "realm_receipt: issued provider-realm receipt is required"
+        )
+    verify_capacity_owner_fact(capacity_fact)
+    verify_provider_realm_enrollment_receipt(realm_receipt)
+
+
 def seal_subscription_canary_admission(
     *,
-    capacity_fact: CapacityOwnerFact,
-    realm_receipt: ProviderRealmEnrollmentReceipt,
+    capacity_fact: Any = None,
+    realm_receipt: Any = None,
     bindings_document: Mapping[str, Any] | None = None,
     profiles_document: Mapping[str, Any] | None = None,
     **kwargs: Any,
 ) -> SubscriptionCanaryAdmission:
-    """Seal one admission from existing Capacity and catalog/realm facts."""
+    """Seal one admission from owner-minted Capacity and realm facts."""
 
+    _require_owner_facts(capacity_fact, realm_receipt)
     _reject_raw_booleans(kwargs)
-    if type(capacity_fact) is not CapacityOwnerFact:
-        raise CanaryAdmissionError("typed capacity fact exported by the Capacity owner is required")
-    if type(realm_receipt) is not ProviderRealmEnrollmentReceipt:
-        raise CanaryAdmissionError("issued provider-realm receipt is required")
     worker = _require_token(capacity_fact.worker_id, "worker_id")
     bound_id = _require_token(realm_receipt.binding_id, "binding_id")
     if capacity_fact.worker_id != worker:
@@ -221,15 +217,7 @@ def seal_subscription_canary_admission(
         or realm_receipt.adapter_id != binding.adapter_id
     ):
         raise CanaryAdmissionError("issued realm receipt identity does not match")
-    expected_realm_digest = compose_realm_receipt_digest(
-        receipt_id=realm_receipt.receipt_id,
-        binding_id=binding.binding_id,
-        profile_id=binding.profile_id,
-        adapter_id=binding.adapter_id,
-        generation=realm_receipt.generation,
-        catalog_digest=digest,
-    )
-    if realm_receipt.receipt_digest != expected_realm_digest:
+    if realm_receipt.catalog_digest != digest:
         raise CanaryAdmissionError("issued realm receipt digest does not match the binding")
     fields = {
         "adapter_id": binding.adapter_id,
@@ -263,6 +251,8 @@ def seal_subscription_canary_admission(
         implementation_state=binding.implementation_state,
         seal_digest=_seal_digest(fields),
         _seal=_SEAL,
+        _capacity_fact=capacity_fact,
+        _realm_receipt=realm_receipt,
     )
 
 
@@ -277,6 +267,21 @@ def verify_subscription_canary_admission(
 
     if type(admission) is not SubscriptionCanaryAdmission:
         raise CanaryAdmissionError("canary admission is required")
+    _require_owner_facts(admission._capacity_fact, admission._realm_receipt)
+    if (
+        admission._capacity_fact.worker_id != admission.worker_id
+        or admission._capacity_fact.generation != admission.capacity_generation
+        or admission._capacity_fact.state.value != admission.capacity_state
+        or admission._capacity_fact.source.value != admission.capacity_source
+    ):
+        raise CanaryAdmissionError("capacity_fact does not match admission")
+    if (
+        admission._realm_receipt.receipt_id != admission.realm_receipt_id
+        or admission._realm_receipt.receipt_digest != admission.realm_receipt_digest
+        or admission._realm_receipt.generation != admission.realm_generation
+        or admission._realm_receipt.enrollment_state != "enrolled"
+    ):
+        raise CanaryAdmissionError("realm_receipt does not match admission")
     if admission.adapter_id != adapter_id:
         raise CanaryAdmissionError("admission adapter identity does not match")
     if admission.execution_mode != "interactive_canary":
@@ -310,15 +315,7 @@ def verify_subscription_canary_admission(
         raise CanaryAdmissionError("admission binding identity does not match the catalog")
     if binding.implementation_state == "SPEC_ONLY":
         raise CanaryAdmissionError("implementation_state is SPEC_ONLY")
-    expected_realm = compose_realm_receipt_digest(
-        receipt_id=admission.realm_receipt_id,
-        binding_id=binding.binding_id,
-        profile_id=binding.profile_id,
-        adapter_id=binding.adapter_id,
-        generation=admission.realm_generation,
-        catalog_digest=digest,
-    )
-    if expected_realm != admission.realm_receipt_digest:
+    if admission._realm_receipt.catalog_digest != digest:
         raise CanaryAdmissionError("forged or stale realm receipt digest")
     return admission
 
@@ -328,7 +325,6 @@ __all__ = [
     "CanaryAdmissionError",
     "SubscriptionCanaryAdmission",
     "compose_catalog_digest",
-    "compose_realm_receipt_digest",
     "seal_subscription_canary_admission",
     "verify_subscription_canary_admission",
 ]
