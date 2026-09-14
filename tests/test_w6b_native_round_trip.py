@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import hashlib
 import json
 import os
@@ -23,43 +24,23 @@ from control_plane.executive_agent_capabilities import (
 from control_plane.executive_coo_cycle import CooCycle
 from control_plane.executive_operator_supervisor import ExecutiveOperatorSupervisor
 from control_plane.executive_orchestration_result import (
-    parse_and_validate_envelope,
-    RawRoleResultObservation,
     RESULT_SCHEMA,
     canonical_bytes as result_canonical_bytes,
-    canonical_digest as result_digest,
-)
-from control_plane.executive_orchestration_principal import (
-    OperatorPrincipalObservation,
 )
 from control_plane.executive_runtime import (
     AttemptStatus,
     JobStatus,
     OrchestrationDispatchOutcome,
     Runtime,
+    StateConflict,
 )
-from control_plane.operator_harness_contract import (
-    AuthRealmFact,
-    AuthRealmRequirement,
-    CandidateResult,
-    CapabilityManifest,
-    EventCursor,
-    NativeHelperPolicy,
-    ObservedHarnessAttestation,
-    ObservedTriState,
-    OperationId,
-    ProcessIdentityObservation,
-    ProcessLiveness,
-    ProviderWriterState,
-    ReconcileObservation,
-    RequestedExecutionProfile,
-    TurnStartObservation,
-    WorkspaceIdentity,
-)
+from control_plane.executive_supervisor import ExecutiveSupervisor, SupervisorError
+from control_plane.operator_harness_contract import runtime_binding_id_for
 from control_plane.executive_worker_broker import (
     BrokerPolicy,
     ExecutiveWorkerBroker,
     PeerCredentials,
+    RemoteCodexWorkerAdapter,
     UIDSweepReceipt,
     UID_SWEEP_SCHEMA_VERSION,
     WorkerBrokerClient,
@@ -153,264 +134,19 @@ class _SealedWorker:
 @dataclass
 class _NativeFixture:
     runtime: Runtime
+    runtime_path: Path
     root_id: str
     broker: ExecutiveWorkerBroker
     peer: PeerCredentials
     sweeper: _PassingSweeper
     socket_path: Path
     provider_home: Path
+    workspace_root: Path
     base_sha: str
 
 
 def _python_digest() -> str:
     return hashlib.sha256(Path(sys.executable).resolve().read_bytes()).hexdigest()
-
-
-def _orchestration_profile(
-    fixture: _NativeFixture,
-    dispatch: OrchestrationDispatchOutcome,
-) -> RequestedExecutionProfile:
-    return RequestedExecutionProfile(
-        worker_id=str(dispatch.attempt.worker_id),
-        provider="codex",
-        requested_model="fixture-model",
-        harness_kind="fixture",
-        harness_binary_digest="a" * 64,
-        harness_version="1",
-        workspace=WorkspaceIdentity(
-            workspace_path="/tmp/work",
-            base_sha="b" * 40,
-            device=1,
-            inode=2,
-            uid=os.getuid(),
-            gid=os.getgid(),
-        ),
-        sandbox_policy="read-only",
-        approval_policy="never",
-        network_policy="disabled",
-        capabilities=CapabilityManifest(),
-        native_helper_policy=NativeHelperPolicy.DISABLED,
-        authority_policy_hash=str(dispatch.attempt.authority_policy_hash),
-        auth_realm_requirement=AuthRealmRequirement.SLOT_BOUND_V1,
-    )
-
-
-def _orchestration_attestation(
-    profile: RequestedExecutionProfile,
-) -> ObservedHarnessAttestation:
-    return ObservedHarnessAttestation(
-        served_model=profile.requested_model,
-        harness_version=profile.harness_version,
-        harness_binary_digest=profile.harness_binary_digest,
-        capabilities=(),
-        effective_skills=(),
-        effective_mcp=(),
-        effective_plugins_or_apps=(),
-        sandbox_state=profile.sandbox_policy,
-        approval_state=profile.approval_policy,
-        network_state=profile.network_policy,
-        effective_config_digest=None,
-        auth=AuthRealmFact(
-            worker_id=profile.worker_id, provider=profile.provider
-        ),
-        workspace=profile.workspace,
-        supports_subagent_capability_ceiling=ObservedTriState.UNKNOWN,
-    )
-
-
-def _complete_ohf_role(
-    fixture: _NativeFixture,
-    dispatch: OrchestrationDispatchOutcome,
-    role_result: dict,
-    *,
-    identity_seed: int,
-) -> tuple[dict, dict]:
-    assert dispatch.lease_token is not None
-    runtime = fixture.runtime
-    harness = runtime.operator_harness
-    attempt = dispatch.attempt
-    job = runtime.jobs.get_job(attempt.job_id)
-    assert job is not None and job.orchestration_role
-    profile = _orchestration_profile(fixture, dispatch)
-    sealed = harness.seal_operator_harness_attempt(
-        attempt.attempt_id,
-        fence_generation=attempt.fence_generation,
-        lease_token=dispatch.lease_token,
-        requested=profile,
-    )
-    start = OperationId(f"ohf-op:complete-{identity_seed}-start")
-    epoch, generation = harness.reserve_start(
-        sealed.attempt_id,
-        fence_generation=sealed.fence_generation,
-        lease_token=dispatch.lease_token,
-        operation_id=start,
-    )
-    process = ProcessIdentityObservation(
-        identity_seed, identity_seed, f"start-{identity_seed}", "boot-test"
-    )
-    provider_session = f"SESSION-{identity_seed}"
-    harness.bind_start_result(
-        epoch=epoch,
-        generation=generation,
-        operation_id=start,
-        fence_generation=sealed.fence_generation,
-        lease_token=dispatch.lease_token,
-        provider_session_id=provider_session,
-        process=process,
-    )
-    principal = OperatorPrincipalObservation(
-        attempt_id=sealed.attempt_id,
-        worker_id=str(sealed.worker_id),
-        process_generation_id=generation.process_generation_id,
-        provider_session_id=provider_session,
-        process_identity={
-            "pid": process.pid,
-            "pgid": process.pgid,
-            "process_start_identity": process.process_start_identity,
-            "boot_id": process.boot_id,
-        },
-        os_principal_name=f"fixture-principal-{identity_seed}",
-        os_principal_uid=identity_seed,
-        provider_home_identity={
-            "path": f"/tmp/phase1fc-codex-home-{identity_seed}",
-            "device": identity_seed,
-            "inode": identity_seed + 1,
-            "uid": identity_seed,
-            "gid": identity_seed,
-            "mode": 0o700,
-        },
-        observed_at_ms=runtime.store.now_ms(),
-    )
-    harness.seal_attestation(
-        generation=generation,
-        fence_generation=sealed.fence_generation,
-        lease_token=dispatch.lease_token,
-        requested=profile,
-        attestation=_orchestration_attestation(profile),
-        principal_observation=principal,
-    )
-    turn_operation = OperationId(f"ohf-op:complete-{identity_seed}-turn")
-    turn = harness.reserve_turn(
-        epoch=epoch,
-        generation=generation,
-        operation_id=turn_operation,
-        fence_generation=sealed.fence_generation,
-        lease_token=dispatch.lease_token,
-    )
-    native_turn = f"NATIVE-{identity_seed}"
-    harness.acknowledge_turn(
-        turn=turn,
-        operation_id=turn_operation,
-        fence_generation=sealed.fence_generation,
-        lease_token=dispatch.lease_token,
-        observation=TurnStartObservation(native_turn, True),
-    )
-    artifact_digest = hashlib.sha256(
-        f"artifact-{identity_seed}".encode()
-    ).hexdigest()
-    harness.record_candidate_evidence(
-        turn=turn,
-        candidate=CandidateResult(
-            attempt.attempt_id,
-            epoch.session_epoch_id,
-            generation.process_generation_id,
-            artifact_digest,
-            "typed fixture candidate",
-        ),
-        events=(),
-        cursor=EventCursor(
-            attempt.attempt_id,
-            epoch.session_epoch_id,
-            generation.process_generation_id,
-            turn_id=turn.turn_id,
-        ),
-        fence_generation=sealed.fence_generation,
-        lease_token=dispatch.lease_token,
-    )
-    envelope = {
-        "schema_version": RESULT_SCHEMA,
-        "job_id": job.job_id,
-        "run_id": attempt.attempt_id,
-        "worker_id": str(attempt.worker_id),
-        "role": job.orchestration_role,
-        "status": "COMPLETED",
-        "role_result": role_result,
-        "summary": "bounded typed fixture result",
-        "current_state": "complete",
-        "next_actions": [],
-        "errors": [],
-        "validations": [],
-    }
-    canonical = result_canonical_bytes(envelope).decode("utf-8")
-    parse_and_validate_envelope(
-        canonical,
-        expected_job_id=job.job_id,
-        expected_run_id=attempt.attempt_id,
-        expected_worker_id=str(attempt.worker_id),
-        expected_role=job.orchestration_role,
-        expected_root_job_id=str(job.root_job_id),
-    )
-    observation = RawRoleResultObservation(
-        attempt_id=attempt.attempt_id,
-        session_epoch_id=epoch.session_epoch_id,
-        process_generation_id=generation.process_generation_id,
-        turn_id=turn.turn_id,
-        provider_session_id=provider_session,
-        provider_native_turn_id=native_turn,
-        provider_turn_artifact_digest=artifact_digest,
-        canonical_result_json=canonical,
-        canonical_result_digest=hashlib.sha256(
-            canonical.encode()
-        ).hexdigest(),
-        canonical_result_byte_length=len(canonical.encode()),
-    )
-    seal = harness.seal_orchestration_role_result(
-        turn=turn,
-        observation=observation,
-        fence_generation=sealed.fence_generation,
-        lease_token=dispatch.lease_token,
-    )
-    death = ReconcileObservation(
-        process_liveness=ProcessLiveness.PROVEN_DEAD,
-        observed_process=process,
-        provider_session_reachable=True,
-        provider_writer_state=ProviderWriterState.RELEASED,
-        observed_provider_session_id=provider_session,
-    )
-    harness.record_graceful_stop(
-        generation=generation,
-        observation=death,
-        fence_generation=sealed.fence_generation,
-        lease_token=dispatch.lease_token,
-    )
-    harness.abandon_epoch(
-        epoch=epoch,
-        fence_generation=sealed.fence_generation,
-        lease_token=dispatch.lease_token,
-    )
-    terminal = {
-        "schema_version": "mastermind.orchestration_terminal_receipt/v1",
-        "status": "COMPLETED",
-        "job_id": job.job_id,
-        "attempt_id": attempt.attempt_id,
-        "orchestration_role": job.orchestration_role,
-        "execution_mode": "OPERATOR_HARNESS",
-        "result_seal_command_id": f"orchestration-result-seal:{attempt.attempt_id}",
-        "result_evidence": None,
-        "result_envelope": envelope,
-        "result_envelope_digest": result_digest(envelope),
-        "artifact_receipt_digest": result_digest([]),
-        "validation_receipt_digest": result_digest([]),
-        "effective_grant_digest": attempt.effective_grant_digest,
-    }
-    terminal["terminal_evidence_digest"] = result_digest(terminal)
-    runtime.attempts.complete_attempt(
-        attempt.attempt_id,
-        fence_generation=sealed.fence_generation,
-        lease_token=dispatch.lease_token,
-        payload=terminal,
-    )
-    return seal, terminal
 
 
 def _planner_result(root_id: str, attempt_id: str) -> dict:
@@ -477,28 +213,18 @@ def _make_git_workspace(root: Path, name: str, branch: str) -> tuple[Path, str]:
     return workspace, head
 
 
-def _native_fixture(tmp_path: Path) -> _NativeFixture:
-    workspace_root = tmp_path / "workspaces"
-    run_root = tmp_path / "runs"
-    provider_home = tmp_path / "provider-home"
-    for path in (workspace_root, run_root, provider_home):
-        path.mkdir(parents=True, mode=0o700)
-    workspace, base_sha = _make_git_workspace(
-        workspace_root, "w6b-root", "codex/w6b-fixture"
-    )
+def _build_broker(
+    workspace_root: Path,
+    provider_home: Path,
+) -> tuple[ExecutiveWorkerBroker, _PassingSweeper, Path]:
     python = Path(sys.executable).resolve()
     fake_state = provider_home / "fake-app-server-state.json"
-    (provider_home / "auth.json").write_text(
-        "fixture marker, not a credential\n", encoding="utf-8"
-    )
-    (provider_home / "auth.json").chmod(0o600)
     router = ModelRouter.load()
     operator = router.model_aliases["coo.operator.readonly"]
     capability_profile = ExecutionCapabilityRegistry.load().resolve(
         operator.execution_profile_id
     )
-    fake_mcp_projection = _FAKE_MCP_PROJECTION
-    expected_config_digest = app_server_security_config_digest(fake_mcp_projection)
+    expected_config_digest = app_server_security_config_digest(_FAKE_MCP_PROJECTION)
     assert expected_config_digest == capability_profile.expected_config_digest
 
     def operator_factory(_workspace, turn_loader, requested):
@@ -535,7 +261,7 @@ def _native_fixture(tmp_path: Path) -> _NativeFixture:
         worker_user="fixture-worker",
         worker_id="worker-a",
         workspace_root=workspace_root,
-        run_root=run_root,
+        run_root=workspace_root.parent / "runs",
         provider_home=provider_home,
         allowed_supplementary_gids=frozenset(set(os.getgroups()) - {os.getegid()}),
     )
@@ -556,8 +282,27 @@ def _native_fixture(tmp_path: Path) -> _NativeFixture:
         Path(tempfile.gettempdir())
         / f"mm-w6b-{os.getpid()}-{os.urandom(4).hex()}.sock"
     )
+    return broker, sweeper, socket_path
 
-    runtime = Runtime.at(tmp_path / "runtime")
+
+def _native_fixture(tmp_path: Path) -> _NativeFixture:
+    workspace_root = tmp_path / "workspaces"
+    run_root = tmp_path / "runs"
+    provider_home = tmp_path / "provider-home"
+    for path in (workspace_root, run_root, provider_home):
+        path.mkdir(parents=True, mode=0o700)
+    workspace, base_sha = _make_git_workspace(
+        workspace_root, "w6b-root", "codex/w6b-fixture"
+    )
+    (provider_home / "auth.json").write_text(
+        "fixture marker, not a credential\n", encoding="utf-8"
+    )
+    (provider_home / "auth.json").chmod(0o600)
+    router = ModelRouter.load()
+    operator = router.model_aliases["coo.operator.readonly"]
+    broker, sweeper, socket_path = _build_broker(workspace_root, provider_home)
+    runtime_path = tmp_path / "runtime"
+    runtime = Runtime.at(runtime_path)
     binding = {
         "eligible_quota_classes": ["codex-coo-default"],
         "provider": operator.provider_alias,
@@ -671,23 +416,29 @@ def _native_fixture(tmp_path: Path) -> _NativeFixture:
     )
     return _NativeFixture(
         runtime=runtime,
+        runtime_path=runtime_path,
         root_id=str(receipt["job_id"]),
         broker=broker,
         peer=broker.peer_resolver(object()),
         sweeper=sweeper,
         socket_path=socket_path,
         provider_home=provider_home,
+        workspace_root=workspace_root,
         base_sha=base_sha,
     )
 
 
-def _plan_reply(fixture: _NativeFixture, attempt_id: str) -> str:
-    value = _planner_result(fixture.root_id, attempt_id)
-    value["job_id"] = fixture.runtime.attempts.get_attempt(attempt_id).job_id
+def _plan_reply(runtime: Runtime, root_id: str, attempt_id: str) -> str:
+    value = _planner_result(root_id, attempt_id)
+    value["job_id"] = runtime.attempts.get_attempt(attempt_id).job_id
     return _canonical_result(value)
 
 
-def _with_fake_reply(fixture: _NativeFixture, monkeypatch, reply: str) -> None:
+def _with_fake_reply(
+    monkeypatch,
+    reply: str,
+    requests: list[str] | None = None,
+) -> None:
     monkeypatch.setenv("OHF_FAKE_TURN_REPLY", reply)
     from control_plane import codex_operator_adapter
 
@@ -701,6 +452,8 @@ def _with_fake_reply(fixture: _NativeFixture, monkeypatch, reply: str) -> None:
     def sealed_harness_version_request(
         client, method: str, params=None, *args, **kwargs
     ):
+        if requests is not None:
+            requests.append(method)
         result = original_request(client, method, params, *args, **kwargs)
         if method == "initialize" and isinstance(result, dict):
             if result.get("userAgent") == FAKE_HARNESS_VERSION:
@@ -773,6 +526,7 @@ def _with_fake_reply(fixture: _NativeFixture, monkeypatch, reply: str) -> None:
         "request",
         sealed_harness_version_request,
     )
+
     def sealed_request_raw_turn_page(client, **kwargs):
         result = client.request(
             "thread/turns/list",
@@ -798,267 +552,286 @@ def _with_fake_reply(fixture: _NativeFixture, monkeypatch, reply: str) -> None:
     )
 
 
-class _PromptSource:
-    def _prompt(self, *_args):
-        return "Return one sealed reviewed W6-B plan."
+def _bind_supervisors(
+    runtime: Runtime, socket_path: Path
+) -> tuple[ExecutiveOperatorSupervisor, ExecutiveSupervisor]:
+    """Real production owners used by ExecutiveService._dispatch_cycle_job_exact."""
 
-
-async def _dispatch_plan(
-    fixture: _NativeFixture,
-    server: asyncio.AbstractServer,
-    *,
-    worker_id: str | None = None,
-) -> OrchestrationDispatchOutcome:
-    client = WorkerBrokerClient(fixture.socket_path, timeout_seconds=15.0)
-    supervisor = ExecutiveOperatorSupervisor(
-        fixture.runtime,
+    client = WorkerBrokerClient(socket_path, timeout_seconds=15.0)
+    sealed = ExecutiveSupervisor(
+        runtime,
+        RemoteCodexWorkerAdapter(client),
+        instance_id="executive-supervisor",
+    )
+    operator = ExecutiveOperatorSupervisor(
+        runtime,
         adapter_factory=lambda loader: RemoteCodexOperatorAdapter(
             client, turn_input_loader=loader
         ),
-        prompt_source=_PromptSource(),
+        prompt_source=sealed,
         instance_id="executive-coo-operator",
     )
-    planner = fixture.runtime.jobs.get_job(fixture.root_id)
-    assert planner is not None
-    children = [
-        job
-        for job in fixture.runtime.jobs.list_jobs()
-        if job.parent_job_id == fixture.root_id
-    ]
-    assert len(children) == 1
-    planner = children[0]
-    return await supervisor.start_cycle_job(
-        planner.job_id,
-        command_id=(
-            f"coo-cycle:{fixture.root_id}:dispatch:{planner.job_id}:attempt:1"
-        ),
-    ) if worker_id is None else await supervisor.start_cycle_job(
-        planner.job_id,
-        command_id=(
-            f"coo-cycle:{fixture.root_id}:dispatch:{planner.job_id}:attempt:1"
-        ),
-        worker_id=worker_id,
+    return operator, sealed
+
+
+async def _start_via_production_route(
+    operator: ExecutiveOperatorSupervisor,
+    sealed: ExecutiveSupervisor,
+    runtime: Runtime,
+    job_id: str,
+    command_id: str,
+) -> OrchestrationDispatchOutcome:
+    """Mirror control_plane/executive_service.py:_dispatch_cycle_job_exact routing."""
+
+    job = runtime.jobs.get_job(job_id)
+    if job is None:
+        raise StateConflict(f"job {job_id!r} does not exist")
+    supervisor: ExecutiveOperatorSupervisor | ExecutiveSupervisor = (
+        operator if job.orchestration_role == "plan" else sealed
     )
+    started = await supervisor.start_cycle_job(job_id, command_id=command_id)
+    if isinstance(started, OrchestrationDispatchOutcome):
+        return started
+    raise SupervisorError("sealed start_cycle_job returned an ActiveRun without a cycle outcome")
+
+
+def _session_epoch_id(runtime: Runtime, attempt_id: str) -> str:
+    with runtime.store.read() as connection:
+        rows = connection.execute(
+            "SELECT session_epoch_id FROM harness_session_epochs WHERE attempt_id=?",
+            (attempt_id,),
+        ).fetchall()
+    if rows:
+        return str(rows[0]["session_epoch_id"])
+    return f"sealed-worker:{attempt_id}"
+
+
+def _assert_hop_identity(
+    runtime: Runtime,
+    *,
+    command_id: str,
+    attempt_id: str,
+    job_id: str | None = None,
+) -> str:
+    assert command_id
+    assert attempt_id
+    event = runtime.events.get_event_by_command_id(command_id)
+    assert event is not None
+    assert event.attempt_id == attempt_id
+    if job_id is not None:
+        assert event.job_id == job_id
+    binding_id = runtime_binding_id_for(attempt_id, _session_epoch_id(runtime, attempt_id))
+    assert binding_id.startswith("bind-")
+    assert len(binding_id) == 45
+    return binding_id
 
 
 def test_w6b_native_round_trip_and_crash_after_dispatch_replay(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
+    source = Path(__file__).read_text(encoding="utf-8")
+    banned = (
+        "dispatch_existing_attempt",
+        "crash_after_dispatch",
+        "_complete_ohf_role",
+    )
+    for name in banned:
+        assert f"def {name}(" not in source
+
     fixture = _native_fixture(tmp_path)
-    dispatches: list[OrchestrationDispatchOutcome] = []
-
-    def crash_after_dispatch(job_id: str, command_id: str):
-        job = fixture.runtime.jobs.get_job(job_id)
-        assert job is not None
-        worker_id = (
-            "worker-b"
-            if job.orchestration_role == "review"
-            else None
-            if job.orchestration_role == "plan"
-            else "worker-a"
-        )
-        quota_class = (
-            None
-            if job.orchestration_role == "plan"
-            else "codex-coo-default"
-        )
-        outcome = fixture.runtime.attempts.dispatch_cycle_job(
-            job_id,
-            command_id=command_id,
-            worker_id=worker_id,
-            quota_class=quota_class,
-            lease_owner="executive-coo-operator",
-        )
-        assert outcome is not None
-        dispatches.append(outcome)
-        raise RuntimeError("simulated crash after dispatch")
-
-    def dispatch_existing_attempt(job_id: str, command_id: str):
-        job = fixture.runtime.jobs.get_job(job_id)
-        assert job is not None
-        worker_id = (
-            "worker-b"
-            if job.orchestration_role == "review"
-            else None
-            if job.orchestration_role == "plan"
-            else "worker-a"
-        )
-        quota_class = (
-            None
-            if job.orchestration_role == "plan"
-            else "codex-coo-default"
-        )
-        outcome = fixture.runtime.attempts.dispatch_cycle_job(
-            job_id,
-            command_id=command_id,
-            worker_id=worker_id,
-            quota_class=quota_class,
-            lease_owner="executive-coo-operator",
-        )
-        assert outcome is not None
-        dispatches.append(outcome)
-        return outcome
+    runtime_path = fixture.runtime_path
+    broker_accepts: list[str] = []
+    app_server_requests: list[str] = []
+    sealed_starts: list[tuple[str, str]] = []
 
     async def scenario() -> None:
-        cycle = CooCycle(fixture.runtime)
-        created = cycle.run_once(fixture.root_id)
+        loop = asyncio.get_running_loop()
+        live_runtime = fixture.runtime
+        live_broker = fixture.broker
+        root_id = fixture.root_id
+        workspace_root = fixture.workspace_root
+        provider_home = fixture.provider_home
+        socket_path = fixture.socket_path
+        created = CooCycle(live_runtime).run_once(root_id)
         assert created.action == "PLANNER_CREATED"
         planner_id = str(created.selected_job_id)
-        assert created.command_id == f"coo-cycle:{fixture.root_id}:create-planner:0"
+        planner_create_command = f"coo-cycle:{root_id}:create-planner:0"
+        assert created.command_id == planner_create_command
 
-        crashing_cycle = CooCycle(
-            fixture.runtime,
-            dispatcher=crash_after_dispatch,
+        first_operator, first_sealed = _bind_supervisors(
+            live_runtime, socket_path
         )
+
+        def raise_after_claim(self, job, lease):
+            del self, job, lease
+            raise RuntimeError("simulated crash after dispatch")
+
+        first_operator._run_claimed = raise_after_claim.__get__(
+            first_operator, type(first_operator)
+        )
+
+        def first_dispatch(job_id: str, command_id: str):
+            return asyncio.run_coroutine_threadsafe(
+                _start_via_production_route(
+                    first_operator,
+                    first_sealed,
+                    live_runtime,
+                    job_id,
+                    command_id,
+                ),
+                loop,
+            ).result(timeout=30)
+
         with pytest.raises(RuntimeError, match="simulated crash after dispatch"):
-            crashing_cycle.run_once(fixture.root_id)
-        planner = fixture.runtime.jobs.get_job(planner_id)
+            await asyncio.to_thread(
+                CooCycle(live_runtime, dispatcher=first_dispatch).run_once,
+                root_id,
+            )
+        planner = live_runtime.jobs.get_job(planner_id)
         assert planner is not None
         assert planner.attempt_count == 1
-        crash_attempt_id = planner.current_attempt_id
-        assert crash_attempt_id
-        assert len(fixture.runtime.attempts.list_attempts(planner_id)) == 1
-
-        replay = CooCycle(
-            fixture.runtime,
-            dispatcher=dispatch_existing_attempt,
-        ).run_once(fixture.root_id)
-        assert replay.action == "DISPATCHED"
-        assert replay.command_id == (
-            f"coo-cycle:{fixture.root_id}:dispatch:{planner_id}:attempt:1"
+        crash_attempt_id = str(planner.current_attempt_id)
+        planner_command = (
+            f"coo-cycle:{root_id}:dispatch:{planner_id}:attempt:1"
         )
-        assert replay.receipt["attempt"]["attempt_id"] == crash_attempt_id
-        assert fixture.runtime.jobs.get_job(planner_id).attempt_count == 1
-        assert len(fixture.runtime.attempts.list_attempts(planner_id)) == 1
+        assert live_runtime.events.get_event_by_command_id(planner_command)
+        assert len(live_runtime.attempts.list_attempts(planner_id)) == 1
+        assert broker_accepts == []
 
-        # Return the same durable Attempt through the checked-in fake App Server.
+        fixture.runtime = None  # type: ignore[assignment]
+        fixture.broker = None  # type: ignore[assignment]
+        del first_dispatch, first_operator, first_sealed, live_runtime, live_broker
+        gc.collect()
+
+        runtime = Runtime.at(runtime_path)
+        broker, _sweeper, _ignored_socket = _build_broker(workspace_root, provider_home)
+        broker_accepts.clear()
+
+        async def counting_handle(reader, writer):
+            broker_accepts.append("accept")
+            return await broker.handle_connection(reader, writer)
+
         server = await asyncio.start_unix_server(
-            fixture.broker.handle_connection,
-            path=str(fixture.socket_path),
+            counting_handle,
+            path=str(socket_path),
             limit=4 * 1024 * 1024,
         )
         try:
             _with_fake_reply(
-                fixture,
                 monkeypatch,
-                _plan_reply(fixture, crash_attempt_id),
+                _plan_reply(runtime, root_id, crash_attempt_id),
+                requests=app_server_requests,
             )
-            native = await asyncio.to_thread(
-                lambda: asyncio.run(_dispatch_plan(fixture, server))
+            operator, sealed = _bind_supervisors(runtime, socket_path)
+            original_sealed_start = sealed.start_cycle_job
+
+            async def counting_sealed_start(job_id: str, *, command_id: str):
+                sealed_starts.append((job_id, command_id))
+                return await original_sealed_start(job_id, command_id=command_id)
+
+            sealed.start_cycle_job = counting_sealed_start  # type: ignore[method-assign]
+
+            def dispatch(job_id: str, command_id: str):
+                return asyncio.run_coroutine_threadsafe(
+                    _start_via_production_route(
+                        operator, sealed, runtime, job_id, command_id
+                    ),
+                    loop,
+                ).result(timeout=30)
+
+            replay = await asyncio.to_thread(
+                CooCycle(runtime, dispatcher=dispatch).run_once,
+                root_id,
+            )
+            assert replay.action == "DISPATCHED"
+            assert replay.command_id == planner_command
+            assert replay.receipt["attempt"]["attempt_id"] == crash_attempt_id
+            assert runtime.jobs.get_job(planner_id).attempt_count == 1
+            assert len(runtime.attempts.list_attempts(planner_id)) == 1
+            assert broker_accepts, "planner hop must accept on the Worker Broker socket"
+            assert "initialize" in app_server_requests
+            assert app_server_requests.count("initialize") == 1
+            planner_binding = _assert_hop_identity(
+                runtime,
+                command_id=planner_command,
+                attempt_id=crash_attempt_id,
+                job_id=planner_id,
             )
         finally:
             server.close()
             await server.wait_closed()
-            fixture.socket_path.unlink(missing_ok=True)
+            socket_path.unlink(missing_ok=True)
 
-        assert native.outcome == "TERMINAL"
-        assert native.attempt.attempt_id == crash_attempt_id
-        assert native.command_id == replay.command_id
-        planner = fixture.runtime.jobs.get_job(planner_id)
+        planner = runtime.jobs.get_job(planner_id)
         assert planner is not None and planner.status is JobStatus.COMPLETED
-        attempt = fixture.runtime.attempts.get_attempt(crash_attempt_id)
+        attempt = runtime.attempts.get_attempt(crash_attempt_id)
         assert attempt is not None and attempt.status is AttemptStatus.COMPLETED
-        seal = fixture.runtime.events.get_event_by_command_id(
+        seal = runtime.events.get_event_by_command_id(
             f"orchestration-result-seal:{crash_attempt_id}"
         )
         assert seal is not None
-        materialization = fixture.runtime.events.get_event_by_command_id(
+        materialization = runtime.events.get_event_by_command_id(
             f"ohf-op:start:{crash_attempt_id}"
         )
         assert materialization is not None
         assert materialization.attempt_id == crash_attempt_id
-        binding = seal.payload["result_envelope"]
-        assert binding["run_id"] == crash_attempt_id
-        assert binding["job_id"] == planner_id
-        assert binding["role_result"]["root_job_id"] == fixture.root_id
+        envelope = seal.payload["result_envelope"]
+        assert envelope["run_id"] == crash_attempt_id
+        assert envelope["job_id"] == planner_id
+        assert envelope["role_result"]["root_job_id"] == root_id
+        assert planner_binding == runtime_binding_id_for(
+            crash_attempt_id, _session_epoch_id(runtime, crash_attempt_id)
+        )
 
-        admitted = CooCycle(fixture.runtime).run_once(fixture.root_id)
+        admitted = CooCycle(runtime).run_once(root_id)
         assert admitted.action == "PLAN_ADMITTED"
         work_id = admitted.receipt["work_job_ids"][0]
-        work_dispatched = CooCycle(
-            fixture.runtime,
-            dispatcher=dispatch_existing_attempt,
-        ).run_once(fixture.root_id)
-        assert work_dispatched.action == "DISPATCHED"
-        assert work_dispatched.selected_job_id == work_id
-        work_attempt_id = work_dispatched.receipt["attempt"]["attempt_id"]
-        work_dispatch = dispatches[-1]
-        assert work_attempt_id == work_dispatch.attempt.attempt_id
-        plan_digest = result_digest(_planner_result(fixture.root_id, crash_attempt_id)["role_result"])
-        work_body = {
-            "schema_version": "mastermind.work_result/v1",
-            "root_job_id": fixture.root_id,
-            "plan_attempt_id": crash_attempt_id,
-            "plan_digest": plan_digest,
-            "plan_step_id": "step-1",
-            "repair_round": 0,
-            "artifacts": [],
-            "evidence_digests": [],
-        }
-        work_seal, _ = _complete_ohf_role(
-            fixture,
-            work_dispatch,
-            work_body,
-            identity_seed=3102,
-        )
+        work_command = f"coo-cycle:{root_id}:dispatch:{work_id}:attempt:1"
 
-        review_created = CooCycle(fixture.runtime).run_once(fixture.root_id)
-        assert review_created.action == "REVIEW_CREATED"
-        assert review_created.selected_job_id is not None
-        review_id = str(review_created.selected_job_id)
-        assert review_created.command_id == (
-            f"coo-cycle:{fixture.root_id}:create-review:{work_id}:1"
-        )
-        review_dispatched = CooCycle(
-            fixture.runtime,
-            dispatcher=dispatch_existing_attempt,
-        ).run_once(fixture.root_id)
-        assert review_dispatched.action == "DISPATCHED"
-        assert review_dispatched.selected_job_id == review_id
-        review_dispatch = dispatches[-1]
-        assert review_dispatch.attempt.attempt_id == (
-            review_dispatched.receipt["attempt"]["attempt_id"]
-        )
-        review_body = {
-            "schema_version": "mastermind.review_result/v1",
-            "root_job_id": fixture.root_id,
-            "plan_attempt_id": crash_attempt_id,
-            "plan_digest": plan_digest,
-            "plan_step_id": "step-1",
-            "reviewed_job_id": work_id,
-            "reviewed_attempt_id": work_dispatch.attempt.attempt_id,
-            "reviewed_result_digest": work_seal["role_result_digest"],
-            "repair_round": 0,
-            "verdict": "approve",
-            "evidence_digests": [],
-            "findings": [],
-        }
-        _complete_ohf_role(
-            fixture,
-            review_dispatch,
-            review_body,
-            identity_seed=3103,
-        )
-        handoff = CooCycle(fixture.runtime).run_once(fixture.root_id)
-        assert handoff.action == "HANDOFF_CREATED"
-        next_child = CooCycle(
-            fixture.runtime,
-            dispatcher=dispatch_existing_attempt,
-        ).run_once(fixture.root_id)
-        assert next_child.action == "DISPATCHED"
-        assert next_child.selected_job_id == fixture.root_id
-        assert next_child.command_id == (
-            f"coo-cycle:{fixture.root_id}:dispatch:{fixture.root_id}:attempt:1"
-        )
+        with pytest.raises(
+            StateConflict, match="App Server supervisor accepts only planner Jobs"
+        ):
+            await operator.start_cycle_job(work_id, command_id=work_command)
 
-        # Exact durable command/attempt identity across the native hop.
-        claim = fixture.runtime.events.get_event_by_command_id(replay.command_id)
-        assert claim is not None and claim.attempt_id == crash_attempt_id
-        assert seal.attempt_id == crash_attempt_id
-        assert materialization.attempt_id == crash_attempt_id
-        assert fixture.runtime.jobs.get_job(work_id) is not None
-        assert fixture.runtime.jobs.get_job(review_id) is not None
+        with pytest.raises(SupervisorError, match="unimplemented surface"):
+            await asyncio.to_thread(
+                CooCycle(runtime, dispatcher=dispatch).run_once,
+                root_id,
+            )
+        work = runtime.jobs.get_job(work_id)
+        assert work is not None
+        assert work.attempt_count == 1
+        work_attempt_id = str(work.current_attempt_id)
+        assert sealed_starts == [(work_id, work_command)]
+        work_binding = _assert_hop_identity(
+            runtime,
+            command_id=work_command,
+            attempt_id=work_attempt_id,
+            job_id=work_id,
+        )
+        assert work_binding == runtime_binding_id_for(
+            work_attempt_id, f"sealed-worker:{work_attempt_id}"
+        )
+        # FINDING: work launch cannot complete hermetically. The sealed
+        # supervisor claims via start_cycle_job then refuses the operator/MCP
+        # profile at control_plane/executive_supervisor.py:1020-1022. The
+        # operator supervisor refuses non-plan work at
+        # control_plane/executive_operator_supervisor.py:808-809. Completing
+        # work/review/root would require a second fake (sealed Codex process).
+        # Review / aggregation / next-child therefore do not run.
+        review_jobs = [
+            job
+            for job in runtime.jobs.list_jobs()
+            if job.orchestration_role == "review"
+        ]
+        assert review_jobs == []
+        aggregation_command = f"coo-cycle:{root_id}:aggregation-handoff:1"
+        assert aggregation_command == f"coo-cycle:{root_id}:aggregation-handoff:1"
+        assert runtime.events.get_event_by_command_id(aggregation_command) is None
+        next_child_command = f"coo-cycle:{root_id}:dispatch:{root_id}:attempt:1"
+        assert runtime.events.get_event_by_command_id(next_child_command) is None
+        assert app_server_requests.count("initialize") == 1
 
     asyncio.run(scenario())
 
