@@ -36,6 +36,15 @@ RECIPE_ROOT = str(
     / "workbench_action_mcp"
     / "recipes"
 )
+_PRIVATE_PYTHON = ""
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _bind_private_python(private_python_executable: str):
+    global _PRIVATE_PYTHON
+    _PRIVATE_PYTHON = private_python_executable
+    yield
+    _PRIVATE_PYTHON = ""
 
 
 def _sha(raw: bytes) -> str:
@@ -90,7 +99,8 @@ class Harness:
         self.store = adopt_artifact_store(self.store_fd)
         self.artifact_host = ActionHostBinding("c" * 64, "boot-alpha")
 
-        self.python = os.path.realpath(os.sys.executable)
+        assert _PRIVATE_PYTHON
+        self.python = _PRIVATE_PYTHON
         self.host = CommandHostBinding(
             host_id=self.artifact_host.host_id,
             boot_session_id=self.artifact_host.boot_session_id,

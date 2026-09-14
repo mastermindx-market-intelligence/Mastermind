@@ -48,6 +48,7 @@ COMMAND_TOOLS = {
     "read_action_result",
     "reconcile_action",
 }
+_PRIVATE_PYTHON = ""
 ALL_TOOLS = {
     "workspace_manifest",
     "read_project_file",
@@ -63,9 +64,18 @@ def _file_sha256(path: str) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _bind_private_python(private_python_executable: str):
+    global _PRIVATE_PYTHON
+    _PRIVATE_PYTHON = private_python_executable
+    yield
+    _PRIVATE_PYTHON = ""
+
+
 def _command_document(tmp_path):
     document, project, audit, key = _document(tmp_path)
-    python = os.path.realpath(sys.executable)
+    assert _PRIVATE_PYTHON
+    python = _PRIVATE_PYTHON
     document.update(
         {
             "python_executable": python,
