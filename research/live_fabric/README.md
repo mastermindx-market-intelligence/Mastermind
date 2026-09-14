@@ -1,22 +1,36 @@
-# Live Fabric — active build reading index
+# Live Fabric / Mastermind OS — active architecture reading index
 
-**Workstream:** WS:CHAIRMAN-CONTROL-ROOM. **Source carrier:** Mastermind PR #595. **State:** design/source candidates; no installed Live Fabric capability or delegated build START is established by these records.
+**Workstream:** WS:CHAIRMAN-CONTROL-ROOM. **Source carrier:** Mastermind PR #595. **State:** design/source candidates; no installed Live Fabric capability or new delegated build START is established by these records.
 
-## Start with these three contracts
+## Current systems view
 
-1. [Conversation workspace](../../docs/superpowers/specs/2026-09-13-live-fabric-conversation-workspace-design.md): the user experience is full available conversations, exact recipients and context on demand, not a dashboard with transcript excerpts.
-2. [Deterministic topology](../../docs/superpowers/specs/2026-09-13-live-fabric-deterministic-topology-contract.md): work is recorded with lineage at creation; the graph is derived without a labeling model. This contains the actual inspected direct-child and plan-schema ceilings.
-3. [Connected-suite contract map](2026-09-13-connected-suite-contract-map.md): actual producer, identity, capability and consumer boundaries, including Executive app #599, Workspace supervision #603/#7130, provider content and Workbench.
+Start with the [Mastermind OS integration blueprint](../../docs/superpowers/specs/2026-09-13-mastermind-os-integration-blueprint.md). It explains how the operating workspace composes the existing company rather than becoming another OS: deterministic relationship creation, conversation and execution separation, Linear/Workroom integration, existing backend boundaries, optional Workspace supervision, remote access, the later systems-design board and one useful cross-system acceptance journey.
 
-Then use the [dynamic masterplan](../../docs/superpowers/plans/2026-09-13-live-fabric-dynamic-masterplan.md) for delivery sequencing. Its first slice is tightened by the conversation and deterministic-topology contracts: actual nonterminal content and authorized available history are required, and unsupported hierarchy/typed dependencies need their owning integration rather than visual invention.
+This is an integration view above the contracts below, not a replacement Fable execution plan or another prerequisite for the incumbent's already-admitted repairs. Current evidence was re-read at Mastermind `4c148709f52ff036d71dd212abd2688212d91ed0` and Macro `9d0ed2ff4c1fb11637d99461ab430cadb743b5d0`.
 
-The [dynamic architecture](../../docs/superpowers/specs/2026-09-13-live-fabric-dynamic-orchestration-addendum.md) remains the detailed transport, remote web/Mac, provider compatibility and routing explanation reference where not narrowed above. The first [design](../../docs/superpowers/specs/2026-09-13-mastermind-live-fabric-design.md) preserves authority/effect/privacy laws; its graph-first screen organization is superseded.
+Important current corrections:
 
-## One current prototype, not five competing products
+- #599 is now merged as source, `0ae0ad3c8729e4ffea1ee6cf342bff633708a744`; its current PR still leaves production installation and real client acceptance pending. Do not repeat its old Draft status or call it live from merge.
+- Incumbent Fable already owns the fabric integration under #600 and operation `agent-fabric-end-to-end-fable-integration-20260913-sol-001`. The session-messaging handoff supplements that existing program; no second Fable, source writer or runtime is created here.
+- Linear/Slack Project Workroom Fabric already supplies the protected collaboration architecture. The existing Project/Initiative compilers and projector ownership must be consumed, not replaced with another bidirectional synchronizer.
+- The live Linear CCR Project belongs to the existing Autonomous AI Organization Initiative. Old zero-Initiative estate prose is historical, not today's object graph.
+- **Figma is paused by current Chairman direction.** Do not call it until the Chairman confirms reconnection. The prototype inventory below is the last verified checkpoint, not a new observation in this pass.
+
+## Implementation contracts, in reading order
+
+1. [Conversation workspace](../../docs/superpowers/specs/2026-09-13-live-fabric-conversation-workspace-design.md): full available conversations, exact recipients and context on demand, not a dashboard with transcript excerpts.
+2. [Deterministic topology](../../docs/superpowers/specs/2026-09-13-live-fabric-deterministic-topology-contract.md): lineage is recorded at creation and rendered without a labeling model. Contains the inspected direct-child and plan-schema ceilings.
+3. [Connected-suite contract map](2026-09-13-connected-suite-contract-map.md): detailed producer, identity, capability and consumer seams. Its dated adjacent-PR observations are superseded only by the newer evidence in the integration blueprint, not by a fabricated installation claim.
+
+Use the [dynamic masterplan](../../docs/superpowers/plans/2026-09-13-live-fabric-dynamic-masterplan.md) for delivery sequencing. Its first slice is tightened by the conversation/topology contracts: actual nonterminal content and authorized available history are required. Unsupported hierarchy and typed dependencies require the existing owner's implementation, not visual invention.
+
+The [dynamic architecture](../../docs/superpowers/specs/2026-09-13-live-fabric-dynamic-orchestration-addendum.md) remains the detailed remote web/Mac, provider and routing reference where not narrowed above. The first [design](../../docs/superpowers/specs/2026-09-13-mastermind-live-fabric-design.md) retains authority/effect/privacy requirements; graph-first screen organization is superseded. The blueprint's system-board proposal does not restore a graph-first daily product.
+
+## Last verified prototype checkpoint — Figma paused
 
 File: https://www.figma.com/design/GfH3jNfel8F2cv7ZdTtiXt
 
-Current page: `41:780`, **01 · Workspace — current**.
+Last verified current page: `41:780`, **01 · Workspace — current**.
 
 - Start guide: `63:2`.
 - CEO conversation: `42:780`.
@@ -30,42 +44,40 @@ Current page: `41:780`, **01 · Workspace — current**.
 - Unknown outcome / original receipt recovered: `59:780` / `60:780`.
 - Draft whose target changed: `59:860`.
 
-The core conversation journey, exact-recipient prepared drafts, split panes, contextual relationships, routing preview and selected failure branches are wired. This is Figma navigation with synthetic data, not real chat input or provider execution. Live search, arbitrary attachments, other unwired controls and actual backend behavior are not implied.
+The prior design pass wired the core conversation journey, exact-recipient prepared drafts, split panes, relationships, routing preview and selected failure branches. This was Figma navigation with synthetic data, not real chat input or provider execution. Live search, arbitrary attachments, other unwired controls and actual backend behavior were not implied.
 
-Twenty-one superseded dashboard/graph-first frames were removed from the file under current Chairman direction. Old links into pages `0:1` and `24:881` are retired. The Today reference was moved, not discarded. The retained device/Today studies are explicitly reference-only; their old prototype links were cleared. Fifteen shared component masters remain. Do not use removed frames or old autoplay links as the current acceptance target.
+That pass removed twenty-one superseded dashboard/graph-first frames under Chairman direction. Old links into pages `0:1` and `24:881` were retired. The Today study was moved, not discarded; device/Today studies became reference-only and their old links were cleared. Fifteen shared component masters were retained. These are historical design receipts. Another active Figma account may have changed the file since; re-read it only after the Chairman permits reconnection, and never overwrite that person's changes blindly.
 
-## The system should not need a diagram caretaker
+## The system needs no diagram caretaker
 
-The planner supplies useful work and ordinary labels. Existing Runtime admission records child/parent/root identity. Capacity and binding owners establish the actual execution. Dialogue records exact messages and results. The UI renders those facts and can reconstruct itself after losing its disposable cache. No model reads the entire chat estate to maintain connections.
+The planner supplies useful work and semantic proposals. Existing Runtime admission records child/parent/root identity. Capacity and binding owners establish actual execution. Dialogue records exact messages and returns. The UI renders those facts and reconstructs from its sources after losing a disposable view cache. No model scans the entire chat estate to maintain connections.
 
-Missing source facts stay missing. No parent from title similarity; no provider session from a queued Job; no consumed result from an unread counter; no dependency gate from unstructured prose; no permission from an animated edge. Company supervision, Runtime containment and native helper lineage are distinct views.
+Missing source facts remain missing. No parent from title similarity; no provider session from a queued Job; no consumed result from an unread counter; no dependency gate from unstructured prose; no permission from an animated edge. Company supervision, Runtime containment, native helper lineage, peer consultation and accepted execution prerequisites are distinct relationships.
 
-## Build readiness and ownership
+The inspected COO path remains root plus direct children, exact budget reservations and a closed plan without arbitrary step dependencies. Its run-once source is not proof an installed supervisor is running. Richer governed topology needs the actual owner contract, source and production proof; do not remove reviews to fit budgets or change only one constant and claim arbitrary nesting.
 
-The intended eventual build route is Fable as principal integrator for the genuinely cross-owner program, with bounded specialists for implementation and independent review. Sol owns design adjudication, source-bound scope and final acceptance. No receiver, worker, watcher, source custody, release or provider operation has been assigned by writing this index.
+## Build ownership and first useful consumer
 
-Five finite integration responsibilities define the build: born-linked work inventory; continuous provider-visible content and available history; exact messages/returns/consumption; authenticated conversation UI and safe command ingress; and separately qualified deeper/concurrent orchestration with typed dependencies. They extend the existing owners, not five new services.
+The incumbent Fable program integrates the runtime/provider/communication substrate. Its bounded implementation/review workers retain their real source custody. This source stream owns the integrated workspace contract and acceptance, not an alternative scheduler or a second principal appointment. Sol retains high-level synthesis and cross-owner adjudication under current Chairman authority. Writing this index does not issue another commission or semantic edge on that program.
 
-The current inspected COO path enforces root plus direct children, exact budget reservations and a closed plan without arbitrary step dependencies. Its run-once source is not an installed daemon. The richer desired topology remains the target, but it needs explicit existing-owner source and production proof. Do not relax reviews to fit child budgets or change a policy constant and call arbitrary nesting supported.
+The finite integration responsibilities remain: born-linked work inventory; continuous safe provider content and available history; exact communication/returns/consumption; authenticated workspace and safe command ingress; portfolio/projector integration; and separately qualified deeper/concurrent orchestration. These are owned capabilities, not mandatory new services.
 
-The first useful implemented journey remains one qualified managed mission: readable nonterminal output and retained history, source-derived children, exact-recipient communication and parent return. Broader orchestration can advance as a separately scoped dependency while the lawful smaller path is proven.
+The first useful implemented conversation journey is a qualified managed mission with readable nonterminal output, available history, source-derived relations, exact-recipient communication and correct parent return. The broader cross-system proof also joins a real Project/work packet and a useful peer answer. Existing native return/next-child work must keep moving without waiting for every optional Workspace, remote or visual capability.
 
-## First live-content connection: the actual producer seam
+## Actual provider-content seam
 
-Further source inspection located an existing continuous receiver rather than a need for another reader process: `scripts/ohf/laboratory.py`, blob `e5592bbc66d97db9bf44873b9bb7fe718cbf0637` at the procedural SHA, starts one `_read_stdout` thread. It already parses incoming frames and routes redacted notifications to the existing condition-protected notification list. The richer adapter's later `read_events` projection waits for completion and strips ordinary content; those are different stages.
+Earlier source inspection located one continuous receiver in `scripts/ohf/laboratory.py`, blob `e5592bbc66d97db9bf44873b9bb7fe718cbf0637` at `f087f9cf90a8fc7a81273c2576eefa6d06b54d9e`. It starts `_read_stdout`, parses incoming frames and routes redacted notifications to the existing condition-protected list. The rich adapter's later `read_events` projection waits for completion and strips ordinary response content; these are separate stages. Recheck the current binary/source before implementation.
 
-The first provider-owner design must therefore add a qualified, non-blocking spectator projection alongside the existing receiver/controller path, not run another App Server or let a GUI drain `notifications`. Keep lifecycle/control delivery intact. Do not call network subscribers while holding `_notification_condition`, pass raw private-turn responses to viewers, or treat general redaction as sufficient content authorization. Before a native turn is exactly joined to its admitted Attempt, withhold unqualified content rather than guess the association. A slow, failed or revoked viewer must not delay or suppress terminal/control events.
+Extend that owner with a qualified, nonblocking spectator/content projection; do not run another App Server or let a GUI drain `notifications`. Keep lifecycle/control delivery intact. Do not invoke network subscribers while holding `_notification_condition`, pass private raw-turn responses to viewers, or treat general redaction as content authorization. Before exact native-turn/Attempt correlation exists, withhold the content. Slow, failed or revoked viewers must not suppress terminal/control events.
 
-The source-level acceptance test must hold terminal completion back, deliver a safe visible message, observe it in the spectator consumer, then allow the original controller to receive its exact terminal event once. A history read must cause no start/resume/turn and must preserve page/correction/scope limits. Actual provider-version fixtures, configured owner identity and the finite authenticated resource mapping are still required before this becomes an executable production commission; no new observer was installed by the inspection.
+The decisive test withholds terminal completion, delivers a safe visible message, observes it through the spectator consumer, then lets the original controller receive its terminal event exactly once. History reads must not start/resume/turn. The actual provider fixture/version, owner identity and authenticated resource mapping remain necessary; this index installs none of them.
 
-## Proof status
+## Proof status and precedence
 
-The deterministic-topology pass ran 33 sandbox source/design checks successfully, including all 24 input orders for four synthetic rows. It used the exact copied COO policy and the recorded-lane graph-validator excerpt with a disposable reference projection. It did not execute the Runtime database, authenticated network app, provider, installed supervisor or the SQL reader. Classification: `OFFLINE_SOURCE_AND_DESIGN_CHECKS_NOT_RUNTIME_PROOF`.
+Historical deterministic-topology work ran 33 sandbox source/design checks, including 24 input orders for four synthetic rows, with copied COO policy and a validator excerpt. Classification remains `OFFLINE_SOURCE_AND_DESIGN_CHECKS_NOT_RUNTIME_PROOF`. It did not execute the installed Runtime, authenticated app, provider or SQL reader. It was not rerun in the integration-blueprint pass.
 
-The existing [72-case matrix](2026-09-13-failure-matrix.md) remains required, not executed. Prior abstract interleaving research remains historical and scoped. Figma structural/visual checks are not application, accessibility or production proof. Independent architecture adjudication and current integration/release checks remain distinct from these source artifacts.
+The [72-case matrix](2026-09-13-failure-matrix.md) remains required and not an executed campaign. Figma structural checks are not browser/accessibility/production proof. The system blueprint adds contract-level cross-system questions; it does not create another assurance authority or pronounce independent architecture approval.
 
-## Historical references and precedence
+Historical documents are evidence, not extra implementation queues. Use this index to select the current contract. No old source commentary can authorize deployment, revive #424/H1A, seize #508/#546/#599/#600, or create another Executive/Agent OS. The current systems pass is records-only and performs no Figma, provider, host, Linear mutation or runtime effect.
 
-The original delivery program, first graph-centric storyboard and earlier design review retain the history of the program. They are not additional prerequisite reviews or separate implementation queues. Use this index to select the current contract, and inspect older evidence only for the relevant boundary. No old source commentary can authorize a deployment, revive superseded #424/H1A, seize #508/#546/#599, or create another Executive/Agent OS.
-
-**Exact next action:** freeze the first real provider spectator/history mapping and its current authenticated resource consumer against the current conversation prototype. Resolve the actual source/version/custody, then issue the scoped principal build commission through current placement and authority gates. No recurring graph-labeling work or another general redesign is required to make recorded parent links visible.
+**Exact next action:** bind the blueprint's cross-system reference journey to the incumbent Fable producer/return contract and the existing portfolio-mapping owner, then finalize the finite authenticated conversation/content/relationship consumer contract. Resolve exact source/version/custody and missing fields without appointing another principal. Keep Figma paused until the Chairman explicitly reconnects it.
