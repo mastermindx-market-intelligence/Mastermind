@@ -9,6 +9,7 @@ from control_plane.executive_runtime import Runtime
 from control_plane.model_router import (
     DEFAULT_POLICY_PATH,
     ModelRouter,
+    ProviderAlias,
     ROUTER_SCHEMA_VERSION,
     RouteMode,
     RoutingPolicyError,
@@ -162,6 +163,97 @@ def test_policy_refuses_production_arming_or_an_unimplemented_live_provider(tmp_
     unimplemented.write_text(json.dumps(raw), encoding="utf-8")
     with pytest.raises(RoutingPolicyError, match="unimplemented adapter"):
         ModelRouter.load(unimplemented)
+
+
+def test_heterogeneous_pair_does_not_arm_general_routing_or_bypass_capacity(tmp_path):
+    checked_in = ModelRouter.load()
+    pair = _v2_policy()
+    pair["providers"]["claude"] = {
+        "adapter_id": "openai-compatible",
+        "enabled": False,
+        "autonomous_allowed": False,
+    }
+    pair["model_aliases"]["hf1q.claude.fixture"] = {
+        "provider_alias": "claude",
+        "execution_profile_id": checked_in.model_aliases[
+            "fast.engineering"
+        ].execution_profile_id,
+        "model": "hf1q-fixture-model",
+        "effort": "high",
+        "cost_class": "small",
+        "capabilities": ["code"],
+        "worker_eligible": False,
+    }
+    fixture = _load_policy(tmp_path, pair)
+
+    assert checked_in.providers["codex"].enabled
+    assert fixture.providers["claude"] == ProviderAlias(
+        "claude",
+        "openai-compatible",
+        False,
+        False,
+    )
+    assert fixture.model_aliases["hf1q.claude.fixture"].worker_eligible is False
+    with pytest.raises(RoutingPolicyError, match="not worker eligible"):
+        fixture.resolve_model_alias("hf1q.claude.fixture")
+
+    for provider in ("qwen", "glm", "xai"):
+        assert not checked_in.providers[provider].enabled
+        assert not checked_in.providers[provider].autonomous_allowed
+
+    bypasses = {
+        "enabled only": {
+            **pair,
+            "providers": {
+                **pair["providers"],
+                "claude": {**pair["providers"]["claude"], "enabled": True},
+            },
+        },
+        "autonomous only": {
+            **pair,
+            "providers": {
+                **pair["providers"],
+                "claude": {**pair["providers"]["claude"], "autonomous_allowed": True},
+            },
+        },
+        "worker alias": {
+            **pair,
+            "model_aliases": {
+                **pair["model_aliases"],
+                "hf1q.claude.fixture": {
+                    **pair["model_aliases"]["hf1q.claude.fixture"],
+                    "worker_eligible": True,
+                },
+            },
+        },
+    }
+    for name, raw in bypasses.items():
+        policy_dir = tmp_path / name.replace(" ", "-")
+        policy_dir.mkdir()
+        with pytest.raises(
+            RoutingPolicyError,
+            match="unimplemented adapter|enabled autonomous provider",
+        ):
+            _load_policy(policy_dir, raw)
+
+    runtime = Runtime.at(tmp_path / "runtime")
+    codex = checked_in.resolve_model_alias("fast.engineering")
+    runtime.workers.register_worker(
+        "hf1q-codex-capacity",
+        provider=codex.provider_alias,
+        account_label="fixture-account-codex",
+        worker_type=codex.adapter_id,
+        capabilities=list(codex.capabilities),
+        quota_classes={"default": {"provider": codex.provider_alias}},
+    )
+    decision = checked_in.route(WorkRequest("implementation"))
+    job = runtime.jobs.create_job(
+        "Policy-scoped fixture job", constraints=decision.job_constraints()
+    )
+    assert runtime.broker.select_worker(job) is None
+    assert runtime.broker.claim(job.job_id) is None
+    event_types = [event.event_type for event in runtime.events.list_events()]
+    assert "JOB_CLAIMED" not in event_types
 
 
 def _register_alias_worker(

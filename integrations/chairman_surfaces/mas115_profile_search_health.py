@@ -218,15 +218,12 @@ def _is_exact_profile_search_request(
         or type(diagnostic_sink) is not _vendors._InitialPeerCensusDiagnosticSink  # noqa: SLF001
     ):
         return False
-    if len(headers) != 1:
+    if set(headers) != {"Authorization", "Accept"}:
         return False
-    authorization = None
-    for key, value in headers.items():
-        if type(key) is not str or type(value) is not str:
-            return False
-        if key != "Authorization":
-            return False
-        authorization = value
+    authorization = headers["Authorization"]
+    accept = headers["Accept"]
+    if type(authorization) is not str or type(accept) is not str:
+        return False
     if len(body) != len(fixed_body_types):
         return False
     for key, value in body.items():
@@ -241,6 +238,7 @@ def _is_exact_profile_search_request(
         and path == "/profile/search"
         and authorization.startswith("Bearer ")
         and len(authorization) > len("Bearer ")
+        and accept == "application/json"
         and body["is_removed"] is False
         and body["limit"] == _vendors._PROFILE_PAGE_SIZE  # noqa: SLF001
         and 0 <= body["offset"] < _vendors._MAX_PROFILE_CENSUS  # noqa: SLF001
@@ -279,6 +277,7 @@ def _run_profile_search_health(
     params = None
     body = None
     request_sink = None
+    status_handoff = None
     client_closed = None
     code = "VENDOR_ERROR"
 
@@ -324,6 +323,9 @@ def _run_profile_search_health(
                     sink = _vendors._InitialPeerCensusDiagnosticSink(  # noqa: SLF001
                         _vendors._INITIAL_PEER_CENSUS_DIAGNOSTIC_SEAL,  # noqa: SLF001
                     )
+                    status_handoff = _vendors._H2ProfileSearchStatusHandoff(  # noqa: SLF001
+                        _vendors._H2_PROFILE_SEARCH_STATUS_HANDOFF_SEAL,  # noqa: SLF001
+                    )
                     state = _vendors._ProfileSearchCensusState(  # noqa: SLF001
                         folder_id=provision["folder_id"],
                         peer_name=None,
@@ -362,6 +364,7 @@ def _run_profile_search_health(
                             params=params,
                             json_body=body,
                             diagnostic_sink=request_sink,
+                            status_handoff=status_handoff,
                         )
                         state.consume(response, diagnostic_sink=sink)
                         response = None
@@ -402,6 +405,7 @@ def _run_profile_search_health(
     response = None
     matches = None
     method = origin = path = headers = params = body = request_sink = None
+    status_handoff = None
     preflight_loader = pipe_factory = credential_reader = pipe_closer = None
     sink = None
 

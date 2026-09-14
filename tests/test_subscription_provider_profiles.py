@@ -74,7 +74,7 @@ def test_harness_id_is_rejected_at_document_and_row_levels():
 
 
 def test_profile_protocols_are_plan_declared_and_fail_closed():
-    catalog = _catalog()
+    catalog = copy.deepcopy(load_profiles())
     catalog["profiles"]["glm-coding-plan"]["protocol"] = "openai-chat"
     validate_profiles(catalog)
     catalog["profiles"]["glm-coding-plan"]["protocol"] = "responses"

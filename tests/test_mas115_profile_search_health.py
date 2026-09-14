@@ -141,7 +141,10 @@ class _FakeHttp:
     def stream(self, method, url, *, headers=None, params=None, json=None):
         assert method == "POST"
         assert url.endswith("/profile/search")
-        assert headers == {"Authorization": f"Bearer {_SECRET}"}
+        assert headers == {
+            "Authorization": f"Bearer {_SECRET}",
+            "Accept": "application/json",
+        }
         assert params is None
         assert isinstance(json, dict)
         assert json["folder_id"] == _FOLDER
@@ -942,6 +945,44 @@ def test_profile_search_request_builder_matches_canonical_vendor_dispatch(monkey
     )
 
 
+def test_profile_search_request_builder_explicitly_advertises_json_with_fixed_shape():
+    credential = core.Credential(_SECRET, "stdin")
+    sink = vendors._InitialPeerCensusDiagnosticSink(
+        vendors._INITIAL_PEER_CENSUS_DIAGNOSTIC_SEAL,
+    )
+
+    method, origin, path, headers, params, body, actual_sink = (
+        vendors._mlx_profile_search_request_arguments(  # noqa: SLF001
+            credential,
+            _FOLDER,
+            offset=0,
+            diagnostic_sink=sink,
+        )
+    )
+
+    assert (method, origin, path) == (
+        "POST",
+        vendors._MLX_CLOUD_ORIGIN,
+        "/profile/search",
+    )
+    assert headers == {
+        "Authorization": f"Bearer {_SECRET}",
+        "Accept": "application/json",
+    }
+    assert params is None
+    assert body == {
+        "is_removed": False,
+        "limit": vendors._PROFILE_PAGE_SIZE,
+        "offset": 0,
+        "search_text": "",
+        "storage_type": "all",
+        "order_by": "created_at",
+        "sort": "asc",
+        "folder_id": _FOLDER,
+    }
+    assert actual_sink is sink
+
+
 def test_h2_uses_the_shared_profile_search_request_builder(monkeypatch):
     calls = []
     original_builder = vendors._mlx_profile_search_request_arguments
@@ -1262,7 +1303,10 @@ def test_profile_search_request_guard_refuses_non_search_shapes_before_http():
         "method": "POST",
         "origin": vendors._MLX_CLOUD_ORIGIN,
         "path": "/profile/search",
-        "headers": {"Authorization": f"Bearer {_SECRET}"},
+        "headers": {
+            "Authorization": f"Bearer {_SECRET}",
+            "Accept": "application/json",
+        },
         "params": None,
         "json_body": canonical_body,
     }
@@ -1284,6 +1328,8 @@ def test_profile_search_request_guard_refuses_non_search_shapes_before_http():
         {**canonical, "path": "/profile/create"},
         {**canonical, "params": {}},
         {**canonical, "headers": {}},
+        {**canonical, "headers": {"Authorization": f"Bearer {_SECRET}"}},
+        {**canonical, "headers": {**canonical["headers"], "Accept": "text/html"}},
         {**canonical, "headers": {**canonical["headers"], "X-Extra": "x"}},
     ]
     for key, value in (
@@ -1353,7 +1399,10 @@ def test_profile_search_request_guard_refuses_subclass_hooks_before_behavior():
         "method": "POST",
         "origin": vendors._MLX_CLOUD_ORIGIN,
         "path": "/profile/search",
-        "headers": {"Authorization": f"Bearer {_SECRET}"},
+        "headers": {
+            "Authorization": f"Bearer {_SECRET}",
+            "Accept": "application/json",
+        },
         "params": None,
         "json_body": canonical_body,
     }
@@ -1374,6 +1423,7 @@ def test_profile_search_request_guard_refuses_subclass_hooks_before_behavior():
         {**canonical, "headers": HostileDict(canonical["headers"])},
         {**canonical, "headers": hostile_key_headers},
         {**canonical, "headers": {"Authorization": HostileText(f"Bearer {_SECRET}")}},
+        {**canonical, "headers": {"Authorization": f"Bearer {_SECRET}", "Accept": HostileText("application/json")}},
         {**canonical, "json_body": HostileDict(canonical_body)},
         {
             **canonical,
@@ -1488,9 +1538,7 @@ def test_checked_pipe_initial_wait_error_still_attempts_term_and_kill_and_refuse
 @pytest.mark.parametrize(
     ("wire", "status_class", "media_class", "decoder_class"),
     (
-        (_RawWireResponse(503, b"<html>private</html>", "text/html"), "HTTP_5XX", "HTML", "JSON_VALUE_REJECTED"),
-        (_RawWireResponse(302, b"not-json", None), "HTTP_3XX", "MISSING", "JSON_VALUE_REJECTED"),
-        (_RawWireResponse(429, b"\xff", "text/plain"), "HTTP_RATE_LIMITED", "TEXT", "UNICODE_REJECTED"),
+        (_RawWireResponse(200, b"not-json", "text/html"), "HTTP_200", "HTML", "JSON_VALUE_REJECTED"),
     ),
 )
 def test_decode_failure_context_projects_closed_wire_classes_without_raw_leak(
@@ -1508,6 +1556,92 @@ def test_decode_failure_context_projects_closed_wire_classes_without_raw_leak(
     rendered = json.dumps(receipt, sort_keys=True)
     assert "private" not in rendered
     assert "not-json" not in rendered
+    assert http.search_calls == 1
+
+
+@pytest.mark.parametrize("status_code", (502, 503))
+def test_diagnostic_initial_census_classifies_bounded_html_5xx_before_json_decode(
+    status_code,
+):
+    code, receipt, _events, http = _run([
+        _RawWireResponse(status_code, b"<html>private</html>", "text/html"),
+    ])
+
+    assert code == 2
+    assert receipt["code"] == "VENDOR_ERROR"
+    assert receipt["initial_peer_census_diagnostic"] == "HTTP_SERVICE_UNAVAILABLE"
+    assert receipt["initial_peer_census_decode_context"] == _NONE_CONTEXT
+    assert "private" not in json.dumps(receipt, sort_keys=True)
+    assert http.search_calls == 1
+
+
+def test_generic_diagnostic_profile_search_keeps_html_5xx_decode_first():
+    sink = vendors._InitialPeerCensusDiagnosticSink(
+        vendors._INITIAL_PEER_CENSUS_DIAGNOSTIC_SEAL,
+    )
+    http = _FakeHttp([
+        _RawWireResponse(503, b"<html>private</html>", "text/html"),
+    ])
+    client = vendors.BoundedHttpClient(client=http)
+
+    try:
+        response = client._mlx_profile_search_with_diagnostic(  # noqa: SLF001
+            core.Credential(_SECRET, "stdin"),
+            _FOLDER,
+            offset=0,
+            diagnostic_sink=sink,
+        )
+    finally:
+        client.close()
+
+    assert response is None
+    assert sink.value == "RESPONSE_DECODE_FAILURE"
+    assert sink.decode_context == {
+        "status_class": "HTTP_5XX",
+        "declared_media_type_class": "HTML",
+        "decoder_class": "JSON_VALUE_REJECTED",
+    }
+    assert http.search_calls == 1
+
+
+def test_foreign_h2_status_handoff_keeps_html_5xx_decode_first():
+    sink = vendors._InitialPeerCensusDiagnosticSink(
+        vendors._INITIAL_PEER_CENSUS_DIAGNOSTIC_SEAL,
+    )
+    http = _FakeHttp([
+        _RawWireResponse(503, b"<html>private</html>", "text/html"),
+    ])
+    client = vendors.BoundedHttpClient(client=http)
+    method, origin, path, headers, params, body, request_sink = (
+        vendors._mlx_profile_search_request_arguments(  # noqa: SLF001
+            core.Credential(_SECRET, "stdin"),
+            _FOLDER,
+            offset=0,
+            diagnostic_sink=sink,
+        )
+    )
+
+    try:
+        response = client._request(  # noqa: SLF001
+            method,
+            origin,
+            path,
+            headers=headers,
+            params=params,
+            json_body=body,
+            diagnostic_sink=request_sink,
+            status_handoff=object(),
+        )
+    finally:
+        client.close()
+
+    assert response is None
+    assert sink.value == "RESPONSE_DECODE_FAILURE"
+    assert sink.decode_context == {
+        "status_class": "HTTP_5XX",
+        "declared_media_type_class": "HTML",
+        "decoder_class": "JSON_VALUE_REJECTED",
+    }
     assert http.search_calls == 1
 
 
