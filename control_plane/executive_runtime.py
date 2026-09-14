@@ -818,6 +818,45 @@ def _assert_child_does_not_widen_parent(
             )
 
 
+def _project_work_placement(
+    constraints: dict[str, Any],
+    root_constraints: Mapping[str, Any],
+    placement: Mapping[str, Any],
+    *,
+    raw_root_constraints: Mapping[str, Any],
+) -> dict[str, Any]:
+    provider_realm = str(placement.get("provider_realm") or "").strip().lower()
+    quota_class = str(placement.get("quota_class") or "").strip().lower()
+    if (
+        _ROUTING_VALUE_RE.fullmatch(provider_realm) is None
+        or _ROUTING_VALUE_RE.fullmatch(quota_class) is None
+    ):
+        raise StateConflict("plan step placement values are invalid")
+    admitted_union = raw_root_constraints.get("work_placement_union")
+    if not isinstance(admitted_union, list):
+        raise StateConflict(
+            "plan step placement is outside the reviewed host work-placement union"
+        )
+    member = next(
+        (
+            item
+            for item in admitted_union
+            if isinstance(item, Mapping)
+            and str(item.get("provider_realm") or "").strip().lower() == provider_realm
+            and str(item.get("quota_class") or "").strip().lower() == quota_class
+        ),
+        None,
+    )
+    if member is None:
+        raise StateConflict(
+            "plan step placement is outside the reviewed host work-placement union"
+        )
+    projected = dict(constraints)
+    projected["provider"] = provider_realm
+    projected["eligible_quota_classes"] = [quota_class]
+    return projected
+
+
 def _has_executive_provenance(
     provenance: dict[str, Any] | None, *, target: str
 ) -> bool:
@@ -6932,6 +6971,7 @@ def _validated_plan_admission(
             plan_digest=str(admission["plan_digest"]),
             plan_step_id=str(step["step_id"]),
             repair_round=0,
+            placement=step.get("placement"),
         )
     try:
         expected_total = policy.reserved_children_total(tuple(requirements))
@@ -8027,6 +8067,7 @@ def _insert_cycle_child(
     provenance_source_id: str | None = None,
     provenance_source_digest: str | None = None,
     creation_evidence: dict[str, str] | None = None,
+    placement: dict[str, Any] | None = None,
 ) -> sqlite3.Row:
     """Insert one cycle-owned direct child inside its caller's transaction."""
 
@@ -8042,6 +8083,15 @@ def _insert_cycle_child(
     )
     constraints = dict(root_constraints)
     constraints["cost_class"] = cost_class
+    if role == "work" and placement is not None:
+        constraints = _project_work_placement(
+            constraints,
+            root_constraints,
+            placement,
+            raw_root_constraints=_strict_canonical_json_loads(
+                str(root_row["constraints_json"]), name="root constraints"
+            ),
+        )
     constraints = _normalise_constraints(constraints)
     try:
         authority = ExecutiveAuthorityPolicy.load().authorize(
@@ -8244,6 +8294,7 @@ def _reconcile_cycle_child_creation(
     provenance_source_id: str | None = None,
     provenance_source_digest: str | None = None,
     creation_evidence: dict[str, str] | None = None,
+    placement: dict[str, Any] | None = None,
 ) -> sqlite3.Row:
     """Reconcile one immutable child creation without consulting mutable phase state."""
 
@@ -8269,6 +8320,15 @@ def _reconcile_cycle_child_creation(
     )
     expected_constraints = dict(root_constraints)
     expected_constraints["cost_class"] = cost_class
+    if role == "work" and placement is not None:
+        expected_constraints = _project_work_placement(
+            expected_constraints,
+            root_constraints,
+            placement,
+            raw_root_constraints=_strict_canonical_json_loads(
+                str(root_row["constraints_json"]), name="root constraints"
+            ),
+        )
     expected_constraints = _normalise_constraints(expected_constraints)
     stored_authorities = _strict_canonical_json_loads(
         str(row["requested_authorities_json"]), name="cycle child authorities"
@@ -8932,6 +8992,21 @@ class JobRegistry:
                 )
                 for step in plan_body["steps"]
             )
+            if plan_body["schema_version"] == "mastermind.execution_plan/v2":
+                if any("placement" not in step for step in plan_body["steps"]):
+                    raise StateConflict(
+                        "v2 plan work steps require an exact placement"
+                    )
+                for step in plan_body["steps"]:
+                    placement = step.get("placement")
+                    if (
+                        not isinstance(placement, dict)
+                        or set(placement)
+                        != {"provider_realm", "quota_class"}
+                    ):
+                        raise StateConflict(
+                            "v2 plan step placement is invalid"
+                        )
             try:
                 reserved_total = policy.reserved_children_total(requirements)
             except CooCyclePolicyError as exc:
@@ -8967,6 +9042,7 @@ class JobRegistry:
                     plan_digest=plan_digest,
                     plan_step_id=str(step["step_id"]),
                     repair_round=0,
+                    placement=step.get("placement"),
                 )
                 created_ids.append(str(member["job_id"]))
                 reservation_steps.append(

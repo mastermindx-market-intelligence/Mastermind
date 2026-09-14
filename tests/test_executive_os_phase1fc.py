@@ -106,6 +106,147 @@ def _register(runtime: Runtime, worker_id: str = "worker-1") -> None:
     )
 
 
+def _register_placement_union(runtime: Runtime) -> None:
+    runtime.workers.register_worker(
+        "worker-a",
+        provider="codex",
+        account_label="worker-a@company",
+        worker_type="mock",
+        capabilities=["read", "research"],
+        quota_classes={
+            "codex-hf1q-step": {
+                "provider": "codex",
+                "capabilities": ["read", "research"],
+                "cost_class": "small",
+            }
+        },
+    )
+    runtime.workers.register_worker(
+        "worker-b",
+        provider="claude-compatible-subscription",
+        account_label="worker-b@company",
+        worker_type="mock",
+        capabilities=["read", "research"],
+        quota_classes={
+            "claude-hf1q-step": {
+                "provider": "claude-compatible-subscription",
+                "capabilities": ["read", "research"],
+                "cost_class": "small",
+            }
+        },
+    )
+
+
+def _admit_v2_plan(
+    runtime: Runtime,
+    *,
+    placements: list[dict[str, str] | None] | None = None,
+    admit_claude_union: bool = True,
+):
+    receipt = submit_intent(
+        runtime,
+        _v2_intent(
+            intent_id="CEO-HF1Q-T2V2-001",
+            business_impact="routine",
+        ),
+    )
+    root = runtime.jobs.get_job(receipt["job_id"])
+    assert root is not None
+    with runtime.store.transaction() as connection:
+        connection.execute(
+            """
+            UPDATE jobs SET constraints_json=? WHERE job_id=?
+            """,
+            (
+                json.dumps(
+                    {
+                        **root.constraints,
+                        "provider": "codex",
+                        "eligible_quota_classes": ["codex-hf1q-step"],
+                        "work_placement_union": [
+                            {
+                                "provider_realm": "codex",
+                                "quota_class": "codex-hf1q-step",
+                            }
+                        ],
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+                root.job_id,
+            ),
+        )
+    root = runtime.jobs.get_job(root.job_id)
+    assert root is not None
+    planner = runtime.jobs.create_cycle_planner(
+        root.job_id,
+        command_id=f"coo-cycle:{root.job_id}:create-planner:0",
+    )
+    dispatch = runtime.attempts.dispatch_cycle_job(
+        planner.job_id,
+        command_id=f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1",
+        worker_id="worker-a",
+    )
+    assert isinstance(dispatch, OrchestrationDispatchOutcome)
+    if admit_claude_union and placements and any(
+        item is not None
+        and item.get("provider_realm") == "claude-compatible-subscription"
+        for item in placements
+    ):
+        with runtime.store.transaction() as connection:
+            root_row = connection.execute(
+                "SELECT constraints_json FROM jobs WHERE job_id=?", (root.job_id,)
+            ).fetchone()
+            raw_constraints = json.loads(str(root_row["constraints_json"]))
+            raw_constraints["work_placement_union"].append(
+                {
+                    "provider_realm": "claude-compatible-subscription",
+                    "quota_class": "claude-hf1q-step",
+                }
+            )
+            connection.execute(
+                "UPDATE jobs SET constraints_json=? WHERE job_id=?",
+                (
+                    json.dumps(
+                        raw_constraints,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        ensure_ascii=False,
+                    ),
+                    root.job_id,
+                ),
+            )
+    steps = []
+    for ordinal, placement in enumerate(placements or [None, None]):
+        step = {
+            "ordinal": ordinal,
+            "step_id": f"step-{ordinal}",
+            "objective": f"Hermetic reviewed placement step {ordinal}.",
+            "business_impact": "routine",
+            "review_required": False,
+            "requested_authorities": ["READ"],
+            "allowed_write_paths": [],
+            "validation_ids": [],
+            "attempt_limit": 1,
+            "cost_class": "small",
+        }
+        if placement is not None:
+            step["placement"] = dict(placement)
+        steps.append(step)
+    plan_body = {
+        "schema_version": "mastermind.execution_plan/v2",
+        "root_job_id": root.job_id,
+        "plan_attempt_id": dispatch.attempt.attempt_id,
+        "steps": steps,
+    }
+    _complete_ohf_role(runtime, dispatch, plan_body, identity_seed=7301)
+    command = (
+        f"coo-cycle:{root.job_id}:admit-plan:{dispatch.attempt.attempt_id}"
+    )
+    admitted = runtime.jobs.admit_cycle_plan(root.job_id, command_id=command)
+    return runtime, root, plan_body, admitted
+
+
 def _source(source_id: str = "coo-source") -> dict[str, str]:
     return {
         "schema_version": "mastermind.executive_orchestration_provenance_source/v1",
@@ -1481,6 +1622,214 @@ def test_plan_enum_wrong_json_types_raise_typed_refusal(field, bad):
         )
 
 
+def test_t2v2_v1_and_closed_v2_plan_schema_refusals():
+    envelope = _result_envelope("plan", _plan_body())
+    expected = {
+        "expected_job_id": "JOB-100",
+        "expected_run_id": "ATT-100",
+        "expected_worker_id": "worker-1",
+        "expected_role": "plan",
+        "expected_root_job_id": "JOB-001",
+    }
+    validated = validate_envelope(envelope, **expected)
+    assert validated == envelope
+    assert result_digest(validated["role_result"]) == result_digest(
+        _plan_body()
+    )
+
+    placement = json.loads(json.dumps(envelope))
+    placement["role_result"]["steps"][0]["placement"] = {
+        "provider_realm": "codex",
+        "quota_class": "codex-hf1q-step",
+    }
+    with pytest.raises(OrchestrationResultError, match="does not match its closed schema"):
+        validate_envelope(placement, **expected)
+
+    v2 = json.loads(json.dumps(placement))
+    v2["role_result"]["schema_version"] = "mastermind.execution_plan/v2"
+    validated_v2 = validate_envelope(v2, **expected)
+    assert validated_v2["role_result"]["steps"][0]["placement"] == {
+        "provider_realm": "codex",
+        "quota_class": "codex-hf1q-step",
+    }
+    assert result_digest(validated_v2["role_result"]) != result_digest(
+        _plan_body()
+    )
+
+    unknown = json.loads(json.dumps(v2))
+    unknown["role_result"]["steps"][0]["placement"]["worker_id"] = "worker-a"
+    with pytest.raises(OrchestrationResultError, match="does not match its closed schema"):
+        validate_envelope(unknown, **expected)
+
+    wrong_version = json.loads(json.dumps(v2))
+    wrong_version["role_result"]["schema_version"] = "mastermind.execution_plan/v3"
+    with pytest.raises(OrchestrationResultError, match="unsupported plan schema"):
+        validate_envelope(wrong_version, **expected)
+
+    missing_version = json.loads(json.dumps(v2))
+    del missing_version["role_result"]["schema_version"]
+    with pytest.raises(
+        OrchestrationResultError,
+        match="plan role_result does not match its closed schema",
+    ):
+        validate_envelope(missing_version, **expected)
+
+
+def test_t2v2_two_step_placement_projection_and_exact_claim_refusal(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    _register_placement_union(runtime)
+    runtime, root, _plan, admitted = _admit_v2_plan(
+        runtime,
+        placements=[
+            {"provider_realm": "codex", "quota_class": "codex-hf1q-step"},
+            {
+                "provider_realm": "claude-compatible-subscription",
+                "quota_class": "claude-hf1q-step",
+            },
+        ],
+    )
+    constraints_by_step = {
+        job.plan_step_id: job.constraints
+        for job in admitted
+        if job.orchestration_role == "work"
+    }
+    assert constraints_by_step == {
+        "step-0": {
+            **root.constraints,
+            "cost_class": "small",
+            "eligible_quota_classes": ["codex-hf1q-step"],
+            "provider": "codex",
+        },
+        "step-1": {
+            **root.constraints,
+            "cost_class": "small",
+            "eligible_quota_classes": ["claude-hf1q-step"],
+            "provider": "claude-compatible-subscription",
+        },
+    }
+    step_1 = next(
+        job for job in admitted if job.plan_step_id == "step-1"
+    )
+    unavailable = runtime.workers.get_worker("worker-b")
+    assert unavailable is not None
+    runtime.workers.set_worker_status(
+        "worker-b",
+        status="OFFLINE",
+    )
+    assert runtime.workers.get_quota_class(
+        "worker-b", "claude-hf1q-step"
+    ).status.value == "OFFLINE"
+    dispatch = runtime.attempts.dispatch_cycle_job(
+        step_1.job_id,
+        command_id=(
+            f"coo-cycle:{root.job_id}:dispatch:{step_1.job_id}:attempt:1"
+        ),
+    )
+    assert dispatch is None
+    assert runtime.attempts.list_attempts(step_1.job_id) == []
+
+    step_0 = next(
+        job for job in admitted if job.plan_step_id == "step-0"
+    )
+    exact = runtime.attempts.dispatch_cycle_job(
+        step_0.job_id,
+        command_id=(
+            f"coo-cycle:{root.job_id}:dispatch:{step_0.job_id}:attempt:1"
+        ),
+    )
+    assert exact is not None
+    assert exact.attempt.quota_class == "codex-hf1q-step"
+    assert exact.attempt.placement_snapshot["provider"] == "codex"
+
+
+def test_t2v2_exact_root_refuses_claude_step_before_child_creation(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    _register_placement_union(runtime)
+    with pytest.raises(
+        StateConflict,
+        match="plan step placement is outside the reviewed host work-placement union",
+    ):
+        _admit_v2_plan(
+            runtime,
+            admit_claude_union=False,
+            placements=[
+                {"provider_realm": "codex", "quota_class": "codex-hf1q-step"},
+                {
+                    "provider_realm": "claude-compatible-subscription",
+                    "quota_class": "claude-hf1q-step",
+                },
+            ],
+        )
+    work_children = [
+        job
+        for job in runtime.jobs.list_jobs()
+        if job.orchestration_role == "work"
+    ]
+    assert work_children == []
+    assert [
+        event
+        for event in runtime.events.list_events()
+        if event.event_type == "COO_PLAN_ADMITTED"
+    ] == []
+
+
+def test_t2v2_placement_refuses_concrete_identity_keys():
+    concrete_identities = [
+        ("worker_id", "worker-a"),
+        ("session_id", "session-a"),
+        ("credential_home", "/credential/home"),
+        ("native_task_id", "task-a"),
+        ("lease_token", "lease-a"),
+        ("host", "host-a"),
+    ]
+    for field, value in concrete_identities:
+        envelope = _result_envelope("plan", _plan_body())
+        envelope["role_result"]["schema_version"] = "mastermind.execution_plan/v2"
+        envelope["role_result"]["steps"][0]["placement"] = {
+            "provider_realm": "codex",
+            "quota_class": "codex-hf1q-step",
+            field: value,
+        }
+        with pytest.raises(
+            OrchestrationResultError,
+            match="does not match its closed schema",
+        ):
+            validate_envelope(
+                envelope,
+                expected_job_id="JOB-100",
+                expected_run_id="ATT-100",
+                expected_worker_id="worker-1",
+                expected_role="plan",
+                expected_root_job_id="JOB-001",
+            )
+
+
+def test_t2v2_admission_replay_preserves_exact_step_requirements(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    _register_placement_union(runtime)
+    runtime, root, plan_body, admitted = _admit_v2_plan(
+        runtime,
+        placements=[
+            {"provider_realm": "codex", "quota_class": "codex-hf1q-step"},
+            {"provider_realm": "codex", "quota_class": "codex-hf1q-step"},
+        ],
+    )
+    before = [runtime.jobs.get_job(job.job_id) for job in admitted]
+    assert all(job is not None for job in before)
+    replay = runtime.jobs.admit_cycle_plan(
+        root.job_id,
+        command_id=(
+            f"coo-cycle:{root.job_id}:admit-plan:{plan_body['plan_attempt_id']}"
+        ),
+    )
+    after = [runtime.jobs.get_job(job.job_id) for job in replay]
+    assert after == before
+    assert len([job for job in runtime.jobs.list_jobs() if job.orchestration_role == "work"]) == 2
+    for job in replay:
+        assert job.constraints["eligible_quota_classes"] == ["codex-hf1q-step"]
+        assert job.constraints["provider"] == "codex"
+
+
 @pytest.mark.parametrize(("field", "bad"), [("verdict", {}), ("severity", [])])
 def test_review_enum_wrong_json_types_raise_typed_refusal(field, bad):
     body = {
@@ -2088,13 +2437,14 @@ def _review_body(
     target_result_digest: str,
     repair_round: int,
     verdict: str,
+    plan_step_id: str = "step-1",
 ) -> dict[str, Any]:
     return {
         "schema_version": "mastermind.review_result/v1",
         "root_job_id": root_id,
         "plan_attempt_id": plan_attempt_id,
         "plan_digest": plan_digest,
-        "plan_step_id": "step-1",
+        "plan_step_id": plan_step_id,
         "reviewed_job_id": target_job_id,
         "reviewed_attempt_id": target_attempt_id,
         "reviewed_result_digest": target_result_digest,
@@ -2378,6 +2728,393 @@ def test_run_once_typed_plan_work_independent_review_and_aggregation_complete(
     )
     assert runtime.jobs.get_job(root.job_id).status is executive_runtime.JobStatus.COMPLETED
     assert cycle.run_once(root.job_id).action == "NO_ACTION"
+
+
+def test_heterogeneous_pair_results_reach_independent_review_and_exact_aggregation_handoff(
+    tmp_path: Path,
+) -> None:
+    runtime = Runtime.at(tmp_path)
+    _register(runtime, "worker-a")
+    _register(runtime, "worker-b")
+    receipt = submit_intent(
+        runtime,
+        _v2_intent(
+            intent_id="CEO-HF1Q-PAIR-T3",
+            business_impact="routine",
+        ),
+    )
+    root = runtime.jobs.get_job(receipt["job_id"])
+    assert root is not None
+    dispatches: list[OrchestrationDispatchOutcome] = []
+
+    def accepted_dispatch(job_id: str, command_id: str):
+        job = runtime.jobs.get_job(job_id)
+        assert job is not None
+        worker = (
+            "worker-a"
+            if job.orchestration_role in {"plan", "aggregation"}
+            or (job.orchestration_role == "work" and job.plan_step_id == "step-codex")
+            else "worker-b"
+        )
+        if job.orchestration_role == "work":
+            assert job.constraints["eligible_quota_classes"] == ["default"]
+        outcome = runtime.attempts.dispatch_cycle_job(
+            job_id, command_id=command_id, worker_id=worker
+        )
+        assert outcome is not None
+        dispatches.append(outcome)
+        return outcome
+
+    cycle = CooCycle(runtime, dispatcher=accepted_dispatch)
+    assert cycle.run_once(root.job_id).action == "PLANNER_CREATED"
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    planner = dispatches[-1]
+    plan_body = {
+        "schema_version": "mastermind.execution_plan/v1",
+        "root_job_id": root.job_id,
+        "plan_attempt_id": planner.attempt.attempt_id,
+        "steps": [
+            {
+                "ordinal": 0,
+                "step_id": "step-codex",
+                "objective": "Hermetic reviewed Codex child result.",
+                "business_impact": "routine",
+                "review_required": True,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+            },
+            {
+                "ordinal": 1,
+                "step_id": "step-claude",
+                "objective": "Hermetic reviewed Claude-compatible child result.",
+                "business_impact": "routine",
+                "review_required": False,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+            },
+        ],
+    }
+    _complete_ohf_role(runtime, planner, plan_body, identity_seed=3301)
+    admission = cycle.run_once(root.job_id)
+    assert admission.action == "PLAN_ADMITTED"
+    work_ids = list(admission.receipt["work_job_ids"])
+    assert len(work_ids) == 2
+    assert [str(runtime.jobs.get_job(job_id).plan_step_id) for job_id in work_ids] == [
+        "step-codex",
+        "step-claude",
+    ]
+
+    work_by_step = {}
+    for work_id in work_ids:
+        job = runtime.jobs.get_job(work_id)
+        assert job is not None
+        worker = "worker-a" if job.plan_step_id == "step-codex" else "worker-b"
+        outcome = runtime.attempts.dispatch_cycle_job(
+            work_id,
+            command_id=(
+                f"coo-cycle:{root.job_id}:dispatch:{work_id}:attempt:1"
+            ),
+            worker_id=worker,
+        )
+        assert outcome is not None
+        dispatches.append(outcome)
+        work_by_step[str(job.plan_step_id)] = outcome
+    assert {value.attempt.worker_id for value in work_by_step.values()} == {
+        "worker-a",
+        "worker-b",
+    }
+
+    seals_by_step = {}
+    for step_id, work in work_by_step.items():
+        body = {
+            "schema_version": "mastermind.work_result/v1",
+            "root_job_id": root.job_id,
+            "plan_attempt_id": planner.attempt.attempt_id,
+            "plan_digest": result_digest(plan_body),
+            "plan_step_id": step_id,
+            "repair_round": 0,
+            "artifacts": [],
+            "evidence_digests": [],
+        }
+        seals_by_step[step_id] = _complete_ohf_role(
+            runtime, work, body, identity_seed=3302 if step_id == "step-codex" else 3303
+        )[0]
+
+    assert cycle.run_once(root.job_id).action == "REVIEW_CREATED"
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    review = dispatches[-1]
+    reviewed_job = runtime.jobs.get_job(review.attempt.job_id)
+    assert reviewed_job is not None and reviewed_job.reviews_job_id
+    reviewed_work = work_by_step["step-codex"]
+    body = _review_body(
+        root_id=root.job_id,
+        plan_attempt_id=planner.attempt.attempt_id,
+        plan_digest=result_digest(plan_body),
+        target_job_id=reviewed_work.attempt.job_id,
+        target_attempt_id=reviewed_work.attempt.attempt_id,
+        target_result_digest=seals_by_step["step-codex"]["role_result_digest"],
+        repair_round=0,
+        verdict="approve",
+        plan_step_id="step-codex",
+    )
+    _complete_ohf_role(runtime, review, body, identity_seed=3304)
+    assert review.attempt.worker_id != reviewed_work.attempt.worker_id
+
+    handoff_outcome = cycle.run_once(root.job_id)
+    assert handoff_outcome.action == "HANDOFF_CREATED"
+    handoff = runtime.jobs.get_cycle_handoff(root.job_id)
+    assert len(handoff["revisions"]) == 2
+    assert {item["current_attempt_id"] for item in handoff["revisions"]} == {
+        value.attempt.attempt_id for value in work_by_step.values()
+    }
+    assert {item["current_result_digest"] for item in handoff["revisions"]} == {
+        value["role_result_digest"] for value in seals_by_step.values()
+    }
+    assert handoff["revisions"][0]["qualifying_review_attempt_id"]
+    assert handoff["revisions"][1]["qualifying_review_attempt_id"] is None
+
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    aggregation = dispatches[-1]
+    aggregation_body = {
+        "schema_version": "mastermind.aggregation_result/v1",
+        "root_job_id": root.job_id,
+        "handoff_digest": handoff["handoff_digest"],
+        "policy_sha": handoff["policy_sha"],
+        "plan_attempt_id": handoff["plan_attempt_id"],
+        "plan_digest": handoff["plan_digest"],
+        "revisions": [
+            {key: item[key] for key in (
+                "ordinal",
+                "plan_step_id",
+                "current_job_id",
+                "current_attempt_id",
+                "current_result_digest",
+                "repair_round",
+                "review_required",
+                "qualifying_review_job_id",
+                "qualifying_review_attempt_id",
+                "qualifying_review_result_digest",
+            )}
+            for item in handoff["revisions"]
+        ],
+        "aggregate_summary": "Two reviewed heterogeneous results are ready.",
+        "evidence_digests": [],
+    }
+    _complete_ohf_role(
+        runtime, aggregation, aggregation_body, identity_seed=3306
+    )
+    assert runtime.jobs.get_job(root.job_id).status is executive_runtime.JobStatus.COMPLETED
+
+
+def test_heterogeneous_pair_qualification_receipts_use_existing_runtime_events_only(
+    tmp_path: Path,
+) -> None:
+    runtime = Runtime.at(tmp_path)
+    _register(runtime, "worker-a")
+    _register(runtime, "worker-b")
+    receipt = submit_intent(
+        runtime,
+        _v2_intent(
+            intent_id="CEO-HF1Q-PAIR-T5",
+            business_impact="routine",
+        ),
+    )
+    root = runtime.jobs.get_job(receipt["job_id"])
+    assert root is not None
+    dispatches: list[OrchestrationDispatchOutcome] = []
+
+    def accepted_dispatch(job_id: str, command_id: str):
+        job = runtime.jobs.get_job(job_id)
+        assert job is not None
+        worker = (
+            "worker-a"
+            if job.orchestration_role in {"plan", "aggregation"}
+            or (job.orchestration_role == "work" and job.plan_step_id == "step-codex")
+            else "worker-b"
+        )
+        outcome = runtime.attempts.dispatch_cycle_job(
+            job_id, command_id=command_id, worker_id=worker
+        )
+        assert outcome is not None
+        dispatches.append(outcome)
+        return outcome
+
+    cycle = CooCycle(runtime, dispatcher=accepted_dispatch)
+    assert cycle.run_once(root.job_id).action == "PLANNER_CREATED"
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    planner = dispatches[-1]
+    plan_body = {
+        "schema_version": "mastermind.execution_plan/v1",
+        "root_job_id": root.job_id,
+        "plan_attempt_id": planner.attempt.attempt_id,
+        "steps": [
+            {
+                "ordinal": 0,
+                "step_id": "step-codex",
+                "objective": "Hermetic reviewed Codex child result.",
+                "business_impact": "routine",
+                "review_required": True,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+            },
+            {
+                "ordinal": 1,
+                "step_id": "step-claude",
+                "objective": "Hermetic review-exempt Claude child result.",
+                "business_impact": "routine",
+                "review_required": False,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+            },
+        ],
+    }
+    _complete_ohf_role(runtime, planner, plan_body, identity_seed=3401)
+    admitted = cycle.run_once(root.job_id)
+    assert admitted.action == "PLAN_ADMITTED"
+    work_ids = list(admitted.receipt["work_job_ids"])
+    work_dispatches = []
+    for work_id in work_ids:
+        work_job = runtime.jobs.get_job(work_id)
+        assert work_job is not None
+        worker = "worker-a" if work_job.plan_step_id == "step-codex" else "worker-b"
+        work_dispatch = runtime.attempts.dispatch_cycle_job(
+            work_id,
+            command_id=f"coo-cycle:{root.job_id}:dispatch:{work_id}:attempt:1",
+            worker_id=worker,
+        )
+        assert work_dispatch is not None
+        work_dispatches.append(work_dispatch)
+
+    work_seals = {}
+    for work in work_dispatches:
+        work_job = runtime.jobs.get_job(work.attempt.job_id)
+        assert work_job is not None
+        work_body = {
+            "schema_version": "mastermind.work_result/v1",
+            "root_job_id": root.job_id,
+            "plan_attempt_id": planner.attempt.attempt_id,
+            "plan_digest": result_digest(plan_body),
+            "plan_step_id": str(work_job.plan_step_id),
+            "repair_round": 0,
+            "artifacts": [],
+            "evidence_digests": [],
+        }
+        work_seals[str(work_job.plan_step_id)] = _complete_ohf_role(
+            runtime,
+            work,
+            work_body,
+            identity_seed=3402 if work.attempt.worker_id == "worker-a" else 3403,
+        )[0]
+
+    assert cycle.run_once(root.job_id).action == "REVIEW_CREATED"
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    review = dispatches[-1]
+    reviewed = work_by_worker(work_dispatches, "worker-a")
+    review_body = _review_body(
+        root_id=root.job_id,
+        plan_attempt_id=planner.attempt.attempt_id,
+        plan_digest=result_digest(plan_body),
+        target_job_id=reviewed.attempt.job_id,
+        target_attempt_id=reviewed.attempt.attempt_id,
+        target_result_digest=work_seals["step-codex"]["role_result_digest"],
+        repair_round=0,
+        verdict="approve",
+        plan_step_id="step-codex",
+    )
+    _complete_ohf_role(runtime, review, review_body, identity_seed=3404)
+    assert cycle.run_once(root.job_id).action == "HANDOFF_CREATED"
+    handoff = runtime.jobs.get_cycle_handoff(root.job_id)
+
+    claims = [
+        event
+        for event in runtime.events.list_events()
+        if event.event_type == "JOB_CLAIMED"
+    ]
+    seals = [
+        event
+        for event in runtime.events.list_events()
+        if event.event_type == "ORCHESTRATION_ROLE_RESULT_SEALED"
+    ]
+    assert len(claims) == 4
+    assert len(seals) == 4
+    work_claims = [
+        event for event in claims if event.job_id in set(work_ids)
+    ]
+    work_seal_events = [
+        event for event in seals if event.job_id in set(work_ids)
+    ]
+    assert {event.worker_id for event in work_claims} == {"worker-a", "worker-b"}
+    assert {event.quota_class for event in work_claims} == {"default"}
+    assert {event.attempt_id for event in work_claims} == {
+        value.attempt.attempt_id for value in work_dispatches
+    }
+    assert {event.attempt_id for event in work_seal_events} == {
+        value.attempt.attempt_id for value in work_dispatches
+    }
+    assert all(set(event.payload).isdisjoint(
+        {"adapter_id", "harness_id", "binding_id", "profile_id"}
+    ) for event in work_claims)
+    assert all(
+        event.payload["result_envelope"]["worker_id"] == event.worker_id
+        for event in work_seal_events
+    )
+    assert all(set(event.payload).isdisjoint(
+        {"adapter_id", "harness_id", "binding_id", "profile_id"}
+    ) for event in work_seal_events)
+
+    revisions_by_attempt = {
+        item["current_attempt_id"]: item for item in handoff["revisions"]
+    }
+    assert set(revisions_by_attempt) == {
+        value.attempt.attempt_id for value in work_dispatches
+    }
+    reviewed_revision = revisions_by_attempt[reviewed.attempt.attempt_id]
+    assert reviewed_revision["current_result_digest"] == (
+        work_seals["step-codex"]["role_result_digest"]
+    )
+    assert reviewed_revision["qualifying_review_attempt_id"] == (
+        review.attempt.attempt_id
+    )
+    assert reviewed_revision["qualifying_review_result_digest"] == (
+        next(
+            event.payload["role_result_digest"]
+            for event in seals
+            if event.attempt_id == review.attempt.attempt_id
+        )
+    )
+    assert set(handoff).isdisjoint(
+        {"adapter_id", "harness_id", "binding_id", "profile_id"}
+    )
+
+    with runtime.store.read() as connection:
+        provider_owners = {
+            row[1]
+            for row in connection.execute(
+                "SELECT type,name FROM sqlite_master WHERE type='table'"
+            )
+            if row[1] in {"provider_accounts", "wake_queue", "result_store"}
+        }
+    assert provider_owners == set()
+
+
+def work_by_worker(
+    dispatches: list[OrchestrationDispatchOutcome], worker_id: str
+) -> OrchestrationDispatchOutcome:
+    matches = [item for item in dispatches if item.attempt.worker_id == worker_id]
+    assert len(matches) == 1
+    return matches[0]
 
 
 def test_run_once_without_accepted_supervisor_blocks_before_claim(tmp_path):
