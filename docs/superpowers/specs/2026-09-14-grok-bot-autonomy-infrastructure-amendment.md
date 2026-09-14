@@ -5,7 +5,7 @@
 **Operation:** `grok-bot-autonomy-design-20260914-sol-001`  
 **State:** `ARCHITECTURE_CANDIDATE / SPEC_ONLY / PRODUCTION_INERT`  
 **Carrier:** existing Mastermind PR #624 / `sol/grok-bot-autonomy-design-20260914`  
-**Procedure pin:** protected Mastermind `f4730cc65436d86500ef827c24493f83a7e41def`, `mastermind.sol_skillpack.v1` 1.0.1 / bootstrap-major 1  
+**Procedure pin:** protected Mastermind `af9fce32861f9c1496b85a580e3569712170d92b`, `mastermind.sol_skillpack.v1` 1.0.1 / bootstrap-major 1
 **Organizational read pin:** Macro `e0e3fda2fa2a44d8d64c3f0a52b9d56c1de3653b`
 
 ## 1. Precedence and purpose
@@ -24,7 +24,7 @@ The Bot is not the CEO, lifecycle authority, ranked agenda, scheduler, provider 
 | --- | --- | --- |
 | Web-independent operational continuation law | `SPEC_ONLY / SOURCE_PROTECTED` | `docs/EXECUTIVE_WEB_CEO_AUTONOMOUS_DELIVERY_AMENDMENT.md` on protected source defines strategic, operational, and deterministic loops; it does not install the journey. |
 | Company peer-consultation grammar | `BUILT_NOT_PROVEN / PRODUCTION_INERT` | W6-C1 protected at `f4730cc...`: `common/agent_dialogue_consultation_contract.py` and `integrations/mastermind_company_mcp/consultation.py`. |
-| Consultation runtime receipts | `BUILT_NOT_PROVEN / UNMERGED / PRODUCTION_DISARMED` | Draft PR #615 contains `ConsultationRuntime` and native receipt lineage. Its direct current head and final interfaces must be reconciled before downstream implementation. |
+| Consultation runtime receipts | `BUILT_NOT_PROVEN / UNMERGED / RELEASE_BLOCKED` | PR #615 exact head `97634130...` is green but fails review `5196352060`: protected-v1 breakage, unusable real Codex ingress, unjoined Wake/provider effects, contradictory `EFFECT_UNKNOWN`, and unsafe answer availability/consumption. Downstream code must not bind to it. |
 | Executive read/app edge | `BUILT_NOT_PROVEN` | #599 is merged; its own receipt leaves intended installation and real client acceptance pending. It remains separate from Company Consultation. |
 | Grok wake transport | `NOT_BUILT` | `grok-computer` is named in `control_plane/wake_transport.py` but `transport_implemented=false`; all checked-in targets remain disabled and global production is false. |
 | Grok reasoning-surface identity | `NOT_BUILT` | `control_plane/session_targets.py` has no `grok-bot` reasoning surface. Existing `chatgpt-sol` targets using `grok-computer` are not a lawful substitute. |
@@ -72,7 +72,7 @@ Existing Executive / Dialogue / Wake facts
  current requester consumes answer and decides
 ```
 
-The **inbound seam** is canonical Wake. The **outbound seam** is canonical Company Consultation. They remain separate because provider acceptance and returned company evidence are different facts. Neither seam owns the other, and neither becomes a new lifecycle.
+The **inbound seam** is canonical Wake. The **outbound seam** is canonical Company Consultation. They remain separate because provider acceptance and returned company evidence are different facts. Neither seam owns the other, and neither becomes a new lifecycle. Consultation semantic receipts may project the exact Wake/provider evidence, but they may not independently mint dispatch, native-acceptance, retry, or effect-unknown truth.
 
 ### 3.3 Canonical owners remain unchanged
 
@@ -169,9 +169,9 @@ The protected limits remain: one answer, at most four evidence reads, zero forwa
 
 ### 5.2 Version the external reasoning surface honestly
 
-W6-C1 v1 admits only its current closed surfaces. Add a reviewed versioned contract for `grok-bot`; do not label Grok as Codex or Claude. Preserve v1 parsing and fingerprints exactly. The new version must keep actor refs as real Worker/Attempt identities and continue requiring current RuntimeBinding correlation.
+Protected v1 admits only its current closed surfaces and is immutable: every previously accepted/rejected frame and fingerprint must remain byte-for-byte stable. After C0 protects the consultation schema table, add `grok-bot` only in the **next unused lawful schema version**; do not assume that `v2` remains available, and do not label Grok as Codex or Claude. The new version must keep actor refs as real Worker/Attempt identities and require exact current RuntimeBinding correlation.
 
-Draft W6-C2 already proposes receipt lineage for INTENT, DISPATCH_ATTEMPT, NATIVE_ACCEPTED, CONSUMED_BY_RECIPIENT, ANSWER_AVAILABLE, and CONSUMED_BY_REQUESTER. Downstream Grok work begins only after the current W6-C2 owner freezes and protects the actual interface. This amendment does not copy its draft runtime into a Grok module.
+W6-C2 may project INTENT, dispatch, recipient, answer, and requester-consumption semantics only when each effect-bearing fact is causally derived from the exact canonical Wake attempt and typed provider observation. Downstream Grok work begins only after the current W6-C2 owner closes review `5196352060` and protects the actual interface. This amendment does not copy its draft runtime or effect reducer into a Grok module.
 
 ### 5.3 Authenticated remote composition
 
@@ -320,17 +320,19 @@ The Bot cloud computer is optional working context. No local Mastermind source c
 
 ## 12. Implementation waves and dependencies
 
-1. **C0 — W6-C runtime acceptance:** reconcile and protect W6-C2. Downstream code binds the protected interface, not a draft.
-2. **C1 — external reasoning-surface version:** add `grok-bot` to a versioned consultation contract and exact producer/consumer tests.
-3. **G1 — Grok Wake adapter:** add provider client, secret-resolution seam, exact target, registry, hermetic dispatch/reconciliation tests. Keep disabled.
-4. **G2 — remote Company Consultation app:** authenticated four-tool HTTP composition using existing auth/audit/service owners; no CEO app change.
-5. **G3 — capability and installation package:** sealed profile, dedicated service/tunnel config, Bot description/skill/routine artifacts, and secret-free attestation.
-6. **G4 — account setup and read-only qualification:** one dedicated Bot, connector/tool inventory, OAuth, usage/overflow inspection, routine saved but inactive until negative tests pass.
-7. **G5 — real return canary:** exact Wake -> HTTP 200 -> recipient consumption -> answer -> requester consumption, plus duplicate/stale/late/effect-unknown failures.
-8. **G6 — one economical helper:** current Router/Capacity selects one qualified peer; validate answer and one bounded correction if naturally required.
-9. **G7 — event-driven operational responsibility:** enable one narrow event/routine after proof; no timer/polling storm.
-10. **G8 — delegated operational continuation:** grant only closed repair/continue/park classes under #612 after identity/effect proof.
-11. **G9 — Control Room and ROI promotion:** expose truthful state; scale only after measured accepted value and no authority defects.
+1. **C0 — W6-C runtime acceptance:** repair #615 on its existing carrier and protect one canonical Wake/effect/result interface. Required closure includes protected-schema compatibility, real current-writer composition, exact Wake/provider causality, one effect reducer, authoritative RuntimeBinding evidence, exact available-to-consumed answer identity, and atomic answer/consumption budgets.
+2. **G1a — provider-free Grok Wake adapter:** may proceed in parallel because it depends only on the already-protected generic Wake contract. It must remain unregistered, unarmed, network-free, and incapable of claiming delivery or target consumption.
+3. **G1b — bounded HTTP client:** may follow G1a with injected transport/secret seams and no checked-in target, credential, routine, or production registration.
+4. **C1 — external reasoning-surface version:** after C0, add `grok-bot` to the next unused consultation schema version with exact compatibility tests.
+5. **G2 — Grok target/registry composition:** bind the adapter only after C0/C1, keep the transport descriptor false and target disabled.
+6. **G3 — remote Company Consultation app:** authenticated four-tool HTTP composition using existing auth/audit/service owners; no CEO app change.
+7. **G4 — capability and installation package:** sealed profile, dedicated service/tunnel config, Bot description/skill/routine artifacts, and secret-free attestation.
+8. **G5 — account setup and read-only qualification:** one dedicated Bot, connector/tool inventory, OAuth, usage/overflow inspection, routine saved but inactive until negative tests pass.
+9. **G6 — real return canary:** exact Wake -> HTTP 200 -> exact recipient consumption -> exact answer availability -> matching requester consumption, plus duplicate/stale/late/effect-unknown failures.
+10. **G7 — one economical helper:** current Router/Capacity selects one qualified peer; validate answer and one bounded correction if naturally required.
+11. **G8 — event-driven operational responsibility:** enable one narrow event/routine after proof; no timer/polling storm.
+12. **G9 — delegated operational continuation:** grant only closed repair/continue/park classes under #612 after identity/effect proof.
+13. **G10 — Control Room and ROI promotion:** expose truthful state; scale only after measured accepted value and no authority defects.
 
 Each wave must be independently useful, separately reviewed, and separately proven. Source merge, install, provider acceptance, answer arrival, parent consumption, production proof, and final Sol acceptance remain distinct.
 
@@ -350,7 +352,7 @@ real admitted returned-work obligation
 -> Grok can be unavailable afterward without losing company state
 ```
 
-Required negative proofs: pre-submit unavailable, non-200, post-submit `EFFECT_UNKNOWN`, duplicate delivery, changed payload conflict, wrong binding generation, revoked grant, expired question, stale/late answer, exhausted one-answer budget, Company MCP unavailable, Bot paused, included usage exhausted, and helper invalid output.
+Required negative proofs: pre-submit unavailable, non-200, post-submit `EFFECT_UNKNOWN`, late-result reconciliation, duplicate delivery, changed payload conflict, wrong binding generation, revoked grant, expired question, foreign requester/recipient/binding, same-message-key changed answer, available/consumed fingerprint mismatch, concurrent answer race, stale/late/corrected answer history, exhausted one-answer budget, Company MCP unavailable, Bot paused, included usage exhausted, and helper invalid output.
 
 ROI is accepted useful outcomes per scarce principal/human effort. Measure existing telemetry/evidence owners for human interventions, parent-consumption latency, first-pass acceptance, repairs, false escalations, missed actionable obligations, Grok usage basis, helper usage/cost, duplicate effects, and authority violations. Do not infer per-run savings from an account-wide usage meter when concurrent work exists.
 
@@ -367,9 +369,9 @@ ROI is accepted useful outcomes per scarce principal/human effort. Measure exist
 
 ## 15. Exact next action
 
-The next implementation dependency is **C0: reconcile and protect the current W6-C2 runtime carrier, including its exact consultation receipt interfaces and source-owner state**. In parallel, bounded and path-disjoint source preparation may begin for the Grok Wake adapter and remote Company Consultation app only after their implementers bind to the protected W6-C1 contracts and hold all W6-C2-dependent composition until C0 resolves.
+The next implementation dependency is **C0: repair #615 on its existing carrier and close exact review `5196352060`**. The protected interface must preserve old schemas, reuse the canonical Wake/current-writer path, authenticate exact provider evidence, expose one coherent effect reducer, and enforce exact/atomic answer availability and consumption.
 
-After C0, execute C1 and G1 as separate source waves. Account/Bot setup follows the reviewed G2/G3 source and installation artifacts; it must not precede the security, identity, and secret-custody boundaries merely because the Bot product is already available.
+In parallel, only the provider-free Grok Wake dispatcher and bounded HTTP client may advance because they depend solely on the already-protected generic Wake protocol. They remain unregistered, unarmed and incapable of target or completion claims. Contract versioning, target/registry composition, remote Company Consultation composition, account/Bot setup and every canary remain held until C0. After C0, allocate `grok-bot` to the next unused schema version and continue the gated sequence.
 
 ## 16. Primary external references observed 2026-09-14
 

@@ -12,8 +12,9 @@
 
 ## Global Constraints
 
-- Protected source pin for this plan: `f4730cc65436d86500ef827c24493f83a7e41def`; re-pin Skillpack and current source before every modifying child.
-- W6-C2 draft PR #615 is a blocking interface dependency. Do not implement against draft symbols until its current owner protects the accepted interface or returns a superseding contract.
+- Current review pin for this plan: protected Mastermind `af9fce32861f9c1496b85a580e3569712170d92b`; re-pin Skillpack and current source before every modifying child.
+- W6-C2 PR #615 exact head `97634130d4bd69c3592502b2bb0e71829c55405c` is `RELEASE_BLOCKED` by exact review `5196352060`. Do not implement against its draft schema, effect reducer, ingress, or answer lineage until the same carrier returns a protected accepted interface.
+- Tasks 2 and 3 are the only C0-parallel source waves: they consume the already-protected generic Wake contract only and must remain unregistered, unarmed, provider-secret-free in fixtures, and incapable of claiming delivery or target consumption. Task 1 and Tasks 4 onward remain C0-gated.
 - Executive OS remains the only Job/Attempt/Worker/Event lifecycle and admission authority.
 - W6-C remains the only consultation/result lineage. No Grok callback database, queue, result store, retry service, or memory owner.
 - The Executive five-tool app remains unchanged. Company Consultation is a distinct four-tool app and scope.
@@ -28,30 +29,42 @@
 
 ---
 
-## Gate C0: Protect the W6-C2 consultation runtime interface
+## Gate C0: Repair and protect the W6-C2 consultation return interface
 
-**Carrier:** existing PR #615 only. This gate creates no replacement branch or implementation.
+**Carrier:** existing PR #615 only. No replacement PR, branch, result store, callback service, queue, retry plane, or provider path is permitted.
 
-**Required protected interfaces:**
+**Current exact blocker:** review `5196352060` on `97634130d4bd69c3592502b2bb0e71829c55405c`. Green CI is not acceptance. The repair must close all of these owners together:
 
-- `control_plane.consultation_runtime.ConsultationRuntime`
-- consultation events for INTENT, DISPATCH_ATTEMPT, NATIVE_ACCEPTED, CONSUMED_BY_RECIPIENT, ANSWER_AVAILABLE, and CONSUMED_BY_REQUESTER
-- exact duplicate/conflict semantics, one-answer budget, correction lineage, and sticky `EFFECT_UNKNOWN`
-- Company Dialogue carrier/source-resolution integration
-- actual producer/consumer boundary used by `CompanyConsultationGateway.dispatcher`
+- protected consultation-schema compatibility, including exact old v1 frames and fingerprints;
+- real managed-current-writer composition through the existing Wake dispatcher and fixed attention instruction;
+- exact persisted Wake attempt and typed provider-observation causality before semantic dispatch/native credit;
+- one coherent reducer for restart, late-result reconciliation, projection, and downstream credit;
+- canonical RuntimeBinding/current-writer evidence rather than a partial parallel SQL definition;
+- exact stored requester/recipient/binding/correlation/artifact identity before answer availability;
+- exact available-answer fingerprint and semantic digest before requester consumption;
+- atomic one-answer and one-consumption reservation;
+- trusted-time expiry/lateness and non-crediting correction/history behavior.
 
-- [ ] Re-read protected master, current PR #615 head, review threads, checks, and all changed paths.
-- [ ] Resolve any discrepancy between PR body and direct current head; direct repository state wins.
-- [ ] Run the exact PR-prescribed focused and repository tests on the final head.
-- [ ] Obtain independent non-author review of lifecycle, idempotency, correction, and effect-unknown behavior.
-- [ ] Protect or explicitly supersede the accepted interface.
-- [ ] Record the protected commit and exact public symbols in PR #624 before Task 1 begins.
+- [ ] Re-read protected master, exact #615 head, all unresolved reviews/threads/checks, and the seven-path delta.
+- [ ] Preserve old v1 byte behavior or introduce an explicit new schema version and compatibility dispatch; retaining the string `v1` is not compatibility.
+- [ ] Replace free-form/direct Codex attention with the canonical Wake/current-writer path, stable persisted nudge identity, fixed instruction, and opaque IDs only.
+- [ ] Make consultation effect-bearing facts derive from the exact Wake attempt/provider observation; arbitrary WAKE-looking IDs and invented turn IDs must produce zero credit.
+- [ ] Use one effect reducer and explicit same-attempt late-result reconciliation. No history may be simultaneously unblocked and `EFFECT_UNKNOWN`.
+- [ ] Require canonical non-empty semantic fingerprints at Runtime ingress.
+- [ ] Bind answer/correction availability to the stored request and atomically reserve the sole accepted slot.
+- [ ] Require requester consumption to match the exact available answer fingerprint and semantic digest.
+- [ ] Add fail-first controls for foreign requester, foreign recipient/binding, same-key changed answer, blank fingerprint, concurrent answers, expiry, correction history, restart/ABA, and real-adapter instruction/nudge identity.
+- [ ] Run focused, 17-file importer, native round-trip, isolated-entrypoint, current-protected integrated, hosted `test`, and security checks on one immutable final head.
+- [ ] Obtain fresh non-author Sol review and protect or explicitly supersede the accepted interface.
+- [ ] Record the protected commit, complete schema table, exact public symbols, and no-rebuild boundaries in PR #624 before Task 1 or Task 4 begins.
 
-**Stop:** W6-C2 is protected with exact interfaces, or the current owner returns a blocker/superseding design. Do not start Tasks 1–9 against an unresolved draft.
+**Stop:** C0 passes only when the exact return path has one canonical effect owner and exact result lineage. Tasks 2 and 3 may proceed independently; Task 1 and Tasks 4–17 remain held.
 
 ---
 
-### Task 1: Version the consultation contract for a real Grok reasoning surface
+### Task 1: Add an honest Grok reasoning surface using the next lawful schema version
+
+**Prerequisite:** Gate C0 PASS with an immutable protected consultation schema table. Do not assume `v2` is unused.
 
 **Files:**
 - Modify: `common/agent_dialogue_consultation_contract.py`
@@ -62,95 +75,82 @@
 - Modify: `tests/test_company_consultation_peer_resolver.py`
 
 **Interfaces:**
-- Produces: `CONSULTATION_SCHEMA_V1`, `CONSULTATION_SCHEMA_V2`, `LATEST_CONSULTATION_SCHEMA`, and `consultation_reasoning_surfaces(schema: str) -> frozenset[str]`.
-- Preserves: every v1 accepted/rejected byte sequence, fingerprint, budget, and peer projection.
-- Adds: `grok-bot` only to v2 and `control_plane.session_targets.REASONING_SURFACES`.
-- Consumes later: Tasks 2, 7, 9, and the W6-C runtime.
+- Consumes the complete protected schema/version table returned by C0.
+- Defines `GROK_CONSULTATION_SCHEMA` as the next unused version after the protected latest schema.
+- Preserves every protected schema's accepted/rejected bytes, canonical JSON, fingerprints, budgets, correction behavior, and peer projections.
+- Adds `grok-bot` only to `GROK_CONSULTATION_SCHEMA` and to the closed SessionTarget reasoning-surface vocabulary.
+- Derives schema selection from the trusted current peer/RuntimeBinding projection, never model arguments.
 
-- [ ] **Step 1: Write failing version-compatibility tests**
+- [ ] **Step 1: Freeze all protected compatibility vectors before adding Grok**
 
-```python
-def test_v1_rejects_grok_and_v2_accepts_it() -> None:
-    v1 = consultation_fixture(schema=CONSULTATION_SCHEMA_V1, reasoning_surface="grok-bot")
-    with pytest.raises(ConsultationContractError):
-        validate_consultation(v1)
-    v2 = consultation_fixture(schema=CONSULTATION_SCHEMA_V2, reasoning_surface="grok-bot")
-    assert validate_consultation(v2).recipient_binding["reasoning_surface"] == "grok-bot"
-
-
-def test_v1_fingerprint_is_byte_preserved() -> None:
-    envelope = consultation_fixture(schema=CONSULTATION_SCHEMA_V1, reasoning_surface="codex")
-    assert consultation_fingerprint(envelope) == FROZEN_V1_FINGERPRINT
-```
-
-- [ ] **Step 2: Run the focused tests and confirm the Grok-v2 test fails while frozen v1 remains green**
-
-Run:
-
-```bash
-python3 -m pytest tests/test_agent_dialogue_consultation_contract.py tests/test_company_consultation_peer_resolver.py -q -p no:randomly -o addopts=''
-```
-
-Expected: the new v2 acceptance test fails because `grok-bot` is unknown; existing v1 tests pass.
-
-- [ ] **Step 3: Add closed schema/surface tables**
+Build a corpus from exact protected frames and expected results/fingerprints for every existing schema generation. Tests must read literal frozen vectors rather than rebuilding expected fingerprints through the candidate implementation.
 
 ```python
-CONSULTATION_SCHEMA_V1 = "mastermind.agent_dialogue_consultation.v1"
-CONSULTATION_SCHEMA_V2 = "mastermind.agent_dialogue_consultation.v2"
-CONSULTATION_SCHEMA = CONSULTATION_SCHEMA_V1
-LATEST_CONSULTATION_SCHEMA = CONSULTATION_SCHEMA_V2
-_REASONING_SURFACES_BY_SCHEMA = {
-    CONSULTATION_SCHEMA_V1: frozenset({"codex", "claude"}),
-    CONSULTATION_SCHEMA_V2: frozenset({"codex", "claude", "grok-bot"}),
-}
-
-
-def consultation_reasoning_surfaces(schema: str) -> frozenset[str]:
-    try:
-        return _REASONING_SURFACES_BY_SCHEMA[str(schema)]
-    except KeyError:
-        raise ConsultationContractError("unsupported consultation schema") from None
+@pytest.mark.parametrize("frame, expected", PROTECTED_CONSULTATION_VECTORS)
+def test_all_protected_consultation_vectors_are_unchanged(frame, expected) -> None:
+    assert classify_protected_vector(frame) == expected
 ```
 
-Use this function at the existing recipient-binding validation site. Preserve `CONSULTATION_SCHEMA` as the v1 alias so old imports and fixtures cannot silently change behavior.
-
-- [ ] **Step 4: Add `grok-bot` to the closed SessionTarget surface vocabulary**
+- [ ] **Step 2: Write the failing Grok-version tests**
 
 ```python
-REASONING_SURFACES = frozenset(
-    {"chatgpt-sol", "codex", "claude", "grok-bot", "workspace-agent", "human"}
+def test_protected_schemas_reject_grok_without_changing_other_results() -> None:
+    for schema in PROTECTED_CONSULTATION_SCHEMAS:
+        with pytest.raises(ConsultationContractError):
+            validate_consultation(
+                consultation_fixture(schema=schema, reasoning_surface="grok-bot")
+            )
+
+
+def test_next_schema_accepts_only_attested_grok_surface() -> None:
+    frame = consultation_fixture(
+        schema=GROK_CONSULTATION_SCHEMA,
+        reasoning_surface="grok-bot",
+    )
+    assert validate_consultation(frame)["recipient_binding"]["reasoning_surface"] == "grok-bot"
+```
+
+Run the focused contract/peer suites and require the new Grok case to fail while every frozen protected vector remains green.
+
+- [ ] **Step 3: Add the closed schema/surface mapping**
+
+Read the protected version table at action time. Add exactly one new constant for Grok; never rename, alias, or mutate a protected generation. Keep any legacy `CONSULTATION_SCHEMA` alias bound to its protected meaning.
+
+```python
+GROK_CONSULTATION_SCHEMA = next_unused_consultation_schema(
+    PROTECTED_LATEST_CONSULTATION_SCHEMA
 )
+_REASONING_SURFACES_BY_SCHEMA = {
+    **PROTECTED_REASONING_SURFACES_BY_SCHEMA,
+    GROK_CONSULTATION_SCHEMA: frozenset(
+        {*PROTECTED_LATEST_REASONING_SURFACES, "grok-bot"}
+    ),
+}
 ```
 
-Do not add a target or enable transport in this task.
+The code need not use this illustrative helper name; the implementation must use a closed literal version accepted in review, not calculate a schema dynamically at runtime.
 
-- [ ] **Step 5: Make the peer resolver emit v2 only for an explicitly Grok-bound peer**
+- [ ] **Step 4: Add `grok-bot` to SessionTarget vocabulary only**
 
-The resolver must derive the schema from the current typed RuntimeBinding/peer profile, never from model arguments. Add a closed function:
+Do not add a target, dispatcher registration, workstream route, implementation bit, or production arm in this task.
 
-```python
-def consultation_schema_for_surface(reasoning_surface: str) -> str:
-    if reasoning_surface == "grok-bot":
-        return CONSULTATION_SCHEMA_V2
-    if reasoning_surface in {"codex", "claude"}:
-        return CONSULTATION_SCHEMA_V1
-    raise ConsultationPeerRefused("CAPABILITY_NOT_ATTESTED")
-```
+- [ ] **Step 5: Make peer schema selection host-derived**
 
-- [ ] **Step 6: Run contract, peer, and target suites**
+A Grok-bound peer receives the exact new schema only when the current typed peer/RuntimeBinding projection says `reasoning_surface == "grok-bot"`. Every protected surface keeps its protected schema behavior. Unknown or unattested surfaces refuse.
+
+- [ ] **Step 6: Run compatibility, peer, and target suites**
 
 ```bash
 python3 -m pytest \
   tests/test_agent_dialogue_consultation_contract.py \
   tests/test_company_consultation_peer_resolver.py \
   tests/test_session_targets.py \
-  -q -p no:randomly -o addopts=''
+  -q -p no:randomly -p no:cacheprovider -o addopts=''
 ```
 
-Expected: all pass; v1 fingerprints remain unchanged.
+Run the complete importer family for the touched contract and demonstrate that mutating one protected vector or fingerprint makes the compatibility test fail.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 7: Commit the one-version source wave**
 
 ```bash
 git add common/agent_dialogue_consultation_contract.py \
@@ -162,7 +162,7 @@ git add common/agent_dialogue_consultation_contract.py \
 git commit -m "feat(consultation): add versioned Grok reasoning surface"
 ```
 
-**Acceptance:** a real Grok-bound Worker/Attempt can be represented honestly without changing any v1 result or enabling execution.
+**Acceptance:** a real Grok-bound Worker/Attempt can be represented honestly with zero changed result in every protected consultation generation and without enabling execution.
 
 ---
 
@@ -366,6 +366,8 @@ git commit -m "feat(wake): add bounded Grok webhook client"
 
 ### Task 4: Compose an inert Grok target without arming production
 
+**Prerequisites:** Gate C0 PASS and Task 1 protected. The generic dispatcher source alone is not sufficient.
+
 **Files:**
 - Modify: `config/wake_session_targets.json`
 - Modify: `integrations/executive_wake/registry.py`
@@ -429,6 +431,8 @@ git commit -m "feat(wake): add disabled Grok logical target"
 ---
 
 ### Task 5: Build the authenticated remote Company Consultation app
+
+**Prerequisite:** Gate C0 PASS. Bind only to the protected W6-C runtime and result lineage.
 
 **Files:**
 - Create: `integrations/mastermind_company_mcp/http_app.py`
