@@ -12,18 +12,6 @@ from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import urlparse
 
-from control_plane.codex_provider_realm import (
-    CODEX_WIRE_API_RESPONSES,
-    REVIEWED_CODEX_PROVIDER_REALMS,
-)
-from control_plane.provider_protocols import PROVIDER_PROTOCOLS as _ALLOWED_PROTOCOLS
-from control_plane.subscription_provider_profiles import (
-    SubscriptionProviderProfile,
-    get_profile,
-    load_profiles,
-    validate_profiles,
-)
-
 SCHEMA = "mastermind.subscription_harness_bindings/v1"
 DEFAULT_BINDINGS_PATH = (
     Path(__file__).resolve().parents[1]
@@ -59,7 +47,7 @@ class SubscriptionHarnessBinding:
 
     def model_for(
         self,
-        profile: SubscriptionProviderProfile,
+        profile: Any,
         model_class: str | None = None,
     ) -> str:
         selected = model_class or profile.default_model_class
@@ -109,6 +97,8 @@ def _reviewed_codex_realm(
     effective_base_url: str,
     protocol: str,
 ) -> None:
+    from control_plane.codex_provider_realm import REVIEWED_CODEX_PROVIDER_REALMS
+
     matches = tuple(
         realm
         for realm in REVIEWED_CODEX_PROVIDER_REALMS.values()
@@ -123,6 +113,11 @@ def _reviewed_codex_realm(
 
 
 def _profiles(document: Mapping[str, Any] | None) -> Mapping[str, Any]:
+    from control_plane.subscription_provider_profiles import (
+        load_profiles,
+        validate_profiles,
+    )
+
     return validate_profiles(document) if document is not None else load_profiles()
 
 
@@ -131,6 +126,8 @@ def validate_bindings(
     *,
     profiles_document: Mapping[str, Any] | None = None,
 ) -> Mapping[str, Any]:
+    from control_plane.subscription_provider_profiles import get_profile
+
     if not isinstance(document, Mapping) or document.get("schema") != SCHEMA:
         raise HarnessBindingError("unsupported harness-binding schema")
     profiles = _profiles(profiles_document)
@@ -149,7 +146,9 @@ def validate_bindings(
         harness_id = _identifier(row.get("harness_id"), "harness id")
         adapter_id = _identifier(row.get("adapter_id"), "adapter id")
         protocol = row.get("protocol")
-        if protocol not in _ALLOWED_PROTOCOLS:
+        from control_plane.provider_protocols import PROVIDER_PROTOCOLS
+
+        if protocol not in PROVIDER_PROTOCOLS:
             raise HarnessBindingError(f"binding {binding_id!r} protocol is unsupported")
         endpoint = row.get("endpoint")
         if not isinstance(endpoint, Mapping):
@@ -185,6 +184,8 @@ def validate_bindings(
             normalized_harness_id == "codex-cli"
             or normalized_adapter_id == "codex-cli"
         ):
+            from control_plane.codex_provider_realm import CODEX_WIRE_API_RESPONSES
+
             if normalized_harness_id != normalized_adapter_id:
                 raise HarnessBindingError(
                     f"binding {binding_id!r} codex harness identity disagrees"
@@ -227,6 +228,8 @@ def get_binding(
     document: Mapping[str, Any] | None = None,
     profiles_document: Mapping[str, Any] | None = None,
 ) -> SubscriptionHarnessBinding:
+    from control_plane.subscription_provider_profiles import get_profile
+
     catalog = (
         validate_bindings(document, profiles_document=profiles_document)
         if document is not None

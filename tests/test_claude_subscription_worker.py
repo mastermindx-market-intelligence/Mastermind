@@ -658,6 +658,24 @@ def test_claude_lane_is_spec_only_and_admits_no_broker_execution() -> None:
         ExecutiveWorkerBroker(object(), object(), object(), adapter_id=binding.adapter_id)
 
 
+def test_catalog_digest_entrypoints_share_one_policy() -> None:
+    from control_plane.subscription_canary_admission import (
+        compose_catalog_digest as admission_digest,
+    )
+    from control_plane.subscription_catalog import (
+        compose_catalog_digest as catalog_digest,
+    )
+
+    bindings, profiles = _documents()
+    assert admission_digest(
+        bindings_document=bindings,
+        profiles_document=profiles,
+    ) == catalog_digest(
+        bindings_document=bindings,
+        profiles_document=profiles,
+    )
+
+
 def test_attack_a_primitive_kwarg_construction_is_typed_field_refusal() -> None:
     """(a) Residual TypeError surface: primitives must name capacity_fact/realm_receipt."""
 

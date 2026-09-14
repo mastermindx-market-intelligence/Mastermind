@@ -78,23 +78,72 @@ import os
 import re
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
 from control_plane import ceo_boot_packet
-from control_plane.executive_runtime import (
-    RuntimeReadBinding,
-    RuntimeReadUnavailable,
-    Attempt,
-    AttemptStatus,
-    Job,
-    JobPayload,
-    JobStatus,
-    Runtime,
-    RuntimeProofError,
-    WorkerStatus,
-    orchestration_digest,
-)
+import hashlib
+
+
+def orchestration_digest(value: Any) -> str:
+    try:
+        encoded = json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError, UnicodeEncodeError):
+        return ""
+    return hashlib.sha256(encoded).hexdigest()
+
+
+
+class RuntimeProofError(RuntimeError):
+    pass
+
+
+class WorkerStatus(str, Enum):
+    AVAILABLE = "AVAILABLE"
+    BUSY = "BUSY"
+    DRAINING = "DRAINING"
+    RATE_LIMITED = "RATE_LIMITED"
+    OFFLINE = "OFFLINE"
+    ERROR = "ERROR"
+
+
+class JobStatus(str, Enum):
+    QUEUED = "QUEUED"
+    RUNNING = "RUNNING"
+    CHECKPOINTED = "CHECKPOINTED"
+    RATE_LIMITED = "RATE_LIMITED"
+    FAILED = "FAILED"
+    LOST = "LOST"
+    CANCEL_REQUESTED = "CANCEL_REQUESTED"
+    COMPLETED = "COMPLETED"
+    CANCELLED = "CANCELLED"
+
+
+class AttemptStatus(str, Enum):
+    CLAIMED = "CLAIMED"
+    RUNNING = "RUNNING"
+    CHECKPOINTED = "CHECKPOINTED"
+    CANCEL_REQUESTED = "CANCEL_REQUESTED"
+    RATE_LIMITED = "RATE_LIMITED"
+    FAILED = "FAILED"
+    LOST = "LOST"
+    COMPLETED = "COMPLETED"
+    CANCELLED = "CANCELLED"
+
+
+RuntimeReadBinding = Any
+RuntimeReadUnavailable = RuntimeProofError
+Attempt = Any
+Job = Any
+JobPayload = Any
+Runtime = Any
 
 #: Schema version of the document this module emits.  A bump means a migration.
 SCHEMA = "mastermind.executive_inbox.v2"

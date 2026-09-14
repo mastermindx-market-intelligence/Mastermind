@@ -16,15 +16,9 @@ from typing import Any, Mapping
 
 from control_plane.subscription_harness_bindings import (
     HarnessBindingError,
-    load_bindings,
-    validate_bindings,
     get_binding,
 )
-from control_plane.subscription_provider_profiles import (
-    ProviderProfileError,
-    load_profiles,
-    validate_profiles,
-)
+from control_plane.subscription_provider_profiles import ProviderProfileError
 
 SCHEMA = "mastermind.subscription_canary_admission/v1"
 _SEAL = object()
@@ -86,17 +80,12 @@ def compose_catalog_digest(
     bindings_document: Mapping[str, Any] | None = None,
     profiles_document: Mapping[str, Any] | None = None,
 ) -> str:
-    profiles = (
-        validate_profiles(profiles_document) if profiles_document is not None else load_profiles()
+    from control_plane.subscription_catalog import compose_catalog_digest as canonical_digest
+
+    return canonical_digest(
+        bindings_document=bindings_document,
+        profiles_document=profiles_document,
     )
-    bindings = (
-        validate_bindings(bindings_document, profiles_document=profiles)
-        if bindings_document is not None
-        else load_bindings(profiles_document=profiles)
-    )
-    return hashlib.sha256(
-        _canonical_json({"bindings": bindings, "profiles": profiles}).encode("utf-8")
-    ).hexdigest()
 
 
 def _public_fields(admission: "SubscriptionCanaryAdmission") -> dict[str, Any]:
@@ -192,6 +181,11 @@ def seal_subscription_canary_admission(
     if realm_receipt.enrollment_state != "enrolled":
         raise CanaryAdmissionError("provider realm enrollment state is not enrolled")
     try:
+        from control_plane.subscription_provider_profiles import (
+            load_profiles,
+            validate_profiles,
+        )
+
         profiles = (
             validate_profiles(profiles_document)
             if profiles_document is not None

@@ -78,18 +78,17 @@ def get_binding(
     )
     binding = bindings.get("bindings", {}).get(binding_id)
     if binding is None:
-        raise HarnessBindingError(f"binding {binding_id!r} is unknown")
-    if binding.get("binding_id") != binding_id:
+        raise HarnessBindingError(f"unknown harness binding {binding_id!r}")
+    if binding.get("binding_id", binding_id) != binding_id:
         raise HarnessBindingError(f"binding {binding_id!r} does not match its catalog key")
-    from control_plane.subscription_harness_bindings import SubscriptionHarnessBinding
+    from control_plane.subscription_harness_bindings import get_binding as binding_lookup
 
-    return SubscriptionHarnessBinding(
-        **{
-            **binding,
-            "autonomous_allowed": bool(binding["autonomous_allowed"]),
-            "activation_gates": tuple(binding["activation_gates"]),
-            "model_classes": tuple(binding["model_classes"]),
-        }
+    return binding_lookup(
+        binding_id,
+        document={**document, "bindings": {binding_id: binding}}
+        if document is not None
+        else None,
+        profiles_document=profiles,
     )
 
 

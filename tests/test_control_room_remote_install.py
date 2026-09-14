@@ -435,7 +435,7 @@ def test_installer_exact_extracted_allowlist_boots_under_isolated_python(tmp_pat
     assert sum(
         path.startswith("control_plane/") and path.endswith(".py")
         for path in manifest["files"]
-    ) == 33
+    ) == 7
     assert "config/strategic_state.yml" in manifest["files"]
     assert not any(path.startswith(".git/") for path in manifest["files"])
     for unrelated in (
@@ -796,7 +796,7 @@ def test_installer_verify_source_only_refuses_unsafe_source(tmp_path, problem):
     elif problem == "hardlink":
         target = repo / "control_plane/chairman_control_room.py"
         target.unlink()
-        os.link(repo / "control_plane/ceo_intent.py", target)
+        os.link(repo / "control_plane/executive_inbox.py", target)
         _git("add", "control_plane/chairman_control_room.py", cwd=repo)
         _git("commit", "-qm", "hard", cwd=repo)
         commit, tree = _git("rev-parse", "HEAD", cwd=repo), _git("rev-parse", "HEAD^{tree}", cwd=repo)

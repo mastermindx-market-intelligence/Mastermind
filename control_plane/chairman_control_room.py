@@ -70,9 +70,10 @@ from typing import Any
 from control_plane import (
     ceo_boot_packet,
     executive_inbox,
-    executive_runtime,
     surface_bindings,
 )
+
+executive_runtime = None
 
 # CAP-C1 placement selection is an OPTIONAL capability: an extracted
 # control-room-remote release stages an exact runtime file allowlist, and

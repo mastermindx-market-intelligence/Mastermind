@@ -373,8 +373,7 @@ def issue_provider_realm_enrollment_receipt(
 ) -> Any:
     """Mint one keyed-sealed realm receipt. Enrollment is owner-observed."""
 
-    from control_plane.subscription_catalog import compose_catalog_digest
-    from control_plane.subscription_harness_bindings import get_binding
+    from control_plane.subscription_catalog import compose_catalog_digest, get_binding
     from ops.executive_os.provider_realm_facts import (
         ProviderRealmEnrollmentReceipt,
         ProviderRealmFactError,
