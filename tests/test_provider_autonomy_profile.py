@@ -76,6 +76,30 @@ def test_verify_passes_after_apply(tmp_path: Path) -> None:
     assert verify_profiles(codex, claude) == ()
 
 
+def test_verify_detects_selected_profile_override(tmp_path: Path) -> None:
+    codex = tmp_path / "config.toml"
+    claude = tmp_path / "settings.json"
+    codex.write_text(
+        'sandbox_mode = "danger-full-access"\napproval_policy = "never"\n'
+        'profile = "interactive"\n\n[profiles.interactive]\napproval_policy = "on-request"\n'
+    )
+    claude.write_text('{"permissions":{"defaultMode":"bypassPermissions"}}\n')
+    issues = verify_profiles(codex, claude, codex_project_configs=())
+    assert "codex.profile" in issues
+    assert "codex.profiles.override" in issues
+
+
+def test_verify_detects_project_layer_permission_override(tmp_path: Path) -> None:
+    codex = tmp_path / "config.toml"
+    claude = tmp_path / "settings.json"
+    project = tmp_path / "project.toml"
+    codex.write_text('sandbox_mode = "danger-full-access"\napproval_policy = "never"\n')
+    claude.write_text('{"permissions":{"defaultMode":"bypassPermissions"}}\n')
+    project.write_text('approval_policy = "on-request"\n')
+    issues = verify_profiles(codex, claude, codex_project_configs=(project,))
+    assert "codex.project.approval_policy" in issues
+
+
 @pytest.mark.parametrize(
     "filename,payload",
     [

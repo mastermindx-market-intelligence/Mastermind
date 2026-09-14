@@ -202,7 +202,42 @@ def apply_claude(path: Path) -> bool:
     return True
 
 
-def verify_profiles(codex_path: Path, claude_path: Path) -> tuple[str, ...]:
+def _codex_nested_override_issues(value: dict[str, object], *, prefix: str) -> list[str]:
+    issues: list[str] = []
+    for section in ("profiles", "projects"):
+        rows = value.get(section)
+        if not isinstance(rows, dict):
+            continue
+        if any(
+            isinstance(row, dict) and any(key in row for key in ("sandbox_mode", "approval_policy"))
+            for row in rows.values()
+        ):
+            issues.append(f"{prefix}.{section}.override")
+    return issues
+
+
+def _discover_codex_project_configs(codex_path: Path) -> tuple[Path, ...]:
+    root = Path(codex_path).resolve()
+    discovered: list[Path] = []
+    for parent in (Path.cwd(), *Path.cwd().parents):
+        candidate = parent / ".codex" / "config.toml"
+        if not candidate.exists():
+            continue
+        try:
+            same = candidate.resolve() == root
+        except OSError:
+            same = False
+        if not same and candidate not in discovered:
+            discovered.append(candidate)
+    return tuple(discovered)
+
+
+def verify_profiles(
+    codex_path: Path,
+    claude_path: Path,
+    *,
+    codex_project_configs: Sequence[Path] | None = None,
+) -> tuple[str, ...]:
     codex = _parse_codex(_read_bytes(Path(codex_path)))
     claude = _parse_claude(_read_bytes(Path(claude_path)))
     issues: list[str] = []
@@ -210,10 +245,29 @@ def verify_profiles(codex_path: Path, claude_path: Path) -> tuple[str, ...]:
         issues.append("codex.sandbox_mode")
     if codex.get("approval_policy") != CODEX_APPROVAL:
         issues.append("codex.approval_policy")
+    if "profile" in codex:
+        issues.append("codex.profile")
+    issues.extend(_codex_nested_override_issues(codex, prefix="codex"))
+
+    projects = (
+        _discover_codex_project_configs(Path(codex_path))
+        if codex_project_configs is None
+        else tuple(Path(path) for path in codex_project_configs)
+    )
+    for project_path in projects:
+        project = _parse_codex(_read_bytes(project_path))
+        if "sandbox_mode" in project and project.get("sandbox_mode") != CODEX_SANDBOX:
+            issues.append("codex.project.sandbox_mode")
+        if "approval_policy" in project and project.get("approval_policy") != CODEX_APPROVAL:
+            issues.append("codex.project.approval_policy")
+        if "profile" in project:
+            issues.append("codex.project.profile")
+        issues.extend(_codex_nested_override_issues(project, prefix="codex.project"))
+
     permissions = claude.get("permissions")
     if not isinstance(permissions, dict) or permissions.get("defaultMode") != CLAUDE_MODE:
         issues.append("claude.permissions.defaultMode")
-    return tuple(issues)
+    return tuple(dict.fromkeys(issues))
 
 
 def apply_profiles(codex_path: Path, claude_path: Path) -> tuple[bool, bool]:
@@ -230,6 +284,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("mode", choices=("verify", "apply"))
     parser.add_argument("--codex-config", type=Path, required=True)
     parser.add_argument("--claude-settings", type=Path, required=True)
+    parser.add_argument("--codex-project-config", dest="codex_project_configs", type=Path, action="append")
     return parser
 
 
@@ -238,7 +293,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.mode == "apply":
             apply_profiles(args.codex_config, args.claude_settings)
-        issues = verify_profiles(args.codex_config, args.claude_settings)
+        issues = verify_profiles(
+            args.codex_config,
+            args.claude_settings,
+            codex_project_configs=args.codex_project_configs,
+        )
     except AutonomyProfileError as exc:
         sys.stderr.write(f"provider autonomy profile refused: {exc}\n")
         return 65

@@ -16,6 +16,7 @@ import json
 import os
 import platform
 import re
+import signal
 import socket
 import stat
 import subprocess
@@ -66,6 +67,10 @@ class EffectUnknownError(PrivilegedBrokerError):
 
 class BrokerTrustError(PrivilegedBrokerError):
     """The installed root trust boundary is absent or drifted."""
+
+
+class ChildStartError(PrivilegedBrokerError):
+    """The reviewed child failed before a process existed."""
 
 
 class Executor(Protocol):
@@ -208,18 +213,49 @@ def _read_bounded_json(path: Path) -> dict[str, Any]:
 def _default_executor(
     argv: Sequence[str], *, cwd: Path, env: Mapping[str, str], timeout: int
 ) -> subprocess.CompletedProcess[bytes]:
-    return subprocess.run(
-        list(argv),
-        cwd=str(cwd),
-        env=dict(env),
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        timeout=timeout,
-        check=False,
-        shell=False,
-        close_fds=True,
-    )
+    try:
+        process = subprocess.Popen(
+            list(argv),
+            cwd=str(cwd),
+            env=dict(env),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            shell=False,
+            close_fds=True,
+            start_new_session=True,
+        )
+    except OSError as exc:
+        raise ChildStartError("privileged child could not be started") from exc
+
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        try:
+            process.communicate()
+        except OSError:
+            pass
+        raise EffectUnknownError(
+            "privileged child timed out after spawn; effect is unknown"
+        ) from exc
+    except OSError as exc:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except (OSError, ProcessLookupError):
+            pass
+        try:
+            process.communicate()
+        except OSError:
+            pass
+        raise EffectUnknownError(
+            "privileged child transport failed after spawn; effect is unknown"
+        ) from exc
+
+    return subprocess.CompletedProcess(list(argv), process.returncode, stdout, stderr)
 
 
 def _assert_root_owned_nonwritable(path: Path, *, directory: bool) -> os.stat_result:
@@ -293,22 +329,28 @@ class PrivilegedActionBroker:
     ) -> None:
         self.config = config
         self.receipt_root = Path(config.receipt_root)
+        self.inflight_root = self.receipt_root / "inflight"
         self._executor = executor
         if require_root and os.geteuid() != 0:
             raise BrokerTrustError("privileged broker must run as root")
         trust_validator(config)
         self.receipt_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        self.inflight_root.mkdir(exist_ok=True, mode=0o700)
         if require_root:
-            info = self.receipt_root.lstat()
-            if info.st_uid != 0 or info.st_gid != 0 or not stat.S_ISDIR(info.st_mode):
-                raise BrokerTrustError("privileged receipt root ownership drifted")
-            os.chmod(self.receipt_root, 0o700)
+            for path, label in (
+                (self.receipt_root, "privileged receipt root"),
+                (self.inflight_root, "privileged in-flight root"),
+            ):
+                info = path.lstat()
+                if info.st_uid != 0 or info.st_gid != 0 or not stat.S_ISDIR(info.st_mode):
+                    raise BrokerTrustError(f"{label} ownership drifted")
+                os.chmod(path, 0o700)
 
     def receipt_path(self, request_id: str) -> Path:
         return self.receipt_root / f"{request_id}.json"
 
     def inflight_path(self, request_id: str) -> Path:
-        return self.receipt_root / f"{request_id}.inflight.json"
+        return self.inflight_root / f"{request_id}.json"
 
     @staticmethod
     def _request_digest(request: PrivilegedActionRequest) -> str:
@@ -358,16 +400,18 @@ class PrivilegedActionBroker:
     def _remove_inflight(self, request_id: str) -> None:
         path = self.inflight_path(request_id)
         path.unlink()
-        _fsync_directory(self.receipt_root)
+        _fsync_directory(self.inflight_root)
 
-    def handle(self, raw_request: Mapping[str, Any], *, peer_uid: int) -> dict[str, Any]:
+    def _handle_outcome(
+        self, raw_request: Mapping[str, Any], *, peer_uid: int
+    ) -> tuple[dict[str, Any], bool]:
         if isinstance(peer_uid, bool) or not isinstance(peer_uid, int) or peer_uid not in self.config.allowed_peer_uids:
             raise PeerAuthorizationError("kernel peer uid is not authorized for privileged actions")
         request = validate_request(raw_request)
         digest = self._request_digest(request)
         existing = self._existing_terminal(request, digest)
         if existing is not None:
-            return existing
+            return existing, True
         self._check_inflight(request, digest)
 
         started_at = _utc_now()
@@ -380,15 +424,20 @@ class PrivilegedActionBroker:
                 env=_CLOSED_ENV,
                 timeout=self.config.timeout_seconds,
             )
-        except subprocess.TimeoutExpired as exc:
-            raise EffectUnknownError("privileged child timed out after spawn; effect is unknown") from exc
-        except OSError as exc:
-            # Popen-level OS errors occur before a child executable can start.
+        except ChildStartError as exc:
             try:
                 self._remove_inflight(request.request_id)
             except OSError as cleanup_exc:
-                raise EffectUnknownError("executor failed and in-flight cleanup failed") from cleanup_exc
+                raise EffectUnknownError("child start failed and in-flight cleanup failed") from cleanup_exc
             raise PrivilegedBrokerError("privileged child could not be started") from exc
+        except EffectUnknownError:
+            raise
+        except subprocess.TimeoutExpired as exc:
+            raise EffectUnknownError("privileged child timed out after spawn; effect is unknown") from exc
+        except OSError as exc:
+            # An injected executor cannot prove whether its OSError occurred before
+            # or after spawn. Preserve the marker and fail closed as effect-unknown.
+            raise EffectUnknownError("privileged executor failed after admission; effect is unknown") from exc
 
         stdout = bytes(completed.stdout or b"")
         stderr = bytes(completed.stderr or b"")
@@ -421,12 +470,17 @@ class PrivilegedActionBroker:
         except OSError as exc:
             # The terminal receipt wins replay, but cleanup drift must not be called clean success.
             raise EffectUnknownError("terminal receipt exists but in-flight cleanup failed") from exc
+        return receipt, False
+
+    def handle(self, raw_request: Mapping[str, Any], *, peer_uid: int) -> dict[str, Any]:
+        receipt, _replayed = self._handle_outcome(raw_request, peer_uid=peer_uid)
         return receipt
 
 
 WIRE_RESPONSE_SCHEMA = "mastermind.executive_privileged_action_response.v1"
 _MAX_REQUEST_BYTES = 64 * 1024
 _LAUNCHD_SOCKET_NAME = "PrivilegedActions"
+_BROKER_IDLE_TIMEOUT_SECONDS = 120
 
 
 def get_peer_uid(peer_socket: socket.socket) -> int:
@@ -503,8 +557,13 @@ def _wire_error(code: str, detail: str) -> dict[str, Any]:
     }
 
 
-def _wire_success(receipt: Mapping[str, Any]) -> dict[str, Any]:
-    return {"schema": WIRE_RESPONSE_SCHEMA, "ok": True, "receipt": dict(receipt)}
+def _wire_success(receipt: Mapping[str, Any], *, replayed: bool) -> dict[str, Any]:
+    return {
+        "schema": WIRE_RESPONSE_SCHEMA,
+        "ok": True,
+        "replayed": replayed,
+        "receipt": dict(receipt),
+    }
 
 
 def _send_wire(connection: socket.socket, value: Mapping[str, Any]) -> None:
@@ -547,8 +606,8 @@ def serve_connection(
         if peer_uid not in broker.config.allowed_peer_uids:
             raise PeerAuthorizationError("kernel peer uid is not authorized for privileged actions")
         raw = _read_request_frame(connection)
-        receipt = broker.handle(raw, peer_uid=peer_uid)
-        _send_wire(connection, _wire_success(receipt))
+        receipt, replayed = broker._handle_outcome(raw, peer_uid=peer_uid)
+        _send_wire(connection, _wire_success(receipt, replayed=replayed))
     except PeerAuthorizationError:
         # Do not parse or reflect an unauthorized peer's body.
         _send_wire(connection, _wire_error("PEER_UNAUTHORIZED", "kernel peer uid is not authorized"))
@@ -567,11 +626,19 @@ def run_broker(
 ) -> None:
     broker = PrivilegedActionBroker(config)
     listener = activated_socket if activated_socket is not None else activate_launchd_socket()
+    listener.settimeout(_BROKER_IDLE_TIMEOUT_SECONDS)
     while True:
-        connection, _address = listener.accept()
+        try:
+            connection, _address = listener.accept()
+        except TimeoutError:
+            return
         with connection:
             connection.settimeout(30)
-            serve_connection(broker, connection)
+            try:
+                serve_connection(broker, connection)
+            except OSError:
+                # A disconnected client cannot pin the privileged process resident.
+                continue
 
 
 __all__ = [

@@ -1633,6 +1633,22 @@ def test_installer_privileged_broker_is_explicitly_armed_and_never_edits_sudoers
     assert '/usr/bin/stat -f' in text[live - 1800 : live]
 
 
+def test_failed_privileged_arm_cleanup_proves_the_root_daemon_is_absent() -> None:
+    text = (OPS / "install.sh").read_text(encoding="utf-8")
+    start = text.index("leave_installed_services_stopped() {")
+    end = text.index("trap leave_installed_services_stopped EXIT", start)
+    cleanup = text[start:end]
+    assert 'if /bin/launchctl print "system/$PRIVILEGED_LABEL" >/dev/null 2>&1; then' in cleanup
+    assert "privileged LaunchDaemon remained loaded after cleanup" in cleanup
+
+
+def test_privileged_broker_budget_exceeds_provider_inference_canary_budget() -> None:
+    install = (OPS / "install.sh").read_text(encoding="utf-8")
+    canary = (OPS / "provider_inference_canary.py").read_text(encoding="utf-8")
+    assert '"timeout_seconds": 600' in install
+    assert 'timeout_seconds: float = 180.0' in canary
+
+
 def test_privileged_client_and_broker_entrypoints_are_in_release_manifest_surface() -> None:
     install = (OPS / "install.sh").read_text(encoding="utf-8")
     for relative in (

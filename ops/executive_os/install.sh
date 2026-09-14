@@ -668,6 +668,14 @@ leave_installed_services_stopped() {
   if [ "$PRIVILEGED_BROKER_LIVE" != "1" ]; then
     /bin/launchctl disable "system/$PRIVILEGED_LABEL" >/dev/null 2>&1 || true
     /bin/launchctl bootout "system/$PRIVILEGED_LABEL" >/dev/null 2>&1 || true
+    if /bin/launchctl print "system/$PRIVILEGED_LABEL" >/dev/null 2>&1; then
+      /bin/sleep 2
+      /bin/launchctl bootout "system/$PRIVILEGED_LABEL" >/dev/null 2>&1 || true
+    fi
+    if /bin/launchctl print "system/$PRIVILEGED_LABEL" >/dev/null 2>&1; then
+      /bin/echo "privileged LaunchDaemon remained loaded after cleanup" >&2
+      exit 65
+    fi
   fi
   /bin/launchctl bootout "system/$RELAY_LABEL" >/dev/null 2>&1 || true
   /bin/launchctl bootout "system/$CONTROL_LABEL" >/dev/null 2>&1 || true
@@ -1009,7 +1017,7 @@ value = {
     "release_root": release_root,
     "receipt_root": receipt_root,
     "allowed_peer_uids": sorted({int(control_uid), int(operator_uid)}),
-    "timeout_seconds": 120,
+    "timeout_seconds": 600,
     "broker_version": "1",
 }
 out = pathlib.Path(path)

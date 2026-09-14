@@ -2,11 +2,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import signal
 import subprocess
+import sys
+import time
 from pathlib import Path
 
 import pytest
 
+from control_plane import executive_privileged_broker as broker_module
 from control_plane.executive_privileged_action import REQUEST_SCHEMA, canonical_request_bytes, validate_request
 from control_plane.executive_privileged_broker import (
     BROKER_CONFIG_SCHEMA,
@@ -15,6 +20,7 @@ from control_plane.executive_privileged_broker import (
     PrivilegedActionBroker,
     PrivilegedBrokerConfig,
     RequestIdConflictError,
+    serve_connection,
 )
 
 
@@ -76,6 +82,37 @@ def test_success_persists_terminal_receipt_and_replays_without_second_spawn(tmp_
     assert json.loads(receipt.read_text()) == first
 
 
+def test_wire_response_marks_fresh_and_replayed_successes(tmp_path: Path) -> None:
+    class MemoryConnection:
+        def __init__(self, payload: bytes) -> None:
+            self.payload = payload
+            self.sent = bytearray()
+
+        def recv(self, _size: int) -> bytes:
+            payload, self.payload = self.payload, b""
+            return payload
+
+        def sendall(self, payload: bytes) -> None:
+            self.sent.extend(payload)
+
+    executor = FakeExecutor()
+    broker = _broker(tmp_path, executor)
+    payload = (json.dumps(_raw(), sort_keys=True, separators=(",", ":")) + "\n").encode()
+
+    first = MemoryConnection(payload)
+    serve_connection(broker, first, peer_resolver=lambda _connection: 501)
+    first_response = json.loads(bytes(first.sent))
+    assert first_response["ok"] is True
+    assert first_response["replayed"] is False
+
+    second = MemoryConnection(payload)
+    serve_connection(broker, second, peer_resolver=lambda _connection: 501)
+    second_response = json.loads(bytes(second.sent))
+    assert second_response["ok"] is True
+    assert second_response["replayed"] is True
+    assert len(executor.calls) == 1
+
+
 def test_changed_request_reusing_terminal_id_refuses_without_spawn(tmp_path: Path) -> None:
     executor = FakeExecutor()
     broker = _broker(tmp_path, executor)
@@ -129,6 +166,106 @@ def test_receipt_failure_after_spawn_preserves_inflight_as_effect_unknown(tmp_pa
         broker.handle(_raw(), peer_uid=501)
     assert len(executor.calls) == 1
     assert broker.inflight_path("req-001").is_file()
+
+
+def test_executor_oserror_after_marker_is_effect_unknown_and_preserves_marker(tmp_path: Path) -> None:
+    class OSErrorExecutor:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def __call__(self, argv, *, cwd, env, timeout):
+            self.calls += 1
+            raise OSError("post-spawn transport failure")
+
+    executor = OSErrorExecutor()
+    broker = _broker(tmp_path, executor)
+    with pytest.raises(EffectUnknownError, match="effect is unknown"):
+        broker.handle(_raw(), peer_uid=501)
+    assert executor.calls == 1
+    assert broker.inflight_path("req-001").is_file()
+
+
+def test_terminal_and_inflight_request_ids_use_disjoint_namespaces(tmp_path: Path) -> None:
+    executor = FakeExecutor()
+    broker = _broker(tmp_path, executor)
+    broker.handle(_raw(request_id="foo.inflight"), peer_uid=501)
+    result = broker.handle(_raw(request_id="foo"), peer_uid=501)
+    assert result["outcome"] == "SUCCEEDED"
+    assert len(executor.calls) == 2
+    assert broker.receipt_path("foo.inflight") != broker.inflight_path("foo")
+
+
+def test_default_executor_timeout_kills_the_entire_spawned_process_group(tmp_path: Path) -> None:
+    marker = tmp_path / "descendant.pid"
+    child = (
+        "import subprocess,sys,time; "
+        "p=subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'], "
+        "stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); "
+        f"open({str(marker)!r}, 'w').write(str(p.pid)); "
+        "time.sleep(60)"
+    )
+    descendant_pid = None
+    try:
+        with pytest.raises(EffectUnknownError, match="timed out"):
+            broker_module._default_executor(
+                [sys.executable, "-c", child], cwd=tmp_path, env=os.environ, timeout=1
+            )
+        deadline = time.time() + 2
+        while not marker.exists() and time.time() < deadline:
+            time.sleep(0.02)
+        assert marker.exists()
+        descendant_pid = int(marker.read_text())
+        deadline = time.time() + 2
+        while time.time() < deadline:
+            try:
+                os.kill(descendant_pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.02)
+        with pytest.raises(ProcessLookupError):
+            os.kill(descendant_pid, 0)
+    finally:
+        if descendant_pid is not None:
+            try:
+                os.kill(descendant_pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
+def test_run_broker_exits_when_idle_and_survives_one_client_socket_error(tmp_path: Path, monkeypatch) -> None:
+    class FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def settimeout(self, _value):
+            pass
+
+    class FakeListener:
+        def __init__(self) -> None:
+            self.timeout = None
+            self.accepts = 0
+
+        def settimeout(self, value):
+            self.timeout = value
+
+        def accept(self):
+            self.accepts += 1
+            if self.accepts == 1:
+                return FakeConnection(), None
+            raise TimeoutError("idle")
+
+    config = _broker(tmp_path).config
+    listener = FakeListener()
+    monkeypatch.setattr(broker_module, "PrivilegedActionBroker", lambda _config: object())
+    monkeypatch.setattr(
+        broker_module, "serve_connection", lambda *_args, **_kwargs: (_ for _ in ()).throw(BrokenPipeError())
+    )
+    broker_module.run_broker(config, activated_socket=listener)
+    assert listener.timeout == broker_module._BROKER_IDLE_TIMEOUT_SECONDS
+    assert listener.accepts == 2
 
 
 def test_config_mapping_requires_fixed_production_roots_and_control_peer() -> None:
