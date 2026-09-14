@@ -715,9 +715,11 @@ _ALLOWED_CONSUMER_EXACT: Final = frozenset(
         "research/code_intelligence_fabric/z0-result.schema.json",
     }
 )
+_BINARY_METADATA_FILES: Final = ("meta/toolchain-lock.json", "meta/provenance.json", "meta/sbom.json")
 _REQUIRED_BUNDLE_FILES: Final = frozenset(
     {
         "bin/zoekt-git-index",
+        "bin/zoekt-index",
         "bin/zoekt-webserver",
         "meta/NOTICE.txt",
         "meta/provenance.json",
@@ -2292,6 +2294,12 @@ def create_content_addressed_bundle(
         "context": dict(context),
         "files": manifest_files,
     }
+    _validate_bundle_manifest(manifest)
+    metadata = {
+        relative: _regular_file(root / relative, "BUNDLE_PROVENANCE_MISMATCH", max_bytes=locks.STRICT_JSON_MAX_BYTES).read_bytes()
+        for relative in _BINARY_METADATA_FILES
+    }
+    _validate_bundle_binary_provenance(manifest, metadata)
     assert_secret_free(manifest)
     manifest_bytes = locks.canonical_json_bytes(manifest) + b"\n"
     manifest_sha256 = locks.sha256_bytes(manifest_bytes)
@@ -2423,6 +2431,16 @@ def verify_bundle(bundle_path: Path, *, expected_sha256: str) -> VerifiedBundle:
                     remaining -= len(block)
                 if body_stream.read(1) or digest.hexdigest() != row["sha256"]:
                     raise HostedRunnerError("BUNDLE_PAYLOAD_MISMATCH", relative)
+            binary_metadata = {}
+            for relative in _BINARY_METADATA_FILES:
+                member = actual_files[relative]
+                if member.size > locks.STRICT_JSON_MAX_BYTES:
+                    raise HostedRunnerError("BUNDLE_PROVENANCE_MISMATCH", "binary metadata is oversized")
+                stream = archive.extractfile(member)
+                if stream is None:
+                    raise HostedRunnerError("BUNDLE_PROVENANCE_MISMATCH", "binary metadata is absent")
+                binary_metadata[relative] = stream.read(locks.STRICT_JSON_MAX_BYTES + 1)
+            _validate_bundle_binary_provenance(manifest, binary_metadata)
     except HostedRunnerError:
         raise
     except (OSError, tarfile.TarError) as error:
@@ -2439,8 +2457,13 @@ def verify_bundle(bundle_path: Path, *, expected_sha256: str) -> VerifiedBundle:
 def extract_verified_bundle(
     bundle: VerifiedBundle, destination: Path
 ) -> Mapping[str, Path]:
-    """Extract a previously verified bundle without overwrite or link following."""
+    """Reverify and extract exact bundle bytes without overwrite or link following."""
 
+    current = verify_bundle(bundle.path, expected_sha256=bundle.sha256)
+    if (current.manifest_sha256 != bundle.manifest_sha256
+        or locks.canonical_json_bytes(current.manifest) != locks.canonical_json_bytes(bundle.manifest)):
+        raise HostedRunnerError("BUNDLE_MANIFEST_MISMATCH", "verified manifest changed before extraction")
+    bundle = current
     root = Path(destination)
     if root.exists() or root.is_symlink():
         raise HostedRunnerError(
@@ -2468,6 +2491,8 @@ def extract_verified_bundle(
             finally:
                 os.close(descriptor)
             os.chmod(target, int(row["mode"], 8))
+            if target.stat().st_size != row["size"] or locks.sha256_file(target, max_bytes=100_663_296) != row["sha256"]:
+                raise HostedRunnerError("BUNDLE_PAYLOAD_MISMATCH", "extracted member bytes differ")
             paths[relative] = target
     return paths
 
@@ -3327,6 +3352,7 @@ def prepare_phase_p(
         "go_mod_blob_sha1": locks.ZOEKT_GO_MOD_BLOB,
         "go_sum_blob_sha1": locks.ZOEKT_GO_SUM_BLOB,
         "modules": module_inventory,
+        "binaries": build["binaries"],
     }
     assert_secret_free(sbom)
     sbom_bytes = locks.canonical_json_bytes(sbom) + b"\n"
@@ -3334,6 +3360,7 @@ def prepare_phase_p(
 
     notice = (
         "Mastermind CodeIntel Z0 disposable experiment bundle\n"
+        f"Executables: {chr(44).join(locks.ZOEKT_BINARY_PACKAGES)}.\n"
         f"Zoekt {locks.ZOEKT_COMMIT} — Apache-2.0; exact LICENSE follows.\n"
         f"Go {locks.GO_VERSION} ({locks.GO_SOURCE_COMMIT}) — BSD-3-Clause; exact "
         "LICENSE follows.\n"
@@ -3556,6 +3583,20 @@ def run_phase_e(
             "BUNDLE_SUBSTITUTION", "bundle name does not bind complete bytes"
         )
     verified_before = verify_bundle(bundle_path, expected_sha256=bundle_sha256)
+    bundle_context = verified_before.manifest["context"]
+    expected_bundle_context = {
+        "request_digest": request.digest,
+        "lock_sha256": lock.sha256,
+        "build_recipe_sha256": lock.build_recipe_sha256,
+    }
+    if any(
+        bundle_context.get(field) != expected
+        for field, expected in expected_bundle_context.items()
+    ):
+        raise HostedRunnerError(
+            "BUNDLE_REQUEST_MISMATCH",
+            "bundle build context differs from the admitted request",
+        )
 
     consumer = verify_consumer_checkout(
         consumer_root, request.consumer_sha, request.consumer_tree_sha
@@ -3576,21 +3617,18 @@ def run_phase_e(
     scratch = _fresh_directory(scratch_root, "SCRATCH_CONFLICT")
     outputs = _ensure_output_directory(result_directory)
     extracted = extract_verified_bundle(verified_before, scratch / "bundle")
-    indexer = _verified_executable(
-        extracted["bin/zoekt-git-index"],
-        expected_sha256=_manifest_file_digest(
-            verified_before.manifest, "bin/zoekt-git-index"
-        ),
-    )
-    webserver = _verified_executable(
-        extracted["bin/zoekt-webserver"],
-        expected_sha256=_manifest_file_digest(
-            verified_before.manifest, "bin/zoekt-webserver"
-        ),
-    )
+    executables = {
+        name: _verified_executable(
+            extracted["bin/" + name],
+            expected_sha256=_manifest_file_digest(verified_before.manifest, "bin/" + name),
+        )
+        for name in locks.ZOEKT_BINARY_PACKAGES
+    }
+    indexer = executables["zoekt-git-index"]
+    webserver = executables["zoekt-webserver"]
     binary_before = {
-        "zoekt-git-index": locks.sha256_file(indexer, max_bytes=100_663_296),
-        "zoekt-webserver": locks.sha256_file(webserver, max_bytes=100_663_296),
+        name: locks.sha256_file(executable, max_bytes=100_663_296)
+        for name, executable in executables.items()
     }
 
     input_root = scratch / "input"
@@ -3665,8 +3703,11 @@ def run_phase_e(
             consumer_root, includes=includes, excludes=excludes
         )
         binary_after = {
-            "zoekt-git-index": locks.sha256_file(indexer, max_bytes=100_663_296),
-            "zoekt-webserver": locks.sha256_file(webserver, max_bytes=100_663_296),
+            name: locks.sha256_file(
+                _verified_executable(executable, expected_sha256=None),
+                max_bytes=100_663_296,
+            )
+            for name, executable in executables.items()
         }
         verified_after = verify_bundle(bundle_path, expected_sha256=bundle_sha256)
         if (
@@ -4246,10 +4287,7 @@ def _repeat_build_zoekt(
     modules = _normalize_go_module_inventory(inventory_output)
 
     builds: list[dict[str, Mapping[str, object]]] = []
-    packages = {
-        "zoekt-git-index": "./cmd/zoekt-git-index",
-        "zoekt-webserver": "./cmd/zoekt-webserver",
-    }
+    packages = locks.ZOEKT_BINARY_PACKAGES
     for attempt in (1, 2):
         output = scratch / f"build-{attempt}"
         cache = scratch / f"gocache-{attempt}"
@@ -4306,6 +4344,8 @@ def _repeat_build_zoekt(
             "mode": "0755",
             "repeat_builds": 2,
             "byte_identical": True,
+            "package": packages[name],
+            "source_commit": locks.ZOEKT_COMMIT,
         }
         for name in packages
     }
@@ -4968,9 +5008,95 @@ def _bundle_payload_census(root: Path) -> list[tuple[str, Path, int]]:
     return rows
 
 
+def _validate_bundle_binary_provenance(
+    manifest: Mapping[str, Any], metadata: Mapping[str, bytes]
+) -> None:
+    """Join each executable to the exact lock, build receipt and module inventory."""
+    code = "BUNDLE_PROVENANCE_MISMATCH"
+    context = manifest["context"]
+    context_fields = {
+        "request_digest", "lock_sha256", "build_recipe_sha256",
+        "module_inventory_sha256", "provenance_sha256",
+    }
+    if set(context) != context_fields or any(
+        not isinstance(value, str) or _SHA256_RE.fullmatch(value) is None
+        for value in context.values()
+    ):
+        raise HostedRunnerError(code, "bundle context identities differ")
+    rows = {row["path"]: row for row in manifest["files"]}
+    expected_metadata = set(_BINARY_METADATA_FILES)
+    if set(metadata) != expected_metadata:
+        raise HostedRunnerError(code, "binary metadata census differs")
+    decoded = {}
+    try:
+        for path, raw in metadata.items():
+            if len(raw) != rows[path]["size"] or locks.sha256_bytes(raw) != rows[path]["sha256"]:
+                raise HostedRunnerError(code, "binary metadata bytes differ")
+            decoded[path] = locks.decode_strict_json_bytes(raw, invalid_code=code)
+        lock = locks.validate_lock_payload(
+            decoded["meta/toolchain-lock.json"], raw_bytes=metadata["meta/toolchain-lock.json"]
+        )
+    except locks.ToolchainLockError as error:
+        raise HostedRunnerError(code, "binary metadata or toolchain lock is invalid") from error
+    provenance = decoded["meta/provenance.json"]
+    sbom = decoded["meta/sbom.json"]
+    if not isinstance(provenance, Mapping) or not isinstance(sbom, Mapping):
+        raise HostedRunnerError(code, "binary metadata must be objects")
+    if (
+        context["lock_sha256"] != lock.sha256
+        or context["build_recipe_sha256"] != lock.build_recipe_sha256
+        or context["provenance_sha256"] != locks.sha256_bytes(metadata["meta/provenance.json"])
+        or context["module_inventory_sha256"] != locks.sha256_bytes(metadata["meta/sbom.json"])
+        or provenance.get("schema_version") != PHASE_P_PROVENANCE_SCHEMA_VERSION
+        or provenance.get("request_digest") != context["request_digest"]
+        or provenance.get("lock_sha256") != lock.sha256
+        or provenance.get("build_recipe_sha256") != lock.build_recipe_sha256
+        or provenance.get("module_inventory_sha256") != context["module_inventory_sha256"]
+    ):
+        raise HostedRunnerError(code, "binary build context is unbound")
+    if (
+        sbom.get("schema_version") != "mastermind.codeintel_go_module_inventory.v1"
+        or sbom.get("main_module") != locks.ZOEKT_MODULE_PATH
+        or sbom.get("go_version") != locks.GO_VERSION
+        or sbom.get("go_mod_blob_sha1") != locks.ZOEKT_GO_MOD_BLOB
+        or sbom.get("go_sum_blob_sha1") != locks.ZOEKT_GO_SUM_BLOB
+        or not isinstance(sbom.get("modules"), list)
+    ):
+        raise HostedRunnerError(code, "binary module inventory is unbound")
+    binaries = provenance.get("binaries")
+    if (
+        not isinstance(binaries, Mapping)
+        or set(binaries) != set(locks.ZOEKT_BINARY_PACKAGES)
+        or sbom.get("binaries") != binaries
+    ):
+        raise HostedRunnerError(code, "binary provenance and SBOM census differ")
+    fields = {"sha256", "size", "mode", "repeat_builds", "byte_identical", "package", "source_commit"}
+    digests = set()
+    for name, package in locks.ZOEKT_BINARY_PACKAGES.items():
+        evidence = binaries[name]
+        member = rows["bin/" + name]
+        if (
+            not isinstance(evidence, Mapping) or set(evidence) != fields
+            or evidence.get("package") != package
+            or evidence.get("source_commit") != locks.ZOEKT_COMMIT
+            or type(evidence.get("repeat_builds")) is not int
+            or evidence.get("repeat_builds") != 2
+            or evidence.get("byte_identical") is not True
+            or evidence.get("mode") != "0755"
+            or type(evidence.get("size")) is not int
+            or not 0 < evidence.get("size", 0) <= 100_663_296
+            or evidence.get("size") != member["size"]
+            or evidence.get("sha256") != member["sha256"]
+            or evidence.get("sha256") in digests
+        ):
+            raise HostedRunnerError(code, "binary role/source/build observation differs")
+        digests.add(evidence["sha256"])
+
+
 def _bundle_role(relative: str) -> str:
     roles = {
         "bin/zoekt-git-index": "Z0_INDEXER_EXECUTABLE",
+        "bin/zoekt-index": "Z0_SELECTED_INDEXER_EXECUTABLE",
         "bin/zoekt-webserver": "Z0_SEARCH_EXECUTABLE",
         "meta/NOTICE.txt": "RIGHTS_AND_NOTICES",
         "meta/provenance.json": "PHASE_P_PROVENANCE",

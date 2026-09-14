@@ -53,6 +53,13 @@ HOST_USERNS_POLICY: Final = MappingProxyType(
 
 ZOEKT_REPOSITORY: Final = "sourcegraph/zoekt"
 ZOEKT_MODULE_PATH: Final = "github.com/sourcegraph/zoekt"
+ZOEKT_BINARY_PACKAGES: Final = MappingProxyType(
+    {
+        "zoekt-git-index": "./cmd/zoekt-git-index",
+        "zoekt-index": "./cmd/zoekt-index",
+        "zoekt-webserver": "./cmd/zoekt-webserver",
+    }
+)
 ZOEKT_SOURCE_URL: Final = "https://github.com/sourcegraph/zoekt.git"
 ZOEKT_COMMIT: Final = "5f833dde1bc4b1a8f99007617b4b721e44506c4f"
 ZOEKT_TREE: Final = "8135ec1d7329e7f8de43714ac5c7a2bad14bd7b5"
@@ -86,7 +93,7 @@ GO_LICENSE_SHA256: Final = (
 )
 
 BUILD_RECIPE_SHA256: Final = (
-    "50ac9f471a49fcda38359b1917277a736cadc8d45ee3a52db09dc6383974e2ae"
+    "6530e5ce996e1274c0888d5256b03fcb538473b0e2ecac424336f41ac8ea5a61"
 )
 Z0_OPERATION_KEY: Final = "mastermind-codeintel-z0-discovery-falsifier-20260830-sol-001"
 
@@ -273,20 +280,25 @@ def _strict_json_file(
             invalid_code, f"{candidate.name} changed while it was read"
         )
 
+    return decode_strict_json_bytes(raw, invalid_code=invalid_code, label=candidate.name), raw
+
+
+def decode_strict_json_bytes(
+    raw: bytes, *, invalid_code: str, label: str = "JSON input"
+) -> object:
+    """Use the existing bounded, duplicate-safe decoder for files and bundle bytes."""
+    if not isinstance(raw, bytes) or len(raw) > STRICT_JSON_MAX_BYTES:
+        raise ToolchainLockError(invalid_code, "JSON input exceeds byte ceiling")
     try:
-        text = raw.decode("utf-8", errors="strict")
-        value = json.loads(
-            text,
+        return json.loads(
+            raw.decode("utf-8", errors="strict"),
             object_pairs_hook=_strict_object_pairs,
             parse_constant=_reject_nonfinite_json_number,
         )
     except _StrictJsonViolation as error:
         raise ToolchainLockError(invalid_code, str(error)) from error
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise ToolchainLockError(
-            invalid_code, f"{candidate.name} must be UTF-8 JSON"
-        ) from error
-    return value, raw
+        raise ToolchainLockError(invalid_code, f"{label} must be UTF-8 JSON") from error
 
 
 def _strict_object_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -443,10 +455,7 @@ def validate_lock_payload(
             "sha256": ZOEKT_LICENSE_SHA256,
             "size": 11357,
         },
-        "binaries": {
-            "zoekt-git-index": "./cmd/zoekt-git-index",
-            "zoekt-webserver": "./cmd/zoekt-webserver",
-        },
+        "binaries": dict(ZOEKT_BINARY_PACKAGES),
     }
     _require_exact_mapping(payload, ("zoekt",), expected_zoekt)
 
@@ -489,10 +498,7 @@ def validate_lock_payload(
             "GOVCS": "*:off",
         },
         "go_build_flags": ["-trimpath", "-buildvcs=false", "-ldflags=-buildid="],
-        "packages": {
-            "zoekt-git-index": "./cmd/zoekt-git-index",
-            "zoekt-webserver": "./cmd/zoekt-webserver",
-        },
+        "packages": dict(ZOEKT_BINARY_PACKAGES),
         "repeat_builds": 2,
     }
     build = _mapping_at(payload, ("build",))

@@ -110,6 +110,7 @@
         },
         "binaries": {
           "zoekt-git-index": "./cmd/zoekt-git-index",
+          "zoekt-index": "./cmd/zoekt-index",
           "zoekt-webserver": "./cmd/zoekt-webserver"
         }
       }
@@ -161,11 +162,12 @@
           ],
           "packages": {
             "zoekt-git-index": "./cmd/zoekt-git-index",
+            "zoekt-index": "./cmd/zoekt-index",
             "zoekt-webserver": "./cmd/zoekt-webserver"
           },
           "repeat_builds": 2
         },
-        "recipe_sha256": "50ac9f471a49fcda38359b1917277a736cadc8d45ee3a52db09dc6383974e2ae"
+        "recipe_sha256": "6530e5ce996e1274c0888d5256b03fcb538473b0e2ecac424336f41ac8ea5a61"
       }
     },
     "universal_ctags": {

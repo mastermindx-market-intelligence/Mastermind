@@ -473,3 +473,32 @@ def test_safe_extract_never_follows_preexisting_destination_symlink(
             max_total_bytes=4096,
         )
     assert list(outside.iterdir()) == []
+
+
+def test_selected_indexer_has_exact_package_in_lock_recipe_and_schema() -> None:
+    expected = {
+        "zoekt-git-index": "./cmd/zoekt-git-index",
+        "zoekt-index": "./cmd/zoekt-index",
+        "zoekt-webserver": "./cmd/zoekt-webserver",
+    }
+    lock = locks.load_toolchain_lock(LOCK_PATH, schema_path=SCHEMA_PATH)
+    assert dict(lock.payload["zoekt"]["binaries"]) == expected
+    assert dict(lock.payload["build"]["recipe"]["packages"]) == expected
+    schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+    assert schema["properties"]["zoekt"]["const"]["binaries"] == expected
+    assert schema["properties"]["build"]["const"]["recipe"]["packages"] == expected
+
+
+@pytest.mark.parametrize("mutation", ["missing", "wrong_package", "extra"])
+def test_selected_indexer_role_is_closed_in_both_lock_locations(mutation: str) -> None:
+    payload = _payload()
+    for packages in (payload["zoekt"]["binaries"], payload["build"]["recipe"]["packages"]):
+        if mutation == "missing":
+            packages.pop("zoekt-index", None)
+        elif mutation == "wrong_package":
+            packages["zoekt-index"] = "./cmd/zoekt-git-index"
+        else:
+            packages["unexpected-indexer"] = "./cmd/zoekt-index"
+    payload["build"]["recipe_sha256"] = locks.sha256_bytes(locks.canonical_json_bytes(payload["build"]["recipe"]))
+    with pytest.raises(locks.ToolchainLockError, match="PIN_MISMATCH"):
+        locks.validate_lock_payload(payload)

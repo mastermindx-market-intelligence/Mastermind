@@ -141,17 +141,15 @@ def _request(**changes: str) -> runner.ExperimentRequest:
 def _payload_tree(root: Path) -> None:
     (root / "bin").mkdir(parents=True)
     (root / "meta").mkdir()
-    (root / "bin/zoekt-git-index").write_bytes(b"indexer\n")
-    (root / "bin/zoekt-webserver").write_bytes(b"server\n")
-    os.chmod(root / "bin/zoekt-git-index", 0o755)
-    os.chmod(root / "bin/zoekt-webserver", 0o755)
-    (root / "meta/sbom.json").write_text('{"modules":[]}\n', encoding="utf-8")
+    for name, body in (
+        ("zoekt-git-index", b"indexer\n"),
+        ("zoekt-index", b"selected-indexer-fixture\n"),
+        ("zoekt-webserver", b"server\n"),
+    ):
+        (root / "bin" / name).write_bytes(body)
+        (root / "bin" / name).chmod(0o755)
     (root / "meta/NOTICE.txt").write_text("Apache-2.0 notices\n", encoding="utf-8")
-    (root / "meta/provenance.json").write_text(
-        '{"schema_version":"mastermind.codeintel_phase_p_provenance.v1"}\n',
-        encoding="utf-8",
-    )
-    (root / "meta/toolchain-lock.json").write_text("{}\n", encoding="utf-8")
+    _bind_test_binary_provenance(root)
 
 
 def _write_valid_success_artifacts(
@@ -801,11 +799,7 @@ def test_content_addressed_bundle_is_byte_identical_across_mtime_and_order(
     for index, path in enumerate(reversed(tuple(second_root.rglob("*"))), start=1):
         os.utime(path, (1_800_000_000 + index, 1_800_000_000 + index))
 
-    context = {
-        "request_digest": _request().digest,
-        "lock_sha256": SHA_A,
-        "build_recipe_sha256": "9" * 64,
-    }
+    context = _payload_context(first_root)
     first = runner.create_content_addressed_bundle(
         first_root, tmp_path / "out-one", context=context
     )
@@ -840,13 +834,13 @@ def test_bundle_builder_rejects_symlink_and_special_payload(
     else:
         os.mkfifo(hostile)
     with pytest.raises(runner.HostedRunnerError, match="BUNDLE_PAYLOAD_UNSAFE"):
-        runner.create_content_addressed_bundle(root, tmp_path / "out", context={})
+        runner.create_content_addressed_bundle(root, tmp_path / "out", context=_payload_context(root))
 
 
 def test_bundle_substitution_and_post_launch_drift_are_detected(tmp_path: Path) -> None:
     root = tmp_path / "payload"
     _payload_tree(root)
-    bundle = runner.create_content_addressed_bundle(root, tmp_path / "out", context={})
+    bundle = runner.create_content_addressed_bundle(root, tmp_path / "out", context=_payload_context(root))
     body = bytearray(bundle.path.read_bytes())
     body[-1] ^= 1
     bundle.path.write_bytes(body)
@@ -1403,7 +1397,12 @@ def test_repeat_build_uses_only_supplied_go_and_fresh_explicit_caches(
         call[1]["PATH"].startswith(f"{pinned_go.parent.resolve()}:") for call in calls
     )
     assert len({call[1]["GOCACHE"] for call in calls}) >= 5
+    assert set(result["binaries"]) == {"zoekt-git-index", "zoekt-index", "zoekt-webserver"}
+    assert [argv[-1] for argv, _env in calls if "build" in argv].count("./cmd/zoekt-index") == 2
+    assert (payload_bin / "zoekt-index").read_bytes() == b"binary:./cmd/zoekt-index"
     assert result["binaries"]["zoekt-git-index"]["byte_identical"] is True
+    assert result["binaries"]["zoekt-index"]["package"] == "./cmd/zoekt-index"
+    assert result["binaries"]["zoekt-index"]["source_commit"] == runner.locks.ZOEKT_COMMIT
     assert (payload_bin / "zoekt-webserver").read_bytes().startswith(b"binary:")
 
 
@@ -3341,8 +3340,9 @@ def test_dataclass_evidence_is_json_safe_and_has_no_raw_environment() -> None:
     assert "environment" not in encoded
 
 
+@pytest.mark.parametrize("selected_drift", ["none", "before", "after", "mode_after", "missing_before", "request_before", "lock_before", "recipe_before"])
 def test_phase_e_completed_receipt_shape_is_secret_free_and_replayable(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selected_drift: str
 ) -> None:
     repository_root = Path(runner.__file__).resolve().parents[2]
     lock = runner.locks.load_toolchain_lock(
@@ -3363,9 +3363,16 @@ def test_phase_e_completed_receipt_shape_is_secret_free_and_replayable(
     bundle_path = tmp_path / f"codeintel-z0-{bundle_sha}.tar.gz"
     bundle_path.write_bytes(b"fixture")
     indexer_body = b"indexer"
+    selected_body = b"selected-indexer"
     webserver_body = b"webserver"
     manifest = {
+        "context": {
+            "request_digest": request.digest,
+            "lock_sha256": lock.sha256,
+            "build_recipe_sha256": lock.build_recipe_sha256,
+        },
         "files": [
+            {"path": "bin/zoekt-index", "sha256": hashlib.sha256(selected_body).hexdigest()},
             {
                 "path": "bin/zoekt-git-index",
                 "sha256": hashlib.sha256(indexer_body).hexdigest(),
@@ -3376,6 +3383,13 @@ def test_phase_e_completed_receipt_shape_is_secret_free_and_replayable(
             },
         ]
     }
+    context_field = {
+        "request_before": "request_digest",
+        "lock_before": "lock_sha256",
+        "recipe_before": "build_recipe_sha256",
+    }.get(selected_drift)
+    if context_field is not None:
+        manifest["context"][context_field] = "0" * 64
     verified = runner.VerifiedBundle(
         path=bundle_path,
         sha256=bundle_sha,
@@ -3466,6 +3480,10 @@ def test_phase_e_completed_receipt_shape_is_secret_free_and_replayable(
     def extract(bundle: runner.VerifiedBundle, destination: Path) -> dict[str, Path]:
         del bundle
         (destination / "bin").mkdir(parents=True)
+        selected = destination / "bin/zoekt-index"
+        if selected_drift != "missing_before":
+            selected.write_bytes(selected_body if selected_drift != "before" else b"substituted")
+            selected.chmod(0o755)
         indexer = destination / "bin/zoekt-git-index"
         webserver = destination / "bin/zoekt-webserver"
         indexer.write_bytes(indexer_body)
@@ -3473,6 +3491,7 @@ def test_phase_e_completed_receipt_shape_is_secret_free_and_replayable(
         os.chmod(indexer, 0o755)
         os.chmod(webserver, 0o755)
         return {
+            "bin/zoekt-index": selected,
             "bin/zoekt-git-index": indexer,
             "bin/zoekt-webserver": webserver,
         }
@@ -3532,6 +3551,11 @@ def test_phase_e_completed_receipt_shape_is_secret_free_and_replayable(
             },
             tool_schema_digest=str(consumer_policy["tool_schema_digest"]),
         )
+        selected_path = tmp_path / "scratch/bundle/bin/zoekt-index"
+        if selected_drift == "after":
+            selected_path.write_bytes(b"changed-after-consumer")
+        elif selected_drift == "mode_after":
+            selected_path.chmod(0o644)
         return launch
 
     monkeypatch.setattr(runner, "_launch_fixed_consumer", launch_consumer)
@@ -3557,16 +3581,38 @@ def test_phase_e_completed_receipt_shape_is_secret_free_and_replayable(
     )
     receipt_path = tmp_path / "receipt/semantic-receipt.json"
 
-    receipt = runner.run_phase_e(
-        forge,
-        consumer,
-        request,
-        bundle_path=bundle_path,
-        bundle_sha256=bundle_sha,
-        scratch_root=tmp_path / "scratch",
-        result_directory=tmp_path / "result",
-        receipt_path=receipt_path,
-    )
+    def execute():
+        return runner.run_phase_e(
+            forge,
+            consumer,
+            request,
+            bundle_path=bundle_path,
+            bundle_sha256=bundle_sha,
+            scratch_root=tmp_path / "scratch",
+            result_directory=tmp_path / "result",
+            receipt_path=receipt_path,
+        )
+
+    if selected_drift != "none":
+        expected = {
+            "before": "EXECUTABLE_DIGEST_MISMATCH",
+            "after": "POST_LAUNCH_IDENTITY_DRIFT",
+            "mode_after": "EXECUTABLE_UNSAFE",
+            "missing_before": "EXECUTABLE_UNAVAILABLE",
+            "request_before": "BUNDLE_REQUEST_MISMATCH",
+            "lock_before": "BUNDLE_REQUEST_MISMATCH",
+            "recipe_before": "BUNDLE_REQUEST_MISMATCH",
+        }[selected_drift]
+        with pytest.raises(runner.HostedRunnerError, match=expected):
+            execute()
+        assert bool(observed_argv) == (selected_drift in {"after", "mode_after"})
+        if observed_argv:
+            assert json.loads(receipt_path.read_text())["effect"] == "EFFECT_UNKNOWN"
+        return
+    receipt = execute()
+    assert set(receipt["evidence"]["bundle"]["binary_digests_before"]) == {"zoekt-git-index", "zoekt-index", "zoekt-webserver"}
+    assert receipt["evidence"]["bundle"]["binary_digests_before"] == receipt["evidence"]["bundle"]["binary_digests_after"]
+
 
     assert receipt["status"] == "COMPLETED"
     assert receipt["effect"] == "APPLIED"
@@ -3592,3 +3638,198 @@ def test_phase_e_completed_receipt_shape_is_secret_free_and_replayable(
         runner.reconcile_receipt(receipt_path, request).disposition
         is runner.ReplayDisposition.RETURN_PRIOR
     )
+
+
+def test_selected_indexer_roundtrips_through_real_bundle_functions(tmp_path: Path) -> None:
+    root = tmp_path / "payload"
+    _payload_tree(root)
+    selected = root / "bin/zoekt-index"
+    selected.write_bytes(b"selected-indexer-fixture\n")
+    selected.chmod(0o755)
+    bundle = runner.create_content_addressed_bundle(root, tmp_path / "out", context=_payload_context(root))
+    verified = runner.verify_bundle(bundle.path, expected_sha256=bundle.sha256)
+    rows = {row["path"]: row for row in verified.manifest["files"]}
+    assert rows["bin/zoekt-index"]["role"] == "Z0_SELECTED_INDEXER_EXECUTABLE"
+    assert rows["bin/zoekt-index"]["sha256"] == hashlib.sha256(selected.read_bytes()).hexdigest()
+    extracted = runner.extract_verified_bundle(verified, tmp_path / "extracted")
+    assert extracted["bin/zoekt-index"].read_bytes() == selected.read_bytes()
+    assert stat.S_IMODE(extracted["bin/zoekt-index"].stat().st_mode) == 0o755
+
+
+def test_bundle_requires_selected_indexer_not_only_legacy_pair(tmp_path: Path) -> None:
+    root = tmp_path / "payload"
+    _payload_tree(root)
+    (root / "bin/zoekt-index").unlink(missing_ok=True)
+    with pytest.raises(runner.HostedRunnerError, match="BUNDLE_PAYLOAD_INCOMPLETE"):
+        runner.create_content_addressed_bundle(root, tmp_path / "out", context=_payload_context(root))
+    assert not (tmp_path / "out").exists()
+
+
+def _bind_test_binary_provenance(root: Path) -> None:
+    """Synthetic bytes exercise the real artifact contract, not a Go build."""
+    lock_path = Path(__file__).resolve().parents[2] / "research/code_intelligence_fabric/codeintel-experiment-toolchain-lock.v1.json"
+    lock_bytes = lock_path.read_bytes()
+    lock = runner.locks.load_toolchain_lock(lock_path)
+    (root / "meta/toolchain-lock.json").write_bytes(lock_bytes)
+    binaries = {}
+    for name in ("zoekt-git-index", "zoekt-index", "zoekt-webserver"):
+        body = (root / "bin" / name).read_bytes()
+        binaries[name] = {
+            "sha256": hashlib.sha256(body).hexdigest(),
+            "size": len(body), "mode": "0755", "repeat_builds": 2,
+            "byte_identical": True, "package": "./cmd/" + name,
+            "source_commit": runner.locks.ZOEKT_COMMIT,
+        }
+    sbom = {
+        "schema_version": "mastermind.codeintel_go_module_inventory.v1",
+        "main_module": runner.locks.ZOEKT_MODULE_PATH,
+        "go_version": runner.locks.GO_VERSION,
+        "go_mod_blob_sha1": runner.locks.ZOEKT_GO_MOD_BLOB,
+        "go_sum_blob_sha1": runner.locks.ZOEKT_GO_SUM_BLOB,
+        "modules": [{"path": runner.locks.ZOEKT_MODULE_PATH, "main": True}],
+        "binaries": binaries,
+    }
+    sbom_bytes = runner.locks.canonical_json_bytes(sbom) + b"\n"
+    (root / "meta/sbom.json").write_bytes(sbom_bytes)
+    provenance = {
+        "schema_version": runner.PHASE_P_PROVENANCE_SCHEMA_VERSION,
+        "request_digest": _request().digest,
+        "lock_sha256": lock.sha256,
+        "build_recipe_sha256": lock.build_recipe_sha256,
+        "module_inventory_sha256": hashlib.sha256(sbom_bytes).hexdigest(),
+        "binaries": binaries,
+    }
+    (root / "meta/provenance.json").write_bytes(runner.locks.canonical_json_bytes(provenance) + b"\n")
+
+
+def _payload_context(root: Path) -> dict[str, str]:
+    return {
+        "request_digest": _request().digest,
+        "lock_sha256": hashlib.sha256((root / "meta/toolchain-lock.json").read_bytes()).hexdigest(),
+        "build_recipe_sha256": runner.locks.BUILD_RECIPE_SHA256,
+        "module_inventory_sha256": hashlib.sha256((root / "meta/sbom.json").read_bytes()).hexdigest(),
+        "provenance_sha256": hashlib.sha256((root / "meta/provenance.json").read_bytes()).hexdigest(),
+    }
+
+
+@pytest.mark.parametrize("change", ["copy", "swap", "package", "source", "missing_row", "missing_sbom", "repeat", "recipe", "size", "duplicate_json", "nonfinite"])
+def test_selected_indexer_provenance_is_verified_before_bundle_publication(tmp_path: Path, change: str) -> None:
+    root = tmp_path / "payload"
+    _payload_tree(root)
+    _bind_test_binary_provenance(root)
+    provenance_path = root / "meta/provenance.json"
+    provenance = json.loads(provenance_path.read_text())
+    row = provenance["binaries"]["zoekt-index"]
+    if change == "copy":
+        (root / "bin/zoekt-index").write_bytes((root / "bin/zoekt-git-index").read_bytes())
+        _bind_test_binary_provenance(root)
+        provenance = json.loads(provenance_path.read_text())
+    elif change == "swap":
+        selected, legacy = root / "bin/zoekt-index", root / "bin/zoekt-git-index"
+        left, right = selected.read_bytes(), legacy.read_bytes()
+        selected.write_bytes(right)
+        legacy.write_bytes(left)
+    elif change == "package":
+        row["package"] = "./cmd/zoekt-git-index"
+    elif change == "source":
+        row["source_commit"] = "0" * 40
+    elif change == "missing_row":
+        del provenance["binaries"]["zoekt-index"]
+    elif change == "missing_sbom":
+        path = root / "meta/sbom.json"
+        sbom = json.loads(path.read_text())
+        del sbom["binaries"]["zoekt-index"]
+        path.write_bytes(runner.locks.canonical_json_bytes(sbom) + b"\n")
+        provenance["module_inventory_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+    elif change == "repeat":
+        row["byte_identical"] = False
+    elif change == "recipe":
+        provenance["build_recipe_sha256"] = "0" * 64
+    elif change == "size":
+        row["size"] += 1
+    if change != "missing_sbom":
+        sbom_path = root / "meta/sbom.json"
+        sbom = json.loads(sbom_path.read_text())
+        sbom["binaries"] = provenance["binaries"]
+        sbom_path.write_bytes(runner.locks.canonical_json_bytes(sbom) + b"\n")
+        provenance["module_inventory_sha256"] = hashlib.sha256(sbom_path.read_bytes()).hexdigest()
+    provenance_path.write_bytes(runner.locks.canonical_json_bytes(provenance) + b"\n")
+    if change == "duplicate_json":
+        provenance_path.write_bytes(provenance_path.read_bytes().replace(b'{"binaries":', b'{"binaries":{},"binaries":', 1))
+    elif change == "nonfinite":
+        provenance_path.write_bytes(provenance_path.read_bytes().replace(b'"repeat_builds":2', b'"repeat_builds":NaN', 1))
+    with pytest.raises(runner.HostedRunnerError, match="BUNDLE_PROVENANCE_MISMATCH"):
+        runner.create_content_addressed_bundle(root, tmp_path / "out", context=_payload_context(root))
+    assert not (tmp_path / "out").exists()
+
+
+def test_extract_rechecks_manifest_before_creating_destination(tmp_path: Path) -> None:
+    root = tmp_path / "payload"
+    _payload_tree(root)
+    _bind_test_binary_provenance(root)
+    bundle = runner.create_content_addressed_bundle(root, tmp_path / "out", context=_payload_context(root))
+    verified = runner.verify_bundle(bundle.path, expected_sha256=bundle.sha256)
+    row = next(row for row in verified.manifest["files"] if row["path"] == "bin/zoekt-index")
+    row["sha256"] = "0" * 64
+    with pytest.raises(runner.HostedRunnerError, match="BUNDLE_MANIFEST_MISMATCH"):
+        runner.extract_verified_bundle(verified, tmp_path / "extracted")
+    assert not (tmp_path / "extracted").exists()
+
+
+def test_extract_checks_copied_binary_bytes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tmp_path / "payload"
+    _payload_tree(root)
+    _bind_test_binary_provenance(root)
+    bundle = runner.create_content_addressed_bundle(root, tmp_path / "out", context=_payload_context(root))
+    verified = runner.verify_bundle(bundle.path, expected_sha256=bundle.sha256)
+
+    def drifting_copy(source, output, length=0):
+        del length
+        body = source.read()
+        output.write(body)
+        if body == b"selected-indexer-fixture\n":
+            output.write(b"changed-during-copy")
+
+    monkeypatch.setattr(runner.shutil, "copyfileobj", drifting_copy)
+    with pytest.raises(runner.HostedRunnerError, match="BUNDLE_PAYLOAD_MISMATCH"):
+        runner.extract_verified_bundle(verified, tmp_path / "extracted")
+
+
+def test_archive_verifier_independently_rejects_consistent_wrong_package(tmp_path: Path) -> None:
+    """Rehash an isolated malformed fixture; the real verifier must still refuse."""
+    import gzip
+    import io
+    import tarfile
+
+    root = tmp_path / "payload"
+    _payload_tree(root)
+    bundle = runner.create_content_addressed_bundle(root, tmp_path / "out", context=_payload_context(root))
+    with tarfile.open(bundle.path, "r:gz") as archive:
+        members = archive.getmembers()
+        bodies = {m.name: archive.extractfile(m).read() for m in members if m.isfile()}
+    provenance = json.loads(bodies["meta/provenance.json"])
+    sbom = json.loads(bodies["meta/sbom.json"])
+    provenance["binaries"]["zoekt-index"]["package"] = "./cmd/zoekt-git-index"
+    sbom["binaries"] = provenance["binaries"]
+    bodies["meta/sbom.json"] = runner.locks.canonical_json_bytes(sbom) + b"\n"
+    provenance["module_inventory_sha256"] = hashlib.sha256(bodies["meta/sbom.json"]).hexdigest()
+    bodies["meta/provenance.json"] = runner.locks.canonical_json_bytes(provenance) + b"\n"
+    manifest = json.loads(bodies["manifest.json"])
+    for name, key in (("meta/sbom.json", "module_inventory_sha256"), ("meta/provenance.json", "provenance_sha256")):
+        manifest["context"][key] = hashlib.sha256(bodies[name]).hexdigest()
+        row = next(row for row in manifest["files"] if row["path"] == name)
+        row.update(size=len(bodies[name]), sha256=hashlib.sha256(bodies[name]).hexdigest())
+    bodies["manifest.json"] = runner.locks.canonical_json_bytes(manifest) + b"\n"
+    forged = io.BytesIO()
+    with gzip.GzipFile(filename="", fileobj=forged, mode="wb", mtime=0) as compressed:
+        with tarfile.open(fileobj=compressed, mode="w", format=tarfile.GNU_FORMAT) as archive:
+            for member in members:
+                if member.isfile():
+                    member.size = len(bodies[member.name])
+                    archive.addfile(member, io.BytesIO(bodies[member.name]))
+                else:
+                    archive.addfile(member)
+    altered = tmp_path / "consistent-wrong-role.tar.gz"
+    altered.write_bytes(forged.getvalue())
+    with pytest.raises(runner.HostedRunnerError, match="BUNDLE_PROVENANCE_MISMATCH"):
+        runner.verify_bundle(altered, expected_sha256=hashlib.sha256(forged.getvalue()).hexdigest())
