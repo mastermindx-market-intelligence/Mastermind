@@ -66,7 +66,7 @@ def _run(codex_bin: str, *args: str) -> subprocess.CompletedProcess[str]:
             stderr=subprocess.PIPE,
             text=True,
             check=False,
-            timeout=15,
+            timeout=60,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise RegistrationError("Codex MCP command is unavailable") from exc

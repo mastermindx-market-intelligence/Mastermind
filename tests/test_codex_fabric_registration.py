@@ -139,3 +139,18 @@ def test_cli_emits_secret_free_receipt(tmp_path: Path, capsys: pytest.CaptureFix
     serialized = json.dumps(payload).lower()
     assert "token" not in serialized
     assert "bearer" not in serialized
+
+
+def test_codex_command_timeout_covers_observed_slow_mcp_census(monkeypatch: pytest.MonkeyPatch):
+    import ops.codex_fabric.register_executive_mcp as registration
+
+    observed: dict[str, object] = {}
+
+    def fake_run(*args, **kwargs):
+        observed.update(kwargs)
+        return registration.subprocess.CompletedProcess(args[0], 0, "[]", "")
+
+    monkeypatch.setattr(registration.subprocess, "run", fake_run)
+    registration._run("codex", "mcp", "list", "--json")
+
+    assert observed["timeout"] >= 60
