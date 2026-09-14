@@ -43,9 +43,11 @@ def load_config(path: Path) -> PrivilegedBrokerConfig:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    # Let argparse reject malformed invocation before any host trust check so
+    # isolated wrapper probes fail cleanly without a traceback.
+    args = _parser().parse_args(argv)
     if os.geteuid() != 0:
         raise RuntimeError("privileged broker entrypoint must run as root")
-    args = _parser().parse_args(argv)
     if args.command != "serve":  # pragma: no cover - argparse owns this invariant
         raise RuntimeError("unsupported privileged broker command")
     config = load_config(args.config)

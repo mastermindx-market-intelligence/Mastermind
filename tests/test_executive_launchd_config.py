@@ -1658,3 +1658,24 @@ def test_privileged_client_and_broker_entrypoints_are_in_release_manifest_surfac
         "control_plane/executive_privileged_broker.py",
     ):
         assert relative in install or "release_manifest.py" in install
+
+
+def test_privileged_broker_cli_rejects_unknown_command_without_traceback(tmp_path: Path) -> None:
+    target = ROOT / "scripts" / "executive_os_privileged_broker.py"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-S",
+            "-B",
+            str(target),
+            "--definitely-not-a-real-subcommand",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 2
+    assert "arguments are required: command" in result.stderr
+    assert "Traceback" not in result.stderr
