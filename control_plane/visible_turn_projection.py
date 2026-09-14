@@ -563,6 +563,19 @@ class VisibleTurnProjection:
                 None,
             )
         if replacement is not None:
+            if (
+                item.state == "partial"
+                and replacement.state == "completed"
+            ):
+                return
+            identical = (
+                item.state == replacement.state
+                and item.source_sequence == replacement.source_sequence
+                and item.text == replacement.text
+                and item.byte_length == replacement.byte_length
+            )
+            if identical:
+                return
             sequence = record.next_publication_sequence + 1
             updated = VisibleItem(
                 item.source_item_id,

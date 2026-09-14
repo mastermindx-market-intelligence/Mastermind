@@ -2923,9 +2923,9 @@ class CodexOperatorAdapter:
                     )
                 except Exception as exc:
                     raise _rpc_failure(exc, effect_unknown=True) from exc
-                remaining = state.client.drain_notifications()
+                completed_after = state.client.drain_notifications()
                 self._ingest_turn_notifications(
-                    state, turn, [*remaining, completed]
+                    state, turn, [*completed_after, completed]
                 )
             self._audit_native_helper_tree(state, turn)
         events = tuple(state.events[cursor.local_sequence :])
