@@ -9,17 +9,14 @@ rechecked on both sides of the Unix socket.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, Callable
+from typing import Any, Callable, Protocol
 
 from control_plane.executive_orchestration_principal import (
     OSProcessCredentialObservation,
     ProviderHomeIdentityObservation,
 )
 from control_plane.executive_orchestration_result import RawRoleResultObservation
-from control_plane.executive_worker_broker import (
-    BrokerProtocolError,
-    WorkerBrokerClient,
-)
+from control_plane.executive_worker_broker import BrokerProtocolError
 from control_plane.operator_harness_contract import (
     OPERATOR_HARNESS_INTERFACE_VERSION,
     AttentionTurnObservation,
@@ -74,6 +71,16 @@ from control_plane.worker_browser_b1 import (
 TurnInputLoader = Callable[[TurnRef], str]
 
 
+class BrokerRequestClient(Protocol):
+    def request_sync(
+        self,
+        operation: str,
+        payload: Mapping[str, Any],
+        *,
+        timeout_seconds: float | None = None,
+    ) -> dict[str, Any]: ...
+
+
 class RemoteCodexOperatorAdapter:
     """Typed, one-request-per-call proxy for the worker-local App Server."""
 
@@ -81,7 +88,7 @@ class RemoteCodexOperatorAdapter:
 
     def __init__(
         self,
-        client: WorkerBrokerClient,
+        client: BrokerRequestClient,
         *,
         turn_input_loader: TurnInputLoader,
     ) -> None:
