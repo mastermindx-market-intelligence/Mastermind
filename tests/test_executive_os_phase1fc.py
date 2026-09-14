@@ -2056,6 +2056,7 @@ def _cycle_through_completed_work(
     }
     _complete_ohf_role(runtime, planner, plan_body, identity_seed=3201)
     admission = cycle.run_once(root.job_id)
+    print(admission.to_dict())
     assert admission.action == "PLAN_ADMITTED"
     assert cycle.run_once(root.job_id).action == "DISPATCHED"
     work = dispatches[-1]
@@ -2085,13 +2086,14 @@ def _review_body(
     target_result_digest: str,
     repair_round: int,
     verdict: str,
+    plan_step_id: str = "step-1",
 ) -> dict[str, Any]:
     return {
         "schema_version": "mastermind.review_result/v1",
         "root_job_id": root_id,
         "plan_attempt_id": plan_attempt_id,
         "plan_digest": plan_digest,
-        "plan_step_id": "step-1",
+        "plan_step_id": plan_step_id,
         "reviewed_job_id": target_job_id,
         "reviewed_attempt_id": target_attempt_id,
         "reviewed_result_digest": target_result_digest,
@@ -2375,6 +2377,188 @@ def test_run_once_typed_plan_work_independent_review_and_aggregation_complete(
     )
     assert runtime.jobs.get_job(root.job_id).status is executive_runtime.JobStatus.COMPLETED
     assert cycle.run_once(root.job_id).action == "NO_ACTION"
+
+
+def test_heterogeneous_pair_results_reach_independent_review_and_exact_aggregation_handoff(
+    tmp_path: Path,
+) -> None:
+    runtime = Runtime.at(tmp_path)
+    _register(runtime, "worker-a")
+    _register(runtime, "worker-b")
+    receipt = submit_intent(
+        runtime,
+        _v2_intent(
+            intent_id="CEO-HF1Q-PAIR-T3",
+            business_impact="routine",
+        ),
+    )
+    root = runtime.jobs.get_job(receipt["job_id"])
+    assert root is not None
+    dispatches: list[OrchestrationDispatchOutcome] = []
+
+    def accepted_dispatch(job_id: str, command_id: str):
+        job = runtime.jobs.get_job(job_id)
+        assert job is not None
+        worker = (
+            "worker-a"
+            if job.orchestration_role in {"plan", "aggregation"}
+            or (job.orchestration_role == "work" and job.plan_step_id == "step-codex")
+            else "worker-b"
+        )
+        if job.orchestration_role == "work":
+            assert job.constraints["eligible_quota_classes"] == ["default"]
+        outcome = runtime.attempts.dispatch_cycle_job(
+            job_id, command_id=command_id, worker_id=worker
+        )
+        assert outcome is not None
+        dispatches.append(outcome)
+        return outcome
+
+    cycle = CooCycle(runtime, dispatcher=accepted_dispatch)
+    assert cycle.run_once(root.job_id).action == "PLANNER_CREATED"
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    planner = dispatches[-1]
+    plan_body = {
+        "schema_version": "mastermind.execution_plan/v1",
+        "root_job_id": root.job_id,
+        "plan_attempt_id": planner.attempt.attempt_id,
+        "steps": [
+            {
+                "ordinal": 0,
+                "step_id": "step-codex",
+                "objective": "Hermetic reviewed Codex child result.",
+                "business_impact": "routine",
+                "review_required": True,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+            },
+            {
+                "ordinal": 1,
+                "step_id": "step-claude",
+                "objective": "Hermetic reviewed Claude-compatible child result.",
+                "business_impact": "routine",
+                "review_required": False,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+            },
+        ],
+    }
+    _complete_ohf_role(runtime, planner, plan_body, identity_seed=3301)
+    admission = cycle.run_once(root.job_id)
+    assert admission.action == "PLAN_ADMITTED"
+    work_ids = list(admission.receipt["work_job_ids"])
+    assert len(work_ids) == 2
+    assert [str(runtime.jobs.get_job(job_id).plan_step_id) for job_id in work_ids] == [
+        "step-codex",
+        "step-claude",
+    ]
+
+    work_by_step = {}
+    for work_id in work_ids:
+        job = runtime.jobs.get_job(work_id)
+        assert job is not None
+        worker = "worker-a" if job.plan_step_id == "step-codex" else "worker-b"
+        outcome = runtime.attempts.dispatch_cycle_job(
+            work_id,
+            command_id=(
+                f"coo-cycle:{root.job_id}:dispatch:{work_id}:attempt:1"
+            ),
+            worker_id=worker,
+        )
+        assert outcome is not None
+        dispatches.append(outcome)
+        work_by_step[str(job.plan_step_id)] = outcome
+    assert {value.attempt.worker_id for value in work_by_step.values()} == {
+        "worker-a",
+        "worker-b",
+    }
+
+    seals_by_step = {}
+    for step_id, work in work_by_step.items():
+        body = {
+            "schema_version": "mastermind.work_result/v1",
+            "root_job_id": root.job_id,
+            "plan_attempt_id": planner.attempt.attempt_id,
+            "plan_digest": result_digest(plan_body),
+            "plan_step_id": step_id,
+            "repair_round": 0,
+            "artifacts": [],
+            "evidence_digests": [],
+        }
+        seals_by_step[step_id] = _complete_ohf_role(
+            runtime, work, body, identity_seed=3302 if step_id == "step-codex" else 3303
+        )[0]
+
+    assert cycle.run_once(root.job_id).action == "REVIEW_CREATED"
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    review = dispatches[-1]
+    reviewed_job = runtime.jobs.get_job(review.attempt.job_id)
+    assert reviewed_job is not None and reviewed_job.reviews_job_id
+    reviewed_work = work_by_step["step-codex"]
+    body = _review_body(
+        root_id=root.job_id,
+        plan_attempt_id=planner.attempt.attempt_id,
+        plan_digest=result_digest(plan_body),
+        target_job_id=reviewed_work.attempt.job_id,
+        target_attempt_id=reviewed_work.attempt.attempt_id,
+        target_result_digest=seals_by_step["step-codex"]["role_result_digest"],
+        repair_round=0,
+        verdict="approve",
+        plan_step_id="step-codex",
+    )
+    _complete_ohf_role(runtime, review, body, identity_seed=3304)
+    assert review.attempt.worker_id != reviewed_work.attempt.worker_id
+
+    handoff_outcome = cycle.run_once(root.job_id)
+    assert handoff_outcome.action == "HANDOFF_CREATED"
+    handoff = runtime.jobs.get_cycle_handoff(root.job_id)
+    assert len(handoff["revisions"]) == 2
+    assert {item["current_attempt_id"] for item in handoff["revisions"]} == {
+        value.attempt.attempt_id for value in work_by_step.values()
+    }
+    assert {item["current_result_digest"] for item in handoff["revisions"]} == {
+        value["role_result_digest"] for value in seals_by_step.values()
+    }
+    assert handoff["revisions"][0]["qualifying_review_attempt_id"]
+    assert handoff["revisions"][1]["qualifying_review_attempt_id"] is None
+
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    aggregation = dispatches[-1]
+    aggregation_body = {
+        "schema_version": "mastermind.aggregation_result/v1",
+        "root_job_id": root.job_id,
+        "handoff_digest": handoff["handoff_digest"],
+        "policy_sha": handoff["policy_sha"],
+        "plan_attempt_id": handoff["plan_attempt_id"],
+        "plan_digest": handoff["plan_digest"],
+        "revisions": [
+            {key: item[key] for key in (
+                "ordinal",
+                "plan_step_id",
+                "current_job_id",
+                "current_attempt_id",
+                "current_result_digest",
+                "repair_round",
+                "review_required",
+                "qualifying_review_job_id",
+                "qualifying_review_attempt_id",
+                "qualifying_review_result_digest",
+            )}
+            for item in handoff["revisions"]
+        ],
+        "aggregate_summary": "Two reviewed heterogeneous results are ready.",
+        "evidence_digests": [],
+    }
+    _complete_ohf_role(
+        runtime, aggregation, aggregation_body, identity_seed=3306
+    )
+    assert runtime.jobs.get_job(root.job_id).status is executive_runtime.JobStatus.COMPLETED
 
 
 def test_run_once_without_accepted_supervisor_blocks_before_claim(tmp_path):
