@@ -26,7 +26,8 @@ import re
 import stat
 import threading
 from collections.abc import Mapping
-from typing import Any
+from contextlib import contextmanager
+from typing import Any, Literal
 
 ACTION_CLAIM_SCHEMA = "mastermind.workbench_action_claim.v1"
 ACTION_RESULT_SCHEMA = "mastermind.workbench_action_result.v1"
@@ -46,8 +47,6 @@ _HEX32 = re.compile(r"^[0-9a-f]{32}$")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$")
 _BOOT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
-_THREAD_LOCKS: dict[tuple[int, int], threading.Lock] = {}
-_THREAD_LOCKS_GUARD = threading.Lock()
 
 
 class ActionArtifactError(Exception):
@@ -68,14 +67,48 @@ class ActionHostBinding:
     boot_session_id: str
 
 
+class _CleanupState:
+    """Sticky physical ownership uncertainty; never cleared by evidence reads."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._reasons: set[str] = set()
+
+    def mark(self, reason: str) -> None:
+        with self._lock:
+            self._reasons.add(reason)
+
+    def reasons(self) -> tuple[str, ...]:
+        with self._lock:
+            return tuple(sorted(self._reasons))
+
+
 @dataclasses.dataclass(frozen=True)
 class ActionArtifactStore:
-    """Borrowed host-owned artifact directory. The helper never closes dir_fd."""
+    """Borrowed directory; runtime owns dir_fd and checks cleanup at shutdown."""
 
     dir_fd: int
     device: int
     inode: int
     owner_uid: int
+    _cleanup: _CleanupState = dataclasses.field(
+        default_factory=_CleanupState, compare=False, repr=False
+    )
+
+    @property
+    def cleanup_uncertain(self) -> bool:
+        return bool(self.cleanup_reasons)
+
+    @property
+    def cleanup_reasons(self) -> tuple[str, ...]:
+        return self._cleanup.reasons()
+
+    def mark_cleanup_uncertain(self, reason: str) -> None:
+        self._cleanup.mark(reason)
+
+    def raise_if_cleanup_uncertain(self) -> None:
+        if self.cleanup_uncertain:
+            raise ActionArtifactUncertain("action resource cleanup uncertain")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -133,39 +166,40 @@ class ActionClassification:
     claim: ActionClaimRecord | None
     result: ActionResultRecord | None
     store_valid: bool
+    evidence_status: Literal["absent", "pending", "qualified", "uncertain"]
+
+    @property
+    def claimable(self) -> bool:
+        return self.store_valid and self.evidence_status == "absent"
 
 
 class ArtifactWriterLock:
-    """Process flock plus same-store thread lock. Release is explicit."""
+    """Owns one independently opened flock descriptor. Never retries close."""
 
-    def __init__(
-        self,
-        store: ActionArtifactStore,
-        thread_lock: threading.Lock,
-        *,
-        flocked: bool,
-    ) -> None:
+    def __init__(self, store: ActionArtifactStore, fd: int) -> None:
         self._store = store
-        self._thread_lock = thread_lock
-        self._flocked = flocked
+        self._fd = fd
         self._released = False
+        self._release_uncertain = False
 
     def release(self) -> None:
         if self._released:
+            if self._release_uncertain:
+                raise ActionArtifactUncertain("writer lock release uncertain")
             return
         self._released = True
-        errors: list[BaseException] = []
-        if self._flocked:
-            try:
-                fcntl.flock(self._store.dir_fd, fcntl.LOCK_UN)
-            except OSError as error:
-                errors.append(error)
         try:
-            self._thread_lock.release()
-        except RuntimeError as error:
-            errors.append(error)
-        if errors:
-            raise ActionArtifactUncertain("writer lock release uncertain") from errors[0]
+            fcntl.flock(self._fd, fcntl.LOCK_UN)
+        except OSError:
+            self._release_uncertain = True
+            self._store.mark_cleanup_uncertain("writer_unlock")
+        try:
+            os.close(self._fd)
+        except OSError:
+            self._release_uncertain = True
+            self._store.mark_cleanup_uncertain("writer_close")
+        if self._release_uncertain:
+            raise ActionArtifactUncertain("writer lock release uncertain")
 
     def __enter__(self) -> ArtifactWriterLock:
         return self
@@ -299,17 +333,33 @@ def acquire_store_writer(store: ActionArtifactStore) -> ArtifactWriterLock:
     """Nonblocking descriptor-bound mutex. Busy is a pre-effect refusal."""
 
     revalidate_artifact_store(store)
-    thread_lock = _thread_lock_for(store)
-    if not thread_lock.acquire(blocking=False):
-        raise ActionArtifactBusy("store writer busy")
+    store.raise_if_cleanup_uncertain()
+    fd = -1
     try:
-        fcntl.flock(store.dir_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError as error:
-        thread_lock.release()
-        if error.errno in {errno.EAGAIN, errno.EACCES, errno.EWOULDBLOCK}:
-            raise ActionArtifactBusy("store writer busy") from error
-        raise ActionArtifactUncertain("store writer lock unavailable") from error
-    return ArtifactWriterLock(store, thread_lock, flocked=True)
+        fd = os.open(
+            ".", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+            dir_fd=store.dir_fd,
+        )
+        opened = os.fstat(fd)
+        _check_store_stat(opened)
+        if (opened.st_dev, opened.st_ino, opened.st_uid) != (
+            store.device, store.inode, store.owner_uid
+        ):
+            raise ActionArtifactUncertain("writer store identity changed")
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BaseException as error:
+        if fd >= 0:
+            try:
+                os.close(fd)
+            except OSError as close_error:
+                store.mark_cleanup_uncertain("writer_acquire_close")
+                raise ActionArtifactUncertain("writer acquire cleanup uncertain") from close_error
+        if isinstance(error, OSError):
+            if error.errno in {errno.EAGAIN, errno.EACCES, errno.EWOULDBLOCK}:
+                raise ActionArtifactBusy("store writer busy") from error
+            raise ActionArtifactUncertain("store writer lock unavailable") from error
+        raise
+    return ArtifactWriterLock(store, fd)
 
 
 def claim_action(
@@ -318,13 +368,23 @@ def claim_action(
     *,
     claimed_at_ms: int,
 ) -> ClaimOutcome:
-    """Durable O_EXCL claim. Existing or uncertain claims are not overwritten."""
+    """Durable O_EXCL claim. Caller holds the store writer for the whole action.
+
+    Existing, one-sided, or uncertain evidence is never overwritten or replayed.
+    """
 
     store = revalidate_artifact_store(store)
     identity = validate_artifact_identity(identity)
     _assert_store_binding(store, identity)
     if type(claimed_at_ms) is not int or not 0 <= claimed_at_ms < 2**63:
         raise ActionArtifactError("invalid claim timestamp")
+    classified = classify_action(store, identity)
+    if not classified.claimable:
+        return ClaimOutcome(
+            created=False, claim=classified.claim,
+            uncertain=classified.evidence_status == "uncertain" or not classified.store_valid,
+        )
+    store.raise_if_cleanup_uncertain()
     body = {
         "schema": ACTION_CLAIM_SCHEMA,
         "identity": dataclasses.asdict(identity),
@@ -339,7 +399,7 @@ def claim_action(
             max_bytes=MAX_CLAIM_BYTES,
         )
     except FileExistsError:
-        existing = _read_claim_record(store, identity, require_match=False)
+        existing = _read_claim_record(store, identity, require_match=True)
         return ClaimOutcome(
             created=False,
             claim=existing.record if existing.status == "ok" else None,
@@ -375,14 +435,15 @@ def finalize_action(
         raise ActionArtifactError("invalid result classification")
     if durability != "durable" and effect_state == "APPLIED":
         raise ActionArtifactError("uncertain durability cannot be APPLIED")
-    if effect_state == "APPLIED" and durability != "durable":
-        raise ActionArtifactError("uncertain durability cannot be APPLIED")
     if observed_sha256 is not None and (
         type(observed_sha256) is not str or _HEX64.fullmatch(observed_sha256) is None
     ):
         raise ActionArtifactError("invalid observed digest")
     if type(completed_at_ms) is not int or not 0 <= completed_at_ms < 2**63:
         raise ActionArtifactError("invalid result timestamp")
+    claim = read_action_claim(store, identity)
+    if claim is None or completed_at_ms < claim.claimed_at_ms:
+        raise ActionArtifactUncertain("matching prior claim required")
     payload = _closed_details(details)
     body = {
         "schema": ACTION_RESULT_SCHEMA,
@@ -435,20 +496,36 @@ def read_action_claim(
     store: ActionArtifactStore,
     identity: ActionArtifactIdentity,
 ) -> ActionClaimRecord | None:
-    """Strict claim read. Missing is None; corruption is uncertain."""
+    """Qualify an existing matching claim; absence is not evidence of no effect."""
 
-    result = _read_claim_record(store, identity, require_match=True)
-    if result.status == "missing":
-        return None
-    if result.status != "ok" or result.record is None:
-        raise ActionArtifactUncertain("claim is unreadable")
-    return result.record
+    revalidate_artifact_store(store)
+    validate_artifact_identity(identity)
+    _assert_store_binding(store, identity)
+    name = artifact_name(identity.action_id, "claim")
+    try:
+        with _opened_regular_file(store, name, max_bytes=MAX_CLAIM_BYTES,
+                                  missing_ok=True) as held:
+            record = None
+            if held is not None:
+                record = _decode_claim(held[1], identity, require_match=True)
+                os.fsync(held[0])
+                os.fsync(store.dir_fd)
+                revalidate_artifact_store(store)
+                _validate_held(store, name, held[0], held[2])
+        return record
+    except (ActionArtifactError, OSError, UnicodeError, TypeError, ValueError, RecursionError) as error:
+        raise ActionArtifactUncertain("claim qualification uncertain") from error
 
 
 def read_action_result(
     store: ActionArtifactStore,
     identity: ActionArtifactIdentity,
 ) -> ActionResultRecord | None:
+    """Integrity-only read; use classify_action for qualified effect evidence."""
+
+    revalidate_artifact_store(store)
+    validate_artifact_identity(identity)
+    _assert_store_binding(store, identity)
     result = _read_result_record(store, identity, require_match=True)
     if result.status == "missing":
         return None
@@ -482,55 +559,61 @@ def classify_action(
     store: ActionArtifactStore,
     identity: ActionArtifactIdentity,
 ) -> ActionClassification:
-    """Read-only reconciliation. Never creates a claim or infers from project bytes."""
+    """Logical read-only qualification: fsync existing matched evidence, no replay.
 
+    Both descriptors stay held through pair validation and fsync; success is only
+    returned after identity revalidation and successful close of both readers.
+    Absence is claimable for a serialized writer, never proof of NOT_APPLIED.
+    """
     try:
         revalidate_artifact_store(store)
         identity = validate_artifact_identity(identity)
         _assert_store_binding(store, identity)
-    except (ActionArtifactError, ActionArtifactUncertain):
-        return ActionClassification(
-            effect_state="EFFECT_UNKNOWN",
-            claim=None,
-            result=None,
-            store_valid=False,
-        )
-    claim_read = _read_claim_record(store, identity, require_match=True)
-    result_read = _read_result_record(store, identity, require_match=True)
-    if claim_read.status == "uncertain" or result_read.status == "uncertain":
-        return ActionClassification(
-            effect_state="EFFECT_UNKNOWN",
-            claim=claim_read.record if claim_read.status == "ok" else None,
-            result=result_read.record if result_read.status == "ok" else None,
-            store_valid=True,
-        )
-    claim = claim_read.record if claim_read.status == "ok" else None
-    result = result_read.record if result_read.status == "ok" else None
-    if result is not None:
-        effect = (
-            result.effect_state
-            if result.durability == "durable" and result.effect_state in _EFFECTS
-            else "EFFECT_UNKNOWN"
-        )
-        return ActionClassification(
-            effect_state=effect,
-            claim=claim,
-            result=result,
-            store_valid=True,
-        )
-    if claim is not None:
-        return ActionClassification(
-            effect_state="EFFECT_UNKNOWN",
-            claim=claim,
-            result=None,
-            store_valid=True,
-        )
-    return ActionClassification(
-        effect_state="EFFECT_UNKNOWN",
-        claim=None,
-        result=None,
-        store_valid=True,
-    )
+    except ActionArtifactError:
+        return ActionClassification("EFFECT_UNKNOWN", None, None, False, "uncertain")
+    claim = result = None
+    status = "uncertain"
+    effect = "EFFECT_UNKNOWN"
+    try:
+        claim_name = artifact_name(identity.action_id, "claim")
+        result_name = artifact_name(identity.action_id, "result")
+        with _opened_regular_file(store, claim_name, max_bytes=MAX_CLAIM_BYTES,
+                                  missing_ok=True) as claimed:
+            with _opened_regular_file(store, result_name, max_bytes=MAX_RESULT_BYTES,
+                                      missing_ok=True) as completed:
+                if claimed is None and completed is None:
+                    # Recheck both names after the initial observations. The caller
+                    # must hold the store writer mutex when consuming claimable.
+                    for name in (claim_name, result_name):
+                        try:
+                            os.stat(name, dir_fd=store.dir_fd, follow_symlinks=False)
+                        except FileNotFoundError:
+                            continue
+                        raise ActionArtifactUncertain("artifact appeared")
+                    revalidate_artifact_store(store)
+                    status = "absent"
+                else:
+                    if claimed is not None:
+                        claim = _decode_claim(claimed[1], identity, require_match=True)
+                    if completed is not None:
+                        result = _decode_result(completed[1], identity, require_match=True)
+                    if claim is not None and result is None:
+                        status = "pending"
+                    elif claim is not None and result is not None:
+                        if result.completed_at_ms < claim.claimed_at_ms:
+                            raise ActionArtifactUncertain("result predates claim")
+                        if result.durability == "durable":
+                            for held in (claimed, completed):
+                                os.fsync(held[0])
+                            os.fsync(store.dir_fd)
+                            revalidate_artifact_store(store)
+                            _validate_held(store, claim_name, claimed[0], claimed[2])
+                            _validate_held(store, result_name, completed[0], completed[2])
+                            status = "qualified"
+                            effect = result.effect_state
+        return ActionClassification(effect, claim, result, True, status)
+    except (ActionArtifactError, OSError, ValueError, TypeError, UnicodeError, RecursionError):
+        return ActionClassification("EFFECT_UNKNOWN", claim, result, True, "uncertain")
 
 
 def _check_store_stat(value: os.stat_result) -> None:
@@ -551,12 +634,6 @@ def _assert_store_binding(
         or store.owner_uid != os.geteuid()
     ):
         raise ActionArtifactUncertain("artifact store binding changed")
-
-
-def _thread_lock_for(store: ActionArtifactStore) -> threading.Lock:
-    key = (store.device, store.inode)
-    with _THREAD_LOCKS_GUARD:
-        return _THREAD_LOCKS.setdefault(key, threading.Lock())
 
 
 def _file_identity(value: os.stat_result) -> tuple[int, ...]:
@@ -588,10 +665,13 @@ def _closed_details(value: Mapping[str, Any] | None) -> dict[str, Any]:
         return {}
     if type(value) is not dict:
         raise ActionArtifactError("invalid result details")
-    raw = _dumps(dict(value))
+    try:
+        raw = _dumps(dict(value))
+    except (TypeError, ValueError, OverflowError, RecursionError) as error:
+        raise ActionArtifactError("invalid result details") from error
     if len(raw) > MAX_DETAILS_BYTES:
         raise ActionArtifactError("result details too large")
-    parsed = json.loads(raw.decode("utf-8"))
+    parsed = _strict_json(raw)
     if type(parsed) is not dict:
         raise ActionArtifactError("invalid result details")
     return parsed
@@ -632,10 +712,9 @@ def _write_exclusive_bytes(
     cloexec = getattr(os, "O_CLOEXEC", 0)
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | nofollow | cloexec
     fd = -1
-    created = False
     try:
+        revalidate_artifact_store(store)
         fd = os.open(name, flags, 0o600, dir_fd=store.dir_fd)
-        created = True
         _write_all(fd, payload)
         os.fsync(fd)
         opened = os.fstat(fd)
@@ -649,7 +728,10 @@ def _write_exclusive_bytes(
         named = os.stat(name, dir_fd=store.dir_fd, follow_symlinks=False)
         if _file_identity(named) != _file_identity(opened):
             raise ActionArtifactUncertain("artifact name drifted")
+        revalidate_artifact_store(store)
         os.fsync(store.dir_fd)
+        revalidate_artifact_store(store)
+        _validate_held(store, name, fd, opened)
     except FileExistsError:
         raise
     except (OSError, TypeError, ValueError, OverflowError) as error:
@@ -659,17 +741,31 @@ def _write_exclusive_bytes(
             try:
                 os.close(fd)
             except OSError as error:
-                if created:
-                    raise ActionArtifactUncertain("artifact close uncertain") from error
+                store.mark_cleanup_uncertain("artifact_writer_close")
+                raise ActionArtifactUncertain("artifact close uncertain") from error
 
 
-def _read_regular_file(
+def _validate_held(store, name, fd, before) -> None:
+    if (_file_identity(os.fstat(fd)) != _file_identity(before)
+            or _file_identity(os.stat(name, dir_fd=store.dir_fd, follow_symlinks=False))
+            != _file_identity(before)):
+        raise ActionArtifactUncertain("artifact identity changed")
+
+
+def _read_regular_file(store, name, *, max_bytes, missing_ok) -> bytes | None:
+    with _opened_regular_file(store, name, max_bytes=max_bytes, missing_ok=missing_ok) as held:
+        raw = None if held is None else held[1]
+    return raw
+
+
+@contextmanager
+def _opened_regular_file(
     store: ActionArtifactStore,
     name: str,
     *,
     max_bytes: int,
     missing_ok: bool,
-) -> bytes | None:
+):
     revalidate_artifact_store(store)
     nofollow = getattr(os, "O_NOFOLLOW", 0)
     nonblock = getattr(os, "O_NONBLOCK", 0)
@@ -680,7 +776,9 @@ def _read_regular_file(
             before = os.stat(name, dir_fd=store.dir_fd, follow_symlinks=False)
         except FileNotFoundError:
             if missing_ok:
-                return None
+                revalidate_artifact_store(store)
+                yield None
+                return
             raise ActionArtifactUncertain("artifact missing") from None
         if (
             not stat.S_ISREG(before.st_mode)
@@ -716,13 +814,13 @@ def _read_regular_file(
             or _file_identity(after_path) != _file_identity(before)
         ):
             raise ActionArtifactUncertain("artifact identity changed")
-        return b"".join(chunks)
+        yield fd, b"".join(chunks), before
+        revalidate_artifact_store(store)
+        _validate_held(store, name, fd, before)
     except ActionArtifactUncertain:
         raise
     except FileNotFoundError:
-        if missing_ok:
-            return None
-        raise ActionArtifactUncertain("artifact missing") from None
+        raise ActionArtifactUncertain("artifact disappeared") from None
     except (OSError, TypeError, ValueError, OverflowError) as error:
         raise ActionArtifactUncertain("artifact read uncertain") from error
     finally:
@@ -730,6 +828,7 @@ def _read_regular_file(
             try:
                 os.close(fd)
             except OSError as error:
+                store.mark_cleanup_uncertain("artifact_reader_close")
                 raise ActionArtifactUncertain("artifact close uncertain") from error
 
 
@@ -755,107 +854,109 @@ def _parse_identity(raw: object) -> ActionArtifactIdentity:
         raise ActionArtifactUncertain("invalid identity") from error
 
 
-def _read_claim_record(
-    store: ActionArtifactStore,
-    identity: ActionArtifactIdentity,
-    *,
-    require_match: bool,
-) -> _RecordRead:
-    try:
-        raw = _read_regular_file(
-            store,
-            artifact_name(identity.action_id, "claim"),
-            max_bytes=MAX_CLAIM_BYTES,
-            missing_ok=True,
-        )
-    except ActionArtifactUncertain:
-        return _RecordRead(status="uncertain", record=None)
-    if raw is None:
-        return _RecordRead(status="missing", record=None)
-    try:
-        body = json.loads(raw.decode("utf-8"))
-        if type(body) is not dict or set(body) != {
-            "schema",
-            "identity",
-            "claimed_at_ms",
-            "phase",
-        }:
-            raise ActionArtifactUncertain("invalid claim")
-        if body["schema"] != ACTION_CLAIM_SCHEMA or body["phase"] != "claimed":
-            raise ActionArtifactUncertain("invalid claim")
-        if type(body["claimed_at_ms"]) is not int or not 0 <= body["claimed_at_ms"] < 2**63:
-            raise ActionArtifactUncertain("invalid claim")
-        parsed = _parse_identity(body["identity"])
-        if require_match and parsed != identity:
-            raise ActionArtifactUncertain("claim identity mismatch")
-        record = ActionClaimRecord(
-            schema=ACTION_CLAIM_SCHEMA,
-            identity=parsed,
-            claimed_at_ms=body["claimed_at_ms"],
-            phase="claimed",
-        )
-        return _RecordRead(status="ok", record=record)
-    except (ActionArtifactUncertain, UnicodeError, json.JSONDecodeError, TypeError, ValueError):
-        return _RecordRead(status="uncertain", record=None)
+def _strict_json(raw: bytes) -> dict[str, Any]:
+    def pairs(items):
+        result = {}
+        for key, value in items:
+            if key in result:
+                raise ActionArtifactUncertain("duplicate JSON key")
+            result[key] = value
+        return result
+
+    def constant(_value):
+        raise ActionArtifactUncertain("nonfinite JSON constant")
+
+    return json.loads(raw.decode("utf-8"), object_pairs_hook=pairs, parse_constant=constant)
 
 
-def _read_result_record(
-    store: ActionArtifactStore,
-    identity: ActionArtifactIdentity,
-    *,
-    require_match: bool,
-) -> _RecordRead:
+def _decode_claim(raw, identity, *, require_match):
+    body = _strict_json(raw)
+    if type(body) is not dict or set(body) != {
+        "schema",
+        "identity",
+        "claimed_at_ms",
+        "phase",
+    }:
+        raise ActionArtifactUncertain("invalid claim")
+    if body["schema"] != ACTION_CLAIM_SCHEMA or body["phase"] != "claimed":
+        raise ActionArtifactUncertain("invalid claim")
+    if type(body["claimed_at_ms"]) is not int or not 0 <= body["claimed_at_ms"] < 2**63:
+        raise ActionArtifactUncertain("invalid claim")
+    parsed = _parse_identity(body["identity"])
+    if require_match and parsed != identity:
+        raise ActionArtifactUncertain("claim identity mismatch")
+    record = ActionClaimRecord(
+        schema=ACTION_CLAIM_SCHEMA,
+        identity=parsed,
+        claimed_at_ms=body["claimed_at_ms"],
+        phase="claimed",
+    )
+    return record
+
+
+def _read_claim_record(store, identity, *, require_match) -> _RecordRead:
     try:
-        raw = _read_regular_file(
-            store,
-            artifact_name(identity.action_id, "result"),
-            max_bytes=MAX_RESULT_BYTES,
-            missing_ok=True,
-        )
-    except ActionArtifactUncertain:
-        return _RecordRead(status="uncertain", record=None)
-    if raw is None:
-        return _RecordRead(status="missing", record=None)
+        raw = _read_regular_file(store, artifact_name(identity.action_id, "claim"),
+                                 max_bytes=MAX_CLAIM_BYTES, missing_ok=True)
+        if raw is None:
+            return _RecordRead("missing", None)
+        return _RecordRead("ok", _decode_claim(raw, identity, require_match=require_match))
+    except (ActionArtifactError, UnicodeError, TypeError, ValueError, RecursionError):
+        return _RecordRead("uncertain", None)
+
+
+def _decode_result(raw, identity, *, require_match):
+    body = _strict_json(raw)
+    if type(body) is not dict or set(body) != {
+        "schema",
+        "identity",
+        "effect_state",
+        "observed_sha256",
+        "completed_at_ms",
+        "durability",
+        "details",
+    }:
+        raise ActionArtifactUncertain("invalid result")
+    if (
+        body["schema"] != ACTION_RESULT_SCHEMA
+        or body["effect_state"] not in _EFFECTS
+        or body["durability"] not in _DURABILITY
+        or type(body["completed_at_ms"]) is not int
+        or not 0 <= body["completed_at_ms"] < 2**63
+        or (body["observed_sha256"] is not None and not (
+            type(body["observed_sha256"]) is str
+            and _HEX64.fullmatch(body["observed_sha256"])
+        ))
+        or type(body["details"]) is not dict
+    ):
+        raise ActionArtifactUncertain("invalid result")
+    details = _closed_details(body["details"])
+    if body["effect_state"] == "APPLIED" and body["durability"] != "durable":
+        raise ActionArtifactUncertain("invalid result durability")
+    parsed = _parse_identity(body["identity"])
+    if require_match and parsed != identity:
+        raise ActionArtifactUncertain("result identity mismatch")
+    record = ActionResultRecord(
+        schema=ACTION_RESULT_SCHEMA,
+        identity=parsed,
+        effect_state=body["effect_state"],
+        observed_sha256=body["observed_sha256"],
+        completed_at_ms=body["completed_at_ms"],
+        durability=body["durability"],
+        details=details,
+    )
+    return record
+
+
+def _read_result_record(store, identity, *, require_match) -> _RecordRead:
     try:
-        body = json.loads(raw.decode("utf-8"))
-        if type(body) is not dict or set(body) != {
-            "schema",
-            "identity",
-            "effect_state",
-            "observed_sha256",
-            "completed_at_ms",
-            "durability",
-            "details",
-        }:
-            raise ActionArtifactUncertain("invalid result")
-        if (
-            body["schema"] != ACTION_RESULT_SCHEMA
-            or body["effect_state"] not in _EFFECTS
-            or body["durability"] not in _DURABILITY
-            or type(body["completed_at_ms"]) is not int
-            or not 0 <= body["completed_at_ms"] < 2**63
-            or (body["observed_sha256"] is not None and not (
-                type(body["observed_sha256"]) is str
-                and _HEX64.fullmatch(body["observed_sha256"])
-            ))
-            or type(body["details"]) is not dict
-        ):
-            raise ActionArtifactUncertain("invalid result")
-        parsed = _parse_identity(body["identity"])
-        if require_match and parsed != identity:
-            raise ActionArtifactUncertain("result identity mismatch")
-        record = ActionResultRecord(
-            schema=ACTION_RESULT_SCHEMA,
-            identity=parsed,
-            effect_state=body["effect_state"],
-            observed_sha256=body["observed_sha256"],
-            completed_at_ms=body["completed_at_ms"],
-            durability=body["durability"],
-            details=body["details"],
-        )
-        return _RecordRead(status="ok", record=record)
-    except (ActionArtifactUncertain, UnicodeError, json.JSONDecodeError, TypeError, ValueError):
-        return _RecordRead(status="uncertain", record=None)
+        raw = _read_regular_file(store, artifact_name(identity.action_id, "result"),
+                                 max_bytes=MAX_RESULT_BYTES, missing_ok=True)
+        if raw is None:
+            return _RecordRead("missing", None)
+        return _RecordRead("ok", _decode_result(raw, identity, require_match=require_match))
+    except (ActionArtifactError, UnicodeError, TypeError, ValueError, RecursionError):
+        return _RecordRead("uncertain", None)
 
 
 __all__ = [

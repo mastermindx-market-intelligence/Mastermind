@@ -158,7 +158,6 @@ def test_reply_loss_while_physical_write_is_pending(tmp_path: Path, monkeypatch:
             raise TimeoutError("publication hold was not released")
 
     monkeypatch.setattr(patch_port, "_publication_gate", gate)
-    worker = None
     try:
         prepared = asyncio.run(
             harness.prepare(
@@ -178,12 +177,18 @@ def test_reply_loss_while_physical_write_is_pending(tmp_path: Path, monkeypatch:
             task = asyncio.create_task(
                 harness.commit(harness.caller, prepared["action_ref"])
             )
-            await asyncio.get_running_loop().run_in_executor(None, lambda: at_gate.wait(5))
-            assert at_gate.is_set()
-            lost = await harness.reconcile(harness.caller, prepared["action_ref"])
-            hold.set()
-            committed = await task
-            return lost, committed
+            try:
+                await asyncio.get_running_loop().run_in_executor(None, lambda: at_gate.wait(5))
+                assert at_gate.is_set()
+                lost = await harness.reconcile(harness.caller, prepared["action_ref"])
+                hold.set()
+                committed = await task
+                return lost, committed
+            finally:
+                # Release and drain before asyncio.run shuts down its executor,
+                # including when the pending-read assertion itself fails.
+                hold.set()
+                await asyncio.gather(task, return_exceptions=True)
 
         lost, committed = asyncio.run(exercise())
         assert lost["effect_state"] == "EFFECT_UNKNOWN"
@@ -191,8 +196,6 @@ def test_reply_loss_while_physical_write_is_pending(tmp_path: Path, monkeypatch:
         assert target.read_text() == "after\n"
     finally:
         hold.set()
-        if worker is not None:
-            worker.join(timeout=5)
         harness.close()
 
 
@@ -614,4 +617,182 @@ def test_directory_fsync_uncertainty_is_not_applied(tmp_path: Path, monkeypatch:
         )
         assert reconciled["effect_state"] == "EFFECT_UNKNOWN"
     finally:
+        harness.close()
+
+
+@pytest.mark.parametrize("damage", ["corrupt_orphan", "valid_orphan", "corrupt_claim"])
+def test_port_cannot_claim_unresolved_existing_evidence(tmp_path, damage):
+    target = tmp_path / "leaf.txt"
+    harness = Harness(tmp_path, allowed_paths=("leaf.txt",))
+    try:
+        prepared = asyncio.run(harness.prepare(harness.caller, {
+            "project_ref": harness.project_ref, "relative_path": "leaf.txt",
+            "mode": "CREATE", "new_text": "once\n",
+        }))
+        action_id = _action_id(harness, prepared["action_ref"])
+        claim_path = harness.store_path / artifact_name(action_id, "claim")
+        result_path = harness.store_path / artifact_name(action_id, "result")
+        if damage == "corrupt_orphan":
+            result_path.write_text("{")
+        else:
+            assert asyncio.run(harness.commit(harness.caller, prepared["action_ref"]))["effect_state"] == "APPLIED"
+            target.unlink()
+            if damage == "valid_orphan":
+                claim_path.unlink()
+            else:
+                claim_path.write_text("{")
+        before = result_path.read_bytes()
+        reply = asyncio.run(harness.commit(harness.caller, prepared["action_ref"]))
+        assert reply["effect_state"] == "EFFECT_UNKNOWN"
+        assert not target.exists()
+        assert result_path.read_bytes() == before
+        if damage.endswith("orphan"):
+            assert not claim_path.exists()
+    finally:
+        harness.close()
+
+
+@pytest.mark.parametrize("stage", ["before_claim", "after_claim", "after_publication"])
+@pytest.mark.parametrize("reader", ["leaf", "parent"])
+def test_project_reader_close_uncertainty_survives_at_every_boundary(tmp_path, monkeypatch, stage, reader):
+    from integrations.workbench_action_mcp.action_artifacts import ActionArtifactUncertain
+
+    target = tmp_path / "leaf.txt"
+    target.write_text("before\n")
+    harness = Harness(tmp_path, allowed_paths=("leaf.txt",))
+    real_close = os.close
+    fired = False
+    try:
+        prepared = asyncio.run(harness.prepare(harness.caller, {
+            "project_ref": harness.project_ref, "relative_path": "leaf.txt", "mode": "REPLACE",
+            "expected_sha256": _sha(b"before\n"), "old_text": "before", "new_text": "after",
+        }))
+        action_id = _action_id(harness, prepared["action_ref"])
+        claim_path = harness.store_path / artifact_name(action_id, "claim")
+
+        def close(fd):
+            nonlocal fired
+            opened = os.fstat(fd)
+            appropriate = (opened.st_ino == target.stat().st_ino if reader == "leaf" else
+                           opened.st_ino == harness.scope.root_inode and fd != harness.root_fd)
+            claimed = claim_path.exists()
+            published = target.read_text() == "after\n"
+            matches = {"before_claim": not claimed,
+                       "after_claim": claimed and not published,
+                       "after_publication": published}[stage]
+            real_close(fd)
+            if appropriate and matches and not fired:
+                fired = True
+                raise OSError("reader close acknowledgement uncertain")
+
+        monkeypatch.setattr(patch_port.os, "close", close)
+        if stage == "before_claim":
+            with pytest.raises(ProjectActionRefused):
+                asyncio.run(harness.commit(harness.caller, prepared["action_ref"]))
+            assert not claim_path.exists()
+        else:
+            reply = asyncio.run(harness.commit(harness.caller, prepared["action_ref"]))
+            assert reply["effect_state"] == "EFFECT_UNKNOWN"
+            assert reply["cleanup_state"] == "UNCERTAIN"
+        assert fired and harness.store.cleanup_uncertain
+        assert target.read_text() == ("after\n" if stage == "after_publication" else "before\n")
+        monkeypatch.setattr(patch_port.os, "close", real_close)
+        with pytest.raises(ActionArtifactUncertain):
+            harness.store.raise_if_cleanup_uncertain()
+        with pytest.raises(ProjectActionRefused):
+            asyncio.run(harness.commit(harness.caller, prepared["action_ref"]))
+        reconciled = asyncio.run(harness.reconcile(harness.caller, prepared["action_ref"]))
+        assert reconciled["cleanup_state"] == "UNCERTAIN"
+        assert harness.store.cleanup_uncertain
+    finally:
+        monkeypatch.setattr(patch_port.os, "close", real_close)
+        harness.close()
+
+
+@pytest.mark.parametrize("boundary", ["unlock", "mutex_close", "receipt_close"])
+def test_postpublication_cleanup_is_visible_with_historical_effect(tmp_path, monkeypatch, boundary):
+    from integrations.workbench_action_mcp import action_artifacts as artifacts
+
+    target = tmp_path / "leaf.txt"
+    harness = Harness(tmp_path, allowed_paths=("leaf.txt",))
+    real_close, real_flock = os.close, artifacts.fcntl.flock
+    fired = False
+    try:
+        prepared = asyncio.run(harness.prepare(harness.caller, {
+            "project_ref": harness.project_ref, "relative_path": "leaf.txt", "mode": "CREATE",
+            "new_text": "once\n",
+        }))
+        result_path = harness.store_path / artifact_name(_action_id(harness, prepared["action_ref"]), "result")
+
+        def close(fd):
+            nonlocal fired
+            opened = os.fstat(fd)
+            match = False
+            if result_path.exists():
+                match = (boundary == "receipt_close" and opened.st_ino == result_path.stat().st_ino or
+                         boundary == "mutex_close" and opened.st_ino == harness.store.inode and fd != harness.store_fd)
+            real_close(fd)
+            if match and not fired:
+                fired = True
+                raise OSError("close acknowledgement uncertain")
+
+        def flock(fd, operation):
+            nonlocal fired
+            real_flock(fd, operation)
+            if boundary == "unlock" and operation == artifacts.fcntl.LOCK_UN:
+                fired = True
+                raise OSError("unlock acknowledgement uncertain")
+
+        monkeypatch.setattr(artifacts.os, "close", close)
+        monkeypatch.setattr(artifacts.fcntl, "flock", flock)
+        result = asyncio.run(harness.commit(harness.caller, prepared["action_ref"]))
+        assert fired
+        assert result["effect_state"] == "EFFECT_UNKNOWN"
+        assert result["cleanup_state"] == "UNCERTAIN"
+        assert target.read_text() == "once\n"
+        monkeypatch.setattr(artifacts.os, "close", real_close)
+        monkeypatch.setattr(artifacts.fcntl, "flock", real_flock)
+        historical = asyncio.run(harness.reconcile(harness.caller, prepared["action_ref"]))
+        assert historical["effect_state"] == "APPLIED"
+        assert historical["cleanup_state"] == "UNCERTAIN"
+        assert harness.store.cleanup_uncertain
+        with pytest.raises(artifacts.ActionArtifactUncertain):
+            harness.store.raise_if_cleanup_uncertain()
+    finally:
+        monkeypatch.setattr(artifacts.os, "close", real_close)
+        monkeypatch.setattr(artifacts.fcntl, "flock", real_flock)
+        harness.close()
+
+
+def test_claim_writer_close_uncertainty_forbids_publication(tmp_path, monkeypatch):
+    from integrations.workbench_action_mcp import action_artifacts as artifacts
+
+    harness = Harness(tmp_path, allowed_paths=("leaf.txt",))
+    real_close = os.close
+    fired = False
+    try:
+        prepared = asyncio.run(harness.prepare(harness.caller, {
+            "project_ref": harness.project_ref, "relative_path": "leaf.txt", "mode": "CREATE",
+            "new_text": "once\n",
+        }))
+        claim_path = harness.store_path / artifact_name(_action_id(harness, prepared["action_ref"]), "claim")
+
+        def close(fd):
+            nonlocal fired
+            match = claim_path.exists() and os.fstat(fd).st_ino == claim_path.stat().st_ino
+            real_close(fd)
+            if match and not fired:
+                fired = True
+                raise OSError("claim close uncertain")
+
+        monkeypatch.setattr(artifacts.os, "close", close)
+        result = asyncio.run(harness.commit(harness.caller, prepared["action_ref"]))
+        assert fired
+        assert result["effect_state"] == "EFFECT_UNKNOWN"
+        assert result["cleanup_state"] == "UNCERTAIN"
+        assert not (tmp_path / "leaf.txt").exists()
+        assert claim_path.exists()
+        assert harness.store.cleanup_uncertain
+    finally:
+        monkeypatch.setattr(artifacts.os, "close", real_close)
         harness.close()

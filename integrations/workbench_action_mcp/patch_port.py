@@ -269,7 +269,9 @@ def _assert_apply_host(
         raise ProjectActionRefused("ACTION_BINDING_CHANGED")
 
 
-def _open_parent(scope: ActionScope, relative_path: str) -> tuple[list[int], int, str]:
+def _open_parent(
+    store: ActionArtifactStore, scope: ActionScope, relative_path: str
+) -> tuple[list[int], int, str]:
     validate_relative_path(relative_path)
     if relative_path not in scope.allowed_paths:
         raise ProjectActionRefused()
@@ -311,18 +313,26 @@ def _open_parent(scope: ActionScope, relative_path: str) -> tuple[list[int], int
             parent = child
         return fds, parent, relative_path.split("/")[-1]
     except BaseException:
-        for fd in reversed(fds):
-            try:
-                os.close(fd)
-            except OSError:
-                pass
+        _close_readers(store, fds)
         raise
 
 
+def _close_readers(store: ActionArtifactStore, fds: list[int]) -> None:
+    failed = False
+    for fd in reversed(fds):
+        try:
+            os.close(fd)
+        except OSError:
+            failed = True
+            store.mark_cleanup_uncertain("project_reader_close")
+    if failed:
+        raise ProjectActionRefused("ACTION_UNAVAILABLE")
+
+
 def _read_leaf(
-    scope: ActionScope, relative_path: str, *, allow_absent: bool
+    store: ActionArtifactStore, scope: ActionScope, relative_path: str, *, allow_absent: bool
 ) -> _FileSnapshot | None:
-    fds, parent, leaf = _open_parent(scope, relative_path)
+    fds, parent, leaf = _open_parent(store, scope, relative_path)
     file_fd = -1
     try:
         try:
@@ -380,16 +390,7 @@ def _read_leaf(
     except (OSError, TypeError, ValueError, OverflowError) as error:
         raise ProjectActionRefused("ACTION_UNAVAILABLE") from error
     finally:
-        if file_fd >= 0:
-            try:
-                os.close(file_fd)
-            except OSError:
-                pass
-        for fd in reversed(fds):
-            try:
-                os.close(fd)
-            except OSError:
-                pass
+        _close_readers(store, fds + ([file_fd] if file_fd >= 0 else []))
 
 
 def _candidate_from_snapshot(
@@ -416,8 +417,10 @@ def _write_all(fd: int, payload: bytes) -> None:
         offset += written
 
 
-def _observe(scope: ActionScope, relative_path: str) -> str | None:
-    snapshot = _read_leaf(scope, relative_path, allow_absent=True)
+def _observe(
+    store: ActionArtifactStore, scope: ActionScope, relative_path: str
+) -> str | None:
+    snapshot = _read_leaf(store, scope, relative_path, allow_absent=True)
     return None if snapshot is None else snapshot.sha256
 
 
@@ -468,7 +471,7 @@ def _publish_candidate(
     store: ActionArtifactStore,
 ) -> dict[str, Any]:
     _assert_direct_write_path(prepared.relative_path)
-    fds, parent, leaf = _open_parent(scope, prepared.relative_path)
+    fds, parent, leaf = _open_parent(store, scope, prepared.relative_path)
     temp_fd = -1
     temp_name = f".mmx-workbench-action-{prepared.action_id}.tmp"
     created_temp = False
@@ -504,10 +507,12 @@ def _publish_candidate(
         try:
             temp_fd = os.open(temp_name, flags, 0o600, dir_fd=parent)
         except FileExistsError:
-            observed = _observe(confirm_binding(), prepared.relative_path)
+            observed = _observe(store, confirm_binding(), prepared.relative_path)
             _pending("EFFECT_UNKNOWN", observed, "uncertain", "temp_collision")
         else:
             created_temp = True
+            # Retain ownership even if the subsequent write/fsync fails.
+            temp_identity = _file_identity(os.fstat(temp_fd))
             _write_all(temp_fd, candidate)
             os.fchmod(temp_fd, mode)
             os.fsync(temp_fd)
@@ -518,7 +523,7 @@ def _publish_candidate(
             named = os.stat(temp_name, dir_fd=parent, follow_symlinks=False)
             if _file_identity(named) != temp_identity:
                 created_temp = False
-                observed = _observe(confirm_binding(), prepared.relative_path)
+                observed = _observe(store, confirm_binding(), prepared.relative_path)
                 _pending("EFFECT_UNKNOWN", observed, "uncertain", "temp_identity_drift")
             else:
                 current_scope = confirm_binding()
@@ -529,6 +534,7 @@ def _publish_candidate(
                     raise ProjectActionRefused("ACTION_BINDING_CHANGED")
                 _assert_action_fresh(prepared, _now(clock_ms))
                 current = _read_leaf(
+                    store,
                     current_scope,
                     prepared.relative_path,
                     allow_absent=prepared.mode == "CREATE",
@@ -578,7 +584,7 @@ def _publish_candidate(
                         or _file_identity(held) != temp_identity
                     ):
                         created_temp = False
-                        observed = _observe(current_scope, prepared.relative_path)
+                        observed = _observe(store, current_scope, prepared.relative_path)
                         _pending(
                             "EFFECT_UNKNOWN",
                             observed,
@@ -618,6 +624,7 @@ def _publish_candidate(
                             os.fsync(parent)
                         except OSError:
                             final = _read_leaf(
+                                store,
                                 confirm_binding(),
                                 prepared.relative_path,
                                 allow_absent=True,
@@ -632,6 +639,7 @@ def _publish_candidate(
                         else:
                             final_scope = confirm_binding()
                             final = _read_leaf(
+                                store,
                                 final_scope,
                                 prepared.relative_path,
                                 allow_absent=True,
@@ -655,14 +663,14 @@ def _publish_candidate(
         if pending is None and effect_started:
             observed = None
             try:
-                observed = _observe(scope, prepared.relative_path)
+                observed = _observe(store, scope, prepared.relative_path)
             except ProjectActionRefused:
                 observed = None
             _pending("EFFECT_UNKNOWN", observed, "uncertain", "refused_after_effect")
         elif pending is None and error.code == "ACTION_EXPIRED":
             observed = None
             try:
-                observed = _observe(scope, prepared.relative_path)
+                observed = _observe(store, scope, prepared.relative_path)
             except ProjectActionRefused:
                 observed = None
             _pending("NOT_APPLIED", observed, "durable", "expired_before_publication")
@@ -680,11 +688,14 @@ def _publish_candidate(
                 os.close(temp_fd)
             except OSError:
                 close_uncertain = True
+        if created_temp and temp_identity is None:
+            cleanup_uncertain = True
         if created_temp and temp_identity is not None:
             try:
                 named = os.stat(temp_name, dir_fd=parent, follow_symlinks=False)
                 if (named.st_dev, named.st_ino) == temp_identity[:2]:
                     os.unlink(temp_name, dir_fd=parent)
+                    os.fsync(parent)
             except FileNotFoundError:
                 pass
             except OSError:
@@ -695,11 +706,16 @@ def _publish_candidate(
             except OSError:
                 close_uncertain = True
 
+    if close_uncertain:
+        store.mark_cleanup_uncertain("project_writer_close")
+    if cleanup_uncertain:
+        store.mark_cleanup_uncertain("project_temp_cleanup")
+
     if pending is not None:
         effect = pending["effect_state"]
         durability = pending["durability"]
         reason = pending["reason"]
-        if (close_uncertain or cleanup_uncertain) and effect == "APPLIED":
+        if store.cleanup_uncertain:
             effect = "EFFECT_UNKNOWN"
             durability = "uncertain"
             reason = "cleanup_uncertain"
@@ -809,8 +825,10 @@ def create_text_patch_port(
             return current.scope
 
         def operation() -> dict[str, Any]:
+            if store.cleanup_uncertain:
+                raise ProjectActionRefused("ACTION_UNAVAILABLE")
             scope = current_scope()
-            snapshot = _read_leaf(scope, relative_path, allow_absent=mode == "CREATE")
+            snapshot = _read_leaf(store, scope, relative_path, allow_absent=mode == "CREATE")
             if mode == "CREATE":
                 if snapshot is not None:
                     raise ProjectActionRefused("ACTION_PREIMAGE_MISMATCH")
@@ -945,7 +963,7 @@ def create_text_patch_port(
             return _receipt(effect_state="EFFECT_UNKNOWN", observed_sha256=observed_sha256)
         if not classified.store_valid:
             return _receipt(effect_state="EFFECT_UNKNOWN", observed_sha256=observed_sha256)
-        if classified.claim is None and classified.result is None:
+        if classified.claimable:
             return None
         return _receipt(
             effect_state=classified.effect_state,
@@ -979,11 +997,12 @@ def create_text_patch_port(
             except ActionArtifactUncertain as error:
                 raise ProjectActionRefused("ACTION_UNAVAILABLE") from error
             try:
-                observed = _observe(scope, prepared.relative_path)
+                observed = _observe(store, scope, prepared.relative_path)
                 existing = _classified_receipt(prepared, observed_sha256=observed)
                 if existing is not None:
                     return existing
                 current = _read_leaf(
+                    store,
                     scope,
                     prepared.relative_path,
                     allow_absent=prepared.mode == "CREATE",
@@ -1033,7 +1052,7 @@ def create_text_patch_port(
                 if claimed:
                     observed = None
                     try:
-                        observed = _observe(scope, prepared.relative_path)
+                        observed = _observe(store, scope, prepared.relative_path)
                     except ProjectActionRefused:
                         observed = None
                     return _finalize_receipt(
@@ -1053,6 +1072,9 @@ def create_text_patch_port(
                     except ActionArtifactUncertain as error:
                         if not claimed:
                             raise ProjectActionRefused("ACTION_UNAVAILABLE") from error
+                        # Effect receipt remains separately available for qualified
+                        # historical reads. This completion cannot claim clean release.
+                        return _receipt(effect_state="EFFECT_UNKNOWN", observed_sha256=None)
 
         pending = run_io(operation)
         if not inspect.isawaitable(pending):
@@ -1075,6 +1097,7 @@ def create_text_patch_port(
             "preimage_sha256": prepared.preimage_sha256,
             "postimage_sha256": prepared.postimage_sha256,
             "observed_sha256": result.get("observed_sha256"),
+            "cleanup_state": "UNCERTAIN" if store.cleanup_uncertain else "CLEAN",
         }
 
     async def reconcile(caller: ActionCaller, action_ref: object) -> Mapping[str, Any]:
@@ -1098,7 +1121,7 @@ def create_text_patch_port(
             ):
                 return _receipt(effect_state="EFFECT_UNKNOWN", observed_sha256=None)
             try:
-                observed = _observe(current.scope, prepared.relative_path)
+                observed = _observe(store, current.scope, prepared.relative_path)
             except ProjectActionRefused:
                 observed = None
             existing = _classified_receipt(prepared, observed_sha256=observed)
@@ -1125,6 +1148,7 @@ def create_text_patch_port(
             "preimage_sha256": prepared.preimage_sha256,
             "postimage_sha256": prepared.postimage_sha256,
             "observed_sha256": result.get("observed_sha256"),
+            "cleanup_state": "UNCERTAIN" if store.cleanup_uncertain else "CLEAN",
         }
 
     return prepare, commit, reconcile
