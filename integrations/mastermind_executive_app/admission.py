@@ -49,6 +49,7 @@ from integrations.mastermind_executive_app.gateway import (
     TRANSPORT_SENT_OK,
     TRANSPORT_SENT_UNKNOWN,
     observe_trusted_grounding,
+    observe_ingress_grounding,
 )
 
 __all__ = [
@@ -132,6 +133,7 @@ class AdmissionRequest:
     macro_root_flag: str | None
     environ: Mapping[str, str]
     client: CeoIngressClient
+    read_grounding_from_ingress: bool = False
 
 
 def _validate_five_tool_shape(payload: Any) -> dict[str, Any]:
@@ -201,11 +203,16 @@ async def compose_admission(request: AdmissionRequest) -> AdmissionOutcome:
 
     # Step 3: fresh trusted grounding, immediately before effect.
     try:
-        grounding = observe_trusted_grounding(
-            mastermind_root=request.mastermind_root,
-            macro_root_flag=request.macro_root_flag,
-            environ=request.environ,
-        )
+        if request.read_grounding_from_ingress:
+            grounding = await observe_ingress_grounding(
+                request.client, request.ceo_ingress_socket_path,
+            )
+        else:
+            grounding = observe_trusted_grounding(
+                mastermind_root=request.mastermind_root,
+                macro_root_flag=request.macro_root_flag,
+                environ=request.environ,
+            )
     except GroundingUnavailable as exc:
         raise AdmissionError("grounding_unavailable", "trusted grounding is unavailable") from exc
 
