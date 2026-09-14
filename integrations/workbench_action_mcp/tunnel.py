@@ -26,10 +26,11 @@ import stat
 import sys
 import time
 
+from control_plane.codex_worker import ProcessInspector
 from jsonschema import Draft202012Validator
 import mcp.types as mcp_types
 from mcp.server.lowlevel import NotificationOptions, Server
-from common.mcp_stdio_boundary import private_stdio_server
+from integrations.workbench_stdio_boundary import MAX_WIRE_BYTES, private_stdio_server
 from mcp.types import CallToolResult, ServerResult, TextContent, Tool, ToolAnnotations
 
 from common.bounded_sync_executor import SyncExecutionTimeout
@@ -51,6 +52,14 @@ from .app import (
     _PREPARE_SCHEMA,
 )
 from .contracts import ActionTokenCodec
+from .command_contracts import (
+    MAX_PAGE_BYTES as MAX_COMMAND_PAGE_BYTES,
+    MAX_PAGE_LINES as MAX_COMMAND_PAGE_LINES,
+    MAX_PROCESS_DEADLINE_S,
+    RECIPE_SHA256,
+    CommandHostBinding,
+)
+from .command_port import create_command_port
 from .patch_port import ProjectActionRefused, create_text_patch_port
 from .read_composition import (
     READ_OUTPUT_SCHEMAS,
@@ -87,9 +96,220 @@ _PREPARE_INPUT = _PREPARE_SCHEMA
 _ACTION_REF_INPUT = _ACTION_REF_SCHEMA
 _PREPARE_OUTPUT = _PREPARE_OUTPUT_SCHEMA
 _EFFECT_OUTPUT = _EFFECT_OUTPUT_SCHEMA
-_KNOWN_TUNNEL_TOOLS = frozenset(
-    {*READ_TOOL_NAMES, PREPARE_TOOL, COMMIT_TOOL, RECONCILE_TOOL}
+PREPARE_COMMAND_TOOL = "prepare_project_command"
+RUN_COMMAND_TOOL = "run_project_command"
+READ_ACTION_RESULT_TOOL = "read_action_result"
+RECONCILE_ACTION_TOOL = "reconcile_action"
+COMMAND_TOOL_NAMES = (
+    PREPARE_COMMAND_TOOL,
+    RUN_COMMAND_TOOL,
+    READ_ACTION_RESULT_TOOL,
+    RECONCILE_ACTION_TOOL,
 )
+_KNOWN_TUNNEL_TOOLS = frozenset(
+    {
+        *READ_TOOL_NAMES,
+        PREPARE_TOOL,
+        COMMIT_TOOL,
+        RECONCILE_TOOL,
+        *COMMAND_TOOL_NAMES,
+    }
+)
+
+
+def _closed_schema(
+    properties: dict[str, object], required: tuple[str, ...]
+) -> dict[str, object]:
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": list(required),
+        "additionalProperties": False,
+    }
+
+
+_HEX64_SCHEMA = {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+_REFERENCE_SCHEMA = {"type": "string", "minLength": 1, "maxLength": 256}
+_COMMAND_PREPARE_INPUT = _closed_schema(
+    {
+        "project_ref": _REFERENCE_SCHEMA,
+        "relative_path": {"type": "string", "minLength": 1, "maxLength": 512},
+        "recipe_id": {
+            "type": "string",
+            "enum": ["canary_checksum", "canary_refuse"],
+        },
+        "expected_sha256": _HEX64_SCHEMA,
+    },
+    ("project_ref", "relative_path", "recipe_id", "expected_sha256"),
+)
+_COMMAND_PREPARE_OUTPUT = _closed_schema(
+    {
+        "status": {"const": "PREPARED"},
+        "action_ref": {"type": "string", "minLength": 1, "maxLength": 65536},
+        "project_ref": _REFERENCE_SCHEMA,
+        "responsibility_ref": _REFERENCE_SCHEMA,
+        "operation_ref": _REFERENCE_SCHEMA,
+        "recipe_id": {
+            "type": "string",
+            "enum": ["canary_checksum", "canary_refuse"],
+        },
+        "relative_path": {"type": "string", "minLength": 1, "maxLength": 512},
+        "preimage_sha256": _HEX64_SCHEMA,
+        "source_identity": {
+            "type": "string",
+            "pattern": "^[0-9]+(:[0-9]+){8}$",
+        },
+        "host_id": _HEX64_SCHEMA,
+        "boot_session_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "expires_at_ms": {"type": "integer", "minimum": 0},
+    },
+    (
+        "status",
+        "action_ref",
+        "project_ref",
+        "responsibility_ref",
+        "operation_ref",
+        "recipe_id",
+        "relative_path",
+        "preimage_sha256",
+        "source_identity",
+        "host_id",
+        "boot_session_id",
+        "expires_at_ms",
+    ),
+)
+_COMMAND_ACTION_REF_INPUT = _closed_schema(
+    {"action_ref": {"type": "string", "minLength": 1, "maxLength": 65536}},
+    ("action_ref",),
+)
+_COMMAND_READ_INPUT = _closed_schema(
+    {
+        "action_ref": {"type": "string", "minLength": 1, "maxLength": 65536},
+        "stream": {"type": "string", "enum": ["stdout", "stderr"]},
+        "start_line": {"type": "integer", "minimum": 0, "maximum": 1048576},
+        "max_lines": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": MAX_COMMAND_PAGE_LINES,
+        },
+        "max_content_bytes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": MAX_COMMAND_PAGE_BYTES,
+        },
+    },
+    ("action_ref", "stream"),
+)
+_PROCESS_IDENTITY_SCHEMA = _closed_schema(
+    {
+        "pid": {"type": "integer", "minimum": 1},
+        "process_start_identity": {"type": "string", "minLength": 1},
+        "pgid": {"type": "integer", "minimum": 1},
+        "session_id": {"type": "integer", "minimum": 1},
+        "host_id": _HEX64_SCHEMA,
+        "boot_session_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    },
+    (
+        "pid",
+        "process_start_identity",
+        "pgid",
+        "session_id",
+        "host_id",
+        "boot_session_id",
+    ),
+)
+_COMMAND_EFFECT_OUTPUT = _closed_schema(
+    {
+        "status": {"const": "OK"},
+        "effect_state": {
+            "type": "string",
+            "enum": ["APPLIED", "EFFECT_UNKNOWN"],
+        },
+        "isError": {"const": False},
+        "project_ref": _REFERENCE_SCHEMA,
+        "recipe_id": {
+            "type": "string",
+            "enum": ["canary_checksum", "canary_refuse"],
+        },
+        "relative_path": {"type": "string", "minLength": 1, "maxLength": 512},
+        "preimage_sha256": _HEX64_SCHEMA,
+        "cleanup_state": {"type": "string", "enum": ["CLEAN", "UNCERTAIN"]},
+        "exit_code": {"type": "integer", "minimum": -(2**31), "maximum": 2**31 - 1},
+        "stdout_sha256": _HEX64_SCHEMA,
+        "stderr_sha256": _HEX64_SCHEMA,
+        "stdout_bytes": {"type": "integer", "minimum": 0, "maximum": 65536},
+        "stderr_bytes": {"type": "integer", "minimum": 0, "maximum": 65536},
+        "truncated": {"type": "boolean"},
+        "process_identity": _PROCESS_IDENTITY_SCHEMA,
+        "timed_out": {"type": "boolean"},
+    },
+    (
+        "status",
+        "effect_state",
+        "isError",
+        "project_ref",
+        "recipe_id",
+        "relative_path",
+        "preimage_sha256",
+        "cleanup_state",
+    ),
+)
+_COMMAND_EFFECT_OUTPUT["allOf"] = [
+    {
+        "if": {"properties": {"effect_state": {"const": "APPLIED"}}},
+        "then": {
+            "required": [
+                "exit_code",
+                "stdout_sha256",
+                "stderr_sha256",
+                "stdout_bytes",
+                "stderr_bytes",
+                "truncated",
+                "process_identity",
+                "timed_out",
+            ]
+        },
+    }
+]
+_COMMAND_READ_OUTPUT = _closed_schema(
+    {
+        **_COMMAND_EFFECT_OUTPUT["properties"],
+        "stream": {"type": "string", "enum": ["stdout", "stderr"]},
+        "content": {"type": "string", "maxLength": MAX_COMMAND_PAGE_BYTES},
+        "line_start": {"type": "integer", "minimum": 0},
+        "line_end": {"type": "integer", "minimum": 0},
+        "total_lines": {"type": "integer", "minimum": 0},
+        "next_line": {
+            "anyOf": [{"type": "null"}, {"type": "integer", "minimum": 0}]
+        },
+        "file_sha256": _HEX64_SCHEMA,
+    },
+    ("status", "effect_state", "isError"),
+)
+_COMMAND_READ_OUTPUT["oneOf"] = [
+    {
+        "required": [
+            "project_ref",
+            "recipe_id",
+            "relative_path",
+            "preimage_sha256",
+            "cleanup_state",
+        ]
+    },
+    {
+        "required": [
+            "stream",
+            "content",
+            "line_start",
+            "line_end",
+            "total_lines",
+            "next_line",
+            "truncated",
+            "file_sha256",
+            "exit_code",
+        ]
+    },
+]
 _CONFIG_KEYS = frozenset(
     {
         "schema",
@@ -102,6 +322,10 @@ _CONFIG_KEYS = frozenset(
         "artifact_directory",
         "host_id",
         "action_key_file",
+        "python_executable",
+        "python_sha256",
+        "recipe_root",
+        "process_deadline_seconds",
         "max_concurrency",
         "io_timeout_seconds",
         "close_timeout_seconds",
@@ -155,6 +379,10 @@ class TunnelConfig:
     artifact_directory: str
     host_id: str
     action_key_file: str
+    python_executable: str
+    python_sha256: str
+    recipe_root: str
+    process_deadline_seconds: float
     max_concurrency: int
     io_timeout_seconds: float
     close_timeout_seconds: float
@@ -200,6 +428,13 @@ def _bounded_timeout(value: object) -> float:
     return selected
 
 
+def _bounded_process_deadline(value: object) -> float:
+    selected = _bounded_timeout(value)
+    if selected > MAX_PROCESS_DEADLINE_S:
+        _refuse()
+    return selected
+
+
 def _channel_identifier(value: object) -> str:
     if type(value) is not str or not value or len(value) > 512:
         _refuse()
@@ -209,6 +444,12 @@ def _channel_identifier(value: object) -> str:
 
 
 def _host_id(value: object) -> str:
+    if type(value) is not str or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+        _refuse()
+    return value
+
+
+def _sha256(value: object) -> str:
     if type(value) is not str or re.fullmatch(r"[0-9a-f]{64}", value) is None:
         _refuse()
     return value
@@ -402,6 +643,12 @@ def parse_tunnel_config(value: object) -> TunnelConfig:
         artifact_directory=_absolute_path(value.get("artifact_directory")),
         host_id=_host_id(value.get("host_id")),
         action_key_file=_absolute_path(value.get("action_key_file")),
+        python_executable=_absolute_path(value.get("python_executable")),
+        python_sha256=_sha256(value.get("python_sha256")),
+        recipe_root=_absolute_path(value.get("recipe_root")),
+        process_deadline_seconds=_bounded_process_deadline(
+            value.get("process_deadline_seconds")
+        ),
         max_concurrency=_bounded_int(
             value.get("max_concurrency"), minimum=1, maximum=MAX_CONCURRENCY
         ),
@@ -428,6 +675,24 @@ def _secure_json(path: str, *, maximum: int) -> dict[str, object]:
     if not isinstance(result, dict):
         _refuse()
     return result
+
+
+def _bind_command_host(runtime: WorkbenchActionRuntime, config: TunnelConfig) -> None:
+    if (
+        not isinstance(runtime, WorkbenchActionRuntime)
+        or not isinstance(config, TunnelConfig)
+        or config.host_id != runtime.host_binding.host_id
+        or config.process_deadline_seconds > MAX_PROCESS_DEADLINE_S
+    ):
+        _refuse()
+    runtime._tunnel_command_host = CommandHostBinding(
+        host_id=runtime.host_binding.host_id,
+        boot_session_id=runtime.host_binding.boot_session_id,
+        python_executable=config.python_executable,
+        python_sha256=config.python_sha256,
+        recipe_root=config.recipe_root,
+        process_deadline_seconds=config.process_deadline_seconds,
+    )
 
 
 def load_tunnel_config(path: str) -> TunnelConfig:
@@ -529,6 +794,7 @@ async def create_runtime_channel(
             io_timeout_seconds=config.io_timeout_seconds,
             action_ttl_ms=config.action_ttl_ms,
         )
+        _bind_command_host(runtime, config)
     except BaseException as error:
         primary_error = error
     finally:
@@ -574,8 +840,12 @@ def _snapshot(value: object, maximum: int) -> object:
     )
     raw = text.encode("utf-8", errors="strict")
     if len(raw) > maximum:
-        raise ValueError("payload too large")
+        raise _PayloadTooLarge("payload too large")
     return json.loads(text)
+
+
+class _PayloadTooLarge(ValueError):
+    """Internal size classification; never serialized with its message."""
 
 
 def _error(code: str) -> CallToolResult:
@@ -594,6 +864,21 @@ def _action_digest(value: object) -> str | None:
     if type(value) is not str:
         return None
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _fits_maximum_mcp_response(result: CallToolResult) -> bool:
+    """Account for the exact escaped result plus the largest admitted request id."""
+
+    response = mcp_types.JSONRPCResponse(
+        jsonrpc="2.0",
+        id="\U0010ffff" * 256,
+        result=result.model_dump(mode="json", by_alias=True, exclude_none=True),
+    )
+    return (
+        len(response.model_dump_json(by_alias=True, exclude_none=True).encode("utf-8"))
+        + 1
+        <= MAX_WIRE_BYTES
+    )
 
 
 class _ClosedTunnelServer(Server):
@@ -644,6 +929,13 @@ def create_tunnel_action_server(runtime: WorkbenchActionRuntime) -> Server:
         raise ValueError("FIXED_CHANNEL_SERVICES_REQUIRED")
     caller = services.caller
     project_ref = services.project_ref
+    command_host = getattr(runtime, "_tunnel_command_host", None)
+    if (
+        type(command_host) is not CommandHostBinding
+        or command_host.host_id != services.host_binding.host_id
+        or command_host.boot_session_id != services.host_binding.boot_session_id
+    ):
+        raise ValueError("FIXED_COMMAND_HOST_REQUIRED")
     read_composition = create_bound_read_composition(runtime)
     token_codec = ActionTokenCodec(services.action_token_key)
     prepare, commit, reconcile = create_text_patch_port(
@@ -655,6 +947,21 @@ def create_tunnel_action_server(runtime: WorkbenchActionRuntime) -> Server:
         host=services.host_binding,
         action_ttl_ms=services.action_ttl_ms,
     )
+    (
+        prepare_project_command,
+        run_project_command,
+        read_action_result,
+        reconcile_action,
+    ) = create_command_port(
+        resolve_binding=runtime.resolve_binding,
+        clock_ms=services.clock_ms,
+        run_io=runtime.run_io,
+        token_codec=token_codec,
+        artifact_store=runtime.artifact_store,
+        host=command_host,
+        inspector=ProcessInspector(),
+        action_ttl_ms=services.action_ttl_ms,
+    )
     prepare_validator = Draft202012Validator(_PREPARE_INPUT)
     ref_validator = Draft202012Validator(_ACTION_REF_INPUT)
     prepare_output_validator = Draft202012Validator(_PREPARE_OUTPUT)
@@ -664,6 +971,18 @@ def create_tunnel_action_server(runtime: WorkbenchActionRuntime) -> Server:
     }
     read_output_validators = {
         name: Draft202012Validator(schema) for name, schema in READ_OUTPUT_SCHEMAS.items()
+    }
+    command_input_validators = {
+        PREPARE_COMMAND_TOOL: Draft202012Validator(_COMMAND_PREPARE_INPUT),
+        RUN_COMMAND_TOOL: Draft202012Validator(_COMMAND_ACTION_REF_INPUT),
+        READ_ACTION_RESULT_TOOL: Draft202012Validator(_COMMAND_READ_INPUT),
+        RECONCILE_ACTION_TOOL: Draft202012Validator(_COMMAND_ACTION_REF_INPUT),
+    }
+    command_output_validators = {
+        PREPARE_COMMAND_TOOL: Draft202012Validator(_COMMAND_PREPARE_OUTPUT),
+        RUN_COMMAND_TOOL: Draft202012Validator(_COMMAND_EFFECT_OUTPUT),
+        READ_ACTION_RESULT_TOOL: Draft202012Validator(_COMMAND_READ_OUTPUT),
+        RECONCILE_ACTION_TOOL: Draft202012Validator(_COMMAND_EFFECT_OUTPUT),
     }
 
     async def emit_channel_audit(
@@ -784,6 +1103,66 @@ def create_tunnel_action_server(runtime: WorkbenchActionRuntime) -> Server:
                     openWorldHint=False,
                 ),
             ),
+            Tool(
+                name=PREPARE_COMMAND_TOOL,
+                description=(
+                    "Prepare one pinned command recipe against one exact allowed "
+                    "file preimage. This returns a signed reference and starts no process."
+                ),
+                inputSchema=_COMMAND_PREPARE_INPUT,
+                outputSchema=_COMMAND_PREPARE_OUTPUT,
+                annotations=ToolAnnotations(
+                    readOnlyHint=True,
+                    destructiveHint=False,
+                    idempotentHint=True,
+                    openWorldHint=False,
+                ),
+            ),
+            Tool(
+                name=RUN_COMMAND_TOOL,
+                description=(
+                    "Run exactly one previously prepared pinned canary recipe. "
+                    "The only input is its signed action reference."
+                ),
+                inputSchema=_COMMAND_ACTION_REF_INPUT,
+                outputSchema=_COMMAND_EFFECT_OUTPUT,
+                annotations=ToolAnnotations(
+                    readOnlyHint=False,
+                    destructiveHint=True,
+                    idempotentHint=True,
+                    openWorldHint=False,
+                ),
+            ),
+            Tool(
+                name=READ_ACTION_RESULT_TOOL,
+                description=(
+                    "Read one bounded page of retained stdout or stderr from a "
+                    "completed command action without starting a process."
+                ),
+                inputSchema=_COMMAND_READ_INPUT,
+                outputSchema=_COMMAND_READ_OUTPUT,
+                annotations=ToolAnnotations(
+                    readOnlyHint=True,
+                    destructiveHint=False,
+                    idempotentHint=True,
+                    openWorldHint=False,
+                ),
+            ),
+            Tool(
+                name=RECONCILE_ACTION_TOOL,
+                description=(
+                    "Classify retained command evidence for one signed action "
+                    "without starting or replaying a process."
+                ),
+                inputSchema=_COMMAND_ACTION_REF_INPUT,
+                outputSchema=_COMMAND_EFFECT_OUTPUT,
+                annotations=ToolAnnotations(
+                    readOnlyHint=True,
+                    destructiveHint=False,
+                    idempotentHint=True,
+                    openWorldHint=False,
+                ),
+            ),
         ]
 
     @server.call_tool(validate_input=False)
@@ -795,6 +1174,10 @@ def create_tunnel_action_server(runtime: WorkbenchActionRuntime) -> Server:
             request = _snapshot(arguments, MAX_ARGUMENT_BYTES)
             if name in READ_TOOL_NAMES:
                 read_input_validators[name].validate(request)
+            elif name in COMMAND_TOOL_NAMES:
+                command_input_validators[name].validate(request)
+                if name != PREPARE_COMMAND_TOOL:
+                    action_digest = _action_digest(request["action_ref"])
             elif name == PREPARE_TOOL:
                 prepare_validator.validate(request)
             else:
@@ -848,6 +1231,14 @@ def create_tunnel_action_server(runtime: WorkbenchActionRuntime) -> Server:
         try:
             if name in READ_TOOL_NAMES:
                 observed = await read_composition.call(name, request)
+            elif name == PREPARE_COMMAND_TOOL:
+                observed = await prepare_project_command(caller, request)
+            elif name == RUN_COMMAND_TOOL:
+                observed = await run_project_command(caller, request["action_ref"])
+            elif name == READ_ACTION_RESULT_TOOL:
+                observed = await read_action_result(caller, request)
+            elif name == RECONCILE_ACTION_TOOL:
+                observed = await reconcile_action(caller, request["action_ref"])
             elif name == PREPARE_TOOL:
                 observed = await prepare(caller, request)
             elif name == COMMIT_TOOL:
@@ -857,7 +1248,11 @@ def create_tunnel_action_server(runtime: WorkbenchActionRuntime) -> Server:
         except ProjectActionRefused as error:
             return _error(error.code)
         except (RuntimeClosed, SyncExecutionTimeout):
-            return _error("CHANNEL_ADMISSION_CHANGED")
+            return _error(
+                "ACTION_EFFECT_UNKNOWN"
+                if name in (COMMIT_TOOL, RUN_COMMAND_TOOL)
+                else "CHANNEL_ADMISSION_CHANGED"
+            )
         except Exception:
             return _error("ACTION_UNAVAILABLE")
 
@@ -873,12 +1268,16 @@ def create_tunnel_action_server(runtime: WorkbenchActionRuntime) -> Server:
         # to retry.
         if runtime.resolve_binding(caller, project_ref) is None:
             return _error(
-                "ACTION_EFFECT_UNKNOWN" if name == COMMIT_TOOL else "CHANNEL_ADMISSION_CHANGED"
+                "ACTION_EFFECT_UNKNOWN"
+                if name in (COMMIT_TOOL, RUN_COMMAND_TOOL)
+                else "CHANNEL_ADMISSION_CHANGED"
             )
         try:
-            data = _snapshot(dict(observed), MAX_RESULT_BYTES // 2)
+            data = _snapshot(dict(observed), MAX_RESULT_BYTES)
             if name in READ_TOOL_NAMES:
                 read_output_validators[name].validate(data)
+            elif name in COMMAND_TOOL_NAMES:
+                command_output_validators[name].validate(data)
             elif name == PREPARE_TOOL:
                 prepare_output_validator.validate(data)
             else:
@@ -893,14 +1292,32 @@ def create_tunnel_action_server(runtime: WorkbenchActionRuntime) -> Server:
                 structuredContent=data,
                 isError=False,
             )
-            _snapshot(
-                result.model_dump(mode="json", by_alias=True, exclude_none=True),
-                MAX_RESULT_BYTES,
-            )
+            if not _fits_maximum_mcp_response(result):
+                return _error(
+                    "PREVIEW_TOO_LARGE"
+                    if name == "preview_text_replace"
+                    else (
+                        "ACTION_EFFECT_UNKNOWN"
+                        if name in (COMMIT_TOOL, RUN_COMMAND_TOOL)
+                        else "ACTION_RESULT_UNVERIFIED"
+                    )
+                )
             return result
+        except _PayloadTooLarge:
+            return _error(
+                "PREVIEW_TOO_LARGE"
+                if name == "preview_text_replace"
+                else (
+                    "ACTION_EFFECT_UNKNOWN"
+                    if name in (COMMIT_TOOL, RUN_COMMAND_TOOL)
+                    else "ACTION_RESULT_UNVERIFIED"
+                )
+            )
         except Exception:
             return _error(
-                "ACTION_EFFECT_UNKNOWN" if name == COMMIT_TOOL else "ACTION_RESULT_UNVERIFIED"
+                "ACTION_EFFECT_UNKNOWN"
+                if name in (COMMIT_TOOL, RUN_COMMAND_TOOL)
+                else "ACTION_RESULT_UNVERIFIED"
             )
 
     return server

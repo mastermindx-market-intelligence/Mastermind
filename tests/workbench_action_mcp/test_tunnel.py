@@ -14,6 +14,7 @@ import time
 import mcp.types as mcp_types
 import pytest
 
+import integrations.workbench_action_mcp.tunnel as tunnel_module
 from integrations.workbench_action_mcp.runtime import (
     FixedTunnelChannel,
     StableWorkbenchActionLease,
@@ -83,6 +84,13 @@ def _document(
     key_file = tmp_path / f"action-key-{tag}.hex"
     key_file.write_text(key_hex + "\n")
     os.chmod(key_file, 0o600)
+    python_executable = os.path.realpath(sys.executable)
+    recipe_root = (
+        Path(__file__).resolve().parents[2]
+        / "integrations"
+        / "workbench_action_mcp"
+        / "recipes"
+    )
     now_ms = int(time.time() * 1000)
     lease = _lease(channel, now_ms)
     document: dict[str, object] = {
@@ -96,6 +104,12 @@ def _document(
         "artifact_directory": str(artifact),
         "host_id": "a" * 64,
         "action_key_file": str(key_file),
+        "python_executable": python_executable,
+        "python_sha256": hashlib.sha256(
+            Path(python_executable).read_bytes()
+        ).hexdigest(),
+        "recipe_root": str(recipe_root),
+        "process_deadline_seconds": 5.0,
         "max_concurrency": 1,
         "io_timeout_seconds": 5.0,
         "close_timeout_seconds": 5.0,
@@ -168,6 +182,10 @@ def test_fixed_channel_prepares_commits_and_reconciles(tmp_path: Path) -> None:
                 "prepare_text_patch",
                 "commit_text_patch",
                 "reconcile_text_patch",
+                "prepare_project_command",
+                "run_project_command",
+                "read_action_result",
+                "reconcile_action",
             }
             commit_tool = next(t for t in tools if t.name == "commit_text_patch")
             assert commit_tool.annotations.readOnlyHint is False
@@ -343,6 +361,8 @@ def test_expired_lease_refuses_open_and_live_admission(tmp_path: Path) -> None:
             io_timeout_seconds=5.0,
             action_ttl_ms=60_000,
         )
+        config_document, _, _, _ = _document(tmp_path, tag="command-binding")
+        tunnel_module._bind_command_host(runtime, parse_tunnel_config(config_document))
         server = create_tunnel_action_server(runtime)
 
         async def exercise() -> None:
@@ -880,5 +900,12 @@ def test_launcher_describe_is_dependency_free_and_truthful() -> None:
             "prepare_text_patch",
             "commit_text_patch",
             "reconcile_text_patch",
+            "workspace_manifest",
+            "read_project_file",
+            "preview_text_replace",
+            "prepare_project_command",
+            "run_project_command",
+            "read_action_result",
+            "reconcile_action",
         ],
     }

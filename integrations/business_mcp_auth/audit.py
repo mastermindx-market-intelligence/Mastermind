@@ -37,6 +37,10 @@ _CHANNEL_TOOLS = frozenset(
         "prepare_text_patch",
         "commit_text_patch",
         "reconcile_text_patch",
+        "prepare_project_command",
+        "run_project_command",
+        "read_action_result",
+        "reconcile_action",
     }
 )
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")

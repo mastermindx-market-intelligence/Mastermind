@@ -1,29 +1,35 @@
 # First-party Workbench Action F0
 
-Status: **BUILT_NOT_PROVEN / RUNNABLE_LOOPBACK_SOURCE / NOT INSTALLED / ASTRA-PRO PLATFORM CANARY PENDING**.
+Status: **BUILT_NOT_PROVEN / RUNNABLE LOCAL SOURCE / NOT INSTALLED / C1 PERSONAL CANARY PENDING**.
 
 Operation: `web-ceo-workbench-action-f0-20260913-sol-001`.
 
-This source composes bounded protected Read and attended text-patch operations in one fixed-channel runtime. It exists so an authorized Web CEO can inspect an allowed file, preview one exact replacement, and prepare/commit that replacement without receiving a generic filesystem, shell, host, credential, Git publication, browser, or administrator tool.
+This source composes bounded protected Read, attended text-patch operations, and two pinned command recipes in one fixed-channel runtime. It exists so an authorized Web CEO can inspect an allowed file, preview and apply one exact replacement, run a checksum or intentional-refusal canary, and retrieve retained results without receiving a generic filesystem, shell, host, credential, Git publication, browser, or administrator tool.
 
 It does **not** make a Web CEO autonomous, install a ChatGPT app, create an Executive Job/Attempt/Worker, grant branch ownership, commit/push/merge source, select provider accounts, or bypass ChatGPT platform safety. Source tests prove the implementation boundary only; they do not prove that a particular ChatGPT model/mode will dispatch the modifying tool.
 
 ## Tool surface
 
-The current Phase A model-visible MCP surface is deliberately only:
+The attended fixed-channel MCP surface contains exactly ten tools:
 
 | Tool | Effect | Input authority |
 |---|---|---|
-| `workspace_manifest` | read-only | no model-selected authority; reports the current fixed project binding and six-tool source capability as `BUILT_NOT_PROVEN` |
+| `workspace_manifest` | read-only | no model-selected authority; reports the current fixed project binding and ten-tool `attended_workbench_f0` source capability as `BUILT_NOT_PROVEN` |
 | `read_project_file` | read-only | one allowed relative path plus bounded line paging and optional expected preimage |
 | `preview_text_replace` | read-only | one allowed relative path, required preimage, and one exact in-memory replacement; never persists |
 | `prepare_text_patch` | read-only | selected project ref, relative path, `CREATE` or one unique-text `REPLACE`, expected preimage for replacement |
 | `commit_text_patch` | modifying | **only** the short-lived signed `action_ref` returned by preparation |
 | `reconcile_text_patch` | read-only | the original signed `action_ref`; never creates or replays another action |
+| `prepare_project_command` | read-only | selected project ref, allowed relative path, exact preimage, and one of two pinned recipe IDs; starts no process |
+| `run_project_command` | process start | **only** the short-lived signed `action_ref` returned by command preparation |
+| `read_action_result` | read-only | original command action ref plus bounded stream/line/page selectors; never starts or replays a process |
+| `reconcile_action` | read-only | original command action ref; classifies retained evidence without spawning |
 
-The annotations are truthful. The three Read tools and patch preparation/reconciliation are read-only. `commit_text_patch` is advertised as modifying/destructive, idempotent for the *same prepared action*, and closed-world. It is intentionally not disguised as a read in an attempt to influence platform classification. The standalone Read profile's `preview_project_command` is not exposed here because its preview recipes are not this executable profile's reviewed command contract.
+The annotations are truthful. The three Read tools, both prepare tools, both reconcile tools, and result paging are read-only. `commit_text_patch` and `run_project_command` are advertised as modifying/destructive, idempotent for the *same prepared action*, and closed-world. The standalone Read profile's `preview_project_command` is not exposed here because its preview recipes are not this executable profile's reviewed command contract.
 
-The model never supplies an absolute root, machine, worktree, branch, account, credential, environment, shell, executable, network destination, action-signing key, source-writer identity, or effect state. Those remain owner-derived.
+`workspace_manifest` validates authority through the borrowed Read manifest call, then labels the complete envelope and data as `attended_workbench_f0` with `mutation_allowed=true`. Its effects are `file_write=true`, `process_start=true`, `network_call=false`, and `durable_prepare=false`. Preparation is a stateless, short-lived signed reference; it is not a durable queue, ledger, or pending action. Individual Read and preview results retain the borrowed `pro_read_prepare` profile with `mutation_allowed=false`.
+
+The model never supplies an absolute root, machine, worktree, branch, account, credential, environment, shell, executable, recipe path/hash, network destination, action-signing key, source-writer identity, or effect state. Those remain owner-derived.
 
 ## Owner-bound action
 
@@ -36,7 +42,7 @@ One runtime owns one already-authorized selected project descriptor and consumes
 - committed baseline when known;
 - expiry.
 
-Preparation captures that authority plus the exact pre/post image into a short-lived HMAC-signed action reference. The service reads one owner-provisioned generation key from a fixed `0600` file; the model never receives or selects it. Keeping that key stable across ordinary service restart lets the original signed action remain reconcilable until its own lease/TTL expires, without creating an action registry or replay database. Key rotation is therefore a generation/reconciliation event and must not strand an unresolved `EFFECT_UNKNOWN` action.
+Patch and command preparation capture that authority plus the exact preimage and intended operation into a short-lived HMAC-signed action reference. The service reads one owner-provisioned generation key from a fixed `0600` file; the model never receives or selects it. Keeping that key stable across ordinary child restart lets the original signed action remain reconcilable until its own lease/TTL expires, without creating an action registry or replay database. Key rotation is therefore a generation/reconciliation event and must not strand an unresolved `EFFECT_UNKNOWN` action.
 
 Every prepare/commit/reconcile re-resolves current binding. A prepared action cannot be remapped to another project, operation, responsibility, root, generation or caller.
 
@@ -53,6 +59,8 @@ NOT_APPLIED | APPLIED | EFFECT_UNKNOWN
 Commit and reconcile also return `cleanup_state: CLEAN | UNCERTAIN`. This reports physical descriptor/lock release separately from the action effect. A qualified historical `APPLIED` receipt may coexist with `UNCERTAIN`; that uncertainty is sticky for the runtime owner and never authorizes replay.
 
 Same-action replay observes an already matching postimage and returns `APPLIED` without issuing a second write. Changed/foreign source is not overwritten intentionally; it returns or reconciles to `EFFECT_UNKNOWN`. A lost client response is never permission to prepare another action or fail over to another actuator.
+
+Command execution accepts only `canary_checksum` and `canary_refuse`, each bound to a source-pinned SHA-256 recipe. The host pins an absolute Python executable and its SHA-256, the recipe root, and a deadline of at most 15 seconds. The child receives a closed environment and descriptor-bound project/file inputs. Exit `0` and intentional exit `7` are completed MCP results, not transport failures. Stdout/stderr are retained in the same Action artifact store and paged without replay. Process identity, cleanup state, and effect state remain separate facts.
 
 F0 depends on the owner-issued project binding to exclude concurrent authorized writers. It does not claim a kernel-level compare-and-swap primitive against an uncooperative process that mutates the same path in the final filesystem publication window. Production admission therefore requires an isolated or otherwise writer-fenced disposable workspace for the first canary, and a stronger local-source fence before any unattended mutation claim.
 
@@ -123,7 +131,7 @@ Example without secrets:
 
 Status: **BUILT_NOT_PROVEN / TRANSPORT SEAM ONLY / NOT INSTALLED / NOT ENROLLED**.
 
-The HTTP/OAuth service above stays exactly as it is. The tunnel entry point is a second composition of the *same* runtime: one host-selected Secure MCP Tunnel channel → one stdio child (`scripts/mastermind_workbench_action_stdio.py`) → `WorkbenchActionRuntime.open_channel(...)` → the existing text patch port plus the borrowed Read port. It exists so a tunnel-terminated client can reach the six-tool Phase A surface without a second authentication service being invented on this path.
+The HTTP/OAuth service above stays exactly as it is. The tunnel entry point is a second composition of the *same* runtime: one host-selected Secure MCP Tunnel channel → one stdio child (`scripts/mastermind_workbench_action_stdio.py`) → `WorkbenchActionRuntime.open_channel(...)` → the existing text patch port, borrowed Read port, and closed command port. It exists so a tunnel-terminated client can reach the ten-tool attended surface without a second authentication service being invented on this path.
 
 The borrowed Read port opens no root and owns no executor, lease, audit sink, descriptor, or cache. Every callback re-resolves the current channel/project binding and maps its exact root descriptor identity, context, owner, generation, allowed paths, expiry, and committed baseline into a `ReadScope`. Its synchronous operation executes through the same runtime `run_io` used by patch work. Read-port refusals become closed MCP errors with `isError=true`.
 
@@ -145,6 +153,10 @@ The borrowed Read port opens no root and owns no executor, lease, audit sink, de
   "artifact_directory": "/srv/mastermind/workbench/artifacts-c1",
   "host_id": "<hex64 host identity>",
   "action_key_file": "/srv/mastermind/workbench/keys/action-c1.hex",
+  "python_executable": "/absolute/hash-locked/python3.12",
+  "python_sha256": "<hex64 executable hash>",
+  "recipe_root": "/absolute/protected/source/integrations/workbench_action_mcp/recipes",
+  "process_deadline_seconds": 5.0,
   "max_concurrency": 2,
   "io_timeout_seconds": 5.0,
   "close_timeout_seconds": 5.0,
@@ -169,26 +181,28 @@ The borrowed Read port opens no root and owns no executor, lease, audit sink, de
 
 Run: `/path/to/python scripts/mastermind_workbench_action_stdio.py --config /srv/mastermind/workbench/tunnel-c1.json` (stdio MCP on stdin/stdout; diagnostics on stderr). `--describe` is dependency-free and never claims installation. The lease's digest fields are derived by the host from the exact channel triple — the model can never supply the channel, lease, key, or locations.
 
-**Read/patch guarantees preserved.** The fixed-channel entry point has one runtime owner (root descriptor, revoke, `run_io`, physical drain, audit closure). It composes the existing text patch port and the borrowed Read port without another physical owner. Each advertised input and success output has a bounded closed schema; stdio dispatch uses bounded full-schema validation with `validate_input=False`, fixed sanitized error payloads (`{"code": ...}`, never reflected rejected values), and explicit `CallToolResult.isError`. The same stable action key across ordinary restarts keeps an already-prepared action reconcilable until its own lease/TTL expiry; key rotation remains a generation boundary and must not strand an unresolved `EFFECT_UNKNOWN`.
+**Read/patch/command guarantees preserved.** The fixed-channel entry point has one runtime owner (root descriptor, artifact-store descriptor, revoke, `run_io`, physical drain, audit closure). It composes the existing text patch port, borrowed Read port, and command port without another physical owner. Patch and command share the same token codec and exact artifact-store object. Each advertised input and success output has a bounded closed schema; stdio dispatch uses bounded full-schema validation with `validate_input=False`, fixed sanitized error payloads (`{"code": ...}`, never reflected rejected values), and explicit `CallToolResult.isError`. Responses are measured as their exact escaped MCP JSON-RPC envelope against the 262,144-byte wire cap; a predictably oversized text preview returns `PREVIEW_TOO_LARGE` without truncation. The same stable action key/store across ordinary restarts keeps an already-prepared action reconcilable until its own lease/TTL expiry; key rotation remains a generation boundary and must not strand an unresolved `EFFECT_UNKNOWN`.
 
-**Not claimed by this seam.** No tunnel enrollment, native account admission, ChatGPT app connection, command execution (`run_project_command` remains pending final composition), install, supervisor, or `PROVEN_LIVE`. Honest write admission on the C1 Personal account is the parent rollout's next step.
+**Not claimed by this seam.** No tunnel enrollment, native account admission, ChatGPT app connection, install, supervisor, or `PROVEN_LIVE`. Local command subprocess tests establish source behavior only. Honest modifying-tool admission on the C1 Personal account is the parent rollout's next step.
 
-## Required Astra Pro Web-seat canary
+## Required C1 Personal Web-seat canary
 
-The product target is to restore useful modifying CEO work specifically on the affected **Business Premium Astra Pro** path where generic external writes have shown pre-dispatch safety refusals. This is a qualification of that model/mode/tool route, not a restriction on other Web CEO modes.
+The first product target is the existing C1 Personal account, its dedicated private Workbench tunnel, and its single associated Personal workspace. Current user evidence says that surface offers custom change/write capability; the canary must measure honest modifying annotations and calls directly. No Business-only condition is assumed, and results from another account, workspace, model, plugin, or Studio Direct route do not qualify this Workbench path.
 
 The real canary must use a disposable writer-fenced project and the actual intended ChatGPT app/tunnel/auth principal. It must prove, in order:
 
-1. app connection and `tools/list` exposes exactly the final reviewed bounded inventory for that installed generation (Phase A source exposes six; command integration will increase this to ten);
+1. app connection and `tools/list` exposes exactly the final reviewed ten-tool bounded inventory for that installed generation;
 2. `prepare_text_patch` reaches the service and returns `PREPARED` with zero source effect;
 3. `commit_text_patch(action_ref)` reaches the service and returns/reads back `APPLIED`;
-4. replaying the same prepared action produces no second write;
-5. a simulated/lost commit response is recovered with `reconcile_text_patch`, never replayed blindly;
-6. an outside-allowlist or stale-preimage request is refused with zero unauthorized source effect;
-7. service logs distinguish platform pre-dispatch absence from Workbench receipt/refusal;
-8. exact source/app generation and rollback/disarm are recorded.
+4. prepare/run `canary_checksum` completes with actual exit `0`, and `canary_refuse` completes with actual exit `7` while remaining an MCP success;
+5. `read_action_result` pages all retained lines and `reconcile_action` observes the same action without a second spawn;
+6. replaying the same prepared patch action produces no second write;
+7. simulated/lost responses are recovered with the appropriate reconcile tool, never replayed blindly;
+8. an outside-allowlist, stale-preimage, unknown-recipe, or model-supplied environment/executable request is refused with zero unauthorized source effect;
+9. service logs distinguish platform pre-dispatch absence from Workbench receipt/refusal;
+10. exact source/app/channel/host/project/store generation and rollback/disarm are recorded.
 
-Run the same bounded canary as controls in **Sol** and **Astra Extra High** when useful, but do not downgrade, gate or relabel those modes merely because Astra Pro has shown a different failure pattern. Their capability posture changes only from direct evidence on their own route.
+Run controls on other model/mode routes when useful, but do not infer C1 Workbench admission or effect from them. Each route's capability posture changes only from direct evidence on that route.
 
 ## Remaining production gates
 
@@ -198,8 +212,8 @@ This branch has source and local/adjacent test evidence only. Before any `PROVEN
 - protected source release under ordinary repository protection;
 - reviewed installation/supervision/rollback on the selected host;
 - Secure MCP Tunnel / ChatGPT app enrollment with the dedicated `workbench.action` resource;
-- actual selected-project/attended-Web binding and OAuth principal;
-- the Astra Pro Web-seat canary above;
+- actual selected-project/attended-Web channel binding;
+- the C1 Personal Web-seat canary above;
 - post-canary disarm/rollback proof and a final Sol acceptance decision.
 
-A source merge, successful service startup, or a passing Sol control is not evidence that Astra Pro's platform safety layer accepts the modifying call.
+A source merge, successful service startup, or a passing control route is not evidence that C1 Personal admits the Workbench modifying call.

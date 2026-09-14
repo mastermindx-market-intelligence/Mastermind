@@ -24,12 +24,19 @@ from integrations.workbench_local_mcp.schemas import (
 )
 from integrations.workbench_read_mcp.observer import ReadScope
 
+from .command_contracts import (
+    MAX_PAGE_BYTES as MAX_COMMAND_PAGE_BYTES,
+    MAX_PAGE_LINES as MAX_COMMAND_PAGE_LINES,
+    RECIPE_SHA256,
+    CommandHostBinding,
+)
 from .contracts import ProjectActionBinding
 from .runtime import WorkbenchActionRuntime
 
 WORKSPACE_MANIFEST_TOOL = "workspace_manifest"
 READ_PROJECT_FILE_TOOL = "read_project_file"
 PREVIEW_TEXT_REPLACE_TOOL = "preview_text_replace"
+ATTENDED_WORKBENCH_PROFILE = "attended_workbench_f0"
 READ_TOOL_NAMES = (
     WORKSPACE_MANIFEST_TOOL,
     READ_PROJECT_FILE_TOOL,
@@ -46,11 +53,15 @@ READ_REFUSAL_CODES = frozenset(
         "INTERNAL_ERROR",
     }
 )
-PHASE_A_TOOL_NAMES = (
+UNIFIED_TOOL_NAMES = (
     *READ_TOOL_NAMES,
     "prepare_text_patch",
     "commit_text_patch",
     "reconcile_text_patch",
+    "prepare_project_command",
+    "run_project_command",
+    "read_action_result",
+    "reconcile_action",
 )
 
 _READ_SPEC_BY_NAME = {spec.name: spec for spec in TOOL_SPECS}
@@ -84,7 +95,7 @@ _MANIFEST_DATA = _closed_object(
         "capability_state": {"const": "BUILT_NOT_PROVEN"},
         "transport": {"const": "stdio-via-secure-mcp-tunnel"},
         "project_ref": _REFERENCE,
-        "profile": {"const": PROFILE_PRO_READ_PREPARE},
+        "profile": {"const": ATTENDED_WORKBENCH_PROFILE},
         "allowed_paths": {
             "type": "array",
             "items": {"type": "string", "minLength": 1, "maxLength": 512},
@@ -99,16 +110,49 @@ _MANIFEST_DATA = _closed_object(
         "generation": _REFERENCE,
         "supported_tools": {
             "type": "array",
-            "prefixItems": [{"const": name} for name in PHASE_A_TOOL_NAMES],
-            "minItems": len(PHASE_A_TOOL_NAMES),
-            "maxItems": len(PHASE_A_TOOL_NAMES),
+            "prefixItems": [{"const": name} for name in UNIFIED_TOOL_NAMES],
+            "minItems": len(UNIFIED_TOOL_NAMES),
+            "maxItems": len(UNIFIED_TOOL_NAMES),
         },
+        "recipes": {
+            "type": "array",
+            "prefixItems": [
+                _closed_object(
+                    {
+                        "recipe_id": {"const": recipe_id},
+                        "sha256": {"const": RECIPE_SHA256[recipe_id]},
+                    },
+                    ("recipe_id", "sha256"),
+                )
+                for recipe_id in ("canary_checksum", "canary_refuse")
+            ],
+            "minItems": 2,
+            "maxItems": 2,
+        },
+        "limits": _closed_object(
+            {
+                "action_ttl_ms": {"type": "integer", "minimum": 1000, "maximum": 300000},
+                "process_deadline_seconds": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "maximum": 15,
+                },
+                "command_result_page_lines": {"const": MAX_COMMAND_PAGE_LINES},
+                "command_result_page_bytes": {"const": MAX_COMMAND_PAGE_BYTES},
+            },
+            (
+                "action_ttl_ms",
+                "process_deadline_seconds",
+                "command_result_page_lines",
+                "command_result_page_bytes",
+            ),
+        ),
         "effects": _closed_object(
             {
                 "file_write": {"const": True},
-                "process_start": {"const": False},
+                "process_start": {"const": True},
                 "network_call": {"const": False},
-                "durable_prepare": {"const": True},
+                "durable_prepare": {"const": False},
             },
             ("file_write", "process_start", "network_call", "durable_prepare"),
         ),
@@ -125,6 +169,8 @@ _MANIFEST_DATA = _closed_object(
         "owner_ref",
         "generation",
         "supported_tools",
+        "recipes",
+        "limits",
         "effects",
     ),
 )
@@ -206,15 +252,21 @@ _PREVIEW_DATA = _closed_object(
 )
 
 
-def _result_schema(tool: str, data_schema: dict[str, Any]) -> dict[str, Any]:
+def _result_schema(
+    tool: str,
+    data_schema: dict[str, Any],
+    *,
+    profile: str = PROFILE_PRO_READ_PREPARE,
+    mutation_allowed: bool = False,
+) -> dict[str, Any]:
     return _closed_object(
         {
             "schema": {"const": RESULT_SCHEMA},
             "tool": {"const": tool},
             "ok": {"const": True},
             "server_version": {"const": READ_SERVER_VERSION},
-            "profile": {"const": PROFILE_PRO_READ_PREPARE},
-            "mutation_allowed": {"const": False},
+            "profile": {"const": profile},
+            "mutation_allowed": {"const": mutation_allowed},
             "project_ref": _REFERENCE,
             "data": data_schema,
             "error": {"type": "null"},
@@ -234,7 +286,12 @@ def _result_schema(tool: str, data_schema: dict[str, Any]) -> dict[str, Any]:
 
 
 READ_OUTPUT_SCHEMAS = {
-    WORKSPACE_MANIFEST_TOOL: _result_schema(WORKSPACE_MANIFEST_TOOL, _MANIFEST_DATA),
+    WORKSPACE_MANIFEST_TOOL: _result_schema(
+        WORKSPACE_MANIFEST_TOOL,
+        _MANIFEST_DATA,
+        profile=ATTENDED_WORKBENCH_PROFILE,
+        mutation_allowed=True,
+    ),
     READ_PROJECT_FILE_TOOL: _result_schema(READ_PROJECT_FILE_TOOL, _READ_DATA),
     PREVIEW_TEXT_REPLACE_TOOL: _result_schema(PREVIEW_TEXT_REPLACE_TOOL, _PREVIEW_DATA),
 }
@@ -246,19 +303,39 @@ class BoundReadComposition:
 
     runtime: WorkbenchActionRuntime
     port: BoundWorkbenchReadPort
+    command_host: CommandHostBinding
+    action_ttl_ms: int
 
     async def call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         observed = await self.runtime.run_io(lambda: self.port.call(name, arguments))
         if name == WORKSPACE_MANIFEST_TOOL and observed.get("ok") is True:
             data = dict(observed["data"])
-            data["supported_tools"] = list(PHASE_A_TOOL_NAMES)
+            data["profile"] = ATTENDED_WORKBENCH_PROFILE
+            data["supported_tools"] = list(UNIFIED_TOOL_NAMES)
+            data["recipes"] = [
+                {"recipe_id": recipe_id, "sha256": RECIPE_SHA256[recipe_id]}
+                for recipe_id in ("canary_checksum", "canary_refuse")
+            ]
+            data["limits"] = {
+                "action_ttl_ms": self.action_ttl_ms,
+                "process_deadline_seconds": float(
+                    self.command_host.process_deadline_seconds
+                ),
+                "command_result_page_lines": MAX_COMMAND_PAGE_LINES,
+                "command_result_page_bytes": MAX_COMMAND_PAGE_BYTES,
+            }
             data["effects"] = {
                 "file_write": True,
-                "process_start": False,
+                "process_start": True,
                 "network_call": False,
-                "durable_prepare": True,
+                "durable_prepare": False,
             }
-            observed = {**observed, "data": data}
+            observed = {
+                **observed,
+                "profile": ATTENDED_WORKBENCH_PROFILE,
+                "mutation_allowed": True,
+                "data": data,
+            }
         return observed
 
 
@@ -268,6 +345,9 @@ def create_bound_read_composition(runtime: WorkbenchActionRuntime) -> BoundReadC
     services = runtime.channel_services
     caller = services.caller
     project_ref = services.project_ref
+    command_host = getattr(runtime, "_tunnel_command_host", None)
+    if type(command_host) is not CommandHostBinding:
+        raise ValueError("FIXED_COMMAND_HOST_REQUIRED")
 
     def resolve_scope() -> ReadScope:
         binding = runtime.resolve_binding(caller, project_ref)
@@ -296,18 +376,24 @@ def create_bound_read_composition(runtime: WorkbenchActionRuntime) -> BoundReadC
         resolve_scope,
         services.clock_ms,
     )
-    return BoundReadComposition(runtime=runtime, port=port)
+    return BoundReadComposition(
+        runtime=runtime,
+        port=port,
+        command_host=command_host,
+        action_ttl_ms=services.action_ttl_ms,
+    )
 
 
 __all__ = [
-    "PHASE_A_TOOL_NAMES",
     "PREVIEW_TEXT_REPLACE_TOOL",
+    "ATTENDED_WORKBENCH_PROFILE",
     "READ_REFUSAL_CODES",
     "READ_OUTPUT_SCHEMAS",
     "READ_PROJECT_FILE_TOOL",
     "READ_TOOL_NAMES",
     "READ_TOOL_SPECS",
     "WORKSPACE_MANIFEST_TOOL",
+    "UNIFIED_TOOL_NAMES",
     "BoundReadComposition",
     "create_bound_read_composition",
 ]

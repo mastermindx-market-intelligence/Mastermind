@@ -1,12 +1,12 @@
 # Mastermind Workbench Local MCP + Secure MCP Tunnel
 
-**State: BUILT_NOT_PROVEN.** The Personal-Pro-safe local MCP source exists and a
-real SDK stdio initialize/list/call sequence passed on Mac Studio on 2026-09-13.
-A new OpenAI Secure MCP Tunnel has **not** been registered for this surface and
-no ChatGPT app/plugin has been created from it. The Studio CLI creation path is
-currently blocked on a missing OpenAI Admin API key, but that is not an
-architecture blocker: a Platform organization owner/RBAC admin with Tunnels
-Read + Manage can create the tunnel directly in Platform tunnel settings.
+**State: BUILT_NOT_PROVEN.** The pure Personal-Pro local Read profile and the
+ten-tool attended Workbench Action tunnel profile exist in source. Real SDK
+stdio initialize/list/call tests pass locally. The attended profile is not
+installed or admitted by ChatGPT in this source receipt. C1 validation reuses
+the existing dedicated private Workbench tunnel and its one actual Personal
+workspace association after a fresh host readback; it must not retarget an
+Executive tunnel or create a second C1 Workbench tunnel.
 
 This carrier does not replace Executive OS, Agent OS, RuntimeBinding, Capacity,
 Workbench Read, Code Intelligence, process ownership, or effect reconciliation.
@@ -36,14 +36,23 @@ A Personal-Pro leader that wants an actual effect must use a separately
 supported effectful carrier/worker. This MCP never changes its behavior because
 a prompt asks it to write.
 
-### Business / full action surface
+### Attended action profile: `attended_workbench_f0`
 
-Do not widen this Personal-Pro adapter. The full Business surface belongs in
-the bounded **Workbench Action sibling** already specified by the Web CEO/native
-operator architecture. That sibling must own honest modifying tools and effect
-truth (`NOT_APPLIED | APPLIED | EFFECT_UNKNOWN`) with prepare/consume/reconcile
-semantics. Keep it independently versioned and connected as a write-capable
-Business app while reusing the same canonical project/process owners.
+Do not widen the pure four-tool adapter. The fixed-channel Action launcher
+composes the borrowed Read port with bounded patch and command ports under one
+runtime. Its manifest reports the `attended_workbench_f0` profile and exactly:
+
+1. `workspace_manifest`, `read_project_file`, `preview_text_replace`;
+2. `prepare_text_patch`, `commit_text_patch`, `reconcile_text_patch`;
+3. `prepare_project_command`, `run_project_command`, `read_action_result`,
+   `reconcile_action`.
+
+`commit_text_patch` and `run_project_command` are honestly modifying. Command
+execution is limited to the pinned checksum and intentional-refusal canaries;
+the preview-only `preview_project_command` is absent. The first native target
+is C1 Personal because the user reports custom change/write support there.
+There is no Business-only condition: actual tool scan and invocation decide
+admission for each account/workspace route.
 
 ## Transport topology
 
@@ -170,67 +179,53 @@ This establishes a local stdio canary only. It is not proof of ChatGPT tunnel
 transport, account enrollment, app scan, Personal-Pro policy acceptance, or
 production longevity.
 
-## Secure MCP Tunnel registration gate
+## Secure MCP Tunnel binding gate
 
-Mac Studio already has official `tunnel-client` 0.0.14 and healthy existing
-Mastermind Executive tunnel runtimes. The CLI route for creating a **new**
-remote tunnel requires an OpenAI Admin API key; the current Studio and MacBook
-admin profiles reference `env:OPENAI_ADMIN_KEY`, but that environment variable
-was not present during this canary. Do not copy an Admin key into source,
-command history, chat, or the MCP config merely to clear this gate.
+Mac Studio already has the official tunnel client and a dedicated stopped C1
+Workbench tunnel. Refresh its actual organization and single Personal workspace
+association before use. Keep runtime credentials in the existing private
+file/environment reference; never copy them into source, command history, chat,
+or the MCP config.
 
-There are two approved ways to clear tunnel registration:
-
-1. **Preferred one-time UI path:** in Platform tunnel settings, an organization
-   owner/RBAC admin with **Tunnels Read + Manage** creates `Mastermind Workbench
-   - Personal` and associates it with the intended Personal ChatGPT workspace.
-   Record the resulting `tunnel_id`. No Admin API key needs to be copied to the
-   Studio for this path.
-2. **CLI/admin path:** make an approved Admin API key available to the local
-   operator environment, then create the workspace-scoped tunnel below.
-
-For the CLI/admin path, do not reuse or retarget either live Executive tunnel:
-
-```sh
-tunnel-client runtimes create \
-  --alias mastermind-workbench-chatgpt1 \
-  --name "Mastermind Workbench - Personal" \
-  --description "Bounded local project reads and pure previews; no mutation or process execution." \
-  --workspace-id <INTENDED_CHATGPT_WORKSPACE_ID>
-```
-
-After either path produces the new `tunnel_id`, connect that tunnel to the
-local stdio command using a workspace-valid runtime API key **by file/env
-reference**, not inline secret text. If the tunnel was created in Platform UI,
-use `tunnel-client init`/`runtimes connect` with that exact new `tunnel_id` rather
-than creating another remote tunnel:
+Connect only that existing dedicated tunnel to the attended Action launcher
+using its workspace-valid runtime key **by file/env reference**, never inline
+secret text:
 
 ```sh
 tunnel-client runtimes connect \
   --alias mastermind-workbench-chatgpt1 \
   --profile mastermind-workbench-chatgpt1 \
-  --mcp-command "/Users/chriswong/.venvs/mastermind-executive-canary/bin/python /absolute/checkout/scripts/mastermind_workbench_local_mcp.py --config /Users/chriswong/.config/mastermind-workbench/pro-local-canary.json" \
+  --mcp-command "/absolute/hash-locked/python /absolute/protected/source/scripts/mastermind_workbench_action_stdio.py --config /Users/chriswong/.config/mastermind-workbench/action-c1.json" \
   --runtime-api-key file:/Users/chriswong/.config/tunnel-client/credentials/<workspace-runtime-key>
 
 tunnel-client runtimes status mastermind-workbench-chatgpt1 --json
 tunnel-client doctor --profile mastermind-workbench-chatgpt1 --explain
 ```
 
-Do not report the tunnel ready unless health/ready are green and the tunnel is a
-new Workbench tunnel, not an Executive tunnel with its command replaced.
+Do not report the tunnel ready unless health/ready are green and the exact
+Workbench tunnel organization/workspace binding was read back.
+
+The selected project is the existing assigned external-SSD helper project.
+Attended Web source custody follows the installed `mmx-workspace acquire` and
+`release` contract in `docs/DELIVERY_WORKFLOW.md`; its receipt, not a model path,
+defines the workspace. This integration does not claim that it created a new
+workspace through `mmx-workspace`, and it preserves the current assigned
+checkout unless the custody owner explicitly supplies another receipt.
 
 ## ChatGPT app admission
 
-After the tunnel is healthy, create a separate developer-mode custom app in the
-intended ChatGPT workspace, choose **Tunnel** as the connection, select the new
-Workbench tunnel, and scan tools. The scan must show exactly the four
-Personal-Pro tools above with no effectful tool. Test `workspace_manifest`, one
-bounded file read, one preview replacement, and one command preview. Re-read the
-source preimage after each preview to prove no effect.
+After the tunnel is healthy, create or update one developer-mode Workbench app
+in the intended C1 Personal workspace, choose **Tunnel** as the connection,
+select the dedicated Workbench tunnel, and scan tools. The attended scan must
+show exactly the ten tools above, with only `commit_text_patch` and
+`run_project_command` marked modifying. Exercise manifest, bounded read/preview,
+patch create/replace/reconcile, command exits 0/7, retained result paging, and
+same-action reconciliation without replay. The pure local Read launcher remains
+a separate four-tool profile and is never relabeled as the attended profile.
 
-Do not call the result `PROVEN_LIVE` until the actual Personal-Pro account has
-successfully scanned and invoked it through ChatGPT and the disconnect/rollback
-path has been exercised.
+Do not call the result `PROVEN_LIVE` until the actual C1 Personal account has
+successfully scanned and invoked it through ChatGPT and the revoke, physical
+drain, disconnect, and rollback path has been exercised.
 
 ## Rollback
 
@@ -242,5 +237,5 @@ tunnel-client runtimes stop mastermind-workbench-chatgpt1
 
 Disconnect only the Workbench custom app. Do not stop or edit the existing
 Mastermind Executive aliases/tunnels. Remove the Workbench profile/config only
-after confirming no in-flight command and no ambiguous effect; this Personal
-profile has no modifying effect state to reconcile.
+after confirming no in-flight command and reconciling every ambiguous patch or
+command effect.

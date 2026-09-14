@@ -33,9 +33,15 @@ PATCH_TOOLS = {
     "commit_text_patch",
     "reconcile_text_patch",
 }
+COMMAND_TOOLS = {
+    "prepare_project_command",
+    "run_project_command",
+    "read_action_result",
+    "reconcile_action",
+}
 
 
-def test_phase_a_lists_read_and_patch_tools_with_closed_schemas(tmp_path) -> None:
+def test_unified_server_lists_read_patch_and_command_tools_with_closed_schemas(tmp_path) -> None:
     document, project, _, _ = _document(tmp_path)
     (project / "sample.py").write_text("value = 1\n", encoding="utf-8")
 
@@ -43,7 +49,7 @@ def test_phase_a_lists_read_and_patch_tools_with_closed_schemas(tmp_path) -> Non
         runtime = await create_runtime_channel(parse_tunnel_config(document))
         try:
             tools = await _tools(create_tunnel_action_server(runtime))
-            assert {tool.name for tool in tools} == READ_TOOLS | PATCH_TOOLS
+            assert {tool.name for tool in tools} == READ_TOOLS | PATCH_TOOLS | COMMAND_TOOLS
             assert "preview_project_command" not in {tool.name for tool in tools}
             for tool in tools:
                 assert tool.inputSchema.get("additionalProperties") is False
@@ -57,7 +63,7 @@ def test_phase_a_lists_read_and_patch_tools_with_closed_schemas(tmp_path) -> Non
     asyncio.run(exercise())
 
 
-def test_manifest_validates_live_scope_and_describes_only_phase_a(tmp_path) -> None:
+def test_manifest_validates_live_scope_and_describes_unified_profile(tmp_path) -> None:
     document, project, audit, _ = _document(tmp_path)
     (project / "sample.py").write_text("value = 1\n", encoding="utf-8")
 
@@ -73,7 +79,8 @@ def test_manifest_validates_live_scope_and_describes_only_phase_a(tmp_path) -> N
     manifest = asyncio.run(exercise())
     assert manifest["tool"] == "workspace_manifest"
     assert manifest["ok"] is True
-    assert manifest["mutation_allowed"] is False
+    assert manifest["profile"] == "attended_workbench_f0"
+    assert manifest["mutation_allowed"] is True
     assert manifest["data"]["capability_state"] == "BUILT_NOT_PROVEN"
     assert manifest["data"]["supported_tools"] == [
         "workspace_manifest",
@@ -82,14 +89,22 @@ def test_manifest_validates_live_scope_and_describes_only_phase_a(tmp_path) -> N
         "prepare_text_patch",
         "commit_text_patch",
         "reconcile_text_patch",
+        "prepare_project_command",
+        "run_project_command",
+        "read_action_result",
+        "reconcile_action",
     ]
     assert manifest["data"]["effects"] == {
         "file_write": True,
-        "process_start": False,
+        "process_start": True,
         "network_call": False,
-        "durable_prepare": True,
+        "durable_prepare": False,
     }
-    assert "recipes" not in manifest["data"]
+    assert manifest["data"]["profile"] == "attended_workbench_f0"
+    assert [recipe["recipe_id"] for recipe in manifest["data"]["recipes"]] == [
+        "canary_checksum",
+        "canary_refuse",
+    ]
     assert [row["tool"] for row in _audit_lines(audit)] == ["workspace_manifest"]
 
 
