@@ -21,7 +21,7 @@
 - [x] Observe RED because instruction/corpus artifacts are absent, not because a provider or optional test dependency is missing.
 - [x] Supply the candidate skill and corpus. The data materializes directly as `ScenarioPacket(**row)`; no provider, model, account, Job or permission fields are accepted by this fixture contract.
 - [x] Run `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider tests/test_web_ceo_role_adaptive_delegation.py --tb=short` in the managed operation workspace; require exit 0 and no skips/errors.
-- [ ] Verify exact five-path delta, JSON parse, `git diff --check`, and immutable source publication as DRAFT/HOLD. Preserve any dirty/local-only work; no automatic merge, installation or enrollment.
+- [x] Verify exact five-path delta, JSON parse, `git diff --check`, and immutable source publication as DRAFT/HOLD. Preserve any dirty/local-only work; no automatic merge, installation or enrollment.
 
 ## Task 2 — Obtain one existing-owner review and source-integration disposition
 **Owner:** incumbent fabric principal/Capacity and the existing non-author review lanes. **Consumes:** exact published candidate SHA and current #506/#591 heads. **Produces:** an attributed exact-artifact verdict and the current source-enrollment gate.
@@ -59,3 +59,11 @@ Source package completion means exact source publication and current review disp
 
 ## Author execution receipt
 The managed source workspace was allocated by mmx-workspace for this operation at the pinned base. The tests-first run (native process 37292) returned exit 1 with absent-corpus/procedure assertion failures. After materializing both artifacts, the same bounded command (process 59701) executed all 31 checks and returned exit 0. These are static instruction/data-contract checks against the existing ScenarioPacket import, not independent review, provider execution, Web Pro behavior, enrollment or production proof.
+
+## Live integration delta after initial publication
+The incumbent Fabric carrier was freshly read through Sol ruling `1789412997.054509` after the first candidate was published. HF1-Q CORE #630 now owns the authorized versioned per-WORK-step placement extension: v1 stays compatible, the new requirement only narrows within root-authorized provider/capability space, and Capacity remains the concrete eligibility/selection owner. This operation must not duplicate that writer or mutate the public five-tool submission contract. The first useful single-qualified-lane pilot need not wait for heterogeneous placement; multi-provider-under-one-parent proof remains dependent on #630 and its actual acceptance.
+The incumbent T3 report also exposed reserved-child capacity pressure: planning must count future review/repair descendants under current COO policy, not just active execution slots. The candidate skill now states that constraint explicitly; this is a planning requirement, not a budget/limit change. #615 and #623 retain their incumbent repair lanes. The carrier evidence is attributed integration state, not source execution or production proof performed by this operation.
+
+The useful exact-source review in Task 2 may use an already-approved available manual/operator route before effects, within current placement/custody/budget law; it need not wait for Task 4 Web Executive client restoration. Record its actual manual delivery, pickup, START and result separately from Executive lifecycle. This exception never permits rerouting a platform-blocked inspection through another actor, inventing a direct spawn path, or changing the carrier of a started/effect-unknown operation.
+
+Source publication: draft PR #632 was created from the first immutable candidate `09389f101c3197e48646d2baced5c84a31055d47`. After the review/repair-reservation and lawful manual-route clarifications, the bounded static suite ran again (79417) with all 31 checks and exit 0. Independent review, procedure enrollment and live execution remain pending.
