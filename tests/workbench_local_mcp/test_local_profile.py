@@ -7,7 +7,9 @@ from pathlib import Path
 import tempfile
 import time
 import unittest
+from unittest import mock
 
+from integrations.workbench_local_mcp import schemas as profile_schemas
 from integrations.workbench_local_mcp.adapter import LocalWorkbenchGateway
 from integrations.workbench_local_mcp.schemas import (
     CONFIG_SCHEMA,
@@ -164,9 +166,12 @@ class LocalWorkbenchProfileTests(unittest.TestCase):
             self.assertEqual(result["error"]["code"], "INVALID_REQUEST")
 
     def test_unknown_or_extra_tool_input_refuses(self) -> None:
-        result = self.call("shell", {"command": "whoami"})
+        private_name = "private-" + "x" * 4096
+        result = self.call(private_name, {"command": "whoami"})
         self.assertFalse(result["ok"])
         self.assertEqual(result["error"]["code"], "TOOL_NOT_AVAILABLE")
+        self.assertEqual(result["tool"], "unknown")
+        self.assertNotIn(private_name, json.dumps(result))
         result = self.call("read_project_file", {"relative_path": "README.md", "root": "/"})
         self.assertFalse(result["ok"])
         self.assertEqual(result["error"]["code"], "INVALID_REQUEST")
@@ -195,6 +200,135 @@ class LocalWorkbenchProfileTests(unittest.TestCase):
         config_path.chmod(0o666)
         with self.assertRaises(LocalProfileError):
             load_config(str(config_path))
+
+    def test_config_loader_uses_required_nonblocking_and_nofollow_flags(self) -> None:
+        config_path = self.root / "profile-flags.json"
+        config_path.write_text(json.dumps(self.payload), encoding="utf-8")
+        original_open = profile_schemas.os.open
+        observed: list[int] = []
+
+        def observe_open(path, flags, *args, **kwargs):
+            observed.append(flags)
+            return original_open(path, flags, *args, **kwargs)
+
+        with mock.patch.object(profile_schemas.os, "open", side_effect=observe_open):
+            self.assertEqual(load_config(str(config_path)).project_ref, "mastermind")
+        self.assertEqual(len(observed), 1)
+        self.assertTrue(observed[0] & profile_schemas.os.O_NONBLOCK)
+        self.assertTrue(observed[0] & profile_schemas.os.O_NOFOLLOW)
+        self.assertTrue(observed[0] & profile_schemas.os.O_CLOEXEC)
+
+    def test_config_loader_requires_every_platform_safety_flag(self) -> None:
+        config_path = self.root / "profile-required-flags.json"
+        config_path.write_text(json.dumps(self.payload), encoding="utf-8")
+        for flag_name in ("O_CLOEXEC", "O_NOFOLLOW", "O_NONBLOCK"):
+            with self.subTest(flag_name=flag_name):
+                with mock.patch.object(profile_schemas.os, flag_name, 0):
+                    with self.assertRaisesRegex(
+                        LocalProfileError, "^CONFIGURATION_REFUSED$"
+                    ):
+                        load_config(str(config_path))
+
+    def test_config_loader_fifo_swap_cannot_block_or_pass(self) -> None:
+        config_path = self.root / "profile-fifo.json"
+        config_path.write_text(json.dumps(self.payload), encoding="utf-8")
+        original_open = profile_schemas.os.open
+
+        def replace_with_fifo(path, flags, *args, **kwargs):
+            config_path.unlink()
+            os.mkfifo(config_path)
+            return original_open(path, flags, *args, **kwargs)
+
+        with mock.patch.object(
+            profile_schemas.os, "open", side_effect=replace_with_fifo
+        ):
+            with self.assertRaisesRegex(
+                LocalProfileError, "^CONFIGURATION_REFUSED$"
+            ):
+                load_config(str(config_path))
+
+    def test_config_loader_refuses_initial_and_opened_hardlinks(self) -> None:
+        initial = self.root / "profile-initial-link.json"
+        initial.write_text(json.dumps(self.payload), encoding="utf-8")
+        initial_link = self.root / "profile-initial-link-copy.json"
+        os.link(initial, initial_link)
+        with self.assertRaisesRegex(LocalProfileError, "^CONFIGURATION_REFUSED$"):
+            load_config(str(initial))
+
+        opened = self.root / "profile-opened-link.json"
+        opened.write_text(json.dumps(self.payload), encoding="utf-8")
+        opened_link = self.root / "profile-opened-link-copy.json"
+        original_open = profile_schemas.os.open
+
+        def add_link_before_open(path, flags, *args, **kwargs):
+            os.link(opened, opened_link)
+            return original_open(path, flags, *args, **kwargs)
+
+        with mock.patch.object(
+            profile_schemas.os, "open", side_effect=add_link_before_open
+        ):
+            with self.assertRaisesRegex(
+                LocalProfileError, "^CONFIGURATION_REFUSED$"
+            ):
+                load_config(str(opened))
+
+    def test_config_loader_refuses_final_identity_and_link_changes(self) -> None:
+        identity = self.root / "profile-identity.json"
+        identity.write_text(json.dumps(self.payload), encoding="utf-8")
+        replacement = self.root / "profile-replacement.json"
+        replacement.write_text(json.dumps(self.payload), encoding="utf-8")
+        original_close = profile_schemas.os.close
+
+        def close_then_replace(descriptor):
+            original_close(descriptor)
+            os.replace(replacement, identity)
+
+        with mock.patch.object(
+            profile_schemas.os, "close", side_effect=close_then_replace
+        ):
+            with self.assertRaisesRegex(
+                LocalProfileError, "^CONFIGURATION_REFUSED$"
+            ):
+                load_config(str(identity))
+
+        linked = self.root / "profile-final-link.json"
+        linked.write_text(json.dumps(self.payload), encoding="utf-8")
+        final_link = self.root / "profile-final-link-copy.json"
+
+        def close_then_link(descriptor):
+            original_close(descriptor)
+            os.link(linked, final_link)
+
+        with mock.patch.object(
+            profile_schemas.os, "close", side_effect=close_then_link
+        ):
+            with self.assertRaisesRegex(
+                LocalProfileError, "^CONFIGURATION_REFUSED$"
+            ):
+                load_config(str(linked))
+
+    def test_config_loader_preserves_close_uncertainty_over_read_refusal(self) -> None:
+        config_path = self.root / "profile-close-uncertain.json"
+        config_path.write_text(json.dumps(self.payload), encoding="utf-8")
+        original_close = profile_schemas.os.close
+
+        def close_then_fail(descriptor):
+            original_close(descriptor)
+            raise OSError("simulated close uncertainty")
+
+        with (
+            mock.patch.object(
+                profile_schemas.os,
+                "read",
+                side_effect=LocalProfileError("CONFIGURATION_REFUSED"),
+            ),
+            mock.patch.object(
+                profile_schemas.os, "close", side_effect=close_then_fail
+            ),
+        ):
+            with self.assertRaises(LocalProfileError) as caught:
+                load_config(str(config_path))
+        self.assertEqual(caught.exception.code, "CONFIGURATION_CLEANUP_UNCERTAIN")
 
     def test_expired_profile_fails_closed(self) -> None:
         expired = parse_config({**self.payload, "lease_expires_at_ms": int(time.time() * 1000) - 1})

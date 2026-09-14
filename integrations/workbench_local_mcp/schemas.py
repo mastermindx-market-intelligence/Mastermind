@@ -45,6 +45,7 @@ class LocalProfileError(ValueError):
     _CODES = frozenset(
         {
             "CONFIGURATION_REFUSED",
+            "CONFIGURATION_CLEANUP_UNCERTAIN",
             "INVALID_REQUEST",
             "TOOL_NOT_AVAILABLE",
             "PROJECT_READ_REFUSED",
@@ -232,23 +233,30 @@ def _secure_json(path: str) -> dict[str, object]:
         or before.st_size > MAX_CONFIG_BYTES
     ):
         _refuse()
-    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
-    if not getattr(os, "O_CLOEXEC", 0) or not getattr(os, "O_NOFOLLOW", 0):
+    cloexec = getattr(os, "O_CLOEXEC", 0)
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    nonblocking = getattr(os, "O_NONBLOCK", 0)
+    if not cloexec or not nofollow or not nonblocking:
         _refuse()
+    flags = os.O_RDONLY | cloexec | nofollow | nonblocking
     descriptor = -1
+    chunks: list[bytes] = []
+    total = 0
+    close_error: BaseException | None = None
+    read_error: BaseException | None = None
     try:
         descriptor = os.open(selected, flags)
         opened = os.fstat(descriptor)
         if (
             opened.st_dev != before.st_dev
             or opened.st_ino != before.st_ino
+            or not stat.S_ISREG(opened.st_mode)
+            or opened.st_nlink != 1
             or opened.st_uid != before.st_uid
-            or opened.st_mode != before.st_mode
+            or stat.S_IMODE(opened.st_mode) != stat.S_IMODE(before.st_mode)
             or os.get_inheritable(descriptor)
         ):
             _refuse()
-        chunks: list[bytes] = []
-        total = 0
         while True:
             chunk = os.read(descriptor, min(4096, MAX_CONFIG_BYTES + 1 - total))
             if not chunk:
@@ -257,25 +265,35 @@ def _secure_json(path: str) -> dict[str, object]:
             total += len(chunk)
             if total > MAX_CONFIG_BYTES:
                 _refuse()
-    except LocalProfileError:
-        raise
-    except OSError:
-        _refuse()
+    except BaseException as error:
+        read_error = error
     finally:
         if descriptor >= 0:
             try:
                 os.close(descriptor)
-            except OSError:
-                _refuse()
+            except BaseException as error:
+                close_error = error
+            descriptor = -1
+    if close_error is not None:
+        raise LocalProfileError("CONFIGURATION_CLEANUP_UNCERTAIN") from close_error
+    if read_error is not None:
+        if isinstance(read_error, LocalProfileError):
+            raise read_error
+        _refuse()
     try:
         after = selected.lstat()
-        if (
-            after.st_dev != before.st_dev
-            or after.st_ino != before.st_ino
-            or after.st_mode != before.st_mode
-            or after.st_uid != before.st_uid
-        ):
-            _refuse()
+    except OSError:
+        _refuse()
+    if (
+        not stat.S_ISREG(after.st_mode)
+        or after.st_nlink != 1
+        or after.st_dev != before.st_dev
+        or after.st_ino != before.st_ino
+        or after.st_mode != before.st_mode
+        or after.st_uid != before.st_uid
+    ):
+        _refuse()
+    try:
         decoded = b"".join(chunks).decode("utf-8", errors="strict")
         payload = json.loads(decoded, object_pairs_hook=_closed_pairs)
     except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError):

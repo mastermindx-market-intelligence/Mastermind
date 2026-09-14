@@ -210,7 +210,7 @@ class LocalWorkbenchGateway:
 
     def call(self, name: str, arguments: object) -> dict[str, Any]:
         if name not in TOOL_NAMES:
-            return self._error(name if isinstance(name, str) else "unknown", "TOOL_NOT_AVAILABLE")
+            return self._error("unknown", "TOOL_NOT_AVAILABLE")
         try:
             request = self._snapshot_arguments(arguments)
             if name == "workspace_manifest":
