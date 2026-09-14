@@ -2048,6 +2048,10 @@ def test_ohf_completed_replacement_gets_new_publication_sequence() -> None:
     assert [(item.text, item.state) for item in completed.items] == [
         ("final", "completed")
     ]
+    assert (
+        partial.items[0].publication_sequence
+        < completed.items[0].publication_sequence
+    )
     assert projection.read(
         key, reader_grant=grant, cursor=None, max_items=64
     ).items == completed.items
@@ -2180,11 +2184,92 @@ def test_ohf_prebind_completion_replays_without_duplicate_item() -> None:
     assert [(item.text, item.state) for item in replayed.items] == [
         ("final one", "completed"),
     ]
-    assert replayed.next_cursor != partial.next_cursor
+    assert replayed.next_cursor == partial.next_cursor
     assert (
         partial.items[0].publication_sequence
-        < replayed.items[0].publication_sequence
+        == replayed.items[0].publication_sequence
     )
+
+
+def test_ohf_identical_prebind_replay_preserves_publication_order() -> None:
+    projection = VisibleTurnProjection()
+    key = TurnKey(
+        "ATT-REPLAY-ORDER", "epoch-replay", "generation-replay", 1, "codex-01",
+        "turn-replay", "native-replay",
+    )
+    grant = projection.mint_grant(key)
+    projection.arm_prebind(7)
+
+    def params(
+        item_id: str, source_sequence: int, method: str, text: str
+    ) -> dict[str, object]:
+        return {
+            "turnId": key.native_turn_id,
+            "item": {
+                "id": item_id,
+                "type": "agentMessage",
+                "sequence": source_sequence,
+                "text": text,
+            },
+            "method_sentinel": method,
+        }
+
+    committed_frames = [
+        ("partial-one", 1, "item/updated", "partial one"),
+        ("final-one", 2, "item/completed", "final one"),
+        ("partial-two", 3, "item/updated", "partial two"),
+        ("final-two", 4, "item/completed", "final two"),
+    ]
+    for item_id, source_sequence, method, text in committed_frames:
+        projection.prebind_frame(
+            7,
+            method=method,
+            params=params(item_id, source_sequence, method, text),
+        )
+    assert projection.commit_prebind(
+        7, key, native_turn_id=key.native_turn_id
+    ) is None
+    before = projection.read(
+        key, reader_grant=grant, cursor=None, max_items=64
+    )
+    assert [item.text for item in before.items] == [
+        "partial one", "final one", "partial two", "final two"
+    ]
+
+    for item_id, source_sequence, method, text in committed_frames[:3]:
+        projection.publish_demultiplexed(
+            8,
+            payload={
+                "method": method,
+                "params": params(item_id, source_sequence, method, text),
+            },
+        )
+    after = projection.read(
+        key, reader_grant=grant, cursor=None, max_items=64
+    )
+    assert [item.text for item in after.items] == [
+        "partial one", "final one", "partial two", "final two"
+    ]
+    assert [item.publication_sequence for item in after.items] == [
+        item.publication_sequence for item in before.items
+    ]
+    assert after.next_cursor == before.next_cursor
+    assert projection.read(
+        key, reader_grant=grant, cursor=before.next_cursor, max_items=64
+    ).items == ()
+    assert after == before
+
+    projection.publish_demultiplexed(
+        8,
+        payload={
+            "method": "item/updated",
+            "params": params("partial-one", 1, "item/updated", "partial one"),
+        },
+    )
+    stale = projection.read(
+        key, reader_grant=grant, cursor=None, max_items=64
+    )
+    assert stale == after
 
 
 def test_ohf_complete_page_without_gap_does_not_require_resync() -> None:
