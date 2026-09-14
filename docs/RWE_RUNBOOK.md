@@ -44,6 +44,30 @@ Program reference: `research/REPRODUCIBLE_WORKER_ENVIRONMENTS_MASTERPLAN_V1.md`
   e.g. `tests/test_executive_service.py` -- never touch `engine`/`lib` and
   are a valid equivalence check on their own).
 
+## One-command disposable worker path
+
+For a worker or attended operator that needs one deterministic test invocation but should not
+manage a venv lifecycle itself, use `run`:
+
+```
+python scripts/rwe_env.py run \
+  --subset tests/test_executive_service.py \
+  --receipt-out /existing/artifact/dir/rwe-receipt.json
+```
+
+`run` composes the existing `realize` and `gate` operations in a fresh temporary environment,
+exports the final secret-free `mastermind.worker_environment/v1` receipt, and removes the
+temporary environment before returning. The gate's real exit code is preserved, so a failing test
+run still exports its gate proof and exits non-zero. The receipt target must be new and its parent
+must already be a real directory; `run` never overwrites a caller-owned artifact. A realization
+refusal produces no receipt.
+
+Use `--python` or `--lock` only under the same rules as `realize`. Omit `--subset` only when the
+full-gate vendored input described above is already materialized. This convenience path does not
+cache environments, install a host service, select a worker/provider, change CI authority, or make
+the shadow RWE lane required. It exists so a worker can consume the accepted environment without
+spending reasoning time on venv construction and cleanup.
+
 ## Realize a fresh environment
 
 ```

@@ -23,6 +23,9 @@ Subcommands
 ``gate --env DIR [--subset PATH]``
     Run the repository test gate (or a bounded ``pytest`` subset) using
     ``DIR``'s interpreter, and append the outcome to the receipt.
+``run --receipt-out PATH [--subset PATH] [--lock PATH] [--python PATH]``
+    Realize one fresh disposable environment, run the gate, export its final
+    secret-free receipt, and remove the environment before returning.
 
 Receipt schema: ``mastermind.worker_environment/v1`` (see ``build_receipt``).
 Hard rule: the receipt never contains secrets, raw environment-variable
@@ -39,6 +42,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -1020,6 +1024,95 @@ def cmd_gate(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# subcommand: run -- one fresh disposable worker environment + gate
+# ---------------------------------------------------------------------------
+
+
+def _receipt_output_path(value: str) -> Path:
+    """Resolve a new receipt artifact without following caller-supplied symlinks."""
+
+    lexical = Path(value).expanduser()
+    # Check the lexical target before resolving: a broken symlink otherwise
+    # resolves to a nonexistent destination and could bypass the no-overwrite
+    # contract.  The receipt path is an operator-owned artifact boundary.
+    if lexical.exists() or lexical.is_symlink():
+        raise EnvError(f"receipt output already exists: {lexical}")
+    try:
+        parent = lexical.parent.resolve(strict=True)
+    except OSError as exc:
+        raise EnvError("receipt output parent must be an existing real directory") from exc
+    if not parent.is_dir():
+        raise EnvError("receipt output parent must be an existing real directory")
+    # Write through the canonical parent rather than later following a caller
+    # supplied parent symlink.  This keeps standard macOS paths such as /tmp
+    # usable while the final receipt target remains no-follow/no-overwrite.
+    return parent / lexical.name
+
+
+def _export_receipt(path: Path, receipt: Mapping[str, Any]) -> None:
+    """Create one durable receipt copy; never replace an existing artifact."""
+
+    payload = json.dumps(receipt, indent=2, sort_keys=False) + "\n"
+    try:
+        with path.open("x", encoding="utf-8") as handle:
+            handle.write(payload)
+            handle.flush()
+    except FileExistsError as exc:
+        raise EnvError(f"receipt output already exists: {path}") from exc
+    except OSError as exc:
+        raise EnvError("receipt output could not be written") from exc
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    """Realize -> gate -> export receipt -> cleanup as one worker-facing action.
+
+    This composes the existing RWE primitives. It does not cache environments,
+    redefine the test gate, select a worker/provider, or create lifecycle state.
+    The temporary environment is removed on success, test failure, refusal, and
+    exceptions; only the secret-free receipt copy is retained.
+    """
+
+    root = Path(args.root).resolve() if args.root else repo_root()
+    try:
+        receipt_out = _receipt_output_path(args.receipt_out)
+    except EnvError as exc:
+        print(f"rwe_env run refused: {exc}", file=sys.stderr)
+        return 2
+
+    with tempfile.TemporaryDirectory(prefix="mastermind-rwe-run-") as temporary_parent:
+        env_dir = Path(temporary_parent) / "env"
+        realize_args = argparse.Namespace(
+            dest=str(env_dir),
+            lock=args.lock,
+            python=args.python,
+            force=False,
+            root=str(root),
+        )
+        realize_rc = cmd_realize(realize_args)
+        if realize_rc != 0:
+            return realize_rc
+
+        gate_args = argparse.Namespace(
+            env=str(env_dir),
+            subset=args.subset,
+            root=str(root),
+        )
+        gate_rc = cmd_gate(gate_args)
+        receipt = load_receipt(env_dir)
+        if receipt is None:
+            print("rwe_env run refused: realized environment produced no receipt", file=sys.stderr)
+            return 2
+        try:
+            _export_receipt(receipt_out, receipt)
+        except EnvError as exc:
+            print(f"rwe_env run refused: {exc}", file=sys.stderr)
+            return 2
+        print(f"run receipt written: {receipt_out}")
+        print(f"environment_id={receipt.get('environment_id', 'unknown')}")
+        return gate_rc
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -1050,6 +1143,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_gate.add_argument("--subset", default=None)
     p_gate.add_argument("--root", default=None)
     p_gate.set_defaults(func=cmd_gate)
+
+    p_run = sub.add_parser(
+        "run", help="realize a disposable env, run the gate, and export its receipt"
+    )
+    p_run.add_argument("--receipt-out", required=True)
+    p_run.add_argument("--subset", default=None)
+    p_run.add_argument("--lock", default=None)
+    p_run.add_argument("--python", default=None)
+    p_run.add_argument("--root", default=None)
+    p_run.set_defaults(func=cmd_run)
 
     return parser
 

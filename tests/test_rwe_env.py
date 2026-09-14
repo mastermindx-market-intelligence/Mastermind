@@ -916,3 +916,231 @@ def test_parse_discovered_takes_last_summary_line():
         "1 failed, 30 passed, 6 skipped in 9.00s\n"
     )
     assert rwe._parse_discovered(out) == 37
+
+
+# ---------------------------------------------------------------------------
+# RWE-E0: one-command disposable worker environment
+# ---------------------------------------------------------------------------
+
+
+def _fake_tempdir(path: Path):
+    class _TempDir:
+        def __enter__(self):
+            path.mkdir(parents=True, exist_ok=False)
+            return str(path)
+
+        def __exit__(self, exc_type, exc, tb):
+            rwe.shutil.rmtree(path, ignore_errors=True)
+            return False
+
+    return _TempDir()
+
+
+def test_cmd_run_realizes_gates_exports_receipt_and_cleans_env(tmp_path, monkeypatch):
+    import argparse
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    root = _fake_repo(repo_dir, lock_bytes=b"fake-lock-content-v1\n")
+    temp_parent = tmp_path / "disposable"
+    receipt_out = tmp_path / "worker-receipt.json"
+    observed = {}
+
+    monkeypatch.setattr(
+        rwe.tempfile,
+        "TemporaryDirectory",
+        lambda **kwargs: _fake_tempdir(temp_parent),
+    )
+
+    def fake_realize(args):
+        env_dir = Path(args.dest)
+        observed["env_dir"] = env_dir
+        assert not env_dir.exists()
+        env_dir.mkdir(parents=True)
+        rwe.write_receipt(
+            env_dir,
+            {"schema": rwe.SCHEMA, "environment_id": "env-test", "proof": {"pip_check": "ok"}},
+        )
+        return 0
+
+    def fake_gate(args):
+        assert Path(args.env) == observed["env_dir"]
+        receipt = rwe.load_receipt(Path(args.env))
+        assert receipt is not None
+        receipt["proof"]["gate"] = {"exit": 0, "discovered": 7, "seconds": 0.1}
+        rwe.write_receipt(Path(args.env), receipt)
+        return 0
+
+    monkeypatch.setattr(rwe, "cmd_realize", fake_realize)
+    monkeypatch.setattr(rwe, "cmd_gate", fake_gate)
+
+    args = argparse.Namespace(
+        root=str(root),
+        subset="tests/test_rwe_env.py",
+        lock=None,
+        python=None,
+        receipt_out=str(receipt_out),
+    )
+    rc = rwe.cmd_run(args)
+
+    assert rc == 0
+    assert not temp_parent.exists()
+    exported = json.loads(receipt_out.read_text(encoding="utf-8"))
+    assert exported["schema"] == rwe.SCHEMA
+    assert exported["environment_id"] == "env-test"
+    assert exported["proof"]["gate"]["discovered"] == 7
+    assert str(temp_parent) not in receipt_out.read_text(encoding="utf-8")
+
+
+def test_cmd_run_preserves_failing_gate_receipt_and_exit(tmp_path, monkeypatch):
+    import argparse
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    root = _fake_repo(repo_dir, lock_bytes=b"fake-lock-content-v1\n")
+    temp_parent = tmp_path / "disposable"
+    receipt_out = tmp_path / "worker-receipt.json"
+
+    monkeypatch.setattr(
+        rwe.tempfile,
+        "TemporaryDirectory",
+        lambda **kwargs: _fake_tempdir(temp_parent),
+    )
+
+    def fake_realize(args):
+        env_dir = Path(args.dest)
+        env_dir.mkdir(parents=True)
+        rwe.write_receipt(env_dir, {"schema": rwe.SCHEMA, "proof": {"pip_check": "ok"}})
+        return 0
+
+    def fake_gate(args):
+        env_dir = Path(args.env)
+        receipt = rwe.load_receipt(env_dir)
+        assert receipt is not None
+        receipt["proof"]["gate"] = {"exit": 5, "discovered": 3, "seconds": 0.1}
+        rwe.write_receipt(env_dir, receipt)
+        return 5
+
+    monkeypatch.setattr(rwe, "cmd_realize", fake_realize)
+    monkeypatch.setattr(rwe, "cmd_gate", fake_gate)
+
+    rc = rwe.cmd_run(
+        argparse.Namespace(
+            root=str(root), subset="tests/test_x.py", lock=None, python=None,
+            receipt_out=str(receipt_out),
+        )
+    )
+
+    assert rc == 5
+    assert not temp_parent.exists()
+    exported = json.loads(receipt_out.read_text(encoding="utf-8"))
+    assert exported["proof"]["gate"]["exit"] == 5
+
+
+def test_cmd_run_refuses_existing_receipt_before_realize(tmp_path, monkeypatch, capsys):
+    import argparse
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    root = _fake_repo(repo_dir, lock_bytes=b"fake-lock-content-v1\n")
+    receipt_out = tmp_path / "worker-receipt.json"
+    receipt_out.write_text("owned\n", encoding="utf-8")
+    called = {"realize": False}
+
+    def fake_realize(args):
+        called["realize"] = True
+        raise AssertionError("run must refuse before environment realization")
+
+    monkeypatch.setattr(rwe, "cmd_realize", fake_realize)
+
+    rc = rwe.cmd_run(
+        argparse.Namespace(
+            root=str(root), subset="tests/test_x.py", lock=None, python=None,
+            receipt_out=str(receipt_out),
+        )
+    )
+
+    assert rc == 2
+    assert called["realize"] is False
+    assert receipt_out.read_text(encoding="utf-8") == "owned\n"
+    assert "receipt output already exists" in capsys.readouterr().err
+
+
+
+def test_cmd_run_refuses_broken_receipt_symlink_before_realize(tmp_path, monkeypatch, capsys):
+    import argparse
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    root = _fake_repo(repo_dir, lock_bytes=b"fake-lock-content-v1\n")
+    receipt_out = tmp_path / "worker-receipt.json"
+    receipt_out.symlink_to(tmp_path / "missing-target.json")
+    called = {"realize": False}
+
+    def fake_realize(args):
+        called["realize"] = True
+        raise AssertionError("run must refuse before environment realization")
+
+    monkeypatch.setattr(rwe, "cmd_realize", fake_realize)
+
+    rc = rwe.cmd_run(
+        argparse.Namespace(
+            root=str(root), subset="tests/test_x.py", lock=None, python=None,
+            receipt_out=str(receipt_out),
+        )
+    )
+
+    assert rc == 2
+    assert called["realize"] is False
+    assert receipt_out.is_symlink()
+    assert "receipt output already exists" in capsys.readouterr().err
+
+
+
+
+def test_receipt_output_path_canonicalizes_parent_symlink(tmp_path):
+    real_parent = tmp_path / "real-artifacts"
+    real_parent.mkdir()
+    linked_parent = tmp_path / "artifact-link"
+    linked_parent.symlink_to(real_parent, target_is_directory=True)
+
+    resolved = rwe._receipt_output_path(str(linked_parent / "receipt.json"))
+
+    assert resolved == real_parent.resolve() / "receipt.json"
+
+
+def test_cmd_run_realize_failure_cleans_partial_env_and_writes_no_receipt(
+    tmp_path, monkeypatch
+):
+    import argparse
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    root = _fake_repo(repo_dir, lock_bytes=b"fake-lock-content-v1\n")
+    temp_parent = tmp_path / "disposable"
+    receipt_out = tmp_path / "worker-receipt.json"
+
+    monkeypatch.setattr(
+        rwe.tempfile,
+        "TemporaryDirectory",
+        lambda **kwargs: _fake_tempdir(temp_parent),
+    )
+
+    def fake_realize(args):
+        env_dir = Path(args.dest)
+        env_dir.mkdir(parents=True)
+        (env_dir / "partial-install").write_text("partial\n", encoding="utf-8")
+        return 4
+
+    monkeypatch.setattr(rwe, "cmd_realize", fake_realize)
+
+    rc = rwe.cmd_run(
+        argparse.Namespace(
+            root=str(root), subset="tests/test_x.py", lock=None, python=None,
+            receipt_out=str(receipt_out),
+        )
+    )
+
+    assert rc == 4
+    assert not temp_parent.exists()
+    assert not receipt_out.exists()
