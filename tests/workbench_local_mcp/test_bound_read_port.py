@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import concurrent.futures
 import dataclasses
 import hashlib
 import json
 import os
 from pathlib import Path
 import tempfile
+import threading
 import unittest
 from unittest import mock
 
@@ -177,6 +179,125 @@ class BoundReadPortTests(unittest.TestCase):
         refused = self.port.call("workspace_manifest", {})
         self.assertFalse(refused["ok"])
         self.assertEqual(self._error_code(refused), "PROJECT_READ_REFUSED")
+
+    def test_cleanup_uncertainty_is_sticky_and_forwarded_once(self) -> None:
+        callbacks: list[str] = []
+        port = create_bound_read_port(
+            "action-project",
+            PROFILE_PRO_READ_PREPARE,
+            ("README.md",),
+            self.resolve_scope,
+            lambda: NOW_MS,
+            on_cleanup_uncertain=lambda: callbacks.append("persisted"),
+        )
+        original_close = os.close
+        close_attempts: list[int] = []
+
+        def close_first_then_fail(descriptor: int) -> None:
+            close_attempts.append(descriptor)
+            original_close(descriptor)
+            if len(close_attempts) == 1:
+                raise OSError("PRIVATE_CLOSE_DETAIL")
+
+        with mock.patch.object(
+            adapter.os, "close", side_effect=close_first_then_fail
+        ):
+            first = port.call(
+                "read_project_file", {"relative_path": "README.md"}
+            )
+        self.assertFalse(first["ok"])
+        self.assertEqual(self._error_code(first), "PROJECT_CLEANUP_UNCERTAIN")
+        self.assertEqual(callbacks, ["persisted"])
+        attempts_after_read = list(close_attempts)
+
+        for name, arguments in (
+            ("workspace_manifest", {}),
+            ("preview_project_command", {"recipe": "git_diff_check"}),
+            ("read_project_file", {"relative_path": "README.md"}),
+        ):
+            with self.subTest(tool=name):
+                refused = port.call(name, arguments)
+                self.assertFalse(refused["ok"])
+                self.assertEqual(
+                    self._error_code(refused), "PROJECT_CLEANUP_UNCERTAIN"
+                )
+        self.assertEqual(callbacks, ["persisted"])
+        self.assertEqual(close_attempts, attempts_after_read)
+        with self.assertRaisesRegex(
+            LocalProfileError, "^PROJECT_CLEANUP_UNCERTAIN$"
+        ):
+            port.close()
+        os.fstat(self.root_fd)
+
+    def test_simultaneous_cleanup_failures_forward_one_callback_and_error(self) -> None:
+        callbacks: list[str] = []
+        port = create_bound_read_port(
+            "action-project",
+            PROFILE_PRO_READ_PREPARE,
+            ("README.md",),
+            self.resolve_scope,
+            lambda: NOW_MS,
+            on_cleanup_uncertain=lambda: callbacks.append("persisted"),
+        )
+        failures_entered = threading.Barrier(2)
+        first_constructor_entered = threading.Event()
+        release_first_constructor = threading.Event()
+        actual_error = LocalProfileError
+
+        class ControlledLocalProfileError(actual_error):
+            def __new__(cls, code: str):
+                if code == "PROJECT_CLEANUP_UNCERTAIN":
+                    if not first_constructor_entered.is_set():
+                        first_constructor_entered.set()
+                        release_first_constructor.wait(0.2)
+                    else:
+                        release_first_constructor.set()
+                return super().__new__(cls)
+
+        def simultaneous_observer_failure(
+            _selected,
+            _scope,
+            *,
+            clock_ms,
+            on_cleanup_uncertain,
+        ):
+            self.assertTrue(callable(clock_ms))
+            failures_entered.wait(timeout=2.0)
+            on_cleanup_uncertain()
+            raise ReadRefusal("CLEANUP_UNCERTAIN")
+
+        with (
+            mock.patch.object(
+                adapter, "LocalProfileError", ControlledLocalProfileError
+            ),
+            mock.patch.object(
+                adapter, "observe_file", side_effect=simultaneous_observer_failure
+            ),
+            concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool,
+        ):
+            futures = [
+                pool.submit(
+                    port.call,
+                    "read_project_file",
+                    {"relative_path": "README.md"},
+                )
+                for _ in range(2)
+            ]
+            results = [future.result(timeout=3.0) for future in futures]
+
+        self.assertEqual(callbacks, ["persisted"])
+        for result in results:
+            self.assertFalse(result["ok"])
+            self.assertEqual(
+                self._error_code(result), "PROJECT_CLEANUP_UNCERTAIN"
+            )
+        sticky = []
+        for _ in range(2):
+            with self.assertRaises(LocalProfileError) as caught:
+                port._scope()
+            sticky.append(caught.exception)
+        self.assertIs(sticky[0], sticky[1])
+        os.fstat(self.root_fd)
 
     def test_tool_arguments_cannot_supply_scope_profile_caller_or_root(self) -> None:
         attempts = (
