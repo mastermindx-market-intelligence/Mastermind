@@ -47,7 +47,12 @@ from control_plane.subscription_harness_bindings import (
     load_bindings,
 )
 from control_plane.subscription_provider_profiles import DEFAULT_PROFILES_PATH, get_profile
-from control_plane.worker_adapter import ADAPTER_DESCRIPTORS, adapter_descriptor
+from control_plane.worker_adapter import (
+    AdapterBindingError,
+    ADAPTER_DESCRIPTORS,
+    adapter_descriptor,
+    construct_reviewed_adapter,
+)
 from control_plane.worker_execution_contract import WorkerLaunchSpec
 from test_executive_worker_broker import _fixture as _broker_fixture
 
@@ -224,10 +229,17 @@ def _adapter(tmp_path: Path, binding_id: str = _GLM_BINDING) -> ClaudeSubscripti
     )
 
 
-def test_common_adapter_descriptor_is_not_implemented_without_receipt():
+def test_common_adapter_descriptor_is_implemented_only_through_reviewed_receipt():
     binding = get_binding(_GLM_BINDING)
-    with pytest.raises(ValueError, match="unknown worker adapter"):
-        adapter_descriptor(binding.adapter_id)
+    assert adapter_descriptor(binding.adapter_id).implemented
+    class ClaimedAdapter:
+        adapter_id = binding.adapter_id
+
+        def status(self, ref=None):
+            return None
+
+    with pytest.raises(AdapterBindingError, match="does not accept"):
+        construct_reviewed_adapter(binding.adapter_id, ClaimedAdapter())
 
 
 def test_worker_takes_adapter_endpoint_and_models_from_binding_catalog(tmp_path: Path):
@@ -554,12 +566,12 @@ def test_worker_identity_must_match_before_spawn(tmp_path: Path) -> None:
         asyncio.run(adapter.start(spec))
 
 
-def test_unimplemented_descriptor_fails_closed_at_broker_construction(tmp_path: Path) -> None:
+def test_caller_supplied_descriptor_fails_closed_at_broker_construction(tmp_path: Path) -> None:
     adapter = _adapter(tmp_path)
     broker_root = tmp_path / "broker-root"
     broker_root.mkdir(mode=0o700)
     _broker, policy, sweeper, _peer, _wire = _broker_fixture(broker_root)
-    with pytest.raises(Exception, match="unknown worker adapter"):
+    with pytest.raises(WorkerBrokerError, match="was not constructed"):
         ExecutiveWorkerBroker(adapter, policy, sweeper, adapter_id=adapter.adapter_id)
 
 
@@ -648,14 +660,20 @@ def test_adapter_refuses_missing_capacity_or_realm_proof_and_changed_catalog(tmp
         )
 
 
-def test_claude_lane_is_spec_only_and_admits_no_broker_execution() -> None:
+def test_claude_lane_is_spec_only_and_reviewed_admission_gates_broker_execution() -> None:
     binding = get_binding(_GLM_BINDING)
     assert binding.implementation_state == "SPEC_ONLY"
-    assert "claude-compatible-subscription" not in ADAPTER_DESCRIPTORS
-    with pytest.raises(ValueError, match="unknown worker adapter"):
-        adapter_descriptor(binding.adapter_id)
-    with pytest.raises(WorkerBrokerError, match="unknown worker adapter"):
-        ExecutiveWorkerBroker(object(), object(), object(), adapter_id=binding.adapter_id)
+    assert ADAPTER_DESCRIPTORS[binding.adapter_id].implemented
+    class ClaimedAdapter:
+        adapter_id = binding.adapter_id
+
+        def status(self, ref=None):
+            return None
+
+    with pytest.raises(WorkerBrokerError, match="reviewed implementation"):
+        ExecutiveWorkerBroker(
+            ClaimedAdapter(), object(), object(), adapter_id=binding.adapter_id
+        )
 
 
 def test_catalog_digest_entrypoints_share_one_policy() -> None:

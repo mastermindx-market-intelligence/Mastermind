@@ -5,6 +5,7 @@ import asyncio
 import contextlib
 import dataclasses
 import hashlib
+import inspect
 import itertools
 import json
 import os
@@ -33,6 +34,20 @@ from control_plane.codex_worker import (
     WorkerResult,
     WorkerRunStatus,
 )
+from control_plane.claude_subscription_worker import (
+    attest_claude_binary as attest_fixture_claude_binary,
+)
+from control_plane.codex_provider_realm import (
+    _PROVIDER_REALM_OWNER_SEAM,
+    issue_provider_realm_enrollment_receipt,
+)
+from control_plane.model_router import (
+    _CAPACITY_OWNER_SEAM,
+    export_capacity_owner_fact,
+)
+from control_plane.subscription_canary_admission import seal_subscription_canary_admission
+from control_plane.subscription_harness_bindings import DEFAULT_BINDINGS_PATH
+from control_plane.subscription_provider_profiles import DEFAULT_PROFILES_PATH
 from control_plane.worker_adapter import (
     AdapterBindingError,
     bind_reviewed_adapter,
@@ -60,6 +75,7 @@ from control_plane.executive_worker_broker import (
     WorkerBrokerError,
     _ps_pids_for_uid,
 )
+from control_plane.executive_steward import CapacityState, SourceOwner
 
 
 class FakeSweeper:
@@ -555,6 +571,73 @@ def test_broker_binds_real_codex_adapter_identity(tmp_path: Path):
     assert bound.adapter_id == "codex-cli"
     assert adapter.adapter_id == "codex-cli"
     assert callable(adapter.status)
+
+
+def test_reviewed_constructor_binds_two_exact_heterogeneous_adapter_identities(
+    tmp_path: Path,
+):
+    codex_kwargs = _reviewed_codex_kwargs(tmp_path / "codex")
+    codex = construct_reviewed_adapter(
+        "codex-cli", codex_kwargs.pop("binary_path"), **codex_kwargs
+    )
+    codex_descriptor = bind_reviewed_adapter(codex, "codex-cli")
+
+    bindings = json.loads(DEFAULT_BINDINGS_PATH.read_text(encoding="utf-8"))
+    profiles = json.loads(DEFAULT_PROFILES_PATH.read_text(encoding="utf-8"))
+    binding_id = "glm-coding-plan.claude-code-anthropic"
+    bindings["bindings"][binding_id]["implementation_state"] = "BUILT_NOT_PROVEN"
+    claude_binary = tmp_path / "fixture-claude"
+    claude_binary.write_text(
+        "#!/bin/sh\nprintf '2.1.239 (Claude Code)\\n'\n",
+        encoding="utf-8",
+    )
+    claude_binary.chmod(0o700)
+    claude_attestation = attest_fixture_claude_binary(
+        claude_binary, allowed_versions=frozenset({"2.1.239"})
+    )
+    with _CAPACITY_OWNER_SEAM.install_test_key(
+        b"hf1q-test-capacity-owner"
+    ), _PROVIDER_REALM_OWNER_SEAM.install_test_key(
+        b"hf1q-test-provider-realm-owner"
+    ), _PROVIDER_REALM_OWNER_SEAM.install_test_enrollment("enrolled"):
+        capacity_fact = export_capacity_owner_fact(
+            worker_id="worker-1",
+            state=CapacityState.AVAILABLE,
+            generation=7,
+        )
+        realm_receipt = issue_provider_realm_enrollment_receipt(
+            binding_id=binding_id,
+            bindings_document=bindings,
+            profiles_document=profiles,
+            generation=3,
+        )
+        admission = seal_subscription_canary_admission(
+            capacity_fact=capacity_fact,
+            realm_receipt=realm_receipt,
+            bindings_document=bindings,
+            profiles_document=profiles,
+        )
+        claude = construct_reviewed_adapter(
+            "claude-compatible-subscription",
+            claude_binary,
+            admission=admission,
+            credential_loader=lambda: "fixture-credential",
+            binary_attestation=claude_attestation,
+            bindings_document=bindings,
+            profiles_document=profiles,
+        )
+    claude_descriptor = bind_reviewed_adapter(
+        claude, "claude-compatible-subscription"
+    )
+
+    assert type(codex) is not type(claude)
+    assert codex.adapter_id == codex_descriptor.adapter_id == "codex-cli"
+    assert claude.adapter_id == claude_descriptor.adapter_id
+    assert claude.adapter_id == claude.binding.adapter_id
+    assert claude.binding.implementation_state == "BUILT_NOT_PROVEN"
+    assert codex_descriptor.implemented and claude_descriptor.implemented
+    assert "provider_home" not in inspect.signature(type(claude).__init__).parameters
+    assert "codex_home" not in inspect.signature(type(claude).__init__).parameters
 
 
 def test_broker_rejects_wrong_peer_and_unknown_operation(tmp_path: Path) -> None:
