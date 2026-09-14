@@ -62,6 +62,7 @@ from integrations.mastermind_executive_app.gateway import (
     AppPolicies,
     CeoIngressClient,
     build_read_gateway,
+    CeoIngressReadGateway,
     make_jwt_authenticators,
 )
 
@@ -126,6 +127,12 @@ class AppSettings:
     #: E1 sets this immutable capability flag.  Legacy direct callers retain
     #: the existing writer-capable route surface by default.
     read_only: bool = False
+    #: Native five-tool MCP can receive a token upgraded to the exact submit
+    #: policy. This opt-in verifies that policy in full on reader routes;
+    #: legacy HTTP and temporary E1 retain their exact read-only policy.
+    allow_submit_authorized_reads: bool = False
+    #: Installed composition reads only through the existing CeoIngress.
+    read_from_ceo_ingress: bool = False
     #: E1's temporary runtime projection root.  It is required only for the
     #: read-only capability and never comes from a request body.
     runtime_root: "Path | str | None" = None
@@ -140,6 +147,14 @@ class AppSettings:
     def __post_init__(self) -> None:
         if type(self.read_only) is not bool:
             raise ValueError("read_only must be a bool")
+        if type(self.allow_submit_authorized_reads) is not bool:
+            raise ValueError("allow_submit_authorized_reads must be a bool")
+        if self.read_only and self.allow_submit_authorized_reads:
+            raise ValueError("read_only app refuses submit-authorized reads")
+        if type(self.read_from_ceo_ingress) is not bool:
+            raise ValueError("read_from_ceo_ingress must be a bool")
+        if self.read_from_ceo_ingress and (self.read_only or self.runtime_root is not None):
+            raise ValueError("installed reads refuse temporary E1/runtime configuration")
         if self.read_only:
             if self.ceo_ingress_socket_path is not None:
                 raise ValueError("read_only app refuses an ingress socket path")
@@ -174,7 +189,8 @@ def _auth_header(request: Request) -> str | None:
 
 
 async def _authenticate(
-    request: Request, authenticator: JwtAuthenticator, *, clock: Callable[[], int]
+    request: Request, authenticator: JwtAuthenticator, *, clock: Callable[[], int],
+    submit_fallback: JwtAuthenticator | None = None,
 ) -> VerifiedPrincipal | JSONResponse:
     now = clock()
     if type(now) is not int:
@@ -190,7 +206,13 @@ async def _authenticate(
             status_code=401,
         )
     try:
-        return await authenticator.verify_authorization_header(header, now=now)
+        try:
+            return await authenticator.verify_authorization_header(header, now=now)
+        except AuthError as exc:
+            if submit_fallback is None or exc.code.value != "scope_refused":
+                raise
+            authenticator = submit_fallback
+            return await authenticator.verify_authorization_header(header, now=now)
     except AuthError as exc:
         challenge = mcp_auth_error_result(authenticator.policy, exc)
         header_value = challenge["_meta"]["mcp/www_authenticate"][0]
@@ -319,15 +341,18 @@ def create_app(settings: AppSettings) -> Any:
     read_authenticator, submit_authenticator = make_jwt_authenticators(
         settings.policies, jwks_cache=settings.jwks_cache
     )
-    read_gateway = build_read_gateway(
-        settings.mastermind_root,
-        macro_root_flag=settings.macro_root_flag,
-        runtime_root=settings.runtime_root,
-    )
     ceo_ingress_client = None
     if not settings.read_only:
         ceo_ingress_client = CeoIngressClient(
             connect_timeout=settings.connect_timeout, read_timeout=settings.read_timeout
+        )
+    if settings.read_from_ceo_ingress:
+        read_gateway = CeoIngressReadGateway(settings.ceo_ingress_socket_path, ceo_ingress_client)
+    else:
+        read_gateway = build_read_gateway(
+            settings.mastermind_root,
+            macro_root_flag=settings.macro_root_flag,
+            runtime_root=settings.runtime_root,
         )
 
     async def call_read_tool(request: Request) -> JSONResponse:
@@ -338,7 +363,8 @@ def create_app(settings: AppSettings) -> Any:
                 status_code=404,
             )
         principal_or_response = await _authenticate(
-            request, read_authenticator, clock=settings.clock
+            request, read_authenticator, clock=settings.clock,
+            submit_fallback=(submit_authenticator if settings.allow_submit_authorized_reads else None),
         )
         if isinstance(principal_or_response, JSONResponse):
             return principal_or_response
@@ -366,6 +392,7 @@ def create_app(settings: AppSettings) -> Any:
             macro_root_flag=settings.macro_root_flag,
             environ=settings.environ,
             client=ceo_ingress_client,
+            read_grounding_from_ingress=settings.read_from_ceo_ingress,
         )
         try:
             outcome = await compose_admission(admission_request)

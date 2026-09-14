@@ -6,8 +6,9 @@ crosses the distinct-UID worker broker; this entrypoint has no local adapter or
 TCP fallback.  G1 adds one exact-root deterministic COO-cycle operation and one
 bounded service tick; both remain disabled by checked-in host configuration.
 C1 may additionally expose the already-implemented dedicated CeoIngress state
-listener through the SAME service process while CEO write admission remains
-hard-disabled. Restore operations are deliberately offline CLI commands and are
+listener through the SAME service process while C1 write admission remains
+hard-disabled. An explicitly configured App peer has a separate admission
+setting and canonical read binding on that same socket. Restore operations are deliberately offline CLI commands and are
 never exposed through the live control socket.
 """
 from __future__ import annotations
@@ -32,6 +33,7 @@ from control_plane.executive_autonomy import (
 from control_plane.executive_service import (
     ExecutiveDialogueWakeBridge,
     ExecutiveControlService,
+    CeoIngressAppBinding,
     ServiceConfig,
     ServiceError,
     activate_launchd_socket,
@@ -150,6 +152,9 @@ _CONFIG_OPTIONAL = frozenset(
         "ceo_ingress_socket_path",
         "ceo_ingress_launchd_socket_name",
         "ceo_ingress_peer_uid",
+        "ceo_ingress_app_peer_uid",
+        "ceo_ingress_app_armed",
+        "ceo_ingress_app_macro_root",
         "terminal_return_armed",
         "terminal_return_socket_path",
         "dialogue_observation_socket_path",
@@ -166,6 +171,9 @@ _CEO_INGRESS_CONFIG_KEYS = frozenset(
         "ceo_ingress_peer_uid",
     }
 )
+_CEO_INGRESS_APP_CONFIG_KEYS = frozenset({
+    "ceo_ingress_app_peer_uid", "ceo_ingress_app_armed", "ceo_ingress_app_macro_root",
+})
 _TERMINAL_RETURN_CONFIG_KEYS = frozenset(
     {
         "terminal_return_armed",
@@ -307,6 +315,12 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
     ceo_ingress_present = keys & _CEO_INGRESS_CONFIG_KEYS
     if ceo_ingress_present and ceo_ingress_present != _CEO_INGRESS_CONFIG_KEYS:
         raise ServiceError("CeoIngress control config fields must be supplied together")
+    app_present = keys & _CEO_INGRESS_APP_CONFIG_KEYS
+    if app_present and (
+        app_present != _CEO_INGRESS_APP_CONFIG_KEYS
+        or ceo_ingress_present != _CEO_INGRESS_CONFIG_KEYS
+    ):
+        raise ServiceError("App binding requires all App and CeoIngress configuration fields")
     terminal_return_present = keys & _TERMINAL_RETURN_CONFIG_KEYS
     if terminal_return_present and terminal_return_present != _TERMINAL_RETURN_CONFIG_KEYS:
         raise ServiceError("terminal-return control config fields must be supplied together")
@@ -360,6 +374,20 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
     if ceo_ingress_present:
         config["ceo_ingress_peer_uid"] = _integer(
             config["ceo_ingress_peer_uid"], "ceo_ingress_peer_uid"
+        )
+    if app_present:
+        config["ceo_ingress_app_peer_uid"] = _integer(
+            config["ceo_ingress_app_peer_uid"], "ceo_ingress_app_peer_uid"
+        )
+        if config["ceo_ingress_app_peer_uid"] in {
+            config["control_uid"], config["ceo_ingress_peer_uid"], config["worker_uid"],
+            *config["allowed_peer_uids"],
+        }:
+            raise ServiceError("App peer must be distinct from control, Operator, C1 and worker identities")
+        if type(config["ceo_ingress_app_armed"]) is not bool:
+            raise ServiceError("App admission arming must be boolean")
+        config["ceo_ingress_app_macro_root"] = _path(
+            config["ceo_ingress_app_macro_root"], "ceo_ingress_app_macro_root"
         )
     if observation_present:
         config["dialogue_observation_peer_uid"] = _integer(
@@ -1023,6 +1051,20 @@ def _service_from_config(
             "ceo_ingress_armed": False,
             "ceo_ingress_activated_socket": ceo_listener,
         }
+    if _CEO_INGRESS_APP_CONFIG_KEYS <= set(raw):
+        # SDK-free canonical projection runs under the existing control uid.
+        # The network App has no Runtime database or source-checkout access.
+        from integrations.executive_mcp.installed import InstalledExecutiveReaders
+        readers = InstalledExecutiveReaders(
+            repo_root=Path(raw["proof_source_repository"]),
+            macro_root=Path(raw["ceo_ingress_app_macro_root"]),
+            runtime_root=Path(raw["runtime_root"]),
+        )
+        ceo_ingress_kwargs["ceo_ingress_app_binding"] = CeoIngressAppBinding(
+            peer_uid=int(raw["ceo_ingress_app_peer_uid"]),
+            armed=raw["ceo_ingress_app_armed"],
+            grounding_provider=readers, read_provider=readers,
+        )
     dialogue_observation_kwargs: dict[str, Any] = {}
     if (
         _DIALOGUE_BRIDGE_CONFIG_KEYS <= set(raw)

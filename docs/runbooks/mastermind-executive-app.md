@@ -245,3 +245,85 @@ socket.
   the MCP SDK anywhere in this app, no reference to `send_control_request`
   or a `.submit_intent(` call site, the frozen schema digest, and zero diff
   on `control_plane/executive_service.py`.
+
+## Native five-tool MCP composition
+
+`integrations.executive_mcp.server.build_executive_mcp_app(settings,
+audit_sink=...)` composes the frozen five-tool contract over stateless
+Streamable HTTP `POST /mcp`. It owns one existing Executive App instance;
+readers use its canonical gateway and submit uses its existing dedicated
+CeoIngress client. It adds no admission queue, token store or retry service.
+
+The builder accepts the exact read policy or the exact two-scope submit
+policy through two unchanged A1 adapters. A token upgraded for submission can
+also read through an explicit App setting, with the full submit policy
+independently verified by the App. The default direct HTTP App and temporary
+`e1-read` profile retain their original policy boundaries. Tool OAuth metadata
+and the insufficient-scope challenge use the existing A1 helpers; the input
+schemas and annotations remain unchanged.
+
+Both request and inner response buffering reuse the existing bounded ASGI
+boundary. The final escaped MCP result has its own budget, reserving space
+for the admitted JSON-RPC request ID. Literal routes refuse query strings,
+encoded aliases and trailing-slash redirects. The MCP backend accepts loopback
+Host values and is intended for the existing Secure MCP Tunnel.
+
+The composition also exposes the existing authenticated
+`POST /v1/tools/submit_ceo_intent/reconcile` status route. This is an operator
+status endpoint, not a sixth MCP tool. A lost, oversized, malformed or
+identity-mismatched reply after possible admission returns `effect_unknown`
+with the original `request_ref`; reconcile that same reference before taking
+another modifying action. No transport retry is performed.
+
+Focused proof lives in `tests/test_executive_mcp_app_composition.py`: real
+A1-signed test tokens, real temporary repositories, a real temporary
+CeoIngress/Runtime with execution disabled, exact tool scan, authorization
+upgrade, one queued Job, duplicate/conflict behavior and loss-after-admission
+reconciliation. These tests do not establish production installation or a
+successful ChatGPT call.
+
+### Installed production binding
+
+The installed composition gives the network MCP process its own non-login
+service identity. `ceo_ingress_app_peer_uid`, `ceo_ingress_app_armed`, and
+`ceo_ingress_app_macro_root` must be supplied together in the existing protected
+control configuration. Its peer must differ from control, Operator, worker,
+and C1 identities. C1 retains its existing peer, grounding provider and arming
+setting.
+
+The full-schema `control.json.template` includes an unarmed App binding and an
+explicit Macro snapshot placeholder. Supply the actual sealed snapshot when
+provisioning the App, or omit all three App fields when installing control
+without it. The base installer does not add these optional fields by default.
+
+The App peer can use existing v2 submit/status frames and two closed internal
+read frames on the same CeoIngress socket. The four public tools and schemas
+remain unchanged. `InstalledExecutiveReaders` runs inside the control process,
+using the existing gateway projections and read-only Runtime handle. The
+network App receives canonical envelopes and freshly observed grounding over
+the socket; it has no filesystem access to the Runtime database or worker
+leases. The admission owner independently rechecks grounding before effect.
+Temporary E1/fixture roots and all their production-path refusals remain intact.
+
+On macOS, the control process applies one named-user ACL for socket read/write.
+The existing bootstrap's root-owned 0755 socket directory already permits
+traversal and remains untouched. A private control-owned parent receives only
+a traversal ACL. Socket ownership, group and POSIX mode remain unchanged, and a
+normal restart does not duplicate the ACL. The App identity is not added to the
+C1 group or the general Operator allowlist. Before activation, the host installer
+must establish the socket directory using the existing bootstrap's ownership
+and mode; the network process cannot create it.
+
+`ops/executive_os/executive_mcp_entry.py` is the installed network-process
+launcher. It requires an explicit root-owned configuration, the matching sealed
+release directory, dedicated process uid, loopback port, real A1 policies and
+separate directories for the existing read/submit durable authentication audit
+sinks. It refuses user-writable installation configuration. Run it under a
+separately provisioned network Python environment with `-I -B`; the sealed
+Executive control Python remains SDK-free.
+
+Deployment evidence belongs in the private operation receipt. Source tests do
+not establish an installed generation, accepted identity provider, live tunnel,
+or real ChatGPT canary. Production qualification still requires all five tools
+through the actual registered app, one separately confirmed harmless admission,
+same-operation duplicate/conflict checks, and zero Attempts or Workers.

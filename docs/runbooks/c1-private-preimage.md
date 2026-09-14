@@ -61,6 +61,10 @@ binary plists are rejected before a repeated key can overwrite its predecessor.
 Plist parsing is in-process, and only validated projections enter the receipt.
 Unknown fields are deliberately not projected.
 
+The worker configuration and Codex attestation identify the installer's fixed
+destination, `/Library/Application Support/MastermindExecutive/bin/codex-0.147.0`.
+The Homebrew executable is installer input, not the installed worker identity.
+
 Private config, tokens, keys, canaries, provider auth, DR, job, backup, relay,
 and socket paths are metadata-only. Their bytes, hashes, values, prefixes, and
 suffixes are never read or emitted. Metadata is restricted to lexical path,
@@ -101,6 +105,14 @@ The command adapter permits only:
 /bin/ps -o uid=,gid=,pid=,ppid= -p <exact positive launchd pid>
 /usr/bin/stat -f %Sp <one frozen path>
 ```
+
+The disabled-service parser accepts native `enabled`/`disabled` entries and
+legacy `false`/`true` entries. It projects only the five frozen service labels,
+ignoring other services in the system listing. Missing overrides are emitted
+as `disabled: null`; they never imply a disabled or safely stopped service.
+Such uncertainty retains `EFFECT_UNKNOWN` while preserving the collected facts.
+Malformed framing, invalid values for a frozen label, and duplicate frozen
+labels remain `MALFORMED_LAUNCHD` refusals.
 
 Commands use no shell, a five-second total execution/settlement deadline, no
 retry, acquisition-time bounded nonblocking output, `stdin=DEVNULL`, and

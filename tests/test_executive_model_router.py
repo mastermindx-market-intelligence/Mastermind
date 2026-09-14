@@ -400,9 +400,13 @@ def test_cli_routed_job_persists_semantics_without_raw_provider_selection(
 
 def test_common_worker_adapter_protocol_is_provider_neutral():
     class FakeAdapter:
+        adapter_id = "codex-cli"
         inspector = object()
 
         async def start(self, spec):
+            return None
+
+        async def status(self, ref):
             return None
 
         async def collect_result(self, ref):

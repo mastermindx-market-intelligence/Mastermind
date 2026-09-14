@@ -84,10 +84,7 @@ WORKER_CONFIG = f"{SYSTEM_ROOT}/config/worker-codex.json"
 PYTHON_PROVENANCE = f"{SYSTEM_ROOT}/python-runtime.json"
 CODEX_ATTESTATION = f"{SYSTEM_ROOT}/codex-attestation-0.147.0.json"
 PYTHON_BINARY = "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12"
-CODEX_BINARY = (
-    "/opt/homebrew/lib/node_modules/@openai/codex/node_modules/"
-    "@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"
-)
+CODEX_BINARY = f"{SYSTEM_ROOT}/bin/codex-0.147.0"
 CONTENT_PATHS = (*PLISTS, CONTROL_CONFIG, WORKER_CONFIG, PYTHON_PROVENANCE, CODEX_ATTESTATION)
 SOCKET_METADATA_PATHS = (
     "/var/run/mastermind-executive/ceo-ingress.sock",
@@ -639,19 +636,31 @@ def parse_launchd_state(
     return result
 
 
-def parse_disabled_state(output: str) -> dict[str, bool]:
-    matches = re.findall(
-        r'(?m)^\s*"(com\.mastermind\.executive\.[A-Za-z0-9.-]+)"\s*=>\s*(true|false)\s*$',
-        output,
-    )
-    values: dict[str, bool] = {}
-    for label, raw_value in matches:
-        if label not in LABELS or label in values:
-            raise PreimageUnsettled("MALFORMED_LAUNCHD")
-        values[label] = raw_value == "true"
-    if set(values) != set(LABELS):
+def parse_disabled_state(output: str) -> dict[str, bool | None]:
+    lines = output.strip().splitlines()
+    if (
+        len(lines) < 2
+        or re.fullmatch(r"disabled\s+services\s*=\s*\{", lines[0].strip()) is None
+        or lines[-1].strip() != "}"
+    ):
         raise PreimageUnsettled("MALFORMED_LAUNCHD")
-    return values
+    spellings = {"true": True, "disabled": True, "false": False, "enabled": False}
+    values: dict[str, bool] = {}
+    for line in lines[1:-1]:
+        if not line.strip():
+            continue
+        match = re.fullmatch(r'\s*"([^"\r\n]+)"\s*=>\s*(\S+)\s*', line)
+        if match is None:
+            raise PreimageUnsettled("MALFORMED_LAUNCHD")
+        label, raw_value = match.groups()
+        if label not in LABELS:
+            continue
+        if label in values or raw_value not in spellings:
+            raise PreimageUnsettled("MALFORMED_LAUNCHD")
+        values[label] = spellings[raw_value]
+    # An omitted override is not proof that the service is disabled. Preserve
+    # it as unknown so collection can report facts without admitting an install.
+    return {label: values.get(label) for label in LABELS}
 
 
 def parse_process_identity(output: str, *, expected_pid: int) -> dict[str, int]:

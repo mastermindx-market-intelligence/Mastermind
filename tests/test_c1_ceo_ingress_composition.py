@@ -102,3 +102,46 @@ def test_service_composes_second_launchd_listener_unarmed_and_state_only(monkeyp
     provider = captured["ceo_ingress_grounding_provider"]
     with pytest.raises(RuntimeError, match="C1_GROUNDING_UNAVAILABLE"):
         provider.observe()
+
+
+def _write_config(tmp_path, raw):
+    path = tmp_path/'control-app.json'
+    path.write_text(json.dumps({k: str(v) if isinstance(v, Path) else list(v) if isinstance(v, tuple) else v for k,v in raw.items()}))
+    path.chmod(0o600)
+    return path
+
+
+def test_app_config_is_explicit_and_keeps_c1_unarmed(tmp_path):
+    module = _module()
+    raw = _raw(tmp_path)
+    raw.update(ceo_ingress_app_peer_uid=os.geteuid()+10,
+               ceo_ingress_app_armed=True, ceo_ingress_app_macro_root=tmp_path/'macro')
+    loaded = module.load_control_config(_write_config(tmp_path, raw))
+    assert loaded['ceo_ingress_app_peer_uid'] != loaded['ceo_ingress_peer_uid']
+    assert loaded['ceo_ingress_app_armed'] is True
+    assert 'ceo_ingress_armed' not in loaded
+
+
+@pytest.mark.parametrize('change', [
+    {'ceo_ingress_app_peer_uid': RELAY_UID},
+    {'ceo_ingress_app_peer_uid': os.geteuid()},
+    {'ceo_ingress_app_peer_uid': True},
+    {'ceo_ingress_app_armed': 1},
+    {'ceo_ingress_app_macro_root': 'relative/path'},
+])
+def test_app_config_refuses_identity_or_capability_ambiguity(tmp_path, change):
+    module = _module()
+    raw = _raw(tmp_path)
+    raw.update(ceo_ingress_app_peer_uid=os.geteuid()+10,
+               ceo_ingress_app_armed=True, ceo_ingress_app_macro_root=tmp_path/'macro')
+    raw.update(change)
+    with pytest.raises(module.ServiceError):
+        module.load_control_config(_write_config(tmp_path, raw))
+
+
+def test_partial_app_config_is_refused(tmp_path):
+    module = _module()
+    raw = _raw(tmp_path)
+    raw['ceo_ingress_app_peer_uid'] = os.geteuid()+10
+    with pytest.raises(module.ServiceError):
+        module.load_control_config(_write_config(tmp_path, raw))

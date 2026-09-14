@@ -32,6 +32,7 @@ RELEASE_TRACKED_PATHS=(
   control_plane/ceo_intent.py
   control_plane/chairman_control_room.py
   control_plane/chairman_control_room_remote.py
+  control_plane/codex_provider_realm.py
   control_plane/codex_worker.py
   control_plane/executive_agent_capabilities.py
   control_plane/executive_ambient_process.py

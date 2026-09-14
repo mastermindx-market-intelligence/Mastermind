@@ -46,12 +46,16 @@ from control_plane.executive_ambient_process import (
     NullAmbientClassifier,
 )
 from control_plane.codex_worker import (
-    CodexWorkerAdapter,
     GitPreflightFailed,
     GitPreflightTimeout,
     ISOLATION_MANIFEST_SCHEMA_VERSION,
     LaunchValidationStageError,
     ProcessIdentityError,
+)
+from control_plane.worker_adapter import (
+    AdapterBindingError,
+    WorkerExecutionAdapter,
+    bind_reviewed_adapter,
 )
 from control_plane.executive_orchestration_principal import (
     OSProcessCredentialObservation,
@@ -1285,10 +1289,11 @@ class ExecutiveWorkerBroker:
 
     def __init__(
         self,
-        adapter: CodexWorkerAdapter,
+        adapter: WorkerExecutionAdapter,
         policy: BrokerPolicy,
         sweeper: ResidualSweeper,
         *,
+        adapter_id: str = "codex-cli",
         peer_resolver: Callable[[socket.socket], PeerCredentials] = get_peer_credentials,
         operator_adapter_factory: OperatorAdapterFactory | None = None,
         operator_resource_factory: OperatorResourceFactory | None = None,
@@ -1299,7 +1304,16 @@ class ExecutiveWorkerBroker:
         ]
         | None = None,
     ) -> None:
+        try:
+            descriptor = bind_reviewed_adapter(adapter, adapter_id)
+        except AdapterBindingError as exc:
+            raise WorkerBrokerError(str(exc)) from exc
+        except Exception as exc:
+            raise WorkerBrokerError(
+                f"worker adapter {adapter_id!r} failed to bind"
+            ) from exc
         self.adapter = adapter
+        self.adapter_id = descriptor.adapter_id
         self.policy = policy
         self.sweeper = sweeper
         self.peer_resolver = peer_resolver
@@ -3430,6 +3444,8 @@ def _launch_spec_to_json(spec: WorkerLaunchSpec) -> dict[str, Any]:
 
 class RemoteCodexWorkerAdapter:
     """Control-side Codex adapter facade backed by the distinct-UID broker."""
+
+    adapter_id = "codex-cli"
 
     def __init__(
         self,
