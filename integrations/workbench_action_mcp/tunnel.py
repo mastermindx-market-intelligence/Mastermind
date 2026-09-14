@@ -29,7 +29,7 @@ import time
 from jsonschema import Draft202012Validator
 import mcp.types as mcp_types
 from mcp.server.lowlevel import NotificationOptions, Server
-from mcp.server.stdio import stdio_server
+from common.mcp_stdio_boundary import private_stdio_server
 from mcp.types import CallToolResult, ServerResult, TextContent, Tool, ToolAnnotations
 
 from common.bounded_sync_executor import SyncExecutionTimeout
@@ -858,7 +858,7 @@ async def run_stdio(runtime: WorkbenchActionRuntime, *, close_timeout_seconds: f
             notification_options=NotificationOptions(),
             experimental_capabilities={},
         )
-        async with stdio_server() as (read_stream, write_stream):
+        async with private_stdio_server() as (read_stream, write_stream):
             await server.run(read_stream, write_stream, options)
     except BaseException as error:
         primary = error
