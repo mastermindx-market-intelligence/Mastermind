@@ -15,6 +15,9 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[1]
 SENTINEL = "WORKBENCH_REJECTED_SECRET_7b927c"
+# Cold interpreter/import startup is separate from an already-live MCP call.
+STARTUP_TIMEOUT_SECONDS = 20
+RESPONSE_TIMEOUT_SECONDS = 5
 
 
 class NativeChild:
@@ -37,7 +40,7 @@ class NativeChild:
         self.process.stdin.write(raw)
         self.process.stdin.flush()
 
-    def receive(self, timeout=5):
+    def receive(self, timeout=RESPONSE_TIMEOUT_SECONDS):
         deadline = time.monotonic() + timeout
         while b"\n" not in self.buffer:
             remaining = deadline - time.monotonic()
@@ -94,7 +97,7 @@ def initialize(process):
         "protocolVersion": "2025-11-25", "capabilities": {},
         "clientInfo": {"name": "native-test", "version": "1"},
     }})
-    assert "result" in process.receive()
+    assert "result" in process.receive(timeout=STARTUP_TIMEOUT_SECONDS)
     process.send({"jsonrpc": "2.0", "method": "notifications/initialized"})
 
 
