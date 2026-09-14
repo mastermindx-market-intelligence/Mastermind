@@ -15,6 +15,19 @@ if [ "$(basename "$common_abs")" != ".git" ]; then
 fi
 source_repo="$(dirname "$common_abs")"
 
+# Select the workspace root once, while an authorized host installer owns the
+# decision. The installed launcher pins this value so a shell caller cannot
+# redirect the canonical route through MASTERMIND_AGENT_WORKSPACE_ROOT.
+workspace_root="$HOME/.mastermind/agent-workspaces"
+workspace_mount=""
+if [ -d /Volumes/Mastermind ]; then
+  observed_mount="$(/bin/df -P /Volumes/Mastermind 2>/dev/null | /usr/bin/awk 'END {print $6}')"
+  if [ "$observed_mount" = "/Volumes/Mastermind" ]; then
+    workspace_root="/Volumes/Mastermind/agent-workspaces"
+    workspace_mount="/Volumes/Mastermind"
+  fi
+fi
+
 target="${MASTERMIND_WORKSPACE_CLI_INSTALL:-$HOME/.local/bin/mmx-workspace}"
 payload_root="${MASTERMIND_WORKSPACE_CLI_PAYLOAD_ROOT:-$HOME/.local/share/mastermind/workspace-cli/$release_sha}"
 mkdir -p "$(dirname "$target")" "$payload_root/scripts" "$payload_root/control_plane"
@@ -28,7 +41,16 @@ wrapper_tmp="$target.tmp.$$"
 cat > "$wrapper_tmp" <<EOF
 #!/bin/sh
 set -eu
+workspace_mount='$workspace_mount'
+if [ -n "\$workspace_mount" ]; then
+  observed_mount="\$(/bin/df -P "\$workspace_mount" 2>/dev/null | /usr/bin/awk 'END {print \$6}')"
+  if [ "\$observed_mount" != "\$workspace_mount" ]; then
+    echo "Mastermind workspace volume is not mounted at \$workspace_mount; refusing fallback" >&2
+    exit 66
+  fi
+fi
 export MASTERMIND_SOURCE_REPO='$source_repo'
+export MASTERMIND_AGENT_WORKSPACE_ROOT='$workspace_root'
 if [ -n "\${MASTERMIND_PYTHON:-}" ]; then
   exec "\$MASTERMIND_PYTHON" '$payload_root/scripts/mastermind_workspace.py' "\$@"
 elif [ -x /opt/homebrew/bin/python3 ]; then

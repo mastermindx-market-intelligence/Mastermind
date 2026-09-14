@@ -103,3 +103,110 @@ def test_cli_census_reports_source_and_managed_workspace(tmp_path: Path):
     states = {entry["path"]: entry["state"] for entry in census["receipt"]["worktrees"]}
     assert states[str(source.resolve())] == "SOURCE_CHECKOUT"
     assert states[str((root / "web" / "cli-op-003").resolve())] == "MANAGED_ACTIVE"
+
+
+def test_installer_pins_host_root_and_refuses_missing_mount(tmp_path: Path):
+    repo_root = Path(__file__).resolve().parents[1]
+    fixture = tmp_path / "installer-repo"
+    (fixture / "scripts").mkdir(parents=True)
+    (fixture / "control_plane").mkdir()
+    for relative in (
+        "scripts/install_mastermind_workspace_cli.sh",
+        "scripts/mastermind_workspace.py",
+        "control_plane/executive_workspace.py",
+        "control_plane/__init__.py",
+    ):
+        source = repo_root / relative
+        target_file = fixture / relative
+        target_file.write_bytes(source.read_bytes())
+        target_file.chmod(source.stat().st_mode & 0o777)
+    _git(fixture, "init", "-q")
+    _git(fixture, "config", "user.name", "Workspace Installer Test")
+    _git(fixture, "config", "user.email", "workspace-installer@example.invalid")
+    _git(fixture, "add", ".")
+    _git(fixture, "commit", "-qm", "fixture")
+
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    launcher = tmp_path / "bin" / "mmx-workspace"
+    payload = tmp_path / "payload"
+    env = dict(os.environ)
+    env.update(
+        {
+            "HOME": str(fake_home),
+            "MASTERMIND_WORKSPACE_CLI_INSTALL": str(launcher),
+            "MASTERMIND_WORKSPACE_CLI_PAYLOAD_ROOT": str(payload),
+        }
+    )
+    subprocess.run(
+        ["/bin/sh", str(fixture / "scripts" / "install_mastermind_workspace_cli.sh")],
+        cwd=fixture,
+        env=env,
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    wrapper = launcher.read_text(encoding="utf-8")
+    assert f"export MASTERMIND_SOURCE_REPO='{fixture.resolve()}'" in wrapper
+
+    observed_external = ""
+    if Path("/Volumes/Mastermind").is_dir():
+        probe = subprocess.run(
+            ["/bin/df", "-P", "/Volumes/Mastermind"],
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if probe.returncode == 0 and probe.stdout.strip():
+            observed_external = probe.stdout.strip().splitlines()[-1].split()[-1]
+    expected_root = (
+        "/Volumes/Mastermind/agent-workspaces"
+        if observed_external == "/Volumes/Mastermind"
+        else str(fake_home / ".mastermind" / "agent-workspaces")
+    )
+    assert f"export MASTERMIND_AGENT_WORKSPACE_ROOT='{expected_root}'" in wrapper
+
+    payload_script = payload / "scripts" / "mastermind_workspace.py"
+    payload_script.write_text(
+        "import json, os\n"
+        "print(json.dumps({\"source\": os.environ.get(\"MASTERMIND_SOURCE_REPO\"), "
+        "\"root\": os.environ.get(\"MASTERMIND_AGENT_WORKSPACE_ROOT\")}))\n",
+        encoding="utf-8",
+    )
+    hostile_env = dict(env)
+    hostile_env["MASTERMIND_PYTHON"] = sys.executable
+    hostile_env["MASTERMIND_SOURCE_REPO"] = str(tmp_path / "hostile-source")
+    hostile_env["MASTERMIND_AGENT_WORKSPACE_ROOT"] = str(tmp_path / "hostile-root")
+    completed = subprocess.run(
+        [str(launcher)],
+        env=hostile_env,
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    observed = json.loads(completed.stdout)
+    assert observed == {"source": str(fixture.resolve()), "root": expected_root}
+
+    original_mount_line = next(
+        line for line in wrapper.splitlines() if line.startswith("workspace_mount=")
+    )
+    guarded = wrapper.replace(
+        original_mount_line,
+        f"workspace_mount='{tmp_path}'",
+        1,
+    )
+    launcher.write_text(guarded, encoding="utf-8")
+    launcher.chmod(0o755)
+    refused = subprocess.run(
+        [str(launcher)],
+        env=hostile_env,
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert refused.returncode == 66
+    assert "refusing fallback" in refused.stderr
