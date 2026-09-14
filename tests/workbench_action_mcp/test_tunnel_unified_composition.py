@@ -12,6 +12,7 @@ import mcp.types as mcp_types
 import pytest
 
 import integrations.workbench_action_mcp.action_artifacts as action_artifacts
+import integrations.workbench_action_mcp.runtime as runtime_module
 import integrations.workbench_action_mcp.tunnel as tunnel_module
 import integrations.workbench_read_mcp.observer as read_observer
 from integrations.workbench_action_mcp.command_contracts import RECIPE_SHA256
@@ -58,10 +59,40 @@ ALL_TOOLS = {
     "reconcile_text_patch",
     *COMMAND_TOOLS,
 }
+_NATIVE_PROCESS_INSPECTOR = runtime_module.ProcessInspector
 
 
 def _file_sha256(path: str) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+class _StableBootProcessInspector:
+    """Test boot observer that preserves real native process inspection."""
+
+    def __init__(self, boot_session_id: str) -> None:
+        self._boot_session_id = boot_session_id
+        self._native = _NATIVE_PROCESS_INSPECTOR()
+
+    def boot_session_id(self) -> str:
+        return self._boot_session_id
+
+    def inspect(self, pid: int):
+        return self._native.inspect(pid)
+
+
+def _install_boot_observer(
+    monkeypatch: pytest.MonkeyPatch, boot_session_id: str
+) -> None:
+    def observer() -> _StableBootProcessInspector:
+        return _StableBootProcessInspector(boot_session_id)
+
+    monkeypatch.setattr(runtime_module, "ProcessInspector", observer)
+    monkeypatch.setattr(tunnel_module, "ProcessInspector", observer)
+
+
+@pytest.fixture
+def stable_process_boot(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_boot_observer(monkeypatch, "test-stable-boot-session")
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -256,7 +287,7 @@ def test_manifest_reports_final_tools_recipes_and_limits_without_durable_prepare
     [("canary_checksum", 0), ("canary_refuse", 7)],
 )
 def test_command_routes_preserve_actual_exit_and_read_40_lines(
-    tmp_path, recipe_id, exit_code
+    tmp_path, recipe_id, exit_code, stable_process_boot
 ) -> None:
     document, project, _, _ = _command_document(tmp_path)
     target = project / "sample.py"
@@ -314,7 +345,7 @@ def test_command_routes_preserve_actual_exit_and_read_40_lines(
 
 
 def test_cancelled_command_process_evidence_fsync_keeps_runtime_owned_until_drain(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
+    tmp_path, monkeypatch: pytest.MonkeyPatch, stable_process_boot
 ) -> None:
     document, project, _, _ = _command_document(tmp_path)
     document["close_timeout_seconds"] = 0.05
@@ -548,6 +579,13 @@ def test_oversized_escaped_preview_returns_closed_preview_error(tmp_path) -> Non
     assert _error_code(asyncio.run(exercise())) == "PREVIEW_TOO_LARGE"
 
 
+@pytest.mark.skipif(
+    sys.platform != "darwin",
+    reason=(
+        "native positive command recovery requires Darwin's kernel boot-session "
+        "identity; non-Darwin adapter identities are deliberately refused"
+    ),
+)
 def test_native_stdio_all_ten_routes_and_restart_command_reconciliation(
     tmp_path,
 ) -> None:
@@ -715,6 +753,93 @@ def test_native_stdio_all_ten_routes_and_restart_command_reconciliation(
     assert invoked == ALL_TOOLS
     assert (project / "sample.py").read_bytes() == replaced
     assert (project / "created.txt").read_bytes() == b"created\n"
+
+
+def test_explicit_adapter_boot_refuses_command_prepare_without_artifact_or_effect(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    document, project, _, _ = _command_document(tmp_path)
+    target = project / "sample.py"
+    content = b"value = 1\n"
+    target.write_bytes(content)
+    artifact = Path(document["artifact_directory"])
+    before = tuple(artifact.iterdir())
+    monkeypatch.setattr(runtime_module.platform, "system", lambda: "Linux")
+    _install_boot_observer(monkeypatch, "adapter-explicit-test")
+
+    async def exercise():
+        runtime = await create_runtime_channel(parse_tunnel_config(document))
+        try:
+            return await _call(
+                create_tunnel_action_server(runtime),
+                "prepare_project_command",
+                {
+                    "project_ref": document["lease"]["project_ref"],
+                    "relative_path": "sample.py",
+                    "recipe_id": "canary_checksum",
+                    "expected_sha256": hashlib.sha256(content).hexdigest(),
+                },
+            )
+        finally:
+            await runtime.aclose(timeout=5.0)
+
+    refused = asyncio.run(exercise())
+    assert _error_code(refused) == "ACTION_UNAVAILABLE"
+    assert tuple(artifact.iterdir()) == before
+    assert target.read_bytes() == content
+
+
+@pytest.mark.skipif(
+    sys.platform == "darwin",
+    reason="non-Darwin native child proves the real adapter boot refusal",
+)
+def test_native_stdio_adapter_boot_refuses_command_without_claim_spawn_or_effect(
+    tmp_path,
+) -> None:
+    document, project, _, _ = _command_document(tmp_path)
+    target = project / "sample.py"
+    content = b"value = 1\n"
+    target.write_bytes(content)
+    artifact = Path(document["artifact_directory"])
+    before = tuple(artifact.iterdir())
+    config_path = tmp_path / "tunnel.json"
+    config_path.write_text(json.dumps(document), encoding="utf-8")
+    os.chmod(config_path, 0o600)
+    launcher = (
+        Path(__file__).resolve().parents[2]
+        / "scripts"
+        / "mastermind_workbench_action_stdio.py"
+    )
+
+    with child([sys.executable, str(launcher), "--config", str(config_path)]) as process:
+        initialize(process)
+        process.send(
+            {
+                "jsonrpc": "2.0",
+                "id": 20,
+                "method": "tools/call",
+                "params": {
+                    "name": "prepare_project_command",
+                    "arguments": {
+                        "project_ref": document["lease"]["project_ref"],
+                        "relative_path": "sample.py",
+                        "recipe_id": "canary_checksum",
+                        "expected_sha256": hashlib.sha256(content).hexdigest(),
+                    },
+                },
+            }
+        )
+        response = process.receive()
+        assert response["id"] == 20
+        result = response["result"]
+        assert result["isError"] is True
+        assert json.loads(result["content"][0]["text"]) == {
+            "code": "ACTION_UNAVAILABLE"
+        }
+        process.assert_exit(0)
+
+    assert tuple(artifact.iterdir()) == before
+    assert target.read_bytes() == content
 
 
 def test_launcher_describe_reports_exact_ten_tool_source_profile(tmp_path) -> None:
