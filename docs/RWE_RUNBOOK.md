@@ -57,10 +57,18 @@ python scripts/rwe_env.py run \
 
 `run` composes the existing `realize` and `gate` operations in a fresh temporary environment,
 exports the final secret-free `mastermind.worker_environment/v1` receipt, and removes the
-temporary environment before returning. The gate's real exit code is preserved, so a failing test
-run still exports its gate proof and exits non-zero. The receipt target must be new and its parent
-must already be a real directory; `run` never overwrites a caller-owned artifact. A realization
-refusal produces no receipt.
+temporary environment before returning. The gate's real non-zero exit code is preserved even if
+receipt publication later fails. A completed gate retains `proof.gate` and adds
+`proof.run.status=gate_completed`. A lawful gate refusal that occurs before pytest starts does **not**
+fabricate `proof.gate`; it exports `proof.run.status=gate_refused_before_execution` with the refusal
+exit code. If the gate raises before it can persist a trustworthy terminal, the exported receipt says
+`proof.run.status=gate_outcome_unavailable` and exits 2.
+
+The receipt target must be new. Existing parent symlinks such as macOS `/tmp` are canonicalized once,
+then parent device/inode identity is rechecked at publication. Receipt bytes are fsynced to a private
+same-directory inode and atomically hard-linked into the final leaf, so a racing owner is never
+overwritten and an interrupted write cannot leave a partial final JSON file that blocks a later run.
+A realization refusal produces no receipt.
 
 Use `--python` or `--lock` only under the same rules as `realize`. Omit `--subset` only when the
 full-gate vendored input described above is already materialized. This convenience path does not
