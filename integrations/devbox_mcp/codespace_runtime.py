@@ -346,6 +346,29 @@ def _record_projection(record: Mapping[str, Any], *, reconciled: bool) -> dict[s
     }
 
 
+def _cancel_receipt_exists(op_dir: Path) -> bool:
+    path = op_dir / "cancel.json"
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        raise DevBoxRuntimeError(
+            "RECEIPT_UNAVAILABLE", "cancellation receipt is unavailable"
+        ) from exc
+    if (
+        stat.S_ISLNK(info.st_mode)
+        or not stat.S_ISREG(info.st_mode)
+        or info.st_uid != os.geteuid()
+        or info.st_nlink != 1
+        or stat.S_IMODE(info.st_mode) != 0o600
+    ):
+        raise DevBoxRuntimeError(
+            "RECEIPT_UNAVAILABLE", "cancellation receipt identity changed"
+        )
+    return True
+
+
 _RECORD_IDENTITY_FIELDS = (
     "schema",
     "process_ref",
@@ -760,9 +783,12 @@ class CodespaceDevBoxRuntime:
             "LANG": "C.UTF-8",
             "LC_ALL": "C.UTF-8",
             "PYTHONPATH": str(Path(__file__).resolve().parents[2]),
+            "PYTHONSAFEPATH": "1",
+            "PYTHONNOUSERSITE": "1",
         }
         argv = [
             sys.executable,
+            "-P",
             "-m",
             "integrations.devbox_mcp.codespace_runtime",
             "--supervise",
@@ -782,7 +808,7 @@ class CodespaceDevBoxRuntime:
         try:
             supervisor = subprocess.Popen(
                 argv,
-                cwd=str(self.repo_root),
+                cwd=str(self.state_root / "home"),
                 env=supervisor_env,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.DEVNULL,
@@ -852,7 +878,8 @@ class CodespaceDevBoxRuntime:
             "terminal": bool(record.get("terminal", False)),
             "exit_code": record.get("exit_code"),
             "timed_out": bool(record.get("timed_out", False)),
-            "cancel_requested": bool(record.get("cancel_requested", False)),
+            "cancel_requested": bool(record.get("cancel_requested", False))
+            or _cancel_receipt_exists(op_dir),
             "stdout": stdout,
             "stderr": stderr,
         }
@@ -867,7 +894,8 @@ class CodespaceDevBoxRuntime:
         if record.get("terminal") is True:
             return {
                 "process_ref": process_ref,
-                "cancel_requested": bool(record.get("cancel_requested", False)),
+                "cancel_requested": bool(record.get("cancel_requested", False))
+                or _cancel_receipt_exists(op_dir),
                 "terminal": True,
             }
         if record.get("phase") != "STARTED":
@@ -886,7 +914,8 @@ class CodespaceDevBoxRuntime:
             if latest.get("terminal") is True:
                 return {
                     "process_ref": process_ref,
-                    "cancel_requested": bool(latest.get("cancel_requested", False)),
+                    "cancel_requested": bool(latest.get("cancel_requested", False))
+                    or _cancel_receipt_exists(op_dir),
                     "terminal": True,
                 }
             raise DevBoxRuntimeError("PROCESS_IDENTITY_UNKNOWN", "owned process cannot be re-attested") from exc
@@ -906,7 +935,8 @@ class CodespaceDevBoxRuntime:
                 raise DevBoxRuntimeError("PROCESS_IDENTITY_UNKNOWN", "process disappeared before cancellation proof")
             return {
                 "process_ref": process_ref,
-                "cancel_requested": bool(latest.get("cancel_requested", False)),
+                "cancel_requested": bool(latest.get("cancel_requested", False))
+                or _cancel_receipt_exists(op_dir),
                 "terminal": True,
             }
         except OSError as exc:
@@ -1165,11 +1195,12 @@ def _supervise(
             terminal=True,
             exit_code=child.returncode,
             timed_out=timed_out,
+            cancel_requested=_cancel_receipt_exists(op_dir),
         )
         _persist_effect_record(op_dir, final)
         return 74
 
-    cancel_requested = (op_dir / "cancel.json").is_file()
+    cancel_requested = _cancel_receipt_exists(op_dir)
     final = _load_reconciled_record(op_dir)
     final.update(
         phase="TERMINAL",

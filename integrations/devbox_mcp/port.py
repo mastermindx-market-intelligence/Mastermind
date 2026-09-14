@@ -34,6 +34,7 @@ class DevBoxPortRefused(RuntimeError):
             "EFFECT_UNKNOWN",
             "CANCEL_UNCERTAIN",
             "PRE_EFFECT_RECEIPT_UNAVAILABLE",
+            "RECEIPT_UNAVAILABLE",
         }
     )
 

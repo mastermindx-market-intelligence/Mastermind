@@ -80,6 +80,10 @@ Runtime admission also persists one exact source-baseline receipt outside the ch
 
 The detached supervisor records PID, PGID/session, Linux boot ID when available, `/proc/<pid>/stat` start identity, exact command digest, workspace identity, start time, terminal time, exit code, cancellation facts, and output file identities. It writes identity-bound `STARTED` and terminal sidecars before replacing the mutable projection, so a lost primary receipt replacement can be reconciled without spawning process two. A malformed or identity-mismatched sidecar fails closed. Client-visible results contain only bounded secret-free projections.
 
+The supervisor itself is launched from the private state home with Python safe-path mode (`-P`, `PYTHONSAFEPATH=1`, `PYTHONNOUSERSITE=1`) and an exact reviewed-source `PYTHONPATH`. The attended checkout is therefore the child command's cwd and mutation target, never the authority that selects the receipt-writing supervisor module.
+
+A durable `cancel.json` receipt is the canonical fact that cancellation was requested. Live reads project it immediately, and normal, terminal-race, and output-uncertain terminal paths all fold the same fact into their result. A terminal process and a requested cancellation remain separate facts; neither is inferred from the other.
+
 Each stdout/stderr projection includes `accounting_complete`. While it is `false`, `total_bytes`, `retained_bytes`, `dropped_bytes`, and `gap_ranges` are monotonic facts for bytes already consumed by the pump; more bytes may still arrive. Retained bytes are written before the corresponding progress projection is published, so a reported retained range is already readable. `accounting_complete=true` is emitted only from an exact `TERMINAL` + `APPLIED` receipt, when the byte accounting is final.
 
 ## Command confinement
@@ -118,6 +122,8 @@ After the execution vertical is proven, a controller may automate `list/create/s
 - operation-key conflict: refuse before effect;
 - response loss after a possible spawn: `EFFECT_UNKNOWN`, same-action reconciliation only;
 - exact empty owner-private operation directory with no durable PREPARED receipt: `PRE_EFFECT_RECEIPT_UNAVAILABLE`; stop the service and use the bounded operator recovery procedure, never infer a spawned process or auto-delete an ambiguous directory;
+- missing, malformed, or identity-drifted durable receipt: typed `RECEIPT_UNAVAILABLE`, never generic success/refusal and never a new effect;
+- durable PREPARED / START_RECEIPT_UNAVAILABLE state after a possible supervisor start: preserve `EFFECT_UNKNOWN`, reconcile the same operation only, and never apply the exact-empty deletion rule;
 - missing/rotated process identity: unknown/refused, never signal a PID by number alone;
 - output gap/truncation: explicit retained range/gap/truncation metadata plus `accounting_complete`;
 - timeout: owned supervisor terminates the exact process group and records terminal truth; inability to prove termination is not rewritten as cancellation success;

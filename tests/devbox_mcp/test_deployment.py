@@ -170,7 +170,7 @@ def test_unknown_tool_refuses_without_runtime_call() -> None:
         ("CANCEL_UNCERTAIN", "CANCEL_UNCERTAIN"),
         ("PRE_EFFECT_RECEIPT_UNAVAILABLE", "PRE_EFFECT_RECEIPT_UNAVAILABLE"),
         ("START_REFUSED", "DEVBOX_REFUSED"),
-        ("RECEIPT_UNAVAILABLE", "DEVBOX_REFUSED"),
+        ("RECEIPT_UNAVAILABLE", "RECEIPT_UNAVAILABLE"),
         ("PRIVATE_UNKNOWN", "DEVBOX_REFUSED"),
     ],
 )

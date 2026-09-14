@@ -81,7 +81,7 @@ python -m compileall -q integrations/devbox_mcp ops/devbox
 git diff --check
 ```
 
-Direct runtime acceptance must prove: clean source admission; dirty-source refusal before the first owned effect; preservation of that gate after a known pre-effect refusal; exit 0; intentional exit 7; a process still observable after its start call returns; same-operation reconciliation with no process two; recovery from a lost primary STARTED/terminal receipt replacement through the immutable sidecars; changed-payload conflict; bounded and truthful live stdout/stderr accounting; timeout; exact cancellation; binding drift refusal; and absence of ambient GitHub/cloud/SSH credential values from the child environment. This is not proof that arbitrary same-UID credential files or process memory are unreadable.
+Direct runtime acceptance must prove: clean source admission; dirty-source refusal before the first owned effect; preservation of that gate after a known pre-effect refusal; supervisor import from the reviewed source even when the checkout contains a hostile same-name module; exit 0; intentional exit 7; a process still observable after its start call returns; same-operation reconciliation with no process two; recovery from a lost primary STARTED/terminal receipt replacement through the immutable sidecars; changed-payload conflict; bounded and truthful live stdout/stderr accounting; timeout; exact cancellation with `cancel_requested=true` visible before terminal and preserved through terminal races/output uncertainty; binding drift refusal; typed durable-receipt unavailability; and absence of ambient GitHub/cloud/SSH credential values from the child environment. This is not proof that arbitrary same-UID credential files or process memory are unreadable.
 
 ## 5. Mint exact policy + lease outside source control
 
@@ -193,6 +193,8 @@ Only after these calls traverse the actual Personal Pro custom-MCP connection ma
 2. Inspect the exact directory under `<state-root>/operations/`; verify it is a real non-symlink directory, owned by the service UID, mode 0700, and contains zero entries.
 3. Remove only that exact empty directory. If any file, temporary entry, sidecar, ownership/mode drift, or uncertainty exists, remove nothing and preserve the operation as unresolved.
 4. Restart the same generation and replay the same `operation_key` and payload. Never create a different operation merely to bypass the refusal.
+
+This exact-empty procedure does **not** apply when `record.json` exists in `PREPARED`, `START_RECEIPT_UNAVAILABLE`, or another effect-uncertain phase, or when any sidecar/output/cancel/temp entry exists. Those states may follow a supervisor start. Preserve the complete operation directory, keep the same operation/generation bound, inspect the source and process evidence, and classify unresolved state as `EFFECT_UNKNOWN` / `RECEIPT_UNAVAILABLE`. If exact effect truth cannot be recovered, export the evidence and retire the disposable Codespace/generation without claiming the command was not applied; any later work requires a fresh explicit generation.
 
 ## 10. Stop and reconcile
 

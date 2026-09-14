@@ -430,6 +430,39 @@ def test_command_can_outlive_start_call_and_be_observed_later(repo: Path, tmp_pa
     asyncio.run(exercise())
 
 
+def test_supervisor_import_uses_reviewed_source_not_attended_repo(
+    repo: Path, tmp_path: Path
+) -> None:
+    hostile = repo / "integrations" / "devbox_mcp"
+    hostile.mkdir(parents=True)
+    (repo / "integrations" / "__init__.py").write_text("", encoding="utf-8")
+    (hostile / "__init__.py").write_text("", encoding="utf-8")
+    (hostile / "codespace_runtime.py").write_text(
+        "from pathlib import Path\n"
+        "Path(__file__).resolve().parents[2].joinpath("
+        "'HOSTILE_SUPERVISOR_IMPORTED').write_text('wrong source', encoding='utf-8')\n",
+        encoding="utf-8",
+    )
+    _git(repo, "add", "integrations")
+    _git(repo, "commit", "-qm", "hostile attended checkout module")
+
+    async def exercise() -> None:
+        runtime = _open(repo, tmp_path / "state")
+        started = await runtime.start_command(
+            {
+                "operation_key": "reviewed-supervisor-source",
+                "command_text": "printf reviewed-source",
+                "timeout_seconds": 5,
+            }
+        )
+        assert not (repo / "HOSTILE_SUPERVISOR_IMPORTED").exists()
+        result = await _terminal(runtime, started["process_ref"])
+        assert result["exit_code"] == 0
+        assert result["stdout"]["text"] == "reviewed-source"
+
+    asyncio.run(exercise())
+
+
 def test_same_operation_reconciles_one_process_and_changed_payload_conflicts(
     repo: Path, tmp_path: Path
 ) -> None:
@@ -531,6 +564,36 @@ def test_cancel_targets_exact_owned_generation(repo: Path, tmp_path: Path) -> No
     asyncio.run(exercise())
 
 
+def test_live_read_projects_cancel_receipt_before_terminal(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = tmp_path / "state"
+    runtime = _open(repo, state)
+    _op_dir, process_ref, _record = _manual_started_operation(
+        runtime, state, "live-cancel-projection"
+    )
+    monkeypatch.setattr(runtime_module.os, "getpgid", lambda _pid: 4242)
+    monkeypatch.setattr(
+        runtime_module,
+        "_process_start_identity",
+        lambda _pid: ("procfs:12345", "boot-fixture"),
+    )
+    monkeypatch.setattr(runtime_module.os, "killpg", lambda _pgid, _sig: None)
+
+    cancellation = asyncio.run(
+        runtime.cancel_process(
+            {"process_ref": process_ref, "reason": "live cancellation truth"}
+        )
+    )
+    assert cancellation["cancel_requested"] is True
+    assert cancellation["terminal"] is False
+    observed = asyncio.run(
+        runtime.read_process({"process_ref": process_ref, "max_bytes": 65536})
+    )
+    assert observed["terminal"] is False
+    assert observed["cancel_requested"] is True
+
+
 def test_cancel_after_terminal_returns_terminal_without_signalling(
     repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -618,7 +681,7 @@ def test_cancel_returns_terminal_projection_when_process_exits_before_signal(
             phase="TERMINAL",
             terminal=True,
             exit_code=0,
-            cancel_requested=True,
+            cancel_requested=False,
             ended_at_ns=time.time_ns(),
         )
         runtime_module._persist_effect_record(op_dir, terminal)
@@ -856,13 +919,24 @@ def test_output_uncertainty_does_not_leave_nondaemon_supervisor_threads(
         buffer = io.BytesIO(b'{"command_text":"true"}\n')
 
     daemon_flags: list[bool] = []
+    cancel_receipt_written = False
 
     class StuckThread:
         def __init__(self, *args, daemon: bool, **kwargs) -> None:
             daemon_flags.append(daemon)
 
         def start(self) -> None:
-            return None
+            nonlocal cancel_receipt_written
+            if not cancel_receipt_written:
+                runtime_module._atomic_json(
+                    op_dir / "cancel.json",
+                    {
+                        "process_ref": process_ref,
+                        "reason_digest": "7" * 64,
+                        "requested_at_ns": time.time_ns(),
+                    },
+                )
+                cancel_receipt_written = True
 
         def join(self, timeout: float | None = None) -> None:
             return None
@@ -887,6 +961,7 @@ def test_output_uncertainty_does_not_leave_nondaemon_supervisor_threads(
     assert observed["phase"] == "TERMINAL_OUTPUT_UNCERTAIN"
     assert observed["effect_state"] == "EFFECT_UNKNOWN"
     assert observed["terminal"] is True
+    assert observed["cancel_requested"] is True
 
 
 def test_durable_record_contains_no_command_text_or_secret_values(
