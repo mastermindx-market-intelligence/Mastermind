@@ -7,6 +7,7 @@ import json
 import os
 import stat
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -63,7 +64,13 @@ from control_plane.operator_materialization_receipt import (
     materialization_receipt_path,
 )
 from control_plane.worker_browser_b1 import BrowserReviewReceipt
-from control_plane.visible_turn_projection import TurnKey, VisibleTurnProjection
+from control_plane.visible_turn_projection import (
+    MAX_ITEMS_PER_TURN,
+    MAX_PREBIND_ITEMS,
+    ProjectionError,
+    TurnKey,
+    VisibleTurnProjection,
+)
 
 
 class _Sweeper:
@@ -140,6 +147,8 @@ class _OperatorAdapter:
         self.resource = None
         self.visible_turn_projection = VisibleTurnProjection()
         self._generations = {}
+        self.gate = threading.Event()
+        self.gate.set()
 
     def bind_attempt_resource(self, resource, **_kwargs):
         self.lifecycle.append("resource_bind")
@@ -227,6 +236,7 @@ class _OperatorAdapter:
 
     def read_events(self, cursor, *, timeout_seconds):
         assert timeout_seconds > 0 and self.turn is not None
+        self.gate.wait()
         return (
             (
                 NormalizedEvent(
@@ -254,6 +264,24 @@ class _OperatorAdapter:
             turn.process_generation_id,
             "e" * 64,
             "bounded candidate",
+        )
+
+    def publish_visible(self, text, state, *, native_turn_id="native-turn-1"):
+        turn = self.turn
+        assert turn is not None
+        key = TurnKey(
+            turn.attempt_id,
+            turn.session_epoch_id,
+            turn.process_generation_id,
+            1,
+            "codex-01",
+            turn.turn_id,
+            native_turn_id,
+        )
+        self.visible_turn_projection.publish(
+            key,
+            method="item/completed",
+            params={"item": {"id": text, "sequence": 1, "type": "agentMessage", "text": text}},
         )
 
     def observe_raw_role_result(self, turn):
@@ -1427,5 +1455,554 @@ def test_same_process_terminal_generation_is_not_restart_only(
             "receipt": None,
         }
         assert adapters[0].lifecycle.count("provider_start") == 1
+
+    asyncio.run(scenario())
+
+
+def _observer_payload(turn, grant, cursor=None, max_items=64, **overrides):
+    payload = {
+        "attempt": turn.attempt_id,
+        "epoch": turn.session_epoch_id,
+        "generation": turn.process_generation_id,
+        "turn": turn.turn_id,
+        "reader_grant": grant,
+        "cursor": cursor,
+        "max_items": max_items,
+    }
+    payload.update(overrides)
+    return payload
+
+
+async def _lc1_broker_turn(tmp_path, suffix, prompt, *, release_gate=False):
+    broker, peer, profile, _sweeper, adapters = _fixture(tmp_path)
+    epoch = SessionEpochRef(f"epoch-{suffix}", f"ATT-{suffix.upper()}", "codex-01", 1)
+    generation = ProcessGenerationRef(
+        f"generation-{suffix}", f"epoch-{suffix}", 1, "codex-01"
+    )
+    await broker.execute(
+        _request(
+            "ohf-start",
+            _materialization_payload(profile, epoch, generation),
+            f"{suffix}-start",
+        ),
+        peer=peer,
+    )
+    turn = TurnRef(
+        "turn-1", f"epoch-{suffix}", f"generation-{suffix}", f"ATT-{suffix.upper()}"
+    )
+    attestation = adapters[-1].observed_attestation(generation)
+    await broker.execute(
+        _request(
+            "ohf-begin-turn",
+            {
+                "operation_id": to_wire(OperationId(f"ohf-op:{suffix}-turn")),
+                "turn": to_wire(turn),
+                "generation": to_wire(generation),
+                "launch": to_wire(compare_launch(profile, attestation)),
+                "prompt": prompt,
+            },
+            f"{suffix}-turn",
+        ),
+        peer=peer,
+    )
+    if release_gate:
+        adapters[-1].gate.set()
+    return broker, peer, turn, adapters
+
+
+def test_lc1_fixture_stays_busy_until_gate_released(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        broker, peer, turn, adapters = await _lc1_broker_turn(
+            tmp_path, "lc1", "LC1 gate-held turn"
+        )
+        collecting = asyncio.Event()
+        adapters[-1].gate.clear()
+
+        async def collect_gate_held():
+            collecting.set()
+            return await broker.execute(
+                _request(
+                    "ohf-collect-turn",
+                    {
+                        "turn": to_wire(turn),
+                        "cursor": to_wire(
+                            EventCursor(
+                                turn.attempt_id,
+                                turn.session_epoch_id,
+                                turn.process_generation_id,
+                                turn_id=turn.turn_id,
+                            )
+                        ),
+                        "timeout_seconds": 5.0,
+                    },
+                    "lc1-collect",
+                ),
+                peer=peer,
+            )
+
+        task = asyncio.create_task(collect_gate_held())
+        await asyncio.wait_for(collecting.wait(), timeout=1)
+        await asyncio.sleep(0)
+        assert broker._operator_run is not None and broker._operator_run.busy
+        adapters[-1].gate.set()
+        baseline = await task
+        assert baseline["result"]["candidate"]["complete_job_permitted"] is False
+        assert broker._operator_run is not None and not broker._operator_run.busy
+
+    asyncio.run(scenario())
+
+
+def test_ohf_observer_sees_items_while_controller_waits_then_terminal_once(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        broker, peer, turn, adapters = await _lc1_broker_turn(
+            tmp_path, "obs", "LC1 observed turn"
+        )
+        grant = adapters[-1].mint_observer_grant(turn)
+        mid_read = await broker.execute(
+            _request(
+                "ohf-observe-turn",
+                _observer_payload(turn, grant),
+                "obs-mid",
+            ),
+            peer=peer,
+        )
+        assert mid_read["result"]["items"] == []
+        assert mid_read["result"]["terminal"] is False
+        collecting = asyncio.Event()
+        adapters[-1].gate.clear()
+
+        async def collect_controller_terminal():
+            collecting.set()
+            return await broker.execute(
+                _request(
+                    "ohf-collect-turn",
+                    {
+                        "turn": to_wire(turn),
+                        "cursor": to_wire(
+                            EventCursor(
+                                turn.attempt_id,
+                                turn.session_epoch_id,
+                                turn.process_generation_id,
+                                turn_id=turn.turn_id,
+                            )
+                        ),
+                        "timeout_seconds": 5.0,
+                    },
+                    "obs-collect",
+                ),
+                peer=peer,
+            )
+
+        collector = asyncio.create_task(collect_controller_terminal())
+        await asyncio.wait_for(collecting.wait(), timeout=1)
+        await asyncio.sleep(0)
+        assert broker._operator_run is not None and broker._operator_run.busy
+        adapters[-1].publish_visible("LC1 completed item", "completed")
+        completed_read = await broker.execute(
+            _request(
+                "ohf-observe-turn",
+                _observer_payload(
+                    turn, grant, cursor=mid_read["result"]["next_cursor"]
+                ),
+                "obs-completed",
+            ),
+            peer=peer,
+        )
+        assert [item["text"] for item in completed_read["result"]["items"]] == [
+            "LC1 completed item"
+        ]
+        adapters[-1].gate.set()
+        collected = await collector
+        assert collected["result"]["candidate"]["summary"] == "bounded candidate"
+        terminal_read = await broker.execute(
+            _request(
+                "ohf-observe-turn",
+                _observer_payload(
+                    turn, grant, cursor=completed_read["result"]["next_cursor"]
+                ),
+                "obs-terminal",
+            ),
+            peer=peer,
+        )
+        assert terminal_read["result"]["items"] == []
+
+    asyncio.run(scenario())
+
+
+def test_ohf_slow_viewer_resyncs_by_cursor_without_stalling_controller(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        broker, peer, turn, adapters = await _lc1_broker_turn(
+            tmp_path,
+            "slow",
+            "LC1 slow viewer turn",
+            release_gate=True,
+        )
+        grant = adapters[-1].mint_observer_grant(turn)
+        adapters[-1].gate.set()
+        first = await broker.execute(
+            _request(
+                "ohf-observe-turn",
+                _observer_payload(turn, grant, max_items=1),
+                "slow-1",
+            ),
+            peer=peer,
+        )
+        adapters[-1].publish_visible("first", "partial")
+        adapters[-1].publish_visible("second", "partial")
+        stale = await broker.execute(
+            _request(
+                "ohf-observe-turn",
+                _observer_payload(turn, grant, max_items=1),
+                "slow-2",
+            ),
+            peer=peer,
+        )
+        cursor = stale["result"]["next_cursor"]
+        full = await broker.execute(
+            _request(
+                "ohf-observe-turn",
+                _observer_payload(turn, grant, cursor=None, max_items=64),
+                "slow-full",
+            ),
+            peer=peer,
+        )
+        assert [item["text"] for item in full["result"]["items"]] == ["first", "second"]
+        resumed = await broker.execute(
+            _request(
+                "ohf-observe-turn",
+                _observer_payload(turn, grant, cursor=cursor, max_items=64),
+                "slow-resume",
+            ),
+            peer=peer,
+        )
+        assert [item["text"] for item in resumed["result"]["items"]] == ["second"]
+
+        projection = adapters[-1].visible_turn_projection
+        first_key = projection.check_grant(grant)
+        assert first_key is not None
+        projection.arm_prebind(99)
+        dropped = projection.drop_prebind("test_whole_drop")
+        assert dropped is not None and dropped.reason == "test_whole_drop"
+        assert projection.active_prebind_request_id() is None
+
+    asyncio.run(scenario())
+
+
+def test_ohf_two_viewers_have_independent_cursors_and_zero_control_effects(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        broker, peer, turn, adapters = await _lc1_broker_turn(
+            tmp_path,
+            "two",
+            "LC1 two viewers",
+            release_gate=True,
+        )
+        first_grant = adapters[-1].mint_observer_grant(turn)
+        second_grant = adapters[-1].mint_observer_grant(turn)
+        adapters[-1].gate.set()
+        adapters[-1].publish_visible("visible-one", "partial")
+        first = await broker.execute(
+            _request(
+                "ohf-observe-turn",
+                _observer_payload(turn, first_grant, max_items=1),
+                "two-first",
+            ),
+            peer=peer,
+        )
+        second = await broker.execute(
+            _request(
+                "ohf-observe-turn",
+                _observer_payload(turn, second_grant),
+                "two-second",
+            ),
+            peer=peer,
+        )
+        assert first_grant != second_grant
+        assert first["result"]["next_cursor"] == second["result"]["next_cursor"]
+        assert [item["text"] for item in first["result"]["items"]] == ["visible-one"]
+        assert [item["text"] for item in second["result"]["items"]] == ["visible-one"]
+        assert adapters[-1].prompts == ["LC1 two viewers"]
+        assert adapters[-1].lifecycle == ["provider_start"]
+
+    asyncio.run(scenario())
+
+
+def test_ohf_disconnected_viewer_causes_zero_worker_effects(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        broker, peer, turn, adapters = await _lc1_broker_turn(
+            tmp_path, "disconnect", "LC1 disconnect"
+        )
+        grant = adapters[-1].mint_observer_grant(turn)
+        first = await broker.execute(
+            _request(
+                "ohf-observe-turn",
+                _observer_payload(turn, grant),
+                "disconnect-read",
+            ),
+            peer=peer,
+        )
+        adapters[-1].visible_turn_projection.revoke_grant(grant)
+        with pytest.raises(BrokerStateError, match="READER_REVOKED"):
+            await broker.execute(
+                _request(
+                    "ohf-observe-turn",
+                    _observer_payload(
+                        turn, grant, cursor=first["result"]["next_cursor"]
+                    ),
+                    "disconnect-refused",
+                ),
+                peer=peer,
+            )
+        assert adapters[-1].prompts == ["LC1 disconnect"]
+        assert adapters[-1].lifecycle == ["provider_start"]
+        assert adapters[-1].visible_turn_projection.check_grant(grant) is None
+
+    asyncio.run(scenario())
+
+
+def test_ohf_parser_failure_records_gap_without_blocking_controller(
+    tmp_path: Path,
+) -> None:
+    projection = VisibleTurnProjection()
+    key = TurnKey(
+        "ATT-PARSER", "epoch-parser", "generation-parser", 1, "codex-01",
+        "turn-parser", "native-parser",
+    )
+    grant = projection.mint_grant(key)
+    projection.publish(
+        key,
+        method="item/completed",
+        params={"item": {"type": "agentMessage", "id": "missing-sequence"}},
+    )
+    projection.publish(
+        key,
+        method="item/completed",
+        params={
+            "item": {
+                "id": "valid-item",
+                "sequence": 1,
+                "type": "agentMessage",
+                "text": "valid",
+            }
+        },
+    )
+    result = projection.read(key, reader_grant=grant, cursor=None, max_items=64)
+    assert [item.text for item in result.items] == ["valid"]
+    assert [gap.reason for gap in result.gaps] == ["parser_failure"]
+    assert projection.parser_gaps() == ()
+
+    clock = iter([0.0, 0.0, 2.0]).__next__
+    expired = VisibleTurnProjection(clock=clock)
+    expired.arm_prebind(17)
+    expired.prebind_frame(
+        17,
+        method="item/updated",
+        params={
+            "item": {
+                "id": "early",
+                "sequence": 1,
+                "type": "agentMessage",
+                "text": "early",
+            }
+        },
+    )
+    dropped = expired.drop_expired_prebind()
+    assert dropped is not None and dropped.reason == "prebind_timeout"
+    assert expired.active_prebind_request_id() is None
+
+
+def test_ohf_reader_revocation_stops_publication_and_clears_unsent_buffer(
+    tmp_path: Path,
+) -> None:
+    projection = VisibleTurnProjection()
+    key = TurnKey(
+        "ATT-REVOKE", "epoch-revoke", "generation-revoke", 1, "codex-01",
+        "turn-revoke", "native-revoke",
+    )
+    grant = projection.mint_grant(key)
+    projection.arm_prebind(1)
+    projection.prebind_frame(
+        1,
+        method="item/updated",
+        params={
+            "item": {
+                "id": "unsent",
+                "sequence": 1,
+                "type": "agentMessage",
+                "text": "unsent bytes",
+            }
+        },
+    )
+    projection.revoke_grant(grant)
+    with pytest.raises(ProjectionError, match="READER_REVOKED"):
+        projection.read(key, reader_grant=grant, cursor=None, max_items=64)
+    assert projection.active_prebind_request_id() is None
+    assert projection.check_grant(grant) is None
+
+    overfull = VisibleTurnProjection()
+    overfull_key = TurnKey(
+        "ATT-OVER", "epoch-over", "generation-over", 1, "codex-01",
+        "turn-over", "native-over",
+    )
+    overfull_grant = overfull.mint_grant(overfull_key)
+    overfull.arm_prebind(1)
+    for index in range(MAX_PREBIND_ITEMS + 1):
+        overfull.prebind_frame(
+            1,
+            method="item/updated",
+            params={
+                "item": {
+                    "id": f"item-{index}",
+                    "sequence": index,
+                    "type": "agentMessage",
+                    "text": str(index),
+                }
+            },
+        )
+    assert overfull.active_prebind_request_id() is None
+    assert overfull.check_grant(overfull_grant) is not None
+
+
+def test_ohf_observer_wrong_generation_refused_before_content_release(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        broker, peer, turn, adapters = await _lc1_broker_turn(
+            tmp_path, "wrong", "LC1 wrong identity"
+        )
+        grant = adapters[-1].mint_observer_grant(turn)
+        for field, value in (
+            ("attempt", "ATT-OTHER"),
+            ("generation", "generation-other"),
+        ):
+            with pytest.raises(BrokerStateError, match="GENERATION_INVALID"):
+                await broker.execute(
+                    _request(
+                        "ohf-observe-turn",
+                        _observer_payload(turn, grant, **{field: value}),
+                        f"wrong-{field}",
+                    ),
+                    peer=peer,
+                )
+        assert broker._observer_refusals[-2][1] == "GENERATION_INVALID"
+        assert broker._observer_refusals[-1][1] == "GENERATION_INVALID"
+
+    asyncio.run(scenario())
+
+
+def test_ohf_observation_never_acquires_busy_or_calls_provider(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        broker, peer, turn, adapters = await _lc1_broker_turn(
+            tmp_path,
+            "busy",
+            "LC1 busy proof",
+            release_gate=True,
+        )
+        grant = adapters[-1].mint_observer_grant(turn)
+        before = list(adapters[-1].lifecycle)
+        observed = await broker.execute(
+            _request(
+                "ohf-observe-turn",
+                _observer_payload(turn, grant),
+                "busy-observe",
+            ),
+            peer=peer,
+        )
+        assert observed["result"]["items"] == []
+        assert broker._operator_run is not None and not broker._operator_run.busy
+        assert adapters[-1].lifecycle == before
+        assert set(observed["result"]) == {
+            "items",
+            "next_cursor",
+            "gaps",
+            "terminal",
+            "publication_epoch",
+            "retained_scope",
+            "resync_required",
+        }
+
+    asyncio.run(scenario())
+
+
+def test_ohf_effect_counter_is_zero_for_all_observer_paths(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        broker, peer, turn, adapters = await _lc1_broker_turn(
+            tmp_path,
+            "effects",
+            "LC1 effects",
+            release_gate=True,
+        )
+        first_grant = adapters[-1].mint_observer_grant(turn)
+        second_grant = adapters[-1].mint_observer_grant(turn)
+        adapters[-1].publish_visible("observer-path-visible", "partial")
+        provider_calls = []
+        original_read_events = type(adapters[-1]).read_events
+        original_collect = type(adapters[-1]).collect_candidate_result
+        original_raw = type(adapters[-1]).observe_raw_role_result
+
+        def counted_read_events(*args, **kwargs):
+            provider_calls.append("read_events")
+            return original_read_events(*args, **kwargs)
+
+        def counted_collect(*args, **kwargs):
+            provider_calls.append("candidate_collections")
+            return original_collect(*args, **kwargs)
+
+        def counted_raw(*args, **kwargs):
+            provider_calls.append("raw_collections")
+            return original_raw(*args, **kwargs)
+
+        adapters[-1].read_events = counted_read_events
+        adapters[-1].collect_candidate_result = counted_collect
+        adapters[-1].observe_raw_role_result = counted_raw
+        adapters[-1].gate.set()
+        observed = await broker.execute(
+            _request(
+                "ohf-observe-turn",
+                _observer_payload(turn, first_grant),
+                "effects-read",
+            ),
+            peer=peer,
+        )
+        second = await broker.execute(
+            _request(
+                "ohf-observe-turn",
+                _observer_payload(
+                    turn,
+                    second_grant,
+                    cursor=observed["result"]["next_cursor"],
+                    max_items=1,
+                ),
+                "effects-second",
+            ),
+            peer=peer,
+        )
+        assert second["result"]["items"] == []
+        adapters[-1].visible_turn_projection.revoke_grant(second_grant)
+        with pytest.raises(BrokerStateError, match="READER_REVOKED"):
+            await broker.execute(
+                _request(
+                    "ohf-observe-turn",
+                    _observer_payload(turn, second_grant),
+                    "effects-revoked",
+                ),
+            peer=peer,
+        )
+        assert adapters[-1].lifecycle == ["provider_start"]
+        assert adapters[-1].prompts == ["LC1 effects"]
+        assert broker._operator_run.busy is False
+        assert provider_calls == []
+        assert broker._observer_refusals[-1][1] == "READER_REVOKED"
+        assert adapters[-1].visible_turn_projection.check_grant(second_grant) is None
+        assert observed["result"]["resync_required"] is False
 
     asyncio.run(scenario())

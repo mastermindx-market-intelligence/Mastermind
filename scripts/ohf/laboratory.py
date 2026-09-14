@@ -495,7 +495,6 @@ class AppServerClient:
         params: Mapping[str, Any] | None = None,
         *,
         timeout: float = 15.0,
-        arm_prebind: bool = False,
     ) -> dict[str, Any]:
         response_queue: queue.Queue[dict[str, Any] | None] = queue.Queue(maxsize=1)
         with self._notification_condition:
@@ -504,8 +503,6 @@ class AppServerClient:
             request_id = self._next_id
             self._next_id += 1
             self._responses[request_id] = response_queue
-            if arm_prebind and self.visible_projection is not None:
-                self.visible_projection.arm_prebind(request_id)
         message: dict[str, Any] = {"method": method, "id": request_id}
         if params is not None:
             message["params"] = dict(params)
@@ -543,6 +540,12 @@ class AppServerClient:
                 self.visible_projection.drop_expired_prebind()
             with self._notification_condition:
                 self._responses.pop(request_id, None)
+
+    def arm_prebind(self, request_id: int | None) -> None:
+        if request_id is None or request_id != self._next_id:
+            return
+        if self.visible_projection is not None:
+            self.visible_projection.arm_prebind(request_id)
 
     def next_request_id(self) -> int:
         with self._notification_condition:

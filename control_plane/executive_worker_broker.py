@@ -2148,6 +2148,9 @@ class ExecutiveWorkerBroker:
             self._observer_refusals.append((None, "UNKNOWN_GENERATION"))
             raise BrokerStateError("UNKNOWN_GENERATION")
         grant_key = projection.check_grant(payload["reader_grant"])
+        if grant_key is None:
+            self._observer_refusals.append((None, "READER_REVOKED"))
+            raise BrokerStateError("READER_REVOKED")
         exact_local = None
         generation_state = active.adapter._generations.get(
             active.generation.process_generation_id
@@ -2159,7 +2162,6 @@ class ExecutiveWorkerBroker:
             if (
                 local_turn == payload["turn"]
                 and candidate_native
-                and grant_key is not None
                 and candidate_native == grant_key.native_turn_id
             ):
                 exact_local = local_turn

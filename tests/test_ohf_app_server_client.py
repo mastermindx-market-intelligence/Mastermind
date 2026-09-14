@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from control_plane.visible_turn_projection import VisibleTurnProjection
 import scripts.ohf.laboratory as laboratory
 from scripts.ohf.laboratory import AppServerClient, JsonRpcError
 
@@ -88,5 +89,19 @@ def test_raw_method_is_hard_wired_to_closed_page_contract(tmp_path):
             client.request_raw_turn_page(  # type: ignore[call-arg]
                 thread_id="THREAD", native_turn_id="TURN-RAW", method="account/read"
             )
+    finally:
+        client.close()
+
+
+def test_lc1_extraction_publishes_after_demux_and_never_retains_raw_pages(tmp_path):
+    projection = VisibleTurnProjection()
+    client = _client(tmp_path)
+    client.visible_projection = projection
+    try:
+        ordinary = client.request("thread/turns/list", {"threadId": "THREAD"})
+        assert isinstance(ordinary, dict)
+        assert projection.parser_gaps() == ()
+        assert projection.active_prebind_request_id() is None
+        assert isinstance(client.notifications, list)
     finally:
         client.close()

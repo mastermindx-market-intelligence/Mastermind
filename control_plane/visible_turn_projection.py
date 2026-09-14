@@ -26,6 +26,9 @@ MAX_VIEWERS = 2
 _ID_BYTES = 18
 _MAX_ID_LENGTH = 256
 _MAX_REASON_LENGTH = 128
+_CURSOR_JSON_BYTES = frozenset(
+    b'0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-",:{}[] '
+)
 
 
 class ProjectionError(ValueError):
@@ -136,7 +139,10 @@ def _decode_cursor(value: object) -> _Cursor:
     if not isinstance(value, str) or not value:
         raise ProjectionError("CURSOR_STALE", "cursor is missing")
     try:
-        raw = json.loads(base64.urlsafe_b64decode(value.encode("ascii"), validate=True))
+        decoded = base64.urlsafe_b64decode(value.encode("ascii"))
+        if not decoded or any(byte not in _CURSOR_JSON_BYTES for byte in decoded):
+            raise ValueError("cursor is not canonical JSON")
+        raw = json.loads(decoded)
         projection_id = raw["p"]
         publication_epoch = raw["e"]
         publication_sequence = raw["s"]
@@ -390,10 +396,17 @@ class VisibleTurnProjection:
                 for gap in record.gaps
                 if gap.to_publication_sequence > sequence
             ]
-            page = tuple(eligible[:max_items])
-            response_size = sum(len(item.text.encode("utf-8")) for item in page)
-            if response_size > MAX_ENCODED_READ_BYTES:
-                self._refuse(key, "OVER_BUDGET")
+            selected = []
+            response_size = 0
+            for item in eligible:
+                item_size = len(item.text.encode("utf-8"))
+                if selected and response_size + item_size > MAX_ENCODED_READ_BYTES:
+                    break
+                selected.append(item)
+                response_size += item_size
+                if response_size >= MAX_ENCODED_READ_BYTES:
+                    break
+            page = tuple(selected[:max_items])
             last = page[-1].publication_sequence if page else sequence
             return ReadResult(
                 page,
@@ -402,7 +415,7 @@ class VisibleTurnProjection:
                 record.terminal,
                 record.publication_epoch,
                 (record.key.process_generation_id, record.key.native_turn_id),
-                False,
+                len(page) < len(eligible),
             )
 
     def invalidate_generation(self, key: TurnKey, reason: str = "generation_invalid") -> None:
@@ -512,10 +525,6 @@ class VisibleTurnProjection:
                 record.next_publication_sequence,
             )
             return
-        if len(record.items) >= MAX_ITEMS_PER_TURN:
-            if gap_on_bounds:
-                self._add_gap_locked(record, "turn_item_overflow")
-            return
         sequence = record.next_publication_sequence + 1
         visible = VisibleItem(
             item.source_item_id,
@@ -526,6 +535,20 @@ class VisibleTurnProjection:
             sequence,
         )
         retained = record.retained_bytes + item.byte_length
+        while len(record.items) >= MAX_ITEMS_PER_TURN and record.items:
+            oldest = record.items[0]
+            retained -= oldest.byte_length
+            record = self._turns[record.key.native_turn_id] = _TurnRecord(
+                record.projection_id,
+                record.publication_epoch,
+                record.key,
+                record.items[1:],
+                record.gaps,
+                record.terminal,
+                retained,
+                record.next_publication_sequence,
+            )
+            self._add_gap_locked(record, "turn_item_overflow")
         while retained > MAX_RETAINED_TURN_BYTES and record.items:
             oldest = record.items[0]
             retained -= oldest.byte_length

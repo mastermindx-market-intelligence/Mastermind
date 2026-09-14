@@ -86,7 +86,6 @@ from control_plane.worker_browser_b1 import BROWSER_RESOURCE_ENV_KEYS
 from control_plane.visible_turn_projection import (
     TurnKey,
     VisibleTurnProjection,
-    VisibleItem,
 )
 from scripts.ohf.capability_skill_projection import SkillProjectionReceipt
 from scripts.ohf.laboratory import AppServerClient, AppServerStopProof, JsonRpcError
@@ -2113,6 +2112,13 @@ class CodexOperatorAdapter:
                 "turn is outside the bound generation",
             )
 
+    def _visible_projection(self) -> VisibleTurnProjection:
+        projection = getattr(self, "visible_turn_projection", None)
+        if projection is None:
+            projection = VisibleTurnProjection()
+            self.visible_turn_projection = projection
+        return projection
+
     def mint_observer_grant(self, turn: TurnRef) -> str:
         state = self._generations.get(turn.process_generation_id)
         if state is None:
@@ -2125,7 +2131,7 @@ class CodexOperatorAdapter:
             raise CodexAdapterError(
                 AdapterFailureClass.SESSION_MISSING, "native turn is missing"
             )
-        return self.visible_turn_projection.mint_grant(
+        return self._visible_projection().mint_grant(
             TurnKey(
                 turn.attempt_id,
                 turn.session_epoch_id,
@@ -2170,6 +2176,26 @@ class CodexOperatorAdapter:
 
         for item in notifications:
             method = str(item.get("method") or "unknown")
+            if turn.turn_id in state.visible_turns:
+                self._visible_projection().publish(
+                    TurnKey(
+                        turn.attempt_id,
+                        turn.session_epoch_id,
+                        turn.process_generation_id,
+                        state.generation.generation_number,
+                        state.generation.worker_id,
+                        turn.turn_id,
+                        state.turns[turn.turn_id],
+                    ),
+                    method=method,
+                    params=item.get("params"),
+                    native_turn_id=(
+                        item.get("params", {}).get("turn", {}).get("id")
+                        if isinstance(item.get("params"), Mapping)
+                        and isinstance(item.get("params", {}).get("turn"), Mapping)
+                        else None
+                    ),
+                )
             if self.skill_canary_binding is not None and method == "skills/changed":
                 # CAP-S1 protocol-attestation amendment §8: any post-observation
                 # skills/changed notification invalidates the launch attestation
@@ -2500,6 +2526,14 @@ class CodexOperatorAdapter:
                 "turn input loader returned an unsupported input type",
             )
         try:
+            next_request_id = getattr(state.client, "next_request_id", None)
+            if callable(next_request_id):
+                state.pending_prebind_request_id = next_request_id()
+            else:
+                state.pending_prebind_request_id = None
+            prebind_armer = getattr(state.client, "arm_prebind", None)
+            if callable(prebind_armer):
+                prebind_armer(state.pending_prebind_request_id)
             result = state.client.request(
                 "turn/start",
                 {
@@ -2515,9 +2549,10 @@ class CodexOperatorAdapter:
             )
             native_turn_id = str(turn_obj.get("id") or "")
         except Exception as exc:
-            self.visible_turn_projection.drop_prebind("turn_start_error")
+            self._visible_projection().drop_prebind("turn_start_error")
             raise _rpc_failure(exc, effect_unknown=True) from exc
         if not native_turn_id:
+            self._visible_projection().drop_prebind("turn_start_invalid_identity")
             raise CodexAdapterError(
                 AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
                 "turn/start returned no native turn identity",
@@ -2533,14 +2568,19 @@ class CodexOperatorAdapter:
             turn.turn_id,
             native_turn_id,
         )
-        self.visible_turn_projection.commit_prebind(
+        self._visible_projection().commit_prebind(
             state.pending_prebind_request_id
             if state.pending_prebind_request_id is not None
             else -1,
             turn_key,
             native_turn_id=native_turn_id,
         )
-        state.visible_turns.add(turn.turn_id)
+        state.pending_prebind_request_id = None
+        visible_turns = getattr(state, "visible_turns", None)
+        if visible_turns is None:
+            visible_turns = set()
+            state.visible_turns = visible_turns
+        visible_turns.add(turn.turn_id)
         notifications = state.client.drain_notifications()
         self._ingest_turn_notifications(state, turn, notifications)
         return TurnStartObservation(
