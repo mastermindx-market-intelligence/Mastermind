@@ -63,6 +63,7 @@ from control_plane.operator_materialization_receipt import (
     materialization_receipt_path,
 )
 from control_plane.worker_browser_b1 import BrowserReviewReceipt
+from control_plane.visible_turn_projection import TurnKey, VisibleTurnProjection
 
 
 class _Sweeper:
@@ -137,6 +138,8 @@ class _OperatorAdapter:
         self.prompts: list[str] = []
         self.lifecycle: list[str] = []
         self.resource = None
+        self.visible_turn_projection = VisibleTurnProjection()
+        self._generations = {}
 
     def bind_attempt_resource(self, resource, **_kwargs):
         self.lifecycle.append("resource_bind")
@@ -202,7 +205,25 @@ class _OperatorAdapter:
     def begin_turn(self, *, turn, **_kwargs):
         self.turn = turn
         self.prompts.append(self.prompt_loader(turn))
+        self._generations[turn.process_generation_id] = type(
+            "GenerationState",
+            (),
+            {"turns": {turn.turn_id: "native-turn-1"}},
+        )()
         return TurnStartObservation("native-turn-1", True)
+
+    def mint_observer_grant(self, turn):
+        return self.visible_turn_projection.mint_grant(
+            TurnKey(
+                turn.attempt_id,
+                turn.session_epoch_id,
+                turn.process_generation_id,
+                1,
+                "codex-01",
+                turn.turn_id,
+                self._generations[turn.process_generation_id].turns[turn.turn_id],
+            )
+        )
 
     def read_events(self, cursor, *, timeout_seconds):
         assert timeout_seconds > 0 and self.turn is not None
@@ -775,21 +796,7 @@ def test_operator_broker_runs_one_exact_generation_and_cleans_uid(tmp_path: Path
         )
         assert collected["result"]["candidate"]["complete_job_permitted"] is False
         assert adapters[-1].prompts == ["Produce one bounded read-only plan."]
-        # LC1 provisional handoff: only the exact bound local/native turn can
-        # mint the first ephemeral observer grant, and observation never acquires
-        # the busy operation lane.
-        from control_plane.visible_turn_projection import TurnKey, VisibleTurnProjection
-
-        key = TurnKey(
-            "ATT-1", "epoch-1", "generation-1", 1, "codex-01", "turn-1",
-            "native-turn-1",
-        )
-        projection = VisibleTurnProjection()
-        adapters[-1].visible_turn_projection = projection
-        adapters[-1]._generations = {
-            "generation-1": type("State", (), {"turns": {"turn-1": "native-turn-1"}})()
-        }
-        grant = projection.mint_grant(key)
+        grant = adapters[-1].mint_observer_grant(turn)
         observed = await broker.execute(
             _request(
                 "ohf-observe-turn",

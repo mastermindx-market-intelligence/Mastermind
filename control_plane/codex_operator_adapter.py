@@ -83,7 +83,11 @@ from control_plane.executive_orchestration_result import (
     parse_canonical_json,
 )
 from control_plane.worker_browser_b1 import BROWSER_RESOURCE_ENV_KEYS
-from control_plane.visible_turn_projection import TurnKey, VisibleTurnProjection
+from control_plane.visible_turn_projection import (
+    TurnKey,
+    VisibleTurnProjection,
+    VisibleItem,
+)
 from scripts.ohf.capability_skill_projection import SkillProjectionReceipt
 from scripts.ohf.laboratory import AppServerClient, AppServerStopProof, JsonRpcError
 from scripts.ohf.redaction import redact_evidence_text
@@ -2108,6 +2112,30 @@ class CodexOperatorAdapter:
                 AdapterFailureClass.VALIDATION_FAILURE,
                 "turn is outside the bound generation",
             )
+
+    def mint_observer_grant(self, turn: TurnRef) -> str:
+        state = self._generations.get(turn.process_generation_id)
+        if state is None:
+            raise CodexAdapterError(
+                AdapterFailureClass.SESSION_MISSING, "turn generation is missing"
+            )
+        self._assert_turn(state, turn)
+        native_turn = state.turns.get(turn.turn_id)
+        if not native_turn:
+            raise CodexAdapterError(
+                AdapterFailureClass.SESSION_MISSING, "native turn is missing"
+            )
+        return self.visible_turn_projection.mint_grant(
+            TurnKey(
+                turn.attempt_id,
+                turn.session_epoch_id,
+                turn.process_generation_id,
+                state.generation.generation_number,
+                state.generation.worker_id,
+                turn.turn_id,
+                native_turn,
+            )
+        )
 
     def _ingest_turn_notifications(
         self,
