@@ -266,7 +266,12 @@ class VisibleTurnProjection:
         method = payload.get("method")
         params = payload.get("params")
         native_turn_id = None
-        if method == "turn/completed":
+        if isinstance(params, Mapping) and any(
+            method == candidate
+            for candidate in ("item/updated", "item/completed")
+        ):
+            native_turn_id = params.get("turnId")
+        elif method == "turn/completed":
             turn = params.get("turn") if isinstance(params, Mapping) else None
             native_turn_id = (
                 turn.get("id") if isinstance(turn, Mapping) else None
