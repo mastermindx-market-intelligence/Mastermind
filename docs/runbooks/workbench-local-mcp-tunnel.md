@@ -55,6 +55,8 @@ OpenAI Secure MCP Tunnel
     v
 stdio: scripts/mastermind_workbench_local_mcp.py
     |
+bounded private MCP stdio boundary
+    |
 LocalWorkbenchGateway
     |
 existing integrations.workbench_read_mcp.observer
@@ -64,6 +66,12 @@ fixed owner-configured project descriptor
 
 There is no Desktop Commander hosted relay, `broadcast_v1`, public inbound
 listener, model-selected host, or generic remote shell in this path.
+
+The stdio boundary validates closed JSON-RPC envelopes before MCP SDK dispatch,
+caps inbound and outbound frames at 262,144 UTF-8 bytes, and returns a fixed
+null-ID protocol refusal for malformed input. Rejected values are excluded from
+SDK diagnostics. The server still validates each known tool against its frozen
+schema and returns the adapter's bounded result envelope.
 
 ### Borrowed Read port for the Action runtime
 
@@ -111,9 +119,18 @@ The launcher accepts exactly one absolute owner-controlled JSON config. Example:
 ```
 
 Config is bounded, duplicate-key refusing, same-euid, nofollow, regular-file,
-and not group/world-writable. Project root must be same-euid, non-symlink,
+and not group/world-writable. Acquisition requires the initial path, opened
+descriptor, post-read descriptor and final path to retain the same identity,
+mode, owner, link count, size, mtime and ctime, with an exact-size nonblocking
+read. Project root must be same-euid, non-symlink,
 non-group/world-writable directory. `.git` paths, traversal, absolute paths,
 Windows-drive syntax and undeclared files refuse closed.
+
+Server construction and initialization are inside the same cleanup boundary as
+serving. Once an executor exists it drains before the owned project descriptor
+closes. An ambiguous descriptor close reports
+`PROJECT_CLEANUP_UNCERTAIN`, remains sticky on later close calls, and is never
+retried against a possibly reused descriptor number.
 
 The serving command is:
 
@@ -130,9 +147,10 @@ The serving command is:
 Focused source and inherited read-boundary proof:
 
 ```text
-13 passed  tests/workbench_local_mcp/test_local_profile.py
-14 passed  tests/workbench_local_mcp
+43 passed  tests/workbench_local_mcp
 47 passed  tests/workbench_read_mcp/test_observer.py
+17 passed  tests/test_mcp_stdio_boundary.py
+53 unittest subtests passed across the combined gate
 ```
 
 A real MCP 1.28.1 stdio client then proved:

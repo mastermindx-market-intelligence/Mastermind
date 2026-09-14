@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import sys
 import tempfile
 import threading
 import time
@@ -395,6 +396,54 @@ class SdkDispatchBoundaryTests(unittest.TestCase):
         finally:
             gateway.close = original_close  # type: ignore[method-assign]
             gateway.close()
+
+    def test_native_launcher_refuses_private_malformed_frame_and_recovers(self) -> None:
+        from tests.test_mcp_stdio_boundary import SENTINEL, child, initialize
+
+        config_path = Path(self.fixtures._tmp.name) / "native-profile.json"
+        config_path.write_text(json.dumps(self.fixtures.payload), encoding="utf-8")
+        launcher = (
+            Path(__file__).resolve().parents[2]
+            / "scripts"
+            / "mastermind_workbench_local_mcp.py"
+        )
+        with child(
+            [sys.executable, str(launcher), "--config", str(config_path)]
+        ) as process:
+            initialize(process)
+            process.send(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {"name": [SENTINEL]},
+                }
+            )
+            self.assertEqual(
+                process.receive(),
+                {
+                    "jsonrpc": "2.0",
+                    "id": None,
+                    "error": {
+                        "code": -32600,
+                        "message": "WORKBENCH_MCP_INVALID_REQUEST",
+                    },
+                },
+            )
+            process.send(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "tools/call",
+                    "params": {"name": "workspace_manifest", "arguments": {}},
+                }
+            )
+            recovered = process.receive()
+            self.assertEqual(recovered["id"], 3)
+            self.assertFalse(recovered["result"]["isError"])
+            process.assert_exit()
+            self.assertNotIn(SENTINEL.encode(), process.wire + process.stderr())
+            self.assertFalse(process.fallback_used)
 
     def test_physical_timeout_blocks_descriptor_close_until_eventual_drain(self) -> None:
         import mcp.types as mcp_types

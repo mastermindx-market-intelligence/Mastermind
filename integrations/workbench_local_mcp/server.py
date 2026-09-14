@@ -14,9 +14,9 @@ import jsonschema
 import mcp.types as mcp_types
 from mcp.server.lowlevel import NotificationOptions, Server
 from mcp.server.models import InitializationOptions
-from mcp.server.stdio import stdio_server
 
 from common.bounded_sync_executor import BoundedSyncExecutor
+from common.mcp_stdio_boundary import private_stdio_server
 from .adapter import LocalWorkbenchGateway
 from .schemas import (
     MAX_ARGUMENT_BYTES,
@@ -183,7 +183,7 @@ async def run_stdio(gateway: LocalWorkbenchGateway) -> None:
             raise RuntimeError("Workbench executor ownership missing")
         executor = selected_executor
         options = initialization_options(server)
-        async with stdio_server() as (read_stream, write_stream):
+        async with private_stdio_server() as (read_stream, write_stream):
             await server.run(read_stream, write_stream, options)
     finally:
         if executor is None:
