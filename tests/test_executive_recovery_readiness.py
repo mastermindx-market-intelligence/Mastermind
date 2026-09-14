@@ -23,6 +23,7 @@ from control_plane.executive_recovery_readiness import (
     PREDICATE_CODES,
     PREDICATE_EVIDENCE_CLASSES,
     PREDICATE_IDS,
+    PREDICATE_MEASUREMENT_LAW,
     READINESS_PROFILES,
     READINESS_SCHEMA,
     REPORT_FIELDS,
@@ -32,6 +33,7 @@ from control_plane.executive_recovery_readiness import (
     canonical_recovery_readiness_json,
     classify_recovery_readiness,
     recovery_profile,
+    resolve_recovery_state,
     validate_recovery_readiness_report,
 )
 from ops.executive_os import host_recovery_readiness as probe_module
@@ -975,6 +977,370 @@ def test_out_of_vocabulary_preboot_code_is_refused() -> None:
     with pytest.raises(RecoveryReadinessContractError) as excinfo:
         validate_recovery_readiness_report(report)
     assert str(excinfo.value) == "PREDICATE_CODE_INVALID"
+
+
+# ------------------------------------------------- status/code semantic pairing
+
+
+def _refusal(
+    report: dict[str, Any], *, expected_profile: Any = None
+) -> str:
+    with pytest.raises(RecoveryReadinessContractError) as excinfo:
+        validate_recovery_readiness_report(report, expected_profile=expected_profile)
+    return str(excinfo.value)
+
+
+def _forge_status(
+    report: dict[str, Any], predicate_id: str, status: str
+) -> dict[str, Any]:
+    """Relabel one predicate's status and repair every derived field.
+
+    This is the whole attack: a report whose syntax, vocabulary, requirement
+    table and top-level derivation are all internally consistent, and which is
+    a lie only in the pairing between a failure code and a passing status.
+    """
+
+    predicates = report["predicates"]
+    predicates[predicate_id]["status"] = status
+    state, blocking, unknown = resolve_recovery_state(predicates)
+    report["recovery_state"] = state
+    report["blocking_predicates"] = blocking
+    report["unknown_predicates"] = unknown
+    return report
+
+
+def test_forged_daemon_pass_on_a_not_installed_control_daemon_is_refused() -> None:
+    """The independent review's attack: DAEMON_NOT_INSTALLED relabelled OK.
+
+    Every required Studio control daemon is genuinely missing, so the honest
+    report is NOT_READY.  Relabelling each blocking predicate OK while leaving
+    its failure code intact used to buy a forged READY, because status
+    vocabulary and code vocabulary were validated independently.
+    """
+
+    daemons = {label: "NOT_INSTALLED" for label in REQUIRED_RUNNING_DAEMON_LABELS}
+    daemons.update(
+        {label: "DISABLED" for label in DISARMED_EXPECTED_DAEMON_LABELS}
+    )
+    honest = _classify(_observation(system_daemons=daemons))
+    assert honest["recovery_state"] == "NOT_READY"
+    assert _blocking(honest) == [
+        f"system_daemon.{label}" for label in sorted(REQUIRED_RUNNING_DAEMON_LABELS)
+    ]
+    for label in REQUIRED_RUNNING_DAEMON_LABELS:
+        predicate = honest["predicates"][f"system_daemon.{label}"]
+        assert predicate["code"] == "DAEMON_NOT_INSTALLED"
+        assert predicate["status"] == "NOT_READY"
+
+    forged = json.loads(json.dumps(honest))
+    for label in REQUIRED_RUNNING_DAEMON_LABELS:
+        forged["predicates"][f"system_daemon.{label}"]["status"] = "OK"
+    forged["recovery_state"] = "READY"
+    forged["blocking_predicates"] = []
+
+    assert (
+        _refusal(forged, expected_profile=EXECUTIVE_CONTROL_PROFILE)
+        == "PREDICATE_STATUS_CODE_MISMATCH"
+    )
+    assert _refusal(forged) == "PREDICATE_STATUS_CODE_MISMATCH"
+
+
+def test_forged_daemon_failure_on_a_running_control_daemon_is_refused() -> None:
+    """The inverse lie must refuse too: a running daemon reported NOT_READY."""
+
+    report = _classify(_observation())
+    predicate_id = "system_daemon.com.mastermind.executive.control"
+    assert report["predicates"][predicate_id]["code"] == "DAEMON_RUNNING"
+
+    forged = _forge_status(report, predicate_id, "NOT_READY")
+    assert forged["recovery_state"] == "NOT_READY"
+
+    assert _refusal(forged) == "PREDICATE_STATUS_CODE_MISMATCH"
+
+
+@pytest.mark.parametrize(
+    "profile,requirement,canonical_status",
+    [
+        (BASE_RECOVERY_PROFILE, "ADVISORY", "ADVISORY"),
+        (EXECUTIVE_CONTROL_PROFILE, "REQUIRED_RUNNING", "NOT_READY"),
+    ],
+)
+def test_same_daemon_code_has_profile_specific_canonical_status(
+    profile: str, requirement: str, canonical_status: str
+) -> None:
+    """``DAEMON_NOT_INSTALLED`` is advisory under base and a defect under control.
+
+    One observed code, two profiles, two different legal statuses — and neither
+    of them is ``OK``.  The status the validator demands therefore has to be
+    derived through the requirement the named profile assigns, not from a
+    profile-independent code table.
+    """
+
+    observation = _m1_worker_observation()
+    predicate_id = f"system_daemon.{REQUIRED_RUNNING_DAEMON_LABELS[0]}"
+    report = _classify(observation, profile)
+    predicate = report["predicates"][predicate_id]
+
+    assert predicate["requirement"] == requirement
+    assert predicate["code"] == "DAEMON_NOT_INSTALLED"
+    assert predicate["status"] == canonical_status
+
+    forged = _forge_status(report, predicate_id, "OK")
+    assert _refusal(forged) == "PREDICATE_STATUS_CODE_MISMATCH"
+
+
+def test_cross_requirement_daemon_status_is_refused_by_vocabulary() -> None:
+    """The two layers compose: a status the requirement cannot hold at all.
+
+    ``ADVISORY`` is the honest base-profile status for a missing Executive
+    daemon, but a ``REQUIRED_RUNNING`` predicate may never carry it, so the
+    status vocabulary refuses before the pairing law is consulted.
+    """
+
+    report = _classify(_m1_worker_observation(), EXECUTIVE_CONTROL_PROFILE)
+    predicate_id = f"system_daemon.{REQUIRED_RUNNING_DAEMON_LABELS[0]}"
+    report["predicates"][predicate_id]["status"] = "ADVISORY"
+
+    assert _refusal(report) == "PREDICATE_STATUS_INVALID"
+
+
+def test_disarmed_verdict_is_unreachable_on_a_required_running_daemon() -> None:
+    """A code its own requirement can never emit is refused, not just an odd pair."""
+
+    report = _classify(_observation())
+    predicate_id = "system_daemon.com.mastermind.executive.mcp"
+    report["predicates"][predicate_id]["code"] = "DAEMON_INTENTIONALLY_DISARMED"
+
+    assert _refusal(report) == "PREDICATE_STATUS_CODE_MISMATCH"
+
+
+@pytest.mark.parametrize(
+    "predicate_id,observation_overrides,code,forged_status",
+    [
+        (
+            "auto_restart_after_power_loss",
+            {"ac_power_settings": {"sleep": 0, "autorestart": 0}},
+            "AUTO_RESTART_DISABLED",
+            "OK",
+        ),
+        (
+            "auto_restart_after_power_loss",
+            {},
+            "AUTO_RESTART_ENABLED",
+            "NOT_READY",
+        ),
+        (
+            "remote_login_listener",
+            {"remote_login": "DISABLED"},
+            "REMOTE_LOGIN_DISABLED",
+            "OK",
+        ),
+        (
+            "preboot_remote_unlock",
+            {"filevault_code": "FILEVAULT_ENCRYPTION_IN_PROGRESS"},
+            "PREBOOT_UNLOCK_STATE_UNKNOWN",
+            "OK",
+        ),
+        (
+            "os_identity",
+            {"macos_product_version": "13.6"},
+            "OS_UNSUPPORTED_VERSION",
+            "OK",
+        ),
+        (
+            "cpu_architecture",
+            {"apple_silicon": None},
+            "ARCHITECTURE_UNKNOWN",
+            "OK",
+        ),
+        (
+            "disk_encryption_state",
+            {"filevault_code": "FILEVAULT_STATE_UNKNOWN"},
+            "FILEVAULT_STATE_UNKNOWN",
+            "OK",
+        ),
+    ],
+)
+def test_non_daemon_status_code_forgery_is_refused(
+    predicate_id: str,
+    observation_overrides: dict[str, Any],
+    code: str,
+    forged_status: str,
+) -> None:
+    report = _classify(_observation(**observation_overrides))
+    assert report["predicates"][predicate_id]["code"] == code
+
+    forged = _forge_status(report, predicate_id, forged_status)
+    assert _refusal(forged) == "PREDICATE_STATUS_CODE_MISMATCH"
+
+
+def test_status_code_forgery_cannot_move_the_top_level_state() -> None:
+    """A pairing lie is refused before ``recovery_state`` is ever believed."""
+
+    honest = _classify(_studio_observation())
+    assert honest["recovery_state"] == "NOT_READY"
+    assert _blocking(honest) == ["auto_restart_after_power_loss"]
+
+    forged = json.loads(json.dumps(honest))
+    forged["predicates"]["auto_restart_after_power_loss"]["status"] = "OK"
+    forged["recovery_state"] = "READY"
+    forged["blocking_predicates"] = []
+    assert _refusal(forged) == "PREDICATE_STATUS_CODE_MISMATCH"
+
+    # The honest UNKNOWN case cannot be laundered into READY either.
+    unknown = _classify(_observation(ac_power_settings=None))
+    assert unknown["recovery_state"] == "UNKNOWN"
+    laundered = json.loads(json.dumps(unknown))
+    for predicate_id in unknown["unknown_predicates"]:
+        laundered["predicates"][predicate_id]["status"] = "OK"
+    laundered["recovery_state"] = "READY"
+    laundered["unknown_predicates"] = []
+    assert _refusal(laundered) == "PREDICATE_STATUS_CODE_MISMATCH"
+
+
+# ------------------------------------------------------ measurement semantics
+
+
+def test_every_predicate_that_never_measures_must_carry_no_measurement() -> None:
+    report = _classify(_observation())
+
+    measuring = set(PREDICATE_MEASUREMENT_LAW)
+    for predicate_id in PREDICATE_IDS:
+        if predicate_id in measuring:
+            continue
+        assert report["predicates"][predicate_id]["measurement"] is None
+
+        tampered = json.loads(json.dumps(report))
+        tampered["predicates"][predicate_id]["measurement"] = 1
+        assert _refusal(tampered) == "PREDICATE_MEASUREMENT_MISMATCH"
+
+
+@pytest.mark.parametrize("measurement", [0, None])
+def test_enabled_ac_sleep_must_carry_a_positive_measurement(
+    measurement: Any,
+) -> None:
+    report = _classify(
+        _observation(ac_power_settings={"sleep": 15, "autorestart": 1})
+    )
+    predicate = report["predicates"]["ac_sleep_policy"]
+    assert predicate["code"] == "AC_SLEEP_ENABLED"
+    assert predicate["measurement"] == 15
+
+    predicate["measurement"] = measurement
+    assert _refusal(report) == "PREDICATE_MEASUREMENT_MISMATCH"
+
+
+@pytest.mark.parametrize(
+    "settings,code",
+    [
+        ({"sleep": 0, "autorestart": 1}, "AC_SLEEP_DISABLED"),
+        ({"autorestart": 1}, "AC_SLEEP_UNKNOWN"),
+    ],
+)
+def test_non_enabled_ac_sleep_cannot_carry_a_measurement(
+    settings: dict[str, int], code: str
+) -> None:
+    report = _classify(_observation(ac_power_settings=settings))
+    predicate = report["predicates"]["ac_sleep_policy"]
+    assert predicate["code"] == code
+    assert predicate["measurement"] is None
+
+    predicate["measurement"] = 15
+    assert _refusal(report) == "PREDICATE_MEASUREMENT_MISMATCH"
+
+
+@pytest.mark.parametrize(
+    "agents_present,code,forged",
+    [
+        (0, "USER_SESSION_AGENTS_ABSENT", 2),
+        (3, "USER_SESSION_LOGIN_REQUIRED", 0),
+        (None, "USER_SESSION_STATE_UNKNOWN", 3),
+    ],
+)
+def test_user_session_count_must_match_its_own_code(
+    agents_present: Any, code: str, forged: int
+) -> None:
+    report = _classify(_observation(user_session_agents_present=agents_present))
+    predicate = report["predicates"]["user_session_surfaces"]
+    assert predicate["code"] == code
+    assert predicate["measurement"] == agents_present
+
+    predicate["measurement"] = forged
+    assert _refusal(report) == "PREDICATE_MEASUREMENT_MISMATCH"
+
+
+def test_known_user_session_code_cannot_drop_its_count() -> None:
+    report = _classify(_observation(user_session_agents_present=0))
+    report["predicates"]["user_session_surfaces"]["measurement"] = None
+
+    assert _refusal(report) == "PREDICATE_MEASUREMENT_MISMATCH"
+
+
+@pytest.mark.parametrize(
+    "free_bytes,code,forged",
+    [
+        (DISK_FREE_FLOOR_BYTES * 4, "DISK_FREE_ABOVE_FLOOR", DISK_FREE_FLOOR_BYTES - 1),
+        (DISK_FREE_FLOOR_BYTES - 1, "DISK_FREE_BELOW_FLOOR", DISK_FREE_FLOOR_BYTES),
+        (DISK_FREE_FLOOR_BYTES * 4, "DISK_FREE_ABOVE_FLOOR", None),
+        (DISK_FREE_FLOOR_BYTES - 1, "DISK_FREE_BELOW_FLOOR", None),
+    ],
+)
+def test_disk_free_measurement_must_sit_on_the_side_its_code_claims(
+    free_bytes: int, code: str, forged: Any
+) -> None:
+    report = _classify(_observation(root_free_bytes=free_bytes))
+    predicate = report["predicates"]["disk_free_floor"]
+    assert predicate["code"] == code
+    assert predicate["measurement"] == free_bytes
+
+    predicate["measurement"] = forged
+    assert _refusal(report) == "PREDICATE_MEASUREMENT_MISMATCH"
+
+
+def test_unknown_disk_free_space_cannot_acquire_a_measurement() -> None:
+    report = _classify(_observation(root_free_bytes=None))
+    predicate = report["predicates"]["disk_free_floor"]
+    assert predicate["code"] == "DISK_FREE_UNKNOWN"
+    assert predicate["measurement"] is None
+
+    predicate["measurement"] = DISK_FREE_FLOOR_BYTES * 4
+    assert _refusal(report) == "PREDICATE_MEASUREMENT_MISMATCH"
+
+
+def test_measurement_bounds_still_apply_before_semantics() -> None:
+    report = _classify(_observation(root_free_bytes=DISK_FREE_FLOOR_BYTES * 4))
+    report["predicates"]["disk_free_floor"]["measurement"] = -1
+
+    assert _refusal(report) == "PREDICATE_MEASUREMENT_INVALID"
+
+
+def test_untouched_reports_still_validate_and_canonicalize_byte_stably() -> None:
+    """Closing the pairing law must not disturb any honest report."""
+
+    for observation in (
+        _observation(),
+        _studio_observation(),
+        _m1_observation(),
+        _m1_worker_observation(),
+        _observation(ac_power_settings=None, root_free_bytes=None),
+        _observation(root_free_bytes=DISK_FREE_FLOOR_BYTES - 1),
+        _observation(user_session_agents_present=0),
+    ):
+        for profile in READINESS_PROFILES:
+            report = _classify(observation, profile)
+            payload = canonical_recovery_readiness_json(
+                report, expected_profile=profile
+            )
+            roundtripped = json.loads(payload)
+            assert validate_recovery_readiness_report(
+                roundtripped, expected_profile=profile
+            ) == report
+            assert (
+                canonical_recovery_readiness_json(
+                    roundtripped, expected_profile=profile
+                )
+                == payload
+            )
 
 
 # ------------------------------------------------------- daemon gate semantics

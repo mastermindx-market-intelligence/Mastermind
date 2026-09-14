@@ -38,6 +38,15 @@ Requirement semantics are deliberately explicit:
     absence is the intended gate state, never a defect.
 ``ADVISORY``
     Reported because an operator must know it, but it cannot decide readiness.
+
+The report contract is semantic, not merely syntactic.  A predicate's status,
+its code and its measurement are only true together, so each is derived from
+one law and the validator re-derives all three: given a predicate, the
+requirement the named profile assigns it, and its code, exactly one status is
+legal, and only the codes whose classifier observes a value may carry one.  A
+failure code wearing ``OK``, an advisory-only code on a load-bearing pass, or a
+bounded integer parked on an unrelated verdict is refused before any derived
+recovery state is trusted.
 """
 from __future__ import annotations
 
@@ -154,102 +163,117 @@ _DAEMON_CODES = frozenset(
     }
 )
 
-_BASE_PREDICATES: dict[str, tuple[str, str, frozenset[str]]] = {
+# Encryption state alone is an operator fact, not a readiness defect: an
+# encrypted host can still be recovered unattended when the platform supports
+# remote preboot unlock, and ``preboot_remote_unlock`` is the load-bearing
+# predicate that decides that.
+_FILEVAULT_CODE_STATUSES = {
+    "FILEVAULT_ON": "ADVISORY",
+    "FILEVAULT_ENCRYPTION_IN_PROGRESS": "ADVISORY",
+    "FILEVAULT_DECRYPTION_IN_PROGRESS": "ADVISORY",
+    "FILEVAULT_OFF": "OK",
+    "FILEVAULT_STATE_UNKNOWN": "UNKNOWN",
+}
+
+# The non-daemon predicate table.  Each entry is
+# ``(requirement, evidence_class, {code: canonical_status})`` and that third
+# mapping is the *only* law relating a code to a status: the classifiers derive
+# the status they emit from it and the validator derives the status it demands
+# from it, so a report cannot pair a failure code with a passing status.  The
+# code vocabulary is exactly the mapping's key set, so a new code cannot be
+# added without deciding what it means.
+_BASE_PREDICATES: dict[str, tuple[str, str, dict[str, str]]] = {
     "os_identity": (
         "REQUIRED",
         "SYSTEM_PLATFORM",
-        frozenset(
-            {
-                "OS_SUPPORTED",
-                "OS_UNSUPPORTED_VERSION",
-                "OS_NOT_DARWIN",
-                "OS_IDENTITY_UNKNOWN",
-            }
-        ),
+        {
+            "OS_SUPPORTED": "OK",
+            "OS_UNSUPPORTED_VERSION": "NOT_READY",
+            "OS_NOT_DARWIN": "NOT_READY",
+            "OS_IDENTITY_UNKNOWN": "UNKNOWN",
+        },
     ),
     "cpu_architecture": (
         "REQUIRED",
         "SYSTEM_PLATFORM",
-        frozenset(
-            {
-                "ARCHITECTURE_APPLE_SILICON",
-                "ARCHITECTURE_UNSUPPORTED",
-                "ARCHITECTURE_UNKNOWN",
-            }
-        ),
+        {
+            "ARCHITECTURE_APPLE_SILICON": "OK",
+            "ARCHITECTURE_UNSUPPORTED": "NOT_READY",
+            "ARCHITECTURE_UNKNOWN": "UNKNOWN",
+        },
     ),
     "ac_sleep_policy": (
         "REQUIRED",
         "POWER_POLICY",
-        frozenset({"AC_SLEEP_DISABLED", "AC_SLEEP_ENABLED", "AC_SLEEP_UNKNOWN"}),
+        {
+            "AC_SLEEP_DISABLED": "OK",
+            "AC_SLEEP_ENABLED": "NOT_READY",
+            "AC_SLEEP_UNKNOWN": "UNKNOWN",
+        },
     ),
     "auto_restart_after_power_loss": (
         "REQUIRED",
         "POWER_POLICY",
-        frozenset(
-            {"AUTO_RESTART_ENABLED", "AUTO_RESTART_DISABLED", "AUTO_RESTART_UNKNOWN"}
-        ),
+        {
+            "AUTO_RESTART_ENABLED": "OK",
+            "AUTO_RESTART_DISABLED": "NOT_READY",
+            "AUTO_RESTART_UNKNOWN": "UNKNOWN",
+        },
     ),
     "auto_restart_on_power_connect": (
         "OPTIONAL",
         "POWER_POLICY",
-        frozenset(
-            {
-                "AUTO_RESTART_ON_CONNECT_ENABLED",
-                "AUTO_RESTART_ON_CONNECT_DISABLED",
-                "AUTO_RESTART_ON_CONNECT_NOT_EXPOSED",
-                "AUTO_RESTART_ON_CONNECT_UNKNOWN",
-            }
-        ),
+        {
+            "AUTO_RESTART_ON_CONNECT_ENABLED": "OK",
+            "AUTO_RESTART_ON_CONNECT_DISABLED": "ADVISORY",
+            "AUTO_RESTART_ON_CONNECT_NOT_EXPOSED": "NOT_APPLICABLE",
+            "AUTO_RESTART_ON_CONNECT_UNKNOWN": "UNKNOWN",
+        },
     ),
     "remote_login_listener": (
         "REQUIRED",
         "REMOTE_ACCESS_POLICY",
-        frozenset(
-            {
-                "REMOTE_LOGIN_ENABLED",
-                "REMOTE_LOGIN_DISABLED",
-                "REMOTE_LOGIN_NOT_INSTALLED",
-                "REMOTE_LOGIN_UNKNOWN",
-            }
-        ),
+        {
+            "REMOTE_LOGIN_ENABLED": "OK",
+            "REMOTE_LOGIN_DISABLED": "NOT_READY",
+            "REMOTE_LOGIN_NOT_INSTALLED": "NOT_READY",
+            "REMOTE_LOGIN_UNKNOWN": "UNKNOWN",
+        },
     ),
     "disk_encryption_state": (
         "ADVISORY",
         "DISK_ENCRYPTION_STATE",
-        frozenset(FILEVAULT_CODES),
+        {code: _FILEVAULT_CODE_STATUSES[code] for code in FILEVAULT_CODES},
     ),
     "preboot_remote_unlock": (
         "REQUIRED",
         "PREBOOT_RECOVERY_DEPENDENCY",
-        frozenset(
-            {
-                "PREBOOT_UNLOCK_NOT_REQUIRED",
-                "PREBOOT_UNLOCK_SUPPORTED",
-                "PREBOOT_UNLOCK_OS_GENERATION_UNSUPPORTED",
-                "PREBOOT_UNLOCK_ARCHITECTURE_UNSUPPORTED",
-                "PREBOOT_UNLOCK_REMOTE_LOGIN_UNAVAILABLE",
-                "PREBOOT_UNLOCK_STATE_UNKNOWN",
-            }
-        ),
+        {
+            "PREBOOT_UNLOCK_NOT_REQUIRED": "OK",
+            "PREBOOT_UNLOCK_SUPPORTED": "OK",
+            "PREBOOT_UNLOCK_OS_GENERATION_UNSUPPORTED": "NOT_READY",
+            "PREBOOT_UNLOCK_ARCHITECTURE_UNSUPPORTED": "NOT_READY",
+            "PREBOOT_UNLOCK_REMOTE_LOGIN_UNAVAILABLE": "NOT_READY",
+            "PREBOOT_UNLOCK_STATE_UNKNOWN": "UNKNOWN",
+        },
     ),
     "user_session_surfaces": (
         "ADVISORY",
         "USER_SESSION_DEPENDENCY",
-        frozenset(
-            {
-                "USER_SESSION_LOGIN_REQUIRED",
-                "USER_SESSION_AGENTS_ABSENT",
-                "USER_SESSION_STATE_UNKNOWN",
-            }
-        ),
+        {
+            "USER_SESSION_LOGIN_REQUIRED": "ADVISORY",
+            "USER_SESSION_AGENTS_ABSENT": "ADVISORY",
+            "USER_SESSION_STATE_UNKNOWN": "UNKNOWN",
+        },
     ),
     "disk_free_floor": (
         "REQUIRED",
         "FILESYSTEM_CAPACITY",
-        frozenset(
-            {"DISK_FREE_ABOVE_FLOOR", "DISK_FREE_BELOW_FLOOR", "DISK_FREE_UNKNOWN"}
-        ),
+        {
+            "DISK_FREE_ABOVE_FLOOR": "OK",
+            "DISK_FREE_BELOW_FLOOR": "NOT_READY",
+            "DISK_FREE_UNKNOWN": "UNKNOWN",
+        },
     ),
 }
 
@@ -320,8 +344,16 @@ class _PredicateProfile:
         return PREDICATE_IDS
 
 
+# The code -> canonical-status law for every non-daemon predicate.  Daemon
+# predicates are deliberately absent: the same daemon code means different
+# things under ADVISORY, REQUIRED_RUNNING and DISARMED_EXPECTED, so their law
+# is requirement-specific and derived from ``_DAEMON_VERDICTS`` below.
+PREDICATE_CODE_STATUSES: dict[str, dict[str, str]] = {
+    predicate_id: dict(entry[2]) for predicate_id, entry in _BASE_PREDICATES.items()
+}
 PREDICATE_CODES: dict[str, frozenset[str]] = {
-    predicate_id: entry[2] for predicate_id, entry in _BASE_PREDICATES.items()
+    predicate_id: frozenset(entry[2])
+    for predicate_id, entry in _BASE_PREDICATES.items()
 } | {DAEMON_PREDICATE_PREFIX + label: _DAEMON_CODES for label in ALL_DAEMON_LABELS}
 PREDICATE_EVIDENCE_CLASSES: dict[str, str] = {
     predicate_id: entry[1] for predicate_id, entry in _BASE_PREDICATES.items()
@@ -344,6 +376,89 @@ def _predicate_codes(predicate_id: str) -> frozenset[str]:
     if codes is None:
         _refuse("PREDICATE_UNKNOWN")
     return codes
+
+
+def _canonical_predicate_status(
+    predicate_id: str, requirement: Any, code: Any
+) -> str:
+    """Return the one status this ``(predicate, requirement, code)`` may carry.
+
+    There is exactly one legal status per triple, so a report cannot attach a
+    passing status to a failure code, an unknown code to a decided status, or an
+    advisory-only code to a load-bearing pass.  Daemon predicates resolve
+    through the requirement-specific verdict table because the same observed
+    daemon code is a defect under ``REQUIRED_RUNNING``, the intended gate state
+    under ``DISARMED_EXPECTED``, and visibility-only under ``ADVISORY``.
+    """
+
+    statuses = PREDICATE_CODE_STATUSES.get(predicate_id)
+    if statuses is None:
+        if predicate_id not in PREDICATE_CODES:
+            _refuse("PREDICATE_UNKNOWN")
+        statuses = _DAEMON_CODE_STATUSES.get(requirement)
+        if statuses is None:
+            _refuse("PREDICATE_STATUS_CODE_MISMATCH")
+    status = statuses.get(code)
+    if status is None:
+        # Either an out-of-vocabulary code or, for a daemon, a code this
+        # requirement can never produce (a disarmed-expected verdict on a
+        # required-running service, say).
+        _refuse("PREDICATE_STATUS_CODE_MISMATCH")
+    return status
+
+
+# The closed measurement law.  A code appears here only when the classifier can
+# legitimately attach an observed value to it; every code that does not appear
+# must carry ``None``, so a bounded integer cannot be parked on a semantically
+# unrelated verdict.
+_MEASUREMENT_ABSENT = "ABSENT"
+_MEASUREMENT_ZERO = "ZERO"
+_MEASUREMENT_POSITIVE = "POSITIVE"
+_MEASUREMENT_AT_OR_ABOVE_DISK_FLOOR = "AT_OR_ABOVE_DISK_FLOOR"
+_MEASUREMENT_BELOW_DISK_FLOOR = "BELOW_DISK_FLOOR"
+
+PREDICATE_MEASUREMENT_LAW: dict[str, dict[str, str]] = {
+    # Only an enabled AC sleep timer has a value, and an enabled timer of zero
+    # minutes is not a thing the classifier can observe.
+    "ac_sleep_policy": {"AC_SLEEP_ENABLED": _MEASUREMENT_POSITIVE},
+    # The observed console-agent count, which is what decides the code.
+    "user_session_surfaces": {
+        "USER_SESSION_AGENTS_ABSENT": _MEASUREMENT_ZERO,
+        "USER_SESSION_LOGIN_REQUIRED": _MEASUREMENT_POSITIVE,
+    },
+    # Observed free bytes, which must sit on the side of the reviewed floor
+    # that the code claims.
+    "disk_free_floor": {
+        "DISK_FREE_ABOVE_FLOOR": _MEASUREMENT_AT_OR_ABOVE_DISK_FLOOR,
+        "DISK_FREE_BELOW_FLOOR": _MEASUREMENT_BELOW_DISK_FLOOR,
+    },
+}
+_NO_MEASUREMENTS: dict[str, str] = {}
+
+
+def _check_measurement(predicate_id: str, code: str, measurement: Any) -> None:
+    """Refuse a measurement that the predicate's own code cannot carry."""
+
+    rule = PREDICATE_MEASUREMENT_LAW.get(predicate_id, _NO_MEASUREMENTS).get(
+        code, _MEASUREMENT_ABSENT
+    )
+    if rule == _MEASUREMENT_ABSENT:
+        if measurement is not None:
+            _refuse("PREDICATE_MEASUREMENT_MISMATCH")
+        return
+    if type(measurement) is not int or not 0 <= measurement <= _INT64_MAX:
+        _refuse("PREDICATE_MEASUREMENT_MISMATCH")
+    if rule == _MEASUREMENT_ZERO and measurement != 0:
+        _refuse("PREDICATE_MEASUREMENT_MISMATCH")
+    if rule == _MEASUREMENT_POSITIVE and measurement <= 0:
+        _refuse("PREDICATE_MEASUREMENT_MISMATCH")
+    if (
+        rule == _MEASUREMENT_AT_OR_ABOVE_DISK_FLOOR
+        and measurement < DISK_FREE_FLOOR_BYTES
+    ):
+        _refuse("PREDICATE_MEASUREMENT_MISMATCH")
+    if rule == _MEASUREMENT_BELOW_DISK_FLOOR and measurement >= DISK_FREE_FLOOR_BYTES:
+        _refuse("PREDICATE_MEASUREMENT_MISMATCH")
 
 
 RECOVERY_PROFILES: dict[str, _PredicateProfile] = {
@@ -412,18 +527,22 @@ _INT64_MAX = (1 << 63) - 1
 def _predicate(
     predicate_id: str,
     *,
-    status: str,
     code: str,
+    requirement: str | None = None,
     measurement: int | None = None,
 ) -> dict[str, Any]:
-    """Build one profile-independent observation verdict.
+    """Build one observation verdict from its code alone.
 
-    The ``requirement`` field is stamped later, from the profile the caller
-    named, so no classifier can silently read requirements out of global state.
+    The status is *derived*, never asserted by the classifier, so the code and
+    the status can never disagree at the source either.  ``requirement`` is only
+    needed by daemon predicates, whose status is requirement-specific; the
+    report's ``requirement`` field is still stamped later from the profile the
+    caller named, so no classifier reads requirements out of global state.
     """
 
+    _check_measurement(predicate_id, code, measurement)
     return {
-        "status": status,
+        "status": _canonical_predicate_status(predicate_id, requirement, code),
         "code": code,
         "evidence_class": _evidence_class(predicate_id),
         "measurement": measurement,
@@ -526,31 +645,31 @@ def _macos_major(observation: Mapping[str, Any]) -> int | None:
 def _classify_os_identity(observation: Mapping[str, Any]) -> dict[str, Any]:
     os_name = observation["os_name"]
     if os_name is None:
-        return _predicate("os_identity", status="UNKNOWN", code="OS_IDENTITY_UNKNOWN")
+        return _predicate("os_identity", code="OS_IDENTITY_UNKNOWN")
     if os_name != "Darwin":
-        return _predicate("os_identity", status="NOT_READY", code="OS_NOT_DARWIN")
+        return _predicate("os_identity", code="OS_NOT_DARWIN")
     major = _macos_major(observation)
     if major is None:
-        return _predicate("os_identity", status="UNKNOWN", code="OS_IDENTITY_UNKNOWN")
+        return _predicate("os_identity", code="OS_IDENTITY_UNKNOWN")
     if major < MIN_SUPPORTED_MACOS_MAJOR:
         return _predicate(
-            "os_identity", status="NOT_READY", code="OS_UNSUPPORTED_VERSION"
+            "os_identity", code="OS_UNSUPPORTED_VERSION"
         )
-    return _predicate("os_identity", status="OK", code="OS_SUPPORTED")
+    return _predicate("os_identity", code="OS_SUPPORTED")
 
 
 def _classify_architecture(observation: Mapping[str, Any]) -> dict[str, Any]:
     apple_silicon = observation["apple_silicon"]
     if apple_silicon is None:
         return _predicate(
-            "cpu_architecture", status="UNKNOWN", code="ARCHITECTURE_UNKNOWN"
+            "cpu_architecture", code="ARCHITECTURE_UNKNOWN"
         )
     if not apple_silicon:
         return _predicate(
-            "cpu_architecture", status="NOT_READY", code="ARCHITECTURE_UNSUPPORTED"
+            "cpu_architecture", code="ARCHITECTURE_UNSUPPORTED"
         )
     return _predicate(
-        "cpu_architecture", status="OK", code="ARCHITECTURE_APPLE_SILICON"
+        "cpu_architecture", code="ARCHITECTURE_APPLE_SILICON"
     )
 
 
@@ -559,16 +678,14 @@ def _classify_power(observation: Mapping[str, Any]) -> dict[str, dict[str, Any]]
     if settings is None:
         return {
             "ac_sleep_policy": _predicate(
-                "ac_sleep_policy", status="UNKNOWN", code="AC_SLEEP_UNKNOWN"
+                "ac_sleep_policy", code="AC_SLEEP_UNKNOWN"
             ),
             "auto_restart_after_power_loss": _predicate(
                 "auto_restart_after_power_loss",
-                status="UNKNOWN",
                 code="AUTO_RESTART_UNKNOWN",
             ),
             "auto_restart_on_power_connect": _predicate(
                 "auto_restart_on_power_connect",
-                status="UNKNOWN",
                 code="AUTO_RESTART_ON_CONNECT_UNKNOWN",
             ),
         }
@@ -576,16 +693,15 @@ def _classify_power(observation: Mapping[str, Any]) -> dict[str, dict[str, Any]]
     sleep_value = settings.get("sleep")
     if sleep_value is None:
         sleep_predicate = _predicate(
-            "ac_sleep_policy", status="UNKNOWN", code="AC_SLEEP_UNKNOWN"
+            "ac_sleep_policy", code="AC_SLEEP_UNKNOWN"
         )
     elif sleep_value == 0:
         sleep_predicate = _predicate(
-            "ac_sleep_policy", status="OK", code="AC_SLEEP_DISABLED"
+            "ac_sleep_policy", code="AC_SLEEP_DISABLED"
         )
     else:
         sleep_predicate = _predicate(
             "ac_sleep_policy",
-            status="NOT_READY",
             code="AC_SLEEP_ENABLED",
             measurement=sleep_value,
         )
@@ -594,17 +710,15 @@ def _classify_power(observation: Mapping[str, Any]) -> dict[str, dict[str, Any]]
     if restart_value is None:
         restart_predicate = _predicate(
             "auto_restart_after_power_loss",
-            status="UNKNOWN",
             code="AUTO_RESTART_UNKNOWN",
         )
     elif restart_value == 1:
         restart_predicate = _predicate(
-            "auto_restart_after_power_loss", status="OK", code="AUTO_RESTART_ENABLED"
+            "auto_restart_after_power_loss", code="AUTO_RESTART_ENABLED"
         )
     else:
         restart_predicate = _predicate(
             "auto_restart_after_power_loss",
-            status="NOT_READY",
             code="AUTO_RESTART_DISABLED",
         )
 
@@ -616,19 +730,16 @@ def _classify_power(observation: Mapping[str, Any]) -> dict[str, dict[str, Any]]
     if connect_value is None:
         connect_predicate = _predicate(
             "auto_restart_on_power_connect",
-            status="NOT_APPLICABLE",
             code="AUTO_RESTART_ON_CONNECT_NOT_EXPOSED",
         )
     elif connect_value == 1:
         connect_predicate = _predicate(
             "auto_restart_on_power_connect",
-            status="OK",
             code="AUTO_RESTART_ON_CONNECT_ENABLED",
         )
     else:
         connect_predicate = _predicate(
             "auto_restart_on_power_connect",
-            status="ADVISORY",
             code="AUTO_RESTART_ON_CONNECT_DISABLED",
         )
 
@@ -643,36 +754,26 @@ def _classify_remote_login(observation: Mapping[str, Any]) -> dict[str, Any]:
     observed = observation["remote_login"]
     if observed == "ENABLED":
         return _predicate(
-            "remote_login_listener", status="OK", code="REMOTE_LOGIN_ENABLED"
+            "remote_login_listener", code="REMOTE_LOGIN_ENABLED"
         )
     if observed == "DISABLED":
         return _predicate(
-            "remote_login_listener", status="NOT_READY", code="REMOTE_LOGIN_DISABLED"
+            "remote_login_listener", code="REMOTE_LOGIN_DISABLED"
         )
     if observed == "NOT_INSTALLED":
         return _predicate(
             "remote_login_listener",
-            status="NOT_READY",
             code="REMOTE_LOGIN_NOT_INSTALLED",
         )
     return _predicate(
-        "remote_login_listener", status="UNKNOWN", code="REMOTE_LOGIN_UNKNOWN"
+        "remote_login_listener", code="REMOTE_LOGIN_UNKNOWN"
     )
 
 
 def _classify_encryption(observation: Mapping[str, Any]) -> dict[str, Any]:
-    code = observation["filevault_code"]
-    if code == "FILEVAULT_OFF":
-        status = "OK"
-    elif code == "FILEVAULT_STATE_UNKNOWN":
-        status = "UNKNOWN"
-    else:
-        # Encryption state alone is an operator fact, not a readiness defect:
-        # an encrypted host can still be recovered unattended when the platform
-        # supports remote preboot unlock.  ``preboot_remote_unlock`` is the
-        # load-bearing predicate that decides that, so this one stays advisory.
-        status = "ADVISORY"
-    return _predicate("disk_encryption_state", status=status, code=code)
+    return _predicate(
+        "disk_encryption_state", code=observation["filevault_code"]
+    )
 
 
 def _classify_preboot_remote_unlock(observation: Mapping[str, Any]) -> dict[str, Any]:
@@ -697,7 +798,6 @@ def _classify_preboot_remote_unlock(observation: Mapping[str, Any]) -> dict[str,
     if filevault_code == "FILEVAULT_OFF":
         return _predicate(
             "preboot_remote_unlock",
-            status="OK",
             code="PREBOOT_UNLOCK_NOT_REQUIRED",
         )
     if filevault_code != "FILEVAULT_ON":
@@ -705,7 +805,6 @@ def _classify_preboot_remote_unlock(observation: Mapping[str, Any]) -> dict[str,
         # host will actually present is not yet determined.
         return _predicate(
             "preboot_remote_unlock",
-            status="UNKNOWN",
             code="PREBOOT_UNLOCK_STATE_UNKNOWN",
         )
 
@@ -713,13 +812,11 @@ def _classify_preboot_remote_unlock(observation: Mapping[str, Any]) -> dict[str,
     if apple_silicon is None:
         return _predicate(
             "preboot_remote_unlock",
-            status="UNKNOWN",
             code="PREBOOT_UNLOCK_STATE_UNKNOWN",
         )
     if not apple_silicon:
         return _predicate(
             "preboot_remote_unlock",
-            status="NOT_READY",
             code="PREBOOT_UNLOCK_ARCHITECTURE_UNSUPPORTED",
         )
 
@@ -727,13 +824,11 @@ def _classify_preboot_remote_unlock(observation: Mapping[str, Any]) -> dict[str,
     if major is None:
         return _predicate(
             "preboot_remote_unlock",
-            status="UNKNOWN",
             code="PREBOOT_UNLOCK_STATE_UNKNOWN",
         )
     if major < MIN_PREBOOT_REMOTE_UNLOCK_MACOS_MAJOR:
         return _predicate(
             "preboot_remote_unlock",
-            status="NOT_READY",
             code="PREBOOT_UNLOCK_OS_GENERATION_UNSUPPORTED",
         )
 
@@ -741,17 +836,15 @@ def _classify_preboot_remote_unlock(observation: Mapping[str, Any]) -> dict[str,
     if remote_login == "UNKNOWN":
         return _predicate(
             "preboot_remote_unlock",
-            status="UNKNOWN",
             code="PREBOOT_UNLOCK_STATE_UNKNOWN",
         )
     if remote_login != "ENABLED":
         return _predicate(
             "preboot_remote_unlock",
-            status="NOT_READY",
             code="PREBOOT_UNLOCK_REMOTE_LOGIN_UNAVAILABLE",
         )
     return _predicate(
-        "preboot_remote_unlock", status="OK", code="PREBOOT_UNLOCK_SUPPORTED"
+        "preboot_remote_unlock", code="PREBOOT_UNLOCK_SUPPORTED"
     )
 
 
@@ -785,6 +878,32 @@ _DAEMON_VERDICTS = {
 }
 
 
+def _invert_daemon_verdicts(
+    verdicts: Mapping[str, tuple[str, str]],
+) -> dict[str, str]:
+    """Derive the code -> status law for one requirement from its verdict table.
+
+    The verdict tables above stay the single source of daemon semantics; this
+    only reads them backwards so the validator can demand the same pairing the
+    classifier would have produced.  Two observations may share a code (a
+    disarmed service that is loaded-not-running and one that is disabled are
+    both intentionally disarmed), but they must then share a status, or the
+    table would not define one law and the module refuses to load.
+    """
+
+    inverted: dict[str, str] = {}
+    for status, code in verdicts.values():
+        if inverted.setdefault(code, status) != status:
+            raise RecoveryReadinessContractError("DAEMON_VERDICT_TABLE_AMBIGUOUS")
+    return inverted
+
+
+_DAEMON_CODE_STATUSES = {
+    requirement: _invert_daemon_verdicts(verdicts)
+    for requirement, verdicts in _DAEMON_VERDICTS.items()
+}
+
+
 def _classify_daemons(
     profile: _PredicateProfile, observation: Mapping[str, Any]
 ) -> dict[str, dict[str, Any]]:
@@ -793,8 +912,11 @@ def _classify_daemons(
     for label in ALL_DAEMON_LABELS:
         predicate_id = DAEMON_PREDICATE_PREFIX + label
         state = observed.get(label, "UNKNOWN")
-        status, code = _DAEMON_VERDICTS[profile.requirement(predicate_id)][state]
-        predicates[predicate_id] = _predicate(predicate_id, status=status, code=code)
+        requirement = profile.requirement(predicate_id)
+        _, code = _DAEMON_VERDICTS[requirement][state]
+        predicates[predicate_id] = _predicate(
+            predicate_id, code=code, requirement=requirement
+        )
     return predicates
 
 
@@ -803,14 +925,13 @@ def _classify_user_session(observation: Mapping[str, Any]) -> dict[str, Any]:
     if present is None:
         return _predicate(
             "user_session_surfaces",
-            status="UNKNOWN",
             code="USER_SESSION_STATE_UNKNOWN",
         )
     code = (
         "USER_SESSION_LOGIN_REQUIRED" if present else "USER_SESSION_AGENTS_ABSENT"
     )
     return _predicate(
-        "user_session_surfaces", status="ADVISORY", code=code, measurement=present
+        "user_session_surfaces", code=code, measurement=present
     )
 
 
@@ -818,18 +939,16 @@ def _classify_disk(observation: Mapping[str, Any]) -> dict[str, Any]:
     free_bytes = observation["root_free_bytes"]
     if free_bytes is None:
         return _predicate(
-            "disk_free_floor", status="UNKNOWN", code="DISK_FREE_UNKNOWN"
+            "disk_free_floor", code="DISK_FREE_UNKNOWN"
         )
     if free_bytes >= DISK_FREE_FLOOR_BYTES:
         return _predicate(
             "disk_free_floor",
-            status="OK",
             code="DISK_FREE_ABOVE_FLOOR",
             measurement=free_bytes,
         )
     return _predicate(
         "disk_free_floor",
-        status="NOT_READY",
         code="DISK_FREE_BELOW_FLOOR",
         measurement=free_bytes,
     )
@@ -960,11 +1079,18 @@ def validate_recovery_readiness_report(
         code = predicate.get("code")
         if code not in PREDICATE_CODES[predicate_id]:
             _refuse("PREDICATE_CODE_INVALID")
+        # Status vocabulary and code vocabulary are not enough: they are only
+        # true together.  Re-derive the one status this code may carry under
+        # this requirement and demand it, so a forged pass on a failure code is
+        # refused before any derived state is trusted.
+        if status != _canonical_predicate_status(predicate_id, requirement, code):
+            _refuse("PREDICATE_STATUS_CODE_MISMATCH")
         measurement = predicate.get("measurement")
         if measurement is not None and (
             type(measurement) is not int or not 0 <= measurement <= _INT64_MAX
         ):
             _refuse("PREDICATE_MEASUREMENT_INVALID")
+        _check_measurement(predicate_id, code, measurement)
         normalized_predicates[predicate_id] = {
             "requirement": requirement,
             "status": status,
@@ -1035,8 +1161,10 @@ __all__ = [
     "MIN_SUPPORTED_MACOS_MAJOR",
     "OBSERVATION_FIELDS",
     "PREDICATE_CODES",
+    "PREDICATE_CODE_STATUSES",
     "PREDICATE_EVIDENCE_CLASSES",
     "PREDICATE_FIELDS",
+    "PREDICATE_MEASUREMENT_LAW",
     "PREDICATE_IDS",
     "READINESS_PROFILES",
     "READINESS_SCHEMA",
