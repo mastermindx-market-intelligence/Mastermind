@@ -281,7 +281,11 @@ def test_default_refresh_posts_only_to_exact_issuer_token_endpoint(tmp_path: Pat
     def fake_post(url: str, fields: dict[str, str]):
         observed["url"] = url
         observed["fields"] = fields
-        return {"access_token": _token(exp=2_000_100_000), "refresh_token": "rotated"}
+        return {
+            "access_token": _token(exp=2_000_100_000),
+            "refresh_token": "rotated",
+            "token_type": "Bearer",
+        }
 
     result = auth.refresh_access_token(policy, bundle, post_form=fake_post)
     assert observed == {
@@ -338,3 +342,21 @@ def test_header_helper_entrypoint_failure_is_opaque_and_never_echoes_secret(tmp_
     assert captured.out == ""
     assert captured.err == "REFUSED: Executive MCP authorization unavailable.\n"
     assert secret not in captured.err
+
+
+def test_default_refresh_refuses_non_bearer_token_type(tmp_path: Path):
+    import ops.codex_fabric.executive_mcp_auth as auth
+
+    policy = load_installed_policy(_write_policy(tmp_path), expected_uid=os.getuid())
+    bundle = _bundle(policy)
+
+    with pytest.raises(ExecutiveAuthError, match="refresh failed"):
+        auth.refresh_access_token(
+            policy,
+            bundle,
+            post_form=lambda _url, _fields: {
+                "access_token": _token(exp=2_000_100_000),
+                "refresh_token": "rotated",
+                "token_type": "MAC",
+            },
+        )

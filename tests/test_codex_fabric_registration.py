@@ -154,3 +154,72 @@ def test_codex_command_timeout_covers_observed_slow_mcp_census(monkeypatch: pyte
     registration._run("codex", "mcp", "list", "--json")
 
     assert observed["timeout"] >= 60
+
+
+def test_ambiguous_add_timeout_reconciles_exact_registration_without_second_add(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    import ops.codex_fabric.register_executive_mcp as registration
+
+    calls: list[list[str]] = []
+    census_count = 0
+
+    def fake_run(argv, **_kwargs):
+        nonlocal census_count
+        args = list(argv[1:])
+        calls.append(args)
+        if args == ["mcp", "list", "--json"]:
+            census_count += 1
+            if census_count == 1:
+                return registration.subprocess.CompletedProcess(argv, 0, "[]", "")
+            row = {
+                "name": SERVER,
+                "enabled": True,
+                "transport": {
+                    "type": "streamable_http",
+                    "url": URL,
+                    "bearer_token_env_var": None,
+                    "http_headers": None,
+                    "env_http_headers": None,
+                    "http_headers_helper": None,
+                },
+                "auth_status": "unknown",
+            }
+            return registration.subprocess.CompletedProcess(argv, 0, json.dumps([row]), "")
+        if args == ["mcp", "add", SERVER, "--url", URL]:
+            raise registration.subprocess.TimeoutExpired(argv, timeout=60)
+        raise AssertionError(args)
+
+    monkeypatch.setattr(registration.subprocess, "run", fake_run)
+    receipt = registration.register(URL)
+
+    assert receipt.created is True
+    assert receipt.url == URL
+    assert calls == [
+        ["mcp", "list", "--json"],
+        ["mcp", "add", SERVER, "--url", URL],
+        ["mcp", "list", "--json"],
+    ]
+    assert sum(call[:2] == ["mcp", "add"] for call in calls) == 1
+
+
+def test_existing_http_headers_helper_refuses_as_configuration_drift(monkeypatch: pytest.MonkeyPatch):
+    import ops.codex_fabric.register_executive_mcp as registration
+
+    row = {
+        "name": SERVER,
+        "enabled": True,
+        "transport": {
+            "type": "streamable_http",
+            "url": URL,
+            "bearer_token_env_var": None,
+            "http_headers": None,
+            "env_http_headers": None,
+            "http_headers_helper": "/foreign/helper",
+        },
+        "auth_status": "unknown",
+    }
+    monkeypatch.setattr(registration, "_list_servers", lambda _codex: [row])
+
+    with pytest.raises(RegistrationError, match="different configuration"):
+        registration.register(URL)

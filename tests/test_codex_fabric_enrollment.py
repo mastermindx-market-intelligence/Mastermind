@@ -441,3 +441,55 @@ def test_reconcile_pending_registration_refuses_absent_completed_stale_or_non_tp
         with pytest.raises(EnrollmentError):
             enroll.reconcile_pending_registration(policy, store=pending, observed_client_id=bad)
     assert isinstance(pending.load_state(), enroll.PendingRegistration)
+
+
+def test_cli_reconciles_pending_public_client_id_without_echoing_it(tmp_path: Path, capsys):
+    import ops.codex_fabric.enroll_executive_mcp as enroll
+
+    policy = _policy(tmp_path)
+    policy_path = tmp_path / "executive-mcp.json"
+    api = BlobApi()
+    store = KeychainRegistrationStore(api=api)
+    store.save_pending(enroll.PendingRegistration("f" * 64, CALLBACK_URL, policy.policy_digest))
+    public_id = "tpc_reconcile_cli_123"
+
+    code = enroll.main(
+        ["--reconcile-client-id", public_id],
+        policy_path=policy_path,
+        expected_uid=os.getuid(),
+        registration_store=store,
+    )
+    captured = capsys.readouterr()
+    assert code == 0
+    payload = json.loads(captured.out)
+    assert payload == {
+        "client_id_digest": __import__("hashlib").sha256(public_id.encode()).hexdigest(),
+        "policy_digest": policy.policy_digest,
+        "state": "reconciled",
+    }
+    assert public_id not in captured.out
+    assert captured.err == ""
+    assert store.load_state() == ClientRegistration(public_id, CALLBACK_URL, policy.policy_digest)
+
+
+def test_cli_reconcile_refusal_is_opaque_and_does_not_clear_pending(tmp_path: Path, capsys):
+    import ops.codex_fabric.enroll_executive_mcp as enroll
+
+    policy = _policy(tmp_path)
+    policy_path = tmp_path / "executive-mcp.json"
+    api = BlobApi()
+    store = KeychainRegistrationStore(api=api)
+    pending = enroll.PendingRegistration("a" * 64, CALLBACK_URL, policy.policy_digest)
+    store.save_pending(pending)
+
+    code = enroll.main(
+        ["--reconcile-client-id", "not-a-dcr-client"],
+        policy_path=policy_path,
+        expected_uid=os.getuid(),
+        registration_store=store,
+    )
+    captured = capsys.readouterr()
+    assert code == 2
+    assert captured.out == ""
+    assert captured.err == "REFUSED: Executive MCP enrollment unavailable.\n"
+    assert store.load_state() == pending

@@ -488,7 +488,7 @@ def refresh_access_token(
         raise
     except Exception:
         raise ExecutiveAuthError("Executive access token refresh failed") from None
-    if not isinstance(payload, Mapping):
+    if not isinstance(payload, Mapping) or payload.get("token_type") != "Bearer":
         raise ExecutiveAuthError("Executive access token refresh failed")
     return payload
 

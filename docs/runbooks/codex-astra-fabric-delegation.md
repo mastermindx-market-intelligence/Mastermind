@@ -62,10 +62,17 @@ While `DCR_EFFECT_UNKNOWN` is present:
 
 Reconcile the Auth0 tenant first. With an authorized tenant-admin surface, inspect Applications for the
 exact client name `Mastermind Codex Astra` and callback `http://127.0.0.1:8769/oauth/callback`.
-If an exact matching client exists, recover its public client id through a reviewed reconciliation path
-and convert the pending state to the completed registration. If the tenant proves no such client exists,
-only then may the same logical enrollment operation clear/re-admit the pending state and issue one fresh
-DCR effect. Ambiguous tenant evidence stays blocked.
+If an exact matching client exists, recover its public `tpc_` client id through the authorized admin
+surface and run:
+
+```bash
+python3 -m ops.codex_fabric.enroll_executive_mcp --reconcile-client-id "$PUBLIC_TPC_CLIENT_ID"
+```
+
+The client id is public metadata; the command stores only the exact reconciled public client identity and
+prints a digest-only receipt. It performs no DCR call and no token exchange. If the tenant proves no such
+client exists, only then may the same logical enrollment operation clear/re-admit the pending state and
+issue one fresh DCR effect. Ambiguous tenant evidence stays blocked.
 
 The current Chrome profile was checked only for serviceability and reached the Auth0 Dashboard login
 page, so it did not provide tenant reconciliation. No token or secret should be pasted into this runbook

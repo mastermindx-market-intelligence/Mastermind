@@ -7,6 +7,7 @@ new Auth0 application on every retry.
 """
 from __future__ import annotations
 
+import argparse
 import base64
 import dataclasses
 import hashlib
@@ -554,17 +555,46 @@ def enroll_once(
     )
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = sys.argv[1:] if argv is None else argv
-    if args:
-        print("REFUSED: Executive MCP enrollment unavailable.", file=sys.stderr)
-        return 2
+def main(
+    argv: list[str] | None = None,
+    *,
+    policy_path=DEFAULT_POLICY_PATH,
+    expected_uid: int = 0,
+    registration_store: KeychainRegistrationStore | None = None,
+) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument(
+        "--reconcile-client-id",
+        help="public Auth0 DCR client id observed by an authorized tenant admin",
+    )
+    args = parser.parse_args(sys.argv[1:] if argv is None else argv)
+    registrations = KeychainRegistrationStore() if registration_store is None else registration_store
     try:
-        receipt = enroll_once()
+        if args.reconcile_client_id is not None:
+            policy = load_installed_policy(policy_path, expected_uid=expected_uid)
+            registration = reconcile_pending_registration(
+                policy,
+                store=registrations,
+                observed_client_id=args.reconcile_client_id,
+            )
+            payload = {
+                "client_id_digest": hashlib.sha256(
+                    registration.client_id.encode("utf-8")
+                ).hexdigest(),
+                "policy_digest": registration.policy_digest,
+                "state": "reconciled",
+            }
+        else:
+            receipt = enroll_once(
+                policy_path=policy_path,
+                expected_uid=expected_uid,
+                registration_store=registrations,
+            )
+            payload = dataclasses.asdict(receipt)
     except Exception:
         print("REFUSED: Executive MCP enrollment unavailable.", file=sys.stderr)
         return 2
-    print(json.dumps(dataclasses.asdict(receipt), sort_keys=True, separators=(",", ":")))
+    print(json.dumps(payload, sort_keys=True, separators=(",", ":")))
     return 0
 
 

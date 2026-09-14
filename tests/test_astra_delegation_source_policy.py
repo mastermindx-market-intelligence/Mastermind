@@ -66,6 +66,7 @@ def test_runbook_records_real_client_auth_and_dcr_effect_unknown_boundaries():
         "DCR_EFFECT_UNKNOWN",
         "must not retry",
         "must not delete the pending registration marker",
+        "--reconcile-client-id",
         "Mastermind Codex Astra",
         "offline_access",
         "must not request `openid`",
