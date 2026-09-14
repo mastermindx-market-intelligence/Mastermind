@@ -2,8 +2,8 @@
 
 This module is the transport seam only: one host-selected Secure MCP Tunnel
 channel becomes one stdio child that reuses the existing
-``WorkbenchActionRuntime`` root/lease/executor ownership and the existing text
-patch port.  The tunnel association authenticates the channel, never a
+``WorkbenchActionRuntime`` root/lease/executor ownership, text patch port, and
+borrowed protected Read port.  The tunnel association authenticates the channel, never a
 cryptographically attested end user, so no ``JwtAuthenticator``,
 ``ResourcePolicy``, token verifier, or OAuth-accepted audit row exists on this
 path.  Channel admission is durably audited before dispatch, and an audit
@@ -52,6 +52,13 @@ from .app import (
 )
 from .contracts import ActionTokenCodec
 from .patch_port import ProjectActionRefused, create_text_patch_port
+from .read_composition import (
+    READ_OUTPUT_SCHEMAS,
+    READ_REFUSAL_CODES,
+    READ_TOOL_NAMES,
+    READ_TOOL_SPECS,
+    create_bound_read_composition,
+)
 from .runtime import (
     CHANNEL_AUTHORITY_KIND,
     ChannelRuntimeServices,
@@ -80,7 +87,9 @@ _PREPARE_INPUT = _PREPARE_SCHEMA
 _ACTION_REF_INPUT = _ACTION_REF_SCHEMA
 _PREPARE_OUTPUT = _PREPARE_OUTPUT_SCHEMA
 _EFFECT_OUTPUT = _EFFECT_OUTPUT_SCHEMA
-_KNOWN_TUNNEL_TOOLS = frozenset({PREPARE_TOOL, COMMIT_TOOL, RECONCILE_TOOL})
+_KNOWN_TUNNEL_TOOLS = frozenset(
+    {*READ_TOOL_NAMES, PREPARE_TOOL, COMMIT_TOOL, RECONCILE_TOOL}
+)
 _CONFIG_KEYS = frozenset(
     {
         "schema",
@@ -619,8 +628,8 @@ def create_tunnel_action_server(runtime: WorkbenchActionRuntime) -> Server:
     """One low-level MCP server for the fixed channel, or a typed refusal.
 
     Exactly two request handlers are registered (``tools/list`` and
-    ``tools/call``), reusing the OAuth adapter's closed input/output schemas
-    and the existing text patch port behind the same runtime ownership.
+    ``tools/call``). The existing text patch port and accepted borrowed Read
+    port both remain behind the same runtime ownership.
     """
 
     if not isinstance(runtime, WorkbenchActionRuntime):
@@ -635,11 +644,13 @@ def create_tunnel_action_server(runtime: WorkbenchActionRuntime) -> Server:
         raise ValueError("FIXED_CHANNEL_SERVICES_REQUIRED")
     caller = services.caller
     project_ref = services.project_ref
+    read_composition = create_bound_read_composition(runtime)
+    token_codec = ActionTokenCodec(services.action_token_key)
     prepare, commit, reconcile = create_text_patch_port(
         resolve_binding=runtime.resolve_binding,
         clock_ms=services.clock_ms,
         run_io=runtime.run_io,
-        token_codec=ActionTokenCodec(services.action_token_key),
+        token_codec=token_codec,
         artifact_store=services.artifact_store,
         host=services.host_binding,
         action_ttl_ms=services.action_ttl_ms,
@@ -648,6 +659,12 @@ def create_tunnel_action_server(runtime: WorkbenchActionRuntime) -> Server:
     ref_validator = Draft202012Validator(_ACTION_REF_INPUT)
     prepare_output_validator = Draft202012Validator(_PREPARE_OUTPUT)
     effect_output_validator = Draft202012Validator(_EFFECT_OUTPUT)
+    read_input_validators = {
+        spec.name: Draft202012Validator(spec.input_schema) for spec in READ_TOOL_SPECS
+    }
+    read_output_validators = {
+        name: Draft202012Validator(schema) for name, schema in READ_OUTPUT_SCHEMAS.items()
+    }
 
     async def emit_channel_audit(
         *, code: str, accepted: bool, tool: str, action_digest: str | None
@@ -708,7 +725,18 @@ def create_tunnel_action_server(runtime: WorkbenchActionRuntime) -> Server:
 
     @server.list_tools()
     async def list_tools() -> list[Tool]:
+        read_tools = [
+            Tool(
+                name=spec.name,
+                description=spec.description,
+                inputSchema=spec.input_schema,
+                outputSchema=READ_OUTPUT_SCHEMAS[spec.name],
+                annotations=ToolAnnotations(**spec.annotations),
+            )
+            for spec in READ_TOOL_SPECS
+        ]
         return [
+            *read_tools,
             Tool(
                 name=PREPARE_TOOL,
                 description=(
@@ -760,12 +788,14 @@ def create_tunnel_action_server(runtime: WorkbenchActionRuntime) -> Server:
 
     @server.call_tool(validate_input=False)
     async def call_tool(name: str, arguments: dict[str, object] | None) -> CallToolResult:
-        if name not in (PREPARE_TOOL, COMMIT_TOOL, RECONCILE_TOOL):
+        if name not in _KNOWN_TUNNEL_TOOLS:
             return _error("TOOL_NOT_AVAILABLE")
         action_digest: str | None = None
         try:
             request = _snapshot(arguments, MAX_ARGUMENT_BYTES)
-            if name == PREPARE_TOOL:
+            if name in READ_TOOL_NAMES:
+                read_input_validators[name].validate(request)
+            elif name == PREPARE_TOOL:
                 prepare_validator.validate(request)
             else:
                 ref_validator.validate(request)
@@ -816,7 +846,9 @@ def create_tunnel_action_server(runtime: WorkbenchActionRuntime) -> Server:
 
         emit_call_receipt(name=name, request=request)
         try:
-            if name == PREPARE_TOOL:
+            if name in READ_TOOL_NAMES:
+                observed = await read_composition.call(name, request)
+            elif name == PREPARE_TOOL:
                 observed = await prepare(caller, request)
             elif name == COMMIT_TOOL:
                 observed = await commit(caller, request["action_ref"])
@@ -824,8 +856,17 @@ def create_tunnel_action_server(runtime: WorkbenchActionRuntime) -> Server:
                 observed = await reconcile(caller, request["action_ref"])
         except ProjectActionRefused as error:
             return _error(error.code)
+        except (RuntimeClosed, SyncExecutionTimeout):
+            return _error("CHANNEL_ADMISSION_CHANGED")
         except Exception:
             return _error("ACTION_UNAVAILABLE")
+
+        if name in READ_TOOL_NAMES and observed.get("ok") is not True:
+            error = observed.get("error")
+            code = error.get("code") if type(error) is dict else None
+            return _error(
+                code if code in READ_REFUSAL_CODES else "ACTION_RESULT_UNVERIFIED"
+            )
 
         # A response loss after commit may hide an already-applied effect.
         # Never convert post-action admission uncertainty into an invitation
@@ -836,7 +877,9 @@ def create_tunnel_action_server(runtime: WorkbenchActionRuntime) -> Server:
             )
         try:
             data = _snapshot(dict(observed), MAX_RESULT_BYTES // 2)
-            if name == PREPARE_TOOL:
+            if name in READ_TOOL_NAMES:
+                read_output_validators[name].validate(data)
+            elif name == PREPARE_TOOL:
                 prepare_output_validator.validate(data)
             else:
                 effect_output_validator.validate(data)

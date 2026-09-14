@@ -30,7 +30,14 @@ _POLICY_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{2,95}$")
 _CODES = frozenset({"accepted", *(code.value for code in AuthErrorCode)})
 _CHANNEL_CODES = frozenset({"accepted", "channel_refused", "request_refused"})
 _CHANNEL_TOOLS = frozenset(
-    {"prepare_text_patch", "commit_text_patch", "reconcile_text_patch"}
+    {
+        "workspace_manifest",
+        "read_project_file",
+        "preview_text_replace",
+        "prepare_text_patch",
+        "commit_text_patch",
+        "reconcile_text_patch",
+    }
 )
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 _DEFAULT_MAX_LINE_BYTES = 4096

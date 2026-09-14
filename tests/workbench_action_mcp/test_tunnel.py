@@ -162,6 +162,9 @@ def test_fixed_channel_prepares_commits_and_reconciles(tmp_path: Path) -> None:
             server = create_tunnel_action_server(runtime)
             tools = await _tools(server)
             assert {tool.name for tool in tools} == {
+                "workspace_manifest",
+                "read_project_file",
+                "preview_text_replace",
                 "prepare_text_patch",
                 "commit_text_patch",
                 "reconcile_text_patch",

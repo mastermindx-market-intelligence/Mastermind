@@ -343,6 +343,7 @@ def test_stdio_initialize_list_shutdown_roundtrip(tmp_path: Path) -> None:
         process.send({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
         tools = process.receive()["result"]["tools"]
         assert {tool["name"] for tool in tools} == {
+            "workspace_manifest", "read_project_file", "preview_text_replace",
             "prepare_text_patch", "commit_text_patch", "reconcile_text_patch",
         }
         process.assert_exit(0)
