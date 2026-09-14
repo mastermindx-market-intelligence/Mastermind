@@ -343,3 +343,51 @@ def test_enrollment_main_emits_only_redacted_receipt(monkeypatch, capsys):
     assert "token" not in captured.out.lower()
     assert "client_id\"" not in captured.out
     assert captured.err == ""
+
+
+def test_dcr_persists_attempt_before_post_and_ambiguous_failure_blocks_retry(tmp_path: Path):
+    import ops.codex_fabric.enroll_executive_mcp as enroll
+
+    policy = _policy(tmp_path)
+    metadata = discover_metadata(policy, get_json=lambda _url: _metadata_document())
+    store = KeychainRegistrationStore(api=BlobApi())
+    observed = []
+
+    def ambiguous_post(_url, _payload):
+        state = store.load_state()
+        observed.append(state)
+        assert isinstance(state, enroll.PendingRegistration)
+        raise TimeoutError("response lost")
+
+    with pytest.raises(enroll.EnrollmentEffectUnknown):
+        ensure_client_registration(
+            policy, metadata, store=store, post_json=ambiguous_post,
+            attempt_ref_fn=lambda: "a" * 64,
+        )
+    assert len(observed) == 1
+    pending = store.load_state()
+    assert isinstance(pending, enroll.PendingRegistration)
+    assert pending.attempt_ref == "a" * 64
+
+    with pytest.raises(enroll.EnrollmentEffectUnknown):
+        ensure_client_registration(
+            policy, metadata, store=store,
+            post_json=lambda *_: pytest.fail("effect-unknown DCR must never retry"),
+            attempt_ref_fn=lambda: "b" * 64,
+        )
+
+
+def test_invalid_dcr_success_payload_keeps_effect_unknown_marker(tmp_path: Path):
+    import ops.codex_fabric.enroll_executive_mcp as enroll
+
+    policy = _policy(tmp_path)
+    metadata = discover_metadata(policy, get_json=lambda _url: _metadata_document())
+    store = KeychainRegistrationStore(api=BlobApi())
+
+    with pytest.raises(enroll.EnrollmentEffectUnknown):
+        ensure_client_registration(
+            policy, metadata, store=store,
+            post_json=lambda *_: {"client_id": "unexpected-shape"},
+            attempt_ref_fn=lambda: "c" * 64,
+        )
+    assert isinstance(store.load_state(), enroll.PendingRegistration)

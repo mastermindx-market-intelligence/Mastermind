@@ -39,12 +39,18 @@ from ops.codex_fabric.executive_mcp_auth import (
 CALLBACK_URL = "http://127.0.0.1:8769/oauth/callback"
 CLIENT_NAME = "Mastermind Codex Astra"
 REGISTRATION_SCHEMA = "mastermind.codex_fabric.executive_mcp_registration.v1"
+PENDING_REGISTRATION_SCHEMA = "mastermind.codex_fabric.executive_mcp_registration_attempt.v1"
 REGISTRATION_ACCOUNT = b"astra-executive-registration"
 _REGISTRATION_KEYS = frozenset({"schema", "client_id", "redirect_uri", "policy_digest"})
+_PENDING_REGISTRATION_KEYS = frozenset({"schema", "attempt_ref", "redirect_uri", "policy_digest"})
 
 
 class EnrollmentError(RuntimeError):
     """Closed enrollment refusal; never contains codes, tokens, or browser payloads."""
+
+
+class EnrollmentEffectUnknown(EnrollmentError):
+    """DCR may have committed; automatic retry is forbidden until reconciled."""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -61,13 +67,27 @@ class ClientRegistration:
     policy_digest: str
 
 
+@dataclasses.dataclass(frozen=True)
+class PendingRegistration:
+    attempt_ref: str
+    redirect_uri: str
+    policy_digest: str
+
+
 class KeychainRegistrationStore:
-    """One fixed public DCR client identity, separate from the token bundle."""
+    """One fixed DCR state item: absent, pending-effect, or completed client."""
 
     def __init__(self, *, api=None):
         self._api = api if api is not None else _MacKeychainApi()
 
-    def load_optional(self) -> ClientRegistration | None:
+    @staticmethod
+    def _hex64(value: Any) -> bool:
+        return (
+            isinstance(value, str) and len(value) == 64
+            and all(ch in "0123456789abcdef" for ch in value)
+        )
+
+    def load_state(self) -> ClientRegistration | PendingRegistration | None:
         raw = self._api.read(KEYCHAIN_SERVICE, REGISTRATION_ACCOUNT)
         if raw is None:
             return None
@@ -77,27 +97,59 @@ class KeychainRegistrationStore:
             value = json.loads(raw.decode("utf-8"))
         except (UnicodeError, json.JSONDecodeError):
             raise EnrollmentError("stored Executive client registration is invalid") from None
-        if not isinstance(value, dict) or set(value) != _REGISTRATION_KEYS:
+        if not isinstance(value, dict):
             raise EnrollmentError("stored Executive client registration is invalid")
-        client_id = value.get("client_id")
-        redirect_uri = value.get("redirect_uri")
-        policy_digest = value.get("policy_digest")
+        schema = value.get("schema")
+        if schema == REGISTRATION_SCHEMA and set(value) == _REGISTRATION_KEYS:
+            client_id = value.get("client_id")
+            redirect_uri = value.get("redirect_uri")
+            policy_digest = value.get("policy_digest")
+            if (
+                not isinstance(client_id, str) or not client_id.startswith("tpc_")
+                or redirect_uri != CALLBACK_URL or not self._hex64(policy_digest)
+            ):
+                raise EnrollmentError("stored Executive client registration is invalid")
+            return ClientRegistration(client_id, redirect_uri, policy_digest)
+        if schema == PENDING_REGISTRATION_SCHEMA and set(value) == _PENDING_REGISTRATION_KEYS:
+            attempt_ref = value.get("attempt_ref")
+            redirect_uri = value.get("redirect_uri")
+            policy_digest = value.get("policy_digest")
+            if not self._hex64(attempt_ref) or redirect_uri != CALLBACK_URL or not self._hex64(policy_digest):
+                raise EnrollmentError("stored Executive client registration is invalid")
+            return PendingRegistration(attempt_ref, redirect_uri, policy_digest)
+        raise EnrollmentError("stored Executive client registration is invalid")
+
+    def load_optional(self) -> ClientRegistration | None:
+        state = self.load_state()
+        if isinstance(state, PendingRegistration):
+            raise EnrollmentEffectUnknown("Executive public client registration effect is unknown")
+        return state
+
+    def save_pending(self, pending: PendingRegistration) -> None:
         if (
-            value.get("schema") != REGISTRATION_SCHEMA
-            or not isinstance(client_id, str) or not client_id.startswith("tpc_")
-            or not isinstance(redirect_uri, str) or redirect_uri != CALLBACK_URL
-            or not isinstance(policy_digest, str) or len(policy_digest) != 64
-            or any(ch not in "0123456789abcdef" for ch in policy_digest)
+            not isinstance(pending, PendingRegistration)
+            or not self._hex64(pending.attempt_ref)
+            or pending.redirect_uri != CALLBACK_URL
+            or not self._hex64(pending.policy_digest)
         ):
-            raise EnrollmentError("stored Executive client registration is invalid")
-        return ClientRegistration(client_id, redirect_uri, policy_digest)
+            raise EnrollmentError("Executive client registration attempt is invalid")
+        raw = json.dumps(
+            {
+                "schema": PENDING_REGISTRATION_SCHEMA,
+                "attempt_ref": pending.attempt_ref,
+                "redirect_uri": pending.redirect_uri,
+                "policy_digest": pending.policy_digest,
+            },
+            sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")
+        self._api.upsert(KEYCHAIN_SERVICE, REGISTRATION_ACCOUNT, raw)
 
     def save(self, registration: ClientRegistration) -> None:
         if (
             not isinstance(registration, ClientRegistration)
             or not registration.client_id.startswith("tpc_")
             or registration.redirect_uri != CALLBACK_URL
-            or len(registration.policy_digest) != 64
+            or not self._hex64(registration.policy_digest)
         ):
             raise EnrollmentError("Executive client registration is invalid")
         raw = json.dumps(
@@ -107,8 +159,7 @@ class KeychainRegistrationStore:
                 "redirect_uri": registration.redirect_uri,
                 "policy_digest": registration.policy_digest,
             },
-            sort_keys=True,
-            separators=(",", ":"),
+            sort_keys=True, separators=(",", ":"),
         ).encode("utf-8")
         self._api.upsert(KEYCHAIN_SERVICE, REGISTRATION_ACCOUNT, raw)
 
@@ -155,12 +206,18 @@ def ensure_client_registration(
     *,
     store: KeychainRegistrationStore,
     post_json: Callable[[str, dict[str, Any]], Mapping[str, Any]],
+    attempt_ref_fn: Callable[[], str] = lambda: secrets.token_hex(32),
 ) -> ClientRegistration:
-    existing = store.load_optional()
+    existing = store.load_state()
+    if isinstance(existing, PendingRegistration):
+        raise EnrollmentEffectUnknown("Executive public client registration effect is unknown")
     if existing is not None:
         if existing.policy_digest != policy.policy_digest or existing.redirect_uri != CALLBACK_URL:
             raise EnrollmentError("stored Executive client registration does not match installed policy")
         return existing
+    attempt_ref = attempt_ref_fn()
+    pending = PendingRegistration(attempt_ref, CALLBACK_URL, policy.policy_digest)
+    store.save_pending(pending)
     request = {
         "client_name": CLIENT_NAME,
         "redirect_uris": [CALLBACK_URL],
@@ -170,12 +227,10 @@ def ensure_client_registration(
     }
     try:
         response = post_json(metadata.registration_endpoint, request)
-    except EnrollmentError:
-        raise
     except Exception:
-        raise EnrollmentError("Executive public client registration failed") from None
+        raise EnrollmentEffectUnknown("Executive public client registration effect is unknown") from None
     if not isinstance(response, Mapping):
-        raise EnrollmentError("Executive public client registration failed")
+        raise EnrollmentEffectUnknown("Executive public client registration effect is unknown")
     client_id = response.get("client_id")
     redirects = response.get("redirect_uris")
     grants = response.get("grant_types")
@@ -188,9 +243,12 @@ def ensure_client_registration(
         or not {"authorization_code", "refresh_token"}.issubset(set(grants))
         or auth_method != "none"
     ):
-        raise EnrollmentError("Executive public client registration failed")
+        raise EnrollmentEffectUnknown("Executive public client registration effect is unknown")
     registration = ClientRegistration(client_id, CALLBACK_URL, policy.policy_digest)
-    store.save(registration)
+    try:
+        store.save(registration)
+    except Exception:
+        raise EnrollmentEffectUnknown("Executive public client registration effect is unknown") from None
     return registration
 
 
