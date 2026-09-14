@@ -55,6 +55,7 @@ from control_plane.codex_worker import (
 from control_plane.worker_adapter import (
     AdapterBindingError,
     WorkerExecutionAdapter,
+    adapter_descriptor,
     bind_reviewed_adapter,
 )
 from control_plane.executive_orchestration_principal import (
@@ -215,6 +216,10 @@ class BrokerProtocolError(WorkerBrokerError):
 
 class BrokerStateError(WorkerBrokerError):
     """A typed operation is invalid for the broker's current state."""
+
+
+class WorkerAdapterNotImplementedError(WorkerBrokerError):
+    """A reviewed adapter is not implemented for broker execution."""
 
 
 class BrokerPreSubmitError(WorkerBrokerError):
@@ -2645,6 +2650,24 @@ class ExecutiveWorkerBroker:
         }
 
     async def _start(self, payload: dict[str, Any]) -> dict[str, Any]:
+        descriptor = adapter_descriptor(self.adapter_id)
+        if not descriptor.implemented:
+            raise WorkerAdapterNotImplementedError(
+                f"worker adapter {descriptor.adapter_id!r} is not implemented "
+                "for broker execution"
+            )
+        binding = getattr(self.adapter, "binding", None)
+        if binding is not None:
+            if getattr(binding, "implementation_state", None) == "SPEC_ONLY":
+                raise WorkerAdapterNotImplementedError(
+                    f"worker adapter {descriptor.adapter_id!r} catalog binding "
+                    "is SPEC_ONLY for broker execution"
+                )
+            if getattr(binding, "autonomous_allowed", None) is False:
+                raise WorkerAdapterNotImplementedError(
+                    f"worker adapter {descriptor.adapter_id!r} catalog binding "
+                    "does not allow autonomous broker execution"
+                )
         self._require_current_autonomy()
         if set(payload) != {"launch_spec", "validation_commands"}:
             raise BrokerProtocolError("start payload fields are invalid")
