@@ -830,3 +830,38 @@ def test_attack_e_replace_unenrolled_to_enrolled_is_refused() -> None:
             profiles_document=profiles,
         )
     assert "enrollment_state" in str(exc.value)
+
+
+def test_attack_f_every_use_admission_seal_bypass_is_refused() -> None:
+    """Every-use verification refuses a mutated live admission plus a valid replacement fact."""
+
+    bindings, profiles = _documents()
+    replacement = _capacity_fact(worker_id="worker-2")
+
+    def _mutated_live_admission(*, seal=...):
+        admission = _owner_seal(bindings=bindings, profiles=profiles)
+        object.__setattr__(admission, "worker_id", "worker-2")
+        object.__setattr__(admission, "_capacity_fact", replacement)
+        if seal is not ...:
+            object.__setattr__(admission, "_seal", seal)
+        return admission
+
+    def _verify(admission):
+        return verify_subscription_canary_admission(
+            admission,
+            adapter_id=admission.adapter_id,
+            bindings_document=bindings,
+            profiles_document=profiles,
+        )
+
+    with pytest.raises(CanaryAdmissionError, match="seal_digest") as digest_exc:
+        _verify(_mutated_live_admission())
+    assert "seal_digest" in str(digest_exc.value)
+
+    with pytest.raises(CanaryAdmissionError, match="_seal") as cleared_exc:
+        _verify(_mutated_live_admission(seal=None))
+    assert "_seal" in str(cleared_exc.value)
+
+    with pytest.raises(CanaryAdmissionError, match="_seal") as forged_exc:
+        _verify(_mutated_live_admission(seal=object()))
+    assert "_seal" in str(forged_exc.value)

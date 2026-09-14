@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import hmac
 import json
 import re
 from typing import Any, Mapping
@@ -267,6 +268,13 @@ def verify_subscription_canary_admission(
 
     if type(admission) is not SubscriptionCanaryAdmission:
         raise CanaryAdmissionError("canary admission is required")
+    if admission._seal is not _SEAL:
+        raise CanaryAdmissionError("_seal is not the factory seal")
+    expected_digest = _seal_digest(_public_fields(admission))
+    if type(admission.seal_digest) is not str or not hmac.compare_digest(
+        admission.seal_digest, expected_digest
+    ):
+        raise CanaryAdmissionError("seal_digest does not cover current public fields")
     _require_owner_facts(admission._capacity_fact, admission._realm_receipt)
     if (
         admission._capacity_fact.worker_id != admission.worker_id
