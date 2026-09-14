@@ -69,6 +69,11 @@ class FakeAppServer:
             os.environ.get("OHF_FAKE_GATE_LOG")
             or (self.state_path.parent / "w7_lc1_gate.log")
         )
+        self.item_gate_path = (
+            Path(os.environ["OHF_FAKE_ITEM_GATE_PATH"])
+            if os.environ.get("OHF_FAKE_ITEM_GATE_PATH")
+            else None
+        )
         self.effect_counter_path = (
             Path(os.environ.get("OHF_FAKE_EFFECT_COUNTERS"))
             if os.environ.get("OHF_FAKE_EFFECT_COUNTERS")
@@ -410,10 +415,15 @@ class FakeAppServer:
                         f"gate_path={self.gate_path}\n"
                     )
                 self._notify("turn/started", {"turn": {"id": turn_id}})
+                if self.item_gate_path is not None:
+                    while self.item_gate_path.exists():
+                        time.sleep(0.01)
                 for index, text in enumerate(self.visible_updates):
                     self._notify(
                         "item/updated",
                         {
+                            "threadId": thread_id,
+                            "turnId": turn_id,
                             "item": {
                                 "id": f"item_{turn_id}_{index}",
                                 "sequence": index,
@@ -425,6 +435,8 @@ class FakeAppServer:
                 self._notify(
                     "item/completed",
                     {
+                        "threadId": thread_id,
+                        "turnId": turn_id,
                         "item": {
                             "id": f"item_{turn_id}_0",
                             "sequence": 0,
@@ -436,6 +448,8 @@ class FakeAppServer:
                 self._notify(
                     "item/completed",
                     {
+                        "threadId": thread_id,
+                        "turnId": turn_id,
                         "item": {
                             "id": f"item_{turn_id}_1",
                             "sequence": 1,

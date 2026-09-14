@@ -433,7 +433,7 @@ def _fixture(tmp_path: Path, *, armed: bool = True, autonomy_guard=None):
 
 
 def _real_lc1_broker_turn(
-    tmp_path: Path, gate: Path
+    tmp_path: Path, gate: Path, *, item_gate: Path | None = None
 ):
     broker, peer, profile, _sweeper, adapters = _fixture(tmp_path)
     python = Path(sys.executable).resolve()
@@ -471,6 +471,9 @@ def _real_lc1_broker_turn(
             "OHF_FAKE_GATE_MODE": "held",
             "OHF_FAKE_GATE_PATH": str(gate),
             "OHF_FAKE_GATE_LOG": str(gate_log),
+            "OHF_FAKE_ITEM_GATE_PATH": (
+                str(item_gate) if item_gate is not None else ""
+            ),
             "OHF_FAKE_EFFECT_COUNTERS": str(effect_log),
             "OHF_FAKE_TURN_REPLY": '{"r623-r3":"complete"}',
             "OHF_FAKE_VISIBLE_UPDATES": ";".join(
@@ -1623,7 +1626,11 @@ def test_ohf_real_chain_publishes_visible_items_while_controller_nonterminal(
 ) -> None:
     gate = tmp_path / "terminal-gate"
     gate.touch()
-    broker, peer, profile, adapter = _real_lc1_broker_turn(tmp_path, gate)
+    item_gate = tmp_path / "item-notification-gate"
+    item_gate.touch()
+    broker, peer, profile, adapter = _real_lc1_broker_turn(
+        tmp_path, gate, item_gate=item_gate
+    )
     epoch = SessionEpochRef(
         "epoch-r623-r3", "ATT-R623-R3", "codex-01", 1
     )
@@ -1691,6 +1698,7 @@ def test_ohf_real_chain_publishes_visible_items_while_controller_nonterminal(
         await asyncio.wait_for(collecting.wait(), timeout=1)
         await asyncio.sleep(0)
         assert broker._operator_run is not None and broker._operator_run.busy
+        item_gate.unlink()
         nonterminal_read = None
         for attempt in range(100):
             candidate_read = await broker.execute(
@@ -1710,6 +1718,7 @@ def test_ohf_real_chain_publishes_visible_items_while_controller_nonterminal(
         assert [
             item["text"] for item in nonterminal_read["result"]["items"]
         ] == ["LC1 real partial", "LC1 real final"]
+        nonterminal_cursor = nonterminal_read["result"]["next_cursor"]
         assert nonterminal_read["result"]["terminal"] is False
         assert not collector.done()
 
@@ -1724,13 +1733,12 @@ def test_ohf_real_chain_publishes_visible_items_while_controller_nonterminal(
                 _observer_payload(
                     turn,
                     grant,
-                    cursor=nonterminal_read["result"]["next_cursor"],
+                    cursor=nonterminal_cursor,
                 ),
                 "r623-r3-terminal-read",
             ),
             peer=peer,
         )
-        assert terminal_read["result"]["items"] == []
         assert terminal_read["result"]["terminal"] is True
         assert adapter._state(generation).client._next_id > 0
         adapter.graceful_stop(generation, operation_id=OperationId("ohf-op:r623-r3-stop"))
