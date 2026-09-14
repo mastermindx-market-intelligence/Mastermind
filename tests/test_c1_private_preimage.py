@@ -261,6 +261,68 @@ def test_launchd_and_process_parsers_are_closed_and_reject_ambiguity():
         assert error.value.code == "MALFORMED_PROCESS"
 
 
+def test_launchd_parser_uses_service_fields_not_nested_coalition_fields():
+    output = """system/com.mastermind.executive.control = {
+    state = running
+    pid = 412
+    program = /Library/Application Support/Executive/python
+    arguments = {
+        /Library/Application Support/Executive/python
+        -I
+    }
+    resource coalition = {
+        state = active
+        pid = 999
+        program = /foreign/python
+        arguments = {
+            /foreign/python
+        }
+    }
+    jetsam coalition = {
+        state = active
+    }
+}
+"""
+    assert subject().parse_launchd_state(
+        output,
+        expected_program="/Library/Application Support/Executive/python",
+        expected_arguments=["/Library/Application Support/Executive/python", "-I"],
+    ) == {
+        "active": True, "pid": 412, "state": "running",
+        "program_matches": True, "arguments_match": True,
+    }
+
+
+@pytest.mark.parametrize("body", [
+    "state = running\npid = 1\nstate = running\n",
+    "state = running\npid = 1\npid = 2\n",
+    "nested = {\nstate = running\npid = 1\n}\n",
+    "state = running\nnested = {\npid = 1\n}\n",
+    "state = running\npid = 1\nnested = {\n",
+    "state = running\npid = 1\n}\n",
+])
+def test_launchd_parser_rejects_ambiguous_or_unbalanced_service_body(body):
+    module = subject()
+    with pytest.raises(module.PreimageUnsettled) as error:
+        module.parse_launchd_state("system/service = {\n" + body + "}\n")
+    assert error.value.code == "MALFORMED_LAUNCHD"
+
+
+@pytest.mark.parametrize("fields", [
+    "nested = {\nprogram = /python\narguments = {\n/python\n}\n}\n",
+    "program = /python\nprogram = /python\narguments = {\n/python\n}\n",
+    "program = /python\narguments = {\n/python\n}\narguments = {\n/python\n}\n",
+])
+def test_launchd_parser_requires_unique_top_level_program_and_arguments(fields):
+    module = subject()
+    with pytest.raises(module.PreimageUnsettled) as error:
+        module.parse_launchd_state(
+            "state = running\npid = 1\n" + fields,
+            expected_program="/python", expected_arguments=["/python"],
+        )
+    assert error.value.code == "MALFORMED_LAUNCHD"
+
+
 def test_metadata_projection_contains_no_content_or_hash():
     module = subject()
     info = os.stat_result((stat.S_IFREG | 0o400, 2, 3, 1, 450, 450, 99, 1, 2, 3))

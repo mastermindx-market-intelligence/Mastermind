@@ -26,6 +26,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
+_ROOT = Path(__file__).resolve().parents[2]
+if os.fspath(_ROOT) not in sys.path:
+    sys.path.insert(0, os.fspath(_ROOT))
+
 from control_plane.executive_autonomy import (
     ARMED_READY,
     CAPABILITY_POLICY_DIGEST,

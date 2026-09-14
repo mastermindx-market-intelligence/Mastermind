@@ -25,6 +25,10 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+_ROOT = Path(__file__).resolve().parents[1]
+if os.fspath(_ROOT) not in sys.path:
+    sys.path.insert(0, os.fspath(_ROOT))
+
 from control_plane.executive_runtime import RuntimeProofError, RuntimeStore
 from control_plane.executive_autonomy import (
     AutonomyRefusal,

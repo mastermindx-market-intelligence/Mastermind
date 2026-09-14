@@ -16,6 +16,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
+_ROOT = Path(__file__).resolve().parents[1]
+if os.fspath(_ROOT) not in sys.path:
+    sys.path.insert(0, os.fspath(_ROOT))
+
 from control_plane.executive_backup import verify_restore_drill
 from control_plane.executive_dr import (
     ExecutiveDRError,
