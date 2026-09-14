@@ -46,6 +46,7 @@ class LocalProfileError(ValueError):
         {
             "CONFIGURATION_REFUSED",
             "CONFIGURATION_CLEANUP_UNCERTAIN",
+            "PROJECT_CLEANUP_UNCERTAIN",
             "INVALID_REQUEST",
             "TOOL_NOT_AVAILABLE",
             "PROJECT_READ_REFUSED",
@@ -216,6 +217,22 @@ def _closed_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
     return result
 
 
+def _config_snapshot(selected: os.stat_result) -> tuple[int, ...]:
+    """Return every stable field needed to bind one regular-file acquisition."""
+
+    return (
+        selected.st_dev,
+        selected.st_ino,
+        selected.st_mode,
+        selected.st_nlink,
+        selected.st_uid,
+        selected.st_gid,
+        selected.st_size,
+        selected.st_mtime_ns,
+        selected.st_ctime_ns,
+    )
+
+
 def _secure_json(path: str) -> dict[str, object]:
     selected = Path(path)
     if not selected.is_absolute() or "\x00" in path:
@@ -248,23 +265,28 @@ def _secure_json(path: str) -> dict[str, object]:
         descriptor = os.open(selected, flags)
         opened = os.fstat(descriptor)
         if (
-            opened.st_dev != before.st_dev
-            or opened.st_ino != before.st_ino
-            or not stat.S_ISREG(opened.st_mode)
+            not stat.S_ISREG(opened.st_mode)
             or opened.st_nlink != 1
-            or opened.st_uid != before.st_uid
-            or stat.S_IMODE(opened.st_mode) != stat.S_IMODE(before.st_mode)
+            or _config_snapshot(opened) != _config_snapshot(before)
             or os.get_inheritable(descriptor)
         ):
             _refuse()
-        while True:
-            chunk = os.read(descriptor, min(4096, MAX_CONFIG_BYTES + 1 - total))
+        expected_size = opened.st_size
+        while total < expected_size:
+            chunk = os.read(descriptor, min(4096, expected_size - total))
             if not chunk:
-                break
+                _refuse()
             chunks.append(chunk)
             total += len(chunk)
-            if total > MAX_CONFIG_BYTES:
-                _refuse()
+        if os.read(descriptor, 1):
+            _refuse()
+        post_read = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(post_read.st_mode)
+            or post_read.st_nlink != 1
+            or _config_snapshot(post_read) != _config_snapshot(opened)
+        ):
+            _refuse()
     except BaseException as error:
         read_error = error
     finally:
@@ -284,13 +306,8 @@ def _secure_json(path: str) -> dict[str, object]:
         after = selected.lstat()
     except OSError:
         _refuse()
-    if (
-        not stat.S_ISREG(after.st_mode)
-        or after.st_nlink != 1
-        or after.st_dev != before.st_dev
-        or after.st_ino != before.st_ino
-        or after.st_mode != before.st_mode
-        or after.st_uid != before.st_uid
+    if not stat.S_ISREG(after.st_mode) or after.st_nlink != 1 or (
+        _config_snapshot(after) != _config_snapshot(before)
     ):
         _refuse()
     try:

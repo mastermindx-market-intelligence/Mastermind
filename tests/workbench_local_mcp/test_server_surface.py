@@ -3,16 +3,19 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import tempfile
 import threading
 import time
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 from common.bounded_sync_executor import (
     BoundedSyncExecutor,
     SyncExecutorCloseTimeout,
+    SyncExecutorClosed,
 )
 from integrations.workbench_local_mcp.adapter import LocalWorkbenchGateway
 from integrations.workbench_local_mcp.schemas import (
@@ -318,6 +321,79 @@ class SdkDispatchBoundaryTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "must not exceed two calls"):
                 build_server(gateway, BoundedSyncExecutor(max_concurrency=3))
         finally:
+            gateway.close()
+
+    def test_run_stdio_closes_gateway_when_server_construction_fails(self) -> None:
+        from integrations.workbench_local_mcp import server as local_server
+
+        gateway = LocalWorkbenchGateway.open(self.fixtures.config)
+        descriptor = gateway._project.fd
+        with mock.patch.object(
+            local_server,
+            "build_server",
+            side_effect=RuntimeError("controlled server construction failure"),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, "controlled server construction failure"
+            ):
+                asyncio.run(local_server.run_stdio(gateway))
+        with self.assertRaises(OSError):
+            os.fstat(descriptor)
+
+    def test_run_stdio_drains_executor_when_options_construction_fails(self) -> None:
+        from integrations.workbench_local_mcp import server as local_server
+
+        gateway = LocalWorkbenchGateway.open(self.fixtures.config)
+        descriptor = gateway._project.fd
+        built: list[Any] = []
+        original_build = local_server.build_server
+
+        def capture_server(*args: Any, **kwargs: Any):
+            server = original_build(*args, **kwargs)
+            built.append(server)
+            return server
+
+        async def scenario() -> None:
+            with (
+                mock.patch.object(local_server, "build_server", side_effect=capture_server),
+                mock.patch.object(
+                    local_server,
+                    "initialization_options",
+                    side_effect=RuntimeError("controlled options failure"),
+                ),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "controlled options failure"):
+                    await local_server.run_stdio(gateway)
+            executor = built[0]._workbench_executor
+            with self.assertRaises(SyncExecutorClosed):
+                await executor.run(lambda: None, timeout=1.0)
+
+        asyncio.run(scenario())
+        self.assertEqual(len(built), 1)
+        with self.assertRaises(OSError):
+            os.fstat(descriptor)
+
+    def test_run_stdio_cleanup_uncertainty_supersedes_construction_failure(self) -> None:
+        from integrations.workbench_local_mcp import server as local_server
+
+        gateway = LocalWorkbenchGateway.open(self.fixtures.config)
+        original_close = gateway.close
+
+        def uncertain_close() -> None:
+            raise LocalProfileError("PROJECT_CLEANUP_UNCERTAIN")
+
+        gateway.close = uncertain_close  # type: ignore[method-assign]
+        try:
+            with mock.patch.object(
+                local_server,
+                "build_server",
+                side_effect=RuntimeError("controlled server construction failure"),
+            ):
+                with self.assertRaises(LocalProfileError) as caught:
+                    asyncio.run(local_server.run_stdio(gateway))
+            self.assertEqual(caught.exception.code, "PROJECT_CLEANUP_UNCERTAIN")
+        finally:
+            gateway.close = original_close  # type: ignore[method-assign]
             gateway.close()
 
     def test_physical_timeout_blocks_descriptor_close_until_eventual_drain(self) -> None:

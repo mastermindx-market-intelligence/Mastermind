@@ -175,13 +175,18 @@ async def _drain_and_close(
 
 
 async def run_stdio(gateway: LocalWorkbenchGateway) -> None:
-    server = build_server(gateway)
-    options = initialization_options(server)
-    executor = getattr(server, "_workbench_executor", None)
+    executor: BoundedSyncExecutor | None = None
     try:
+        server = build_server(gateway)
+        selected_executor = getattr(server, "_workbench_executor", None)
+        if not isinstance(selected_executor, BoundedSyncExecutor):
+            raise RuntimeError("Workbench executor ownership missing")
+        executor = selected_executor
+        options = initialization_options(server)
         async with stdio_server() as (read_stream, write_stream):
             await server.run(read_stream, write_stream, options)
     finally:
-        if not isinstance(executor, BoundedSyncExecutor):
-            raise RuntimeError("Workbench executor ownership missing")
-        await _drain_and_close(gateway, executor)
+        if executor is None:
+            gateway.close()
+        else:
+            await _drain_and_close(gateway, executor)

@@ -411,6 +411,7 @@ class LocalWorkbenchGateway(_ReadOperations):
             canonical_json({"fingerprint": digest, "started_at_ns": time.time_ns()})
         ).hexdigest()
         self._closed = False
+        self._close_uncertainty: LocalProfileError | None = None
         super().__init__(
             project_ref=config.project_ref,
             profile=config.profile,
@@ -476,12 +477,17 @@ class LocalWorkbenchGateway(_ReadOperations):
     def close(self) -> None:
         if self._closed:
             return
-        self._closed = True
+        if self._close_uncertainty is not None:
+            raise self._close_uncertainty
+        uncertainty = LocalProfileError("PROJECT_CLEANUP_UNCERTAIN")
+        self._close_uncertainty = uncertainty
         self._port_closed = True
         try:
             os.close(self._project.fd)
-        except OSError:
-            raise LocalProfileError("INTERNAL_ERROR") from None
+        except OSError as error:
+            raise uncertainty from error
+        self._closed = True
+        self._close_uncertainty = None
 
     def __enter__(self) -> "LocalWorkbenchGateway":
         return self
@@ -490,7 +496,7 @@ class LocalWorkbenchGateway(_ReadOperations):
         self.close()
 
     def _owned_scope(self) -> ReadScope:
-        if self._closed:
+        if self._port_closed:
             raise LocalProfileError("PROJECT_READ_REFUSED")
         try:
             current = os.fstat(self._project.fd)

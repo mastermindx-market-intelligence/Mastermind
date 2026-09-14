@@ -330,6 +330,100 @@ class LocalWorkbenchProfileTests(unittest.TestCase):
                 load_config(str(config_path))
         self.assertEqual(caught.exception.code, "CONFIGURATION_CLEANUP_UNCERTAIN")
 
+    def test_config_loader_refuses_same_inode_rewrite_after_read(self) -> None:
+        config_path = self.root / "profile-same-inode-rewrite.json"
+        original_bytes = json.dumps(self.payload).encode("utf-8")
+        replacement_bytes = original_bytes.replace(b"mastermind", b"mastermimd", 1)
+        self.assertEqual(len(replacement_bytes), len(original_bytes))
+        config_path.write_bytes(original_bytes)
+        before = config_path.stat()
+        writer = os.open(config_path, os.O_WRONLY)
+        original_read = profile_schemas.os.read
+        rewritten = False
+
+        def read_then_rewrite(descriptor: int, count: int) -> bytes:
+            nonlocal rewritten
+            chunk = original_read(descriptor, count)
+            if chunk and not rewritten:
+                time.sleep(0.01)
+                os.pwrite(writer, replacement_bytes, 0)
+                os.fsync(writer)
+                os.utime(
+                    config_path,
+                    ns=(before.st_atime_ns, before.st_mtime_ns),
+                )
+                rewritten = True
+            return chunk
+
+        try:
+            with mock.patch.object(
+                profile_schemas.os, "read", side_effect=read_then_rewrite
+            ):
+                with self.assertRaisesRegex(
+                    LocalProfileError, "^CONFIGURATION_REFUSED$"
+                ):
+                    load_config(str(config_path))
+        finally:
+            os.close(writer)
+        after = config_path.stat()
+        self.assertTrue(rewritten)
+        self.assertEqual(after.st_ino, before.st_ino)
+        self.assertEqual(after.st_size, before.st_size)
+        self.assertEqual(after.st_mtime_ns, before.st_mtime_ns)
+        self.assertNotEqual(after.st_ctime_ns, before.st_ctime_ns)
+
+    def test_gateway_close_uncertainty_is_sticky_without_descriptor_retry(self) -> None:
+        other = LocalWorkbenchGateway.open(self.config)
+        descriptor = other._project.fd
+        close_attempts: list[int] = []
+
+        def fail_without_closing(selected: int) -> None:
+            close_attempts.append(selected)
+            raise OSError("simulated ambiguous close")
+
+        try:
+            with mock.patch.object(
+                profile_schemas.os, "close", side_effect=fail_without_closing
+            ):
+                with self.assertRaises(LocalProfileError) as first:
+                    other.close()
+                with self.assertRaises(LocalProfileError) as repeated:
+                    other.close()
+            self.assertEqual(first.exception.code, "PROJECT_CLEANUP_UNCERTAIN")
+            self.assertIs(repeated.exception, first.exception)
+            self.assertEqual(close_attempts, [descriptor])
+            os.fstat(descriptor)
+            with self.assertRaisesRegex(
+                LocalProfileError, "^PROJECT_READ_REFUSED$"
+            ):
+                other._scope()
+        finally:
+            os.close(descriptor)
+
+    def test_gateway_close_uncertainty_remains_sticky_when_fd_was_closed(self) -> None:
+        other = LocalWorkbenchGateway.open(self.config)
+        descriptor = other._project.fd
+        original_close = profile_schemas.os.close
+        close_attempts: list[int] = []
+
+        def close_then_fail(selected: int) -> None:
+            close_attempts.append(selected)
+            original_close(selected)
+            raise OSError("simulated lost close acknowledgement")
+
+        with mock.patch.object(
+            profile_schemas.os, "close", side_effect=close_then_fail
+        ):
+            with self.assertRaises(LocalProfileError) as first:
+                other.close()
+            with self.assertRaises(LocalProfileError) as repeated:
+                other.close()
+        self.assertEqual(first.exception.code, "PROJECT_CLEANUP_UNCERTAIN")
+        self.assertIs(repeated.exception, first.exception)
+        self.assertEqual(close_attempts, [descriptor])
+        with self.assertRaises(OSError):
+            os.fstat(descriptor)
+
     def test_expired_profile_fails_closed(self) -> None:
         expired = parse_config({**self.payload, "lease_expires_at_ms": int(time.time() * 1000) - 1})
         other = LocalWorkbenchGateway.open(expired)
