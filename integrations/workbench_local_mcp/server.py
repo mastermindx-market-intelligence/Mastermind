@@ -16,7 +16,7 @@ from mcp.server.lowlevel import NotificationOptions, Server
 from mcp.server.models import InitializationOptions
 
 from common.bounded_sync_executor import BoundedSyncExecutor
-from common.mcp_stdio_boundary import private_stdio_server
+from integrations.workbench_stdio_boundary import private_stdio_server
 from .adapter import LocalWorkbenchGateway
 from .schemas import (
     MAX_ARGUMENT_BYTES,

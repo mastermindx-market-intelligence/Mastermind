@@ -106,7 +106,7 @@ def initialize(process):
 PROTOCOL_CHILD = '''
 import asyncio, logging
 from mcp.server.lowlevel import Server
-from common.mcp_stdio_boundary import private_stdio_server
+from integrations.workbench_stdio_boundary import private_stdio_server
 logging.basicConfig(level=logging.DEBUG)
 async def main():
     server = Server("protocol-boundary-test")
@@ -152,7 +152,7 @@ def test_native_protocol_rejection_is_private_and_recovers(label, payload):
 
 
 def test_native_protocol_oversize_frame_is_bounded_and_drained():
-    from common.mcp_stdio_boundary import MAX_WIRE_BYTES
+    from integrations.workbench_stdio_boundary import MAX_WIRE_BYTES
 
     with child([sys.executable, "-c", PROTOCOL_CHILD]) as process:
         initialize(process)
@@ -166,7 +166,7 @@ def test_native_protocol_oversize_frame_is_bounded_and_drained():
 
 def test_scoped_sdk_filter_preserves_other_sessions_and_diagnostics(caplog):
     import logging
-    from common.mcp_stdio_boundary import _protocol_diagnostics
+    from integrations.workbench_stdio_boundary import _protocol_diagnostics
 
     logger = logging.getLogger("mcp.server.lowlevel.server")
     caplog.set_level(logging.DEBUG)
@@ -192,7 +192,7 @@ import anyio
 from mcp.server.lowlevel import Server
 from mcp.types import Tool
 from mcp.shared.exceptions import McpError
-from common.mcp_stdio_boundary import private_stdio_server
+from integrations.workbench_stdio_boundary import private_stdio_server
 logging.basicConfig(level=logging.DEBUG)
 async def main():
     server = Server("server-ping-test")
@@ -226,13 +226,13 @@ asyncio.run(main())
 
 
 def test_oversized_native_output_is_refused_and_next_request_survives():
-    from common.mcp_stdio_boundary import MAX_WIRE_BYTES
+    from integrations.workbench_stdio_boundary import MAX_WIRE_BYTES
 
     code = '''
 import asyncio, logging
 from mcp.server.lowlevel import Server
 from mcp.types import Tool
-from common.mcp_stdio_boundary import private_stdio_server, MAX_WIRE_BYTES
+from integrations.workbench_stdio_boundary import private_stdio_server, MAX_WIRE_BYTES
 logging.basicConfig(level=logging.DEBUG)
 async def main():
     server = Server("output-limit-test")
@@ -288,7 +288,7 @@ def test_official_client_original_oversized_request_completes_without_timeout(mo
 import asyncio
 from mcp.server.lowlevel import Server
 from mcp.types import Tool
-from common.mcp_stdio_boundary import private_stdio_server, MAX_WIRE_BYTES
+from integrations.workbench_stdio_boundary import private_stdio_server, MAX_WIRE_BYTES
 async def main():
     server = Server("original-response-test")
     @server.list_tools()
@@ -322,7 +322,7 @@ asyncio.run(main())
 
 @pytest.mark.parametrize("request_id", [True, 2**64, SENTINEL + "x" * 1024])
 def test_uncorrelatable_request_id_is_refused_before_sdk(request_id):
-    from common.mcp_stdio_boundary import _validated_protocol_line
+    from integrations.workbench_stdio_boundary import _validated_protocol_line
 
     with pytest.raises(ValueError, match="PROTOCOL_ID"):
         _validated_protocol_line(json.dumps({"jsonrpc": "2.0", "id": request_id, "method": "ping"}))
