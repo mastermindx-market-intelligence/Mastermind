@@ -12,11 +12,11 @@ import json
 import os
 import re
 import stat
-import subprocess
-import sys
 from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import urlparse
+
+from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
 
 
 _REALM_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
@@ -104,23 +104,10 @@ class CodexProviderRealm:
 
 
 def _has_macos_acl(path: Path) -> bool:
-    if sys.platform != "darwin":
-        return False
     try:
-        completed = subprocess.run(
-            ["/usr/bin/stat", "-f", "%Sp", os.fspath(path)],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            check=False,
-            timeout=5,
-        )
-    except (OSError, subprocess.SubprocessError):
-        raise ProviderRealmError("provider credential is unavailable") from None
-    if completed.returncode != 0:
+        return has_macos_acl(path)
+    except FilesystemSecurityError:
         raise ProviderRealmError("provider credential is unavailable")
-    return completed.stdout.strip().endswith("+")
 
 
 def load_private_provider_credential(

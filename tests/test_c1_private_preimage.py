@@ -8,6 +8,7 @@ import plistlib
 import stat
 import subprocess
 from dataclasses import dataclass
+from unittest import mock
 
 import pytest
 
@@ -479,16 +480,29 @@ def test_acl_marker_requires_stable_identity_and_closed_marker():
             return dict(metadata)
 
     class Commands:
-        def __init__(self, marker):
-            self.marker = marker
+        calls = []
 
         def run(self, _argv):
-            return {"status": "ok", "stdout": self.marker}
+            self.calls.append(tuple(_argv))
+            return {"status": "ok", "stdout": ""}
 
-    assert module.inspect_acl(FS(), Commands("-rw-r--r-- \n"), module.CONTROL_CONFIG) is False
-    assert module.inspect_acl(FS(), Commands("-rw-r--r--+\n"), module.CONTROL_CONFIG) is True
+    with mock.patch.object(
+        module, "has_macos_acl", return_value=False
+    ) as observer:
+        assert module.inspect_acl(FS(), Commands(), module.CONTROL_CONFIG) is False
+    with mock.patch.object(
+        module, "has_macos_acl", return_value=True
+    ) as observer:
+        assert module.inspect_acl(FS(), Commands(), module.CONTROL_CONFIG) is True
+    observer.assert_called_once_with(module.CONTROL_CONFIG)
+    assert Commands.calls == [("/usr/bin/true",), ("/usr/bin/true",)]
     with pytest.raises(module.PreimageUnsettled) as error:
-        module.inspect_acl(FS(), Commands("unknown\n"), module.CONTROL_CONFIG)
+        with mock.patch.object(
+            module,
+            "has_macos_acl",
+            side_effect=module.FilesystemSecurityError("observer fixture"),
+        ):
+            module.inspect_acl(FS(), Commands(), module.CONTROL_CONFIG)
     assert error.value.code == "ACL_UNKNOWN"
 
 
@@ -847,8 +861,8 @@ class InstalledCommands:
     def run(self, argv):
         module = subject()
         command = tuple(argv)
-        if command[:3] == ("/usr/bin/stat", "-f", "%Sp"):
-            return {"status": "ok", "stdout": "-r--r----- \n"}
+        if command == ("/usr/bin/true",):
+            return {"status": "ok", "stdout": ""}
         if command == ("/bin/launchctl", "print-disabled", "system"):
             entries = "".join(f'    "{label}" => true\n' for label in module.LABELS)
             return {"status": "ok", "stdout": f"disabled services = {{\n{entries}}}\n"}
@@ -1243,8 +1257,8 @@ def test_command_adapter_is_joined_to_active_service_ownership(
 
     def runner(argv, **_kwargs):
         command = tuple(argv)
-        if command[:3] == ("/usr/bin/stat", "-f", "%Sp"):
-            return Completed(stdout=b"-r--r-----\n")
+        if command == ("/usr/bin/true",):
+            return Completed(stdout=b"")
         if command == ("/bin/launchctl", "print-disabled", "system"):
             entries = b"".join(
                 f'    "{label}" => true\n'.encode() for label in module.LABELS

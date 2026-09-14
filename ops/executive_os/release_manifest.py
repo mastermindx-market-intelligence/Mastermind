@@ -12,6 +12,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
+
 
 SCHEMA_VERSION = "mastermind.executive_release_manifest/v1"
 MANIFEST_NAME = ".executive-release-manifest.json"
@@ -22,19 +24,10 @@ class ReleaseManifestError(RuntimeError):
 
 
 def _has_acl(path: Path) -> bool:
-    if sys.platform != "darwin":
-        return False
-    completed = subprocess.run(
-        ["/usr/bin/stat", "-f", "%Sp", os.fspath(path)],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-        timeout=5,
-    )
-    if completed.returncode != 0:
+    try:
+        return has_macos_acl(path)
+    except FilesystemSecurityError:
         raise ReleaseManifestError(f"cannot inspect release ACL: {path.name}")
-    return b"+" in completed.stdout
 
 
 def _validate_owned_info(info: os.stat_result, *, label: str) -> None:

@@ -22,6 +22,7 @@ from control_plane.executive_ambient_process import (
     AmbientProcessClassifier,
     DarwinDistnotedClassifier,
 )
+from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
 
 MAX_CREDENTIAL_BYTES = 4096
 
@@ -35,23 +36,12 @@ class SubscriptionCredentialEffectUnknown(SubscriptionCredentialError):
 
 
 def _has_macos_acl(path: Path) -> bool:
-    if sys.platform != "darwin":
-        return False
     try:
-        completed = subprocess.run(
-            ["/usr/bin/stat", "-f", "%Sp", os.fspath(path)],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            check=False,
-            timeout=5,
-        )
-    except (OSError, subprocess.SubprocessError):
-        raise SubscriptionCredentialError("credential filesystem metadata unavailable") from None
-    if completed.returncode != 0:
+        return has_macos_acl(path)
+    except SubscriptionCredentialError:
+        raise
+    except FilesystemSecurityError:
         raise SubscriptionCredentialError("credential filesystem metadata unavailable")
-    return completed.stdout.strip().endswith("+")
 
 
 def _require_provider_home(config: Mapping[str, Any]) -> Path:
@@ -60,13 +50,17 @@ def _require_provider_home(config: Mapping[str, Any]) -> Path:
         info = home.lstat()
     except OSError:
         raise SubscriptionCredentialError("provider home is unavailable") from None
+    try:
+        acl_present = _has_macos_acl(home)
+    except SubscriptionCredentialError:
+        raise
     if (
         stat.S_ISLNK(info.st_mode)
         or not stat.S_ISDIR(info.st_mode)
         or info.st_uid != int(config["worker_uid"])
         or info.st_gid != int(config["worker_gid"])
         or stat.S_IMODE(info.st_mode) != 0o700
-        or _has_macos_acl(home)
+        or acl_present
     ):
         raise SubscriptionCredentialError("provider home metadata is unsafe")
     return home
@@ -77,6 +71,10 @@ def _credential_metadata(path: Path, *, worker_uid: int, worker_gid: int) -> os.
         info = path.lstat()
     except OSError:
         raise SubscriptionCredentialError("provider credential is unavailable") from None
+    try:
+        acl_present = _has_macos_acl(path)
+    except SubscriptionCredentialError:
+        raise
     if (
         stat.S_ISLNK(info.st_mode)
         or not stat.S_ISREG(info.st_mode)
@@ -86,7 +84,7 @@ def _credential_metadata(path: Path, *, worker_uid: int, worker_gid: int) -> os.
         or info.st_nlink != 1
         or info.st_size < 1
         or info.st_size > MAX_CREDENTIAL_BYTES
-        or _has_macos_acl(path)
+        or acl_present
     ):
         raise SubscriptionCredentialError("provider credential metadata is unsafe")
     return info
