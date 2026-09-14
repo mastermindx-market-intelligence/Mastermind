@@ -325,6 +325,7 @@ class AppServerClient:
         self.start_new_session = start_new_session
         self._private_pgid: int | None = None
         self.last_termination_outcome: str | None = None
+        self.visible_projection = None
 
     def start(self) -> None:
         self.proc = subprocess.Popen(
@@ -370,6 +371,8 @@ class AppServerClient:
             try:
                 payload = json.loads(line)
             except json.JSONDecodeError:
+                if self.visible_projection is not None:
+                    self.visible_projection.record_parser_failure()
                 with self._notification_condition:
                     raw_pending = bool(self._raw_responses)
                 if raw_pending:
@@ -378,6 +381,14 @@ class AppServerClient:
                 self._stdout.put({"_malformed": True, "raw": redact_text(line)})
                 continue
             if isinstance(payload, dict):
+                prebind_request_id: int | None = None
+                if self.visible_projection is not None:
+                    prebind_request_id = self.visible_projection.active_prebind_request_id()
+                    self.visible_projection.prebind_frame(
+                        prebind_request_id,
+                        method=payload.get("method"),
+                        params=payload.get("params"),
+                    )
                 with self._notification_condition:
                     response_id = payload.get("id")
                     raw_target = (
@@ -418,6 +429,11 @@ class AppServerClient:
                     else:
                         self.notifications.append(observed)
                         self._notification_condition.notify_all()
+                if self.visible_projection is not None:
+                    self.visible_projection.publish_demultiplexed(
+                        prebind_request_id,
+                        payload=payload,
+                    )
         with self._notification_condition:
             self._transport_closed = True
             for target in self._responses.values():
@@ -479,6 +495,7 @@ class AppServerClient:
         params: Mapping[str, Any] | None = None,
         *,
         timeout: float = 15.0,
+        arm_prebind: bool = False,
     ) -> dict[str, Any]:
         response_queue: queue.Queue[dict[str, Any] | None] = queue.Queue(maxsize=1)
         with self._notification_condition:
@@ -487,6 +504,8 @@ class AppServerClient:
             request_id = self._next_id
             self._next_id += 1
             self._responses[request_id] = response_queue
+            if arm_prebind and self.visible_projection is not None:
+                self.visible_projection.arm_prebind(request_id)
         message: dict[str, Any] = {"method": method, "id": request_id}
         if params is not None:
             message["params"] = dict(params)
@@ -495,12 +514,16 @@ class AppServerClient:
             try:
                 payload = response_queue.get(timeout=timeout)
             except queue.Empty as exc:
+                if self.visible_projection is not None:
+                    self.visible_projection.drop_prebind("response_timeout")
                 raise JsonRpcError(f"timeout waiting for {method}") from exc
             if payload is None:
                 raise JsonRpcError(f"app-server exited before answering {method}")
             if payload.get("_transport_failure"):
                 raise JsonRpcError("app-server transport compromised")
             if "error" in payload:
+                if self.visible_projection is not None:
+                    self.visible_projection.drop_prebind("response_error")
                 raise JsonRpcError(
                     redact_text(
                         str(
@@ -513,8 +536,17 @@ class AppServerClient:
             result = payload.get("result")
             return result if isinstance(result, dict) else {"value": result}
         finally:
+            if isinstance(payload, dict) and payload.get("_transport_failure"):
+                if self.visible_projection is not None:
+                    self.visible_projection.drop_prebind("transport_failure")
+            if self.visible_projection is not None:
+                self.visible_projection.drop_expired_prebind()
             with self._notification_condition:
                 self._responses.pop(request_id, None)
+
+    def next_request_id(self) -> int:
+        with self._notification_condition:
+            return self._next_id
 
     def request_raw_turn_page(
         self,

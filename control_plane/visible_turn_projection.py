@@ -175,6 +175,7 @@ class VisibleTurnProjection:
         self._grants: dict[str, _Grant] = {}
         self._viewers_by_turn: dict[TurnKey, set[str]] = {}
         self._refusals: list[tuple[TurnKey | None, str, float]] = []
+        self._parser_gaps: list[GapRecord] = []
         self._clock = clock
 
     def attach(self) -> None:
@@ -229,9 +230,40 @@ class VisibleTurnProjection:
             buffer.items.append(item)
             buffer.retained_bytes += item_bytes
 
+    def prebind_frame(
+        self,
+        request_id: int,
+        *,
+        method: object,
+        params: object,
+    ) -> None:
+        self.prebind(request_id, method=method, params=params)
+
+    def publish_demultiplexed(self, request_id: int, *, payload: object) -> None:
+        del request_id, payload
+
+    def record_parser_failure(self) -> None:
+        # Parser failures intentionally do not touch controller transport state.
+        self._parser_gaps.append(GapRecord(0, 0, "parser_failure"))
+
+    def parser_gaps(self) -> tuple[GapRecord, ...]:
+        with self._lock:
+            return tuple(self._parser_gaps)
+
     def drop_prebind(self, reason: str) -> GapRecord | None:
         with self._lock:
             return self._drop_prebind_locked(reason)
+
+    def drop_expired_prebind(self) -> GapRecord | None:
+        with self._lock:
+            buffer = self._prebind
+            if buffer is not None and self._clock() - buffer.armed_at >= PREBIND_TTL_SECONDS:
+                return self._drop_prebind_locked("prebind_timeout")
+            return None
+
+    def active_prebind_request_id(self) -> int | None:
+        with self._lock:
+            return self._prebind.request_id if self._prebind is not None else None
 
     def commit_prebind(
         self,

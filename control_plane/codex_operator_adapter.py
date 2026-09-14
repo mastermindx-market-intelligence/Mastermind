@@ -83,6 +83,7 @@ from control_plane.executive_orchestration_result import (
     parse_canonical_json,
 )
 from control_plane.worker_browser_b1 import BROWSER_RESOURCE_ENV_KEYS
+from control_plane.visible_turn_projection import TurnKey, VisibleTurnProjection
 from scripts.ohf.capability_skill_projection import SkillProjectionReceipt
 from scripts.ohf.laboratory import AppServerClient, AppServerStopProof, JsonRpcError
 from scripts.ohf.redaction import redact_evidence_text
@@ -426,6 +427,8 @@ class _GenerationState:
     turn_subordinates: dict[str, set[str]] = field(default_factory=dict)
     audited_native_helper_turns: set[str] = field(default_factory=set)
     candidate_artifact_digests: dict[str, str] = field(default_factory=dict)
+    pending_prebind_request_id: int | None = None
+    visible_turns: set[str] = field(default_factory=set)
     skills_changed: bool = False
     accepted_skill_observation: "tuple[tuple[str, str, str | None, str], ...] | None" = None
     accepted_skill_observation_root: "str | None" = None
@@ -676,6 +679,7 @@ class CodexOperatorAdapter:
         self._generations: dict[str, _GenerationState] = {}
         self._active_workers: dict[str, str] = {}
         self._bound_resources: dict[str, _BoundAttemptResource] = {}
+        self.visible_turn_projection = VisibleTurnProjection()
         self._validate_constructor()
         # Exact executable evidence is captured without starting it.
         self.binary_digest = _sha256_file(self.binary_path)
@@ -1389,6 +1393,7 @@ class CodexOperatorAdapter:
             )
         client = self._new_client(resource_binding)
         try:
+            client.visible_projection = self.visible_turn_projection
             client.start()
             if not client.pid or not client.alive():
                 raise CodexAdapterError(
@@ -2482,6 +2487,7 @@ class CodexOperatorAdapter:
             )
             native_turn_id = str(turn_obj.get("id") or "")
         except Exception as exc:
+            self.visible_turn_projection.drop_prebind("turn_start_error")
             raise _rpc_failure(exc, effect_unknown=True) from exc
         if not native_turn_id:
             raise CodexAdapterError(
@@ -2490,6 +2496,23 @@ class CodexOperatorAdapter:
                 effect_unknown=True,
             )
         state.turns[turn.turn_id] = native_turn_id
+        turn_key = TurnKey(
+            turn.attempt_id,
+            turn.session_epoch_id,
+            turn.process_generation_id,
+            state.generation.generation_number,
+            state.generation.worker_id,
+            turn.turn_id,
+            native_turn_id,
+        )
+        self.visible_turn_projection.commit_prebind(
+            state.pending_prebind_request_id
+            if state.pending_prebind_request_id is not None
+            else -1,
+            turn_key,
+            native_turn_id=native_turn_id,
+        )
+        state.visible_turns.add(turn.turn_id)
         notifications = state.client.drain_notifications()
         self._ingest_turn_notifications(state, turn, notifications)
         return TurnStartObservation(
@@ -3138,6 +3161,7 @@ class CodexOperatorAdapter:
             state.writer_state = ProviderWriterState.UNKNOWN
             return self._observation(state, failure=AdapterFailureClass.PROCESS_CRASH)
         state.writer_state = ProviderWriterState.RELEASED
+        state.client.visible_projection = None
         if self._active_workers.get(self.worker_id) == generation.process_generation_id:
             self._active_workers.pop(self.worker_id, None)
         return self._observation(state)
