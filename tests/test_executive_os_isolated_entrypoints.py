@@ -83,10 +83,25 @@ TARGETS = sorted(
 )
 TARGETS = [target for target in TARGETS if target[0].name != "render_launchd_program_arguments.py"]
 
+assert TARGETS, "no wrapper-invoked entrypoints discovered"
+
+MINIMUM_EXPECTED_TARGETS = {
+    "ops/executive_os/autonomy_control.py",
+    "scripts/executive_os_phase1c.py",
+    "scripts/executive_dr_cli.py",
+}
+
 
 @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda path: path.name)
 def test_wrapper_target_discovery_succeeds(wrapper: Path) -> None:
     _wrapper_targets(wrapper)
+
+
+def test_discovery_includes_patched_entrypoints() -> None:
+    discovered_targets = {
+        target_path.relative_to(REPO_ROOT).as_posix() for target_path, _ in TARGETS
+    }
+    assert MINIMUM_EXPECTED_TARGETS <= discovered_targets
 
 
 @pytest.mark.parametrize(
@@ -106,8 +121,7 @@ def test_wrapper_invoked_entrypoint_imports_without_implicit_repo_path(
         timeout=60,
     )
     assert "ModuleNotFoundError" not in result.stderr
-    if result.returncode != 2 or "invalid choice" not in result.stderr:
-        assert "Traceback" not in result.stderr
+    assert "Traceback" not in result.stderr
 
 
 def test_autonomy_control_imports_control_plane_under_wrapper_isolation(tmp_path: Path) -> None:
