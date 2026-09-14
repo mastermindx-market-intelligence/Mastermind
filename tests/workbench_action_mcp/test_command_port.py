@@ -601,6 +601,223 @@ def test_input_close_uncertainty_is_sticky_but_does_not_change_observed_exit(
         harness.close()
 
 
+@pytest.mark.parametrize("surface", ["reconcile", "read_result"])
+def test_evidence_read_cancel_keeps_blocking_fsync_off_event_loop_and_drains(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, surface: str
+) -> None:
+    harness = Harness(tmp_path, workers=1)
+    entered = threading.Event()
+    released = threading.Event()
+    drained = threading.Event()
+    original_fsync = action_artifacts.os.fsync
+    first = True
+
+    def controlled_fsync(fd):
+        nonlocal first
+        if first:
+            first = False
+            entered.set()
+            released.wait(timeout=0.5)
+            drained.set()
+        return original_fsync(fd)
+
+    try:
+        prepared = harness.prepare_command()
+        asyncio.run(harness.run(harness.caller, prepared["action_ref"]))
+        monkeypatch.setattr(action_artifacts.os, "fsync", controlled_fsync)
+
+        async def cancel_blocked_read() -> None:
+            if surface == "reconcile":
+                pending = harness.reconcile(
+                    harness.caller, prepared["action_ref"]
+                )
+            else:
+                pending = harness.read_result(
+                    harness.caller,
+                    {"action_ref": prepared["action_ref"], "stream": "stdout"},
+                )
+            task = asyncio.create_task(pending)
+            for _ in range(100):
+                if entered.is_set():
+                    break
+                await asyncio.sleep(0.005)
+            assert entered.is_set()
+            await asyncio.sleep(0.03)
+            assert not released.is_set(), "event loop stalled until blocking fsync ended"
+            assert not task.done()
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert not drained.is_set()
+            released.set()
+            for _ in range(100):
+                if drained.is_set():
+                    break
+                await asyncio.sleep(0.005)
+            assert drained.is_set()
+
+        asyncio.run(cancel_blocked_read())
+    finally:
+        released.set()
+        harness.close()
+
+
+def test_timed_out_run_does_not_probe_evidence_on_event_loop_or_replay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    harness = Harness(tmp_path, workers=1)
+    prepared = harness.prepare_command()
+    launched = threading.Event()
+    physical_done = threading.Event()
+    popen_calls = 0
+    main_thread_qualification_calls = 0
+    original_popen = command_port.subprocess.Popen
+    original_qualified = command_port._qualified_result
+    main_thread = threading.get_ident()
+
+    def recording_popen(*args, **kwargs):
+        nonlocal popen_calls
+        popen_calls += 1
+        launched.set()
+        return original_popen(*args, **kwargs)
+
+    def thread_guarded_qualified(*args, **kwargs):
+        nonlocal main_thread_qualification_calls
+        if threading.get_ident() == main_thread:
+            main_thread_qualification_calls += 1
+        return original_qualified(*args, **kwargs)
+
+    async def timeout_after_start(operation):
+        loop = asyncio.get_running_loop()
+
+        def owned_operation():
+            try:
+                return operation()
+            finally:
+                physical_done.set()
+
+        loop.run_in_executor(harness.executor, owned_operation)
+        for _ in range(200):
+            if launched.is_set():
+                break
+            await asyncio.sleep(0.005)
+        assert launched.is_set()
+        raise TimeoutError("injected lost reply")
+
+    monkeypatch.setattr(command_port.subprocess, "Popen", recording_popen)
+    monkeypatch.setattr(command_port, "_qualified_result", thread_guarded_qualified)
+    harness.run_io = timeout_after_start
+    harness._open_port()
+    try:
+        result = asyncio.run(harness.run(harness.caller, prepared["action_ref"]))
+        assert result["effect_state"] == "EFFECT_UNKNOWN"
+        assert main_thread_qualification_calls == 0
+        assert popen_calls == 1
+        assert physical_done.wait(timeout=5)
+        monkeypatch.setattr(command_port, "_qualified_result", original_qualified)
+        harness.run_io = lambda operation: asyncio.get_running_loop().run_in_executor(
+            harness.executor, operation
+        )
+        harness._open_port()
+        reconciled = asyncio.run(
+            harness.reconcile(harness.caller, prepared["action_ref"])
+        )
+        assert reconciled["effect_state"] == "APPLIED"
+        assert popen_calls == 1
+    finally:
+        harness.close()
+
+
+@pytest.mark.parametrize("kind", ["process", "stdout", "stderr"])
+def test_orphan_command_artifact_is_nonclaimable_and_never_spawns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    harness = Harness(tmp_path)
+    popen_calls = 0
+    original_popen = command_port.subprocess.Popen
+
+    def recording_popen(*args, **kwargs):
+        nonlocal popen_calls
+        popen_calls += 1
+        return original_popen(*args, **kwargs)
+
+    monkeypatch.setattr(command_port.subprocess, "Popen", recording_popen)
+    try:
+        prepared = harness.prepare_command()
+        action_id = harness.action_id(prepared["action_ref"])
+        orphan = harness.store_path / artifact_name(action_id, kind)
+        orphan.write_bytes(b"orphan-evidence")
+        os.chmod(orphan, 0o600)
+
+        first = asyncio.run(harness.run(harness.caller, prepared["action_ref"]))
+        second = asyncio.run(harness.run(harness.caller, prepared["action_ref"]))
+        assert first["effect_state"] == "EFFECT_UNKNOWN"
+        assert second["effect_state"] == "EFFECT_UNKNOWN"
+        assert popen_calls == 0
+        assert not (
+            harness.store_path / artifact_name(action_id, "claim")
+        ).exists()
+    finally:
+        harness.close()
+
+
+@pytest.mark.parametrize("phase", ["input_error_cleanup", "attestation_cleanup"])
+def test_preclaim_descriptor_close_failure_poisons_shared_cleanup_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, phase: str
+) -> None:
+    harness = Harness(tmp_path)
+    prepared = harness.prepare_command()
+    original_close = command_port.os.close
+    selected_fd = None
+    injected = False
+
+    if phase == "input_error_cleanup":
+        replacement = harness.project / "replacement.txt"
+        replacement.write_bytes(b"hello world")
+        harness.target.unlink()
+        harness.target.symlink_to(replacement.name)
+        target_identity = (
+            harness.scope.root_device,
+            harness.scope.root_inode,
+        )
+    else:
+        python_stat = os.stat(harness.python)
+        target_identity = (python_stat.st_dev, python_stat.st_ino)
+
+    def failing_close(fd):
+        nonlocal selected_fd, injected
+        try:
+            fd_stat = os.fstat(fd)
+            matches = (fd_stat.st_dev, fd_stat.st_ino) == target_identity
+        except OSError:
+            matches = False
+        if matches and fd not in {harness.root_fd, harness.store_fd}:
+            selected_fd = fd
+            if not injected:
+                injected = True
+                raise OSError("injected descriptor close failure")
+        return original_close(fd)
+
+    monkeypatch.setattr(command_port.os, "close", failing_close)
+    try:
+        with pytest.raises(ProjectActionRefused):
+            asyncio.run(harness.run(harness.caller, prepared["action_ref"]))
+        assert injected is True
+        assert harness.store.cleanup_uncertain is True
+        action_id = harness.action_id(prepared["action_ref"])
+        assert not (
+            harness.store_path / artifact_name(action_id, "claim")
+        ).exists()
+    finally:
+        monkeypatch.setattr(command_port.os, "close", original_close)
+        if selected_fd is not None:
+            try:
+                original_close(selected_fd)
+            except OSError:
+                pass
+        harness.close()
+
+
 @pytest.mark.parametrize("damage", ["process_missing", "result_missing", "stdout_missing", "stdout_corrupt"])
 def test_missing_or_corrupt_command_evidence_stays_unknown(
     tmp_path: Path, damage: str

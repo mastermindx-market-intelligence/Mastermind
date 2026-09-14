@@ -401,6 +401,26 @@ def claim_action(
             created=False, claim=classified.claim,
             uncertain=classified.evidence_status == "uncertain" or not classified.store_valid,
         )
+    if identity.purpose == ACTION_PURPOSE_CLOSED_COMMAND:
+        # A crash or damaged store can leave command evidence without the
+        # claim/result pair. Under the same writer mutex, every closed
+        # per-action name must be absent before this action can be claimed.
+        for kind, max_bytes in (
+            ("process", MAX_PROCESS_BYTES),
+            ("stdout", MAX_BLOB_BYTES),
+            ("stderr", MAX_BLOB_BYTES),
+        ):
+            try:
+                orphan = _read_regular_file(
+                    store,
+                    artifact_name(identity.action_id, kind),
+                    max_bytes=max_bytes,
+                    missing_ok=True,
+                )
+            except (ActionArtifactError, ActionArtifactUncertain, OSError):
+                return ClaimOutcome(created=False, claim=None, uncertain=True)
+            if orphan is not None:
+                return ClaimOutcome(created=False, claim=None, uncertain=True)
     store.raise_if_cleanup_uncertain()
     body = {
         "schema": ACTION_CLAIM_SCHEMA,

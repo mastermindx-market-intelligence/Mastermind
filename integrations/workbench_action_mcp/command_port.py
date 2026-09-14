@@ -261,7 +261,9 @@ def _artifact_identity(prepared: PreparedClosedCommand) -> ActionArtifactIdentit
     )
 
 
-def _open_input(scope: ActionScope, relative_path: str) -> _HeldInput:
+def _open_input(
+    store: ActionArtifactStore, scope: ActionScope, relative_path: str
+) -> _HeldInput:
     if relative_path not in scope.allowed_paths:
         raise ProjectActionRefused("PROJECT_ACTION_REFUSED")
     root_fd = input_fd = -1
@@ -344,7 +346,7 @@ def _open_input(scope: ActionScope, relative_path: str) -> _HeldInput:
                 try:
                     os.close(fd)
                 except OSError:
-                    pass
+                    store.mark_cleanup_uncertain("command_input_open_close")
 
 
 def _close_held(store: ActionArtifactStore, held: _HeldInput) -> None:
@@ -376,7 +378,9 @@ def _revalidate_held(held: _HeldInput, scope: ActionScope, relative_path: str) -
     os.lseek(held.input_fd, 0, os.SEEK_SET)
 
 
-def _attest_path(path: str, expected_sha256: str) -> None:
+def _attest_path(
+    store: ActionArtifactStore, path: str, expected_sha256: str
+) -> None:
     fd = -1
     try:
         before = os.lstat(path)
@@ -418,6 +422,7 @@ def _attest_path(path: str, expected_sha256: str) -> None:
             try:
                 os.close(fd)
             except OSError:
+                store.mark_cleanup_uncertain("command_attestation_close")
                 raise ProjectActionRefused("ACTION_UNAVAILABLE") from None
 
 
@@ -845,17 +850,20 @@ def create_command_port(
             raise ProjectActionRefused("PROJECT_ACTION_REFUSED")
         original_key = _binding_key(original)
         current_store = _live_store(store)
-        _boot(inspector, host_binding.boot_session_id, prepare=True)
-
         def operation() -> dict[str, Any]:
+            _boot(inspector, host_binding.boot_session_id, prepare=True)
             current = _current_binding(caller, project_ref, resolve_binding, clock_ms)
             if _binding_key(current) != original_key:
                 raise ProjectActionRefused("ACTION_BINDING_CHANGED")
-            held = _open_input(current.scope, relative_path)
+            held = _open_input(store, current.scope, relative_path)
             try:
                 if held.sha256 != expected_sha256:
                     raise ProjectActionRefused("ACTION_PREIMAGE_MISMATCH")
-                return {"sha256": held.sha256, "source_identity": _source_identity(held.identity)}
+                _boot(inspector, host_binding.boot_session_id, prepare=True)
+                return {
+                    "sha256": held.sha256,
+                    "source_identity": _source_identity(held.identity),
+                }
             finally:
                 _close_held(store, held)
 
@@ -873,7 +881,6 @@ def create_command_port(
             raise ProjectActionRefused("ACTION_BINDING_CHANGED")
         if store.cleanup_uncertain:
             raise ProjectActionRefused("ACTION_UNAVAILABLE")
-        _boot(inspector, host_binding.boot_session_id, prepare=True)
         if _live_store(store) != current_store:
             raise ProjectActionRefused("ACTION_BINDING_CHANGED")
         issued_at = _now(clock_ms)
@@ -931,8 +938,6 @@ def create_command_port(
         prepared = decode(caller, action_ref, evidence=False)
         original = binding_for(caller, prepared)
         original_key = _binding_key(original)
-        _boot(inspector, prepared.boot_session_id, prepare=False)
-
         def current_scope() -> ActionScope:
             current = binding_for(caller, prepared)
             if _binding_key(current) != original_key:
@@ -941,7 +946,7 @@ def create_command_port(
             return current.scope
 
         def operation() -> dict[str, Any]:
-            held = _open_input(current_scope(), prepared.relative_path)
+            held = _open_input(store, current_scope(), prepared.relative_path)
             process: subprocess.Popen[bytes] | None = None
             observed = None
             writer = None
@@ -958,9 +963,13 @@ def create_command_port(
                     raise ProjectActionRefused("ACTION_PREIMAGE_MISMATCH")
                 if _source_identity(held.identity) != prepared.source_identity:
                     raise ProjectActionRefused("ACTION_SOURCE_CHANGED")
-                _attest_path(host_binding.python_executable, host_binding.python_sha256)
+                _attest_path(
+                    store,
+                    host_binding.python_executable,
+                    host_binding.python_sha256,
+                )
                 recipe_path = _recipe_path(host_binding, prepared.recipe_id)
-                _attest_path(recipe_path, RECIPE_SHA256[prepared.recipe_id])
+                _attest_path(store, recipe_path, RECIPE_SHA256[prepared.recipe_id])
                 try:
                     writer = acquire_store_writer(_live_store(store))
                 except ActionArtifactBusy:
@@ -1158,11 +1167,7 @@ def create_command_port(
         except ProjectActionRefused:
             raise
         except Exception:
-            try:
-                existing = _qualified_result(store, prepared)
-            except Exception:
-                existing = None
-            return existing or _result_receipt(
+            return _result_receipt(
                 prepared, effect_state="EFFECT_UNKNOWN", cleanup_uncertain=False
             )
 
@@ -1173,10 +1178,28 @@ def create_command_port(
         caller: ActionCaller, action_ref: object
     ) -> Mapping[str, Any]:
         prepared = decode(caller, action_ref, evidence=True)
-        historical_binding(caller, prepared)
-        return _qualified_result(_live_store(store), prepared) or _result_receipt(
-            prepared, effect_state="EFFECT_UNKNOWN", cleanup_uncertain=store.cleanup_uncertain
-        )
+
+        def operation() -> dict[str, Any]:
+            historical_binding(caller, prepared)
+            return _qualified_result(_live_store(store), prepared) or _result_receipt(
+                prepared,
+                effect_state="EFFECT_UNKNOWN",
+                cleanup_uncertain=store.cleanup_uncertain,
+            )
+
+        pending = run_io(operation)
+        if not inspect.isawaitable(pending):
+            raise ProjectActionRefused("ACTION_UNAVAILABLE")
+        try:
+            return await pending
+        except asyncio.CancelledError:
+            raise
+        except ProjectActionRefused:
+            raise
+        except Exception:
+            return _result_receipt(
+                prepared, effect_state="EFFECT_UNKNOWN", cleanup_uncertain=True
+            )
 
     async def read_action_result(
         caller: ActionCaller, arguments: Mapping[str, Any]
@@ -1204,48 +1227,66 @@ def create_command_port(
         except Exception as error:
             raise ProjectActionRefused("ACTION_INVALID") from error
         prepared = decode(caller, request["action_ref"], evidence=True)
-        historical_binding(caller, prepared)
-        receipt = _qualified_result(_live_store(store), prepared)
-        if receipt is None or receipt["effect_state"] != "APPLIED":
-            return receipt or _result_receipt(
-                prepared, effect_state="EFFECT_UNKNOWN", cleanup_uncertain=store.cleanup_uncertain
-            )
+
+        def operation() -> dict[str, Any]:
+            historical_binding(caller, prepared)
+            receipt = _qualified_result(_live_store(store), prepared)
+            if receipt is None or receipt["effect_state"] != "APPLIED":
+                return receipt or _result_receipt(
+                    prepared,
+                    effect_state="EFFECT_UNKNOWN",
+                    cleanup_uncertain=store.cleanup_uncertain,
+                )
+            try:
+                raw = read_action_blob(store, prepared.action_id, stream)
+                if raw is None:
+                    raise ActionArtifactUncertain("missing command stream")
+                text = raw.decode("utf-8")
+            except (ActionArtifactError, ActionArtifactUncertain, UnicodeError):
+                return _result_receipt(
+                    prepared, effect_state="EFFECT_UNKNOWN", cleanup_uncertain=True
+                )
+            lines = text.splitlines(keepends=True)
+            selected: list[str] = []
+            selected_bytes = 0
+            index = min(start_line, len(lines))
+            while index < len(lines) and len(selected) < max_lines:
+                encoded = lines[index].encode("utf-8")
+                if selected_bytes + len(encoded) > max_content_bytes:
+                    break
+                selected.append(lines[index])
+                selected_bytes += len(encoded)
+                index += 1
+            if index == min(start_line, len(lines)) and index < len(lines):
+                raise ProjectActionRefused("ACTION_INVALID")
+            return {
+                "status": "OK",
+                "stream": stream,
+                "content": "".join(selected),
+                "line_start": min(start_line, len(lines)),
+                "line_end": index,
+                "total_lines": len(lines),
+                "next_line": None if index >= len(lines) else index,
+                "truncated": receipt["truncated"],
+                "file_sha256": hashlib.sha256(raw).hexdigest(),
+                "exit_code": receipt["exit_code"],
+                "effect_state": receipt["effect_state"],
+                "isError": False,
+            }
+
+        pending = run_io(operation)
+        if not inspect.isawaitable(pending):
+            raise ProjectActionRefused("ACTION_UNAVAILABLE")
         try:
-            raw = read_action_blob(store, prepared.action_id, stream)
-            if raw is None:
-                raise ActionArtifactUncertain("missing command stream")
-            text = raw.decode("utf-8")
-        except (ActionArtifactError, ActionArtifactUncertain, UnicodeError):
+            return await pending
+        except asyncio.CancelledError:
+            raise
+        except ProjectActionRefused:
+            raise
+        except Exception:
             return _result_receipt(
                 prepared, effect_state="EFFECT_UNKNOWN", cleanup_uncertain=True
             )
-        lines = text.splitlines(keepends=True)
-        selected: list[str] = []
-        selected_bytes = 0
-        index = min(start_line, len(lines))
-        while index < len(lines) and len(selected) < max_lines:
-            encoded = lines[index].encode("utf-8")
-            if selected_bytes + len(encoded) > max_content_bytes:
-                break
-            selected.append(lines[index])
-            selected_bytes += len(encoded)
-            index += 1
-        if index == min(start_line, len(lines)) and index < len(lines):
-            raise ProjectActionRefused("ACTION_INVALID")
-        return {
-            "status": "OK",
-            "stream": stream,
-            "content": "".join(selected),
-            "line_start": min(start_line, len(lines)),
-            "line_end": index,
-            "total_lines": len(lines),
-            "next_line": None if index >= len(lines) else index,
-            "truncated": receipt["truncated"],
-            "file_sha256": hashlib.sha256(raw).hexdigest(),
-            "exit_code": receipt["exit_code"],
-            "effect_state": receipt["effect_state"],
-            "isError": False,
-        }
 
     return (
         prepare_project_command,
