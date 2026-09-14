@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Pickup must fresh-read protected `master`, this spec, #595/#600 current source ownership, and current Executive provider/admission/install state before effects. The authoring source was `ef4682c8b998a9ca522b4690fadf938aa57029ad`; protected movement to `dfa518c079bca971ae55d53a1a6cd67d7128a039` changed only provider-identity probe/test paths and is material-source-disjoint to this plan.
+- Pickup must fresh-read protected `master`, this spec, #595/#600 current source ownership, and current Executive provider/admission/install state before effects. The authoring source was `ef4682c8b998a9ca522b4690fadf938aa57029ad`. The 2026-09-13 compatibility review at protected `e8f755d1db35f29a227aaac7335caa86fa2b02c4` additionally includes #606, protected #576/#575, and #605. #605's workspace-custody rule is controlling for attended Web/host source edits: use installed `mmx-workspace`; if that launcher is unavailable, do not substitute raw `git worktree add`/clone as a production session-isolation path.
 - Executive OS remains the sole Job/Attempt/Worker/Event/result-lineage owner. Do not add a mission DB, scheduler table, queue, retry ledger, watcher DB, browser-session store or result store.
 - `mastermind.chairman_delegation_envelope.v1` remains the authority projection. This canary does not introduce a second authority token or caller-selected provider/model/account.
 - Checked-in install defaults remain unarmed. Production arming uses the existing exact receipt/host ceremony; source merge is never permission to arm.
