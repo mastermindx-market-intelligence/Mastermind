@@ -67,12 +67,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from control_plane import (
-    ceo_boot_packet,
-    executive_inbox,
-    executive_runtime,
-    surface_bindings,
-)
+from control_plane import ceo_boot_packet, executive_inbox, surface_bindings
+
+
+def __getattr__(name: str):
+    if name == "executive_runtime":
+        return importlib.import_module("control_plane.executive_runtime")
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 # CAP-C1 placement selection is an OPTIONAL capability: an extracted
 # control-room-remote release stages an exact runtime file allowlist, and
@@ -1248,6 +1250,8 @@ def _read_runtime_jobs_from_runtime(
 ) -> tuple[list[Any] | None, list[dict[str, Any]] | None, str | None]:
     """Read public Job objects plus the existing safe workstream projection."""
 
+    from control_plane import executive_runtime
+
     try:
         jobs = runtime.jobs.list_jobs()
     except (executive_runtime.RuntimeProofError, ValueError, KeyError) as exc:
@@ -1304,6 +1308,8 @@ def _read_runtime_jobs(root: Path) -> tuple[list[dict[str, Any]] | None, str | N
     db_path = root / executive_inbox.DB_RELATIVE_PATH
     if not db_path.is_file():
         return None, f"database missing at {db_path}"
+
+    from control_plane import executive_runtime
 
     try:
         runtime = executive_runtime.Runtime.at(root, create=False)
@@ -1390,6 +1396,8 @@ def _current_capacity_commitment_reader(runtime: Any) -> Any:
     production authority. Older compatible protected bases without C2 retain
     the explicit owner-held state.
     """
+
+    from control_plane import executive_runtime
 
     runtime_type = type(runtime)
     if runtime_type is not executive_runtime.Runtime:
@@ -1639,6 +1647,8 @@ def _gather_dispatch_evidence(
     """
 
     del generated_at
+    from control_plane import executive_runtime
+
     try:
         db_path = root / executive_inbox.DB_RELATIVE_PATH
         if not db_path.is_file():

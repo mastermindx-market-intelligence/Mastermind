@@ -12,10 +12,6 @@ from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import urlparse
 
-from control_plane.codex_provider_realm import (
-    CODEX_WIRE_API_RESPONSES,
-    REVIEWED_CODEX_PROVIDER_REALMS,
-)
 from control_plane.provider_protocols import PROVIDER_PROTOCOLS as _ALLOWED_PROTOCOLS
 from control_plane.subscription_provider_profiles import (
     SubscriptionProviderProfile,
@@ -124,6 +120,8 @@ def _reviewed_codex_realm(
     effective_base_url: str,
     protocol: str,
 ) -> None:
+    from control_plane.codex_provider_realm import REVIEWED_CODEX_PROVIDER_REALMS
+
     matches = tuple(
         realm
         for realm in REVIEWED_CODEX_PROVIDER_REALMS.values()
@@ -202,6 +200,8 @@ def validate_bindings(
             normalized_harness_id == "codex-cli"
             or normalized_adapter_id == "codex-cli"
         ):
+            from control_plane.codex_provider_realm import CODEX_WIRE_API_RESPONSES
+
             if normalized_harness_id != normalized_adapter_id:
                 raise HarnessBindingError(
                     f"binding {binding_id!r} codex harness identity disagrees"
