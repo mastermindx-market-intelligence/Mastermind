@@ -8,12 +8,15 @@ receipt so transport loss can never be interpreted as proof of no effect.
 """
 from __future__ import annotations
 
+import ctypes
 import dataclasses
 import datetime as dt
 import hashlib
 import json
 import os
+import platform
 import re
+import socket
 import stat
 import subprocess
 from pathlib import Path
@@ -421,6 +424,156 @@ class PrivilegedActionBroker:
         return receipt
 
 
+WIRE_RESPONSE_SCHEMA = "mastermind.executive_privileged_action_response.v1"
+_MAX_REQUEST_BYTES = 64 * 1024
+_LAUNCHD_SOCKET_NAME = "PrivilegedActions"
+
+
+def get_peer_uid(peer_socket: socket.socket) -> int:
+    """Return the kernel-authenticated Unix peer UID."""
+    descriptor = peer_socket.fileno()
+    if descriptor < 0:
+        raise PeerAuthorizationError("peer socket is closed")
+    if platform.system() == "Darwin":
+        libc = ctypes.CDLL(None, use_errno=True)
+        function = libc.getpeereid
+        function.argtypes = [
+            ctypes.c_int,
+            ctypes.POINTER(ctypes.c_uint),
+            ctypes.POINTER(ctypes.c_uint),
+        ]
+        function.restype = ctypes.c_int
+        uid = ctypes.c_uint()
+        gid = ctypes.c_uint()
+        if function(descriptor, ctypes.byref(uid), ctypes.byref(gid)) != 0:
+            raise PeerAuthorizationError("cannot resolve Unix peer credentials")
+        return int(uid.value)
+    if hasattr(socket, "SO_PEERCRED"):
+        import struct
+        raw = peer_socket.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
+        _pid, uid, _gid = struct.unpack("3i", raw)
+        return int(uid)
+    getter = getattr(peer_socket, "getpeereid", None)
+    if callable(getter):
+        uid, _gid = getter()
+        return int(uid)
+    raise PeerAuthorizationError("Unix peer credentials are unavailable")
+
+
+def activate_launchd_socket(name: str = _LAUNCHD_SOCKET_NAME) -> socket.socket:
+    """Claim exactly one launchd-activated listener by its fixed socket key."""
+    if platform.system() != "Darwin":
+        raise BrokerTrustError("launchd socket activation is available only on macOS")
+    if name != _LAUNCHD_SOCKET_NAME:
+        raise BrokerTrustError("privileged launchd socket name is not reviewed")
+    libc = ctypes.CDLL(None, use_errno=True)
+    activate = libc.launch_activate_socket
+    activate.argtypes = [
+        ctypes.c_char_p,
+        ctypes.POINTER(ctypes.POINTER(ctypes.c_int)),
+        ctypes.POINTER(ctypes.c_size_t),
+    ]
+    activate.restype = ctypes.c_int
+    descriptors = ctypes.POINTER(ctypes.c_int)()
+    count = ctypes.c_size_t()
+    result = activate(name.encode("ascii"), ctypes.byref(descriptors), ctypes.byref(count))
+    if result != 0:
+        raise BrokerTrustError(f"launchd socket activation failed with errno {result}")
+    try:
+        values = [int(descriptors[index]) for index in range(int(count.value))]
+    finally:
+        libc.free.argtypes = [ctypes.c_void_p]
+        libc.free.restype = None
+        libc.free(descriptors)
+    if len(values) != 1:
+        for descriptor in values:
+            os.close(descriptor)
+        raise BrokerTrustError("privileged broker requires exactly one launchd socket")
+    listener = socket.socket(fileno=values[0])
+    listener.setblocking(True)
+    return listener
+
+
+def _wire_error(code: str, detail: str) -> dict[str, Any]:
+    return {
+        "schema": WIRE_RESPONSE_SCHEMA,
+        "ok": False,
+        "error": code,
+        "detail": sanitize_external_text(detail, limit=300),
+    }
+
+
+def _wire_success(receipt: Mapping[str, Any]) -> dict[str, Any]:
+    return {"schema": WIRE_RESPONSE_SCHEMA, "ok": True, "receipt": dict(receipt)}
+
+
+def _send_wire(connection: socket.socket, value: Mapping[str, Any]) -> None:
+    payload = (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+    connection.sendall(payload)
+
+
+def _read_request_frame(connection: socket.socket) -> Mapping[str, Any]:
+    buffer = bytearray()
+    while True:
+        chunk = connection.recv(min(4096, _MAX_REQUEST_BYTES + 1 - len(buffer)))
+        if not chunk:
+            raise PrivilegedBrokerError("client closed before a complete request frame")
+        buffer.extend(chunk)
+        if len(buffer) > _MAX_REQUEST_BYTES:
+            raise PrivilegedBrokerError("privileged request frame is too large")
+        newline = buffer.find(b"\n")
+        if newline >= 0:
+            if newline != len(buffer) - 1:
+                raise PrivilegedBrokerError("privileged protocol accepts exactly one JSON frame")
+            break
+    try:
+        value = json.loads(bytes(buffer[:-1]).decode("utf-8", errors="strict"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise PrivilegedBrokerError("privileged request frame is invalid JSON") from exc
+    if not isinstance(value, dict):
+        raise PrivilegedBrokerError("privileged request frame must contain a mapping")
+    return value
+
+
+def serve_connection(
+    broker: PrivilegedActionBroker,
+    connection: socket.socket,
+    *,
+    peer_resolver: Callable[[socket.socket], int] = get_peer_uid,
+) -> None:
+    """Serve one request, checking the kernel peer before reading its body."""
+    try:
+        peer_uid = peer_resolver(connection)
+        if peer_uid not in broker.config.allowed_peer_uids:
+            raise PeerAuthorizationError("kernel peer uid is not authorized for privileged actions")
+        raw = _read_request_frame(connection)
+        receipt = broker.handle(raw, peer_uid=peer_uid)
+        _send_wire(connection, _wire_success(receipt))
+    except PeerAuthorizationError:
+        # Do not parse or reflect an unauthorized peer's body.
+        _send_wire(connection, _wire_error("PEER_UNAUTHORIZED", "kernel peer uid is not authorized"))
+    except EffectUnknownError as exc:
+        _send_wire(connection, _wire_error("EFFECT_UNKNOWN", str(exc)))
+    except RequestIdConflictError as exc:
+        _send_wire(connection, _wire_error("REQUEST_ID_CONFLICT", str(exc)))
+    except (PrivilegedBrokerError, ValueError) as exc:
+        _send_wire(connection, _wire_error("REFUSED", str(exc)))
+
+
+def run_broker(
+    config: PrivilegedBrokerConfig,
+    *,
+    activated_socket: socket.socket | None = None,
+) -> None:
+    broker = PrivilegedActionBroker(config)
+    listener = activated_socket if activated_socket is not None else activate_launchd_socket()
+    while True:
+        connection, _address = listener.accept()
+        with connection:
+            connection.settimeout(30)
+            serve_connection(broker, connection)
+
+
 __all__ = [
     "BROKER_CONFIG_SCHEMA",
     "BrokerTrustError",
@@ -431,5 +584,10 @@ __all__ = [
     "PrivilegedBrokerError",
     "RECEIPT_SCHEMA",
     "RequestIdConflictError",
+    "WIRE_RESPONSE_SCHEMA",
+    "activate_launchd_socket",
+    "get_peer_uid",
+    "run_broker",
+    "serve_connection",
     "verify_production_trust",
 ]
