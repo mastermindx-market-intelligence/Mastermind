@@ -339,8 +339,8 @@ class TestCredentialOpenDiscriminators(unittest.TestCase):
             assert credential_opens == [expected_flags, expected_flags]
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="Darwin credential metadata boundary")
 class TestDarwinACLBoundary:
-    @pytest.mark.skipif(sys.platform != "darwin", reason="Darwin credential metadata boundary")
     def test_nonregular_credentials_refuse_before_read_without_blocking(
         self,
         tmp_path: Path,
