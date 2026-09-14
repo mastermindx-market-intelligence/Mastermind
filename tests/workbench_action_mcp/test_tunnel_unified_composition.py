@@ -12,6 +12,8 @@ import mcp.types as mcp_types
 import pytest
 
 import integrations.workbench_action_mcp.action_artifacts as action_artifacts
+import integrations.workbench_action_mcp.tunnel as tunnel_module
+import integrations.workbench_read_mcp.observer as read_observer
 from integrations.workbench_action_mcp.command_contracts import RECIPE_SHA256
 from integrations.workbench_action_mcp.tunnel import (
     TunnelConfigurationError,
@@ -20,9 +22,13 @@ from integrations.workbench_action_mcp.tunnel import (
     parse_tunnel_config,
 )
 from integrations.workbench_stdio_boundary import MAX_WIRE_BYTES
-from integrations.workbench_read_mcp.runtime import RuntimeCloseIncomplete
+from integrations.workbench_read_mcp.runtime import (
+    RuntimeCloseIncomplete,
+    RuntimeCloseUncertain,
+)
 from tests.test_mcp_stdio_boundary import child, initialize
 from tests.workbench_action_mcp.test_tunnel import (
+    _audit_lines,
     _call,
     _document,
     _error_code,
@@ -94,6 +100,48 @@ def test_ten_tool_inventory_annotations_and_closed_schemas(tmp_path) -> None:
     asyncio.run(exercise())
 
 
+def test_patch_read_and_command_share_one_runtime_store_and_token_codec(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    document, project, _, _ = _command_document(tmp_path)
+    (project / "sample.py").write_text("value = 1\n", encoding="utf-8")
+    captured = {}
+    real_read = tunnel_module.create_bound_read_composition
+    real_patch = tunnel_module.create_text_patch_port
+    real_command = tunnel_module.create_command_port
+
+    def read(runtime):
+        captured["read_runtime"] = runtime
+        return real_read(runtime)
+
+    def patch(**kwargs):
+        captured["patch"] = kwargs
+        return real_patch(**kwargs)
+
+    def command(**kwargs):
+        captured["command"] = kwargs
+        return real_command(**kwargs)
+
+    monkeypatch.setattr(tunnel_module, "create_bound_read_composition", read)
+    monkeypatch.setattr(tunnel_module, "create_text_patch_port", patch)
+    monkeypatch.setattr(tunnel_module, "create_command_port", command)
+
+    async def exercise() -> None:
+        runtime = await create_runtime_channel(parse_tunnel_config(document))
+        try:
+            create_tunnel_action_server(runtime)
+            assert captured["read_runtime"] is runtime
+            assert captured["patch"]["artifact_store"] is runtime.artifact_store
+            assert captured["command"]["artifact_store"] is runtime.artifact_store
+            assert captured["patch"]["token_codec"] is captured["command"]["token_codec"]
+            assert captured["patch"]["run_io"].__self__ is runtime
+            assert captured["command"]["run_io"].__self__ is runtime
+        finally:
+            await runtime.aclose(timeout=5.0)
+
+    asyncio.run(exercise())
+
+
 @pytest.mark.parametrize(
     "field",
     [
@@ -108,6 +156,48 @@ def test_command_host_configuration_is_required_and_closed(tmp_path, field) -> N
     document.pop(field)
     with pytest.raises(TunnelConfigurationError):
         parse_tunnel_config(document)
+
+
+def test_command_inputs_reject_model_selected_host_knobs_and_audit_refusals(
+    tmp_path,
+) -> None:
+    document, project, audit, _ = _command_document(tmp_path)
+    target = project / "sample.py"
+    content = b"value = 1\n"
+    target.write_bytes(content)
+    requests = {
+        "prepare_project_command": {
+            "project_ref": document["lease"]["project_ref"],
+            "relative_path": "sample.py",
+            "recipe_id": "canary_checksum",
+            "expected_sha256": hashlib.sha256(content).hexdigest(),
+            "environment": {"PATH": "/tmp"},
+        },
+        "run_project_command": {"action_ref": "opaque", "executable": "/bin/sh"},
+        "read_action_result": {
+            "action_ref": "opaque",
+            "stream": "stdout",
+            "result_path": "/tmp/result",
+        },
+        "reconcile_action": {"action_ref": "opaque", "host_id": "b" * 64},
+    }
+
+    async def exercise() -> list[str]:
+        runtime = await create_runtime_channel(parse_tunnel_config(document))
+        try:
+            server = create_tunnel_action_server(runtime)
+            return [
+                _error_code(await _call(server, name, arguments))
+                for name, arguments in requests.items()
+            ]
+        finally:
+            await runtime.aclose(timeout=5.0)
+
+    assert asyncio.run(exercise()) == ["INVALID_REQUEST"] * 4
+    rows = _audit_lines(audit)
+    assert [(row["tool"], row["code"], row["accepted"]) for row in rows] == [
+        (name, "request_refused", False) for name in requests
+    ]
 
 
 def test_command_process_deadline_cannot_exceed_command_contract(tmp_path) -> None:
@@ -293,6 +383,48 @@ def test_cancelled_command_process_evidence_fsync_keeps_runtime_owned_until_drai
     asyncio.run(exercise())
 
 
+def test_read_observer_close_uncertainty_marks_shared_store_and_runtime_close(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    document, project, _, _ = _command_document(tmp_path)
+    target = project / "sample.py"
+    target.write_text("value = 1\n", encoding="utf-8")
+    target_identity = target.stat()
+    real_os = read_observer.os
+    failed = False
+
+    class UncertainReadClose:
+        def __getattr__(self, name):
+            return getattr(real_os, name)
+
+        def close(self, fd):
+            nonlocal failed
+            opened = real_os.fstat(fd)
+            real_os.close(fd)
+            if not failed and (opened.st_dev, opened.st_ino) == (
+                target_identity.st_dev,
+                target_identity.st_ino,
+            ):
+                failed = True
+                raise OSError("synthetic read observer close uncertainty")
+
+    async def exercise() -> None:
+        runtime = await create_runtime_channel(parse_tunnel_config(document))
+        monkeypatch.setattr(read_observer, "os", UncertainReadClose())
+        server = create_tunnel_action_server(runtime)
+        first = await _call(
+            server, "read_project_file", {"relative_path": "sample.py"}
+        )
+        assert _error_code(first) == "PROJECT_CLEANUP_UNCERTAIN"
+        assert runtime.artifact_store.cleanup_reasons == ("read_observer_close",)
+        refused = await _call(server, "workspace_manifest", {})
+        assert _error_code(refused) == "PROJECT_CLEANUP_UNCERTAIN"
+        with pytest.raises(RuntimeCloseUncertain):
+            await runtime.aclose(timeout=5.0)
+
+    asyncio.run(exercise())
+
+
 def test_valid_large_escaped_preview_fits_exact_mcp_wire_envelope(tmp_path) -> None:
     document, project, _, _ = _command_document(tmp_path)
     old_text = "UNIQUE!!"
@@ -359,6 +491,175 @@ def test_oversized_escaped_preview_returns_closed_preview_error(tmp_path) -> Non
             await runtime.aclose(timeout=5.0)
 
     assert _error_code(asyncio.run(exercise())) == "PREVIEW_TOO_LARGE"
+
+
+def test_native_stdio_all_ten_routes_and_restart_command_reconciliation(
+    tmp_path,
+) -> None:
+    document, project, _, _ = _command_document(tmp_path)
+    document["lease"]["allowed_paths"] = ["sample.py", "created.txt"]
+    original = b"value = 1\n"
+    replaced = b"value = 2\n"
+    (project / "sample.py").write_bytes(original)
+    config_path = tmp_path / "tunnel.json"
+    config_path.write_text(json.dumps(document), encoding="utf-8")
+    os.chmod(config_path, 0o600)
+    launcher = (
+        Path(__file__).resolve().parents[2]
+        / "scripts"
+        / "mastermind_workbench_action_stdio.py"
+    )
+    request_id = 10
+    invoked: set[str] = set()
+
+    def call(process, name, arguments):
+        nonlocal request_id
+        request_id += 1
+        invoked.add(name)
+        process.send(
+            {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "method": "tools/call",
+                "params": {"name": name, "arguments": arguments},
+            }
+        )
+        response = process.receive()
+        assert response["id"] == request_id
+        assert response["result"]["isError"] is False
+        return response["result"]["structuredContent"]
+
+    command_refs = {}
+    with child([sys.executable, str(launcher), "--config", str(config_path)]) as process:
+        initialize(process)
+        manifest = call(process, "workspace_manifest", {})
+        assert set(manifest["data"]["supported_tools"]) == ALL_TOOLS
+        assert call(
+            process, "read_project_file", {"relative_path": "sample.py"}
+        )["data"]["content"] == original.decode()
+        preview = call(
+            process,
+            "preview_text_replace",
+            {
+                "relative_path": "sample.py",
+                "expected_sha256": hashlib.sha256(original).hexdigest(),
+                "old_text": "value = 1",
+                "new_text": "value = 2",
+            },
+        )
+        assert preview["data"]["applied"] is False
+
+        prepared_replace = call(
+            process,
+            "prepare_text_patch",
+            {
+                "project_ref": document["lease"]["project_ref"],
+                "relative_path": "sample.py",
+                "mode": "REPLACE",
+                "expected_sha256": hashlib.sha256(original).hexdigest(),
+                "old_text": "value = 1",
+                "new_text": "value = 2",
+            },
+        )
+        replaced_result = call(
+            process,
+            "commit_text_patch",
+            {"action_ref": prepared_replace["action_ref"]},
+        )
+        assert replaced_result["effect_state"] == "APPLIED"
+        assert call(
+            process,
+            "reconcile_text_patch",
+            {"action_ref": prepared_replace["action_ref"]},
+        )["effect_state"] == "APPLIED"
+        assert call(
+            process, "read_project_file", {"relative_path": "sample.py"}
+        )["data"]["content"] == replaced.decode()
+
+        prepared_create = call(
+            process,
+            "prepare_text_patch",
+            {
+                "project_ref": document["lease"]["project_ref"],
+                "relative_path": "created.txt",
+                "mode": "CREATE",
+                "new_text": "created\n",
+            },
+        )
+        assert call(
+            process,
+            "commit_text_patch",
+            {"action_ref": prepared_create["action_ref"]},
+        )["effect_state"] == "APPLIED"
+        assert call(
+            process, "read_project_file", {"relative_path": "created.txt"}
+        )["data"]["content"] == "created\n"
+
+        for recipe_id, exit_code in (
+            ("canary_checksum", 0),
+            ("canary_refuse", 7),
+        ):
+            prepared = call(
+                process,
+                "prepare_project_command",
+                {
+                    "project_ref": document["lease"]["project_ref"],
+                    "relative_path": "sample.py",
+                    "recipe_id": recipe_id,
+                    "expected_sha256": hashlib.sha256(replaced).hexdigest(),
+                },
+            )
+            command_refs[recipe_id] = prepared["action_ref"]
+            applied = call(
+                process,
+                "run_project_command",
+                {"action_ref": prepared["action_ref"]},
+            )
+            assert applied["exit_code"] == exit_code
+        process.assert_exit(0)
+
+    artifact = Path(document["artifact_directory"])
+    before_reconcile = {
+        path.name: (path.stat().st_ino, path.stat().st_mtime_ns, path.stat().st_size)
+        for path in artifact.iterdir()
+    }
+    with child([sys.executable, str(launcher), "--config", str(config_path)]) as process:
+        initialize(process)
+        for recipe_id, exit_code in (
+            ("canary_checksum", 0),
+            ("canary_refuse", 7),
+        ):
+            action_ref = command_refs[recipe_id]
+            page = call(
+                process,
+                "read_action_result",
+                {
+                    "action_ref": action_ref,
+                    "stream": "stdout",
+                    "start_line": 0,
+                    "max_lines": 40,
+                    "max_content_bytes": 8192,
+                },
+            )
+            assert page["exit_code"] == exit_code
+            assert page["line_end"] == 40
+            assert page["next_line"] is None
+            assert len(page["content"].splitlines()) == 40
+            reconciled = call(
+                process, "reconcile_action", {"action_ref": action_ref}
+            )
+            assert reconciled["effect_state"] == "APPLIED"
+            assert reconciled["exit_code"] == exit_code
+        process.assert_exit(0)
+
+    after_reconcile = {
+        path.name: (path.stat().st_ino, path.stat().st_mtime_ns, path.stat().st_size)
+        for path in artifact.iterdir()
+    }
+    assert after_reconcile == before_reconcile
+    assert invoked == ALL_TOOLS
+    assert (project / "sample.py").read_bytes() == replaced
+    assert (project / "created.txt").read_bytes() == b"created\n"
 
 
 def test_launcher_describe_reports_exact_ten_tool_source_profile(tmp_path) -> None:

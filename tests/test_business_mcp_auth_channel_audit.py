@@ -25,6 +25,18 @@ from integrations.business_mcp_auth.contracts import (
 POLICY_ID = "workbench-action-tunnel-c1"
 CHANNEL_REF = "a" * 64
 ACTION_DIGEST = "b" * 64
+CHANNEL_TOOLS = (
+    "workspace_manifest",
+    "read_project_file",
+    "preview_text_replace",
+    "prepare_text_patch",
+    "commit_text_patch",
+    "reconcile_text_patch",
+    "prepare_project_command",
+    "run_project_command",
+    "read_action_result",
+    "reconcile_action",
+)
 
 
 def oauth_event(code: str = "accepted", accepted: bool = True) -> AuthAuditEvent:
@@ -173,6 +185,19 @@ def test_foreign_event_type_is_refused_without_append(tmp_path: Path) -> None:
         os.close(host_fd)
 
 
+@pytest.mark.parametrize("tool", CHANNEL_TOOLS)
+def test_exact_unified_channel_tool_names_are_accepted(tmp_path: Path, tool: str) -> None:
+    directory = tmp_path / "audit"
+    host_fd = open_directory(directory)
+    try:
+        sink = DurableAuthAuditSink.open(host_fd, policy_id=POLICY_ID)
+        sink.emit(channel_event(tool=tool))
+        sink.close()
+    finally:
+        os.close(host_fd)
+    assert json.loads((directory / "auth-audit.jsonl").read_text())["tool"] == tool
+
+
 @pytest.mark.parametrize(
     "event_builder",
     [
@@ -180,7 +205,7 @@ def test_foreign_event_type_is_refused_without_append(tmp_path: Path) -> None:
         lambda: channel_event(code="accepted", accepted=False),
         lambda: channel_event(code="channel_refused", accepted=True),
         lambda: channel_event(code="oauth_accepted", accepted=True),
-        lambda: channel_event(tool="run_project_command"),
+        lambda: channel_event(tool="preview_project_command"),
         lambda: channel_event(tool=7),
         lambda: channel_event(channel_ref="workspace:ws-01"),
         lambda: channel_event(channel_ref="a" * 63),

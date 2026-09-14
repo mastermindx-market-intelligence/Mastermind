@@ -50,6 +50,7 @@ READ_REFUSAL_CODES = frozenset(
         "SOURCE_CHANGED",
         "PREVIEW_NOT_APPLICABLE",
         "PREVIEW_TOO_LARGE",
+        "PROJECT_CLEANUP_UNCERTAIN",
         "INTERNAL_ERROR",
     }
 )
@@ -375,6 +376,9 @@ def create_bound_read_composition(runtime: WorkbenchActionRuntime) -> BoundReadC
         initial_binding.scope.allowed_paths,
         resolve_scope,
         services.clock_ms,
+        on_cleanup_uncertain=lambda: runtime.artifact_store.mark_cleanup_uncertain(
+            "read_observer_close"
+        ),
     )
     return BoundReadComposition(
         runtime=runtime,
