@@ -60,6 +60,14 @@ decision:
   `autorestartatconnect` only governs restarting when AC is reconnected, and
   macOS exposes the key only on models that support that behavior — so a `0`
   there is `ADVISORY` and a missing key is `NOT_APPLICABLE`, never a defect.
+- **Installation is proven by the job definition, never by `print-disabled`.**
+  `launchctl print-disabled system` is an override table, so a normally enabled
+  installed service usually has no row in it at all. Each fixed Executive label
+  is therefore classified from `/Library/LaunchDaemons/<label>.plist` first, then
+  an explicit disable override, then `launchctl print`; Remote Login uses
+  `/System/Library/LaunchDaemons/ssh.plist` plus launchd registration, because
+  that plist ships with macOS whether or not the listener is on. An installed
+  label launchd will not describe is `UNKNOWN`, never `NOT_INSTALLED`.
 - **Unloaded worker, backup, and privileged-broker daemons are not defects.**
   They are `DISARMED_EXPECTED`, and the report distinguishes
   `DAEMON_NOT_INSTALLED` from `DAEMON_INTENTIONALLY_DISARMED` so the current

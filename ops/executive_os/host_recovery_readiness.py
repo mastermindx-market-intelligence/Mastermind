@@ -2,7 +2,9 @@
 
 One bounded observation of local public system state, classified by the closed
 contract in :mod:`control_plane.executive_recovery_readiness`.  Every external
-call is a fixed, absolute, read-only macOS system tool.
+call is a fixed, absolute, read-only macOS system tool, and every filesystem
+read is an existence check on a fixed, absolute path derived from the reviewed
+label set — never a caller-supplied path and never a directory scan.
 
 This module never mutates power policy, launchd state, disk encryption, remote
 login, network routes, accounts, credentials, or services; never escalates
@@ -52,6 +54,13 @@ READ_ONLY_COMMANDS = (
 )
 
 SSHD_LABEL = "com.openssh.sshd"
+# ``launchctl print-disabled`` is an override table, not an inventory: a normally
+# enabled installed service usually has no row at all.  Installation is proven
+# instead by the fixed path every Executive installer writes and every
+# uninstaller removes (``ops/executive_os/install.sh``, ``uninstall.sh``,
+# ``prepare-capacity-host.sh``), and by the macOS-owned sshd job definition.
+SYSTEM_DAEMON_PLIST_DIR = Path("/Library/LaunchDaemons")
+SSHD_SYSTEM_PLIST = Path("/System/Library/LaunchDaemons/ssh.plist")
 ROOT_VOLUME = "/"
 DEFAULT_LAUNCH_AGENTS_DIR = Path.home() / "Library" / "LaunchAgents"
 COMMAND_TIMEOUT_SECONDS = 10
@@ -102,6 +111,14 @@ def launchctl_print_command(label: str) -> tuple[str, ...]:
     if label not in PREDICATE_PROFILE.all_daemon_labels and label != SSHD_LABEL:
         _refuse("REFERENCE_INVALID")
     return ("/bin/launchctl", "print", f"system/{label}")
+
+
+def system_daemon_plist_path(label: str) -> Path:
+    """Return the fixed install path of one known Executive system LaunchDaemon."""
+
+    if label not in PREDICATE_PROFILE.all_daemon_labels:
+        _refuse("REFERENCE_INVALID")
+    return SYSTEM_DAEMON_PLIST_DIR / f"{label}.plist"
 
 
 # ------------------------------------------------------------------ parsers
@@ -281,42 +298,82 @@ def _observe_user_session_agents(launch_agents_dir: Path) -> int | None:
     return present
 
 
+def _default_plist_exists(path: Path) -> bool:
+    return path.is_file()
+
+
+def _job_definition_present(
+    plist_exists: Callable[[Path], bool], path: Path
+) -> bool | None:
+    """Return whether one fixed job definition exists, or ``None`` if unreadable."""
+
+    try:
+        present = plist_exists(path)
+    except Exception:
+        return None
+    return present if type(present) is bool else None
+
+
+def _observe_daemon(
+    runner: Callable[[tuple[str, ...]], subprocess.CompletedProcess[str]],
+    plist_exists: Callable[[Path], bool],
+    overrides: dict[str, bool] | None,
+    label: str,
+) -> str:
+    """Classify one fixed label from install, override and runtime evidence in turn."""
+
+    installed = _job_definition_present(plist_exists, system_daemon_plist_path(label))
+    if installed is False:
+        return "NOT_INSTALLED"
+    override = None if overrides is None else overrides.get(label)
+    if override is True:
+        return "DISABLED"
+    if installed is None or overrides is None:
+        return "UNKNOWN"
+    service_stdout = _read_stdout(runner, launchctl_print_command(label))
+    if service_stdout is None:
+        # Installed and not overridden, but launchd will not describe the label.
+        # It is neither proven loaded nor proven absent, so stay closed.
+        return "UNKNOWN"
+    return parse_launchctl_print_state(service_stdout)
+
+
+def _observe_remote_login(
+    runner: Callable[[tuple[str, ...]], subprocess.CompletedProcess[str]],
+    plist_exists: Callable[[Path], bool],
+    overrides: dict[str, bool] | None,
+) -> str:
+    """Classify Remote Login from the macOS-owned sshd job, not from plist presence."""
+
+    installed = _job_definition_present(plist_exists, SSHD_SYSTEM_PLIST)
+    if installed is False:
+        return "NOT_INSTALLED"
+    override = None if overrides is None else overrides.get(SSHD_LABEL)
+    if override is True:
+        return "DISABLED"
+    if installed is None or overrides is None:
+        return "UNKNOWN"
+    # ``ssh.plist`` ships with macOS whether or not Remote Login is on, so only a
+    # launchd-registered, socket-capable job proves the listener is enabled.
+    if _read_stdout(runner, launchctl_print_command(SSHD_LABEL)) is None:
+        return "UNKNOWN"
+    return "ENABLED"
+
+
 def _observe_services(
     runner: Callable[[tuple[str, ...]], subprocess.CompletedProcess[str]],
+    plist_exists: Callable[[Path], bool],
 ) -> tuple[dict[str, str], str]:
     """Observe launchd enablement and run state without changing either."""
 
     stdout = _read_stdout(runner, LAUNCHCTL_PRINT_DISABLED_COMMAND)
-    if stdout is None:
-        return {label: "UNKNOWN" for label in PREDICATE_PROFILE.all_daemon_labels}, (
-            "UNKNOWN"
-        )
-    disabled = parse_launchctl_print_disabled(stdout)
+    overrides = parse_launchctl_print_disabled(stdout) if stdout is not None else None
 
-    daemons: dict[str, str] = {}
-    for label in PREDICATE_PROFILE.all_daemon_labels:
-        is_disabled = disabled.get(label)
-        if is_disabled is None:
-            # launchd lists every known system label, including disabled ones.
-            daemons[label] = "NOT_INSTALLED"
-            continue
-        if is_disabled:
-            daemons[label] = "DISABLED"
-            continue
-        service_stdout = _read_stdout(runner, launchctl_print_command(label))
-        if service_stdout is None:
-            daemons[label] = "LOADED_NOT_RUNNING"
-            continue
-        daemons[label] = parse_launchctl_print_state(service_stdout)
-
-    sshd_disabled = disabled.get(SSHD_LABEL)
-    if sshd_disabled is None:
-        remote_login = "NOT_INSTALLED"
-    elif sshd_disabled:
-        remote_login = "DISABLED"
-    else:
-        remote_login = "ENABLED"
-    return daemons, remote_login
+    daemons = {
+        label: _observe_daemon(runner, plist_exists, overrides, label)
+        for label in PREDICATE_PROFILE.all_daemon_labels
+    }
+    return daemons, _observe_remote_login(runner, plist_exists, overrides)
 
 
 def collect_recovery_observation(
@@ -324,6 +381,7 @@ def collect_recovery_observation(
     host_ref: str | None = None,
     runner: Callable[[tuple[str, ...]], subprocess.CompletedProcess[str]] | None = None,
     platform_system: Callable[[], str] | None = None,
+    plist_exists: Callable[[Path], bool] | None = None,
     launch_agents_dir: Path | None = None,
     free_bytes: Callable[[], int | None] | None = None,
     wall_time_ms: Callable[[], int] | None = None,
@@ -350,6 +408,7 @@ def collect_recovery_observation(
         _refuse("LAUNCH_AGENTS_PATH_INVALID")
 
     run = runner or _run
+    exists_fn = plist_exists or _default_plist_exists
     wall_fn = wall_time_ms or _default_wall_time_ms
     free_fn = free_bytes or _default_free_bytes
 
@@ -362,7 +421,7 @@ def collect_recovery_observation(
 
     product_version = _read_stdout(run, SW_VERS_COMMAND)
     fdesetup_stdout = _read_stdout(run, FDESETUP_STATUS_COMMAND)
-    daemons, remote_login = _observe_services(run)
+    daemons, remote_login = _observe_services(run, exists_fn)
 
     try:
         observed_free = free_fn()
@@ -487,8 +546,10 @@ __all__ = [
     "PMSET_CUSTOM_COMMAND",
     "READ_ONLY_COMMANDS",
     "SSHD_LABEL",
+    "SSHD_SYSTEM_PLIST",
     "SW_VERS_COMMAND",
     "SYSCTL_ARM64_COMMAND",
+    "SYSTEM_DAEMON_PLIST_DIR",
     "RecoveryReadinessProbeError",
     "collect_recovery_observation",
     "launchctl_print_command",
@@ -497,4 +558,5 @@ __all__ = [
     "parse_launchctl_print_disabled",
     "parse_launchctl_print_state",
     "parse_pmset_custom",
+    "system_daemon_plist_path",
 ]

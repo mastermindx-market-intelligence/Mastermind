@@ -30,6 +30,8 @@ from ops.executive_os.host_recovery_readiness import (
     LAUNCHCTL_PRINT_DISABLED_COMMAND,
     PMSET_CUSTOM_COMMAND,
     READ_ONLY_COMMANDS,
+    SSHD_LABEL,
+    SSHD_SYSTEM_PLIST,
     SW_VERS_COMMAND,
     SYSCTL_ARM64_COMMAND,
     RecoveryReadinessProbeError,
@@ -40,6 +42,7 @@ from ops.executive_os.host_recovery_readiness import (
     parse_launchctl_print_disabled,
     parse_launchctl_print_state,
     parse_pmset_custom,
+    system_daemon_plist_path,
 )
 
 
@@ -644,6 +647,38 @@ def test_parse_launchctl_print_state(stdout: str, expected: str) -> None:
 # ------------------------------------------------------- collector and CLI
 
 
+REQUIRED_LABEL = "com.mastermind.executive.control"
+UNINSTALLED_STUDIO_LABEL = "com.mastermind.executive.privileged"
+
+# ``print-disabled`` on a host where nothing Executive-related was ever
+# overridden: the table exists and is readable, but holds no row for any label
+# this observer cares about.
+LAUNCHCTL_DISABLED_NO_EXECUTIVE_ROWS = """disabled services = {
+\t\t"com.apple.screensharing" => disabled
+}
+"""
+
+STUDIO_PLISTS = frozenset(
+    {SSHD_SYSTEM_PLIST}
+    | {
+        system_daemon_plist_path(label)
+        for label in PREDICATE_PROFILE.all_daemon_labels
+        if label != UNINSTALLED_STUDIO_LABEL
+    }
+)
+
+
+def _plist_exists_for(paths: frozenset[Path]):
+    present = frozenset(paths)
+
+    def plist_exists(path: Path) -> bool:
+        assert isinstance(path, Path)
+        assert path.is_absolute()
+        return path in present
+
+    return plist_exists
+
+
 def _runner_for(
     *,
     pmset: str = PMSET_STUDIO,
@@ -652,6 +687,7 @@ def _runner_for(
     fdesetup: str = "FileVault is On.\n",
     disabled: str = LAUNCHCTL_DISABLED_STUDIO,
     running_labels: frozenset[str] | None = None,
+    sshd_registered: bool = True,
 ):
     running = (
         running_labels
@@ -670,6 +706,12 @@ def _runner_for(
             return _completed(command, stdout=fdesetup)
         if command == LAUNCHCTL_PRINT_DISABLED_COMMAND:
             return _completed(command, stdout=disabled)
+        if command == launchctl_print_command(SSHD_LABEL):
+            if sshd_registered:
+                return _completed(
+                    command, stdout="\tstate = waiting\n\tsockets = {\n\t}\n"
+                )
+            return _completed(command, returncode=113, stdout="")
         for label in PREDICATE_PROFILE.all_daemon_labels:
             if command == launchctl_print_command(label):
                 if label in running:
@@ -682,16 +724,29 @@ def _runner_for(
     return runner
 
 
+def _collect(
+    *,
+    runner,
+    plists: frozenset[Path] = STUDIO_PLISTS,
+    launch_agents_dir: Path,
+    host_ref: str | None = None,
+) -> dict[str, Any]:
+    return collect_recovery_observation(
+        host_ref=host_ref,
+        runner=runner,
+        plist_exists=_plist_exists_for(plists),
+        launch_agents_dir=launch_agents_dir,
+        free_bytes=lambda: DISK_FREE_FLOOR_BYTES * 3,
+        wall_time_ms=lambda: 1_789_000_000_000,
+    )
+
+
 def test_collector_reproduces_studio_like_unsafe_state(tmp_path: Path) -> None:
     for label in USER_SESSION_CRITICAL_LABELS:
         (tmp_path / f"{label}.plist").write_text("", encoding="utf-8")
 
-    observation = collect_recovery_observation(
-        host_ref=HOST_REF,
-        runner=_runner_for(),
-        launch_agents_dir=tmp_path,
-        free_bytes=lambda: DISK_FREE_FLOOR_BYTES * 3,
-        wall_time_ms=lambda: 1_789_000_000_000,
+    observation = _collect(
+        runner=_runner_for(), launch_agents_dir=tmp_path, host_ref=HOST_REF
     )
     report = classify_recovery_readiness(observation)
 
@@ -706,12 +761,10 @@ def test_collector_reproduces_studio_like_unsafe_state(tmp_path: Path) -> None:
 
 
 def test_collector_reproduces_ready_state(tmp_path: Path) -> None:
-    observation = collect_recovery_observation(
-        host_ref=HOST_REF,
+    observation = _collect(
         runner=_runner_for(pmset=PMSET_READY, fdesetup="FileVault is Off.\n"),
         launch_agents_dir=tmp_path,
-        free_bytes=lambda: DISK_FREE_FLOOR_BYTES * 3,
-        wall_time_ms=lambda: 1_789_000_000_000,
+        host_ref=HOST_REF,
     )
     report = classify_recovery_readiness(observation)
 
@@ -742,6 +795,7 @@ def test_collector_maps_unavailable_commands_to_unknown(tmp_path: Path) -> None:
     observation = collect_recovery_observation(
         host_ref=None,
         runner=runner,
+        plist_exists=_plist_exists_for(STUDIO_PLISTS),
         launch_agents_dir=tmp_path,
         free_bytes=lambda: None,
         wall_time_ms=lambda: 1_789_000_000_000,
@@ -762,17 +816,143 @@ def test_permission_refusal_is_unknown_not_pass(tmp_path: Path) -> None:
             raise PermissionError("denied")
         return _runner_for()(command)
 
-    observation = collect_recovery_observation(
-        host_ref=None,
-        runner=runner,
-        launch_agents_dir=tmp_path,
-        free_bytes=lambda: DISK_FREE_FLOOR_BYTES * 3,
-        wall_time_ms=lambda: 1_789_000_000_000,
-    )
+    observation = _collect(runner=runner, launch_agents_dir=tmp_path)
 
     assert observation["remote_login"] == "UNKNOWN"
     report = classify_recovery_readiness(observation)
     assert report["predicates"]["remote_login_listener"]["status"] == "UNKNOWN"
+    for label in PREDICATE_PROFILE.required_running_labels:
+        assert observation["system_daemons"][label] == "UNKNOWN"
+
+
+# ------------------------------------ install-vs-override discrimination
+
+
+def test_missing_disable_override_row_never_means_not_installed(
+    tmp_path: Path,
+) -> None:
+    """A fresh host has no override row for a normally enabled installed service."""
+
+    observation = _collect(
+        runner=_runner_for(disabled=LAUNCHCTL_DISABLED_NO_EXECUTIVE_ROWS),
+        launch_agents_dir=tmp_path,
+    )
+
+    for label in PREDICATE_PROFILE.required_running_labels:
+        assert observation["system_daemons"][label] == "RUNNING"
+    report = classify_recovery_readiness(observation)
+    assert _blocking(report) == ["auto_restart_after_power_loss"]
+
+
+def test_installed_daemon_unreadable_by_launchd_is_unknown_not_not_installed(
+    tmp_path: Path,
+) -> None:
+    observation = _collect(
+        runner=_runner_for(
+            disabled=LAUNCHCTL_DISABLED_NO_EXECUTIVE_ROWS,
+            running_labels=frozenset(),
+        ),
+        launch_agents_dir=tmp_path,
+    )
+    state = observation["system_daemons"][REQUIRED_LABEL]
+
+    assert state != "NOT_INSTALLED"
+    assert state == "UNKNOWN"
+    report = classify_recovery_readiness(observation)
+    predicate = report["predicates"][f"system_daemon.{REQUIRED_LABEL}"]
+    assert predicate["status"] == "UNKNOWN"
+    assert predicate["code"] == "DAEMON_STATE_UNKNOWN"
+
+
+def test_absent_daemon_plist_is_not_installed(tmp_path: Path) -> None:
+    observation = _collect(
+        runner=_runner_for(
+            disabled=LAUNCHCTL_DISABLED_NO_EXECUTIVE_ROWS,
+            running_labels=frozenset(),
+        ),
+        plists=frozenset(
+            STUDIO_PLISTS - {system_daemon_plist_path(REQUIRED_LABEL)}
+        ),
+        launch_agents_dir=tmp_path,
+    )
+
+    assert observation["system_daemons"][REQUIRED_LABEL] == "NOT_INSTALLED"
+    report = classify_recovery_readiness(observation)
+    assert (
+        report["predicates"][f"system_daemon.{REQUIRED_LABEL}"]["code"]
+        == "DAEMON_NOT_INSTALLED"
+    )
+
+
+def test_present_disabled_worker_stays_intentionally_disarmed(tmp_path: Path) -> None:
+    label = "com.mastermind.executive.worker.codex"
+    observation = _collect(runner=_runner_for(), launch_agents_dir=tmp_path)
+
+    assert observation["system_daemons"][label] == "DISABLED"
+    predicate = classify_recovery_readiness(observation)["predicates"][
+        f"system_daemon.{label}"
+    ]
+    assert predicate["status"] == "OK"
+    assert predicate["code"] == "DAEMON_INTENTIONALLY_DISARMED"
+
+
+def test_remote_login_enabled_needs_registration_not_just_the_system_plist(
+    tmp_path: Path,
+) -> None:
+    enabled = _collect(
+        runner=_runner_for(disabled=LAUNCHCTL_DISABLED_NO_EXECUTIVE_ROWS),
+        launch_agents_dir=tmp_path,
+    )
+    assert enabled["remote_login"] == "ENABLED"
+
+    unregistered = _collect(
+        runner=_runner_for(
+            disabled=LAUNCHCTL_DISABLED_NO_EXECUTIVE_ROWS, sshd_registered=False
+        ),
+        launch_agents_dir=tmp_path,
+    )
+    assert unregistered["remote_login"] == "UNKNOWN"
+
+
+def test_remote_login_explicit_disabled_override_is_disabled(tmp_path: Path) -> None:
+    observation = _collect(
+        runner=_runner_for(
+            disabled='disabled services = {\n\t\t"com.openssh.sshd" => disabled\n}\n'
+        ),
+        launch_agents_dir=tmp_path,
+    )
+
+    assert observation["remote_login"] == "DISABLED"
+    report = classify_recovery_readiness(observation)
+    assert "remote_login_listener" in _blocking(report)
+
+
+def test_remote_login_without_system_plist_is_not_installed(tmp_path: Path) -> None:
+    observation = _collect(
+        runner=_runner_for(sshd_registered=False),
+        plists=frozenset(STUDIO_PLISTS - {SSHD_SYSTEM_PLIST}),
+        launch_agents_dir=tmp_path,
+    )
+
+    assert observation["remote_login"] == "NOT_INSTALLED"
+    assert (
+        classify_recovery_readiness(observation)["predicates"][
+            "remote_login_listener"
+        ]["code"]
+        == "REMOTE_LOGIN_NOT_INSTALLED"
+    )
+
+
+def test_daemon_plist_path_is_fixed_and_rejects_unknown_labels() -> None:
+    assert system_daemon_plist_path(REQUIRED_LABEL) == Path(
+        f"/Library/LaunchDaemons/{REQUIRED_LABEL}.plist"
+    )
+    assert SSHD_SYSTEM_PLIST == Path("/System/Library/LaunchDaemons/ssh.plist")
+
+    for label in ("../etc/passwd", SSHD_LABEL, "com.example.other"):
+        with pytest.raises(RecoveryReadinessProbeError) as excinfo:
+            system_daemon_plist_path(label)
+        assert excinfo.value.code == "REFERENCE_INVALID"
 
 
 def test_main_emits_canonical_json_and_exits_zero(tmp_path: Path) -> None:
@@ -850,7 +1030,8 @@ def test_every_command_is_absolute_fixed_and_read_only() -> None:
         }
     )
     commands = list(READ_ONLY_COMMANDS) + [
-        launchctl_print_command(label) for label in PREDICATE_PROFILE.all_daemon_labels
+        launchctl_print_command(label)
+        for label in PREDICATE_PROFILE.all_daemon_labels + (SSHD_LABEL,)
     ]
 
     assert commands
