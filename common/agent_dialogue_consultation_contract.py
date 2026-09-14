@@ -1,4 +1,9 @@
-"""Versioned, non-command peer-consultation dialogue contract."""
+"""Versioned, non-command peer-consultation dialogue contract.
+
+The still-unmerged ``v1`` amendment adds ``question_message_key`` on ANSWER
+frames.  It explicitly identifies the QUESTION referenced by the ANSWER; the
+contract remains ``mastermind.agent_dialogue_consultation.v1``.
+"""
 from __future__ import annotations
 
 import copy
@@ -43,6 +48,7 @@ CONSULTATION_KEYS = frozenset(
         "deadline_ms",
         "response_budget",
         "supersedes_message_key",
+        "question_message_key",
         "receipts",
         "fingerprint",
     }
@@ -89,6 +95,7 @@ RECEIPT_KEYS = frozenset(
     }
 )
 RECEIPT_KEYS_BY_INDEX = tuple(sorted(RECEIPT_KEYS))
+QUESTION_MESSAGE_KEY = "question_message_key"
 _PEER_REF_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._:-]{7,127}\Z")
 _CONSULTATION_ID_RE = re.compile(r"\Aconsult-[0-9a-f]{32}\Z")
 # Mirrors runtime_binding_id_for in control_plane.operator_harness_contract:
@@ -251,11 +258,20 @@ def validate_consultation(value: Any) -> dict[str, Any]:
     for key in ("request_message_key", "consultation_id"):
         if not isinstance(correlation[key], str):
             raise DialogueContractError("MESSAGE_INVALID")
+    if not isinstance(item["question_message_key"], str) or _MESSAGE_KEY_RE.fullmatch(
+        item["question_message_key"]
+    ) is None:
+        raise DialogueContractError("MESSAGE_INVALID")
     if (
         item["purpose"] == "QUESTION"
         and correlation["request_message_key"] != item["message_key"]
     ):
         raise DialogueContractError("MESSAGE_INVALID")
+    if item["purpose"] == "ANSWER":
+        if item["question_message_key"] != correlation["request_message_key"]:
+            raise DialogueContractError("MESSAGE_INVALID")
+        if item["message_key"] == correlation["request_message_key"]:
+            raise DialogueContractError("MESSAGE_INVALID")
     if correlation["consultation_id"] != item["consultation_id"]:
         raise DialogueContractError("MESSAGE_INVALID")
     item["correlation"] = correlation
@@ -376,6 +392,7 @@ __all__ = [
     "CORRELATION_KEYS",
     "DuplicateClassification",
     "RECEIPT_KEYS",
+    "QUESTION_MESSAGE_KEY",
     "RECIPIENT_BINDING_KEYS",
     "RESPONSE_BUDGET_KEYS",
     "RESPONSE_BUDGET_MAXIMA",

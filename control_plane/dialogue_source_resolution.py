@@ -16,10 +16,10 @@ from typing import Any, Mapping
 from control_plane.wake_events import mint_obligation_id
 
 
+CONSULTATION_SOURCE_SCHEMA = "mastermind.company_consultation_mcp.v1"
 PHYSICAL_SOURCE_SCHEMA = "mastermind.dialogue_physical_source/v2"
 SOURCE_OBSERVATION_SCHEMA = "mastermind.dialogue_source_observation/v1"
 SOURCE_SNAPSHOT_SCHEMA = "mastermind.dialogue_source_snapshot/v1"
-CONSULTATION_SOURCE_SCHEMA = "mastermind.dialogue_consultation_source.v1"
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
 _WORKSPACE = re.compile(r"^T[A-Z0-9]{8,31}$")
 _CHANNEL = re.compile(r"^[CG][A-Z0-9]{8,31}$")

@@ -30,6 +30,7 @@ CONSULTATION_RECEIPT_EVENTS = (
     "ANSWER_AVAILABLE",
     "CONSUMED_BY_REQUESTER",
 )
+REFUSAL_RECEIPT_EVENTS = frozenset({"BUDGET_EXHAUSTED"})
 ANSWER_EVENTS = frozenset({"ANSWER_AVAILABLE", "CONSUMED_BY_REQUESTER"})
 
 
@@ -282,6 +283,16 @@ class ConsultationRuntime:
             raise StateConflict("answer evidence revisions drifted")
         if item["correlation"]["request_message_key"] != request["message_key"]:
             raise StateConflict("answer correlation drifted")
+        events = self.runtime.events.list_events(
+            aggregate_type="consultation",
+            aggregate_id=item["consultation_id"],
+        )
+        answer_count = sum(
+            event.event_type == "ANSWER_AVAILABLE"
+            for event in events
+        )
+        if answer_count >= item["response_budget"]["max_answers"]:
+            return self._budget_exhausted(item, observed_at)
         latest_digest = self._accepted_answer_digest()
         historical = historical or (
             latest_digest is not None
@@ -318,6 +329,9 @@ class ConsultationRuntime:
             raise StateConflict("answer requester actor drifted")
         if item["recipient_actor_ref"] != request["recipient_actor_ref"]:
             raise StateConflict("answer recipient actor drifted")
+        budget = self._event(item, "BUDGET_EXHAUSTED")
+        if budget is not None and budget.event_type == "BUDGET_EXHAUSTED":
+            raise StateConflict("answer budget exhausted")
         available = self._event(item, "ANSWER_AVAILABLE")
         if available is None:
             raise StateConflict("requester consumption requires an available answer")
@@ -341,6 +355,79 @@ class ConsultationRuntime:
             },
             actor="requester-runtime",
         )
+
+    def _budget_exhausted(
+        self,
+        item: Mapping[str, Any],
+        observed_at: str,
+    ) -> ConsultationEventResult:
+        answer_count = sum(
+            event.event_type == "ANSWER_AVAILABLE"
+            for event in self.runtime.events.list_events(
+                aggregate_type="consultation",
+                aggregate_id=item["consultation_id"],
+            )
+        )
+        request = self._request_for_answer(item)
+        if answer_count != request["response_budget"]["max_answers"]:
+            raise StateConflict("answer budget is already exhausted")
+        payload = {
+            "schema_version": CONSULTATION_RECEIPT_SCHEMA,
+            "fact": "BUDGET_EXHAUSTED",
+            "consultation_id": item["consultation_id"],
+            "refused_message_key": item["message_key"],
+            "answer_fingerprint": item["fingerprint"],
+            "semantic_answer_digest": _semantic_answer_digest(item),
+            "evidence_revision_digest": self._artifact_digest(item),
+            "historical": True,
+            "conflict": "BUDGET_EXHAUSTED",
+            "observed_at": _utc(observed_at),
+        }
+        return self._append_budget_receipt(item, payload)
+
+    def _append_budget_receipt(
+        self,
+        item: Mapping[str, Any],
+        payload: Mapping[str, Any],
+    ) -> ConsultationEventResult:
+        command_id = self._command_id(item, "BUDGET_EXHAUSTED")
+        existing = self.runtime.events.get_event_by_command_id(command_id)
+        if existing is not None:
+            self._assert_replay(existing, payload)
+            return ConsultationEventResult(event=existing, inserted=False)
+        try:
+            with self.runtime.store.transaction() as connection:
+                existing = self.runtime.store.get_event_by_command_id(
+                    command_id, connection=connection
+                )
+                if existing is not None:
+                    self._assert_replay(existing, payload)
+                    return ConsultationEventResult(
+                        event=existing, inserted=False
+                    )
+                self.runtime.store.append_event(
+                    connection,
+                    aggregate_type="consultation",
+                    aggregate_id=str(item["consultation_id"]),
+                    event_type="BUDGET_EXHAUSTED",
+                    command_id=command_id,
+                    actor="dialogue-carrier",
+                    job_id=str(item["requester_actor_ref"]["job_id"]),
+                    attempt_id=str(item["requester_actor_ref"]["attempt_id"]),
+                    worker_id=str(item["requester_actor_ref"]["worker_id"]),
+                    payload=dict(payload),
+                )
+                written = self.runtime.store.get_event_by_command_id(
+                    command_id, connection=connection
+                )
+                assert written is not None
+                return ConsultationEventResult(event=written, inserted=True)
+        except sqlite3.IntegrityError as exc:
+            existing = self.runtime.events.get_event_by_command_id(command_id)
+            if existing is not None:
+                self._assert_replay(existing, payload)
+                return ConsultationEventResult(event=existing, inserted=False)
+            raise ConsultationConflict("budget-exhausted race is CONFLICT") from exc
 
     def resolve_restart(self, frame: Mapping[str, Any]) -> str:
         item = validate_consultation(frame)
@@ -571,6 +658,7 @@ class ConsultationRuntime:
             "recipient_binding": payload["recipient_binding"],
             "correlation": payload["correlation"],
             "artifact_revisions": payload["artifact_revisions"],
+            "response_budget": payload["response_budget"],
             "valid_until": payload["valid_until"],
             "deadline_ms": payload["deadline_ms"],
         }
@@ -589,7 +677,7 @@ class ConsultationRuntime:
         return f"consult:{item['consultation_id']}:"
 
     def _command_id(self, item: Mapping[str, Any], fact: str) -> str:
-        if fact in ANSWER_EVENTS:
+        if fact in ANSWER_EVENTS or fact in REFUSAL_RECEIPT_EVENTS:
             return f"consult:{item['consultation_id']}:{fact}:{item['message_key']}"
         return self._command_prefix(item) + fact
 

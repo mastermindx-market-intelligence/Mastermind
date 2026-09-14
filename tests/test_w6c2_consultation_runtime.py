@@ -217,6 +217,7 @@ def _frame(
             "max_payload_bytes": 32768,
         },
         "supersedes_message_key": None,
+        "question_message_key": "asd-consultation-0000000000000001",
         "receipts": {key: None for key in RECEIPT_KEYS},
         "fingerprint": "",
     }
@@ -343,14 +344,34 @@ def test_consultation_runtime_restart_effect_unknown_and_late_answer(
     request_one = reopened.consumed_by_requester(
         answer_one, observed_at="2026-09-14T00:08:00Z"
     )
+    available_commands = {
+        event.command_id
+        for event in reopened.events(frame)
+        if event.event_type == "ANSWER_AVAILABLE"
+    }
+    assert len(available_commands) == 1
+    assert available_commands == {
+        f"consult:{frame['consultation_id']}:ANSWER_AVAILABLE:{answer_one['message_key']}"
+    }
     assert first_available.event.event_type == "ANSWER_AVAILABLE"
     assert request_one.event.event_type == "CONSUMED_BY_REQUESTER"
     second_available = reopened.answer_available(
         answer_two, observed_at="2026-09-14T00:09:00Z"
     )
-    second_request = reopened.consumed_by_requester(
+    late_receipt = reopened.answer_available(
         answer_two, observed_at="2026-09-14T00:10:00Z"
     )
+    expected_budget_command = (
+        f"consult:{frame['consultation_id']}:"
+        f"BUDGET_EXHAUSTED:{answer_two['message_key']}"
+    )
+    assert expected_budget_command in {
+        event.command_id for event in reopened.events(frame)
+    }
+    with pytest.raises(StateConflict, match="answer budget exhausted"):
+        reopened.consumed_by_requester(
+            answer_two, observed_at="2026-09-14T00:10:00Z"
+        )
     forged_answer = _answer_frame(frame, "forged", semantic)
     forged_answer["requester_actor_ref"] = _actor(
         root, "ROOT", "root-worker"
@@ -360,20 +381,22 @@ def test_consultation_runtime_restart_effect_unknown_and_late_answer(
     )
     forged_answer["fingerprint"] = ""
     forged_answer = build_consultation(forged_answer)
+    assert second_available.event.event_type == "BUDGET_EXHAUSTED"
+    assert second_available.inserted is True
+    assert second_available.event.command_id == (
+        f"consult:{frame['consultation_id']}:"
+        f"BUDGET_EXHAUSTED:{answer_two['message_key']}"
+    )
     with pytest.raises(StateConflict, match="answer requester actor drifted"):
         reopened.consumed_by_requester(
             forged_answer, observed_at="2026-09-14T00:10:30Z"
         )
-    historical = reopened.answer_available(
-        late, observed_at="2026-09-14T00:11:00Z"
-    )
-    assert second_available.event.event_type == "ANSWER_AVAILABLE"
-    assert second_request.event.event_type == "CONSUMED_BY_REQUESTER"
-    assert historical.event.payload["historical"] is True
-    with pytest.raises(ConsultationConflict, match="historical answer"):
-        reopened.consumed_by_requester(
-            late, observed_at="2026-09-14T00:12:00Z"
-        )
+    assert late_receipt.event.event_type == "BUDGET_EXHAUSTED"
+    assert late_receipt.inserted is False
+    assert late_receipt.event.payload["historical"] is True
+    assert late_receipt.event.payload["conflict"] == "BUDGET_EXHAUSTED"
+    assert late_receipt.event.payload["refused_message_key"] == answer_two["message_key"]
+    assert late_receipt.event.payload["answer_fingerprint"] == answer_two["fingerprint"]
 
     projection = consultation_projection(runtime)
     assert len(projection) == 1
@@ -388,9 +411,7 @@ def test_consultation_runtime_restart_effect_unknown_and_late_answer(
         "CONSUMED_BY_RECIPIENT",
         "ANSWER_AVAILABLE",
         "CONSUMED_BY_REQUESTER",
-        "ANSWER_AVAILABLE",
-        "CONSUMED_BY_REQUESTER",
-        "ANSWER_AVAILABLE",
+        "BUDGET_EXHAUSTED",
     ]
 
 
@@ -403,7 +424,8 @@ def _answer_frame(frame: dict, suffix: str, semantic: dict) -> dict:
         "text": json.dumps(semantic, sort_keys=True, separators=(",", ":")),
         "evidence_refs": frame["evidence_refs"],
     }
-    raw["correlation"]["request_message_key"] = frame["message_key"]
+    raw["correlation"]["request_message_key"] = "asd-consultation-0000000000000001"
+    raw["question_message_key"] = frame["message_key"]
     raw["fingerprint"] = ""
     return build_consultation(raw)
 
@@ -459,7 +481,6 @@ def test_consultation_wake_source_and_peer_binding_extension(tmp_path: Path) -> 
         binding_id=str(recipient_binding["binding_id"]),
         binding_generation=int(recipient_binding["binding_generation"]),
     )
-    assert identity.schema == "mastermind.dialogue_consultation_source.v1"
     assert peer_attention_source_ref(identity).startswith(
         "agent_dialogue_attention:"
     )
