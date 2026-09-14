@@ -22,6 +22,7 @@ from control_plane.executive_ambient_process import (
     AmbientProcessClassifier,
     DarwinDistnotedClassifier,
 )
+from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
 
 MAX_CREDENTIAL_BYTES = 4096
 
@@ -34,42 +35,97 @@ class SubscriptionCredentialEffectUnknown(SubscriptionCredentialError):
     """The credential replacement may have landed and must be reconciled."""
 
 
-def _has_macos_acl(path: Path) -> bool:
-    if sys.platform != "darwin":
-        return False
+def _has_macos_acl(
+    path: Path,
+    *,
+    expected_identity: os.stat_result | None = None,
+    descriptor: int | None = None,
+) -> bool:
     try:
-        completed = subprocess.run(
-            ["/usr/bin/stat", "-f", "%Sp", os.fspath(path)],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            check=False,
-            timeout=5,
+        return has_macos_acl(
+            path,
+            expected_identity=expected_identity,
+            descriptor=descriptor,
         )
-    except (OSError, subprocess.SubprocessError):
-        raise SubscriptionCredentialError("credential filesystem metadata unavailable") from None
-    if completed.returncode != 0:
+    except SubscriptionCredentialError:
+        raise
+    except FilesystemSecurityError:
         raise SubscriptionCredentialError("credential filesystem metadata unavailable")
-    return completed.stdout.strip().endswith("+")
 
 
 def _require_provider_home(config: Mapping[str, Any]) -> Path:
     home = Path(str(config["provider_home"]))
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NONBLOCK", 0)
+        | os.O_DIRECTORY
+    )
     try:
         info = home.lstat()
     except OSError:
         raise SubscriptionCredentialError("provider home is unavailable") from None
-    if (
-        stat.S_ISLNK(info.st_mode)
-        or not stat.S_ISDIR(info.st_mode)
-        or info.st_uid != int(config["worker_uid"])
-        or info.st_gid != int(config["worker_gid"])
-        or stat.S_IMODE(info.st_mode) != 0o700
-        or _has_macos_acl(home)
-    ):
-        raise SubscriptionCredentialError("provider home metadata is unsafe")
+    try:
+        descriptor = os.open(home, flags)
+    except OSError:
+        raise SubscriptionCredentialError("provider home is unavailable") from None
+    try:
+        if (
+            stat.S_ISLNK(info.st_mode)
+            or not stat.S_ISDIR(info.st_mode)
+            or info.st_uid != int(config["worker_uid"])
+            or info.st_gid != int(config["worker_gid"])
+            or stat.S_IMODE(info.st_mode) != 0o700
+            or _has_macos_acl(
+                home,
+                expected_identity=info,
+                descriptor=descriptor,
+            )
+        ):
+            raise SubscriptionCredentialError("provider home metadata is unsafe")
+    except (OSError, SubscriptionCredentialError) as exc:
+        if isinstance(exc, SubscriptionCredentialError):
+            raise
+        raise SubscriptionCredentialError("provider home metadata is unsafe") from None
+    finally:
+        os.close(descriptor)
     return home
+
+
+def _open_regular_credential(
+    path: Path,
+    before: os.stat_result,
+    *,
+    worker_uid: int,
+    worker_gid: int,
+) -> int:
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NONBLOCK", 0)
+    )
+    descriptor = os.open(path, flags)
+    try:
+        observed = os.fstat(descriptor)
+        if (
+            observed.st_dev != before.st_dev
+            or observed.st_ino != before.st_ino
+            or stat.S_ISLNK(before.st_mode)
+            or not stat.S_ISREG(observed.st_mode)
+            or observed.st_uid != int(worker_uid)
+            or observed.st_gid != int(worker_gid)
+            or stat.S_IMODE(observed.st_mode) != 0o600
+            or observed.st_nlink != 1
+            or observed.st_size < 1
+            or observed.st_size > MAX_CREDENTIAL_BYTES
+        ):
+            raise SubscriptionCredentialError("provider credential metadata is unsafe")
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
 
 
 def _credential_metadata(path: Path, *, worker_uid: int, worker_gid: int) -> os.stat_result:
@@ -77,18 +133,28 @@ def _credential_metadata(path: Path, *, worker_uid: int, worker_gid: int) -> os.
         info = path.lstat()
     except OSError:
         raise SubscriptionCredentialError("provider credential is unavailable") from None
-    if (
-        stat.S_ISLNK(info.st_mode)
-        or not stat.S_ISREG(info.st_mode)
-        or info.st_uid != int(worker_uid)
-        or info.st_gid != int(worker_gid)
-        or stat.S_IMODE(info.st_mode) != 0o600
-        or info.st_nlink != 1
-        or info.st_size < 1
-        or info.st_size > MAX_CREDENTIAL_BYTES
-        or _has_macos_acl(path)
-    ):
-        raise SubscriptionCredentialError("provider credential metadata is unsafe")
+    try:
+        descriptor = _open_regular_credential(
+            path,
+            info,
+            worker_uid=worker_uid,
+            worker_gid=worker_gid,
+        )
+    except OSError:
+        raise SubscriptionCredentialError("provider credential is unavailable") from None
+    try:
+        if _has_macos_acl(
+            path,
+            expected_identity=info,
+            descriptor=descriptor,
+        ):
+            raise SubscriptionCredentialError("provider credential metadata is unsafe")
+    except (OSError, SubscriptionCredentialError) as exc:
+        if isinstance(exc, SubscriptionCredentialError):
+            raise
+        raise SubscriptionCredentialError("provider credential metadata is unsafe") from None
+    finally:
+        os.close(descriptor)
     return info
 
 
@@ -217,7 +283,13 @@ def install_provider_credential(
     temporary = home / f".{PROVIDER_CREDENTIAL_FILENAME}.new.{os.getpid()}"
     if temporary.exists() or temporary.is_symlink():
         raise SubscriptionCredentialError("provider credential staging path is occupied")
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    flags = (
+        os.O_WRONLY
+        | os.O_CREAT
+        | os.O_EXCL
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+    )
     descriptor = -1
     replaced = False
     try:

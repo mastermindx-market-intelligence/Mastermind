@@ -27,6 +27,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+_RELEASE_ROOT = Path(__file__).resolve().parents[2]
+if os.fspath(_RELEASE_ROOT) not in sys.path:
+    sys.path.insert(0, os.fspath(_RELEASE_ROOT))
+
+from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
+
 
 SCHEMA_VERSION = "mastermind.executive_host_acceptance/v1"
 CONTROL_LABEL = "com.mastermind.executive.control"
@@ -879,11 +885,11 @@ def _live_directory_membership_snapshot(*, operator_user: str) -> dict[str, Any]
 
 
 def _assert_no_acl(path: Path) -> None:
-    mode = _run(
-        ["/usr/bin/stat", "-f", "%Sp", path],
-        label=f"filesystem ACL check {path}",
-    ).stdout.decode("ascii", errors="strict").strip()
-    if "+" in mode:
+    try:
+        acl_present = has_macos_acl(path)
+    except FilesystemSecurityError:
+        raise AcceptanceError(f"cannot inspect filesystem ACL: {path}")
+    if acl_present:
         raise AcceptanceError(f"unexpected filesystem ACL: {path}")
 
 

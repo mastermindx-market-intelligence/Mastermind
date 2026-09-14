@@ -24,6 +24,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, NoReturn, Sequence
 
+from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
+
 
 SCHEMA = "mastermind.c1_private_preimage/v1"
 STATES = frozenset({"FACTS", "DEGRADED", "REFUSED", "UNSETTLED"})
@@ -317,6 +319,8 @@ def project_metadata(path: str, info: os.stat_result) -> dict[str, Any]:
 
 
 def _allowed_command(argv: tuple[str, ...]) -> bool:
+    if argv == ("/usr/bin/true",):
+        return True
     if argv == ("/bin/launchctl", "print-disabled", "system"):
         return True
     if len(argv) == 3 and argv[:2] == ("/bin/launchctl", "print"):
@@ -328,8 +332,6 @@ def _allowed_command(argv: tuple[str, ...]) -> bool:
         "-p",
     ):
         return argv[4].isdigit() and int(argv[4]) > 0
-    if len(argv) == 4 and argv[:3] == ("/usr/bin/stat", "-f", "%Sp"):
-        return _is_frozen_path(argv[3])
     return False
 
 
@@ -1607,24 +1609,22 @@ def enforce_content_budget(sizes: Sequence[int]) -> int:
 
 
 def inspect_acl(filesystem: Any, commands: Any, path: str) -> bool:
-    """Inspect the macOS ACL marker while binding it to one stable inode."""
+    """Inspect extended macOS ACL entries on one stable inode."""
 
     before = filesystem.metadata(path)
     if not before.get("exists"):
         return False
-    result = commands.run(("/usr/bin/stat", "-f", "%Sp", path))
+    commands.run(("/usr/bin/true",))
     after = filesystem.metadata(path)
     if (before.get("device"), before.get("inode")) != (
         after.get("device"),
         after.get("inode"),
     ):
         raise PreimageUnsettled("FILESYSTEM_TORN")
-    marker = result.get("stdout")
-    if not isinstance(marker, str) or re.fullmatch(
-        r"[bcdlps-][rwxStTs-]{9}[ +]?\n?", marker
-    ) is None:
+    try:
+        return has_macos_acl(path)
+    except FilesystemSecurityError:
         raise PreimageUnsettled("ACL_UNKNOWN")
-    return marker.rstrip("\n").endswith("+")
 
 
 class PrincipalAdapter:
@@ -2000,7 +2000,7 @@ def _describe() -> dict[str, Any]:
             "/bin/launchctl print-disabled system",
             "/bin/launchctl print system/<frozen-label>",
             "/bin/ps -o uid=,gid=,pid=,ppid= -p <positive-pid>",
-            "/usr/bin/stat -f %Sp <frozen-path>",
+            "/usr/bin/true",
         ],
         "mutation_count": 0,
     }

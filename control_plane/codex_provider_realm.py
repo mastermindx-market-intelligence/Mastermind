@@ -14,13 +14,14 @@ import json
 import os
 import re
 import stat
-import subprocess
 import sys
 from collections.abc import Callable
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import urlparse
+
+from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
 
 
 _REALM_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
@@ -106,25 +107,94 @@ class CodexProviderRealm:
             raise ProviderRealmError("provider credential is unavailable")
         return credential
 
-
-def _has_macos_acl(path: Path) -> bool:
-    if sys.platform != "darwin":
-        return False
+def _has_macos_acl(
+    path: Path,
+    *,
+    expected_identity: os.stat_result | None = None,
+    descriptor: int | None = None,
+) -> bool:
     try:
-        completed = subprocess.run(
-            ["/usr/bin/stat", "-f", "%Sp", os.fspath(path)],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            check=False,
-            timeout=5,
+        return has_macos_acl(
+            path,
+            expected_identity=expected_identity,
+            descriptor=descriptor,
         )
-    except (OSError, subprocess.SubprocessError):
-        raise ProviderRealmError("provider credential is unavailable") from None
-    if completed.returncode != 0:
+    except FilesystemSecurityError:
         raise ProviderRealmError("provider credential is unavailable")
-    return completed.stdout.strip().endswith("+")
+
+
+def _require_provider_home(
+    home: Path,
+    *,
+    expected_uid: int,
+    expected_gid: int,
+) -> None:
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NONBLOCK", 0)
+        | os.O_DIRECTORY
+    )
+    try:
+        info = home.lstat()
+    except OSError:
+        raise ProviderRealmError("provider credential is unavailable") from None
+    descriptor = os.open(home, flags)
+    try:
+        if (
+            stat.S_ISLNK(info.st_mode)
+            or not stat.S_ISDIR(info.st_mode)
+            or info.st_uid != int(expected_uid)
+            or info.st_gid != int(expected_gid)
+            or stat.S_IMODE(info.st_mode) != 0o700
+            or _has_macos_acl(
+                home,
+                expected_identity=info,
+                descriptor=descriptor,
+            )
+        ):
+            raise ProviderRealmError("provider credential is unavailable")
+    except OSError:
+        raise ProviderRealmError("provider credential is unavailable") from None
+    except ProviderRealmError:
+        raise
+    finally:
+        os.close(descriptor)
+
+
+def _open_regular_credential(
+    path: Path,
+    before: os.stat_result,
+    *,
+    expected_uid: int,
+    expected_gid: int,
+) -> tuple[int, os.stat_result]:
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NONBLOCK", 0)
+    )
+    descriptor = os.open(path, flags)
+    try:
+        observed = os.fstat(descriptor)
+        if (
+            observed.st_dev != before.st_dev
+            or observed.st_ino != before.st_ino
+            or not stat.S_ISREG(observed.st_mode)
+            or observed.st_uid != int(expected_uid)
+            or observed.st_gid != int(expected_gid)
+            or stat.S_IMODE(observed.st_mode) != 0o600
+            or observed.st_nlink != 1
+            or observed.st_size < 1
+            or observed.st_size > 4096
+        ):
+            raise ProviderRealmError("provider credential is unavailable")
+        return descriptor, observed
+    except BaseException:
+        os.close(descriptor)
+        raise
 
 
 def load_private_provider_credential(
@@ -138,28 +208,21 @@ def load_private_provider_credential(
     home = Path(provider_home)
     path = home / PROVIDER_CREDENTIAL_FILENAME
     try:
+        _require_provider_home(home, expected_uid=expected_uid, expected_gid=expected_gid)
         before = path.lstat()
-        if (
-            stat.S_ISLNK(before.st_mode)
-            or not stat.S_ISREG(before.st_mode)
-            or _has_macos_acl(path)
-        ):
-            raise ProviderRealmError("provider credential is unavailable")
-        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-        descriptor = os.open(path, flags)
+        descriptor, observed = _open_regular_credential(
+            path,
+            before,
+            expected_uid=expected_uid,
+            expected_gid=expected_gid,
+        )
     except (OSError, ProviderRealmError):
         raise ProviderRealmError("provider credential is unavailable") from None
     try:
-        observed = os.fstat(descriptor)
-        if (
-            observed.st_dev != before.st_dev
-            or observed.st_ino != before.st_ino
-            or observed.st_nlink != 1
-            or observed.st_uid != int(expected_uid)
-            or observed.st_gid != int(expected_gid)
-            or stat.S_IMODE(observed.st_mode) != 0o600
-            or observed.st_size < 1
-            or observed.st_size > 4096
+        if _has_macos_acl(
+            path,
+            expected_identity=before,
+            descriptor=descriptor,
         ):
             raise ProviderRealmError("provider credential is unavailable")
         try:

@@ -12,6 +12,14 @@ from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import urlparse
 
+from control_plane.provider_protocols import PROVIDER_PROTOCOLS as _ALLOWED_PROTOCOLS
+from control_plane.subscription_provider_profiles import (
+    SubscriptionProviderProfile,
+    get_profile,
+    load_profiles,
+    validate_profiles,
+)
+
 SCHEMA = "mastermind.subscription_harness_bindings/v1"
 DEFAULT_BINDINGS_PATH = (
     Path(__file__).resolve().parents[1]
@@ -19,9 +27,24 @@ DEFAULT_BINDINGS_PATH = (
     / "subscription_harness_bindings.v1.json"
 )
 _ALLOWED_STATES = {"SPEC_ONLY", "BUILT_NOT_PROVEN", "PROVEN_LIVE"}
+_REQUIRED_KEYS = frozenset(
+    {
+        "profile_id",
+        "provider",
+        "harness_id",
+        "adapter_id",
+        "protocol",
+        "endpoint",
+        "model_classes",
+        "implementation_state",
+        "autonomous_allowed",
+        "activation_gates",
+    }
+)
 _REQUIRED_GATES = (
     "adapter_implemented",
-    "provider_realm_enrolled",    "capacity_known",
+    "provider_realm_enrolled",
+    "capacity_known",
     "real_canary_passed",
     "usage_policy_satisfied",
 )
@@ -47,7 +70,7 @@ class SubscriptionHarnessBinding:
 
     def model_for(
         self,
-        profile: Any,
+        profile: SubscriptionProviderProfile,
         model_class: str | None = None,
     ) -> str:
         selected = model_class or profile.default_model_class
@@ -64,7 +87,7 @@ def _identifier(value: Any, label: str) -> str:
     allowed = set("abcdefghijklmnopqrstuvwxyz0123456789-_.")
     if any(ch not in allowed for ch in value.lower()):
         raise HarnessBindingError(f"invalid {label}: {value!r}")
-    return value
+    return value.lower()
 
 
 def _safe_https(value: Any) -> str:
@@ -113,11 +136,6 @@ def _reviewed_codex_realm(
 
 
 def _profiles(document: Mapping[str, Any] | None) -> Mapping[str, Any]:
-    from control_plane.subscription_provider_profiles import (
-        load_profiles,
-        validate_profiles,
-    )
-
     return validate_profiles(document) if document is not None else load_profiles()
 
 
@@ -126,8 +144,6 @@ def validate_bindings(
     *,
     profiles_document: Mapping[str, Any] | None = None,
 ) -> Mapping[str, Any]:
-    from control_plane.subscription_provider_profiles import get_profile
-
     if not isinstance(document, Mapping) or document.get("schema") != SCHEMA:
         raise HarnessBindingError("unsupported harness-binding schema")
     profiles = _profiles(profiles_document)
@@ -138,6 +154,8 @@ def validate_bindings(
         _identifier(binding_id, "binding id")
         if not isinstance(row, Mapping):
             raise HarnessBindingError(f"binding {binding_id!r} must be a mapping")
+        if set(row) != _REQUIRED_KEYS:
+            raise HarnessBindingError(f"binding {binding_id!r} has invalid fields")
         profile_id = _identifier(row.get("profile_id"), "profile id")
         profile = get_profile(profile_id, document=profiles)
         provider = _identifier(row.get("provider"), "provider")
@@ -146,9 +164,7 @@ def validate_bindings(
         harness_id = _identifier(row.get("harness_id"), "harness id")
         adapter_id = _identifier(row.get("adapter_id"), "adapter id")
         protocol = row.get("protocol")
-        from control_plane.provider_protocols import PROVIDER_PROTOCOLS
-
-        if protocol not in PROVIDER_PROTOCOLS:
+        if protocol not in _ALLOWED_PROTOCOLS:
             raise HarnessBindingError(f"binding {binding_id!r} protocol is unsupported")
         endpoint = row.get("endpoint")
         if not isinstance(endpoint, Mapping):
@@ -228,8 +244,6 @@ def get_binding(
     document: Mapping[str, Any] | None = None,
     profiles_document: Mapping[str, Any] | None = None,
 ) -> SubscriptionHarnessBinding:
-    from control_plane.subscription_provider_profiles import get_profile
-
     catalog = (
         validate_bindings(document, profiles_document=profiles_document)
         if document is not None
@@ -240,12 +254,14 @@ def get_binding(
         raise HarnessBindingError(f"unknown harness binding {binding_id!r}")
     profile = get_profile(row["profile_id"], document=_profiles(profiles_document))
     effective_base_url = _effective_base_url(row, profile)
+    harness_id = _identifier(row["harness_id"], "harness id")
+    adapter_id = _identifier(row["adapter_id"], "adapter id")
     return SubscriptionHarnessBinding(
         binding_id=binding_id,
         profile_id=row["profile_id"],
         provider=row["provider"],
-        harness_id=row["harness_id"],
-        adapter_id=row["adapter_id"],
+        harness_id=harness_id,
+        adapter_id=adapter_id,
         protocol=row["protocol"],
         effective_base_url=effective_base_url,
         model_classes=tuple(row["model_classes"]),
