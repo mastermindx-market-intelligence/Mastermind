@@ -252,6 +252,8 @@ def _validate_base_url(value: Any, path: str) -> str:
         _raise(f"{path} has invalid base URL")
     if not _allowlisted_base_url_path(raw_path):
         _raise(f"{path} has invalid base URL")
+    if token != "https://" + hostname + raw_path:
+        _raise(f"{path} has invalid base URL")
     return token
 
 
