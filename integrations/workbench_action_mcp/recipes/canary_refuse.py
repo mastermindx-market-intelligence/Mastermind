@@ -68,6 +68,16 @@ def _safe_regular(file_stat):
     )
 
 
+def _safe_root(root_stat, expected_device, expected_inode):
+    return (
+        stat.S_ISDIR(root_stat.st_mode)
+        and root_stat.st_uid == os.geteuid()
+        and stat.S_IMODE(root_stat.st_mode) & 0o022 == 0
+        and root_stat.st_dev == expected_device
+        and root_stat.st_ino == expected_inode
+    )
+
+
 def _read_bounded(fd):
     chunks = []
     total = 0
@@ -82,8 +92,15 @@ def _read_bounded(fd):
     return b"".join(chunks)
 
 
-def _run(fd, expected_sha256, label):
+def _run(fd, root_fd, root_device, root_inode, expected_sha256, label):
     if os.read(sys.stdin.fileno(), 1) != b"\x01":
+        _refuse()
+
+    root_stat = os.fstat(root_fd)
+    if not _safe_root(root_stat, root_device, root_inode):
+        _refuse()
+    os.fchdir(root_fd)
+    if not _safe_root(os.stat("."), root_device, root_inode):
         _refuse()
 
     initial_stat = os.fstat(fd)
@@ -122,15 +139,25 @@ def _run(fd, expected_sha256, label):
 
 def main():
     try:
-        if len(sys.argv) != 4:
+        if len(sys.argv) != 7:
             _refuse()
-        raw_fd, expected_sha256, label = sys.argv[1:]
-        if not _valid_fd(raw_fd):
+        raw_fd, raw_root_fd, raw_root_device, raw_root_inode, expected_sha256, label = sys.argv[1:]
+        if not all(_valid_fd(value) for value in (raw_fd, raw_root_fd, raw_root_device, raw_root_inode)):
             _refuse()
         fd = int(raw_fd)
-        if fd < 3 or not _valid_hash(expected_sha256) or not _valid_label(label):
+        root_fd = int(raw_root_fd)
+        root_device = int(raw_root_device)
+        root_inode = int(raw_root_inode)
+        if (
+            fd < 3
+            or root_fd < 3
+            or root_device < 0
+            or root_inode < 0
+            or not _valid_hash(expected_sha256)
+            or not _valid_label(label)
+        ):
             _refuse()
-        return _run(fd, expected_sha256, label)
+        return _run(fd, root_fd, root_device, root_inode, expected_sha256, label)
     except (OSError, OverflowError, ValueError, UnicodeError):
         _refuse()
 

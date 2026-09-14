@@ -62,17 +62,33 @@ def _expected_refusal_output(label, digest):
     return ("\n".join(lines) + "\n").encode("utf-8")
 
 
-def _spawn(script, fd_arg, expected_sha256, label, pass_fd=None):
-    pass_fds = () if pass_fd is None else (pass_fd,)
-    return subprocess.Popen(
-        [PYTHON, "-I", "-S", script, str(fd_arg), expected_sha256, label],
-        env=CLOSED_ENV,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        pass_fds=pass_fds,
-        close_fds=True,
+def _spawn(
+    script, fd_arg, expected_sha256, label, pass_fd=None, *, root_path=None,
+    root_device=None, root_inode=None,
+):
+    root_fd = os.open(
+        root_path or os.getcwd(), os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC
     )
+    root_stat = os.fstat(root_fd)
+    pass_fds = (root_fd,) if pass_fd is None else (pass_fd, root_fd)
+    try:
+        return subprocess.Popen(
+            [
+                PYTHON, "-I", "-S", script, str(fd_arg), str(root_fd),
+                str(root_stat.st_dev if root_device is None else root_device),
+                str(root_stat.st_ino if root_inode is None else root_inode),
+                expected_sha256, label,
+            ],
+            env=CLOSED_ENV,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            pass_fds=pass_fds,
+            close_fds=True,
+            cwd="/",
+        )
+    finally:
+        os.close(root_fd)
 
 
 def _finish(proc, barrier=b"\x01", require_blocked=False, timeout=5.0):
@@ -100,9 +116,12 @@ def _finish(proc, barrier=b"\x01", require_blocked=False, timeout=5.0):
 
 def _invoke(
     script, fd_arg, expected_sha256, label, *, pass_fd=None,
-    barrier=b"\x01", require_blocked=False,
+    barrier=b"\x01", require_blocked=False, **spawn_options,
 ):
-    proc = _spawn(script, fd_arg, expected_sha256, label, pass_fd=pass_fd)
+    proc = _spawn(
+        script, fd_arg, expected_sha256, label,
+        pass_fd=pass_fd, **spawn_options,
+    )
     return _finish(proc, barrier=barrier, require_blocked=require_blocked)
 
 
@@ -199,6 +218,44 @@ def test_checksum_valid_file_waits_then_emits_exact_match_output():
         os.unlink(path)
 
 
+def test_recipe_enters_selected_descriptor_cwd_and_rejects_wrong_root_identity(tmp_path):
+    """A harmless launch cwd cannot substitute for the host-selected root fd."""
+    path = _make_file(b"hello world")
+    selected_root = tmp_path / "selected-root"
+    selected_root.mkdir()
+    try:
+        with open(path, "rb") as input_file:
+            result = _invoke(
+                CANARY_CHECKSUM,
+                input_file.fileno(),
+                HELLO_SHA256,
+                "fixture.bin",
+                pass_fd=input_file.fileno(),
+                root_path=selected_root,
+                require_blocked=True,
+            )
+        assert result == (
+            _expected_checksum_output("fixture.bin", HELLO_SHA256),
+            b"checksum-ok\n",
+            0,
+        )
+        with open(path, "rb") as input_file:
+            root_stat = selected_root.stat()
+            result = _invoke(
+                CANARY_CHECKSUM,
+                input_file.fileno(),
+                HELLO_SHA256,
+                "fixture.bin",
+                pass_fd=input_file.fileno(),
+                root_path=selected_root,
+                root_inode=root_stat.st_ino + 1,
+                require_blocked=True,
+            )
+        _assert_fixed_refusal(result, CHECKSUM_REFUSAL)
+    finally:
+        os.unlink(path)
+
+
 def test_checksum_reads_full_maximum_file_from_offset_zero():
     """A single read or inherited-offset read cannot silently hash a suffix."""
     content = b"x" * 65536
@@ -268,8 +325,8 @@ def test_invalid_hashes_refuse_without_normalization(script, diagnostic, bad_has
 
 @pytest.mark.parametrize("args", [
     [],
-    ["3", EMPTY_SHA256],
-    ["3", EMPTY_SHA256, "fixture.bin", "extra"],
+    ["3", "4", "1", "2", EMPTY_SHA256],
+    ["3", "4", "1", "2", EMPTY_SHA256, "fixture.bin", "extra"],
 ])
 @pytest.mark.parametrize("script,diagnostic", [
     (CANARY_CHECKSUM, CHECKSUM_REFUSAL),

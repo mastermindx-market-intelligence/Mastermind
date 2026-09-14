@@ -31,14 +31,18 @@ from typing import Any, Literal
 
 ACTION_CLAIM_SCHEMA = "mastermind.workbench_action_claim.v1"
 ACTION_RESULT_SCHEMA = "mastermind.workbench_action_result.v1"
+ACTION_PROCESS_SCHEMA = "mastermind.workbench_command_process.v1"
 ACTION_PURPOSE_TEXT_PATCH = "text_patch"
 ACTION_PURPOSE_CLOSED_COMMAND = "closed_command"
 ACTION_PURPOSES = frozenset(
     {ACTION_PURPOSE_TEXT_PATCH, ACTION_PURPOSE_CLOSED_COMMAND}
 )
-ACTION_ARTIFACT_KINDS = frozenset({"claim", "result", "stdout", "stderr"})
+ACTION_ARTIFACT_KINDS = frozenset(
+    {"claim", "process", "result", "stdout", "stderr"}
+)
 MAX_CLAIM_BYTES = 4096
 MAX_RESULT_BYTES = 16384
+MAX_PROCESS_BYTES = 4096
 MAX_BLOB_BYTES = 65536
 MAX_DETAILS_BYTES = 2048
 _EFFECTS = frozenset({"NOT_APPLIED", "APPLIED", "EFFECT_UNKNOWN"})
@@ -151,6 +155,19 @@ class ActionResultRecord:
     completed_at_ms: int
     durability: str
     details: dict[str, Any]
+
+
+@dataclasses.dataclass(frozen=True)
+class ActionProcessRecord:
+    schema: str
+    identity: ActionArtifactIdentity
+    pid: int
+    process_start_identity: str
+    pgid: int
+    session_id: int
+    host_id: str
+    boot_session_id: str
+    recorded_at_ms: int
 
 
 @dataclasses.dataclass(frozen=True)
@@ -490,6 +507,92 @@ def write_action_blob(
         payload,
         max_bytes=MAX_BLOB_BYTES,
     )
+
+
+def write_action_process(
+    store: ActionArtifactStore,
+    identity: ActionArtifactIdentity,
+    *,
+    pid: int,
+    process_start_identity: str,
+    pgid: int,
+    session_id: int,
+    host_id: str,
+    boot_session_id: str,
+    recorded_at_ms: int,
+) -> ActionProcessRecord:
+    """Persist one immutable verified process identity after the durable claim."""
+
+    store = revalidate_artifact_store(store)
+    identity = validate_artifact_identity(identity)
+    _assert_store_binding(store, identity)
+    if identity.purpose != ACTION_PURPOSE_CLOSED_COMMAND:
+        raise ActionArtifactUncertain("process record purpose mismatch")
+    _validate_process_values(
+        identity,
+        pid=pid,
+        process_start_identity=process_start_identity,
+        pgid=pgid,
+        session_id=session_id,
+        host_id=host_id,
+        boot_session_id=boot_session_id,
+        recorded_at_ms=recorded_at_ms,
+    )
+    claim = read_action_claim(store, identity)
+    if claim is None or recorded_at_ms < claim.claimed_at_ms:
+        raise ActionArtifactUncertain("matching prior claim required")
+    body = {
+        "schema": ACTION_PROCESS_SCHEMA,
+        "identity": dataclasses.asdict(identity),
+        "pid": pid,
+        "process_start_identity": process_start_identity,
+        "pgid": pgid,
+        "session_id": session_id,
+        "host_id": host_id,
+        "boot_session_id": boot_session_id,
+        "recorded_at_ms": recorded_at_ms,
+    }
+    _write_exclusive_json(
+        store,
+        artifact_name(identity.action_id, "process"),
+        body,
+        max_bytes=MAX_PROCESS_BYTES,
+    )
+    return ActionProcessRecord(
+        schema=ACTION_PROCESS_SCHEMA,
+        identity=identity,
+        pid=pid,
+        process_start_identity=process_start_identity,
+        pgid=pgid,
+        session_id=session_id,
+        host_id=host_id,
+        boot_session_id=boot_session_id,
+        recorded_at_ms=recorded_at_ms,
+    )
+
+
+def read_action_process(
+    store: ActionArtifactStore,
+    identity: ActionArtifactIdentity,
+) -> ActionProcessRecord | None:
+    """Read one exact process record; absence alone never classifies effect."""
+
+    revalidate_artifact_store(store)
+    validate_artifact_identity(identity)
+    _assert_store_binding(store, identity)
+    try:
+        raw = _read_regular_file(
+            store,
+            artifact_name(identity.action_id, "process"),
+            max_bytes=MAX_PROCESS_BYTES,
+            missing_ok=True,
+        )
+        if raw is None:
+            return None
+        return _decode_process(raw, identity)
+    except (ActionArtifactError, OSError, UnicodeError, TypeError, ValueError,
+            RecursionError) as error:
+        raise ActionArtifactUncertain("process qualification uncertain") from error
 
 
 def read_action_claim(
@@ -869,6 +972,84 @@ def _strict_json(raw: bytes) -> dict[str, Any]:
     return json.loads(raw.decode("utf-8"), object_pairs_hook=pairs, parse_constant=constant)
 
 
+def _validate_process_values(
+    identity: ActionArtifactIdentity,
+    *,
+    pid: object,
+    process_start_identity: object,
+    pgid: object,
+    session_id: object,
+    host_id: object,
+    boot_session_id: object,
+    recorded_at_ms: object,
+) -> None:
+    if (
+        type(pid) is not int
+        or pid <= 0
+        or type(pgid) is not int
+        or pgid <= 0
+        or type(session_id) is not int
+        or session_id <= 0
+        or type(process_start_identity) is not str
+        or not process_start_identity
+        or process_start_identity != process_start_identity.strip()
+        or len(process_start_identity) > 256
+        or any(ord(character) < 32 or ord(character) > 126
+               for character in process_start_identity)
+        or type(host_id) is not str
+        or host_id != identity.host_id
+        or _HEX64.fullmatch(host_id) is None
+        or type(boot_session_id) is not str
+        or boot_session_id != identity.boot_session_id
+        or _BOOT.fullmatch(boot_session_id) is None
+        or type(recorded_at_ms) is not int
+        or not 0 <= recorded_at_ms < 2**63
+    ):
+        raise ActionArtifactUncertain("invalid process record")
+
+
+def _decode_process(raw: bytes, identity: ActionArtifactIdentity) -> ActionProcessRecord:
+    body = _strict_json(raw)
+    if type(body) is not dict or set(body) != {
+        "schema",
+        "identity",
+        "pid",
+        "process_start_identity",
+        "pgid",
+        "session_id",
+        "host_id",
+        "boot_session_id",
+        "recorded_at_ms",
+    }:
+        raise ActionArtifactUncertain("invalid process record")
+    if body["schema"] != ACTION_PROCESS_SCHEMA:
+        raise ActionArtifactUncertain("invalid process record")
+    parsed = _parse_identity(body["identity"])
+    if parsed != identity:
+        raise ActionArtifactUncertain("process identity mismatch")
+    _validate_process_values(
+        parsed,
+        pid=body["pid"],
+        process_start_identity=body["process_start_identity"],
+        pgid=body["pgid"],
+        session_id=body["session_id"],
+        host_id=body["host_id"],
+        boot_session_id=body["boot_session_id"],
+        recorded_at_ms=body["recorded_at_ms"],
+    )
+    return ActionProcessRecord(
+        schema=ACTION_PROCESS_SCHEMA,
+        identity=parsed,
+        pid=body["pid"],
+        process_start_identity=body["process_start_identity"],
+        pgid=body["pgid"],
+        session_id=body["session_id"],
+        host_id=body["host_id"],
+        boot_session_id=body["boot_session_id"],
+        recorded_at_ms=body["recorded_at_ms"],
+    )
+
+
 def _decode_claim(raw, identity, *, require_match):
     body = _strict_json(raw)
     if type(body) is not dict or set(body) != {
@@ -965,10 +1146,12 @@ __all__ = [
     "ACTION_PURPOSE_CLOSED_COMMAND",
     "ACTION_PURPOSE_TEXT_PATCH",
     "ACTION_PURPOSES",
+    "ACTION_PROCESS_SCHEMA",
     "ACTION_RESULT_SCHEMA",
     "MAX_BLOB_BYTES",
     "MAX_CLAIM_BYTES",
     "MAX_RESULT_BYTES",
+    "MAX_PROCESS_BYTES",
     "ActionArtifactBusy",
     "ActionArtifactError",
     "ActionArtifactIdentity",
@@ -977,6 +1160,7 @@ __all__ = [
     "ActionClaimRecord",
     "ActionClassification",
     "ActionHostBinding",
+    "ActionProcessRecord",
     "ActionResultRecord",
     "ArtifactWriterLock",
     "ClaimOutcome",
@@ -988,9 +1172,11 @@ __all__ = [
     "finalize_action",
     "read_action_blob",
     "read_action_claim",
+    "read_action_process",
     "read_action_result",
     "revalidate_artifact_store",
     "validate_artifact_identity",
     "validate_host_binding",
     "write_action_blob",
+    "write_action_process",
 ]
