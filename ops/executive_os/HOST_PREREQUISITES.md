@@ -13,6 +13,88 @@ type that password locally. The device-login step likewise requires the
 operator to approve OpenAI's one-time code in a browser. Neither secret should
 be pasted into a terminal transcript, issue, PR, or chat.
 
+## Unattended recovery readiness (read-only departure gate)
+
+Before a period without a human at the keyboard, prove each home Mac recovers
+on its own instead of remembering that it was set up. This is a read-only
+observation, so it needs no install stage, no administrator password, and no
+service state change. Run it as the ordinary operator on Studio, M1, and any
+future host being enrolled:
+
+```bash
+/usr/bin/python3 -I -S -B \
+  "$SOURCE_REPO/ops/executive_os/host_recovery_readiness.py"
+```
+
+It emits one canonical `mastermind.host_recovery_readiness/v1` JSON report on
+stdout and exits `0`. `--host-ref host-<64-lower-hex>` optionally stamps an
+opaque host reference; any other value is refused without echoing it. A typed
+refusal exits `65` and writes only a closed code to stderr. Reruns are free and
+create no effect.
+
+Read `recovery_state` first: `READY`, `NOT_READY`, or `UNKNOWN`. Unknown
+load-bearing evidence — a missing command, a permission refusal, or malformed
+output — fails closed to `UNKNOWN` and is never inferred as a pass. A definite
+defect outranks unknown evidence, so `NOT_READY` wins when both are present.
+`blocking_predicates` and `unknown_predicates` name exactly which predicates
+produced that state, which is the whole point before departure: an operator sees
+that (for example) `auto_restart_after_power_loss` is the single reason a host
+is unsafe.
+
+Each predicate carries a reviewed `requirement` that decides whether it can move
+the overall state:
+
+| Requirement | Load-bearing | Meaning |
+|---|---|---|
+| `REQUIRED` | yes | Unattended recovery depends on it. |
+| `REQUIRED_RUNNING` | yes | An already-installed critical system LaunchDaemon must be running. |
+| `OPTIONAL` | no | Reviewed as preferable, but it does not decide readiness. |
+| `DISARMED_EXPECTED` | no | The current gates intend this service to be absent or disabled. |
+| `ADVISORY` | no | Reported because the operator must know it. |
+
+Three semantics are deliberate and should not be "fixed" later without a
+decision:
+
+- **`autorestart` is required; `autorestartatconnect` is optional.** Recovery
+  after a power cut on a continuously-powered desktop comes from `autorestart`.
+  `autorestartatconnect` only governs restarting when AC is reconnected, and
+  macOS exposes the key only on models that support that behavior — so a `0`
+  there is `ADVISORY` and a missing key is `NOT_APPLICABLE`, never a defect.
+- **Unloaded worker, backup, and privileged-broker daemons are not defects.**
+  They are `DISARMED_EXPECTED`, and the report distinguishes
+  `DAEMON_NOT_INSTALLED` from `DAEMON_INTENTIONALLY_DISARMED` so the current
+  gates do not read as failures. A disarmed service found running is `ADVISORY`
+  (`DAEMON_UNEXPECTEDLY_RUNNING`), not a readiness failure.
+- **User-session surfaces are reported separately.** The Executive tunnel,
+  Chairman Control Room, Desktop Commander, and studio-direct MCP are
+  LaunchAgents. They cannot exist before a console login, so
+  `user_session_surfaces` is `ADVISORY` with
+  `USER_SESSION_LOGIN_REQUIRED` rather than pretending system-boot
+  availability. With FileVault on, an unattended boot reaches the login window;
+  `disk_encryption_state` records that preboot-unlock dependency as `ADVISORY`
+  and never carries encryption or recovery material.
+
+`disk_free_floor` uses the reviewed 25 GiB floor in
+`control_plane/executive_recovery_readiness.py`; it reports
+`DISK_FREE_BELOW_FLOOR` and never deletes anything. The observer's only
+external calls are fixed, absolute, read-only macOS tools (`pmset -g custom`,
+`sw_vers`, `sysctl -n hw.optional.arm64`, `fdesetup status`, and
+`launchctl print` / `print-disabled`). It opens no socket, so it observes the
+Remote Login listener's enablement without touching sshd.
+
+### Remediation boundary
+
+This observer never remediates. Turning a red predicate green is a one-time
+local administrator ceremony, and the privileged root actions belong to the
+existing reviewed broker path described in this runbook — do not add a second
+broker, helper, or mutation script beside the checker, and do not widen the
+checker's authority. In particular, power-policy, FileVault, Remote Login, and
+launchd enablement changes remain administrator/broker-owned actions performed
+once at the host, after which the exact same read-only command must turn green
+with no source change. If a host needs authority the current broker does not
+already hold, stop and return the gap for a Chairman/CEO decision instead of
+extending this path.
+
 ## Stage 1 — review and merge (no administrator actions)
 
 The delivery pull request must have a clean pushed head, passing deterministic CI and CodeQL, and
