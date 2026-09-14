@@ -16,7 +16,9 @@ import json
 import re
 from typing import Any
 
-ACTION_TOKEN_SCHEMA = "mastermind.workbench_text_patch.v1"
+ACTION_TOKEN_SCHEMA = "mastermind.workbench_text_patch.v2"
+ACTION_TOKEN_SCHEMA_V1 = "mastermind.workbench_text_patch.v1"
+ACTION_TOKEN_PURPOSE = "text_patch"
 MAX_ACTION_REF_BYTES = 65536
 MAX_PATCH_TEXT_BYTES = 16384
 MAX_ACTION_TTL_MS = 5 * 60 * 1000
@@ -24,6 +26,8 @@ _HEX32 = re.compile(r"^[0-9a-f]{32}$")
 _HEX40 = re.compile(r"^[0-9a-f]{40}$")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$")
+_BOOT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+_SOURCE_IDENTITY = re.compile(r"^[0-9]+(:[0-9]+){8}$")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -74,11 +78,17 @@ class PreparedTextPatch:
     generation: str
     root_device: int
     root_inode: int
+    artifact_store_device: int
+    artifact_store_inode: int
+    host_id: str
+    boot_session_id: str
+    purpose: str
     committed_head: str | None
     relative_path: str
     mode: str
     preimage_sha256: str | None
     postimage_sha256: str
+    source_identity: str | None
     old_text: str | None
     new_text: str
     issued_at_ms: int
@@ -172,11 +182,16 @@ def validate_action_caller(value: object) -> ActionCaller:
     return value
 
 
-def validate_prepared(value: object, *, now_ms: int) -> PreparedTextPatch:
+def validate_prepared(
+    value: object, *, now_ms: int, require_fresh: bool = True
+) -> PreparedTextPatch:
     if type(value) is not PreparedTextPatch:
         raise ActionContractError("invalid prepared action")
+    if value.schema == ACTION_TOKEN_SCHEMA_V1:
+        raise ActionContractError("invalid action reference")
     if (
         value.schema != ACTION_TOKEN_SCHEMA
+        or value.purpose != ACTION_TOKEN_PURPOSE
         or type(value.action_id) is not str
         or _HEX32.fullmatch(value.action_id) is None
         or type(value.subject_digest) is not str
@@ -203,6 +218,14 @@ def validate_prepared(value: object, *, now_ms: int) -> PreparedTextPatch:
         or value.root_device < 0
         or type(value.root_inode) is not int
         or value.root_inode < 0
+        or type(value.artifact_store_device) is not int
+        or value.artifact_store_device < 0
+        or type(value.artifact_store_inode) is not int
+        or value.artifact_store_inode < 0
+        or type(value.host_id) is not str
+        or _HEX64.fullmatch(value.host_id) is None
+        or type(value.boot_session_id) is not str
+        or _BOOT.fullmatch(value.boot_session_id) is None
     ):
         raise ActionContractError("invalid prepared action")
     validate_relative_path(value.relative_path)
@@ -224,12 +247,18 @@ def validate_prepared(value: object, *, now_ms: int) -> PreparedTextPatch:
     ):
         raise ActionContractError("invalid prepared action")
     if value.mode == "CREATE":
-        if value.preimage_sha256 is not None or value.old_text is not None:
+        if (
+            value.preimage_sha256 is not None
+            or value.old_text is not None
+            or value.source_identity is not None
+        ):
             raise ActionContractError("invalid prepared action")
     elif (
         value.preimage_sha256 is None
         or type(value.old_text) is not str
         or not value.old_text
+        or type(value.source_identity) is not str
+        or _SOURCE_IDENTITY.fullmatch(value.source_identity) is None
     ):
         raise ActionContractError("invalid prepared action")
     if type(value.new_text) is not str:
@@ -254,9 +283,10 @@ def validate_prepared(value: object, *, now_ms: int) -> PreparedTextPatch:
         or value.issued_at_ms < 0
         or value.expires_at_ms <= value.issued_at_ms
         or value.expires_at_ms - value.issued_at_ms > MAX_ACTION_TTL_MS
-        or value.expires_at_ms <= now_ms
         or value.expires_at_ms >= 2**63
     ):
+        raise ActionContractError("prepared action expired or invalid")
+    if require_fresh and value.expires_at_ms <= now_ms:
         raise ActionContractError("prepared action expired or invalid")
     return value
 
@@ -305,6 +335,16 @@ class ActionTokenCodec:
         return token
 
     def decode(self, token: object, *, now_ms: int) -> PreparedTextPatch:
+        return self._decode(token, now_ms=now_ms, require_fresh=True)
+
+    def decode_evidence(self, token: object, *, now_ms: int) -> PreparedTextPatch:
+        """Integrity-only decode. Expired apply tokens remain readable."""
+
+        return self._decode(token, now_ms=now_ms, require_fresh=False)
+
+    def _decode(
+        self, token: object, *, now_ms: int, require_fresh: bool
+    ) -> PreparedTextPatch:
         if type(token) is not str or not token or len(token.encode("utf-8")) > MAX_ACTION_REF_BYTES:
             raise ActionContractError("invalid action reference")
         parts = token.split(".")
@@ -325,11 +365,13 @@ class ActionTokenCodec:
             raise
         except Exception as error:
             raise ActionContractError("invalid action reference") from error
-        return validate_prepared(value, now_ms=now_ms)
+        return validate_prepared(value, now_ms=now_ms, require_fresh=require_fresh)
 
 
 __all__ = [
+    "ACTION_TOKEN_PURPOSE",
     "ACTION_TOKEN_SCHEMA",
+    "ACTION_TOKEN_SCHEMA_V1",
     "MAX_ACTION_REF_BYTES",
     "MAX_ACTION_TTL_MS",
     "MAX_PATCH_TEXT_BYTES",
