@@ -16,6 +16,7 @@ from collections.abc import Callable
 from pathlib import Path
 import re
 import stat
+import threading
 import time
 from typing import Any
 
@@ -83,15 +84,20 @@ class _ReadOperations:
         self._clock_ms = clock_ms
         self._on_cleanup_uncertain = on_cleanup_uncertain
         self._cleanup_uncertainty: LocalProfileError | None = None
+        self._cleanup_uncertainty_lock = threading.Lock()
         self._port_closed = False
 
     def _record_cleanup_uncertainty(self) -> None:
-        if self._cleanup_uncertainty is not None:
-            return
-        self._cleanup_uncertainty = LocalProfileError("PROJECT_CLEANUP_UNCERTAIN")
-        if self._on_cleanup_uncertain is not None:
+        claimed_callback: Callable[[], None] | None = None
+        with self._cleanup_uncertainty_lock:
+            if self._cleanup_uncertainty is None:
+                self._cleanup_uncertainty = LocalProfileError(
+                    "PROJECT_CLEANUP_UNCERTAIN"
+                )
+                claimed_callback = self._on_cleanup_uncertain
+        if claimed_callback is not None:
             try:
-                self._on_cleanup_uncertain()
+                claimed_callback()
             except Exception:
                 pass
 
