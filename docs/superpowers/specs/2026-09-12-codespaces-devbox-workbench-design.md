@@ -68,6 +68,8 @@ File edits, git operations, worktree management and tests are commands in the bo
 
 A process reference is derived from an owner namespace plus the `operation_key` and request digest. Provider-local records live under a deployment-owned private state directory outside the repository working tree. They are execution evidence, not Executive lifecycle state.
 
+Runtime admission also persists one exact source-baseline receipt outside the checkout. Production admission requires a clean Git working tree by default. A known `NOT_APPLIED` start refusal does not consume that clean-baseline gate; the source must remain equal to the admitted baseline until an owned effect is durably observed. An unresolved pre-effect receipt remains `EFFECT_UNKNOWN` and blocks a different new command rather than being treated as an owned edit. Once an owned effect exists, later commands may inspect and test that command's working-tree changes. Reopening the same generation preserves the original admission baseline rather than redefining a dirty post-effect tree as clean.
+
 `start_devbox_command` is prepare-and-start in one attended tool call but has at-most-once semantics by `operation_key`:
 
 - no prior receipt + successful durable pre-effect record -> attempt start;
@@ -76,7 +78,7 @@ A process reference is derived from an owner namespace plus the `operation_key` 
 - uncertain spawn/write boundary -> persist/return `EFFECT_UNKNOWN`; never start a second process;
 - known pre-effect refusal -> `NOT_APPLIED`.
 
-The detached supervisor records PID, PGID/session, Linux boot ID when available, `/proc/<pid>/stat` start identity, exact command digest, workspace identity, start time, terminal time, exit code, cancellation facts, and output file identities. Client-visible results contain only bounded secret-free projections.
+The detached supervisor records PID, PGID/session, Linux boot ID when available, `/proc/<pid>/stat` start identity, exact command digest, workspace identity, start time, terminal time, exit code, cancellation facts, and output file identities. It writes identity-bound `STARTED` and terminal sidecars before replacing the mutable projection, so a lost primary receipt replacement can be reconciled without spawning process two. A malformed or identity-mismatched sidecar fails closed. Client-visible results contain only bounded secret-free projections.
 
 ## Command confinement
 
@@ -110,6 +112,7 @@ After the execution vertical is proven, a controller may automate `list/create/s
 
 - malformed/oversized input: refuse before effect;
 - target/root/generation drift: refuse before new effect;
+- dirty or changed source before the first durably owned effect: `SOURCE_DIRTY`, refuse before effect;
 - operation-key conflict: refuse before effect;
 - response loss after a possible spawn: `EFFECT_UNKNOWN`, same-action reconciliation only;
 - missing/rotated process identity: unknown/refused, never signal a PID by number alone;

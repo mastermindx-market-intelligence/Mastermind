@@ -80,7 +80,7 @@ python -m compileall -q integrations/devbox_mcp ops/devbox
 git diff --check
 ```
 
-Direct runtime acceptance must prove: exit 0, intentional exit 7, a process still observable after its start call returns, same-operation reconciliation with no process two, changed-payload conflict, bounded stdout/stderr, timeout, exact cancellation, binding drift refusal, and absence of ambient GitHub/cloud/SSH credentials in child execution.
+Direct runtime acceptance must prove: clean source admission; dirty-source refusal before the first owned effect; preservation of that gate after a known pre-effect refusal; exit 0; intentional exit 7; a process still observable after its start call returns; same-operation reconciliation with no process two; recovery from a lost primary STARTED/terminal receipt replacement through the immutable sidecars; changed-payload conflict; bounded stdout/stderr; timeout; exact cancellation; binding drift refusal; and absence of ambient GitHub/cloud/SSH credentials in child execution.
 
 ## 5. Mint exact policy + lease outside source control
 
@@ -152,7 +152,7 @@ Connect the existing approved Personal Pro custom-MCP surface to the exact `DEVB
 
 From the real Web-Sol conversation, execute in order:
 
-1. `devbox_status` — exact target/generation/repository/HEAD only.
+1. `devbox_status` — exact target/generation/repository/HEAD plus `baseline_working_tree_dirty`, current `working_tree_dirty`, and `working_tree_changed_from_baseline`; the production baseline must be clean.
 2. `start_devbox_command` with an exit-0 command; read terminal exit 0.
 3. Intentional exit 7; read exact exit 7.
 4. Start a delayed command; let the initiating tool call return; later observe the same `process_ref` to terminal.
