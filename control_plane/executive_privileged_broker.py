@@ -363,6 +363,8 @@ class PrivilegedActionBroker:
         value = _read_bounded_json(path)
         if value.get("schema") != RECEIPT_SCHEMA or value.get("request_id") != request.request_id:
             raise BrokerTrustError("terminal receipt identity is invalid")
+        if value.get("release_sha") != self.config.release_root.name:
+            raise RequestIdConflictError("request id belongs to a different installed release")
         if value.get("request_sha256") != digest:
             raise RequestIdConflictError("request id already has a different terminal request")
         return value
@@ -374,6 +376,8 @@ class PrivilegedActionBroker:
         value = _read_bounded_json(path)
         if value.get("schema") != INFLIGHT_SCHEMA or value.get("request_id") != request.request_id:
             raise BrokerTrustError("in-flight marker identity is invalid")
+        if value.get("release_sha") != self.config.release_root.name:
+            raise RequestIdConflictError("request id belongs to a different installed release")
         if value.get("request_sha256") != digest:
             raise RequestIdConflictError("request id already has a different in-flight request")
         raise EffectUnknownError("matching request has a stale in-flight marker; effect is unknown")

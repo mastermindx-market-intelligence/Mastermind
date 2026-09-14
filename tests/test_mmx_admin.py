@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from control_plane.executive_privileged_action import REQUEST_SCHEMA
+from scripts import mmx_admin
 from scripts.mmx_admin import build_request, send_request
 
 
@@ -69,6 +70,24 @@ def test_generated_request_id_is_contract_safe() -> None:
     request = build_request(["executive.services.stop"])
     assert request["request_id"].startswith("req-")
     assert 3 <= len(request["request_id"]) <= 64
+
+
+def test_client_timeout_exceeds_installed_privileged_broker_budget() -> None:
+    install = (Path(__file__).resolve().parents[1] / "ops" / "executive_os" / "install.sh").read_text()
+    assert '"timeout_seconds": 600' in install
+    assert mmx_admin.DEFAULT_CLIENT_TIMEOUT_SECONDS > 600
+
+
+def test_main_prints_stable_request_id_before_transport_failure(monkeypatch, capsys) -> None:
+    def fail_send(*_args, **_kwargs):
+        raise TimeoutError("simulated transport loss")
+
+    monkeypatch.setattr(mmx_admin, "send_request", fail_send)
+    rc = mmx_admin.main(["executive.services.start", "--request-id", "req-visible-001"])
+    captured = capsys.readouterr()
+    assert rc == 69
+    assert "request_id=req-visible-001" in captured.err
+    assert "transport failure" in captured.err
 
 
 def test_send_request_uses_one_newline_delimited_json_frame(short_socket_root: Path) -> None:

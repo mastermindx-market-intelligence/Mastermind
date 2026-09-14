@@ -113,6 +113,38 @@ def test_wire_response_marks_fresh_and_replayed_successes(tmp_path: Path) -> Non
     assert len(executor.calls) == 1
 
 
+def test_terminal_receipt_from_other_release_conflicts_without_spawn(tmp_path: Path) -> None:
+    executor = FakeExecutor()
+    broker = _broker(tmp_path, executor)
+    broker.handle(_raw(), peer_uid=501)
+    path = broker.receipt_path("req-001")
+    value = json.loads(path.read_text())
+    value["release_sha"] = "foreign-release"
+    path.write_text(json.dumps(value) + "\n")
+
+    with pytest.raises(RequestIdConflictError, match="release"):
+        broker.handle(_raw(), peer_uid=501)
+    assert len(executor.calls) == 1
+
+
+def test_inflight_marker_from_other_release_conflicts_without_spawn(tmp_path: Path) -> None:
+    executor = FakeExecutor()
+    broker = _broker(tmp_path, executor)
+    validated = validate_request(_raw())
+    digest = hashlib.sha256(canonical_request_bytes(validated)).hexdigest()
+    broker.inflight_path("req-001").write_text(
+        json.dumps({
+            "schema": "mastermind.executive_privileged_action_inflight.v1",
+            "request_id": "req-001",
+            "request_sha256": digest,
+            "release_sha": "foreign-release",
+        }) + "\n"
+    )
+    with pytest.raises(RequestIdConflictError, match="release"):
+        broker.handle(_raw(), peer_uid=501)
+    assert executor.calls == []
+
+
 def test_changed_request_reusing_terminal_id_refuses_without_spawn(tmp_path: Path) -> None:
     executor = FakeExecutor()
     broker = _broker(tmp_path, executor)
@@ -127,7 +159,7 @@ def test_stale_inflight_same_request_is_effect_unknown_without_spawn(tmp_path: P
     broker = _broker(tmp_path, executor)
     validated = validate_request(_raw())
     digest = hashlib.sha256(canonical_request_bytes(validated)).hexdigest()
-    broker.inflight_path("req-001").write_text(json.dumps({"schema": "mastermind.executive_privileged_action_inflight.v1", "request_id": "req-001", "request_sha256": digest}) + "\n")
+    broker.inflight_path("req-001").write_text(json.dumps({"schema": "mastermind.executive_privileged_action_inflight.v1", "request_id": "req-001", "request_sha256": digest, "release_sha": broker.config.release_root.name}) + "\n")
     with pytest.raises(EffectUnknownError):
         broker.handle(_raw(), peer_uid=501)
     assert executor.calls == []
@@ -136,7 +168,7 @@ def test_stale_inflight_same_request_is_effect_unknown_without_spawn(tmp_path: P
 def test_stale_inflight_different_request_hash_is_conflict(tmp_path: Path) -> None:
     executor = FakeExecutor()
     broker = _broker(tmp_path, executor)
-    broker.inflight_path("req-001").write_text(json.dumps({"schema": "mastermind.executive_privileged_action_inflight.v1", "request_id": "req-001", "request_sha256": "0" * 64}) + "\n")
+    broker.inflight_path("req-001").write_text(json.dumps({"schema": "mastermind.executive_privileged_action_inflight.v1", "request_id": "req-001", "request_sha256": "0" * 64, "release_sha": broker.config.release_root.name}) + "\n")
     with pytest.raises(RequestIdConflictError):
         broker.handle(_raw(), peer_uid=501)
     assert executor.calls == []

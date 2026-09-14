@@ -18,6 +18,7 @@ from control_plane.executive_privileged_action import REQUEST_SCHEMA, validate_r
 
 
 DEFAULT_SOCKET = Path("/var/run/mastermind-executive/privileged.sock")
+DEFAULT_CLIENT_TIMEOUT_SECONDS = 660
 _MAX_RESPONSE_BYTES = 128 * 1024
 _ACTIONS = (
     "executive.services.start",
@@ -83,12 +84,17 @@ def _read_response(connection: socket.socket) -> dict[str, object]:
     return value
 
 
-def send_request(request: dict[str, object], *, socket_path: Path = DEFAULT_SOCKET) -> dict[str, object]:
+def send_request(
+    request: dict[str, object],
+    *,
+    socket_path: Path = DEFAULT_SOCKET,
+    timeout_seconds: int = DEFAULT_CLIENT_TIMEOUT_SECONDS,
+) -> dict[str, object]:
     validated = validate_request(request)
     payload = (json.dumps(validated.to_dict(), sort_keys=True, separators=(",", ":")) + "\n").encode("ascii")
     connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
-        connection.settimeout(30)
+        connection.settimeout(timeout_seconds)
         connection.connect(str(socket_path))
         connection.sendall(payload)
         return _read_response(connection)
@@ -101,6 +107,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = _parser()
     namespace = parser.parse_args(values)
     request = build_request(values)
+    sys.stderr.write(f"mmx-admin request_id={request['request_id']}\n")
+    sys.stderr.flush()
     try:
         response = send_request(request, socket_path=namespace.socket_path)
     except (OSError, RuntimeError, UnicodeError, json.JSONDecodeError) as exc:

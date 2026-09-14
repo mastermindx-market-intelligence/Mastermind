@@ -552,7 +552,7 @@ the stable non-root client; no administrator password is involved:
 MMX_ADMIN='/Library/Application Support/MastermindExecutive/bin/mmx-admin'
 CREDENTIAL_EXPIRES_AT='YYYY-MM-DDTHH:MM:SSZ'
 "$MMX_ADMIN" executive.worker_auth.verify_ready \
-  --request-id initial-company-readiness \
+  --request-id "company-ready-$MERGE_SHA" \
   --expected-credential-kind service-account \
   --workspace-binding-class company-workspace-admin-attested \
   --credential-expires-at "$CREDENTIAL_EXPIRES_AT"
