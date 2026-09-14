@@ -1564,7 +1564,11 @@ class ExecutiveWorkerBroker:
             "worker_gid": os.getegid(),
             "active_process_ref": self._active_devbox_process_ref,
             "workspace_source": observed.get("workspace_source"),
+            "baseline_working_tree_dirty": observed.get("baseline_working_tree_dirty"),
             "working_tree_dirty": observed.get("working_tree_dirty"),
+            "working_tree_changed_from_baseline": observed.get(
+                "working_tree_changed_from_baseline"
+            ),
         }
 
     async def _devbox_start(self, payload: dict[str, Any]) -> dict[str, Any]:

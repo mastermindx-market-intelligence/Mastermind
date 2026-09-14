@@ -63,7 +63,9 @@ class Port:
                 "repository": "mastermindx-market-intelligence/Mastermind",
                 "committed_head": "4" * 40,
                 "observed_head": "4" * 40,
+                "baseline_working_tree_dirty": False,
                 "working_tree_dirty": False,
+                "working_tree_changed_from_baseline": False,
                 "execution_profile": "ATTENDED_ONLY",
                 "provider": "github_codespaces",
             }
@@ -234,6 +236,14 @@ class DevBoxAppTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(by_name["read_devbox_process"]["annotations"]["readOnlyHint"])
         self.assertFalse(by_name["start_devbox_command"]["annotations"]["readOnlyHint"])
         self.assertFalse(by_name["cancel_devbox_process"]["annotations"]["readOnlyHint"])
+
+    async def test_status_projects_baseline_and_current_source_truth(self):
+        result = self.result(await self.call("devbox_status"))
+        self.assertFalse(result.get("isError", False), result)
+        status = result["structuredContent"]
+        self.assertFalse(status["baseline_working_tree_dirty"])
+        self.assertFalse(status["working_tree_dirty"])
+        self.assertFalse(status["working_tree_changed_from_baseline"])
 
     async def test_authenticated_calls_project_only_pseudonymous_caller_to_port(self):
         start = self.result(

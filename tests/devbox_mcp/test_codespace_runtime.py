@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import os
 import stat
@@ -10,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+import integrations.devbox_mcp.codespace_runtime as runtime_module
 from integrations.devbox_mcp.codespace_runtime import (
     CodespaceBinding,
     CodespaceDevBoxRuntime,
@@ -98,6 +100,155 @@ def test_open_binds_exact_repo_and_private_external_state(repo: Path, tmp_path: 
     assert result["working_tree_dirty"] is False
     assert stat.S_IMODE(state.stat().st_mode) == 0o700
     assert repo not in state.parents and state not in repo.parents
+
+
+def test_default_open_refuses_dirty_source_before_effect(repo: Path, tmp_path: Path) -> None:
+    (repo / "README.md").write_text("dirty before admission\n", encoding="utf-8")
+
+    with pytest.raises(DevBoxRuntimeError) as exc_info:
+        _open(repo, tmp_path / "state")
+
+    assert exc_info.value.code == "SOURCE_DIRTY"
+    assert not (tmp_path / "state" / "operations").exists()
+
+
+def test_status_preserves_opening_baseline_truth_after_source_cleanup(
+    repo: Path, tmp_path: Path
+) -> None:
+    (repo / "README.md").write_text("dirty before admission\n", encoding="utf-8")
+    runtime = _open(repo, tmp_path / "state", require_clean_baseline=False)
+
+    opening = asyncio.run(runtime.status({}))
+    assert opening["baseline_working_tree_dirty"] is True
+    assert opening["working_tree_dirty"] is True
+    assert opening["working_tree_changed_from_baseline"] is False
+
+    _git(repo, "checkout", "--", "README.md")
+    cleaned = asyncio.run(runtime.status({}))
+    assert cleaned["baseline_working_tree_dirty"] is True
+    assert cleaned["working_tree_dirty"] is False
+    assert cleaned["working_tree_changed_from_baseline"] is True
+
+
+def test_source_must_remain_clean_until_first_effect(repo: Path, tmp_path: Path) -> None:
+    async def exercise() -> None:
+        state = tmp_path / "state"
+        runtime = _open(repo, state)
+        (repo / "external-drift.txt").write_text("unowned drift\n", encoding="utf-8")
+
+        with pytest.raises(DevBoxRuntimeError) as exc_info:
+            await runtime.start_command(
+                {"operation_key": "dirty-before-first-effect", "command_text": "touch applied.txt"}
+            )
+
+        assert exc_info.value.code == "SOURCE_DIRTY"
+        assert not (repo / "applied.txt").exists()
+        assert list((state / "operations").iterdir()) == []
+
+    asyncio.run(exercise())
+
+
+def test_not_applied_attempt_does_not_consume_clean_baseline_gate(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def exercise() -> None:
+        state = tmp_path / "state"
+        runtime = _open(repo, state)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(
+                runtime_module.sys,
+                "executable",
+                str(tmp_path / "missing-supervisor-python"),
+            )
+            with pytest.raises(DevBoxRuntimeError) as exc_info:
+                await runtime.start_command(
+                    {"operation_key": "refused-first", "command_text": "touch refused.txt"}
+                )
+            assert exc_info.value.code == "START_REFUSED"
+
+        (repo / "external-drift.txt").write_text("unowned drift\n", encoding="utf-8")
+        with pytest.raises(DevBoxRuntimeError) as exc_info:
+            await runtime.start_command(
+                {"operation_key": "after-refusal", "command_text": "touch applied.txt"}
+            )
+
+        assert exc_info.value.code == "SOURCE_DIRTY"
+        assert not (repo / "applied.txt").exists()
+
+    asyncio.run(exercise())
+
+
+def test_later_commands_can_test_the_first_owned_edit(repo: Path, tmp_path: Path) -> None:
+    async def exercise() -> None:
+        runtime = _open(repo, tmp_path / "state")
+        edit = await runtime.start_command(
+            {
+                "operation_key": "owned-edit",
+                "command_text": "printf changed > owned-change.txt",
+                "timeout_seconds": 5,
+            }
+        )
+        edited = await _terminal(runtime, edit["process_ref"])
+        assert edited["exit_code"] == 0
+
+        verify = await runtime.start_command(
+            {
+                "operation_key": "verify-owned-edit",
+                "command_text": 'test "$(cat owned-change.txt)" = changed',
+                "timeout_seconds": 5,
+            }
+        )
+        verified = await _terminal(runtime, verify["process_ref"])
+        assert verified["exit_code"] == 0
+
+    asyncio.run(exercise())
+
+
+def test_reopen_after_owned_edit_preserves_clean_admission_baseline(
+    repo: Path, tmp_path: Path
+) -> None:
+    async def exercise() -> None:
+        state = tmp_path / "state"
+        runtime = _open(repo, state)
+        started = await runtime.start_command(
+            {
+                "operation_key": "edit-before-reopen",
+                "command_text": "printf changed > reopened-change.txt",
+                "timeout_seconds": 5,
+            }
+        )
+        terminal = await _terminal(runtime, started["process_ref"])
+        assert terminal["exit_code"] == 0
+
+        reopened = _open(repo, state)
+        status = await reopened.status({})
+        assert status["baseline_working_tree_dirty"] is False
+        assert status["working_tree_dirty"] is True
+        assert status["working_tree_changed_from_baseline"] is True
+        recovered = await reopened.read_process(
+            {"process_ref": started["process_ref"], "max_bytes": 65536}
+        )
+        assert recovered["terminal"] is True
+        assert recovered["exit_code"] == 0
+        assert (state / "baseline.json").is_file()
+        assert stat.S_IMODE((state / "baseline.json").stat().st_mode) == 0o600
+
+    asyncio.run(exercise())
+
+
+def test_dirty_inspection_baseline_cannot_be_cleaned_and_rearmed(
+    repo: Path, tmp_path: Path
+) -> None:
+    state = tmp_path / "state"
+    (repo / "README.md").write_text("dirty before admission\n", encoding="utf-8")
+    _open(repo, state, require_clean_baseline=False)
+    _git(repo, "checkout", "--", "README.md")
+
+    with pytest.raises(DevBoxRuntimeError) as exc_info:
+        _open(repo, state)
+
+    assert exc_info.value.code == "SOURCE_DIRTY"
 
 
 def test_open_refuses_wrong_platform_symlink_or_state_inside_repo(repo: Path, tmp_path: Path) -> None:
@@ -352,3 +503,72 @@ def test_durable_record_contains_no_command_text_or_secret_values(
         assert started["process_ref"] in rendered
 
     asyncio.run(exercise())
+
+
+def test_supervisor_reconciles_when_primary_effect_receipt_write_is_lost(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = tmp_path / "state"
+    runtime = _open(repo, state)
+    digest = runtime._op_digest("primary-receipt-loss")
+    process_ref = "process:" + digest
+    op_dir = state / "operations" / digest
+    op_dir.mkdir(mode=0o700)
+    prepared = {
+        "schema": "mastermind.devbox_process_receipt.v1",
+        "process_ref": process_ref,
+        "request_digest": "4" * 64,
+        "target_ref": runtime.binding.target_ref,
+        "generation": runtime.binding.generation,
+        "owner_ref": runtime.binding.owner_ref,
+        "repository": runtime.binding.repository,
+        "committed_head": runtime.binding.committed_head,
+        "phase": "PREPARED",
+        "effect_state": "EFFECT_UNKNOWN",
+        "terminal": False,
+        "timed_out": False,
+        "cancel_requested": False,
+        "child_pid": None,
+        "child_pgid": None,
+        "process_start_identity": None,
+        "boot_id": None,
+        "exit_code": None,
+        "stdout": {"total_bytes": 0, "retained_bytes": 0, "dropped_bytes": 0},
+        "stderr": {"total_bytes": 0, "retained_bytes": 0, "dropped_bytes": 0},
+    }
+    real_atomic = runtime_module._atomic_json
+    real_atomic(op_dir / "record.json", prepared)
+
+    class FakeStdin:
+        buffer = io.BytesIO(b'{"command_text":"printf durable"}\n')
+
+    monkeypatch.setattr(runtime_module.sys, "stdin", FakeStdin())
+
+    def lose_primary_effect_write(path: Path, value: dict) -> None:
+        if path.name == "record.json" and value.get("phase") in {
+            "STARTED",
+            "TERMINAL",
+        }:
+            raise OSError("simulated primary receipt loss")
+        real_atomic(path, value)
+
+    monkeypatch.setattr(runtime_module, "_atomic_json", lose_primary_effect_write)
+    exit_code = runtime_module._supervise(
+        op_dir,
+        repo_root=repo,
+        state_home=state / "home",
+        shell=Path("/bin/bash"),
+        timeout_seconds=5,
+        output_limit_bytes=65536,
+    )
+
+    assert exit_code == 0
+    observed = asyncio.run(
+        runtime.read_process({"process_ref": process_ref, "max_bytes": 65536})
+    )
+    assert observed["effect_state"] == "APPLIED"
+    assert observed["terminal"] is True
+    assert observed["exit_code"] == 0
+    assert observed["stdout"]["text"] == "durable"
+    assert (op_dir / "started.json").is_file()
+    assert (op_dir / "terminal.json").is_file()

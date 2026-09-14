@@ -29,6 +29,7 @@ from .contracts import validate_tool_arguments
 _REF_RE = re.compile(r"^(target|generation|owner):[0-9a-f]{64}$")
 _HEX40 = re.compile(r"^[0-9a-f]{40}$")
 _RECORD_SCHEMA = "mastermind.devbox_process_receipt.v1"
+_BASELINE_SCHEMA = "mastermind.devbox_source_baseline.v1"
 _DEFAULT_TIMEOUT_SECONDS = 300
 _DEFAULT_OUTPUT_LIMIT_BYTES = 65536
 _START_WAIT_SECONDS = 2.5
@@ -137,6 +138,16 @@ def _load_json(path: Path) -> dict[str, Any]:
     return value
 
 
+def _load_source_baseline(path: Path) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise DevBoxRuntimeError("RECEIPT_UNAVAILABLE", "source baseline is unavailable") from exc
+    if type(value) is not dict or value.get("schema") != _BASELINE_SCHEMA:
+        raise DevBoxRuntimeError("RECEIPT_UNAVAILABLE", "source baseline is malformed")
+    return value
+
+
 def _git(repo: Path, *args: str) -> str:
     env = {
         "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"),
@@ -163,6 +174,38 @@ def _git(repo: Path, *args: str) -> str:
     if completed.returncode != 0:
         raise DevBoxRuntimeError("BINDING_UNAVAILABLE", "Git observation is unavailable")
     return completed.stdout.rstrip("\n")
+
+
+def _working_tree_snapshot(repo: Path) -> bytes:
+    env = {
+        "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"),
+        "HOME": "/nonexistent",
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_TERMINAL_PROMPT": "0",
+        "GCM_INTERACTIVE": "never",
+    }
+    try:
+        completed = subprocess.run(
+            ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
+            cwd=str(repo),
+            env=env,
+            check=False,
+            capture_output=True,
+            text=False,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise DevBoxRuntimeError("BINDING_UNAVAILABLE", "Git observation is unavailable") from exc
+    if completed.returncode != 0:
+        raise DevBoxRuntimeError("BINDING_UNAVAILABLE", "Git observation is unavailable")
+    return bytes(completed.stdout)
+
+
+def _working_tree_digest(snapshot: bytes) -> str:
+    return hashlib.sha256(snapshot).hexdigest()
 
 
 def _lstat_real_directory(path: Path) -> os.stat_result:
@@ -253,6 +296,54 @@ def _record_projection(record: Mapping[str, Any], *, reconciled: bool) -> dict[s
     }
 
 
+_RECORD_IDENTITY_FIELDS = (
+    "schema",
+    "process_ref",
+    "request_digest",
+    "target_ref",
+    "generation",
+    "owner_ref",
+    "repository",
+    "committed_head",
+)
+
+
+def _load_reconciled_record(op_dir: Path) -> dict[str, Any]:
+    primary = _load_json(op_dir / "record.json")
+    selected = primary
+    for filename, allowed_phases in (
+        ("started.json", frozenset({"STARTED"})),
+        ("terminal.json", frozenset({"TERMINAL", "TERMINAL_OUTPUT_UNCERTAIN"})),
+    ):
+        path = op_dir / filename
+        if not path.exists():
+            continue
+        candidate = _load_json(path)
+        if candidate.get("phase") not in allowed_phases or any(
+            candidate.get(field) != primary.get(field) for field in _RECORD_IDENTITY_FIELDS
+        ):
+            raise DevBoxRuntimeError("RECEIPT_UNAVAILABLE", "process receipt identity changed")
+        selected = candidate
+    return selected
+
+
+def _persist_effect_record(op_dir: Path, record: Mapping[str, Any]) -> None:
+    phase = record.get("phase")
+    if phase == "STARTED":
+        sidecar = op_dir / "started.json"
+    elif phase in {"TERMINAL", "TERMINAL_OUTPUT_UNCERTAIN"}:
+        sidecar = op_dir / "terminal.json"
+    else:
+        raise ValueError("effect receipt phase is not reconcilable")
+    # The immutable phase sidecar is authoritative if replacement of the mutable
+    # projection is interrupted after the effect exists.
+    _atomic_json(sidecar, record)
+    try:
+        _atomic_json(op_dir / "record.json", record)
+    except OSError:
+        pass
+
+
 class CodespaceDevBoxRuntime:
     def __init__(
         self,
@@ -262,12 +353,16 @@ class CodespaceDevBoxRuntime:
         binding: CodespaceBinding,
         shell_path: Path,
         root_identity: tuple[int, int, int],
+        baseline_working_tree_digest: str,
+        baseline_working_tree_dirty: bool,
     ) -> None:
         self.repo_root = repo_root
         self.state_root = state_root
         self.binding = binding
         self.shell_path = shell_path
         self._root_identity = root_identity
+        self._baseline_working_tree_digest = baseline_working_tree_digest
+        self._baseline_working_tree_dirty = baseline_working_tree_dirty
         self._operations = state_root / "operations"
 
     @classmethod
@@ -279,9 +374,14 @@ class CodespaceDevBoxRuntime:
         binding: CodespaceBinding,
         platform_name: str | None = None,
         shell_path: Path | str = Path("/bin/bash"),
+        require_clean_baseline: bool = True,
     ) -> "CodespaceDevBoxRuntime":
         selected_platform = sys.platform if platform_name is None else platform_name
-        if selected_platform != "linux" or type(binding) is not CodespaceBinding:
+        if (
+            selected_platform != "linux"
+            or type(binding) is not CodespaceBinding
+            or type(require_clean_baseline) is not bool
+        ):
             raise DevBoxRuntimeError("RUNTIME_UNQUALIFIED", "Codespace V1 requires qualified Linux")
         repo = Path(repo_root).absolute()
         state = Path(state_root).absolute()
@@ -321,7 +421,66 @@ class CodespaceDevBoxRuntime:
         observed_head = _git(repo_real, "rev-parse", "HEAD")
         if observed_head != binding.committed_head:
             raise DevBoxRuntimeError("BINDING_CHANGED", "repository source head differs from binding")
+        root_identity = (int(repo_stat.st_dev), int(repo_stat.st_ino), int(repo_stat.st_uid))
+        baseline_path = state_real / "baseline.json"
         operations = state_real / "operations"
+        if baseline_path.exists():
+            baseline = _load_source_baseline(baseline_path)
+            expected_identity = {
+                "target_ref": binding.target_ref,
+                "generation": binding.generation,
+                "owner_ref": binding.owner_ref,
+                "repository": binding.repository,
+                "committed_head": binding.committed_head,
+                "repo_device": root_identity[0],
+                "repo_inode": root_identity[1],
+                "repo_uid": root_identity[2],
+            }
+            if any(baseline.get(key) != value for key, value in expected_identity.items()):
+                raise DevBoxRuntimeError("BINDING_CHANGED", "source baseline binding changed")
+            baseline_digest = baseline.get("working_tree_digest")
+            baseline_dirty = baseline.get("working_tree_dirty")
+            if (
+                type(baseline_digest) is not str
+                or re.fullmatch(r"[0-9a-f]{64}", baseline_digest) is None
+                or type(baseline_dirty) is not bool
+            ):
+                raise DevBoxRuntimeError("RECEIPT_UNAVAILABLE", "source baseline is malformed")
+            if require_clean_baseline and baseline_dirty:
+                raise DevBoxRuntimeError("SOURCE_DIRTY", "repository source was dirty at admission")
+        else:
+            if operations.exists():
+                try:
+                    has_operation_state = next(operations.iterdir(), None) is not None
+                except OSError as exc:
+                    raise DevBoxRuntimeError(
+                        "RECEIPT_UNAVAILABLE", "operation state is unavailable"
+                    ) from exc
+                if has_operation_state:
+                    raise DevBoxRuntimeError(
+                        "RECEIPT_UNAVAILABLE", "source baseline is missing for existing effects"
+                    )
+            baseline_snapshot = _working_tree_snapshot(repo_real)
+            baseline_dirty = bool(baseline_snapshot)
+            if require_clean_baseline and baseline_dirty:
+                raise DevBoxRuntimeError("SOURCE_DIRTY", "repository source is not clean at admission")
+            baseline_digest = _working_tree_digest(baseline_snapshot)
+            _atomic_json(
+                baseline_path,
+                {
+                    "schema": _BASELINE_SCHEMA,
+                    "target_ref": binding.target_ref,
+                    "generation": binding.generation,
+                    "owner_ref": binding.owner_ref,
+                    "repository": binding.repository,
+                    "committed_head": binding.committed_head,
+                    "repo_device": root_identity[0],
+                    "repo_inode": root_identity[1],
+                    "repo_uid": root_identity[2],
+                    "working_tree_digest": baseline_digest,
+                    "working_tree_dirty": baseline_dirty,
+                },
+            )
         operations.mkdir(mode=0o700, exist_ok=True)
         operations.chmod(0o700)
         home = state_real / "home"
@@ -332,7 +491,9 @@ class CodespaceDevBoxRuntime:
             state_root=state_real,
             binding=binding,
             shell_path=shell,
-            root_identity=(int(repo_stat.st_dev), int(repo_stat.st_ino), int(repo_stat.st_uid)),
+            root_identity=root_identity,
+            baseline_working_tree_digest=baseline_digest,
+            baseline_working_tree_dirty=baseline_dirty,
         )
 
     def _revalidate_binding(self) -> None:
@@ -361,11 +522,51 @@ class CodespaceDevBoxRuntime:
             raise DevBoxRuntimeError("PROCESS_NOT_FOUND", "process reference is not owned here")
         return path
 
+    def _owned_effect_exists(self) -> bool:
+        try:
+            operation_dirs = tuple(self._operations.iterdir())
+        except OSError as exc:
+            raise DevBoxRuntimeError(
+                "BINDING_UNAVAILABLE", "operation state is unavailable"
+            ) from exc
+        owned_effect = False
+        for op_dir in operation_dirs:
+            if not op_dir.is_dir():
+                raise DevBoxRuntimeError(
+                    "RECEIPT_UNAVAILABLE", "operation state is malformed"
+                )
+            record = _load_reconciled_record(op_dir)
+            phase = record.get("phase")
+            effect_state = record.get("effect_state")
+            if phase in {
+                "STARTED",
+                "TERMINAL",
+                "TERMINAL_OUTPUT_UNCERTAIN",
+                "START_RECEIPT_UNAVAILABLE",
+            }:
+                owned_effect = True
+                continue
+            if (
+                phase == "REFUSED"
+                and effect_state == "NOT_APPLIED"
+                and record.get("terminal") is True
+            ):
+                continue
+            if phase == "PREPARED" and effect_state == "EFFECT_UNKNOWN":
+                raise DevBoxRuntimeError(
+                    "EFFECT_UNKNOWN", "prior command effect is unresolved"
+                )
+            raise DevBoxRuntimeError(
+                "RECEIPT_UNAVAILABLE", "operation receipt state is invalid"
+            )
+        return owned_effect
+
     async def status(self, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
         validate_tool_arguments("devbox_status", dict(arguments))
         self._revalidate_binding()
         observed_head = _git(self.repo_root, "rev-parse", "HEAD")
-        dirty = bool(_git(self.repo_root, "status", "--porcelain=v1", "--untracked-files=all"))
+        snapshot = _working_tree_snapshot(self.repo_root)
+        dirty = bool(snapshot)
         return {
             "target_ref": self.binding.target_ref,
             "generation": self.binding.generation,
@@ -373,7 +574,11 @@ class CodespaceDevBoxRuntime:
             "repository": self.binding.repository,
             "committed_head": self.binding.committed_head,
             "observed_head": observed_head,
+            "baseline_working_tree_dirty": self._baseline_working_tree_dirty,
             "working_tree_dirty": dirty,
+            "working_tree_changed_from_baseline": (
+                _working_tree_digest(snapshot) != self._baseline_working_tree_digest
+            ),
             "execution_profile": "ATTENDED_ONLY",
             "provider": "github_codespaces",
         }
@@ -398,6 +603,15 @@ class CodespaceDevBoxRuntime:
                 "committed_head": self.binding.committed_head,
             }
         )
+        if not op_dir.exists() and not self._owned_effect_exists():
+            snapshot = _working_tree_snapshot(self.repo_root)
+            if (
+                self._baseline_working_tree_dirty
+                or _working_tree_digest(snapshot) != self._baseline_working_tree_digest
+            ):
+                raise DevBoxRuntimeError(
+                    "SOURCE_DIRTY", "repository source changed before the first effect"
+                )
         try:
             op_dir.mkdir(mode=0o700)
             op_dir.chmod(0o700)
@@ -405,7 +619,7 @@ class CodespaceDevBoxRuntime:
         except FileExistsError:
             created = False
         if not created:
-            record = _load_json(op_dir / "record.json")
+            record = _load_reconciled_record(op_dir)
             if record.get("request_digest") != request_digest:
                 raise DevBoxRuntimeError("OPERATION_CONFLICT", "operation key has a different payload")
             return _record_projection(record, reconciled=True)
@@ -491,7 +705,7 @@ class CodespaceDevBoxRuntime:
         latest = record
         while time.monotonic() < deadline:
             await asyncio.sleep(0.02)
-            latest = _load_json(op_dir / "record.json")
+            latest = _load_reconciled_record(op_dir)
             if latest.get("phase") != "PREPARED":
                 break
         return _record_projection(latest, reconciled=False)
@@ -500,7 +714,7 @@ class CodespaceDevBoxRuntime:
         request = validate_tool_arguments("read_devbox_process", dict(arguments))
         process_ref = str(request["process_ref"])
         op_dir = self._op_dir_from_ref(process_ref)
-        record = _load_json(op_dir / "record.json")
+        record = _load_reconciled_record(op_dir)
         if record.get("process_ref") != process_ref:
             raise DevBoxRuntimeError("PROCESS_NOT_FOUND", "process receipt does not match reference")
         maximum = int(request.get("max_bytes", _DEFAULT_OUTPUT_LIMIT_BYTES))
@@ -531,7 +745,7 @@ class CodespaceDevBoxRuntime:
         request = validate_tool_arguments("cancel_devbox_process", dict(arguments))
         process_ref = str(request["process_ref"])
         op_dir = self._op_dir_from_ref(process_ref)
-        record = _load_json(op_dir / "record.json")
+        record = _load_reconciled_record(op_dir)
         if record.get("process_ref") != process_ref:
             raise DevBoxRuntimeError("PROCESS_NOT_FOUND", "process receipt does not match reference")
         if record.get("terminal") is True:
@@ -552,7 +766,7 @@ class CodespaceDevBoxRuntime:
             observed_pgid = os.getpgid(pid)
             current_start, current_boot = _process_start_identity(pid)
         except (OSError, DevBoxRuntimeError) as exc:
-            latest = _load_json(op_dir / "record.json")
+            latest = _load_reconciled_record(op_dir)
             if latest.get("terminal") is True:
                 return {
                     "process_ref": process_ref,
@@ -571,7 +785,7 @@ class CodespaceDevBoxRuntime:
         try:
             os.killpg(pgid, signal.SIGTERM)
         except ProcessLookupError:
-            latest = _load_json(op_dir / "record.json")
+            latest = _load_reconciled_record(op_dir)
             if latest.get("terminal") is not True:
                 raise DevBoxRuntimeError("PROCESS_IDENTITY_UNKNOWN", "process disappeared before cancellation proof")
         except OSError as exc:
@@ -692,7 +906,34 @@ def _supervise(
         boot_id=boot_id,
         started_at_ns=time.time_ns(),
     )
-    _atomic_json(record_path, started)
+    try:
+        _persist_effect_record(op_dir, started)
+    except OSError:
+        try:
+            os.killpg(pgid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            child.wait(timeout=_CANCEL_GRACE_SECONDS)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            child.wait()
+        uncertain = dict(started)
+        uncertain.update(
+            phase="START_RECEIPT_UNAVAILABLE",
+            effect_state="EFFECT_UNKNOWN",
+            terminal=True,
+            exit_code=child.returncode,
+            ended_at_ns=time.time_ns(),
+        )
+        try:
+            _atomic_json(record_path, uncertain)
+        except OSError:
+            pass
+        return 74
 
     totals: dict[str, int] = {}
     stdout_thread = threading.Thread(
@@ -728,7 +969,7 @@ def _supervise(
     stderr_thread.join(timeout=5)
     if stdout_thread.is_alive() or stderr_thread.is_alive():
         # The child is terminal but retained output accounting is incomplete.
-        final = _load_json(record_path)
+        final = _load_reconciled_record(op_dir)
         final.update(
             phase="TERMINAL_OUTPUT_UNCERTAIN",
             effect_state="EFFECT_UNKNOWN",
@@ -736,11 +977,11 @@ def _supervise(
             exit_code=child.returncode,
             timed_out=timed_out,
         )
-        _atomic_json(record_path, final)
+        _persist_effect_record(op_dir, final)
         return 74
 
     cancel_requested = (op_dir / "cancel.json").is_file()
-    final = _load_json(record_path)
+    final = _load_reconciled_record(op_dir)
     final.update(
         phase="TERMINAL",
         effect_state="APPLIED",
@@ -760,7 +1001,7 @@ def _supervise(
             "dropped_bytes": max(0, totals.get("stderr", 0) - totals.get("stderr_retained", 0)),
         },
     )
-    _atomic_json(record_path, final)
+    _persist_effect_record(op_dir, final)
     return 0
 
 

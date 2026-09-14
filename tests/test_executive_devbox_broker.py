@@ -57,7 +57,9 @@ class DevBoxAdapter:
     async def status(self):
         return {
             "workspace_source": "b" * 40,
+            "baseline_working_tree_dirty": False,
             "working_tree_dirty": False,
+            "working_tree_changed_from_baseline": False,
         }
 
     async def start(self, *, process_ref, command_text, timeout_seconds, output_limit_bytes):
@@ -180,6 +182,8 @@ def test_codespace_profile_exposes_only_devbox_operations(tmp_path: Path) -> Non
     assert status["ok"] is True
     assert status["result"]["generation"] == GENERATION
     assert status["result"]["worker_uid"] == os.geteuid()
+    assert status["result"]["baseline_working_tree_dirty"] is False
+    assert status["result"]["working_tree_changed_from_baseline"] is False
 
     for forbidden in ("start", "status", "collect", "cancel", "validate", "ohf-start"):
         with pytest.raises(BrokerProtocolError, match="profile"):

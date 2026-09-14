@@ -27,6 +27,7 @@ class DevBoxPortRefused(RuntimeError):
         {
             "DEVBOX_REFUSED",
             "BINDING_CHANGED",
+            "SOURCE_DIRTY",
             "OPERATION_CONFLICT",
             "PROCESS_NOT_FOUND",
             "PROCESS_IDENTITY_UNKNOWN",

@@ -162,6 +162,7 @@ def test_unknown_tool_refuses_without_runtime_call() -> None:
     ("runtime_code", "port_code"),
     [
         ("BINDING_CHANGED", "BINDING_CHANGED"),
+        ("SOURCE_DIRTY", "SOURCE_DIRTY"),
         ("OPERATION_CONFLICT", "OPERATION_CONFLICT"),
         ("PROCESS_NOT_FOUND", "PROCESS_NOT_FOUND"),
         ("PROCESS_IDENTITY_UNKNOWN", "PROCESS_IDENTITY_UNKNOWN"),
