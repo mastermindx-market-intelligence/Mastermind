@@ -19,13 +19,31 @@ from typing import Any
 
 from .contracts import (
     AUTH_AUDIT_SCHEMA,
+    CHANNEL_AUDIT_SCHEMA,
     AuthAuditEvent,
     AuthErrorCode,
+    ChannelAuditEvent,
 )
 
 _AUDIT_NAME = "auth-audit.jsonl"
 _POLICY_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{2,95}$")
 _CODES = frozenset({"accepted", *(code.value for code in AuthErrorCode)})
+_CHANNEL_CODES = frozenset({"accepted", "channel_refused", "request_refused"})
+_CHANNEL_TOOLS = frozenset(
+    {
+        "workspace_manifest",
+        "read_project_file",
+        "preview_text_replace",
+        "prepare_text_patch",
+        "commit_text_patch",
+        "reconcile_text_patch",
+        "prepare_project_command",
+        "run_project_command",
+        "read_action_result",
+        "reconcile_action",
+    }
+)
+_HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 _DEFAULT_MAX_LINE_BYTES = 4096
 _DEFAULT_MAX_FILE_BYTES = 16 * 1024 * 1024
 
@@ -331,9 +349,17 @@ class DurableAuthAuditSink:
         self._prove_owner_lock(expected_size=expected_size)
 
     def _encode(self, event: object) -> bytes:
+        # One closed dispatch over the exact event types.  There is no
+        # arbitrary callback serializer: each schema is encoded literally.
+        if type(event) is AuthAuditEvent:
+            return self._encode_oauth(event)
+        if type(event) is ChannelAuditEvent:
+            return self._encode_channel(event)
+        raise AuditSinkPoisoned("audit event contract refused")
+
+    def _encode_oauth(self, event: AuthAuditEvent) -> bytes:
         if (
-            type(event) is not AuthAuditEvent
-            or event.schema != AUTH_AUDIT_SCHEMA
+            event.schema != AUTH_AUDIT_SCHEMA
             or event.policy_id != self._policy_id
             or type(event.code) is not str
             or event.code not in _CODES
@@ -360,7 +386,50 @@ class DurableAuthAuditSink:
             raise AuditSinkPoisoned("audit event exceeds its fixed line budget")
         return payload
 
-    def emit(self, event: AuthAuditEvent) -> None:
+    def _encode_channel(self, event: ChannelAuditEvent) -> bytes:
+        if (
+            event.schema != CHANNEL_AUDIT_SCHEMA
+            or event.policy_id != self._policy_id
+            or type(event.code) is not str
+            or event.code not in _CHANNEL_CODES
+            or type(event.accepted) is not bool
+            or event.accepted != (event.code == "accepted")
+            or type(event.channel_ref) is not str
+            or _HEX64_RE.fullmatch(event.channel_ref) is None
+            or type(event.tool) is not str
+            or event.tool not in _CHANNEL_TOOLS
+            or (
+                event.action_digest is not None
+                and (
+                    type(event.action_digest) is not str
+                    or _HEX64_RE.fullmatch(event.action_digest) is None
+                )
+            )
+        ):
+            raise AuditSinkPoisoned("audit channel event contract refused")
+        payload = (
+            json.dumps(
+                {
+                    "accepted": event.accepted,
+                    "action_digest": event.action_digest,
+                    "channel_ref": event.channel_ref,
+                    "code": event.code,
+                    "policy_id": event.policy_id,
+                    "schema": event.schema,
+                    "tool": event.tool,
+                },
+                ensure_ascii=True,
+                allow_nan=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            + b"\n"
+        )
+        if len(payload) > self._max_line_bytes:
+            raise AuditSinkPoisoned("audit event exceeds its fixed line budget")
+        return payload
+
+    def emit(self, event: AuthAuditEvent | ChannelAuditEvent) -> None:
         with self._gate:
             if self._closed or self._poisoned:
                 raise AuditSinkPoisoned("audit sink is not live")
