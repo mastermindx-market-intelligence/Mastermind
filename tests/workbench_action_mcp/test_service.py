@@ -26,8 +26,10 @@ from integrations.workbench_action_mcp.service import (
 def _document(tmp_path: Path) -> tuple[dict[str, object], Path, Path]:
     project = tmp_path / "project"
     audit = tmp_path / "audit"
+    artifacts = tmp_path / "artifacts"
     project.mkdir(mode=0o700)
     audit.mkdir(mode=0o700)
+    artifacts.mkdir(mode=0o700)
     subject = "a" * 64
     client = "b" * 64
     now_ms = int(time.time() * 1000)
@@ -59,6 +61,8 @@ def _document(tmp_path: Path) -> tuple[dict[str, object], Path, Path]:
         "policy_file": str(policy_file),
         "project_root": str(project),
         "audit_directory": str(audit),
+        "artifact_directory": str(artifacts),
+        "host_id": "c" * 64,
         "action_key_file": str(action_key_file),
         "bind_host": "127.0.0.1",
         "bind_port": 19443,
@@ -96,6 +100,8 @@ def test_closed_service_config_loads_from_secure_file(tmp_path: Path) -> None:
     assert loaded.allowed_hosts == ("127.0.0.1:19443",)
     assert loaded.lease.required_scopes == ("workbench.action",)
     assert loaded.lease.operation_ref.startswith("operation:")
+    assert loaded.artifact_directory.endswith("/artifacts")
+    assert loaded.host_id == "c" * 64
 
 
 def test_service_config_rejects_read_scope_and_extra_keys(tmp_path: Path) -> None:
@@ -116,6 +122,14 @@ def test_service_config_rejects_read_scope_and_extra_keys(tmp_path: Path) -> Non
         assert getattr(error, "code", None) == "SERVICE_CONFIGURATION_REFUSED"
     else:
         raise AssertionError("generic shell selector was accepted")
+    invalid_host = dict(document)
+    invalid_host["host_id"] = "host-a"
+    try:
+        parse_service_config(invalid_host)
+    except Exception as error:
+        assert getattr(error, "code", None) == "SERVICE_CONFIGURATION_REFUSED"
+    else:
+        raise AssertionError("non-digest host identity was accepted")
 
 
 def test_runtime_from_service_config_is_ready_only_while_owned(tmp_path: Path) -> None:
@@ -171,11 +185,13 @@ def test_action_key_is_stable_across_runtime_restart_for_reconciliation(tmp_path
 
     async def exercise() -> None:
         first = await create_runtime(config)
-        prepare, _, _ = create_text_patch_port(
+        prepare, commit, _ = create_text_patch_port(
             resolve_binding=first.resolve_binding,
             clock_ms=lambda: int(time.time() * 1000),
             run_io=first.run_io,
             token_codec=ActionTokenCodec(bytes.fromhex("9" * 64)),
+            artifact_store=first.artifact_store,
+            host=first.host_binding,
             action_ttl_ms=config.action_ttl_ms,
         )
         prepared = await prepare(
@@ -187,6 +203,10 @@ def test_action_key_is_stable_across_runtime_restart_for_reconciliation(tmp_path
                 "new_text": "hello\n",
             },
         )
+        applied = await commit(caller, prepared["action_ref"])
+        assert applied["effect_state"] == "APPLIED"
+        first_store_identity = (first.artifact_store.device, first.artifact_store.inode)
+        first_boot = first.host_binding.boot_session_id
         await first.aclose(timeout=5.0)
 
         second = await create_runtime(config)
@@ -195,10 +215,14 @@ def test_action_key_is_stable_across_runtime_restart_for_reconciliation(tmp_path
             clock_ms=lambda: int(time.time() * 1000),
             run_io=second.run_io,
             token_codec=ActionTokenCodec(bytes.fromhex("9" * 64)),
+            artifact_store=second.artifact_store,
+            host=second.host_binding,
             action_ttl_ms=config.action_ttl_ms,
         )
         observed = await reconcile(caller, prepared["action_ref"])
-        assert observed["effect_state"] == "NOT_APPLIED"
+        assert observed["effect_state"] == "APPLIED"
+        assert (second.artifact_store.device, second.artifact_store.inode) == first_store_identity
+        assert second.host_binding.boot_session_id == first_boot
         await second.aclose(timeout=5.0)
 
     asyncio.run(exercise())

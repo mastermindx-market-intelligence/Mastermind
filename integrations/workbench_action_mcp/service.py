@@ -46,12 +46,15 @@ MAX_CONCURRENCY = 8
 MAX_TIMEOUT_SECONDS = 60.0
 MAX_ACTION_TTL_MS = 5 * 60 * 1000
 _HOST_LABEL = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?")
+_HEX64 = re.compile(r"[0-9a-f]{64}")
 _CONFIG_KEYS = frozenset(
     {
         "schema",
         "policy_file",
         "project_root",
         "audit_directory",
+        "artifact_directory",
+        "host_id",
         "action_key_file",
         "bind_host",
         "bind_port",
@@ -111,6 +114,8 @@ class ServiceConfig:
     policy_file: str
     project_root: str
     audit_directory: str
+    artifact_directory: str
+    host_id: str
     action_key_file: str
     bind_host: str
     bind_port: int
@@ -159,6 +164,12 @@ def _reject_constant(_value: str) -> object:
 
 def _absolute_path(value: object) -> str:
     if type(value) is not str or not value or not value.startswith("/") or "\x00" in value:
+        _refuse()
+    return value
+
+
+def _host_id(value: object) -> str:
+    if type(value) is not str or _HEX64.fullmatch(value) is None:
         _refuse()
     return value
 
@@ -263,6 +274,8 @@ def parse_service_config(value: object) -> ServiceConfig:
         policy_file=_absolute_path(value.get("policy_file")),
         project_root=_absolute_path(value.get("project_root")),
         audit_directory=_absolute_path(value.get("audit_directory")),
+        artifact_directory=_absolute_path(value.get("artifact_directory")),
+        host_id=_host_id(value.get("host_id")),
         action_key_file=_absolute_path(value.get("action_key_file")),
         bind_host="127.0.0.1",
         bind_port=_bounded_int(value.get("bind_port"), minimum=1, maximum=65535),
@@ -625,12 +638,14 @@ async def create_runtime(config: ServiceConfig) -> WorkbenchActionRuntime:
     action_token_key = _secure_action_key(config.action_key_file)
     project_fd = -1
     audit_fd = -1
+    artifact_fd = -1
     runtime: WorkbenchActionRuntime | None = None
     primary_error: BaseException | None = None
     cleanup_errors: list[BaseException] = []
     try:
         project_fd = _open_safe_directory(config.project_root)
         audit_fd = _open_safe_directory(config.audit_directory)
+        artifact_fd = _open_safe_directory(config.artifact_directory)
         runtime = WorkbenchActionRuntime.open(
             authenticator=authenticator,
             policy=policy,
@@ -638,6 +653,8 @@ async def create_runtime(config: ServiceConfig) -> WorkbenchActionRuntime:
             clock_ms=lambda: int(time.time() * 1000),
             project_directory_fd=project_fd,
             audit_directory_fd=audit_fd,
+            host_artifact_fd=artifact_fd,
+            host_id=config.host_id,
             lease=config.lease,
             action_token_key=action_token_key,
             allowed_hosts=config.allowed_hosts,
@@ -652,7 +669,7 @@ async def create_runtime(config: ServiceConfig) -> WorkbenchActionRuntime:
     except BaseException as error:
         primary_error = error
     finally:
-        for descriptor in (audit_fd, project_fd):
+        for descriptor in (artifact_fd, audit_fd, project_fd):
             if descriptor >= 0:
                 try:
                     os.close(descriptor)

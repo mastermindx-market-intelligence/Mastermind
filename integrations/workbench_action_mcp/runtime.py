@@ -12,6 +12,7 @@ import dataclasses
 import hashlib
 import math
 import os
+import platform
 import re
 import stat
 import threading
@@ -28,12 +29,17 @@ from common.bounded_sync_executor import (
     SyncExecutorClosed,
     SyncExecutorLoopConflict,
 )
+from control_plane.codex_worker import ProcessInspector
 from integrations.business_mcp_auth.audit import (
     AuditAcquisitionUncertain,
     AuditSinkPoisoned,
     DurableAuthAuditSink,
 )
-from integrations.business_mcp_auth.contracts import ResourcePolicy, validate_resource_policy
+from integrations.business_mcp_auth.contracts import (
+    ChannelAuditEvent,
+    ResourcePolicy,
+    validate_resource_policy,
+)
 from integrations.business_mcp_auth.jwt_verifier import JwtAuthenticator
 from integrations.workbench_read_mcp.runtime import (
     RuntimeCloseIncomplete,
@@ -42,6 +48,13 @@ from integrations.workbench_read_mcp.runtime import (
     RuntimeConfigurationError,
 )
 
+from .action_artifacts import (
+    ActionArtifactStore,
+    ActionHostBinding,
+    adopt_artifact_store,
+    revalidate_artifact_store,
+    validate_host_binding,
+)
 from .contracts import ActionCaller, ActionScope, ProjectActionBinding
 from .deployment import RuntimeServices, create_deployment
 
@@ -161,6 +174,8 @@ class ChannelRuntimeServices:
     audit_policy_id: str
     clock_ms: Callable[[], int]
     audit_sink: DurableAuthAuditSink
+    artifact_store: ActionArtifactStore
+    host_binding: ActionHostBinding
     action_token_key: bytes
     action_ttl_ms: int
     call_receipt_sink: Callable[[Mapping[str, Any]], None] | None
@@ -363,6 +378,24 @@ def _open_owned_root(host_fd: int) -> tuple[int, os.stat_result]:
         raise
 
 
+def _host_binding(host_id: object) -> ActionHostBinding:
+    try:
+        boot_session_id = ProcessInspector().boot_session_id()
+    except Exception as error:
+        raise _configuration("host boot identity is unavailable") from error
+    if platform.system() == "Darwin" and boot_session_id.startswith("adapter-"):
+        raise _configuration("native host boot identity is unavailable")
+    try:
+        return validate_host_binding(
+            ActionHostBinding(
+                host_id=host_id,  # type: ignore[arg-type]
+                boot_session_id=boot_session_id,
+            )
+        )
+    except Exception as error:
+        raise _configuration("host binding is invalid") from error
+
+
 class WorkbenchActionRuntime:
     def __init__(
         self,
@@ -370,12 +403,16 @@ class WorkbenchActionRuntime:
         lease: _OwnedLease,
         audit_sink: DurableAuthAuditSink,
         executor: BoundedSyncExecutor,
+        artifact_store: ActionArtifactStore,
+        host_binding: ActionHostBinding,
         io_timeout_seconds: float,
         clock_ms: Callable[[], int],
     ) -> None:
         self._lease = lease
         self._audit_sink = audit_sink
         self._executor = executor
+        self._artifact_store = artifact_store
+        self._host_binding = host_binding
         self._io_timeout_seconds = io_timeout_seconds
         self._clock_ms = clock_ms
         self._gate = threading.RLock()
@@ -398,6 +435,8 @@ class WorkbenchActionRuntime:
         clock_ms: Callable[[], int],
         project_directory_fd: int,
         audit_directory_fd: int,
+        host_artifact_fd: int,
+        host_id: str,
         lease: StableWorkbenchActionLease,
         action_token_key: bytes,
         allowed_hosts: tuple[str, ...],
@@ -419,6 +458,7 @@ class WorkbenchActionRuntime:
         selected_policy, selected_lease = _validate_policy_and_lease(
             policy, authenticator, lease, now_ms=now_ms
         )
+        selected_host = _host_binding(host_id)
         if (
             type(action_token_key) is not bytes
             or len(action_token_key) < 32
@@ -443,6 +483,8 @@ class WorkbenchActionRuntime:
                 now=now,
                 clock_ms=clock_ms,
                 audit_sink=audit_sink,
+                artifact_store=runtime.artifact_store,
+                host_binding=runtime.host_binding,
                 resolve_binding=runtime.resolve_binding,
                 run_io=runtime.run_io,
                 action_token_key=bytes(action_token_key),
@@ -458,6 +500,8 @@ class WorkbenchActionRuntime:
             clock_ms=clock_ms,
             project_directory_fd=project_directory_fd,
             audit_directory_fd=audit_directory_fd,
+            host_artifact_fd=host_artifact_fd,
+            host_binding=selected_host,
             audit_policy_id=selected_policy.policy_id,
             capacity=capacity,
             io_timeout=io_timeout,
@@ -472,6 +516,8 @@ class WorkbenchActionRuntime:
         clock_ms: Callable[[], int],
         project_directory_fd: int,
         audit_directory_fd: int,
+        host_artifact_fd: int,
+        host_id: str,
         audit_policy_id: str,
         lease: StableWorkbenchActionLease,
         action_token_key: bytes,
@@ -495,6 +541,7 @@ class WorkbenchActionRuntime:
         now_ms = _clock(clock_ms(), "clock_ms")
         selected_channel = validate_fixed_tunnel_channel(channel)
         selected_lease = _validate_lease(lease, now_ms=now_ms)
+        selected_host = _host_binding(host_id)
         if (
             type(audit_policy_id) is not str
             or not audit_policy_id
@@ -532,6 +579,8 @@ class WorkbenchActionRuntime:
                 audit_policy_id=audit_policy_id,
                 clock_ms=clock_ms,
                 audit_sink=audit_sink,
+                artifact_store=runtime.artifact_store,
+                host_binding=runtime.host_binding,
                 action_token_key=bytes(action_token_key),
                 action_ttl_ms=action_ttl_ms,
                 call_receipt_sink=call_receipt_sink,
@@ -542,6 +591,8 @@ class WorkbenchActionRuntime:
             clock_ms=clock_ms,
             project_directory_fd=project_directory_fd,
             audit_directory_fd=audit_directory_fd,
+            host_artifact_fd=host_artifact_fd,
+            host_binding=selected_host,
             audit_policy_id=audit_policy_id,
             capacity=capacity,
             io_timeout=io_timeout,
@@ -556,6 +607,8 @@ class WorkbenchActionRuntime:
         clock_ms: Callable[[], int],
         project_directory_fd: int,
         audit_directory_fd: int,
+        host_artifact_fd: int,
+        host_binding: ActionHostBinding,
         audit_policy_id: str,
         capacity: int,
         io_timeout: float,
@@ -569,9 +622,13 @@ class WorkbenchActionRuntime:
         """
 
         root_fd = -1
+        artifact_fd = -1
+        artifact_store: ActionArtifactStore | None = None
         audit_sink: DurableAuthAuditSink | None = None
         try:
             root_fd, root_stat = _open_owned_root(project_directory_fd)
+            artifact_fd, _artifact_stat = _open_owned_root(host_artifact_fd)
+            artifact_store = adopt_artifact_store(artifact_fd)
             audit_sink = DurableAuthAuditSink.open(
                 audit_directory_fd, policy_id=audit_policy_id
             )
@@ -587,6 +644,8 @@ class WorkbenchActionRuntime:
                 ),
                 audit_sink=audit_sink,
                 executor=executor,
+                artifact_store=artifact_store,
+                host_binding=host_binding,
                 io_timeout_seconds=io_timeout,
                 clock_ms=clock_ms,
             )
@@ -603,6 +662,13 @@ class WorkbenchActionRuntime:
                 try:
                     os.close(root_fd)
                 except BaseException as cleanup_error:
+                    cleanup_errors.append(cleanup_error)
+            if artifact_fd >= 0:
+                try:
+                    os.close(artifact_fd)
+                except BaseException as cleanup_error:
+                    if artifact_store is not None:
+                        artifact_store.mark_cleanup_uncertain("runtime_acquisition_close")
                     cleanup_errors.append(cleanup_error)
             if cleanup_errors:
                 raise RuntimeCloseUncertain(
@@ -627,6 +693,14 @@ class WorkbenchActionRuntime:
     @property
     def root_fd(self) -> int:
         return self._lease.root_fd
+
+    @property
+    def artifact_store(self) -> ActionArtifactStore:
+        return self._artifact_store
+
+    @property
+    def host_binding(self) -> ActionHostBinding:
+        return self._host_binding
 
     def _validate_root_locked(self) -> None:
         try:
@@ -725,6 +799,27 @@ class WorkbenchActionRuntime:
         except (SyncExecutorClosed, SyncExecutorLoopConflict) as error:
             raise RuntimeClosed("runtime admission is closed") from error
 
+    async def emit_channel_audit(self, event: ChannelAuditEvent) -> None:
+        if type(event) is not ChannelAuditEvent:
+            raise TypeError("event must be an exact ChannelAuditEvent")
+        with self._gate:
+            if self._closing or self._closed:
+                raise RuntimeClosed("runtime admission is closed")
+            services = getattr(self, "channel_services", None)
+            if (
+                type(services) is not ChannelRuntimeServices
+                or event.policy_id != services.audit_policy_id
+                or event.channel_ref != services.channel_ref
+            ):
+                raise ValueError("channel audit binding is invalid")
+        try:
+            await self._executor.run(
+                lambda: self._audit_sink.emit(event),
+                timeout=self._io_timeout_seconds,
+            )
+        except (SyncExecutorClosed, SyncExecutorLoopConflict) as error:
+            raise RuntimeClosed("runtime admission is closed") from error
+
     def revoke(self) -> None:
         with self._gate:
             self._revoked = True
@@ -770,6 +865,20 @@ class WorkbenchActionRuntime:
             release_errors.append(error)
         try:
             os.close(self._lease.root_fd)
+        except BaseException as error:
+            release_errors.append(error)
+        try:
+            revalidate_artifact_store(self._artifact_store)
+        except BaseException as error:
+            self._artifact_store.mark_cleanup_uncertain("runtime_store_revalidation")
+            release_errors.append(error)
+        try:
+            os.close(self._artifact_store.dir_fd)
+        except BaseException as error:
+            self._artifact_store.mark_cleanup_uncertain("runtime_store_close")
+            release_errors.append(error)
+        try:
+            self._artifact_store.raise_if_cleanup_uncertain()
         except BaseException as error:
             release_errors.append(error)
         with self._gate:

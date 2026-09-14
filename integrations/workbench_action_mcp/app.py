@@ -107,6 +107,7 @@ _EFFECT_OUTPUT_SCHEMA: dict[str, Any] = {
             "type": "string",
             "enum": ["NOT_APPLIED", "APPLIED", "EFFECT_UNKNOWN"],
         },
+        "cleanup_state": {"type": "string", "enum": ["CLEAN", "UNCERTAIN"]},
         "project_ref": {"type": "string", "minLength": 1, "maxLength": 256},
         "responsibility_ref": {"type": "string", "minLength": 1, "maxLength": 256},
         "operation_ref": {"type": "string", "minLength": 1, "maxLength": 256},
@@ -128,6 +129,7 @@ _EFFECT_OUTPUT_SCHEMA: dict[str, Any] = {
     "required": [
         "status",
         "effect_state",
+        "cleanup_state",
         "project_ref",
         "responsibility_ref",
         "operation_ref",

@@ -47,6 +47,8 @@ Commit builds a same-directory candidate, revalidates source/binding immediately
 NOT_APPLIED | APPLIED | EFFECT_UNKNOWN
 ```
 
+Commit and reconcile also return `cleanup_state: CLEAN | UNCERTAIN`. This reports physical descriptor/lock release separately from the action effect. A qualified historical `APPLIED` receipt may coexist with `UNCERTAIN`; that uncertainty is sticky for the runtime owner and never authorizes replay.
+
 Same-action replay observes an already matching postimage and returns `APPLIED` without issuing a second write. Changed/foreign source is not overwritten intentionally; it returns or reconciles to `EFFECT_UNKNOWN`. A lost client response is never permission to prepare another action or fail over to another actuator.
 
 F0 depends on the owner-issued project binding to exclude concurrent authorized writers. It does not claim a kernel-level compare-and-swap primitive against an uncooperative process that mutates the same path in the final filesystem publication window. Production admission therefore requires an isolated or otherwise writer-fenced disposable workspace for the first canary, and a stronger local-source fence before any unattended mutation claim.
@@ -74,7 +76,43 @@ Absence of a receipt is not meaningful when the service or its log channel is it
 
 `scripts/mastermind_workbench_action_server.py` exposes only a configured loopback service. Its serving mode accepts one absolute owner configuration path; it does not accept host, project root, patch path, token key, credential or tunnel selectors on the command line.
 
-The closed service configuration is `mastermind.workbench_action_service.v1` and contains owner-selected policy/project/audit paths, one fixed action-key path, fixed loopback bind/authority, bounded concurrency/timeouts/TTL, and the exact stable lease. The service opens secure directory descriptors, reads the exact `0600` action-key file, composes the existing Business JWT/JWKS verifier and durable auth audit, and uses the shared `BoundedSyncExecutor`. The key is service-integrity material, not a provider/account credential, and installation must place it through the existing approved host/secret-owning path rather than model input.
+The closed service configuration is `mastermind.workbench_action_service.v1` and contains owner-selected policy/project/audit/artifact paths, a 64-hex host identity, one fixed action-key path, fixed loopback bind/authority, bounded concurrency/timeouts/TTL, and the exact stable lease. The service opens secure directory descriptors, retains one artifact-store descriptor and host/boot binding for its lifetime, reads the exact `0600` action-key file, composes the existing Business JWT/JWKS verifier and durable auth audit, and uses the shared `BoundedSyncExecutor`. The host identity and key are host-owned configuration, not model input or provider/account credentials; installation must place them through the existing approved host/secret-owning path.
+
+Example without secrets:
+
+```json
+{
+  "schema": "mastermind.workbench_action_service.v1",
+  "policy_file": "/srv/mastermind/workbench/policy.json",
+  "project_root": "/srv/mastermind/workbench/disposable-01",
+  "audit_directory": "/srv/mastermind/workbench/audit-c1",
+  "artifact_directory": "/srv/mastermind/workbench/artifacts-c1",
+  "host_id": "<hex64 host identity>",
+  "action_key_file": "/srv/mastermind/workbench/keys/action-c1.hex",
+  "bind_host": "127.0.0.1",
+  "bind_port": 19443,
+  "incoming_authority": "127.0.0.1:19443",
+  "max_concurrency": 2,
+  "io_timeout_seconds": 5.0,
+  "close_timeout_seconds": 5.0,
+  "action_ttl_ms": 60000,
+  "lease": {
+    "expected_subject_digest": "<hex64>",
+    "expected_client_ref": "<hex64>",
+    "resource": "https://workbench-action.example/mcp",
+    "required_scopes": ["workbench.action"],
+    "project_ref": "project:<hex64>",
+    "context_ref": "context:<hex64>",
+    "responsibility_ref": "responsibility:<hex64>",
+    "operation_ref": "operation:<hex64>",
+    "owner_ref": "owner:<hex64>",
+    "generation": "generation:<hex64>",
+    "allowed_paths": ["sample.py"],
+    "committed_head": null,
+    "lease_expires_at_ms": 1800000300000
+  }
+}
+```
 
 `--describe` is dependency-free and reports `BUILT_NOT_PROVEN`; it never claims installation.
 
