@@ -4,45 +4,46 @@
 
 **Goal:** Make an Executive-owned Astra/Codex orchestrator offload bounded execution to the existing Mastermind Agent Fabric through the existing five-tool Executive MCP, complete one real external-provider work/review/result round trip, resume the exact Astra parent, and prove at least a 50% reduction in Astra + internal-Codex usage versus a comparable Codex-heavy baseline.
 
-**Architecture:** Preserve the frozen five-tool MCP and its existing authenticated Executive App admission path. `submit_ceo_intent` remains a bounded caller surface that the App converts to CeoIngress v2; Executive Runtime/COO/Capacity own execution and placement, qualified external adapters own work, and the existing Codex RuntimeBinding/Wake path owns exact parent continuation. Codex configuration and instructions only make Astra a client of those owners; they do not create a scheduler, lifecycle store, provider selector, or retry plane.
+**Architecture:** Preserve the frozen five-tool MCP and its existing authenticated Executive App admission path. `submit_ceo_intent` remains the model-facing bounded intent surface; the App converts it to CeoIngress v2. Executive Runtime/COO/Capacity own lifecycle, planning, continuation, and placement. Qualified worker adapters own execution. The existing Codex `RuntimeBinding`/Wake path owns exact parent continuation. Codex configuration and instructions only make Astra a client of those owners; they do not create a scheduler, lifecycle store, provider selector, retry plane, or result bus.
 
-**Tech Stack:** Python 3.12, existing Mastermind Executive Runtime/CeoIngress/COO/Capacity, existing `integrations.executive_mcp` + `integrations.mastermind_executive_app`, MCP Streamable HTTP, Codex CLI MCP registration/OAuth, existing `CodexOperatorAdapter` + Wake/RuntimeBinding, pytest.
+**Tech Stack:** Python 3.12, Mastermind Executive Runtime/CeoIngress/COO/Capacity, `integrations.executive_mcp`, `integrations.mastermind_executive_app`, Streamable HTTP MCP, Codex CLI MCP registration/OAuth, `CodexOperatorAdapter`, RuntimeBinding/Wake, pytest.
 
 **Spec:** `docs/superpowers/specs/2026-09-14-astra-external-fabric-delegation-design.md`
 
 ## Global Constraints
 
-- Implementation base must be freshly rebased/recovered from protected `master`; the freeze was authored against `cf4c082d83fffe35daee81aa3d30bd27450bacf1`, not treated as an eternal implementation base.
-- Keep the existing five-tool Executive MCP input schemas and tool names unchanged for this vertical.
-- Reuse `integrations.mastermind_executive_app.admission.compose_admission`; do not add another modifying sink or call `ceo_intent.submit_intent` from Codex-facing code.
-- `submit_ceo_intent` must still return an admission receipt with `dispatched=false`; later execution is owned by the existing strict-v2 COO cycle.
-- Astra never supplies provider, model, account, provider home, credential, endpoint, host, UID/GID, socket, worker ID, branch, worktree, raw authority, or raw validation argv.
-- One modifying operation keeps one stable `operation_key`/derived `request_ref`; on `effect_unknown`, reconcile the same request and never fail over or mint a new key.
-- Do not copy worker transcripts into Astra's normal context. Consume canonical bounded Job/result/review projections and pull more evidence only on demand.
-- Existing repo-local Codex internal agents remain Terra/medium with maximum concurrency 3 unless a separate reviewed change amends them; they are fallback, not the primary worker fabric.
-- Do not edit #583-owned provider binding files until #583 or its accepted successor is protected and source ownership is reconciled.
-- Do not arm autonomous continuation beyond current accepted source law; #612 or an accepted successor must cover the operational interval before a production-like canary.
-- Do not create another Job/Attempt store, scheduler, quota registry, auth store, retry journal, transcript store, Wake bus, provider-spawn MCP tool, or generic shell execution surface.
-- Every modifying worker uses the workspace assigned by its current harness; attended Web/host execution uses `mmx-workspace`; do not mint nested worktrees.
-- Production proof requires a real external provider call, canonical result/review evidence, exact Astra-parent consumption, and usage comparison. Unit tests alone are not acceptance.
+- Freshly reconcile the implementation branch with protected `master` before source work. The design freeze was authored against `cf4c082d83fffe35daee81aa3d30bd27450bacf1`; that SHA is an evidence pin, not a permanent implementation base.
+- Keep the five public Executive MCP tool names and schemas unchanged for this vertical.
+- Reuse `integrations.mastermind_executive_app.admission.compose_admission`; no new Codex-facing mutation sink may call `ceo_intent.submit_intent` directly.
+- Preserve `dispatched=false` on the admission receipt. Later COO execution is a distinct canonical transition.
+- Astra may author only the existing high-level business fields. It may not supply provider, model, account, provider home, credential, endpoint, host, UID/GID, socket, worker ID, branch, worktree, raw authority, or validation argv.
+- One logical modifying operation keeps one stable `operation_key` and derived `request_ref`. `effect_unknown` is reconciled on that identity before any further modification; no blind retry or carrier/provider/internal-agent failover.
+- Worker transcripts are not normal Astra return context. Use canonical bounded Job/result/review projections; fetch more evidence only for a specific review or acceptance question.
+- Keep the existing repo-local internal Codex fallback at Terra/medium and maximum concurrency 3 unless a separate reviewed policy change amends it.
+- Do not edit #583-owned provider-binding files until #583 or its accepted successor is protected and source ownership is reconciled.
+- Do not arm operational continuation beyond current accepted source law; #612 or an accepted successor must cover the intended autonomous interval before the real canary.
+- Do not introduce another Job/Attempt store, task queue, provider/account registry, auth store, retry journal, transcript store, Wake bus, raw provider-spawn tool, or generic shell execution surface.
+- Every modifying worker uses the workspace assigned by its current harness; attended Web/host work uses the current `mmx-workspace` path.
+- A manually opened arbitrary Codex tab is not accepted parent proof. End-to-end completion requires the exact Astra native session/generation to be the current Executive `RuntimeBinding` target.
+- Unit tests are not production acceptance. Final proof requires a real external provider call, canonical result/review evidence, exact Astra-parent consumption, and measured usage reduction.
+
+## First-Vertical Source Surface
+
+The client-side source PR should remain narrow:
+
+- Create `ops/codex_fabric/register_executive_mcp.py`.
+- Create `tests/test_codex_fabric_registration.py`.
+- Create `tests/test_astra_external_fabric_contract.py`.
+- Modify `AGENTS.md` with a concise Astra delegation policy.
+- Create `docs/runbooks/codex-astra-fabric-delegation.md`.
+- Create `tests/test_astra_delegation_source_policy.py`.
+- Extend `tests/test_codex_app_server_wake_rpc.py` only if one exact-parent discriminator is genuinely absent from the current suite.
+
+Do not modify `integrations/executive_mcp/schemas.py`, `control_plane/ceo_intent.py`, `control_plane/executive_runtime.py`, `control_plane/executive_coo_cycle.py`, provider-binding files, or Capacity policy in this first client PR. If a discriminating test proves one of those current owners cannot support the frozen design, stop at the owner boundary and return the exact blocker; do not broaden the PR by convenience.
 
 ---
 
-## File Structure for This Vertical
-
-The first source PR should be intentionally small and client-side:
-
-- `ops/codex_fabric/register_executive_mcp.py` — idempotent, non-secret Codex MCP registration verifier/installer. It owns no auth token and no Executive state.
-- `tests/test_codex_fabric_registration.py` — hermetic fake-`codex` tests for registration, collision refusal, and no-secret/no-retry behavior.
-- `tests/test_astra_external_fabric_contract.py` — cross-layer regression pins proving the existing five-tool submit path still produces the existing CeoIngress v2 frame and refuses caller-selected provider/account fields.
-- `AGENTS.md` — concise Astra principal/delegation policy; no new authority is introduced here.
-- `docs/runbooks/codex-astra-fabric-delegation.md` — operator/acceptance procedure for registration, auth, exact-parent qualification, canary, failure behavior, and token-economics proof.
-
-Do **not** modify `integrations/executive_mcp/schemas.py`, `control_plane/ceo_intent.py`, `control_plane/executive_runtime.py`, `control_plane/executive_coo_cycle.py`, provider binding files, or Capacity policy in the first source PR unless a failing discriminating test proves the current owner cannot satisfy the frozen design. Such a failure ends this plan at the named owner boundary; it is not permission to broaden the PR.
-
----
-
-### Task 1: Pin the Existing Five-Tool-to-v2 Delegation Contract
+### Task 1: Pin the Existing Five-Tool -> CeoIngress-v2 Contract
 
 **Files:**
 - Create: `tests/test_astra_external_fabric_contract.py`
@@ -52,121 +53,43 @@ Do **not** modify `integrations/executive_mcp/schemas.py`, `control_plane/ceo_in
 - Read only: `control_plane/ceo_request.py`
 
 **Interfaces:**
-- Consumes: `schemas.validate_tool_arguments("submit_ceo_intent", payload)`, `admission.compose_admission(AdmissionRequest)`, `ceo_request.app_request_ref(operation_key)`, `ceo_ingress.SUBMIT_SCHEMA_V2`.
-- Produces: a regression test module establishing that Codex can keep the five-tool public shape while the App emits the v2 automated frame, with stable identity and no caller-selected physical execution fields.
+- `validate_tool_arguments("submit_ceo_intent", payload)` remains the caller validator.
+- `compose_admission(AdmissionRequest)` remains the modifying App composition.
+- `ceo_request.app_request_ref(operation_key)` remains the stable outer identity derivation.
+- The App must emit `ceo_ingress.SUBMIT_SCHEMA_V2` and omit `operation_key` from the semantic v2 request.
 
-- [ ] **Step 1: Write the failing cross-layer tests before any implementation change**
+- [ ] **Step 1: Write the cross-layer contract tests before any production change**
 
-Create `tests/test_astra_external_fabric_contract.py` with a recording fake `CeoIngressClient` and tests equivalent to the following behavior:
+Implement these exact tests in `tests/test_astra_external_fabric_contract.py`:
 
-```python
-from __future__ import annotations
+1. `test_submit_shape_refuses_physical_routing_fields`
+   - Start from a valid `research_only` five-tool payload.
+   - Add each forbidden field independently: `provider`, `model`, `account`, `provider_home`, `endpoint`, `host`, `worker_id`, `socket_path`.
+   - Require `GatewayError` from `validate_tool_arguments` for every mutation.
 
-import dataclasses
-from pathlib import Path
+2. `test_app_converts_five_tool_submit_to_v2_automated_frame`
+   - Construct `VerifiedPrincipal` with the exact submit+read scope tuple using the field pattern already present in `tests/test_mastermind_executive_app_admission.py`.
+   - Use a recording fake `CeoIngressClient` returning a canonical accepted receipt with `dispatched=False`.
+   - Monkeypatch only `observe_trusted_grounding` to return a valid exact three-field grounding document.
+   - Call `compose_admission` once.
+   - Assert exactly one frame was sent.
+   - Assert `frame["schema"] == ceo_ingress.SUBMIT_SCHEMA_V2`.
+   - Assert `frame["request_ref"] == ceo_request.app_request_ref(operation_key)`.
+   - Assert `operation_key` is absent from `frame["request"]`.
+   - Assert the semantic objective/profile fields are unchanged.
+   - Assert the returned receipt reports `dispatched is False`.
 
-import pytest
+3. `test_request_ref_is_stable_for_same_operation_key`
+   - Require two calls to `app_request_ref` with the same key to be byte-identical and match `AUTOMATED_REQUEST_REF_RE`.
 
-from control_plane import ceo_request, executive_ceo_ingress as ceo_ingress
-from integrations.executive_mcp.schemas import GatewayError, validate_tool_arguments
-from integrations.mastermind_executive_app.admission import (
-    AdmissionRequest,
-    compose_admission,
-)
-from integrations.mastermind_executive_app.gateway import CeoIngressResponse, TRANSPORT_SENT_OK
+4. `test_effect_unknown_reconciles_by_same_request_ref_without_second_submit`
+   - Script the fake client to return `TRANSPORT_SENT_UNKNOWN` for the first submit and a canonical status result for the next status call.
+   - Require `compose_admission` to return `STATUS_EFFECT_UNKNOWN` after exactly one submit frame.
+   - Call `reconcile_by_request_ref` with that exact `request_ref`.
+   - Assert the second frame uses `STATUS_SCHEMA_V2` and the same `request_ref`.
+   - Assert no second `SUBMIT_SCHEMA_V2` frame exists.
 
-
-VALID = {
-    "operation_key": "astra-external-fabric-contract-001",
-    "objective": "Read the bounded source and return the requested evidence.",
-    "department": "executive-infrastructure",
-    "priority": 10,
-    "execution_profile": "research_only",
-}
-GROUNDING = {
-    "mastermind_sha": "1" * 40,
-    "macro_sha": "2" * 40,
-    "boot_packet_schema": "mastermind.ceo_boot_packet.v1",
-}
-
-
-@dataclasses.dataclass
-class RecordingClient:
-    frames: list[dict] = dataclasses.field(default_factory=list)
-
-    async def send_frame(self, _path, frame):
-        self.frames.append(dict(frame))
-        return CeoIngressResponse(
-            transport=TRANSPORT_SENT_OK,
-            ok=True,
-            result={"dispatched": False, "job_id": "JOB-1"},
-            error=None,
-        )
-
-
-def test_frozen_submit_shape_refuses_physical_routing_fields():
-    for forbidden in ("provider", "model", "account", "provider_home", "endpoint", "host"):
-        payload = dict(VALID)
-        payload[forbidden] = "attacker-choice"
-        with pytest.raises(GatewayError):
-            validate_tool_arguments("submit_ceo_intent", payload)
-
-
-@pytest.mark.asyncio
-async def test_app_turns_five_tool_submit_into_v2_automated_frame(monkeypatch, tmp_path):
-    client = RecordingClient()
-    principal = make_submit_principal()  # local helper in this test, exact scopes only
-    monkeypatch.setattr(
-        "integrations.mastermind_executive_app.admission.observe_trusted_grounding",
-        lambda **_kwargs: dict(GROUNDING),
-    )
-    outcome = await compose_admission(
-        AdmissionRequest(
-            payload=VALID,
-            principal=principal,
-            ceo_ingress_socket_path=tmp_path / "ceo-ingress.sock",
-            mastermind_root=tmp_path,
-            macro_root_flag=None,
-            environ={},
-            client=client,
-        )
-    )
-    assert outcome.request_ref == ceo_request.app_request_ref(VALID["operation_key"])
-    assert outcome.receipt["dispatched"] is False
-    assert len(client.frames) == 1
-    frame = client.frames[0]
-    assert frame["schema"] == ceo_ingress.SUBMIT_SCHEMA_V2
-    assert frame["request_ref"] == outcome.request_ref
-    assert "operation_key" not in frame["request"]
-    assert frame["request"]["objective"] == VALID["objective"]
-```
-
-Use the repository's existing `VerifiedPrincipal` construction pattern from `tests/test_mastermind_executive_app_admission.py` for `make_submit_principal()`; do not invent a weaker principal fixture.
-
-- [ ] **Step 2: Add identity/effect-unknown regression cases**
-
-Add tests asserting:
-
-```python
-def test_app_request_ref_is_stable_and_domain_owned():
-    first = ceo_request.app_request_ref(VALID["operation_key"])
-    second = ceo_request.app_request_ref(VALID["operation_key"])
-    assert first == second
-    assert first.startswith("req-")
-
-
-@pytest.mark.asyncio
-async def test_effect_unknown_never_causes_a_second_submit(...):
-    # Recording client returns TRANSPORT_SENT_UNKNOWN for submit.
-    # Assert compose_admission returns status == "effect_unknown".
-    # Assert exactly one submit frame was sent.
-    # Reconciliation is exercised through reconcile_by_request_ref and sends
-    # STATUS_SCHEMA_V2 with the same request_ref, never another SUBMIT_SCHEMA_V2.
-```
-
-- [ ] **Step 3: Run the focused tests and prove they are green against current source**
-
-Run:
+- [ ] **Step 2: Run the contract set**
 
 ```bash
 python3 -m pytest -q \
@@ -175,9 +98,13 @@ python3 -m pytest -q \
   tests/test_executive_mcp_app_composition.py
 ```
 
-Expected: all pass. If the new test proves the current five-tool App no longer emits CeoIngress v2, stop and return to architecture review; do not add a sixth tool to make the test pass.
+Expected: green on current architecture. If the five-tool App no longer emits CeoIngress v2, stop and return to architecture review; do not add a sixth tool.
 
-- [ ] **Step 4: Commit the contract pin**
+- [ ] **Step 3: Mutation-proof the caller-authority fence**
+
+Temporarily alter the new test fixture so `provider` is removed from the forbidden-field loop. Confirm the mutation makes the test incapable of detecting provider injection, restore the original test, then confirm green. Record the mutation receipt in the PR body; do not leave the mutant in source.
+
+- [ ] **Step 4: Commit**
 
 ```bash
 git add tests/test_astra_external_fabric_contract.py
@@ -186,97 +113,108 @@ git commit -m "test: pin Astra external Fabric admission contract"
 
 ---
 
-### Task 2: Add a Safe Codex MCP Registration Helper
+### Task 2: Add an Idempotent, Non-Secret Codex MCP Registration Helper
 
 **Files:**
 - Create: `ops/codex_fabric/register_executive_mcp.py`
 - Create: `tests/test_codex_fabric_registration.py`
 
 **Interfaces:**
-- Consumes: installed `codex` executable with `mcp get`, `mcp add`, and `mcp login`; explicit operator-supplied Streamable HTTP URL from the accepted Executive MCP installation receipt.
-- Produces: `register(server_url: str, codex_bin: str = "codex") -> RegistrationReceipt`, where the receipt records server name, normalized URL, whether an entry was created, and whether login remains required. No token or OAuth credential is returned or stored.
+- Fixed server name: `mastermind-executive`.
+- Input: one explicit loopback Streamable HTTP URL taken from the accepted Executive MCP installation receipt.
+- Codex commands used: `codex mcp get mastermind-executive --json` and, only when absent, `codex mcp add mastermind-executive --url <exact normalized URL>`.
+- Output: immutable `RegistrationReceipt(server_name, url, created, login_required)` containing no secret value.
 
-The fixed server name is `mastermind-executive`. The helper accepts only loopback HTTP URLs with literal path `/mcp`, no userinfo, query, or fragment. It must not read Executive root-owned config and must not guess the installed port.
+The helper does not read root-owned Executive config, guess a port, perform OAuth login, or store an access token. OAuth enrollment remains a separate attended installation action using Codex's supported credential flow.
 
-- [ ] **Step 1: Write registration tests with a fake Codex binary**
+- [ ] **Step 1: Write hermetic fake-Codex tests**
 
-The fake binary records argv to a temporary file and returns deterministic JSON for `mcp get`. Add these cases:
+Create an executable fake `codex` program under `tmp_path` that records argv in a JSON-lines file and serves scripted JSON from a second fixture file. Implement these tests:
 
-```python
-def test_new_registration_uses_streamable_http_without_secret_arguments(tmp_path): ...
-def test_matching_registration_is_idempotent_and_does_not_re_add(tmp_path): ...
-def test_existing_different_url_refuses_instead_of_overwriting(tmp_path): ...
-def test_non_loopback_or_non_mcp_url_refuses_before_running_codex(tmp_path): ...
-def test_registration_never_passes_bearer_token_or_literal_secret(tmp_path): ...
-def test_missing_codex_binary_is_closed_error(tmp_path): ...
-```
+- `test_new_registration_adds_exact_streamable_http_url_once`
+  - Initial `mcp get` returns the same nonzero/not-found behavior produced by the fake for an absent server.
+  - Require exactly one `mcp add` call with argv `["mcp", "add", "mastermind-executive", "--url", expected_url]`.
+  - Require the verification `mcp get` to return enabled `streamable_http` with the exact URL.
+  - Require `created is True` and `login_required is True`.
 
-For the create case, assert the exact child argv is:
+- `test_matching_registration_is_idempotent`
+  - Initial `mcp get` returns enabled `streamable_http` with the exact URL.
+  - Require no `mcp add` call.
+  - Require `created is False`.
 
-```text
-codex mcp add mastermind-executive --url http://127.0.0.1:<accepted-port>/mcp
-```
+- `test_existing_different_url_refuses_without_overwrite`
+  - Existing server returns a different URL.
+  - Require `RegistrationError` and zero mutation calls.
 
-The helper must **not** execute `codex mcp login` automatically. OAuth login is a distinct attended enrollment step because it may require the provider/browser flow; after enrollment, credentials belong to Codex's supported credential store rather than this script.
+- `test_non_loopback_or_wrong_path_refuses_before_codex_process`
+  - Exercise `https://example.com/mcp`, `http://127.0.0.1:9123/not-mcp`, userinfo, query, fragment, and port below 1024.
+  - Require `RegistrationError` and no fake-Codex invocation.
 
-- [ ] **Step 2: Run the registration tests and observe RED**
+- `test_registration_never_places_secret_material_on_argv`
+  - Scan every recorded argv element for `Bearer`, `sk-`, `access_token`, `provider-credential`, and `Authorization`.
+  - Require none are present.
 
-Run:
+- `test_missing_codex_binary_refuses_closed`
+  - Point `codex_bin` at a nonexistent path and require opaque `RegistrationError`.
+
+- `test_effect_unknown_add_reconciles_with_get_before_retry`
+  - First `mcp get` reports absent.
+  - Fake `mcp add` times out after recording the mutation.
+  - The helper must issue one `mcp get` reconciliation.
+  - If that read shows the exact server present, return success without a second add.
+  - Assert exactly one `mcp add` mutation occurred.
+
+- [ ] **Step 2: Run RED**
 
 ```bash
 python3 -m pytest -q tests/test_codex_fabric_registration.py
 ```
 
-Expected: failure because `ops.codex_fabric.register_executive_mcp` does not exist.
+Expected: import/collection failure because the helper does not yet exist.
 
 - [ ] **Step 3: Implement the minimal helper**
 
-Implement these types and functions:
+Implement:
 
-```python
-@dataclasses.dataclass(frozen=True)
-class RegistrationReceipt:
-    server_name: str
-    url: str
-    created: bool
-    login_required: bool
-
-
-class RegistrationError(RuntimeError):
-    pass
-
-
-def normalize_loopback_mcp_url(value: str) -> str: ...
-def register(server_url: str, *, codex_bin: str = "codex") -> RegistrationReceipt: ...
+```text
+RegistrationReceipt: frozen dataclass with server_name, url, created, login_required
+RegistrationError: closed RuntimeError subclass
+normalize_loopback_mcp_url(value: str) -> str
+register(server_url: str, *, codex_bin: str = "codex") -> RegistrationReceipt
 ```
 
-Required behavior:
+`normalize_loopback_mcp_url` must use `urllib.parse.urlsplit` and require:
 
-1. parse with `urllib.parse.urlsplit`;
-2. require `scheme == "http"`;
-3. require hostname in `{127.0.0.1, localhost, ::1}`;
-4. require an explicit port in `1024..65535`;
-5. require exact path `/mcp`, empty username/password/query/fragment;
-6. call `[codex_bin, "mcp", "get", "mastermind-executive", "--json"]` once;
-7. if a valid existing entry has exact URL and is enabled, return `created=False`;
-8. if an entry exists with another URL/transport, raise `RegistrationError` and do not mutate it;
-9. if the entry is absent, call `[codex_bin, "mcp", "add", "mastermind-executive", "--url", url]` exactly once, then `get --json` once to verify the saved result;
-10. never put an auth token, policy content, provider credential, Executive socket path, or root-owned config path into argv/environment/config.
+```text
+scheme: http
+hostname: 127.0.0.1, localhost, or ::1
+explicit port: 1024..65535
+path: exactly /mcp
+username/password/query/fragment: absent
+```
 
-Use `stdin=DEVNULL`, bounded subprocess timeouts, and opaque error messages. A timeout after `mcp add` is **effect-unknown for Codex config**: re-read with `mcp get` before deciding whether another add is safe. Do not blindly issue `mcp add` twice.
+`register` must:
 
-- [ ] **Step 4: Run RED-to-GREEN and mutation checks**
+1. normalize before spawning a process;
+2. run `mcp get` with `stdin=DEVNULL`, captured stdout/stderr, and a bounded timeout;
+3. accept an existing server only when transport type is `streamable_http`, URL matches exactly, and the entry is enabled;
+4. refuse a conflicting existing entry instead of overwriting it;
+5. add only when the initial read proves absence;
+6. after add success or ambiguous add timeout, re-read with `mcp get` before deciding state;
+7. never issue `mcp add` twice inside one call;
+8. return `login_required=True` because auth enrollment is not performed here;
+9. never inherit or inject a token-specific environment variable in this helper.
 
-Run:
+- [ ] **Step 4: Run RED-to-GREEN and a mutation check**
 
 ```bash
 python3 -m pytest -q tests/test_codex_fabric_registration.py
 python3 -m compileall -q ops/codex_fabric
 ```
 
-Then locally mutate the collision branch to allow overwriting a different URL and prove `test_existing_different_url_refuses_instead_of_overwriting` goes red; revert and rerun green.
+Then locally mutate the conflicting-URL branch to overwrite the entry, prove `test_existing_different_url_refuses_without_overwrite` fails, restore the implementation, and rerun green.
 
-- [ ] **Step 5: Commit the registration helper**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add ops/codex_fabric/register_executive_mcp.py tests/test_codex_fabric_registration.py
@@ -285,7 +223,7 @@ git commit -m "feat: register Executive MCP for Codex safely"
 
 ---
 
-### Task 3: Make External Fabric Delegation the Astra Default, Without Expanding Authority
+### Task 3: Make External Fabric Delegation the Astra Default
 
 **Files:**
 - Modify: `AGENTS.md`
@@ -294,70 +232,65 @@ git commit -m "feat: register Executive MCP for Codex safely"
 - Read only: `.codex/config.toml`
 
 **Interfaces:**
-- Consumes: the current `submit_ceo_intent`, `executive_job`, `ceo_intent_status`, and Executive state/inbox tools.
-- Produces: source-visible Astra operating instructions that define external-delegation eligibility, principal-retained work, effect-unknown handling, compact return behavior, and the bounded internal-Codex fallback.
+- Uses the existing Executive tools only.
+- Produces source-visible operating instructions; it does not create authority or runtime state.
 
-- [ ] **Step 1: Write source-policy tests first**
+- [ ] **Step 1: Write source-policy tests**
 
-Create `tests/test_astra_delegation_source_policy.py` that reads `AGENTS.md` and `.codex/config.toml` and asserts all of these invariants:
+`tests/test_astra_delegation_source_policy.py` must read `AGENTS.md` and `.codex/config.toml` and require:
 
-```python
-assert "External Fabric delegation" in agents
-assert "submit_ceo_intent" in agents
-assert "never choose a provider" in agents.lower()
-assert "effect_unknown" in agents
-assert "full worker transcript" in agents.lower()
-assert "internal Codex" in agents
-assert 'max_concurrent_threads_per_session = 3' in codex_config
-assert 'default_subagent_model = "gpt-5.6-terra"' in codex_config
-assert 'default_subagent_reasoning_effort = "medium"' in codex_config
+```text
+AGENTS contains heading/text "External Fabric delegation"
+AGENTS names submit_ceo_intent
+AGENTS says Astra must never choose a provider
+AGENTS names effect_unknown same-identity reconciliation
+AGENTS prohibits normal full worker transcript replay
+AGENTS identifies internal Codex as pre-effect fallback
+.codex/config.toml still has max_concurrent_threads_per_session = 3
+.codex/config.toml still has default_subagent_model = "gpt-5.6-terra"
+.codex/config.toml still has default_subagent_reasoning_effort = "medium"
 ```
 
-Also assert the new section does not contain the forbidden direct-execution strings `pool run`, `spawn_minimax`, `spawn_glm`, `provider_home=`, or `account=`.
+The new AGENTS section must not contain direct-spawn instructions for `pool run`, `spawn_minimax`, `spawn_glm`, provider-home assignment, or account-number selection.
 
-- [ ] **Step 2: Run the policy test and observe RED**
+- [ ] **Step 2: Run RED**
 
 ```bash
 python3 -m pytest -q tests/test_astra_delegation_source_policy.py
 ```
 
-Expected: failure because the new policy section is absent.
+Expected: failure because the source-policy section is absent.
 
-- [ ] **Step 3: Add a concise `External Fabric delegation` section to `AGENTS.md`**
+- [ ] **Step 3: Add the `External Fabric delegation` section to `AGENTS.md`**
 
-The section must state, in operational language:
+The section must state all of the following without changing the existing hierarchy/authority sections:
 
-```text
-Astra/principal behavior:
-- Keep intent recovery, architecture, cross-return judgment, exceptions, and final acceptance.
-- For bounded independently executable research, implementation, tests, repair, or independent review, prefer the existing Executive Fabric via submit_ceo_intent before opening internal Codex subagents.
-- Author objective/profile/write/test constraints only. Never choose a provider, model, account, credential home, endpoint, host, or worker identity.
-- An accepted admission with dispatched=false is normal; execution belongs to the COO cycle.
-- On effect_unknown, reconcile the same request identity; never mint a new key or switch transports/providers/internal agents until canonical settlement.
-- Consume bounded Executive Job/result/review evidence. Do not replay a full worker transcript into the parent unless a specific acceptance contradiction requires it.
-- Internal Codex agents are pre-effect fallback only when Fabric is unavailable or lacks the required capability; record the fallback reason.
-```
-
-Do not change hierarchy, authority, Agent OS ownership, delivery workflow, or provider policy elsewhere in `AGENTS.md`.
+- Astra keeps intent recovery, architecture, cross-return judgment, exception adjudication, and final acceptance.
+- For bounded independently executable research, implementation, tests, repair, or independent review, Astra uses the existing Executive Fabric via `submit_ceo_intent` before opening internal Codex subagents.
+- Astra authors objective/profile/write/test constraints only and never chooses provider, model, account, credential home, endpoint, host, or worker identity.
+- `dispatched=false` after admission is normal; the COO cycle owns later execution.
+- On `effect_unknown`, Astra reconciles the same request identity and does not mint a new key or switch carrier/provider/internal agent until canonical settlement.
+- Astra consumes bounded Executive Job/result/review evidence and does not replay a full worker transcript into parent context unless a specific acceptance contradiction requires it.
+- Internal Codex agents are pre-effect fallback only when Fabric is unavailable or lacks the required capability, with a named fallback reason.
 
 - [ ] **Step 4: Write the operator runbook**
 
-`docs/runbooks/codex-astra-fabric-delegation.md` must give the exact first-vertical procedure:
+`docs/runbooks/codex-astra-fabric-delegation.md` must define the first-vertical procedure exactly:
 
-1. verify current protected source/Skillpack and source-owner collisions;
-2. obtain the accepted installed Executive MCP loopback URL from the current installation owner/receipt;
-3. run the registration helper;
+1. fresh-pin protected Mastermind Skillpack and reconcile source collisions;
+2. obtain the installed Executive MCP loopback URL from the current accepted installation receipt;
+3. run `python3 ops/codex_fabric/register_executive_mcp.py --url "$MMX_EXECUTIVE_MCP_URL"`, where the environment variable is populated from that non-secret installation coordinate;
 4. run `codex mcp get mastermind-executive --json` and require enabled Streamable HTTP with the exact URL;
-5. perform supported OAuth enrollment once with `codex mcp login mastermind-executive` using the currently approved scopes/policy; do not paste credentials into config;
-6. start a **fresh** Codex/Astra session after registration/auth changes and inspect `/mcp` or equivalent current tool census;
-7. require exactly the expected five Executive tools and no caller-controlled provider field;
-8. qualify the exact Astra parent as an Executive-owned current Codex Operator/RuntimeBinding before claiming unattended return;
-9. run the baseline and delegated canaries in Task 6;
-10. on any `effect_unknown`, use the same `request_ref` reconciliation path and stop other modifying actions until settled.
+5. run the supported OAuth enrollment command `codex mcp login mastermind-executive` once under the currently approved resource/scopes; credentials remain in Codex's supported credential store;
+6. start a fresh Codex/Astra session after registration/auth changes and inspect the current MCP tool census;
+7. require the five expected Executive tools and no caller-controlled provider field;
+8. prove the Astra orchestrator is the exact current Executive-owned Codex `RuntimeBinding` before unattended return is claimed;
+9. execute the baseline and delegated canaries in Task 6;
+10. on `effect_unknown`, reconcile the original `request_ref` and stop other modifying work until settled.
 
-The runbook must explicitly say that a manually opened arbitrary Codex tab is not accepted parent proof unless the current RuntimeBinding identifies that exact native session/generation.
+The runbook must explicitly state: a manually opened arbitrary Codex tab may prove MCP connectivity, but it is not accepted exact-parent proof unless Runtime evidence binds that native session/generation.
 
-- [ ] **Step 5: Re-run tests and commit**
+- [ ] **Step 5: Re-run and commit**
 
 ```bash
 python3 -m pytest -q tests/test_astra_delegation_source_policy.py
@@ -368,21 +301,20 @@ git commit -m "docs: make Executive Fabric Astra's default worker path"
 
 ---
 
-### Task 4: Qualify the Exact Astra Parent and No-Poll Return Path
+### Task 4: Qualify Exact Astra Parent Return Without Model Polling
 
 **Files:**
 - Read/verify: `control_plane/codex_operator_adapter.py`
 - Read/verify: `control_plane/session_targets.py`
 - Read/verify: `control_plane/runtime_binding_projection.py`
 - Read/verify: `integrations/executive_wake/codex_app_server_rpc.py`
-- Extend tests only if needed: `tests/test_codex_app_server_wake_rpc.py`
-- No production source change is authorized by this task unless an existing exact-parent behavior fails a discriminating test and the current owner explicitly accepts that repair scope.
+- Extend only if needed: `tests/test_codex_app_server_wake_rpc.py`
 
 **Interfaces:**
-- Consumes: an Executive-owned current Codex `RuntimeBinding` with `reasoning_surface="codex"`, one exact process generation/native handle, and existing Wake attention delivery.
-- Produces: evidence that the Astra orchestrator used for the canary is the exact bound native Codex session that can receive a result-driven continuation, with no newest-tab/latest-session fallback.
+- Input: Executive-owned current Codex `RuntimeBinding` with `reasoning_surface="codex"`, exact process generation, and exact provider-native handle.
+- Output: evidence that Wake delivers attention only to that current Astra generation and cannot select another Codex session.
 
-- [ ] **Step 1: Run the existing exact-session Wake regression**
+- [ ] **Step 1: Run current exact-session regressions**
 
 ```bash
 python3 -m pytest -q \
@@ -391,125 +323,121 @@ python3 -m pytest -q \
   tests/test_wake_ack_ingress.py
 ```
 
-Expected: green.
+- [ ] **Step 2: Verify the four discriminators in existing tests**
 
-- [ ] **Step 2: Add one Astra-specific binding discriminator only if coverage is absent**
-
-If the existing suite does not already assert all four properties below in one path, add a focused test to `tests/test_codex_app_server_wake_rpc.py`:
+The suite must demonstrably pin all four facts:
 
 ```text
-reasoning_surface == "codex"
-exact native_handle/thread id agrees
-exact binding_generation/process_generation agrees
-attention uses turn/start on that current writer and never thread/resume, thread/fork, or discovery of a newer session
+reasoning_surface == codex
+native handle/thread id agrees with RuntimeBinding
+binding_generation and process_generation agree
+attention uses the current writer's turn/start and never discovers/resumes/forks a neighboring session
 ```
 
-The test must use the existing `RuntimeBinding`, `CodexCurrentWriterWakeClient`, and adapter fixtures; do not create a second session registry.
+If all four already have discriminating coverage, make no source/test change and record exact test names in the PR evidence.
 
-- [ ] **Step 3: Prove arbitrary/unbound Codex sessions are refused**
+If one fact lacks discriminating coverage, add one focused test to `tests/test_codex_app_server_wake_rpc.py` using the existing `RuntimeBinding`, `CodexCurrentWriterWakeClient`, and adapter fixtures. Do not add a session registry or new resolver.
 
-Run or add a negative test where the native handle or generation differs. Required outcome: refusal/effect-unknown according to the current owner; never delivery to another Codex thread.
+- [ ] **Step 3: Prove wrong-parent refusal**
 
-- [ ] **Step 4: Stop condition**
+Exercise a mismatched native handle or binding generation. Require the current owner to refuse or preserve uncertainty; delivery to another Codex thread is a test failure.
 
-If the production Astra orchestrator cannot be materialized as an Executive-owned current Codex generation through existing owner paths, mark the first vertical `BLOCKED_PARENT_BINDING` and return to Sol with the exact missing binding capability. Do **not** add "latest Codex session" discovery, window automation, a session-name lookup, or model polling.
+- [ ] **Step 4: Apply the parent-binding stop condition**
 
-If the exact binding is supported, record the exact session alias, binding id/generation, process generation, and native handle in the private canary evidence and continue.
+For the real canary, require the Astra orchestrator to be materialized/bound through the existing Executive Codex Operator path. If that exact native generation cannot be represented as the current `RuntimeBinding`, stop the program at `BLOCKED_PARENT_BINDING`. Do not add latest-tab discovery, window automation, title matching, or model polling.
 
-- [ ] **Step 5: Commit only if a test-only discriminator was required**
+- [ ] **Step 5: Commit only when a test discriminator was added**
+
+When a test changed:
 
 ```bash
 git add tests/test_codex_app_server_wake_rpc.py
 git commit -m "test: pin exact Astra parent wake binding"
 ```
 
-If no source/test change was necessary, record the verified existing test names in the PR/canary evidence and create no empty commit.
+When current tests already cover the required behavior, create no empty commit.
 
 ---
 
-### Task 5: Consume, Do Not Duplicate, the First External Provider Lane
+### Task 5: Consume the First External Provider Lane From Its Existing Owner
 
 **Files:**
-- Dependency/read: PR #583 or its protected successor
-- Dependency/read: `config/subscription_provider_profiles.v1.json`
-- Dependency/read after protection: `config/subscription_harness_bindings.v1.json`
-- Dependency/read after protection: `control_plane/subscription_harness_bindings.py`
-- Dependency/read: existing Capacity worker/placement configuration selected by the current owner
-- No #583-owned file is modified from this plan until source ownership is terminal/reconciled.
+- Dependency/read: PR #583 or its protected successor.
+- Dependency/read: `config/subscription_provider_profiles.v1.json`.
+- Dependency/read after protection: `config/subscription_harness_bindings.v1.json` and `control_plane/subscription_harness_bindings.py`.
+- Capacity/worker files remain with their current owner; this plan does not preclaim them.
 
 **Interfaces:**
-- Consumes: one reviewed external binding whose activation gates are `adapter_implemented`, `provider_realm_enrolled`, `capacity_known`, `real_canary_passed`, and `usage_policy_satisfied`.
-- Produces: one Capacity-visible qualified external worker lane that the existing router may select without Astra naming it.
+- Required activation facts: `adapter_implemented`, `provider_realm_enrolled`, `capacity_known`, `real_canary_passed`, `usage_policy_satisfied`.
+- Preferred first canary lane: Alibaba Codex Responses only if current Capacity says it is eligible.
 
 - [ ] **Step 1: Reconcile #583 at execution time**
 
-Required state before proceeding:
+All must be true before this task advances:
 
 ```text
-#583 (or accepted successor) is protected/merged
-binding source is on current protected master
-no active writer still owns the same provider-binding files
-the selected Alibaba Codex Responses binding is at least BUILT_NOT_PROVEN
-its autonomous_allowed flag is still false before the real canary
+#583 or its accepted successor is protected/merged
+its binding source is on current protected master
+no active writer still owns the same binding files
+Alibaba Codex Responses is at least BUILT_NOT_PROVEN
+autonomous_allowed remains false before the real provider canary
 ```
 
-If these are not all true, stop this task at `BLOCKED_PROVIDER_BINDING_SOURCE`; do not reimplement the binding in this plan.
+If any condition fails, return `BLOCKED_PROVIDER_BINDING_SOURCE`; do not reimplement the binding in this plan.
 
-- [ ] **Step 2: Use the current provider/Capacity owner to establish the canary prerequisites**
+- [ ] **Step 2: Have the current provider/Capacity owner establish pre-canary facts**
 
-The selected lane must have:
+Before the one-shot real canary, require:
 
 ```text
 adapter_implemented = true
 provider_realm_enrolled = true
 capacity_known = true
 usage_policy_satisfied = true
-real_canary_passed = false   # before the one-shot canary
+real_canary_passed = false
 ```
 
-Credential material remains in the existing provider-home/host trust boundary. Never print the credential, pass it in a prompt, copy it into Codex config, or commit it.
+Credential material stays in the existing provider-home/host trust boundary. It must never enter prompts, Codex config, PR text, logs, or Git history.
 
-- [ ] **Step 3: Run one read-only real provider canary through the common worker path**
+- [ ] **Step 3: Run one harmless real external provider canary through the common worker path**
 
-Use a harmless source-grounded research objective with no write paths. Drive the request through Executive admission/COO/Capacity/common worker; do not invoke the provider CLI directly from the Astra session.
+Use `research_only` with no write paths. The provider call must be reached through Executive admission -> COO/Capacity -> common worker/broker. Direct provider CLI invocation from Astra is not proof.
 
-Pass requires a canonical successful `WorkerResult`/collection result with:
+Pass requires canonical evidence of:
 
 ```text
 exact Job/Attempt/worker identity
-exact source base/workspace identity
-selected reviewed binding/provider realm
+exact source/workspace identity
+reviewed binding/provider realm
 bounded useful output
 clean process/session settlement
 no effect uncertainty
-no provider/account chosen by Astra
+no provider/account selected by Astra
 ```
 
-- [ ] **Step 4: Complete the existing activation ceremony, not a local shortcut**
+- [ ] **Step 4: Complete the existing activation ceremony**
 
-Only after the real canary and all current activation gates pass may the existing owner move the binding/worker lane to its accepted autonomous state. Any such source/config change belongs to that provider/Capacity owner and its own PR, not this Codex client PR.
+Only the existing provider/Capacity owner may advance the lane after the real canary and every current activation gate passes. Any binding/worker activation source change remains in that owner's PR, not the Codex client PR.
 
-- [ ] **Step 5: Negative proof**
+- [ ] **Step 5: Negative placement proof**
 
-Demonstrate one refused placement with stale/unknown capacity or missing capability. Required behavior: parked/refused named state; no automatic internal-Codex/provider failover after a worker effect starts.
+Exercise one stale/unknown-capacity or missing-capability case. Require a named park/refusal state and no automatic internal-Codex/provider failover after worker effect begins.
 
 ---
 
 ### Task 6: Run the End-to-End Token-Relief Canary
 
 **Files:**
-- No new authority/store files.
-- Evidence: use existing Executive Job/Attempt/result records plus PR/canary evidence; if a repository evidence artifact is required by current owner procedure, store only bounded non-secret evidence under the existing `review_evidence/` convention.
+- Use canonical Executive Job/Attempt/result state and PR/canary evidence.
+- If current procedure requires repository evidence, store only bounded non-secret proof under the existing `review_evidence/` convention; do not create a lifecycle or results authority there.
 
 **Interfaces:**
-- Consumes: registered/authenticated Executive MCP in the exact Astra session, strict-v2 host admission, exact Codex RuntimeBinding/Wake, one qualified external provider lane.
-- Produces: a real accepted project result and token-economics comparison proving the user-visible capability.
+- Inputs: registered/authenticated Executive MCP, strict-v2 host admission, exact Astra RuntimeBinding/Wake, one qualified external provider lane.
+- Outputs: accepted real project result + independent review + exact parent consumption + baseline/delegated usage comparison.
 
-- [ ] **Step 1: Freeze one representative acceptance contract**
+- [ ] **Step 1: Freeze one representative acceptance contract before either run**
 
-Use the same bounded project objective for both runs. It must require enough substantive repository reading/analysis or implementation work that a Codex-heavy execution would normally use internal agents/tool turns, but remain safe for the selected external lane.
-
-Record before either run:
+Record:
 
 ```text
 objective
@@ -517,84 +445,79 @@ source base SHA
 allowed write paths (empty for the first research canary is preferred)
 validation/review requirement
 acceptance evidence
-usage unit available from Codex for the baseline and delegated run
+one usage unit available in both baseline and delegated runs
 ```
 
-Do not change the acceptance contract after seeing one run's usage.
+Do not modify the acceptance contract after observing one run's usage.
 
 - [ ] **Step 2: Capture the Codex-heavy baseline**
 
-Run the objective with External Fabric delegation intentionally disabled for the baseline only, using the current bounded internal-Codex policy. Capture the best common available usage measure:
+Run the same class of objective with External Fabric delegation intentionally disabled for this baseline only, using the current bounded internal-Codex policy. Capture the best common usage measure available in both runs:
 
 ```text
-Astra input/output/reasoning tokens if exposed
-internal Codex subagent count and tokens/usage if exposed
-otherwise one documented provider/harness usage proxy used identically for both runs
-wall-clock is secondary, never a token substitute
+Astra input/output/reasoning tokens when exposed
+internal Codex subagent count and usage when exposed
+otherwise one documented common provider/harness usage proxy
 ```
 
-Capture accepted output and independent review evidence. The baseline is evidence, not the desired production policy.
+Capture accepted output and independent review evidence. Wall-clock duration is secondary and never substitutes for token/usage accounting.
 
 - [ ] **Step 3: Start a fresh exact-bound Astra session for the delegated run**
 
-Verify:
+Before modifying work, require:
 
 ```text
 mastermind-executive MCP registered and enabled
 five expected tools visible
 auth valid for read + submit
-exact Astra native session/generation has current RuntimeBinding
-selected external lane is eligible through Capacity
-no stale EFFECT_UNKNOWN operation exists for the operation key
+exact Astra native session/generation has the current RuntimeBinding
+selected external lane is currently eligible through Capacity
+no unresolved EFFECT_UNKNOWN operation exists for the chosen operation key
 ```
 
-- [ ] **Step 4: Submit the same class of objective through `submit_ceo_intent`**
+- [ ] **Step 4: Submit through the existing `submit_ceo_intent` tool**
 
-Use one stable operation key. The Astra call supplies only the frozen five-tool business fields. Required immediate result is an accepted admission with `dispatched=false` and canonical job/request identity.
+Use one stable operation key and the frozen five-tool business fields only. Immediate success is a canonical accepted admission with `dispatched=false` and stable job/request identity. Astra must not open an internal subagent merely because the new root is initially queued.
 
-Astra does not invoke an internal subagent merely because the root is initially queued.
+- [ ] **Step 5: Let the existing COO/Capacity fabric execute**
 
-- [ ] **Step 5: Let existing COO/Capacity execute the program**
+The strict-v2 cycle owns planning and dispatch. At least one substantive work child must execute on the qualified external lane. Required independent review must use a distinct eligible reviewer under current review policy.
 
-The current strict-v2 cycle performs planning/dispatch. At least one substantive work child must run on the qualified external lane. Any required independent review must use a distinct eligible reviewer under current review policy.
+Do not keep Astra in a model polling loop. Existing exact RuntimeBinding/Wake should trigger result-driven continuation. If provider work completes but the exact parent cannot be resumed, stop at `BLOCKED_PARENT_RETURN`; provider success alone is not end-to-end success.
 
-Do not keep Astra alive in a model polling loop. Result-driven continuation should use the exact existing RuntimeBinding/Wake path. If Wake is unavailable but the Job result is durable, stop at `BLOCKED_PARENT_RETURN` rather than calling provider completion end-to-end success.
+- [ ] **Step 6: Consume the compact canonical return**
 
-- [ ] **Step 6: Consume only the compact canonical return**
+Normal parent context must contain only the bounded identity/state, exact source/artifact revision or digest, bounded result summary, validation evidence, review verdict/state, unresolved blocker/next-decision data, and any canonical bounding receipts. Full worker transcripts and shell logs are excluded unless Astra explicitly requests a specific artifact to adjudicate a contradiction.
 
-Astra receives/reads:
+- [ ] **Step 7: Perform final Astra acceptance**
 
-```text
-root/job/attempt state
-source/artifact revision or digest
-bounded result summary
-validation evidence
-review verdict/state
-unresolved blockers / next required decision
-bounding receipts when present
-```
-
-Do not inject the full worker transcript, complete shell log, or repeated repository source into the parent prompt.
-
-- [ ] **Step 7: Astra performs final acceptance**
-
-The result is accepted only if the original user job is complete and the independent review/validation evidence passes. A technically successful worker result with a rejecting review is not acceptance; route the existing bounded repair/re-review path instead.
+Accept only when the original user job is complete and the required independent review/validation passes. A worker success with a rejecting review routes through the existing bounded repair/re-review path; Astra does not self-approve it.
 
 - [ ] **Step 8: Calculate the token-economics gate**
 
-Using the common usage unit from Step 1:
+Use the common unit frozen in Step 1:
 
 ```text
-reduction = 1 - (delegated_astra_plus_internal_codex_usage / baseline_astra_plus_internal_codex_usage)
+reduction = 1 - delegated_astra_plus_internal_codex_usage / baseline_astra_plus_internal_codex_usage
 ```
 
-Pass requires `reduction >= 0.50`, equivalent acceptance quality, at least one substantive external work unit, zero routine Chairman account-selection/message-shuttle steps, and no worker transcript replay into normal parent context.
+Pass requires all of:
 
-If exact token counters are unavailable, use the predeclared common proxy and label the result `USAGE_PROXY`, never `TOKENS`.
+```text
+reduction >= 0.50
+equivalent acceptance quality
+at least one substantive external work unit
+zero routine Chairman account-selection actions
+zero Chairman message shuttling between admission and returned candidate
+no normal worker-transcript replay into Astra
+exact bound Astra parent consumption
+```
+
+If exact token counters are unavailable, label the common measure `USAGE_PROXY`; never call it token count.
 
 - [ ] **Step 9: Exercise duplicate/restart/effect-negative proof**
 
-Within the same canary program or a separately named non-destructive fault drill, prove:
+Prove:
 
 ```text
 same operation identity does not create a duplicate root
@@ -603,29 +526,25 @@ runtime/reasoning restart preserves accepted result and owed parent action
 wrong/stale Astra RuntimeBinding cannot consume the continuation
 ```
 
-No blind retry or provider swap is permitted for the effect-unknown case.
+No blind retry or provider switch is permitted for the effect-unknown case.
 
-- [ ] **Step 10: Record the capability state truthfully**
+- [ ] **Step 10: Record capability state precisely**
 
-If the complete real path passes, mark only this first vertical `PROVEN_LIVE` in its correct durable owners. Do not claim ready-frontier parity, GLM/MiniMax fleet completion, multi-host completion, or Web closed-tab autonomy.
+Only when the complete real path passes may this first vertical be recorded `PROVEN_LIVE`. Do not claim ready-frontier parity, provider-fleet completion, multi-host completion, or Web closed-tab autonomy.
 
-If the path stops earlier, classify the exact sub-capability (`BUILT_NOT_PROVEN`, `PARTIAL`, `DARK_OR_DISCONNECTED`, or `BROKEN`) and leave the exact next action.
+If the path stops earlier, record the exact sub-capability as `BUILT_NOT_PROVEN`, `PARTIAL`, `DARK_OR_DISCONNECTED`, or `BROKEN` and leave the exact next action.
 
 ---
 
-### Task 7: Current-Base Review, Release, and Closeout
+### Task 7: Current-Base Review, Release, and Durable Closeout
 
 **Files:**
 - No new feature scope.
-- Update only the correct existing durable records required by current procedure after acceptance.
+- Update only the correct current durable records after acceptance.
 
-**Interfaces:**
-- Consumes: source changes from Tasks 1-3, any Task-4 test pin, external provider canary evidence from Task 5, end-to-end proof from Task 6.
-- Produces: one reviewable source PR for the Codex client/policy changes plus exact production/capability evidence owned by the existing Executive/Capacity/Agent OS systems.
+- [ ] **Step 1: Reconcile with current protected master and collision-check again**
 
-- [ ] **Step 1: Rebase/reconcile with current protected master and collision-check again**
-
-No force push over another owner. If current master changes `AGENTS.md`, Executive MCP/App admission, Codex Wake, or the registration paths materially, re-run the relevant contract tests before continuing.
+Do not force-push over another source owner. If current master materially changes `AGENTS.md`, Executive MCP/App admission, Codex Wake, or the registration path, re-run the corresponding contract tests before proceeding.
 
 - [ ] **Step 2: Run the focused regression set**
 
@@ -644,66 +563,68 @@ python3 -m compileall -q ops/codex_fabric
 git diff --check
 ```
 
-Then run the repository's required current CI gate. Do not substitute the focused set for protected CI.
+Then run the repository's current required protected CI gate. Focused tests do not replace protected CI.
 
 - [ ] **Step 3: Adversarial review against the frozen outcome**
 
-Reviewer must answer:
+Reviewer must answer yes/no with evidence:
 
 ```text
-Did the implementation preserve the five-tool public contract?
-Can Astra name a provider/account/credential/host anywhere? (must be no)
-Can a lost response cause a blind retry/failover? (must be no)
-Can an arbitrary Codex tab receive another session's Wake? (must be no)
-Is any new durable scheduler/lifecycle/result store present? (must be no)
-Can worker transcript bulk flow back into Astra by default? (must be no)
-Did a real external lane do substantive work through the canonical path?
-Was the result independently reviewed and consumed by the exact Astra parent?
-Did measured Astra + internal-Codex usage fall at least 50% using a common unit?
+Five-tool public contract preserved?
+Astra unable to name provider/account/credential/host?
+Lost response unable to trigger blind retry/failover?
+Arbitrary Codex tab unable to receive another session's Wake?
+No new durable scheduler/lifecycle/result store?
+No normal full-worker-transcript replay into Astra?
+Real external lane performed substantive work through canonical path?
+Result independently reviewed and consumed by exact Astra parent?
+Measured Astra + internal-Codex usage reduced at least 50% in the common unit?
 ```
 
-Any negative answer on a required item blocks acceptance.
+Any required negative answer blocks acceptance.
 
-- [ ] **Step 4: Publish source through normal review**
+- [ ] **Step 4: Publish the scoped source PR**
 
-Push the scoped branch, open/update its PR, wait for required checks, and merge only after review. Do not merge provider/Capacity changes from this client PR; those remain with their current owners.
+Push the source branch, open/update the PR, wait for required checks, and merge only after review. Provider/Capacity activation changes stay with their existing owners rather than being folded into the Codex client PR.
 
-- [ ] **Step 5: Update durable truth**
+- [ ] **Step 5: Update durable truth in the correct owners**
 
 After accepted real proof:
 
-- Executive OS remains owner of Job/Attempt/runtime evidence;
-- Agent OS current workstream/handoff records the proven capability, important discoveries, and exact next action through its existing writer;
-- GitHub PR records implementation/test/canary evidence;
-- Linear/Control Room may project the result but do not become authority;
+- Executive OS remains the Job/Attempt/runtime evidence owner.
+- Agent OS current workstream/handoff records the proven capability, important discoveries, and exact next action through its existing writer.
+- GitHub records implementation/test/canary evidence.
+- Linear/Control Room may project status but do not become authority.
 - Slack, if used, remains transport only.
 
-- [ ] **Step 6: Leave the next independent program explicitly held**
+- [ ] **Step 6: Hold the next independent program explicitly**
 
-The next program after this vertical is the existing-owner **ready-frontier dependency/parallelism** wave from #600, followed by provider-matrix expansion. Do not silently start either from this PR.
-
----
+After this vertical, the next planned capability is the existing-owner ready-frontier/dependency-parallelism wave from #600, followed by provider-matrix expansion. Neither starts implicitly from this PR.
 
 ## Plan Self-Review
 
-### Spec coverage
+### Requirement coverage
 
-- Existing-five-tool reuse: Tasks 1-3.
-- CeoIngress v2 / strict-v2 owner boundary: Tasks 1 and 6.
+- Reuse existing five-tool MCP: Tasks 1-3.
+- Preserve CeoIngress v2 / strict-v2 ownership: Tasks 1 and 6.
 - No provider/account choice by Astra: Tasks 1, 3, 5, 7.
-- Effect-unknown same-carrier reconciliation: Tasks 1, 3, 6, 7.
-- Exact Codex parent return: Task 4 and Task 6.
+- Effect-unknown same-identity reconciliation: Tasks 1, 3, 6, 7.
+- Exact Codex parent return: Tasks 4 and 6.
 - External first lane without duplicating #583: Task 5.
-- Compact result / no transcript replay: Task 3 and Task 6.
-- Internal Codex fallback bounded: Task 3.
-- Token-economics proof: Task 6.
-- No duplicate control plane: global constraints and Task 7 review.
+- Compact result / no transcript replay: Tasks 3 and 6.
+- Bounded internal Codex fallback: Task 3.
+- Measured token/usage reduction: Task 6.
+- No duplicate control plane: Global Constraints and Task 7.
 - Production proof and durable closeout: Tasks 6-7.
 
 ### Scope check
 
-This plan intentionally stops after the first independently useful external-delegation/token-relief loop. Ready-frontier parallelism, deeper child budgets, GLM/MiniMax activation, broader multi-host recovery, and Live Fabric UI work remain separate follow-on plans so the first PR cannot expand into a platform rewrite.
+This plan stops after the first independently useful external-delegation/token-relief loop. Ready-frontier parallelism, deeper child budgets, GLM/MiniMax activation, broader multi-host recovery, and Live Fabric UI work are separate follow-on plans so the first source PR cannot expand into a platform rewrite.
 
 ### Type/interface consistency
 
-The plan reuses existing public identities and types: `operation_key` -> `app_request_ref` -> CeoIngress v2 `request_ref`; `submit_ceo_intent` stays the model-facing modifying tool; `RuntimeBinding`/Codex Wake own exact parent return; provider selection stays outside the caller request. No second serialized lifecycle type is introduced.
+The plan reuses existing identities and types: model-facing `operation_key` -> App-owned `app_request_ref` -> CeoIngress v2 `request_ref`; `submit_ceo_intent` remains the modifying tool; `RuntimeBinding`/Codex Wake own exact parent return; provider selection remains outside the caller request. No second serialized lifecycle type is introduced.
+
+### Placeholder scan
+
+This plan contains no `TBD`, `TODO`, unfinished function body, fake return constant, unbound `<port>` token, or implementation placeholder. Runtime-specific values such as the installed MCP URL, current branch SHA, and canary operation key are obtained from their canonical owner at execution time and validated before use.
