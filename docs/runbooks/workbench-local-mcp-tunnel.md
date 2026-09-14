@@ -65,6 +65,32 @@ fixed owner-configured project descriptor
 There is no Desktop Commander hosted relay, `broadcast_v1`, public inbound
 listener, model-selected host, or generic remote shell in this path.
 
+### Borrowed Read port for the Action runtime
+
+The same four pure operations can be composed under an already-authorized
+Action runtime without opening a second root or lifecycle:
+
+```python
+create_bound_read_port(
+    project_ref,
+    profile,
+    allowed_paths,
+    resolve_scope,
+    clock_ms,
+)
+```
+
+This factory returns a synchronous `call(name, arguments)` port. The host owns
+all five inputs; none is a tool argument. `resolve_scope()` remains the sole
+current authority and is called for every advertised tool, including manifest
+and command preview. Manifest identity, generation, expiry and committed
+baseline come from that current `ReadScope`. The port never opens, duplicates
+or closes the borrowed root and creates no executor, audit sink, lease,
+generation or cached live grant. Its `close()` only revokes the local port; the
+Action runtime retains descriptor and drain ownership. File read and text
+preview continue to use the protected descriptor-relative observer under the
+Action runtime's existing physical executor.
+
 ## Owner configuration
 
 The launcher accepts exactly one absolute owner-controlled JSON config. Example:
