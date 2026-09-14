@@ -2561,6 +2561,211 @@ def test_heterogeneous_pair_results_reach_independent_review_and_exact_aggregati
     assert runtime.jobs.get_job(root.job_id).status is executive_runtime.JobStatus.COMPLETED
 
 
+def test_heterogeneous_pair_qualification_receipts_use_existing_runtime_events_only(
+    tmp_path: Path,
+) -> None:
+    runtime = Runtime.at(tmp_path)
+    _register(runtime, "worker-a")
+    _register(runtime, "worker-b")
+    receipt = submit_intent(
+        runtime,
+        _v2_intent(
+            intent_id="CEO-HF1Q-PAIR-T5",
+            business_impact="routine",
+        ),
+    )
+    root = runtime.jobs.get_job(receipt["job_id"])
+    assert root is not None
+    dispatches: list[OrchestrationDispatchOutcome] = []
+
+    def accepted_dispatch(job_id: str, command_id: str):
+        job = runtime.jobs.get_job(job_id)
+        assert job is not None
+        worker = (
+            "worker-a"
+            if job.orchestration_role in {"plan", "aggregation"}
+            or (job.orchestration_role == "work" and job.plan_step_id == "step-codex")
+            else "worker-b"
+        )
+        outcome = runtime.attempts.dispatch_cycle_job(
+            job_id, command_id=command_id, worker_id=worker
+        )
+        assert outcome is not None
+        dispatches.append(outcome)
+        return outcome
+
+    cycle = CooCycle(runtime, dispatcher=accepted_dispatch)
+    assert cycle.run_once(root.job_id).action == "PLANNER_CREATED"
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    planner = dispatches[-1]
+    plan_body = {
+        "schema_version": "mastermind.execution_plan/v1",
+        "root_job_id": root.job_id,
+        "plan_attempt_id": planner.attempt.attempt_id,
+        "steps": [
+            {
+                "ordinal": 0,
+                "step_id": "step-codex",
+                "objective": "Hermetic reviewed Codex child result.",
+                "business_impact": "routine",
+                "review_required": True,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+            },
+            {
+                "ordinal": 1,
+                "step_id": "step-claude",
+                "objective": "Hermetic review-exempt Claude child result.",
+                "business_impact": "routine",
+                "review_required": False,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+            },
+        ],
+    }
+    _complete_ohf_role(runtime, planner, plan_body, identity_seed=3401)
+    admitted = cycle.run_once(root.job_id)
+    assert admitted.action == "PLAN_ADMITTED"
+    work_ids = list(admitted.receipt["work_job_ids"])
+    work_dispatches = []
+    for work_id in work_ids:
+        work_job = runtime.jobs.get_job(work_id)
+        assert work_job is not None
+        worker = "worker-a" if work_job.plan_step_id == "step-codex" else "worker-b"
+        work_dispatch = runtime.attempts.dispatch_cycle_job(
+            work_id,
+            command_id=f"coo-cycle:{root.job_id}:dispatch:{work_id}:attempt:1",
+            worker_id=worker,
+        )
+        assert work_dispatch is not None
+        work_dispatches.append(work_dispatch)
+
+    work_seals = {}
+    for work in work_dispatches:
+        work_job = runtime.jobs.get_job(work.attempt.job_id)
+        assert work_job is not None
+        work_body = {
+            "schema_version": "mastermind.work_result/v1",
+            "root_job_id": root.job_id,
+            "plan_attempt_id": planner.attempt.attempt_id,
+            "plan_digest": result_digest(plan_body),
+            "plan_step_id": str(work_job.plan_step_id),
+            "repair_round": 0,
+            "artifacts": [],
+            "evidence_digests": [],
+        }
+        work_seals[str(work_job.plan_step_id)] = _complete_ohf_role(
+            runtime,
+            work,
+            work_body,
+            identity_seed=3402 if work.attempt.worker_id == "worker-a" else 3403,
+        )[0]
+
+    assert cycle.run_once(root.job_id).action == "REVIEW_CREATED"
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    review = dispatches[-1]
+    reviewed = work_by_worker(work_dispatches, "worker-a")
+    review_body = _review_body(
+        root_id=root.job_id,
+        plan_attempt_id=planner.attempt.attempt_id,
+        plan_digest=result_digest(plan_body),
+        target_job_id=reviewed.attempt.job_id,
+        target_attempt_id=reviewed.attempt.attempt_id,
+        target_result_digest=work_seals["step-codex"]["role_result_digest"],
+        repair_round=0,
+        verdict="approve",
+        plan_step_id="step-codex",
+    )
+    _complete_ohf_role(runtime, review, review_body, identity_seed=3404)
+    assert cycle.run_once(root.job_id).action == "HANDOFF_CREATED"
+    handoff = runtime.jobs.get_cycle_handoff(root.job_id)
+
+    claims = [
+        event
+        for event in runtime.events.list_events()
+        if event.event_type == "JOB_CLAIMED"
+    ]
+    seals = [
+        event
+        for event in runtime.events.list_events()
+        if event.event_type == "ORCHESTRATION_ROLE_RESULT_SEALED"
+    ]
+    assert len(claims) == 4
+    assert len(seals) == 4
+    work_claims = [
+        event for event in claims if event.job_id in set(work_ids)
+    ]
+    work_seal_events = [
+        event for event in seals if event.job_id in set(work_ids)
+    ]
+    assert {event.worker_id for event in work_claims} == {"worker-a", "worker-b"}
+    assert {event.quota_class for event in work_claims} == {"default"}
+    assert {event.attempt_id for event in work_claims} == {
+        value.attempt.attempt_id for value in work_dispatches
+    }
+    assert {event.attempt_id for event in work_seal_events} == {
+        value.attempt.attempt_id for value in work_dispatches
+    }
+    assert all(set(event.payload).isdisjoint(
+        {"adapter_id", "harness_id", "binding_id", "profile_id"}
+    ) for event in work_claims)
+    assert all(
+        event.payload["result_envelope"]["worker_id"] == event.worker_id
+        for event in work_seal_events
+    )
+    assert all(set(event.payload).isdisjoint(
+        {"adapter_id", "harness_id", "binding_id", "profile_id"}
+    ) for event in work_seal_events)
+
+    revisions_by_attempt = {
+        item["current_attempt_id"]: item for item in handoff["revisions"]
+    }
+    assert set(revisions_by_attempt) == {
+        value.attempt.attempt_id for value in work_dispatches
+    }
+    reviewed_revision = revisions_by_attempt[reviewed.attempt.attempt_id]
+    assert reviewed_revision["current_result_digest"] == (
+        work_seals["step-codex"]["role_result_digest"]
+    )
+    assert reviewed_revision["qualifying_review_attempt_id"] == (
+        review.attempt.attempt_id
+    )
+    assert reviewed_revision["qualifying_review_result_digest"] == (
+        next(
+            event.payload["role_result_digest"]
+            for event in seals
+            if event.attempt_id == review.attempt.attempt_id
+        )
+    )
+    assert set(handoff).isdisjoint(
+        {"adapter_id", "harness_id", "binding_id", "profile_id"}
+    )
+
+    with runtime.store.read() as connection:
+        provider_owners = {
+            row[1]
+            for row in connection.execute(
+                "SELECT type,name FROM sqlite_master WHERE type='table'"
+            )
+            if row[1] in {"provider_accounts", "wake_queue", "result_store"}
+        }
+    assert provider_owners == set()
+
+
+def work_by_worker(
+    dispatches: list[OrchestrationDispatchOutcome], worker_id: str
+) -> OrchestrationDispatchOutcome:
+    matches = [item for item in dispatches if item.attempt.worker_id == worker_id]
+    assert len(matches) == 1
+    return matches[0]
+
+
 def test_run_once_without_accepted_supervisor_blocks_before_claim(tmp_path):
     runtime = Runtime.at(tmp_path)
     _register(runtime, "worker-a")
