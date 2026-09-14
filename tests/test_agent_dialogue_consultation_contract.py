@@ -73,6 +73,7 @@ def raw_consultation(**overrides) -> dict:
             "max_payload_bytes": 32768,
         },
         "supersedes_message_key": None,
+        "question_message_key": "asd-consultation-0000000000000001",
         "receipts": {key: None for key in RECEIPT_KEYS},
         "fingerprint": "",
     }
@@ -107,6 +108,16 @@ def test_binding_id_shape_matches_real_runtime_binding_producer() -> None:
     assert _BINDING_ID_RE.fullmatch(binding_id) is not None
     assert _BINDING_ID_RE.fullmatch("bind-" + "a" * 32) is None
     assert _BINDING_ID_RE.fullmatch(binding_id + "0") is None
+
+
+def test_consultation_refuses_32_hex_binding_alias() -> None:
+    alias = raw_consultation()
+    alias["recipient_binding"]["binding_id"] = "bind-" + "a" * 32
+
+    with pytest.raises(DialogueContractError) as exc_info:
+        validate_consultation(alias)
+
+    assert exc_info.value.code == "MESSAGE_INVALID"
 
 
 @pytest.mark.parametrize(
@@ -192,3 +203,34 @@ def test_duplicate_key_classifier_is_idempotent_only_for_equivalent_semantics() 
     assert classify_duplicate(original, replay) is DuplicateClassification.IDEMPOTENT
     assert classify_duplicate(original, conflict) is DuplicateClassification.CONFLICT
     assert set(CONSULTATION_PURPOSES) == {"QUESTION", "ANSWER", "NOTICE", "CORRECTION"}
+
+
+def test_question_and_answer_have_explicit_request_reference_invariants() -> None:
+    request = build_consultation(raw_consultation())
+    assert request["correlation"]["request_message_key"] == request["message_key"]
+
+    mismatched_question = copy.deepcopy(request)
+    mismatched_question["correlation"]["request_message_key"] = "asd-consultation-foreignKey"
+    with pytest.raises(DialogueContractError):
+        validate_consultation(mismatched_question)
+
+    answer = copy.deepcopy(request)
+    answer["message_key"] = "asd-consultation-answer-0001"
+    answer["purpose"] = "ANSWER"
+    answer["question"] = None
+    answer["answer"] = {"text": "closed answer", "evidence_refs": []}
+    answer["question_message_key"] = request["message_key"]
+    answer["correlation"]["request_message_key"] = request["message_key"]
+    answer["fingerprint"] = ""
+    assert validate_consultation(answer)["question_message_key"] == request["message_key"]
+
+    foreign_reference = copy.deepcopy(answer)
+    foreign_reference["question_message_key"] = "asd-consultation-foreignKey"
+    with pytest.raises(DialogueContractError):
+        validate_consultation(foreign_reference)
+
+    reused_request_key = copy.deepcopy(answer)
+    reused_request_key["message_key"] = request["message_key"]
+    reused_request_key["question_message_key"] = request["message_key"]
+    with pytest.raises(DialogueContractError):
+        validate_consultation(reused_request_key)

@@ -19,11 +19,10 @@ from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import unquote, urlparse
 
+from control_plane.provider_protocols import PROVIDER_PROTOCOLS as _ALLOWED_PROTOCOLS
+
 SCHEMA = "mastermind.subscription_provider_profiles/v1"
 DEFAULT_PROFILES_PATH = Path(__file__).resolve().parents[1] / "config" / "subscription_provider_profiles.v1.json"
-# Local copy of the shared wire-protocol vocabulary that lands with #583.
-# Do not import control_plane.provider_protocols from this module.
-_ALLOWED_PROTOCOLS = frozenset({"anthropic", "openai-chat", "responses"})
 _ALLOWED_MODEL_CLASSES = frozenset({"routine", "hard", "fast", "subagent"})
 _FORBIDDEN_HARNESS_FIELDS = frozenset({"adapter_id", "harness_id"})
 

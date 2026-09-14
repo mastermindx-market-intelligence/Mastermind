@@ -30,6 +30,8 @@ _ROOT = Path(__file__).resolve().parents[2]
 if os.fspath(_ROOT) not in sys.path:
     sys.path.insert(0, os.fspath(_ROOT))
 
+from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
+
 from control_plane.executive_autonomy import (
     ARMED_READY,
     CAPABILITY_POLICY_DIGEST,
@@ -858,15 +860,10 @@ def _fallback_snapshot(expected_sha: str, refusal_code: str) -> StatusSnapshot:
 
 
 def _has_acl(path: Path) -> bool:
-    completed = subprocess.run(
-        ["/usr/bin/stat", "-f", "%Sp", os.fspath(path)],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        check=False,
-        timeout=5,
-    )
-    return completed.returncode != 0 or completed.stdout.strip().endswith(b"+")
+    try:
+        return has_macos_acl(path)
+    except FilesystemSecurityError:
+        return True
 
 
 def _read_root_file(
