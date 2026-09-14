@@ -27,15 +27,18 @@ import sys
 import time
 
 from jsonschema import Draft202012Validator
+import mcp.types as mcp_types
 from mcp.server.lowlevel import NotificationOptions, Server
 from mcp.server.stdio import stdio_server
-from mcp.types import CallToolResult, TextContent, Tool, ToolAnnotations
+from mcp.types import CallToolResult, ServerResult, TextContent, Tool, ToolAnnotations
 
+from common.bounded_sync_executor import SyncExecutionTimeout
 from integrations.business_mcp_auth.audit import AuditSinkPoisoned, DurableAuthAuditSink
 from integrations.business_mcp_auth.contracts import CHANNEL_AUDIT_SCHEMA, ChannelAuditEvent
 from integrations.workbench_read_mcp.runtime import (
     RuntimeCloseIncomplete,
     RuntimeCloseUncertain,
+    RuntimeClosed,
 )
 
 from .app import (
@@ -77,6 +80,7 @@ _PREPARE_INPUT = _PREPARE_SCHEMA
 _ACTION_REF_INPUT = _ACTION_REF_SCHEMA
 _PREPARE_OUTPUT = _PREPARE_OUTPUT_SCHEMA
 _EFFECT_OUTPUT = _EFFECT_OUTPUT_SCHEMA
+_KNOWN_TUNNEL_TOOLS = frozenset({PREPARE_TOOL, COMMIT_TOOL, RECONCILE_TOOL})
 _CONFIG_KEYS = frozenset(
     {
         "schema",
@@ -242,6 +246,116 @@ def _lease(value: object) -> StableWorkbenchActionLease:
     raise AssertionError("unreachable")
 
 
+def _regular_file_snapshot(
+    info: os.stat_result, *, required_imode: int | None
+) -> tuple[int, int, int, int, int, int, int, int]:
+    """Closed identity for a host-selected regular file.
+
+    Compared fields are exactly the review's required snapshot:
+    dev/ino/uid/mode/nlink/size/mtime_ns/ctime_ns.
+    """
+
+    if (
+        stat.S_ISLNK(info.st_mode)
+        or not stat.S_ISREG(info.st_mode)
+        or info.st_nlink != 1
+        or info.st_uid != os.geteuid()
+    ):
+        _refuse()
+    mode = stat.S_IMODE(info.st_mode)
+    if required_imode is None:
+        if mode & 0o022:
+            _refuse()
+    elif mode != required_imode:
+        _refuse()
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_uid,
+        info.st_mode,
+        info.st_nlink,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+    )
+
+
+def _read_exact_bytes(fd: int, expected: int, *, maximum: int) -> bytes:
+    if type(expected) is not int or expected <= 0 or expected > maximum:
+        _refuse()
+    chunks: list[bytes] = []
+    total = 0
+    while total < expected:
+        chunk = os.read(fd, min(4096, expected - total))
+        if not chunk:
+            _refuse()
+        total += len(chunk)
+        if total > expected:
+            _refuse()
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _acquire_regular_file_bytes(
+    path: str,
+    *,
+    maximum: int,
+    required_imode: int | None,
+    allowed_sizes: frozenset[int] | None = None,
+) -> bytes:
+    selected = Path(_absolute_path(path))
+    try:
+        before = selected.lstat()
+    except OSError:
+        _refuse()
+    expected = _regular_file_snapshot(before, required_imode=required_imode)
+    if allowed_sizes is not None and expected[5] not in allowed_sizes:
+        _refuse()
+    if expected[5] > maximum:
+        _refuse()
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    nonblock = getattr(os, "O_NONBLOCK", 0)
+    cloexec = getattr(os, "O_CLOEXEC", 0)
+    if not nofollow or not nonblock or not cloexec:
+        _refuse()
+    fd = -1
+    raw = b""
+    primary: BaseException | None = None
+    cleanup: BaseException | None = None
+    try:
+        fd = os.open(selected, os.O_RDONLY | nofollow | nonblock | cloexec)
+        opened = os.fstat(fd)
+        if os.get_inheritable(fd) or _regular_file_snapshot(
+            opened, required_imode=required_imode
+        ) != expected:
+            _refuse()
+        raw = _read_exact_bytes(fd, expected[5], maximum=maximum)
+        reread = os.fstat(fd)
+        if _regular_file_snapshot(reread, required_imode=required_imode) != expected:
+            _refuse()
+    except BaseException as error:
+        primary = error
+    finally:
+        if fd >= 0:
+            try:
+                os.close(fd)
+            except BaseException as error:
+                cleanup = error
+    if cleanup is not None:
+        raise TunnelConfigurationError("TUNNEL_STARTUP_CLEANUP_UNCERTAIN") from cleanup
+    if primary is not None:
+        if isinstance(primary, TunnelConfigurationError):
+            raise primary
+        _refuse()
+    try:
+        after = selected.lstat()
+    except OSError:
+        _refuse()
+    if _regular_file_snapshot(after, required_imode=required_imode) != expected:
+        _refuse()
+    return raw
+
+
 def parse_tunnel_config(value: object) -> TunnelConfig:
     if not isinstance(value, dict) or set(value) != _CONFIG_KEYS:
         _refuse()
@@ -278,78 +392,9 @@ def parse_tunnel_config(value: object) -> TunnelConfig:
 
 
 def _secure_json(path: str, *, maximum: int) -> dict[str, object]:
-    selected = Path(_absolute_path(path))
+    raw = _acquire_regular_file_bytes(path, maximum=maximum, required_imode=None)
     try:
-        before = selected.lstat()
-    except OSError:
-        _refuse()
-    if (
-        stat.S_ISLNK(before.st_mode)
-        or not stat.S_ISREG(before.st_mode)
-        or before.st_nlink != 1
-        or before.st_uid != os.geteuid()
-        or stat.S_IMODE(before.st_mode) & 0o022
-    ):
-        _refuse()
-    nofollow = getattr(os, "O_NOFOLLOW", 0)
-    nonblock = getattr(os, "O_NONBLOCK", 0)
-    cloexec = getattr(os, "O_CLOEXEC", 0)
-    if not nofollow or not nonblock or not cloexec:
-        _refuse()
-    fd = -1
-    chunks: list[bytes] = []
-    primary: BaseException | None = None
-    cleanup: BaseException | None = None
-    try:
-        fd = os.open(selected, os.O_RDONLY | nofollow | nonblock | cloexec)
-        opened = os.fstat(fd)
-        if (
-            opened.st_dev != before.st_dev
-            or opened.st_ino != before.st_ino
-            or not stat.S_ISREG(opened.st_mode)
-            or opened.st_nlink != 1
-            or opened.st_uid != os.geteuid()
-            or stat.S_IMODE(opened.st_mode) & 0o022
-            or os.get_inheritable(fd)
-        ):
-            _refuse()
-        total = 0
-        while True:
-            chunk = os.read(fd, min(4096, maximum + 1 - total))
-            if not chunk:
-                break
-            total += len(chunk)
-            if total > maximum:
-                _refuse()
-            chunks.append(chunk)
-    except BaseException as error:
-        primary = error
-    finally:
-        if fd >= 0:
-            try:
-                os.close(fd)
-            except BaseException as error:
-                cleanup = error
-    if cleanup is not None:
-        raise TunnelConfigurationError("TUNNEL_STARTUP_CLEANUP_UNCERTAIN") from cleanup
-    if primary is not None:
-        if isinstance(primary, TunnelConfigurationError):
-            raise primary
-        _refuse()
-    try:
-        after = selected.lstat()
-    except OSError:
-        _refuse()
-    if (
-        after.st_dev != before.st_dev
-        or after.st_ino != before.st_ino
-        or after.st_uid != before.st_uid
-        or after.st_mode != before.st_mode
-        or after.st_nlink != before.st_nlink
-    ):
-        _refuse()
-    try:
-        decoded = b"".join(chunks).decode("ascii", errors="strict")
+        decoded = raw.decode("ascii", errors="strict")
         result = json.loads(
             decoded,
             object_pairs_hook=_closed_object,
@@ -369,71 +414,12 @@ def load_tunnel_config(path: str) -> TunnelConfig:
 
 
 def _secure_action_key(path: str) -> bytes:
-    selected = Path(_absolute_path(path))
-    try:
-        before = selected.lstat()
-    except OSError:
-        _refuse()
-    if (
-        stat.S_ISLNK(before.st_mode)
-        or not stat.S_ISREG(before.st_mode)
-        or before.st_nlink != 1
-        or before.st_uid != os.geteuid()
-        or stat.S_IMODE(before.st_mode) != 0o600
-        or before.st_size not in (64, 65)
-    ):
-        _refuse()
-    nofollow = getattr(os, "O_NOFOLLOW", 0)
-    nonblock = getattr(os, "O_NONBLOCK", 0)
-    cloexec = getattr(os, "O_CLOEXEC", 0)
-    if not nofollow or not nonblock or not cloexec:
-        _refuse()
-    fd = -1
-    try:
-        fd = os.open(selected, os.O_RDONLY | nofollow | nonblock | cloexec)
-        opened = os.fstat(fd)
-        if (
-            opened.st_dev != before.st_dev
-            or opened.st_ino != before.st_ino
-            or not stat.S_ISREG(opened.st_mode)
-            or opened.st_nlink != 1
-            or opened.st_uid != os.geteuid()
-            or stat.S_IMODE(opened.st_mode) != 0o600
-            or os.get_inheritable(fd)
-        ):
-            _refuse()
-        raw = b""
-        while len(raw) <= 65:
-            chunk = os.read(fd, 66 - len(raw))
-            if not chunk:
-                break
-            raw += chunk
-        if len(raw) > 65:
-            _refuse()
-    except TunnelConfigurationError:
-        raise
-    except (OSError, TypeError, ValueError):
-        _refuse()
-    finally:
-        if fd >= 0:
-            try:
-                os.close(fd)
-            except OSError as error:
-                raise TunnelConfigurationError(
-                    "TUNNEL_STARTUP_CLEANUP_UNCERTAIN"
-                ) from error
-    try:
-        after = selected.lstat()
-    except OSError:
-        _refuse()
-    if (
-        after.st_dev != before.st_dev
-        or after.st_ino != before.st_ino
-        or after.st_mode != before.st_mode
-        or after.st_nlink != before.st_nlink
-        or after.st_uid != before.st_uid
-    ):
-        _refuse()
+    raw = _acquire_regular_file_bytes(
+        path,
+        maximum=65,
+        required_imode=0o600,
+        allowed_sizes=frozenset({64, 65}),
+    )
     if raw.endswith(b"\n"):
         raw = raw[:-1]
     if len(raw) != 64 or any(byte not in b"0123456789abcdef" for byte in raw):
@@ -542,6 +528,10 @@ async def create_runtime_channel(
                 raise TunnelConfigurationError(
                     "TUNNEL_STARTUP_CLEANUP_UNCERTAIN"
                 ) from primary_error
+        if isinstance(primary_error, (RuntimeCloseIncomplete, RuntimeCloseUncertain)):
+            raise TunnelConfigurationError(
+                "TUNNEL_STARTUP_CLEANUP_UNCERTAIN"
+            ) from primary_error
         if isinstance(primary_error, TunnelConfigurationError):
             raise primary_error
         _refuse()
@@ -581,6 +571,34 @@ def _action_digest(value: object) -> str | None:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+class _ClosedTunnelServer(Server):
+    """Server-local boundary: unknown names never reach SDK lookup logs."""
+
+    async def _get_cached_tool_definition(self, tool_name: str) -> mcp_types.Tool | None:
+        if type(tool_name) is not str or tool_name not in _KNOWN_TUNNEL_TOOLS:
+            return None
+        return await super()._get_cached_tool_definition(tool_name)
+
+    def call_tool(self, *, validate_input: bool = True):
+        register = super().call_tool(validate_input=validate_input)
+
+        def decorator(func):
+            registered = register(func)
+            sdk_handler = self.request_handlers[mcp_types.CallToolRequest]
+
+            async def closed_call_tool(req: mcp_types.CallToolRequest) -> ServerResult:
+                params = getattr(req, "params", None)
+                name = getattr(params, "name", None)
+                if type(name) is not str or name not in _KNOWN_TUNNEL_TOOLS:
+                    return ServerResult(_error("TOOL_NOT_AVAILABLE"))
+                return await sdk_handler(req)
+
+            self.request_handlers[mcp_types.CallToolRequest] = closed_call_tool
+            return registered
+
+        return decorator
+
+
 def create_tunnel_action_server(runtime: WorkbenchActionRuntime) -> Server:
     """One low-level MCP server for the fixed channel, or a typed refusal.
 
@@ -613,22 +631,24 @@ def create_tunnel_action_server(runtime: WorkbenchActionRuntime) -> Server:
     prepare_output_validator = Draft202012Validator(_PREPARE_OUTPUT)
     effect_output_validator = Draft202012Validator(_EFFECT_OUTPUT)
 
-    def emit_channel_audit(
+    async def emit_channel_audit(
         *, code: str, accepted: bool, tool: str, action_digest: str | None
     ) -> None:
-        # One durable admission fact per tool call.  Any failure poisons the
-        # sink and must block the effect rather than degrade to memory.
-        services.audit_sink.emit(
-            ChannelAuditEvent(
-                schema=CHANNEL_AUDIT_SCHEMA,
-                policy_id=services.audit_policy_id,
-                code=code,
-                accepted=accepted,
-                channel_ref=services.channel_ref,
-                tool=tool,
-                action_digest=action_digest,
-            )
+        # One durable admission fact per tool call, owned by the runtime's
+        # bounded physical executor.  Any failure poisons the sink and must
+        # block the effect rather than degrade to memory.  Routing the write
+        # through run_io does not reauthorize a revoked effect: a closed
+        # runtime refuses the physical attempt.
+        event = ChannelAuditEvent(
+            schema=CHANNEL_AUDIT_SCHEMA,
+            policy_id=services.audit_policy_id,
+            code=code,
+            accepted=accepted,
+            channel_ref=services.channel_ref,
+            tool=tool,
+            action_digest=action_digest,
         )
+        await runtime.run_io(lambda: services.audit_sink.emit(event))
 
     def emit_call_receipt(*, name: str, request: object) -> None:
         sink = services.call_receipt_sink
@@ -666,7 +686,7 @@ def create_tunnel_action_server(runtime: WorkbenchActionRuntime) -> Server:
             # outage must never mutate action semantics or trigger a retry.
             return
 
-    server: Server = Server(SERVER_NAME, version=SERVER_VERSION)
+    server: Server = _ClosedTunnelServer(SERVER_NAME, version=SERVER_VERSION)
 
     @server.list_tools()
     async def list_tools() -> list[Tool]:
@@ -734,13 +754,15 @@ def create_tunnel_action_server(runtime: WorkbenchActionRuntime) -> Server:
                 action_digest = _action_digest(request["action_ref"])
         except Exception:
             try:
-                emit_channel_audit(
+                await emit_channel_audit(
                     code="request_refused",
                     accepted=False,
                     tool=name,
                     action_digest=None,
                 )
             except AuditSinkPoisoned:
+                return _error("CHANNEL_AUDIT_UNAVAILABLE")
+            except (RuntimeClosed, SyncExecutionTimeout):
                 return _error("CHANNEL_AUDIT_UNAVAILABLE")
             return _error("INVALID_REQUEST")
 
@@ -749,7 +771,7 @@ def create_tunnel_action_server(runtime: WorkbenchActionRuntime) -> Server:
         # refuses here, before any durable acceptance is written.
         if runtime.resolve_binding(caller, project_ref) is None:
             try:
-                emit_channel_audit(
+                await emit_channel_audit(
                     code="channel_refused",
                     accepted=False,
                     tool=name,
@@ -757,15 +779,20 @@ def create_tunnel_action_server(runtime: WorkbenchActionRuntime) -> Server:
                 )
             except AuditSinkPoisoned:
                 return _error("CHANNEL_AUDIT_UNAVAILABLE")
+            except (RuntimeClosed, SyncExecutionTimeout):
+                # run_io will not accept work after revoke/expiry.  The
+                # effect stays refused; the durable refusal row cannot be
+                # written through that API.
+                return _error("CHANNEL_ADMISSION_REFUSED")
             return _error("CHANNEL_ADMISSION_REFUSED")
         try:
-            emit_channel_audit(
+            await emit_channel_audit(
                 code="accepted",
                 accepted=True,
                 tool=name,
                 action_digest=action_digest,
             )
-        except AuditSinkPoisoned:
+        except (AuditSinkPoisoned, RuntimeClosed, SyncExecutionTimeout):
             # Custody precedes effect: without the durable admission fact the
             # tool call is refused, never silently un-audited.
             return _error("CHANNEL_AUDIT_UNAVAILABLE")
@@ -822,17 +849,30 @@ def create_tunnel_action_server(runtime: WorkbenchActionRuntime) -> Server:
 async def run_stdio(runtime: WorkbenchActionRuntime, *, close_timeout_seconds: float) -> None:
     """Serve one fixed channel over stdio and always close the runtime owner."""
 
-    server = create_tunnel_action_server(runtime)
-    options = server.create_initialization_options(
-        notification_options=NotificationOptions(),
-        experimental_capabilities={},
-    )
+    if not isinstance(runtime, WorkbenchActionRuntime):
+        raise ValueError("WORKBENCH_ACTION_RUNTIME_REQUIRED")
+    primary: BaseException | None = None
     try:
+        server = create_tunnel_action_server(runtime)
+        options = server.create_initialization_options(
+            notification_options=NotificationOptions(),
+            experimental_capabilities={},
+        )
         async with stdio_server() as (read_stream, write_stream):
             await server.run(read_stream, write_stream, options)
+    except BaseException as error:
+        primary = error
+        raise
     finally:
         runtime.revoke()
-        await runtime.aclose(timeout=close_timeout_seconds)
+        try:
+            await runtime.aclose(timeout=close_timeout_seconds)
+        except (RuntimeCloseIncomplete, RuntimeCloseUncertain) as close_error:
+            raise close_error from primary
+        except BaseException as close_error:
+            if primary is None:
+                raise
+            raise close_error from primary
 
 
 async def _serve(config: TunnelConfig) -> int:

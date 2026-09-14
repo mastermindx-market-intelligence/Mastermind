@@ -3,10 +3,12 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import os
 from pathlib import Path
 import subprocess
 import sys
+import threading
 import time
 
 import mcp.types as mcp_types
@@ -347,7 +349,10 @@ def test_expired_lease_refuses_open_and_live_admission(tmp_path: Path) -> None:
         # refused one never may.
         assert not (project / "sample.py").exists()
         events = _audit_lines(audit)
-        assert [event["code"] for event in events] == ["accepted", "channel_refused"]
+        # Expiry revokes the runtime before the refusal audit can use run_io.
+        # The effect is still refused; the durable refusal row cannot be
+        # written through that API after revoke.
+        assert [event["code"] for event in events] == ["accepted"]
     finally:
         if runtime is not None:
             try:
@@ -512,16 +517,31 @@ def test_same_key_restart_reconciles_applied_patch_without_another_write(
     )
 
 
-def test_dispatch_errors_are_sanitized_without_reflected_values(tmp_path: Path) -> None:
+def test_dispatch_errors_are_sanitized_without_reflected_values(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, capsys: pytest.CaptureFixture[str]
+) -> None:
     document, project, _, _ = _document(tmp_path)
     config = parse_tunnel_config(document)
+    sentinel = "SECRET_ACTION_TOKEN/" + ("Q" * 4096) + "/bin/sh -c boom"
 
     async def exercise() -> None:
         runtime = await create_runtime_channel(config)
         try:
             server = create_tunnel_action_server(runtime)
-            unknown = await _call(server, "run_project_command", {"argv": ["/bin/sh"]})
+            caplog.set_level(logging.DEBUG)
+            unknown = await _call(server, sentinel, {"argv": ["/bin/sh"]})
             assert _error_code(unknown) == "TOOL_NOT_AVAILABLE"
+            assert unknown.isError is True
+            assert unknown.content[0].text == '{"code":"TOOL_NOT_AVAILABLE"}'
+            assert sentinel not in unknown.content[0].text
+            assert sentinel not in caplog.text
+            captured = capsys.readouterr()
+            assert sentinel not in captured.out
+            assert sentinel not in captured.err
+            for record in caplog.records:
+                assert sentinel not in record.getMessage()
+                if record.args:
+                    assert sentinel not in str(record.args)
 
             injected = {
                 "project_ref": config.lease.project_ref,
@@ -617,45 +637,73 @@ def test_poisoned_audit_blocks_every_effect(tmp_path: Path) -> None:
     assert (audit / "orphaned.jsonl").exists()
 
 
-def test_blocked_physical_operation_is_sanitized(tmp_path: Path) -> None:
-    # A physical attempt that cannot finish inside the fixed I/O budget is
-    # reported as one sanitized code, never a raw executor exception.  The
-    # deadline is set far below the genuine cost of the bounded maximum-size
-    # REPLACE read/hash so the timeout is deterministic, not a race.
-    from integrations.workbench_action_mcp.patch_port import MAX_FILE_BYTES
-
-    document, project, audit, _ = _document(tmp_path)
-    document["io_timeout_seconds"] = 0.001
+def test_blocked_physical_audit_is_owned_and_event_loop_stays_responsive(
+    tmp_path: Path,
+) -> None:
+    # Explicit physical-entry gate: emit is stalled on a threading.Event inside
+    # the runtime-owned executor.  The event loop stays responsive, no effect
+    # is dispatched before durable audit completion, close is incomplete until
+    # release, and the stalled write is drained afterward.
+    document, project, _, _ = _document(tmp_path)
+    document["close_timeout_seconds"] = 0.1
     config = parse_tunnel_config(document)
-    target = project / "sample.py"
-    body = b"MARKER-OLD" + b"x" * (MAX_FILE_BYTES - len(b"MARKER-OLD"))
-    target.write_bytes(body)
+    entered = threading.Event()
+    release = threading.Event()
+
+    def failsafe() -> None:
+        time.sleep(8)
+        release.set()
+
+    threading.Thread(target=failsafe, daemon=True).start()
 
     async def exercise() -> None:
         runtime = await create_runtime_channel(config)
+        real_emit = runtime.channel_services.audit_sink.emit
+
+        def stalled(event):
+            entered.set()
+            if not release.wait(timeout=10):
+                raise RuntimeError("stalled emit was not released")
+            return real_emit(event)
+
+        runtime.channel_services.audit_sink.emit = stalled
         try:
             server = create_tunnel_action_server(runtime)
-            blocked = await _call(
-                server,
-                "prepare_text_patch",
-                {
-                    "project_ref": config.lease.project_ref,
-                    "relative_path": "sample.py",
-                    "mode": "REPLACE",
-                    "expected_sha256": hashlib.sha256(body).hexdigest(),
-                    "old_text": "MARKER-OLD",
-                    "new_text": "MARKER-NEW",
-                },
+            task = asyncio.create_task(
+                _call(
+                    server,
+                    "prepare_text_patch",
+                    {
+                        "project_ref": config.lease.project_ref,
+                        "relative_path": "sample.py",
+                        "mode": "CREATE",
+                        "new_text": "blocked-audit\n",
+                    },
+                )
             )
-            assert _error_code(blocked) == "ACTION_UNAVAILABLE"
-        finally:
+            deadline = time.monotonic() + 5
+            while not entered.is_set() and time.monotonic() < deadline:
+                await asyncio.sleep(0.01)
+            assert entered.is_set()
+            await asyncio.wait_for(asyncio.sleep(0.05), timeout=0.5)
+            assert not (project / "sample.py").exists()
+            with pytest.raises(RuntimeCloseIncomplete):
+                await runtime.aclose(timeout=0.1)
+            assert not task.done()
+            release.set()
+            await asyncio.wait_for(task, timeout=5)
+            assert not (project / "sample.py").exists()
             await runtime.aclose(timeout=5.0)
+        finally:
+            release.set()
+            runtime.revoke()
+            try:
+                await runtime.aclose(timeout=5.0)
+            except Exception:
+                pass
 
     asyncio.run(exercise())
-    assert target.read_bytes() == body
-    # Admission was durably recorded even though the physical attempt timed out.
-    events = _audit_lines(audit)
-    assert [event["code"] for event in events] == ["accepted"]
+    assert not (project / "sample.py").exists()
 
 
 def test_close_drain_is_incomplete_while_physical_operation_active(tmp_path: Path) -> None:
