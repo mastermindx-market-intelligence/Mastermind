@@ -33,6 +33,7 @@ class DevBoxPortRefused(RuntimeError):
             "PROCESS_IDENTITY_UNKNOWN",
             "EFFECT_UNKNOWN",
             "CANCEL_UNCERTAIN",
+            "PRE_EFFECT_RECEIPT_UNAVAILABLE",
         }
     )
 

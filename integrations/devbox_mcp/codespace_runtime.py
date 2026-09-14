@@ -30,6 +30,7 @@ _REF_RE = re.compile(r"^(target|generation|owner):[0-9a-f]{64}$")
 _HEX40 = re.compile(r"^[0-9a-f]{40}$")
 _RECORD_SCHEMA = "mastermind.devbox_process_receipt.v1"
 _BASELINE_SCHEMA = "mastermind.devbox_source_baseline.v1"
+_PROGRESS_SCHEMA = "mastermind.devbox_stream_progress.v1"
 _DEFAULT_TIMEOUT_SECONDS = 300
 _DEFAULT_OUTPUT_LIMIT_BYTES = 65536
 _START_WAIT_SECONDS = 2.5
@@ -128,6 +129,26 @@ def _atomic_json(path: Path, value: Mapping[str, Any]) -> None:
         raise
 
 
+def _volatile_json(path: Path, value: Mapping[str, Any]) -> None:
+    """Publish a complete live projection without claiming crash durability."""
+
+    data = _canonical_bytes(dict(value)) + b"\n"
+    fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
+    temp = Path(temp_name)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "wb", closefd=True) as handle:
+            handle.write(data)
+            handle.flush()
+        os.replace(temp, path)
+    except BaseException:
+        try:
+            temp.unlink()
+        except OSError:
+            pass
+        raise
+
+
 def _load_json(path: Path) -> dict[str, Any]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -146,6 +167,35 @@ def _load_source_baseline(path: Path) -> dict[str, Any]:
     if type(value) is not dict or value.get("schema") != _BASELINE_SCHEMA:
         raise DevBoxRuntimeError("RECEIPT_UNAVAILABLE", "source baseline is malformed")
     return value
+
+
+def _load_stream_progress(path: Path) -> dict[str, int] | None:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise DevBoxRuntimeError("RECEIPT_UNAVAILABLE", "stream progress is unavailable") from exc
+    expected = {"schema", "total_bytes", "retained_bytes", "dropped_bytes"}
+    if type(value) is not dict or set(value) != expected or value.get("schema") != _PROGRESS_SCHEMA:
+        raise DevBoxRuntimeError("RECEIPT_UNAVAILABLE", "stream progress is malformed")
+    total = value.get("total_bytes")
+    retained = value.get("retained_bytes")
+    dropped = value.get("dropped_bytes")
+    if (
+        type(total) is not int
+        or type(retained) is not int
+        or type(dropped) is not int
+        or retained < 0
+        or total < retained
+        or dropped != total - retained
+    ):
+        raise DevBoxRuntimeError("RECEIPT_UNAVAILABLE", "stream progress is malformed")
+    return {
+        "total_bytes": total,
+        "retained_bytes": retained,
+        "dropped_bytes": dropped,
+    }
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -308,9 +358,33 @@ _RECORD_IDENTITY_FIELDS = (
 )
 
 
+def _is_exact_empty_private_operation_directory(op_dir: Path) -> bool:
+    """Recognize only the pre-effect crash shape that an operator may remove."""
+
+    try:
+        info = op_dir.lstat()
+        if (
+            stat.S_ISLNK(info.st_mode)
+            or not stat.S_ISDIR(info.st_mode)
+            or info.st_uid != os.geteuid()
+            or stat.S_IMODE(info.st_mode) != 0o700
+        ):
+            return False
+        with os.scandir(op_dir) as entries:
+            return next(entries, None) is None
+    except OSError:
+        return False
+
+
 def _load_reconciled_record(op_dir: Path) -> dict[str, Any]:
-    primary = _load_json(op_dir / "record.json")
-    selected = primary
+    primary: dict[str, Any] | None = None
+    primary_error: DevBoxRuntimeError | None = None
+    try:
+        primary = _load_json(op_dir / "record.json")
+    except DevBoxRuntimeError as exc:
+        primary_error = exc
+
+    sidecars: list[dict[str, Any]] = []
     for filename, allowed_phases in (
         ("started.json", frozenset({"STARTED"})),
         ("terminal.json", frozenset({"TERMINAL", "TERMINAL_OUTPUT_UNCERTAIN"})),
@@ -319,12 +393,34 @@ def _load_reconciled_record(op_dir: Path) -> dict[str, Any]:
         if not path.exists():
             continue
         candidate = _load_json(path)
-        if candidate.get("phase") not in allowed_phases or any(
-            candidate.get(field) != primary.get(field) for field in _RECORD_IDENTITY_FIELDS
+        if candidate.get("phase") not in allowed_phases:
+            raise DevBoxRuntimeError("RECEIPT_UNAVAILABLE", "process receipt phase changed")
+        sidecars.append(candidate)
+
+    if not sidecars:
+        if primary is None:
+            if _is_exact_empty_private_operation_directory(op_dir):
+                raise DevBoxRuntimeError(
+                    "PRE_EFFECT_RECEIPT_UNAVAILABLE",
+                    "empty pre-effect operation receipt requires operator recovery",
+                )
+            assert primary_error is not None
+            raise primary_error
+        return primary
+
+    authority = sidecars[0]
+    for candidate in sidecars[1:]:
+        if any(
+            candidate.get(field) != authority.get(field)
+            for field in _RECORD_IDENTITY_FIELDS
         ):
             raise DevBoxRuntimeError("RECEIPT_UNAVAILABLE", "process receipt identity changed")
-        selected = candidate
-    return selected
+        authority = candidate
+    if primary is not None and any(
+        primary.get(field) != authority.get(field) for field in _RECORD_IDENTITY_FIELDS
+    ):
+        raise DevBoxRuntimeError("RECEIPT_UNAVAILABLE", "process receipt identity changed")
+    return authority
 
 
 def _persist_effect_record(op_dir: Path, record: Mapping[str, Any]) -> None:
@@ -646,7 +742,19 @@ class CodespaceDevBoxRuntime:
             "stdout": {"total_bytes": 0, "retained_bytes": 0, "dropped_bytes": 0},
             "stderr": {"total_bytes": 0, "retained_bytes": 0, "dropped_bytes": 0},
         }
-        _atomic_json(op_dir / "record.json", record)
+        try:
+            _atomic_json(op_dir / "record.json", record)
+        except OSError as exc:
+            try:
+                op_dir.rmdir()
+            except OSError as cleanup_error:
+                raise DevBoxRuntimeError(
+                    "PRE_EFFECT_RECEIPT_UNAVAILABLE",
+                    "pre-effect receipt failed and cleanup could not be proven",
+                ) from cleanup_error
+            raise DevBoxRuntimeError(
+                "START_REFUSED", "pre-effect receipt could not be persisted"
+            ) from exc
         supervisor_env = {
             "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"),
             "LANG": "C.UTF-8",
@@ -718,17 +826,25 @@ class CodespaceDevBoxRuntime:
         if record.get("process_ref") != process_ref:
             raise DevBoxRuntimeError("PROCESS_NOT_FOUND", "process receipt does not match reference")
         maximum = int(request.get("max_bytes", _DEFAULT_OUTPUT_LIMIT_BYTES))
+        accounting_complete = (
+            record.get("phase") == "TERMINAL"
+            and record.get("effect_state") == "APPLIED"
+        )
         stdout = _read_stream(
             op_dir / "stdout.bin",
+            progress_path=op_dir / "stdout.progress.json",
             cursor=int(request.get("stdout_cursor", 0)),
             maximum=maximum,
             metadata=record.get("stdout", {}),
+            accounting_complete=accounting_complete,
         )
         stderr = _read_stream(
             op_dir / "stderr.bin",
+            progress_path=op_dir / "stderr.progress.json",
             cursor=int(request.get("stderr_cursor", 0)),
             maximum=maximum,
             metadata=record.get("stderr", {}),
+            accounting_complete=accounting_complete,
         )
         return {
             "process_ref": process_ref,
@@ -788,62 +904,116 @@ class CodespaceDevBoxRuntime:
             latest = _load_reconciled_record(op_dir)
             if latest.get("terminal") is not True:
                 raise DevBoxRuntimeError("PROCESS_IDENTITY_UNKNOWN", "process disappeared before cancellation proof")
+            return {
+                "process_ref": process_ref,
+                "cancel_requested": bool(latest.get("cancel_requested", False)),
+                "terminal": True,
+            }
         except OSError as exc:
             raise DevBoxRuntimeError("CANCEL_UNCERTAIN", "process signal outcome is uncertain") from exc
         return {"process_ref": process_ref, "cancel_requested": True, "terminal": False}
 
 
-def _read_stream(path: Path, *, cursor: int, maximum: int, metadata: object) -> dict[str, Any]:
+def _read_stream(
+    path: Path,
+    *,
+    progress_path: Path,
+    cursor: int,
+    maximum: int,
+    metadata: object,
+    accounting_complete: bool,
+) -> dict[str, Any]:
     if type(metadata) is not dict:
         metadata = {}
     try:
         retained = path.stat().st_size if path.exists() else 0
     except OSError as exc:
         raise DevBoxRuntimeError("RECEIPT_UNAVAILABLE", "stream observation is unavailable") from exc
-    selected = min(maximum, max(0, retained - cursor)) if cursor <= retained else 0
+    progress = _load_stream_progress(progress_path) or {}
+
+    def _counter(source: Mapping[str, Any], name: str, fallback: int) -> int:
+        value = source.get(name, fallback)
+        return value if type(value) is int and value >= 0 else fallback
+
+    recorded_total = _counter(metadata, "total_bytes", retained)
+    progress_total = _counter(progress, "total_bytes", retained)
+    total_bytes = max(retained, recorded_total, progress_total)
+    recorded_retained = _counter(metadata, "retained_bytes", retained)
+    progress_retained = _counter(progress, "retained_bytes", retained)
+    total_bytes = max(total_bytes, recorded_retained, progress_retained)
+    retained_bytes = retained
+    recorded_dropped = _counter(metadata, "dropped_bytes", max(0, total_bytes - retained_bytes))
+    progress_dropped = _counter(progress, "dropped_bytes", max(0, total_bytes - retained_bytes))
+    dropped_bytes = max(recorded_dropped, progress_dropped, total_bytes - retained_bytes)
+    total_bytes = max(total_bytes, retained_bytes + dropped_bytes)
+
+    start_cursor = min(cursor, retained)
+    selected = min(maximum, max(0, retained - start_cursor))
     data = b""
     if selected:
         try:
             with path.open("rb") as handle:
-                handle.seek(cursor)
+                handle.seek(start_cursor)
                 data = handle.read(selected)
         except OSError as exc:
             raise DevBoxRuntimeError("RECEIPT_UNAVAILABLE", "stream observation is unavailable") from exc
-    end = cursor + len(data)
-    total_bytes = int(metadata.get("total_bytes", retained)) if type(metadata.get("total_bytes", retained)) is int else retained
-    retained_bytes = int(metadata.get("retained_bytes", retained)) if type(metadata.get("retained_bytes", retained)) is int else retained
-    dropped_bytes = int(metadata.get("dropped_bytes", max(0, total_bytes - retained_bytes))) if type(metadata.get("dropped_bytes", 0)) is int else max(0, total_bytes - retained_bytes)
+    end = start_cursor + len(data)
     return {
         "text": data.decode("utf-8", errors="replace"),
-        "start_cursor": cursor,
+        "start_cursor": start_cursor,
         "next_cursor": end,
         "total_bytes": total_bytes,
         "retained_bytes": retained_bytes,
         "dropped_bytes": dropped_bytes,
         "truncated": dropped_bytes > 0,
         "gap_ranges": [[retained_bytes, total_bytes]] if dropped_bytes > 0 else [],
+        "accounting_complete": accounting_complete,
     }
 
 
-def _pump(stream: Any, output: Path, limit: int, result: dict[str, int], key: str) -> None:
+def _stream_progress(total: int, retained: int) -> dict[str, Any]:
+    return {
+        "schema": _PROGRESS_SCHEMA,
+        "total_bytes": total,
+        "retained_bytes": retained,
+        "dropped_bytes": max(0, total - retained),
+    }
+
+
+def _pump(
+    stream: Any,
+    output: Path,
+    progress_path: Path,
+    limit: int,
+    result: dict[str, int],
+    key: str,
+) -> None:
     total = 0
     retained = 0
-    with output.open("wb") as handle:
-        os.chmod(output, 0o600)
-        while True:
-            chunk = stream.read(8192)
-            if not chunk:
-                break
-            total += len(chunk)
-            if retained < limit:
-                keep = chunk[: max(0, limit - retained)]
+    try:
+        _volatile_json(progress_path, _stream_progress(total, retained))
+        with output.open("wb", buffering=0) as handle:
+            os.chmod(output, 0o600)
+            read_available = getattr(stream, "read1", stream.read)
+            while True:
+                chunk = read_available(65536)
+                if not chunk:
+                    break
+                total += len(chunk)
+                keep = b""
+                if retained < limit:
+                    keep = chunk[: max(0, limit - retained)]
+                next_retained = retained + len(keep)
                 if keep:
                     handle.write(keep)
-                    retained += len(keep)
-        handle.flush()
-        os.fsync(handle.fileno())
-    result[key] = total
-    result[key + "_retained"] = retained
+                    retained = next_retained
+                _volatile_json(progress_path, _stream_progress(total, retained))
+            os.fsync(handle.fileno())
+        _volatile_json(progress_path, _stream_progress(total, retained))
+        result[key] = total
+        result[key + "_retained"] = retained
+    except BaseException:
+        result[key + "_error"] = 1
 
 
 def _supervise(
@@ -938,13 +1108,27 @@ def _supervise(
     totals: dict[str, int] = {}
     stdout_thread = threading.Thread(
         target=_pump,
-        args=(child.stdout, op_dir / "stdout.bin", output_limit_bytes, totals, "stdout"),
-        daemon=False,
+        args=(
+            child.stdout,
+            op_dir / "stdout.bin",
+            op_dir / "stdout.progress.json",
+            output_limit_bytes,
+            totals,
+            "stdout",
+        ),
+        daemon=True,
     )
     stderr_thread = threading.Thread(
         target=_pump,
-        args=(child.stderr, op_dir / "stderr.bin", output_limit_bytes, totals, "stderr"),
-        daemon=False,
+        args=(
+            child.stderr,
+            op_dir / "stderr.bin",
+            op_dir / "stderr.progress.json",
+            output_limit_bytes,
+            totals,
+            "stderr",
+        ),
+        daemon=True,
     )
     stdout_thread.start()
     stderr_thread.start()
@@ -967,7 +1151,12 @@ def _supervise(
             child.wait()
     stdout_thread.join(timeout=5)
     stderr_thread.join(timeout=5)
-    if stdout_thread.is_alive() or stderr_thread.is_alive():
+    if (
+        stdout_thread.is_alive()
+        or stderr_thread.is_alive()
+        or totals.get("stdout_error")
+        or totals.get("stderr_error")
+    ):
         # The child is terminal but retained output accounting is incomplete.
         final = _load_reconciled_record(op_dir)
         final.update(

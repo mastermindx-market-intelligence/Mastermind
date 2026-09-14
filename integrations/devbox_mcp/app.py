@@ -58,6 +58,7 @@ _STREAM_SCHEMA: dict[str, Any] = {
         "retained_bytes": {"type": "integer", "minimum": 0},
         "dropped_bytes": {"type": "integer", "minimum": 0},
         "truncated": {"type": "boolean"},
+        "accounting_complete": {"type": "boolean"},
         "gap_ranges": {
             "type": "array",
             "maxItems": 1,
@@ -80,6 +81,7 @@ _STREAM_SCHEMA: dict[str, Any] = {
         "retained_bytes",
         "dropped_bytes",
         "truncated",
+        "accounting_complete",
         "gap_ranges",
     ],
     "additionalProperties": False,

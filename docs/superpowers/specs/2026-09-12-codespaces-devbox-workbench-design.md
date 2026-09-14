@@ -80,6 +80,8 @@ Runtime admission also persists one exact source-baseline receipt outside the ch
 
 The detached supervisor records PID, PGID/session, Linux boot ID when available, `/proc/<pid>/stat` start identity, exact command digest, workspace identity, start time, terminal time, exit code, cancellation facts, and output file identities. It writes identity-bound `STARTED` and terminal sidecars before replacing the mutable projection, so a lost primary receipt replacement can be reconciled without spawning process two. A malformed or identity-mismatched sidecar fails closed. Client-visible results contain only bounded secret-free projections.
 
+Each stdout/stderr projection includes `accounting_complete`. While it is `false`, `total_bytes`, `retained_bytes`, `dropped_bytes`, and `gap_ranges` are monotonic facts for bytes already consumed by the pump; more bytes may still arrive. Retained bytes are written before the corresponding progress projection is published, so a reported retained range is already readable. `accounting_complete=true` is emitted only from an exact `TERMINAL` + `APPLIED` receipt, when the byte accounting is final.
+
 ## Command confinement
 
 This is `ATTENDED_ONLY`, not an autonomous sandbox claim. The deployment owner fixes:
@@ -98,7 +100,7 @@ A repository-root boundary does not claim strong filesystem confinement against 
 
 ## MCP/auth boundary
 
-The MCP app reuses `integrations.business_mcp_auth` for OAuth/JWT verification and audit. A dedicated policy/resource scope `workbench.execute` is required. The server owns no token store and never receives GitHub credentials. The deployment owner supplies the authenticated port and exact allowed host/origin policy.
+The MCP app reuses `integrations.business_mcp_auth` for OAuth/JWT verification and audit. A dedicated policy/resource scope `workbench.execute` is required. The server owns no token store and never receives GitHub credentials. The deployment owner supplies the authenticated port and exact allowed host/origin policy. `lease.expected_client_ref` is derived only through the public canonical `client_ref_digest(issuer, client_id)` helper from the exact accepted OAuth client identity; it is never copied from an unverified token or invented independently. A token without a usable `client_id`/`azp` cannot satisfy the DevBox lease.
 
 Personal Pro write capability is an observed account/platform fact for this Chairman seat and is no longer treated as absent. Account capability does not replace Mastermind authorization: every modifying call still needs the current authenticated subject, bound target generation and attended authority.
 
@@ -115,8 +117,9 @@ After the execution vertical is proven, a controller may automate `list/create/s
 - dirty or changed source before the first durably owned effect: `SOURCE_DIRTY`, refuse before effect;
 - operation-key conflict: refuse before effect;
 - response loss after a possible spawn: `EFFECT_UNKNOWN`, same-action reconciliation only;
+- exact empty owner-private operation directory with no durable PREPARED receipt: `PRE_EFFECT_RECEIPT_UNAVAILABLE`; stop the service and use the bounded operator recovery procedure, never infer a spawned process or auto-delete an ambiguous directory;
 - missing/rotated process identity: unknown/refused, never signal a PID by number alone;
-- output gap/truncation: explicit retained range/gap/truncation metadata;
+- output gap/truncation: explicit retained range/gap/truncation metadata plus `accounting_complete`;
 - timeout: owned supervisor terminates the exact process group and records terminal truth; inability to prove termination is not rewritten as cancellation success;
 - Codespace stop/disconnect: process becomes unavailable/unknown until same target is observed again; never auto-fail over to a Mac or second Codespace;
 - Git working-tree changes are evidence, not publication or acceptance.

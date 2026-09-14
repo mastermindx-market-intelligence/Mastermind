@@ -30,7 +30,7 @@
 - Create `integrations/devbox_mcp/codespace_runtime.py`
 - Test `tests/devbox_mcp/test_codespace_runtime.py`
 
-**RED behaviors:** startup refuses non-Linux/unqualified shell or unsafe repo/state roots; root identity is stable; child env strips GitHub/cloud/SSH credential variables and Git credential helper configuration; start persists a pre-effect receipt before spawn; identical operation reuses one process; changed payload conflicts; stdout/stderr are separate and independently cursor-read; exit 0 and exit 7 preserved; timeout terminal truth; cancel verifies boot/PID start identity before process-group signal; stale/unknown process refuses; output bounds/gaps explicit.
+**RED behaviors:** startup refuses non-Linux/unqualified shell or unsafe repo/state roots; root identity is stable; child env strips GitHub/cloud/SSH credential variables and Git credential helper configuration; start persists a pre-effect receipt before spawn; a known failed pre-effect write cleans its exact empty operation directory, while an inherited exact-empty crash shape produces typed operator recovery; identical operation reuses one process; changed payload conflicts; stdout/stderr are separate and independently cursor-read; retained bytes become visible before live progress advertises them; live/final accounting is distinguished explicitly; exit 0 and exit 7 are preserved; timeout terminal truth; cancel verifies boot/PID/PGID/start identity before process-group signal; terminal/cancel races return the terminal receipt; stale/unknown process refuses; output bounds/gaps are explicit.
 
 **GREEN:** implement an injected-clock/runtime-root `CodespaceDevBoxRuntime`. Use a detached supervisor process for commands expected to outlive the request. Store provider-local execution receipts in private deployment-owned state outside the repo; fsync atomic JSON transitions. Never create Executive lifecycle rows or Git remotes.
 
@@ -76,7 +76,7 @@ Run the full new suite, then adjacent Workbench/business-auth suites. Exercise a
 
 **External gate:** current `gh` token on the authorized Mac lacks `codespace` scope. Refresh the existing GitHub CLI authorization for scope `codespace`; do not create a new credential plane. Read back scope/capability before any create.
 
-Create one disposable Codespace from this exact branch on the smallest available machine and aggressive idle timeout. Run the preflight and the Task-2 behavioral canary inside that Codespace. Prove exit-0, exit-7, detached continuation/readback, duplicate same-operation reconciliation, conflict refusal, exact cancellation and credential-env stripping. Do not push/merge from the DevBox shell.
+Create one disposable Codespace from this exact branch on the smallest available machine and aggressive idle timeout. Mint the lease caller binding with the public `client_ref_digest` helper from the exact accepted OAuth client identity. Run the preflight and the Task-2 behavioral canary inside that Codespace. Prove exit-0, exit-7, detached continuation/readback, duplicate same-operation reconciliation, conflict refusal, exact cancellation, live/final stream accounting and credential-env stripping. Do not push/merge from the DevBox shell.
 
 Stop the Codespace after evidence capture unless the next MCP canary immediately requires it.
 

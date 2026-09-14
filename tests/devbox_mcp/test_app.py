@@ -85,6 +85,7 @@ class Port:
                 "retained_bytes": 2,
                 "dropped_bytes": 0,
                 "truncated": False,
+                "accounting_complete": True,
                 "gap_ranges": [],
             }
             return {
@@ -331,6 +332,7 @@ class DevBoxAppTests(unittest.IsolatedAsyncioTestCase):
                     "retained_bytes": size,
                     "dropped_bytes": 0,
                     "truncated": False,
+                    "accounting_complete": True,
                     "gap_ranges": [],
                 }
             return {

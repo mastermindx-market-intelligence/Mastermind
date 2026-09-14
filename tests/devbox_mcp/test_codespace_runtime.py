@@ -60,6 +60,46 @@ def _open(repo: Path, state: Path, **kwargs) -> CodespaceDevBoxRuntime:
     )
 
 
+def _manual_started_operation(
+    runtime: CodespaceDevBoxRuntime,
+    state: Path,
+    operation_key: str,
+    *,
+    pid: int = 4242,
+    pgid: int = 4242,
+    start_identity: str = "procfs:12345",
+    boot_id: str | None = "boot-fixture",
+) -> tuple[Path, str, dict]:
+    digest = runtime._op_digest(operation_key)
+    process_ref = "process:" + digest
+    op_dir = state / "operations" / digest
+    op_dir.mkdir(mode=0o700)
+    record = {
+        "schema": "mastermind.devbox_process_receipt.v1",
+        "process_ref": process_ref,
+        "request_digest": "6" * 64,
+        "target_ref": runtime.binding.target_ref,
+        "generation": runtime.binding.generation,
+        "owner_ref": runtime.binding.owner_ref,
+        "repository": runtime.binding.repository,
+        "committed_head": runtime.binding.committed_head,
+        "phase": "STARTED",
+        "effect_state": "APPLIED",
+        "terminal": False,
+        "timed_out": False,
+        "cancel_requested": False,
+        "child_pid": pid,
+        "child_pgid": pgid,
+        "process_start_identity": start_identity,
+        "boot_id": boot_id,
+        "exit_code": None,
+        "stdout": {"total_bytes": 0, "retained_bytes": 0, "dropped_bytes": 0},
+        "stderr": {"total_bytes": 0, "retained_bytes": 0, "dropped_bytes": 0},
+    }
+    runtime_module._atomic_json(op_dir / "record.json", record)
+    return op_dir, process_ref, record
+
+
 async def _terminal(
     runtime: CodespaceDevBoxRuntime,
     process_ref: str,
@@ -175,6 +215,60 @@ def test_not_applied_attempt_does_not_consume_clean_baseline_gate(
 
         assert exc_info.value.code == "SOURCE_DIRTY"
         assert not (repo / "applied.txt").exists()
+
+    asyncio.run(exercise())
+
+
+def test_pre_effect_receipt_write_failure_cleans_empty_operation_and_allows_retry(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def exercise() -> None:
+        state = tmp_path / "state"
+        runtime = _open(repo, state)
+        real_atomic = runtime_module._atomic_json
+
+        def fail_prepared(path: Path, value: dict) -> None:
+            if path.name == "record.json" and value.get("phase") == "PREPARED":
+                raise OSError("simulated pre-effect receipt failure")
+            real_atomic(path, value)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(runtime_module, "_atomic_json", fail_prepared)
+            with pytest.raises(DevBoxRuntimeError) as exc_info:
+                await runtime.start_command(
+                    {"operation_key": "receipt-write-fails", "command_text": "true"}
+                )
+            assert exc_info.value.code == "START_REFUSED"
+
+        failed_dir = state / "operations" / runtime._op_digest("receipt-write-fails")
+        assert not failed_dir.exists()
+        started = await runtime.start_command(
+            {"operation_key": "after-receipt-cleanup", "command_text": "printf recovered"}
+        )
+        result = await _terminal(runtime, started["process_ref"])
+        assert result["exit_code"] == 0
+        assert result["stdout"]["text"] == "recovered"
+
+    asyncio.run(exercise())
+
+
+def test_exact_empty_pre_effect_directory_has_typed_recovery_refusal(
+    repo: Path, tmp_path: Path
+) -> None:
+    async def exercise() -> None:
+        state = tmp_path / "state"
+        runtime = _open(repo, state)
+        orphan = state / "operations" / runtime._op_digest("orphan-pre-effect")
+        orphan.mkdir(mode=0o700)
+        orphan.chmod(0o700)
+
+        for operation_key in ("orphan-pre-effect", "different-after-orphan"):
+            with pytest.raises(DevBoxRuntimeError) as exc_info:
+                await runtime.start_command(
+                    {"operation_key": operation_key, "command_text": "true"}
+                )
+            assert exc_info.value.code == "PRE_EFFECT_RECEIPT_UNAVAILABLE"
+        assert list(orphan.iterdir()) == []
 
     asyncio.run(exercise())
 
@@ -437,6 +531,140 @@ def test_cancel_targets_exact_owned_generation(repo: Path, tmp_path: Path) -> No
     asyncio.run(exercise())
 
 
+def test_cancel_after_terminal_returns_terminal_without_signalling(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def exercise() -> None:
+        runtime = _open(repo, tmp_path / "state")
+        started = await runtime.start_command(
+            {"operation_key": "already-terminal", "command_text": "true"}
+        )
+        terminal = await _terminal(runtime, started["process_ref"])
+        signals: list[tuple[int, int]] = []
+        monkeypatch.setattr(
+            runtime_module.os, "killpg", lambda pgid, sig: signals.append((pgid, sig))
+        )
+        result = await runtime.cancel_process(
+            {"process_ref": started["process_ref"], "reason": "late cancel"}
+        )
+        assert result == {
+            "process_ref": started["process_ref"],
+            "cancel_requested": terminal["cancel_requested"],
+            "terminal": True,
+        }
+        assert signals == []
+
+    asyncio.run(exercise())
+
+
+def test_cancel_unknown_process_refuses(repo: Path, tmp_path: Path) -> None:
+    runtime = _open(repo, tmp_path / "state")
+    with pytest.raises(DevBoxRuntimeError) as exc_info:
+        asyncio.run(
+            runtime.cancel_process(
+                {"process_ref": "process:" + "f" * 64, "reason": "unknown"}
+            )
+        )
+    assert exc_info.value.code == "PROCESS_NOT_FOUND"
+
+
+def test_cancel_refuses_identity_mismatch_before_signal(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = tmp_path / "state"
+    runtime = _open(repo, state)
+    _op_dir, process_ref, _record = _manual_started_operation(
+        runtime, state, "identity-mismatch"
+    )
+    signals: list[tuple[int, int]] = []
+    monkeypatch.setattr(runtime_module.os, "getpgid", lambda _pid: 9999)
+    monkeypatch.setattr(
+        runtime_module,
+        "_process_start_identity",
+        lambda _pid: ("procfs:changed", "boot-fixture"),
+    )
+    monkeypatch.setattr(
+        runtime_module.os, "killpg", lambda pgid, sig: signals.append((pgid, sig))
+    )
+
+    with pytest.raises(DevBoxRuntimeError) as exc_info:
+        asyncio.run(
+            runtime.cancel_process(
+                {"process_ref": process_ref, "reason": "identity mismatch"}
+            )
+        )
+    assert exc_info.value.code == "PROCESS_IDENTITY_UNKNOWN"
+    assert signals == []
+
+
+def test_cancel_returns_terminal_projection_when_process_exits_before_signal(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = tmp_path / "state"
+    runtime = _open(repo, state)
+    op_dir, process_ref, record = _manual_started_operation(
+        runtime, state, "exit-before-signal"
+    )
+    monkeypatch.setattr(runtime_module.os, "getpgid", lambda _pid: 4242)
+    monkeypatch.setattr(
+        runtime_module,
+        "_process_start_identity",
+        lambda _pid: ("procfs:12345", "boot-fixture"),
+    )
+
+    def exit_before_signal(_pgid: int, _sig: int) -> None:
+        terminal = dict(record)
+        terminal.update(
+            phase="TERMINAL",
+            terminal=True,
+            exit_code=0,
+            cancel_requested=True,
+            ended_at_ns=time.time_ns(),
+        )
+        runtime_module._persist_effect_record(op_dir, terminal)
+        raise ProcessLookupError("already exited")
+
+    monkeypatch.setattr(runtime_module.os, "killpg", exit_before_signal)
+    result = asyncio.run(
+        runtime.cancel_process(
+            {"process_ref": process_ref, "reason": "race with terminal"}
+        )
+    )
+    assert result == {
+        "process_ref": process_ref,
+        "cancel_requested": True,
+        "terminal": True,
+    }
+
+
+def test_cancel_signal_error_is_effect_uncertain(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = tmp_path / "state"
+    runtime = _open(repo, state)
+    _op_dir, process_ref, _record = _manual_started_operation(
+        runtime, state, "signal-uncertain"
+    )
+    monkeypatch.setattr(runtime_module.os, "getpgid", lambda _pid: 4242)
+    monkeypatch.setattr(
+        runtime_module,
+        "_process_start_identity",
+        lambda _pid: ("procfs:12345", "boot-fixture"),
+    )
+    monkeypatch.setattr(
+        runtime_module.os,
+        "killpg",
+        lambda _pgid, _sig: (_ for _ in ()).throw(OSError("signal uncertain")),
+    )
+    with pytest.raises(DevBoxRuntimeError) as exc_info:
+        asyncio.run(
+            runtime.cancel_process(
+                {"process_ref": process_ref, "reason": "signal uncertainty"}
+            )
+        )
+    assert exc_info.value.code == "CANCEL_UNCERTAIN"
+
+
 def test_root_identity_drift_refuses_new_effect(repo: Path, tmp_path: Path) -> None:
     async def exercise() -> None:
         runtime = _open(repo, tmp_path / "state")
@@ -455,6 +683,88 @@ def test_root_identity_drift_refuses_new_effect(repo: Path, tmp_path: Path) -> N
     asyncio.run(exercise())
 
 
+def test_live_progress_never_claims_retained_bytes_before_file_is_visible(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output = tmp_path / "stdout.bin"
+    progress = tmp_path / "stdout.progress.json"
+    real_volatile = runtime_module._volatile_json
+    observed_progress: list[dict] = []
+
+    def witness(path: Path, value: dict) -> None:
+        if path == progress and value.get("retained_bytes", 0) > 0:
+            visible = output.stat().st_size if output.exists() else 0
+            assert visible >= value["retained_bytes"]
+        observed_progress.append(dict(value))
+        real_volatile(path, value)
+
+    monkeypatch.setattr(runtime_module, "_volatile_json", witness)
+    result: dict[str, int] = {}
+    runtime_module._pump(
+        io.BytesIO(b"x" * 5000),
+        output,
+        progress,
+        2048,
+        result,
+        "stdout",
+    )
+
+    assert result == {"stdout": 5000, "stdout_retained": 2048}
+    assert output.read_bytes() == b"x" * 2048
+    assert observed_progress[-1]["total_bytes"] == 5000
+    assert observed_progress[-1]["retained_bytes"] == 2048
+
+
+def test_midflight_stream_accounting_reports_produced_and_dropped_bytes(
+    repo: Path, tmp_path: Path
+) -> None:
+    async def exercise() -> None:
+        runtime = _open(repo, tmp_path / "state")
+        started = await runtime.start_command(
+            {
+                "operation_key": "midflight-accounting",
+                "command_text": (
+                    "python3 -c \"import sys,time; "
+                    "sys.stdout.write('x'*5000); sys.stdout.flush(); time.sleep(1.5)\""
+                ),
+                "timeout_seconds": 5,
+                "output_limit_bytes": 2048,
+            }
+        )
+        latest: dict = {}
+        deadline = time.monotonic() + 1.0
+        try:
+            while time.monotonic() < deadline:
+                latest = await runtime.read_process(
+                    {"process_ref": started["process_ref"], "max_bytes": 65536}
+                )
+                if (
+                    latest["stdout"]["text"]
+                    and latest["stdout"]["total_bytes"] == 5000
+                ):
+                    break
+                await asyncio.sleep(0.05)
+            assert latest["terminal"] is False
+            assert latest["stdout"]["accounting_complete"] is False
+            assert latest["stdout"]["text"] == "x" * 2048
+            assert latest["stdout"]["total_bytes"] == 5000
+            assert latest["stdout"]["retained_bytes"] == 2048
+            assert latest["stdout"]["dropped_bytes"] == 5000 - 2048
+            assert latest["stdout"]["truncated"] is True
+            assert latest["stdout"]["gap_ranges"] == [[2048, 5000]]
+        finally:
+            observed = await runtime.read_process(
+                {"process_ref": started["process_ref"], "max_bytes": 65536}
+            )
+            if not observed["terminal"]:
+                await runtime.cancel_process(
+                    {"process_ref": started["process_ref"], "reason": "test cleanup"}
+                )
+            await _terminal(runtime, started["process_ref"], timeout=6)
+
+    asyncio.run(exercise())
+
+
 def test_output_is_bounded_and_reports_dropped_bytes(repo: Path, tmp_path: Path) -> None:
     async def exercise() -> None:
         runtime = _open(repo, tmp_path / "state")
@@ -468,6 +778,8 @@ def test_output_is_bounded_and_reports_dropped_bytes(repo: Path, tmp_path: Path)
         )
         result = await _terminal(runtime, started["process_ref"])
         assert result["exit_code"] == 0
+        assert result["stdout"]["accounting_complete"] is True
+        assert result["stderr"]["accounting_complete"] is True
         assert result["stdout"]["retained_bytes"] == 2048
         assert result["stderr"]["retained_bytes"] == 2048
         assert result["stdout"]["dropped_bytes"] == 5000 - 2048
@@ -476,6 +788,105 @@ def test_output_is_bounded_and_reports_dropped_bytes(repo: Path, tmp_path: Path)
         assert result["stderr"]["truncated"] is True
 
     asyncio.run(exercise())
+
+
+def test_cursor_past_retained_output_rebases_to_readable_end(
+    repo: Path, tmp_path: Path
+) -> None:
+    async def exercise() -> None:
+        runtime = _open(repo, tmp_path / "state")
+        started = await runtime.start_command(
+            {
+                "operation_key": "cursor-rebase",
+                "command_text": "printf abc",
+                "timeout_seconds": 5,
+            }
+        )
+        await _terminal(runtime, started["process_ref"])
+        result = await runtime.read_process(
+            {
+                "process_ref": started["process_ref"],
+                "stdout_cursor": 999,
+                "max_bytes": 65536,
+            }
+        )
+        assert result["stdout"]["text"] == ""
+        assert result["stdout"]["start_cursor"] == 3
+        assert result["stdout"]["next_cursor"] == 3
+        assert result["stdout"]["total_bytes"] == 3
+        assert result["stdout"]["retained_bytes"] == 3
+
+    asyncio.run(exercise())
+
+
+def test_output_uncertainty_does_not_leave_nondaemon_supervisor_threads(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = tmp_path / "state"
+    runtime = _open(repo, state)
+    digest = runtime._op_digest("pump-uncertainty")
+    process_ref = "process:" + digest
+    op_dir = state / "operations" / digest
+    op_dir.mkdir(mode=0o700)
+    prepared = {
+        "schema": "mastermind.devbox_process_receipt.v1",
+        "process_ref": process_ref,
+        "request_digest": "5" * 64,
+        "target_ref": runtime.binding.target_ref,
+        "generation": runtime.binding.generation,
+        "owner_ref": runtime.binding.owner_ref,
+        "repository": runtime.binding.repository,
+        "committed_head": runtime.binding.committed_head,
+        "phase": "PREPARED",
+        "effect_state": "EFFECT_UNKNOWN",
+        "terminal": False,
+        "timed_out": False,
+        "cancel_requested": False,
+        "child_pid": None,
+        "child_pgid": None,
+        "process_start_identity": None,
+        "boot_id": None,
+        "exit_code": None,
+        "stdout": {"total_bytes": 0, "retained_bytes": 0, "dropped_bytes": 0},
+        "stderr": {"total_bytes": 0, "retained_bytes": 0, "dropped_bytes": 0},
+    }
+    runtime_module._atomic_json(op_dir / "record.json", prepared)
+
+    class FakeStdin:
+        buffer = io.BytesIO(b'{"command_text":"true"}\n')
+
+    daemon_flags: list[bool] = []
+
+    class StuckThread:
+        def __init__(self, *args, daemon: bool, **kwargs) -> None:
+            daemon_flags.append(daemon)
+
+        def start(self) -> None:
+            return None
+
+        def join(self, timeout: float | None = None) -> None:
+            return None
+
+        def is_alive(self) -> bool:
+            return True
+
+    monkeypatch.setattr(runtime_module.sys, "stdin", FakeStdin())
+    monkeypatch.setattr(runtime_module.threading, "Thread", StuckThread)
+    exit_code = runtime_module._supervise(
+        op_dir,
+        repo_root=repo,
+        state_home=state / "home",
+        shell=Path("/bin/bash"),
+        timeout_seconds=5,
+        output_limit_bytes=65536,
+    )
+
+    assert exit_code == 74
+    assert daemon_flags == [True, True]
+    observed = runtime_module._load_reconciled_record(op_dir)
+    assert observed["phase"] == "TERMINAL_OUTPUT_UNCERTAIN"
+    assert observed["effect_state"] == "EFFECT_UNKNOWN"
+    assert observed["terminal"] is True
 
 
 def test_durable_record_contains_no_command_text_or_secret_values(
@@ -572,3 +983,38 @@ def test_supervisor_reconciles_when_primary_effect_receipt_write_is_lost(
     assert observed["stdout"]["text"] == "durable"
     assert (op_dir / "started.json").is_file()
     assert (op_dir / "terminal.json").is_file()
+
+    (op_dir / "record.json").unlink()
+    missing_primary = asyncio.run(
+        runtime.read_process({"process_ref": process_ref, "max_bytes": 65536})
+    )
+    assert missing_primary["effect_state"] == "APPLIED"
+    assert missing_primary["terminal"] is True
+    assert missing_primary["exit_code"] == 0
+    assert missing_primary["stdout"]["text"] == "durable"
+
+    (op_dir / "record.json").write_text("{malformed", encoding="utf-8")
+    malformed_primary = asyncio.run(
+        runtime.read_process({"process_ref": process_ref, "max_bytes": 65536})
+    )
+    assert malformed_primary["effect_state"] == "APPLIED"
+    assert malformed_primary["terminal"] is True
+    assert malformed_primary["exit_code"] == 0
+    assert malformed_primary["stdout"]["text"] == "durable"
+
+    terminal_path = op_dir / "terminal.json"
+    valid_terminal = json.loads(terminal_path.read_text(encoding="utf-8"))
+    identity_conflict = dict(valid_terminal)
+    identity_conflict["owner_ref"] = "owner:" + "f" * 64
+    real_atomic(terminal_path, identity_conflict)
+    with pytest.raises(DevBoxRuntimeError) as exc_info:
+        asyncio.run(runtime.read_process({"process_ref": process_ref, "max_bytes": 65536}))
+    assert exc_info.value.code == "RECEIPT_UNAVAILABLE"
+
+    phase_conflict = dict(valid_terminal)
+    phase_conflict["phase"] = "STARTED"
+    real_atomic(terminal_path, phase_conflict)
+    with pytest.raises(DevBoxRuntimeError) as exc_info:
+        asyncio.run(runtime.read_process({"process_ref": process_ref, "max_bytes": 65536}))
+    assert exc_info.value.code == "RECEIPT_UNAVAILABLE"
+    real_atomic(terminal_path, valid_terminal)
