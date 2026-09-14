@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import socket
@@ -18,8 +19,14 @@ if str(_RELEASE_ROOT) not in sys.path:
 from control_plane.executive_privileged_action import (
     REQUEST_SCHEMA,
     STATUS_REQUEST_SCHEMA,
+    canonical_request_bytes,
     validate_request,
     validate_status_request,
+)
+from control_plane.executive_privileged_broker import (
+    BrokerTrustError,
+    WIRE_RESPONSE_SCHEMA,
+    validate_terminal_receipt,
 )
 
 
@@ -49,7 +56,6 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Invoke one reviewed Mastermind privileged action")
     parser.add_argument("action", choices=_ACTIONS + (_STATUS_ACTION,))
     parser.add_argument("--request-id")
-    parser.add_argument("--socket", dest="socket_path", type=Path, default=DEFAULT_SOCKET)
     parser.add_argument("--slot-id", choices=_SLOT_IDS)
     parser.add_argument("--expected-credential-kind", choices=_CREDENTIAL_KINDS)
     parser.add_argument("--workspace-binding-class")
@@ -181,12 +187,43 @@ def _status_exit_code(response: dict[str, object], request_id: str) -> int:
     return 1
 
 
+def _effect_exit_code(
+    response: dict[str, object], request: dict[str, object]
+) -> int:
+    if response.get("schema") != WIRE_RESPONSE_SCHEMA or not isinstance(response.get("ok"), bool):
+        raise RuntimeError("privileged broker returned an invalid effect response")
+    if response["ok"] is False:
+        if frozenset(response) != frozenset({"schema", "ok", "error", "detail"}):
+            raise RuntimeError("privileged broker returned an invalid refusal response")
+        if not isinstance(response.get("error"), str) or not isinstance(response.get("detail"), str):
+            raise RuntimeError("privileged broker returned an invalid refusal response")
+        return 75 if response["error"] == "EFFECT_UNKNOWN" else 1
+    if (
+        frozenset(response) != frozenset({"schema", "ok", "replayed", "receipt"})
+        or not isinstance(response.get("replayed"), bool)
+        or not isinstance(response.get("receipt"), dict)
+    ):
+        raise RuntimeError("privileged broker returned an invalid success response")
+    validated = validate_request(request)
+    digest = hashlib.sha256(canonical_request_bytes(validated)).hexdigest()
+    release_name = _RELEASE_ROOT.name
+    expected_release = release_name if re.fullmatch(r"[0-9a-f]{40}", release_name) else None
+    receipt = validate_terminal_receipt(
+        response["receipt"],
+        expected_request_id=validated.request_id,
+        expected_request_sha256=digest,
+        expected_release_sha=expected_release,
+        expected_action=validated.action,
+    )
+    return 0 if receipt["outcome"] == "SUCCEEDED" else 1
+
+
 def _main_status(values: Sequence[str], namespace: argparse.Namespace) -> int:
     request = build_status_request(values)
     sys.stderr.write(f"mmx-admin request_id={request['request_id']}\n")
     sys.stderr.flush()
     try:
-        response = send_status_request(request, socket_path=namespace.socket_path)
+        response = send_status_request(request, socket_path=DEFAULT_SOCKET)
     except (OSError, RuntimeError, UnicodeError, json.JSONDecodeError) as exc:
         sys.stderr.write(f"mmx-admin transport failure: {exc}\n")
         return 69
@@ -208,17 +245,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     sys.stderr.write(f"mmx-admin request_id={request['request_id']}\n")
     sys.stderr.flush()
     try:
-        response = send_request(request, socket_path=namespace.socket_path)
+        response = send_request(request, socket_path=DEFAULT_SOCKET)
     except (OSError, RuntimeError, UnicodeError, json.JSONDecodeError) as exc:
         sys.stderr.write(f"mmx-admin transport failure: {exc}\n")
         return 69
-    sys.stdout.write(json.dumps(response, sort_keys=True, separators=(",", ":")) + "\n")
-    if response.get("ok") is not True:
-        return 75 if response.get("error") == "EFFECT_UNKNOWN" else 1
-    receipt = response.get("receipt")
-    if not isinstance(receipt, dict) or receipt.get("outcome") != "SUCCEEDED":
+    try:
+        exit_code = _effect_exit_code(response, request)
+    except (BrokerTrustError, RuntimeError) as exc:
+        sys.stderr.write(f"mmx-admin effect response refused or invalid: {exc}\n")
         return 1
-    return 0
+    sys.stdout.write(json.dumps(response, sort_keys=True, separators=(",", ":")) + "\n")
+    return exit_code
 
 
 if __name__ == "__main__":

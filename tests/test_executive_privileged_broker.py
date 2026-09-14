@@ -127,7 +127,7 @@ def test_terminal_receipt_from_other_release_conflicts_without_spawn(tmp_path: P
     broker.handle(_raw(), peer_uid=501)
     path = broker.receipt_path("req-001")
     value = json.loads(path.read_text())
-    value["release_sha"] = "foreign-release"
+    value["release_sha"] = "f" * 40
     path.write_text(json.dumps(value) + "\n")
 
     with pytest.raises(RequestIdConflictError, match="release"):
@@ -649,3 +649,31 @@ def test_malformed_state_entry_never_becomes_absence_or_reexecution(
             broker.handle(_raw(), peer_uid=501)
     assert executor.calls == []
     assert path.is_symlink()
+
+
+def test_replay_rejects_corrupt_terminal_receipt_without_second_spawn(tmp_path: Path) -> None:
+    executor = FakeExecutor()
+    broker = _broker(tmp_path, executor)
+    broker.handle(_raw(), peer_uid=501)
+    receipt_path = broker.receipt_path("req-001")
+    receipt = json.loads(receipt_path.read_text())
+    receipt["stdout_sha256"] = "not-a-valid-digest"
+    receipt_path.write_text(json.dumps(receipt) + "\n")
+
+    with pytest.raises(BrokerTrustError, match="terminal receipt"):
+        broker.handle(_raw(), peer_uid=501)
+    assert len(executor.calls) == 1
+
+
+def test_status_rejects_incomplete_terminal_receipt_shape(tmp_path: Path) -> None:
+    executor = FakeExecutor()
+    broker = _broker(tmp_path, executor)
+    broker.handle(_raw(), peer_uid=501)
+    receipt_path = broker.receipt_path("req-001")
+    receipt = json.loads(receipt_path.read_text())
+    receipt.pop("effect_class")
+    receipt_path.write_text(json.dumps(receipt) + "\n")
+
+    with pytest.raises(BrokerTrustError, match="terminal receipt"):
+        broker.query_status(_status(), peer_uid=501)
+    assert len(executor.calls) == 1

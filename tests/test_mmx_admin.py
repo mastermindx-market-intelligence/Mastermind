@@ -271,3 +271,50 @@ def test_status_client_refuses_uncorrelated_or_malformed_terminal(monkeypatch, p
     response.update(patch)
     monkeypatch.setattr(mmx_admin, "send_status_request", lambda *_a, **_k: response)
     assert mmx_admin.main(["status", "--request-id", "req-001"]) != 0
+
+
+def test_cli_rejects_caller_selected_socket_path() -> None:
+    with pytest.raises(SystemExit):
+        build_request(
+            [
+                "executive.services.start",
+                "--request-id",
+                "req-fixed-socket-001",
+                "--socket",
+                "/tmp/untrusted-broker.sock",
+            ]
+        )
+
+
+def test_main_effect_refuses_uncorrelated_success_response(monkeypatch, capsys) -> None:
+    response = {
+        "schema": "mastermind.executive_privileged_action_response.v1",
+        "ok": True,
+        "replayed": False,
+        "receipt": {
+            "schema": "mastermind.executive_privileged_action_receipt.v1",
+            "request_id": "req-other-001",
+            "request_sha256": "0" * 64,
+            "action": "executive.services.start",
+            "effect_class": "SERVICE_CONTROL",
+            "started_at": "2026-09-14T00:00:00Z",
+            "finished_at": "2026-09-14T00:00:01Z",
+            "exit_code": 0,
+            "outcome": "SUCCEEDED",
+            "release_sha": "a" * 40,
+            "broker_version": "1",
+            "stdout_bytes": 0,
+            "stdout_sha256": "0" * 64,
+            "stdout_excerpt": "",
+            "stderr_bytes": 0,
+            "stderr_sha256": "0" * 64,
+            "stderr_excerpt": "",
+        },
+    }
+    monkeypatch.setattr(mmx_admin, "send_request", lambda *_a, **_k: response)
+
+    rc = mmx_admin.main(["executive.services.start", "--request-id", "req-bound-001"])
+    captured = capsys.readouterr()
+
+    assert rc != 0
+    assert "refused or invalid" in captured.err

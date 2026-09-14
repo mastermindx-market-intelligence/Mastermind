@@ -25,6 +25,7 @@ from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from common.redaction import sanitize_external_text
 from control_plane.executive_privileged_action import (
+    ACTION_EFFECT_CLASS,
     PrivilegedActionRequest,
     PrivilegedActionStatusRequest,
     STATUS_REQUEST_SCHEMA,
@@ -53,6 +54,29 @@ _CLOSED_ENV = {
     "NO_COLOR": "1",
 }
 _MAX_RECEIPT_BYTES = 64 * 1024
+_REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{2,63}$")
+_UTC_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
+_TERMINAL_RECEIPT_KEYS = frozenset(
+    {
+        "schema",
+        "request_id",
+        "request_sha256",
+        "action",
+        "effect_class",
+        "started_at",
+        "finished_at",
+        "exit_code",
+        "outcome",
+        "release_sha",
+        "broker_version",
+        "stdout_bytes",
+        "stdout_sha256",
+        "stdout_excerpt",
+        "stderr_bytes",
+        "stderr_sha256",
+        "stderr_excerpt",
+    }
+)
 
 
 class PrivilegedBrokerError(RuntimeError):
@@ -240,6 +264,83 @@ def _validate_stored_digest(value: Any) -> str:
     return value
 
 
+def _validate_receipt_time(value: Any, field: str) -> dt.datetime:
+    if not isinstance(value, str) or _UTC_RE.fullmatch(value) is None:
+        raise BrokerTrustError(f"terminal receipt {field} is invalid")
+    try:
+        parsed = dt.datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError as exc:
+        raise BrokerTrustError(f"terminal receipt {field} is invalid") from exc
+    if parsed.strftime("%Y-%m-%dT%H:%M:%SZ") != value:
+        raise BrokerTrustError(f"terminal receipt {field} is not canonical UTC")
+    return parsed
+
+
+def validate_terminal_receipt(
+    value: Mapping[str, Any],
+    *,
+    expected_request_id: str | None = None,
+    expected_request_sha256: str | None = None,
+    expected_release_sha: str | None = None,
+    expected_action: str | None = None,
+) -> dict[str, Any]:
+    """Validate one complete stored/wire receipt without granting effect authority."""
+    if not isinstance(value, Mapping) or frozenset(value) != _TERMINAL_RECEIPT_KEYS:
+        raise BrokerTrustError("terminal receipt keys are invalid")
+    receipt = dict(value)
+    if receipt.get("schema") != RECEIPT_SCHEMA:
+        raise BrokerTrustError("terminal receipt schema is invalid")
+    request_id = receipt.get("request_id")
+    if not isinstance(request_id, str) or _REQUEST_ID_RE.fullmatch(request_id) is None:
+        raise BrokerTrustError("terminal receipt request_id is invalid")
+    try:
+        digest = _validate_stored_digest(receipt.get("request_sha256"))
+    except BrokerTrustError as exc:
+        raise BrokerTrustError("terminal receipt request_sha256 is invalid") from exc
+    action = receipt.get("action")
+    if not isinstance(action, str) or action not in ACTION_EFFECT_CLASS:
+        raise BrokerTrustError("terminal receipt action is invalid")
+    if receipt.get("effect_class") != ACTION_EFFECT_CLASS[action]:
+        raise BrokerTrustError("terminal receipt effect class is invalid")
+    started_at = _validate_receipt_time(receipt.get("started_at"), "started_at")
+    finished_at = _validate_receipt_time(receipt.get("finished_at"), "finished_at")
+    if finished_at < started_at:
+        raise BrokerTrustError("terminal receipt time order is invalid")
+    exit_code = receipt.get("exit_code")
+    outcome = receipt.get("outcome")
+    if (
+        isinstance(exit_code, bool)
+        or not isinstance(exit_code, int)
+        or outcome not in ("SUCCEEDED", "FAILED")
+        or (outcome == "SUCCEEDED") != (exit_code == 0)
+    ):
+        raise BrokerTrustError("terminal receipt outcome is invalid")
+    release_sha = _validate_stored_release_sha(receipt.get("release_sha"))
+    version = receipt.get("broker_version")
+    if not isinstance(version, str) or re.fullmatch(r"[0-9A-Za-z._-]{1,32}", version) is None:
+        raise BrokerTrustError("terminal receipt broker_version is invalid")
+    for stream in ("stdout", "stderr"):
+        size = receipt.get(f"{stream}_bytes")
+        if isinstance(size, bool) or not isinstance(size, int) or size < 0:
+            raise BrokerTrustError(f"terminal receipt {stream}_bytes is invalid")
+        try:
+            _validate_stored_digest(receipt.get(f"{stream}_sha256"))
+        except BrokerTrustError as exc:
+            raise BrokerTrustError(f"terminal receipt {stream}_sha256 is invalid") from exc
+        excerpt = receipt.get(f"{stream}_excerpt")
+        if not isinstance(excerpt, str) or len(excerpt) > 300:
+            raise BrokerTrustError(f"terminal receipt {stream}_excerpt is invalid")
+    for observed, expected, label in (
+        (request_id, expected_request_id, "request_id"),
+        (digest, expected_request_sha256, "request_sha256"),
+        (release_sha, expected_release_sha, "release_sha"),
+        (action, expected_action, "action"),
+    ):
+        if expected is not None and observed != expected:
+            raise BrokerTrustError(f"terminal receipt {label} does not match the request")
+    return receipt
+
+
 def _default_executor(
     argv: Sequence[str], *, cwd: Path, env: Mapping[str, str], timeout: int
 ) -> subprocess.CompletedProcess[bytes]:
@@ -391,13 +492,14 @@ class PrivilegedActionBroker:
         value = _read_optional_bounded_json(path)
         if value is None:
             return None
-        if value.get("schema") != RECEIPT_SCHEMA or value.get("request_id") != request.request_id:
-            raise BrokerTrustError("terminal receipt identity is invalid")
-        if value.get("release_sha") != self.config.release_root.name:
+        receipt = validate_terminal_receipt(value, expected_request_id=request.request_id)
+        if receipt["release_sha"] != self.config.release_root.name:
             raise RequestIdConflictError("request id belongs to a different installed release")
-        if value.get("request_sha256") != digest:
+        if receipt["request_sha256"] != digest:
             raise RequestIdConflictError("request id already has a different terminal request")
-        return value
+        if receipt["action"] != request.action:
+            raise BrokerTrustError("terminal receipt action does not match the request")
+        return receipt
 
     def _check_inflight(self, request: PrivilegedActionRequest, digest: str) -> None:
         path = self.inflight_path(request.request_id)
@@ -515,20 +617,7 @@ class PrivilegedActionBroker:
         value = _read_optional_bounded_json(path)
         if value is None:
             return None
-        if value.get("schema") != RECEIPT_SCHEMA or value.get("request_id") != request_id:
-            raise BrokerTrustError("terminal receipt identity is invalid")
-        _validate_stored_release_sha(value.get("release_sha"))
-        _validate_stored_digest(value.get("request_sha256"))
-        exit_code = value.get("exit_code")
-        outcome = value.get("outcome")
-        if (
-            isinstance(exit_code, bool)
-            or not isinstance(exit_code, int)
-            or outcome not in ("SUCCEEDED", "FAILED")
-            or (outcome == "SUCCEEDED") != (exit_code == 0)
-        ):
-            raise BrokerTrustError("terminal receipt outcome is invalid")
-        return value
+        return validate_terminal_receipt(value, expected_request_id=request_id)
 
     def _read_inflight_for_status(self, request_id: str) -> dict[str, Any] | None:
         path = self.inflight_path(request_id)
@@ -778,5 +867,6 @@ __all__ = [
     "get_peer_uid",
     "run_broker",
     "serve_connection",
+    "validate_terminal_receipt",
     "verify_production_trust",
 ]
