@@ -47,7 +47,8 @@ _REQUIRED_KEYS = frozenset(
 )
 _REQUIRED_GATES = (
     "adapter_implemented",
-    "provider_realm_enrolled",    "capacity_known",
+    "provider_realm_enrolled",
+    "capacity_known",
     "real_canary_passed",
     "usage_policy_satisfied",
 )
