@@ -4,6 +4,7 @@ from __future__ import annotations
 import ctypes
 import errno
 import os
+import stat
 import sys
 from pathlib import Path
 from typing import Any
@@ -84,7 +85,12 @@ def has_macos_acl(
             f"macOS ACL observation target is unavailable: errno={exc.errno}"
         ) from exc
 
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NONBLOCK", 0)
+    )
     close_descriptor = False
     if descriptor is None:
         try:
@@ -100,34 +106,37 @@ def has_macos_acl(
             raise FilesystemSecurityError("macOS ACL object is unavailable") from exc
         if _identity(observed) != _identity(before):
             raise FilesystemSecurityError("macOS ACL observation identity changed")
+        if not stat.S_ISREG(observed.st_mode) and not stat.S_ISDIR(observed.st_mode):
+            raise FilesystemSecurityError("macOS ACL object is not a file or directory")
 
         acl = _acl_get_fd(opened_descriptor)
+        acl_error_number = ctypes.get_errno()
         if not acl:
-            error_number = ctypes.get_errno()
-            if error_number == errno.ENOENT:
+            if acl_error_number == errno.ENOENT:
                 return False
             raise FilesystemSecurityError(
-                f"macOS ACL observation failed: errno={error_number}"
+                f"macOS ACL observation failed: errno={acl_error_number}"
             )
 
         entry = ctypes.c_void_p()
         try:
             result = _acl_get_entry(acl, ACL_FIRST_ENTRY, ctypes.byref(entry))
+        except BaseException:
+            _acl_free(acl)
+            raise
+        enumeration_error_number = ctypes.get_errno()
+        try:
+            if result != 0:
+                raise FilesystemSecurityError(
+                    f"macOS ACL enumeration failed: errno={enumeration_error_number}"
+                )
+            if not getattr(entry, "_obj", entry):
+                raise FilesystemSecurityError(
+                    "macOS ACL object has no enumerable entries"
+                )
+            return True
         finally:
             _acl_free(acl)
-
-        if result == 0:
-            return bool(entry)
-        if result == -1:
-            error_number = ctypes.get_errno()
-            if error_number == errno.ENOENT:
-                return False
-            raise FilesystemSecurityError(
-                f"macOS ACL enumeration failed: errno={error_number}"
-            )
-        raise FilesystemSecurityError(
-            f"macOS ACL enumeration failed: errno={ctypes.get_errno()}"
-        )
     finally:
         if close_descriptor:
             try:

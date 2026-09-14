@@ -92,6 +92,9 @@ def _add_read_acl(path: Path) -> None:
         check=True,
     )
 
+def _fake_entry_pointer(value: object) -> object:
+    return value
+
 
 class SubscriptionProviderCredentialTest(unittest.TestCase):
     def test_stdin_accepts_one_terminal_newline_only(self) -> None:
@@ -256,6 +259,56 @@ class SubscriptionProviderCredentialTest(unittest.TestCase):
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS ACL observer")
 class TestDarwinACLBoundary:
+    @pytest.mark.skipif(sys.platform != "darwin", reason="Darwin credential metadata boundary")
+    def test_nonregular_credentials_refuse_before_read_without_blocking(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        config = _config(tmp_path)
+        home = Path(str(config["provider_home"]))
+        fifo = home / PROVIDER_CREDENTIAL_FILENAME
+        os.mkfifo(fifo, 0o600)
+        os.chown(fifo, os.getuid(), os.getgid())
+
+        with mock.patch.object(codex_provider_realm.os, "read") as realm_read:
+            with pytest.raises(
+                ProviderRealmError,
+                match="provider credential is unavailable",
+            ):
+                load_private_provider_credential(
+                    home,
+                    expected_uid=os.getuid(),
+                    expected_gid=os.getgid(),
+                )
+        realm_read.assert_not_called()
+
+        with mock.patch.object(credential.os, "read") as enrollment_read:
+            with pytest.raises(
+                credential.SubscriptionCredentialError,
+                match="provider credential metadata is unsafe",
+            ):
+                credential.install_provider_credential(
+                    config,
+                    ALIBABA_TOKEN_PLAN,
+                    credential=b"replacement-provider-key",
+                    replace_existing=True,
+                )
+        enrollment_read.assert_not_called()
+
+        fifo.unlink()
+        directory = home / PROVIDER_CREDENTIAL_FILENAME
+        directory.mkdir(mode=0o600)
+        os.chown(directory, os.getuid(), os.getgid())
+        with pytest.raises(
+            ProviderRealmError,
+            match="provider credential is unavailable",
+        ):
+            load_private_provider_credential(
+                home,
+                expected_uid=os.getuid(),
+                expected_gid=os.getgid(),
+            )
+
     def test_file_acl_is_refused_at_read_verify_and_enroll(self, tmp_path: Path) -> None:
         config, path = _installed_config(tmp_path)
         _add_read_acl(path)
@@ -474,6 +527,28 @@ class TestDarwinACLBoundary:
             with pytest.raises(FilesystemSecurityError, match="errno=13"):
                 fs_security.has_macos_acl(path)
 
+        with (
+            mock.patch.object(fs_security, "_acl_get_fd", return_value=None),
+            mock.patch.object(ctypes, "get_errno", return_value=errno.ENOENT),
+        ):
+            assert fs_security.has_macos_acl(path) is False
+
+        with (
+            mock.patch.object(fs_security, "_acl_get_fd", return_value=1001),
+            mock.patch.object(fs_security, "_acl_get_entry", return_value=0),
+            mock.patch.object(
+                ctypes,
+                "byref",
+                side_effect=_fake_entry_pointer,
+            ),
+            mock.patch.object(fs_security, "_acl_free", return_value=0),
+        ):
+            with pytest.raises(
+                FilesystemSecurityError,
+                match="macOS ACL object has no enumerable entries",
+            ):
+                fs_security.has_macos_acl(path)
+
         _add_read_acl(path)
         with mock.patch.object(
             fs_security,
@@ -489,14 +564,18 @@ class TestDarwinACLBoundary:
         path.write_text("fixture", encoding="utf-8")
 
         with (
-            mock.patch.object(fs_security, "_acl_get_fd", return_value=object()),
+            mock.patch.object(fs_security, "_acl_get_fd", return_value=1001),
             mock.patch.object(
                 fs_security,
                 "_acl_get_entry",
                 return_value=-1,
             ) as enumeration_observer,
             mock.patch.object(fs_security, "_acl_free", return_value=0),
-            mock.patch.object(ctypes, "get_errno", return_value=errno.EIO),
+            mock.patch.object(
+                ctypes,
+                "get_errno",
+                side_effect=[0, errno.EIO, errno.EACCES],
+            ),
         ):
             with pytest.raises(
                 FilesystemSecurityError,
@@ -506,14 +585,16 @@ class TestDarwinACLBoundary:
         enumeration_observer.assert_called_once()
 
         with (
-            mock.patch.object(
-                fs_security,
-                "_acl_get_entry",
-                return_value=-1,
-            ),
-            mock.patch.object(ctypes, "get_errno", return_value=errno.ENOENT),
+            mock.patch.object(fs_security, "_acl_get_fd", return_value=1001),
+            mock.patch.object(fs_security, "_acl_get_entry", return_value=0),
+            mock.patch.object(ctypes, "byref", side_effect=_fake_entry_pointer),
+            mock.patch.object(fs_security, "_acl_free", return_value=0),
         ):
-            assert fs_security.has_macos_acl(path) is False
+            with pytest.raises(
+                FilesystemSecurityError,
+                match="macOS ACL object has no enumerable entries",
+            ):
+                fs_security.has_macos_acl(path)
 
     def test_acl_observer_closes_its_descriptor_when_observation_is_refused(
         self,

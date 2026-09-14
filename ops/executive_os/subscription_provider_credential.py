@@ -59,6 +59,7 @@ def _require_provider_home(config: Mapping[str, Any]) -> Path:
         os.O_RDONLY
         | getattr(os, "O_NOFOLLOW", 0)
         | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NONBLOCK", 0)
         | os.O_DIRECTORY
     )
     try:
@@ -92,31 +93,60 @@ def _require_provider_home(config: Mapping[str, Any]) -> Path:
     return home
 
 
+def _open_regular_credential(
+    path: Path,
+    before: os.stat_result,
+    *,
+    worker_uid: int,
+    worker_gid: int,
+) -> int:
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NONBLOCK", 0)
+    )
+    descriptor = os.open(path, flags)
+    try:
+        observed = os.fstat(descriptor)
+        if (
+            observed.st_dev != before.st_dev
+            or observed.st_ino != before.st_ino
+            or stat.S_ISLNK(before.st_mode)
+            or not stat.S_ISREG(observed.st_mode)
+            or observed.st_uid != int(worker_uid)
+            or observed.st_gid != int(worker_gid)
+            or stat.S_IMODE(observed.st_mode) != 0o600
+            or observed.st_nlink != 1
+            or observed.st_size < 1
+            or observed.st_size > MAX_CREDENTIAL_BYTES
+        ):
+            raise SubscriptionCredentialError("provider credential metadata is unsafe")
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
 def _credential_metadata(path: Path, *, worker_uid: int, worker_gid: int) -> os.stat_result:
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
     try:
         info = path.lstat()
     except OSError:
         raise SubscriptionCredentialError("provider credential is unavailable") from None
     try:
-        descriptor = os.open(path, flags)
+        descriptor = _open_regular_credential(
+            path,
+            info,
+            worker_uid=worker_uid,
+            worker_gid=worker_gid,
+        )
     except OSError:
         raise SubscriptionCredentialError("provider credential is unavailable") from None
     try:
-        if (
-            stat.S_ISLNK(info.st_mode)
-            or not stat.S_ISREG(info.st_mode)
-            or info.st_uid != int(worker_uid)
-            or info.st_gid != int(worker_gid)
-            or stat.S_IMODE(info.st_mode) != 0o600
-            or info.st_nlink != 1
-            or info.st_size < 1
-            or info.st_size > MAX_CREDENTIAL_BYTES
-            or _has_macos_acl(
-                path,
-                expected_identity=info,
-                descriptor=descriptor,
-            )
+        if _has_macos_acl(
+            path,
+            expected_identity=info,
+            descriptor=descriptor,
         ):
             raise SubscriptionCredentialError("provider credential metadata is unsafe")
     except (OSError, SubscriptionCredentialError) as exc:
@@ -253,7 +283,13 @@ def install_provider_credential(
     temporary = home / f".{PROVIDER_CREDENTIAL_FILENAME}.new.{os.getpid()}"
     if temporary.exists() or temporary.is_symlink():
         raise SubscriptionCredentialError("provider credential staging path is occupied")
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    flags = (
+        os.O_WRONLY
+        | os.O_CREAT
+        | os.O_EXCL
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+    )
     descriptor = -1
     replaced = False
     try:
