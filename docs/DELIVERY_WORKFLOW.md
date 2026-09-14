@@ -6,16 +6,18 @@ reviewable documentation.
 
 ## Start every session in isolation
 
-From any clean administrative checkout, harness-provisioned sessions use the exact workspace already assigned by their harness. Attended ChatGPT Web/host sessions use the canonical source-custody adapter instead of raw clone/worktree commands:
+From any clean administrative checkout, harness-provisioned sessions use the exact workspace already assigned by their harness. Attended ChatGPT Web/host sessions use the installed canonical source-custody launcher instead of raw clone/worktree commands or the repository Python payload:
 
 ```bash
 git fetch origin --prune
 base_sha="$(git rev-parse origin/master)"
-python3 scripts/mastermind_workspace.py acquire \
+mmx-workspace acquire \
   --operation-id <stable-operation-id> \
   --base-sha "$base_sha" \
   --lane web
 ```
+
+The accepted release installs `mmx-workspace` with `scripts/install_mastermind_workspace_cli.sh`. The launcher, not the model/session, pins the canonical source checkout and host workspace root. On the Studio it also refuses execution when `/Volumes/Mastermind` is not the actual mounted workspace volume. `scripts/mastermind_workspace.py` is the versioned implementation payload and test/admin seam; it is not the production Web invocation.
 
 The JSON receipt supplies the exact `workspace_path`, derived branch, base SHA, and shared Git common directory. Repeating `acquire` for the same operation reuses that workspace. Never point two independent operations at one workspace or mint proof/review worktrees outside this owner. Before editing, `cd` to the receipt path and confirm:
 
@@ -89,7 +91,7 @@ and must pass its failing acceptance tests before it is eligible to merge.
 After the operation is terminal, release the same workspace through the custody owner:
 
 ```bash
-python3 scripts/mastermind_workspace.py release \
+mmx-workspace release \
   --operation-id <stable-operation-id> \
   --lane web
 ```
