@@ -2,7 +2,14 @@
 
 The port is deliberately narrower than a filesystem API. Preparation is
 read-only. Commit consumes one signed prepared action and performs at most one
-same-directory atomic file publication. Reconciliation never replays a write.
+same-directory atomic file publication after a durable per-action claim.
+Reconciliation never replays a write and never infers an effect from current
+project bytes alone.
+
+Attended F0 write paths are direct children of the owned project root.
+Arbitrary POSIX rename is publication, not compare-and-swap against a
+non-cooperating same-UID writer. Exclusive Workbench custody is the contract
+for that race; extra stat and advisory flock do not close it.
 """
 
 from __future__ import annotations
@@ -16,7 +23,23 @@ import stat
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
+from .action_artifacts import (
+    ACTION_PURPOSE_TEXT_PATCH,
+    ActionArtifactBusy,
+    ActionArtifactError,
+    ActionArtifactIdentity,
+    ActionArtifactStore,
+    ActionArtifactUncertain,
+    ActionHostBinding,
+    acquire_store_writer,
+    claim_action,
+    classify_action,
+    finalize_action,
+    revalidate_artifact_store,
+    validate_host_binding,
+)
 from .contracts import (
+    ACTION_TOKEN_PURPOSE,
     ACTION_TOKEN_SCHEMA,
     MAX_ACTION_TTL_MS,
     MAX_PATCH_TEXT_BYTES,
@@ -71,6 +94,12 @@ class _FileSnapshot:
     identity: tuple[int, ...]
 
 
+def _publication_gate(_prepared: PreparedTextPatch) -> None:
+    """Test hook. Production is a no-op; never used as a fallback owner."""
+
+    return None
+
+
 def _now(clock_ms: Callable[[], int]) -> int:
     try:
         value = clock_ms()
@@ -103,6 +132,10 @@ def _file_identity(value: os.stat_result) -> tuple[int, ...]:
     )
 
 
+def _encode_source_identity(value: tuple[int, ...]) -> str:
+    return ":".join(str(item) for item in value)
+
+
 def _dir_identity(value: os.stat_result) -> tuple[int, int, int, int, int]:
     return value.st_dev, value.st_ino, value.st_mode, value.st_uid, value.st_gid
 
@@ -122,6 +155,42 @@ def _binding_key(value: ProjectActionBinding) -> tuple[object, ...]:
         scope.allowed_paths,
         scope.expires_at_ms,
         scope.committed_head,
+    )
+
+
+def _assert_direct_write_path(value: str) -> str:
+    validate_relative_path(value)
+    if "/" in value or value.startswith("."):
+        raise ProjectActionRefused("ACTION_INVALID")
+    return value
+
+
+def _assert_action_fresh(prepared: PreparedTextPatch, now_ms: int) -> None:
+    if prepared.expires_at_ms <= now_ms:
+        raise ProjectActionRefused("ACTION_EXPIRED")
+
+
+def _artifact_identity(prepared: PreparedTextPatch) -> ActionArtifactIdentity:
+    return ActionArtifactIdentity(
+        action_id=prepared.action_id,
+        purpose=ACTION_PURPOSE_TEXT_PATCH,
+        subject_digest=prepared.subject_digest,
+        client_ref=prepared.client_ref,
+        resource=prepared.resource,
+        project_ref=prepared.project_ref,
+        context_ref=prepared.context_ref,
+        responsibility_ref=prepared.responsibility_ref,
+        operation_ref=prepared.operation_ref,
+        owner_ref=prepared.owner_ref,
+        generation=prepared.generation,
+        root_device=prepared.root_device,
+        root_inode=prepared.root_inode,
+        store_device=prepared.artifact_store_device,
+        store_inode=prepared.artifact_store_inode,
+        host_id=prepared.host_id,
+        boot_session_id=prepared.boot_session_id,
+        relative_path=prepared.relative_path,
+        source_identity=prepared.source_identity,
     )
 
 
@@ -176,6 +245,26 @@ def _assert_action_binding(
         or scope.root_inode != prepared.root_inode
         or scope.committed_head != prepared.committed_head
         or prepared.relative_path not in scope.allowed_paths
+    ):
+        raise ProjectActionRefused("ACTION_BINDING_CHANGED")
+
+
+def _assert_apply_host(
+    prepared: PreparedTextPatch,
+    *,
+    store: ActionArtifactStore,
+    host: ActionHostBinding,
+) -> None:
+    try:
+        revalidate_artifact_store(store)
+        validate_host_binding(host)
+    except (ActionArtifactError, ActionArtifactUncertain) as error:
+        raise ProjectActionRefused("ACTION_UNAVAILABLE") from error
+    if (
+        host.host_id != prepared.host_id
+        or host.boot_session_id != prepared.boot_session_id
+        or store.device != prepared.artifact_store_device
+        or store.inode != prepared.artifact_store_inode
     ):
         raise ProjectActionRefused("ACTION_BINDING_CHANGED")
 
@@ -327,6 +416,47 @@ def _write_all(fd: int, payload: bytes) -> None:
         offset += written
 
 
+def _observe(scope: ActionScope, relative_path: str) -> str | None:
+    snapshot = _read_leaf(scope, relative_path, allow_absent=True)
+    return None if snapshot is None else snapshot.sha256
+
+
+def _receipt(
+    *,
+    effect_state: str,
+    observed_sha256: str | None,
+) -> dict[str, Any]:
+    return {"effect_state": effect_state, "observed_sha256": observed_sha256}
+
+
+def _finalize_receipt(
+    store: ActionArtifactStore,
+    prepared: PreparedTextPatch,
+    *,
+    effect_state: str,
+    observed_sha256: str | None,
+    completed_at_ms: int,
+    durability: str,
+    details: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    try:
+        record = finalize_action(
+            store,
+            _artifact_identity(prepared),
+            effect_state=effect_state,
+            observed_sha256=observed_sha256,
+            completed_at_ms=completed_at_ms,
+            durability=durability,
+            details=details,
+        )
+        return _receipt(
+            effect_state=record.effect_state,
+            observed_sha256=observed_sha256,
+        )
+    except (ActionArtifactError, ActionArtifactUncertain, FileExistsError):
+        return _receipt(effect_state="EFFECT_UNKNOWN", observed_sha256=observed_sha256)
+
+
 def _publish_candidate(
     *,
     scope: ActionScope,
@@ -334,11 +464,35 @@ def _publish_candidate(
     candidate: bytes,
     mode: int,
     confirm_binding: Callable[[], ActionScope],
+    clock_ms: Callable[[], int],
+    store: ActionArtifactStore,
 ) -> dict[str, Any]:
+    _assert_direct_write_path(prepared.relative_path)
     fds, parent, leaf = _open_parent(scope, prepared.relative_path)
     temp_fd = -1
     temp_name = f".mmx-workbench-action-{prepared.action_id}.tmp"
+    created_temp = False
+    temp_identity: tuple[int, ...] | None = None
     effect_started = False
+    close_uncertain = False
+    cleanup_uncertain = False
+    pending: dict[str, Any] | None = None
+    refusal: ProjectActionRefused | None = None
+
+    def _pending(
+        effect_state: str,
+        observed_sha256: str | None,
+        durability: str,
+        reason: str,
+    ) -> None:
+        nonlocal pending
+        pending = {
+            "effect_state": effect_state,
+            "observed_sha256": observed_sha256,
+            "durability": durability,
+            "reason": reason,
+        }
+
     try:
         flags = (
             os.O_WRONLY
@@ -347,105 +501,220 @@ def _publish_candidate(
             | getattr(os, "O_NOFOLLOW", 0)
             | getattr(os, "O_CLOEXEC", 0)
         )
-        temp_fd = os.open(temp_name, flags, 0o600, dir_fd=parent)
-        _write_all(temp_fd, candidate)
-        os.fchmod(temp_fd, mode)
-        os.fsync(temp_fd)
-        temp_stat = os.fstat(temp_fd)
-        if not stat.S_ISREG(temp_stat.st_mode) or temp_stat.st_nlink != 1:
-            raise ProjectActionRefused("ACTION_UNAVAILABLE")
-        os.close(temp_fd)
-        temp_fd = -1
-
-        current_scope = confirm_binding()
-        if (
-            current_scope.root_device != scope.root_device
-            or current_scope.root_inode != scope.root_inode
-        ):
-            raise ProjectActionRefused("ACTION_BINDING_CHANGED")
-        current = _read_leaf(
-            current_scope,
-            prepared.relative_path,
-            allow_absent=prepared.mode == "CREATE",
-        )
-        if prepared.mode == "CREATE":
-            if current is not None:
-                return {
-                    "effect_state": "APPLIED"
-                    if current.sha256 == prepared.postimage_sha256
-                    else "EFFECT_UNKNOWN",
-                    "observed_sha256": current.sha256,
-                }
-            if os.link not in os.supports_dir_fd:
-                raise ProjectActionRefused("ACTION_UNAVAILABLE")
-            os.link(
-                temp_name,
-                leaf,
-                src_dir_fd=parent,
-                dst_dir_fd=parent,
-                follow_symlinks=False,
-            )
-            effect_started = True
-            os.unlink(temp_name, dir_fd=parent)
-        else:
-            if current is None or current.sha256 != prepared.preimage_sha256:
-                observed = None if current is None else current.sha256
-                return {"effect_state": "EFFECT_UNKNOWN", "observed_sha256": observed}
-            expected = _candidate_from_snapshot(
-                current, old_text=prepared.old_text or "", new_text=prepared.new_text
-            )
-            if hashlib.sha256(expected).hexdigest() != prepared.postimage_sha256:
-                raise ProjectActionRefused("ACTION_INVALID")
-            if os.rename not in os.supports_dir_fd:
-                raise ProjectActionRefused("ACTION_UNAVAILABLE")
-            os.rename(temp_name, leaf, src_dir_fd=parent, dst_dir_fd=parent)
-            effect_started = True
         try:
-            os.fsync(parent)
-        except OSError:
-            # Publication may already be visible. Reconciliation below decides.
-            pass
-        final_scope = confirm_binding()
-        final = _read_leaf(final_scope, prepared.relative_path, allow_absent=True)
-        observed = None if final is None else final.sha256
-        return {
-            "effect_state": "APPLIED"
-            if observed == prepared.postimage_sha256
-            else "EFFECT_UNKNOWN",
-            "observed_sha256": observed,
-        }
-    except FileExistsError:
-        current = _read_leaf(scope, prepared.relative_path, allow_absent=True)
-        observed = None if current is None else current.sha256
-        return {
-            "effect_state": "APPLIED"
-            if observed == prepared.postimage_sha256
-            else "EFFECT_UNKNOWN",
-            "observed_sha256": observed,
-        }
-    except ProjectActionRefused:
-        if effect_started:
-            return {"effect_state": "EFFECT_UNKNOWN", "observed_sha256": None}
-        raise
+            temp_fd = os.open(temp_name, flags, 0o600, dir_fd=parent)
+        except FileExistsError:
+            observed = _observe(confirm_binding(), prepared.relative_path)
+            _pending("EFFECT_UNKNOWN", observed, "uncertain", "temp_collision")
+        else:
+            created_temp = True
+            _write_all(temp_fd, candidate)
+            os.fchmod(temp_fd, mode)
+            os.fsync(temp_fd)
+            temp_stat = os.fstat(temp_fd)
+            if not stat.S_ISREG(temp_stat.st_mode) or temp_stat.st_nlink != 1:
+                raise ProjectActionRefused("ACTION_UNAVAILABLE")
+            temp_identity = _file_identity(temp_stat)
+            named = os.stat(temp_name, dir_fd=parent, follow_symlinks=False)
+            if _file_identity(named) != temp_identity:
+                created_temp = False
+                observed = _observe(confirm_binding(), prepared.relative_path)
+                _pending("EFFECT_UNKNOWN", observed, "uncertain", "temp_identity_drift")
+            else:
+                current_scope = confirm_binding()
+                if (
+                    current_scope.root_device != scope.root_device
+                    or current_scope.root_inode != scope.root_inode
+                ):
+                    raise ProjectActionRefused("ACTION_BINDING_CHANGED")
+                _assert_action_fresh(prepared, _now(clock_ms))
+                current = _read_leaf(
+                    current_scope,
+                    prepared.relative_path,
+                    allow_absent=prepared.mode == "CREATE",
+                )
+                if prepared.mode == "CREATE":
+                    if current is not None:
+                        _pending(
+                            "EFFECT_UNKNOWN",
+                            current.sha256,
+                            "durable",
+                            "create_target_exists",
+                        )
+                    elif os.link not in os.supports_dir_fd:
+                        raise ProjectActionRefused("ACTION_UNAVAILABLE")
+                elif (
+                    current is None
+                    or current.sha256 != prepared.preimage_sha256
+                    or _encode_source_identity(current.identity)
+                    != prepared.source_identity
+                ):
+                    observed = None if current is None else current.sha256
+                    _pending(
+                        "EFFECT_UNKNOWN",
+                        observed,
+                        "durable",
+                        "preimage_or_source_changed",
+                    )
+                else:
+                    expected = _candidate_from_snapshot(
+                        current,
+                        old_text=prepared.old_text or "",
+                        new_text=prepared.new_text,
+                    )
+                    if hashlib.sha256(expected).hexdigest() != prepared.postimage_sha256:
+                        raise ProjectActionRefused("ACTION_INVALID")
+                    if os.rename not in os.supports_dir_fd:
+                        raise ProjectActionRefused("ACTION_UNAVAILABLE")
+                if pending is None:
+                    _publication_gate(prepared)
+                    _assert_action_fresh(prepared, _now(clock_ms))
+                    confirm_binding()
+                    named = os.stat(temp_name, dir_fd=parent, follow_symlinks=False)
+                    held = os.fstat(temp_fd)
+                    if (
+                        temp_identity is None
+                        or _file_identity(named) != temp_identity
+                        or _file_identity(held) != temp_identity
+                    ):
+                        created_temp = False
+                        observed = _observe(current_scope, prepared.relative_path)
+                        _pending(
+                            "EFFECT_UNKNOWN",
+                            observed,
+                            "uncertain",
+                            "temp_replaced",
+                        )
+                    else:
+                        if prepared.mode == "CREATE":
+                            os.link(
+                                temp_name,
+                                leaf,
+                                src_dir_fd=parent,
+                                dst_dir_fd=parent,
+                                follow_symlinks=False,
+                            )
+                        else:
+                            os.rename(
+                                temp_name,
+                                leaf,
+                                src_dir_fd=parent,
+                                dst_dir_fd=parent,
+                            )
+                        effect_started = True
+                        if created_temp and temp_identity is not None:
+                            try:
+                                named = os.stat(
+                                    temp_name, dir_fd=parent, follow_symlinks=False
+                                )
+                                if (named.st_dev, named.st_ino) == temp_identity[:2]:
+                                    os.unlink(temp_name, dir_fd=parent)
+                                    created_temp = False
+                            except FileNotFoundError:
+                                created_temp = False
+                            except OSError:
+                                cleanup_uncertain = True
+                        try:
+                            os.fsync(parent)
+                        except OSError:
+                            final = _read_leaf(
+                                confirm_binding(),
+                                prepared.relative_path,
+                                allow_absent=True,
+                            )
+                            observed = None if final is None else final.sha256
+                            _pending(
+                                "EFFECT_UNKNOWN",
+                                observed,
+                                "uncertain",
+                                "directory_fsync_failed",
+                            )
+                        else:
+                            final_scope = confirm_binding()
+                            final = _read_leaf(
+                                final_scope,
+                                prepared.relative_path,
+                                allow_absent=True,
+                            )
+                            observed = None if final is None else final.sha256
+                            if observed != prepared.postimage_sha256:
+                                _pending(
+                                    "EFFECT_UNKNOWN",
+                                    observed,
+                                    "uncertain",
+                                    "readback_mismatch",
+                                )
+                            else:
+                                _pending(
+                                    "APPLIED",
+                                    observed,
+                                    "durable",
+                                    "published",
+                                )
+    except ProjectActionRefused as error:
+        if pending is None and effect_started:
+            observed = None
+            try:
+                observed = _observe(scope, prepared.relative_path)
+            except ProjectActionRefused:
+                observed = None
+            _pending("EFFECT_UNKNOWN", observed, "uncertain", "refused_after_effect")
+        elif pending is None and error.code == "ACTION_EXPIRED":
+            observed = None
+            try:
+                observed = _observe(scope, prepared.relative_path)
+            except ProjectActionRefused:
+                observed = None
+            _pending("NOT_APPLIED", observed, "durable", "expired_before_publication")
+        elif pending is None:
+            refusal = error
     except (OSError, TypeError, ValueError, OverflowError) as error:
-        if effect_started:
-            return {"effect_state": "EFFECT_UNKNOWN", "observed_sha256": None}
-        raise ProjectActionRefused("ACTION_UNAVAILABLE") from error
+        if pending is None and effect_started:
+            _pending("EFFECT_UNKNOWN", None, "uncertain", "publish_uncertain")
+        elif pending is None:
+            refusal = ProjectActionRefused("ACTION_UNAVAILABLE")
+            refusal.__cause__ = error
     finally:
         if temp_fd >= 0:
             try:
                 os.close(temp_fd)
             except OSError:
+                close_uncertain = True
+        if created_temp and temp_identity is not None:
+            try:
+                named = os.stat(temp_name, dir_fd=parent, follow_symlinks=False)
+                if (named.st_dev, named.st_ino) == temp_identity[:2]:
+                    os.unlink(temp_name, dir_fd=parent)
+            except FileNotFoundError:
                 pass
-        try:
-            os.unlink(temp_name, dir_fd=parent)
-        except (FileNotFoundError, OSError):
-            pass
+            except OSError:
+                cleanup_uncertain = True
         for fd in reversed(fds):
             try:
                 os.close(fd)
             except OSError:
-                pass
+                close_uncertain = True
+
+    if pending is not None:
+        effect = pending["effect_state"]
+        durability = pending["durability"]
+        reason = pending["reason"]
+        if (close_uncertain or cleanup_uncertain) and effect == "APPLIED":
+            effect = "EFFECT_UNKNOWN"
+            durability = "uncertain"
+            reason = "cleanup_uncertain"
+        return _finalize_receipt(
+            store,
+            prepared,
+            effect_state=effect,
+            observed_sha256=pending["observed_sha256"],
+            completed_at_ms=_now(clock_ms),
+            durability=durability,
+            details={"reason": reason},
+        )
+    if refusal is not None:
+        raise refusal
+    raise ProjectActionRefused("ACTION_UNAVAILABLE")
 
 
 def create_text_patch_port(
@@ -454,6 +723,8 @@ def create_text_patch_port(
     clock_ms: Callable[[], int],
     run_io: ActionExecutor,
     token_codec: ActionTokenCodec,
+    artifact_store: ActionArtifactStore,
+    host: ActionHostBinding,
     action_ttl_ms: int = MAX_ACTION_TTL_MS,
 ):
     """Create prepare/commit/reconcile callbacks over existing owner services."""
@@ -464,6 +735,17 @@ def create_text_patch_port(
         raise TypeError("explicit action token codec required")
     if type(action_ttl_ms) is not int or not 1000 <= action_ttl_ms <= MAX_ACTION_TTL_MS:
         raise ValueError("action ttl is outside the closed F0 range")
+    try:
+        store = revalidate_artifact_store(artifact_store)
+        host_binding = validate_host_binding(host)
+    except (ActionArtifactError, ActionArtifactUncertain) as error:
+        raise TypeError("explicit host-owned artifact store and host binding required") from error
+
+    def _live_store() -> ActionArtifactStore:
+        try:
+            return revalidate_artifact_store(store)
+        except (ActionArtifactError, ActionArtifactUncertain) as error:
+            raise ProjectActionRefused("ACTION_UNAVAILABLE") from error
 
     async def prepare(caller: ActionCaller, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
         try:
@@ -471,7 +753,9 @@ def create_text_patch_port(
             if set(request) - _REQUEST_KEYS:
                 raise ProjectActionRefused("ACTION_INVALID")
             project_ref = request["project_ref"]
-            relative_path = validate_relative_path(request["relative_path"])
+            relative_path = _assert_direct_write_path(
+                validate_relative_path(request["relative_path"])
+            )
             mode = request["mode"]
             new_text = request["new_text"]
             if type(project_ref) is not str or not project_ref or len(project_ref) > 256:
@@ -510,6 +794,8 @@ def create_text_patch_port(
         if relative_path not in original.scope.allowed_paths:
             raise ProjectActionRefused()
         binding_key = _binding_key(original)
+        current_store = _live_store()
+        current_host = validate_host_binding(host_binding)
 
         def current_scope() -> ActionScope:
             current = _current_binding(
@@ -530,6 +816,7 @@ def create_text_patch_port(
                     raise ProjectActionRefused("ACTION_PREIMAGE_MISMATCH")
                 candidate = new_text.encode("utf-8")
                 preimage = None
+                source_identity = None
             else:
                 if snapshot is None or snapshot.sha256 != expected_sha:
                     raise ProjectActionRefused("ACTION_PREIMAGE_MISMATCH")
@@ -537,10 +824,12 @@ def create_text_patch_port(
                     snapshot, old_text=old_text or "", new_text=new_text
                 )
                 preimage = snapshot.sha256
+                source_identity = _encode_source_identity(snapshot.identity)
             current_scope()
             return {
                 "preimage_sha256": preimage,
                 "postimage_sha256": hashlib.sha256(candidate).hexdigest(),
+                "source_identity": source_identity,
             }
 
         pending = run_io(operation)
@@ -559,6 +848,12 @@ def create_text_patch_port(
             clock_ms=clock_ms,
         )
         if _binding_key(final) != binding_key:
+            raise ProjectActionRefused("ACTION_BINDING_CHANGED")
+        final_store = _live_store()
+        if (
+            final_store.device != current_store.device
+            or final_store.inode != current_store.inode
+        ):
             raise ProjectActionRefused("ACTION_BINDING_CHANGED")
         issued_at = _now(clock_ms)
         expires_at = min(
@@ -582,11 +877,17 @@ def create_text_patch_port(
             generation=final.scope.generation,
             root_device=final.scope.root_device,
             root_inode=final.scope.root_inode,
+            artifact_store_device=final_store.device,
+            artifact_store_inode=final_store.inode,
+            host_id=current_host.host_id,
+            boot_session_id=current_host.boot_session_id,
+            purpose=ACTION_TOKEN_PURPOSE,
             committed_head=final.scope.committed_head,
             relative_path=relative_path,
             mode=mode,
             preimage_sha256=result["preimage_sha256"],
             postimage_sha256=result["postimage_sha256"],
+            source_identity=result["source_identity"],
             old_text=old_text,
             new_text=new_text,
             issued_at_ms=issued_at,
@@ -605,10 +906,15 @@ def create_text_patch_port(
             "expires_at_ms": expires_at,
         }
 
-    def _decode_for_caller(caller: ActionCaller, action_ref: object) -> PreparedTextPatch:
+    def _decode_for_caller(
+        caller: ActionCaller, action_ref: object, *, evidence: bool
+    ) -> PreparedTextPatch:
         validate_action_caller(caller)
         try:
-            prepared = token_codec.decode(action_ref, now_ms=_now(clock_ms))
+            if evidence:
+                prepared = token_codec.decode_evidence(action_ref, now_ms=_now(clock_ms))
+            else:
+                prepared = token_codec.decode(action_ref, now_ms=_now(clock_ms))
         except ActionContractError as error:
             code = "ACTION_EXPIRED" if "expired" in str(error) else "ACTION_INVALID"
             raise ProjectActionRefused(code) from error
@@ -630,50 +936,123 @@ def create_text_patch_port(
         _assert_action_binding(prepared, current)
         return current
 
+    def _classified_receipt(
+        prepared: PreparedTextPatch, *, observed_sha256: str | None
+    ) -> dict[str, Any] | None:
+        try:
+            classified = classify_action(_live_store(), _artifact_identity(prepared))
+        except (ActionArtifactError, ActionArtifactUncertain):
+            return _receipt(effect_state="EFFECT_UNKNOWN", observed_sha256=observed_sha256)
+        if not classified.store_valid:
+            return _receipt(effect_state="EFFECT_UNKNOWN", observed_sha256=observed_sha256)
+        if classified.claim is None and classified.result is None:
+            return None
+        return _receipt(
+            effect_state=classified.effect_state,
+            observed_sha256=observed_sha256,
+        )
+
     async def commit(caller: ActionCaller, action_ref: object) -> Mapping[str, Any]:
-        prepared = _decode_for_caller(caller, action_ref)
+        prepared = _decode_for_caller(caller, action_ref, evidence=False)
         original = _binding_for_prepared(caller, prepared)
         binding_key = _binding_key(original)
+        _assert_apply_host(prepared, store=_live_store(), host=host_binding)
+        _assert_direct_write_path(prepared.relative_path)
+        _assert_action_fresh(prepared, _now(clock_ms))
 
         def current_scope() -> ActionScope:
             current = _binding_for_prepared(caller, prepared)
             if _binding_key(current) != binding_key:
                 raise ProjectActionRefused("ACTION_BINDING_CHANGED")
+            _assert_apply_host(prepared, store=_live_store(), host=host_binding)
             return current.scope
 
         def operation() -> dict[str, Any]:
+            _assert_action_fresh(prepared, _now(clock_ms))
             scope = current_scope()
-            current = _read_leaf(
-                scope,
-                prepared.relative_path,
-                allow_absent=prepared.mode == "CREATE",
-            )
-            if current is not None and current.sha256 == prepared.postimage_sha256:
-                return {"effect_state": "APPLIED", "observed_sha256": current.sha256}
-            if prepared.mode == "CREATE":
-                if current is not None:
-                    return {"effect_state": "EFFECT_UNKNOWN", "observed_sha256": current.sha256}
-                candidate = prepared.new_text.encode("utf-8")
-                file_mode = 0o644
-            else:
-                if current is None or current.sha256 != prepared.preimage_sha256:
-                    observed = None if current is None else current.sha256
-                    return {"effect_state": "EFFECT_UNKNOWN", "observed_sha256": observed}
-                candidate = _candidate_from_snapshot(
-                    current,
-                    old_text=prepared.old_text or "",
-                    new_text=prepared.new_text,
+            writer = None
+            claimed = False
+            try:
+                writer = acquire_store_writer(_live_store())
+            except ActionArtifactBusy as error:
+                raise ProjectActionRefused("ACTION_UNAVAILABLE") from error
+            except ActionArtifactUncertain as error:
+                raise ProjectActionRefused("ACTION_UNAVAILABLE") from error
+            try:
+                observed = _observe(scope, prepared.relative_path)
+                existing = _classified_receipt(prepared, observed_sha256=observed)
+                if existing is not None:
+                    return existing
+                current = _read_leaf(
+                    scope,
+                    prepared.relative_path,
+                    allow_absent=prepared.mode == "CREATE",
                 )
-                file_mode = current.mode
-            if hashlib.sha256(candidate).hexdigest() != prepared.postimage_sha256:
-                raise ProjectActionRefused("ACTION_INVALID")
-            return _publish_candidate(
-                scope=scope,
-                prepared=prepared,
-                candidate=candidate,
-                mode=file_mode,
-                confirm_binding=current_scope,
-            )
+                if prepared.mode == "CREATE":
+                    if current is not None:
+                        raise ProjectActionRefused("ACTION_PREIMAGE_MISMATCH")
+                    candidate = prepared.new_text.encode("utf-8")
+                    file_mode = 0o644
+                else:
+                    if current is None or current.sha256 != prepared.preimage_sha256:
+                        raise ProjectActionRefused("ACTION_PREIMAGE_MISMATCH")
+                    if _encode_source_identity(current.identity) != prepared.source_identity:
+                        raise ProjectActionRefused("ACTION_SOURCE_CHANGED")
+                    candidate = _candidate_from_snapshot(
+                        current,
+                        old_text=prepared.old_text or "",
+                        new_text=prepared.new_text,
+                    )
+                    file_mode = current.mode
+                if hashlib.sha256(candidate).hexdigest() != prepared.postimage_sha256:
+                    raise ProjectActionRefused("ACTION_INVALID")
+                _assert_action_fresh(prepared, _now(clock_ms))
+                outcome = claim_action(
+                    _live_store(),
+                    _artifact_identity(prepared),
+                    claimed_at_ms=_now(clock_ms),
+                )
+                if outcome.uncertain:
+                    return _receipt(effect_state="EFFECT_UNKNOWN", observed_sha256=observed)
+                if not outcome.created:
+                    replay = _classified_receipt(prepared, observed_sha256=observed)
+                    return replay or _receipt(
+                        effect_state="EFFECT_UNKNOWN", observed_sha256=observed
+                    )
+                claimed = True
+                return _publish_candidate(
+                    scope=scope,
+                    prepared=prepared,
+                    candidate=candidate,
+                    mode=file_mode,
+                    confirm_binding=current_scope,
+                    clock_ms=clock_ms,
+                    store=_live_store(),
+                )
+            except ProjectActionRefused:
+                if claimed:
+                    observed = None
+                    try:
+                        observed = _observe(scope, prepared.relative_path)
+                    except ProjectActionRefused:
+                        observed = None
+                    return _finalize_receipt(
+                        _live_store(),
+                        prepared,
+                        effect_state="EFFECT_UNKNOWN",
+                        observed_sha256=observed,
+                        completed_at_ms=_now(clock_ms),
+                        durability="uncertain",
+                        details={"reason": "refused_after_claim"},
+                    )
+                raise
+            finally:
+                if writer is not None:
+                    try:
+                        writer.release()
+                    except ActionArtifactUncertain as error:
+                        if not claimed:
+                            raise ProjectActionRefused("ACTION_UNAVAILABLE") from error
 
         pending = run_io(operation)
         if not inspect.isawaitable(pending):
@@ -699,29 +1078,33 @@ def create_text_patch_port(
         }
 
     async def reconcile(caller: ActionCaller, action_ref: object) -> Mapping[str, Any]:
-        prepared = _decode_for_caller(caller, action_ref)
+        prepared = _decode_for_caller(caller, action_ref, evidence=True)
         binding = _binding_for_prepared(caller, prepared)
         binding_key = _binding_key(binding)
+        if prepared.host_id != host_binding.host_id:
+            raise ProjectActionRefused("ACTION_BINDING_CHANGED")
 
         def operation() -> dict[str, Any]:
             current = _binding_for_prepared(caller, prepared)
             if _binding_key(current) != binding_key:
                 raise ProjectActionRefused("ACTION_BINDING_CHANGED")
-            snapshot = _read_leaf(
-                current.scope,
-                prepared.relative_path,
-                allow_absent=True,
-            )
-            observed = None if snapshot is None else snapshot.sha256
-            if observed == prepared.postimage_sha256:
-                effect = "APPLIED"
-            elif prepared.mode == "CREATE" and observed is None:
-                effect = "NOT_APPLIED"
-            elif prepared.mode == "REPLACE" and observed == prepared.preimage_sha256:
-                effect = "NOT_APPLIED"
-            else:
-                effect = "EFFECT_UNKNOWN"
-            return {"effect_state": effect, "observed_sha256": observed}
+            try:
+                live = _live_store()
+            except ProjectActionRefused:
+                return _receipt(effect_state="EFFECT_UNKNOWN", observed_sha256=None)
+            if (
+                live.device != prepared.artifact_store_device
+                or live.inode != prepared.artifact_store_inode
+            ):
+                return _receipt(effect_state="EFFECT_UNKNOWN", observed_sha256=None)
+            try:
+                observed = _observe(current.scope, prepared.relative_path)
+            except ProjectActionRefused:
+                observed = None
+            existing = _classified_receipt(prepared, observed_sha256=observed)
+            if existing is not None:
+                return existing
+            return _receipt(effect_state="EFFECT_UNKNOWN", observed_sha256=observed)
 
         pending = run_io(operation)
         if not inspect.isawaitable(pending):

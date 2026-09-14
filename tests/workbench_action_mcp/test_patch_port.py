@@ -8,6 +8,10 @@ from pathlib import Path
 
 import pytest
 
+from integrations.workbench_action_mcp.action_artifacts import (
+    ActionHostBinding,
+    adopt_artifact_store,
+)
 from integrations.workbench_action_mcp.contracts import (
     ActionCaller,
     ActionScope,
@@ -25,10 +29,30 @@ def _sha(value: bytes) -> str:
 
 
 class Harness:
-    def __init__(self, root: Path, *, allowed_paths: tuple[str, ...]) -> None:
+    def __init__(
+        self,
+        root: Path,
+        *,
+        allowed_paths: tuple[str, ...],
+        host_id: str = "b" * 64,
+        boot_session_id: str = "boot-session-alpha",
+        store_dir: Path | None = None,
+        threaded: bool = False,
+    ) -> None:
         self.clock = 1_800_000_000_000
-        self.root_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+        self.root = root
+        self.root_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+        os.set_inheritable(self.root_fd, False)
         root_stat = os.fstat(self.root_fd)
+        self.store_path = store_dir if store_dir is not None else root / "mmx-action-store"
+        self.store_path.mkdir(mode=0o700, exist_ok=True)
+        os.chmod(self.store_path, 0o700)
+        self.store_fd = os.open(
+            self.store_path, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC
+        )
+        os.set_inheritable(self.store_fd, False)
+        self.store = adopt_artifact_store(self.store_fd)
+        self.host = ActionHostBinding(host_id=host_id, boot_session_id=boot_session_id)
         self.caller = ActionCaller(
             subject_digest="a" * 64,
             client_ref="client-ref",
@@ -50,6 +74,7 @@ class Harness:
             committed_head="1" * 40,
         )
         self.project_ref = "project:alpha"
+        self.codec = ActionTokenCodec(b"k" * 32)
 
         def resolve(caller: ActionCaller, project_ref: str):
             if caller != self.caller or project_ref != self.project_ref:
@@ -57,18 +82,23 @@ class Harness:
             return ProjectActionBinding(caller, project_ref, self.scope)
 
         async def run_io(operation):
-            return operation()
+            if not threaded:
+                return operation()
+            return await asyncio.get_running_loop().run_in_executor(None, operation)
 
         self.prepare, self.commit, self.reconcile = create_text_patch_port(
             resolve_binding=resolve,
             clock_ms=lambda: self.clock,
             run_io=run_io,
-            token_codec=ActionTokenCodec(b"k" * 32),
+            token_codec=self.codec,
+            artifact_store=self.store,
+            host=self.host,
             action_ttl_ms=60_000,
         )
 
     def close(self) -> None:
         os.close(self.root_fd)
+        os.close(self.store_fd)
 
 
 def test_replace_prepare_commit_reconcile_and_replay(tmp_path: Path) -> None:
@@ -129,7 +159,7 @@ def test_create_is_not_applied_until_commit_and_replay_is_read_only(tmp_path: Pa
         )
         assert not target.exists()
         before = asyncio.run(harness.reconcile(harness.caller, prepared["action_ref"]))
-        assert before["effect_state"] == "NOT_APPLIED"
+        assert before["effect_state"] == "EFFECT_UNKNOWN"
 
         applied = asyncio.run(harness.commit(harness.caller, prepared["action_ref"]))
         assert applied["effect_state"] == "APPLIED"
@@ -193,8 +223,9 @@ def test_changed_preimage_never_gets_clobbered(tmp_path: Path) -> None:
             )
         )
         target.write_text("foreign\n")
-        result = asyncio.run(harness.commit(harness.caller, prepared["action_ref"]))
-        assert result["effect_state"] == "EFFECT_UNKNOWN"
+        with pytest.raises(ProjectActionRefused) as caught:
+            asyncio.run(harness.commit(harness.caller, prepared["action_ref"]))
+        assert caught.value.code == "ACTION_PREIMAGE_MISMATCH"
         assert target.read_text() == "foreign\n"
     finally:
         harness.close()
@@ -299,8 +330,10 @@ def test_tamper_wrong_caller_and_expiry_refuse(tmp_path: Path) -> None:
         assert caught.value.code == "ACTION_BINDING_CHANGED"
 
         harness.clock += 61_000
+        reconciled = asyncio.run(harness.reconcile(harness.caller, token))
+        assert reconciled["effect_state"] == "EFFECT_UNKNOWN"
         with pytest.raises(ProjectActionRefused) as caught:
-            asyncio.run(harness.reconcile(harness.caller, token))
+            asyncio.run(harness.commit(harness.caller, token))
         assert caught.value.code == "ACTION_EXPIRED"
         assert target.read_bytes() == original
     finally:
