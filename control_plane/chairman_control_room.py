@@ -858,7 +858,10 @@ def compose_control_room(
     agent_os_state_ws: dict[str, dict[str, Any]] = {}
 
     if agent_os_state is None:
-        degraded.append("agent_os_state: unavailable")
+        degraded.append(
+            "agent_os_state: unavailable; fixture projection is "
+            "BUILT_NOT_PROVEN, not live"
+        )
     elif not isinstance(agent_os_state, Mapping):
         degraded.append(f"agent_os_state: expected an object, got {type(agent_os_state).__name__}")
     else:
@@ -919,7 +922,10 @@ def compose_control_room(
     # running, cleanly completed) can still carry CEO-intent provenance and
     # belongs on its card.
     if runtime_jobs is None:
-        degraded.append("executive_runtime: unavailable")
+        degraded.append(
+            "executive_runtime: unavailable; fixture projection is "
+            "BUILT_NOT_PROVEN, not live"
+        )
     runtime_jobs_by_ref = _group_jobs_by_ref(runtime_jobs) if runtime_jobs is not None else {}
 
     # --- active builds ---------------------------------------------------
