@@ -408,8 +408,10 @@ def test_same_byte_inode_swap_is_refused(tmp_path: Path) -> None:
             )
         )
         inode = target.stat().st_ino
-        target.unlink()
-        target.write_bytes(original)
+        replacement = tmp_path / "swap-replacement.txt"
+        replacement.write_bytes(original)
+        assert replacement.stat().st_ino != inode
+        os.replace(replacement, target)
         assert target.stat().st_ino != inode
         with pytest.raises(ProjectActionRefused) as caught:
             asyncio.run(harness.commit(harness.caller, prepared["action_ref"]))
