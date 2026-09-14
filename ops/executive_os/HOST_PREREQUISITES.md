@@ -52,7 +52,7 @@ the overall state:
 | `DISARMED_EXPECTED` | no | The current gates intend this service to be absent or disabled. |
 | `ADVISORY` | no | Reported because the operator must know it. |
 
-Three semantics are deliberate and should not be "fixed" later without a
+These semantics are deliberate and should not be "fixed" later without a
 decision:
 
 - **`autorestart` is required; `autorestartatconnect` is optional.** Recovery
@@ -78,9 +78,40 @@ decision:
   LaunchAgents. They cannot exist before a console login, so
   `user_session_surfaces` is `ADVISORY` with
   `USER_SESSION_LOGIN_REQUIRED` rather than pretending system-boot
-  availability. With FileVault on, an unattended boot reaches the login window;
-  `disk_encryption_state` records that preboot-unlock dependency as `ADVISORY`
-  and never carries encryption or recovery material.
+  availability.
+- **FileVault-on recovery is conditional, not generic.** A host with FileVault
+  on stops at the preboot unlock screen after a restart, and only one platform
+  generation can be unlocked from there without a human at the keyboard. The
+  local prerequisite is exact: Apple silicon, **macOS 26 or later**, and Remote
+  Login enabled. `disk_encryption_state` therefore stays `ADVISORY` — it only
+  reports the encryption state and never carries encryption or recovery
+  material — while the `REQUIRED` `preboot_remote_unlock` predicate is the
+  load-bearing law:
+
+  | Observed host | `preboot_remote_unlock` |
+  |---|---|
+  | FileVault off | `OK` / `PREBOOT_UNLOCK_NOT_REQUIRED` — no unlock is needed, so macOS 14/15 is fine |
+  | FileVault on, Apple silicon, macOS 26+, Remote Login enabled | `OK` / `PREBOOT_UNLOCK_SUPPORTED` |
+  | FileVault on, macOS below 26 | `NOT_READY` / `PREBOOT_UNLOCK_OS_GENERATION_UNSUPPORTED` |
+  | FileVault on, not Apple silicon | `NOT_READY` / `PREBOOT_UNLOCK_ARCHITECTURE_UNSUPPORTED` |
+  | FileVault on, Remote Login disabled or not installed | `NOT_READY` / `PREBOOT_UNLOCK_REMOTE_LOGIN_UNAVAILABLE` |
+  | FileVault encrypting/decrypting/unreadable, or unknown architecture or version | `UNKNOWN` / `PREBOOT_UNLOCK_STATE_UNKNOWN` |
+
+  So an encrypted M1 on macOS 15 is honestly `NOT_READY` for the unattended
+  cruise journey even though every power and service predicate is green, and
+  the same M1 with FileVault off passes. The two remedies are a Chairman-owned
+  decision, not something this observer chooses: upgrade that host to macOS 26+,
+  or leave FileVault off on a physically controlled always-on host.
+- **This predicate is local eligibility only.** It proves the host *can* be
+  unlocked at preboot over Remote Login, never that anything can reach it. The
+  checker opens no socket and performs no reachability probe, so external
+  network path, bastion, and tunnel reachability remain a separate acceptance
+  journey with its own evidence. A green `preboot_remote_unlock` plus an
+  unreachable network is still an unrecoverable host.
+- **`auto_restart_after_power_loss` stays independent.** Preboot unlock decides
+  whether a returning host can be opened; `autorestart` decides whether it
+  returns at all. Neither substitutes for the other, and a host missing both
+  reports both.
 
 `disk_free_floor` uses the reviewed 25 GiB floor in
 `control_plane/executive_recovery_readiness.py`; it reports

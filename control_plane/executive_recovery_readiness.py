@@ -38,6 +38,13 @@ READINESS_PROFILE = "always-on-executive-host/v1"
 # macOS 14+ on Apple silicon.  Raise it deliberately, never infer it.
 MIN_SUPPORTED_MACOS_MAJOR = 14
 
+# Apple-silicon remote FileVault unlock after a restart, over Remote Login and
+# without a human at the keyboard, is only a supported platform capability from
+# macOS 26 onward.  An encrypted host below that generation cannot satisfy the
+# unattended preboot journey no matter how the rest of the host is configured,
+# so this floor is a separate reviewed constant from the profile floor above.
+MIN_PREBOOT_REMOTE_UNLOCK_MACOS_MAJOR = 26
+
 # Reviewed free-space floor for an unattended host that must survive a cold boot
 # plus log, snapshot and release growth without a human freeing space.
 DISK_FREE_FLOOR_BYTES = 25 * 1024**3
@@ -56,6 +63,7 @@ EVIDENCE_CLASSES = frozenset(
         "POWER_POLICY",
         "REMOTE_ACCESS_POLICY",
         "DISK_ENCRYPTION_STATE",
+        "PREBOOT_RECOVERY_DEPENDENCY",
         "SYSTEM_SERVICE_STATE",
         "USER_SESSION_DEPENDENCY",
         "FILESYSTEM_CAPACITY",
@@ -179,6 +187,20 @@ _BASE_PREDICATES: dict[str, tuple[str, str, frozenset[str]]] = {
         "ADVISORY",
         "DISK_ENCRYPTION_STATE",
         frozenset(FILEVAULT_CODES),
+    ),
+    "preboot_remote_unlock": (
+        "REQUIRED",
+        "PREBOOT_RECOVERY_DEPENDENCY",
+        frozenset(
+            {
+                "PREBOOT_UNLOCK_NOT_REQUIRED",
+                "PREBOOT_UNLOCK_SUPPORTED",
+                "PREBOOT_UNLOCK_OS_GENERATION_UNSUPPORTED",
+                "PREBOOT_UNLOCK_ARCHITECTURE_UNSUPPORTED",
+                "PREBOOT_UNLOCK_REMOTE_LOGIN_UNAVAILABLE",
+                "PREBOOT_UNLOCK_STATE_UNKNOWN",
+            }
+        ),
     ),
     "user_session_surfaces": (
         "ADVISORY",
@@ -397,16 +419,26 @@ def _validate_observation(value: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _macos_major(observation: Mapping[str, Any]) -> int | None:
+    """Return the macOS major version, or ``None`` when it cannot be trusted."""
+
+    if observation["os_name"] != "Darwin":
+        return None
+    version = observation["macos_product_version"]
+    if version is None or _MACOS_VERSION_RE.fullmatch(version) is None:
+        return None
+    return int(version.split(".", 1)[0])
+
+
 def _classify_os_identity(observation: Mapping[str, Any]) -> dict[str, Any]:
     os_name = observation["os_name"]
-    version = observation["macos_product_version"]
     if os_name is None:
         return _predicate("os_identity", status="UNKNOWN", code="OS_IDENTITY_UNKNOWN")
     if os_name != "Darwin":
         return _predicate("os_identity", status="NOT_READY", code="OS_NOT_DARWIN")
-    if version is None or _MACOS_VERSION_RE.fullmatch(version) is None:
+    major = _macos_major(observation)
+    if major is None:
         return _predicate("os_identity", status="UNKNOWN", code="OS_IDENTITY_UNKNOWN")
-    major = int(version.split(".", 1)[0])
     if major < MIN_SUPPORTED_MACOS_MAJOR:
         return _predicate(
             "os_identity", status="NOT_READY", code="OS_UNSUPPORTED_VERSION"
@@ -542,12 +574,92 @@ def _classify_encryption(observation: Mapping[str, Any]) -> dict[str, Any]:
     elif code == "FILEVAULT_STATE_UNKNOWN":
         status = "UNKNOWN"
     else:
-        # Encrypted volumes need a preboot unlock, so an unattended boot reaches
-        # the login window rather than a usable session.  That is an operator
-        # fact, not a readiness defect, and the required autorestart predicate
-        # above is what proves the machine returns at all.
+        # Encryption state alone is an operator fact, not a readiness defect:
+        # an encrypted host can still be recovered unattended when the platform
+        # supports remote preboot unlock.  ``preboot_remote_unlock`` is the
+        # load-bearing predicate that decides that, so this one stays advisory.
         status = "ADVISORY"
     return _predicate("disk_encryption_state", status=status, code=code)
+
+
+def _classify_preboot_remote_unlock(observation: Mapping[str, Any]) -> dict[str, Any]:
+    """Decide whether this host can be unlocked at preboot without a keyboard.
+
+    This is host-local eligibility only.  It never proves that a bastion, a
+    tunnel, or any external path can actually reach the host; that remains a
+    separate acceptance journey with its own evidence.
+
+    FileVault off needs no preboot unlock at all, so the prerequisite is
+    vacuously satisfied.  FileVault on requires the full Apple-silicon remote
+    unlock generation: Apple silicon, macOS
+    ``MIN_PREBOOT_REMOTE_UNLOCK_MACOS_MAJOR`` or later, and an enabled Remote
+    Login listener.  A transitional or unreadable FileVault state cannot be
+    decided, and neither can unknown architecture or unparseable version
+    evidence, so all of those fail closed to ``UNKNOWN``.  The three
+    prerequisites are evaluated in a fixed order — architecture, then OS
+    generation, then Remote Login — so one host always yields one code.
+    """
+
+    filevault_code = observation["filevault_code"]
+    if filevault_code == "FILEVAULT_OFF":
+        return _predicate(
+            "preboot_remote_unlock",
+            status="OK",
+            code="PREBOOT_UNLOCK_NOT_REQUIRED",
+        )
+    if filevault_code != "FILEVAULT_ON":
+        # Encrypting, decrypting, or unreadable: the preboot boot path this
+        # host will actually present is not yet determined.
+        return _predicate(
+            "preboot_remote_unlock",
+            status="UNKNOWN",
+            code="PREBOOT_UNLOCK_STATE_UNKNOWN",
+        )
+
+    apple_silicon = observation["apple_silicon"]
+    if apple_silicon is None:
+        return _predicate(
+            "preboot_remote_unlock",
+            status="UNKNOWN",
+            code="PREBOOT_UNLOCK_STATE_UNKNOWN",
+        )
+    if not apple_silicon:
+        return _predicate(
+            "preboot_remote_unlock",
+            status="NOT_READY",
+            code="PREBOOT_UNLOCK_ARCHITECTURE_UNSUPPORTED",
+        )
+
+    major = _macos_major(observation)
+    if major is None:
+        return _predicate(
+            "preboot_remote_unlock",
+            status="UNKNOWN",
+            code="PREBOOT_UNLOCK_STATE_UNKNOWN",
+        )
+    if major < MIN_PREBOOT_REMOTE_UNLOCK_MACOS_MAJOR:
+        return _predicate(
+            "preboot_remote_unlock",
+            status="NOT_READY",
+            code="PREBOOT_UNLOCK_OS_GENERATION_UNSUPPORTED",
+        )
+
+    remote_login = observation["remote_login"]
+    if remote_login == "UNKNOWN":
+        return _predicate(
+            "preboot_remote_unlock",
+            status="UNKNOWN",
+            code="PREBOOT_UNLOCK_STATE_UNKNOWN",
+        )
+    if remote_login != "ENABLED":
+        return _predicate(
+            "preboot_remote_unlock",
+            status="NOT_READY",
+            code="PREBOOT_UNLOCK_REMOTE_LOGIN_UNAVAILABLE",
+        )
+    return _predicate(
+        "preboot_remote_unlock", status="OK", code="PREBOOT_UNLOCK_SUPPORTED"
+    )
 
 
 def _classify_daemons(observation: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
@@ -647,6 +759,7 @@ def classify_recovery_readiness(observation: Mapping[str, Any]) -> dict[str, Any
         "cpu_architecture": _classify_architecture(normalized),
         "remote_login_listener": _classify_remote_login(normalized),
         "disk_encryption_state": _classify_encryption(normalized),
+        "preboot_remote_unlock": _classify_preboot_remote_unlock(normalized),
         "user_session_surfaces": _classify_user_session(normalized),
         "disk_free_floor": _classify_disk(normalized),
     }
@@ -773,6 +886,7 @@ __all__ = [
     "FILEVAULT_CODES",
     "HOST_REF_RE",
     "LOAD_BEARING_REQUIREMENTS",
+    "MIN_PREBOOT_REMOTE_UNLOCK_MACOS_MAJOR",
     "MIN_SUPPORTED_MACOS_MAJOR",
     "OBSERVATION_FIELDS",
     "PREDICATE_CODES",

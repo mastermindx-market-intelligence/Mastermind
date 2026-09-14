@@ -11,7 +11,9 @@ import pytest
 
 from control_plane.executive_recovery_readiness import (
     DISK_FREE_FLOOR_BYTES,
+    EVIDENCE_CLASSES,
     LOAD_BEARING_REQUIREMENTS,
+    MIN_PREBOOT_REMOTE_UNLOCK_MACOS_MAJOR,
     MIN_SUPPORTED_MACOS_MAJOR,
     PREDICATE_CODES,
     PREDICATE_PROFILE,
@@ -133,6 +135,20 @@ def _studio_observation(**overrides: Any) -> dict[str, Any]:
     }
     studio.update(overrides)
     return _observation(**studio)
+
+
+def _m1_observation(**overrides: Any) -> dict[str, Any]:
+    """An Apple-silicon laptop on macOS 15 with FileVault off and safe power."""
+
+    m1: dict[str, Any] = {
+        "macos_product_version": "15.6",
+        "apple_silicon": True,
+        "ac_power_settings": {"sleep": 0, "autorestart": 1, "autorestartatconnect": 1},
+        "filevault_code": "FILEVAULT_OFF",
+        "remote_login": "ENABLED",
+    }
+    m1.update(overrides)
+    return _observation(**m1)
 
 
 def _completed(
@@ -366,24 +382,27 @@ def test_filevault_on_is_advisory_preboot_dependency_not_a_defect() -> None:
 
 
 @pytest.mark.parametrize(
-    "filevault_code,expected_status",
+    "filevault_code,expected_status,expected_state",
     [
-        ("FILEVAULT_ON", "ADVISORY"),
-        ("FILEVAULT_ENCRYPTION_IN_PROGRESS", "ADVISORY"),
-        ("FILEVAULT_DECRYPTION_IN_PROGRESS", "ADVISORY"),
-        ("FILEVAULT_OFF", "OK"),
-        ("FILEVAULT_STATE_UNKNOWN", "UNKNOWN"),
+        ("FILEVAULT_ON", "ADVISORY", "READY"),
+        ("FILEVAULT_ENCRYPTION_IN_PROGRESS", "ADVISORY", "UNKNOWN"),
+        ("FILEVAULT_DECRYPTION_IN_PROGRESS", "ADVISORY", "UNKNOWN"),
+        ("FILEVAULT_OFF", "OK", "READY"),
+        ("FILEVAULT_STATE_UNKNOWN", "UNKNOWN", "UNKNOWN"),
     ],
 )
 def test_filevault_states_are_classified_without_recovery_material(
-    filevault_code: str, expected_status: str
+    filevault_code: str, expected_status: str, expected_state: str
 ) -> None:
     report = classify_recovery_readiness(_observation(filevault_code=filevault_code))
     predicate = report["predicates"]["disk_encryption_state"]
 
     assert predicate["status"] == expected_status
     assert predicate["code"] == filevault_code
-    assert report["recovery_state"] == "READY"
+    # The base observation is macOS 26.5 Apple silicon with Remote Login on, so a
+    # settled FileVault state is supported; a transitional or unknown one cannot
+    # be decided and fails closed through the load-bearing preboot predicate.
+    assert report["recovery_state"] == expected_state
     assert predicate["measurement"] is None
 
 
@@ -400,6 +419,264 @@ def test_filevault_recovery_key_text_is_never_carried_into_the_report() -> None:
     )
     assert b"ABCD" not in payload
     assert b"Recovery" not in payload
+
+
+# ------------------------------------------- local preboot remote-unlock law
+
+
+def test_filevault_off_needs_no_local_preboot_unlock() -> None:
+    report = classify_recovery_readiness(_observation(filevault_code="FILEVAULT_OFF"))
+    predicate = report["predicates"]["preboot_remote_unlock"]
+
+    assert predicate["requirement"] == "REQUIRED"
+    assert predicate["requirement"] in LOAD_BEARING_REQUIREMENTS
+    assert predicate["status"] == "OK"
+    assert predicate["code"] == "PREBOOT_UNLOCK_NOT_REQUIRED"
+    assert predicate["evidence_class"] == "PREBOOT_RECOVERY_DEPENDENCY"
+    assert report["recovery_state"] == "READY"
+
+
+def test_m1_like_host_passes_preboot_predicate_despite_macos_below_26() -> None:
+    report = classify_recovery_readiness(_m1_observation())
+    predicate = report["predicates"]["preboot_remote_unlock"]
+
+    assert int(_m1_observation()["macos_product_version"].split(".")[0]) < (
+        MIN_PREBOOT_REMOTE_UNLOCK_MACOS_MAJOR
+    )
+    assert predicate["status"] == "OK"
+    assert predicate["code"] == "PREBOOT_UNLOCK_NOT_REQUIRED"
+    assert report["recovery_state"] == "READY"
+    assert _blocking(report) == []
+    assert report["unknown_predicates"] == []
+
+
+def test_filevault_on_macos_15_cannot_satisfy_remote_preboot_unlock() -> None:
+    report = classify_recovery_readiness(
+        _m1_observation(filevault_code="FILEVAULT_ON")
+    )
+    predicate = report["predicates"]["preboot_remote_unlock"]
+
+    assert report["recovery_state"] == "NOT_READY"
+    assert _blocking(report) == ["preboot_remote_unlock"]
+    assert predicate["status"] == "NOT_READY"
+    assert predicate["code"] == "PREBOOT_UNLOCK_OS_GENERATION_UNSUPPORTED"
+    assert predicate["measurement"] is None
+    # Encryption state itself stays advisory; the conditional predicate is the
+    # load-bearing law.
+    assert report["predicates"]["disk_encryption_state"]["requirement"] == "ADVISORY"
+    assert report["predicates"]["disk_encryption_state"]["status"] == "ADVISORY"
+    assert report["predicates"]["os_identity"]["status"] == "OK"
+
+
+def test_filevault_on_macos_26_with_remote_login_supports_preboot_unlock() -> None:
+    report = classify_recovery_readiness(
+        _observation(
+            filevault_code="FILEVAULT_ON",
+            macos_product_version=f"{MIN_PREBOOT_REMOTE_UNLOCK_MACOS_MAJOR}.0",
+            remote_login="ENABLED",
+        )
+    )
+    predicate = report["predicates"]["preboot_remote_unlock"]
+
+    assert predicate["status"] == "OK"
+    assert predicate["code"] == "PREBOOT_UNLOCK_SUPPORTED"
+    assert report["recovery_state"] == "READY"
+
+
+@pytest.mark.parametrize(
+    "remote_login,expected_status,expected_code",
+    [
+        ("DISABLED", "NOT_READY", "PREBOOT_UNLOCK_REMOTE_LOGIN_UNAVAILABLE"),
+        ("NOT_INSTALLED", "NOT_READY", "PREBOOT_UNLOCK_REMOTE_LOGIN_UNAVAILABLE"),
+        ("UNKNOWN", "UNKNOWN", "PREBOOT_UNLOCK_STATE_UNKNOWN"),
+    ],
+)
+def test_filevault_on_requires_remote_login_for_preboot_unlock(
+    remote_login: str, expected_status: str, expected_code: str
+) -> None:
+    report = classify_recovery_readiness(
+        _observation(filevault_code="FILEVAULT_ON", remote_login=remote_login)
+    )
+    predicate = report["predicates"]["preboot_remote_unlock"]
+
+    assert predicate["status"] == expected_status
+    assert predicate["code"] == expected_code
+    if expected_status == "NOT_READY":
+        assert report["recovery_state"] == "NOT_READY"
+        assert _blocking(report) == [
+            "preboot_remote_unlock",
+            "remote_login_listener",
+        ]
+    else:
+        assert report["recovery_state"] == "UNKNOWN"
+        assert report["unknown_predicates"] == [
+            "preboot_remote_unlock",
+            "remote_login_listener",
+        ]
+
+
+@pytest.mark.parametrize(
+    "apple_silicon,expected_status,expected_code",
+    [
+        (False, "NOT_READY", "PREBOOT_UNLOCK_ARCHITECTURE_UNSUPPORTED"),
+        (None, "UNKNOWN", "PREBOOT_UNLOCK_STATE_UNKNOWN"),
+    ],
+)
+def test_filevault_on_preboot_unlock_fails_closed_without_apple_silicon(
+    apple_silicon: bool | None, expected_status: str, expected_code: str
+) -> None:
+    report = classify_recovery_readiness(
+        _observation(filevault_code="FILEVAULT_ON", apple_silicon=apple_silicon)
+    )
+    predicate = report["predicates"]["preboot_remote_unlock"]
+
+    assert predicate["status"] == expected_status
+    assert predicate["code"] == expected_code
+
+
+@pytest.mark.parametrize(
+    "filevault_code",
+    ["FILEVAULT_ENCRYPTION_IN_PROGRESS", "FILEVAULT_DECRYPTION_IN_PROGRESS"],
+)
+def test_transitional_filevault_is_unknown_for_preboot_unlock(
+    filevault_code: str,
+) -> None:
+    report = classify_recovery_readiness(_observation(filevault_code=filevault_code))
+    predicate = report["predicates"]["preboot_remote_unlock"]
+
+    assert predicate["status"] == "UNKNOWN"
+    assert predicate["code"] == "PREBOOT_UNLOCK_STATE_UNKNOWN"
+    assert report["recovery_state"] == "UNKNOWN"
+    assert report["unknown_predicates"] == ["preboot_remote_unlock"]
+
+
+def test_unknown_filevault_state_is_unknown_for_preboot_unlock() -> None:
+    report = classify_recovery_readiness(
+        _observation(filevault_code="FILEVAULT_STATE_UNKNOWN")
+    )
+    predicate = report["predicates"]["preboot_remote_unlock"]
+
+    assert predicate["status"] == "UNKNOWN"
+    assert predicate["code"] == "PREBOOT_UNLOCK_STATE_UNKNOWN"
+    assert report["recovery_state"] == "UNKNOWN"
+
+
+@pytest.mark.parametrize(
+    "macos_product_version", [None, "", "26-beta", "twentysix", "26.5.1.2.3"]
+)
+def test_malformed_os_version_never_guesses_a_preboot_pass(
+    macos_product_version: str | None,
+) -> None:
+    observation = _observation(
+        filevault_code="FILEVAULT_ON",
+        macos_product_version=macos_product_version,
+    )
+    if macos_product_version == "":
+        with pytest.raises(RecoveryReadinessContractError) as excinfo:
+            classify_recovery_readiness(observation)
+        assert str(excinfo.value) == "OBSERVATION_TEXT_INVALID"
+        return
+
+    report = classify_recovery_readiness(observation)
+    predicate = report["predicates"]["preboot_remote_unlock"]
+
+    assert predicate["status"] == "UNKNOWN"
+    assert predicate["code"] == "PREBOOT_UNLOCK_STATE_UNKNOWN"
+    assert report["recovery_state"] == "UNKNOWN"
+
+
+def test_non_darwin_host_never_claims_preboot_unlock_support() -> None:
+    report = classify_recovery_readiness(
+        _observation(
+            os_name="Linux",
+            macos_product_version=None,
+            filevault_code="FILEVAULT_ON",
+        )
+    )
+    predicate = report["predicates"]["preboot_remote_unlock"]
+
+    assert predicate["status"] == "UNKNOWN"
+    assert predicate["code"] == "PREBOOT_UNLOCK_STATE_UNKNOWN"
+    assert report["recovery_state"] == "NOT_READY"
+    assert _blocking(report) == ["os_identity"]
+
+
+def test_preboot_unlock_predicate_is_independent_of_auto_restart() -> None:
+    """The current Studio fixture must still block on exactly one predicate."""
+
+    report = classify_recovery_readiness(_studio_observation())
+
+    assert report["recovery_state"] == "NOT_READY"
+    assert _blocking(report) == ["auto_restart_after_power_loss"]
+    assert report["unknown_predicates"] == []
+    assert report["predicates"]["preboot_remote_unlock"] == {
+        "requirement": "REQUIRED",
+        "status": "OK",
+        "code": "PREBOOT_UNLOCK_SUPPORTED",
+        "evidence_class": "PREBOOT_RECOVERY_DEPENDENCY",
+        "measurement": None,
+    }
+
+
+def test_predicate_set_is_closed_and_canonically_ordered() -> None:
+    expected_ids = (
+        "ac_sleep_policy",
+        "auto_restart_after_power_loss",
+        "auto_restart_on_power_connect",
+        "cpu_architecture",
+        "disk_encryption_state",
+        "disk_free_floor",
+        "os_identity",
+        "preboot_remote_unlock",
+        "remote_login_listener",
+        "system_daemon.com.mastermind.executive.backup",
+        "system_daemon.com.mastermind.executive.control",
+        "system_daemon.com.mastermind.executive.mcp",
+        "system_daemon.com.mastermind.executive.privileged",
+        "system_daemon.com.mastermind.executive.sol-state-relay",
+        "system_daemon.com.mastermind.executive.worker.codex",
+        "system_daemon.com.mastermind.executive.worker.codex-pro-01",
+        "system_daemon.com.mastermind.executive.worker.codex-pro-02",
+        "system_daemon.com.mastermind.executive.worker.codex-pro-03",
+        "user_session_surfaces",
+    )
+
+    assert PREDICATE_PROFILE.predicate_ids() == expected_ids
+    assert expected_ids == tuple(sorted(expected_ids))
+
+    report = classify_recovery_readiness(_studio_observation())
+    payload = canonical_recovery_readiness_json(report).decode("ascii")
+    decoded = json.loads(payload)
+
+    assert tuple(decoded["predicates"]) == expected_ids
+    assert tuple(decoded) == tuple(sorted(REPORT_FIELDS))
+    assert {
+        PREDICATE_PROFILE.evidence_class(predicate_id)
+        for predicate_id in expected_ids
+    } <= EVIDENCE_CLASSES
+    assert "PREBOOT_RECOVERY_DEPENDENCY" in EVIDENCE_CLASSES
+    assert (
+        PREDICATE_CODES["preboot_remote_unlock"]
+        == frozenset(
+            {
+                "PREBOOT_UNLOCK_NOT_REQUIRED",
+                "PREBOOT_UNLOCK_SUPPORTED",
+                "PREBOOT_UNLOCK_OS_GENERATION_UNSUPPORTED",
+                "PREBOOT_UNLOCK_ARCHITECTURE_UNSUPPORTED",
+                "PREBOOT_UNLOCK_REMOTE_LOGIN_UNAVAILABLE",
+                "PREBOOT_UNLOCK_STATE_UNKNOWN",
+            }
+        )
+    )
+
+
+def test_out_of_vocabulary_preboot_code_is_refused() -> None:
+    report = classify_recovery_readiness(_observation())
+    report["predicates"]["preboot_remote_unlock"]["code"] = "PREBOOT_UNLOCK_ASSUMED_OK"
+
+    with pytest.raises(RecoveryReadinessContractError) as excinfo:
+        validate_recovery_readiness_report(report)
+    assert str(excinfo.value) == "PREDICATE_CODE_INVALID"
 
 
 # ------------------------------------------------------- daemon gate semantics
