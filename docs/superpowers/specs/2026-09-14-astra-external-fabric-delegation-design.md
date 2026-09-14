@@ -83,6 +83,7 @@ The freeze is based on current protected source, not the older planning snapshot
 | GLM / MiniMax external lanes | Mostly `SPEC_ONLY` on #583 candidate | Held until one external closed loop is proven. |
 | Web/strategic vs operational autonomy law | PR #612 source candidate, not protected at freeze | Autonomous continuation must not outrun the accepted authority boundary. |
 | Codex -> Mastermind Executive MCP registration | `DARK_OR_DISCONNECTED` / absent from observed Codex MCP census | First practical integration gap to close. |
+| Codex exact-current-session Wake primitive | Built/tested for current `RuntimeBinding` / process generation; not yet proven for this Astra orchestration journey | First canary must prove exact parent binding; arbitrary/newest Codex tabs are forbidden fallback targets. |
 | Repo-local internal Codex subagent policy | Built: Terra/medium, max 3 | Keep as bounded fallback, not the default execution path. |
 
 The older `docs/EXECUTIVE_MCP.md` description of the legacy submit path must not be over-read. Current source composes the native five-tool MCP through `build_executive_mcp_app(...)`, whose Executive App admission layer keeps the five-tool caller shape but derives a stable `req-*` identity and sends the existing CeoIngress v2 frame. The receipt still truthfully reports `dispatched=false`: admission and later COO execution are distinct events.
@@ -150,6 +151,14 @@ Astra submit_ceo_intent
 ```
 
 If the installed host is not configured for strict-v2/autonomous COO admission, the request may remain a truthful queued root. That is an installation/gate failure to surface, not a reason to create a second dispatcher in Codex.
+
+### 4.4 Exact Astra parent binding is part of completion
+
+An arbitrary manually opened Codex tab/session is not automatically the parent merely because it called `submit_ceo_intent`. Production proof requires the Astra orchestrator to be an Executive-owned current Codex operator generation with an exact `RuntimeBinding`, process generation, and provider-native handle that the existing Codex Wake path can re-enter.
+
+The system must never route by "latest Codex session", newest window, human-readable title, or provider account. If the exact bound Astra generation cannot be resolved, the durable result remains unconsumed and the capability is `PARTIAL`/blocked rather than being delivered to a neighboring session.
+
+An attended arbitrary Codex session may prove MCP registration and read/submit connectivity, but it does not count as the end-to-end parent-continuation proof unless current Runtime evidence binds that exact native session/generation.
 
 ## 5. Astra operating policy
 
@@ -262,7 +271,7 @@ This system must not transform one expensive Astra task into an invisible unboun
 
 All planner, work, review, repair, and aggregation children remain visible Runtime Jobs under current child/depth/budget rules. External workers do not gain a hidden recursive delegation authority from prompt text. A worker may use model-native helpers only when its admitted capability/profile explicitly permits them and their consumption remains inside the canonical budget/accounting owner.
 
-The first vertical uses the existing v1 bounded child/review policy. Broader ready-frontier parallelism and deeper policy changes are separate reviewed waves after one real external closed loop succeeds.
+The first vertical uses the current bounded COO child/review policy. Broader ready-frontier parallelism and deeper policy changes are separate reviewed waves after one real external closed loop succeeds.
 
 ## 10. Authentication, secrets, and installation
 
@@ -288,6 +297,7 @@ The first vertical must explicitly exercise and preserve these states:
 | Review rejects candidate | Existing bounded repair/re-review path; Astra does not self-approve. |
 | Result too large | Preserve canonical bounding receipt; Astra pulls more evidence only on demand. |
 | Parent Wake unavailable | Result remains durable/unconsumed; no busy model polling. |
+| Wrong/unbound Codex parent | Refuse delivery; never choose a neighboring/latest session. |
 | Duplicate completion/return | Existing command/event identity reconciles; no duplicate child or result promotion. |
 | Runtime/reasoning process restart | Recover objective, children, result and next action from canonical owners, not transcript replay. |
 
@@ -318,7 +328,8 @@ Use two materially comparable bounded project runs: a baseline Codex-heavy run a
 3. at least one substantive execution work unit is completed by a qualified external provider lane;
 4. no full worker transcript is injected into Astra's normal result context;
 5. the Chairman performs zero routine account selection and zero message shuttling between admission and returned candidate;
-6. effect-unknown, duplicate, and restart paths do not create duplicate Jobs or provider attempts.
+6. effect-unknown, duplicate, and restart paths do not create duplicate Jobs or provider attempts;
+7. the returned candidate is consumed by the exact Executive-bound Astra Codex generation, not merely visible in Runtime.
 
 If exact tokens are not exposed by a harness, use one documented common usage proxy for both runs and label it as a proxy. Do not fabricate token precision.
 
@@ -326,7 +337,7 @@ If exact tokens are not exposed by a harness, use one documented common usage pr
 
 This freeze authorizes planning for one closed-loop capability only:
 
-> **Astra submits one bounded program through the existing five-tool Executive MCP; the installed App admits the request through CeoIngress v2 into the existing strict-v2/COO fabric; one qualified external worker lane performs substantive work; the canonical review/result path returns a compact result to the exact parent; Astra performs final acceptance; measured Astra/internal-Codex usage is materially lower than the baseline.**
+> **An Executive-owned Astra orchestrator submits one bounded program through the existing five-tool Executive MCP; the installed App admits the request through CeoIngress v2 into the existing strict-v2/COO fabric; one qualified external worker lane performs substantive work; the canonical review/result path returns a compact result to the exact bound Astra Codex generation; Astra performs final acceptance; measured Astra/internal-Codex usage is materially lower than the baseline.**
 
 The first external lane should be Alibaba Codex Responses if #583 is accepted and its current activation gates pass. That is a routing recommendation, not an override of Capacity or provider eligibility.
 
@@ -358,7 +369,8 @@ The implementation is rejected if it introduces any of the following:
 - caller-selected provider credentials or host targets;
 - blind failover after uncertain effect;
 - a hidden recursive subagent tree not counted by current policy;
-- a change to the frozen five-tool schema merely to make this first canary convenient.
+- a change to the frozen five-tool schema merely to make this first canary convenient;
+- a newest-tab/newest-session Codex parent resolver.
 
 ## 15. Dependencies and gates
 
@@ -370,11 +382,12 @@ Implementation may build and test source behind disabled/non-arming gates, but r
 - The installed Executive MCP/App/CeoIngress generation must be current and authenticated.
 - The strict-v2/COO path must be armed through its existing owner, not by Codex configuration.
 - The selected project/source workspace must use current canonical custody.
+- The Astra orchestrator used for production proof must be materialized/bound through the existing Codex Operator/RuntimeBinding path.
 
 A missing gate produces a named blocker. It does not authorize a bypass.
 
 ## 16. Frozen decision
 
-**APPROVED AND FROZEN:** Astra becomes an external-delegation-first principal through the **existing authenticated five-tool Executive MCP**, which already maps `submit_ceo_intent` into the transport-neutral CeoIngress v2 path. Executive Runtime/COO/Capacity remain the orchestration and placement authorities. External workers carry routine execution load. Internal Codex subagents are bounded fallback. Parent context receives compact canonical results, not worker transcripts.
+**APPROVED AND FROZEN:** Astra becomes an external-delegation-first principal through the **existing authenticated five-tool Executive MCP**, which already maps `submit_ceo_intent` into the transport-neutral CeoIngress v2 path. Executive Runtime/COO/Capacity remain the orchestration and placement authorities. External workers carry routine execution load. Internal Codex subagents are bounded fallback. Parent context receives compact canonical results, not worker transcripts, and end-to-end completion requires exact Runtime-bound Astra parent consumption.
 
-Any implementation that requires a second scheduler, a raw provider-spawn interface, provider choice by Astra, a duplicate lifecycle, or an in-place widening of the five-tool contract is outside this freeze and must return for architecture review.
+Any implementation that requires a second scheduler, a raw provider-spawn interface, provider choice by Astra, a duplicate lifecycle, an in-place widening of the five-tool contract, or guessed/latest-session parent routing is outside this freeze and must return for architecture review.
