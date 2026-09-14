@@ -141,11 +141,6 @@ def _validate_orchestration_child(job: Job) -> None:
         ):
             _refuse("aggregation root is not a strict root")
     else:
-        if (
-            not isinstance(job.parent_job_id, str)
-            or _JOB_ID_RE.fullmatch(job.parent_job_id) is None
-        ):
-            _refuse("parent_job_id is not a canonical Runtime Job identifier")
         if job.job_id == job.root_job_id:
             _refuse("orchestration child cannot be its own root")
         if (

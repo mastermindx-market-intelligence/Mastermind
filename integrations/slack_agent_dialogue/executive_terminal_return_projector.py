@@ -99,7 +99,6 @@ class RuntimeTerminalReturnBindingResolver:
             identity.operation_key != candidate.operation_key
             or identity.session_ref != candidate.session_ref
             or identity.root_job_id != candidate.root_job_id
-            or identity.job_id != candidate.job_id
         ):
             raise ValueError("terminal-return delegation identity drifted")
         return ResolvedTerminalReturnBinding(
