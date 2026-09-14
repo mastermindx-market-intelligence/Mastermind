@@ -749,6 +749,10 @@ def test_packing_collapses_the_local_clone_to_a_single_object_file(tmp_path):
     source = tmp_path / "loose"
     source.mkdir()
     _git(source, "init", "-q")
+    # This fixture must stay loose until the explicit repack below. Runner
+    # maintenance settings must not compact it while commits are created.
+    _git(source, "config", "gc.auto", "0")
+    _git(source, "config", "maintenance.auto", "false")
     _git(source, "config", "user.name", "Executive Test")
     _git(source, "config", "user.email", "executive@example.invalid")
     for index in range(40):
