@@ -4,17 +4,25 @@ import hashlib
 import json
 import os
 import signal
+import socket
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
 import pytest
 
 from control_plane import executive_privileged_broker as broker_module
-from control_plane.executive_privileged_action import REQUEST_SCHEMA, canonical_request_bytes, validate_request
+from control_plane.executive_privileged_action import (
+    REQUEST_SCHEMA,
+    STATUS_REQUEST_SCHEMA,
+    canonical_request_bytes,
+    validate_request,
+)
 from control_plane.executive_privileged_broker import (
     BROKER_CONFIG_SCHEMA,
+    BrokerTrustError,
     EffectUnknownError,
     PeerAuthorizationError,
     PrivilegedActionBroker,
@@ -41,7 +49,7 @@ class FakeExecutor:
 
 
 def _broker(tmp_path: Path, executor=None) -> PrivilegedActionBroker:
-    release = tmp_path / "release"
+    release = tmp_path / ("a" * 40)
     release.mkdir()
     receipt_root = tmp_path / "receipts"
     config = PrivilegedBrokerConfig(
@@ -338,3 +346,287 @@ def test_config_mapping_refuses_unreviewed_production_policy(patch: dict[str, ob
     raw.update(patch)
     with pytest.raises(ValueError):
         PrivilegedBrokerConfig.from_mapping(raw)
+
+
+def _status(request_id: str = "req-001") -> dict[str, object]:
+    return {"schema": STATUS_REQUEST_SCHEMA, "request_id": request_id}
+
+
+def _write_inflight_marker(broker: PrivilegedActionBroker, request_id: str, *, digest: str, release_sha: str | None = None) -> None:
+    broker.inflight_path(request_id).write_text(
+        json.dumps(
+            {
+                "schema": "mastermind.executive_privileged_action_inflight.v1",
+                "request_id": request_id,
+                "request_sha256": digest,
+                "release_sha": release_sha or broker.config.release_root.name,
+            }
+        )
+        + "\n"
+    )
+
+
+def test_status_terminal_returns_stored_receipt_without_respawn(tmp_path: Path) -> None:
+    executor = FakeExecutor()
+    broker = _broker(tmp_path, executor)
+    receipt = broker.handle(_raw(), peer_uid=501)
+
+    projection = broker.query_status(_status(), peer_uid=501)
+
+    assert projection["status"] == "TERMINAL"
+    assert projection["receipt"] == receipt
+    assert len(executor.calls) == 1
+
+
+def test_status_inflight_marker_is_effect_unknown_without_repair(tmp_path: Path) -> None:
+    executor = FakeExecutor()
+    broker = _broker(tmp_path, executor)
+    digest = hashlib.sha256(canonical_request_bytes(validate_request(_raw()))).hexdigest()
+    _write_inflight_marker(broker, "req-001", digest=digest)
+
+    projection = broker.query_status(_status(), peer_uid=501)
+
+    assert projection["status"] == "EFFECT_UNKNOWN"
+    assert projection["marker_release_sha"] == broker.config.release_root.name
+    assert broker.inflight_path("req-001").is_file()
+    assert executor.calls == []
+
+
+def test_status_not_found_creates_nothing(tmp_path: Path) -> None:
+    broker = _broker(tmp_path)
+
+    projection = broker.query_status(_status("req-ghost"), peer_uid=501)
+
+    assert projection == {
+        "status": "NOT_FOUND",
+        "request_id": "req-ghost",
+        "installed_release_sha": broker.config.release_root.name,
+    }
+    assert not broker.receipt_path("req-ghost").exists()
+    assert not broker.inflight_path("req-ghost").exists()
+
+
+def test_status_terminal_wins_over_leftover_marker(tmp_path: Path) -> None:
+    executor = FakeExecutor()
+    broker = _broker(tmp_path, executor)
+    receipt = broker.handle(_raw(), peer_uid=501)
+    digest = hashlib.sha256(canonical_request_bytes(validate_request(_raw()))).hexdigest()
+    _write_inflight_marker(broker, "req-001", digest=digest)
+
+    projection = broker.query_status(_status(), peer_uid=501)
+
+    assert projection["status"] == "TERMINAL"
+    assert projection["receipt"] == receipt
+    assert len(executor.calls) == 1
+
+
+def test_status_permits_foreign_release_readback_without_reinterpreting_as_current(tmp_path: Path) -> None:
+    executor = FakeExecutor()
+    broker = _broker(tmp_path, executor)
+    broker.handle(_raw(), peer_uid=501)
+    path = broker.receipt_path("req-001")
+    value = json.loads(path.read_text())
+    value["release_sha"] = "f" * 40
+    path.write_text(json.dumps(value) + "\n")
+
+    projection = broker.query_status(_status(), peer_uid=501)
+
+    assert projection["status"] == "TERMINAL"
+    assert projection["receipt"]["release_sha"] == "f" * 40
+    assert projection["installed_release_sha"] == broker.config.release_root.name
+    assert projection["installed_release_sha"] != projection["receipt"]["release_sha"]
+    assert len(executor.calls) == 1
+
+
+def test_status_malformed_receipt_digest_fails_closed_without_effect(tmp_path: Path) -> None:
+    executor = FakeExecutor()
+    broker = _broker(tmp_path, executor)
+    broker.handle(_raw(), peer_uid=501)
+    path = broker.receipt_path("req-001")
+    value = json.loads(path.read_text())
+    value["request_sha256"] = "not-a-valid-digest"
+    path.write_text(json.dumps(value) + "\n")
+
+    with pytest.raises(BrokerTrustError):
+        broker.query_status(_status(), peer_uid=501)
+    assert len(executor.calls) == 1  # Only the fixture-producing effect, not the status query.
+
+
+def test_status_malformed_receipt_release_field_fails_closed_without_effect(tmp_path: Path) -> None:
+    executor = FakeExecutor()
+    broker = _broker(tmp_path, executor)
+    broker.handle(_raw(), peer_uid=501)
+    path = broker.receipt_path("req-001")
+    value = json.loads(path.read_text())
+    value["release_sha"] = 12345
+    path.write_text(json.dumps(value) + "\n")
+
+    with pytest.raises(BrokerTrustError):
+        broker.query_status(_status(), peer_uid=501)
+    assert len(executor.calls) == 1  # Only the fixture-producing effect, not the status query.
+
+
+def test_status_malformed_marker_json_fails_closed_without_effect(tmp_path: Path) -> None:
+    executor = FakeExecutor()
+    broker = _broker(tmp_path, executor)
+    broker.inflight_path("req-001").write_text("not json")
+
+    with pytest.raises(BrokerTrustError):
+        broker.query_status(_status(), peer_uid=501)
+    assert executor.calls == []
+
+
+def test_status_malformed_marker_digest_fails_closed_without_effect(tmp_path: Path) -> None:
+    executor = FakeExecutor()
+    broker = _broker(tmp_path, executor)
+    broker.inflight_path("req-001").write_text(
+        json.dumps(
+            {
+                "schema": "mastermind.executive_privileged_action_inflight.v1",
+                "request_id": "req-001",
+                "request_sha256": "not-a-valid-digest",
+                "release_sha": broker.config.release_root.name,
+            }
+        )
+        + "\n"
+    )
+
+    with pytest.raises(BrokerTrustError):
+        broker.query_status(_status(), peer_uid=501)
+    assert executor.calls == []
+
+
+def test_status_rejects_unauthorized_peer_before_request_validation(tmp_path: Path) -> None:
+    broker = _broker(tmp_path)
+    malformed = {"schema": "bogus-schema", "request_id": "../etc/passwd"}
+
+    with pytest.raises(PeerAuthorizationError):
+        broker.query_status(malformed, peer_uid=502)
+
+
+@pytest.mark.parametrize(
+    "malformed_status",
+    [
+        {"schema": STATUS_REQUEST_SCHEMA, "request_id": "../etc/passwd"},
+        {"schema": STATUS_REQUEST_SCHEMA, "request_id": "req; rm -rf /"},
+        {"schema": STATUS_REQUEST_SCHEMA, "request_id": "req-001", "action": "executive.services.start"},
+        {"schema": REQUEST_SCHEMA, "request_id": "req-001"},
+    ],
+)
+def test_status_traversal_shell_and_extra_keys_refuse_before_lookup(
+    tmp_path: Path, malformed_status: dict[str, object]
+) -> None:
+    executor = FakeExecutor()
+    broker = _broker(tmp_path, executor)
+    with pytest.raises(Exception):
+        broker.query_status(malformed_status, peer_uid=501)
+    assert executor.calls == []
+
+
+def test_serve_connection_dispatches_status_schema(tmp_path: Path) -> None:
+    class MemoryConnection:
+        def __init__(self, payload: bytes) -> None:
+            self.payload = payload
+            self.sent = bytearray()
+
+        def recv(self, _size: int) -> bytes:
+            payload, self.payload = self.payload, b""
+            return payload
+
+        def sendall(self, payload: bytes) -> None:
+            self.sent.extend(payload)
+
+    executor = FakeExecutor()
+    broker = _broker(tmp_path, executor)
+    broker.handle(_raw(), peer_uid=501)
+
+    payload = (json.dumps(_status(), sort_keys=True, separators=(",", ":")) + "\n").encode()
+    connection = MemoryConnection(payload)
+    serve_connection(broker, connection, peer_resolver=lambda _connection: 501)
+
+    response = json.loads(bytes(connection.sent))
+    assert response["ok"] is True
+    assert response["query"] is True
+    assert response["status"] == "TERMINAL"
+    assert len(executor.calls) == 1
+
+
+def test_serve_connection_status_rejects_unauthorized_peer_before_body_read(tmp_path: Path) -> None:
+    class ExplodingConnection:
+        def __init__(self) -> None:
+            self.sent = b""
+
+        def recv(self, _size: int) -> bytes:
+            raise AssertionError("body must not be read for an unauthorized peer")
+
+        def sendall(self, payload: bytes) -> None:
+            self.sent = payload
+
+    broker = _broker(tmp_path)
+    connection = ExplodingConnection()
+    serve_connection(broker, connection, peer_resolver=lambda _connection: 999)
+
+    response = json.loads(connection.sent)
+    assert response["ok"] is False
+    assert response["error"] == "PEER_UNAUTHORIZED"
+
+
+def test_real_socket_effect_then_status_share_one_executor_call(tmp_path: Path, short_socket_root: Path) -> None:
+    executor = FakeExecutor()
+    broker = _broker(tmp_path, executor)
+    socket_path = short_socket_root / "broker.sock"
+
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    listener.bind(str(socket_path))
+    listener.listen(2)
+
+    def send(payload: bytes) -> dict[str, object]:
+        def serve_one() -> None:
+            connection, _address = listener.accept()
+            with connection:
+                serve_connection(broker, connection, peer_resolver=lambda _connection: 501)
+
+        thread = threading.Thread(target=serve_one)
+        thread.start()
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        client.connect(str(socket_path))
+        client.sendall(payload)
+        data = b""
+        while not data.endswith(b"\n"):
+            data += client.recv(4096)
+        client.close()
+        thread.join(2)
+        return json.loads(data)
+
+    try:
+        effect_payload = (json.dumps(_raw(), sort_keys=True, separators=(",", ":")) + "\n").encode()
+        effect_response = send(effect_payload)
+        assert effect_response["ok"] is True
+        assert effect_response["replayed"] is False
+
+        status_payload = (json.dumps(_status(), sort_keys=True, separators=(",", ":")) + "\n").encode()
+        status_response = send(status_payload)
+        assert status_response["ok"] is True
+        assert status_response["query"] is True
+        assert status_response["status"] == "TERMINAL"
+        assert status_response["receipt"] == effect_response["receipt"]
+        assert len(executor.calls) == 1
+    finally:
+        listener.close()
+
+
+@pytest.mark.parametrize("field,value", [("release_sha", "not-a-git-sha"), ("outcome", "RUNNING"), ("outcome", None)])
+def test_status_rejects_corrupt_terminal_metadata(tmp_path: Path, field: str, value) -> None:
+    executor = FakeExecutor()
+    broker = _broker(tmp_path, executor)
+    broker.handle(_raw(), peer_uid=501)
+    path = broker.receipt_path("req-001")
+    receipt = json.loads(path.read_text())
+    if value is None:
+        receipt.pop(field)
+    else:
+        receipt[field] = value
+    path.write_text(json.dumps(receipt))
+    with pytest.raises(BrokerTrustError):
+        broker.query_status(_status(), peer_uid=501)
+    assert len(executor.calls) == 1

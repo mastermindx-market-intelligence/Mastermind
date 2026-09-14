@@ -6,10 +6,12 @@ import pytest
 
 from control_plane.executive_privileged_action import (
     REQUEST_SCHEMA,
+    STATUS_REQUEST_SCHEMA,
     PrivilegedActionError,
     build_argv,
     canonical_request_bytes,
     validate_request,
+    validate_status_request,
 )
 
 
@@ -219,6 +221,47 @@ def test_exactly_six_actions_are_accepted() -> None:
         "executive.worker_auth.recover_transaction": {},
     }
     assert {validate_request(_request(action, args)).action for action, args in cases.items()} == set(cases)
+
+
+def _status_request(request_id: str = "req-001") -> dict[str, object]:
+    return {"schema": STATUS_REQUEST_SCHEMA, "request_id": request_id}
+
+
+def test_status_request_accepts_exact_keys() -> None:
+    status = validate_status_request(_status_request())
+    assert status.schema == STATUS_REQUEST_SCHEMA
+    assert status.request_id == "req-001"
+    assert status.to_dict() == {"schema": STATUS_REQUEST_SCHEMA, "request_id": "req-001"}
+
+
+def test_status_request_rejects_wrong_schema() -> None:
+    request = _status_request()
+    request["schema"] = REQUEST_SCHEMA
+    with pytest.raises(PrivilegedActionError, match="schema"):
+        validate_status_request(request)
+
+
+@pytest.mark.parametrize(
+    "extra_or_missing",
+    [
+        {"schema": STATUS_REQUEST_SCHEMA, "request_id": "req-001", "action": "executive.services.start"},
+        {"schema": STATUS_REQUEST_SCHEMA, "request_id": "req-001", "args": {}},
+        {"schema": STATUS_REQUEST_SCHEMA},
+        {"request_id": "req-001"},
+    ],
+)
+def test_status_request_requires_exact_keys(extra_or_missing: dict[str, object]) -> None:
+    with pytest.raises(PrivilegedActionError, match="keys"):
+        validate_status_request(extra_or_missing)
+
+
+@pytest.mark.parametrize(
+    "request_id",
+    ["ab", "-bad", ".bad", "bad space", "a" * 65, "../etc/passwd", "req; rm -rf /", "req`id`"],
+)
+def test_status_request_id_reuses_bounded_safe_token_grammar(request_id: str) -> None:
+    with pytest.raises(PrivilegedActionError, match="request_id"):
+        validate_status_request(_status_request(request_id))
 
 
 def test_canonical_request_bytes_are_stable_across_mapping_order() -> None:

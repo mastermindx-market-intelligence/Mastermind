@@ -58,6 +58,35 @@ Receipts live under `/var/db/mastermind-executive/privileged-actions/receipts/`,
 
 Before spawning an effect, the broker atomically writes an in-flight marker and fsyncs it. On normal completion it atomically replaces that marker with the terminal receipt. On startup/request, any stale marker for the same request produces `EFFECT_UNKNOWN`; the caller must reconcile the target state or use a dedicated recovery action rather than blind-retry.
 
+## Status query (read-only)
+
+An authorized non-root caller may inspect an earlier request without resubmitting it:
+`mmx-admin status --request-id ID`. The client sends
+`mastermind.executive_privileged_action_status_request.v1` (exact keys `schema`,
+`request_id`) over the same socket, after the same kernel-peer authentication and the
+same bounded request-id grammar as effect requests. Status never accepts an effect
+argument and never generates an id.
+
+The broker's status handler authenticates the peer, validates the request, and reads
+only that id's existing terminal receipt or in-flight marker; a terminal receipt always
+wins over a leftover marker. It returns exactly one of `TERMINAL` (the stored receipt,
+verbatim, from whatever release produced it), `EFFECT_UNKNOWN` (an existing marker), or
+`NOT_FOUND` (neither exists at observation time). The response also carries
+`installed_release_sha`, the broker's own current release, kept separate from any
+`release_sha` recorded inside a historical receipt; reading an older release's receipt
+is never reinterpreted as proof about the currently installed release.
+
+Status lookup is pure observation: it never invokes the executor, never creates or
+repairs a receipt or marker, never removes a marker, and never retries or recovers a
+transaction on the caller's behalf. `NOT_FOUND` is not authority to resubmit, and an
+`EFFECT_UNKNOWN` result still requires the existing explicit canonical reconciliation
+path, not a blind retry.
+
+CLI exit codes distinguish query success from the original effect outcome: `0` for a
+successfully retrieved `TERMINAL` projection regardless of the stored outcome, `75` for
+`EFFECT_UNKNOWN`, `4` for `NOT_FOUND`, and nonzero for any malformed or refused
+response. The six effect actions and their exit codes are unchanged.
+
 ## Provider unattended permissions
 
 Host privilege alone is insufficient if the model product itself pauses for approval. The Mastermind operator profile therefore standardizes:

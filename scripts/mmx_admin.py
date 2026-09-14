@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import socket
 import sys
 import uuid
@@ -14,7 +15,12 @@ _RELEASE_ROOT = Path(__file__).resolve().parents[1]
 if str(_RELEASE_ROOT) not in sys.path:
     sys.path.insert(0, str(_RELEASE_ROOT))
 
-from control_plane.executive_privileged_action import REQUEST_SCHEMA, validate_request
+from control_plane.executive_privileged_action import (
+    REQUEST_SCHEMA,
+    STATUS_REQUEST_SCHEMA,
+    validate_request,
+    validate_status_request,
+)
 
 
 DEFAULT_SOCKET = Path("/var/run/mastermind-executive/privileged.sock")
@@ -28,13 +34,20 @@ _ACTIONS = (
     "executive.worker_auth.verify_ready",
     "executive.worker_auth.recover_transaction",
 )
+_STATUS_ACTION = "status"
 _SLOT_IDS = ("codex-01", "codex-pro-01", "codex-pro-02", "codex-pro-03")
 _CREDENTIAL_KINDS = ("service-account", "personal-access-token", "device-auth")
+_EFFECT_ONLY_FLAGS = (
+    ("--slot-id", "slot_id"),
+    ("--expected-credential-kind", "expected_credential_kind"),
+    ("--workspace-binding-class", "workspace_binding_class"),
+    ("--credential-expires-at", "credential_expires_at"),
+)
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Invoke one reviewed Mastermind privileged action")
-    parser.add_argument("action", choices=_ACTIONS)
+    parser.add_argument("action", choices=_ACTIONS + (_STATUS_ACTION,))
     parser.add_argument("--request-id")
     parser.add_argument("--socket", dest="socket_path", type=Path, default=DEFAULT_SOCKET)
     parser.add_argument("--slot-id", choices=_SLOT_IDS)
@@ -62,6 +75,20 @@ def build_request(argv: Sequence[str]) -> dict[str, object]:
         "args": values,
     }
     return validate_request(raw).to_dict()
+
+
+def build_status_request(argv: Sequence[str]) -> dict[str, object]:
+    parser = _parser()
+    args = parser.parse_args(list(argv))
+    if args.action != _STATUS_ACTION:
+        parser.error("build_status_request requires the status action")
+    if args.request_id is None:
+        parser.error("status requires an explicit --request-id")
+    for flag, attribute in _EFFECT_ONLY_FLAGS:
+        if getattr(args, attribute) is not None:
+            parser.error(f"status does not accept {flag}")
+    raw = {"schema": STATUS_REQUEST_SCHEMA, "request_id": args.request_id}
+    return validate_status_request(raw).to_dict()
 
 
 def _read_response(connection: socket.socket) -> dict[str, object]:
@@ -102,10 +129,81 @@ def send_request(
         connection.close()
 
 
+def send_status_request(
+    request: dict[str, object],
+    *,
+    socket_path: Path = DEFAULT_SOCKET,
+    timeout_seconds: int = DEFAULT_CLIENT_TIMEOUT_SECONDS,
+) -> dict[str, object]:
+    validated = validate_status_request(request)
+    payload = (json.dumps(validated.to_dict(), sort_keys=True, separators=(",", ":")) + "\n").encode("ascii")
+    connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        connection.settimeout(timeout_seconds)
+        connection.connect(str(socket_path))
+        connection.sendall(payload)
+        return _read_response(connection)
+    finally:
+        connection.close()
+
+
+def _status_exit_code(response: dict[str, object], request_id: str) -> int:
+    # A successful query is not evidence that the historical effect succeeded.
+    # Correlate it before exposing a terminal/successful retrieval to callers.
+    if (
+        response.get("schema") != "mastermind.executive_privileged_action_response.v1"
+        or response.get("ok") is not True
+        or response.get("query") is not True
+        or response.get("request_id") != request_id
+        or not isinstance(response.get("installed_release_sha"), str)
+        or re.fullmatch(r"[0-9a-f]{40}", response["installed_release_sha"]) is None
+    ):
+        return 1
+    status = response.get("status")
+    if status == "TERMINAL":
+        receipt = response.get("receipt")
+        if not isinstance(receipt, dict) or receipt.get("request_id") != request_id:
+            return 1
+        exit_code = receipt.get("exit_code")
+        outcome = receipt.get("outcome")
+        if (
+            isinstance(exit_code, bool)
+            or not isinstance(exit_code, int)
+            or outcome not in ("SUCCEEDED", "FAILED")
+            or (outcome == "SUCCEEDED") != (exit_code == 0)
+        ):
+            return 1
+        return 0
+    if status == "EFFECT_UNKNOWN":
+        return 75
+    if status == "NOT_FOUND":
+        return 4
+    return 1
+
+
+def _main_status(values: Sequence[str], namespace: argparse.Namespace) -> int:
+    request = build_status_request(values)
+    sys.stderr.write(f"mmx-admin request_id={request['request_id']}\n")
+    sys.stderr.flush()
+    try:
+        response = send_status_request(request, socket_path=namespace.socket_path)
+    except (OSError, RuntimeError, UnicodeError, json.JSONDecodeError) as exc:
+        sys.stderr.write(f"mmx-admin transport failure: {exc}\n")
+        return 69
+    exit_code = _status_exit_code(response, str(request["request_id"]))
+    if exit_code == 1:
+        sys.stderr.write("mmx-admin status response refused or invalid\n")
+        return 1
+    sys.stdout.write(json.dumps(response, sort_keys=True, separators=(",", ":")) + "\n")
+    return exit_code
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     values = list(sys.argv[1:] if argv is None else argv)
     parser = _parser()
     namespace = parser.parse_args(values)
+    if namespace.action == _STATUS_ACTION:
+        return _main_status(values, namespace)
     request = build_request(values)
     sys.stderr.write(f"mmx-admin request_id={request['request_id']}\n")
     sys.stderr.flush()

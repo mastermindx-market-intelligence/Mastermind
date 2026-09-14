@@ -562,6 +562,19 @@ A repeated request with the same id and identical content returns the stored
 receipt without re-executing. The same id with changed content refuses, and a
 stale in-flight marker returns `EFFECT_UNKNOWN` rather than retrying blindly.
 
+To inspect an earlier request's outcome without resubmitting it, query its id
+over the same socket:
+
+```bash
+"$MMX_ADMIN" status --request-id "company-ready-$MERGE_SHA"
+```
+
+This is observation only: it never re-executes the action, never creates or
+repairs a receipt/marker, and never retries. Exit `0` means the terminal
+receipt was retrieved (regardless of that receipt's own recorded outcome),
+`75` means only a stale in-flight marker exists (`EFFECT_UNKNOWN`), and `4`
+means neither exists yet (`NOT_FOUND`, which is not license to resubmit).
+
 ### Three isolated Personal Pro readiness slots
 
 The company worker above remains the only installed Executive worker service.

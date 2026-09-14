@@ -26,15 +26,21 @@ from typing import Any, Callable, Mapping, Protocol, Sequence
 from common.redaction import sanitize_external_text
 from control_plane.executive_privileged_action import (
     PrivilegedActionRequest,
+    PrivilegedActionStatusRequest,
+    STATUS_REQUEST_SCHEMA,
     build_argv,
     canonical_request_bytes,
     validate_request,
+    validate_status_request,
 )
 
 
 BROKER_CONFIG_SCHEMA = "mastermind.executive_privileged_broker_config.v1"
 RECEIPT_SCHEMA = "mastermind.executive_privileged_action_receipt.v1"
 INFLIGHT_SCHEMA = "mastermind.executive_privileged_action_inflight.v1"
+STATUS_TERMINAL = "TERMINAL"
+STATUS_EFFECT_UNKNOWN = "EFFECT_UNKNOWN"
+STATUS_NOT_FOUND = "NOT_FOUND"
 _RELEASE_PREFIX = Path("/Library/Application Support/MastermindExecutive/releases")
 _RECEIPT_ROOT = Path("/var/db/mastermind-executive/privileged-actions/receipts")
 _SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -207,6 +213,18 @@ def _read_bounded_json(path: Path) -> dict[str, Any]:
         raise BrokerTrustError(f"broker state is unreadable: {path.name}") from exc
     if not isinstance(value, dict):
         raise BrokerTrustError(f"broker state is not a mapping: {path.name}")
+    return value
+
+
+def _validate_stored_release_sha(value: Any) -> str:
+    if not isinstance(value, str) or _SHA40_RE.fullmatch(value) is None:
+        raise BrokerTrustError("stored release_sha is not an exact Git commit")
+    return value
+
+
+def _validate_stored_digest(value: Any) -> str:
+    if not isinstance(value, str) or _SHA256_RE.fullmatch(value) is None:
+        raise BrokerTrustError("stored request_sha256 is not a valid digest")
     return value
 
 
@@ -480,6 +498,71 @@ class PrivilegedActionBroker:
         receipt, _replayed = self._handle_outcome(raw_request, peer_uid=peer_uid)
         return receipt
 
+    def _read_terminal_for_status(self, request_id: str) -> dict[str, Any] | None:
+        path = self.receipt_path(request_id)
+        if not path.exists():
+            return None
+        value = _read_bounded_json(path)
+        if value.get("schema") != RECEIPT_SCHEMA or value.get("request_id") != request_id:
+            raise BrokerTrustError("terminal receipt identity is invalid")
+        _validate_stored_release_sha(value.get("release_sha"))
+        _validate_stored_digest(value.get("request_sha256"))
+        exit_code = value.get("exit_code")
+        outcome = value.get("outcome")
+        if (
+            isinstance(exit_code, bool)
+            or not isinstance(exit_code, int)
+            or outcome not in ("SUCCEEDED", "FAILED")
+            or (outcome == "SUCCEEDED") != (exit_code == 0)
+        ):
+            raise BrokerTrustError("terminal receipt outcome is invalid")
+        return value
+
+    def _read_inflight_for_status(self, request_id: str) -> dict[str, Any] | None:
+        path = self.inflight_path(request_id)
+        if not path.exists():
+            return None
+        value = _read_bounded_json(path)
+        if value.get("schema") != INFLIGHT_SCHEMA or value.get("request_id") != request_id:
+            raise BrokerTrustError("in-flight marker identity is invalid")
+        _validate_stored_release_sha(value.get("release_sha"))
+        _validate_stored_digest(value.get("request_sha256"))
+        return value
+
+    def query_status(
+        self, raw_status_request: Mapping[str, Any], *, peer_uid: int
+    ) -> dict[str, Any]:
+        """Read-only status lookup: never executes, writes, or reconciles state."""
+        if isinstance(peer_uid, bool) or not isinstance(peer_uid, int) or peer_uid not in self.config.allowed_peer_uids:
+            raise PeerAuthorizationError("kernel peer uid is not authorized for privileged actions")
+        status_request: PrivilegedActionStatusRequest = validate_status_request(raw_status_request)
+        request_id = status_request.request_id
+        installed_release_sha = self.config.release_root.name
+
+        terminal = self._read_terminal_for_status(request_id)
+        if terminal is not None:
+            return {
+                "status": STATUS_TERMINAL,
+                "request_id": request_id,
+                "installed_release_sha": installed_release_sha,
+                "receipt": terminal,
+            }
+
+        marker = self._read_inflight_for_status(request_id)
+        if marker is not None:
+            return {
+                "status": STATUS_EFFECT_UNKNOWN,
+                "request_id": request_id,
+                "installed_release_sha": installed_release_sha,
+                "marker_release_sha": marker.get("release_sha"),
+            }
+
+        return {
+            "status": STATUS_NOT_FOUND,
+            "request_id": request_id,
+            "installed_release_sha": installed_release_sha,
+        }
+
 
 WIRE_RESPONSE_SCHEMA = "mastermind.executive_privileged_action_response.v1"
 _MAX_REQUEST_BYTES = 64 * 1024
@@ -570,6 +653,22 @@ def _wire_success(receipt: Mapping[str, Any], *, replayed: bool) -> dict[str, An
     }
 
 
+def _wire_status(projection: Mapping[str, Any]) -> dict[str, Any]:
+    value: dict[str, Any] = {
+        "schema": WIRE_RESPONSE_SCHEMA,
+        "ok": True,
+        "query": True,
+        "status": projection["status"],
+        "request_id": projection["request_id"],
+        "installed_release_sha": projection["installed_release_sha"],
+    }
+    if "receipt" in projection:
+        value["receipt"] = dict(projection["receipt"])
+    if "marker_release_sha" in projection:
+        value["marker_release_sha"] = projection["marker_release_sha"]
+    return value
+
+
 def _send_wire(connection: socket.socket, value: Mapping[str, Any]) -> None:
     payload = (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
     connection.sendall(payload)
@@ -610,8 +709,12 @@ def serve_connection(
         if peer_uid not in broker.config.allowed_peer_uids:
             raise PeerAuthorizationError("kernel peer uid is not authorized for privileged actions")
         raw = _read_request_frame(connection)
-        receipt, replayed = broker._handle_outcome(raw, peer_uid=peer_uid)
-        _send_wire(connection, _wire_success(receipt, replayed=replayed))
+        if raw.get("schema") == STATUS_REQUEST_SCHEMA:
+            projection = broker.query_status(raw, peer_uid=peer_uid)
+            _send_wire(connection, _wire_status(projection))
+        else:
+            receipt, replayed = broker._handle_outcome(raw, peer_uid=peer_uid)
+            _send_wire(connection, _wire_success(receipt, replayed=replayed))
     except PeerAuthorizationError:
         # Do not parse or reflect an unauthorized peer's body.
         _send_wire(connection, _wire_error("PEER_UNAUTHORIZED", "kernel peer uid is not authorized"))
@@ -655,6 +758,9 @@ __all__ = [
     "PrivilegedBrokerError",
     "RECEIPT_SCHEMA",
     "RequestIdConflictError",
+    "STATUS_EFFECT_UNKNOWN",
+    "STATUS_NOT_FOUND",
+    "STATUS_TERMINAL",
     "WIRE_RESPONSE_SCHEMA",
     "activate_launchd_socket",
     "get_peer_uid",

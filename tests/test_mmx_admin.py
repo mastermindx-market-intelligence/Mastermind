@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from control_plane.executive_privileged_action import REQUEST_SCHEMA
+from control_plane.executive_privileged_action import REQUEST_SCHEMA, STATUS_REQUEST_SCHEMA
 from scripts import mmx_admin
-from scripts.mmx_admin import build_request, send_request
+from scripts.mmx_admin import build_request, build_status_request, send_request, send_status_request
 
 
 def test_client_builds_verify_ready_request() -> None:
@@ -119,3 +119,155 @@ def test_send_request_uses_one_newline_delimited_json_frame(short_socket_root: P
     frame = observed["raw"]
     assert frame.count(b"\n") == 1
     assert json.loads(frame) == request
+
+
+def test_status_client_builds_exact_status_request() -> None:
+    request = build_status_request(["status", "--request-id", "req-status-001"])
+    assert request == {"schema": STATUS_REQUEST_SCHEMA, "request_id": "req-status-001"}
+
+
+def test_status_requires_explicit_request_id_and_never_generates_one() -> None:
+    with pytest.raises(SystemExit):
+        build_status_request(["status"])
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["status", "--request-id", "req-001", "--slot-id", "codex-pro-01"],
+        [
+            "status",
+            "--request-id", "req-001",
+            "--expected-credential-kind", "service-account",
+        ],
+        [
+            "status",
+            "--request-id", "req-001",
+            "--workspace-binding-class", "company-workspace-admin-attested",
+        ],
+        [
+            "status",
+            "--request-id", "req-001",
+            "--credential-expires-at", "2026-09-14T00:00:00Z",
+        ],
+    ],
+)
+def test_status_rejects_effect_arguments(argv: list[str]) -> None:
+    with pytest.raises(SystemExit):
+        build_status_request(argv)
+
+
+def test_six_effect_actions_remain_backward_compatible() -> None:
+    request = build_request(["executive.services.start", "--request-id", "req-effect-001"])
+    assert request["action"] == "executive.services.start"
+    assert request["schema"] == REQUEST_SCHEMA
+
+
+def test_main_status_terminal_exit_code_is_zero_regardless_of_stored_outcome(monkeypatch, capsys) -> None:
+    response = {
+        "schema": "mastermind.executive_privileged_action_response.v1",
+        "ok": True,
+        "query": True,
+        "status": "TERMINAL",
+        "request_id": "req-001",
+        "installed_release_sha": "a" * 40,
+        "receipt": {"request_id": "req-001", "outcome": "FAILED", "exit_code": 65},
+    }
+    monkeypatch.setattr(mmx_admin, "send_status_request", lambda *_a, **_k: response)
+    rc = mmx_admin.main(["status", "--request-id", "req-001"])
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert json.loads(captured.out) == response
+
+
+def test_main_status_effect_unknown_exit_code_is_75(monkeypatch) -> None:
+    response = {
+        "schema": "mastermind.executive_privileged_action_response.v1",
+        "ok": True,
+        "query": True,
+        "status": "EFFECT_UNKNOWN",
+        "request_id": "req-001",
+        "installed_release_sha": "a" * 40,
+    }
+    monkeypatch.setattr(mmx_admin, "send_status_request", lambda *_a, **_k: response)
+    assert mmx_admin.main(["status", "--request-id", "req-001"]) == 75
+
+
+def test_main_status_not_found_exit_code_is_4(monkeypatch) -> None:
+    response = {
+        "schema": "mastermind.executive_privileged_action_response.v1",
+        "ok": True,
+        "query": True,
+        "status": "NOT_FOUND",
+        "request_id": "req-001",
+        "installed_release_sha": "a" * 40,
+    }
+    monkeypatch.setattr(mmx_admin, "send_status_request", lambda *_a, **_k: response)
+    assert mmx_admin.main(["status", "--request-id", "req-001"]) == 4
+
+
+def test_main_status_refused_response_is_nonzero(monkeypatch) -> None:
+    response = {"ok": False, "error": "REFUSED", "detail": "malformed state"}
+    monkeypatch.setattr(mmx_admin, "send_status_request", lambda *_a, **_k: response)
+    assert mmx_admin.main(["status", "--request-id", "req-001"]) != 0
+
+
+def test_main_status_transport_failure_keeps_original_request_id_visible(monkeypatch, capsys) -> None:
+    def fail_send(*_args, **_kwargs):
+        raise TimeoutError("simulated transport loss")
+
+    monkeypatch.setattr(mmx_admin, "send_status_request", fail_send)
+    rc = mmx_admin.main(["status", "--request-id", "req-visible-status-001"])
+    captured = capsys.readouterr()
+    assert rc == 69
+    assert "request_id=req-visible-status-001" in captured.err
+    assert "transport failure" in captured.err
+
+
+def test_send_status_request_uses_one_newline_delimited_json_frame(short_socket_root: Path) -> None:
+    socket_path = short_socket_root / "broker-status.sock"
+    observed = {}
+    ready = threading.Event()
+
+    def server() -> None:
+        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        listener.bind(str(socket_path))
+        listener.listen(1)
+        ready.set()
+        connection, _ = listener.accept()
+        with connection:
+            data = b""
+            while not data.endswith(b"\n"):
+                data += connection.recv(4096)
+            observed["raw"] = data
+            connection.sendall(
+                b'{"ok":true,"query":true,"status":"NOT_FOUND",'
+                b'"request_id":"req-status-wire-001",'
+                b'"installed_release_sha":"' + b"a" * 40 + b'"}\n'
+            )
+        listener.close()
+
+    thread = threading.Thread(target=server, daemon=True)
+    thread.start()
+    assert ready.wait(2)
+    request = build_status_request(["status", "--request-id", "req-status-wire-001"])
+    response = send_status_request(request, socket_path=socket_path)
+    thread.join(2)
+    assert response["ok"] is True
+    assert response["status"] == "NOT_FOUND"
+    frame = observed["raw"]
+    assert frame.count(b"\n") == 1
+    assert json.loads(frame) == request
+
+
+@pytest.mark.parametrize("patch", [{"request_id": "other-001"}, {"schema": "unknown"}, {"receipt": None}])
+def test_status_client_refuses_uncorrelated_or_malformed_terminal(monkeypatch, patch) -> None:
+    response = {
+        "schema": "mastermind.executive_privileged_action_response.v1", "ok": True,
+        "query": True, "status": "TERMINAL", "request_id": "req-001",
+        "installed_release_sha": "a" * 40,
+        "receipt": {"request_id": "req-001", "outcome": "FAILED", "exit_code": 65},
+    }
+    response.update(patch)
+    monkeypatch.setattr(mmx_admin, "send_status_request", lambda *_a, **_k: response)
+    assert mmx_admin.main(["status", "--request-id", "req-001"]) != 0

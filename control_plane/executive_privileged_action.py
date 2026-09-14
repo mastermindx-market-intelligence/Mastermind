@@ -19,9 +19,11 @@ from ops.executive_os.provider_worker_slots import all_slots, get_slot
 
 
 REQUEST_SCHEMA = "mastermind.executive_privileged_action_request.v1"
+STATUS_REQUEST_SCHEMA = "mastermind.executive_privileged_action_status_request.v1"
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{2,63}$")
 _UTC_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
 _REQUEST_KEYS = frozenset({"schema", "request_id", "action", "args"})
+_STATUS_REQUEST_KEYS = frozenset({"schema", "request_id"})
 _REVIEWED_SLOT_IDS = frozenset(slot.slot_id for slot in all_slots())
 _COMPANY_SLOT = get_slot("codex-01")
 _COMPANY_BINDING = _COMPANY_SLOT.workspace_binding_class
@@ -80,6 +82,15 @@ class PrivilegedActionRequest:
 
 
 ValidatedPrivilegedAction = PrivilegedActionRequest
+
+
+@dataclasses.dataclass(frozen=True)
+class PrivilegedActionStatusRequest:
+    schema: str
+    request_id: str
+
+    def to_dict(self) -> dict[str, object]:
+        return {"schema": self.schema, "request_id": self.request_id}
 
 
 def _require_exact_keys(mapping: Mapping[str, Any], expected: frozenset[str], label: str) -> None:
@@ -201,6 +212,19 @@ def validate_request(raw: Mapping[str, Any]) -> ValidatedPrivilegedAction:
     )
 
 
+def validate_status_request(raw: Mapping[str, Any]) -> PrivilegedActionStatusRequest:
+    if not isinstance(raw, Mapping):
+        raise PrivilegedActionError("privileged status request must be a mapping")
+    _require_exact_keys(raw, _STATUS_REQUEST_KEYS, "status request")
+    schema = _require_string(raw["schema"], "schema")
+    if schema != STATUS_REQUEST_SCHEMA:
+        raise PrivilegedActionError("unsupported privileged status request schema")
+    request_id = _require_string(raw["request_id"], "request_id")
+    if _REQUEST_ID_RE.fullmatch(request_id) is None:
+        raise PrivilegedActionError("request_id is not a bounded safe token")
+    return PrivilegedActionStatusRequest(schema=schema, request_id=request_id)
+
+
 def build_argv(request: ValidatedPrivilegedAction, release_root: str | Path) -> tuple[str, ...]:
     root = Path(release_root)
     args = request.args_dict()
@@ -252,10 +276,13 @@ __all__ = [
     "ACTION_EFFECT_CLASS",
     "PRIVILEGED_ACTIONS",
     "REQUEST_SCHEMA",
+    "STATUS_REQUEST_SCHEMA",
     "PrivilegedActionError",
     "PrivilegedActionRequest",
+    "PrivilegedActionStatusRequest",
     "ValidatedPrivilegedAction",
     "build_argv",
     "canonical_request_bytes",
     "validate_request",
+    "validate_status_request",
 ]
