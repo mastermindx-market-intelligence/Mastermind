@@ -121,6 +121,28 @@ class SubscriptionHarnessBindingsTest(unittest.TestCase):
         ):
             validate_bindings(mutated, profiles_document=self.profiles)
 
+    def test_cased_codex_cli_openai_chat_binding_is_refused(self) -> None:
+        mutated = copy.deepcopy(self.raw)
+        row = mutated["bindings"]["alibaba-token-plan-personal.codex-responses"]
+        row["harness_id"] = "Codex-cli"
+        row["adapter_id"] = "Codex-cli"
+        row["protocol"] = "openai-chat"
+        with self.assertRaisesRegex(
+            HarnessBindingError, "not a reviewed Codex Responses lane"
+        ):
+            validate_bindings(mutated, profiles_document=self.profiles)
+
+    def test_cased_codex_cli_spec_only_binding_is_refused(self) -> None:
+        mutated = copy.deepcopy(self.raw)
+        row = mutated["bindings"]["alibaba-token-plan-personal.codex-responses"]
+        row["harness_id"] = "Codex-cli"
+        row["adapter_id"] = "Codex-cli"
+        row["implementation_state"] = "SPEC_ONLY"
+        with self.assertRaisesRegex(
+            HarnessBindingError, "not a reviewed Codex Responses lane"
+        ):
+            validate_bindings(mutated, profiles_document=self.profiles)
+
     def test_built_alibaba_codex_lane_can_reach_canary_gate_only(self) -> None:
         binding = get_binding(
             "alibaba-token-plan-personal.codex-responses",

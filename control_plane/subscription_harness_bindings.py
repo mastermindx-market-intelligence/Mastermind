@@ -179,8 +179,13 @@ def validate_bindings(
         state = row.get("implementation_state")
         if state not in _ALLOWED_STATES:
             raise HarnessBindingError(f"binding {binding_id!r} state is invalid")
-        if harness_id == "codex-cli" or adapter_id == "codex-cli":
-            if harness_id != adapter_id:
+        normalized_harness_id = str(harness_id).strip().lower()
+        normalized_adapter_id = str(adapter_id).strip().lower()
+        if (
+            normalized_harness_id == "codex-cli"
+            or normalized_adapter_id == "codex-cli"
+        ):
+            if normalized_harness_id != normalized_adapter_id:
                 raise HarnessBindingError(
                     f"binding {binding_id!r} codex harness identity disagrees"
                 )
