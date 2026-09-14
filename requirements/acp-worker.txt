@@ -1,0 +1,2 @@
+# Install only in the isolated worker integration environment, not the sealed Runtime.
+agent-client-protocol==0.12.1
