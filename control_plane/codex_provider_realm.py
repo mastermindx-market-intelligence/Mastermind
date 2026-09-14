@@ -110,6 +110,31 @@ def _has_macos_acl(path: Path) -> bool:
         raise ProviderRealmError("provider credential is unavailable")
 
 
+def _require_provider_home(
+    home: Path,
+    *,
+    expected_uid: int,
+    expected_gid: int,
+) -> None:
+    try:
+        info = home.lstat()
+    except OSError:
+        raise ProviderRealmError("provider credential is unavailable") from None
+    try:
+        acl_present = _has_macos_acl(home)
+    except ProviderRealmError:
+        raise
+    if (
+        stat.S_ISLNK(info.st_mode)
+        or not stat.S_ISDIR(info.st_mode)
+        or info.st_uid != int(expected_uid)
+        or info.st_gid != int(expected_gid)
+        or stat.S_IMODE(info.st_mode) != 0o700
+        or acl_present
+    ):
+        raise ProviderRealmError("provider credential is unavailable")
+
+
 def load_private_provider_credential(
     provider_home: Path | str,
     *,
@@ -121,6 +146,7 @@ def load_private_provider_credential(
     home = Path(provider_home)
     path = home / PROVIDER_CREDENTIAL_FILENAME
     try:
+        _require_provider_home(home, expected_uid=expected_uid, expected_gid=expected_gid)
         before = path.lstat()
         if (
             stat.S_ISLNK(before.st_mode)

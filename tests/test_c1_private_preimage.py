@@ -22,6 +22,11 @@ def subject():
     return importlib.import_module(MODULE)
 
 
+@pytest.fixture(autouse=True)
+def installed_filesystem_acl_observer(monkeypatch):
+    monkeypatch.setattr(subject(), "has_macos_acl", lambda _path: False)
+
+
 def snapshot(**changes):
     value = {
         "unsafe": False,

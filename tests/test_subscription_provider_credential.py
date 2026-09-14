@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ctypes
+import errno
 import io
 import os
 import subprocess
@@ -24,6 +26,8 @@ from control_plane.executive_ambient_process import (
     AmbientClassification,
     AmbientProcessIdentity,
 )
+from control_plane import fs_security
+from control_plane.fs_security import FilesystemSecurityError
 from ops.executive_os import subscription_provider_credential as credential
 
 
@@ -299,6 +303,35 @@ class TestDarwinACLBoundary:
         ):
             credential.verify_provider_credential(config)
 
+    def test_home_acl_is_refused_at_read_while_credential_file_is_clean(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        config, _ = _installed_config(tmp_path)
+        home = Path(str(config["provider_home"]))
+        _add_read_acl(home)
+
+        with pytest.raises(ProviderRealmError, match="provider credential is unavailable"):
+            load_private_provider_credential(
+                home,
+                expected_uid=os.getuid(),
+                expected_gid=os.getgid(),
+            )
+
+    def test_file_acl_is_refused_at_read_while_provider_home_is_clean(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        config, path = _installed_config(tmp_path)
+        _add_read_acl(path)
+
+        with pytest.raises(ProviderRealmError, match="provider credential is unavailable"):
+            load_private_provider_credential(
+                path.parent,
+                expected_uid=os.getuid(),
+                expected_gid=os.getgid(),
+            )
+
     def test_home_without_acl_allows_read_verify_and_enroll(self, tmp_path: Path) -> None:
         config, path = _installed_config(tmp_path)
 
@@ -343,61 +376,86 @@ class TestDarwinACLBoundary:
             == path
         )
 
-    def test_observer_failure_refuses_for_file_and_home(self, tmp_path: Path) -> None:
+    def test_observer_failure_refuses_for_file_and_home_at_each_boundary(
+        self,
+        tmp_path: Path,
+    ) -> None:
         config, path = _installed_config(tmp_path)
 
-        with mock.patch.object(
-            credential,
-            "_has_macos_acl",
-            side_effect=credential.SubscriptionCredentialError("observer fixture"),
-        ):
-            with pytest.raises(
-                credential.SubscriptionCredentialError,
-                match="observer fixture",
+        for target in (path.parent, path):
+            with mock.patch.object(
+                fs_security,
+                "_acl_get_file",
+                return_value=None,
+            ) as observer, mock.patch.object(
+                ctypes,
+                "get_errno",
+                return_value=errno.EACCES,
             ):
-                credential._credential_metadata(
-                    path,
-                    worker_uid=os.getuid(),
-                    worker_gid=os.getgid(),
-                )
-            with pytest.raises(
-                credential.SubscriptionCredentialError,
-                match="observer fixture",
-            ):
-                credential.verify_provider_credential(config)
-            with pytest.raises(
-                credential.SubscriptionCredentialError,
-                match="observer fixture",
-            ):
-                credential.install_provider_credential(
-                    config,
-                    ALIBABA_TOKEN_PLAN,
-                    credential=b"replacement-provider-key",
-                    replace_existing=True,
-                )
+                with pytest.raises(FilesystemSecurityError, match="errno=13"):
+                    fs_security.has_macos_acl(target)
 
-        with mock.patch.object(
-            credential,
-            "_has_macos_acl",
-            side_effect=credential.SubscriptionCredentialError("observer fixture"),
-        ):
-            with pytest.raises(
-                credential.SubscriptionCredentialError,
-                match="observer fixture",
-            ):
-                credential.verify_provider_credential(config)
+                with pytest.raises(
+                    credential.SubscriptionCredentialError,
+                    match="credential filesystem metadata unavailable",
+                ):
+                    credential.install_provider_credential(
+                        config,
+                        ALIBABA_TOKEN_PLAN,
+                        credential=b"replacement-provider-key",
+                        replace_existing=True,
+                    )
+                with pytest.raises(
+                    credential.SubscriptionCredentialError,
+                    match="credential filesystem metadata unavailable",
+                ):
+                    credential.verify_provider_credential(config)
+                with pytest.raises(
+                    ProviderRealmError,
+                    match="provider credential is unavailable",
+                ):
+                    load_private_provider_credential(
+                        path.parent,
+                        expected_uid=os.getuid(),
+                        expected_gid=os.getgid(),
+            )
+            assert os.fsencode(target) in {call.args[0] for call in observer.call_args_list}
 
-        with mock.patch.object(
-            codex_provider_realm,
-            "_has_macos_acl",
-            side_effect=ProviderRealmError("observer fixture"),
+    def test_acl_observer_native_semantics_and_error_classification(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        path = tmp_path / "observer-fixture"
+        path.write_text("fixture", encoding="utf-8")
+        path.chmod(0o600)
+
+        assert fs_security.has_macos_acl(path) is False
+        _add_read_acl(path)
+        assert fs_security.has_macos_acl(path) is True
+        subprocess.run(["/bin/chmod", "-N", os.fspath(path)], check=True)
+        assert fs_security.has_macos_acl(path) is False
+
+        missing = tmp_path / "absent"
+        with pytest.raises(FilesystemSecurityError):
+            fs_security.has_macos_acl(missing)
+
+        with mock.patch.object(fs_security, "_acl_get_file", return_value=None), mock.patch.object(
+            ctypes,
+            "get_errno",
+            return_value=errno.EACCES,
         ):
-            with pytest.raises(ProviderRealmError, match="provider credential is unavailable"):
-                load_private_provider_credential(
-                    path.parent,
-                    expected_uid=os.getuid(),
-                    expected_gid=os.getgid(),
-                )
+            with pytest.raises(FilesystemSecurityError, match="errno=13"):
+                fs_security.has_macos_acl(path)
+
+        _add_read_acl(path)
+        with mock.patch.object(
+            fs_security,
+            "_acl_get_entry",
+            return_value=1,
+        ) as observer, mock.patch.object(fs_security, "_acl_free", return_value=0):
+            with pytest.raises(FilesystemSecurityError, match="enumeration failed"):
+                fs_security.has_macos_acl(path)
+        observer.assert_called_once()
 
     def test_old_stat_probe_does_not_observe_the_acl_fixture(self, tmp_path: Path) -> None:
         _, path = _installed_config(tmp_path)
