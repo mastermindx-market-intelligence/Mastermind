@@ -604,17 +604,15 @@ def test_control_wrapper_post_exec_argv_contains_no_canary_name(
 def test_installer_replaces_whole_program_argument_arrays() -> None:
     install = (OPS / "install.sh").read_text(encoding="utf-8")
     assert "render_launchd_program_arguments.py" in install
-    # DR-B1 (off-host disaster recovery) added a third rendered daemon,
-    # com.mastermind.executive.backup -- extending this pin rather than
-    # dropping it, per the same discipline the control/worker pair already
-    # enforced: install.sh must keep replacing ProgramArguments wholesale via
-    # the reviewed renderer, never piecemeal via `plutil -replace
-    # ProgramArguments.N`.
-    assert install.count("render_launchd_program_arguments.py") == 3
+    # DR-B1 added backup and the privileged-action wave adds one socket-activated
+    # root broker. All four still replace ProgramArguments wholesale via the
+    # reviewed renderer, never piecemeal via `plutil -replace ProgramArguments.N`.
+    assert install.count("render_launchd_program_arguments.py") == 4
     assert "plutil -replace ProgramArguments." not in install
     assert '"$CONTROL_PLIST" --' in install
     assert '"$WORKER_PLIST" --' in install
     assert '"$BACKUP_PLIST" --' in install
+    assert '"$PRIVILEGED_PLIST" --' in install
     assert 'scripts/executive_os_phase1c_worker.py"' in install
     assert 'ops/executive_os/run_nightly_backup.sh"' in install
     assert 'plutil -replace UserName -string "$WORKER_USER" "$WORKER_PLIST"' in install
@@ -1541,7 +1539,16 @@ def test_installer_stops_old_daemons_before_first_release_or_policy_mutation() -
     assert stop < control_absent < worker_absent < archive < config_write < plist_install
     assert "trap leave_installed_services_stopped EXIT" in source
     tail_after_plists = source[plist_install:]
-    assert '/bin/launchctl bootstrap' not in tail_after_plists
+    # Normal Executive daemons stay inert. The only bootstrap is the explicitly
+    # armed privileged broker, after exact-release verification.
+    assert '/bin/launchctl bootstrap system "$CONTROL_PLIST"' not in tail_after_plists
+    assert '/bin/launchctl bootstrap system "$WORKER_PLIST"' not in tail_after_plists
+    assert '/bin/launchctl bootstrap system "$BACKUP_PLIST"' not in tail_after_plists
+    assert tail_after_plists.count('/bin/launchctl bootstrap') == 1
+    arm = tail_after_plists.index('if [ "$ARM_PRIVILEGED_BROKER" = "1" ]; then')
+    bootstrap = tail_after_plists.index('/bin/launchctl bootstrap system "$PRIVILEGED_PLIST"')
+    manifest_verify = tail_after_plists.rindex('release_manifest.py" verify', 0, arm)
+    assert manifest_verify < arm < bootstrap
 
 
 @pytest.mark.skipif(sys.platform != 'darwin', reason='macOS plutil installer rendering')
