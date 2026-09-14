@@ -91,7 +91,10 @@ RECEIPT_KEYS = frozenset(
 RECEIPT_KEYS_BY_INDEX = tuple(sorted(RECEIPT_KEYS))
 _PEER_REF_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._:-]{7,127}\Z")
 _CONSULTATION_ID_RE = re.compile(r"\Aconsult-[0-9a-f]{32}\Z")
-_BINDING_ID_RE = re.compile(r"\Abind-[0-9a-f]{32}\Z")
+# Mirrors runtime_binding_id_for in control_plane.operator_harness_contract:
+# "bind-" plus a 40-hex SHA-256 prefix.  Kept literal so common/ remains free
+# of control_plane imports; a producer-composition test pins the shapes equal.
+_BINDING_ID_RE = re.compile(r"\Abind-[0-9a-f]{40}\Z")
 _REPOSITORY_RE = re.compile(r"\A[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\Z")
 _PATH_RE = re.compile(r"\A[A-Za-z0-9_][A-Za-z0-9_./-]{0,254}\Z")
 _COMMIT_RE = re.compile(r"\A[0-9a-f]{40}\Z")

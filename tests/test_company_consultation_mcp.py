@@ -12,6 +12,8 @@ from control_plane.executive_agent_capabilities import (
     CompanyConsultationGrantProfile,
     build_company_consultation_grant_profile,
 )
+from control_plane.runtime_binding_projection import project_runtime_binding
+from control_plane.operator_harness_contract import runtime_binding_id_for
 from integrations.mastermind_company_mcp.consultation import (
     COMPANY_CONSULTATION_CAPABILITY,
     COMPANY_CONSULTATION_ERROR_CODES,
@@ -49,6 +51,10 @@ from integrations.slack_agent_dialogue.company_dialogue_runtime_binding import (
     CurrentWorkerDialogueSnapshot,
     WorkerDialogueCaller,
 )
+from common.agent_dialogue_consultation_contract import validate_consultation
+from integrations.slack_agent_dialogue.contract import DialogueContractError
+from tests.test_agent_dialogue_consultation_contract import raw_consultation
+from tests.test_runtime_binding_projection import _admitted_runtime, _target
 
 
 class _Dispatcher:
@@ -610,6 +616,62 @@ def test_existing_company_dialogue_resolver_derives_only_public_peer_facts() -> 
         "peer_ref": "peer-7bdf4a6f9a664bbcf1a93d67a41ba51d",
         "display_name": "Peer 7bdf",
     }
+
+
+def test_real_runtime_binding_composes_through_peer_into_envelope_validator(tmp_path) -> None:
+    runtime, _dispatch, sealed, epoch, _generation, _process, _profile_value = _admitted_runtime(tmp_path)
+    runtime_binding = project_runtime_binding(
+        runtime, sealed.attempt_id, _target()
+    )
+    current = dataclasses.replace(
+        _current_snapshot(),
+        attempt_id=sealed.attempt_id,
+        runtime_binding=runtime_binding,
+    )
+    actor = dataclasses.replace(
+        _caller(),
+        attempt_id=sealed.attempt_id,
+        runtime_binding=runtime_binding,
+    )
+    resolution = peer_from_company_dialogue(
+        peer_ref="peer-7bdf4a6f9a664bbcf1a93d67a41ba51d",
+        display_name="Peer 7bdf",
+        program_ref="JOB-100/agent-fabric-end-to-end-fable-integration",
+        delegation_identity=_delegation_identity(),
+        dialogue_parent=_dialogue_parent(),
+        thread_ts="1787896128.625239",
+        current=current,
+        actor=actor,
+    )
+
+    assert resolution.state.value == "RESOLVED"
+    assert resolution.peer is not None
+    assert resolution.peer.binding["binding_id"] == runtime_binding_id_for(
+        sealed.attempt_id, epoch.session_epoch_id
+    )
+    assert resolution.peer.binding["binding_id"] == runtime_binding.binding_id
+
+    envelope = raw_consultation()
+    envelope["recipient_binding"] = resolution.peer.binding
+    validated = validate_consultation(envelope)
+    assert validated["recipient_binding"] == resolution.peer.binding
+    assert validated["schema"] == "mastermind.agent_dialogue_consultation.v1"
+    assert validated["response_budget"] == {
+        "max_answers": 1,
+        "max_evidence_reads": 2,
+        "max_forward_hops": 0,
+        "max_payload_bytes": 32768,
+    }
+
+    canonical_hex = runtime_binding.binding_id.removeprefix("bind-")
+    for noncanonical in ("bind-" + "a" * 32, runtime_binding.binding_id + "0"):
+        envelope["recipient_binding"] = {
+            **resolution.peer.binding,
+            "binding_id": noncanonical,
+        }
+        with pytest.raises(DialogueContractError):
+            validate_consultation(envelope)
+    assert canonical_hex
 
 
 def test_stale_generation_or_forged_actor_refuses_before_dispatch() -> None:
