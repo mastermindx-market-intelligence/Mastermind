@@ -76,6 +76,8 @@ def _document(
 ) -> tuple[dict[str, object], Path, Path, str]:
     project = tmp_path / f"project-{tag}"
     audit = tmp_path / f"audit-{tag}"
+    artifact = tmp_path / f"artifact-{tag}"
+    artifact.mkdir(mode=0o700)
     project.mkdir(mode=0o700)
     audit.mkdir(mode=0o700)
     key_file = tmp_path / f"action-key-{tag}.hex"
@@ -91,6 +93,8 @@ def _document(
         "audit_policy_id": f"workbench-action-tunnel-{tag}",
         "project_root": str(project),
         "audit_directory": str(audit),
+        "artifact_directory": str(artifact),
+        "host_id": "a" * 64,
         "action_key_file": str(key_file),
         "max_concurrency": 1,
         "io_timeout_seconds": 5.0,
@@ -223,6 +227,9 @@ def test_open_channel_exposes_channel_services_without_oauth_surface(tmp_path: P
     lease = _lease(CHANNEL, now_ms)
     project_fd = os.open(project, os.O_RDONLY | os.O_DIRECTORY)
     audit_fd = os.open(audit, os.O_RDONLY | os.O_DIRECTORY)
+    artifact = tmp_path / "artifacts"
+    artifact.mkdir(mode=0o700)
+    artifact_fd = os.open(artifact, os.O_RDONLY | os.O_DIRECTORY)
     runtime = None
     try:
         runtime = WorkbenchActionRuntime.open_channel(
@@ -230,6 +237,8 @@ def test_open_channel_exposes_channel_services_without_oauth_surface(tmp_path: P
             clock_ms=lambda: int(time.time() * 1000),
             project_directory_fd=project_fd,
             audit_directory_fd=audit_fd,
+            host_artifact_fd=artifact_fd,
+            host_id="a" * 64,
             audit_policy_id="workbench-action-tunnel-fixture",
             lease=lease,
             action_token_key=bytes.fromhex(KEY_A),
@@ -257,6 +266,7 @@ def test_open_channel_exposes_channel_services_without_oauth_surface(tmp_path: P
                 pass
         os.close(project_fd)
         os.close(audit_fd)
+        os.close(artifact_fd)
 
 
 def test_open_channel_refuses_channel_not_matching_host_lease(tmp_path: Path) -> None:
@@ -267,6 +277,9 @@ def test_open_channel_refuses_channel_not_matching_host_lease(tmp_path: Path) ->
     lease = _lease(CHANNEL, int(time.time() * 1000))
     project_fd = os.open(project, os.O_RDONLY | os.O_DIRECTORY)
     audit_fd = os.open(audit, os.O_RDONLY | os.O_DIRECTORY)
+    artifact = tmp_path / "artifacts"
+    artifact.mkdir(mode=0o700)
+    artifact_fd = os.open(artifact, os.O_RDONLY | os.O_DIRECTORY)
     try:
         with pytest.raises(RuntimeConfigurationError):
             WorkbenchActionRuntime.open_channel(
@@ -274,6 +287,8 @@ def test_open_channel_refuses_channel_not_matching_host_lease(tmp_path: Path) ->
                 clock_ms=lambda: int(time.time() * 1000),
                 project_directory_fd=project_fd,
                 audit_directory_fd=audit_fd,
+                host_artifact_fd=artifact_fd,
+                host_id="a" * 64,
                 audit_policy_id="workbench-action-tunnel-fixture",
                 lease=lease,
                 action_token_key=bytes.fromhex(KEY_A),
@@ -281,6 +296,7 @@ def test_open_channel_refuses_channel_not_matching_host_lease(tmp_path: Path) ->
     finally:
         os.close(project_fd)
         os.close(audit_fd)
+        os.close(artifact_fd)
 
 
 def test_expired_lease_refuses_open_and_live_admission(tmp_path: Path) -> None:
@@ -291,6 +307,9 @@ def test_expired_lease_refuses_open_and_live_admission(tmp_path: Path) -> None:
     now_ms = int(time.time() * 1000)
     project_fd = os.open(project, os.O_RDONLY | os.O_DIRECTORY)
     audit_fd = os.open(audit, os.O_RDONLY | os.O_DIRECTORY)
+    artifact = tmp_path / "artifacts"
+    artifact.mkdir(mode=0o700)
+    artifact_fd = os.open(artifact, os.O_RDONLY | os.O_DIRECTORY)
     runtime = None
     try:
         with pytest.raises(RuntimeConfigurationError):
@@ -299,6 +318,8 @@ def test_expired_lease_refuses_open_and_live_admission(tmp_path: Path) -> None:
                 clock_ms=lambda: now_ms + 300_001,
                 project_directory_fd=project_fd,
                 audit_directory_fd=audit_fd,
+                host_artifact_fd=artifact_fd,
+                host_id="a" * 64,
                 audit_policy_id="workbench-action-tunnel-fixture",
                 lease=_lease(CHANNEL, now_ms),
                 action_token_key=bytes.fromhex(KEY_A),
@@ -310,6 +331,8 @@ def test_expired_lease_refuses_open_and_live_admission(tmp_path: Path) -> None:
             clock_ms=lambda: clock["ms"],
             project_directory_fd=project_fd,
             audit_directory_fd=audit_fd,
+            host_artifact_fd=artifact_fd,
+            host_id="a" * 64,
             audit_policy_id="workbench-action-tunnel-fixture",
             lease=_lease(CHANNEL, now_ms),
             action_token_key=bytes.fromhex(KEY_A),
@@ -349,10 +372,8 @@ def test_expired_lease_refuses_open_and_live_admission(tmp_path: Path) -> None:
         # refused one never may.
         assert not (project / "sample.py").exists()
         events = _audit_lines(audit)
-        # Expiry revokes the runtime before the refusal audit can use run_io.
-        # The effect is still refused; the durable refusal row cannot be
-        # written through that API after revoke.
-        assert [event["code"] for event in events] == ["accepted"]
+        # The narrow observation-only audit method survives effect revocation.
+        assert [event["code"] for event in events] == ["accepted", "channel_refused"]
     finally:
         if runtime is not None:
             try:
@@ -361,6 +382,7 @@ def test_expired_lease_refuses_open_and_live_admission(tmp_path: Path) -> None:
                 pass
         os.close(project_fd)
         os.close(audit_fd)
+        os.close(artifact_fd)
 
 
 def test_foreign_project_and_foreign_root_refuse(tmp_path: Path) -> None:

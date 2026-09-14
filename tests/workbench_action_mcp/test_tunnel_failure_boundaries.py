@@ -330,7 +330,7 @@ def test_uncertain_close_is_not_masked_by_server_construction_error(
 
 
 def test_stdio_initialize_list_shutdown_roundtrip(tmp_path: Path) -> None:
-    from mcp import ClientSession, StdioServerParameters, stdio_client
+    from tests.test_mcp_stdio_boundary import child, initialize
 
     assert importlib.metadata.version("mcp") == "1.28.1"
     document, _, _, _ = _document(tmp_path)
@@ -338,32 +338,15 @@ def test_stdio_initialize_list_shutdown_roundtrip(tmp_path: Path) -> None:
     config_path.write_text(json.dumps(document))
     os.chmod(config_path, 0o600)
     script = Path(__file__).resolve().parents[2] / "scripts" / "mastermind_workbench_action_stdio.py"
-
-    async def exercise() -> None:
-        params = StdioServerParameters(
-            command=sys.executable,
-            args=[str(script), "--config", str(config_path)],
-            cwd="/",
-            env={
-                "PATH": os.environ.get("PATH", ""),
-                "HOME": os.environ.get("HOME", ""),
-                "USER": os.environ.get("USER", ""),
-                "LOGNAME": os.environ.get("LOGNAME", ""),
-                "PYTHONUNBUFFERED": "1",
-            },
-        )
-        async with stdio_client(params) as (read, write):
-            async with ClientSession(read, write) as session:
-                init = await session.initialize()
-                assert init.serverInfo.name == SERVER_NAME
-                tools = await session.list_tools()
-                assert {tool.name for tool in tools.tools} == {
-                    "prepare_text_patch",
-                    "commit_text_patch",
-                    "reconcile_text_patch",
-                }
-
-    asyncio.run(asyncio.wait_for(exercise(), timeout=20))
+    with child([sys.executable, str(script), "--config", str(config_path)]) as process:
+        initialize(process)
+        process.send({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+        tools = process.receive()["result"]["tools"]
+        assert {tool["name"] for tool in tools} == {
+            "prepare_text_patch", "commit_text_patch", "reconcile_text_patch",
+        }
+        process.assert_exit(0)
+        assert not process.fallback_used
 
 
 def test_same_inode_key_rewrite_during_load_is_refused(

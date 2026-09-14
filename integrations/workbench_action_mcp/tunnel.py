@@ -90,6 +90,8 @@ _CONFIG_KEYS = frozenset(
         "audit_policy_id",
         "project_root",
         "audit_directory",
+        "artifact_directory",
+        "host_id",
         "action_key_file",
         "max_concurrency",
         "io_timeout_seconds",
@@ -141,6 +143,8 @@ class TunnelConfig:
     audit_policy_id: str
     project_root: str
     audit_directory: str
+    artifact_directory: str
+    host_id: str
     action_key_file: str
     max_concurrency: int
     io_timeout_seconds: float
@@ -191,6 +195,12 @@ def _channel_identifier(value: object) -> str:
     if type(value) is not str or not value or len(value) > 512:
         _refuse()
     if any(ord(character) <= 32 or ord(character) == 127 for character in value):
+        _refuse()
+    return value
+
+
+def _host_id(value: object) -> str:
+    if type(value) is not str or re.fullmatch(r"[0-9a-f]{64}", value) is None:
         _refuse()
     return value
 
@@ -380,6 +390,8 @@ def parse_tunnel_config(value: object) -> TunnelConfig:
         audit_policy_id=_audit_policy_id(value.get("audit_policy_id")),
         project_root=_absolute_path(value.get("project_root")),
         audit_directory=_absolute_path(value.get("audit_directory")),
+        artifact_directory=_absolute_path(value.get("artifact_directory")),
+        host_id=_host_id(value.get("host_id")),
         action_key_file=_absolute_path(value.get("action_key_file")),
         max_concurrency=_bounded_int(
             value.get("max_concurrency"), minimum=1, maximum=MAX_CONCURRENCY
@@ -485,17 +497,21 @@ async def create_runtime_channel(
     action_token_key = _secure_action_key(config.action_key_file)
     project_fd = -1
     audit_fd = -1
+    artifact_fd = -1
     runtime: WorkbenchActionRuntime | None = None
     primary_error: BaseException | None = None
     cleanup_errors: list[BaseException] = []
     try:
         project_fd = _open_safe_directory(config.project_root)
         audit_fd = _open_safe_directory(config.audit_directory)
+        artifact_fd = _open_safe_directory(config.artifact_directory)
         runtime = WorkbenchActionRuntime.open_channel(
             channel=config.channel,
             clock_ms=lambda: int(time.time() * 1000),
             project_directory_fd=project_fd,
             audit_directory_fd=audit_fd,
+            host_artifact_fd=artifact_fd,
+            host_id=config.host_id,
             audit_policy_id=config.audit_policy_id,
             lease=config.lease,
             action_token_key=action_token_key,
@@ -507,7 +523,7 @@ async def create_runtime_channel(
     except BaseException as error:
         primary_error = error
     finally:
-        for descriptor in (audit_fd, project_fd):
+        for descriptor in (artifact_fd, audit_fd, project_fd):
             if descriptor >= 0:
                 try:
                     os.close(descriptor)
@@ -624,6 +640,8 @@ def create_tunnel_action_server(runtime: WorkbenchActionRuntime) -> Server:
         clock_ms=services.clock_ms,
         run_io=runtime.run_io,
         token_codec=ActionTokenCodec(services.action_token_key),
+        artifact_store=services.artifact_store,
+        host=services.host_binding,
         action_ttl_ms=services.action_ttl_ms,
     )
     prepare_validator = Draft202012Validator(_PREPARE_INPUT)
@@ -636,9 +654,9 @@ def create_tunnel_action_server(runtime: WorkbenchActionRuntime) -> Server:
     ) -> None:
         # One durable admission fact per tool call, owned by the runtime's
         # bounded physical executor.  Any failure poisons the sink and must
-        # block the effect rather than degrade to memory.  Routing the write
-        # through run_io does not reauthorize a revoked effect: a closed
-        # runtime refuses the physical attempt.
+        # block the effect rather than degrade to memory. The narrow runtime
+        # method can durably record denial after revocation without reopening
+        # effect admission; closing/closed still refuse the audit attempt.
         event = ChannelAuditEvent(
             schema=CHANNEL_AUDIT_SCHEMA,
             policy_id=services.audit_policy_id,
@@ -648,7 +666,7 @@ def create_tunnel_action_server(runtime: WorkbenchActionRuntime) -> Server:
             tool=tool,
             action_digest=action_digest,
         )
-        await runtime.run_io(lambda: services.audit_sink.emit(event))
+        await runtime.emit_channel_audit(event)
 
     def emit_call_receipt(*, name: str, request: object) -> None:
         sink = services.call_receipt_sink
@@ -780,9 +798,8 @@ def create_tunnel_action_server(runtime: WorkbenchActionRuntime) -> Server:
             except AuditSinkPoisoned:
                 return _error("CHANNEL_AUDIT_UNAVAILABLE")
             except (RuntimeClosed, SyncExecutionTimeout):
-                # run_io will not accept work after revoke/expiry.  The
-                # effect stays refused; the durable refusal row cannot be
-                # written through that API.
+                # A closing/closed or timed-out audit remains unavailable;
+                # effect admission stays refused.
                 return _error("CHANNEL_ADMISSION_REFUSED")
             return _error("CHANNEL_ADMISSION_REFUSED")
         try:
