@@ -1,9 +1,4 @@
-"""Versioned, non-command peer-consultation dialogue contract.
-
-The still-unmerged ``v1`` amendment adds ``question_message_key`` on ANSWER
-frames.  It explicitly identifies the QUESTION referenced by the ANSWER; the
-contract remains ``mastermind.agent_dialogue_consultation.v1``.
-"""
+"""Versioned, non-command peer-consultation dialogue contract."""
 from __future__ import annotations
 
 import copy
@@ -28,6 +23,7 @@ from common.agent_dialogue_contract_v2 import (
 )
 
 CONSULTATION_SCHEMA = "mastermind.agent_dialogue_consultation.v1"
+CONSULTATION_V2_SCHEMA = "mastermind.agent_dialogue_consultation.v2"
 CONSULTATION_PURPOSES = frozenset({"QUESTION", "ANSWER", "NOTICE", "CORRECTION"})
 CONSULTATION_KEYS = frozenset(
     {
@@ -48,11 +44,11 @@ CONSULTATION_KEYS = frozenset(
         "deadline_ms",
         "response_budget",
         "supersedes_message_key",
-        "question_message_key",
         "receipts",
         "fingerprint",
     }
 )
+CONSULTATION_V2_KEYS = CONSULTATION_KEYS | {"question_message_key"}
 RECIPIENT_BINDING_KEYS = frozenset(
     {"binding_id", "binding_generation", "reasoning_surface"}
 )
@@ -95,7 +91,6 @@ RECEIPT_KEYS = frozenset(
     }
 )
 RECEIPT_KEYS_BY_INDEX = tuple(sorted(RECEIPT_KEYS))
-QUESTION_MESSAGE_KEY = "question_message_key"
 _PEER_REF_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._:-]{7,127}\Z")
 _CONSULTATION_ID_RE = re.compile(r"\Aconsult-[0-9a-f]{32}\Z")
 # Mirrors runtime_binding_id_for in control_plane.operator_harness_contract:
@@ -162,6 +157,18 @@ def _exact_keys(value: Any, keys: frozenset[str]) -> dict[str, Any]:
     return copy.deepcopy(dict(value))
 
 
+def _schema_keys(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise DialogueContractError("MESSAGE_INVALID")
+    schema = value.get("schema")
+    keys = (
+        CONSULTATION_V2_KEYS
+        if schema == CONSULTATION_V2_SCHEMA
+        else CONSULTATION_KEYS
+    )
+    return _exact_keys(value, keys)
+
+
 def _require_string(
     value: Any,
     *,
@@ -226,8 +233,21 @@ def _validated_receipt(value: Any) -> dict[str, Any] | None:
 def validate_consultation(value: Any) -> dict[str, Any]:
     _reject_secret_shaped_leaves(value, code="MESSAGE_INVALID")
     _reject_forbidden_names(value)
-    item = _exact_keys(value, CONSULTATION_KEYS)
+    item = _schema_keys(value)
     if item["schema"] != CONSULTATION_SCHEMA:
+        if item["schema"] != CONSULTATION_V2_SCHEMA:
+            raise DialogueContractError("MESSAGE_INVALID")
+        if item["purpose"] not in {"ANSWER", "CORRECTION"}:
+            raise DialogueContractError("MESSAGE_INVALID")
+        question_key = item["question_message_key"]
+        if not isinstance(question_key, str) or _MESSAGE_KEY_RE.fullmatch(question_key) is None:
+            raise DialogueContractError("MESSAGE_INVALID")
+        if (
+            item["purpose"] == "ANSWER"
+            and item["message_key"] == question_key
+        ):
+            raise DialogueContractError("MESSAGE_INVALID")
+    elif item["schema"] != CONSULTATION_SCHEMA:
         raise DialogueContractError("MESSAGE_INVALID")
     if not isinstance(item["message_key"], str) or _MESSAGE_KEY_RE.fullmatch(item["message_key"]) is None:
         raise DialogueContractError("MESSAGE_INVALID")
@@ -258,19 +278,14 @@ def validate_consultation(value: Any) -> dict[str, Any]:
     for key in ("request_message_key", "consultation_id"):
         if not isinstance(correlation[key], str):
             raise DialogueContractError("MESSAGE_INVALID")
-    if not isinstance(item["question_message_key"], str) or _MESSAGE_KEY_RE.fullmatch(
-        item["question_message_key"]
-    ) is None:
-        raise DialogueContractError("MESSAGE_INVALID")
     if (
-        item["purpose"] == "QUESTION"
+        item["schema"] == CONSULTATION_SCHEMA
+        and item["purpose"] == "QUESTION"
         and correlation["request_message_key"] != item["message_key"]
     ):
         raise DialogueContractError("MESSAGE_INVALID")
-    if item["purpose"] == "ANSWER":
+    if item["schema"] == CONSULTATION_V2_SCHEMA:
         if item["question_message_key"] != correlation["request_message_key"]:
-            raise DialogueContractError("MESSAGE_INVALID")
-        if item["message_key"] == correlation["request_message_key"]:
             raise DialogueContractError("MESSAGE_INVALID")
     if correlation["consultation_id"] != item["consultation_id"]:
         raise DialogueContractError("MESSAGE_INVALID")
@@ -387,12 +402,13 @@ __all__ = [
     "ANSWER_KEYS",
     "ARTIFACT_REVISION_KEYS",
     "CONSULTATION_KEYS",
+    "CONSULTATION_V2_KEYS",
+    "CONSULTATION_V2_SCHEMA",
     "CONSULTATION_PURPOSES",
     "CONSULTATION_SCHEMA",
     "CORRELATION_KEYS",
     "DuplicateClassification",
     "RECEIPT_KEYS",
-    "QUESTION_MESSAGE_KEY",
     "RECIPIENT_BINDING_KEYS",
     "RESPONSE_BUDGET_KEYS",
     "RESPONSE_BUDGET_MAXIMA",

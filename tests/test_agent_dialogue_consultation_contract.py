@@ -78,6 +78,8 @@ def raw_consultation(**overrides) -> dict:
         "fingerprint": "",
     }
     value.update(overrides)
+    if value["purpose"] == "QUESTION":
+        value.pop("question_message_key", None)
     return value
 
 
@@ -150,6 +152,7 @@ def test_consultation_enforces_purpose_and_frozen_budget_bounds() -> None:
         answer=answer,
         supersedes_message_key="asd-consultation-0000000000000000",
     )
+    correction["schema"] = "mastermind.agent_dialogue_consultation.v2"
     assert validate_consultation(correction)["purpose"] == "CORRECTION"
 
     with pytest.raises(DialogueContractError):
@@ -216,6 +219,7 @@ def test_question_and_answer_have_explicit_request_reference_invariants() -> Non
 
     answer = copy.deepcopy(request)
     answer["message_key"] = "asd-consultation-answer-0001"
+    answer["schema"] = "mastermind.agent_dialogue_consultation.v2"
     answer["purpose"] = "ANSWER"
     answer["question"] = None
     answer["answer"] = {"text": "closed answer", "evidence_refs": []}
@@ -234,3 +238,15 @@ def test_question_and_answer_have_explicit_request_reference_invariants() -> Non
     reused_request_key["question_message_key"] = request["message_key"]
     with pytest.raises(DialogueContractError):
         validate_consultation(reused_request_key)
+
+
+def test_protected_v1_frame_and_fingerprint_remain_admitted_unchanged() -> None:
+    protected = raw_consultation()
+    built = build_consultation(protected)
+
+    assert "question_message_key" not in built
+    assert validate_consultation(built) is not built
+    assert built["fingerprint"] == consultation_semantic_fingerprint(built)
+
+    replay = copy.deepcopy(built)
+    assert classify_duplicate(built, replay) is DuplicateClassification.IDEMPOTENT

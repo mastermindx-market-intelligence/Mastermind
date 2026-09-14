@@ -23,6 +23,7 @@ from control_plane.executive_worker_broker import (
     WorkerBrokerClient,
 )
 from control_plane.operator_harness_contract import (
+    ATTENTION_TURN_INSTRUCTION,
     OPERATOR_HARNESS_INTERFACE_VERSION,
     AttentionTurnObservation,
     CandidateResult,
@@ -120,13 +121,6 @@ class CodexConsultationIngress:
             raise ConsultationIngressRefused(
                 "active consultation recipient turn refused before provider I/O"
             )
-        instruction = (
-            "Company consultation reference only; no authority is granted:\n"
-            f"consultation_id={consultation_ref}\n"
-            f"message_key={message_key}\n"
-            f"semantic_fingerprint={semantic_fingerprint}\n"
-            f"opaque_wake_id={wake_obligation_id}"
-        )
         observation = self.adapter.deliver_attention(
             generation=self.generation,
             attempt_id=self.attempt_id,
@@ -135,7 +129,7 @@ class CodexConsultationIngress:
             provider_session_id=self.provider_session_id,
             nudge_id="consult-" + uuid4().hex,
             opaque_ids=(wake_obligation_id,),
-            instruction=instruction,
+            instruction=ATTENTION_TURN_INSTRUCTION,
             completion_timeout_seconds=15.0,
         )
         if not isinstance(observation, AttentionTurnObservation):
