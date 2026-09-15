@@ -9,6 +9,7 @@ from dataclasses import replace
 import pytest
 
 from control_plane.executive_runtime import (
+    OHF_CHECKPOINT_OPERATION_SCHEMA_VERSION,
     OrchestrationDispatchOutcome,
     Runtime,
     RuntimeStore,
@@ -562,6 +563,26 @@ def test_cctx0_checkpoint_closes_g1_and_legacy_refusal_remains(tmp_path):
             "SELECT COUNT(*) FROM events WHERE event_type='JOB_CHECKPOINTED'",
         ).fetchone()[0]
     assert checkpoint_events == 1
+    checkpoint_operation = OperationId("ohf-op:cctx0-d7-checkpoint")
+    applied = runtime.events.get_event_by_command_id(
+        operation_receipt_command_id(
+            checkpoint_operation, OperationReceiptKind.APPLIED
+        )
+    )
+    assert applied is not None
+    assert (
+        applied.payload["schema_version"]
+        == OHF_CHECKPOINT_OPERATION_SCHEMA_VERSION
+    )
+    assert applied.payload["checkpoint_sequence"] == 1
+    checkpoint_event = runtime.events.list_events(
+        job_id=str(dispatch.attempt.job_id)
+    )
+    assert any(
+        event.event_type == "JOB_CHECKPOINTED"
+        and event.payload == {"checkpoint_sequence": 1}
+        for event in checkpoint_event
+    )
     with pytest.raises(
         StateConflict,
         match="orchestration OHF checkpoints require a generation-bound API",
