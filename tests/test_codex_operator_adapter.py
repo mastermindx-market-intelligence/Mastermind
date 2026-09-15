@@ -609,11 +609,14 @@ def test_fake_app_server_end_to_end_through_provider_neutral_orchestrator(
 def test_lc1_gate_held_visible_turn_projection(tmp_path: Path) -> None:
     gate = tmp_path / "gate"
     gate.touch()
+    item_gate = tmp_path / "item-notification-gate"
+    item_gate.touch()
     harness = _make_harness(
         tmp_path,
         extra_env={
             "OHF_FAKE_GATE_MODE": "held",
             "OHF_FAKE_GATE_PATH": str(gate),
+            "OHF_FAKE_ITEM_GATE_PATH": str(item_gate),
             "OHF_FAKE_GATE_LOG": str(tmp_path / "gate.log"),
             "OHF_FAKE_EFFECT_COUNTERS": str(tmp_path / "effects.log"),
             "OHF_FAKE_TURN_REPLY": "LC1 fixture reply",
@@ -699,6 +702,7 @@ def test_lc1_gate_held_visible_turn_projection(tmp_path: Path) -> None:
     projection = harness.adapter.visible_turn_projection
     key = projection.check_grant(grant)
     assert key is not None
+    item_gate.unlink()
     turn_deadline = time.monotonic() + 5.0
     while True:
         try:
@@ -789,7 +793,34 @@ def test_lc1_gate_held_visible_turn_projection(tmp_path: Path) -> None:
     gate.unlink()
     thread.join(timeout=5)
     assert completed.is_set()
-    observed = projection.read(key, reader_grant=grant, cursor=None, max_items=64)
+    terminal_deadline = time.monotonic() + 10.0
+    while True:
+        observed = projection.read(key, reader_grant=grant, cursor=None, max_items=64)
+        if (
+            [item.text for item in observed.items]
+            == [
+                "LC1 partial one",
+                "LC1 final one",
+                "LC1 partial two",
+                "LC1 final two",
+            ]
+            and [item.state for item in observed.items]
+            == [
+                "completed",
+                "completed",
+                "partial",
+                "partial",
+            ]
+            and observed.terminal is True
+        ):
+            break
+        assert time.monotonic() < terminal_deadline, (
+            "terminal visible turn projection did not converge: "
+            f"texts={[item.text for item in observed.items]}; "
+            f"states={[item.state for item in observed.items]}; "
+            f"terminal={observed.terminal}"
+        )
+        time.sleep(0.01)
     assert [item.text for item in observed.items] == [
         "LC1 partial one",
         "LC1 final one",
