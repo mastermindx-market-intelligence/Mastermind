@@ -14,6 +14,7 @@ import ssl
 from contextlib import suppress
 from typing import Any, Mapping
 
+from control_plane.operator_harness_contract import COMMAND_ID_RE
 from control_plane.remote_worker_transport import (
     MAX_FRAME_BYTES,
     BrokerTransportBinding,
@@ -28,18 +29,13 @@ from control_plane.remote_worker_transport import (
 
 _READ_ONLY_OPERATIONS = frozenset(
     {
-        "status",
-        "validate",
-        "ohf-validate",
         "ohf-identity",
         "ohf-materialization-status",
-        "ohf-read-events",
-        "ohf-collect-result",
         "ohf-reconcile",
-        "ohf-reconcile-absence",
     }
 )
 _BOUND_AUTHORITY_KEYS = frozenset({"host_ref", "job_id", "attempt_id", "worker_id"})
+_BOUND_PAYLOAD_IDENTITY_KEYS = frozenset({"session_epoch_id", "process_generation_id"})
 
 
 class RemoteWorkerBrokerClient:
@@ -51,6 +47,7 @@ class RemoteWorkerBrokerClient:
         identity: Mapping[str, Any],
         *,
         allowed_operations: set[str] | frozenset[str],
+        bound_payload_identity: Mapping[str, str] | None = None,
     ) -> None:
         self.binding = binding
         operations = frozenset(allowed_operations)
@@ -61,8 +58,17 @@ class RemoteWorkerBrokerClient:
         normalized_identity = dict(identity)
         for operation in operations:
             build_request(normalized_identity, operation, {})
+        payload_identity = dict(bound_payload_identity or {})
+        if payload_identity and set(payload_identity) != _BOUND_PAYLOAD_IDENTITY_KEYS:
+            raise TransportValidationError("remote broker payload identity is invalid")
+        if any(
+            not isinstance(value, str) or COMMAND_ID_RE.fullmatch(value) is None
+            for value in payload_identity.values()
+        ):
+            raise TransportValidationError("remote broker payload identity is invalid")
         self.identity = normalized_identity
         self.allowed_operations = operations
+        self.bound_payload_identity = payload_identity
 
     async def _open_connection(self) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
         context = build_client_ssl_context(self.binding)
@@ -94,12 +100,22 @@ class RemoteWorkerBrokerClient:
                 name = str(key)
                 if name in _BOUND_AUTHORITY_KEYS and child != self.identity[name]:
                     return True
+                if name in _BOUND_PAYLOAD_IDENTITY_KEYS:
+                    expected = self.bound_payload_identity.get(name)
+                    if expected is None or child != expected:
+                        return True
                 if self._payload_retargets_authority(child):
                     return True
             return False
         if isinstance(value, (list, tuple)):
             return any(self._payload_retargets_authority(child) for child in value)
         return False
+
+    @staticmethod
+    def _operation_is_observational(operation: str, payload: Mapping[str, Any]) -> bool:
+        if operation == "status":
+            return payload.get("fresh_uid_sweep", False) is False
+        return operation in _READ_ONLY_OPERATIONS
 
     @staticmethod
     def _canonical_bytes(value: Mapping[str, Any]) -> bytes:
@@ -157,7 +173,7 @@ class RemoteWorkerBrokerClient:
         except TransportValidationError as exc:
             raise TransportError("request_invalid", TransportEffect.NO_EFFECT) from exc
 
-        modifying = operation not in _READ_ONLY_OPERATIONS
+        modifying = not self._operation_is_observational(operation, payload)
         try:
             reader, writer = await asyncio.wait_for(
                 self._open_connection(), timeout=effective_timeout

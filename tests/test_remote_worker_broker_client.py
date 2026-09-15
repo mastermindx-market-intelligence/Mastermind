@@ -31,6 +31,10 @@ from tests.test_remote_worker_transport import HOST_REF, IDENTITY
 pytestmark = pytest.mark.anyio
 
 _PEER_CERT = b"peer-certificate-der"
+_BOUND_PAYLOAD_IDENTITY = {
+    "session_epoch_id": "EPOCH-001",
+    "process_generation_id": "GEN-001",
+}
 
 
 @pytest.fixture
@@ -231,6 +235,123 @@ async def test_read_only_post_write_loss_is_no_effect_and_zero_retry(paths: _Pat
         await client.request("status", {"run_id": "RUN-001"})
     assert raised.value.classification is TransportEffect.NO_EFFECT
     assert calls == 1
+
+
+@pytest.mark.parametrize(
+    ("operation", "payload"),
+    [
+        ("validate", {"run_id": "RUN-001", "argv": ["true"], "timeout_seconds": 1}),
+        ("ohf-validate", {"requested": {}}),
+        ("ohf-reconcile-absence", {}),
+        ("status", {"fresh_uid_sweep": True}),
+    ],
+)
+async def test_effectful_broker_operations_become_effect_unknown_after_write(
+    paths: _Paths, operation: str, payload: dict
+) -> None:
+    client = RemoteWorkerBrokerClient(
+        _binding(paths),
+        IDENTITY,
+        allowed_operations={operation},
+    )
+    calls = 0
+
+    async def exchange() -> object:
+        nonlocal calls
+        calls += 1
+        return _Reader(b""), _Writer()
+
+    client._open_connection = exchange
+    with pytest.raises(TransportError) as raised:
+        await client.request(operation, payload)
+    assert raised.value.classification is TransportEffect.EFFECT_UNKNOWN
+    assert calls == 1
+
+
+async def test_generation_identity_requires_explicit_binding(paths: _Paths) -> None:
+    client = RemoteWorkerBrokerClient(
+        _binding(paths),
+        IDENTITY,
+        allowed_operations={"ohf-reconcile"},
+    )
+    called = False
+
+    async def should_not_connect() -> object:
+        nonlocal called
+        called = True
+        raise AssertionError("network must not be reached")
+
+    client._open_connection = should_not_connect
+    payload = {
+        "generation": {
+            "process_generation_id": "GEN-001",
+            "session_epoch_id": "EPOCH-001",
+            "generation_number": 1,
+            "worker_id": IDENTITY["worker_id"],
+        }
+    }
+    with pytest.raises(TransportError) as raised:
+        await client.request("ohf-reconcile", payload)
+    assert raised.value.classification is TransportEffect.NO_EFFECT
+    assert raised.value.code == "payload_identity_override"
+    assert called is False
+
+
+async def test_generation_identity_cannot_retarget_bound_generation(paths: _Paths) -> None:
+    client = RemoteWorkerBrokerClient(
+        _binding(paths),
+        IDENTITY,
+        allowed_operations={"ohf-cancel"},
+        bound_payload_identity=_BOUND_PAYLOAD_IDENTITY,
+    )
+    called = False
+
+    async def should_not_connect() -> object:
+        nonlocal called
+        called = True
+        raise AssertionError("network must not be reached")
+
+    client._open_connection = should_not_connect
+    payload = {
+        "generation": {
+            "process_generation_id": "GEN-OTHER",
+            "session_epoch_id": "EPOCH-001",
+            "generation_number": 1,
+            "worker_id": IDENTITY["worker_id"],
+        },
+        "operation_id": {"command_id": "CMD-001"},
+        "reason": "bounded cancel",
+    }
+    with pytest.raises(TransportError) as raised:
+        await client.request("ohf-cancel", payload)
+    assert raised.value.classification is TransportEffect.NO_EFFECT
+    assert raised.value.code == "payload_identity_override"
+    assert called is False
+
+
+async def test_bound_reconcile_remains_observational_after_write_loss(paths: _Paths) -> None:
+    client = RemoteWorkerBrokerClient(
+        _binding(paths),
+        IDENTITY,
+        allowed_operations={"ohf-reconcile"},
+        bound_payload_identity=_BOUND_PAYLOAD_IDENTITY,
+    )
+    payload = {
+        "generation": {
+            "process_generation_id": "GEN-001",
+            "session_epoch_id": "EPOCH-001",
+            "generation_number": 1,
+            "worker_id": IDENTITY["worker_id"],
+        }
+    }
+
+    async def exchange() -> object:
+        return _Reader(b""), _Writer()
+
+    client._open_connection = exchange
+    with pytest.raises(TransportError) as raised:
+        await client.request("ohf-reconcile", payload)
+    assert raised.value.classification is TransportEffect.NO_EFFECT
 
 
 async def test_server_pin_mismatch_refuses_before_any_request_bytes(paths: _Paths) -> None:
