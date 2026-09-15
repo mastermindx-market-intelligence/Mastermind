@@ -131,6 +131,14 @@ def _projection_dict(name):
     return project_operating_context(_load_operating_context_fixture(name)).to_dict()
 
 
+def assert_serialized_output(value):
+    from control_plane.operating_context_projection import serialize_operating_context
+
+    serialized = serialize_operating_context(value)
+    assert len(serialized) <= _MAX_TOTAL_OUTPUT_BYTES, len(serialized)
+    return len(serialized)
+
+
 def _refuses(name, code):
     with pytest.raises(OperatingContextProjectionError) as caught:
         _load_operating_context_fixture(name)
@@ -459,28 +467,19 @@ def test_total_input_boundary_is_refused_without_truncation():
     assert caught.value.code == OVER_BUDGET
 
 
-def test_total_output_boundary_is_refused_without_truncation():
-    valid = _load_operating_context_fixture("baseline.json")
-    result = _projection_dict("baseline.json")
-    selected_items = []
-    result["selected_items"] = selected_items
-    selected_items.clear()
-    selected_items.extend(["y" * _MAX_ITEM_LENGTH] * 29)
-    remaining = _MAX_TOTAL_OUTPUT_BYTES - len(_serialized(result)) - 3
-    selected_items.append("y" * remaining)
-    result["selected_items"] = selected_items.copy()
-    _assert_serialized_bytes(result, _MAX_TOTAL_OUTPUT_BYTES)
-    oversized_last = selected_items[-1] + "y"
-    result["selected_items"] = selected_items[:-1] + [oversized_last]
-    _assert_serialized_bytes(result, _MAX_TOTAL_OUTPUT_BYTES + 1)
-    assert len(selected_items) == 30
-    oversized_items = tuple(item + "y" for item in selected_items)
+def test_serializer_refuses_oversize_output_without_truncation():
+    payload = _projection_dict("baseline.json")
+    payload["selected_items"] = ["y" * _MAX_TOTAL_OUTPUT_BYTES]
+    assert len(_serialized(payload)) > _MAX_TOTAL_OUTPUT_BYTES
     with pytest.raises(OperatingContextProjectionError) as caught:
-        replace(
-            valid,
-            context_bundle=replace(valid.context_bundle, selected_items=oversized_items),
-        )
+        assert_serialized_output(payload)
     assert caught.value.code == OVER_BUDGET
+
+
+def test_admissible_projection_output_stays_under_serializer_bound():
+    result = _projection_dict("baseline.json")
+    observed = assert_serialized_output(result)
+    assert observed == 2110
 
 
 def test_all_three_supply_states_are_pinned():

@@ -369,6 +369,13 @@ def _serialized(value):
     ).encode("utf-8")
 
 
+def serialize_operating_context(value):
+    serialized = _serialized(value)
+    if len(serialized) > _MAX_TOTAL_OUTPUT_BYTES:
+        raise OperatingContextProjectionError(OVER_BUDGET, "serialized output exceeds byte bound")
+    return serialized
+
+
 def _source_digest(snapshot):
     mission_identity = "\0".join(
         (snapshot.mission.mission_id, snapshot.mission.job_ref, snapshot.mission.objective)
@@ -471,7 +478,5 @@ def project_operating_context(snapshot):
         source_digests=_source_digest(snapshot),
         missingness=projected_missingness,
     )
-    serialized = _serialized(projection.to_dict())
-    if len(serialized) > _MAX_TOTAL_OUTPUT_BYTES:
-        raise OperatingContextProjectionError(OVER_BUDGET, "serialized output exceeds byte bound")
+    serialized = serialize_operating_context(projection.to_dict())
     return projection
