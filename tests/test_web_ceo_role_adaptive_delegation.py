@@ -49,19 +49,20 @@ def test_corpus_covers_evaluator_exposure_and_fail_closed_pro_admission():
     "LOWER_TOTAL_OVERHEAD", "PRINCIPAL_JUDGMENT", "UNIQUE_APPROVED_ACCESS",
     "CRITICAL_PATH_SHORTCUT", "NO_ELIGIBLE_PRE_EFFECT_WORKER",
     "EFFECT_UNKNOWN", "not live admission", "ACTIVE_EXECUTION",
-    "accepted enrollment in the same pinned INDEX",
+    "enrolled in the same pinned INDEX",
     "PRO_MODE_TASK_CLASS", "PRO_MODE_REFUSED / USE_NON_PRO_MODE",
     "Model Router fixes the first lawful suitability tier",
     "fresh-Sol evaluation bundle", "evaluation exposure, not production enrollment",
-    "not enrolled", "not a served-model or Web Pro attestation",
+    "Enrolled companion procedure", "same protected commit whose INDEX registers",
+    "not a served-model or Web Pro attestation",
 ])
-def test_candidate_instruction_preserves_required_boundaries(clause):
-    assert SKILL.is_file(), "role-adaptive instruction candidate is not supplied"
+def test_enrolled_instruction_preserves_required_boundaries(clause):
+    assert SKILL.is_file(), "enrolled role-adaptive instruction is not supplied"
     assert clause in SKILL.read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("artifact", [SKILL, PLAN, SPEC])
-def test_candidate_discloses_fresh_sol_bundle_effect_without_claiming_enrollment(artifact):
+def test_artifacts_disclose_bundle_exposure_without_claiming_runtime_authority(artifact):
     text = artifact.read_text(encoding="utf-8")
     assert "fresh-Sol evaluation bundle" in text
     assert "evaluation exposure, not production enrollment" in text
@@ -85,9 +86,22 @@ def test_minimax_evidence_and_holds_are_route_scoped():
     assert "MiniMax remains held unless" not in plan
 
 
-def test_candidate_is_structurally_unenrolled_and_closes_bypass_and_pro_class_gaps():
-    skill = SKILL.read_text(encoding="utf-8")
-    index = INDEX.read_text(encoding="utf-8")
+def test_index_enrolls_web_ceo_delegation_as_same_pin_companion_without_new_finalizer():
+    raw_index = INDEX.read_text(encoding="utf-8")
+    index = " ".join(raw_index.split())
+    active = "### `ACTIVE_EXECUTION.md`"
+    companion = "### `WEB_CEO_DELEGATION.md`"
+    review = "### `REVIEW_RETURN.md`"
+    assert raw_index.count(companion) == 1
+    assert raw_index.index(active) < raw_index.index(companion) < raw_index.index(review)
+    assert "same pinned Skillpack revision" in index
+    assert "ACTIVE_EXECUTION remains the sole active-turn, no-delta and finalization owner" in index
+    assert "does not select a provider, account, credential, host, model setting, or reasoning mode" in index
+
+
+def test_enrolled_companion_is_truthful_and_preserves_existing_authority_boundaries():
+    raw_skill = SKILL.read_text(encoding="utf-8")
+    skill = " ".join(raw_skill.split())
     plan = PLAN.read_text(encoding="utf-8")
     spec = SPEC.read_text(encoding="utf-8")
     rows = {
@@ -95,7 +109,11 @@ def test_candidate_is_structurally_unenrolled_and_closes_bypass_and_pro_class_ga
         for row in json.loads(CORPUS.read_text(encoding="utf-8"))
     }
 
-    assert "WEB_CEO_DELEGATION" not in index
+    assert "Enrolled companion procedure" in skill
+    assert "Candidate procedure: not enrolled" not in raw_skill
+    assert "Before that enrollment, this candidate has no procedural authority" not in raw_skill
+    assert "file presence or fresh-Sol evaluation-bundle exposure alone grants no authority" in skill
+    assert "ACTIVE_EXECUTION as the sole active-turn, no-delta and finalization owner" in skill
     for clause in ("direct-spawn", "raw-socket", "alternate-queue"):
         assert clause in skill
     assert "raw-socket/provider-spawn bypass" in rows["WCD08"]["pass_requires"]
