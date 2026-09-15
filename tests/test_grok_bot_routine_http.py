@@ -240,6 +240,7 @@ def test_bounded_http_result_repr_redacts_response_body():
 
 def test_payload_is_exact_canonical_json_and_contains_only_opaque_correlation():
     body = grok_wake_payload(
+        native_handle=NATIVE_HANDLE,
         nudge_id=NUDGE_ID,
         binding_id=BINDING_ID,
         binding_generation=BINDING_GENERATION,
@@ -248,7 +249,7 @@ def test_payload_is_exact_canonical_json_and_contains_only_opaque_correlation():
 
     assert body == (
         b'{"binding_generation":4,"binding_id":"bind-grokroutine01",'
-        b'"company_consultation_server":"mastermind-company-consultation-mcp",'
+        b'"native_handle":"grok-routine-opaque-123",'
         b'"nudge_id":"NUDGE-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",'
         b'"opaque_ids":["WAKE-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",'
         b'"WAKE-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:delivery:1"],'
@@ -260,19 +261,23 @@ def test_payload_is_exact_canonical_json_and_contains_only_opaque_correlation():
         "nudge_id",
         "binding_id",
         "binding_generation",
+        "native_handle",
         "opaque_ids",
-        "company_consultation_server",
     }
     rendered = body.decode("ascii")
     assert TOKEN not in rendered
     assert URL not in rendered
-    assert NATIVE_HANDLE not in rendered
+    assert NATIVE_HANDLE in rendered
+    assert "company_consultation_server" not in rendered
+    assert "mastermind-company-consultation-mcp" not in rendered
     assert "account" not in rendered
 
 
 @pytest.mark.parametrize(
     ("overrides", "match"),
     [
+        ({"native_handle": None}, "native handle"),
+        ({"native_handle": " bad"}, "native handle"),
         ({"nudge_id": "bad"}, "nudge"),
         ({"binding_id": None}, "binding"),
         ({"binding_id": " bad"}, "binding"),
@@ -285,6 +290,7 @@ def test_payload_is_exact_canonical_json_and_contains_only_opaque_correlation():
 )
 def test_payload_rejects_unbounded_or_untyped_inputs(overrides, match):
     values = {
+        "native_handle": NATIVE_HANDLE,
         "nudge_id": NUDGE_ID,
         "binding_id": BINDING_ID,
         "binding_generation": BINDING_GENERATION,
@@ -301,6 +307,7 @@ def test_payload_rejects_request_larger_than_sixteen_kibibytes():
 
     with pytest.raises(ValueError, match="request ceiling"):
         grok_wake_payload(
+            native_handle=NATIVE_HANDLE,
             nudge_id=NUDGE_ID,
             binding_id=BINDING_ID,
             binding_generation=BINDING_GENERATION,
@@ -338,6 +345,7 @@ def test_exact_http_200_returns_accepted_typed_observation_and_one_post():
     assert call["timeout_seconds"] == POST_TIMEOUT_SECONDS
     assert call["max_response_bytes"] == MAX_RESPONSE_BYTES
     assert call["body"] == grok_wake_payload(
+        native_handle=NATIVE_HANDLE,
         nudge_id=NUDGE_ID,
         binding_id=BINDING_ID,
         binding_generation=BINDING_GENERATION,
@@ -396,6 +404,8 @@ def test_credential_resolution_failure_is_typed_no_start_and_redacted():
         _deliver(client)
 
     assert TOKEN not in repr(captured.value)
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
     assert source.calls == [NATIVE_HANDLE]
     assert poster.calls == []
 
@@ -430,6 +440,7 @@ def test_poster_exception_is_redacted_after_one_call_for_dispatcher_effect_unkno
     assert TOKEN not in repr(captured.value)
     assert URL not in repr(captured.value)
     assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
     assert source.calls == [NATIVE_HANDLE]
     assert len(poster.calls) == 1
 
@@ -438,6 +449,8 @@ def test_poster_exception_is_redacted_after_one_call_for_dispatcher_effect_unkno
         asyncio.run(dispatcher.nudge(_wake()))
     assert TOKEN not in repr(unknown.value)
     assert URL not in repr(unknown.value)
+    assert unknown.value.__cause__ is not None
+    assert unknown.value.__cause__.__context__ is None
     assert len(poster.calls) == 2
 
 
@@ -480,19 +493,27 @@ def test_non_200_through_dispatcher_is_target_unavailable_not_effect_unknown():
 
 
 def test_http_source_contains_no_concrete_network_library_or_retry_loop():
+    import ast
     from pathlib import Path
 
     source = Path("integrations/executive_wake/grok_bot_http.py").read_text()
-    forbidden = (
+    tree = ast.parse(source)
+    forbidden_modules = {
+        "aiohttp",
+        "http",
         "httpx",
         "requests",
-        "urllib.request",
-        "aiohttp",
         "socket",
         "subprocess",
-        "for attempt in",
-        "while True",
-        "sleep(",
-    )
-    for token in forbidden:
-        assert token not in source
+        "urllib3",
+    }
+    imported = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported.update(alias.name.split(".", 1)[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imported.add(node.module.split(".", 1)[0])
+    assert imported.isdisjoint(forbidden_modules)
+    assert not any(isinstance(node, (ast.For, ast.AsyncFor, ast.While)) for node in ast.walk(tree))
+    assert "company_consultation_server" not in source
+    assert "mastermind-company-consultation-mcp" not in source

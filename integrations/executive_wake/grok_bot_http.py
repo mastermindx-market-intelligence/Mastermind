@@ -19,7 +19,6 @@ from integrations.executive_wake.grok_bot_routine import GrokRoutineWakeObservat
 
 
 GROK_WAKE_SCHEMA = "mastermind.grok_bot_wake.v1"
-COMPANY_CONSULTATION_SERVER = "mastermind-company-consultation-mcp"
 MAX_REQUEST_BYTES = 16 * 1024
 MAX_RESPONSE_BYTES = 16 * 1024
 POST_TIMEOUT_SECONDS = 15.0
@@ -125,6 +124,7 @@ def grok_routine_target_digest(native_handle: str) -> str:
 
 def grok_wake_payload(
     *,
+    native_handle: str,
     nudge_id: str,
     binding_id: str,
     binding_generation: int,
@@ -132,6 +132,7 @@ def grok_wake_payload(
 ) -> bytes:
     """Build the one closed, prose-free provider payload."""
 
+    native = _bounded_opaque(native_handle, field="native handle")
     if not isinstance(nudge_id, str) or _NUDGE_ID_RE.fullmatch(nudge_id) is None:
         raise ValueError("Grok routine payload requires a canonical nudge id")
     binding = _bounded_opaque(binding_id, field="binding id")
@@ -151,8 +152,8 @@ def grok_wake_payload(
             "nudge_id": nudge_id,
             "binding_id": binding,
             "binding_generation": generation,
+            "native_handle": native,
             "opaque_ids": list(resolved_ids),
-            "company_consultation_server": COMPANY_CONSULTATION_SERVER,
         }
     )
     if len(body) > MAX_REQUEST_BYTES:
@@ -246,25 +247,33 @@ class GrokRoutineHttpClient:
     ) -> GrokRoutineWakeObservation:
         """Perform one call; only explicit provider non-start is terminal."""
 
+        payload_invalid = False
         try:
             target_digest = grok_routine_target_digest(native_handle)
             body = grok_wake_payload(
+                native_handle=native_handle,
                 nudge_id=nudge_id,
                 binding_id=binding_id,
                 binding_generation=binding_generation,
                 opaque_ids=opaque_ids,
             )
         except Exception:
+            payload_invalid = True
+        if payload_invalid:
             raise WakePreSubmitError(
                 "Grok routine payload is invalid before submission"
-            ) from None
+            )
 
+        credential_unavailable = False
+        credential = None
         try:
             credential = self.credential_source.resolve(native_handle)
         except Exception:
+            credential_unavailable = True
+        if credential_unavailable:
             raise WakePreSubmitError(
                 "Grok routine credential unavailable before submission"
-            ) from None
+            )
         if not isinstance(credential, GrokRoutineCredential):
             raise WakePreSubmitError(
                 "Grok routine credential unavailable before submission"
@@ -278,6 +287,8 @@ class GrokRoutineHttpClient:
                 "Grok routine credential generation mismatch before submission"
             )
 
+        submission_unknown = False
+        result = None
         try:
             result = await self.poster.post_json(
                 url=credential.url,
@@ -290,9 +301,11 @@ class GrokRoutineHttpClient:
                 max_response_bytes=MAX_RESPONSE_BYTES,
             )
         except Exception:
+            submission_unknown = True
+        if submission_unknown:
             raise RuntimeError(
                 "Grok routine submission result is unavailable after POST began"
-            ) from None
+            )
         if not isinstance(result, BoundedHttpResult):
             raise RuntimeError("Grok routine poster returned an invalid result")
         if result.status_code != 200:
@@ -313,7 +326,6 @@ class GrokRoutineHttpClient:
 __all__ = [
     "BoundedHttpResult",
     "BoundedJsonPoster",
-    "COMPANY_CONSULTATION_SERVER",
     "GROK_WAKE_SCHEMA",
     "GrokRoutineCredential",
     "GrokRoutineCredentialSource",
