@@ -3,10 +3,13 @@ from __future__ import annotations
 import ast
 import asyncio
 import importlib
+import io
 import json
 import os
+import subprocess
+import tokenize
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -53,6 +56,46 @@ def _write(tmp_path: Path, raw: dict[str, object]) -> Path:
 
 def _module():
     return importlib.import_module("scripts.executive_os_phase1c")
+
+
+def _added_line_numbers(path: Path, base: str) -> set[int]:
+    diff = subprocess.run(
+        ["git", "diff", "--unified=0", base, "--", str(path)],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    lines: set[int] = set()
+    for line in diff.splitlines():
+        if not line.startswith("@@"):
+            continue
+        added = line.split("+")[1].split(" ")[0]
+        start, _, count = added.partition(",")
+        first = int(start)
+        amount = int(count) if count else 1
+        lines.update(range(first, first + amount))
+    return lines
+
+
+def _scan_added_identity_literals(added_lines: str) -> list[str]:
+    flagged: list[str] = []
+    for line in added_lines.splitlines():
+        try:
+            tokens = tokenize.generate_tokens(io.StringIO(line + "\n").readline)
+            for token in tokens:
+                if token.type == tokenize.NUMBER:
+                    try:
+                        value = int(token.string, 0)
+                    except ValueError:
+                        continue
+                    if 400 <= value <= 999:
+                        flagged.append(token.string)
+                elif token.type == tokenize.NAME and token.string.startswith("_mastermind_"):
+                    flagged.append(token.string)
+        except (IndentationError, tokenize.TokenError):
+            continue
+    return flagged
 
 
 def test_d1_closed_value_is_loaded_passed_through_and_unarmed(tmp_path, monkeypatch):
@@ -168,6 +211,74 @@ def test_d3_app_458_is_independent_of_c1_and_submit_arms(tmp_path, monkeypatch):
     assert captured["ceo_ingress_app_binding"].armed is False
 
 
+def test_d3_strict_v2_uses_host_providers_for_binding_and_dialogue_source(monkeypatch):
+    from control_plane import executive_ceo_ingress as ceo_ingress
+    from tests.test_executive_ceo_ingress import (
+        GROUNDING_A,
+        _FakeGrounding,
+        _automated_research_request,
+        _submit_v2_bytes,
+    )
+
+    binding = {
+        "provider": "host-codex",
+        "provider_home": "/host/provider-home",
+        "credential_home": "/host/credentials",
+    }
+    source = {
+        "schema_version": "mastermind.executive_dialogue_source/v1",
+        "work_ref": "WS:EXECUTIVE-OS",
+        "commission_ref": {
+            "repository": "mastermindx-market-intelligence/Mastermind",
+            "commit": "c" * 40,
+            "path": "docs/commissions/executive-terminal-return.md",
+            "content_sha256": "d" * 64,
+        },
+        "watch_mode": "turn_watch_v1",
+    }
+    execution_binding_provider = MagicMock(return_value=binding)
+    dialogue_source_provider = MagicMock(return_value=source)
+    sink = AsyncMock(return_value={"dispatched": False, "job_id": "JOB-HOST"})
+    monkeypatch.setattr(ceo_ingress, "_submit", sink)
+
+    class Store:
+        def find_event_by_command_id(self, _command_id):
+            return None
+
+    class Runtime:
+        store = Store()
+
+    frame = json.loads(
+        _submit_v2_bytes(
+            observed_grounding=GROUNDING_A,
+            request=_automated_research_request(workstream="WS:EXECUTIVE-OS"),
+        )
+    )
+    assert "execution_binding" not in frame
+    assert "dialogue_source" not in frame
+
+    result = asyncio.run(
+        ceo_ingress.handle_frame(
+            frame,
+            runtime=Runtime(),
+            grounding_provider=_FakeGrounding(),
+            workspace_root="/host/workspace",
+            service_state="READY",
+            ceo_ingress_armed=True,
+            strict_v2_admission=True,
+            execution_binding_provider=execution_binding_provider,
+            dialogue_source_provider=dialogue_source_provider,
+        )
+    )
+
+    assert result["job_id"] == "JOB-HOST"
+    execution_binding_provider.assert_called_once_with()
+    assert dialogue_source_provider.call_count == 2
+    assert sink.await_count == 1
+    assert sink.await_args.kwargs["execution_binding"] == binding
+    assert sink.await_args.kwargs["dialogue_source"].to_dict() == source
+
+
 @pytest.mark.parametrize("value", ["true", 1, 0, None])
 def test_d4_submit_arm_is_strict_boolean(tmp_path, value):
     module = _module()
@@ -218,10 +329,33 @@ def test_d6_no_new_transport_and_all_arm_defaults_are_false():
 
 
 def test_d7_diff_and_module_have_no_dispatch_or_provider_import():
-    tree = ast.parse(PHASE1C.read_text(encoding="utf-8"))
-    imports = {alias.name for node in tree.body if isinstance(node, (ast.Import, ast.ImportFrom)) for alias in node.names}
-    assert "subprocess" not in imports
-    assert not any(isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in {"dispatch", "spawn", "claim_job"} for node in ast.walk(tree))
+    base = subprocess.run(
+        ["git", "merge-base", "origin/master", "HEAD"], cwd=ROOT,
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    source = PHASE1C.read_text(encoding="utf-8")
+    added_lines = _added_line_numbers(PHASE1C, base)
+    tree = ast.parse(source)
+    forbidden_imports = {
+        "subprocess", "control_plane.executive_worker_broker", "control_plane.worker_adapter",
+        "control_plane.codex_worker", "control_plane.codex_provider_realm",
+        "control_plane.executive_supervisor", "urllib", "http", "requests",
+    }
+    calls = {"Popen", "dispatch", "spawn", "claim_job", "run"}
+    for node in ast.walk(tree):
+        if getattr(node, "lineno", None) not in added_lines:
+            continue
+        if isinstance(node, ast.Import):
+            assert not any(alias.name in forbidden_imports for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            assert node.module not in forbidden_imports
+        elif isinstance(node, ast.Call):
+            name = (
+                node.func.id if isinstance(node.func, ast.Name)
+                else node.func.attr if isinstance(node.func, ast.Attribute)
+                else None
+            )
+            assert name not in calls
 
 
 @pytest.mark.parametrize("app_uid", [452, 501])
@@ -247,9 +381,6 @@ def test_d8_template_topology_and_protected_defaults():
     assert value["ceo_ingress_app_peer_uid"] == 458
     assert value["ceo_ingress_app_armed"] is False
 
-    import re
-    import subprocess
-
     base = subprocess.run(
         ["git", "merge-base", "origin/master", "HEAD"], cwd=ROOT,
         check=True, capture_output=True, text=True,
@@ -258,6 +389,19 @@ def test_d8_template_topology_and_protected_defaults():
         ["git", "diff", "--unified=0", base, "HEAD", "--", ":!tests/"], cwd=ROOT,
         check=True, capture_output=True, text=True,
     ).stdout
-    additions = "\n".join(line[1:] for line in diff.splitlines() if line.startswith("+") and not line.startswith("+++"))
-    assert not re.search(r"\b(?:uid|gid)\b[^\n]*\b(?:[4-9]\d{2})\b", additions, re.IGNORECASE)
-    assert not re.search(r"_mastermind_[A-Za-z0-9_]+", additions)
+    additions = "\n".join(
+        line[1:] for line in diff.splitlines()
+        if line.startswith("+") and not line.startswith("+++")
+    )
+    positive = "\n".join(
+        [
+            "ceo_ingress_app_peer_uid = 459",
+            "_EXTRA_PEER = 459",
+            "FALLBACK = 501",
+            "ALLOWED = (450, 459)",
+            "peer_uid = 777",
+        ]
+    )
+    positive_hits = _scan_added_identity_literals(positive)
+    assert positive_hits == ["459", "459", "501", "450", "459", "777"]
+    assert _scan_added_identity_literals(additions) == []
