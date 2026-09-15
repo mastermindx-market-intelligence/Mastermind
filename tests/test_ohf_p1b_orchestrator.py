@@ -90,6 +90,8 @@ class FakeRuntime:
     def __init__(self) -> None:
         self.calls: list[tuple[str, object]] = []
         self.fail: set[str] = set()
+        self.checkpoint_events: list[str] = []
+        self.checkpoint_sequence = 0
         self.epoch = SessionEpochRef("epoch-1", "attempt-1", "slot-a", 1)
         self.generation = ProcessGenerationRef("gen-1", "epoch-1", 1, "slot-a")
         self.candidates: list[CandidateResult] = []
@@ -165,6 +167,8 @@ class FakeRuntime:
         self, attempt_id, generation, operation_id, observation
     ):
         self._call("checkpoint_applied", observation.checkpoint_candidate)
+        self.checkpoint_events.append("JOB_CHECKPOINTED")
+        self.checkpoint_sequence += 1
 
     def graceful_stop_operator_generation(
         self, attempt_id, generation, operation_id, observation
@@ -268,6 +272,18 @@ class FakeAdapter:
 
     def describe_capabilities(self):  # pragma: no cover - protocol completeness
         raise NotImplementedError
+
+
+class UnsupportedCheckpointAdapter:
+    interface_version = FakeAdapter.interface_version
+
+    def __init__(self, requested: RequestedExecutionProfile) -> None:
+        self.inner = FakeAdapter(requested)
+
+    def __getattr__(self, name: str):
+        if name == "checkpoint":
+            raise AttributeError(name)
+        return getattr(self.inner, name)
 
 
 def _reconcile(writer: ProviderWriterState, *, alive: bool = False):
@@ -514,6 +530,30 @@ def test_checkpoint_ambiguity_is_non_replayable_and_apply_is_refused() -> None:
             operation,
             CheckpointObservation({"candidate": "late"}),
         )
+
+
+def test_checkpoint_capability_refusal_precedes_durable_write() -> None:
+    requested, runtime, _shared_adapter, _shared_orchestrator = _orchestrator()
+    adapter = UnsupportedCheckpointAdapter(requested)
+    orchestrator = OperatorHarnessOrchestrator(
+        runtime,
+        adapter,
+        attestation_reader=lambda item, generation: item.attestation,
+    )
+    session = orchestrator.start_attempt(
+        attempt_id="attempt-1", requested=requested, operation_id=_op("start")
+    )
+
+    with pytest.raises(
+        OperatorHarnessOrchestrationError,
+        match=r"^adapter does not support checkpoint$",
+    ):
+        orchestrator.checkpoint(session, operation_id=_op("unsupported"))
+
+    assert adapter.calls == ["validate", "start_session"]
+    assert not any(name == "checkpoint_intent" for name, _ in runtime.calls)
+    assert runtime.checkpoint_events == []
+    assert runtime.checkpoint_sequence == 0
 
 
 def test_resume_is_bound_to_handoff_s1_and_mismatch_is_effect_unknown() -> None:
