@@ -221,7 +221,7 @@ Machine path owed:
 
 `fresh Provider Control MiniMax observation -> Model Router suitability -> Capacity economic rank -> Executive claim/admission -> existing governed MiniMax harness -> same workspace visible result -> normalized terminal usage/outcome -> independent review -> parent result consumption -> corrected Provider Control observation`
 
-Acceptance requires no Chairman account/model selection, no duplicate attempt, no hidden pay-as-you-go fallback, and a routing receipt that shows why direct MiniMax was chosen over scarcer/metred alternatives.
+Acceptance requires no Chairman account/model selection, no duplicate attempt, no hidden pay-as-you-go fallback, and a routing receipt that shows why direct MiniMax was chosen over scarcer/metered alternatives.
 
 ### OpenCode first useful vertical
 
