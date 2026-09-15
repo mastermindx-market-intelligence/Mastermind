@@ -195,5 +195,7 @@ def test_service_composes_app_reader_with_dependency_python(monkeypatch, tmp_pat
     assert captured_reader["macro_root"] == raw["ceo_ingress_app_macro_root"]
     assert captured_reader["runtime_root"] == raw["runtime_root"]
     assert captured_reader["packet_python"] == raw["ceo_ingress_app_read_python"]
+    assert captured_reader["code_root"] == Path(module.__file__).resolve().parents[1]
+    assert captured_reader["expected_source_sha"] == raw["proof_base_sha"]
     binding = captured_service["ceo_ingress_app_binding"]
     assert binding.armed is True

@@ -336,18 +336,27 @@ PyYAML 6.0.3 because installed `executive_state`/`executive_inbox` invoke the
 canonical boot-packet CLI in that dependency-complete runtime. The control
 process itself stays `-I -S -B`: it does not import PyYAML or the MCP SDK.
 
-The installed reader passes both the sealed Mastermind source root and sealed
-Macro snapshot explicitly to `scripts/ceo_boot_packet.py --repo-root ...
---macro-root ...`; returned packet roots and schema are revalidated before the
-projection crosses CeoIngress. Timeout, invalid UTF-8, nonzero exit, output
-overflow, wrong schema, or root drift refuse the read rather than falling back
-to the dependency-incomplete control interpreter. The child receives a minimal
-secret-free environment: fixed system `PATH`, no global/system Git config, one
-command-scoped `safe.directory` for the exact root-owned Macro snapshot, and
-`MACRO_MASTERMIND_REPO` pinned to the exact sealed Mastermind source. This keeps
-the Macro snapshot root-owned while allowing Git to attest its detached HEAD; it
-does not create a wildcard safe-directory trust or expose the control process
-environment to the dependency-complete edge.
+The installed reader executes `scripts/ceo_boot_packet.py` only from the
+root-owned immutable installed release. The separately configured Mastermind
+administrative checkout and Macro snapshot are data/grounding roots, never code
+roots. Immediately before and after each packet read, both data roots must have a
+single valid Git HEAD and a clean tracked/untracked status; the Mastermind HEAD
+must also equal the installed `proof_base_sha`. The packet's own Mastermind and
+Macro SHAs must equal the pre-read observations, and both observations must stay
+unchanged through the post-read check. Dirty bytes, untracked bytes, identity
+movement, wrong schema/root, timeout, invalid UTF-8, nonzero exit, output overflow,
+or cleanup uncertainty all refuse the read rather than falling back.
+
+The helper receives a minimal secret-free environment: fixed system `PATH`, no
+global/system Git config, one command-scoped `safe.directory` for the exact
+root-owned Macro snapshot, and `MACRO_MASTERMIND_REPO` pinned to the immutable
+installed Mastermind release so Macro's P0 join never reads executable/product
+state from the owner-writable administrative checkout. This keeps the Macro
+snapshot root-owned without wildcard Git trust. The installed packet gets a
+28-second total budget beneath the MCP read executor's 30-second ceiling; the
+inner Agent OS brief receives a further two-second-shorter budget so JSON
+serialization, pipe drain and process-group settlement remain inside the total
+read deadline.
 
 Deployment evidence belongs in the private operation receipt. Source tests do
 not establish an installed generation, accepted identity provider, live tunnel,
