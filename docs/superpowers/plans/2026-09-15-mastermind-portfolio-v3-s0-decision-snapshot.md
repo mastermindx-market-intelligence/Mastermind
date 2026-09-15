@@ -730,6 +730,7 @@ Do not mark Ready, enable auto-merge, deploy, or add implementation commits to P
   - `control_plane.contracts.contract(key)`;
   - `portfolio.registry.data_dir("autonomous")`.
 - Produces:
+  - `ACCEPTED_SETTLEMENT_RECEIPT_SCHEMA = "paper_settlement_receipt.v2"`
   - `InternalSourceSpec`
   - `INTERNAL_SOURCE_SPECS`
   - `SourceSpec`
@@ -825,7 +826,7 @@ def test_historical_memory_has_explicit_closed_internal_sources(repo_roots):
         },
     })
     _write_json(book / "settlement_receipts" / ("a" * 64 + ".json"), {
-        "schema": "mastermind.paper_settlement_receipt/v1",
+        "schema": "paper_settlement_receipt.v2",
         "portfolio_id": "autonomous",
         "transaction_id": "a" * 64,
         "committed_at": "2026-09-15T19:59:00Z",
@@ -838,6 +839,12 @@ def test_historical_memory_has_explicit_closed_internal_sources(repo_roots):
         decision_cutoff="2026-09-15T20:00:00Z",
         recorded_at="2026-09-15T20:01:00Z",
     )
+    from portfolio import paper_account
+    assert (
+        sources.ACCEPTED_SETTLEMENT_RECEIPT_SCHEMA
+        == paper_account.PAPER_SETTLEMENT_RECEIPT_SCHEMA
+        == "paper_settlement_receipt.v2"
+    )
     memory = result["sections"]["historical_memory"]
     assert memory["coverage_state"] == "COMPLETE"
     assert memory["source_ids"] == [
@@ -849,6 +856,19 @@ def test_historical_memory_has_explicit_closed_internal_sources(repo_roots):
     assert {row["kind"] for row in memory["rows"]} == {
         "decision", "fill", "position_lifecycle", "settlement_receipt",
     }
+    truth = result["sections"]["book_truth"]
+    assert "book.settlement_receipts" in truth["source_ids"]
+    outstanding = [
+        row for row in truth["rows"]
+        if row.get("kind") == "outstanding_settlement_receipt"
+    ]
+    assert outstanding == [{
+        "kind": "outstanding_settlement_receipt",
+        "transaction_id": "a" * 64,
+        "committed_at": "2026-09-15T19:59:00Z",
+        "target_sha256": "b" * 64,
+        "fill_count": 0,
+    }]
     assert _by_id(result["sources"])["book.settlement_receipts"]["rows_total"] == 1
 ```
 
@@ -1029,6 +1049,12 @@ Expected: import failure because `portfolio.decision_snapshot_sources` does not 
 Create the closed internal and external source registries:
 
 ```python
+# Compatibility pin to the current canonical writer-owned schema. The focused
+# source test compares this literal with paper_account.PAPER_SETTLEMENT_RECEIPT_SCHEMA
+# so writer movement cannot silently drift the read contract.
+ACCEPTED_SETTLEMENT_RECEIPT_SCHEMA = "paper_settlement_receipt.v2"
+
+
 @dataclass(frozen=True)
 class InternalSourceSpec:
     source_id: str
@@ -1296,6 +1322,8 @@ status = UNQUALIFIED_CLOCK
 
 - [ ] **Step 5: Implement bounded projections**
 
+Projection functions return domain-specific rows. A single source may contribute different bounded row shapes to different domains, but every domain row retains the same `source_id` and source-generation receipt.
+
 Projection rules:
 
 - `risk_envelope`: carry only schema/definition/clocks/data_state/measured_state/hazard_summary/capital_policy/coherence/authority.
@@ -1310,8 +1338,11 @@ Projection rules:
 - `book.decisions`: last 100 valid object rows as `kind="decision"`; preserve source line order and carry bounded decision identity, as-of, target/effect state, selected/rejected summary, falsifiers, and source references.
 - `book.fills`: last 100 valid object rows as `kind="fill"`; preserve source line order and carry fill identity, date, ticker, side, shares, price, value, transaction/receipt lineage, and portfolio ID.
 - `book.positions_ledger`: one `kind="position_lifecycle"` row per native ledger key, sorted by that key, capped at 100; carry native key, ticker, sleeve, open/close clocks, still-open state, weights, thesis/time-stop fields, published entry levels, and at most the last 20 bounded history events. Report omitted position and history counts.
-- `book.settlement_receipts`: direct child receipts sorted by `(committed_at, transaction_id)` as `kind="settlement_receipt"`, capped at 100; carry schema, transaction ID, portfolio ID, committed clock, target digest, decision snapshot reference, fill IDs/count, and execution-constraint metadata only. Never call `pending_settlement_receipts()` because it validates through mutable account code.
-- The four rows above populate `historical_memory` with source IDs exactly `book.decisions`, `book.fills`, `book.positions_ledger`, and `book.settlement_receipts`. Outstanding settlement receipts also populate `book_truth` as unsettled execution lineage.
+- `book.settlement_receipts`: direct child receipts are canonical outstanding-outbox entries by directory membership: the sole writer keeps a committed receipt in the fixed `settlement_receipts/` directory until acknowledgement removes it. Require each direct filename to equal `<transaction_id>.json`, schema to equal `ACCEPTED_SETTLEMENT_RECEIPT_SCHEMA` (`paper_settlement_receipt.v2` at this plan revision), and `portfolio_id="autonomous"`; an invalid child makes the collection partial and contributes no row.
+  - `historical_memory` receives `kind="settlement_receipt"` rows sorted by `(committed_at, transaction_id)`, capped at 100, carrying schema, transaction ID, portfolio ID, committed clock, target digest, decision snapshot reference, fill IDs/count, and bounded execution-constraint metadata.
+  - `book_truth` receives a separate `kind="outstanding_settlement_receipt"` row for every valid direct child, sorted identically and capped at 100, carrying exactly `transaction_id`, `committed_at`, `target_sha256`, and `fill_count`. Directory membership after identity validation is the outstanding predicate; no field inside the receipt is invented for it.
+  - Never call `pending_settlement_receipts()` because it validates through mutable account code.
+- The four historical projections above populate `historical_memory` with source IDs exactly `book.decisions`, `book.fills`, `book.positions_ledger`, and `book.settlement_receipts`. The separate outstanding-receipt projection populates `book_truth` under the same `book.settlement_receipts` source receipt.
 - account/latest: carry cash, position identity, shares/cost/weight, and published mark/identity fields; never request a fresh quote.
 
 Every projection returns rows plus exact `rows_total`, `rows_returned`, and `omitted_rows`. Known absence of an optional internal history file is `ABSENT_OPTIONAL` with complete knowledge of zero rows; malformed, oversize, unstable, or unreadable history makes `historical_memory` `PARTIAL` and emits a named gap.
@@ -2290,7 +2321,7 @@ git commit -m "feat(ui): add V3 decision evidence inspector"
 
 - [ ] **Step 1: Write a full before/after state-hash test**
 
-Create fixed fixture bytes for:
+Create fixed fixture bytes for every existing Portfolio state source S0 reads or must prove untouched:
 
 ```text
 data/portfolios/autonomous/account.json
@@ -2300,9 +2331,59 @@ data/portfolios/autonomous/decisions.jsonl
 data/portfolios/autonomous/pending_orders.json
 data/portfolios/autonomous/pending_target.json
 data/portfolios/autonomous/_pending_decision.json
+data/portfolios/autonomous/positions_ledger.json
+data/portfolios/autonomous/settlement_receipts/*.json
 ```
 
-Hash all seven before the call.
+Define the test helper explicitly:
+
+```python
+from control_plane.wake_events import canonical_json_bytes
+
+STATE_FILES = (
+    "account.json",
+    "fills.jsonl",
+    "nav_history.jsonl",
+    "decisions.jsonl",
+    "pending_orders.json",
+    "pending_target.json",
+    "_pending_decision.json",
+    "positions_ledger.json",
+)
+
+
+def _state_hashes(book: Path) -> dict[str, str]:
+    out = {
+        name: (
+            hashlib.sha256((book / name).read_bytes()).hexdigest()
+            if (book / name).is_file()
+            else "ABSENT"
+        )
+        for name in STATE_FILES
+    }
+    receipt_dir = book / "settlement_receipts"
+    children = []
+    if receipt_dir.exists():
+        for path in sorted(receipt_dir.glob("*.json")):
+            assert path.is_file() and not path.is_symlink()
+            children.append({
+                "name": path.name,
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            })
+    out["settlement_receipts/*.json"] = (
+        hashlib.sha256(canonical_json_bytes(children)).hexdigest()
+        if receipt_dir.exists()
+        else "ABSENT"
+    )
+    return out
+```
+
+Hash all eight fixed files plus the canonical settlement-receipt collection before the call:
+
+```python
+book_dir = root / "data/portfolios/autonomous"
+before = _state_hashes(book_dir)
+```
 
 Call:
 
@@ -2317,7 +2398,7 @@ receipt = decision_snapshot.create_snapshot(
 Assert:
 
 ```python
-assert _hashes(state_paths) == before
+assert _state_hashes(book_dir) == before
 created = list(
     (root / "data/shadow/decision_snapshots/autonomous").glob("*.json")
 )
@@ -2603,22 +2684,44 @@ python3 - <<'PY' > /tmp/v3-s0-before.sha256
 from pathlib import Path
 import hashlib
 
-paths = (
-    Path("data/portfolios/autonomous/account.json"),
-    Path("data/portfolios/autonomous/fills.jsonl"),
-    Path("data/portfolios/autonomous/nav_history.jsonl"),
-    Path("data/portfolios/autonomous/decisions.jsonl"),
-    Path("data/portfolios/autonomous/pending_orders.json"),
-    Path("data/portfolios/autonomous/pending_target.json"),
-    Path("data/portfolios/autonomous/_pending_decision.json"),
+from control_plane.wake_events import canonical_json_bytes
+
+book = Path("data/portfolios/autonomous")
+files = (
+    "account.json",
+    "fills.jsonl",
+    "nav_history.jsonl",
+    "decisions.jsonl",
+    "pending_orders.json",
+    "pending_target.json",
+    "_pending_decision.json",
+    "positions_ledger.json",
 )
-for path in paths:
+for name in files:
+    path = book / name
     digest = hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else "ABSENT"
     print(f"{path.as_posix()} {digest}")
+
+receipt_dir = book / "settlement_receipts"
+children = []
+if receipt_dir.exists():
+    for path in sorted(receipt_dir.glob("*.json")):
+        if not path.is_file() or path.is_symlink():
+            raise SystemExit(f"invalid settlement receipt path: {path}")
+        children.append({
+            "name": path.name,
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        })
+collection = (
+    hashlib.sha256(canonical_json_bytes(children)).hexdigest()
+    if receipt_dir.exists()
+    else "ABSENT"
+)
+print(f"{receipt_dir.as_posix()}/*.json {collection}")
 PY
 ```
 
-The receipt records missing optional files as `ABSENT` without creating them or causing the command to fail.
+The receipt records missing optional files and the optional receipt directory as `ABSENT` without creating them or causing the command to fail. It covers every canonical Portfolio source S0 reads, including position lifecycle and outstanding settlement lineage.
 
 - [ ] **Step 3: Compose exactly one real snapshot with explicit clocks**
 
