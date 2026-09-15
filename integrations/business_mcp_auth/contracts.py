@@ -284,6 +284,16 @@ def subject_digest(*, issuer: str, subject: str) -> str:
     ).hexdigest()
 
 
+def client_ref_digest(*, issuer: str, client_id: str) -> str:
+    """Digest one exact OAuth client identity using the verifier's projection law."""
+
+    issuer_value, _issuer_parts = _split_https_url(issuer)
+    client_value = _exact_subject(client_id, maximum=1024)
+    return hashlib.sha256(
+        f"{issuer_value}\nclient\n{client_value}".encode("utf-8")
+    ).hexdigest()
+
+
 def load_resource_policy(value: object) -> ResourcePolicy:
     """Validate one exact closed policy wire and return an immutable contract."""
 
@@ -437,6 +447,7 @@ __all__ = [
     "ChannelAuditEvent",
     "ResourcePolicy",
     "VerifiedPrincipal",
+    "client_ref_digest",
     "load_resource_policy",
     "subject_digest",
     "validate_resource_policy",

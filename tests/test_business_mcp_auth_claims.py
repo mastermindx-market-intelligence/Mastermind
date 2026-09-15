@@ -14,6 +14,7 @@ from integrations.business_mcp_auth.contracts import (
     AuthError,
     AuthErrorCode,
     VerifiedPrincipal,
+    client_ref_digest,
     load_resource_policy,
     subject_digest,
 )
@@ -388,9 +389,11 @@ def test_single_client_claim_is_pseudonymized(claim_name: str) -> None:
     claims = _claims()
     claims.pop("client_id")
     claims[claim_name] = "chatgpt-client"
-    result = validate_verified_claims(claims, _policy(), now=NOW)
-    assert result.client_ref != "chatgpt-client"
-    assert len(result.client_ref) == 64
+    policy = _policy()
+    result = validate_verified_claims(claims, policy, now=NOW)
+    assert result.client_ref == client_ref_digest(
+        issuer=policy.issuer, client_id="chatgpt-client"
+    )
 
 
 def test_absent_client_claim_has_explicit_nonidentity_marker() -> None:
