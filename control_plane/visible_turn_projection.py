@@ -381,15 +381,17 @@ class VisibleTurnProjection:
 
     def mint_grant(self, key: TurnKey) -> str:
         with self._lock:
-            existing = self._viewers_by_turn.get(key, set())
+            existing = self._viewers_by_turn.get(key)
+            if existing is None:
+                existing = set()
+                self._viewers_by_turn[key] = existing
             if len(existing) >= MAX_VIEWERS:
                 raise ProjectionError("OVER_BUDGET", "turn viewer budget is full")
-        grant = str(uuid.uuid4())
-        self._grants[grant] = _Grant(key, grant)
-        existing.add(grant)
-        self._viewers_by_turn[key] = existing
-        self._create_turn_locked(key)
-        return grant
+            grant = str(uuid.uuid4())
+            self._grants[grant] = _Grant(key, grant)
+            existing.add(grant)
+            self._create_turn_locked(key)
+            return grant
 
     def revoke_grant(self, reader_grant: str) -> None:
         with self._lock:
@@ -428,6 +430,12 @@ class VisibleTurnProjection:
             self._refuse(key, "OVER_BUDGET")
         decoded = _decode_cursor(cursor) if cursor is not None else None
         with self._lock:
+            live_grant = (
+                self._grants.get(reader_grant)
+                if isinstance(reader_grant, str) else None
+            )
+            if live_grant is None or live_grant.key != key:
+                self._refuse(key, "READER_REVOKED")
             record = self._turns.get(key.native_turn_id)
             if record is None or record.key != key:
                 self._refuse(key, "TURN_NOT_BOUND")
@@ -438,18 +446,26 @@ class VisibleTurnProjection:
             sequence = 0 if decoded is None else decoded.publication_sequence
             if sequence > record.next_publication_sequence:
                 self._refuse(key, "CURSOR_OUT_OF_RANGE")
-            eligible = [item for item in record.items if item.publication_sequence > sequence]
+            eligible_pub = sorted(
+                (item for item in record.items if item.publication_sequence > sequence),
+                key=lambda i: i.publication_sequence,
+            )
             gaps = [
                 gap
                 for gap in record.gaps
                 if gap.to_publication_sequence > sequence
             ]
             page: tuple[VisibleItem, ...] = ()
-            for index in range(min(max_items, len(eligible))):
-                candidate = tuple(eligible[: index + 1])
+            last_served_pub = sequence
+            for index in range(min(max_items, len(eligible_pub))):
+                candidate_pub = tuple(eligible_pub[: index + 1])
+                candidate_source = sorted(
+                    candidate_pub,
+                    key=lambda i: (i.source_sequence, i.publication_sequence),
+                )
                 candidate_result = ReadResult(
-                    candidate,
-                    _encode_cursor(record, candidate[-1].publication_sequence),
+                    candidate_source,
+                    _encode_cursor(record, candidate_pub[-1].publication_sequence),
                     tuple(gaps),
                     record.terminal,
                     record.publication_epoch,
@@ -463,14 +479,13 @@ class VisibleTurnProjection:
                 )
                 if encoded_size > MAX_ENCODED_READ_BYTES:
                     break
-                page = candidate
-            if eligible and not page:
+                page = candidate_source
+                last_served_pub = candidate_pub[-1].publication_sequence
+            if eligible_pub and not page:
                 self._refuse(key, "OVER_BUDGET")
             return ReadResult(
                 page,
-                _encode_cursor(
-                    record, page[-1].publication_sequence if page else sequence
-                ),
+                _encode_cursor(record, last_served_pub),
                 tuple(gaps),
                 record.terminal,
                 record.publication_epoch,
@@ -589,7 +604,7 @@ class VisibleTurnProjection:
                 updated if existing is replacement else existing for existing in record.items
             )
             retained = record.retained_bytes - replacement.byte_length + item.byte_length
-            self._turns[record.key.native_turn_id] = _TurnRecord(
+            new_record = _TurnRecord(
                 record.projection_id,
                 record.publication_epoch,
                 record.key,
@@ -599,6 +614,44 @@ class VisibleTurnProjection:
                 retained,
                 sequence,
             )
+            # Eviction — same retention contract as the append branch below. Drop from
+            # the FRONT (oldest first), record one ``turn_byte_overflow`` GapRecord per
+            # eviction. The item just written by THIS replacement (the ``updated``
+            # VisibleItem) is NEVER the one evicted: if it would be the oldest, evict
+            # the next-oldest instead, and if it is the ONLY retained item, stop
+            # rather than silently dropping the final.
+            while (
+                new_record.retained_bytes > MAX_RETAINED_TURN_BYTES
+                and new_record.items
+            ):
+                items_list = list(new_record.items)
+                if items_list[0] is updated and len(items_list) > 1:
+                    evict_index = 1
+                elif items_list[0] is updated:
+                    break
+                else:
+                    evict_index = 0
+                oldest = items_list[evict_index]
+                new_items = tuple(
+                    items_list[:evict_index] + items_list[evict_index + 1:]
+                )
+                new_retained = new_record.retained_bytes - oldest.byte_length
+                new_gaps = (*new_record.gaps, GapRecord(
+                    new_record.next_publication_sequence + 1,
+                    new_record.next_publication_sequence + 1,
+                    _reason("turn_byte_overflow"),
+                ))
+                new_record = _TurnRecord(
+                    new_record.projection_id,
+                    new_record.publication_epoch,
+                    new_record.key,
+                    new_items,
+                    new_gaps,
+                    new_record.terminal,
+                    new_retained,
+                    new_record.next_publication_sequence,
+                )
+            self._turns[record.key.native_turn_id] = new_record
             return
         sequence = record.next_publication_sequence + 1
         visible = VisibleItem(
