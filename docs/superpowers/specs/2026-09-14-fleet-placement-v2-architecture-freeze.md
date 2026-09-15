@@ -79,9 +79,9 @@ The following states are the maximum claims supported by protected `fdf6d19a...`
 | Economics/quota preference | `BUILT_NOT_PROVEN` | PR #594 is the current open owner of model economics and subscription-burn projection; it is production-inert. |
 | Physical-resource contracts/accounting | `BUILT_NOT_PROVEN` | PR #510 merged inactive same-store reserve/begin/settle semantics; checked-in production policy remains unarmed and unqualified. |
 | Darwin host-pressure snapshot | `BUILT_NOT_PROVEN` | Read-only evidence producer exists; it is evidence, not admission. |
-| Raw Darwin host-capacity observation | `NOT_BUILT` | Existing HP1A child is pre-START/effect-none and must be continued on its exact operation if still required; no protected `executive_host_capacity` producer exists. |
+| Raw Darwin host-capacity observation | `NOT_BUILT` | No protected `executive_host_capacity` producer exists. HP1A is the exact implementation child; its live START/effect/custody state belongs to that carrier and must be re-read rather than frozen into this ledger. |
 | Host recovery qualification | `BUILT_NOT_PROVEN` | PR #638 is open and separates worker-host recovery from Studio control-host recovery; source merge would not make hosts cruise-ready. |
-| MH1 cross-host Worker transport | `SPEC_ONLY` | Protected source contains the implementation plan but no transport implementation. Existing MH1-R0 child has a retained pre-START receiver/effect-none and must be reconciled rather than duplicated. |
+| MH1 cross-host Worker transport | `SPEC_ONLY` | Protected source contains the implementation plan but no transport implementation. MH1-R0 is the exact implementation child; its live START/effect/custody state belongs to that carrier and must be re-read rather than frozen into this ledger. |
 | Fleet product operations | `SPEC_ONLY` | SCF freezes `fleet_capacity`, `placement_explanation`, `fleet_bottlenecks`, `commission_child` and health operations; live product proof is absent. |
 | End-to-end autonomous multi-host placement | `NOT_BUILT` | No real objective currently proves quality -> economics -> host reservation -> remote execution -> result across the fleet. |
 
