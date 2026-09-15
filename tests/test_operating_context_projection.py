@@ -229,6 +229,23 @@ def test_deterministic_output_bytes_for_identical_inputs():
     assert first_bytes == second_bytes
     assert len(first_bytes) <= 128 * 1024
     assert before == {name: _fixture_bytes(name) for name in fixture_names}
+    valid = _load_operating_context_fixture("supplied.json")
+    maximal = replace(
+        valid,
+        context_bundle=replace(
+            valid.context_bundle,
+            selected_items=("x",) * 64,
+            excluded=("e",) * 32,
+            omitted_due_to_budget=("o",) * 32,
+            degraded=("g",) * 32,
+        ),
+        receipts=tuple(
+            replace(valid.receipts[0], receipt_id=str(index)) for index in range(5)
+        ),
+        conversation_ref="x" * (len(valid.conversation_ref) + 18),
+    )
+    observed = assert_serialized_output(project_operating_context(maximal).to_dict())
+    assert observed == 12495, "observed maximal admissible projection: 12,495 B"
 
 
 def test_excluded_and_degraded_missingness_are_preserved():
@@ -467,19 +484,14 @@ def test_total_input_boundary_is_refused_without_truncation():
     assert caught.value.code == OVER_BUDGET
 
 
-def test_serializer_refuses_oversize_output_without_truncation():
-    payload = _projection_dict("baseline.json")
-    payload["selected_items"] = ["y" * _MAX_TOTAL_OUTPUT_BYTES]
+def test_total_output_boundary_is_refused_without_truncation():
+    # This synthetic serializer input bypasses project_operating_context and is
+    # deliberately between the 128 KiB bound and a doubled bound.
+    payload = {"synthetic": "y" * (2 * _MAX_TOTAL_OUTPUT_BYTES - 1024)}
     assert len(_serialized(payload)) > _MAX_TOTAL_OUTPUT_BYTES
     with pytest.raises(OperatingContextProjectionError) as caught:
         assert_serialized_output(payload)
     assert caught.value.code == OVER_BUDGET
-
-
-def test_admissible_projection_output_stays_under_serializer_bound():
-    result = _projection_dict("baseline.json")
-    observed = assert_serialized_output(result)
-    assert observed == 2110
 
 
 def test_all_three_supply_states_are_pinned():
