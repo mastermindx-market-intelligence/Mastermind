@@ -57,21 +57,68 @@ def _installed_child_env(*, code_root: Path, macro_root: Path) -> dict[str, str]
 def _clean_git_snapshot(
     path: Path, *, runner: PacketRunner, env: Mapping[str, str], label: str,
 ) -> str:
-    """Return exact HEAD only when the whole checkout is clean at observation time."""
-    try:
-        result = runner(
-            ["git", "status", "--porcelain=v2", "--branch", "--untracked-files=all"],
-            cwd=path, timeout=10.0, max_bytes=256 * 1024, env=env,
-        )
-    except Exception as exc:
-        raise GatewayError("backend_unavailable", f"installed {label} observation failed") from exc
-    if not isinstance(result, Mapping):
-        raise GatewayError("backend_unavailable", f"installed {label} observation failed")
-    if any(result.get(flag) is True for flag in ("timed_out", "limit_exceeded", "invalid_utf8")):
-        raise GatewayError("backend_unavailable", f"installed {label} observation failed")
-    stdout = result.get("stdout")
-    if result.get("code") != 0 or type(stdout) is not str:
-        raise GatewayError("backend_unavailable", f"installed {label} observation failed")
+    """Return exact HEAD only when the checkout has no hidden or visible dirt."""
+    # Repository-local config and index hints belong to the owner-writable data root,
+    # so neither may weaken the cleanliness observation. In particular a local
+    # fsmonitor can execute during ``git status`` and assume-unchanged/skip-worktree
+    # can make changed bytes disappear from ordinary porcelain output.
+    git_metadata = path / ".git"
+    real_checkout = git_metadata.exists() or git_metadata.is_symlink()
+    git_prefix = ["git"]
+    if real_checkout:
+        git_prefix.extend([
+            "-c", "core.fsmonitor=false",
+            "-c", "core.untrackedCache=false",
+            "-c", "core.hooksPath=/dev/null",
+        ])
+
+    def observe(args: list[str], *, max_bytes: int) -> str:
+        try:
+            result = runner(
+                [*git_prefix, *args], cwd=path, timeout=10.0,
+                max_bytes=max_bytes, env=env,
+            )
+        except Exception as exc:
+            raise GatewayError(
+                "backend_unavailable", f"installed {label} observation failed"
+            ) from exc
+        if not isinstance(result, Mapping):
+            raise GatewayError("backend_unavailable", f"installed {label} observation failed")
+        if any(
+            result.get(flag) is True
+            for flag in ("timed_out", "limit_exceeded", "invalid_utf8")
+        ):
+            raise GatewayError("backend_unavailable", f"installed {label} observation failed")
+        stdout = result.get("stdout")
+        if result.get("code") != 0 or type(stdout) is not str:
+            raise GatewayError("backend_unavailable", f"installed {label} observation failed")
+        return stdout
+
+    # Hermetic unit tests may inject a synthetic Git runner over plain directories.
+    # A real installed checkout always carries .git metadata, so production takes
+    # this additional index-hint fence while fixture-only runners retain their
+    # existing single-status contract.
+    if real_checkout:
+        index_view = observe(["ls-files", "-v", "-z"], max_bytes=4 * 1024 * 1024)
+        for entry in index_view.split("\0"):
+            if not entry:
+                continue
+            if len(entry) < 3 or entry[1] != " ":
+                raise GatewayError(
+                    "backend_unavailable", f"installed {label} index observation failed"
+                )
+            # Normal tracked entries are H. Lower-case tags are assume-unchanged;
+            # S is skip-worktree. Other non-H states are likewise not a clean,
+            # canonical installed data-root observation.
+            if entry[0] != "H":
+                raise GatewayError(
+                    "backend_unavailable", f"installed {label} index hint is not clean"
+                )
+
+    stdout = observe(
+        ["status", "--porcelain=v2", "--branch", "--untracked-files=all"],
+        max_bytes=256 * 1024,
+    )
     oid: str | None = None
     dirty = False
     for line in stdout.splitlines():
