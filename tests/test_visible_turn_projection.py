@@ -1,4 +1,4 @@
-"""Maintenance wave VTP-M1 — RED tests for four defects in
+"""Maintenance wave VTP-M1 — RED tests for defects in
 ``control_plane/visible_turn_projection.py``.
 
   F1 — upsert + small page strands a retained item (publication order vs storage order).
@@ -9,6 +9,12 @@
        revoked reader is served text.
   F4 — the replacement branch of ``_append_locked`` skips the byte-budget eviction
        loop, so retention can grow past ``MAX_RETAINED_TURN_BYTES``.
+  F5 — the F4 eviction gap is recorded BEYOND ``next_publication_sequence`` so it
+       can never be cleared by a subsequent read; the same retention contract as
+       the append branch requires the gap to be reachable.
+  F6 — ``ReadResult.items`` is now a ``list``, breaking the frozen
+       ``tuple[VisibleItem, ...]`` shape declared on the dataclass.
+  F7 — render order test must distinguish source order from storage order.
 
 Each test must finish within its own deterministic budget. No thread or Event in
 this file waits more than 2.0 s; the whole file runs in well under 15 s wall-clock
@@ -139,20 +145,33 @@ def test_page_renders_in_source_order_not_publication_order():
     key = _make_key()
     grant = proj.mint_grant(key)
 
-    _publish(proj, key, source_id="A", source_sequence=0, state="partial", text="A-partial")
-    _publish(proj, key, source_id="B", source_sequence=1, state="completed", text="B-completed")
-    _publish(proj, key, source_id="A", source_sequence=0, state="completed", text="A-completed")
+    # Discriminating scenario: publish A FIRST with source_sequence=1, then B with
+    # source_sequence=0. Storage order is (A, B); independent source order is
+    # (B, A). A render that respects source order renders [B, A]; a render that
+    # respects storage order renders [A, B].
+    _publish(proj, key, source_id="A", source_sequence=1, state="partial", text="A-partial")
+    _publish(proj, key, source_id="B", source_sequence=0, state="completed", text="B-completed")
+    _publish(proj, key, source_id="A", source_sequence=1, state="completed", text="A-completed")
 
     result = proj.read(key, reader_grant=grant, cursor=None, max_items=8)
     assert len(result.items) == 2, f"expected 2 items, got {len(result.items)}"
-    # Source order: A (sequence 0) then B (sequence 1).
-    assert result.items[0].source_item_id == "A"
-    assert result.items[1].source_item_id == "B"
+    # Source order: B (sequence 0) then A (sequence 1).
+    assert result.items[0].source_item_id == "B", (
+        f"expected B first (source_sequence=0), got {result.items[0].source_item_id!r}; "
+        f"the page rendered storage order instead of source order"
+    )
+    assert result.items[1].source_item_id == "A", (
+        f"expected A second (source_sequence=1), got {result.items[1].source_item_id!r}"
+    )
     assert result.items[0].source_sequence == 0
     assert result.items[1].source_sequence == 1
     # Last-write-wins: A's state is the completed one.
-    assert result.items[0].state == "completed"
-    assert result.items[0].text == "A-completed"
+    assert result.items[1].state == "completed"
+    assert result.items[1].text == "A-completed"
+    # F6 — ReadResult.items is the frozen ``tuple[VisibleItem, ...]`` shape, never a list.
+    assert isinstance(result.items, tuple), (
+        f"ReadResult.items must be a tuple, got {type(result.items).__name__}"
+    )
 
 
 # ===========================================================================
@@ -406,4 +425,72 @@ def test_replacement_enforces_the_same_retention_contract_as_append():
     reasons = [g.reason for g in record.gaps]
     assert "turn_byte_overflow" in reasons, (
         f"no turn_byte_overflow gap recorded; got {reasons}"
+    )
+
+
+# ===========================================================================
+# F5 — replacement-eviction gap is unreachable when the eviction is last
+# ===========================================================================
+
+
+def test_replacement_eviction_gap_is_reachable_like_append():
+    """When the LAST publication triggers an eviction, the gap it records must be
+    REACHABLE by a subsequent drain — the same retention contract as the append
+    branch. Concretely: 65 small partials (1 byte each), then EXACTLY 64
+    replacements with 16_384-byte text. The 64th replacement is the final
+    publication; it triggers an eviction that must record a gap AT its own
+    publication sequence, with ``next_publication_sequence`` advanced to that
+    same sequence. A drain that advances the cursor past every retained item
+    must end with ``resync_required is False`` and ``gaps == ()``.
+    """
+    proj = VisibleTurnProjection()
+    key = _make_key()
+    grant = proj.mint_grant(key)
+
+    # Step 1 — 65 small partials (1 byte each).
+    for i in range(65):
+        _publish(proj, key, source_id=f"i{i}", source_sequence=i, state="partial", text="a")
+
+    # Step 2 — EXACTLY 64 replacements of i0..i63 with 16_384-byte text. i64 is
+    # NOT replaced, so the final retained item is i64 (1 byte). The 64th
+    # replacement is the final publication and triggers an eviction.
+    big = "x" * 16_384
+    for i in range(64):
+        _publish(
+            proj, key,
+            source_id=f"i{i}", source_sequence=i, state="completed", text=big,
+        )
+
+    record = proj._turns[key.native_turn_id]
+
+    # Eviction was not silent — at least one gap carries reason "turn_byte_overflow".
+    overflow_gaps = [g for g in record.gaps if g.reason == "turn_byte_overflow"]
+    assert overflow_gaps, (
+        f"no turn_byte_overflow gap recorded; got reasons={[g.reason for g in record.gaps]}"
+    )
+
+    # Step 3 — drain with successive cursors (max_items=64, at most 8 iterations).
+    cursor = None
+    final = None
+    for _ in range(8):
+        result = proj.read(key, reader_grant=grant, cursor=cursor, max_items=64)
+        final = result
+        if not result.items:
+            break
+        cursor = result.next_cursor
+
+    assert final is not None
+
+    # The FINAL read is empty (no retained items past the cursor) AND its gap
+    # filter has cleared the eviction gap because the gap's ``to_publication_sequence``
+    # is reachable — i.e. it is NOT strictly greater than the cursor's "s".
+    assert final.items == (), (
+        f"final read items not empty: {[(it.source_item_id, it.publication_sequence) for it in final.items]}"
+    )
+    assert final.gaps == (), (
+        f"final read gaps not empty: {[(g.from_publication_sequence, g.to_publication_sequence, g.reason) for g in final.gaps]}"
+    )
+    assert final.resync_required is False, (
+        f"resync_required still True on final read; the eviction gap is unreachable: "
+        f"gaps={final.gaps} cursor s={final.next_cursor!r}"
     )

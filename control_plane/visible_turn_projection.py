@@ -459,9 +459,11 @@ class VisibleTurnProjection:
             last_served_pub = sequence
             for index in range(min(max_items, len(eligible_pub))):
                 candidate_pub = tuple(eligible_pub[: index + 1])
-                candidate_source = sorted(
-                    candidate_pub,
-                    key=lambda i: (i.source_sequence, i.publication_sequence),
+                candidate_source = tuple(
+                    sorted(
+                        candidate_pub,
+                        key=lambda i: (i.source_sequence, i.publication_sequence),
+                    )
                 )
                 candidate_result = ReadResult(
                     candidate_source,
@@ -637,8 +639,8 @@ class VisibleTurnProjection:
                 )
                 new_retained = new_record.retained_bytes - oldest.byte_length
                 new_gaps = (*new_record.gaps, GapRecord(
-                    new_record.next_publication_sequence + 1,
-                    new_record.next_publication_sequence + 1,
+                    sequence,
+                    sequence,
                     _reason("turn_byte_overflow"),
                 ))
                 new_record = _TurnRecord(
@@ -649,7 +651,7 @@ class VisibleTurnProjection:
                     new_gaps,
                     new_record.terminal,
                     new_retained,
-                    new_record.next_publication_sequence,
+                    sequence,
                 )
             self._turns[record.key.native_turn_id] = new_record
             return
