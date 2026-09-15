@@ -234,3 +234,28 @@ def test_cosmetic_revision_does_not_reset_failed_loop_reassessment():
     text = _section("Step 2B — Overlap judgment and execution without multiplying management")
     assert "A changed revision alone is not evidence of useful repair" in text
     assert "a cosmetic edit does not reset reassessment" in text
+
+
+# Cross-skill enrollment/ownership boundaries, not fresh-model behavior.
+def test_detailed_delegation_owner_requires_accepted_same_source_enrollment():
+    text = _section("Procedural ownership and companion enrollment")
+    assert "WEB_CEO_DELEGATION.md" in text
+    assert "accepted enrollment in the same pinned INDEX" in text
+    assert "Before accepted enrollment" in text
+    assert "candidate file, an evaluation bundle, or another branch is not enrollment" in text
+
+
+def test_delegation_companion_does_not_duplicate_active_turn_controller():
+    text = _section("Procedural ownership and companion enrollment")
+    assert "ACTIVE_EXECUTION remains the sole active-turn owner" in text
+    assert "capability delta, lane-local blocking, no-delta re-planning, and finalization" in text
+    assert "detailed role selection, delegation economics, worker packets, and capacity policy" in text
+    assert "do not create another stop-state machine or routing catalog" in text
+
+
+def test_companion_disagreement_preserves_incumbent_effects_and_source_pin():
+    text = _section("Procedural ownership and companion enrollment")
+    assert "material disagreement requires RECONCILE_STATE" in text
+    assert "Do not mix procedure revisions" in text
+    assert "does not transfer an incumbent writer, authorize a retry, or relax admission" in text
+    assert "explanatory notes, not a second closed routing taxonomy" in text

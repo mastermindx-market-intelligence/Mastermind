@@ -365,3 +365,14 @@ A substantial CEO continuation passes this skill when:
 * the final stop classification and exact next action are recoverable by a fresh session; and
 * no new lifecycle, queue, retry, memory, permission, or control plane was created to enforce this
   procedure.
+
+
+## Procedural ownership and companion enrollment
+
+ACTIVE_EXECUTION remains the sole active-turn owner for capability delta, lane-local blocking, no-delta re-planning, and finalization. Its principal/worker sections apply those active-turn duties; do not create another stop-state machine or routing catalog from them.
+
+When `WEB_CEO_DELEGATION.md` has accepted enrollment in the same pinned INDEX, consume it as the specific owner of detailed role selection, delegation economics, worker packets, and capacity policy. That companion must consume this skill for active-turn advancement and stopping; neither skill creates or replaces Executive/COO lifecycle, admission, placement, retry, or dialogue owners. Reason labels used here are explanatory notes, not a second closed routing taxonomy or new ingress fields.
+
+Before accepted enrollment, a candidate file, an evaluation bundle, or another branch is not enrollment and cannot override current governing procedure. Continue through the accepted commissioning and routing laws already available; a missing optional companion is not a reason to stop otherwise lawful useful work. No implicit enrollment or mandatory dependency on an unaccepted file is introduced.
+
+Do not mix procedure revisions. A material disagreement requires RECONCILE_STATE against the same protected source and the declared owner before the affected action; preserve independently safe work. Resolving document precedence does not transfer an incumbent writer, authorize a retry, or relax admission. Source protection of either procedure still does not prove fresh-session adoption or live delegation.
