@@ -5,6 +5,7 @@ import inspect
 import io
 import json
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -1609,6 +1610,12 @@ STUDIO_PLISTS = frozenset(
 )
 
 
+# Fixtures below simulate a Mac host. The production collector deliberately
+# defaults to the real platform and refuses non-Darwin, so simulated-Mac calls
+# must inject Darwin explicitly to stay hermetic on Linux CI runners.
+_SIMULATED_DARWIN: Callable[[], str] = lambda: "Darwin"
+
+
 def _plist_exists_for(paths: frozenset[Path]):
     present = frozenset(paths)
 
@@ -1671,10 +1678,12 @@ def _collect(
     plists: frozenset[Path] = STUDIO_PLISTS,
     launch_agents_dir: Path,
     host_ref: str | None = None,
+    platform_system: Callable[[], str] = _SIMULATED_DARWIN,
 ) -> dict[str, Any]:
     return collect_recovery_observation(
         host_ref=host_ref,
         runner=runner,
+        platform_system=platform_system,
         plist_exists=_plist_exists_for(plists),
         launch_agents_dir=launch_agents_dir,
         free_bytes=lambda: DISK_FREE_FLOOR_BYTES * 3,
@@ -1736,6 +1745,7 @@ def test_collector_maps_unavailable_commands_to_unknown(tmp_path: Path) -> None:
     observation = collect_recovery_observation(
         host_ref=None,
         runner=runner,
+        platform_system=_SIMULATED_DARWIN,
         plist_exists=_plist_exists_for(STUDIO_PLISTS),
         launch_agents_dir=tmp_path,
         free_bytes=lambda: None,
