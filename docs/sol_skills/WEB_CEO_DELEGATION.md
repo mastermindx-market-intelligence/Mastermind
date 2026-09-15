@@ -25,7 +25,7 @@ A work unit is delegable when an independent eligible worker can acquire the nec
 
 Compare direct principal effort with framing + necessary review + expected clarification/repair, also considering worker latency and useful independent work the principal can advance meanwhile. Delegate when total useful progress improves without lowering quality. Do not delegate merely to meet an agent-count quota or save nominal tokens at the expense of acceptance.
 
-Retain substantial otherwise-delegable work only with a brief concrete reason: `LOWER_TOTAL_OVERHEAD`, `PRINCIPAL_JUDGMENT`, `UNIQUE_APPROVED_ACCESS`, `CRITICAL_PATH_INTERVENTION`, or `NO_ELIGIBLE_WORKER`. These are explanatory notes, not new lifecycle states. Reassess when the remaining task becomes routine, tool work repeats or a repair cycle fails without adding evidence.
+Retain substantial otherwise-delegable work only with a brief concrete reason: `LOWER_TOTAL_OVERHEAD`, `PRINCIPAL_JUDGMENT`, `UNIQUE_APPROVED_ACCESS`, `CRITICAL_PATH_SHORTCUT`, or `NO_ELIGIBLE_PRE_EFFECT_WORKER`. These are explanatory notes aligned to the active-turn owner, not new lifecycle states or runtime enums. Reassess when the remaining task becomes routine, tool work repeats or a repair cycle fails without adding evidence.
 
 ## 3. Commission a complete bounded outcome
 
@@ -47,7 +47,7 @@ Keep a substantive principal-owned task while workers execute: resolve the harde
 
 Sustained Sol orchestration may include normal ACK/CONTINUE/repair/acceptance steps within a substantive mission. That does not promote a standalone acknowledgment, status check or polling turn into frontier reasoning. Astra may continue orchestration when it is productive, and Sol may directly resolve high-level architecture within its authority. Neither should stop solely because it has written a plan or delivered a packet while useful authorized work remains.
 
-Use the ACTIVE_EXECUTION owner once #591 is accepted; until then use the existing COO cycle/control-service owner for critical-path advancement, no-delta handling and finalization. This skill adds no second stop-state machine. A failed or blocked lane freezes only its affected work; independently safe and authorized work can continue. Keep `EFFECT_UNKNOWN` on the exact operation/carrier until reconciled; never start a duplicate or silently move a started modifier to another session.
+After `WEB_CEO_DELEGATION.md` has accepted enrollment in the same pinned INDEX as `ACTIVE_EXECUTION.md`, consume ACTIVE_EXECUTION as the sole active-turn, no-delta and finalization owner and this companion only for detailed delegation. Before that enrollment, this candidate has no procedural authority; use the current accepted COO cycle/control-service owners. This skill adds no second stop-state machine. A failed or blocked lane freezes only its affected work; independently safe and authorized work can continue. Keep `EFFECT_UNKNOWN` on the exact operation/carrier until reconciled; never start a duplicate or silently move a started modifier to another session.
 
 ## 6. Consume evidence, not worker transcripts
 

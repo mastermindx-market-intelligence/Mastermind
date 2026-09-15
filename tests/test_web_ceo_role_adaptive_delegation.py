@@ -47,9 +47,9 @@ def test_corpus_covers_evaluator_exposure_and_fail_closed_pro_admission():
     "CONCENTRATED_JUDGMENT", "SUSTAINED_ORCHESTRATION", "role preferences",
     "not duration guarantees", "Do not force an Astra-to-Sol handoff",
     "LOWER_TOTAL_OVERHEAD", "PRINCIPAL_JUDGMENT", "UNIQUE_APPROVED_ACCESS",
-    "CRITICAL_PATH_INTERVENTION", "NO_ELIGIBLE_WORKER",
+    "CRITICAL_PATH_SHORTCUT", "NO_ELIGIBLE_PRE_EFFECT_WORKER",
     "EFFECT_UNKNOWN", "not live admission", "ACTIVE_EXECUTION",
-    "ACTIVE_EXECUTION owner once #591 is accepted",
+    "accepted enrollment in the same pinned INDEX",
     "PRO_MODE_TASK_CLASS", "PRO_MODE_REFUSED / USE_NON_PRO_MODE",
     "Model Router fixes the first lawful suitability tier",
     "fresh-Sol evaluation bundle", "evaluation exposure, not production enrollment",
@@ -113,6 +113,9 @@ def test_candidate_is_structurally_unenrolled_and_closes_bypass_and_pro_class_ga
         assert "current protected integration base" in artifact
     assert "source basis `bffe2ca" not in plan
     assert "Basis: Mastermind `bffe2ca" not in spec
+    assert "CRITICAL_PATH_INTERVENTION" not in skill
+    assert "NO_ELIGIBLE_WORKER" not in skill
+    assert "once #591 is accepted" not in skill
 
 
 def test_static_packet_checks_do_not_launch_or_grade_models():
