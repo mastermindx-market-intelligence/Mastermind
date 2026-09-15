@@ -1,18 +1,26 @@
 import ast
 import hashlib
 import json
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import pytest
 
 from control_plane.operating_context_projection import (
-        DUPLICATE_IDENTITY,
-        INPUT_SHAPE_INVALID,
+    _MAX_DEGRADED_LENGTH,
+    _MAX_ID_LENGTH,
+    _MAX_ITEM_LENGTH,
+    _MAX_REASON_LENGTH,
+    _MAX_TOTAL_INPUT_BYTES,
+    _MAX_TOTAL_OUTPUT_BYTES,
+    _serialized,
+    DUPLICATE_IDENTITY,
+    INPUT_SHAPE_INVALID,
     MISSION_CONTEXT_MISMATCH,
     OVER_BUDGET,
     RECEIPT_CONTEXT_MISMATCH,
     AcceptedCriteriaFact,
+    ContextBundleFact,
     OperatingContextProjectionError,
     OperatingContextSnapshot,
     OperatingContextProjection,
@@ -190,10 +198,11 @@ def test_adapter_performs_zero_broker_provider_or_control_calls(monkeypatch):
 
 def test_oversize_input_is_refused_without_truncation():
     valid = _load_operating_context_fixture("baseline.json")
-    oversized_item = "x" * 4097
-    with pytest.raises(OperatingContextProjectionError) as caught:
-        replace(valid.context_bundle, selected_items=(oversized_item,))
-    assert caught.value.code == OVER_BUDGET
+    bounded = replace(valid.context_bundle, selected_items=("x" * 4096,))
+    assert len(bounded.selected_items[0].encode("utf-8")) == 4096
+    with pytest.raises(OperatingContextProjectionError) as byte_error:
+        replace(valid.context_bundle, selected_items=("x" * 4097,))
+    assert byte_error.value.code == OVER_BUDGET
     bounded_items = tuple("y" * 4096 for _ in range(64))
     assert len(json.dumps(bounded_items).encode("utf-8")) > 256 * 1024
     with pytest.raises(OperatingContextProjectionError) as total_caught:
@@ -268,6 +277,220 @@ def test_optional_conversation_and_artifact_nulls_are_by_design():
         and item["target_field"] in {"conversation_ref", "artifact_ref"}
         for item in result["missingness"]
     )
+
+def _assert_serialized_bytes(value, expected):
+    assert len(_serialized(value)) == expected
+
+
+def _field_cases():
+    return (
+        (
+            "mission_id",
+            lambda value: replace(
+                _load_operating_context_fixture("baseline.json").mission, mission_id=value
+            ),
+        ),
+        (
+            "job_ref",
+            lambda value: replace(
+                _load_operating_context_fixture("baseline.json").mission, job_ref=value
+            ),
+        ),
+        (
+            "objective",
+            lambda value: replace(
+                _load_operating_context_fixture("baseline.json").mission, objective=value
+            ),
+        ),
+        (
+            "criteria_ref",
+            lambda value: replace(
+                _load_operating_context_fixture("supplied.json").criteria,
+                criteria_ref=value,
+            ),
+        ),
+        (
+            "revision",
+            lambda value: replace(
+                _load_operating_context_fixture("supplied.json").criteria, revision=value
+            ),
+        ),
+        (
+            "producer",
+            lambda value: replace(
+                _load_operating_context_fixture("supplied.json").criteria, producer=value
+            ),
+        ),
+        (
+            "provider_turn_ref",
+            lambda value: replace(
+                _load_operating_context_fixture("supplied.json").receipts[0],
+                provider_turn_ref=value,
+            ),
+        ),
+        (
+            "conversation_ref",
+            lambda value: replace(
+                _load_operating_context_fixture("baseline.json"), conversation_ref=value
+            ),
+        ),
+        (
+            "artifact_ref",
+            lambda value: replace(
+                _load_operating_context_fixture("baseline.json"), artifact_ref=value
+            ),
+        ),
+        (
+            "review_ref",
+            lambda value: replace(
+                _load_operating_context_fixture("baseline.json"), review_ref=value
+            ),
+        ),
+    )
+
+
+def test_parent_selected_item_byte_bound_is_repaired():
+    valid = _load_operating_context_fixture("baseline.json")
+    accepted = replace(valid.context_bundle, selected_items=("x" * _MAX_ITEM_LENGTH,))
+    assert accepted.selected_items == ("x" * _MAX_ITEM_LENGTH,)
+    with pytest.raises(OperatingContextProjectionError) as caught:
+        replace(valid.context_bundle, selected_items=("x" * (_MAX_ITEM_LENGTH + 1),))
+    assert caught.value.code == OVER_BUDGET
+
+
+def test_all_context_entry_counts_and_item_bytes_have_typed_boundaries():
+    valid = _load_operating_context_fixture("baseline.json")
+    cases = (
+        ("selected_items", 64, _MAX_ITEM_LENGTH),
+        ("excluded", 32, _MAX_ITEM_LENGTH),
+        ("omitted_due_to_budget", 32, _MAX_ITEM_LENGTH),
+        ("degraded", 32, _MAX_DEGRADED_LENGTH),
+    )
+    for field_name, count_limit, byte_limit in cases:
+        accepted_items = tuple("y" * byte_limit for _ in range(count_limit))
+        accepted_bundle = replace(valid.context_bundle, **{field_name: accepted_items})
+        assert all(len(value.encode("utf-8")) == byte_limit for value in accepted_items)
+        with pytest.raises(OperatingContextProjectionError) as count_error:
+            replace(valid.context_bundle, **{field_name: accepted_items + ("z",)})
+        assert count_error.value.code == OVER_BUDGET
+        oversized = "x" * (byte_limit + 1)
+        with pytest.raises(OperatingContextProjectionError) as byte_error:
+            replace(valid.context_bundle, **{field_name: (oversized,)})
+        assert byte_error.value.code == OVER_BUDGET
+
+
+def test_digest_boundaries_are_64_lowercase_hex():
+    valid = _load_operating_context_fixture("baseline.json")
+    digest = "a" * 64
+    accepted = replace(valid.context_bundle, context_digest=digest)
+    assert len(accepted.context_digest.encode("utf-8")) == 64
+    assert accepted.context_digest == digest
+    for malformed_digest in ("a" * 63, "a" * 65, "A" * 64, "g" * 64):
+        with pytest.raises(OperatingContextProjectionError) as caught:
+            replace(valid.context_bundle, context_digest=malformed_digest)
+        assert caught.value.code == INPUT_SHAPE_INVALID
+
+
+def test_all_typed_string_fields_have_byte_boundaries():
+    limits = {
+        "mission_id": _MAX_ID_LENGTH,
+        "job_ref": _MAX_ID_LENGTH,
+        "objective": _MAX_REASON_LENGTH,
+        "criteria_ref": _MAX_ID_LENGTH,
+        "revision": _MAX_ID_LENGTH,
+        "producer": _MAX_ID_LENGTH,
+        "provider_turn_ref": _MAX_ID_LENGTH,
+        "conversation_ref": _MAX_ID_LENGTH,
+        "artifact_ref": _MAX_ID_LENGTH,
+        "review_ref": _MAX_ID_LENGTH,
+    }
+    for field_name, construct in _field_cases():
+        value = "x" * limits[field_name]
+        assert construct(value).__getattribute__(field_name) == value
+        with pytest.raises(OperatingContextProjectionError) as caught:
+            construct(value + "x")
+        assert caught.value.code == OVER_BUDGET
+
+
+def test_receipt_count_boundary_is_refused_not_truncated():
+    valid = _load_operating_context_fixture("baseline.json")
+    receipt = _load_operating_context_fixture("supplied.json").receipts[0]
+    receipts = tuple(
+        replace(receipt, receipt_id=f"receipt-{index}") for index in range(8)
+    )
+    accepted = replace(valid, receipts=receipts)
+    assert len(accepted.receipts) == 8
+    repeated = tuple(
+        replace(receipt, receipt_id=f"receipt-{index}") for index in range(9)
+    )
+    with pytest.raises(OperatingContextProjectionError) as caught:
+        replace(valid, receipts=repeated)
+    assert caught.value.code == INPUT_SHAPE_INVALID
+
+
+def test_total_input_boundary_is_refused_without_truncation():
+    valid = _load_operating_context_fixture("baseline.json")
+    baseline = replace(valid, context_bundle=replace(valid.context_bundle, selected_items=()))
+    payload = json.loads(_serialized(asdict(baseline)))
+    selected_items = payload["context_bundle"]["selected_items"]
+    selected_items.clear()
+    full_item = "x" * _MAX_ITEM_LENGTH
+    selected_items.append(full_item)
+    while len(selected_items) < 64:
+        selected_items.append(full_item)
+    shrink = len(_serialized(payload)) - _MAX_TOTAL_INPUT_BYTES
+    selected_items[-1] = "x" * (len(selected_items[-1]) - shrink)
+    _assert_serialized_bytes(payload, _MAX_TOTAL_INPUT_BYTES)
+    assert len(selected_items) == 64
+    oversized_last = selected_items[-1] + "x"
+    plus_one = payload.copy()
+    plus_one["context_bundle"] = payload["context_bundle"].copy()
+    plus_one["context_bundle"]["selected_items"] = selected_items[:-1] + [oversized_last]
+    _assert_serialized_bytes(plus_one, _MAX_TOTAL_INPUT_BYTES + 1)
+    assert len(oversized_last.encode("utf-8")) <= _MAX_ITEM_LENGTH
+    with pytest.raises(OperatingContextProjectionError) as caught:
+        replace(
+            baseline,
+            context_bundle=replace(
+                baseline.context_bundle,
+                selected_items=tuple(item + "x" for item in selected_items),
+            ),
+        )
+    assert caught.value.code == OVER_BUDGET
+
+
+def test_total_output_boundary_is_refused_without_truncation():
+    valid = _load_operating_context_fixture("baseline.json")
+    result = _projection_dict("baseline.json")
+    selected_items = []
+    result["selected_items"] = selected_items
+    selected_items.clear()
+    selected_items.extend(["y" * _MAX_ITEM_LENGTH] * 29)
+    remaining = _MAX_TOTAL_OUTPUT_BYTES - len(_serialized(result)) - 3
+    selected_items.append("y" * remaining)
+    result["selected_items"] = selected_items.copy()
+    _assert_serialized_bytes(result, _MAX_TOTAL_OUTPUT_BYTES)
+    oversized_last = selected_items[-1] + "y"
+    result["selected_items"] = selected_items[:-1] + [oversized_last]
+    _assert_serialized_bytes(result, _MAX_TOTAL_OUTPUT_BYTES + 1)
+    assert len(selected_items) == 30
+    oversized_items = tuple(item + "y" for item in selected_items)
+    with pytest.raises(OperatingContextProjectionError) as caught:
+        replace(
+            valid,
+            context_bundle=replace(valid.context_bundle, selected_items=oversized_items),
+        )
+    assert caught.value.code == OVER_BUDGET
+
+
+def test_all_three_supply_states_are_pinned():
+    selected = _projection_dict("baseline.json")
+    evidence_absent = _projection_dict("missingness.json")
+    supplied = _projection_dict("supplied.json")
+    assert selected["supply_state"] == "SELECTED_ONLY"
+    assert selected["receipt_digests"] == []
+    assert evidence_absent["supply_state"] == "SUPPLY_EVIDENCE_MISSING"
+    assert supplied["supply_state"] == "SUPPLIED_CONFIRMED"
 
 
 def test_source_import_allowlist_has_no_forbidden_import():
