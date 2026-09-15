@@ -18,6 +18,8 @@ This login is the broad feature credential. Chrome integration explicitly requir
 
 The login is not perpetual. Claude Code warns when a saved login is within three days of expiry, and once a login expires and cannot refresh, model requests fail until `/login` is renewed. Provider documentation explicitly warns that long-running background and Remote Control sessions stop making progress when this happens.
 
+A read-only check of the currently installed Studio Claude Code 2.1.259 `auth status --json` schema exposed only these field names: `analyticsDisabled`, `apiProvider`, `authMethod`, `email`, `loggedIn`, `orgId`, `orgName`, `projectsDirectory`, and `subscriptionType`. The check emitted field names only; no PII values were recorded. There is **no machine-readable expiry field in the current installed auth-status contract**, so preflight cannot honestly predict the provider's three-day expiry warning from this command. Until a reviewed supported expiry signal exists, `expiring_soon` remains unknown; Provider Control may observe explicit provider warnings or failed/expired outcomes through a separate bounded source, but must not derive expiry from token contents, Keychain material, account PII, or guessed login age.
+
 ### Long-lived setup token
 
 `claude setup-token` produces a one-year OAuth token for Pro/Max/Team/Enterprise subscriptions and is intended for CI, scripts and environments without interactive browser login. Claude Code does not save it; the runtime receives it as `CLAUDE_CODE_OAUTH_TOKEN`.
@@ -73,8 +75,8 @@ COLD_BOOT_AUTH_PASS
   after an actual host reboot/startup path, prove the worker principal can authenticate without Chairman interaction
 
 EXPIRY_OBSERVABILITY_PASS
-  prove preflight/provider-health observation can distinguish healthy, expiring-soon where provider-supported,
-  and expired/not-ready states without persisting provider PII
+  prove provider-health observation distinguishes healthy from expired/not-ready without provider PII;
+  expiring-soon may be emitted only when a supported bounded source actually reports it
 
 AUTH_PRECEDENCE_PASS
   prove an injected stronger credential source cannot silently move the realm off the admitted subscription mode
