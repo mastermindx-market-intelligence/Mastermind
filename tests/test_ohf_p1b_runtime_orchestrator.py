@@ -136,7 +136,7 @@ def test_expired_ohf_takeover_preserves_authority_and_recovers_lawful_shapes(
                 fence_generation=old.attempt.fence_generation,
                 lease_token=old.lease_token,
             )
-    clock.advance(3)
+    clock.advance(240)
     runtime.attempts.reconcile_expired()
     current = runtime.attempts.get_attempt(old.attempt.attempt_id)
     assert current is not None and current.status in {
@@ -524,6 +524,89 @@ def test_real_port_checkpoint_restarts_and_commits_next_sequence(tmp_path) -> No
         restarted.jobs.get_job(job.job_id).checkpoint["current_state"]
         == "restart-2"
     )
+
+
+def test_stale_checkpoint_intent_cannot_apply_after_generation_advance(tmp_path) -> None:
+    clock = _Clock()
+    runtime, _job, lease = _runtime_lease(tmp_path, clock=clock)
+    profile = _profile(lease)
+    adapter = FakeAdapter(profile)
+    port, orchestrator = _orchestrator(runtime, lease, adapter)
+    session = orchestrator.start_attempt(
+        attempt_id=lease.attempt.attempt_id,
+        requested=profile,
+        operation_id=_op("stale-generation-start"),
+    )
+    stale_operation = _op("stale-generation-checkpoint")
+    runtime.operator_harness.reserve_checkpoint_operation(
+        generation=session.generation,
+        operation_id=stale_operation,
+        fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+    )
+    runtime.operator_harness.record_reconcile_observation(
+        generation=session.generation,
+        observation=ReconcileObservation(
+            process_liveness=ProcessLiveness.PROVEN_DEAD,
+            observed_process=ProcessIdentityObservation(
+                adapter.process_number,
+                adapter.process_number,
+                f"start-{adapter.process_number}",
+                "boot",
+            ),
+            provider_session_reachable=True,
+            provider_writer_state=ProviderWriterState.RELEASED,
+            observed_provider_session_id="S1",
+        ),
+        fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+    )
+    clock.advance(240_000)
+    runtime.attempts.reconcile_expired()
+    runtime = Runtime.from_store(
+        RuntimeStore(
+            tmp_path,
+            clock=clock,
+            database_path=tmp_path / "data" / "control_plane" / "executive.sqlite3",
+        )
+    )
+    replacement = runtime.attempts.takeover_expired_operator_harness(
+        lease.attempt.attempt_id,
+        expected_fence_generation=lease.attempt.fence_generation,
+        lease_owner="stale-generation-recovery",
+        lease_seconds=30,
+    )
+    assert replacement.lease_token is not None
+    successor = runtime.operator_harness.reserve_same_epoch_resume(
+        epoch=session.epoch,
+        old_generation=session.generation,
+        operation_id=_op("stale-generation-resume"),
+        fence_generation=replacement.attempt.fence_generation,
+        lease_token=replacement.lease_token,
+    )
+    assert successor.generation_number == session.generation.generation_number + 1
+
+    with pytest.raises(
+        StateConflict,
+        match=r"^checkpoint operation result does not match INTENT$",
+    ):
+        runtime.operator_harness.apply_checkpoint_operation(
+            generation=successor,
+            operation_id=stale_operation,
+            observation=CheckpointObservation(
+                {"summary": "checkpoint", "current_state": "stale"}
+            ),
+            fence_generation=replacement.attempt.fence_generation,
+            lease_token=replacement.lease_token,
+        )
+
+    attempt = runtime.attempts.get_attempt(lease.attempt.attempt_id)
+    assert attempt is not None and attempt.checkpoint_sequence == 0
+    with runtime.store.read() as connection:
+        checkpoint_events = connection.execute(
+            "SELECT COUNT(*) FROM events WHERE event_type='JOB_CHECKPOINTED'",
+        ).fetchone()[0]
+    assert checkpoint_events == 0
 
 
 def test_real_checkpoint_effect_unknown_blocks_apply_and_replay(tmp_path) -> None:
