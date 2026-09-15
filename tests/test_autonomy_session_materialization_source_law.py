@@ -19,6 +19,7 @@ PORT = ROOT / "control_plane/executive_operator_harness_port.py"
 BROKER = ROOT / "control_plane/executive_worker_broker.py"
 RECEIPT = ROOT / "control_plane/operator_materialization_receipt.py"
 REMOTE = ROOT / "control_plane/remote_codex_operator_adapter.py"
+REMOTE_GENERIC = ROOT / "control_plane/remote_operator_harness_adapter.py"
 SUPERVISOR = ROOT / "control_plane/executive_operator_supervisor.py"
 BINDING = ROOT / "control_plane/runtime_binding_projection.py"
 
@@ -377,9 +378,9 @@ def test_existing_provider_chain_records_uncertainty_and_remains_single_owner() 
     broker_status = definition(
         BROKER, "ExecutiveWorkerBroker._ohf_materialization_status"
     )
-    remote = definition(REMOTE, "RemoteCodexOperatorAdapter.describe_capabilities")
+    remote = definition(REMOTE, "RemoteCodexOperatorAdapter.__init__")
     remote_status = definition(
-        REMOTE, "RemoteCodexOperatorAdapter.materialization_status"
+        REMOTE_GENERIC, "RemoteOperatorHarnessAdapter.materialization_status"
     )
     restart = definition(SUPERVISOR, "ExecutiveOperatorSupervisor.reconcile_restart")
     binding_facts = definition(BINDING, "active_operator_binding_facts")
