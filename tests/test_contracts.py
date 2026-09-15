@@ -717,3 +717,40 @@ def test_incident_replay_module_importable():
         assert fns, "incident replay module has no test_ functions"
     except ImportError:
         pytest.skip("incident replay module not importable (expected in isolated worktree)")
+
+
+# ---------------------------------------------------------------------------
+# G. Portfolio V3 Decision Snapshot source contracts (S0 Task 1)
+# ---------------------------------------------------------------------------
+
+def test_portfolio_v3_snapshot_sources_are_registered_context_only():
+    from control_plane import contracts
+    expected = {
+        "portfolio-v3-risk-envelope-settled": (
+            "site/riskdata/risk_envelope.json", "SHRINK"
+        ),
+        "portfolio-v3-sector-central": (
+            "site/sectordata/sector_central.json", "ADVISORY"
+        ),
+        "portfolio-v3-covariance-spine": (
+            "data/neuralweb/covariance_spine.json", "ADVISORY"
+        ),
+        "portfolio-v3-factor-betas": (
+            "site/factor_betas.json", "ADVISORY"
+        ),
+        "portfolio-v3-prophet-index": (
+            "site/prophet/index.json", "ADVISORY"
+        ),
+        "portfolio-v3-portfolio-context": (
+            "site/data/portfolio_ctx.json", "ADVISORY"
+        ),
+    }
+    for key, (path, degradation) in expected.items():
+        row = contracts.contract(key)
+        assert row is not None
+        assert row["path"] == path
+        assert row["allowed_effect"] in {"context-only", "display-only"}
+        assert row["degradation_class"] == degradation
+        assert row["consumer_modules"] == [
+            "portfolio/decision_snapshot_sources.py"
+        ]
