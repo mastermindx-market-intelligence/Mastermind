@@ -741,7 +741,7 @@ def test_control_config_template_tracks_strict_service_schema() -> None:
 
     value = json.loads((OPS / "control.json.template").read_text(encoding="utf-8"))
     assert value["schema_version"] == CONTROL_CONFIG_SCHEMA_VERSION
-    assert set(value) == _CONFIG_REQUIRED | _CONFIG_OPTIONAL | {"ceo_submit_armed"}
+    assert set(value) == _CONFIG_REQUIRED | _CONFIG_OPTIONAL
 
 
 def _membership_snapshot() -> dict:

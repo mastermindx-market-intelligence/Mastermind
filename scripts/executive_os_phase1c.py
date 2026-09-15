@@ -142,6 +142,7 @@ _CONFIG_OPTIONAL = frozenset(
         "effort",
         "cost_class",
         "coo_autonomy_armed",
+        "ceo_submit_armed",
         "coo_operator_harness_armed",
         "coo_tick_interval_seconds",
         "coo_model_alias",
@@ -518,6 +519,10 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
         config["coo_autonomy_armed"], bool
     ):
         raise ServiceError("control config coo_autonomy_armed must be boolean")
+    if "ceo_submit_armed" in config and not isinstance(
+        config["ceo_submit_armed"], bool
+    ):
+        raise ServiceError("control config ceo_submit_armed must be boolean")
     if "coo_operator_harness_armed" in config and not isinstance(
         config["coo_operator_harness_armed"], bool
     ):
@@ -939,6 +944,7 @@ def _service_from_config(
         effort=str(raw.get("effort") or "xhigh"),
         cost_class=str(raw.get("cost_class") or "standard"),
         coo_autonomy_armed=raw.get("coo_autonomy_armed", False),
+        ceo_submit_armed=raw.get("ceo_submit_armed", False),
         coo_operator_harness_armed=raw.get(
             "coo_operator_harness_armed", False
         ),
