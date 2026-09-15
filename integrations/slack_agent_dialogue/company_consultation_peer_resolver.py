@@ -6,6 +6,9 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from common.agent_dialogue_consultation_contract import (
+    consultation_schema_for_reasoning_surface,
+)
 from integrations.slack_agent_dialogue.company_dialogue_runtime_binding import (
     BindingReason,
     BindingState,
@@ -37,6 +40,12 @@ class ConsultationPeer:
 
     def public_projection(self) -> dict[str, str]:
         return {"peer_ref": self.peer_ref, "display_name": self.display_name}
+
+    @property
+    def consultation_schema(self) -> str:
+        return consultation_schema_for_reasoning_surface(
+            self.binding["reasoning_surface"]
+        )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -100,7 +109,7 @@ class CompanyConsultationPeerResolver:
             or re.fullmatch(r"bind-[A-Za-z0-9][A-Za-z0-9._:-]{7,127}", str(binding.get("binding_id"))) is None
             or type(binding.get("binding_generation")) is not int
             or binding.get("binding_generation") < 1
-            or binding.get("reasoning_surface") not in {"codex", "claude"}
+            or binding.get("reasoning_surface") not in {"codex", "claude", "grok-bot"}
         ):
             raise ConsultationPeerRefused("BINDING_UNAVAILABLE")
 

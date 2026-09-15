@@ -28,6 +28,16 @@ from common.agent_dialogue_contract_v2 import (
 )
 
 CONSULTATION_SCHEMA = "mastermind.agent_dialogue_consultation.v1"
+GROK_CONSULTATION_SCHEMA = "mastermind.agent_dialogue_consultation.v2"
+CONSULTATION_SCHEMA_REASONING_SURFACES = {
+    CONSULTATION_SCHEMA: frozenset({"codex", "claude"}),
+    GROK_CONSULTATION_SCHEMA: frozenset({"codex", "claude", "grok-bot"}),
+}
+_PRODUCER_SCHEMA_BY_REASONING_SURFACE = {
+    "codex": CONSULTATION_SCHEMA,
+    "claude": CONSULTATION_SCHEMA,
+    "grok-bot": GROK_CONSULTATION_SCHEMA,
+}
 CONSULTATION_PURPOSES = frozenset({"QUESTION", "ANSWER", "NOTICE", "CORRECTION"})
 CONSULTATION_KEYS = frozenset(
     {
@@ -223,11 +233,20 @@ def _validated_receipt(value: Any) -> dict[str, Any] | None:
     return result
 
 
+def consultation_schema_for_reasoning_surface(reasoning_surface: Any) -> str:
+    """Map a trusted reasoning surface to its producer consultation schema."""
+    try:
+        return _PRODUCER_SCHEMA_BY_REASONING_SURFACE[reasoning_surface]
+    except KeyError:
+        raise DialogueContractError("MESSAGE_INVALID") from None
+
+
 def validate_consultation(value: Any) -> dict[str, Any]:
     _reject_secret_shaped_leaves(value, code="MESSAGE_INVALID")
     _reject_forbidden_names(value)
     item = _exact_keys(value, CONSULTATION_KEYS)
-    if item["schema"] != CONSULTATION_SCHEMA:
+    allowed_reasoning_surfaces = CONSULTATION_SCHEMA_REASONING_SURFACES.get(item["schema"])
+    if allowed_reasoning_surfaces is None:
         raise DialogueContractError("MESSAGE_INVALID")
     if not isinstance(item["message_key"], str) or _MESSAGE_KEY_RE.fullmatch(item["message_key"]) is None:
         raise DialogueContractError("MESSAGE_INVALID")
@@ -248,7 +267,7 @@ def validate_consultation(value: Any) -> dict[str, Any]:
         raise DialogueContractError("MESSAGE_INVALID")
     if type(binding_raw["binding_generation"]) is not int or binding_raw["binding_generation"] < 1:
         raise DialogueContractError("MESSAGE_INVALID")
-    if not isinstance(binding_raw["reasoning_surface"], str) or binding_raw["reasoning_surface"] not in {"codex", "claude"}:
+    if not isinstance(binding_raw["reasoning_surface"], str) or binding_raw["reasoning_surface"] not in allowed_reasoning_surfaces:
         raise DialogueContractError("MESSAGE_INVALID")
     item["recipient_binding"] = binding_raw
 
@@ -389,8 +408,10 @@ __all__ = [
     "CONSULTATION_KEYS",
     "CONSULTATION_PURPOSES",
     "CONSULTATION_SCHEMA",
+    "CONSULTATION_SCHEMA_REASONING_SURFACES",
     "CORRELATION_KEYS",
     "DuplicateClassification",
+    "GROK_CONSULTATION_SCHEMA",
     "RECEIPT_KEYS",
     "QUESTION_MESSAGE_KEY",
     "RECIPIENT_BINDING_KEYS",
@@ -399,6 +420,7 @@ __all__ = [
     "build_consultation",
     "canonical_consultation_json",
     "classify_duplicate",
+    "consultation_schema_for_reasoning_surface",
     "consultation_semantic_fingerprint",
     "validate_consultation",
 ]

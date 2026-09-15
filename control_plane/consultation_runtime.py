@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from common.agent_dialogue_consultation_contract import (
-    CONSULTATION_SCHEMA,
     canonical_consultation_json,
     validate_consultation,
 )
@@ -109,7 +108,7 @@ class ConsultationRuntime:
         self._require_current_recipient(item)
         payload = {
             "schema_version": CONSULTATION_INTENT_SCHEMA,
-            "consultation_schema": CONSULTATION_SCHEMA,
+            "consultation_schema": item["schema"],
             "message_key": item["message_key"],
             "consultation_id": item["consultation_id"],
             "semantic_fingerprint": item["fingerprint"],

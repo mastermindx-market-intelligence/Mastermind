@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from common.agent_dialogue_consultation_contract import (
+    GROK_CONSULTATION_SCHEMA,
     RECEIPT_KEYS,
     build_consultation,
     validate_consultation,
@@ -250,6 +251,36 @@ def test_runtime_binding_id_grammar_accepts_exact_runtime_ids(tmp_path: Path) ->
     assert intent.event.event_type == "INTENT"
     assert intent.event.payload["recipient_binding"] == recipient_binding
     assert len(frame["recipient_binding"]["binding_id"]) == 45
+
+
+def test_intent_persists_exact_v2_schema_not_the_legacy_v1_alias(tmp_path: Path) -> None:
+    runtime = Runtime.at(tmp_path)
+    consultations = ConsultationRuntime(runtime, repository_root=tmp_path)
+    (requester_job, requester_attempt, _requester_binding), (
+        recipient_job,
+        recipient_attempt,
+        recipient_binding,
+    ), root = _workers(runtime)
+    frame, semantic_bundle = _frame(
+        tmp_path,
+        requester=(requester_job, requester_attempt, "requester", _binding("ignored")),
+        recipient=(recipient_job, recipient_attempt, "recipient", recipient_binding),
+    )
+    frame["schema"] = GROK_CONSULTATION_SCHEMA
+    frame["fingerprint"] = ""
+    frame = build_consultation(frame)
+    fixture_repo = semantic_bundle[1]
+
+    intent = consultations.intent(
+        frame,
+        requester_attempt_id=requester_attempt,
+        carrier_ref="dialogue://fixture/consultation",
+        observed_at="2026-09-14T00:00:00Z",
+        repository_root=fixture_repo,
+    )
+
+    assert intent.event.payload["consultation_schema"] == GROK_CONSULTATION_SCHEMA
+    assert recipient_binding["reasoning_surface"] == "codex"
 
 
 def test_consultation_runtime_restart_effect_unknown_and_late_answer(
