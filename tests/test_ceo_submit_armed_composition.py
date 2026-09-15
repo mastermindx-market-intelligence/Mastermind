@@ -168,8 +168,14 @@ def test_d2_peer_admission_precedes_request_body_read(tmp_path, monkeypatch):
 
 def test_d3_app_458_is_independent_of_c1_and_submit_arms(tmp_path, monkeypatch):
     module = _module()
+    # Same pinning as the D8 cases below: the admitted literal 458 must not be
+    # decided by host-derived identities (worker_uid was os.geteuid() + 1, which
+    # collides with 458 on a host whose euid is 457). Only control_uid stays
+    # host-derived, as scripts/executive_os_phase1c.py:453 requires.
     base = _raw(
         tmp_path,
+        worker_uid=451,
+        allowed_peer_uids=[450, 501],
         ceo_ingress_socket_path=str(tmp_path / "ingress.sock"),
         ceo_ingress_launchd_socket_name="CeoIngress",
         ceo_ingress_peer_uid=452,
@@ -361,8 +367,16 @@ def test_d7_diff_and_module_have_no_dispatch_or_provider_import():
 @pytest.mark.parametrize("app_uid", [452, 501])
 def test_d8_c1_and_worker_uids_are_not_app_peer(tmp_path, app_uid):
     module = _module()
+    # Pin every identity the App-peer distinctness rule reads
+    # (scripts/executive_os_phase1c.py:387-391) so the 452 and 501 collisions are
+    # forced on any host instead of only where os.geteuid() happens to be 501.
+    # control_uid is the one identity that cannot be pinned (:453 requires it to
+    # equal os.geteuid()), which is safe: it can only ADD a member to that set,
+    # never remove the pinned collisions, and the :453 check runs after :388.
     raw = _raw(
         tmp_path,
+        worker_uid=451,
+        allowed_peer_uids=[450, 501],
         ceo_ingress_socket_path=str(tmp_path / "ingress.sock"),
         ceo_ingress_launchd_socket_name="CeoIngress",
         ceo_ingress_peer_uid=452,
@@ -372,6 +386,25 @@ def test_d8_c1_and_worker_uids_are_not_app_peer(tmp_path, app_uid):
     )
     with pytest.raises(module.ServiceError, match="App peer must be distinct"):
         module.load_control_config(_write(tmp_path, raw))
+
+
+def test_d8_genuinely_distinct_app_peer_uid_is_admitted(tmp_path):
+    module = _module()
+    # Same pinned identity set as the raising cases: 458 is distinct from
+    # control/operator/C1/worker, so the rule must admit it on any host.
+    raw = _raw(
+        tmp_path,
+        worker_uid=451,
+        allowed_peer_uids=[450, 501],
+        ceo_ingress_socket_path=str(tmp_path / "ingress.sock"),
+        ceo_ingress_launchd_socket_name="CeoIngress",
+        ceo_ingress_peer_uid=452,
+        ceo_ingress_app_peer_uid=458,
+        ceo_ingress_app_armed=True,
+        ceo_ingress_app_macro_root=str(tmp_path / "macro"),
+    )
+    loaded = module.load_control_config(_write(tmp_path, raw))
+    assert loaded["ceo_ingress_app_peer_uid"] == 458
 
 
 def test_d8_template_topology_and_protected_defaults():
