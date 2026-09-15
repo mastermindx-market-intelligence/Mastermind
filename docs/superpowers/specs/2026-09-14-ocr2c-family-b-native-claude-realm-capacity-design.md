@@ -1,91 +1,135 @@
-# OCR-2C Family B — Native Claude Realm Capacity Architecture
+# OCR-2C Family B — Native Claude Provider Capability + Realm Capacity Architecture
 
-**Date:** 2026-09-14  
+**Date:** 2026-09-15  
 **Owner:** Sol, AI CEO  
 **Operation:** `ocr2c-family-b-native-claude-realm-capacity-architecture-20260914-sol-001`  
 **Status:** `CHAIRMAN-APPROVED DIRECTION / ARCHITECTURE CANDIDATE / RECORDS ONLY / SPEC_ONLY / PRODUCTION INERT`  
-**Protected basis:** `Mastermind@36f74c02edc938f7f5c41f38743f93ee34be2b2b`, Skillpack `mastermind.sol_skillpack.v1` 1.0.1 / bootstrap-major 1.  
+**Current protected reconciliation basis:** `Mastermind@8e25bb32601ef5f40a689da6d6f24149e79e31fa`, Skillpack `mastermind.sol_skillpack.v1` 1.0.1 / bootstrap-major 1.  
 **Organizational owner:** existing `WS:EXECUTIVE-CAPACITY-FABRIC`; no new workstream.  
-**Parent source law:** protected Operator Continuity architecture from PR #181 plus the existing OCR-2C plan and native-Claude-capacity-identity amendment.
+**Paired owner candidate:** Macro PR #7162.
 
 ## 1. Outcome
 
-The Chairman owns multiple direct Claude Max subscriptions and wants Claude/Fable orchestration to leave cloned macOS applications and become a routable Agent Fabric capability. The end state is not “four Claude processes.” It is:
+The target is not “four Claude processes.” It is a governed execution path:
 
 ```text
-Chairman/CEO intent
+Chairman / CEO intent
 -> Executive Job / Attempt
 -> provider-neutral Model Router suitability
 -> canonical Capacity placement
--> one exact native Claude execution realm
--> provider-neutral Worker or Operator Harness
--> useful result through the existing Executive path
+-> one exact native Claude provider-capability domain + host realm
+-> existing Worker / Operator Harness
+-> useful result through existing Executive lifecycle/effect law
 ```
 
-Routine work must not require the Chairman to select a Claude account, foreground an application, repair a cloned app permission, or manually move a task after a quota event. Provider/account/auth-home changes remain new Attempt + fresh provider-native session where current effect law permits; `EFFECT_UNKNOWN` never becomes failover permission.
+Routine work must not require the Chairman to choose a numbered account, foreground a cloned app, or manually move a task after quota loss. Provider/account/host changes remain governed by pre-START placement and post-START RuntimeBinding/effect reconciliation; `EFFECT_UNKNOWN` never becomes failover permission.
 
-The first independently useful capability is narrower: **make direct `claude.ai` CLI realms canonical, rotation-safe company execution/capacity realms without pretending that a config directory is an Anthropic account identity or rebuilding Provider Control inside Mastermind.**
+The independently useful Family-B capability is narrower: **give direct `claude.ai` native execution canonical Provider Control identity and correction-safe host-realm evidence without rebuilding provider capacity or placement inside Mastermind.**
 
-## 2. Current-source findings that this candidate consumes
+## 2. Family A refusal remains binding
 
-1. OCR-2C Family A already failed safely: current native Claude evidence cannot prove an existing native realm is the same paid subscription as a numbered Macro `claude_code_oauth_N` slot with a provider-supported, secret-free, rotation-safe equality witness. The refusal remains authoritative. No ordinal, app name, plan name, reset time, quota percentage, environment variable, account email, account id, token fingerprint, or human intuition may resurrect Family A.
-2. `mastermind.provider_capacity.v1` remains the accepted secret-free Macro projection for its current source family. It is not widened in place for native Claude.
-3. The current Claude preflight family already proves bounded binary/auth readiness and preserves provider PII as discard-only input. It is not a capacity normalizer or canonical provider-capability identity owner.
-4. HF1-B/C/D and the subscription-harness binding work have landed. The common broker and harness boundary is provider-neutral enough that realm identity does not need to become execution lifecycle.
-5. OCR-4A is independently generalizing rich Operator Harness control. This candidate must remain identity/capacity-only and must not absorb persistent session, browser, GUI, background-agent, or operator-control semantics.
-6. Current Claude Code documentation establishes a useful custody fact: `CLAUDE_CONFIG_DIR` changes both the credential-file location and, on macOS, the Keychain entry selected by Claude Code. A different config directory therefore selects a different native credential custody entry. This is an isolation/custody primitive, **not** a stable Anthropic account identifier.
+Do not equate native Claude realms with Macro `claude_code_oauth_N` by ordinal, app/Slack/seat name, config path, plan type, reset time, usage percentage, provider/model name, token fingerprint or operator intuition.
 
-## 3. Frozen ownership ruling
+No current safe provider-supported, secret-free, rotation-safe equality witness proves those are the same paid subscription domains. Family B therefore evolves Provider Control directly.
 
-Family B extends existing owners only:
+## 3. Owners preserved
 
 | Fact / action | Canonical owner |
 |---|---|
-| Job / Attempt / Worker / Event lifecycle and effect reconciliation | Executive OS |
+| Job / Attempt / Worker / Event / effect reconciliation | Executive OS |
 | acceptable model/execution class | Model Router |
-| provider-capability identity, provider availability, health, cooling, quota evidence and normalized capacity projection | Macro Shared AI Provider Control |
-| binding one owner-issued capacity capability generation to an exact native host/principal/credential custody | existing provider-realm owner, generalized/versioned rather than duplicated |
+| provider-capability identity/generation, provider health/cooling/quota normalization | Macro Shared AI Provider Control |
+| host-local provider realm enrollment and `realm_generation` | existing provider-realm owner |
+| production Provider Capacity acquisition, realm-readiness join, deterministic ranking, atomic claim/replay evidence | existing CF2 path |
+| interactive subscription-canary Capacity fact generation | existing `CapacityOwnerFact` / subscription canary admission only |
 | provider-work-free Claude binary/auth readiness | existing Claude preflight family |
-| actual CLI process/tool mechanics | HF1 provider adapter / Worker Harness |
-| persistent rich provider session control | OCR-4A / Operator Harness |
-| exact started provider/host/session binding | RuntimeBinding |
-| browser and native GUI exclusivity | existing BrowserResource / host resource owners, not Provider Control |
+| bounded provider execution | HF1 / Worker Harness |
+| persistent provider session mechanics | OCR-4A / Operator Harness |
+| exact STARTed provider/host/session binding | RuntimeBinding |
+| physical unattended host recovery | canonical host-recovery owner |
+| browser / GUI exclusivity | BrowserResource / host-resource owners |
 | durable organizational continuity | Agent OS |
 
-No `ClaudeAccount` database, `claude_capacity.json`, quota ledger, provider scheduler, retry daemon, provider-specific Executive lifecycle, second session registry, or browser/computer control plane is authorized.
+No Claude account database, second quota table, provider scheduler, placement ledger, retry daemon, lifecycle plane, session registry or browser/computer-use control plane is authorized.
 
-## 4. Identities that must not be collapsed
+## 4. Three generation owners must not be collapsed
 
-Family B deliberately separates:
+Current protected source already has two Mastermind generation owners, so Family B uses three distinct epochs:
 
 ```text
-A. capacity_capability_id + generation
-   “which Provider-Control-owned native execution/capacity realm is this?”
+A. capacity_capability_id + capability_generation
+   owner: Macro Shared AI Provider Control
+   meaning: one logical provider capacity / quota domain
 
-B. provider subscription identity
-   “which Anthropic account/subscription is behind it?”
+B. host_ref + capacity_capability_id + realm_generation
+   owner: existing Mastermind provider-realm owner
+   meaning: one current executable enrollment/custody of A on one host
 
-C. current capacity observations
-   “what fresh health/cooling/quota evidence may rank A now?”
+C. CapacityOwnerFact.generation
+   public subscription-canary field: capacity_generation
+   owner: Mastermind Capacity/Model Router canary seam
+   meaning: current canary Capacity fact generation
 ```
 
-A is an opaque company identity owned by Macro Shared AI Provider Control and may be durable without provider PII. B may remain opaque/unknown. C is versioned Provider Control evidence attached to A. An execution realm can be usable even when exact remaining quota and provider-account identity are unknown; it may not manufacture B or quota from A.
+A, B and C are independent. Equality of integer values proves nothing.
 
-There is deliberately **no second Mastermind-native `realm_id`** for this purpose. For native Claude Family B, the Provider-Control-owned `capacity_capability_id` is the canonical realm/capacity key consumed by Mastermind. The provider-realm binding receipt references that owner-issued key and generation; it does not mint a competing account/realm identity.
+`capability_generation` advances only when the logical Provider-Control domain is deliberately replaced/redefined or its native registration is revoked/re-enrolled as a new provider-domain generation. It does not advance for token refresh, Claude binary update, host reboot, local realm repair or an ordinary canary Capacity fact refresh.
 
-This distinction also handles a subtle duplicate-account case safely. Two native credential custodies can be proven distinct while accidentally using the same Anthropic subscription. Until a provider-supported or separately accepted proof establishes independent quota realms, Provider Control must **not add their quotas together or claim N-times aggregate capacity**. They may still be separate execution custodies and may be fairly sampled while health/cooling evidence remains truthful.
+Protected `ProviderRealmEnrollmentReceipt.generation` already owns the local correction epoch. Family-B V2 extends that owner to bind exact host/principal/config custody; there is **no `binding_generation`**.
 
-## 5. Native realm enrollment v2
+Protected `CapacityOwnerFact.generation`, exposed by `mastermind.subscription_canary_admission/v1` as `capacity_generation`, remains a canary activation fact. It is not provider subscription identity and is not the accepted production CF2 claim contract.
 
-The existing `ProviderRealmEnrollmentReceipt` pattern is retained as the architectural predecessor. Family B requires a provider-neutral successor/extraction rather than a parallel native-Claude registry.
+## 5. Provider Control B1 registration
 
-Provider Control first supplies an owner-issued opaque capability coordinate. The provider-realm owner then binds that coordinate to exact native custody.
+The paired Macro architecture freezes the candidate checked-in source as:
 
-Proposed closed wire:
+```text
+config/provider_native_capabilities.v1.json
+schema = mastermind.provider_native_capability_registry/v1
+owner_program = shared-ai-provider-control
+```
+
+One closed row contains only:
+
+```text
+capacity_capability_id
+capability_generation
+provider = claude
+billing_mode = subscription
+credential_kind = attached_login
+execution_surface = native_cli
+registration_state = registered
+```
+
+`capacity_capability_id` is opaque, non-ordinal and non-PII. It must not encode account email/id/org, host, Worker, config path, token/secret, Keychain label, app clone or `claude_code_oauth_N`.
+
+The registry is the smallest deterministic Provider Control source, not a mutable runtime account database.
+
+Macro owner export:
+
+```text
+schema = mastermind.provider_native_capability_registration/v1
+capacity_capability_id
+capability_generation
+provider
+billing_mode
+credential_kind
+execution_surface
+registration_state = registered | revoked
+material_source_digest
+registration_receipt_digest
+```
+
+There is deliberately no `host_ref` in the Provider Control registration export.
+
+## 6. Provider-realm enrollment V2
+
+Family B evolves the existing provider-realm owner rather than creating a Claude-native realm registry.
 
 ```text
 schema = mastermind.provider_realm_enrollment/v2
 capacity_capability_id
+capability_generation
 realm_generation
 provider_family = anthropic
 product = claude-code
@@ -101,206 +145,209 @@ receipt_id
 receipt_digest
 ```
 
-### 5.1 `capacity_capability_id`
+Provider Control supplies the provider-domain coordinate. Mastermind seals the host realm and custody. Neither side mints a second account identity.
 
-This is the one opaque native-realm/capacity key owned by Macro Shared AI Provider Control. It is not an Anthropic account id, email, organization id, token id, Slack identity, app clone name, human account number, ordinal, or mapping to `claude_code_oauth_N`.
+The raw `CLAUDE_CONFIG_DIR` path is provider-private launch state and must not enter public/canonical evidence. `config_custody_ref` is an opaque non-reversible configuration-custody coordinate. Under current protected PF1/OCR-1 source law, it **does not prove macOS credential isolation** and cannot replace the dedicated OS-principal/Keychain boundary.
 
-Provider Control must issue/admit it through its existing capability-identity owner or a reviewed versioned extension of that owner. Mastermind cannot invent one in a Worker request, derive one from a config path, or rename it locally.
+If a host intentionally moves from logical provider domain A to B, revoke/supersede the old host/A realm, bind the host to B's current provider-domain coordinate, and mint a new realm generation. Do not redefine A merely because one replica moved away from it.
 
-### 5.2 `realm_generation`
+## 7. First-production Claude auth boundary remains protected law
 
-Generation is part of the Provider-Control-owned capability identity. Every deliberate enrollment/re-enrollment/custody replacement that could point the capability at a different native login produces a new owner-issued generation. A receipt for generation G cannot authorize G+1.
+Family B capacity identity does not authorize credential mechanisms.
 
-Normal provider token refresh inside the same accepted managed `claude.ai` login does not itself create a new company generation.
+The first production-real B6 realm remains:
 
-### 5.3 `config_custody_ref`
+```text
+native /login
++ dedicated OS principal
++ macOS Keychain
++ exact reviewed Claude Code binary/profile
++ worker-context preflight proving native Claude.ai auth wins precedence
+```
 
-`CLAUDE_CONFIG_DIR` is provider-private launch configuration. Its raw path does not enter Executive state, Agent OS, GitHub evidence, Capacity projection, Slack, or model-visible receipts.
+Current provider support for setup-token and stronger `CLAUDE_CONFIG_DIR` credential/Keychain keying is useful future requalification evidence, but does not silently supersede current PF1/OCR-1 law.
 
-The provider-realm owner binds the exact local absolute config root to an opaque `config_custody_ref` through the existing host/provider configuration owner. `config_custody_ref` is not a hash of the path and must not be reversible to it. The adapter resolves the local path only inside its admitted host/principal boundary.
+Therefore setup-token is not admitted in B6, same-OS-user multi-config fanout is not admitted as production isolation proof, stronger API/cloud/token/profile auth remains fail-closed, and alternative auth/isolation requires a separate source-law requalification.
 
-For the initial production lane, prefer **one dedicated OS principal + one config custody + one Max login per capability realm**. Same-principal/multi-config operation is a later optimization and cannot weaken the first production isolation proof merely because Claude Code supports different Keychain entries per `CLAUDE_CONFIG_DIR`.
+Cruise-mode production requires real `RESTART_AUTH_PASS`, `COLD_BOOT_AUTH_PASS`, `AUTH_PRECEDENCE_PASS`, `EXPIRY_OBSERVABILITY_PASS`, `REALM_ISOLATION_PASS`, plus separate capability-mode proof. Physical recovery remains owned by `mastermind.host_recovery_readiness/v1`.
 
-### 5.4 Enrollment does not prove provider-account identity or independence
+## 8. Native realm observation into Provider Control
 
-An `enrolled` receipt means Mastermind has bound the exact Provider-Control capability generation to governed native Claude credential custody. It does not assert a specific Anthropic email/id or an independent paid quota pool.
-
-If future provider-supported non-sensitive evidence can prove subscription independence, that evidence belongs in Provider Control and may upgrade `capacity_independence`. It does not change the capability id solely because a new observation arrived.
-
-## 6. Out-of-band credential mutation boundary
-
-Current provider surfaces do not expose a safe stable account identity that lets Mastermind detect every possible human login swap behind an unchanged custody root. Family B therefore does not make a false claim.
-
-Production enrollment assumes the dedicated worker principal/config custody is **managed**: login/logout/account replacement is an explicit provisioning action governed by the capacity/realm owners and must advance the owner-issued generation. Ordinary Worker/Operator tasks cannot invoke auth-changing commands. A privileged human or external process that bypasses that owner creates unsupported custody drift; the capability is no longer entitled to an accepted enrollment generation until re-enrolled.
-
-This is a trust-boundary statement, not a claim that `auth status` can identify the Anthropic account. If a future provider-supported non-secret enrollment generation becomes available, it can strengthen this contract through a reviewed successor.
-
-## 7. Native realm observation wire into Shared AI Provider Control
-
-Mastermind/host-side native probes may supply **source observations** about one exact owner-issued capability generation. Macro remains the only normalizer.
-
-Proposed wire:
+After Provider Control registration and provider-realm enrollment exist, a bounded host-side source may report evidence about that exact domain/realm:
 
 ```text
 schema = mastermind.provider_native_realm_observation/v1
 capacity_capability_id
-realm_generation
+capability_generation
 host_ref
-provider_family = anthropic
-product = claude-code
-execution_surface = native_cli
-auth_state = ready | not_ready | unknown
-auth_method = claudeai | non_native | unknown
-health_state = available | degraded | unavailable | unknown
-health_error_class
-last_provider_outcome_class
-last_provider_outcome_at
-cooling.active
-cooling.kind
-cooling.reset_at
-quota_horizons[]
-capacity_independence = verified | unknown
+realm_generation
+enrollment_receipt_digest
 observed_at
-stale_after
-source_quality
+realm_auth {state, method, source_quality}
+provider_health {state, error_class, scope, observed_at}
+cooling {active, kind, reset_at, evidence, scope, observed_at}
+quota_horizons[] {existing V1 quota evidence fields + scope}
+last_provider_outcome {class, observed_at, scope}
 source_receipt_digest
 ```
 
-Every nullable/unobserved field stays null/unknown. No field may contain provider account PII, token/key material or fingerprints, Keychain labels, config paths, Worker prompt/content, Executive Job/Attempt ids, Slack identities, provider conversation ids, or browser/GUI state.
+Scope distinguishes `provider_domain`, `realm` and `unknown` where applicable.
 
-The observation producer reports only the exact `capacity_capability_id + realm_generation` it was admitted to observe. It cannot mint that identity, rank realms, or set another capability’s health/cooling.
+This is source evidence only. It cannot create a provider capability, rank workers, set another provider domain cooling, assert Executive completion or replace claim-time worker/realm readiness.
 
-## 8. `mastermind.provider_capacity.v2`
+Reject provider PII, credentials/fingerprints, Keychain labels/content, raw config paths, prompts/results, Job/Attempt ids, Slack identities and provider conversation ids.
 
-Family B proposes a versioned successor projection from Macro Shared AI Provider Control. **`mastermind.provider_capacity.v1` remains byte/semantic compatible with its accepted source law.** Native Claude is not silently appended to v1.
+## 9. Provider Capacity V2
 
-V2 retains the current top-level semantic model (`schema`, `generated_at`, `producer`, `audit`, `snapshot_hash`, `slots`, `degraded`) and all v1 evidence laws. Native Claude slots use the Provider-Control `capacity_capability_id` as their normal `capability_id`; no second account/realm key is added.
+`mastermind.provider_capacity.v1` remains unchanged.
 
-For V2, a slot may additionally carry a closed `realm_binding`:
+V2 preserves the V1 top-level semantic model and evidence laws and adds one closed slot identity extension:
 
 ```text
 realm_binding = null
   | {
+      capability_generation,
       realm_generation,
-      enrollment_receipt_digest,
-      capacity_independence = verified | unknown
+      enrollment_receipt_digest
     }
 ```
 
-Existing non-native slots use `realm_binding = null`. Native Claude slots require a non-null binding, `billing_mode=subscription`, `credential_kind=attached_login`, `execution_surface=native_cli`, and the already-existing `host_ref` field. `account_label` remains an opaque display/correlation value and may equal the opaque capability id; it never becomes provider PII.
-
-V2 retains all v1 laws:
+Native Claude row:
 
 ```text
-unknown != false
-unknown quota != unlimited
-stale != fresh
-presence != authentication success
-provider outcome != Executive completion
-host matters
-corrections do not erase historical evidence
-semantic snapshot identity is secret-free
-source quality is explicit
+capability_id = capacity_capability_id
+provider = claude
+billing_mode = subscription
+credential_kind = attached_login
+execution_surface = native_cli
+host_ref = exact accepted opaque host
+realm_binding != null
 ```
 
-Exact remaining Max quota may remain unknown. No percentage is converted to absolute remaining capacity without an authoritative denominator. No aggregate “4 Max accounts = 4x capacity” claim is allowed solely from four capability ids or four credential custodies.
+Existing V1-style rows in V2 use `realm_binding = null` unless separately versioned evidence gives them equivalent semantics. V1 and V2 are separate closed schemas. V1 output and material-source identity do not change because V2 definitions exist.
 
-V1 and V2 coexist until a separately accepted consumer migration closes; v1 users are not silently upgraded.
+Preserved laws include: unknown is not false or unlimited, stale is not fresh, presence is not authentication, authentication is not health, provider outcome is not Executive completion, host matters, correction does not rewrite historical placement evidence, and semantic evidence is secret-free.
 
-## 9. Mastermind consumer boundary
+## 10. Multi-host quota domain law
 
-A later bounded consumer validates the exact accepted V2 projection through a reviewed acquisition seam. It exports only owner-minted Capacity facts to placement. Executive OS does not import Macro implementation modules or read provider credentials as fallback.
-
-Current CF2-H0/P0/CF2-I remains unchanged for its frozen inventory. Native Claude capacity admission is a separate successor/extension path built only after this architecture is protected and its producer contract is implemented.
-
-Current FPH0 host `work_placement_union` may express that a host composition admits a Claude provider realm/quota class. That is a **host admission constraint**, not Provider-Control capability enrollment or Capacity truth. A placement union member cannot self-prove generation, auth readiness, health, or available capacity.
-
-## 10. Selection law for four Claude capability realms
-
-Once four exact capability generations are enrolled and visible through accepted Provider Control V2 evidence, selection remains provider-neutral:
+One provider-capability domain may have several host realms:
 
 ```text
-hard Executive/authority/capability eligibility
--> first lawful Model Router equivalence tier
--> exact owner-issued capability id + generation
--> fresh native auth/health eligibility
--> host/resource eligibility
--> provider cooling/quota evidence when known
--> existing Capacity concurrency/reservation/fairness policy
--> deterministic tie break
+quota evidence key = (capacity_capability_id, capability_generation)
+execution realm key = (host_ref, capacity_capability_id, realm_generation)
 ```
 
-Unknown quota does not block an otherwise accepted realm merely because a number is absent, unless current route policy requires known quota. It also does not rank as infinite/full. With equivalent healthy realms and unknown quota, the Capacity owner may use its accepted deterministic fair-share/least-active policy; the adapter itself never load-balances.
+No consumer may sum host rows into aggregate quota.
 
-Before `START`, lawful Capacity rebinding can choose another eligible capability generation when no effect/effect uncertainty exists. After `START`, RuntimeBinding is sticky. Provider/account/host changes require current reconciliation/retry law; a modifying or `EFFECT_UNKNOWN` Attempt never transparently rolls over.
+Different `capacity_capability_id` values are likewise not assumed numerically additive merely because provisioning intended different Max subscriptions. Family B makes no fleet-total numeric entitlement claim without separately accepted relationship evidence.
 
-## 11. Required failure semantics
+Provider-domain usage-limit/cooling propagates to current replicas only when source semantics prove domain scope. Binary/local-auth/config/transport/host-recovery/resource failures remain realm-local. Unknown scope remains unknown/degraded.
 
-The implementation must discriminate at least:
+The earlier per-row `capacity_independence` proposal is withdrawn.
+
+## 11. Production B5 reuses canonical CF2 acquisition/join/claim/replay
+
+Accepted CF2-F already freezes the production pattern. Family B extends it rather than inventing a bridge around it:
 
 ```text
-old capability generation after re-enrollment  -> START refused
-wrong host/principal/custody binding            -> realm admission refused
-non-native auth precedence wins                 -> NATIVE_AUTH_NOT_SELECTED / ineligible
-logged-out or expired auth                      -> not_ready/unavailable, no guessed replacement
-stale observation                               -> stale/unknown, not fresh capacity
-rate limit before START                         -> cooling/unavailable for new placement
-rate limit after modifying START                -> no transparent failover
-transport loss after possible side effect       -> EFFECT_UNKNOWN / reconcile same binding
-same account behind two custodies                -> independence unknown; no aggregate quota multiplication
-forged realm/capacity receipt                    -> refused
-provider PII/secret/path in public evidence      -> evidence rejected
-provider background restart                     -> cannot mint Executive lifecycle or retry authority
+strict Provider Capacity V2 snapshot
+        +
+current provider-realm V2 / realm-local readiness evidence
+        |
+        v
+immutable (host_ref, capacity_capability_id) join
++ capability_generation + realm_generation validation
+        |
+        v
+strict Mastermind V2 consumer
++ deterministic ranking of already-lawful candidates
+        |
+        v
+existing Executive atomic claim
++ immutable V2 capacity evidence
++ historical replay without current provider re-read/rerank
 ```
 
-## 12. Tool/browser/computer boundary
+The claim-evidence successor binds at minimum Provider Capacity V2 schema/hash/freshness identity, selected `capacity_capability_id + capability_generation`, selected `host_ref + realm_generation`, enrollment/source receipt digests, and existing deterministic policy/reason-code evidence.
 
-Family B does **not** define Claude tool parity, Chrome automation, native computer use, persistent background agents, remote control, session resumption or MCP package realization. Those consume the realm after core admission:
+Use the existing event/claim/placement owner. No second capacity ledger, selector DB or replay plane.
 
-- HF1 owns bounded CLI Worker execution.
-- OCR-4A owns rich persistent Operator Harness mechanics.
-- BrowserResource owns browser exclusivity/custody.
-- host computer-use resource owns native GUI exclusivity.
+Current `SubscriptionCanaryAdmission` remains a separate canary mechanism. If a later B6/B7 canary needs V2 provenance, version that admission explicitly rather than changing the meaning of its `capacity_generation`.
 
-Browser/GUI support must not hold core headless realm/capacity admission hostage, and their scarcity must not contaminate Provider Control capacity identity.
+## 12. Selection law after four domains are proven
 
-## 13. Acceptance ladder
-
-The architecture is not operationally complete when this record merges. Capability advances separately:
+Once four provider-capability domains with one accepted host realm each are accepted:
 
 ```text
-FAMILY_B_ARCHITECTURE_FROZEN
--> Provider-Control native capability identity/generation contract implemented/accepted
--> provider-neutral realm-enrollment v2 binding implemented/accepted
--> Macro native-realm observation + provider_capacity.v2 implemented/accepted
--> Mastermind V2 consumer implemented/accepted
--> one real managed native realm enrollment + logout/re-enrollment generation invalidation proof
--> one bounded real PF1 Claude CLI Worker Job
--> four enrolled capability canaries with one real bounded provider turn each
--> canonical Capacity selects new pre-START work among the four without Chairman account selection
--> sustained Fable/Opus Operator Harness proof
--> separate browser proof
--> separate computer-use proof
+Executive authority/capability filters
+-> first lawful Model Router tier
+-> Provider Capacity V2 provider-domain eligibility
+-> exact realm/host/resource eligibility
+-> provider cooling/quota when known
+-> existing deterministic Capacity fairness/reservation policy
+-> atomic claim
 ```
 
-No step inherits production acceptance from the previous step.
+Unknown quota is not full quota and is not automatically disqualifying unless current policy requires known capacity.
 
-## 14. Completion ruler
+Before START, a definite unavailable realm/domain may be replaced under current placement law when no effect/effect uncertainty exists. After START, RuntimeBinding is sticky.
 
-The Claude CLI migration reaches its core production end state only when a real request can go:
+Multi-host replication is a later proof after the core four-domain canary. It must demonstrate shared quota deduplication, realm-local failure isolation and provider-domain cooling propagation.
+
+## 13. Downstream execution/resource boundaries
+
+Family B does not define persistent provider session lifecycle, browser automation, computer use, provider background retry/failover, MCP/package realization or Operator Harness session ownership.
+
+HF1, OCR-4A, RuntimeBinding, BrowserResource and host-resource owners consume accepted Family-B identity/capacity facts later.
+
+## 14. Required falsifiers
+
+Independent review and later tests must kill at least:
 
 ```text
-Executive Job
--> provider-neutral model tier
--> Capacity-selected exact Claude capability generation
--> native CLI execution with admitted Mastermind tools
--> canonical result/effect receipts
+native realm aliases claude_code_oauth_N by ordinal/name/path
+provider capability id encodes provider PII or host/Worker identity
+caller forges capacity_capability_id or capability_generation
+new binding_generation is created beside realm_generation
+Macro capability_generation is confused with canary capacity_generation
+same provider domain on two hosts is counted twice as quota
+host-local auth failure cools all replicas without provider-domain evidence
+provider-domain usage-limit cools only reporting realm
+stale realm generation is accepted under current capability generation
+stale capability generation is accepted under current realm generation
+host B enrollment is substituted for host A
+Provider Capacity V1 changes because V2 definitions exist
+V1 is accepted as V2 by structural superset
+CapacityOwnerFact substitutes for production V2 claim evidence
+historical replay re-reads current provider capacity
+provider observation is interpreted as Executive Job success
+public evidence contains raw path/secret/account PII
+config_custody_ref is treated as macOS auth-isolation proof
+setup-token is silently admitted under the protected /login source law
 ```
 
-across the multi-realm pool without Chairman account/app selection, while logout/rotation/rate-limit and effect-unknown cases fail safely. Browser and GUI completion remain separately proven capabilities.
+## 15. Implementation ladder
 
-## 15. No-rebuild / non-goals
+```text
+B0 architecture protected
+-> B1 Macro secret-free provider-capability registry/export
+-> B2 provider-realm enrollment v2
+-> B3 current Claude preflight bridge
+-> B4 native observation + provider_capacity.v2
+-> B5 V2 acquisition + existing CF2 join/claim/replay evolution
+-> B6 one managed /login OS-principal realm + restart/cold-boot proof
+-> B7 one bounded real native Claude Worker
+-> B8 four provider domains, one realm each
+-> B9 Capacity-selected multi-realm Jobs
+-> later multi-host replication
+-> B10 persistent Operator Harness
+-> B11 browser/computer use
+```
 
-This candidate authorizes no login/logout, credential read/copy, provider call, route activation, runtime mutation, worker launch, browser action, GUI action, daemon/service install, Mac permission change, quota database, second scheduler, retry plane, provider-specific Executive lifecycle, second host identity, second capacity/account identity, second session registry or production deployment.
+Each step has independent current-source START and production proof.
 
-It also does not self-accept `FAMILY_B_ARCHITECTURE_FROZEN`. That gate requires current-source independent review and protected source release of the cross-repository producer/consumer architecture.
+## 16. Acceptance and no-effect boundary
+
+This architecture remains `SPEC_ONLY` until independent current-head paired review, latest-base/material compatibility, exact-head repository validation and explicit Sol source release record `FAMILY_B_ARCHITECTURE_FROZEN`.
+
+This records wave authorizes no login/logout/setup-token generation, provider call, capability registration, host mutation, Runtime/claim mutation, Worker launch, route activation, browser/GUI action, Ready transition or merge.
