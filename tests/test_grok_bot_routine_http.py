@@ -410,6 +410,19 @@ def test_credential_resolution_failure_is_typed_no_start_and_redacted():
     assert poster.calls == []
 
 
+def test_credential_resolution_cancellation_is_definite_no_start_without_post():
+    source = _CredentialSource(fail=asyncio.CancelledError())
+    client, _, poster = _client(source=source)
+    dispatcher = GrokBotRoutineWakeDispatcher(client)
+
+    receipt = asyncio.run(dispatcher.nudge(_wake()))
+
+    assert receipt.outcome is TransportOutcome.TARGET_UNAVAILABLE
+    assert receipt.reason_code == "target_unavailable"
+    assert source.calls == [NATIVE_HANDLE]
+    assert poster.calls == []
+
+
 def test_invalid_payload_is_typed_no_start_and_never_calls_secret_source_or_poster():
     client, source, poster = _client()
 

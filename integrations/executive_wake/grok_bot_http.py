@@ -6,6 +6,7 @@ one credential generation and delegates exactly one POST to an injected poster.
 """
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import hashlib
 import re
@@ -268,6 +269,8 @@ class GrokRoutineHttpClient:
         credential = None
         try:
             credential = self.credential_source.resolve(native_handle)
+        except asyncio.CancelledError:
+            credential_unavailable = True
         except Exception:
             credential_unavailable = True
         if credential_unavailable:
