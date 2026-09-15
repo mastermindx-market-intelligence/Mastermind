@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 REMOTE_BROKER_REQUEST_SCHEMA = "mastermind.remote_worker_broker_request/v1"
-REMOTE_BROKER_RESPONSE_SCHEMA = "mastermind.remote_worker_response/v1"
+REMOTE_BROKER_RESPONSE_SCHEMA = "mastermind.remote_worker_broker_response/v1"
 MAX_FRAME_BYTES = 1024 * 1024
 
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{1,127}$")

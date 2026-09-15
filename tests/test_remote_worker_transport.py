@@ -104,7 +104,7 @@ def test_oversize_request_and_frame_refuse() -> None:
 def test_response_identity_drift_refuses_before_payload() -> None:
     request = _request()
     response = {
-        "schema": "mastermind.remote_worker_response/v1",
+        "schema": "mastermind.remote_worker_broker_response/v1",
         "host_ref": HOST_REF,
         "job_id": "JOB-001",
         "attempt_id": "ATT-001",
@@ -173,31 +173,91 @@ def _certificate_fixture(
     key = tmp_path / f"{name}.key"
     cert = tmp_path / f"{name}.pem"
     config = tmp_path / f"{name}.cnf"
+    if ca:
+        config.write_text(
+            "[v3]\nbasicConstraints=critical,CA:TRUE\n"
+            "keyUsage=critical,keyCertSign,cRLSign\n"
+            f"subjectAltName={san}\n",
+            encoding="utf-8",
+        )
+        subprocess.run(
+            [
+                "openssl",
+                "req",
+                "-x509",
+                "-newkey",
+                "rsa:2048",
+                "-nodes",
+                "-keyout",
+                str(key),
+                "-out",
+                str(cert),
+                "-days",
+                "1",
+                "-subj",
+                f"/CN={common_name}",
+                "-extensions",
+                "v3",
+                "-config",
+                str(config),
+            ],
+            check=True,
+            capture_output=True,
+        )
+        return key, cert, config
+
+    if issuer_key is None or issuer_cert is None:
+        raise ValueError("leaf certificate fixture requires issuer")
+    csr = tmp_path / f"{name}.csr"
     config.write_text(
-        "[req]\ndistinguished_name=dn\nx509_extensions=v3\n[dn]\n"
-        f"CN={common_name}\n[v3]\nbasicConstraints=critical,CA:"
-        f"{'TRUE' if ca else 'FALSE'}\nkeyUsage=critical,digitalSignature,keyEncipherment\n"
-        f"extendedKeyUsage=serverAuth,clientAuth\nsubjectAltName={san}\n",
+        "[v3]\nbasicConstraints=critical,CA:FALSE\n"
+        "keyUsage=critical,digitalSignature,keyEncipherment\n"
+        "extendedKeyUsage=serverAuth,clientAuth\n"
+        f"subjectAltName={san}\n",
         encoding="utf-8",
     )
-    arguments = ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes"]
-    if not ca and issuer_key is not None and issuer_cert is not None:
-        arguments.extend(["-CA", str(issuer_cert), "-CAkey", str(issuer_key)])
-    arguments.extend(
+    subprocess.run(
         [
+            "openssl",
+            "req",
+            "-new",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
             "-keyout",
             str(key),
+            "-out",
+            str(csr),
+            "-subj",
+            f"/CN={common_name}",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        [
+            "openssl",
+            "x509",
+            "-req",
+            "-in",
+            str(csr),
+            "-CA",
+            str(issuer_cert),
+            "-CAkey",
+            str(issuer_key),
+            "-CAcreateserial",
             "-out",
             str(cert),
             "-days",
             "1",
-            "-subj",
-            f"/CN={common_name}",
-            "-config",
+            "-extensions",
+            "v3",
+            "-extfile",
             str(config),
-        ]
+        ],
+        check=True,
+        capture_output=True,
     )
-    subprocess.run(arguments, check=True, capture_output=True)
     return key, cert, config
 
 
