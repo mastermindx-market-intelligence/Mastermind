@@ -41,8 +41,12 @@ class RemoteWorkerGatewayConfig:
     def __post_init__(self) -> None:
         if self.schema != REMOTE_WORKER_GATEWAY_CONFIG_SCHEMA:
             raise ValueError("remote worker gateway config schema is unsupported")
-        host_ref = str(self.host_ref)
-        if not _ID_RE.fullmatch(host_ref) or host_ref in _RESERVED_UNBOUND_HOST_REFS:
+        host_ref = self.host_ref
+        if (
+            not isinstance(host_ref, str)
+            or not _ID_RE.fullmatch(host_ref)
+            or host_ref in _RESERVED_UNBOUND_HOST_REFS
+        ):
             raise ValueError("remote worker gateway host_ref is invalid")
 
         try:
