@@ -3825,7 +3825,8 @@ def _job_from_row(row: sqlite3.Row) -> Job:
         created_at=_iso(int(row["created_at_ms"])),
         updated_at=_iso(int(row["updated_at_ms"])),
         constraints=_normalise_constraints(
-            _json_loads(row["constraints_json"], fallback={})
+            _json_loads(row["constraints_json"], fallback={}),
+            host_admitted_placement_union=row["orchestration_role"] == "aggregation",
         ),
         current_attempt_id=row["current_attempt_id"],
         attempt_count=int(row["attempt_count"]),
@@ -8726,13 +8727,37 @@ class JobRegistry:
         contract = normalized["execution_contract"]
         constraints = dict(contract.get("constraints") or {})
         if execution_binding is not None:
-            if not isinstance(execution_binding, dict) or set(execution_binding) != set(
+            version = execution_binding.get(
+                HOST_EXECUTION_BINDING_VERSION_KEY,
+                HOST_EXECUTION_BINDING_V2,
+            )
+            if version not in {HOST_EXECUTION_BINDING_V2, HOST_EXECUTION_BINDING_V3}:
+                raise StateConflict("host execution binding version is unknown")
+            carried = dict(execution_binding)
+            carried.pop(HOST_EXECUTION_BINDING_VERSION_KEY, None)
+            admitted_union = None
+            if version == HOST_EXECUTION_BINDING_V3:
+                if not isinstance(execution_binding, dict) or set(carried) != set(
+                    V3_HOST_EXECUTION_BINDING_KEYS
+                ):
+                    raise StateConflict(
+                        "v2 host execution binding fields are incomplete or drifted"
+                    )
+                if "work_placement_union" in constraints:
+                    raise StateConflict(
+                        "caller constraint work_placement_union conflicts "
+                        "with reviewed host composition"
+                    )
+                admitted_union = _normalise_work_placement_union(
+                    carried.pop("work_placement_union")
+                )
+            if not isinstance(execution_binding, dict) or set(carried) != set(
                 V2_HOST_EXECUTION_BINDING_KEYS
             ):
                 raise StateConflict(
                     "v2 host execution binding fields are incomplete or drifted"
                 )
-            bound = _normalise_constraints(execution_binding)
+            bound = _normalise_constraints(carried)
             if set(bound) != set(V2_HOST_EXECUTION_BINDING_KEYS):
                 raise StateConflict(
                     "v2 host execution binding did not normalize exactly"
@@ -8744,7 +8769,14 @@ class JobRegistry:
                         f"caller constraint {key} conflicts with reviewed host composition"
                     )
             normalized_caller.update(bound)
-            constraints = _normalise_constraints(normalized_caller)
+            if admitted_union is not None:
+                normalized_caller["work_placement_union"] = admitted_union
+                constraints = _normalise_constraints(
+                    normalized_caller,
+                    host_admitted_placement_union=True,
+                )
+            else:
+                constraints = _normalise_constraints(normalized_caller)
         worktree = contract.get("worktree")
         if worktree is not None:
             if workspace_root is None:
@@ -10264,7 +10296,13 @@ class JobRegistry:
             raise StateConflict(
                 f"escalation_target={escalation_target!r} requires its typed executive provenance"
             )
-        normalized_constraints = _normalise_constraints(constraints)
+        normalized_constraints = _normalise_constraints(
+            constraints,
+            host_admitted_placement_union=(
+                orchestration_role == "aggregation"
+                and _v2_root_capability is _V2_ROOT_CREATION_CAPABILITY
+            ),
+        )
         try:
             authority = ExecutiveAuthorityPolicy.load().authorize(
                 ["READ"] if requested_authorities is None else requested_authorities,
@@ -18862,7 +18900,12 @@ __all__ = [
     "RuntimeStore",
     "SCHEMA_VERSION",
     "StateConflict",
+    "HOST_EXECUTION_BINDING_V2",
+    "HOST_EXECUTION_BINDING_V3",
+    "HOST_EXECUTION_BINDING_VERSION_KEY",
     "V2_HOST_EXECUTION_BINDING_KEYS",
+    "V3_HOST_EXECUTION_BINDING_KEYS",
+    "WORK_PLACEMENT_UNION_MAX_MEMBERS",
     "ValidatedRoleCompletion",
     "Worker",
     "WorkerQuotaClass",
