@@ -764,9 +764,9 @@ def _normalise_constraints(
             or _ROUTING_VALUE_RE.fullmatch(harness_version.lower()) is None
         ):
             raise StateConflict("operator_harness_version must be a bounded identifier")
-    result["operator_harness_binary_digest"] = harness_digest
-    result["operator_harness_version"] = harness_version
-    result["operator_harness_armed"] = raw["operator_harness_armed"]
+        result["operator_harness_binary_digest"] = harness_digest
+        result["operator_harness_version"] = harness_version
+        result["operator_harness_armed"] = raw["operator_harness_armed"]
     if host_admitted_placement_union and "work_placement_union" in raw:
         result["work_placement_union"] = _normalise_work_placement_union(
             raw["work_placement_union"]

@@ -12,12 +12,24 @@ from pathlib import Path
 import pytest
 
 import control_plane.executive_coo_cycle as executive_coo_cycle
+import control_plane.ceo_intent as ceo_intent
 import control_plane.executive_runtime as executive_runtime
+from control_plane import executive_placement_selection as placement_selection
 from control_plane.executive_coo_cycle import CooCycle
 from control_plane.ceo_intent import (
+    CeoIntentError,
     INTENT_SCHEMA_V2,
     RECEIPT_SCHEMA_V2,
     submit_intent,
+)
+from control_plane.executive_steward import (
+    CapacityState,
+    EffectState,
+    Freshness,
+    ResponsibilityFact,
+    Seat,
+    SourceOwner,
+    SourceRef,
 )
 from control_plane.executive_orchestration_principal import (
     OperatorPrincipalObservation,
@@ -118,6 +130,15 @@ def _register_placement_union(runtime: Runtime) -> None:
                 "provider": "codex",
                 "capabilities": ["read", "research"],
                 "cost_class": "small",
+                "model": "gpt-5.6-sol",
+                "effort": "xhigh",
+                "metadata": {
+                    "routing_policy_version": "fph0-routing",
+                    "execution_profile_id": "fph0-execution",
+                    "execution_profile_digest": "b" * 64,
+                    "capability_policy_version": "fph0-capability",
+                    "capability_policy_digest": "c" * 64,
+                },
             }
         },
     )
@@ -135,6 +156,45 @@ def _register_placement_union(runtime: Runtime) -> None:
             }
         },
     )
+
+
+def _v3_execution_binding():
+    return {
+        "eligible_quota_classes": ["codex-hf1q-step"],
+        "provider": "codex",
+        "model": "gpt-5.6-sol",
+        "effort": "xhigh",
+        "cost_class": "small",
+        "base_sha": "a" * 40,
+        "routing_policy_version": "fph0-routing",
+        "execution_profile_id": "fph0-execution",
+        "execution_profile_digest": "b" * 64,
+        "capability_policy_version": "fph0-capability",
+        "capability_policy_digest": "c" * 64,
+        "operator_eligible_quota_classes": ["codex-operator"],
+        "operator_provider": "codex",
+        "operator_model": "gpt-5.6-sol",
+        "operator_effort": "xhigh",
+        "operator_cost_class": "small",
+        "operator_routing_policy_version": "fph0-routing",
+        "operator_execution_profile_id": "fph0-execution",
+        "operator_execution_profile_digest": "b" * 64,
+        "operator_capability_policy_version": "fph0-capability",
+        "operator_capability_policy_digest": "c" * 64,
+        "operator_harness_binary_digest": "d" * 64,
+        "operator_harness_version": "fph0-harness",
+        "operator_harness_armed": False,
+        "host_execution_binding_version": (
+            "mastermind.host_execution_binding/v3"
+        ),
+        "work_placement_union": [
+            {"provider_realm": "codex", "quota_class": "codex-hf1q-step"},
+            {
+                "provider_realm": "claude-compatible-subscription",
+                "quota_class": "claude-hf1q-step",
+            },
+        ],
+    }
 
 
 def _admit_v2_plan(
@@ -245,6 +305,16 @@ def _admit_v2_plan(
     )
     admitted = runtime.jobs.admit_cycle_plan(root.job_id, command_id=command)
     return runtime, root, plan_body, admitted
+
+
+def _v3_binding_with(v2_binding, union):
+    return {
+        **v2_binding,
+        "host_execution_binding_version": (
+            "mastermind.host_execution_binding/v3"
+        ),
+        "work_placement_union": union,
+    }
 
 
 def _source(source_id: str = "coo-source") -> dict[str, str]:
@@ -1693,15 +1763,20 @@ def test_t2v2_two_step_placement_projection_and_exact_claim_refusal(tmp_path):
         for job in admitted
         if job.orchestration_role == "work"
     }
+    expected_root_constraints = {
+        key: value
+        for key, value in root.constraints.items()
+        if key != "work_placement_union"
+    }
     assert constraints_by_step == {
         "step-0": {
-            **root.constraints,
+            **expected_root_constraints,
             "cost_class": "small",
             "eligible_quota_classes": ["codex-hf1q-step"],
             "provider": "codex",
         },
         "step-1": {
-            **root.constraints,
+            **expected_root_constraints,
             "cost_class": "small",
             "eligible_quota_classes": ["claude-hf1q-step"],
             "provider": "claude-compatible-subscription",
@@ -3302,3 +3377,317 @@ def test_web_ceo_offline_delivery_reject_repair_re_review_reaches_handoff_withou
     assert receipt["sol_final_acceptance_pending"] is True
     assert receipt["production_deploy_authority"] is False
     assert receipt["new_control_planes_created"] == 0
+
+
+def test_fph0_d3_d4_d5_d6_d8_trusted_v3_union_projects_and_fails_closed(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    _register_placement_union(runtime)
+    receipt = submit_intent(
+        runtime,
+        _v2_intent(
+            intent_id="CEO-FPH0-TRUSTED-V3-001",
+            business_impact="routine",
+        ),
+        execution_binding=_v3_execution_binding(),
+    )
+    root = runtime.jobs.get_job(receipt["job_id"])
+    assert root is not None
+    assert root.constraints["work_placement_union"] == [
+        {
+            "provider_realm": "claude-compatible-subscription",
+            "quota_class": "claude-hf1q-step",
+        },
+        {"provider_realm": "codex", "quota_class": "codex-hf1q-step"},
+    ]
+    planner = runtime.jobs.create_cycle_planner(
+        root.job_id,
+        command_id=f"coo-cycle:{root.job_id}:create-planner:0",
+    )
+    dispatch = runtime.attempts.dispatch_cycle_job(
+        planner.job_id,
+        command_id=f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1",
+        worker_id="worker-a",
+    )
+    assert isinstance(dispatch, OrchestrationDispatchOutcome)
+    placements = [
+        {"provider_realm": "codex", "quota_class": "codex-hf1q-step"},
+        {
+            "provider_realm": "claude-compatible-subscription",
+            "quota_class": "claude-hf1q-step",
+        },
+    ]
+    steps = []
+    for ordinal, placement in enumerate(placements):
+        steps.append(
+            {
+                "ordinal": ordinal,
+                "step_id": f"step-{ordinal}",
+                "objective": f"FPH0 trusted placement {ordinal}.",
+                "business_impact": "routine",
+                "review_required": False,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+                "placement": dict(placement),
+            }
+        )
+    plan_body = {
+        "schema_version": "mastermind.execution_plan/v2",
+        "root_job_id": root.job_id,
+        "plan_attempt_id": dispatch.attempt.attempt_id,
+        "steps": steps,
+    }
+    _complete_ohf_role(runtime, dispatch, plan_body, identity_seed=7401)
+    command = f"coo-cycle:{root.job_id}:admit-plan:{dispatch.attempt.attempt_id}"
+    admitted = runtime.jobs.admit_cycle_plan(root.job_id, command_id=command)
+    assert {
+        job.plan_step_id: (
+            job.constraints["provider"],
+            job.constraints["eligible_quota_classes"],
+        )
+        for job in admitted
+        if job.orchestration_role == "work"
+    } == {
+        "step-0": ("codex", ["codex-hf1q-step"]),
+        "step-1": ("claude-compatible-subscription", ["claude-hf1q-step"]),
+    }
+    assert all(
+        "work_placement_union"
+        not in job.constraints
+        for job in admitted
+        if job.orchestration_role == "work"
+    )
+    replay = runtime.jobs.admit_cycle_plan(root.job_id, command_id=command)
+    assert [job.job_id for job in replay] == [job.job_id for job in admitted]
+    with runtime.store.read() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 4
+        assert connection.execute(
+            "SELECT COUNT(*) FROM events WHERE event_type='JOB_CREATED'"
+        ).fetchone()[0] == 4
+        assert connection.execute(
+            "SELECT COUNT(*) FROM events WHERE event_type='COO_PLAN_ADMITTED'"
+        ).fetchone()[0] == 1
+        stored_root = json.loads(
+            connection.execute(
+                "SELECT constraints_json FROM jobs WHERE job_id=?", (root.job_id,)
+            ).fetchone()[0]
+        )
+    assert stored_root["work_placement_union"] == root.constraints[
+        "work_placement_union"
+    ]
+
+
+def test_fph0_d8_v2_caller_union_is_dropped_not_honored(tmp_path, monkeypatch):
+    runtime = Runtime.at(tmp_path)
+    v2 = _v3_execution_binding()
+    v2.pop("work_placement_union", None)
+    v2.pop("host_execution_binding_version", None)
+    payload = _v2_intent(intent_id="CEO-FPH0-V2-DROP-001")
+    payload["execution_contract"]["constraints"] = {
+        "work_placement_union": [
+            {"provider_realm": "codex", "quota_class": "codex-hf1q-step"}
+        ]
+    }
+    monkeypatch.setattr(ceo_intent, "validate_intent", lambda value: value)
+    captured = {}
+    original_create_job = runtime.jobs.create_job
+
+    def create_job(*args, **kwargs):
+        captured["constraints"] = kwargs["constraints"]
+        return original_create_job(*args, **kwargs)
+
+    monkeypatch.setattr(runtime.jobs, "create_job", create_job)
+    receipt = submit_intent(runtime, payload, execution_binding=v2)
+    root = runtime.jobs.get_job(receipt["job_id"])
+    assert root is not None
+    assert "work_placement_union" not in captured["constraints"]
+    assert "work_placement_union" not in root.constraints
+
+
+def test_fph0_d1_binding_versions_and_v2_compatibility(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    v2 = _v3_execution_binding()
+    v2.pop("work_placement_union", None)
+    v2.pop("host_execution_binding_version", None)
+    baseline = submit_intent(
+        runtime,
+        _v2_intent(intent_id="CEO-FPH0-COMPAT-NO-VERSION"),
+        execution_binding=v2,
+    )
+    no_version = runtime.jobs.get_job(baseline["job_id"])
+    assert no_version is not None
+    for intent_id, binding in (
+        ("CEO-FPH0-COMPAT-V2", v2),
+        (
+            "CEO-FPH0-COMPAT-V2-EXPLICIT",
+            {
+                **v2,
+                "host_execution_binding_version": (
+                    "mastermind.host_execution_binding/v2"
+                ),
+            },
+        ),
+    ):
+        receipt = submit_intent(
+            runtime,
+            _v2_intent(intent_id=intent_id),
+            execution_binding=binding,
+        )
+        job = runtime.jobs.get_job(receipt["job_id"])
+        assert job is not None
+        assert executive_runtime._json_dumps(job.constraints) == (
+            executive_runtime._json_dumps(no_version.constraints)
+        )
+        assert "work_placement_union" not in job.constraints
+
+    for intent_id, mutation in (
+        ("CEO-FPH0-COMPAT-MISSING", lambda value: value.pop("model")),
+        ("CEO-FPH0-COMPAT-EXTRA", lambda value: value.update(extra=1)),
+    ):
+        malformed = dict(v2)
+        mutation(malformed)
+        with pytest.raises(
+            CeoIntentError,
+            match="v2 host execution binding fields are incomplete or drifted",
+        ):
+            submit_intent(
+                runtime,
+                _v2_intent(intent_id=intent_id),
+                execution_binding=malformed,
+            )
+
+    with pytest.raises(
+        CeoIntentError,
+        match="host execution binding version is unknown",
+    ):
+        submit_intent(
+            runtime,
+            _v2_intent(intent_id="CEO-FPH0-D2-UNKNOWN"),
+            execution_binding={
+                **v2,
+                "host_execution_binding_version": (
+                    "mastermind.host_execution_binding/v4"
+                ),
+            },
+        )
+
+
+def test_fph0_d2_union_shape_is_bounded_regex_only_and_typed(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    v2 = _v3_execution_binding()
+    v2.pop("work_placement_union", None)
+    v2.pop("host_execution_binding_version", None)
+    valid_member = {"provider_realm": "codex", "quota_class": "codex-hf1q-step"}
+    invalid_cases = [
+        (object(), "host work-placement union must be a bounded list"),
+        ([], "host work-placement union must admit at least one placement"),
+        (
+            [valid_member] * 9,
+            "host work-placement union must be a bounded list",
+        ),
+        (
+            [object()],
+            "host work-placement union member must name exactly "
+            "a provider realm and quota class",
+        ),
+        (
+            [{**valid_member, "extra": "value"}],
+            "host work-placement union member must name exactly "
+            "a provider realm and quota class",
+        ),
+        (
+            [{"provider_realm": "codex"}],
+            "host work-placement union member must name exactly "
+            "a provider realm and quota class",
+        ),
+        (
+            [{"provider_realm": "codex", "quota_class": " "}],
+            "host work-placement union member values are invalid",
+        ),
+        (
+            [{"provider_realm": "CODEX", "quota_class": "codex-hf1q-step"}],
+            "host work-placement union member values are invalid",
+        ),
+        (
+            [{"provider_realm": "codex", "quota_class": "-codex-hf1q-step"}],
+            "host work-placement union member values are invalid",
+        ),
+        (
+            [{"provider_realm": "-codex", "quota_class": "codex-hf1q-step"}],
+            "host work-placement union member values are invalid",
+        ),
+        (
+            [
+                {
+                    "provider_realm": "codex",
+                    "quota_class": "c" * 65,
+                }
+            ],
+            "host work-placement union member values are invalid",
+        ),
+        (
+            [valid_member, valid_member.copy()],
+            "host work-placement union members must be distinct",
+        ),
+    ]
+    for ordinal, (union, message) in enumerate(invalid_cases):
+        context = pytest.raises(CeoIntentError)
+        if message is not None:
+            context = pytest.raises(CeoIntentError, match=message)
+        with context:
+            submit_intent(
+                runtime,
+                _v2_intent(intent_id=f"CEO-FPH0-D2-{ordinal}"),
+                execution_binding=_v3_binding_with(v2, union),
+            )
+    with pytest.raises(
+        CeoIntentError,
+        match="host execution binding version is unknown",
+    ):
+        submit_intent(
+            runtime,
+            _v2_intent(intent_id="CEO-FPH0-D2-UNKNOWN"),
+            execution_binding={
+                **v2,
+                "host_execution_binding_version": (
+                    "mastermind.host_execution_binding/v4"
+                ),
+            },
+        )
+
+    union_inputs = [
+        [
+            {"quota_class": "z-step", "provider_realm": "codex"},
+            {
+                "quota_class": "a-step",
+                "provider_realm": "claude-compatible-subscription",
+            },
+        ],
+        [
+            {
+                "provider_realm": "claude-compatible-subscription",
+                "quota_class": "a-step",
+            },
+            {"provider_realm": "codex", "quota_class": "z-step"},
+        ],
+    ]
+    canonical_roots = []
+    for ordinal, union in enumerate(union_inputs):
+        receipt = submit_intent(
+            runtime,
+            _v2_intent(intent_id=f"CEO-FPH0-D3-{ordinal}"),
+            execution_binding=_v3_binding_with(v2, union),
+        )
+        root = runtime.jobs.get_job(receipt["job_id"])
+        assert root is not None
+        assert root.constraints["work_placement_union"] == [
+            {
+                "provider_realm": "claude-compatible-subscription",
+                "quota_class": "a-step",
+            },
+            {"provider_realm": "codex", "quota_class": "z-step"},
+        ]
+        canonical_roots.append(executive_runtime._json_dumps(root.constraints))
+    assert canonical_roots[0] == canonical_roots[1]
