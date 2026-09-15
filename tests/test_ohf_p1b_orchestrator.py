@@ -11,6 +11,7 @@ from control_plane.operator_harness_contract import (
     AuthRealmFact,
     CandidateResult,
     CapabilityManifest,
+    CheckpointObservation,
     EventCursor,
     LaunchDecision,
     NativeHelperPolicy,
@@ -155,6 +156,16 @@ class FakeRuntime:
     ):
         self._call(f"{operation_kind}_intent", operation_id.command_id)
 
+    def begin_operator_checkpoint(
+        self, attempt_id, generation, operation_id
+    ):
+        self._call("checkpoint_intent", operation_id.command_id)
+
+    def apply_operator_checkpoint(
+        self, attempt_id, generation, operation_id, observation
+    ):
+        self._call("checkpoint_applied", observation.checkpoint_candidate)
+
     def graceful_stop_operator_generation(
         self, attempt_id, generation, operation_id, observation
     ):
@@ -187,6 +198,10 @@ class FakeAdapter:
         self.fail: set[str] = set()
         self.session_id = "session-1"
         self.attestation = _observed(requested)
+
+    def checkpoint(self, generation, *, operation_id):
+        self._call("checkpoint")
+        return CheckpointObservation({"candidate": "checkpoint"})
 
     def _call(self, name: str) -> None:
         self.calls.append(name)
@@ -469,6 +484,36 @@ def test_stop_and_cancel_commit_intent_before_adapter_call() -> None:
     assert names.index("graceful_stop_intent") < names.index("stop_bind")
     assert names.index("cancel_intent") < names.index("cancel_bind")
     assert adapter.calls[-2:] == ["graceful_stop", "cancel"]
+
+
+def test_checkpoint_ambiguity_is_non_replayable_and_apply_is_refused() -> None:
+    requested, runtime, adapter, orchestrator = _orchestrator()
+    session = orchestrator.start_attempt(
+        attempt_id="attempt-1", requested=requested, operation_id=_op("start")
+    )
+    adapter.fail.add("checkpoint")
+    operation = _op("checkpoint-unknown")
+
+    with pytest.raises(OperatorEffectUnknown):
+        orchestrator.checkpoint(session, operation_id=operation)
+    with pytest.raises(OperatorEffectUnknown):
+        orchestrator.checkpoint(session, operation_id=operation)
+
+    assert adapter.calls.count("checkpoint") == 1
+    assert any(
+        name == "effect_unknown"
+        and value[0] == operation.command_id
+        and value[1] == "checkpoint"
+        for name, value in runtime.calls
+    )
+    runtime.fail.add("checkpoint_applied")
+    with pytest.raises(RuntimeError):
+        runtime.apply_operator_checkpoint(
+            session.attempt_id,
+            session.generation,
+            operation,
+            CheckpointObservation({"candidate": "late"}),
+        )
 
 
 def test_resume_is_bound_to_handoff_s1_and_mismatch_is_effect_unknown() -> None:
