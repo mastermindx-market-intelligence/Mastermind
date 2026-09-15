@@ -15,6 +15,7 @@ from control_plane.executive_orchestration_principal import OperatorPrincipalObs
 from control_plane.executive_orchestration_result import RawRoleResultObservation
 from control_plane.operator_harness_contract import (
     CandidateResult,
+    CheckpointObservation,
     EventCursor,
     LaunchComparison,
     NormalizedEvent,
@@ -254,6 +255,36 @@ class ExecutiveOperatorHarnessPort:
             generation=generation,
             operation_id=operation_id,
             operation_kind=operation_kind,
+            fence_generation=self.fence_generation,
+            lease_token=self.lease_token,
+        )
+
+    def begin_operator_checkpoint(
+        self,
+        attempt_id: str,
+        generation: ProcessGenerationRef,
+        operation_id: OperationId,
+    ) -> None:
+        self._require_attempt(attempt_id)
+        self.runtime.operator_harness.reserve_checkpoint_operation(
+            generation=generation,
+            operation_id=operation_id,
+            fence_generation=self.fence_generation,
+            lease_token=self.lease_token,
+        )
+
+    def apply_operator_checkpoint(
+        self,
+        attempt_id: str,
+        generation: ProcessGenerationRef,
+        operation_id: OperationId,
+        observation: CheckpointObservation,
+    ) -> None:
+        self._require_attempt(attempt_id)
+        self.runtime.operator_harness.apply_checkpoint_operation(
+            generation=generation,
+            operation_id=operation_id,
+            observation=observation,
             fence_generation=self.fence_generation,
             lease_token=self.lease_token,
         )
