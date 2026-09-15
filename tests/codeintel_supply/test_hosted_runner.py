@@ -4319,7 +4319,7 @@ def test_bundle_rejects_fully_resigned_wrong_embedded_role_identity(
     ]
     observation_payload = {
         "schema_version": row["build_info_schema_version"],
-        "role": "zoekt-index",
+        "role": "zoekt-git-index",
         "binary_sha256": row["sha256"],
         "binary_size": row["size"],
         "go_executable_sha256": row["go_executable_sha256"],
@@ -4356,6 +4356,38 @@ def test_bundle_rejects_fully_resigned_wrong_embedded_role_identity(
     with pytest.raises(runner.HostedRunnerError, match="BUNDLE_PROVENANCE_MISMATCH"):
         runner.create_content_addressed_bundle(
             root, tmp_path / "out", context=_payload_context(root)
+        )
+    assert not (tmp_path / "out").exists()
+
+
+def test_bundle_rejects_fully_resigned_wrong_three_role_build_info_aggregate(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "payload"
+    _payload_tree(root)
+    provenance_path = root / "meta/provenance.json"
+    sbom_path = root / "meta/sbom.json"
+    provenance = json.loads(provenance_path.read_text())
+    sbom = json.loads(sbom_path.read_text())
+    forged_aggregate = "0" * 64
+    assert forged_aggregate != runner._binary_build_info_sha256(  # noqa: SLF001
+        provenance["binaries"]
+    )
+
+    sbom["binary_build_info_sha256"] = forged_aggregate
+    sbom_bytes = runner.locks.canonical_json_bytes(sbom) + b"\n"
+    sbom_path.write_bytes(sbom_bytes)
+    provenance["binary_build_info_sha256"] = forged_aggregate
+    provenance["module_inventory_sha256"] = hashlib.sha256(sbom_bytes).hexdigest()
+    provenance_path.write_bytes(
+        runner.locks.canonical_json_bytes(provenance) + b"\n"
+    )
+    context = _payload_context(root)
+    assert context["binary_build_info_sha256"] == forged_aggregate
+
+    with pytest.raises(runner.HostedRunnerError, match="BUNDLE_PROVENANCE_MISMATCH"):
+        runner.create_content_addressed_bundle(
+            root, tmp_path / "out", context=context
         )
     assert not (tmp_path / "out").exists()
 
