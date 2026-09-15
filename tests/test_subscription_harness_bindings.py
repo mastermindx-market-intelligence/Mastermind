@@ -206,7 +206,7 @@ class SubscriptionHarnessBindingsTest(unittest.TestCase):
 
     def test_spec_only_lane_cannot_reach_canary(self) -> None:
         binding = get_binding(
-            "minimax-token-plan.openai-compatible",
+            "glm-coding-plan.claude-code-anthropic",
             document=self.catalog,
             profiles_document=self.profiles,
         )
@@ -300,14 +300,50 @@ class SubscriptionHarnessBindingsTest(unittest.TestCase):
         with self.assertRaisesRegex(HarnessBindingError, "protocol is unsupported"):
             validate_bindings(bindings, profiles_document=profiles)
 
-    def test_catalog_is_source_disarmed(self) -> None:
-        for binding_id in self.catalog["bindings"]:
-            binding = get_binding(
+    def test_catalog_arms_exactly_the_proven_minimax_lanes(self) -> None:
+        armed = {
+            binding_id
+            for binding_id in self.catalog["bindings"]
+            if get_binding(
                 binding_id,
                 document=self.catalog,
                 profiles_document=self.profiles,
+            ).autonomous_allowed
+        }
+        self.assertEqual(
+            armed,
+            {
+                "minimax-token-plan.claude-code-anthropic",
+                "minimax-token-plan.openai-compatible",
+            },
+        )
+        for binding_id in armed:
+            self.assertEqual(
+                self.catalog["bindings"][binding_id]["implementation_state"],
+                "PROVEN_LIVE",
             )
-            self.assertFalse(binding.autonomous_allowed)
+        for binding_id in self.catalog["bindings"]:
+            if binding_id not in armed:
+                self.assertFalse(
+                    get_binding(
+                        binding_id,
+                        document=self.catalog,
+                        profiles_document=self.profiles,
+                    ).autonomous_allowed
+                )
+
+    def test_minimax_lanes_are_proven_live_and_armed(self) -> None:
+        for binding_id in (
+            "minimax-token-plan.claude-code-anthropic",
+            "minimax-token-plan.openai-compatible",
+        ):
+            self.assertEqual(
+                self.catalog["bindings"][binding_id]["implementation_state"],
+                "PROVEN_LIVE",
+            )
+            self.assertTrue(
+                self.catalog["bindings"][binding_id]["autonomous_allowed"]
+            )
 
 
 if __name__ == "__main__":

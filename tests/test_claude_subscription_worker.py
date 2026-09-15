@@ -358,6 +358,7 @@ def test_current_subscription_profiles_cannot_be_composed_as_unattended_executiv
     ):
         documents = _documents()
         documents[0]["bindings"][binding_id]["implementation_state"] = "SPEC_ONLY"
+        documents[0]["bindings"][binding_id]["autonomous_allowed"] = False
         receipt_documents = _documents()
         with pytest.raises(CanaryAdmissionError, match="SPEC_ONLY|implementation"):
             seal_subscription_canary_admission(
