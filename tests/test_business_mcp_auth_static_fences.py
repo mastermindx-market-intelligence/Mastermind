@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import tomllib
 import subprocess
 import sys
 from pathlib import Path
@@ -36,6 +37,9 @@ def test_business_auth_dependencies_are_security_pinned() -> None:
     assert '"mcp==1.28.0"' not in text
     assert '"PyJWT[crypto]==2.13.0"' in text
     assert "business-mcp = [" in text
+    parsed = tomllib.loads(text)
+    business = parsed["project"]["optional-dependencies"]["business-mcp"]
+    assert "PyYAML==6.0.3" in business
 
 
 def test_security_dependencies_are_not_base_runtime_dependencies() -> None:

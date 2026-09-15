@@ -48,8 +48,11 @@ from __future__ import annotations
 
 import json
 import os
+import selectors
+import signal
 import subprocess
 import sys
+import time
 from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
@@ -81,6 +84,70 @@ DEFAULT_TIMEOUT = 60
 # explicitly opt into that runner contract.
 DEFAULT_MAX_OUTPUT_BYTES = 4 * 1024 * 1024
 Runner = Callable[..., Mapping[str, Any]]
+
+
+def bounded_subprocess_runner(
+    argv: Sequence[str | os.PathLike[str]], *, cwd: Path, timeout: float, max_bytes: int
+) -> dict[str, Any]:
+    """Run one read-only helper with a hard combined stdout/stderr ceiling."""
+    proc = subprocess.Popen(
+        [os.fspath(item) for item in argv], cwd=os.fspath(cwd),
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        start_new_session=True,
+    )
+    assert proc.stdout is not None and proc.stderr is not None
+    selector = selectors.DefaultSelector()
+    selector.register(proc.stdout, selectors.EVENT_READ, "stdout")
+    selector.register(proc.stderr, selectors.EVENT_READ, "stderr")
+    buffers = {"stdout": bytearray(), "stderr": bytearray()}
+    total = 0
+    timed_out = False
+    limit_exceeded = False
+    deadline = time.monotonic() + max(0.0, float(timeout))
+    try:
+        while selector.get_map():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                timed_out = True
+                break
+            for key, _mask in selector.select(min(0.1, remaining)):
+                chunk = os.read(key.fileobj.fileno(), min(65536, max_bytes + 1))
+                if not chunk:
+                    selector.unregister(key.fileobj)
+                    continue
+                buffers[key.data].extend(chunk)
+                total += len(chunk)
+                if total > max_bytes:
+                    limit_exceeded = True
+                    break
+            if limit_exceeded:
+                break
+    finally:
+        selector.close()
+    if timed_out or limit_exceeded:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    try:
+        proc.wait(timeout=1.0)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+    invalid_utf8 = False
+    decoded: dict[str, str] = {}
+    for name, raw in buffers.items():
+        try:
+            decoded[name] = raw.decode("utf-8", errors="strict")
+        except UnicodeDecodeError:
+            decoded[name] = ""
+            invalid_utf8 = True
+    return {
+        "code": proc.returncode, "stdout": decoded["stdout"],
+        "stderr": decoded["stderr"], "timed_out": timed_out,
+        "limit_exceeded": limit_exceeded, "invalid_utf8": invalid_utf8,
+    }
+
 
 #: Budget for the two ``git rev-parse`` probes.  A hung git is a degraded packet, not
 #: a hung CEO.

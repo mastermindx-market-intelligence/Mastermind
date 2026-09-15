@@ -285,11 +285,13 @@ successful ChatGPT call.
 ### Installed production binding
 
 The installed composition gives the network MCP process its own non-login
-service identity. `ceo_ingress_app_peer_uid`, `ceo_ingress_app_armed`, and
-`ceo_ingress_app_macro_root` must be supplied together in the existing protected
-control configuration. Its peer must differ from control, Operator, worker,
-and C1 identities. C1 retains its existing peer, grounding provider and arming
-setting.
+service identity. `ceo_ingress_app_peer_uid`, `ceo_ingress_app_armed`,
+`ceo_ingress_app_macro_root`, and `ceo_ingress_app_read_python` must be supplied
+together in the existing protected control configuration. The read Python must
+be the content-addressed Executive network runtime path under
+`/Library/Application Support/MastermindExecutive/network-runtimes/<64 hex>/bin/python`.
+Its peer must differ from control, Operator, worker, and C1 identities. C1 retains
+its existing peer, grounding provider and arming setting.
 
 The full-schema `control.json.template` includes an unarmed App binding and an
 explicit Macro snapshot placeholder. Supply the actual sealed snapshot when
@@ -320,7 +322,18 @@ release directory, dedicated process uid, loopback port, real A1 policies and
 separate directories for the existing read/submit durable authentication audit
 sinks. It refuses user-writable installation configuration. Run it under a
 separately provisioned network Python environment with `-I -B`; the sealed
-Executive control Python remains SDK-free.
+Executive control Python remains SDK-free. The reviewed dependency closure for
+that edge is `requirements/executive-mcp-macos-arm64-py312.lock`. It includes
+PyYAML 6.0.3 because installed `executive_state`/`executive_inbox` invoke the
+canonical boot-packet CLI in that dependency-complete runtime. The control
+process itself stays `-I -S -B`: it does not import PyYAML or the MCP SDK.
+
+The installed reader passes both the sealed Mastermind source root and sealed
+Macro snapshot explicitly to `scripts/ceo_boot_packet.py --repo-root ...
+--macro-root ...`; returned packet roots and schema are revalidated before the
+projection crosses CeoIngress. Timeout, invalid UTF-8, nonzero exit, output
+overflow, wrong schema, or root drift refuse the read rather than falling back
+to the dependency-incomplete control interpreter.
 
 Deployment evidence belongs in the private operation receipt. Source tests do
 not establish an installed generation, accepted identity provider, live tunnel,

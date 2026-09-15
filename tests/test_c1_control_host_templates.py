@@ -15,6 +15,10 @@ def test_control_config_template_binds_dedicated_unarmed_ceo_ingress_peer():
     assert document["ceo_ingress_socket_path"] == "/var/run/mastermind-executive/ceo-ingress.sock"
     assert document["ceo_ingress_launchd_socket_name"] == "CeoIngress"
     assert document["ceo_ingress_peer_uid"] == 452
+    assert document["ceo_ingress_app_read_python"].startswith(
+        "/Library/Application Support/MastermindExecutive/network-runtimes/"
+    )
+    assert document["ceo_ingress_app_read_python"].endswith("/bin/python")
     assert "ceo_ingress_armed" not in document
 
 

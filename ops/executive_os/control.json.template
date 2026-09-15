@@ -7,6 +7,7 @@
   "broker_timeout_seconds": 30.0,
   "ceo_ingress_app_armed": false,
   "ceo_ingress_app_macro_root": "/Library/Application Support/MastermindExecutive/macro-sources/__MACRO_SHA__",
+  "ceo_ingress_app_read_python": "/Library/Application Support/MastermindExecutive/network-runtimes/__EXECUTIVE_MCP_RUNTIME_ID__/bin/python",
   "ceo_ingress_app_peer_uid": 458,
   "ceo_ingress_launchd_socket_name": "CeoIngress",
   "ceo_ingress_peer_uid": 452,

@@ -10,6 +10,7 @@ import pytest
 
 
 RELAY_UID = 452
+APP_READ_PYTHON = Path("/Library/Application Support/MastermindExecutive/network-runtimes/" + "a" * 64 + "/bin/python")
 
 
 def _module():
@@ -115,10 +116,12 @@ def test_app_config_is_explicit_and_keeps_c1_unarmed(tmp_path):
     module = _module()
     raw = _raw(tmp_path)
     raw.update(ceo_ingress_app_peer_uid=os.geteuid()+10,
-               ceo_ingress_app_armed=True, ceo_ingress_app_macro_root=tmp_path/'macro')
+               ceo_ingress_app_armed=True, ceo_ingress_app_macro_root=tmp_path/'macro',
+               ceo_ingress_app_read_python=APP_READ_PYTHON)
     loaded = module.load_control_config(_write_config(tmp_path, raw))
     assert loaded['ceo_ingress_app_peer_uid'] != loaded['ceo_ingress_peer_uid']
     assert loaded['ceo_ingress_app_armed'] is True
+    assert loaded['ceo_ingress_app_read_python'] == APP_READ_PYTHON
     assert 'ceo_ingress_armed' not in loaded
 
 
@@ -128,12 +131,15 @@ def test_app_config_is_explicit_and_keeps_c1_unarmed(tmp_path):
     {'ceo_ingress_app_peer_uid': True},
     {'ceo_ingress_app_armed': 1},
     {'ceo_ingress_app_macro_root': 'relative/path'},
+    {'ceo_ingress_app_read_python': '/tmp/network-python'},
+    {'ceo_ingress_app_read_python': 'relative/network-python'},
 ])
 def test_app_config_refuses_identity_or_capability_ambiguity(tmp_path, change):
     module = _module()
     raw = _raw(tmp_path)
     raw.update(ceo_ingress_app_peer_uid=os.geteuid()+10,
-               ceo_ingress_app_armed=True, ceo_ingress_app_macro_root=tmp_path/'macro')
+               ceo_ingress_app_armed=True, ceo_ingress_app_macro_root=tmp_path/'macro',
+               ceo_ingress_app_read_python=APP_READ_PYTHON)
     raw.update(change)
     with pytest.raises(module.ServiceError):
         module.load_control_config(_write_config(tmp_path, raw))
@@ -145,3 +151,49 @@ def test_partial_app_config_is_refused(tmp_path):
     raw['ceo_ingress_app_peer_uid'] = os.geteuid()+10
     with pytest.raises(module.ServiceError):
         module.load_control_config(_write_config(tmp_path, raw))
+
+
+def test_service_composes_app_reader_with_dependency_python(monkeypatch, tmp_path):
+    module = _module()
+    raw = _raw(tmp_path)
+    raw.update(
+        ceo_ingress_app_peer_uid=os.geteuid() + 10,
+        ceo_ingress_app_armed=True,
+        ceo_ingress_app_macro_root=tmp_path / "macro",
+        ceo_ingress_app_read_python=APP_READ_PYTHON,
+    )
+    captured_reader: dict[str, object] = {}
+    captured_service: dict[str, object] = {}
+    installed = importlib.import_module("integrations.executive_mcp.installed")
+
+    class FakeReaders:
+        def __init__(self, **kwargs):
+            captured_reader.update(kwargs)
+
+        def observe(self):
+            return {"mastermind_sha": "a" * 40, "macro_sha": "b" * 40,
+                    "boot_packet_schema": "mastermind.ceo_boot_packet.v1"}
+
+        async def call(self, _name, _arguments):
+            return {"ok": True}
+
+    class FakeService:
+        def __init__(self, config, **kwargs):
+            captured_service.update(kwargs)
+
+    monkeypatch.setattr(installed, "InstalledExecutiveReaders", FakeReaders)
+    monkeypatch.setattr(module, "ExecutiveControlService", FakeService)
+    monkeypatch.setattr(module, "activate_launchd_socket", lambda _name: object())
+    monkeypatch.setattr(
+        importlib.import_module("control_plane.executive_worker_broker"),
+        "WorkerBrokerClient", lambda *_args, **_kwargs: object(),
+    )
+
+    module._service_from_config(raw)
+
+    assert captured_reader["repo_root"] == raw["proof_source_repository"]
+    assert captured_reader["macro_root"] == raw["ceo_ingress_app_macro_root"]
+    assert captured_reader["runtime_root"] == raw["runtime_root"]
+    assert captured_reader["packet_python"] == raw["ceo_ingress_app_read_python"]
+    binding = captured_service["ceo_ingress_app_binding"]
+    assert binding.armed is True
