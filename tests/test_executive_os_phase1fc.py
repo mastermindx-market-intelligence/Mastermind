@@ -3789,3 +3789,143 @@ def test_fph0_d2_union_shape_is_bounded_regex_only_and_typed(tmp_path):
         ]
         canonical_roots.append(executive_runtime._json_dumps(root.constraints))
     assert canonical_roots[0] == canonical_roots[1]
+
+
+def test_fph0_d5_union_admission_grants_no_router_eligibility():
+    def source(owner):
+        return SourceRef(
+            owner=owner,
+            ref="fph0-current",
+            observed_at="2026-09-14T00:00:00Z",
+            freshness=Freshness.CURRENT,
+        )
+
+    responsibility = ResponsibilityFact(
+        responsibility_ref="WS:FPH0",
+        title="FPH0 fail-closed Router proof",
+        accountable_seat=Seat.COO,
+        state="waiting_capacity",
+        root_job_id=None,
+        source=source(SourceOwner.AGENT_OS),
+    )
+    demand = placement_selection.PlacementDemand(
+        required_capabilities=frozenset({"read"}),
+        quota_class="codex-hf1q-step",
+        provider="codex",
+        allowed_modes=frozenset(
+            {placement_selection.PlacementMode.NEW_SESSION_MATERIALIZATION}
+        ),
+    )
+
+    def candidate(**overrides):
+        values = {
+            "worker_id": "worker-a",
+            "provider": "codex",
+            "account_label": "worker-a.company",
+            "quota_class": "codex-hf1q-step",
+            "capabilities": frozenset({"read"}),
+            "observed_at_ms": 1,
+            "occupancy": placement_selection.OccupancyState.FREE,
+            "occupancy_source": source(SourceOwner.RUNTIME_BINDING),
+            "capacity_state": CapacityState.AVAILABLE,
+            "capacity_source": source(SourceOwner.CAPACITY),
+            "host_source_closure_proven": True,
+            "closure_source": source(SourceOwner.CAPACITY),
+            "effect_state": EffectState.NONE,
+            "mode": placement_selection.PlacementMode.NEW_SESSION_MATERIALIZATION,
+            "creation_surface_accessible": True,
+            "session_creation_allowed": True,
+        }
+        values.update(overrides)
+        return placement_selection.PlacementCandidateFact(**values)
+
+    quota_mismatch = placement_selection.select_placement(
+        responsibility=responsibility,
+        demand=demand,
+        candidates=(candidate(quota_class="claude-hf1q-step"),),
+    )
+    assert quota_mismatch.selected is None
+    assert quota_mismatch.exclusions[0].reason is (
+        placement_selection.ExclusionReason.QUOTA_CLASS_MISMATCH
+    )
+    provider_mismatch = placement_selection.select_placement(
+        responsibility=responsibility,
+        demand=demand,
+        candidates=(candidate(provider="claude-compatible-subscription"),),
+    )
+    assert provider_mismatch.selected is None
+    assert provider_mismatch.exclusions[0].reason is (
+        placement_selection.ExclusionReason.PROVIDER_MISMATCH
+    )
+
+
+def test_fph0_v3_refuses_caller_union_collision(
+    tmp_path, monkeypatch
+):
+    runtime = Runtime.at(tmp_path)
+    v2 = _v3_execution_binding()
+    v2.pop("work_placement_union")
+    v2.pop("host_execution_binding_version")
+    payload = _v2_intent(intent_id="CEO-FPH0-COLLISION-001")
+    payload["execution_contract"]["constraints"] = {
+        "work_placement_union": [
+            {"provider_realm": "codex", "quota_class": "codex-hf1q-step"}
+        ]
+    }
+    monkeypatch.setattr(ceo_intent, "validate_intent", lambda value: value)
+    with pytest.raises(
+        StateConflict,
+        match=(
+            "caller constraint work_placement_union conflicts "
+            "with reviewed host composition"
+        ),
+    ):
+        runtime.jobs.create_v2_orchestration_root(
+            payload,
+            fingerprint=ceo_intent.intent_fingerprint(payload),
+            command_id=ceo_intent.command_id_for(payload["intent_id"]),
+            workspace_root=None,
+            execution_binding=_v3_binding_with(
+                v2,
+                [{"provider_realm": "codex", "quota_class": "codex-hf1q-step"}],
+            ),
+        )
+
+
+def test_fph0_d7_composition_and_v2_constant_are_byte_preserved():
+    assert executive_runtime.SCHEMA_VERSION == 4
+    assert executive_runtime.V3_HOST_EXECUTION_BINDING_KEYS == (
+        executive_runtime.V2_HOST_EXECUTION_BINDING_KEYS
+        | {"work_placement_union"}
+    )
+    assert executive_runtime.WORK_PLACEMENT_UNION_MAX_MEMBERS == 8
+    assert executive_runtime._json_dumps(
+        sorted(executive_runtime.V2_HOST_EXECUTION_BINDING_KEYS)
+    ) == executive_runtime._json_dumps(
+        [
+            "base_sha",
+            "capability_policy_digest",
+            "capability_policy_version",
+            "cost_class",
+            "effort",
+            "eligible_quota_classes",
+            "execution_profile_digest",
+            "execution_profile_id",
+            "model",
+            "operator_capability_policy_digest",
+            "operator_capability_policy_version",
+            "operator_cost_class",
+            "operator_effort",
+            "operator_eligible_quota_classes",
+            "operator_execution_profile_digest",
+            "operator_execution_profile_id",
+            "operator_harness_armed",
+            "operator_harness_binary_digest",
+            "operator_harness_version",
+            "operator_model",
+            "operator_provider",
+            "operator_routing_policy_version",
+            "provider",
+            "routing_policy_version",
+        ]
+    )
