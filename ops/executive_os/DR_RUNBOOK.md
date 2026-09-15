@@ -18,6 +18,17 @@ operator the Chairman has directed) performs, never a fleet session.
 - **No hot standby, no automatic failover, no second live runtime.** This is
   a backup/restore capability, not replication. Litestream stays behind the
   separately gated DR-L0 falsifier.
+- **Online backup/verify is provider-independent and does not gate on, or
+  imply, worker acceptance.** `backup`/`verify-backup` operate only on the
+  local SQLite store via the existing `control_plane/executive_backup.py`
+  helpers (no provider adapter, no credential, no canary read) and so may
+  run while the control service is `AWAITING_CANARY`, so RPO does not
+  depend on Codex/worker-provider canary readiness. This never installs or
+  validates a canary, never changes `service_state`, and is never itself
+  evidence of `READY`/worker acceptance — every other command remains
+  refused until the canary activates. `QUARANTINED`, `ACTIVATING_CANARY`,
+  and any other non-`READY`/non-`AWAITING_CANARY` state still refuse both
+  commands.
 - **Restore never overwrites the live database as a first step.** Every
   restore path (`restore_backup_offline` in `control_plane/executive_backup.py`)
   preserves the prior database and sidecars as an owner-only rollback set
