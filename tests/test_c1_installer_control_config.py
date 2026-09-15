@@ -316,3 +316,25 @@ def test_installer_refuses_changed_read_python_for_existing_full_binding(
     assert completed.returncode != 0
     assert "App read Python differs from the existing binding" in completed.stderr
     assert not destination.exists()
+
+
+def test_installer_refuses_malformed_existing_full_app_read_python(
+    tmp_path: Path,
+) -> None:
+    base_dir = tmp_path / "base"
+    base_dir.mkdir()
+    full = _render_default_control_config(base_dir)
+    full.update(APP_LEGACY_FIELDS)
+    full["ceo_ingress_app_read_python"] = "/tmp/python"
+    source = tmp_path / "bad-full-control.json"
+    source.write_text(json.dumps(full), encoding="utf-8")
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+
+    completed, destination = _run_default_control_config(
+        output_dir, source=source, app_read_python="",
+    )
+
+    assert completed.returncode != 0
+    assert "App read Python path is invalid" in completed.stderr
+    assert not destination.exists()

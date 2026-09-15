@@ -1002,7 +1002,13 @@ if source:
         if (app_legacy_keys & set(value)) != app_legacy_keys:
             raise SystemExit("partial Executive App source configuration")
         if app_read_key in value:
-            if app_read_python and value[app_read_key] != app_read_python:
+            existing_app_read_python = value[app_read_key]
+            if (
+                not isinstance(existing_app_read_python, str)
+                or app_read_re.fullmatch(existing_app_read_python) is None
+            ):
+                raise SystemExit("App read Python path is invalid")
+            if app_read_python and existing_app_read_python != app_read_python:
                 raise SystemExit("App read Python differs from the existing binding")
         else:
             if not app_read_python:
