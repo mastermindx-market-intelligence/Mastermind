@@ -695,3 +695,40 @@ def test_cli_pending_status_marks_legacy_prefingerprint_marker_nonreconcilable(t
     assert payload["reconcilable"] is False
     assert payload["client_name"] is None
     assert payload["attempt_ref"] == "8" * 64
+
+
+def test_cli_normal_enrollment_keychain_unavailable_refuses_opaquely(
+    tmp_path: Path, monkeypatch, capsys
+):
+    import ops.codex_fabric.enroll_executive_mcp as enroll
+
+    _policy(tmp_path)
+    policy_path = tmp_path / "executive-mcp.json"
+
+    def unavailable_keychain():
+        raise OSError("Security.framework is unavailable")
+
+    monkeypatch.setattr(enroll, "KeychainRegistrationStore", unavailable_keychain)
+
+    code = enroll.main(
+        [], policy_path=policy_path, expected_uid=os.getuid()
+    )
+    captured = capsys.readouterr()
+    assert code == 2
+    assert captured.out == ""
+    assert captured.err == "REFUSED: Executive MCP enrollment unavailable.\n"
+
+
+def test_cli_reconcile_keychain_unavailable_refuses_opaquely(monkeypatch, capsys):
+    import ops.codex_fabric.enroll_executive_mcp as enroll
+
+    def unavailable_keychain():
+        raise OSError("Security.framework is unavailable")
+
+    monkeypatch.setattr(enroll, "KeychainRegistrationStore", unavailable_keychain)
+
+    code = enroll.main(["--reconcile-client-id", "tpc_x"])
+    captured = capsys.readouterr()
+    assert code == 2
+    assert captured.out == ""
+    assert captured.err == "REFUSED: Executive MCP enrollment unavailable.\n"
