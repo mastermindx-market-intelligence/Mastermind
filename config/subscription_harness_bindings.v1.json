@@ -1,6 +1,6 @@
 {
   "schema": "mastermind.subscription_harness_bindings/v1",
-  "verified_at": "2026-09-15T00:00:45Z",
+  "verified_at": "2026-09-15T01:19:02Z",
   "bindings": {
     "glm-coding-plan.claude-code-anthropic": {
       "profile_id": "glm-coding-plan",
@@ -65,8 +65,8 @@
       "protocol": "anthropic",
       "endpoint": {"source": "profile"},
       "model_classes": ["routine", "hard", "fast", "subagent"],
-      "implementation_state": "PROVEN_LIVE",
-      "autonomous_allowed": true,
+      "implementation_state": "BUILT_NOT_PROVEN",
+      "autonomous_allowed": false,
       "activation_gates": [
         "adapter_implemented",
         "provider_realm_enrolled",
@@ -85,8 +85,8 @@
         "base_url": "https://api.minimax.io/v1"
       },
       "model_classes": ["routine", "hard", "fast", "subagent"],
-      "implementation_state": "PROVEN_LIVE",
-      "autonomous_allowed": true,
+      "implementation_state": "SPEC_ONLY",
+      "autonomous_allowed": false,
       "activation_gates": [
         "adapter_implemented",
         "provider_realm_enrolled",
