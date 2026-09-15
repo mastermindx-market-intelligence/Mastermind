@@ -51,6 +51,8 @@ def _base(*, dependencies: tuple[DependencyFact, ...] = ()) -> CapabilityFact:
 
 def _observation(
     *,
+    capability_name: str = "openai-tunnel-metadata",
+    canonical_owner: str = "openai-tunnel-owner",
     state: CredentialBindingState = CredentialBindingState.READY,
     host: str | None = "studio-01",
     credential_generation: str | None = "credential-g7",
@@ -59,6 +61,8 @@ def _observation(
     source_ref: str = "receipt:credential-readiness",
 ) -> CredentialReadinessObservation:
     return CredentialReadinessObservation(
+        capability_name=capability_name,
+        canonical_owner=canonical_owner,
         state=state,
         expected_host_binding="studio-01",
         observed_host_binding=host,
@@ -292,3 +296,34 @@ def test_reserved_dependency_collision_is_normalized_before_composition():
     )
     with pytest.raises(CredentialReadinessError, match="reserved credential dependencies"):
         augment_credential_readiness(base, _observation())
+
+
+def test_observation_cannot_promote_a_different_semantic_capability():
+    with pytest.raises(CredentialReadinessError, match="capability_name"):
+        augment_credential_readiness(
+            _base(),
+            _observation(capability_name="claude-headless-subscription"),
+        )
+
+
+def test_observation_cannot_cross_canonical_owner_boundary():
+    with pytest.raises(CredentialReadinessError, match="canonical_owner"):
+        augment_credential_readiness(
+            _base(),
+            _observation(canonical_owner="provider-realm-owner"),
+        )
+
+
+def test_headless_auth_readiness_cannot_promote_interactive_provider_capability():
+    interactive = dataclasses.replace(
+        _base(),
+        name="claude-interactive-subscription",
+        canonical_owner="claude-provider-realm-owner",
+    )
+    headless_auth = _observation(
+        capability_name="claude-headless-subscription",
+        canonical_owner="claude-provider-realm-owner",
+    )
+
+    with pytest.raises(CredentialReadinessError, match="capability_name"):
+        augment_credential_readiness(interactive, headless_auth)

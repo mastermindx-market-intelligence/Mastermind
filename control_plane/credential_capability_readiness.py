@@ -54,8 +54,18 @@ class CredentialBindingState(str, Enum):
 
 @dataclasses.dataclass(frozen=True)
 class CredentialReadinessObservation:
-    """One owner-authored, secret-free point-in-time readiness observation."""
+    """One owner-authored, secret-free point-in-time readiness observation.
 
+    ``capability_name`` and ``canonical_owner`` bind the observation to the
+    exact semantic SCF capability it can prove.  This prevents a credential
+    mode that is sufficient for one capability (for example, a headless
+    provider token) from being reused to promote a richer capability owned by
+    the same provider.  Generation values are opaque facts from the existing
+    authoritative owner; this adapter never mints or advances a generation.
+    """
+
+    capability_name: str
+    canonical_owner: str
     state: CredentialBindingState
     expected_host_binding: str
     observed_host_binding: str | None
@@ -77,6 +87,18 @@ def _identifier(value: object, field: str, *, optional: bool = False) -> str | N
     return value
 
 
+
+def _scf_identifier(value: object, field: str) -> str:
+    """Canonicalize a base SCF identifier the same way SCF projection does."""
+    if type(value) is not str:
+        raise CredentialReadinessError(f"{field} must be a string")
+    canonical = value.strip().lower()
+    if _ID.fullmatch(canonical) is None:
+        raise CredentialReadinessError(f"{field} must be a bounded identifier")
+    if _FORBIDDEN_SOURCE.search(canonical):
+        raise CredentialReadinessError(f"{field} contains secret-shaped text")
+    return canonical
+
 def _source_ref(value: object) -> str:
     if type(value) is not str or value != value.strip() or _SOURCE.fullmatch(value) is None:
         raise CredentialReadinessError(
@@ -97,6 +119,8 @@ def _normalize(observation: CredentialReadinessObservation) -> CredentialReadine
     if type(observation.live_proof_current) is not bool:
         raise CredentialReadinessError("live_proof_current must be boolean")
     return CredentialReadinessObservation(
+        _identifier(observation.capability_name, "capability_name"),
+        _identifier(observation.canonical_owner, "canonical_owner"),
         observation.state,
         _identifier(observation.expected_host_binding, "expected_host_binding"),
         _identifier(observation.observed_host_binding, "observed_host_binding", optional=True),
@@ -268,6 +292,16 @@ def augment_credential_readiness(
     if not isinstance(base, CapabilityFact):
         raise CredentialReadinessError("base must be CapabilityFact")
     observation = _normalize(observation)
+    base_name = _scf_identifier(base.name, "base.name")
+    base_owner = _scf_identifier(base.canonical_owner, "base.canonical_owner")
+    if observation.capability_name != base_name:
+        raise CredentialReadinessError(
+            "observation capability_name does not match the SCF capability"
+        )
+    if observation.canonical_owner != base_owner:
+        raise CredentialReadinessError(
+            "observation canonical_owner does not match the SCF capability owner"
+        )
     if not isinstance(base.dependencies, tuple):
         raise CredentialReadinessError("base dependencies must be an immutable tuple")
     existing: set[str] = set()
