@@ -4,7 +4,8 @@ status: ARCHITECTURE_FREEZE_CANDIDATE / SPEC_ONLY / RECORDS_ONLY / PRODUCTION_IN
 operation_key: mastermind-portfolio-v3-risk-first-autonomous-manager-design-20260915-sol-001
 approved_by: Chairman Chris
 approved_at: 2026-09-15
-protected_master: f249802eab3695ff24c9a903798899466c444252
+protected_skillpack_basis: f249802eab3695ff24c9a903798899466c444252
+current_protected_recheck: 19b6111891ffd742ceec7c96f437a2a890847c92
 skillpack: mastermind.sol_skillpack.v1 1.0.1 / bootstrap major 1
 macro_snapshot: fc59066581be1a52e4c89a8e3e1ba2c39796419a
 capability_state: SPEC_ONLY
@@ -163,13 +164,21 @@ V3 begins in isolated shadow. It cannot share the V2 live cohort as if the polic
 
 ### 3.1 Protected Mastermind source
 
-This architecture was composed against protected Mastermind:
+This architecture was composed against protected Mastermind and its exact Skillpack at:
 
 ```text
 f249802eab3695ff24c9a903798899466c444252
 ```
 
-Skillpack loaded atomically from that same commit:
+Current protected master at publication recheck:
+
+```text
+19b6111891ffd742ceec7c96f437a2a890847c92
+```
+
+The `f249802e... -> 19b61118...` movement is the Executive submit-fence merge #654. Its six paths are disjoint from this records-only spec; the Skillpack `INDEX.md` blob remains byte-identical at `5909db6e26b9d61e0622f83079733857010989da`. The candidate history-preservingly composes that current protected commit.
+
+Skillpack loaded atomically from the original protected basis above:
 
 ```text
 schema: mastermind.sol_skillpack.v1
