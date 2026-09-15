@@ -2342,6 +2342,7 @@ from control_plane.wake_events import canonical_json_bytes
 
 STATE_FILES = (
     "account.json",
+    "latest.json",
     "fills.jsonl",
     "nav_history.jsonl",
     "decisions.jsonl",
@@ -2378,7 +2379,7 @@ def _state_hashes(book: Path) -> dict[str, str]:
     return out
 ```
 
-Hash all eight fixed files plus the canonical settlement-receipt collection before the call:
+Hash all nine fixed files plus the canonical settlement-receipt collection before the call:
 
 ```python
 book_dir = root / "data/portfolios/autonomous"
@@ -2689,6 +2690,7 @@ from control_plane.wake_events import canonical_json_bytes
 book = Path("data/portfolios/autonomous")
 files = (
     "account.json",
+    "latest.json",
     "fills.jsonl",
     "nav_history.jsonl",
     "decisions.jsonl",
