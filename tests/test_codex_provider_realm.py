@@ -9,13 +9,19 @@ from pathlib import Path
 import pytest
 
 from control_plane import codex_worker as cw
+from control_plane import opencode_go_pooled_transport
 from control_plane.codex_provider_realm import (
     ALIBABA_TOKEN_PLAN,
     CANDIDATE_CODEX_PROVIDER_REALMS_SPEC_ONLY,
     MINIMAX_TOKEN_PLAN,
+    OPENCODE_GO_TOKEN_PLAN,
     REVIEWED_CODEX_PROVIDER_REALMS,
     CodexProviderRealm,
     ProviderRealmError,
+)
+from scripts.executive_os_phase1c_worker import (
+    WorkerConfigError,
+    _resolve_subscription_binding,
 )
 
 EXECUTIVE_SYSTEM_ROOT = Path("/Library/Application Support/MastermindExecutive")
@@ -51,8 +57,11 @@ def _spec(tmp_path: Path) -> cw.WorkerLaunchSpec:
 
 def test_subscription_realm_registry_quarantines_minimax_candidate() -> None:
     assert "minimax-token-plan" not in REVIEWED_CODEX_PROVIDER_REALMS
+    assert "opencode-go" not in REVIEWED_CODEX_PROVIDER_REALMS
     assert set(REVIEWED_CODEX_PROVIDER_REALMS) == {"alibaba-token-plan-sg"}
-    assert set(CANDIDATE_CODEX_PROVIDER_REALMS_SPEC_ONLY) == {"minimax-token-plan"}
+    assert set(CANDIDATE_CODEX_PROVIDER_REALMS_SPEC_ONLY) == {
+        "minimax-token-plan", "opencode-go",
+    }
     assert MINIMAX_TOKEN_PLAN.base_url == "https://api.minimax.io/v1"
     assert MINIMAX_TOKEN_PLAN.env_key == "MINIMAX_TOKEN_PLAN_KEY"
     assert MINIMAX_TOKEN_PLAN.wire_api == "responses"
@@ -61,13 +70,30 @@ def test_subscription_realm_registry_quarantines_minimax_candidate() -> None:
     )
     assert ALIBABA_TOKEN_PLAN.env_key == "ALIBABA_TOKEN_PLAN_KEY"
     assert ALIBABA_TOKEN_PLAN.wire_api == "responses"
-    for realm in (MINIMAX_TOKEN_PLAN, ALIBABA_TOKEN_PLAN):
+    for realm in (MINIMAX_TOKEN_PLAN, ALIBABA_TOKEN_PLAN, OPENCODE_GO_TOKEN_PLAN):
         rendered = "\n".join(realm.config_overrides())
         assert realm.base_url in rendered
         assert realm.env_key in rendered
         assert "request_max_retries=0" in rendered
         assert "stream_max_retries=0" in rendered
         assert "sk-" not in rendered.lower()
+
+
+def test_opencode_go_candidate_realm_is_spec_only_and_matches_transport_constant() -> None:
+    assert OPENCODE_GO_TOKEN_PLAN.base_url == (
+        opencode_go_pooled_transport.OPENCODE_GO_BASE_URL.rstrip("/")
+    )
+    assert OPENCODE_GO_TOKEN_PLAN.env_key == "OPENCODE_GO_KEY"
+    assert OPENCODE_GO_TOKEN_PLAN.wire_api == "responses"
+    assert OPENCODE_GO_TOKEN_PLAN.realm_id not in REVIEWED_CODEX_PROVIDER_REALMS
+    assert (
+        OPENCODE_GO_TOKEN_PLAN.realm_id
+        in CANDIDATE_CODEX_PROVIDER_REALMS_SPEC_ONLY
+    )
+    with pytest.raises(WorkerConfigError):
+        _resolve_subscription_binding("opencode-go")
+    with pytest.raises(WorkerConfigError):
+        _resolve_subscription_binding("minimax-token-plan")
 
 
 def test_provider_realm_rejects_chat_wire_api() -> None:
