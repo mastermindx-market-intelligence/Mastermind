@@ -69,6 +69,7 @@ from control_plane.executive_retry_safety import (
 from control_plane.operator_harness_contract import (
     AttemptExecutionMode,
     CandidateResult,
+    CheckpointObservation,
     EventCursor,
     LaunchDecision,
     NormalizedEvent,
@@ -123,6 +124,9 @@ def _path_matches_patterns(value: str, patterns: Sequence[str]) -> bool:
 
 OHF_INTERNAL_GENERATION_OPERATION_SCHEMA_VERSION = (
     "mastermind.operator_harness_internal_generation_operation/v1"
+)
+OHF_CHECKPOINT_OPERATION_SCHEMA_VERSION = (
+    "mastermind.operator_harness_checkpoint_operation/v1"
 )
 OHF_RECONCILE_OBSERVATION_SCHEMA_VERSION = (
     "mastermind.operator_harness_reconcile_observation/v1"
@@ -14851,6 +14855,219 @@ class OperatorHarnessRegistry:
                     "executive_writer_released": release,
                 },
             )
+
+    def reserve_checkpoint_operation(
+        self,
+        *,
+        generation: ProcessGenerationRef,
+        operation_id: OperationId,
+        fence_generation: int,
+        lease_token: str,
+    ) -> None:
+        """Commit a checkpoint INTENT before any provider compaction call."""
+
+        timestamp = self.store.now_ms()
+        with self.store.transaction() as connection:
+            found = connection.execute(
+                """
+                SELECT g.*,e.attempt_id,e.state,e.epoch_number,
+                       e.worker_id AS epoch_worker,
+                       e.provider_session_id AS epoch_session
+                FROM process_generations g
+                JOIN harness_session_epochs e
+                  ON e.session_epoch_id=g.session_epoch_id
+                WHERE g.process_generation_id=?
+                """,
+                (generation.process_generation_id,),
+            ).fetchone()
+            if found is None:
+                raise StateConflict("unknown OHF generation")
+            row = self._leased(
+                connection,
+                attempt_id=str(found["attempt_id"]),
+                fence_generation=fence_generation,
+                lease_token=lease_token,
+                timestamp=timestamp,
+                statuses={
+                    AttemptStatus.RUNNING,
+                    AttemptStatus.CHECKPOINTED,
+                },
+            )
+            epoch = SessionEpochRef(
+                str(found["session_epoch_id"]),
+                str(found["attempt_id"]),
+                str(found["epoch_worker"]),
+                int(found["epoch_number"]),
+            )
+            self._owned_generation(
+                connection,
+                leased=row,
+                epoch=epoch,
+                generation=generation,
+                require_current=True,
+                require_writer=True,
+            )
+            if (
+                self._event(connection, operation_id.command_id) is not None
+                or found["state"] != SessionEpochState.CURRENT.value
+                or not found["executive_writer_held"]
+                or found["ended_at_ms"] is not None
+            ):
+                raise StateConflict("checkpoint operation INTENT preconditions failed")
+            payload = {
+                "schema_version": OHF_CHECKPOINT_OPERATION_SCHEMA_VERSION,
+                "attempt_id": str(found["attempt_id"]),
+                "session_epoch_id": generation.session_epoch_id,
+                "process_generation_id": generation.process_generation_id,
+                "worker_id": generation.worker_id,
+                "provider_session_id": found["epoch_session"],
+                "expected_checkpoint_sequence": int(row["checkpoint_sequence"]) + 1,
+            }
+            self._receipt(
+                connection,
+                op=operation_id,
+                kind=OperationReceiptKind.INTENT,
+                row=row,
+                payload=payload,
+            )
+
+    def apply_checkpoint_operation(
+        self,
+        *,
+        generation: ProcessGenerationRef,
+        operation_id: OperationId,
+        observation: CheckpointObservation,
+        fence_generation: int,
+        lease_token: str,
+    ) -> Job:
+        """Apply one checkpoint only from its exact committed INTENT."""
+
+        checkpoint = JobPayload.from_value(observation.checkpoint_candidate).to_dict()
+        timestamp = self.store.now_ms()
+        with self.store.transaction() as connection:
+            found = connection.execute(
+                """
+                SELECT g.*,e.attempt_id,e.state,e.epoch_number,
+                       e.worker_id AS epoch_worker,
+                       e.provider_session_id AS epoch_session
+                FROM process_generations g
+                JOIN harness_session_epochs e
+                  ON e.session_epoch_id=g.session_epoch_id
+                WHERE g.process_generation_id=?
+                """,
+                (generation.process_generation_id,),
+            ).fetchone()
+            if found is None:
+                raise StateConflict("unknown OHF generation")
+            row = self._leased(
+                connection,
+                attempt_id=str(found["attempt_id"]),
+                fence_generation=fence_generation,
+                lease_token=lease_token,
+                timestamp=timestamp,
+                statuses={
+                    AttemptStatus.RUNNING,
+                    AttemptStatus.CHECKPOINTED,
+                },
+            )
+            epoch = SessionEpochRef(
+                str(found["session_epoch_id"]),
+                str(found["attempt_id"]),
+                str(found["epoch_worker"]),
+                int(found["epoch_number"]),
+            )
+            self._owned_generation(
+                connection,
+                leased=row,
+                epoch=epoch,
+                generation=generation,
+                require_current=True,
+                require_writer=True,
+            )
+            expected = {
+                "schema_version": OHF_CHECKPOINT_OPERATION_SCHEMA_VERSION,
+                "attempt_id": str(found["attempt_id"]),
+                "session_epoch_id": generation.session_epoch_id,
+                "process_generation_id": generation.process_generation_id,
+                "worker_id": generation.worker_id,
+                "provider_session_id": found["epoch_session"],
+                "expected_checkpoint_sequence": int(row["checkpoint_sequence"]) + 1,
+            }
+            intent = self._event(connection, operation_id.command_id)
+            intent_payload = (
+                _json_loads(intent["payload_json"], fallback={}) if intent else {}
+            )
+            applied_id = operation_receipt_command_id(
+                operation_id, OperationReceiptKind.APPLIED
+            )
+            if self._event(connection, applied_id) is not None:
+                return JobRegistry(self.store).get_job(str(row["job_id"]))
+            if (
+                intent is None
+                or intent["event_type"] != OperationReceiptKind.INTENT.value
+                or intent_payload != expected
+            ):
+                raise StateConflict("checkpoint operation result does not match INTENT")
+            sequence = int(row["checkpoint_sequence"]) + 1
+            expiry = max(
+                int(row["lease_expires_at_ms"]),
+                timestamp + self.store.lease_seconds * 1000,
+            )
+            connection.execute(
+                """
+                UPDATE attempts
+                SET status='CHECKPOINTED',checkpoint_sequence=?,checkpoint_json=?,heartbeat_at_ms=?,
+                    lease_expires_at_ms=?,updated_at_ms=?,version=version+1
+                WHERE attempt_id=?
+                """,
+                (
+                    sequence,
+                    _json_dumps(checkpoint),
+                    timestamp,
+                    expiry,
+                    timestamp,
+                    str(row["attempt_id"]),
+                ),
+            )
+            connection.execute(
+                """
+                UPDATE jobs SET status='CHECKPOINTED',checkpoint_json=?,updated_at_ms=?,version=version+1
+                WHERE job_id=? AND current_attempt_id=?
+                """,
+                (
+                    _json_dumps(checkpoint),
+                    timestamp,
+                    str(row["job_id"]),
+                    str(row["attempt_id"]),
+                ),
+            )
+            self.store.append_event(
+                connection,
+                aggregate_type="job",
+                aggregate_id=str(row["job_id"]),
+                event_type="JOB_CHECKPOINTED",
+                job_id=str(row["job_id"]),
+                attempt_id=str(row["attempt_id"]),
+                worker_id=str(row["worker_id"]),
+                quota_class=str(row["quota_class"]),
+                payload={"checkpoint_sequence": sequence},
+                timestamp_ms=timestamp,
+            )
+            self._receipt(
+                connection,
+                op=operation_id,
+                kind=OperationReceiptKind.APPLIED,
+                row=row,
+                payload={
+                    "schema_version": OHF_CHECKPOINT_OPERATION_SCHEMA_VERSION,
+                    "process_generation_id": generation.process_generation_id,
+                    "checkpoint_sequence": sequence,
+                    "provider_mutated_state": observation.provider_mutated_state,
+                },
+            )
+        job = JobRegistry(self.store).get_job(str(row["job_id"]))
+        assert job is not None
+        return job
 
     def record_reconcile_observation(
         self,
