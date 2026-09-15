@@ -85,6 +85,8 @@ Do not call architecture/docs “built,” a merged implementation “proven liv
 ### `COLD_START.md`
 Use when opening/recovering a program, workstream, unfamiliar task, or fresh CEO session.
 Produces a current-state model, disagreement ledger and exact next action.
+Host-file, shell, process and desktop capability questions also require its Step 1A
+before declaring local access unavailable or delegating routine host commands.
 
 ### `REVIEW_RETURN.md`
 Use when a worker/Fable/Claude/Codex/Grok session returns code, a PR, research or a claimed

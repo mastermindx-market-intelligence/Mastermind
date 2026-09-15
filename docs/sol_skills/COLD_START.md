@@ -28,6 +28,50 @@ Before archaeology, state privately/in your working model:
 
 Do not let the narrowest open PR redefine the product outcome.
 
+## Step 1A — Discover usable host tools before delegating
+
+When host files, shell, processes or local applications materially help the current task,
+inspect this session's actual connected-tool surface, including Remote Desktop Commander
+when available. Web ChatGPT is not proof that local access is unavailable.
+
+1. Before first use, discover actual schemas, call `list_devices`, select the intended
+   authorized device explicitly, and `ping` it. One account or session connection does not
+   prove another's. Recheck after a device/connection change, not every unchanged turn.
+2. A successful ping does not prove the file/process backend is connected. Use the next
+   relevant bounded read to verify the required capability. Distinguish device presence,
+   relay health, backend health, permissions and successful execution; unknown is not healthy.
+3. When tool capability and task authority are present, perform bounded work directly.
+   Do not delegate merely because this is a web chat or make the Chairman relay routine
+   commands. Preserve meaningful specialist routing; host access does not make Sol the
+   default implementation worker.
+4. The connected Mac and ChatGPT sandbox have separate filesystems. A path or file reference
+   on one is not a file on the other. Prefer native file tools for file operations and
+   process tools for shell work; use explicit working directories and returned process IDs.
+5. Preserve source-writer ownership, existing task scope, required confirmations and
+   same-carrier effect reconciliation. Do not modify another worker's worktree/process or
+   broaden permissions without the required authority. A timeout or cancellation does not
+   prove no effect. Reconcile the original operation before retry or transfer.
+6. Do not invoke a malformed tool with empty arguments. Compare its actual exposed schema
+   with the documented/installed contract. A valid alternative may be selected before any
+   effect only when authorized; it must not bypass a denial or an uncertain prior action.
+7. Do not repackage a platform-blocked action or route it through another tool to evade the
+   block. Report the exact refusal and preserve the target. Independent permitted work may
+   continue. A "Not connected" response is not fixed by relabeling an online device healthy.
+8. Do not dump credentials, cookies, environment variables or authenticated settings to
+   establish readiness. Prefer narrowly scoped, non-secret metadata. Configuration reads
+   and status commands may have side effects; inspect their contract rather than assuming
+   they are inert. Never grant permissions, install, restart or repoint a service implicitly.
+9. Do not repeat write canaries or whole-machine surveys merely to establish connectivity.
+   Reuse applicable evidence; revalidate only the changed connection or required capability.
+10. File/shell access does not prove browser, desktop, provider-session control or unattended execution.
+    Verify each separately against the exact authorized target. Exclude the initiating CEO
+    conversation from generic browser mutation; observation is not authority to operate it.
+
+If unavailable, report the actual missing tool, connection, device, schema, permission or
+backend instead of a generic inability to access the Mac. Live device IDs, account readiness,
+proof paths and results belong in their existing evidence/organizational owners, not here.
+This procedure adds no lifecycle, scheduler, permission service, retry owner or authority.
+
 ## Step 2 — Resolve identity, then owner
 
 Resolve exact names/IDs before broad search where possible:
