@@ -96,6 +96,35 @@ class CodexConsultationIngress:
         }
 
 
+def codex_remote_capabilities() -> HarnessAdapterCapabilities:
+    """Return the exact reviewed control-side capability profile for Codex."""
+
+    return HarnessAdapterCapabilities(
+        interface_version=RemoteOperatorHarnessAdapter.interface_version,
+        supported_required_operations=(
+            "start_session",
+            "begin_turn",
+            "read_events",
+            "interrupt_turn",
+            "collect_candidate_result",
+            "graceful_stop",
+            "cancel",
+            "reconcile",
+        ),
+        supported_optional_operations=("resume_session",),
+        supports_native_resume=True,
+        supports_native_fork=False,
+        supports_steering=False,
+        supports_approval_response=False,
+        supports_checkpoint=False,
+        supports_config_staging=False,
+        supports_subagent_capability_ceiling=True,
+        supports_structured_events=True,
+        supports_provider_native_idempotency=False,
+        provider_capability_ids=("codex-app-server-stdio",),
+    )
+
+
 class RemoteCodexOperatorAdapter(RemoteOperatorHarnessAdapter):
     """Compatibility wrapper for the reviewed Codex App Server realm."""
 
@@ -108,31 +137,12 @@ class RemoteCodexOperatorAdapter(RemoteOperatorHarnessAdapter):
         super().__init__(
             client,
             turn_input_loader=turn_input_loader,
-            capabilities=HarnessAdapterCapabilities(
-                interface_version=self.interface_version,
-                supported_required_operations=(
-                    "start_session",
-                    "begin_turn",
-                    "read_events",
-                    "interrupt_turn",
-                    "collect_candidate_result",
-                    "graceful_stop",
-                    "cancel",
-                    "reconcile",
-                ),
-                supported_optional_operations=("resume_session",),
-                supports_native_resume=True,
-                supports_native_fork=False,
-                supports_steering=False,
-                supports_approval_response=False,
-                supports_checkpoint=False,
-                supports_config_staging=False,
-                supports_subagent_capability_ceiling=True,
-                supports_structured_events=True,
-                supports_provider_native_idempotency=False,
-                provider_capability_ids=("codex-app-server-stdio",),
-            ),
+            capabilities=codex_remote_capabilities(),
         )
 
 
-__all__ = ["RemoteCodexOperatorAdapter", "CodexConsultationIngress"]
+__all__ = [
+    "RemoteCodexOperatorAdapter",
+    "CodexConsultationIngress",
+    "codex_remote_capabilities",
+]

@@ -378,7 +378,7 @@ def test_existing_provider_chain_records_uncertainty_and_remains_single_owner() 
     broker_status = definition(
         BROKER, "ExecutiveWorkerBroker._ohf_materialization_status"
     )
-    remote = definition(REMOTE, "RemoteCodexOperatorAdapter.__init__")
+    remote = definition(REMOTE, "codex_remote_capabilities")
     remote_status = definition(
         REMOTE_GENERIC, "RemoteOperatorHarnessAdapter.materialization_status"
     )

@@ -10,7 +10,10 @@ from control_plane.operator_harness_contract import (
     HarnessAdapterCapabilities,
     OPERATOR_HARNESS_INTERFACE_VERSION,
 )
-from control_plane.remote_codex_operator_adapter import RemoteCodexOperatorAdapter
+from control_plane.remote_codex_operator_adapter import (
+    RemoteCodexOperatorAdapter,
+    codex_remote_capabilities,
+)
 from control_plane.remote_operator_harness_adapter import RemoteOperatorHarnessAdapter
 
 
@@ -69,6 +72,7 @@ def test_codex_wrapper_is_only_a_compatibility_composition_layer():
     }
     assert defined_methods == {"__init__"}
     capabilities = adapter.describe_capabilities()
+    assert capabilities == codex_remote_capabilities()
     assert capabilities.supported_required_operations == _REQUIRED
     assert capabilities.supported_optional_operations == ("resume_session",)
     assert capabilities.provider_capability_ids == ("codex-app-server-stdio",)
