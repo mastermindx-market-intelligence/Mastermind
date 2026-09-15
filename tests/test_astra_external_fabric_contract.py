@@ -99,6 +99,7 @@ def test_frozen_submit_shape_refuses_physical_routing_fields():
         "endpoint",
         "host",
         "worker_id",
+        "socket_path",
     )
     for forbidden in forbidden_fields:
         payload = dict(VALID)

@@ -223,3 +223,25 @@ def test_existing_http_headers_helper_refuses_as_configuration_drift(monkeypatch
 
     with pytest.raises(RegistrationError, match="different configuration"):
         registration.register(URL)
+
+
+def test_unknown_transport_field_refuses_as_configuration_drift(monkeypatch: pytest.MonkeyPatch):
+    import ops.codex_fabric.register_executive_mcp as registration
+
+    row = {
+        "name": SERVER,
+        "enabled": True,
+        "transport": {
+            "type": "streamable_http",
+            "url": URL,
+            "bearer_token_env_var": None,
+            "http_headers": None,
+            "env_http_headers": None,
+            "http_headers_helper": None,
+            "future_secret_field": "opaque",
+        },
+        "auth_status": "unknown",
+    }
+    monkeypatch.setattr(registration, "_list_servers", lambda _codex: [row])
+    with pytest.raises(RegistrationError, match="different configuration"):
+        register(URL)

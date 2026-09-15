@@ -9,17 +9,22 @@ from __future__ import annotations
 
 import base64
 import ctypes
+import errno
+import fcntl
 import dataclasses
 import hashlib
 import hmac
 import json
 import os
+import queue
+import threading
 import stat
 import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from contextlib import contextmanager
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, Protocol
@@ -33,6 +38,9 @@ REQUIRED_READ_SCOPE = "mastermind.executive.read"
 REQUIRED_SUBMIT_SCOPE = "mastermind.executive.intent.submit"
 NON_AUTHORIZING_SCOPES = frozenset({"offline_access"})
 REFRESH_SKEW_SECONDS = 120
+REFRESH_LOCK_TIMEOUT_SECONDS = 2.0
+REFRESH_LOCK_DIRNAME = "mastermind-codex-fabric"
+HEADER_HELPER_DEADLINE_SECONDS = 5.0
 MAX_POLICY_BYTES = 1024 * 1024
 MAX_TOKEN_CHARS = 32768
 MAX_CREDENTIAL_BYTES = 64 * 1024
@@ -64,6 +72,7 @@ class CredentialBundle:
     refresh_token: str
     expires_at: int
     policy_digest: str
+    refresh_state: str = "ready"
 
 
 class CredentialStore(Protocol):
@@ -238,6 +247,94 @@ def validate_access_token(
     return claims
 
 
+def _validate_bundle_for_use(
+    bundle: CredentialBundle,
+    policy: ExecutiveAuthPolicy,
+) -> int:
+    if not isinstance(bundle, CredentialBundle) or bundle.policy_digest != policy.policy_digest:
+        raise ExecutiveAuthError("stored Executive credential does not match installed policy")
+    if bundle.refresh_state != "ready":
+        raise ExecutiveAuthError(
+            "stored Executive credential refresh state requires reauthorization"
+        )
+    _claims, observed_expiry = _validate_claims(bundle.access_token, policy)
+    if observed_expiry != bundle.expires_at:
+        raise ExecutiveAuthError("stored Executive credential expiry is inconsistent")
+    return observed_expiry
+
+
+@contextmanager
+def _exclusive_refresh_lock(
+    *,
+    lock_root: Path | None = None,
+    timeout_seconds: float = REFRESH_LOCK_TIMEOUT_SECONDS,
+):
+    """One bounded, non-secret local mutex for refresh-token rotation."""
+
+    root = (
+        Path(lock_root)
+        if lock_root is not None
+        else Path.home() / "Library" / "Caches" / REFRESH_LOCK_DIRNAME
+    )
+    try:
+        root.mkdir(mode=0o700, parents=False, exist_ok=True)
+        directory = root.lstat()
+    except OSError:
+        raise ExecutiveAuthError("Executive refresh lock is unavailable") from None
+    if (
+        stat.S_ISLNK(directory.st_mode)
+        or not stat.S_ISDIR(directory.st_mode)
+        or directory.st_uid != os.geteuid()
+        or stat.S_IMODE(directory.st_mode) != 0o700
+    ):
+        raise ExecutiveAuthError("Executive refresh lock metadata is unsafe")
+
+    lock_path = root / "refresh.lock"
+    flags = (
+        os.O_RDWR
+        | os.O_CREAT
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    try:
+        descriptor = os.open(lock_path, flags, 0o600)
+    except OSError:
+        raise ExecutiveAuthError("Executive refresh lock is unavailable") from None
+    acquired = False
+    try:
+        opened = os.fstat(descriptor)
+        named = lock_path.lstat()
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or opened.st_dev != named.st_dev
+            or opened.st_ino != named.st_ino
+            or opened.st_uid != os.geteuid()
+            or opened.st_nlink != 1
+            or stat.S_IMODE(opened.st_mode) != 0o600
+        ):
+            raise ExecutiveAuthError("Executive refresh lock metadata is unsafe")
+        deadline = time.monotonic() + max(0.0, float(timeout_seconds))
+        while True:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                acquired = True
+                break
+            except OSError as exc:
+                if exc.errno not in (errno.EAGAIN, errno.EACCES, errno.EWOULDBLOCK):
+                    raise ExecutiveAuthError("Executive refresh lock is unavailable") from None
+                if time.monotonic() >= deadline:
+                    raise ExecutiveAuthError("Executive refresh lock timed out") from None
+                time.sleep(0.05)
+        yield
+    finally:
+        if acquired:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+            except OSError:
+                pass
+        os.close(descriptor)
+
+
 def headers_for_codex(
     *,
     policy_path: Path | str,
@@ -245,50 +342,72 @@ def headers_for_codex(
     now_epoch: int,
     expected_uid: int = 0,
     refresh_fn: Callable[[ExecutiveAuthPolicy, CredentialBundle], Mapping[str, Any]] | None = None,
+    refresh_lock: Callable[[], Any] | None = None,
 ) -> dict[str, str]:
     policy = load_installed_policy(policy_path, expected_uid=expected_uid)
     bundle = store.load()
-    if not isinstance(bundle, CredentialBundle) or bundle.policy_digest != policy.policy_digest:
-        raise ExecutiveAuthError("stored Executive credential does not match installed policy")
-
-    _claims, observed_expiry = _validate_claims(bundle.access_token, policy)
-    if observed_expiry != bundle.expires_at:
-        raise ExecutiveAuthError("stored Executive credential expiry is inconsistent")
+    observed_expiry = _validate_bundle_for_use(bundle, policy)
     if observed_expiry > now_epoch + REFRESH_SKEW_SECONDS:
         validate_access_token(bundle.access_token, policy, now_epoch=now_epoch)
         return {"Authorization": f"Bearer {bundle.access_token}"}
     if not callable(refresh_fn):
         raise ExecutiveAuthError("Executive access token refresh is unavailable")
+
+    lock_factory = refresh_lock if refresh_lock is not None else _exclusive_refresh_lock
     try:
-        response = refresh_fn(policy, bundle)
-    except ExecutiveAuthError:
-        raise
+        lock_context = lock_factory()
     except Exception:
-        raise ExecutiveAuthError("Executive access token refresh failed") from None
-    if not isinstance(response, Mapping):
-        raise ExecutiveAuthError("Executive access token refresh failed")
-    replacement = response.get("access_token")
-    if not isinstance(replacement, str):
-        raise ExecutiveAuthError("Executive access token refresh failed")
-    claims = validate_access_token(replacement, policy, now_epoch=now_epoch)
-    expiry = claims.get("exp")
-    assert isinstance(expiry, int) and not isinstance(expiry, bool)
-    rotated = response.get("refresh_token", bundle.refresh_token)
-    if not isinstance(rotated, str) or not rotated:
-        raise ExecutiveAuthError("Executive refresh token rotation is invalid")
-    updated = CredentialBundle(
-        client_id=bundle.client_id,
-        access_token=replacement,
-        refresh_token=rotated,
-        expires_at=expiry,
-        policy_digest=policy.policy_digest,
-    )
-    store.save(updated)
-    return {"Authorization": f"Bearer {replacement}"}
+        raise ExecutiveAuthError("Executive refresh lock is unavailable") from None
+
+    with lock_context:
+        # Another helper may have won while this process waited.  Re-read both
+        # policy and credential under the mutex before any refresh effect.
+        policy = load_installed_policy(policy_path, expected_uid=expected_uid)
+        bundle = store.load()
+        observed_expiry = _validate_bundle_for_use(bundle, policy)
+        if observed_expiry > now_epoch + REFRESH_SKEW_SECONDS:
+            validate_access_token(bundle.access_token, policy, now_epoch=now_epoch)
+            return {"Authorization": f"Bearer {bundle.access_token}"}
+
+        # Persist the same credential document as pending before the network
+        # effect.  Any timeout/crash/save ambiguity after this point therefore
+        # quarantines future helpers instead of replaying a rotating token.
+        pending = dataclasses.replace(bundle, refresh_state="pending")
+        store.save(pending)
+        try:
+            response = refresh_fn(policy, bundle)
+        except ExecutiveAuthError:
+            raise
+        except Exception:
+            raise ExecutiveAuthError("Executive access token refresh failed") from None
+        if not isinstance(response, Mapping):
+            raise ExecutiveAuthError("Executive access token refresh failed")
+        replacement = response.get("access_token")
+        if not isinstance(replacement, str):
+            raise ExecutiveAuthError("Executive access token refresh failed")
+        claims = validate_access_token(replacement, policy, now_epoch=now_epoch)
+        expiry = claims.get("exp")
+        assert isinstance(expiry, int) and not isinstance(expiry, bool)
+        rotated = response.get("refresh_token", bundle.refresh_token)
+        if not isinstance(rotated, str) or not rotated:
+            raise ExecutiveAuthError("Executive refresh token rotation is invalid")
+        updated = CredentialBundle(
+            client_id=bundle.client_id,
+            access_token=replacement,
+            refresh_token=rotated,
+            expires_at=expiry,
+            policy_digest=policy.policy_digest,
+            refresh_state="ready",
+        )
+        store.save(updated)
+        return {"Authorization": f"Bearer {replacement}"}
 
 
 _CREDENTIAL_KEYS = frozenset(
-    {"schema", "client_id", "access_token", "refresh_token", "expires_at", "policy_digest"}
+    {
+        "schema", "client_id", "access_token", "refresh_token", "expires_at",
+        "policy_digest", "refresh_state",
+    }
 )
 
 
@@ -302,6 +421,7 @@ def _credential_bytes(bundle: CredentialBundle) -> bytes:
         "refresh_token": bundle.refresh_token,
         "expires_at": bundle.expires_at,
         "policy_digest": bundle.policy_digest,
+        "refresh_state": bundle.refresh_state,
     }
     raw = json.dumps(document, sort_keys=True, separators=(",", ":")).encode("utf-8")
     if len(raw) > MAX_CREDENTIAL_BYTES:
@@ -323,6 +443,7 @@ def _credential_from_bytes(raw: bytes | None) -> CredentialBundle:
     refresh_token = document.get("refresh_token")
     expires_at = document.get("expires_at")
     policy_digest = document.get("policy_digest")
+    refresh_state = document.get("refresh_state")
     if (
         document.get("schema") != CREDENTIAL_SCHEMA
         or not isinstance(client_id, str) or not client_id or client_id != client_id.strip()
@@ -331,6 +452,7 @@ def _credential_from_bytes(raw: bytes | None) -> CredentialBundle:
         or isinstance(expires_at, bool) or not isinstance(expires_at, int) or expires_at <= 0
         or not isinstance(policy_digest, str) or len(policy_digest) != 64
         or any(ch not in "0123456789abcdef" for ch in policy_digest)
+        or refresh_state not in {"ready", "pending"}
     ):
         raise ExecutiveAuthError("stored Executive credential is invalid")
     return CredentialBundle(
@@ -339,6 +461,7 @@ def _credential_from_bytes(raw: bytes | None) -> CredentialBundle:
         refresh_token=refresh_token,
         expires_at=expires_at,
         policy_digest=policy_digest,
+        refresh_state=refresh_state,
     )
 
 
@@ -367,6 +490,9 @@ class _MacKeychainApi:
         self._modify = security.SecKeychainItemModifyAttributesAndData
         self._modify.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p]
         self._modify.restype = ctypes.c_int32
+        self._delete = security.SecKeychainItemDelete
+        self._delete.argtypes = [ctypes.c_void_p]
+        self._delete.restype = ctypes.c_int32
         self._release = core.CFRelease
         self._release.argtypes = [ctypes.c_void_p]
         self._release.restype = None
@@ -412,6 +538,26 @@ class _MacKeychainApi:
         if result != 0:
             raise ExecutiveAuthError("stored Executive credential could not be updated")
 
+    def delete(self, service: bytes, account: bytes) -> bool:
+        item = ctypes.c_void_p()
+        status = self._find(
+            None, len(service), service, len(account), account,
+            None, None, ctypes.byref(item),
+        )
+        if status == _ERR_SEC_ITEM_NOT_FOUND:
+            return False
+        if status != 0 or not item.value:
+            if item.value:
+                self._release(item)
+            raise ExecutiveAuthError("stored Executive credential is unavailable")
+        try:
+            result = self._delete(item)
+        finally:
+            self._release(item)
+        if result != 0:
+            raise ExecutiveAuthError("stored Executive credential could not be deleted")
+        return True
+
 
 class KeychainCredentialStore:
     """One fixed Codex Executive credential document in the current user's Keychain."""
@@ -419,8 +565,17 @@ class KeychainCredentialStore:
     def __init__(self, *, api=None):
         self._api = api if api is not None else _MacKeychainApi()
 
+    def load_optional(self) -> CredentialBundle | None:
+        raw = self._api.read(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)
+        if raw is None:
+            return None
+        return _credential_from_bytes(raw)
+
     def load(self) -> CredentialBundle:
-        return _credential_from_bytes(self._api.read(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT))
+        value = self.load_optional()
+        if value is None:
+            raise ExecutiveAuthError("stored Executive credential is unavailable")
+        return value
 
     def save(self, bundle: CredentialBundle) -> None:
         self._api.upsert(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, _credential_bytes(bundle))
@@ -500,25 +655,57 @@ def header_helper_main(
     store: CredentialStore | None = None,
     now_fn: Callable[[], float] = time.time,
     refresh_fn: Callable[[ExecutiveAuthPolicy, CredentialBundle], Mapping[str, Any]] | None = None,
+    deadline_seconds: float = HEADER_HELPER_DEADLINE_SECONDS,
     stdout=None,
     stderr=None,
 ) -> int:
     out = sys.stdout if stdout is None else stdout
     err = sys.stderr if stderr is None else stderr
-    selected_store = KeychainCredentialStore() if store is None else store
-    selected_refresh = refresh_access_token if refresh_fn is None else refresh_fn
-    try:
-        headers = headers_for_codex(
-            policy_path=policy_path,
-            store=selected_store,
-            now_epoch=int(now_fn()),
-            expected_uid=expected_uid,
-            refresh_fn=selected_refresh,
-        )
-    except Exception:
+    if (
+        isinstance(deadline_seconds, bool)
+        or not isinstance(deadline_seconds, (int, float))
+        or deadline_seconds <= 0
+        or deadline_seconds > 30
+    ):
         print("REFUSED: Executive MCP authorization unavailable.", file=err)
         return 2
-    print(json.dumps(headers, sort_keys=True, separators=(",", ":")), file=out)
+    selected_store = KeychainCredentialStore() if store is None else store
+    selected_refresh = refresh_access_token if refresh_fn is None else refresh_fn
+    result_queue: queue.Queue[tuple[str, object]] = queue.Queue(maxsize=1)
+
+    def run_authorization() -> None:
+        try:
+            headers = headers_for_codex(
+                policy_path=policy_path,
+                store=selected_store,
+                now_epoch=int(now_fn()),
+                expected_uid=expected_uid,
+                refresh_fn=selected_refresh,
+            )
+        except BaseException:
+            result = ("error", None)
+        else:
+            result = ("ok", headers)
+        try:
+            result_queue.put_nowait(result)
+        except queue.Full:
+            pass
+
+    worker = threading.Thread(
+        target=run_authorization,
+        name="mastermind-executive-mcp-header-helper",
+        daemon=True,
+    )
+    worker.start()
+    try:
+        status, value = result_queue.get(timeout=float(deadline_seconds))
+    except queue.Empty:
+        print("REFUSED: Executive MCP authorization unavailable.", file=err)
+        return 2
+    if status != "ok" or not isinstance(value, dict):
+        print("REFUSED: Executive MCP authorization unavailable.", file=err)
+        return 2
+    print(json.dumps(value, sort_keys=True, separators=(",", ":")), file=out)
     return 0
 
 

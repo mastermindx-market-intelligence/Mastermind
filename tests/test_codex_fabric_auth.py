@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import dataclasses
 import hashlib
 import json
 import os
@@ -169,13 +170,13 @@ def test_headers_refresh_once_near_expiry_and_persist_rotation(tmp_path: Path):
 
     assert headers == {"Authorization": f"Bearer {refreshed}"}
     assert len(calls) == 1
-    assert len(store.saved) == 1
+    assert [bundle.refresh_state for bundle in store.saved] == ["pending", "ready"]
     assert store.bundle.refresh_token == "refresh-rotated"
     assert store.bundle.access_token == refreshed
     assert store.bundle.expires_at == 1_900_100_000
 
 
-def test_refresh_with_invalid_replacement_never_mutates_store(tmp_path: Path):
+def test_refresh_with_invalid_replacement_quarantines_same_credential(tmp_path: Path):
     policy_path = _write_policy(tmp_path)
     policy = load_installed_policy(policy_path, expected_uid=os.getuid())
     original = _bundle(policy, access_token=_token(exp=1_900_000_150))
@@ -188,8 +189,8 @@ def test_refresh_with_invalid_replacement_never_mutates_store(tmp_path: Path):
             refresh_fn=lambda *_args: {"access_token": _token(audience="https://wrong.example.com/")},
         )
 
-    assert store.bundle == original
-    assert store.saved == []
+    assert store.bundle == dataclasses.replace(original, refresh_state="pending")
+    assert [bundle.refresh_state for bundle in store.saved] == ["pending"]
 
 
 def test_policy_digest_movement_refuses_before_refresh(tmp_path: Path):
@@ -360,3 +361,162 @@ def test_default_refresh_refuses_non_bearer_token_type(tmp_path: Path):
                 "token_type": "MAC",
             },
         )
+
+
+def test_refresh_marks_same_keychain_bundle_pending_before_network_and_restores_ready(tmp_path: Path):
+    from contextlib import nullcontext
+    import ops.codex_fabric.executive_mcp_auth as auth
+
+    policy_path = _write_policy(tmp_path)
+    policy = load_installed_policy(policy_path, expected_uid=os.getuid())
+    old = _bundle(policy, access_token=_token(exp=1_900_000_150))
+    store = MemoryStore(old)
+    replacement = _token(exp=1_900_100_000)
+    observed_states = []
+
+    def refresh(_policy, _bundle):
+        observed_states.append(store.bundle.refresh_state)
+        return {
+            "access_token": replacement,
+            "refresh_token": "refresh-rotated",
+        }
+
+    headers = headers_for_codex(
+        policy_path=policy_path,
+        store=store,
+        now_epoch=1_900_000_100,
+        expected_uid=os.getuid(),
+        refresh_fn=refresh,
+        refresh_lock=lambda: nullcontext(),
+    )
+
+    assert observed_states == ["pending"]
+    assert [bundle.refresh_state for bundle in store.saved] == ["pending", "ready"]
+    assert store.bundle.refresh_state == "ready"
+    assert headers == {"Authorization": f"Bearer {replacement}"}
+
+
+def test_refresh_failure_leaves_pending_and_next_helper_refuses_without_second_effect(tmp_path: Path):
+    from contextlib import nullcontext
+
+    policy_path = _write_policy(tmp_path)
+    policy = load_installed_policy(policy_path, expected_uid=os.getuid())
+    store = MemoryStore(_bundle(policy, access_token=_token(exp=1_900_000_150)))
+    calls = []
+
+    with pytest.raises(ExecutiveAuthError):
+        headers_for_codex(
+            policy_path=policy_path,
+            store=store,
+            now_epoch=1_900_000_100,
+            expected_uid=os.getuid(),
+            refresh_fn=lambda *_args: calls.append("effect") or (_ for _ in ()).throw(TimeoutError()),
+            refresh_lock=lambda: nullcontext(),
+        )
+    assert calls == ["effect"]
+    assert store.bundle.refresh_state == "pending"
+
+    with pytest.raises(ExecutiveAuthError, match="refresh state"):
+        headers_for_codex(
+            policy_path=policy_path,
+            store=store,
+            now_epoch=1_900_000_101,
+            expected_uid=os.getuid(),
+            refresh_fn=lambda *_args: calls.append("duplicate"),
+            refresh_lock=lambda: nullcontext(),
+        )
+    assert calls == ["effect"]
+
+
+def test_waiting_helper_reloads_bundle_after_lock_and_uses_concurrent_winner(tmp_path: Path):
+    from contextlib import contextmanager
+
+    policy_path = _write_policy(tmp_path)
+    policy = load_installed_policy(policy_path, expected_uid=os.getuid())
+    old = _bundle(policy, access_token=_token(exp=1_900_000_150))
+    winner = _bundle(
+        policy,
+        access_token=_token(exp=1_900_100_000),
+        refresh_token="winner-refresh",
+    )
+    store = MemoryStore(old)
+    calls = []
+
+    @contextmanager
+    def lock_with_winner():
+        store.bundle = winner
+        yield
+
+    headers = headers_for_codex(
+        policy_path=policy_path,
+        store=store,
+        now_epoch=1_900_000_100,
+        expected_uid=os.getuid(),
+        refresh_fn=lambda *_args: calls.append("duplicate"),
+        refresh_lock=lock_with_winner,
+    )
+    assert calls == []
+    assert headers == {"Authorization": f"Bearer {winner.access_token}"}
+
+
+def test_refresh_lock_uses_fixed_private_metadata(tmp_path: Path):
+    import stat as stat_module
+    import ops.codex_fabric.executive_mcp_auth as auth
+
+    root = tmp_path / "cache"
+    with auth._exclusive_refresh_lock(lock_root=root, timeout_seconds=0.2):
+        directory = root.lstat()
+        lock_file = (root / "refresh.lock").lstat()
+        assert stat_module.S_IMODE(directory.st_mode) == 0o700
+        assert stat_module.S_IMODE(lock_file.st_mode) == 0o600
+        assert directory.st_uid == os.geteuid()
+        assert lock_file.st_uid == os.geteuid()
+        assert stat_module.S_ISDIR(directory.st_mode)
+        assert stat_module.S_ISREG(lock_file.st_mode)
+
+
+def test_header_helper_deadline_refuses_blocked_keychain_without_header(tmp_path: Path, capsys):
+    import time
+    import ops.codex_fabric.executive_mcp_auth as auth
+
+    policy_path = _write_policy(tmp_path)
+
+    class BlockingStore:
+        def load(self):
+            time.sleep(2)
+            raise AssertionError("deadline should return before this completes")
+        def save(self, _bundle):
+            raise AssertionError("unexpected write")
+
+    started = time.monotonic()
+    code = auth.header_helper_main(
+        policy_path=policy_path,
+        expected_uid=os.getuid(),
+        store=BlockingStore(),
+        deadline_seconds=0.05,
+    )
+    elapsed = time.monotonic() - started
+    captured = capsys.readouterr()
+    assert code == 2
+    assert elapsed < 0.5
+    assert captured.out == ""
+    assert captured.err == "REFUSED: Executive MCP authorization unavailable.\n"
+
+
+def test_header_helper_deadline_still_emits_success_before_bound(tmp_path: Path, capsys):
+    import ops.codex_fabric.executive_mcp_auth as auth
+
+    policy_path = _write_policy(tmp_path)
+    policy = load_installed_policy(policy_path, expected_uid=os.getuid())
+    store = MemoryStore(_bundle(policy))
+    code = auth.header_helper_main(
+        policy_path=policy_path,
+        expected_uid=os.getuid(),
+        store=store,
+        now_fn=lambda: 1_900_000_100,
+        deadline_seconds=0.5,
+    )
+    captured = capsys.readouterr()
+    assert code == 0
+    assert json.loads(captured.out) == {"Authorization": f"Bearer {store.bundle.access_token}"}
+    assert captured.err == ""

@@ -40,10 +40,14 @@ from ops.codex_fabric.executive_mcp_auth import (
 CALLBACK_URL = "http://127.0.0.1:8769/oauth/callback"
 CLIENT_NAME = "Mastermind Codex Astra"
 REGISTRATION_SCHEMA = "mastermind.codex_fabric.executive_mcp_registration.v1"
-PENDING_REGISTRATION_SCHEMA = "mastermind.codex_fabric.executive_mcp_registration_attempt.v1"
+PENDING_REGISTRATION_SCHEMA_V1 = "mastermind.codex_fabric.executive_mcp_registration_attempt.v1"
+PENDING_REGISTRATION_SCHEMA = "mastermind.codex_fabric.executive_mcp_registration_attempt.v2"
 REGISTRATION_ACCOUNT = b"astra-executive-registration"
 _REGISTRATION_KEYS = frozenset({"schema", "client_id", "redirect_uri", "policy_digest"})
-_PENDING_REGISTRATION_KEYS = frozenset({"schema", "attempt_ref", "redirect_uri", "policy_digest"})
+_PENDING_REGISTRATION_V1_KEYS = frozenset({"schema", "attempt_ref", "redirect_uri", "policy_digest"})
+_PENDING_REGISTRATION_KEYS = frozenset(
+    {"schema", "attempt_ref", "client_name", "redirect_uri", "policy_digest"}
+)
 
 
 class EnrollmentError(RuntimeError):
@@ -52,6 +56,10 @@ class EnrollmentError(RuntimeError):
 
 class EnrollmentEffectUnknown(EnrollmentError):
     """DCR may have committed; automatic retry is forbidden until reconciled."""
+
+
+class EnrollmentDefinitiveRefusal(EnrollmentError):
+    """Auth0 returned a bounded refusal proving this DCR effect did not commit."""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -73,6 +81,7 @@ class PendingRegistration:
     attempt_ref: str
     redirect_uri: str
     policy_digest: str
+    client_name: str | None = None
 
 
 class KeychainRegistrationStore:
@@ -113,11 +122,31 @@ class KeychainRegistrationStore:
             return ClientRegistration(client_id, redirect_uri, policy_digest)
         if schema == PENDING_REGISTRATION_SCHEMA and set(value) == _PENDING_REGISTRATION_KEYS:
             attempt_ref = value.get("attempt_ref")
+            client_name = value.get("client_name")
             redirect_uri = value.get("redirect_uri")
             policy_digest = value.get("policy_digest")
-            if not self._hex64(attempt_ref) or redirect_uri != CALLBACK_URL or not self._hex64(policy_digest):
+            if (
+                not self._hex64(attempt_ref)
+                or client_name != f"{CLIENT_NAME} {attempt_ref[:16]}"
+                or redirect_uri != CALLBACK_URL
+                or not self._hex64(policy_digest)
+            ):
                 raise EnrollmentError("stored Executive client registration is invalid")
-            return PendingRegistration(attempt_ref, redirect_uri, policy_digest)
+            return PendingRegistration(attempt_ref, redirect_uri, policy_digest, client_name)
+        if (
+            schema == PENDING_REGISTRATION_SCHEMA_V1
+            and set(value) == _PENDING_REGISTRATION_V1_KEYS
+        ):
+            attempt_ref = value.get("attempt_ref")
+            redirect_uri = value.get("redirect_uri")
+            policy_digest = value.get("policy_digest")
+            if (
+                not self._hex64(attempt_ref)
+                or redirect_uri != CALLBACK_URL
+                or not self._hex64(policy_digest)
+            ):
+                raise EnrollmentError("stored Executive client registration is invalid")
+            return PendingRegistration(attempt_ref, redirect_uri, policy_digest, None)
         raise EnrollmentError("stored Executive client registration is invalid")
 
     def load_optional(self) -> ClientRegistration | None:
@@ -130,6 +159,7 @@ class KeychainRegistrationStore:
         if (
             not isinstance(pending, PendingRegistration)
             or not self._hex64(pending.attempt_ref)
+            or pending.client_name != f"{CLIENT_NAME} {pending.attempt_ref[:16]}"
             or pending.redirect_uri != CALLBACK_URL
             or not self._hex64(pending.policy_digest)
         ):
@@ -138,12 +168,38 @@ class KeychainRegistrationStore:
             {
                 "schema": PENDING_REGISTRATION_SCHEMA,
                 "attempt_ref": pending.attempt_ref,
+                "client_name": pending.client_name,
                 "redirect_uri": pending.redirect_uri,
                 "policy_digest": pending.policy_digest,
             },
             sort_keys=True, separators=(",", ":"),
         ).encode("utf-8")
         self._api.upsert(KEYCHAIN_SERVICE, REGISTRATION_ACCOUNT, raw)
+
+    def clear_pending(self, attempt_ref: str) -> None:
+        state = self.load_state()
+        if not isinstance(state, PendingRegistration) or state.attempt_ref != attempt_ref:
+            raise EnrollmentError("Executive client registration attempt does not match pending state")
+        try:
+            deleted = self._api.delete(KEYCHAIN_SERVICE, REGISTRATION_ACCOUNT)
+        except Exception:
+            raise EnrollmentEffectUnknown(
+                "Executive client registration cleanup effect is unknown"
+            ) from None
+        if deleted is not True:
+            raise EnrollmentEffectUnknown(
+                "Executive client registration cleanup effect is unknown"
+            )
+        try:
+            remaining = self.load_state()
+        except Exception:
+            raise EnrollmentEffectUnknown(
+                "Executive client registration cleanup effect is unknown"
+            ) from None
+        if remaining is not None:
+            raise EnrollmentEffectUnknown(
+                "Executive client registration cleanup effect is unknown"
+            )
 
     def save(self, registration: ClientRegistration) -> None:
         if (
@@ -172,12 +228,33 @@ def _exact_issuer_endpoint(policy: ExecutiveAuthPolicy, suffix: str, value: Any)
     return expected
 
 
+def _validated_issuer_root(value: str) -> str:
+    try:
+        parsed = urllib.parse.urlsplit(value)
+        _ = parsed.port
+    except ValueError:
+        raise EnrollmentError("Executive authorization metadata is incompatible") from None
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path != "/"
+        or parsed.query
+        or parsed.fragment
+        or value != urllib.parse.urlunsplit(("https", parsed.netloc, "/", "", ""))
+    ):
+        raise EnrollmentError("Executive authorization metadata is incompatible")
+    return value
+
+
 def discover_metadata(
     policy: ExecutiveAuthPolicy,
     *,
     get_json: Callable[[str], Mapping[str, Any]],
 ) -> OidcMetadata:
-    discovery_url = policy.issuer.rstrip("/") + "/.well-known/openid-configuration"
+    issuer = _validated_issuer_root(policy.issuer)
+    discovery_url = issuer + ".well-known/openid-configuration"
     try:
         value = get_json(discovery_url)
     except EnrollmentError:
@@ -217,10 +294,15 @@ def ensure_client_registration(
             raise EnrollmentError("stored Executive client registration does not match installed policy")
         return existing
     attempt_ref = attempt_ref_fn()
-    pending = PendingRegistration(attempt_ref, CALLBACK_URL, policy.policy_digest)
+    pending = PendingRegistration(
+        attempt_ref,
+        CALLBACK_URL,
+        policy.policy_digest,
+        f"{CLIENT_NAME} {attempt_ref[:16]}",
+    )
     store.save_pending(pending)
     request = {
-        "client_name": CLIENT_NAME,
+        "client_name": pending.client_name,
         "redirect_uris": [CALLBACK_URL],
         "token_endpoint_auth_method": "none",
         "grant_types": ["authorization_code", "refresh_token"],
@@ -228,6 +310,9 @@ def ensure_client_registration(
     }
     try:
         response = post_json(metadata.registration_endpoint, request)
+    except EnrollmentDefinitiveRefusal:
+        store.clear_pending(attempt_ref)
+        raise EnrollmentError("Executive public client registration was refused") from None
     except Exception:
         raise EnrollmentEffectUnknown("Executive public client registration effect is unknown") from None
     if not isinstance(response, Mapping):
@@ -258,6 +343,8 @@ def reconcile_pending_registration(
     *,
     store: KeychainRegistrationStore,
     observed_client_id: str,
+    observed_attempt_ref: str,
+    observed_client_name: str,
 ) -> ClientRegistration:
     """Bind one admin-observed DCR client to the exact pending operation.
 
@@ -271,6 +358,10 @@ def reconcile_pending_registration(
     if (
         state.policy_digest != policy.policy_digest
         or state.redirect_uri != CALLBACK_URL
+        or not isinstance(observed_attempt_ref, str)
+        or observed_attempt_ref != state.attempt_ref
+        or state.client_name is None
+        or observed_client_name != state.client_name
         or not isinstance(observed_client_id, str)
         or observed_client_id != observed_client_id.strip()
         or not observed_client_id.startswith("tpc_")
@@ -289,6 +380,33 @@ def reconcile_pending_registration(
             "Executive public client registration reconciliation effect is unknown"
         ) from None
     return registration
+
+
+def pending_registration_status(
+    policy: ExecutiveAuthPolicy,
+    *,
+    store: KeychainRegistrationStore,
+) -> dict[str, Any]:
+    """Return only non-secret metadata needed to reconcile one pending DCR effect."""
+
+    state = store.load_state()
+    if not isinstance(state, PendingRegistration):
+        raise EnrollmentError("Executive public client registration is not pending")
+    if (
+        state.policy_digest != policy.policy_digest
+        or state.redirect_uri != CALLBACK_URL
+    ):
+        raise EnrollmentError(
+            "pending Executive public client registration does not match installed policy"
+        )
+    return {
+        "attempt_ref": state.attempt_ref,
+        "client_name": state.client_name,
+        "policy_digest": state.policy_digest,
+        "reconcilable": state.client_name is not None,
+        "redirect_uri": state.redirect_uri,
+        "state": "effect_unknown",
+    }
 
 
 def build_authorize_url(
@@ -435,7 +553,24 @@ def _post_json(url: str, payload: dict[str, Any]) -> Mapping[str, Any]:
             return _read_json_response(response)
     except EnrollmentError:
         raise
-    except (OSError, urllib.error.URLError, urllib.error.HTTPError):
+    except urllib.error.HTTPError as exc:
+        if exc.code in {400, 401, 403}:
+            try:
+                raw = exc.read(MAX_CREDENTIAL_BYTES + 1)
+                value = json.loads(raw.decode("utf-8")) if len(raw) <= MAX_CREDENTIAL_BYTES else None
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                value = None
+            if (
+                isinstance(value, Mapping)
+                and isinstance(value.get("error"), str)
+                and value.get("error")
+                and value.get("client_id") is None
+            ):
+                raise EnrollmentDefinitiveRefusal(
+                    "Executive public client registration was refused"
+                ) from None
+        raise EnrollmentError("Executive public client registration failed") from None
+    except (OSError, urllib.error.URLError):
         raise EnrollmentError("Executive public client registration failed") from None
 
 
@@ -521,6 +656,15 @@ def enroll_once(
     registration = ensure_client_registration(
         policy, metadata, store=registrations, post_json=post_json
     )
+    try:
+        existing_credential = credentials.load_optional()
+    except ExecutiveAuthError:
+        raise EnrollmentError("stored Executive OAuth credential is invalid") from None
+    if (
+        existing_credential is not None
+        and existing_credential.client_id != registration.client_id
+    ):
+        raise EnrollmentError("stored Executive OAuth client does not match registration")
     state = random_token(32)
     verifier = random_token(64)
     if (
@@ -567,15 +711,59 @@ def main(
         "--reconcile-client-id",
         help="public Auth0 DCR client id observed by an authorized tenant admin",
     )
+    parser.add_argument(
+        "--reconcile-attempt-ref",
+        help="exact pending DCR attempt ref read from the local registration state",
+    )
+    parser.add_argument(
+        "--reconcile-client-name",
+        help="exact attempt-fingerprinted Auth0 client name observed by the tenant admin",
+    )
+    parser.add_argument(
+        "--pending-status",
+        action="store_true",
+        help="print non-secret metadata for the exact pending DCR operation",
+    )
     args = parser.parse_args(sys.argv[1:] if argv is None else argv)
-    registrations = KeychainRegistrationStore() if registration_store is None else registration_store
     try:
-        if args.reconcile_client_id is not None:
+        reconciliation_values = (
+            args.reconcile_client_id,
+            args.reconcile_attempt_ref,
+            args.reconcile_client_name,
+        )
+        if args.pending_status and any(
+            value is not None for value in reconciliation_values
+        ):
+            raise EnrollmentError(
+                "pending status cannot be combined with reconciliation"
+            )
+        if any(value is None for value in reconciliation_values) and any(
+            value is not None for value in reconciliation_values
+        ):
+            raise EnrollmentError(
+                "reconciliation requires client id, attempt ref, and client name together"
+            )
+        if args.pending_status:
+            registrations = (
+                KeychainRegistrationStore()
+                if registration_store is None
+                else registration_store
+            )
+            policy = load_installed_policy(policy_path, expected_uid=expected_uid)
+            payload = pending_registration_status(policy, store=registrations)
+        elif args.reconcile_client_id is not None:
+            registrations = (
+                KeychainRegistrationStore()
+                if registration_store is None
+                else registration_store
+            )
             policy = load_installed_policy(policy_path, expected_uid=expected_uid)
             registration = reconcile_pending_registration(
                 policy,
                 store=registrations,
                 observed_client_id=args.reconcile_client_id,
+                observed_attempt_ref=args.reconcile_attempt_ref,
+                observed_client_name=args.reconcile_client_name,
             )
             payload = {
                 "client_id_digest": hashlib.sha256(
@@ -588,7 +776,7 @@ def main(
             receipt = enroll_once(
                 policy_path=policy_path,
                 expected_uid=expected_uid,
-                registration_store=registrations,
+                registration_store=registration_store,
             )
             payload = dataclasses.asdict(receipt)
     except Exception:

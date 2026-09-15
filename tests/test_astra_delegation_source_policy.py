@@ -67,6 +67,12 @@ def test_runbook_records_real_client_auth_and_dcr_effect_unknown_boundaries():
         "must not retry",
         "must not delete the pending registration marker",
         "--reconcile-client-id",
+        "--reconcile-attempt-ref",
+        "--reconcile-client-name",
+        "pre-fingerprint",
+        "mcp_servers.mastermind-executive.http_headers_helper",
+        "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/bin/python3.14",
+        "working directory",
         "Mastermind Codex Astra",
         "offline_access",
         "must not request `openid`",
@@ -91,3 +97,16 @@ def test_runbook_preserves_exact_parent_and_capacity_ownership():
     )
     for phrase in required:
         assert phrase in text
+
+
+def test_astra_policy_contains_no_direct_provider_spawn_or_physical_assignment_commands():
+    section = _astra_section()
+    forbidden = (
+        "pool run",
+        "spawn_minimax",
+        "spawn_glm",
+        "provider_home=",
+        "account_number=",
+    )
+    for token in forbidden:
+        assert token not in section

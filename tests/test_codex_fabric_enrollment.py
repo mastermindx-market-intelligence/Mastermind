@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import dataclasses
 import json
 import os
 from pathlib import Path
@@ -9,7 +10,11 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 
 from integrations.business_mcp_auth.contracts import subject_digest
-from ops.codex_fabric.executive_mcp_auth import KeychainCredentialStore, load_installed_policy
+from ops.codex_fabric.executive_mcp_auth import (
+    CredentialBundle,
+    KeychainCredentialStore,
+    load_installed_policy,
+)
 from ops.codex_fabric.enroll_executive_mcp import (
     CALLBACK_URL,
     ClientRegistration,
@@ -70,6 +75,8 @@ class BlobApi:
         return self.values.get((service, account))
     def upsert(self, service: bytes, account: bytes, value: bytes):
         self.values[(service, account)] = value
+    def delete(self, service: bytes, account: bytes):
+        return self.values.pop((service, account), None) is not None
 
 
 def _metadata_document(**updates):
@@ -106,6 +113,15 @@ def test_discovery_requires_exact_same_issuer_endpoints_and_pkce(tmp_path: Path)
             discover_metadata(policy, get_json=lambda _url, m=mutation: _metadata_document(**m))
 
 
+def test_discovery_refuses_malformed_policy_issuer_before_network(tmp_path: Path):
+    policy = _policy(tmp_path)
+    malformed = dataclasses.replace(policy, issuer="http://issuer.example.com/")
+    seen = []
+    with pytest.raises(EnrollmentError):
+        discover_metadata(malformed, get_json=lambda url: seen.append(url) or _metadata_document())
+    assert seen == []
+
+
 def test_dcr_registration_is_persisted_and_reused_without_duplicate_client(tmp_path: Path):
     policy = _policy(tmp_path)
     metadata = discover_metadata(policy, get_json=lambda _url: _metadata_document())
@@ -116,14 +132,17 @@ def test_dcr_registration_is_persisted_and_reused_without_duplicate_client(tmp_p
     def post_json(url, payload):
         calls.append((url, payload))
         return {
-            "client_name": "Mastermind Codex Astra",
+            "client_name": "Mastermind Codex Astra aaaaaaaaaaaaaaaa",
             "client_id": "tpc_client123",
             "redirect_uris": [CALLBACK_URL],
             "grant_types": ["authorization_code", "refresh_token"],
             "token_endpoint_auth_method": "none",
         }
 
-    first = ensure_client_registration(policy, metadata, store=store, post_json=post_json)
+    first = ensure_client_registration(
+        policy, metadata, store=store, post_json=post_json,
+        attempt_ref_fn=lambda: "a" * 64,
+    )
     second = ensure_client_registration(policy, metadata, store=store, post_json=lambda *_: pytest.fail("duplicate DCR"))
     assert first == second == ClientRegistration(
         client_id="tpc_client123", redirect_uri=CALLBACK_URL, policy_digest=policy.policy_digest
@@ -131,7 +150,7 @@ def test_dcr_registration_is_persisted_and_reused_without_duplicate_client(tmp_p
     assert len(calls) == 1
     assert calls[0][0] == ISSUER + "oidc/register"
     assert calls[0][1] == {
-        "client_name": "Mastermind Codex Astra",
+        "client_name": "Mastermind Codex Astra aaaaaaaaaaaaaaaa",
         "redirect_uris": [CALLBACK_URL],
         "token_endpoint_auth_method": "none",
         "grant_types": ["authorization_code", "refresh_token"],
@@ -283,6 +302,35 @@ def test_enroll_once_persists_dcr_before_browser_and_binds_pkce(tmp_path: Path):
     assert credential_store.load().refresh_token == "refresh-live"
 
 
+def test_enroll_once_refuses_existing_credential_bound_to_different_client_before_browser(tmp_path: Path):
+    import ops.codex_fabric.enroll_executive_mcp as enroll
+
+    policy = _policy(tmp_path)
+    policy_path = tmp_path / "executive-mcp.json"
+    registration_store = KeychainRegistrationStore(api=BlobApi())
+    registration_store.save(ClientRegistration("tpc_registration", CALLBACK_URL, policy.policy_digest))
+    credential_store = KeychainCredentialStore(api=BlobApi())
+    credential_store.save(CredentialBundle(
+        client_id="tpc_other",
+        access_token=_token(),
+        refresh_token="refresh-existing",
+        expires_at=2_000_000_000,
+        policy_digest=policy.policy_digest,
+    ))
+    browser_calls = []
+    with pytest.raises(EnrollmentError, match="client"):
+        enroll.enroll_once(
+            policy_path=policy_path,
+            expected_uid=os.getuid(),
+            registration_store=registration_store,
+            credential_store=credential_store,
+            get_json=lambda _url: _metadata_document(),
+            post_json=lambda *_: pytest.fail("DCR must not repeat"),
+            authorize_code=lambda *_args: browser_calls.append(True) or "code",
+        )
+    assert browser_calls == []
+
+
 def test_enroll_once_reuses_persisted_dcr_client_without_second_registration(tmp_path: Path):
     import ops.codex_fabric.enroll_executive_mcp as enroll
 
@@ -345,6 +393,34 @@ def test_enrollment_main_emits_only_redacted_receipt(monkeypatch, capsys):
     assert captured.err == ""
 
 
+def test_enrollment_main_defers_keychain_construction_to_enroll_once(monkeypatch, capsys):
+    import ops.codex_fabric.enroll_executive_mcp as enroll
+
+    receipt = enroll.EnrollmentReceipt(
+        client_id_digest="a" * 64,
+        policy_digest="b" * 64,
+        expires_at=2_000_000_000,
+    )
+    calls = []
+
+    def fake_enroll_once(**kwargs):
+        calls.append(kwargs)
+        return receipt
+
+    monkeypatch.setattr(
+        enroll,
+        "KeychainRegistrationStore",
+        lambda: pytest.fail("normal enrollment must not construct the platform store in main"),
+    )
+    monkeypatch.setattr(enroll, "enroll_once", fake_enroll_once)
+
+    assert enroll.main([]) == 0
+    assert len(calls) == 1
+    assert calls[0]["registration_store"] is None
+    captured = capsys.readouterr()
+    assert captured.err == ""
+
+
 def test_dcr_persists_attempt_before_post_and_ambiguous_failure_blocks_retry(tmp_path: Path):
     import ops.codex_fabric.enroll_executive_mcp as enroll
 
@@ -393,18 +469,77 @@ def test_invalid_dcr_success_payload_keeps_effect_unknown_marker(tmp_path: Path)
     assert isinstance(store.load_state(), enroll.PendingRegistration)
 
 
+def test_definitive_dcr_refusal_clears_only_same_pending_attempt(tmp_path: Path):
+    import ops.codex_fabric.enroll_executive_mcp as enroll
+
+    policy = _policy(tmp_path)
+    metadata = discover_metadata(policy, get_json=lambda _url: _metadata_document())
+    store = KeychainRegistrationStore(api=BlobApi())
+
+    def refused(_url, _payload):
+        raise enroll.EnrollmentDefinitiveRefusal("refused")
+
+    with pytest.raises(EnrollmentError, match="refused"):
+        ensure_client_registration(
+            policy, metadata, store=store, post_json=refused,
+            attempt_ref_fn=lambda: "9" * 64,
+        )
+    assert store.load_state() is None
+
+
+def test_http_400_oauth_error_is_definitive_dcr_refusal(monkeypatch):
+    import io
+    import urllib.error
+    import ops.codex_fabric.enroll_executive_mcp as enroll
+
+    body = json.dumps({"error": "invalid_client_metadata", "error_description": "blocked"}).encode()
+    error = urllib.error.HTTPError(
+        ISSUER + "oidc/register", 400, "Bad Request", {}, io.BytesIO(body)
+    )
+    monkeypatch.setattr(enroll.urllib.request, "urlopen", lambda *_args, **_kwargs: (_ for _ in ()).throw(error))
+    with pytest.raises(enroll.EnrollmentDefinitiveRefusal):
+        enroll._post_json(ISSUER + "oidc/register", {"client_name": "x"})
+
+
+def test_legacy_prefingerprint_pending_marker_stays_readable_but_is_not_reconcilable(tmp_path: Path):
+    import ops.codex_fabric.enroll_executive_mcp as enroll
+
+    policy = _policy(tmp_path)
+    api = BlobApi()
+    raw = json.dumps({
+        "schema": "mastermind.codex_fabric.executive_mcp_registration_attempt.v1",
+        "attempt_ref": "c" * 64,
+        "redirect_uri": CALLBACK_URL,
+        "policy_digest": policy.policy_digest,
+    }, sort_keys=True, separators=(",", ":")).encode()
+    api.values[(enroll.KEYCHAIN_SERVICE, enroll.REGISTRATION_ACCOUNT)] = raw
+    store = KeychainRegistrationStore(api=api)
+    state = store.load_state()
+    assert isinstance(state, enroll.PendingRegistration)
+    assert state.client_name is None
+    with pytest.raises(EnrollmentError, match="reconcil"):
+        enroll.reconcile_pending_registration(
+            policy, store=store, observed_client_id="tpc_any",
+            observed_attempt_ref="c" * 64,
+            observed_client_name="Mastermind Codex Astra cccccccccccccccc",
+        )
+    assert store.load_state() == state
+
+
 def test_reconcile_pending_registration_accepts_exact_public_client_without_new_dcr(tmp_path: Path):
     import ops.codex_fabric.enroll_executive_mcp as enroll
 
     policy = _policy(tmp_path)
     api = BlobApi()
     store = KeychainRegistrationStore(api=api)
-    store.save_pending(enroll.PendingRegistration("d" * 64, CALLBACK_URL, policy.policy_digest))
+    store.save_pending(enroll.PendingRegistration("d" * 64, CALLBACK_URL, policy.policy_digest, "Mastermind Codex Astra dddddddddddddddd"))
 
     reconciled = enroll.reconcile_pending_registration(
         policy,
         store=store,
         observed_client_id="tpc_reconciled123",
+        observed_attempt_ref="d" * 64,
+        observed_client_name="Mastermind Codex Astra dddddddddddddddd",
     )
     assert reconciled == ClientRegistration(
         "tpc_reconciled123", CALLBACK_URL, policy.policy_digest
@@ -419,27 +554,38 @@ def test_reconcile_pending_registration_refuses_absent_completed_stale_or_non_tp
 
     with pytest.raises(EnrollmentError):
         enroll.reconcile_pending_registration(
-            policy, store=KeychainRegistrationStore(api=BlobApi()), observed_client_id="tpc_x"
+            policy, store=KeychainRegistrationStore(api=BlobApi()), observed_client_id="tpc_x", observed_attempt_ref="a" * 64, observed_client_name="Mastermind Codex Astra aaaaaaaaaaaaaaaa"
         )
 
     completed_api = BlobApi()
     completed = KeychainRegistrationStore(api=completed_api)
     completed.save(ClientRegistration("tpc_existing", CALLBACK_URL, policy.policy_digest))
     with pytest.raises(EnrollmentError):
-        enroll.reconcile_pending_registration(policy, store=completed, observed_client_id="tpc_other")
+        enroll.reconcile_pending_registration(policy, store=completed, observed_client_id="tpc_other", observed_attempt_ref="a" * 64, observed_client_name="Mastermind Codex Astra aaaaaaaaaaaaaaaa")
 
     stale_api = BlobApi()
     stale = KeychainRegistrationStore(api=stale_api)
-    stale.save_pending(enroll.PendingRegistration("e" * 64, CALLBACK_URL, "f" * 64))
+    stale.save_pending(enroll.PendingRegistration("e" * 64, CALLBACK_URL, "f" * 64, "Mastermind Codex Astra eeeeeeeeeeeeeeee"))
     with pytest.raises(EnrollmentError):
-        enroll.reconcile_pending_registration(policy, store=stale, observed_client_id="tpc_x")
+        enroll.reconcile_pending_registration(policy, store=stale, observed_client_id="tpc_x", observed_attempt_ref="e" * 64, observed_client_name="Mastermind Codex Astra eeeeeeeeeeeeeeee")
 
     pending_api = BlobApi()
     pending = KeychainRegistrationStore(api=pending_api)
-    pending.save_pending(enroll.PendingRegistration("a" * 64, CALLBACK_URL, policy.policy_digest))
+    pending.save_pending(enroll.PendingRegistration("a" * 64, CALLBACK_URL, policy.policy_digest, "Mastermind Codex Astra aaaaaaaaaaaaaaaa"))
     for bad in ("client123", "", " tpc_bad", "tpc_bad "):
         with pytest.raises(EnrollmentError):
-            enroll.reconcile_pending_registration(policy, store=pending, observed_client_id=bad)
+            enroll.reconcile_pending_registration(policy, store=pending, observed_client_id=bad, observed_attempt_ref="a" * 64, observed_client_name="Mastermind Codex Astra aaaaaaaaaaaaaaaa")
+    assert isinstance(pending.load_state(), enroll.PendingRegistration)
+    with pytest.raises(EnrollmentError):
+        enroll.reconcile_pending_registration(
+            policy, store=pending, observed_client_id="tpc_valid", observed_attempt_ref="b" * 64, observed_client_name="Mastermind Codex Astra aaaaaaaaaaaaaaaa"
+        )
+    assert isinstance(pending.load_state(), enroll.PendingRegistration)
+    with pytest.raises(EnrollmentError):
+        enroll.reconcile_pending_registration(
+            policy, store=pending, observed_client_id="tpc_valid",
+            observed_attempt_ref="a" * 64, observed_client_name="Mastermind Codex Astra legacy"
+        )
     assert isinstance(pending.load_state(), enroll.PendingRegistration)
 
 
@@ -450,11 +596,12 @@ def test_cli_reconciles_pending_public_client_id_without_echoing_it(tmp_path: Pa
     policy_path = tmp_path / "executive-mcp.json"
     api = BlobApi()
     store = KeychainRegistrationStore(api=api)
-    store.save_pending(enroll.PendingRegistration("f" * 64, CALLBACK_URL, policy.policy_digest))
+    store.save_pending(enroll.PendingRegistration("f" * 64, CALLBACK_URL, policy.policy_digest, "Mastermind Codex Astra ffffffffffffffff"))
     public_id = "tpc_reconcile_cli_123"
 
     code = enroll.main(
-        ["--reconcile-client-id", public_id],
+        ["--reconcile-client-id", public_id, "--reconcile-attempt-ref", "f" * 64,
+         "--reconcile-client-name", "Mastermind Codex Astra ffffffffffffffff"],
         policy_path=policy_path,
         expected_uid=os.getuid(),
         registration_store=store,
@@ -479,11 +626,12 @@ def test_cli_reconcile_refusal_is_opaque_and_does_not_clear_pending(tmp_path: Pa
     policy_path = tmp_path / "executive-mcp.json"
     api = BlobApi()
     store = KeychainRegistrationStore(api=api)
-    pending = enroll.PendingRegistration("a" * 64, CALLBACK_URL, policy.policy_digest)
+    pending = enroll.PendingRegistration("a" * 64, CALLBACK_URL, policy.policy_digest, "Mastermind Codex Astra aaaaaaaaaaaaaaaa")
     store.save_pending(pending)
 
     code = enroll.main(
-        ["--reconcile-client-id", "not-a-dcr-client"],
+        ["--reconcile-client-id", "not-a-dcr-client", "--reconcile-attempt-ref", "a" * 64,
+         "--reconcile-client-name", "Mastermind Codex Astra aaaaaaaaaaaaaaaa"],
         policy_path=policy_path,
         expected_uid=os.getuid(),
         registration_store=store,
@@ -493,3 +641,57 @@ def test_cli_reconcile_refusal_is_opaque_and_does_not_clear_pending(tmp_path: Pa
     assert captured.out == ""
     assert captured.err == "REFUSED: Executive MCP enrollment unavailable.\n"
     assert store.load_state() == pending
+
+
+def test_cli_pending_status_exposes_only_nonsecret_reconciliation_metadata(tmp_path: Path, capsys):
+    import ops.codex_fabric.enroll_executive_mcp as enroll
+
+    policy = _policy(tmp_path)
+    policy_path = tmp_path / "executive-mcp.json"
+    store = KeychainRegistrationStore(api=BlobApi())
+    store.save_pending(enroll.PendingRegistration(
+        "7" * 64, CALLBACK_URL, policy.policy_digest,
+        "Mastermind Codex Astra 7777777777777777",
+    ))
+    code = enroll.main(
+        ["--pending-status"],
+        policy_path=policy_path,
+        expected_uid=os.getuid(),
+        registration_store=store,
+    )
+    captured = capsys.readouterr()
+    assert code == 0
+    payload = json.loads(captured.out)
+    assert payload == {
+        "attempt_ref": "7" * 64,
+        "client_name": "Mastermind Codex Astra 7777777777777777",
+        "policy_digest": policy.policy_digest,
+        "reconcilable": True,
+        "redirect_uri": CALLBACK_URL,
+        "state": "effect_unknown",
+    }
+    assert captured.err == ""
+
+
+def test_cli_pending_status_marks_legacy_prefingerprint_marker_nonreconcilable(tmp_path: Path, capsys):
+    import ops.codex_fabric.enroll_executive_mcp as enroll
+
+    policy = _policy(tmp_path)
+    policy_path = tmp_path / "executive-mcp.json"
+    api = BlobApi()
+    api.values[(enroll.KEYCHAIN_SERVICE, enroll.REGISTRATION_ACCOUNT)] = json.dumps({
+        "schema": "mastermind.codex_fabric.executive_mcp_registration_attempt.v1",
+        "attempt_ref": "8" * 64,
+        "redirect_uri": CALLBACK_URL,
+        "policy_digest": policy.policy_digest,
+    }, sort_keys=True, separators=(",", ":")).encode()
+    code = enroll.main(
+        ["--pending-status"], policy_path=policy_path, expected_uid=os.getuid(),
+        registration_store=KeychainRegistrationStore(api=api),
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert payload["state"] == "effect_unknown"
+    assert payload["reconcilable"] is False
+    assert payload["client_name"] is None
+    assert payload["attempt_ref"] == "8" * 64

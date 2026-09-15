@@ -16,6 +16,14 @@ from urllib.parse import urlsplit
 
 SERVER_NAME = "mastermind-executive"
 _ALLOWED_HOSTS = frozenset({"127.0.0.1"})
+_KNOWN_STREAMABLE_HTTP_TRANSPORT_KEYS = frozenset({
+    "type",
+    "url",
+    "bearer_token_env_var",
+    "http_headers",
+    "env_http_headers",
+    "http_headers_helper",
+})
 
 
 class RegistrationError(RuntimeError):
@@ -105,6 +113,8 @@ def _matching_row(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
 def _validate_existing(row: dict[str, Any], expected_url: str) -> str | None:
     transport = row.get("transport")
     if not isinstance(transport, dict):
+        raise RegistrationError("existing mastermind-executive has different configuration")
+    if set(transport) - _KNOWN_STREAMABLE_HTTP_TRANSPORT_KEYS:
         raise RegistrationError("existing mastermind-executive has different configuration")
     if (
         row.get("enabled") is not True

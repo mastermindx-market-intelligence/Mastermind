@@ -35,6 +35,14 @@ Client credentials live in **macOS Keychain** and are supplied at connection tim
 `http_headers_helper`; access/refresh tokens must not be written to repository source, Codex TOML,
 argv, ambient environment, prompts, Agent OS, or logs.
 
+For the current reviewed canary, the Codex override key is
+`mcp_servers.mastermind-executive.http_headers_helper`. The qualified host interpreter is
+`/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/bin/python3.14`.
+Run the helper module from the reviewed repository/worktree **working directory** (or through the
+canonical launcher that pins that working directory) so `ops.codex_fabric.executive_mcp_auth` resolves
+from the reviewed source. These are host-specific canary coordinates, not permission to copy a helper
+command into an unrelated checkout or silently rewrite the user's global Codex configuration.
+
 Do **not** use `codex mcp login mastermind-executive` as the login path for this installation. It was
 serviceability-tested against Codex 0.154.0 and refused with a **resource identity mismatch**: the
 transport is loopback while the Executive OAuth resource identity is the existing Secure MCP Tunnel
@@ -49,9 +57,9 @@ stored and reused; do not create a new Auth0 application on each login.
 
 ## 3. DCR effect-unknown law — current live blocker
 
-The first live DCR attempt for the client name **Mastermind Codex Astra** reached the DCR HTTP effect
-boundary but returned no usable response to the client. The same Keychain registration item contains a
-pre-effect pending marker. Current state is **DCR_EFFECT_UNKNOWN**.
+The first live DCR attempt for the pre-fingerprint client name **Mastermind Codex Astra** reached the DCR
+HTTP effect boundary but returned no usable response to the client. The same Keychain registration item
+contains the legacy pending marker. Current state is **DCR_EFFECT_UNKNOWN**.
 
 While `DCR_EFFECT_UNKNOWN` is present:
 
@@ -60,19 +68,37 @@ While `DCR_EFFECT_UNKNOWN` is present:
 - it must not create a differently named client or use another carrier as failover;
 - user OAuth/PKCE cannot proceed because a verified client id is not yet available.
 
-Reconcile the Auth0 tenant first. With an authorized tenant-admin surface, inspect Applications for the
-exact client name `Mastermind Codex Astra` and callback `http://127.0.0.1:8769/oauth/callback`.
-If an exact matching client exists, recover its public `tpc_` client id through the authorized admin
-surface and run:
+Read the local non-secret reconciliation coordinates before using an authorized tenant-admin surface:
 
 ```bash
-python3 -m ops.codex_fabric.enroll_executive_mcp --reconcile-client-id "$PUBLIC_TPC_CLIENT_ID"
+python3 -m ops.codex_fabric.enroll_executive_mcp --pending-status
 ```
 
-The client id is public metadata; the command stores only the exact reconciled public client identity and
-prints a digest-only receipt. It performs no DCR call and no token exchange. If the tenant proves no such
-client exists, only then may the same logical enrollment operation clear/re-admit the pending state and
-issue one fresh DCR effect. Ambiguous tenant evidence stays blocked.
+The status receipt contains only the pending `attempt_ref`, exact client name when one was precommitted,
+callback, installed-policy digest, `state=effect_unknown`, and whether the marker is reconcilable. It does
+not make a DCR call, exchange a token, or expose a credential. A legacy **pre-fingerprint** marker reports
+`reconcilable=false` and `client_name=null`; it must remain blocked. Do not guess a name, retrofit an
+attempt fingerprint, clear the marker, or retry. Recovery of that historical operation requires a
+separately reviewed same-operation ceremony based on authoritative tenant evidence.
+
+For a newly admitted attempt, source precommits the exact client name as
+`Mastermind Codex Astra <first-16-attempt-ref-characters>`. Only when `--pending-status` reports
+`reconcilable=true` may an authorized tenant administrator inspect Applications for that exact
+fingerprinted name and callback `http://127.0.0.1:8769/oauth/callback`. If one exact matching client
+exists, recover its public `tpc_` client id and reconcile all three operation-bound values together:
+
+```bash
+python3 -m ops.codex_fabric.enroll_executive_mcp \
+  --reconcile-client-id "$PUBLIC_TPC_CLIENT_ID" \
+  --reconcile-attempt-ref "$PENDING_ATTEMPT_REF" \
+  --reconcile-client-name "$PENDING_CLIENT_NAME"
+```
+
+The client id and pending coordinates are public metadata; the command stores only the exact reconciled
+public client identity and prints a digest-only receipt. It performs no DCR call and no token exchange.
+A missing, duplicate, stale, differently named, differently callback-bound, or otherwise ambiguous tenant
+observation stays blocked. Tenant proof that no client exists does not itself authorize this client to
+clear/re-admit the pending effect or issue a new DCR attempt.
 
 The current Chrome profile was checked only for serviceability and reached the Auth0 Dashboard login
 page, so it did not provide tenant reconciliation. No token or secret should be pasted into this runbook
