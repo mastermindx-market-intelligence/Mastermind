@@ -63,6 +63,30 @@ Neither OAuth credential mode changes the existing secret law:
 - ordinary Worker/Operator tool policy denies auth-changing commands; login/logout/setup-token creation are provisioning-owner operations;
 - ambiguous auth mutation is reconciled on the same custody; it is never retried by changing accounts.
 
+## Composition with canonical host recovery readiness
+
+Protected Mastermind advanced during this architecture wave with the accepted `mastermind.host_recovery_readiness/v1` read-only departure gate. Family B consumes that owner rather than creating a second cold-boot or fleet-recovery checker.
+
+For an unattended native Claude realm, `COLD_BOOT_AUTH_PASS` requires **both**:
+
+```text
+HOST_RECOVERY_READY
+  correct `mastermind.host_recovery_readiness/v1` role/profile is READY for the physical host
+
+CLAUDE_COLD_BOOT_AUTH_READY
+  after an actual boot/startup path, the exact worker principal + capability generation + credential custody
+  can authenticate and run the bounded native Claude readiness/canary without Chairman interaction
+```
+
+The canonical host recovery roles remain authoritative:
+
+- Studio, while it is the canonical Executive control host: `executive-control-host/v1`;
+- M1, future M6, and other worker/capacity Macs: `home-mac-recovery-base/v1`.
+
+The base host-recovery profile explicitly proves physical/local recoverability only; it is **not** Worker/Fabric/provider acceptance. Conversely, a working Claude credential does not prove the Mac will recover after power loss, FileVault preboot, or Remote Login failure. Family B must compose both pieces and must not add a Claude-specific replacement for host power/reboot/FileVault/Remote-Login readiness.
+
+Network/bastion/tunnel reachability remains a separate accepted journey as the host-recovery owner already states. A READY local host plus an unreachable external path is not cruise-ready.
+
 ## Cruise-mode acceptance gates
 
 Before any native Claude realm is counted as unattended-production eligible, require separate evidence for:
@@ -72,7 +96,7 @@ RESTART_AUTH_PASS
   kill/restart the provider process under the same realm generation and prove auth remains usable
 
 COLD_BOOT_AUTH_PASS
-  after an actual host reboot/startup path, prove the worker principal can authenticate without Chairman interaction
+  compose HOST_RECOVERY_READY with a real post-boot Claude auth/readiness canary for the same host/principal/realm
 
 EXPIRY_OBSERVABILITY_PASS
   prove provider-health observation distinguishes healthy from expired/not-ready without provider PII;
