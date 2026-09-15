@@ -551,7 +551,11 @@ def _normalise_capabilities(
     )
 
 
-def _normalise_constraints(value: dict[str, Any] | None) -> dict[str, Any]:
+def _normalise_constraints(
+    value: dict[str, Any] | None,
+    *,
+    host_admitted_placement_union: bool = False,
+) -> dict[str, Any]:
     if value is not None and not isinstance(value, dict):
         raise StateConflict("job constraints must be a mapping")
     raw = value or {}
