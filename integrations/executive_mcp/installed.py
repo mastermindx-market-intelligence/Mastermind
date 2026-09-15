@@ -26,6 +26,39 @@ PacketRunner = Callable[..., Mapping[str, Any]]
 _default_packet_runner = ceo_boot_packet.bounded_subprocess_runner
 
 
+def _installed_child_env(*, source_root: Path, macro_root: Path) -> dict[str, str]:
+    return {
+        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "safe.directory",
+        "GIT_CONFIG_VALUE_0": os.fspath(macro_root),
+        "MACRO_MASTERMIND_REPO": os.fspath(source_root),
+    }
+
+
+def _bounded_git_sha(path: Path, *, runner: PacketRunner, env: Mapping[str, str]) -> str | None:
+    try:
+        result = runner(
+            ["git", "rev-parse", "HEAD"], cwd=path, timeout=10.0,
+            max_bytes=64 * 1024, env=env,
+        )
+    except Exception:
+        return None
+    if not isinstance(result, Mapping):
+        return None
+    if any(result.get(flag) is True for flag in ("timed_out", "limit_exceeded", "invalid_utf8")):
+        return None
+    if result.get("code") != 0 or type(result.get("stdout")) is not str:
+        return None
+    value = result["stdout"].strip()
+    return value or None
+
+
 class InstalledBootPacketCollector:
     """Build one canonical boot packet in the dependency-complete read runtime."""
 
@@ -56,10 +89,13 @@ class InstalledBootPacketCollector:
                 "--macro-root", os.fspath(macro), "--timeout", f"{timeout:g}"]
         if now is not None:
             argv.extend(["--now", now])
+        child_env = _installed_child_env(
+            source_root=self._source_root, macro_root=self._macro_root,
+        )
         try:
             result = self._runner(
                 argv, cwd=self._source_root, timeout=timeout,
-                max_bytes=ceo_boot_packet.DEFAULT_MAX_OUTPUT_BYTES,
+                max_bytes=ceo_boot_packet.DEFAULT_MAX_OUTPUT_BYTES, env=child_env,
             )
         except Exception as exc:
             raise GatewayError("backend_unavailable", "installed boot-packet collector failed") from exc
@@ -106,6 +142,7 @@ class InstalledExecutiveReaders(ExecutiveMcpGateway):
         self._installed_runtime_root = Path(runtime_root).resolve()
         self._source_root = Path(repo_root).resolve()
         self._macro_root = Path(macro_root).resolve()
+        self._read_runner = packet_runner or _default_packet_runner
         packet_builder = ceo_boot_packet.build_packet
         if packet_python is not None:
             packet_builder = InstalledBootPacketCollector(
@@ -140,9 +177,16 @@ class InstalledExecutiveReaders(ExecutiveMcpGateway):
 
     def observe(self) -> dict[str, str]:
         """Fresh source identities; the admission owner independently rechecks."""
+        env = _installed_child_env(
+            source_root=self._source_root, macro_root=self._macro_root,
+        )
         result = {
-            "mastermind_sha": ceo_boot_packet.git_sha(self._source_root),
-            "macro_sha": ceo_boot_packet.git_sha(self._macro_root),
+            "mastermind_sha": _bounded_git_sha(
+                self._source_root, runner=self._read_runner, env=env,
+            ),
+            "macro_sha": _bounded_git_sha(
+                self._macro_root, runner=self._read_runner, env=env,
+            ),
             "boot_packet_schema": executive_ceo_ingress.BOOT_PACKET_SCHEMA,
         }
         validated = executive_ceo_ingress._coerce_grounding_shape(result)

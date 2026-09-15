@@ -303,7 +303,7 @@ reinstall; never add site-packages to the sealed control interpreter.
 
 The full-schema `control.json.template` includes an unarmed App binding and an
 explicit Macro snapshot placeholder. Supply the actual sealed snapshot when
-provisioning the App, or omit all three App fields when installing control
+provisioning the App, or omit all four App fields when installing control
 without it. The base installer does not add these optional fields by default.
 
 The App peer can use existing v2 submit/status frames and two closed internal
@@ -341,7 +341,13 @@ Macro snapshot explicitly to `scripts/ceo_boot_packet.py --repo-root ...
 --macro-root ...`; returned packet roots and schema are revalidated before the
 projection crosses CeoIngress. Timeout, invalid UTF-8, nonzero exit, output
 overflow, wrong schema, or root drift refuse the read rather than falling back
-to the dependency-incomplete control interpreter.
+to the dependency-incomplete control interpreter. The child receives a minimal
+secret-free environment: fixed system `PATH`, no global/system Git config, one
+command-scoped `safe.directory` for the exact root-owned Macro snapshot, and
+`MACRO_MASTERMIND_REPO` pinned to the exact sealed Mastermind source. This keeps
+the Macro snapshot root-owned while allowing Git to attest its detached HEAD; it
+does not create a wildcard safe-directory trust or expose the control process
+environment to the dependency-complete edge.
 
 Deployment evidence belongs in the private operation receipt. Source tests do
 not establish an installed generation, accepted identity provider, live tunnel,

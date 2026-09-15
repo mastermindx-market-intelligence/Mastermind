@@ -87,13 +87,14 @@ Runner = Callable[..., Mapping[str, Any]]
 
 
 def bounded_subprocess_runner(
-    argv: Sequence[str | os.PathLike[str]], *, cwd: Path, timeout: float, max_bytes: int
+    argv: Sequence[str | os.PathLike[str]], *, cwd: Path, timeout: float, max_bytes: int,
+    env: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """Run one read-only helper with a hard combined stdout/stderr ceiling."""
     proc = subprocess.Popen(
         [os.fspath(item) for item in argv], cwd=os.fspath(cwd),
         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        start_new_session=True,
+        start_new_session=True, env=dict(env) if env is not None else None,
     )
     assert proc.stdout is not None and proc.stderr is not None
     selector = selectors.DefaultSelector()

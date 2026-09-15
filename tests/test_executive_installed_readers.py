@@ -25,8 +25,11 @@ def test_installed_boot_packet_collector_uses_dependency_python_and_exact_roots(
         "brief": {"schema": "ceo_brief.v1"},
         "handoffs": [], "degraded": [], "next_recommended_act": "continue",
     }
-    def runner(argv, *, cwd, timeout, max_bytes):
-        observed.update(argv=list(argv), cwd=Path(cwd), timeout=timeout, max_bytes=max_bytes)
+    def runner(argv, *, cwd, timeout, max_bytes, env):
+        observed.update(
+            argv=list(argv), cwd=Path(cwd), timeout=timeout,
+            max_bytes=max_bytes, env=dict(env),
+        )
         return {
             "code": 0,
             "stdout": json.dumps(packet),
@@ -230,3 +233,98 @@ def test_executive_mcp_runtime_lock_includes_dependency_complete_read_stack():
     assert "uvicorn[standard]==0.52.4" in direct
     assert "mcp==1.28.1" in lock
     assert "pyyaml==6.0.3" in lock
+
+
+def test_installed_collector_scopes_git_trust_and_mastermind_sibling(tmp_path: Path):
+    from integrations.executive_mcp.installed import InstalledBootPacketCollector
+
+    repo = (tmp_path / "mastermind").resolve()
+    macro = (tmp_path / "macro").resolve()
+    repo.mkdir()
+    macro.mkdir()
+    python = (tmp_path / "network-python").resolve()
+    python.write_text("fixture", encoding="utf-8")
+    observed: dict[str, object] = {}
+    packet = {
+        "schema": "mastermind.ceo_boot_packet.v1",
+        "mastermind": {"root": str(repo), "sha": "a" * 40, "branch": "HEAD"},
+        "macro": {"root": str(macro), "sha": "b" * 40, "resolved_via": "flag", "candidates_tried": []},
+    }
+
+    def runner(_argv, **kwargs):
+        observed.update(kwargs)
+        return {"code": 0, "stdout": json.dumps(packet), "stderr": "",
+                "timed_out": False, "limit_exceeded": False, "invalid_utf8": False}
+    collector = InstalledBootPacketCollector(
+        source_root=repo, macro_root=macro, python_executable=python, runner=runner,
+    )
+    collector(repo_root=repo, macro_root_flag=str(macro), now=None, timeout=5.0)
+
+    env = observed["env"]
+    assert set(env) == {
+        "PATH", "LANG", "LC_ALL", "PYTHONDONTWRITEBYTECODE",
+        "GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_COUNT",
+        "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0", "MACRO_MASTERMIND_REPO",
+    }
+    assert env["GIT_CONFIG_GLOBAL"] == "/dev/null"
+    assert env["GIT_CONFIG_NOSYSTEM"] == "1"
+    assert env["GIT_CONFIG_COUNT"] == "1"
+    assert env["GIT_CONFIG_KEY_0"] == "safe.directory"
+    assert env["GIT_CONFIG_VALUE_0"] == str(macro)
+    assert env["MACRO_MASTERMIND_REPO"] == str(repo)
+
+
+def test_default_packet_runner_uses_explicit_environment(tmp_path: Path):
+    import os
+    import sys
+    from integrations.executive_mcp.installed import _default_packet_runner
+
+    script = tmp_path / "env_probe.py"
+    script.write_text("import os; print(os.environ['MMX_PACKET_ENV'])\n", encoding="utf-8")
+    env = dict(os.environ)
+    env["MMX_PACKET_ENV"] = "scoped"
+    result = _default_packet_runner(
+        [sys.executable, str(script)], cwd=tmp_path, timeout=5.0,
+        max_bytes=1024, env=env,
+    )
+
+    assert result["code"] == 0
+    assert result["stdout"].strip() == "scoped"
+    assert result["timed_out"] is False
+    assert result["limit_exceeded"] is False
+
+
+def test_installed_grounding_observer_uses_scoped_git_trust(tmp_path: Path):
+    from integrations.executive_mcp.installed import InstalledExecutiveReaders
+
+    repo = (tmp_path / "mastermind").resolve()
+    macro = (tmp_path / "macro").resolve()
+    runtime = (tmp_path / "runtime").resolve()
+    for path in (repo, macro, runtime):
+        path.mkdir()
+    python = (tmp_path / "network-python").resolve()
+    python.write_text("fixture", encoding="utf-8")
+    calls: list[tuple[Path, dict[str, str]]] = []
+
+    def runner(argv, *, cwd, timeout, max_bytes, env):
+        calls.append((Path(cwd), dict(env)))
+        sha = "a" * 40 if Path(cwd) == repo else "b" * 40
+        return {"code": 0, "stdout": sha + "\n", "stderr": "",
+                "timed_out": False, "limit_exceeded": False, "invalid_utf8": False}
+
+    readers = InstalledExecutiveReaders(
+        repo_root=repo, macro_root=macro, runtime_root=runtime,
+        packet_python=python, packet_runner=runner,
+    )
+    observed = readers.observe()
+
+    assert observed == {
+        "mastermind_sha": "a" * 40,
+        "macro_sha": "b" * 40,
+        "boot_packet_schema": "mastermind.ceo_boot_packet.v1",
+    }
+    assert [cwd for cwd, _env in calls] == [repo, macro]
+    for _cwd, env in calls:
+        assert env["GIT_CONFIG_VALUE_0"] == str(macro)
+        assert env["MACRO_MASTERMIND_REPO"] == str(repo)
+        assert env["GIT_CONFIG_GLOBAL"] == "/dev/null"
