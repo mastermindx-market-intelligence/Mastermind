@@ -344,3 +344,38 @@ def test_cctx0_checkpoint_operation_replay_is_idempotent(tmp_path):
             lease_token=lease.lease_token,
         )
     with runtime.store.read() as connection:
+        count = connection.execute(
+            "SELECT COUNT(*) FROM events WHERE event_type='JOB_CHECKPOINTED'"
+        ).fetchone()[0]
+    assert count == 1
+
+
+def test_cctx0_checkpoint_survives_runtime_restart_and_preserves_intent(tmp_path):
+    runtime, lease, _epoch, generation = _started(tmp_path)
+    harness = runtime.operator_harness
+    _commit(runtime, lease, generation, "restart-1", "restart-candidate-1")
+    pending = OperationId("ohf-op:restart-pending")
+    harness.reserve_checkpoint_operation(
+        generation=generation,
+        operation_id=pending,
+        fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+    )
+    database = tmp_path / "data" / "control_plane" / "executive.sqlite3"
+    restarted = Runtime.from_store(
+        RuntimeStore(tmp_path, database_path=database)
+    )
+    attempt = restarted.attempts.get_attempt(lease.attempt.attempt_id)
+    assert attempt is not None and attempt.checkpoint_sequence == 1
+    job = restarted.jobs.get_job(str(lease.attempt.job_id))
+    assert job is not None
+    assert job.checkpoint["current_state"] == "restart-candidate-1"
+    with restarted.store.read() as connection:
+        stored = connection.execute(
+            "SELECT checkpoint_json FROM attempts WHERE attempt_id=?",
+            (lease.attempt.attempt_id,),
+        ).fetchone()
+    assert stored is not None
+    assert _json_loads(stored["checkpoint_json"], fallback={}) == job.checkpoint
+    applied = restarted.operator_harness.apply_checkpoint_operation(
+        generation=generation,
