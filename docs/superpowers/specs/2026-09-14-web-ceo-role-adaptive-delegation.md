@@ -1,6 +1,6 @@
 # Web CEO Role-Adaptive Delegation — Architecture and Pilot
 
-Date: 2026-09-14. Operation: `web-ceo-role-adaptive-delegation-20260914-sol-001`. Existing parent: `WS:EXECUTIVE-CAPACITY-FABRIC`. Basis: Mastermind `bffe2ca8506346ea278c8ee469bf1ac30a4de008`, compatible Skillpack 1.0.1/bootstrap 1. Status: **SOURCE CANDIDATE / SPEC_ONLY / NOT ENROLLED / PRODUCTION INERT**.
+Date: 2026-09-14. Operation: `web-ceo-role-adaptive-delegation-20260914-sol-001`. Existing parent: `WS:EXECUTIVE-CAPACITY-FABRIC`. Original design basis: Mastermind `bffe2ca8506346ea278c8ee469bf1ac30a4de008` with compatible Skillpack 1.0.1/bootstrap 1. The current protected integration base is intentionally not frozen in this architecture source; re-pin it from protected Git and the exact PR/evidence receipt before any modifying or enrollment action. Status: **SOURCE CANDIDATE / SPEC_ONLY / NOT ENROLLED / PRODUCTION INERT**.
 
 Repository-placement disclosure: the current fresh-Sol evaluator materializes every `docs/sol_skills/*.md`, so merging this candidate path places its bytes in a fresh-Sol evaluation bundle pinned at or after that merge. This is evaluation exposure, not production enrollment, INDEX enrollment, runtime authority, live delegation, or served-model proof.
 

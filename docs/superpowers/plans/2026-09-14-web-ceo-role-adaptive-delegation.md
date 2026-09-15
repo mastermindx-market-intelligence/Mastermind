@@ -8,7 +8,7 @@
 **Spec:** `docs/superpowers/specs/2026-09-14-web-ceo-role-adaptive-delegation.md`.
 
 ## Global constraints
-- Operation `web-ceo-role-adaptive-delegation-20260914-sol-001`; parent `WS:EXECUTIVE-CAPACITY-FABRIC`; source basis `bffe2ca8506346ea278c8ee469bf1ac30a4de008`; compatible Skillpack 1.0.1/bootstrap 1.
+- Operation `web-ceo-role-adaptive-delegation-20260914-sol-001`; parent `WS:EXECUTIVE-CAPACITY-FABRIC`; Original design basis: Mastermind `bffe2ca8506346ea278c8ee469bf1ac30a4de008` with compatible Skillpack 1.0.1/bootstrap 1. The current protected integration base is intentionally not frozen in this plan; re-pin it from protected Git and the exact PR/evidence receipt before any modifying or enrollment action.
 - Exactly five additive candidate paths: this plan, its spec, `docs/sol_skills/WEB_CEO_DELEGATION.md`, `research/fixtures/web_ceo_role_adaptive_delegation_2026-09-14.json`, and `tests/test_web_ceo_role_adaptive_delegation.py`.
 - Repository-placement disclosure: `scripts/ohf/fresh_sol_eval.py` materializes every `docs/sol_skills/*.md`, so merging the candidate skill also places its bytes in a fresh-Sol evaluation bundle pinned at or after that merge. This is evaluation exposure, not production enrollment, INDEX enrollment, runtime authority, live delegation, or served-model proof.
 - Do not edit INDEX, ModelRouter, AGENTS, existing source laws, provider settings, active worker branches or shared workspaces in this carrier. Existing owners must reconcile enrollment and source-law changes.

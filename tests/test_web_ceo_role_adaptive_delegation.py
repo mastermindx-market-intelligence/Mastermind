@@ -89,6 +89,7 @@ def test_candidate_is_structurally_unenrolled_and_closes_bypass_and_pro_class_ga
     skill = SKILL.read_text(encoding="utf-8")
     index = INDEX.read_text(encoding="utf-8")
     plan = PLAN.read_text(encoding="utf-8")
+    spec = SPEC.read_text(encoding="utf-8")
     rows = {
         row["scenario_id"]: row
         for row in json.loads(CORPUS.read_text(encoding="utf-8"))
@@ -107,6 +108,11 @@ def test_candidate_is_structurally_unenrolled_and_closes_bypass_and_pro_class_ga
         assert task_class in skill
     assert "`SUSTAINED_ORCHESTRATION` is a work profile, not a `PRO_MODE_TASK_CLASS`" in skill
     assert "44 tests" in plan
+    for artifact in (plan, spec):
+        assert "Original design basis" in artifact
+        assert "current protected integration base" in artifact
+    assert "source basis `bffe2ca" not in plan
+    assert "Basis: Mastermind `bffe2ca" not in spec
 
 
 def test_static_packet_checks_do_not_launch_or_grade_models():
