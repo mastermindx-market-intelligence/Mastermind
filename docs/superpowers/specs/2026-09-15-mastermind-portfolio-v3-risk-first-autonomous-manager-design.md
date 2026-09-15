@@ -1,11 +1,11 @@
 ---
 title: Mastermind Portfolio V3 — Risk-First Autonomous Portfolio Manager Architecture Freeze
-status: ARCHITECTURE_FREEZE_CANDIDATE / SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT
+status: ARCHITECTURE_APPROVED / SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT
 operation_key: mastermind-portfolio-v3-risk-first-autonomous-manager-design-20260915-sol-001
 approved_by: Chairman Chris
 approved_at: 2026-09-15
 protected_skillpack_basis: f249802eab3695ff24c9a903798899466c444252
-current_protected_recheck: 19b6111891ffd742ceec7c96f437a2a890847c92
+current_protected_recheck: 36f74c02edc938f7f5c41f38743f93ee34be2b2b
 skillpack: mastermind.sol_skillpack.v1 1.0.1 / bootstrap major 1
 macro_snapshot: fc59066581be1a52e4c89a8e3e1ba2c39796419a
 capability_state: SPEC_ONLY
@@ -170,13 +170,13 @@ This architecture was composed against protected Mastermind and its exact Skillp
 f249802eab3695ff24c9a903798899466c444252
 ```
 
-Current protected master at publication recheck:
+Current protected master at final plan recheck:
 
 ```text
-19b6111891ffd742ceec7c96f437a2a890847c92
+36f74c02edc938f7f5c41f38743f93ee34be2b2b
 ```
 
-The `f249802e... -> 19b61118...` movement is the Executive submit-fence merge #654. Its six paths are disjoint from this records-only spec; the Skillpack `INDEX.md` blob remains byte-identical at `5909db6e26b9d61e0622f83079733857010989da`. The candidate history-preservingly composes that current protected commit.
+The protected movement from `f249802e...` through `19b61118...` and `36f74c02...` consists of Executive submit-fence PR #654 and host-placement binding PR #655. Their changed paths are disjoint from this records-only Portfolio specification and plan. The Skillpack `INDEX.md` blob remains byte-identical at `5909db6e26b9d61e0622f83079733857010989da`, and the carrier history-preservingly composes current protected master.
 
 Skillpack loaded atomically from the original protected basis above:
 

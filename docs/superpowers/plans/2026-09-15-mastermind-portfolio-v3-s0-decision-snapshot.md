@@ -12,7 +12,9 @@
 
 ## Global Constraints
 
-- Implementation begins from current protected `master`, not the architecture authoring SHA. The accepted design carrier is Mastermind PR #658.
+- This plan was reconciled against protected `Mastermind@36f74c02edc938f7f5c41f38743f93ee34be2b2b` with `mastermind.sol_skillpack.v1` 1.0.1 / bootstrap major 1. Execution must re-pin protected `master` again at action time.
+- Mastermind PR #658 is the records-only architecture-and-plan carrier. It must never carry S0 implementation source, tests, installation, or runtime evidence.
+- After PR #658 is accepted and protected, S0 starts as the separate operation `mastermind-portfolio-v3-s0-decision-snapshot-20260915-sol-001` in a separately acquired `mmx-workspace` and a separate Draft/HOLD implementation PR.
 - The first vertical is `V3-S0 Decision Snapshot` only. No Claim, PM View, constructor, alpha tilt, target, shadow account, learning policy, or execution logic enters this plan.
 - `autonomous` remains the sole active US managed book. Do not add a V3 registry row or a second active book.
 - S0 is read-only with respect to all existing Portfolio state. It may create files only below `data/shadow/decision_snapshots/autonomous/`.
@@ -20,7 +22,7 @@
 - Do not call `portfolio.paper_account._load_account()`: that function may recover a transaction and mutate state. Read canonical files through fixed paths without recovery.
 - Do not write or clear `_pending_decision.json`, `pending_target.json`, `pending_orders.json`, account, fills, NAV, decisions, positions, post-sell, or settlement receipts.
 - Do not add a mutable `latest.json`, index, cursor database, correction ledger, queue, or daemon. Discover snapshots by verifying immutable content-addressed files.
-- Every clock used for truth or cutoff eligibility is supplied by the caller or declared by the source. Filesystem mtime may be recorded only as `filesystem_observed_at`; it is never silently promoted to external market `known_at`.
+- Every clock used for truth or cutoff eligibility is supplied by the caller, declared by the source, or—only for canonical first-party Portfolio state—proven by a stable file read and labeled `FILE_MTIME_FIRST_PARTY_STATE`. External Macro filesystem mtime may be recorded only as `filesystem_observed_at`; it never becomes market `known_at`.
 - Contract/composer modules may not call `datetime.now`, `date.today`, `time.time`, network, subprocess, environment mutation, or random/UUID identity generation.
 - Snapshot identity is `sha256:<64 lowercase hex>` over canonical JSON without the `snapshot_id` field.
 - Root snapshot payload maximum: 262,144 UTF-8 bytes. Section response maximum: 65,536 UTF-8 bytes. Raw source file maximum: 8,388,608 bytes. JSONL tail maximum: 100 rows. Section page maximum: 100 rows.
@@ -42,8 +44,8 @@
 ### New focused modules
 
 - `portfolio/decision_snapshot_contracts.py`
-  - Pure schemas, vocabularies, UTC parsing, canonical JSON, digesting, sealing, and validation.
-  - No filesystem, clock, network, model, or Portfolio imports.
+  - Pure schemas, vocabularies, UTC parsing, digesting, sealing, and validation.
+  - Reuses `control_plane.wake_events.canonical_json_bytes`; no second canonical serializer. No filesystem, clock, network, model, or Portfolio-state imports.
 
 - `portfolio/decision_snapshot_sources.py`
   - Fixed allowlist of internal and external source slots.
@@ -103,21 +105,26 @@
 
 ---
 
-### Task 0: Reconcile Current Source, Carriers, and Path Ownership
+### Task 0: Protect the Records-Only Design and Open a Separate S0 Carrier
 
 **Files:**
 - Read only: `docs/superpowers/specs/2026-09-15-mastermind-portfolio-v3-risk-first-autonomous-manager-design.md`
+- Read only: `docs/superpowers/plans/2026-09-15-mastermind-portfolio-v3-s0-decision-snapshot.md`
 - Read only: Mastermind PR #658
 - Read only: Mastermind PR #548
 - Read only: Mastermind PR #398
 - Read only: current protected `master`
-- No source file changes
+- No implementation source file changes on PR #658
 
 **Interfaces:**
-- Consumes: protected Skillpack `mastermind.sol_skillpack.v1` from the exact current protected commit.
-- Produces: an action-time receipt in PR #658 listing protected SHA, branch head, exact planned paths, #548/#398 dispositions, and any open-PR collision.
+- Consumes: protected Skillpack `mastermind.sol_skillpack.v1` from the exact action-time protected commit.
+- Produces:
+  - terminal acceptance/protection disposition for the records-only architecture-and-plan carrier #658;
+  - operation `mastermind-portfolio-v3-s0-decision-snapshot-20260915-sol-001`;
+  - one separately managed implementation workspace and branch;
+  - one later Draft/HOLD implementation PR after the first scoped source commit.
 
-- [ ] **Step 1: Re-pin protected source and verify the managed workspace**
+- [ ] **Step 1: Re-pin protected source and verify the records-only workspace**
 
 Run:
 
@@ -130,9 +137,10 @@ git rev-parse origin/master
 
 Expected:
 
-- the managed workspace is clean;
-- branch identity is the existing Portfolio V3 carrier;
-- protected `master` is recorded before any source change.
+- the architecture/plan workspace is clean;
+- branch identity is the existing PR #658 records carrier;
+- protected `master` is recorded before any release or implementation action;
+- PR #658 contains only the architecture spec and this implementation plan relative to protected master.
 
 - [ ] **Step 2: Re-read the architecture and dependency carriers**
 
@@ -141,19 +149,20 @@ Use canonical GitHub reads for PR #658, PR #548, and PR #398.
 Record exactly:
 
 ```text
-#658: architecture/plan carrier, current head, current base, Draft state
-#548: non-lossy rotation-reader owner, changed paths, RED/GREEN/review state
-#398: Outcome Learning candidate, open/merged state, protected capability or not
+#658: records-only architecture/plan carrier, exact head/base, review/check state
+#548: non-lossy rotation-reader owner, exact changed paths, RED/GREEN/review state
+#398: Outcome Learning candidate, exact open/merged state, protected capability or not
 ```
 
 Expected:
 
 - #548 remains the owner of `brain/portfolio_intelligence.py`, `brain/autonomous_mcp.py`, and their rotation-reader tests unless current protected source proves otherwise;
-- #398 does not become an S0 dependency merely because it contains useful concepts.
+- #398 does not become an S0 dependency merely because it contains useful concepts;
+- no retrieved PR prose grants START or merge authority by itself.
 
 - [ ] **Step 3: Run an open-PR changed-path collision census**
 
-Check these exact planned paths against every open Mastermind PR:
+Check these exact planned implementation paths against every open Mastermind PR:
 
 ```text
 config/contracts.yml
@@ -177,8 +186,8 @@ app/static/index.html
 Expected:
 
 - no unreconciled writer owns a planned path;
-- if `app/web.py`, `app/static/index.html`, or `config/contracts.yml` is currently owned, sequence S0 behind that exact carrier instead of racing it;
-- do not treat PR title similarity as a path census.
+- if `app/web.py`, `app/static/index.html`, `config/contracts.yml`, or `tests/test_contracts.py` is currently owned, sequence S0 behind that exact carrier rather than racing it;
+- do not infer path ownership from PR titles.
 
 - [ ] **Step 4: Verify current owner invariants**
 
@@ -189,28 +198,66 @@ git grep -n "DASHBOARD_DEFAULT_ID = \"autonomous\"" portfolio/registry.py
 git grep -n "The reasoning model selects names and expresses ordinal intent" brain/decision_submission.py
 git grep -n "Parallel forward shadow books" portfolio/shadow_books.py
 git grep -n "Bounded forward evaluation" portfolio/forward_evaluation.py
+git grep -n "def canonical_json_bytes" control_plane/wake_events.py
 ```
 
-Expected: all four current owners remain present.
+Expected: all five canonical owners remain present.
 
-- [ ] **Step 5: Record the pre-start receipt on PR #658**
+- [ ] **Step 5: Accept and protect PR #658 as records-only design law**
 
-The receipt must state:
+Before protection, require:
 
 ```text
+architecture status: APPROVED
+plan status: APPROVED
+changed paths: exactly the architecture spec and S0 plan
+implementation capability: NOT_BUILT
+production effect: NONE
+```
+
+Obtain applicable exact-head/current-base checks and independent source review. Merge through the normal protected path. Read back the actual protected SHA and confirm the two records are present. Do not place implementation files on #658.
+
+- [ ] **Step 6: Acquire the separate S0 implementation workspace**
+
+From a trusted attended host with the canonical launcher:
+
+```bash
+base_sha=$(git -C /Users/chriswong/Documents/GitHub/Mastermind rev-parse origin/master)
+/Users/chriswong/.local/bin/mmx-workspace acquire \
+  --operation-id mastermind-portfolio-v3-s0-decision-snapshot-20260915-sol-001 \
+  --base-sha "$base_sha" \
+  --lane sol
+```
+
+Expected receipt:
+
+```text
+operation_id=mastermind-portfolio-v3-s0-decision-snapshot-20260915-sol-001
+base_sha=<exact protected SHA containing #658>
+branch=sol/mastermind-portfolio-v3-s0-decision-snapshot-20260915-sol-001
+reused=false or a canonically matching reusable workspace
+```
+
+Use only the returned workspace. Do not create a raw worktree, nested checkout, or replacement branch.
+
+- [ ] **Step 7: Record implementation PRE_START on #658 and the future implementation carrier**
+
+The #658 terminal record states:
+
+```text
+architecture/plan: PROTECTED RECORDS
 S0 implementation: PRE_START
-protected SHA: <exact current SHA>
-carrier head: <exact current head>
-planned path ceiling: exact list above
+implementation operation: mastermind-portfolio-v3-s0-decision-snapshot-20260915-sol-001
+implementation branch: sol/mastermind-portfolio-v3-s0-decision-snapshot-20260915-sol-001
 #548 disposition: current exact state
 #398 disposition: current exact state
-collisions: none or exact blocking PR/path
+collisions: none or exact blocker
 live Portfolio effect: NONE
 ```
 
-Stop if source ownership is ambiguous. Do not create a replacement branch.
+The separate implementation PR is opened as Draft/HOLD after Task 1 creates the first scoped commit. PR #658 remains terminal records history, not an implementation carrier.
 
----
+Stop if source ownership, protected design publication, or workspace identity is ambiguous.
 
 ### Task 1: Add the Closed Snapshot Contract and Register Its Fixed Macro Sources
 
@@ -221,6 +268,7 @@ Stop if source ownership is ambiguous. Do not create a replacement branch.
 - Modify: `tests/test_contracts.py`
 
 **Interfaces:**
+- Consumes: `control_plane.wake_events.canonical_json_bytes(value: Any) -> bytes` as the single canonical JSON serializer.
 - Produces:
   - `SNAPSHOT_SCHEMA = "mastermind.portfolio_decision_snapshot.v1"`
   - `SOURCE_RECEIPT_SCHEMA = "mastermind.portfolio_source_receipt.v1"`
@@ -231,7 +279,6 @@ Stop if source ownership is ambiguous. Do not create a replacement branch.
   - `SECTION_IDS`
   - `DecisionSnapshotContractError`
   - `parse_utc_timestamp(value: str, *, field: str) -> str`
-  - `canonical_json_bytes(value: Any) -> bytes`
   - `content_digest(value: Any) -> str`
   - `validate_source_receipt(receipt: Mapping[str, Any]) -> None`
   - `validate_section(section: Mapping[str, Any]) -> None`
@@ -239,7 +286,7 @@ Stop if source ownership is ambiguous. Do not create a replacement branch.
   - `seal_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]`
   - `validate_snapshot(snapshot: Mapping[str, Any]) -> None`
   - `verify_snapshot(snapshot: Mapping[str, Any]) -> None`
-- Consumes: no project module except Python stdlib.
+- Consumes no project module other than the canonical serializer owner above.
 
 - [ ] **Step 1: Add RED tests for the closed vocabularies and canonical seal**
 
@@ -277,7 +324,7 @@ def _receipt() -> dict:
         "rows_total": 1,
         "rows_returned": 1,
         "omitted_rows": 0,
-        "clock_basis": "FILE_MTIME_INTERNAL_ONLY",
+        "clock_basis": "FILE_MTIME_FIRST_PARTY_STATE",
         "error_code": None,
     }
 
@@ -370,8 +417,10 @@ def test_source_receipt_refuses_unqualified_digest_and_authority_escalation():
         c.validate_source_receipt(bad_authority)
 
 
-def test_contract_module_has_no_clock_io_or_project_imports():
+def test_contract_reuses_canonical_json_owner_and_has_no_hidden_io():
     source = Path(c.__file__).read_text(encoding="utf-8")
+    assert "from control_plane.wake_events import canonical_json_bytes" in source
+    assert "def canonical_json_bytes" not in source
     forbidden = (
         "datetime.now",
         "date.today",
@@ -398,9 +447,11 @@ Expected: import failure because `portfolio.decision_snapshot_contracts` does no
 
 - [ ] **Step 3: Implement the pure contract module**
 
-Create `portfolio/decision_snapshot_contracts.py` with these closed constants:
+Create `portfolio/decision_snapshot_contracts.py` by reusing the existing canonical serializer:
 
 ```python
+from control_plane.wake_events import canonical_json_bytes
+
 SNAPSHOT_SCHEMA = "mastermind.portfolio_decision_snapshot.v1"
 SOURCE_RECEIPT_SCHEMA = "mastermind.portfolio_source_receipt.v1"
 SECTION_SCHEMA = "mastermind.portfolio_snapshot_section.v1"
@@ -620,6 +671,30 @@ git add \
 git commit -m "feat(portfolio): define V3 decision snapshot contracts"
 ```
 
+- [ ] **Step 8: Push and open the separate Draft/HOLD implementation PR**
+
+```bash
+git push -u origin HEAD
+```
+
+Open one Draft PR from:
+
+```text
+sol/mastermind-portfolio-v3-s0-decision-snapshot-20260915-sol-001
+```
+
+to protected `master`, with:
+
+```text
+title: [PORTFOLIO-V3][S0][DRAFT][HOLD] Immutable Decision Snapshot
+operation: mastermind-portfolio-v3-s0-decision-snapshot-20260915-sol-001
+parent architecture/plan: Mastermind PR #658
+capability: BUILT_NOT_PROVEN only after source implementation passes; initially PARTIAL / IN_PROGRESS
+production effect: NONE
+```
+
+Do not mark Ready, enable auto-merge, deploy, or add implementation commits to PR #658.
+
 ---
 
 ### Task 2: Build the Fixed, Clock-Honest Source Capture Layer
@@ -700,6 +775,55 @@ def test_capture_reads_fixed_sources_without_account_recovery(
         "posture": "SELECTIVE"
     }
     assert not any(gap["code"] == "ACCOUNT_RECOVERY_CALLED" for gap in result["gaps"])
+```
+
+Add:
+
+```python
+def test_internal_state_uses_only_stable_first_party_file_clock(repo_roots):
+    repo, _ = repo_roots
+    path = repo / "data/portfolios/autonomous/account.json"
+    _write_json(path, {"cash": 1_000_000.0, "positions": {}})
+    os.utime(path, ns=(1_789_400_000_000_000_000, 1_789_400_000_000_000_000))
+    result = sources.capture_book_state(
+        "autonomous",
+        decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:01:00Z",
+    )
+    receipt = _by_id(result["sources"])["book.account"]
+    assert receipt["clock_basis"] == "FILE_MTIME_FIRST_PARTY_STATE"
+    assert receipt["known_at"] == receipt["filesystem_observed_at"]
+
+
+def test_internal_source_change_during_read_returns_no_rows(monkeypatch, repo_roots):
+    repo, _ = repo_roots
+    path = repo / "data/portfolios/autonomous/account.json"
+    _write_json(path, {"cash": 1_000_000.0, "positions": {}})
+    real_fstat = sources.os.fstat
+    calls = {"n": 0}
+
+    def changed(fd):
+        row = real_fstat(fd)
+        calls["n"] += 1
+        if calls["n"] == 2:
+            return SimpleNamespace(
+                st_dev=row.st_dev,
+                st_ino=row.st_ino,
+                st_size=row.st_size + 1,
+                st_mtime_ns=row.st_mtime_ns + 1,
+            )
+        return row
+
+    monkeypatch.setattr(sources.os, "fstat", changed)
+    result = sources.capture_book_state(
+        "autonomous",
+        decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:01:00Z",
+    )
+    receipt = _by_id(result["sources"])["book.account"]
+    assert receipt["status"] == "INVALID"
+    assert receipt["error_code"] == "SOURCE_CHANGED_DURING_READ"
+    assert result["sections"]["book_truth"]["rows"] == []
 ```
 
 Add:
@@ -945,6 +1069,42 @@ EXTERNAL_SOURCE_SPECS = (
         as_of_fields=("as_of", "asof"),
         generated_at_fields=("generated_at",),
     ),
+    SourceSpec(
+        "macro.intelligence",
+        "site-intelligence-by-ticker",
+        ("fundamental_state", "positioning", "event_state"),
+        False,
+        "CONTEXT_ONLY",
+        "FIRST_PARTY_INTERNAL",
+        "held_ticker_bundle",
+        known_at_fields=("known_at", "generated_at"),
+        as_of_fields=("as_of", "asof"),
+        generated_at_fields=("generated_at",),
+    ),
+    SourceSpec(
+        "macro.altdata",
+        "site-altdata-by-ticker",
+        ("positioning",),
+        False,
+        "CONTEXT_ONLY",
+        "FIRST_PARTY_INTERNAL",
+        "held_ticker_bundle",
+        known_at_fields=("known_at", "generated_at"),
+        as_of_fields=("as_of", "asof"),
+        generated_at_fields=("generated_at",),
+    ),
+    SourceSpec(
+        "macro.news",
+        "site-news-by-ticker",
+        ("event_state",),
+        False,
+        "CONTEXT_ONLY",
+        "FIRST_PARTY_INTERNAL",
+        "held_ticker_bundle",
+        known_at_fields=("known_at", "generated_at"),
+        as_of_fields=("as_of", "asof"),
+        generated_at_fields=("generated_at",),
+    ),
 )
 ```
 
@@ -981,11 +1141,24 @@ positions_ledger.json        optional history
 settlement_receipts/*.json   optional, sorted, metadata-bounded
 ```
 
-For internal state only, file mtime may populate `known_at` with:
+For internal canonical Portfolio files only, use a stable first-party read:
+
+1. open the fixed path without following a caller-selected path;
+2. `fstat` before reading;
+3. read at most the declared bound;
+4. `fstat` again;
+5. require the same device, inode, size, and nanosecond mtime before/after;
+6. otherwise emit `INVALID` / `SOURCE_CHANGED_DURING_READ` and no rows.
+
+For a stable internal read set:
 
 ```text
-clock_basis = FILE_MTIME_INTERNAL_ONLY
+known_at = filesystem mtime normalized to UTC
+filesystem_observed_at = the same explicit file-write clock
+clock_basis = FILE_MTIME_FIRST_PARTY_STATE
 ```
+
+This is lawful only because Portfolio owns both the canonical state writer and file. External Macro mtime never becomes `known_at`.
 
 For external Macro files:
 
@@ -1010,9 +1183,10 @@ Projection rules:
 - `sector_rotation`: receipt and gap only; carry no sector/basket rows.
 - `covariance_spine`: carry schema/as_of/data_state, rates/factors/dispersion/lobes summary, coverage, missing inputs, and authority.
 - `factor_betas`: carry top-level factor metadata and only held-ticker beta rows.
-- `prophet`: preserve authored order; carry metadata and at most 50 plans relevant to held tickers or already present in the bounded artifact head. Do not rerank.
+- `prophet`: select all held-ticker plans up to 50 held names, then the first 50 non-held plans in producer-authored order; preserve original relative order among every selected row; cap the section at 100 rows; report exact omitted counts; never rerank.
 - `neural_web`: carry authority declaration/effective hard-false fence, market summary, and held-ticker candidate rows only.
 - `portfolio_context`: carry metadata and held-ticker rows only, split into fundamental/positioning/event/priceability sections.
+- `intelligence`, `altdata`, and `news`: reuse their existing contracts; carry metadata plus held-ticker rows only into fundamental/positioning/event sections; preserve producer order and report omitted counts.
 - internal decisions/fills: last 100 rows, preserve source order.
 - account/latest: carry cash, position identity, shares/cost/weight, and published mark/identity fields; never request a fresh quote.
 
@@ -1027,7 +1201,7 @@ Every projection returns rows plus exact `rows_total`, `rows_returned`, and `omi
 
 A source with `known_at > decision_cutoff` receives `FUTURE_AT_CUTOFF` and contributes no rows.
 
-A source with no qualified external clock receives `UNQUALIFIED_CLOCK`, may contribute explicitly current observational content to a current snapshot, but makes every dependent domain `PARTIAL`. It cannot make a snapshot `COMPLETE`.
+A source with no qualified external clock receives `UNQUALIFIED_CLOCK`, contributes only its receipt/digest and zero decision rows, and makes every dependent domain `PARTIAL`. It cannot make a snapshot `COMPLETE` or leak post-cutoff content into the PM information set.
 
 A missing optional internal file receives `ABSENT_OPTIONAL` and `coverage_state=COMPLETE`; a missing external context source receives `MISSING` and `coverage_state=PARTIAL`.
 
@@ -1051,6 +1225,7 @@ Mutation proofs:
 1. Replace `UNQUALIFIED_EXTERNAL_CLOCK` behavior with file-mtime promotion; require `test_external_mtime_is_never_promoted_to_market_known_at` to fail.
 2. Call `paper_account._load_account()` in book capture; require `test_capture_reads_fixed_sources_without_account_recovery` to fail.
 3. Project rotation rows; require the #548 dependency test to fail.
+4. Remove the second internal-file `fstat`; require `test_internal_source_change_during_read_returns_no_rows` to fail.
 
 Restore and rerun GREEN.
 
@@ -1144,6 +1319,24 @@ def test_state_is_partial_when_any_required_domain_is_unqualified():
 Add:
 
 ```python
+def test_same_cutoff_same_generation_reuses_existing_snapshot_despite_later_recorded_at(
+    snapshot_root,
+):
+    first = snapshots.create_snapshot(
+        "autonomous",
+        decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:01:00Z",
+    )
+    second = snapshots.create_snapshot(
+        "autonomous",
+        decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:10:00Z",
+    )
+    assert second["snapshot_id"] == first["snapshot_id"]
+    assert second["created"] is False
+    assert len(list(snapshots.snapshot_dir("autonomous").glob("*.json"))) == 1
+
+
 def test_same_cutoff_new_generation_is_explicit_correction():
     original = snapshots.compose_snapshot(
         "autonomous",
@@ -1318,8 +1511,9 @@ Write canonical bytes with `os.open(path, O_WRONLY | O_CREAT | O_EXCL, 0o600)`, 
 2. capture current sources;
 3. compare the sorted `source_generation_set`;
 4. exact same generation + same clocks -> exact retry/no new identity;
-5. changed generation at same cutoff -> include all prior same-cutoff IDs and produce `CORRECTED_GENERATION_AVAILABLE`;
-6. persist only the new sealed snapshot.
+5. same cutoff plus the same sorted `source_generation_set` -> return the existing verified snapshot even when the new operator `recorded_at` is later; do not mint a duplicate identity;
+6. changed generation at the same cutoff -> include all prior same-cutoff IDs and produce `CORRECTED_GENERATION_AVAILABLE`;
+7. persist only the genuinely new sealed snapshot.
 
 Do not rewrite the original.
 
@@ -2014,7 +2208,7 @@ time.time
 utcnow
 ```
 
-`datetime.fromtimestamp` is allowed only for fixed file metadata and must be labeled `filesystem_observed_at`.
+`datetime.fromtimestamp` is allowed only for fixed file metadata. It may populate `known_at` only for a stable first-party Portfolio-state read labeled `FILE_MTIME_FIRST_PARTY_STATE`; external Macro mtime may populate only `filesystem_observed_at`.
 
 - [ ] **Step 5: Run the owning regression set**
 
@@ -2066,17 +2260,32 @@ git commit -m "test(portfolio): prove S0 has no live book effects"
 
 ---
 
-### Task 8: Current-Base Integration, Independent Review, and Source Release
+### Task 8: Current-Base Integration, Independent Review, and S0 Source Release
 
 **Files:**
 - Modify only when needed to resolve a demonstrated current-base conflict.
 - No feature broadening.
+- PR #658 remains untouched except for a cross-reference to the separate implementation PR.
 
 **Interfaces:**
-- Consumes: Tasks 1-7 exact commits.
-- Produces: reviewed, protected source release. It does not itself create a real snapshot.
+- Consumes: Tasks 1-7 exact commits on operation `mastermind-portfolio-v3-s0-decision-snapshot-20260915-sol-001`.
+- Produces: reviewed and protected S0 source in the separate implementation PR. It does not itself create a real snapshot.
 
-- [ ] **Step 1: Reconcile protected movement**
+- [ ] **Step 1: Confirm the separate implementation carrier identity**
+
+Record:
+
+```text
+operation: mastermind-portfolio-v3-s0-decision-snapshot-20260915-sol-001
+branch: sol/mastermind-portfolio-v3-s0-decision-snapshot-20260915-sol-001
+implementation PR: <exact separate PR number>
+architecture/plan parent: Mastermind PR #658
+workspace: exact mmx-workspace receipt
+```
+
+Refuse if implementation commits landed on #658 or any other carrier.
+
+- [ ] **Step 2: Reconcile protected movement**
 
 Run:
 
@@ -2095,7 +2304,7 @@ Classify movement using current `RECONCILE_STATE.md`:
 
 Do not create an ancestry-only commit merely to become zero-behind.
 
-- [ ] **Step 2: Run focused and full repository gates**
+- [ ] **Step 3: Run focused and full repository gates**
 
 Run:
 
@@ -2118,34 +2327,37 @@ python3 scripts/ci_pytest.py --plan-only
 git diff --check
 ```
 
-Then run the repository-required hosted `test` and security checks on the exact PR head.
+Then run the repository-required hosted `test` and security checks on the exact implementation PR head.
 
-- [ ] **Step 3: Obtain independent review**
+- [ ] **Step 4: Obtain independent exact-head review**
 
 The reviewer must verify:
 
-- source paths match the plan ceiling;
+- implementation paths match the plan ceiling;
+- PR #658 contains no implementation source;
 - no #548 duplication;
+- canonical JSON serialization is reused from `control_plane.wake_events`;
 - no hidden clock;
 - no external mtime promoted to market knowledge;
+- internal first-party mtime is used only after a stable read and is labeled distinctly from external market knowledge;
 - no account recovery;
 - no mutable index or second store;
 - no model/provider/network path;
 - no active-book or settlement path;
+- same-generation retry reuses the existing snapshot;
 - correction preserves original bytes;
 - API is read-only;
 - UI distinguishes partial/blocked/corrected;
 - capability remains `BUILT_NOT_PROVEN` before installed proof.
 
-- [ ] **Step 4: Update PR #658 accurately**
+- [ ] **Step 5: Update the separate implementation PR accurately**
 
-Replace the architecture-review hold with:
+Its body must state:
 
 ```text
-ARCHITECTURE: APPROVED
-IMPLEMENTATION PLAN: APPROVED
+PARENT ARCHITECTURE/PLAN: protected PR #658
 S0 SOURCE: exact state from evidence
-V3 OVERALL: SPEC_ONLY
+V3 OVERALL: PARTIAL / downstream capabilities NOT_BUILT
 LIVE PORTFOLIO EFFECT: NONE
 ```
 
@@ -2153,19 +2365,21 @@ Include:
 
 - exact protected base;
 - exact semantic head;
-- changed paths;
+- exact changed paths;
 - focused test counts;
 - mutation receipts;
-- current-base integration;
+- current-base integration identity;
 - independent review;
 - hosted checks;
 - held production-canary gate.
 
-- [ ] **Step 5: Protect source through the normal merge path**
+Add only a cross-reference comment to #658 naming the separate implementation PR; do not turn #658 into a mutable implementation tracker.
+
+- [ ] **Step 6: Protect S0 source through the normal merge path**
 
 After approval and required checks:
 
-- mark Ready only through the authorized release owner;
+- mark the separate implementation PR Ready only through the authorized release owner;
 - merge without bypassing protection;
 - read back the actual protected merge SHA;
 - verify the merged tree contains exactly the accepted S0 bytes.
@@ -2179,7 +2393,7 @@ real snapshot: NONE
 V3 live allocator: NONE
 ```
 
----
+Release the S0 workspace only after source custody and any pending effect are reconciled.
 
 ### Task 9: Deploy the Exact Merge and Prove One Real Current Snapshot
 
@@ -2211,21 +2425,29 @@ Require HTTP 200 and exact deployed SHA in health.
 
 - [ ] **Step 2: Capture the no-effect baseline**
 
-Run on the canonical runtime data root:
+Run this exact bounded Python receipt on the canonical runtime data root:
 
 ```bash
-sha256sum \
-  data/portfolios/autonomous/account.json \
-  data/portfolios/autonomous/fills.jsonl \
-  data/portfolios/autonomous/nav_history.jsonl \
-  data/portfolios/autonomous/decisions.jsonl \
-  data/portfolios/autonomous/pending_orders.json \
-  data/portfolios/autonomous/pending_target.json \
-  data/portfolios/autonomous/_pending_decision.json \
-  > /tmp/v3-s0-before.sha256
+python3 - <<'PY' > /tmp/v3-s0-before.sha256
+from pathlib import Path
+import hashlib
+
+paths = (
+    Path("data/portfolios/autonomous/account.json"),
+    Path("data/portfolios/autonomous/fills.jsonl"),
+    Path("data/portfolios/autonomous/nav_history.jsonl"),
+    Path("data/portfolios/autonomous/decisions.jsonl"),
+    Path("data/portfolios/autonomous/pending_orders.json"),
+    Path("data/portfolios/autonomous/pending_target.json"),
+    Path("data/portfolios/autonomous/_pending_decision.json"),
+)
+for path in paths:
+    digest = hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else "ABSENT"
+    print(f"{path.as_posix()} {digest}")
+PY
 ```
 
-Missing optional files must be recorded as `ABSENT_OPTIONAL` separately rather than created for the proof.
+The receipt records missing optional files as `ABSENT` without creating them or causing the command to fail.
 
 - [ ] **Step 3: Compose exactly one real snapshot with explicit clocks**
 
@@ -2271,7 +2493,7 @@ Require identical snapshot IDs across compose/status/API and `write_permitted=fa
 
 - [ ] **Step 5: Prove no V2 state changed**
 
-Re-run the exact baseline hash command to `/tmp/v3-s0-after.sha256` and compare:
+Re-run the exact bounded Python receipt from Step 2 to `/tmp/v3-s0-after.sha256` and compare:
 
 ```bash
 diff -u /tmp/v3-s0-before.sha256 /tmp/v3-s0-after.sha256
@@ -2290,16 +2512,17 @@ to show the new content-addressed file and no mutable index.
 
 - [ ] **Step 6: Prove exact retry and correction behavior**
 
-Exact retry:
+Exact retry uses the same cutoff but a later observation timestamp:
 
 ```bash
+retry_recorded_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 python3 scripts/portfolio_decision_snapshot.py compose \
   --book autonomous \
   --decision-cutoff "$decision_cutoff" \
-  --recorded-at "$recorded_at"
+  --recorded-at "$retry_recorded_at"
 ```
 
-Require the same snapshot ID and no second file.
+Require the same snapshot ID and no second file because the sorted source-generation set is unchanged.
 
 Correction canary uses a controlled non-market fixture only in the test/runtime staging namespace, not production market artifacts:
 
@@ -2312,7 +2535,7 @@ Do not alter live Macro artifacts merely to demonstrate correction.
 
 - [ ] **Step 7: Prove the operator journey in a real browser**
 
-At 1440x900 and 390x844:
+At 1440x900, 820x1180, and 390x844:
 
 1. open the deployed Portfolio dashboard;
 2. select `US Brain`;
@@ -2359,7 +2582,9 @@ If any no-effect hash changes, classify the release `BROKEN`, stop, reconcile th
 
 The plan maps every S0 requirement to an implementation task:
 
+- separate design and implementation carriers -> Tasks 0 and 8;
 - immutable, content-addressed snapshot -> Tasks 1 and 3;
+- canonical JSON owner reuse -> Task 1;
 - explicit point-in-time clocks -> Tasks 1 and 2;
 - book/risk/opportunity/source coverage -> Task 2;
 - complete/partial/blocked/corrected states -> Tasks 1 and 3;
@@ -2386,6 +2611,7 @@ snapshot_id
 section_id
 coverage_state
 correction_generation
+canonical_json_bytes (imported from control_plane.wake_events)
 read_projection
 ```
 
@@ -2393,4 +2619,4 @@ No later task refers to an interface absent from an earlier task.
 
 ### Scope conclusion
 
-This plan delivers one independently useful read-only vertical. It does not include the PM, research agents, portfolio constructor, execution staging, or promotion logic. Those remain separate plans after S0 is proven.
+This plan delivers one independently useful read-only vertical on a separate implementation carrier after the records-only architecture/plan is protected. It does not include the PM, research agents, portfolio constructor, execution staging, or promotion logic. Those remain separate plans after S0 is proven.
