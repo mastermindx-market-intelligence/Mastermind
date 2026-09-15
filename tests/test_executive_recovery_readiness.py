@@ -14,6 +14,7 @@ import pytest
 from control_plane.executive_recovery_readiness import (
     ALL_DAEMON_LABELS,
     BASE_RECOVERY_PROFILE,
+    DAEMON_OBSERVATIONS,
     DISARMED_EXPECTED_DAEMON_LABELS,
     DISK_FREE_FLOOR_BYTES,
     EVIDENCE_CLASSES,
@@ -1419,6 +1420,31 @@ def test_missing_daemon_observation_is_unknown_not_absent() -> None:
         assert predicate["code"] == "DAEMON_STATE_UNKNOWN"
 
 
+def test_daemon_observation_vocabulary_is_closed() -> None:
+    """An unknown observed state on a known label is refused, never classified.
+
+    The label set already has its own refusal, so this pins the other half of
+    the observation contract: a state token outside the reviewed vocabulary can
+    neither reach a verdict table nor crash one.
+    """
+
+    assert DAEMON_OBSERVATIONS == frozenset(
+        {"RUNNING", "LOADED_NOT_RUNNING", "DISABLED", "NOT_INSTALLED", "UNKNOWN"}
+    )
+
+    for label in (
+        REQUIRED_RUNNING_DAEMON_LABELS[0],
+        DISARMED_EXPECTED_DAEMON_LABELS[0],
+    ):
+        for state in ("WHATEVER", "running", "OK", "", None, 1, True):
+            daemons = _studio_daemons()
+            daemons[label] = state  # type: ignore[assignment]
+            for profile in READINESS_PROFILES:
+                with pytest.raises(RecoveryReadinessContractError) as excinfo:
+                    _classify(_studio_observation(system_daemons=daemons), profile)
+                assert str(excinfo.value) == "DAEMON_OBSERVATION_INVALID"
+
+
 # ------------------------------------------------- user-session separation
 
 
@@ -1723,8 +1749,21 @@ def test_collector_reproduces_ready_state(tmp_path: Path) -> None:
 
 
 def test_collector_refuses_non_darwin_without_running_commands() -> None:
+    """The refusal must precede every host read, proven by an empty call log.
+
+    A runner that raises cannot prove this: ``_read_stdout`` deliberately
+    swallows any runner exception and returns ``None``, so a collector that
+    read the host first and only then checked the platform would still refuse
+    ``UNSUPPORTED_PLATFORM`` and still look correct.  This runner therefore
+    succeeds benignly and records every invocation, and the ordering claim is
+    carried by the call log being exactly empty.
+    """
+
+    calls: list[tuple[str, ...]] = []
+
     def runner(command: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
-        raise AssertionError("no command may run on an unsupported platform")
+        calls.append(command)
+        return _completed(command)
 
     with pytest.raises(RecoveryReadinessProbeError) as excinfo:
         collect_recovery_observation(
@@ -1736,6 +1775,7 @@ def test_collector_refuses_non_darwin_without_running_commands() -> None:
             wall_time_ms=lambda: 1,
         )
     assert excinfo.value.code == "UNSUPPORTED_PLATFORM"
+    assert calls == []
 
 
 def test_collector_maps_unavailable_commands_to_unknown(tmp_path: Path) -> None:
@@ -1903,6 +1943,30 @@ def test_daemon_plist_path_is_fixed_and_rejects_unknown_labels() -> None:
     for label in ("../etc/passwd", SSHD_LABEL, "com.example.other"):
         with pytest.raises(RecoveryReadinessProbeError) as excinfo:
             system_daemon_plist_path(label)
+        assert excinfo.value.code == "REFERENCE_INVALID"
+
+
+def test_launchctl_print_command_is_fixed_and_rejects_unknown_labels() -> None:
+    """The service-state query is closed over the reviewed label set alone."""
+
+    for label in ALL_DAEMON_LABELS + (SSHD_LABEL,):
+        assert launchctl_print_command(label) == (
+            "/bin/launchctl",
+            "print",
+            f"system/{label}",
+        )
+
+    for label in (
+        "com.example.other",
+        "../etc/passwd",
+        "system/com.mastermind.executive.control",
+        "com.mastermind.executive.control ",
+        "com.mastermind.executive",
+        "",
+        "com.mastermind.chairman-control-room",
+    ):
+        with pytest.raises(RecoveryReadinessProbeError) as excinfo:
+            launchctl_print_command(label)
         assert excinfo.value.code == "REFERENCE_INVALID"
 
 
