@@ -1,0 +1,60 @@
+{
+  "mission": {
+    "mission_id": "mission-003",
+    "job_ref": "job-003",
+    "objective": "Refuse malformed and conflicting fixture identities."
+  },
+  "criteria_absent": {
+    "missingness_class": "MISSING_PRODUCER",
+    "target_field": "criteria",
+    "producer_owner": "accepted-criteria-owner",
+    "reason": "No accepted-criteria producer record exists."
+  },
+  "context_association": {
+    "mission_id": "mission-wrong",
+    "context_bundle_id": "context-003",
+    "revision": "revision-003",
+    "context_digest": "8888888888888888888888888888888888888888888888888888888888888888",
+    "publisher": "mission-context-publisher",
+    "association_id": "association-003",
+    "published_at": "2026-09-14T00:00:03Z"
+  },
+  "context_bundle": {
+    "context_bundle_id": "context-003",
+    "revision": "revision-003",
+    "context_digest": "8888888888888888888888888888888888888888888888888888888888888888",
+    "selected_items": [],
+    "excluded": [],
+    "omitted_due_to_budget": [],
+    "degraded": []
+  },
+  "receipts": [
+    {
+      "mission_id": "mission-003",
+      "context_bundle_id": "context-003",
+      "revision": "revision-003",
+      "context_digest": "9999999999999999999999999999999999999999999999999999999999999999",
+      "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "provider_turn_ref": "opaque-provider-turn-003",
+      "receipt_id": "receipt-003",
+      "producer": "receipt-owner",
+      "published_at": "2026-09-14T00:00:04Z"
+    }
+  ],
+  "receipt_absent": null,
+  "conversation_ref": null,
+  "artifact_ref": null,
+  "review_ref": null,
+  "source_digests": [
+    {
+      "source_id": "duplicate",
+      "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "producer": "producer-a"
+    },
+    {
+      "source_id": "duplicate",
+      "digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "producer": "producer-b"
+    }
+  ]
+}
