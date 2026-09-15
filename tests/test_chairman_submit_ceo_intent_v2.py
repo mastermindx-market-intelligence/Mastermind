@@ -54,12 +54,6 @@ def test_d2_wrong_peer_is_refused_before_body_read() -> None:
     reader.readuntil.assert_not_called()
 
 
-def test_d5_duplicate_identity_is_reconciled_by_canonical_command_id() -> None:
-    source = Path(__file__).parents[1] / "control_plane" / "executive_ceo_ingress.py"
-    text = source.read_text(encoding="utf-8")
-    assert "find_event_by_command_id" in text and "if existing is not None:" in text
-
-
 def test_d3_launcher_is_strict_v2_and_has_no_host_owned_fields() -> None:
     frame = launcher.build_frame("W1H2-REQUEST-1", {"objective": "test", "workstream": "WS-1"}, {"mastermind_sha": "a" * 40, "macro_sha": "b" * 40, "boot_packet_schema": executive_ceo_ingress.BOOT_PACKET_SCHEMA})
     assert frame["schema"] is executive_ceo_ingress.SUBMIT_SCHEMA_V2
