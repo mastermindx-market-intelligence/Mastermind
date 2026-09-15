@@ -17,6 +17,7 @@ REMOTE_WORKER_GATEWAY_CONFIG_SCHEMA = "mastermind.remote_worker_gateway_config/v
 
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{1,127}$")
+_RESERVED_UNBOUND_HOST_REFS = frozenset({"local-unbound"})
 
 
 @dataclasses.dataclass(frozen=True)
@@ -40,7 +41,8 @@ class RemoteWorkerGatewayConfig:
     def __post_init__(self) -> None:
         if self.schema != REMOTE_WORKER_GATEWAY_CONFIG_SCHEMA:
             raise ValueError("remote worker gateway config schema is unsupported")
-        if not _HEX64_RE.fullmatch(str(self.host_ref)):
+        host_ref = str(self.host_ref)
+        if not _ID_RE.fullmatch(host_ref) or host_ref in _RESERVED_UNBOUND_HOST_REFS:
             raise ValueError("remote worker gateway host_ref is invalid")
 
         try:
