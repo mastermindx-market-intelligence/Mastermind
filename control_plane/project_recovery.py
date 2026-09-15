@@ -5,7 +5,7 @@ from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
 from control_plane.project_recovery_contract import ASSESSMENT_SCHEMA, DISPOSITIONS, assessment_semantic_hash, validate_inputs
-from control_plane.project_recovery_rules import build_recovery_indexes, detect_recovery_findings, wait_state
+from control_plane.project_recovery_rules import build_recovery_indexes, detect_recovery_findings, has_valid_wait
 
 PRECEDENCE={"NO_RECOVERY_ACTION":0,"VALID_INTENTIONAL_WAIT":1,"CEO_ATTENTION":2,"RECOVERY_REQUIRED":3,"UNKNOWN_RECONCILE":4}
 
@@ -27,7 +27,7 @@ def assess_recovery(session_truth:Mapping[str,Any], agentos_state:Mapping[str,An
     for ws,row in sorted(idx["workstreams"].items()):
         rows=grouped.get(ws,[])
         if rows: disp=max((f["disposition"] for f in rows),key=lambda d:PRECEDENCE[d])
-        elif wait_state(row.get("wait") if isinstance(row.get("wait"),Mapping) else None,as_of=day)=="VALID": disp="VALID_INTENTIONAL_WAIT"
+        elif has_valid_wait(row, as_of=day): disp="VALID_INTENTIONAL_WAIT"
         else: disp="NO_RECOVERY_ACTION"
         subjects.append({"subject":ws,"workstream":ws,"program":row.get("program") or row.get("program_key"),"disposition":disp})
     for pkey in sorted(idx["programs"]):
@@ -35,6 +35,12 @@ def assess_recovery(session_truth:Mapping[str,Any], agentos_state:Mapping[str,An
         if not any(s["subject"]==sid for s in subjects):
             rows=grouped.get(sid,[]); disp=max((f["disposition"] for f in rows),key=lambda d:PRECEDENCE[d]) if rows else "NO_RECOVERY_ACTION"
             subjects.append({"subject":sid,"workstream":None,"program":pkey,"disposition":disp})
+    represented={s["subject"] for s in subjects}
+    for sid, rows in sorted(grouped.items()):
+        if sid in represented: continue
+        disp=max((f["disposition"] for f in rows),key=lambda d:PRECEDENCE[d])
+        first=rows[0]
+        subjects.append({"subject":sid,"workstream":first.get("workstream"),"program":first.get("program"),"disposition":disp})
     summary={d:0 for d in sorted(DISPOSITIONS)}
     for s in subjects: summary[s["disposition"]]+=1
     observations=st.get("observations") or {}; agentobs=observations.get("agentos") or {}
