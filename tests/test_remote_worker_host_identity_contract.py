@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -65,3 +66,9 @@ def test_gateway_config_uses_same_opaque_host_ref_contract(tmp_path: Path) -> No
 
     with pytest.raises(ValueError, match="host_ref is invalid"):
         RemoteWorkerGatewayConfig(host_ref="local-unbound", **kwargs)
+
+
+def test_gateway_config_does_not_coerce_non_string_host_identity(tmp_path: Path) -> None:
+    kwargs: dict[str, Any] = _gateway_kwargs(tmp_path)
+    with pytest.raises(ValueError, match="host_ref is invalid"):
+        RemoteWorkerGatewayConfig(host_ref=12345678, **kwargs)  # type: ignore[arg-type]
