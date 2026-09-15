@@ -37,7 +37,10 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, Path, dict[str, object]]:
     manifest.write_text(json.dumps({"commit_sha": "a" * 40}) + "\n", encoding="utf-8")
     config = tmp_path / "control.json"
     config.write_text(json.dumps({"control_uid": os.geteuid()}) + "\n", encoding="utf-8")
-    target = tmp_path / "receipt.json"
+    parent = tmp_path / "receipt-parent"
+    parent.mkdir()
+    parent.chmod(0o700)
+    target = parent / "receipt.json"
     now = datetime(2026, 9, 15, 12, 0, tzinfo=UTC)
     return target, config, release, {"now": now, "commit": "a" * 40}
 
@@ -112,6 +115,44 @@ def test_d6_verify_rejects_non_private_receipt(tmp_path: Path) -> None:
     with pytest.raises(receipt.SubmitArmReceiptError, match="receipt_not_private"):
         receipt.verify(target, config, release, now=values["now"])
 
+
+def test_d6_receipt_parent_privacy_and_descriptor_discriminators(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    current_uid = os.geteuid()
+    target, config, release, values = _fixture(tmp_path)
+    document = receipt.make_receipt(config, release, principal_uid=current_uid, now=values["now"])
+    target.write_text(json.dumps(document) + "\n", encoding="utf-8")
+    target.chmod(0o400)
+
+    target.parent.chmod(0o755)
+    with pytest.raises(receipt.SubmitArmReceiptError, match="receipt_parent_not_private"):
+        receipt.verify(target, config, release, now=values["now"])
+    monkeypatch.setattr(receipt.os, "geteuid", lambda: 0)
+    with pytest.raises(receipt.SubmitArmReceiptError, match="receipt_parent_not_private"):
+        receipt.emit(target, config, release, now=values["now"])
+
+    target.parent.chmod(0o400)
+    other_uid = current_uid + 1
+    config.write_text(json.dumps({"control_uid": other_uid}) + "\n", encoding="utf-8")
+    with pytest.raises(receipt.SubmitArmReceiptError, match="receipt_parent_not_private"):
+        receipt.verify(target, config, release, now=values["now"])
+
+    target.parent.chmod(0o700)
+    config.write_text(json.dumps({"control_uid": current_uid}) + "\n", encoding="utf-8")
+    target.unlink()
+    target.symlink_to(release / ".executive-release-manifest.json")
+    with pytest.raises(receipt.SubmitArmReceiptError, match="receipt_not_private"):
+        receipt.verify(target, config, release, now=values["now"])
+
+    target.unlink()
+    target.mkdir()
+    with pytest.raises(receipt.SubmitArmReceiptError, match="receipt_not_private"):
+        receipt.verify(target, config, release, now=values["now"])
+
+    target.rmdir()
+    target.write_text(json.dumps(document) + "\n", encoding="utf-8")
+    target.chmod(0o400)
+    assert receipt.verify(target, config, release, now=values["now"]) == document
+
     target.unlink()
     target.symlink_to(config)
     with pytest.raises(receipt.SubmitArmReceiptError, match="receipt_not_private"):
@@ -123,9 +164,7 @@ def test_d6_atomic_private_receipt_shape_and_no_host_absolute_paths(tmp_path: Pa
     text = source.read_text(encoding="utf-8")
     assert "/var/" not in text and "/private/var" not in text and "/Library/" not in text
     target, config, release, values = _fixture(tmp_path)
-    parent = tmp_path / "receipt-parent"
-    parent.mkdir()
-    target = parent / target.name
+    parent = target.parent
     monkeypatch.setattr(receipt.os, "geteuid", lambda: 0)
     receipt.emit(target, config, release, now=values["now"])
     info = target.lstat()
