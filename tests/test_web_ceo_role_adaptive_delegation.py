@@ -116,6 +116,8 @@ def test_candidate_is_structurally_unenrolled_and_closes_bypass_and_pro_class_ga
     assert "CRITICAL_PATH_INTERVENTION" not in skill
     assert "NO_ELIGIBLE_WORKER" not in skill
     assert "once #591 is accepted" not in skill
+    assert "accepted enrollment in the same pinned INDEX" in spec
+    assert "once #591 is accepted" not in spec
 
 
 def test_static_packet_checks_do_not_launch_or_grade_models():
