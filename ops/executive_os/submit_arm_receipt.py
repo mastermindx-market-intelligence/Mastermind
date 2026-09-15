@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import stat
 import tempfile
 from datetime import UTC, datetime
@@ -85,15 +86,24 @@ def _parse_time(value: Any) -> datetime:
 
 def verify(receipt_path: Path, config_path: Path, release_root: Path, *, now: datetime | None = None) -> dict[str, Any]:
     now = now or datetime.now(UTC)
-    if not receipt_path.exists():
+    try:
+        receipt_info = receipt_path.lstat()
+    except OSError:
         raise SubmitArmReceiptError("receipt_absent")
+    expected_uid = _config_uid(config_path)
+    if (
+        stat.S_ISLNK(receipt_info.st_mode)
+        or not stat.S_ISREG(receipt_info.st_mode)
+        or stat.S_IMODE(receipt_info.st_mode) & 0o022
+        or receipt_info.st_uid not in {expected_uid, 0}
+    ):
+        raise SubmitArmReceiptError("receipt_not_private")
     value = _json(receipt_path)
     observed = _parse_time(value.get("observed_at"))
     age = (now.astimezone(UTC) - observed).total_seconds()
     if age < 0 or age > RECEIPT_MAX_AGE_SECONDS:
         raise SubmitArmReceiptError("receipt_stale")
     manifest, manifest_value = _manifest(release_root)
-    expected_uid = _config_uid(config_path)
     principal = value.get("principal")
     if not isinstance(principal, dict) or principal.get("effective_uid") != expected_uid:
         raise SubmitArmReceiptError("receipt_wrong_principal")
@@ -128,6 +138,8 @@ def emit(receipt_path: Path, config_path: Path, release_root: Path, *, now: date
     if os.geteuid() != 0:
         raise SubmitArmReceiptError("emit_requires_root")
     manifest, manifest_value = _manifest(release_root)
+    if not re.fullmatch(r"[0-9a-fA-F]{40}", release_root.name) or release_root.name != manifest_value["commit_sha"]:
+        raise SubmitArmReceiptError("release_mismatch")
     config_uid = _config_uid(config_path)
     configured_release = _json(config_path).get("release_commit_sha")
     if isinstance(configured_release, str) and configured_release != manifest_value["commit_sha"]:

@@ -11,12 +11,12 @@ from ops.executive_os import submit_arm_receipt as receipt
 
 
 def _fixture(tmp_path: Path) -> tuple[Path, Path, Path, dict[str, object]]:
-    release = tmp_path / "release"
+    release = tmp_path / ("a" * 40)
     release.mkdir()
     manifest = release / ".executive-release-manifest.json"
     manifest.write_text(json.dumps({"commit_sha": "a" * 40}) + "\n", encoding="utf-8")
     config = tmp_path / "control.json"
-    config.write_text(json.dumps({"control_uid": os.geteuid(), "release_commit_sha": "a" * 40}) + "\n", encoding="utf-8")
+    config.write_text(json.dumps({"control_uid": os.geteuid()}) + "\n", encoding="utf-8")
     target = tmp_path / "receipt.json"
     now = datetime(2026, 9, 15, 12, 0, tzinfo=UTC)
     return target, config, release, {"now": now, "commit": "a" * 40}
@@ -29,23 +29,30 @@ def test_d6_verify_distinct_absent_stale_principal_release_and_success(tmp_path:
 
     document = receipt.make_receipt(config, release, principal_uid=os.geteuid(), now=values["now"])
     target.write_text(json.dumps(document) + "\n", encoding="utf-8")
+    target.chmod(0o400)
     assert receipt.verify(target, config, release, now=values["now"])["armed_scope"] == "ceo_submit"
 
     stale = dict(document)
     stale["observed_at"] = (values["now"] - timedelta(seconds=receipt.RECEIPT_MAX_AGE_SECONDS + 1)).isoformat(timespec="seconds")
+    target.chmod(0o600)
     target.write_text(json.dumps(stale) + "\n", encoding="utf-8")
+    target.chmod(0o400)
     with pytest.raises(receipt.SubmitArmReceiptError, match="receipt_stale"):
         receipt.verify(target, config, release, now=values["now"])
 
     wrong_principal = dict(document)
     wrong_principal["principal"] = {"effective_uid": 999, "effective_gid": 999}
+    target.chmod(0o600)
     target.write_text(json.dumps(wrong_principal) + "\n", encoding="utf-8")
+    target.chmod(0o400)
     with pytest.raises(receipt.SubmitArmReceiptError, match="receipt_wrong_principal"):
         receipt.verify(target, config, release, now=values["now"])
 
     wrong_release = dict(document)
     wrong_release["release_commit_sha"] = "b" * 40
+    target.chmod(0o600)
     target.write_text(json.dumps(wrong_release) + "\n", encoding="utf-8")
+    target.chmod(0o400)
     with pytest.raises(receipt.SubmitArmReceiptError, match="receipt_wrong_release"):
         receipt.verify(target, config, release, now=values["now"])
 
@@ -59,6 +66,36 @@ def test_d6_emit_refuses_non_root_and_release_mismatch(tmp_path: Path, monkeypat
     (release / ".executive-release-manifest.json").write_text(json.dumps({"commit_sha": "b" * 40}), encoding="utf-8")
     with pytest.raises(receipt.SubmitArmReceiptError, match="release_mismatch"):
         receipt.emit(target, config, release, now=values["now"])
+
+    wrong_name = tmp_path / ("c" * 40)
+    wrong_name.mkdir()
+    (wrong_name / ".executive-release-manifest.json").write_text(json.dumps({"commit_sha": "a" * 40}), encoding="utf-8")
+    with pytest.raises(receipt.SubmitArmReceiptError, match="release_mismatch"):
+        receipt.emit(target, config, wrong_name, now=values["now"])
+
+    non_sha_name = tmp_path / "release"
+    non_sha_name.mkdir()
+    (non_sha_name / ".executive-release-manifest.json").write_text(json.dumps({"commit_sha": "a" * 40}), encoding="utf-8")
+    with pytest.raises(receipt.SubmitArmReceiptError, match="release_mismatch"):
+        receipt.emit(target, config, non_sha_name, now=values["now"])
+
+    with pytest.raises(receipt.SubmitArmReceiptError, match="emit_requires_root"):
+        monkeypatch.setattr(receipt.os, "geteuid", lambda: 501)
+        receipt.emit(target, config, release, now=values["now"])
+
+
+def test_d6_verify_rejects_non_private_receipt(tmp_path: Path) -> None:
+    target, config, release, values = _fixture(tmp_path)
+    document = receipt.make_receipt(config, release, principal_uid=os.geteuid(), now=values["now"])
+    target.write_text(json.dumps(document) + "\n", encoding="utf-8")
+    target.chmod(0o666)
+    with pytest.raises(receipt.SubmitArmReceiptError, match="receipt_not_private"):
+        receipt.verify(target, config, release, now=values["now"])
+
+    target.unlink()
+    target.symlink_to(config)
+    with pytest.raises(receipt.SubmitArmReceiptError, match="receipt_not_private"):
+        receipt.verify(target, config, release, now=values["now"])
 
 
 def test_d6_no_host_absolute_paths_and_atomic_private_shape() -> None:

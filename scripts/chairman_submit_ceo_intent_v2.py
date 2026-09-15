@@ -11,6 +11,9 @@ from typing import Any
 from control_plane import executive_ceo_ingress
 
 
+_PRODUCTION_CONTROL_SOCKET = Path("/var/run/mastermind-executive/control.sock")
+
+
 def _absolute_path(value: str) -> Path:
     path = Path(value)
     if not path.is_absolute():
@@ -43,17 +46,23 @@ def build_frame(request_ref: str, request: dict[str, Any], grounding: dict[str, 
 
 def _socket_path(args: argparse.Namespace) -> Path:
     if args.socket is not None:
-        return args.socket
+        path = args.socket
+        if path.resolve(strict=False) == _PRODUCTION_CONTROL_SOCKET.resolve(strict=False):
+            raise ValueError("refusing Operator control socket")
+        return path
     if args.config is None:
         raise ValueError("client commands require --socket or --config")
     info = args.config.lstat()
     if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) & 0o022:
         raise ValueError("control config must be a private regular file")
     value = json.loads(args.config.read_text(encoding="utf-8"))
-    path = value.get("ceo_ingress_socket_path") if isinstance(value, dict) else None
-    if not isinstance(path, str) or not Path(path).is_absolute():
+    ingress = value.get("ceo_ingress_socket_path") if isinstance(value, dict) else None
+    control = value.get("control_socket_path") if isinstance(value, dict) else None
+    if not isinstance(ingress, str) or not Path(ingress).is_absolute():
         raise ValueError("control config ceo_ingress_socket_path must be absolute")
-    return Path(path)
+    if isinstance(control, str) and Path(ingress).resolve(strict=False) == Path(control).resolve(strict=False):
+        raise ValueError("ceo_ingress_socket_path must differ from control_socket_path")
+    return Path(ingress)
 
 
 def _frame(args: argparse.Namespace) -> dict[str, Any]:

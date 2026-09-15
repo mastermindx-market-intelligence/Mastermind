@@ -99,5 +99,10 @@ def test_d8_template_topology_and_ingress_socket_only(tmp_path: Path) -> None:
     config.write_text(json.dumps({"ceo_ingress_socket_path": "/tmp/ingress.sock", "control_socket_path": "/tmp/operator.sock"}), encoding="utf-8")
     try:
         assert launcher._socket_path(mock.Mock(socket=None, config=config)) == Path("/tmp/ingress.sock")
+        with pytest.raises(ValueError, match="Operator control socket"):
+            launcher._socket_path(mock.Mock(socket=Path("/var/run/mastermind-executive/control.sock"), config=None))
+        config.write_text(json.dumps({"ceo_ingress_socket_path": "/tmp/operator.sock", "control_socket_path": "/tmp/operator.sock"}), encoding="utf-8")
+        with pytest.raises(ValueError, match="must differ"):
+            launcher._socket_path(mock.Mock(socket=None, config=config))
     finally:
         config.unlink(missing_ok=True)
