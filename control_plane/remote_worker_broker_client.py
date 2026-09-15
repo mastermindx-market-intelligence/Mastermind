@@ -31,7 +31,6 @@ _READ_ONLY_OPERATIONS = frozenset(
     {
         "ohf-identity",
         "ohf-materialization-status",
-        "ohf-reconcile",
     }
 )
 _BOUND_AUTHORITY_KEYS = frozenset({"host_ref", "job_id", "attempt_id", "worker_id"})
@@ -53,8 +52,6 @@ class RemoteWorkerBrokerClient:
         operations = frozenset(allowed_operations)
         if not operations or any(not isinstance(value, str) for value in operations):
             raise TransportValidationError("remote broker client operations are invalid")
-        # build_request is the canonical identity/operation validator.  Probe
-        # every configured operation without creating network or lifecycle state.
         normalized_identity = dict(identity)
         for operation in operations:
             build_request(normalized_identity, operation, {})
