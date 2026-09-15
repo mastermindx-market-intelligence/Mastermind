@@ -674,6 +674,8 @@ It is a content-addressed manifest over existing canonical artifacts and bounded
 | Event state | Earnings, catalysts, filings, policy and material corporate events |
 | Historical memory | Existing thesis, prior forecasts, decisions, fills, and outcomes |
 
+S0 binds `historical_memory` explicitly to bounded Portfolio-owned decisions, fills, position-lifecycle rows, and outstanding settlement-receipt lineage. An absent optional history file is a known absence; a malformed, unstable, or unreadable history source makes the section partial. The section may never be silently fabricated merely to satisfy the closed domain list.
+
 ### 10.3 Source receipt
 
 Every referenced source carries:
@@ -701,15 +703,27 @@ authority_class
 
 A fact observed at 09:00 but unavailable to Mastermind until 11:00 cannot enter a 10:00 decision.
 
-### 10.4 Snapshot states
+### 10.4 Snapshot, coverage, and correction states
+
+The root operational `state` is coverage-derived for a valid materialized snapshot:
 
 ```text
 COMPLETE
 PARTIAL
 BLOCKED
 INVALID
+```
+
+`INVALID` is reserved for contract, identity, or integrity failure. The independent `coverage_state` preserves `COMPLETE | PARTIAL | BLOCKED | UNKNOWN` source coverage semantics.
+
+Correction lineage is orthogonal and lives under `correction.status`:
+
+```text
+ORIGINAL
 CORRECTED_GENERATION_AVAILABLE
 ```
+
+A corrected generation may itself be `COMPLETE`, `PARTIAL`, or `BLOCKED`; correction lineage never overwrites the honest coverage state.
 
 A missing source never becomes an empty complete source.
 
@@ -723,7 +737,8 @@ If a source corrects a same-date artifact after the decision cutoff:
 - the correction creates a new source generation;
 - the next decision references the new generation;
 - historical evaluation uses the generation actually available to the PM;
-- no page or continuation token may mix generations.
+- no page or continuation token may mix generations;
+- `correction.status` records the lineage while root `state` and `coverage_state` continue to report the corrected capture's actual completeness.
 
 ### 10.6 Bounded payload
 
