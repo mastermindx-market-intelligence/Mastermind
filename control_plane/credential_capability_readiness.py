@@ -72,6 +72,8 @@ def _identifier(value: object, field: str, *, optional: bool = False) -> str | N
         return None
     if type(value) is not str or value != value.strip() or _ID.fullmatch(value) is None:
         raise CredentialReadinessError(f"{field} must be a bounded lowercase identifier")
+    if _FORBIDDEN_SOURCE.search(value):
+        raise CredentialReadinessError(f"{field} contains secret-shaped text")
     return value
 
 
@@ -266,7 +268,13 @@ def augment_credential_readiness(
     if not isinstance(base, CapabilityFact):
         raise CredentialReadinessError("base must be CapabilityFact")
     observation = _normalize(observation)
-    existing = {dependency.name for dependency in base.dependencies}
+    if not isinstance(base.dependencies, tuple):
+        raise CredentialReadinessError("base dependencies must be an immutable tuple")
+    existing: set[str] = set()
+    for dependency in base.dependencies:
+        if not isinstance(dependency, DependencyFact) or type(dependency.name) is not str:
+            raise CredentialReadinessError("base dependencies must contain DependencyFact")
+        existing.add(dependency.name.strip().lower())
     collision = existing & _RESERVED_DEPENDENCIES
     if collision:
         names = ",".join(sorted(collision))

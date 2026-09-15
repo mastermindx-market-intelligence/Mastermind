@@ -266,3 +266,29 @@ def test_existing_owner_dependencies_are_composed_not_replaced():
     assert dependencies["provider-runtime"].state is CapabilityState.PROVEN_LIVE
     assert dependencies["provider-runtime"].available is True
     assert len(dependencies) == 4
+
+
+def test_secret_shaped_binding_identifier_is_refused_before_projection():
+    observation = dataclasses.replace(
+        _observation(),
+        expected_host_binding="sk-example",
+    )
+    with pytest.raises(CredentialReadinessError, match="secret-shaped"):
+        augment_credential_readiness(_base(), observation)
+
+
+def test_reserved_dependency_collision_is_normalized_before_composition():
+    base = _base(
+        dependencies=(
+            DependencyFact(
+                "Credential.Binding",
+                CapabilityState.PROVEN_LIVE,
+                True,
+                True,
+                "evidence:existing-mixed-case",
+                (),
+            ),
+        )
+    )
+    with pytest.raises(CredentialReadinessError, match="reserved credential dependencies"):
+        augment_credential_readiness(base, _observation())
