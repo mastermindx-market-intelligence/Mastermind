@@ -329,7 +329,7 @@ async def test_generation_identity_cannot_retarget_bound_generation(paths: _Path
     assert called is False
 
 
-async def test_bound_reconcile_remains_observational_after_write_loss(paths: _Paths) -> None:
+async def test_bound_reconcile_post_write_loss_is_effect_unknown(paths: _Paths) -> None:
     client = RemoteWorkerBrokerClient(
         _binding(paths),
         IDENTITY,
@@ -351,7 +351,7 @@ async def test_bound_reconcile_remains_observational_after_write_loss(paths: _Pa
     client._open_connection = exchange
     with pytest.raises(TransportError) as raised:
         await client.request("ohf-reconcile", payload)
-    assert raised.value.classification is TransportEffect.NO_EFFECT
+    assert raised.value.classification is TransportEffect.EFFECT_UNKNOWN
 
 
 async def test_server_pin_mismatch_refuses_before_any_request_bytes(paths: _Paths) -> None:
