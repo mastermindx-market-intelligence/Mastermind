@@ -1245,8 +1245,13 @@ def cmd_run(args: argparse.Namespace) -> int:
         except (EnvError, OSError, subprocess.SubprocessError, json.JSONDecodeError):
             # The local gate may have failed before launch or after a local test
             # effect but before it could persist proof. Never invent a gate
-            # terminal; export only an explicit unavailable outcome.
-            receipt = load_receipt(env_dir)
+            # terminal; export only an explicit unavailable outcome. A failed
+            # receipt write may itself leave unreadable JSON, so that recovery
+            # read must fail closed rather than raising a second exception.
+            try:
+                receipt = load_receipt(env_dir)
+            except (OSError, json.JSONDecodeError):
+                receipt = None
             if receipt is None:
                 print(
                     "rwe_env run refused: gate outcome unavailable and no receipt remains",
