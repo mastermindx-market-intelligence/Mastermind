@@ -6,8 +6,10 @@ Temporary E1/fixture configuration and their production-path fences are unchange
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import stat
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -45,6 +47,7 @@ def _installed_child_env(*, code_root: Path, macro_root: Path) -> dict[str, str]
         "PYTHONDONTWRITEBYTECODE": "1",
         "GIT_CONFIG_GLOBAL": "/dev/null",
         "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_NO_REPLACE_OBJECTS": "1",
         "GIT_CONFIG_COUNT": "1",
         "GIT_CONFIG_KEY_0": "safe.directory",
         "GIT_CONFIG_VALUE_0": os.fspath(macro_root),
@@ -54,28 +57,82 @@ def _installed_child_env(*, code_root: Path, macro_root: Path) -> dict[str, str]
     }
 
 
+def _git_blob_oid(payload: bytes) -> str:
+    digest = hashlib.sha1()  # Git repository uses SHA-1 object ids (40 hex chars).
+    digest.update(f"blob {len(payload)}\0".encode("ascii"))
+    digest.update(payload)
+    return digest.hexdigest()
+
+
+def _worktree_leaf_paths(root: Path) -> set[str]:
+    """Return every filesystem leaf below root except the repository's top-level .git."""
+    leaves: set[str] = set()
+    stack: list[tuple[Path, str]] = [(root, "")]
+    while stack:
+        directory, prefix = stack.pop()
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                if not prefix and entry.name == ".git":
+                    continue
+                rel = f"{prefix}/{entry.name}" if prefix else entry.name
+                if entry.is_dir(follow_symlinks=False):
+                    stack.append((Path(entry.path), rel))
+                else:
+                    leaves.add(rel)
+    return leaves
+
+
+def _raw_worktree_blob_oid(path: Path, *, mode: str) -> str:
+    """Hash raw worktree bytes without Git attributes, filters, index, or ignore rules."""
+    if mode == "120000":
+        st = path.lstat()
+        if not stat.S_ISLNK(st.st_mode):
+            raise OSError("tracked symlink is not a symlink")
+        return _git_blob_oid(os.fsencode(os.readlink(path)))
+    if mode not in {"100644", "100755"}:
+        raise OSError("unsupported tracked mode")
+
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags)
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode):
+            raise OSError("tracked file is not regular")
+        expected_exec = mode == "100755"
+        if bool(before.st_mode & 0o111) != expected_exec:
+            raise OSError("tracked executable mode differs")
+        digest = hashlib.sha1()
+        digest.update(f"blob {before.st_size}\0".encode("ascii"))
+        total = 0
+        while True:
+            chunk = os.read(fd, 1024 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            digest.update(chunk)
+        after = os.fstat(fd)
+        if total != before.st_size or (
+            before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_mode
+        ) != (
+            after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_mode
+        ):
+            raise OSError("tracked file moved during observation")
+        return digest.hexdigest()
+    finally:
+        os.close(fd)
+
+
 def _clean_git_snapshot(
     path: Path, *, runner: PacketRunner, env: Mapping[str, str], label: str,
 ) -> str:
-    """Return exact HEAD only when the checkout has no hidden or visible dirt."""
-    # Repository-local config and index hints belong to the owner-writable data root,
-    # so neither may weaken the cleanliness observation. In particular a local
-    # fsmonitor can execute during ``git status`` and assume-unchanged/skip-worktree
-    # can make changed bytes disappear from ordinary porcelain output.
+    """Return exact HEAD only when raw worktree leaves equal the committed tree."""
     git_metadata = path / ".git"
     real_checkout = git_metadata.exists() or git_metadata.is_symlink()
-    git_prefix = ["git"]
-    if real_checkout:
-        git_prefix.extend([
-            "-c", "core.fsmonitor=false",
-            "-c", "core.untrackedCache=false",
-            "-c", "core.hooksPath=/dev/null",
-        ])
 
     def observe(args: list[str], *, max_bytes: int) -> str:
         try:
             result = runner(
-                [*git_prefix, *args], cwd=path, timeout=10.0,
+                ["git", *args], cwd=path, timeout=10.0,
                 max_bytes=max_bytes, env=env,
             )
         except Exception as exc:
@@ -94,47 +151,83 @@ def _clean_git_snapshot(
             raise GatewayError("backend_unavailable", f"installed {label} observation failed")
         return stdout
 
-    # Hermetic unit tests may inject a synthetic Git runner over plain directories.
-    # A real installed checkout always carries .git metadata, so production takes
-    # this additional index-hint fence while fixture-only runners retain their
-    # existing single-status contract.
-    if real_checkout:
-        index_view = observe(["ls-files", "-v", "-z"], max_bytes=4 * 1024 * 1024)
-        for entry in index_view.split("\0"):
-            if not entry:
+    # Synthetic fixture runners use plain directories and retain the historical
+    # one-status observation contract. Production installed roots are real checkouts
+    # and use the raw object/tree verifier below.
+    if not real_checkout:
+        stdout = observe(
+            ["status", "--porcelain=v2", "--branch", "--untracked-files=all"],
+            max_bytes=256 * 1024,
+        )
+        oid: str | None = None
+        dirty = False
+        for line in stdout.splitlines():
+            if line.startswith("# branch.oid "):
+                if oid is not None:
+                    raise GatewayError(
+                        "backend_unavailable", f"installed {label} identity is ambiguous"
+                    )
+                oid = line.removeprefix("# branch.oid ").strip()
+            elif line.startswith("# ") or not line:
                 continue
-            if len(entry) < 3 or entry[1] != " ":
-                raise GatewayError(
-                    "backend_unavailable", f"installed {label} index observation failed"
-                )
-            # Normal tracked entries are H. Lower-case tags are assume-unchanged;
-            # S is skip-worktree. Other non-H states are likewise not a clean,
-            # canonical installed data-root observation.
-            if entry[0] != "H":
-                raise GatewayError(
-                    "backend_unavailable", f"installed {label} index hint is not clean"
-                )
+            else:
+                dirty = True
+        if dirty:
+            raise GatewayError("backend_unavailable", f"installed {label} checkout is not clean")
+        if not _valid_sha(oid):
+            raise GatewayError("backend_unavailable", f"installed {label} HEAD is unavailable")
+        return oid
 
-    stdout = observe(
-        ["status", "--porcelain=v2", "--branch", "--untracked-files=all"],
-        max_bytes=256 * 1024,
-    )
-    oid: str | None = None
-    dirty = False
-    for line in stdout.splitlines():
-        if line.startswith("# branch.oid "):
-            if oid is not None:
-                raise GatewayError("backend_unavailable", f"installed {label} identity is ambiguous")
-            oid = line.removeprefix("# branch.oid ").strip()
-        elif line.startswith("# ") or not line:
-            continue
-        else:
-            dirty = True
-    if dirty:
-        raise GatewayError("backend_unavailable", f"installed {label} checkout is not clean")
-    if not _valid_sha(oid):
+    head = observe(["rev-parse", "--verify", "HEAD^{commit}"], max_bytes=256).strip()
+    if not _valid_sha(head):
         raise GatewayError("backend_unavailable", f"installed {label} HEAD is unavailable")
-    return oid
+
+    tree = observe(
+        ["ls-tree", "-r", "-z", "--full-tree", head],
+        max_bytes=8 * 1024 * 1024,
+    )
+    expected: dict[str, tuple[str, str]] = {}
+    for record in tree.split("\0"):
+        if not record:
+            continue
+        meta, sep, rel = record.partition("\t")
+        parts = meta.split()
+        if not sep or len(parts) != 3:
+            raise GatewayError("backend_unavailable", f"installed {label} tree is malformed")
+        mode, object_type, oid = parts
+        if (
+            object_type != "blob"
+            or mode not in {"100644", "100755", "120000"}
+            or not _valid_sha(oid)
+            or not rel
+            or rel in expected
+        ):
+            raise GatewayError("backend_unavailable", f"installed {label} tree is unsupported")
+        expected[rel] = (mode, oid)
+
+    try:
+        actual = _worktree_leaf_paths(path)
+    except OSError as exc:
+        raise GatewayError(
+            "backend_unavailable", f"installed {label} worktree observation failed"
+        ) from exc
+    if actual != set(expected):
+        raise GatewayError("backend_unavailable", f"installed {label} worktree bytes differ")
+
+    for rel, (mode, expected_oid) in expected.items():
+        try:
+            observed_oid = _raw_worktree_blob_oid(path / rel, mode=mode)
+        except OSError as exc:
+            raise GatewayError(
+                "backend_unavailable", f"installed {label} worktree observation failed"
+            ) from exc
+        if observed_oid != expected_oid:
+            raise GatewayError("backend_unavailable", f"installed {label} worktree bytes differ")
+
+    post_head = observe(["rev-parse", "--verify", "HEAD^{commit}"], max_bytes=256).strip()
+    if post_head != head:
+        raise GatewayError("backend_unavailable", f"installed {label} HEAD changed")
+    return head
 
 
 def _inner_packet_timeout(total_timeout: float) -> float:

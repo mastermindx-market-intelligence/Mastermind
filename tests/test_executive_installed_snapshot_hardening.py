@@ -54,7 +54,7 @@ def test_clean_snapshot_refuses_index_hint_that_hides_modified_bytes(
     assert tracked.read_text(encoding="utf-8") == "modified\n"
 
     env = _installed_child_env(code_root=repo, macro_root=repo)
-    with pytest.raises(GatewayError, match="index hint"):
+    with pytest.raises(GatewayError, match="worktree bytes differ"):
         _clean_git_snapshot(
             repo,
             runner=_default_packet_runner,
@@ -92,3 +92,62 @@ def test_clean_snapshot_neutralizes_repository_local_fsmonitor(tmp_path: Path):
 
     assert len(observed) == 40
     assert marker.exists() is False
+
+
+def test_clean_snapshot_ignores_local_clean_filter_when_hashing_worktree(tmp_path: Path):
+    from integrations.executive_mcp.installed import (
+        _clean_git_snapshot,
+        _default_packet_runner,
+        _installed_child_env,
+    )
+    from integrations.executive_mcp.schemas import GatewayError
+
+    repo, tracked = _clean_repo(tmp_path)
+    info_attributes = repo / ".git" / "info" / "attributes"
+    info_attributes.write_text("tracked.txt filter=hide\n", encoding="utf-8")
+    _git(repo, "config", "filter.hide.clean", "sed s/modified/original/")
+    tracked.write_text("modified\n", encoding="utf-8")
+
+    status = subprocess.run(
+        [
+            "git", "-C", str(repo),
+            "-c", "core.fsmonitor=false",
+            "-c", "core.untrackedCache=false",
+            "-c", "core.hooksPath=/dev/null",
+            "status", "--porcelain=v2", "--branch", "--untracked-files=all",
+        ],
+        check=True, capture_output=True, text=True,
+    )
+    assert all(not line or line.startswith("# ") for line in status.stdout.splitlines())
+    assert tracked.read_text(encoding="utf-8") == "modified\n"
+
+    env = _installed_child_env(code_root=repo, macro_root=repo)
+    with pytest.raises(GatewayError, match="worktree bytes differ"):
+        _clean_git_snapshot(
+            repo, runner=_default_packet_runner, env=env, label="Mastermind source",
+        )
+
+
+def test_clean_snapshot_refuses_untracked_file_hidden_by_info_exclude(tmp_path: Path):
+    from integrations.executive_mcp.installed import (
+        _clean_git_snapshot,
+        _default_packet_runner,
+        _installed_child_env,
+    )
+    from integrations.executive_mcp.schemas import GatewayError
+
+    repo, _tracked = _clean_repo(tmp_path)
+    hidden = repo / "hidden-authoritative.txt"
+    hidden.write_text("shadow\n", encoding="utf-8")
+    (repo / ".git" / "info" / "exclude").write_text(
+        "hidden-authoritative.txt\n", encoding="utf-8"
+    )
+
+    status = _git(repo, "status", "--porcelain=v2", "--branch", "--untracked-files=all")
+    assert all(not line or line.startswith("# ") for line in status.stdout.splitlines())
+
+    env = _installed_child_env(code_root=repo, macro_root=repo)
+    with pytest.raises(GatewayError, match="worktree bytes differ"):
+        _clean_git_snapshot(
+            repo, runner=_default_packet_runner, env=env, label="Mastermind source",
+        )
