@@ -564,3 +564,21 @@ python3 scripts/executive_mcp.py --profile e1-read --mode readonly --describe \
 These commands document a reviewed source composition only. They do **not**
 authorize an installation, listener launch, tunnel, custom-app connection,
 runtime access, production readiness claim, or production deployment.
+
+### Existing Operator submit fence
+
+The production submit fence is **not** `ServerMode.PRODUCTION`.
+`ServerMode` remains limited to `READONLY` and `FIXTURE`.
+The fence gates the existing `submit-ceo-intent` command.
+It applies when the service is bound to the installed Operator socket.
+That installed socket is the production control socket.
+The gate requires the distinct host-owned `ceo_submit_armed` receipt.
+This receipt is separate from MCP mode and from the other service arming bits.
+The fence does not create a production write mode.
+No command-line flag or MCP mode creates a production write mode.
+The existing submit sink and Job creation path remain unchanged.
+The fence only refuses before that sink is entered when the receipt is absent.
+Fixture and temporary service sockets retain their existing behavior.
+Arming is a Chairman act.
+Arming remains blocked on the installed-host ceremony.
+This documentation does not authorize that ceremony or any deployment.

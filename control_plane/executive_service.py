@@ -118,6 +118,7 @@ from control_plane.executive_workspace import (
 CONTROL_PROTOCOL_VERSION = "mastermind.executive_control/v1"
 DEFAULT_MAX_REQUEST_BYTES = 64 * 1024
 DEFAULT_MAX_RESPONSE_BYTES = 1024 * 1024
+_PRODUCTION_CONTROL_SOCKET = Path("/var/run/mastermind-executive/control.sock")
 DIALOGUE_OBSERVATION_IO_TIMEOUT_SECONDS = 5.0
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _BACKUP_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.sqlite3$")
@@ -169,6 +170,10 @@ _CLIENT_GONE = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
 
 class ServiceError(RuntimeProofError):
     """A private control-service request could not be completed safely."""
+
+
+class _CeoSubmitUnarmedError(ServiceError):
+    code = "ceo_submit_unarmed"
 
 
 class SupervisorProtocol(Protocol):
@@ -1346,6 +1351,7 @@ class ServiceConfig:
     effort: str = "xhigh"
     cost_class: str = "standard"
     coo_autonomy_armed: bool = False
+    ceo_submit_armed: bool = False
     coo_operator_harness_armed: bool = False
     coo_tick_interval_seconds: float = 15.0
     coo_model_alias: str = "coo.sealed"
@@ -1397,6 +1403,8 @@ class ServiceConfig:
                 raise ValueError(f"invalid {field_name}")
         if not isinstance(self.coo_autonomy_armed, bool):
             raise ValueError("coo_autonomy_armed must be boolean")
+        if not isinstance(self.ceo_submit_armed, bool):
+            raise ValueError("ceo_submit_armed must be boolean")
         if not isinstance(self.coo_operator_harness_armed, bool):
             raise ValueError("coo_operator_harness_armed must be boolean")
         if self.coo_operator_harness_armed and not self.coo_autonomy_armed:
@@ -2867,6 +2875,12 @@ class ExecutiveControlService:
         configured = {int(value) for value in self.config.allowed_peer_uids}
         return configured or {os.geteuid()}
 
+    def _is_production_control_socket(self) -> bool:
+        return (
+            Path(self.config.socket_path).resolve(strict=False)
+            == _PRODUCTION_CONTROL_SOCKET.resolve(strict=False)
+        )
+
     async def _handle_connection(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
@@ -2910,6 +2924,9 @@ class ExecutiveControlService:
                 return
             try:
                 result = await self._dispatch_request(request)
+            except _CeoSubmitUnarmedError as exc:
+                await self._send_error(writer, exc.code, str(exc))
+                return
             except (RuntimeProofError, ValueError) as exc:
                 await self._send_error(writer, "request_failed", str(exc)[:1000])
                 return
@@ -5992,6 +6009,8 @@ class ExecutiveControlService:
                 )
             )
         if command == "submit-ceo-intent":
+            if self._is_production_control_socket() and not self.config.ceo_submit_armed:
+                raise _CeoSubmitUnarmedError("CEO intent submission is not armed")
             # The bounded CEO write bridge (Phase 1E-A).  It validates one typed
             # envelope, lets the existing authority policy adjudicate it inside
             # create_job, and returns a receipt naming the resulting QUEUED Job.
