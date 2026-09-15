@@ -296,3 +296,51 @@ def test_cctx0_checkpoint_sequence_is_monotonic_and_intents_are_stale_closed(tmp
     events = runtime.events.list_events(job_id=str(lease.attempt.job_id))
     payloads = [
         event.payload["checkpoint_sequence"]
+        for event in events
+        if event.event_type == "JOB_CHECKPOINTED"
+    ]
+    assert payloads == [1, 2]
+
+
+def test_cctx0_checkpoint_operation_replay_is_idempotent(tmp_path):
+    runtime, lease, _epoch, generation = _started(tmp_path)
+    harness = runtime.operator_harness
+    operation = OperationId("ohf-op:checkpoint-replay")
+    harness.reserve_checkpoint_operation(
+        generation=generation,
+        operation_id=operation,
+        fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+    )
+    observation = _checkpoint("replay")
+    first = harness.apply_checkpoint_operation(
+        generation=generation,
+        operation_id=operation,
+        observation=observation,
+        fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+    )
+    second = harness.apply_checkpoint_operation(
+        generation=generation,
+        operation_id=operation,
+        observation=observation,
+        fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+    )
+    assert second == first
+    with pytest.raises(StateConflict, match="checkpoint operation INTENT preconditions failed"):
+        harness.reserve_checkpoint_operation(
+            generation=generation,
+            operation_id=operation,
+            fence_generation=lease.attempt.fence_generation,
+            lease_token=lease.lease_token,
+        )
+    with pytest.raises(StateConflict, match="does not match INTENT"):
+        harness.apply_checkpoint_operation(
+            generation=generation,
+            operation_id=OperationId("ohf-op:checkpoint-no-intent"),
+            observation=observation,
+            fence_generation=lease.attempt.fence_generation,
+            lease_token=lease.lease_token,
+        )
+    with runtime.store.read() as connection:
