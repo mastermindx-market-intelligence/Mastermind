@@ -19,6 +19,24 @@ PHASE1C = ROOT / "scripts" / "executive_os_phase1c.py"
 TEMPLATE = ROOT / "ops" / "executive_os" / "control.json.template"
 
 
+# scripts/executive_os_phase1c.py:453 forces control_uid == os.geteuid(), so the host
+# uid is the one identity a fixture cannot pin; the App peer is rejected when it matches
+# control_uid (:387-391) or the Operator uid (:474). Consume the other literals the
+# admitted fixtures supply through _off_host so a host uid that happens to equal one of
+# them cannot join that set and decide the outcome.
+_HOST_UID = os.geteuid()
+
+
+def _off_host(uid: int) -> int:
+    """Shift an identity literal that happens to equal the host uid.
+
+    The assertions are about DISTINCTNESS, never about which integers stand in, so a
+    collision-only shift changes nothing they prove and removes the last way a host uid
+    can decide an outcome. +16 cannot collide with any other literal used here.
+    """
+    return uid if uid != _HOST_UID else uid + 16
+
+
 def _raw(tmp_path: Path, **extra: object) -> dict[str, object]:
     uid = os.geteuid()
     raw: dict[str, object] = {
@@ -168,18 +186,21 @@ def test_d2_peer_admission_precedes_request_body_read(tmp_path, monkeypatch):
 
 def test_d3_app_458_is_independent_of_c1_and_submit_arms(tmp_path, monkeypatch):
     module = _module()
-    # Same pinning as the D8 cases below: the admitted literal 458 must not be
-    # decided by host-derived identities (worker_uid was os.geteuid() + 1, which
-    # collides with 458 on a host whose euid is 457). Only control_uid stays
-    # host-derived, as scripts/executive_os_phase1c.py:453 requires.
+    # Same pinning as the D8 cases below, plus _off_host. The admitted literal 458
+    # carries no topology meaning here -- its real-topology value is pinned against the
+    # tracked template in test_d8_template_topology_and_protected_defaults -- it only
+    # means "a genuinely distinct uid", so shifting it off a colliding host uid changes
+    # nothing this test proves. Only control_uid stays host-derived, as
+    # scripts/executive_os_phase1c.py:453 requires.
+    app_peer = _off_host(458)
     base = _raw(
         tmp_path,
-        worker_uid=451,
+        worker_uid=_off_host(451),
         allowed_peer_uids=[450, 501],
         ceo_ingress_socket_path=str(tmp_path / "ingress.sock"),
         ceo_ingress_launchd_socket_name="CeoIngress",
-        ceo_ingress_peer_uid=452,
-        ceo_ingress_app_peer_uid=458,
+        ceo_ingress_peer_uid=_off_host(452),
+        ceo_ingress_app_peer_uid=app_peer,
         ceo_ingress_app_armed=True,
         ceo_ingress_app_macro_root=str(tmp_path / "macro"),
         ceo_submit_armed=False,
@@ -198,14 +219,14 @@ def test_d3_app_458_is_independent_of_c1_and_submit_arms(tmp_path, monkeypatch):
     monkeypatch.setattr(module, "ExecutiveControlService", FakeService)
     module._service_from_config(module.load_control_config(_write(tmp_path, base)))
     assert captured["ceo_ingress_armed"] is False
-    assert captured["ceo_ingress_app_binding"].peer_uid == 458
+    assert captured["ceo_ingress_app_binding"].peer_uid == app_peer
     assert captured["ceo_ingress_app_binding"].armed is True
 
     submit_armed = dict(base, ceo_submit_armed=True)
     captured.clear()
     module._service_from_config(module.load_control_config(_write(tmp_path, submit_armed)))
     assert captured["ceo_ingress_armed"] is False
-    assert captured["ceo_ingress_app_binding"].peer_uid == 458
+    assert captured["ceo_ingress_app_binding"].peer_uid == app_peer
     assert captured["ceo_ingress_app_binding"].armed is True
     assert captured["config"].ceo_submit_armed is True
 
@@ -213,7 +234,7 @@ def test_d3_app_458_is_independent_of_c1_and_submit_arms(tmp_path, monkeypatch):
     captured.clear()
     module._service_from_config(module.load_control_config(_write(tmp_path, unarmed_app)))
     assert captured["ceo_ingress_armed"] is False
-    assert captured["ceo_ingress_app_binding"].peer_uid == 458
+    assert captured["ceo_ingress_app_binding"].peer_uid == app_peer
     assert captured["ceo_ingress_app_binding"].armed is False
 
 
@@ -390,21 +411,23 @@ def test_d8_c1_and_worker_uids_are_not_app_peer(tmp_path, app_uid):
 
 def test_d8_genuinely_distinct_app_peer_uid_is_admitted(tmp_path):
     module = _module()
-    # Same pinned identity set as the raising cases: 458 is distinct from
-    # control/operator/C1/worker, so the rule must admit it on any host.
+    # Same pinned identity set as the raising cases, with _off_host keeping the admitted
+    # literals off the host uid: 458 is distinct from control/Operator/C1/worker, so the
+    # rule must admit it on any host.
+    app_peer = _off_host(458)
     raw = _raw(
         tmp_path,
-        worker_uid=451,
+        worker_uid=_off_host(451),
         allowed_peer_uids=[450, 501],
         ceo_ingress_socket_path=str(tmp_path / "ingress.sock"),
         ceo_ingress_launchd_socket_name="CeoIngress",
-        ceo_ingress_peer_uid=452,
-        ceo_ingress_app_peer_uid=458,
+        ceo_ingress_peer_uid=_off_host(452),
+        ceo_ingress_app_peer_uid=app_peer,
         ceo_ingress_app_armed=True,
         ceo_ingress_app_macro_root=str(tmp_path / "macro"),
     )
     loaded = module.load_control_config(_write(tmp_path, raw))
-    assert loaded["ceo_ingress_app_peer_uid"] == 458
+    assert loaded["ceo_ingress_app_peer_uid"] == app_peer
 
 
 def test_d8_template_topology_and_protected_defaults():
