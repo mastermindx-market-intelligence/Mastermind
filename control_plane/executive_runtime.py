@@ -178,6 +178,13 @@ V2_HOST_EXECUTION_BINDING_KEYS = frozenset(
     }
     | OPERATOR_HARNESS_BINDING_KEYS
 )
+HOST_EXECUTION_BINDING_VERSION_KEY = "host_execution_binding_version"
+HOST_EXECUTION_BINDING_V2 = "mastermind.host_execution_binding/v2"
+HOST_EXECUTION_BINDING_V3 = "mastermind.host_execution_binding/v3"
+V3_HOST_EXECUTION_BINDING_KEYS = frozenset(
+    V2_HOST_EXECUTION_BINDING_KEYS | {"work_placement_union"}
+)
+WORK_PLACEMENT_UNION_MAX_MEMBERS = 8
 EXECUTIVE_DIALOGUE_SOURCE_SCHEMA = "mastermind.executive_dialogue_source/v1"
 _EXECUTIVE_DIALOGUE_SOURCE_KEYS = frozenset(
     {
