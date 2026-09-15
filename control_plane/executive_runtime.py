@@ -764,10 +764,63 @@ def _normalise_constraints(
             or _ROUTING_VALUE_RE.fullmatch(harness_version.lower()) is None
         ):
             raise StateConflict("operator_harness_version must be a bounded identifier")
-        result["operator_harness_binary_digest"] = harness_digest
-        result["operator_harness_version"] = harness_version
-        result["operator_harness_armed"] = raw["operator_harness_armed"]
+    result["operator_harness_binary_digest"] = harness_digest
+    result["operator_harness_version"] = harness_version
+    result["operator_harness_armed"] = raw["operator_harness_armed"]
+    if host_admitted_placement_union and "work_placement_union" in raw:
+        result["work_placement_union"] = _normalise_work_placement_union(
+            raw["work_placement_union"]
+        )
     return result
+
+
+def _normalise_work_placement_union(
+    value: Any,
+) -> list[dict[str, str]]:
+    if not isinstance(value, (list, tuple)) or len(value) > (
+        WORK_PLACEMENT_UNION_MAX_MEMBERS
+    ):
+        raise StateConflict("host work-placement union must be a bounded list")
+    if not value:
+        raise StateConflict(
+            "host work-placement union must admit at least one placement"
+        )
+    members: list[dict[str, str]] = []
+    identities: set[tuple[str, str]] = set()
+    for member in value:
+        if not isinstance(member, Mapping) or set(member) != {
+            "provider_realm",
+            "quota_class",
+        }:
+            raise StateConflict(
+                "host work-placement union member must name exactly "
+                "a provider realm and quota class"
+            )
+        normalized_member = {
+            key: str(member[key]).strip()
+            for key in ("provider_realm", "quota_class")
+        }
+        if any(
+            _ROUTING_VALUE_RE.fullmatch(item) is None
+            for item in normalized_member.values()
+        ):
+            raise StateConflict(
+                "host work-placement union member values are invalid"
+            )
+        identity = (
+            normalized_member["provider_realm"],
+            normalized_member["quota_class"],
+        )
+        if identity in identities:
+            raise StateConflict(
+                "host work-placement union members must be distinct"
+            )
+        identities.add(identity)
+        members.append(normalized_member)
+    return sorted(
+        members,
+        key=lambda item: (item["provider_realm"], item["quota_class"]),
+    )
 
 
 def _normalise_seat(value: str, *, field: str) -> str:
