@@ -67,6 +67,14 @@ def test_candidate_discloses_fresh_sol_bundle_effect_without_claiming_enrollment
     assert "evaluation exposure, not production enrollment" in text
 
 
+def test_spec_treats_workstation_connector_exposure_as_session_scoped():
+    text = SPEC.read_text(encoding="utf-8")
+    assert "Workstation connector exposure is session-scoped" in text
+    assert "Studio Direct or Remote Desktop Commander" in text
+    assert "absence from one effective schema" in text
+    assert "This continuation exposes Studio Direct" not in text
+
+
 def test_candidate_is_structurally_unenrolled_and_closes_bypass_and_pro_class_gaps():
     skill = SKILL.read_text(encoding="utf-8")
     index = INDEX.read_text(encoding="utf-8")
@@ -88,7 +96,7 @@ def test_candidate_is_structurally_unenrolled_and_closes_bypass_and_pro_class_ga
     ):
         assert task_class in skill
     assert "`SUSTAINED_ORCHESTRATION` is a work profile, not a `PRO_MODE_TASK_CLASS`" in skill
-    assert "42 tests" in plan
+    assert "43 tests" in plan
 
 
 def test_static_packet_checks_do_not_launch_or_grade_models():
