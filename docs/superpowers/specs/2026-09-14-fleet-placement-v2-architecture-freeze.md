@@ -49,6 +49,21 @@ Completion means a real company objective can fan out across multiple physical M
 
 Explicitly rejected: Kubernetes/Nomad as a second lifecycle authority; Redis/etcd for placement; a `WorkerRealmRegistry` database; provider-specific schedulers; per-Mac Executive OS databases; a GUI mutex database; hostnames/IPs as company identity; a shared credential directory; and blind cross-host retry after an ambiguous effect.
 
+### 2.1 Precedence and current-program composition
+
+This record has **narrow precedence only for the cross-owner Fleet Placement v2 integration sequence and joins defined here**. It does not replace the more detailed accepted contracts owned by Executive Runtime, CAP-C1/C2, HF1, Provider Control, physical-resource accounting, RuntimeBinding/Wake, MH1, SCF or host recovery. Where an existing owner has a stricter contract, that owner remains controlling.
+
+Protected PR #630 is already part of the source basis and must be subtracted from future work: `mastermind.execution_plan/v2` can carry a closed per-WORK `{provider_realm, quota_class}` placement and Runtime projects that requirement into children without concrete worker/session/credential/host identity. Fleet Placement v2 consumes that capability; it does not create another per-step placement schema.
+
+The incumbent principal operation `agent-fabric-end-to-end-fable-integration-20260913-sol-001` remains the integration/adjudication owner. This FP0 record is a source candidate for that existing program, not a second principal office. Its current CCTX-0 writer owns `executive_runtime.py` and adjacent Operator Harness runtime paths; Fleet Placement must not race that custody. The already-frozen next source slice after CCTX-0 release is the existing host-admission extension that lets the host binding carry the closed root `work_placement_union`.
+
+Two older bounded children are also preserved rather than re-originated:
+
+- `workbench-fleet-hp1a-host-capacity-observation-20260913-sol-001` remains the canonical raw Darwin host-capacity-observation child if that scope is still required after current-base reconciliation. Its last reconciled state was pre-START/effect-none with no receiver.
+- `workbench-fleet-mh1-r0-remote-broker-transport-20260913-sol-001` remains the canonical MH1-R0 child. Its last reconciled state retained one qualified receiver at PRE_START_HOLD/effect-none; any continuation must re-read that carrier and current source rather than mint a replacement transport child.
+
+Historical child state is not current authority merely because it is recorded here. Action-time continuation must re-read the exact carrier, current protected source and current owner/custody before START.
+
 ## 3. Current protected-source capability ledger
 
 The following states are the maximum claims supported by protected `fdf6d19a...` plus current GitHub carrier state. Open PR prose is evidence, not authority.
@@ -57,12 +72,15 @@ The following states are the maximum claims supported by protected `fdf6d19a...`
 | Executive durable lifecycle / atomic claim | `PARTIAL` | Mature source exists and remains the owner; live installed release is distinct from protected source. |
 | CAP-C1 deterministic placement selection | `BUILT_NOT_PROVEN` | Pure point-in-time selector with hard exclusions, source freshness, host-source closure, occupancy and exact-session/new-session modes. Exact top ties abstain. |
 | C2 placement commitment | `BUILT_NOT_PROVEN` | Useful Executive commitment pattern, but current contract is a narrow CEO-session carrier and is not a general fleet scheduler. |
+| Per-WORK heterogeneous placement v2 | `BUILT_NOT_PROVEN` | PR #630 is protected. It projects closed `{provider_realm, quota_class}` requirements without concrete worker/session/credential/host identity; live two-realm claim still lacks the host-admission union and Router/provider activation proof. |
+| Host-admission work-placement union | `NOT_BUILT` | Current protected host execution binding remains single-provider. The incumbent Fable root has frozen this as the next Runtime source slice after CCTX-0 releases custody. |
 | Provider/harness realm bindings | `BUILT_NOT_PROVEN` | Reviewed heterogeneous subscription realms/bindings exist; merge is not provider or fleet production proof. |
 | Economics/quota preference | `BUILT_NOT_PROVEN` | PR #594 is the current open owner of model economics and subscription-burn projection; it is production-inert. |
 | Physical-resource contracts/accounting | `BUILT_NOT_PROVEN` | PR #510 merged inactive same-store reserve/begin/settle semantics; checked-in production policy remains unarmed and unqualified. |
 | Darwin host-pressure snapshot | `BUILT_NOT_PROVEN` | Read-only evidence producer exists; it is evidence, not admission. |
+| Raw Darwin host-capacity observation | `NOT_BUILT` | Existing HP1A child is pre-START/effect-none and must be continued on its exact operation if still required; no protected `executive_host_capacity` producer exists. |
 | Host recovery qualification | `BUILT_NOT_PROVEN` | PR #638 is open and separates worker-host recovery from Studio control-host recovery; source merge would not make hosts cruise-ready. |
-| MH1 cross-host Worker transport | `SPEC_ONLY` | Protected source contains the implementation plan but no `RemoteWorkerBrokerClient`, gateway or `WorkerTransportResolver` implementation. |
+| MH1 cross-host Worker transport | `SPEC_ONLY` | Protected source contains the implementation plan but no transport implementation. Existing MH1-R0 child has a retained pre-START receiver/effect-none and must be reconciled rather than duplicated. |
 | Fleet product operations | `SPEC_ONLY` | SCF freezes `fleet_capacity`, `placement_explanation`, `fleet_bottlenecks`, `commission_child` and health operations; live product proof is absent. |
 | End-to-end autonomous multi-host placement | `NOT_BUILT` | No real objective currently proves quality -> economics -> host reservation -> remote execution -> result across the fleet. |
 
@@ -290,11 +308,20 @@ The Chairman commissions a semantic mission, not a model/account/Mac/worktree. T
 
 Each wave is one independently useful capability. A later wave may begin modifying its owned paths only after its load-bearing source dependencies are accepted/protected and current collisions are reconciled.
 
+### FPH0 — host-admission union for protected per-WORK placement v2
+
+**Do not launch while CCTX-0 owns the Runtime paths.** After that writer returns and source custody is explicitly released, continue the already-frozen incumbent-program successor: version the existing host execution/admission binding so it can carry a closed bounded root `work_placement_union=[{provider_realm,quota_class}, ...]`. Preserve old V2 behavior and compatibility. The plan still chooses no concrete worker/account/session/credential/native task/host. Capacity/Model Router remains the only eligibility/quota/concrete-worker owner.
+
+**Proof:** old binding remains compatible; unknown/malformed/duplicate/oversized union members refuse; members contain realm+quota only; every per-WORK v2 placement is an exact admitted union member and remains inside root authority; unavailable/ineligible Router state fails closed; replay/restart preserves the exact union without duplicate children; zero provider effect. Maximum claim is `BUILT_NOT_PROVEN`; a real two-realm mission remains unproven.
+
 ### FP1 — multi-host physical-resource qualification and reservation
 
-Extend the existing PR #510 physical-resource owner from one canonical host context to host-scoped resource pools and qualified workload profiles. Preserve reserve -> BEGIN recheck -> conservative settlement. Qualify the current Studio and one existing worker Mac before the M6 fleet arrives. No model/economics ranking changes in this wave.
+FP1 consumes, rather than duplicates, the existing HP1A child if its raw-observation scope remains current. The bounded sequence is:
 
-**Proof:** two concurrent reservations cannot overbook one host; independent hosts reserve independently; stale boot/resource generation refuses; Studio protected reserve is preserved.
+1. **FP1A / HP1A:** on the exact existing operation, current-base requalify and produce the read-only secret-safe Darwin host-capacity observation (raw memory/swap/disk plus existing pressure identity) with no CapacityState/admission authority. If that old scope has been superseded, close it explicitly instead of replaying it.
+2. **FP1B / resource v2:** extend the existing PR #510 physical-resource owner from one canonical host context to host-scoped resource pools and qualified workload profiles. Preserve reserve -> BEGIN recheck -> conservative settlement. Qualify the current Studio and one existing worker Mac before the M6 fleet arrives. No model/economics ranking changes in this wave.
+
+**Proof:** raw unknown metrics never become zero; two concurrent reservations cannot overbook one host; independent hosts reserve independently; stale boot/resource generation refuses; Studio protected reserve is preserved.
 
 ### FP2 — Capacity preference composition
 
@@ -310,7 +337,7 @@ Join the FP2 selection to the existing Executive claim transaction and physical 
 
 ### FP4 — MH1 remote Worker transport
 
-Implement the already-frozen `WorkerTransportResolver`, authenticated remote client, stateless gateway and host-local broker composition. First production canary targets an existing worker Mac before any incoming M6 is required.
+Continue the existing `workbench-fleet-mh1-r0-remote-broker-transport-20260913-sol-001` carrier after current-source/custody requalification; do not create a replacement MH1 operation merely because the old receiver was held. Implement the already-frozen `WorkerTransportResolver`, authenticated remote client, stateless gateway and host-local broker composition in bounded R0/R1 slices. First real canary targets an existing worker Mac before any incoming M6 is required.
 
 **Proof:** one real bounded Executive child is claimed centrally, executes through the remote host-local broker/adapter, returns through canonical Executive lifecycle and requires no credential copy or remote Executive database.
 ### FP5 — adversarial remote failure + maintenance semantics
@@ -373,8 +400,8 @@ The Chat-connected Executive plugin returned an authorization failure during rec
 
 ## 21. Immediate continuation and stop conditions
 
-After this source candidate receives exact-head independent architecture review and protection, the next critical-path capability is **FP1 multi-host physical-resource qualification/reservation** on the current Studio plus one existing worker Mac. FP2 and later modifying waves remain held behind that freeze/owner reconciliation.
+After this source candidate receives exact-head independent architecture review and protection, the **current program critical path is CCTX-0 immutable RESULT/source release -> FPH0 host-admission union**. This is already frozen on the incumbent Fable root and must not be duplicated by FP0. In parallel, FP1A may be reconciled/prepared on its existing child once a noncolliding receiver is available; FP1B follows the accepted raw-evidence/owner boundary. FP2 and later modifying waves remain held behind their stated source/owner dependencies.
 
-Return to Sol instead of proceeding if a newer protected source changes an ownership boundary; an open writer occupies the same FP1 paths; PR #594/#638/#640 changes the assumed interface; physical-resource v2 would require a second durable allocator; current host evidence cannot be made secret-safe/fresh; or any modifying effect becomes uncertain.
+Return to Sol instead of proceeding if a newer protected source changes an ownership boundary; CCTX-0 has not released Runtime custody; an open writer occupies the same target paths; the HP1A or MH1 exact carrier reveals a later START/effect/terminal edge; PR #594/#638/#640 changes the assumed interface; physical-resource v2 would require a second durable allocator; current host evidence cannot be made secret-safe/fresh; or any modifying effect becomes uncertain.
 
 The continuation handoff must preserve this exact outcome: build one governed fleet from existing owners, not a new cluster control plane.
