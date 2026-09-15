@@ -586,6 +586,7 @@ artifacts:
     degradation_class: ADVISORY
     consumer_modules:
       - brain/intake.py
+    declared_by: census
 
   portfolio-v3-risk-envelope-settled:
     path: site/riskdata/risk_envelope.json
@@ -657,5 +658,4 @@ artifacts:
     degradation_class: ADVISORY
     consumer_modules:
       - portfolio/decision_snapshot_sources.py
-    declared_by: census
     declared_by: census

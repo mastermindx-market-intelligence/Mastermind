@@ -123,6 +123,57 @@ def test_source_receipt_refuses_unqualified_digest_and_authority_escalation():
         c.validate_source_receipt(bad_authority)
 
 
+def test_verify_snapshot_rejects_tampering_and_mismatched_id():
+    sealed = c.seal_snapshot(_unsealed())
+
+    tampered = dict(sealed)
+    tampered["book"] = "not-autonomous"
+    with pytest.raises(c.DecisionSnapshotContractError):
+        c.verify_snapshot(tampered)
+
+    mismatched_id = dict(sealed)
+    mismatched_id["snapshot_id"] = "sha256:" + "b" * 64
+    with pytest.raises(c.DecisionSnapshotContractError):
+        c.verify_snapshot(mismatched_id)
+
+
+def test_source_receipt_rejects_boolean_as_integer():
+    bad_bytes = {**_receipt(), "bytes": True}
+    with pytest.raises(c.DecisionSnapshotContractError):
+        c.validate_source_receipt(bad_bytes)
+
+
+def test_snapshot_and_receipt_require_already_canonical_utc_timestamps():
+    noncanonical = "2026-09-15T16:00:00-04:00"
+    canonical = "2026-09-15T20:00:00Z"
+    # parse_utc_timestamp itself still normalizes a non-canonical aware offset.
+    assert c.parse_utc_timestamp(noncanonical, field="decision_cutoff") == canonical
+
+    unsealed = _unsealed()
+    unsealed["decision_cutoff"] = noncanonical
+    with pytest.raises(c.DecisionSnapshotContractError):
+        c.validate_unsealed_snapshot(unsealed)
+
+    unsealed_recorded = _unsealed()
+    unsealed_recorded["recorded_at"] = noncanonical
+    with pytest.raises(c.DecisionSnapshotContractError):
+        c.validate_unsealed_snapshot(unsealed_recorded)
+
+    for field in ("known_at", "observed_at", "generated_at", "filesystem_observed_at"):
+        bad_receipt = {**_receipt(), field: noncanonical}
+        with pytest.raises(c.DecisionSnapshotContractError):
+            c.validate_source_receipt(bad_receipt)
+
+    # as_of is source-owned and must not be run through timestamp parsing.
+    date_only_receipt = {**_receipt(), "as_of": "2026-09-15"}
+    c.validate_source_receipt(date_only_receipt)
+
+    # observed_at must actually be checked now, not merely type-checked.
+    unparseable_receipt = {**_receipt(), "observed_at": "banana"}
+    with pytest.raises(c.DecisionSnapshotContractError):
+        c.validate_source_receipt(unparseable_receipt)
+
+
 def test_contract_reuses_canonical_json_owner_and_has_no_hidden_io():
     source = Path(c.__file__).read_text(encoding="utf-8")
     assert "from control_plane.wake_events import canonical_json_bytes" in source

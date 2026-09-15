@@ -156,6 +156,15 @@ def parse_utc_timestamp(value: str, *, field: str) -> str:
     return normalized.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _require_canonical_utc(value: str, *, field: str) -> None:
+    normalized = parse_utc_timestamp(value, field=field)
+    if normalized != value:
+        _fail(
+            f"{field} must already be second-precision UTC 'Z' "
+            f"(got {value!r}, expected {normalized!r})"
+        )
+
+
 def content_digest(value: Any) -> str:
     import hashlib
     return _DIGEST_PREFIX + hashlib.sha256(canonical_json_bytes(value)).hexdigest()
@@ -214,6 +223,7 @@ def validate_source_receipt(receipt: Mapping[str, Any]) -> None:
     _require_str_or_none(receipt, "as_of", what=what)
     _require_str_or_none(receipt, "generated_at", what=what)
     _require_str_or_none(receipt, "filesystem_observed_at", what=what)
+    # as_of is a source-owned date, not a timestamp — it is never parsed here.
     _require_digest(receipt.get("correction_generation"), what=f"{what}.correction_generation")
     _require_enum(receipt, "freshness_state", FRESHNESS_STATES, what=what)
     _require_enum(receipt, "coverage_state", COVERAGE_STATES, what=what)
@@ -227,10 +237,10 @@ def validate_source_receipt(receipt: Mapping[str, Any]) -> None:
     _require_int(receipt, "omitted_rows", what=what)
     _require_enum(receipt, "clock_basis", CLOCK_BASES, what=what)
     _require_str_or_none(receipt, "error_code", what=what)
-    for field in ("known_at", "as_of", "generated_at", "filesystem_observed_at"):
+    for field in ("observed_at", "known_at", "generated_at", "filesystem_observed_at"):
         value = receipt.get(field)
-        if value is not None and field != "as_of":
-            parse_utc_timestamp(value, field=f"{what}.{field}")
+        if value is not None:
+            _require_canonical_utc(value, field=f"{what}.{field}")
 
 
 _SECTION_FIELDS = frozenset({
@@ -351,8 +361,8 @@ def _validate_root(snapshot: Mapping[str, Any], *, fields: frozenset) -> None:
     if snapshot.get("schema") != SNAPSHOT_SCHEMA:
         _fail(f"{what}.schema must equal {SNAPSHOT_SCHEMA!r}")
     _require_str(snapshot, "book", what=what)
-    parse_utc_timestamp(snapshot.get("decision_cutoff"), field="decision_cutoff")
-    parse_utc_timestamp(snapshot.get("recorded_at"), field="recorded_at")
+    for field in ("decision_cutoff", "recorded_at"):
+        _require_canonical_utc(snapshot.get(field), field=field)
     _require_enum(snapshot, "state", SNAPSHOT_STATES, what=what)
     _require_enum(snapshot, "coverage_state", COVERAGE_STATES, what=what)
     _validate_summary(snapshot.get("summary"))
