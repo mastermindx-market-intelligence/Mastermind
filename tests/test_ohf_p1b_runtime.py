@@ -255,3 +255,44 @@ def test_cctx0_checkpoint_generation_ownership_is_exact(tmp_path):
                 generation=generation,
                 operation_id=OperationId(
                     f"ohf-op:fence-{fence}-{bool(token == 'wrong-token')}"
+                ),
+                fence_generation=fence,
+                lease_token=token,
+            )
+
+
+def test_cctx0_checkpoint_sequence_is_monotonic_and_intents_are_stale_closed(tmp_path):
+    runtime, lease, _epoch, generation = _started(tmp_path)
+    harness = runtime.operator_harness
+    first = _commit(runtime, lease, generation, "checkpoint-1", "candidate-1")
+    assert first.checkpoint["current_state"] == "candidate-1"
+    stale = OperationId("ohf-op:checkpoint-stale")
+    harness.reserve_checkpoint_operation(
+        generation=generation,
+        operation_id=stale,
+        fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+    )
+    second = _commit(runtime, lease, generation, "checkpoint-2", "candidate-2")
+    assert second.checkpoint["current_state"] == "candidate-2"
+    with pytest.raises(StateConflict, match="does not match INTENT"):
+        harness.apply_checkpoint_operation(
+            generation=generation,
+            operation_id=stale,
+            observation=_checkpoint("late"),
+            fence_generation=lease.attempt.fence_generation,
+            lease_token=lease.lease_token,
+        )
+    attempt = runtime.attempts.get_attempt(lease.attempt.attempt_id)
+    assert attempt is not None
+    assert attempt.checkpoint_sequence == 2
+    with runtime.store.read() as connection:
+        stored_attempt = connection.execute(
+            "SELECT checkpoint_json FROM attempts WHERE attempt_id=?",
+            (lease.attempt.attempt_id,),
+        ).fetchone()
+    assert stored_attempt is not None
+    assert stored_attempt["checkpoint_json"] == _json_dumps(second.checkpoint)
+    events = runtime.events.list_events(job_id=str(lease.attempt.job_id))
+    payloads = [
+        event.payload["checkpoint_sequence"]
