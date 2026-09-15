@@ -74,7 +74,7 @@ CHAT_REASONING_MODE: PRO_MODE_EXCEPTION
 WHY_PRO_MODE: <specific frontier-reasoning advantage required by this mission>
 WHY_NON_PRO_INSUFFICIENT: <specific evidence that non-Pro reasoning cannot reliably meet the bar>
 PRO_MODE_TASK_CLASS: <one allowed class>
-EXPECTED_DURATION_MINUTES: <integer between 80 and 1440 minutes, inclusive>
+EXPECTED_DURATION_MINUTES: <integer between 1 and 1440 minutes, inclusive>
 STOP_CONDITION: <observable completion or abort condition>
 ```
 
@@ -87,13 +87,21 @@ HARD_DEBUGGING
 ADVERSARIAL_JUDGMENT
 ```
 
-All fields are required. `EXPECTED_DURATION_MINUTES` must be an integer between 80 and 1440 minutes,
-inclusive, and therefore at least 80 minutes.
+All fields are required. `EXPECTED_DURATION_MINUTES` must be an integer between 1 and 1440 minutes,
+inclusive.
+
+Duration is a planning estimate, not a minimum run time. Short substantive work is eligible
+under the same task-class and justification gates. Do not inflate an estimate or keep a session
+generating to fill it. Complete the useful authorized work batch, then checkpoint or yield.
+Current model/account allowances and remaining capacity remain facts supplied by existing Capacity
+owners; this receipt neither reserves quota nor proves model availability. No quota constants,
+new capacity store, or provider entitlement are introduced here.
+
 Pro mode is categorically refused for handoffs; `ACK / PICKUP_ACK / START / CONTINUE / STOP`
 lifecycle or routing packets; status checks; monitoring / watchers / polling; message relay;
-routing / placement / foregrounding; mechanical edits or tests; simple reviews; and other short
-bounded work. A larger parent program does not make one short turn eligible. An incomplete,
-under-duration, over-duration, stale, or ineligible request produces:
+routing / placement / foregrounding; mechanical edits or tests; simple reviews; and other routine
+administrative work. A larger parent program does not make an administrative turn eligible. An incomplete,
+out-of-range, stale, or ineligible request produces:
 
 ```text
 PRO_MODE_REFUSED / USE_NON_PRO_MODE
@@ -364,7 +372,7 @@ WHY: <why this route can reliably satisfy the mission>
 WHY NOT FABLE: <why principal capacity is unnecessary>
 ```
 
-Pro-mode form, only for one of the four admitted long-horizon classes:
+Pro-mode form, only for a substantive mission in one of the four admitted classes:
 
 ```text
 COGNITION_ROUTE: CHAT_INCLUDED_DEFAULT
@@ -372,7 +380,7 @@ CHAT_REASONING_MODE: PRO_MODE_EXCEPTION
 WHY_PRO_MODE: <specific frontier-reasoning advantage required by this mission>
 WHY_NON_PRO_INSUFFICIENT: <specific evidence that non-Pro reasoning cannot reliably meet the bar>
 PRO_MODE_TASK_CLASS: <LONG_HORIZON_FRONTIER_REASONING|CROSS_SYSTEM_ARCHITECTURE|HARD_DEBUGGING|ADVERSARIAL_JUDGMENT>
-EXPECTED_DURATION_MINUTES: <integer between 80 and 1440 minutes, inclusive>
+EXPECTED_DURATION_MINUTES: <integer between 1 and 1440 minutes, inclusive>
 STOP_CONDITION: <observable completion or abort condition>
 ROUTE: <worker/model + execution surface>
 WHY: <mission fit>
@@ -406,7 +414,7 @@ Executive admission/claim records when those are applicable.
 ## 11. Default principle
 
 > **Use included Chat web with non-Pro reasoning for Sol-class executive cognition by default. Use
-> Pro reasoning mode only for a qualifying frontier mission between 80 and 1440 minutes under its
+> Pro reasoning mode only for a qualifying frontier mission between 1 and 1440 minutes under its
 > complete exception receipt. Use the cheapest / least-scarce worker that can reliably achieve the required
 > implementation or research quality. Escalate worker capability when evidence requires it. Use a
 > metered reasoning surface only under its separate complete bounded exception receipt. Fable, Pro
