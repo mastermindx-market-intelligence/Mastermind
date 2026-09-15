@@ -704,8 +704,10 @@ def test_cli_normal_enrollment_keychain_unavailable_refuses_opaquely(
 
     _policy(tmp_path)
     policy_path = tmp_path / "executive-mcp.json"
+    calls = []
 
     def unavailable_keychain():
+        calls.append(True)
         raise OSError("Security.framework is unavailable")
 
     monkeypatch.setattr(enroll, "KeychainRegistrationStore", unavailable_keychain)
@@ -714,21 +716,41 @@ def test_cli_normal_enrollment_keychain_unavailable_refuses_opaquely(
         [], policy_path=policy_path, expected_uid=os.getuid()
     )
     captured = capsys.readouterr()
+    assert calls == [True]
     assert code == 2
     assert captured.out == ""
     assert captured.err == "REFUSED: Executive MCP enrollment unavailable.\n"
 
 
-def test_cli_reconcile_keychain_unavailable_refuses_opaquely(monkeypatch, capsys):
+def test_cli_reconcile_keychain_unavailable_refuses_opaquely(
+    tmp_path: Path, monkeypatch, capsys
+):
     import ops.codex_fabric.enroll_executive_mcp as enroll
 
+    _policy(tmp_path)
+    policy_path = tmp_path / "executive-mcp.json"
+    calls = []
+
     def unavailable_keychain():
+        calls.append(True)
         raise OSError("Security.framework is unavailable")
 
     monkeypatch.setattr(enroll, "KeychainRegistrationStore", unavailable_keychain)
 
-    code = enroll.main(["--reconcile-client-id", "tpc_x"])
+    code = enroll.main(
+        [
+            "--reconcile-client-id",
+            "tpc_x",
+            "--reconcile-attempt-ref",
+            "a" * 64,
+            "--reconcile-client-name",
+            "Mastermind Codex Astra aaaaaaaaaaaaaaaa",
+        ],
+        policy_path=policy_path,
+        expected_uid=os.getuid(),
+    )
     captured = capsys.readouterr()
+    assert calls == [True]
     assert code == 2
     assert captured.out == ""
     assert captured.err == "REFUSED: Executive MCP enrollment unavailable.\n"
