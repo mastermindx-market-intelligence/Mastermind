@@ -92,9 +92,15 @@ and "jobs exist but none join" indistinguishable.
 
 * The compositor is pure (`chairman_control_room.py:11`'s own split); the gather
   layer does all I/O. `read_fabric_view` opens the runtime with
-  `Runtime.at(root, create=False)` **after** checking the database file exists:
-  a bare `Runtime.at(root)` defaults to `create=True` and would manufacture an
-  empty database and then report a quiet, job-free company.
+  `Runtime.at(root, create=False)`, ALWAYS: a bare `Runtime.at(root)` defaults to
+  `create=True` and would manufacture an empty database and then report a quiet,
+  job-free company. The constructor is what fails closed — it raises
+  `PersistenceError` (a `RuntimeProofError`) for an absent **or** unopenable
+  store — and the database-file check that follows only *chooses the message*,
+  telling a genuinely absent runtime (`executive_runtime: database missing at
+  <path>`) apart from a present-but-unreadable one (`jobs unreadable: <detail>`,
+  with `runtime.db_present: true` and `capability.state: UNSUPPORTED`). The
+  check never gates the call, so the fail-closed path cannot be bypassed.
 * `runtime.jobs.list_jobs()` takes no arguments and is a full table scan; the
   root filter happens in Python.
 * The review verdict lives on the **review Job's** payload. `JobPayload.to_dict`

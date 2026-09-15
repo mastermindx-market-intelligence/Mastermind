@@ -704,15 +704,22 @@ def _open_runtime(runtime_root: Path, db_path: Path):
 
     ``Runtime.at`` defaults ``create=True``: a bare call on an absent root
     manufactures an empty database and then reports a quiet, job-free company
-    (census §4.3).  The file check runs FIRST and the constructor is given
-    ``create=False``, so an absent runtime is a typed refusal, never a tree.
+    (census §4.3).  The constructor is therefore ALWAYS called, with
+    ``create=False``, and is what fails closed: ``Runtime.at`` refuses an
+    absent or unopenable store with :class:`PersistenceError`.  The file check
+    below no longer gates the call — it only CHOOSES THE MESSAGE, telling a
+    genuinely absent runtime apart from a present-but-unreadable one.
     """
 
     from control_plane import executive_runtime
 
-    if not db_path.is_file():
-        return None, False, [f"executive_runtime: database missing at {db_path}"]
-    return executive_runtime.Runtime.at(runtime_root, create=False), True, []
+    try:
+        runtime = executive_runtime.Runtime.at(runtime_root, create=False)
+    except (executive_runtime.RuntimeProofError, OSError) as exc:
+        if not db_path.is_file():
+            return None, False, [f"executive_runtime: database missing at {db_path}"]
+        return None, True, [f"jobs unreadable: {_failure_first_line(exc)}"]
+    return runtime, True, []
 
 
 def _gathered(
@@ -746,7 +753,13 @@ def _gather_jobs(runtime_root: str | Path, root_job_id: str) -> dict[str, Any]:
     try:
         runtime, db_present, open_degraded = _open_runtime(runtime_root, db_path)
         if runtime is None:
-            return _gathered(degraded=open_degraded, db_present=False)
+            # A store that exists but will not open is a FAILED READ, not an
+            # absent runtime: report the file as present AND the read as failed.
+            return _gathered(
+                degraded=open_degraded,
+                read_failed=bool(db_present),
+                db_present=db_present,
+            )
 
         all_jobs = runtime.jobs.list_jobs()
         root_job = runtime.jobs.get_job(str(root_job_id))
@@ -847,17 +860,19 @@ def list_roots(
     try:
         runtime, db_present, open_degraded = _open_runtime(runtime_root, db_path)
         if runtime is None:
+            if not db_present:
+                entries = entries + [
+                    "jobs unreadable: runtime database absent; no root can be enumerated"
+                ]
             return {
                 "schema": ROOT_LIST_SCHEMA,
                 "generated_at": _utc_now(),
-                "runtime": {"root": str(runtime_root), "db_present": False, "identity": None},
+                "runtime": {"root": str(runtime_root), "db_present": db_present, "identity": None},
                 "roots": [],
                 "count": 0,
                 "total": 0,
                 "truncated": False,
-                "degraded": sorted(set(entries + list(open_degraded) + [
-                    "jobs unreadable: runtime database absent; no root can be enumerated"
-                ])),
+                "degraded": sorted(set(entries + list(open_degraded))),
             }
         all_jobs = runtime.jobs.list_jobs()
         roots = [
