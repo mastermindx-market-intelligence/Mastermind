@@ -7,6 +7,7 @@ selected by the canonical Wake fabric.
 """
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import re
 from typing import Protocol, Sequence, runtime_checkable
@@ -162,6 +163,10 @@ class GrokBotRoutineWakeDispatcher:
                 exc.reason_code,
                 nudge_id=wake.nudge_id,
             )
+        except asyncio.CancelledError as exc:
+            raise WakeEffectUnknownError(
+                "Grok routine submission effect is unknown after the client call began"
+            ) from exc
         except Exception as exc:
             raise WakeEffectUnknownError(
                 "Grok routine submission effect is unknown after the client call began"
@@ -195,6 +200,10 @@ class GrokBotRoutineWakeDispatcher:
                 native_handle=native_handle,
                 nudge_id=wake.nudge_id,
             )
+        except asyncio.CancelledError as exc:
+            raise WakeEffectUnknownError(
+                "Grok routine submission effect remains unknown"
+            ) from exc
         except Exception as exc:
             raise WakeEffectUnknownError(
                 "Grok routine submission effect remains unknown"

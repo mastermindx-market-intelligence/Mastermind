@@ -200,6 +200,15 @@ def test_post_call_exception_is_effect_unknown_and_never_failed_or_retried():
     assert len(client.calls) == 1
 
 
+def test_post_call_cancellation_is_effect_unknown_and_never_retried():
+    client = _FakeClient(_observation(), fail=asyncio.CancelledError())
+    dispatcher = GrokBotRoutineWakeDispatcher(client)
+
+    with pytest.raises(WakeEffectUnknownError, match="effect is unknown"):
+        _nudge(dispatcher, _wake())
+    assert len(client.calls) == 1
+
+
 @pytest.mark.parametrize(
     "observation",
     [
@@ -272,6 +281,17 @@ def test_reconcile_without_a_provider_observation_remains_effect_unknown():
 def test_reconcile_source_error_remains_effect_unknown_without_submission():
     client = _FakeClient(_observation())
     source = _FakeObservationSource(None, fail=RuntimeError("history unavailable"))
+    dispatcher = GrokBotRoutineWakeDispatcher(client, observation_source=source)
+
+    with pytest.raises(WakeEffectUnknownError, match="remains unknown"):
+        _reconcile(dispatcher, _wake())
+    assert client.calls == []
+    assert len(source.calls) == 1
+
+
+def test_reconcile_cancellation_remains_effect_unknown_without_submission():
+    client = _FakeClient(_observation())
+    source = _FakeObservationSource(None, fail=asyncio.CancelledError())
     dispatcher = GrokBotRoutineWakeDispatcher(client, observation_source=source)
 
     with pytest.raises(WakeEffectUnknownError, match="remains unknown"):
