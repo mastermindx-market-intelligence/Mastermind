@@ -33,6 +33,19 @@ BRIDGE_FIELDS = {
     },
 }
 
+APP_LEGACY_FIELDS = {
+    "ceo_ingress_app_peer_uid": 458,
+    "ceo_ingress_app_armed": True,
+    "ceo_ingress_app_macro_root": (
+        "/Library/Application Support/MastermindExecutive/macro-sources/" + "c" * 40
+    ),
+}
+APP_READ_PYTHON = (
+    "/Library/Application Support/MastermindExecutive/network-runtimes/"
+    + "d" * 64
+    + "/bin/python"
+)
+
 
 def _embedded_control_config_generator() -> str:
     source = INSTALL.read_text(encoding="utf-8")
@@ -47,6 +60,8 @@ def _run_default_control_config(
     tmp_path: Path,
     *,
     release_root: Path = ROOT,
+    source: Path | None = None,
+    app_read_python: str = "",
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
     destination = tmp_path / "control.json"
     expected_sha = "a" * 40
@@ -57,7 +72,7 @@ def _run_default_control_config(
             _embedded_control_config_generator(),
             str(release_root),
             str(destination),
-            "",
+            str(source) if source is not None else "",
             "/private/runtime",
             "/private/admin-checkout",
             "/private/workspaces",
@@ -74,6 +89,7 @@ def _run_default_control_config(
             "501",
             "b" * 64,
             "0.147.0",
+            app_read_python,
         ],
         cwd=ROOT,
         check=False,
@@ -181,4 +197,122 @@ def test_installer_refuses_partial_dialogue_bridge_release_schema(
 
     assert completed.returncode != 0
     assert "partial Executive Dialogue Bridge control-config schema" in completed.stderr
+    assert not destination.exists()
+
+
+def test_installer_migrates_legacy_three_field_app_binding_with_explicit_read_python(
+    tmp_path: Path,
+) -> None:
+    base_dir = tmp_path / "base"
+    base_dir.mkdir()
+    legacy = _render_default_control_config(base_dir)
+    legacy.update(APP_LEGACY_FIELDS)
+    legacy.pop("ceo_ingress_app_read_python", None)
+    source = tmp_path / "legacy-control.json"
+    source.write_text(json.dumps(legacy), encoding="utf-8")
+
+    output_dir = tmp_path / "migrated"
+    output_dir.mkdir()
+    completed, destination = _run_default_control_config(
+        output_dir, source=source, app_read_python=APP_READ_PYTHON,
+    )
+
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    migrated = json.loads(destination.read_text(encoding="utf-8"))
+    for key, value in APP_LEGACY_FIELDS.items():
+        assert migrated[key] == value
+    assert migrated["ceo_ingress_app_read_python"] == APP_READ_PYTHON
+
+
+def test_installer_refuses_app_read_python_without_existing_app_binding(
+    tmp_path: Path,
+) -> None:
+    base_dir = tmp_path / "base"
+    base_dir.mkdir()
+    source_doc = _render_default_control_config(base_dir)
+    source = tmp_path / "no-app-control.json"
+    source.write_text(json.dumps(source_doc), encoding="utf-8")
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+
+    completed, destination = _run_default_control_config(
+        output_dir, source=source, app_read_python=APP_READ_PYTHON,
+    )
+
+    assert completed.returncode != 0
+    assert "App read Python requires an existing App binding" in completed.stderr
+    assert not destination.exists()
+
+
+def test_installer_refuses_noncanonical_app_read_python_migration(
+    tmp_path: Path,
+) -> None:
+    base_dir = tmp_path / "base"
+    base_dir.mkdir()
+    legacy = _render_default_control_config(base_dir)
+    legacy.update(APP_LEGACY_FIELDS)
+    source = tmp_path / "legacy-control.json"
+    source.write_text(json.dumps(legacy), encoding="utf-8")
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+
+    completed, destination = _run_default_control_config(
+        output_dir, source=source, app_read_python="/tmp/python",
+    )
+
+    assert completed.returncode != 0
+    assert "App read Python path is invalid" in completed.stderr
+    assert not destination.exists()
+
+
+def test_installer_declares_app_read_python_option() -> None:
+    source = INSTALL.read_text(encoding="utf-8")
+    assert '--ceo-ingress-app-read-python)' in source
+
+
+def test_installer_reuses_already_migrated_app_binding_idempotently(
+    tmp_path: Path,
+) -> None:
+    base_dir = tmp_path / "base"
+    base_dir.mkdir()
+    full = _render_default_control_config(base_dir)
+    full.update(APP_LEGACY_FIELDS)
+    full["ceo_ingress_app_read_python"] = APP_READ_PYTHON
+    source = tmp_path / "full-control.json"
+    source.write_text(json.dumps(full), encoding="utf-8")
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+
+    completed, destination = _run_default_control_config(
+        output_dir, source=source, app_read_python=APP_READ_PYTHON,
+    )
+
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert json.loads(destination.read_text(encoding="utf-8")) == full
+
+
+def test_installer_refuses_changed_read_python_for_existing_full_binding(
+    tmp_path: Path,
+) -> None:
+    base_dir = tmp_path / "base"
+    base_dir.mkdir()
+    full = _render_default_control_config(base_dir)
+    full.update(APP_LEGACY_FIELDS)
+    full["ceo_ingress_app_read_python"] = APP_READ_PYTHON
+    source = tmp_path / "full-control.json"
+    source.write_text(json.dumps(full), encoding="utf-8")
+    other = (
+        "/Library/Application Support/MastermindExecutive/network-runtimes/"
+        + "e" * 64
+        + "/bin/python"
+    )
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+
+    completed, destination = _run_default_control_config(
+        output_dir, source=source, app_read_python=other,
+    )
+
+    assert completed.returncode != 0
+    assert "App read Python differs from the existing binding" in completed.stderr
     assert not destination.exists()

@@ -293,6 +293,14 @@ be the content-addressed Executive network runtime path under
 Its peer must differ from control, Operator, worker, and C1 identities. C1 retains
 its existing peer, grounding provider and arming setting.
 
+For an already-installed three-field App binding, reinstall with the existing
+root-owned control config as `--control-config` and pass exactly one
+`--ceo-ingress-app-read-python <content-addressed-runtime>/bin/python`. The
+installer may only fill the missing fourth field. It refuses to originate an App
+binding, retarget an existing full binding, or accept a noncanonical/non-executable
+read Python path. Provision and verify that immutable runtime before the control
+reinstall; never add site-packages to the sealed control interpreter.
+
 The full-schema `control.json.template` includes an unarmed App binding and an
 explicit Macro snapshot placeholder. Supply the actual sealed snapshot when
 provisioning the App, or omit all three App fields when installing control
