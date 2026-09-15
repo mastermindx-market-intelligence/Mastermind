@@ -2,12 +2,32 @@ from __future__ import annotations
 
 import json
 import os
+import asyncio
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
+from control_plane import executive_ceo_ingress
 from ops.executive_os import submit_arm_receipt as receipt
+
+
+def _submit_frame() -> dict[str, object]:
+    return {
+        "schema": executive_ceo_ingress.SUBMIT_SCHEMA_V2,
+        "request_ref": "req-replay-1",
+        "observed_grounding": {
+            "mastermind_sha": "a" * 40,
+            "macro_sha": "b" * 40,
+            "boot_packet_schema": executive_ceo_ingress.BOOT_PACKET_SCHEMA,
+        },
+        "request": {
+            "objective": "test", "workstream": "WS:REPLAY",
+            "department": "executive-infrastructure", "priority": 10,
+            "execution_profile": "research_only",
+        },
+    }
 
 
 def _fixture(tmp_path: Path) -> tuple[Path, Path, Path, dict[str, object]]:
@@ -98,7 +118,40 @@ def test_d6_verify_rejects_non_private_receipt(tmp_path: Path) -> None:
         receipt.verify(target, config, release, now=values["now"])
 
 
-def test_d6_no_host_absolute_paths_and_atomic_private_shape() -> None:
+def test_d6_atomic_private_receipt_shape_and_no_host_absolute_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     source = Path(__file__).parents[1] / "ops" / "executive_os" / "submit_arm_receipt.py"
     text = source.read_text(encoding="utf-8")
     assert "/var/" not in text and "/private/var" not in text and "/Library/" not in text
+    target, config, release, values = _fixture(tmp_path)
+    parent = tmp_path / "receipt-parent"
+    parent.mkdir()
+    target = parent / target.name
+    monkeypatch.setattr(receipt.os, "geteuid", lambda: 0)
+    receipt.emit(target, config, release, now=values["now"])
+    info = target.lstat()
+    assert info.st_mode & 0o777 == 0o400
+    assert info.st_mode & 0o170000 == 0o100000
+    assert not target.is_symlink()
+    assert not list(parent.glob(f".{target.name}.*"))
+    assert {entry.name for entry in parent.iterdir()} == {target.name}
+
+
+def test_d5_v2_replay_does_not_reobserve_grounding() -> None:
+    frame = _submit_frame()
+    runtime = mock.Mock()
+    runtime.store.find_event_by_command_id.return_value = {"durable": True}
+    grounding = mock.Mock()
+    sink_receipt = {"dispatched": False, "duplicate": True}
+
+    async def exercise() -> dict[str, object]:
+        with mock.patch.object(executive_ceo_ingress, "_submit", new=mock.AsyncMock(return_value=sink_receipt)) as sink:
+            result = await executive_ceo_ingress.handle_frame(
+                frame, runtime=runtime, grounding_provider=grounding,
+                workspace_root="/tmp", service_state="READY", ceo_ingress_armed=True,
+            )
+            assert sink.await_count == 1
+            return result
+
+    result = asyncio.run(exercise())
+    assert result == sink_receipt
+    grounding.observe.assert_not_called()
