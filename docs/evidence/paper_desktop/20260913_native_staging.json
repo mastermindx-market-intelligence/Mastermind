@@ -1,0 +1,82 @@
+{
+  "observed_on": "2026-09-13",
+  "capability_state": "PARTIAL",
+  "production_accepted": false,
+  "procedure_commit": "9ed16bf0fcc5b47e870350ff2413ff5c8c73b447",
+  "native_host": "admins-Mini-652.ts.net lan",
+  "device_id": "37db60bd-f84d-4521-ae9e-47c575d9ba86",
+  "app": {
+    "version": "0.5.9",
+    "path": "/Users/chriswong/Applications/Paper.app",
+    "download_url": "https://download.paper.design/mac/dmg/arm64",
+    "dmg_sha256": "d87988c92d12cac6b549900bd3725a3d8fff958635743c25eeaff81dc804b7fa",
+    "codesign": "valid on disk; satisfies Designated Requirement",
+    "gatekeeper": "accepted; Notarized Developer ID",
+    "signer": "Stephen Haney (PA579U484X)",
+    "launch_requested": true,
+    "process_observed": 47503,
+    "listener_observed": "127.0.0.1:29979"
+  },
+  "install_root": "/Users/chriswong/.local/share/mastermind-paper/paper-20260913-sol01/workbench",
+  "workspace": "/Users/chriswong/.local/share/mastermind-paper/paper-20260913-sol01/workbench/workspace",
+  "python": "3.14.6",
+  "mcp_sdk": "1.30.0",
+  "runtime_sha256": {
+    "bridge.py": "ecceea22a6d756ef7d100cd8fad7a4b4ff18f0d06c82f63e8e48cc9c6adcc221",
+    "mcp_server.py": "294e699d6da31b56a114003257e6a361b83cfd7844c546d172eb51276d83a6a8",
+    "requirements-mcp.txt": "4fe75062c5d424bbc86a8cd58c63ab19aeffe4f0a0e100022252c8032e12ee5b"
+  },
+  "native_sdk_handshake": {
+    "passed": true,
+    "server_name": "mastermind-paper",
+    "server_version": "1.30.0",
+    "read_only_tools": [
+      "paper_inspect",
+      "paper_catalog",
+      "paper_read"
+    ],
+    "write_tools": [
+      "paper_inspect",
+      "paper_catalog",
+      "paper_read",
+      "paper_edit"
+    ],
+    "read_only_capture_sha256": "0b97c9a9c06fccb45bc8eca80a7bd5b0d005025aa8f62e04c9b8790643bf0292",
+    "write_capture_sha256": "96a5f967148c6408ecfe9f15a3ff59153bcd713be23bf1e4fbc932f02fcb6122",
+    "capture_digest_is_not_an_executive_grant": true
+  },
+  "paper_initialization": {
+    "http_status": 500,
+    "error": "server_error",
+    "error_description": "Could not find Paper. Is it running?",
+    "login_state": "UNKNOWN",
+    "file_loaded": "NOT_PROVEN",
+    "successful_design_reads": 0,
+    "design_mutations": 0
+  },
+  "validation": {
+    "synthetic_core_tests_passed": 24,
+    "native_sdk_initial_failure": "Postponed local CallToolResult annotation was not in module globals",
+    "repair": "Evaluate annotations at function definition; both real stdio handshakes then passed"
+  },
+  "native_receipts": [
+    "native-dependencies.txt",
+    "native-sdk-proof.json",
+    "workbench/INSTALLATION.json"
+  ],
+  "unchanged": [
+    "provider account homes",
+    "live worker processes",
+    "Executive capability registry and production gates",
+    "Figma designs and billing"
+  ],
+  "not_performed": [
+    "Paper login",
+    "subscription purchase",
+    "dedicated ChatGPT app publication",
+    "sealed Executive worker grant",
+    "Paper scratch edit/screenshot/JSX proof",
+    "production browser proof"
+  ],
+  "next_action": "Open the intended Paper scratch file through normal UI after account login as needed, then inspect via the installed bridge; preserve this carrier and stop on ambiguous edit effects."
+}
