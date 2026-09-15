@@ -55,13 +55,23 @@ def _spec(tmp_path: Path) -> cw.WorkerLaunchSpec:
     )
 
 
-def test_subscription_realm_registry_quarantines_minimax_candidate() -> None:
-    assert "minimax-token-plan" not in REVIEWED_CODEX_PROVIDER_REALMS
+def test_subscription_realm_registry_reviews_minimax_and_quarantines_opencode_go() -> None:
+    # MiniMax Token Plan is reviewed for transport after the canary receipt in
+    # control_plane/codex_provider_realm.py; reviewing the realm arms no worker
+    # binding (the minimax codex row stays BUILT_NOT_PROVEN).
+    reviewed_minimax = REVIEWED_CODEX_PROVIDER_REALMS["minimax-token-plan"]
+    assert reviewed_minimax is MINIMAX_TOKEN_PLAN
+    assert reviewed_minimax.base_url == "https://api.minimax.io/v1"
+    assert reviewed_minimax.provider_alias == "minimax"
+    assert reviewed_minimax.wire_api == "responses"
+    # OpenCode Go is still quarantined and still not reviewed.
     assert "opencode-go" not in REVIEWED_CODEX_PROVIDER_REALMS
-    assert set(REVIEWED_CODEX_PROVIDER_REALMS) == {"alibaba-token-plan-sg"}
-    assert set(CANDIDATE_CODEX_PROVIDER_REALMS_SPEC_ONLY) == {
-        "minimax-token-plan", "opencode-go",
+    assert OPENCODE_GO_TOKEN_PLAN.realm_id not in REVIEWED_CODEX_PROVIDER_REALMS
+    assert OPENCODE_GO_TOKEN_PLAN.realm_id in CANDIDATE_CODEX_PROVIDER_REALMS_SPEC_ONLY
+    assert set(REVIEWED_CODEX_PROVIDER_REALMS) == {
+        "minimax-token-plan", "alibaba-token-plan-sg",
     }
+    assert set(CANDIDATE_CODEX_PROVIDER_REALMS_SPEC_ONLY) == {"opencode-go"}
     assert MINIMAX_TOKEN_PLAN.base_url == "https://api.minimax.io/v1"
     assert MINIMAX_TOKEN_PLAN.env_key == "MINIMAX_TOKEN_PLAN_KEY"
     assert MINIMAX_TOKEN_PLAN.wire_api == "responses"

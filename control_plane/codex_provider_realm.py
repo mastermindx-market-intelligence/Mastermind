@@ -294,20 +294,30 @@ ALIBABA_TOKEN_PLAN = CodexProviderRealm(
 )
 
 REVIEWED_CODEX_PROVIDER_REALMS = {
-    realm.realm_id: realm for realm in (ALIBABA_TOKEN_PLAN,)
+    realm.realm_id: realm for realm in (MINIMAX_TOKEN_PLAN, ALIBABA_TOKEN_PLAN,)
 }
 
 CANDIDATE_CODEX_PROVIDER_REALMS_SPEC_ONLY = {
-    realm.realm_id: realm for realm in (MINIMAX_TOKEN_PLAN, OPENCODE_GO_TOKEN_PLAN,)
+    realm.realm_id: realm for realm in (OPENCODE_GO_TOKEN_PLAN,)
 }
 
-# Kit-side Responses transport was observed with Codex 0.147 against MiniMax's
-# OpenAI-compatible base, but it is not officially documented. Promotion to the
-# reviewed registry requires an exact-head native execution proof. No worker
-# binding is authorized from this candidate collection. The OpenCode Go realm
-# is SPEC-ONLY; kit-side Responses transport was proven only for some upstream
-# models (see kit GO_PROOF_LEDGER) and promotion requires the reviewed exact-head
-# native execution proof; no worker binding is authorized from it.
+# MiniMax Token Plan was promoted out of quarantine by the exact-head native
+# execution proof its own comment required: the codex-cli 0.154.0 canary receipt
+# at ~/.claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/
+# handoff_kits/meta-ceo-b-2026-09-08/ext/state/
+# minimax_codex_canary_receipt_20260915.json (rc 0, output PONG, served model
+# MiniMax-M3, wire_api "responses", key fingerprint fadd3d5f310d). That receipt
+# proves transport reachability only -- it is a kit-harness execution proof, not
+# a governed-path canary -- so this realm is reviewed for transport and no worker
+# binding is armed by the promotion. The binding it enables
+# (minimax-token-plan.codex-responses) is BUILT_NOT_PROVEN with
+# autonomous_allowed false, and a live lane still requires the per-binding
+# enrollment and canary gates.
+#
+# The OpenCode Go realm remains SPEC-ONLY and quarantined: kit-side Responses
+# transport was proven only for some upstream models (see kit GO_PROOF_LEDGER)
+# and promotion requires the reviewed exact-head native execution proof; no
+# worker binding is authorized from it.
 
 ProviderCredentialLoader = Callable[[], str]
 
