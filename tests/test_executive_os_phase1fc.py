@@ -3479,6 +3479,104 @@ def test_fph0_d3_d4_d5_d6_d8_trusted_v3_union_projects_and_fails_closed(tmp_path
     ]
 
 
+def test_fph0_d3_d4_d5_d6_d8_trusted_v3_union_projects_and_fails_closed(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    _register_placement_union(runtime)
+    receipt = submit_intent(
+        runtime,
+        _v2_intent(
+            intent_id="CEO-FPH0-TRUSTED-V3-001",
+            business_impact="routine",
+        ),
+        execution_binding=_v3_execution_binding(),
+    )
+    root = runtime.jobs.get_job(receipt["job_id"])
+    assert root is not None
+    assert root.constraints["work_placement_union"] == [
+        {
+            "provider_realm": "claude-compatible-subscription",
+            "quota_class": "claude-hf1q-step",
+        },
+        {"provider_realm": "codex", "quota_class": "codex-hf1q-step"},
+    ]
+    planner = runtime.jobs.create_cycle_planner(
+        root.job_id,
+        command_id=f"coo-cycle:{root.job_id}:create-planner:0",
+    )
+    dispatch = runtime.attempts.dispatch_cycle_job(
+        planner.job_id,
+        command_id=f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1",
+        worker_id="worker-a",
+    )
+    assert isinstance(dispatch, OrchestrationDispatchOutcome)
+    placements = [
+        {"provider_realm": "codex", "quota_class": "codex-hf1q-step"},
+        {
+            "provider_realm": "claude-compatible-subscription",
+            "quota_class": "claude-hf1q-step",
+        },
+    ]
+    steps = []
+    for ordinal, placement in enumerate(placements):
+        steps.append(
+            {
+                "ordinal": ordinal,
+                "step_id": f"step-{ordinal}",
+                "objective": f"FPH0 trusted placement {ordinal}.",
+                "business_impact": "routine",
+                "review_required": False,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+                "placement": dict(placement),
+            }
+        )
+    plan_body = {
+        "schema_version": "mastermind.execution_plan/v2",
+        "root_job_id": root.job_id,
+        "plan_attempt_id": dispatch.attempt.attempt_id,
+        "steps": steps,
+    }
+    _complete_ohf_role(runtime, dispatch, plan_body, identity_seed=7401)
+    command = f"coo-cycle:{root.job_id}:admit-plan:{dispatch.attempt.attempt_id}"
+    admitted = runtime.jobs.admit_cycle_plan(root.job_id, command_id=command)
+    assert {
+        job.plan_step_id: (
+            job.constraints["provider"],
+            job.constraints["eligible_quota_classes"],
+        )
+        for job in admitted
+        if job.orchestration_role == "work"
+    } == {
+        "step-0": ("codex", ["codex-hf1q-step"]),
+        "step-1": ("claude-compatible-subscription", ["claude-hf1q-step"]),
+    }
+    assert all(
+        "work_placement_union" not in job.constraints
+        for job in admitted
+        if job.orchestration_role == "work"
+    )
+    replay = runtime.jobs.admit_cycle_plan(root.job_id, command_id=command)
+    assert [job.job_id for job in replay] == [job.job_id for job in admitted]
+    with runtime.store.read() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 4
+        assert connection.execute(
+            "SELECT COUNT(*) FROM events WHERE event_type='JOB_CREATED'"
+        ).fetchone()[0] == 4
+        assert connection.execute(
+            "SELECT COUNT(*) FROM events WHERE event_type='COO_PLAN_ADMITTED'"
+        ).fetchone()[0] == 1
+        stored_root = json.loads(
+            connection.execute(
+                "SELECT constraints_json FROM jobs WHERE job_id=?", (root.job_id,)
+            ).fetchone()[0]
+        )
+    assert stored_root["work_placement_union"] == root.constraints[
+        "work_placement_union"
+    ]
+
 def test_fph0_d8_v2_caller_union_is_dropped_not_honored(tmp_path, monkeypatch):
     runtime = Runtime.at(tmp_path)
     v2 = _v3_execution_binding()
