@@ -7,15 +7,17 @@ skill: web_ceo_delegation
 
 # WEB CEO DELEGATION — Role-Adaptive Principal Work
 
-Candidate procedure: not enrolled in INDEX or fleet instructions. Apply as governing procedure only after accepted same-source enrollment. Current authority, worker-routing, source-custody, admission, effect and dialogue laws remain controlling. This procedure selects a working approach; it never selects a provider account, changes a model setting, or grants execution authority.
+Candidate procedure: not enrolled in INDEX or fleet instructions. Apply as governing procedure only after accepted same-source enrollment. Current authority, worker-routing, source-custody, admission, effect and dialogue laws remain controlling. This procedure selects a working approach; it never selects a provider account, changes a model setting, or grants execution authority. Because `scripts/ohf/fresh_sol_eval.py` materializes every `docs/sol_skills/*.md`, merging this candidate path also places its bytes in each fresh-Sol evaluation bundle pinned at or after that merge. That is evaluation exposure, not production enrollment, INDEX enrollment, runtime authority or live behavior.
 
 ## 1. Choose the work profile, not a prestige hierarchy
 
-`CONCENTRATED_JUDGMENT`: prefer Astra Pro when a mission's dominant need is difficult architecture, ambiguity resolution, synthesis, adversarial judgment or a concentrated decision that unlocks implementation.
+`CONCENTRATED_JUDGMENT`: prefer Astra when a mission's dominant need is difficult architecture, ambiguity resolution, synthesis, adversarial judgment or a concentrated decision that unlocks implementation. When that same turn independently qualifies for Pro mode under governing law, Astra Pro is the provisional preference for this profile.
 
-`SUSTAINED_ORCHESTRATION`: prefer Sol Pro when a mission's dominant need is extended decision-bearing orchestration: coherent decomposition, worker-return adjudication, bounded repair, integration and advancement of successive authorized dependencies. This is useful principal work, not mechanical labor.
+`SUSTAINED_ORCHESTRATION`: prefer Sol when a mission's dominant need is extended decision-bearing orchestration: coherent decomposition, worker-return adjudication, bounded repair, integration and advancement of successive authorized dependencies. When that same turn independently qualifies for Pro mode under governing law, Sol Pro is the provisional preference for this profile. This is useful principal work, not mechanical labor.
 
-These are provisional role preferences, not duration guarantees, service limits, mandatory elapsed times, or runtime/model aliases. Either model may perform either profile when current evidence and capability favor it. Do not force an Astra-to-Sol handoff, add two principals to every task, or interrupt a productive incumbent just because of a model label. One existing action-authoritative responsibility and current RuntimeBinding remain in charge.
+These are provisional role preferences, not duration guarantees, service limits, mandatory elapsed times, reasoning-mode admission, or runtime/model aliases. Either model may perform either profile when current evidence and capability favor it. Do not force an Astra-to-Sol handoff, add two principals to every task, or interrupt a productive incumbent just because of a model label. One existing action-authoritative responsibility and current RuntimeBinding remain in charge.
+
+Reasoning-mode admission remains separate and fail-closed. The default is `COGNITION_ROUTE: CHAT_INCLUDED_DEFAULT` with `CHAT_REASONING_MODE: NON_PRO_DEFAULT`. A Pro turn must carry the complete governing exception receipt, cite one currently allowed `PRO_MODE_TASK_CLASS`, satisfy the current duration and stop-condition rules, and remain eligible after the turn itself is classified. A substantive mission may include routine lifecycle steps, but standalone handoff, `ACK / PICKUP_ACK / START / CONTINUE / STOP`, status, polling, routing, mechanical edit, test or simple-review turns do not inherit Pro eligibility. Missing, stale, under-duration, over-duration or ineligible receipts produce `PRO_MODE_REFUSED / USE_NON_PRO_MODE`. Never invent a task class or pad a duration estimate; consume #506 or its accepted successor when that owner lawfully changes the gate.
 
 ## 2. Make a delegation decision before substantial routine execution
 
@@ -33,7 +35,7 @@ The worker owns its permitted investigate/build/check/repair loop. Do not requir
 
 ## 4. Capacity and money are real constraints
 
-Capacity/Model Router selects the least-cost or least-scarce eligible route that can reliably meet the task's quality bar. Model, harness, subscription plan, host and organizational role are distinct. A provider preference, installed binary, source catalog entry or successful unrelated native run is not live admission. Unknown quota, route proof or budget remains unknown.
+Model Router fixes the first lawful suitability tier; Capacity Fabric ranks only eligible candidates inside that tier by least cost or least scarcity, without promoting a lower tier or waiving an exclusion. Model, harness, subscription plan, host and organizational role are distinct. A provider preference, installed binary, source catalog entry or successful unrelated native run is not live admission. Unknown quota, route proof or budget remains unknown.
 
 Keep all applicable provider/credential/activation holds effective before any credential read or provider call. Cheap workers are not exceptions. Use the existing approved worker-spend envelope and include review/repair consumption; willingness to spend more is not an unlimited cap. Keep metered executive cognition separate from economical worker execution. Do not invent a direct-spawn, raw-socket, alternate-queue or ad hoc credential fallback when the supported path is absent. Before any effect begins, an already-approved available manual/operator route may still be used under current placement/custody law; report it as manual transport with separate pickup/START/evidence, not Executive dispatch. Missing Web tools do not prove the entire fabric is down. This is not permission to retry a platform-blocked action through another actor or carrier.
 
@@ -45,7 +47,7 @@ Keep a substantive principal-owned task while workers execute: resolve the harde
 
 Sustained Sol orchestration may include normal ACK/CONTINUE/repair/acceptance steps within a substantive mission. That does not promote a standalone acknowledgment, status check or polling turn into frontier reasoning. Astra may continue orchestration when it is productive, and Sol may directly resolve high-level architecture within its authority. Neither should stop solely because it has written a plan or delivered a packet while useful authorized work remains.
 
-Use the accepted ACTIVE_EXECUTION owner for critical-path advancement, no-delta handling and finalization. This skill adds no second stop-state machine. A failed or blocked lane freezes only its affected work; independently safe and authorized work can continue. Keep `EFFECT_UNKNOWN` on the exact operation/carrier until reconciled; never start a duplicate or silently move a started modifier to another session.
+Use the ACTIVE_EXECUTION owner once #591 is accepted; until then use the existing COO cycle/control-service owner for critical-path advancement, no-delta handling and finalization. This skill adds no second stop-state machine. A failed or blocked lane freezes only its affected work; independently safe and authorized work can continue. Keep `EFFECT_UNKNOWN` on the exact operation/carrier until reconciled; never start a duplicate or silently move a started modifier to another session.
 
 ## 6. Consume evidence, not worker transcripts
 
