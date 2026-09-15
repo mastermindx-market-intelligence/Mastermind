@@ -9,6 +9,7 @@ from scripts.ohf.fresh_sol_eval import ScenarioPacket
 ROOT = Path(__file__).resolve().parents[1]
 CORPUS = ROOT / "research/fixtures/web_ceo_role_adaptive_delegation_2026-09-14.json"
 SKILL = ROOT / "docs/sol_skills/WEB_CEO_DELEGATION.md"
+INDEX = ROOT / "docs/sol_skills/INDEX.md"
 PLAN = ROOT / "docs/superpowers/plans/2026-09-14-web-ceo-role-adaptive-delegation.md"
 SPEC = ROOT / "docs/superpowers/specs/2026-09-14-web-ceo-role-adaptive-delegation.md"
 CASE_IDS = tuple(f"WCD{i:02d}" for i in range(1, 15))
@@ -64,6 +65,30 @@ def test_candidate_discloses_fresh_sol_bundle_effect_without_claiming_enrollment
     text = artifact.read_text(encoding="utf-8")
     assert "fresh-Sol evaluation bundle" in text
     assert "evaluation exposure, not production enrollment" in text
+
+
+def test_candidate_is_structurally_unenrolled_and_closes_bypass_and_pro_class_gaps():
+    skill = SKILL.read_text(encoding="utf-8")
+    index = INDEX.read_text(encoding="utf-8")
+    plan = PLAN.read_text(encoding="utf-8")
+    rows = {
+        row["scenario_id"]: row
+        for row in json.loads(CORPUS.read_text(encoding="utf-8"))
+    }
+
+    assert "WEB_CEO_DELEGATION" not in index
+    for clause in ("direct-spawn", "raw-socket", "alternate-queue"):
+        assert clause in skill
+    assert "raw-socket/provider-spawn bypass" in rows["WCD08"]["pass_requires"]
+    for task_class in (
+        "LONG_HORIZON_FRONTIER_REASONING",
+        "CROSS_SYSTEM_ARCHITECTURE",
+        "HARD_DEBUGGING",
+        "ADVERSARIAL_JUDGMENT",
+    ):
+        assert task_class in skill
+    assert "`SUSTAINED_ORCHESTRATION` is a work profile, not a `PRO_MODE_TASK_CLASS`" in skill
+    assert "42 tests" in plan
 
 
 def test_static_packet_checks_do_not_launch_or_grade_models():
