@@ -22,6 +22,7 @@ MAX_FRAME_BYTES = 1024 * 1024
 
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{1,127}$")
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
+_RESERVED_UNBOUND_HOST_REFS = frozenset({"local-unbound"})
 _REQUEST_KEYS = frozenset({
     "schema", "host_ref", "job_id", "attempt_id", "worker_id", "operation_id",
     "broker_operation", "request_sha256", "broker_request",
@@ -110,7 +111,11 @@ def _reject_non_finite(value: Any) -> None:
 
 def _validate_id(name: str, value: Any) -> str:
     if name == "host_ref":
-        if not isinstance(value, str) or not _HEX64_RE.fullmatch(value):
+        if (
+            not isinstance(value, str)
+            or not _ID_RE.fullmatch(value)
+            or value in _RESERVED_UNBOUND_HOST_REFS
+        ):
             raise TransportValidationError("transport identity is invalid")
         return value
     if not isinstance(value, str) or not _ID_RE.fullmatch(value):
