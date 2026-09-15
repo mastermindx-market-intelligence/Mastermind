@@ -60,6 +60,28 @@ ZOEKT_BINARY_PACKAGES: Final = MappingProxyType(
         "zoekt-webserver": "./cmd/zoekt-webserver",
     }
 )
+ZOEKT_EMBEDDED_MAIN_PACKAGES: Final = MappingProxyType(
+    {
+        name: f"{ZOEKT_MODULE_PATH}/{package.removeprefix('./')}"
+        for name, package in ZOEKT_BINARY_PACKAGES.items()
+    }
+)
+GO_BUILD_INFO_SCHEMA_VERSION: Final = "mastermind.codeintel_go_build_identity.v1"
+GO_BUILD_INFO_EXPECTED_SETTINGS: Final = MappingProxyType(
+    {
+        "-buildmode": "exe",
+        "-compiler": "gc",
+        "-trimpath": "true",
+        "CGO_ENABLED": "0",
+        "GOARCH": "amd64",
+        "GOOS": "linux",
+        "GOAMD64": "v1",
+    }
+)
+GO_BUILD_INFO_OPTIONAL_SETTINGS: Final = frozenset({"DefaultGODEBUG"})
+GO_BUILD_INFO_MAX_STDOUT_BYTES: Final = 1_048_576
+GO_BUILD_INFO_MAX_STDERR_BYTES: Final = 65_536
+GO_BUILD_INFO_TIMEOUT_SECONDS: Final = 10.0
 ZOEKT_SOURCE_URL: Final = "https://github.com/sourcegraph/zoekt.git"
 ZOEKT_COMMIT: Final = "5f833dde1bc4b1a8f99007617b4b721e44506c4f"
 ZOEKT_TREE: Final = "8135ec1d7329e7f8de43714ac5c7a2bad14bd7b5"

@@ -3342,6 +3342,14 @@ def prepare_phase_p(
             )
 
     module_inventory = build["modules"]
+    binary_build_info_sha256 = build["binary_build_info_sha256"]
+    if (
+        not isinstance(binary_build_info_sha256, str)
+        or _SHA256_RE.fullmatch(binary_build_info_sha256) is None
+    ):
+        raise HostedRunnerError(
+            "BUILD_INFO_INVALID", "three-role BuildInfo identity differs"
+        )
     main_module = next(
         str(row["path"]) for row in module_inventory if bool(row["main"])
     )
@@ -3352,6 +3360,7 @@ def prepare_phase_p(
         "go_mod_blob_sha1": locks.ZOEKT_GO_MOD_BLOB,
         "go_sum_blob_sha1": locks.ZOEKT_GO_SUM_BLOB,
         "modules": module_inventory,
+        "binary_build_info_sha256": binary_build_info_sha256,
         "binaries": build["binaries"],
     }
     assert_secret_free(sbom)
@@ -3422,6 +3431,7 @@ def prepare_phase_p(
             "license_sha256": locks.ZOEKT_LICENSE_SHA256,
         },
         "module_inventory_sha256": locks.sha256_bytes(sbom_bytes),
+        "binary_build_info_sha256": binary_build_info_sha256,
         "binaries": build["binaries"],
         "source_before": dataclasses.asdict(source_before),
         "source_after": dataclasses.asdict(source_after),
@@ -3442,6 +3452,7 @@ def prepare_phase_p(
             "lock_sha256": lock.sha256,
             "build_recipe_sha256": lock.build_recipe_sha256,
             "module_inventory_sha256": locks.sha256_bytes(sbom_bytes),
+            "binary_build_info_sha256": binary_build_info_sha256,
             "provenance_sha256": locks.sha256_bytes(provenance_bytes),
         },
     )
@@ -3455,6 +3466,7 @@ def prepare_phase_p(
         "lock_sha256": lock.sha256,
         "build_recipe_sha256": lock.build_recipe_sha256,
         "module_inventory_sha256": locks.sha256_bytes(sbom_bytes),
+        "binary_build_info_sha256": binary_build_info_sha256,
         "provenance_sha256": locks.sha256_bytes(provenance_bytes),
         "binary_digests": {
             name: row["sha256"] for name, row in build["binaries"].items()
@@ -4223,6 +4235,387 @@ def _checkout_exact_zoekt(
     )
 
 
+
+@dataclass(frozen=True)
+class _GoBuildInfoObservation:
+    """One immutable executable identity observed from pinned Go BuildInfo bytes."""
+
+    role: str
+    binary_sha256: str
+    binary_size: int
+    go_executable_sha256: str
+    go_version: str
+    main_package: str
+    main_module: str
+    main_module_version: str
+    source_commit: str
+    source_tree: str
+    dependencies_sha256: str
+    settings_sha256: str
+    canonical_bytes: bytes
+    digest: str
+
+
+def _build_info_text(value: object, label: str) -> str:
+    if (
+        not isinstance(value, str)
+        or not value
+        or any(ord(character) < 32 for character in value)
+    ):
+        raise HostedRunnerError(
+            "BUILD_INFO_INVALID", f"{label} must be non-empty printable text"
+        )
+    return value
+
+
+def _normalize_build_info_module(value: object, label: str) -> Mapping[str, str]:
+    if not isinstance(value, Mapping):
+        raise HostedRunnerError("BUILD_INFO_INVALID", f"{label} must be an object")
+    allowed = {"Path", "Version", "Sum", "Replace"}
+    required = {"Path", "Version"}
+    if not required.issubset(value) or not set(value).issubset(allowed):
+        raise HostedRunnerError("BUILD_INFO_INVALID", f"{label} fields differ")
+    if "Replace" in value:
+        raise HostedRunnerError(
+            "BUILD_INFO_INVALID", "module replacement is forbidden"
+        )
+    result: dict[str, str] = {
+        "Path": _build_info_text(value["Path"], f"{label}.Path"),
+        "Version": _build_info_text(value["Version"], f"{label}.Version"),
+    }
+    if "Sum" in value:
+        result["Sum"] = _build_info_text(value["Sum"], f"{label}.Sum")
+    return result
+
+
+def _normalize_build_info_dependencies(value: object) -> tuple[Mapping[str, str], ...]:
+    if not isinstance(value, list):
+        raise HostedRunnerError("BUILD_INFO_INVALID", "Deps must be a list")
+    rows: list[Mapping[str, str]] = []
+    seen: set[str] = set()
+    for index, raw in enumerate(value):
+        row = _normalize_build_info_module(raw, f"Deps[{index}]")
+        module_path = row["Path"]
+        if module_path in seen:
+            raise HostedRunnerError(
+                "BUILD_INFO_INVALID", "dependency module path is duplicated"
+            )
+        seen.add(module_path)
+        rows.append(row)
+    if not rows:
+        raise HostedRunnerError(
+            "BUILD_INFO_INVALID", "dependency graph must be non-empty"
+        )
+    rows.sort(key=lambda row: row["Path"])
+    return tuple(rows)
+
+
+def _validate_default_godebug(value: str) -> None:
+    rows = value.split(",")
+    if not rows or any(not row for row in rows):
+        raise HostedRunnerError("BUILD_INFO_INVALID", "DefaultGODEBUG is malformed")
+    observed: set[str] = set()
+    for row in rows:
+        if row.count("=") != 1:
+            raise HostedRunnerError(
+                "BUILD_INFO_INVALID", "DefaultGODEBUG is malformed"
+            )
+        key, setting = row.split("=", 1)
+        if (
+            not key
+            or not key.isascii()
+            or not key.replace("_", "").isalnum()
+            or not key.islower()
+            or not setting
+            or any(character.isspace() for character in setting)
+            or key in observed
+        ):
+            raise HostedRunnerError(
+                "BUILD_INFO_INVALID", "DefaultGODEBUG is malformed or duplicated"
+            )
+        observed.add(key)
+
+
+def _normalize_build_info_settings(value: object) -> tuple[tuple[str, str], ...]:
+    if not isinstance(value, list):
+        raise HostedRunnerError("BUILD_INFO_INVALID", "Settings must be a list")
+    observed: dict[str, str] = {}
+    for index, raw in enumerate(value):
+        if not isinstance(raw, Mapping) or set(raw) != {"Key", "Value"}:
+            raise HostedRunnerError(
+                "BUILD_INFO_INVALID", f"Settings[{index}] fields differ"
+            )
+        key = _build_info_text(raw["Key"], "build setting key")
+        setting = _build_info_text(raw["Value"], "build setting value")
+        if key in observed:
+            raise HostedRunnerError(
+                "BUILD_INFO_INVALID", "build setting key is duplicated"
+            )
+        observed[key] = setting
+    if any(
+        observed.get(key) != setting
+        for key, setting in locks.GO_BUILD_INFO_EXPECTED_SETTINGS.items()
+    ):
+        raise HostedRunnerError(
+            "BUILD_INFO_INVALID", "build settings differ from frozen recipe"
+        )
+    extras = set(observed) - set(locks.GO_BUILD_INFO_EXPECTED_SETTINGS)
+    if extras - set(locks.GO_BUILD_INFO_OPTIONAL_SETTINGS):
+        raise HostedRunnerError(
+            "BUILD_INFO_INVALID", "unexpected build setting is present"
+        )
+    if "DefaultGODEBUG" in observed:
+        _validate_default_godebug(observed["DefaultGODEBUG"])
+    return tuple(sorted(observed.items()))
+
+
+def _build_info_payload(observation: _GoBuildInfoObservation) -> Mapping[str, object]:
+    return {
+        "schema_version": locks.GO_BUILD_INFO_SCHEMA_VERSION,
+        "role": observation.role,
+        "binary_sha256": observation.binary_sha256,
+        "binary_size": observation.binary_size,
+        "go_executable_sha256": observation.go_executable_sha256,
+        "go_version": observation.go_version,
+        "main_package": observation.main_package,
+        "main_module": observation.main_module,
+        "main_module_version": observation.main_module_version,
+        "source_commit": observation.source_commit,
+        "source_tree": observation.source_tree,
+        "dependencies_sha256": observation.dependencies_sha256,
+        "settings_sha256": observation.settings_sha256,
+    }
+
+
+def _validate_build_info_observation(observation: _GoBuildInfoObservation) -> None:
+    if observation.role not in locks.ZOEKT_EMBEDDED_MAIN_PACKAGES:
+        raise HostedRunnerError("BUILD_INFO_INVALID", "binary role is not closed")
+    for label, value in (
+        ("binary_sha256", observation.binary_sha256),
+        ("go_executable_sha256", observation.go_executable_sha256),
+        ("dependencies_sha256", observation.dependencies_sha256),
+        ("settings_sha256", observation.settings_sha256),
+        ("build_info_sha256", observation.digest),
+    ):
+        if not isinstance(value, str) or _SHA256_RE.fullmatch(value) is None:
+            raise HostedRunnerError("BUILD_INFO_INVALID", f"{label} differs")
+    if type(observation.binary_size) is not int or observation.binary_size <= 0:
+        raise HostedRunnerError("BUILD_INFO_INVALID", "binary size differs")
+    if observation.go_version != f"go{locks.GO_VERSION}":
+        raise HostedRunnerError("BUILD_INFO_INVALID", "Go version differs")
+    if observation.main_package != locks.ZOEKT_EMBEDDED_MAIN_PACKAGES[observation.role]:
+        raise HostedRunnerError("BUILD_INFO_INVALID", "main package differs")
+    if (
+        observation.main_module != locks.ZOEKT_MODULE_PATH
+        or observation.main_module_version != "(devel)"
+    ):
+        raise HostedRunnerError("BUILD_INFO_INVALID", "main module differs")
+    if (
+        observation.source_commit != locks.ZOEKT_COMMIT
+        or observation.source_tree != locks.ZOEKT_TREE
+    ):
+        raise HostedRunnerError("BUILD_INFO_INVALID", "source identity differs")
+    expected = locks.canonical_json_bytes(_build_info_payload(observation))
+    if observation.canonical_bytes != expected:
+        raise HostedRunnerError(
+            "BUILD_INFO_INVALID", "canonical observation bytes differ"
+        )
+    if observation.digest != locks.sha256_bytes(expected):
+        raise HostedRunnerError("BUILD_INFO_INVALID", "observation digest differs")
+
+
+def _parse_go_build_info(
+    raw: bytes,
+    *,
+    role: str,
+    binary_sha256: str,
+    binary_size: int,
+    go_executable_sha256: str,
+) -> _GoBuildInfoObservation:
+    """Parse one exact `go version -m -json` observation into stable bytes."""
+
+    if (
+        type(raw) is not bytes
+        or not raw
+        or len(raw) > locks.GO_BUILD_INFO_MAX_STDOUT_BYTES
+    ):
+        raise HostedRunnerError(
+            "BUILD_INFO_INVALID", "build-info output is absent or oversized"
+        )
+    if role not in locks.ZOEKT_EMBEDDED_MAIN_PACKAGES:
+        raise HostedRunnerError("BUILD_INFO_INVALID", "binary role is not closed")
+    if _SHA256_RE.fullmatch(binary_sha256) is None:
+        raise HostedRunnerError("BUILD_INFO_INVALID", "binary digest differs")
+    if _SHA256_RE.fullmatch(go_executable_sha256) is None:
+        raise HostedRunnerError("BUILD_INFO_INVALID", "Go executable digest differs")
+    if type(binary_size) is not int or binary_size <= 0:
+        raise HostedRunnerError("BUILD_INFO_INVALID", "binary size differs")
+    try:
+        document = locks.decode_strict_json_bytes(
+            raw,
+            invalid_code="BUILD_INFO_INVALID",
+            label="go version -m output",
+        )
+    except locks.ToolchainLockError as error:
+        raise HostedRunnerError("BUILD_INFO_INVALID", error.detail) from error
+    if not isinstance(document, Mapping) or set(document) != {
+        "GoVersion",
+        "Path",
+        "Main",
+        "Deps",
+        "Settings",
+    }:
+        raise HostedRunnerError("BUILD_INFO_INVALID", "BuildInfo fields differ")
+    expected_go_version = f"go{locks.GO_VERSION}"
+    if document["GoVersion"] != expected_go_version:
+        raise HostedRunnerError("BUILD_INFO_INVALID", "embedded Go version differs")
+    expected_package = locks.ZOEKT_EMBEDDED_MAIN_PACKAGES[role]
+    if document["Path"] != expected_package:
+        raise HostedRunnerError(
+            "BUILD_INFO_INVALID", "embedded main package differs from role"
+        )
+    main = _normalize_build_info_module(document["Main"], "Main")
+    if main != {"Path": locks.ZOEKT_MODULE_PATH, "Version": "(devel)"}:
+        raise HostedRunnerError(
+            "BUILD_INFO_INVALID", "embedded main module identity differs"
+        )
+    dependencies = _normalize_build_info_dependencies(document["Deps"])
+    settings = _normalize_build_info_settings(document["Settings"])
+    dependencies_sha256 = locks.sha256_bytes(
+        locks.canonical_json_bytes(list(dependencies))
+    )
+    settings_sha256 = locks.sha256_bytes(
+        locks.canonical_json_bytes([list(item) for item in settings])
+    )
+    seed = _GoBuildInfoObservation(
+        role=role,
+        binary_sha256=binary_sha256,
+        binary_size=binary_size,
+        go_executable_sha256=go_executable_sha256,
+        go_version=expected_go_version,
+        main_package=expected_package,
+        main_module=locks.ZOEKT_MODULE_PATH,
+        main_module_version="(devel)",
+        source_commit=locks.ZOEKT_COMMIT,
+        source_tree=locks.ZOEKT_TREE,
+        dependencies_sha256=dependencies_sha256,
+        settings_sha256=settings_sha256,
+        canonical_bytes=b"",
+        digest="0" * 64,
+    )
+    canonical = locks.canonical_json_bytes(_build_info_payload(seed))
+    observation = dataclasses.replace(
+        seed,
+        canonical_bytes=canonical,
+        digest=locks.sha256_bytes(canonical),
+    )
+    _validate_build_info_observation(observation)
+    return observation
+
+
+def _observe_go_build_info(
+    *,
+    go_binary: Path,
+    binary: Path,
+    role: str,
+    cwd: Path,
+    env: Mapping[str, str],
+    network_environment: Mapping[str, str],
+) -> _GoBuildInfoObservation:
+    """Observe exact embedded identity with pre/post Go and binary verification."""
+
+    go = _verified_executable(go_binary, expected_sha256=None)
+    target = _verified_executable(binary, expected_sha256=None)
+    go_sha256 = locks.sha256_file(go, max_bytes=100_663_296)
+    binary_sha256 = locks.sha256_file(target, max_bytes=100_663_296)
+    binary_size = target.stat().st_size
+    completed = _run_phase_p_process(
+        [os.fspath(go), "version", "-m", "-json", os.fspath(target)],
+        cwd=cwd,
+        env=env,
+        network_environment=network_environment,
+        timeout=locks.GO_BUILD_INFO_TIMEOUT_SECONDS,
+        text=False,
+    )
+    stdout = completed.stdout if completed.stdout is not None else b""
+    stderr = completed.stderr if completed.stderr is not None else b""
+    if not isinstance(stdout, bytes) or not isinstance(stderr, bytes):
+        raise HostedRunnerError(
+            "BUILD_INFO_OBSERVATION_FAILED", "build-info output type differs"
+        )
+    if len(stdout) > locks.GO_BUILD_INFO_MAX_STDOUT_BYTES:
+        raise HostedRunnerError(
+            "BUILD_INFO_OBSERVATION_FAILED", "build-info stdout exceeded bound"
+        )
+    if len(stderr) > locks.GO_BUILD_INFO_MAX_STDERR_BYTES:
+        raise HostedRunnerError(
+            "BUILD_INFO_OBSERVATION_FAILED", "build-info stderr exceeded bound"
+        )
+    if completed.returncode != 0:
+        raise HostedRunnerError(
+            "BUILD_INFO_OBSERVATION_FAILED",
+            f"pinned Go exited {completed.returncode}",
+        )
+    if stderr:
+        raise HostedRunnerError(
+            "BUILD_INFO_OBSERVATION_FAILED", "pinned Go emitted stderr"
+        )
+    _verified_executable(go, expected_sha256=go_sha256)
+    _verified_executable(target, expected_sha256=binary_sha256)
+    if target.stat().st_size != binary_size:
+        raise HostedRunnerError(
+            "BUILD_INFO_OBSERVATION_FAILED", "binary size changed during observation"
+        )
+    return _parse_go_build_info(
+        stdout,
+        role=role,
+        binary_sha256=binary_sha256,
+        binary_size=binary_size,
+        go_executable_sha256=go_sha256,
+    )
+
+
+def _build_info_row(observation: _GoBuildInfoObservation) -> Mapping[str, object]:
+    _validate_build_info_observation(observation)
+    return {
+        "build_info_schema_version": locks.GO_BUILD_INFO_SCHEMA_VERSION,
+        "sha256": observation.binary_sha256,
+        "size": observation.binary_size,
+        "mode": "0755",
+        "repeat_builds": 2,
+        "byte_identical": True,
+        "package": locks.ZOEKT_BINARY_PACKAGES[observation.role],
+        "source_commit": observation.source_commit,
+        "source_tree": observation.source_tree,
+        "go_executable_sha256": observation.go_executable_sha256,
+        "observed_main_package": observation.main_package,
+        "observed_main_module": observation.main_module,
+        "main_module_version": observation.main_module_version,
+        "observed_go_version": observation.go_version,
+        "dependencies_sha256": observation.dependencies_sha256,
+        "settings_sha256": observation.settings_sha256,
+        "build_info_sha256": observation.digest,
+    }
+
+
+def _binary_build_info_sha256(
+    binaries: Mapping[str, Mapping[str, object]],
+) -> str:
+    if set(binaries) != set(locks.ZOEKT_BINARY_PACKAGES):
+        raise HostedRunnerError(
+            "BUILD_INFO_INVALID", "build-info role census differs"
+        )
+    values: dict[str, str] = {}
+    for name in sorted(binaries):
+        digest = binaries[name].get("build_info_sha256")
+        if not isinstance(digest, str) or _SHA256_RE.fullmatch(digest) is None:
+            raise HostedRunnerError(
+                "BUILD_INFO_INVALID", f"build-info digest differs for {name}"
+            )
+        values[name] = digest
+    return locks.sha256_bytes(locks.canonical_json_bytes(values))
+
+
 def _repeat_build_zoekt(
     source: Path,
     *,
@@ -4287,6 +4680,7 @@ def _repeat_build_zoekt(
     modules = _normalize_go_module_inventory(inventory_output)
 
     builds: list[dict[str, Mapping[str, object]]] = []
+    observations: list[dict[str, _GoBuildInfoObservation]] = []
     packages = locks.ZOEKT_BINARY_PACKAGES
     for attempt in (1, 2):
         output = scratch / f"build-{attempt}"
@@ -4294,6 +4688,7 @@ def _repeat_build_zoekt(
         output.mkdir(mode=0o700)
         cache.mkdir(mode=0o700)
         rows: dict[str, Mapping[str, object]] = {}
+        observed: dict[str, _GoBuildInfoObservation] = {}
         env = {**common_env, "GOCACHE": os.fspath(cache)}
         for name, package in packages.items():
             target = output / name
@@ -4314,16 +4709,28 @@ def _repeat_build_zoekt(
                 network_environment=network_environment,
                 timeout=900,
             )
-            executable = _verified_executable(target, expected_sha256=None)
+            observation = _observe_go_build_info(
+                go_binary=go,
+                binary=target,
+                role=name,
+                cwd=source,
+                env=env,
+                network_environment=network_environment,
+            )
             rows[name] = {
-                "sha256": locks.sha256_file(executable, max_bytes=100_663_296),
-                "size": executable.stat().st_size,
+                "sha256": observation.binary_sha256,
+                "size": observation.binary_size,
                 "mode": "0755",
                 "build_attempt": attempt,
             }
+            observed[name] = observation
         builds.append(rows)
+        observations.append(observed)
     first, second = builds
+    first_observations, second_observations = observations
     for name in packages:
+        first_observation = first_observations[name]
+        second_observation = second_observations[name]
         if (
             first[name]["sha256"] != second[name]["sha256"]
             or first[name]["size"] != second[name]["size"]
@@ -4331,25 +4738,41 @@ def _repeat_build_zoekt(
             raise HostedRunnerError(
                 "NONDETERMINISTIC_BUILD", f"{name} differs across clean caches"
             )
+        if (
+            first_observation.canonical_bytes != second_observation.canonical_bytes
+            or first_observation.digest != second_observation.digest
+        ):
+            raise HostedRunnerError(
+                "NONDETERMINISTIC_BUILD_INFO",
+                f"{name} embedded identity differs across clean caches",
+            )
         source_binary = scratch / "build-1" / name
         target = payload_bin / name
         shutil.copyfile(source_binary, target)
         os.chmod(target, 0o755)
         if locks.sha256_file(target, max_bytes=100_663_296) != first[name]["sha256"]:
             raise HostedRunnerError("BINARY_COPY_MISMATCH", name)
+    admitted = tuple(first_observations.values())
+    if len({row.binary_sha256 for row in admitted}) != len(packages):
+        raise HostedRunnerError(
+            "BINARY_ROLE_SUBSTITUTION", "distinct roles share executable bytes"
+        )
+    if len({row.go_executable_sha256 for row in admitted}) != 1:
+        raise HostedRunnerError(
+            "BUILD_INFO_INVALID", "three-role Go executable identity differs"
+        )
+    if len({row.settings_sha256 for row in admitted}) != 1:
+        raise HostedRunnerError(
+            "BUILD_INFO_INVALID", "three-role build settings identity differs"
+        )
     final_rows = {
-        name: {
-            "sha256": first[name]["sha256"],
-            "size": first[name]["size"],
-            "mode": "0755",
-            "repeat_builds": 2,
-            "byte_identical": True,
-            "package": packages[name],
-            "source_commit": locks.ZOEKT_COMMIT,
-        }
-        for name in packages
+        name: _build_info_row(first_observations[name]) for name in packages
     }
-    return {"modules": modules, "binaries": final_rows}
+    return {
+        "modules": modules,
+        "binaries": final_rows,
+        "binary_build_info_sha256": _binary_build_info_sha256(final_rows),
+    }
 
 
 def _normalize_go_module_inventory(raw: str) -> list[Mapping[str, object]]:
@@ -5011,12 +5434,17 @@ def _bundle_payload_census(root: Path) -> list[tuple[str, Path, int]]:
 def _validate_bundle_binary_provenance(
     manifest: Mapping[str, Any], metadata: Mapping[str, bytes]
 ) -> None:
-    """Join each executable to the exact lock, build receipt and module inventory."""
+    """Join each executable to exact lock, embedded identity and module evidence."""
+
     code = "BUNDLE_PROVENANCE_MISMATCH"
     context = manifest["context"]
     context_fields = {
-        "request_digest", "lock_sha256", "build_recipe_sha256",
-        "module_inventory_sha256", "provenance_sha256",
+        "request_digest",
+        "lock_sha256",
+        "build_recipe_sha256",
+        "module_inventory_sha256",
+        "binary_build_info_sha256",
+        "provenance_sha256",
     }
     if set(context) != context_fields or any(
         not isinstance(value, str) or _SHA256_RE.fullmatch(value) is None
@@ -5029,15 +5457,23 @@ def _validate_bundle_binary_provenance(
         raise HostedRunnerError(code, "binary metadata census differs")
     decoded = {}
     try:
-        for path, raw in metadata.items():
-            if len(raw) != rows[path]["size"] or locks.sha256_bytes(raw) != rows[path]["sha256"]:
+        for metadata_path, raw in metadata.items():
+            if (
+                len(raw) != rows[metadata_path]["size"]
+                or locks.sha256_bytes(raw) != rows[metadata_path]["sha256"]
+            ):
                 raise HostedRunnerError(code, "binary metadata bytes differ")
-            decoded[path] = locks.decode_strict_json_bytes(raw, invalid_code=code)
+            decoded[metadata_path] = locks.decode_strict_json_bytes(
+                raw, invalid_code=code
+            )
         lock = locks.validate_lock_payload(
-            decoded["meta/toolchain-lock.json"], raw_bytes=metadata["meta/toolchain-lock.json"]
+            decoded["meta/toolchain-lock.json"],
+            raw_bytes=metadata["meta/toolchain-lock.json"],
         )
     except locks.ToolchainLockError as error:
-        raise HostedRunnerError(code, "binary metadata or toolchain lock is invalid") from error
+        raise HostedRunnerError(
+            code, "binary metadata or toolchain lock is invalid"
+        ) from error
     provenance = decoded["meta/provenance.json"]
     sbom = decoded["meta/sbom.json"]
     if not isinstance(provenance, Mapping) or not isinstance(sbom, Mapping):
@@ -5045,21 +5481,29 @@ def _validate_bundle_binary_provenance(
     if (
         context["lock_sha256"] != lock.sha256
         or context["build_recipe_sha256"] != lock.build_recipe_sha256
-        or context["provenance_sha256"] != locks.sha256_bytes(metadata["meta/provenance.json"])
-        or context["module_inventory_sha256"] != locks.sha256_bytes(metadata["meta/sbom.json"])
+        or context["provenance_sha256"]
+        != locks.sha256_bytes(metadata["meta/provenance.json"])
+        or context["module_inventory_sha256"]
+        != locks.sha256_bytes(metadata["meta/sbom.json"])
         or provenance.get("schema_version") != PHASE_P_PROVENANCE_SCHEMA_VERSION
         or provenance.get("request_digest") != context["request_digest"]
         or provenance.get("lock_sha256") != lock.sha256
         or provenance.get("build_recipe_sha256") != lock.build_recipe_sha256
-        or provenance.get("module_inventory_sha256") != context["module_inventory_sha256"]
+        or provenance.get("module_inventory_sha256")
+        != context["module_inventory_sha256"]
+        or provenance.get("binary_build_info_sha256")
+        != context["binary_build_info_sha256"]
     ):
         raise HostedRunnerError(code, "binary build context is unbound")
     if (
-        sbom.get("schema_version") != "mastermind.codeintel_go_module_inventory.v1"
+        sbom.get("schema_version")
+        != "mastermind.codeintel_go_module_inventory.v1"
         or sbom.get("main_module") != locks.ZOEKT_MODULE_PATH
         or sbom.get("go_version") != locks.GO_VERSION
         or sbom.get("go_mod_blob_sha1") != locks.ZOEKT_GO_MOD_BLOB
         or sbom.get("go_sum_blob_sha1") != locks.ZOEKT_GO_SUM_BLOB
+        or sbom.get("binary_build_info_sha256")
+        != context["binary_build_info_sha256"]
         or not isinstance(sbom.get("modules"), list)
     ):
         raise HostedRunnerError(code, "binary module inventory is unbound")
@@ -5070,15 +5514,59 @@ def _validate_bundle_binary_provenance(
         or sbom.get("binaries") != binaries
     ):
         raise HostedRunnerError(code, "binary provenance and SBOM census differ")
-    fields = {"sha256", "size", "mode", "repeat_builds", "byte_identical", "package", "source_commit"}
-    digests = set()
+    fields = {
+        "build_info_schema_version",
+        "sha256",
+        "size",
+        "mode",
+        "repeat_builds",
+        "byte_identical",
+        "package",
+        "source_commit",
+        "source_tree",
+        "go_executable_sha256",
+        "observed_main_package",
+        "observed_main_module",
+        "main_module_version",
+        "observed_go_version",
+        "dependencies_sha256",
+        "settings_sha256",
+        "build_info_sha256",
+    }
+    digests: set[str] = set()
+    go_executable_digests: set[str] = set()
+    settings_digests: set[str] = set()
     for name, package in locks.ZOEKT_BINARY_PACKAGES.items():
         evidence = binaries[name]
         member = rows["bin/" + name]
+        if not isinstance(evidence, Mapping) or set(evidence) != fields:
+            raise HostedRunnerError(
+                code, "binary role/source/build observation differs"
+            )
+        sha_fields = (
+            "sha256",
+            "go_executable_sha256",
+            "dependencies_sha256",
+            "settings_sha256",
+            "build_info_sha256",
+        )
+        if any(
+            not isinstance(evidence.get(field), str)
+            or _SHA256_RE.fullmatch(str(evidence[field])) is None
+            for field in sha_fields
+        ):
+            raise HostedRunnerError(code, "binary BuildInfo digest differs")
         if (
-            not isinstance(evidence, Mapping) or set(evidence) != fields
+            evidence.get("build_info_schema_version")
+            != locks.GO_BUILD_INFO_SCHEMA_VERSION
             or evidence.get("package") != package
             or evidence.get("source_commit") != locks.ZOEKT_COMMIT
+            or evidence.get("source_tree") != locks.ZOEKT_TREE
+            or evidence.get("observed_main_package")
+            != locks.ZOEKT_EMBEDDED_MAIN_PACKAGES[name]
+            or evidence.get("observed_main_module") != locks.ZOEKT_MODULE_PATH
+            or evidence.get("main_module_version") != "(devel)"
+            or evidence.get("observed_go_version") != f"go{locks.GO_VERSION}"
             or type(evidence.get("repeat_builds")) is not int
             or evidence.get("repeat_builds") != 2
             or evidence.get("byte_identical") is not True
@@ -5089,8 +5577,37 @@ def _validate_bundle_binary_provenance(
             or evidence.get("sha256") != member["sha256"]
             or evidence.get("sha256") in digests
         ):
-            raise HostedRunnerError(code, "binary role/source/build observation differs")
-        digests.add(evidence["sha256"])
+            raise HostedRunnerError(
+                code, "binary role/source/build observation differs"
+            )
+        observation_payload = {
+            "schema_version": evidence["build_info_schema_version"],
+            "role": name,
+            "binary_sha256": evidence["sha256"],
+            "binary_size": evidence["size"],
+            "go_executable_sha256": evidence["go_executable_sha256"],
+            "go_version": evidence["observed_go_version"],
+            "main_package": evidence["observed_main_package"],
+            "main_module": evidence["observed_main_module"],
+            "main_module_version": evidence["main_module_version"],
+            "source_commit": evidence["source_commit"],
+            "source_tree": evidence["source_tree"],
+            "dependencies_sha256": evidence["dependencies_sha256"],
+            "settings_sha256": evidence["settings_sha256"],
+        }
+        if (
+            locks.sha256_bytes(locks.canonical_json_bytes(observation_payload))
+            != evidence["build_info_sha256"]
+        ):
+            raise HostedRunnerError(code, "embedded BuildInfo projection differs")
+        digests.add(str(evidence["sha256"]))
+        go_executable_digests.add(str(evidence["go_executable_sha256"]))
+        settings_digests.add(str(evidence["settings_sha256"]))
+    if len(go_executable_digests) != 1 or len(settings_digests) != 1:
+        raise HostedRunnerError(code, "three-role BuildInfo contract differs")
+    observed_set_sha256 = _binary_build_info_sha256(binaries)
+    if observed_set_sha256 != context["binary_build_info_sha256"]:
+        raise HostedRunnerError(code, "three-role BuildInfo identity is unbound")
 
 
 def _bundle_role(relative: str) -> str:

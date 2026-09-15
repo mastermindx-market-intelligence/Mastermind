@@ -32,6 +32,43 @@ HEX_C = "c" * 40
 HEX_D = "d" * 40
 SHA_A = "a" * 64
 SHA_B = "b" * 64
+
+
+def _go_build_info_bytes(
+    name: str,
+    *,
+    go_version: str | None = None,
+    main_package: str | None = None,
+    settings: list[dict[str, str]] | None = None,
+    dependencies: list[dict[str, str]] | None = None,
+) -> bytes:
+    return json.dumps(
+        {
+            "GoVersion": go_version or f"go{runner.locks.GO_VERSION}",
+            "Path": main_package
+            or runner.locks.ZOEKT_EMBEDDED_MAIN_PACKAGES[name],
+            "Main": {
+                "Path": runner.locks.ZOEKT_MODULE_PATH,
+                "Version": "(devel)",
+            },
+            "Deps": dependencies
+            or [
+                {
+                    "Path": "github.com/bmatcuk/doublestar/v4",
+                    "Version": "v4.10.0",
+                    "Sum": "h1:fixture",
+                }
+            ],
+            "Settings": settings
+            or [
+                {"Key": key, "Value": value}
+                for key, value in runner.locks.GO_BUILD_INFO_EXPECTED_SETTINGS.items()
+            ],
+        },
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+
 ADMITTED_CONSUMER_SHA = "2478239c2d5b6a4e111c13247527e2046e6c3969"
 ADMITTED_CONSUMER_TREE = "4594a3a6b9e1286788f0ef7b84c609d4359ca4be"
 
@@ -1370,7 +1407,26 @@ def test_repeat_build_uses_only_supplied_go_and_fresh_explicit_caches(
         )
         return runner.subprocess.CompletedProcess(argv, 0, stdout=stdout, stderr="")
 
+    def fake_run_process(
+        argv: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        network_environment: dict[str, str],
+        timeout: float,
+        text: bool,
+        stdout: object = subprocess.PIPE,
+    ) -> runner.subprocess.CompletedProcess[bytes]:
+        del cwd, network_environment, timeout, stdout
+        assert text is False
+        calls.append((list(argv), dict(env)))
+        name = Path(argv[-1]).name
+        return runner.subprocess.CompletedProcess(
+            argv, 0, stdout=_go_build_info_bytes(name), stderr=b""
+        )
+
     monkeypatch.setattr(runner, "_run_phase_p_checked", fake_run_checked)
+    monkeypatch.setattr(runner, "_run_phase_p_process", fake_run_process)
     source = tmp_path / "source"
     source.mkdir()
     payload_bin = tmp_path / "payload/bin"
@@ -1404,6 +1460,412 @@ def test_repeat_build_uses_only_supplied_go_and_fresh_explicit_caches(
     assert result["binaries"]["zoekt-index"]["package"] == "./cmd/zoekt-index"
     assert result["binaries"]["zoekt-index"]["source_commit"] == runner.locks.ZOEKT_COMMIT
     assert (payload_bin / "zoekt-webserver").read_bytes().startswith(b"binary:")
+
+
+
+def test_repeat_build_observes_embedded_identity_for_every_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pinned_go = tmp_path / "pinned/go/bin/go"
+    pinned_go.parent.mkdir(parents=True)
+    pinned_go.write_bytes(b"pinned-go")
+    os.chmod(pinned_go, 0o755)
+    version_calls: list[str] = []
+
+    def fake_run_checked(
+        argv: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str] | None = None,
+        network_environment: dict[str, str] | None = None,
+        timeout: float = 60,
+    ) -> runner.subprocess.CompletedProcess[str]:
+        del cwd, env, network_environment, timeout
+        if "build" in argv:
+            target = Path(argv[argv.index("-o") + 1])
+            target.write_bytes(f"binary:{argv[-1]}".encode("ascii"))
+            os.chmod(target, 0o755)
+            stdout = ""
+        elif "list" in argv:
+            stdout = '{"Path":"github.com/sourcegraph/zoekt","Main":true}\n'
+        else:
+            stdout = ""
+        return runner.subprocess.CompletedProcess(argv, 0, stdout=stdout, stderr="")
+
+    def fake_run_process(
+        argv: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        network_environment: dict[str, str],
+        timeout: float,
+        text: bool,
+        stdout: object = subprocess.PIPE,
+    ) -> runner.subprocess.CompletedProcess[bytes]:
+        del cwd, env, network_environment, timeout, stdout
+        assert text is False
+        assert argv[1:4] == ["version", "-m", "-json"]
+        name = Path(argv[-1]).name
+        version_calls.append(name)
+        return runner.subprocess.CompletedProcess(
+            argv, 0, stdout=_go_build_info_bytes(name), stderr=b""
+        )
+
+    monkeypatch.setattr(runner, "_run_phase_p_checked", fake_run_checked)
+    monkeypatch.setattr(runner, "_run_phase_p_process", fake_run_process)
+    source = tmp_path / "source"
+    source.mkdir()
+    payload_bin = tmp_path / "payload/bin"
+    payload_bin.mkdir(parents=True)
+
+    result = runner._repeat_build_zoekt(  # noqa: SLF001 - exact hostile boundary
+        source,
+        go_binary=pinned_go,
+        scratch=tmp_path / "scratch",
+        payload_bin=payload_bin,
+        network_environment=runner._phase_p_client_environment(  # noqa: SLF001
+            "http://127.0.0.1:12345", tmp_path / "network-home"
+        ),
+    )
+
+    assert sorted(version_calls) == sorted(
+        [name for name in runner.locks.ZOEKT_BINARY_PACKAGES for _ in range(2)]
+    )
+    for name, row in result["binaries"].items():
+        assert row["observed_go_version"] == "go1.26.5"
+        assert row["observed_main_package"] == f"github.com/sourcegraph/zoekt/cmd/{name}"
+        assert row["observed_main_module"] == runner.locks.ZOEKT_MODULE_PATH
+        assert len(row["build_info_sha256"]) == 64
+
+
+
+def _parse_build_info_fixture(name: str, raw: bytes | None = None):
+    return runner._parse_go_build_info(  # noqa: SLF001 - hostile parser seam
+        raw if raw is not None else _go_build_info_bytes(name),
+        role=name,
+        binary_sha256="a" * 64,
+        binary_size=123,
+        go_executable_sha256="b" * 64,
+    )
+
+
+def test_build_info_parser_rejects_wrong_role_package_and_go_version() -> None:
+    with pytest.raises(runner.HostedRunnerError, match="main package"):
+        _parse_build_info_fixture(
+            "zoekt-index",
+            _go_build_info_bytes(
+                "zoekt-index",
+                main_package=runner.locks.ZOEKT_EMBEDDED_MAIN_PACKAGES[
+                    "zoekt-git-index"
+                ],
+            ),
+        )
+    with pytest.raises(runner.HostedRunnerError, match="Go version"):
+        _parse_build_info_fixture(
+            "zoekt-index",
+            _go_build_info_bytes("zoekt-index", go_version="go1.26.4"),
+        )
+
+
+def test_build_info_parser_rejects_malformed_duplicate_trailing_and_oversized() -> None:
+    valid = _go_build_info_bytes("zoekt-index")
+    duplicate = valid.replace(
+        b'{"GoVersion":',
+        b'{"GoVersion":"go1.26.5","GoVersion":',
+        1,
+    )
+    for raw in (
+        b"{",
+        duplicate,
+        valid + b"{}",
+        b"\xff",
+        b" " * (runner.locks.GO_BUILD_INFO_MAX_STDOUT_BYTES + 1),
+    ):
+        with pytest.raises(runner.HostedRunnerError, match="BUILD_INFO_INVALID"):
+            _parse_build_info_fixture("zoekt-index", raw)
+
+
+def test_build_info_parser_rejects_unexpected_setting_and_dependency_replacement() -> None:
+    settings = [
+        {"Key": key, "Value": value}
+        for key, value in runner.locks.GO_BUILD_INFO_EXPECTED_SETTINGS.items()
+    ]
+    with pytest.raises(runner.HostedRunnerError, match="unexpected build setting"):
+        _parse_build_info_fixture(
+            "zoekt-index",
+            _go_build_info_bytes(
+                "zoekt-index",
+                settings=settings + [{"Key": "vcs", "Value": "git"}],
+            ),
+        )
+    with pytest.raises(runner.HostedRunnerError, match="replacement"):
+        _parse_build_info_fixture(
+            "zoekt-index",
+            _go_build_info_bytes(
+                "zoekt-index",
+                dependencies=[
+                    {
+                        "Path": "example.invalid/dependency",
+                        "Version": "v1.0.0",
+                        "Replace": {
+                            "Path": "example.invalid/replacement",
+                            "Version": "v1.0.1",
+                        },
+                    }
+                ],
+            ),
+        )
+
+
+def test_build_info_parser_allows_only_valid_default_godebug() -> None:
+    settings = [
+        {"Key": key, "Value": value}
+        for key, value in runner.locks.GO_BUILD_INFO_EXPECTED_SETTINGS.items()
+    ]
+    valid = _parse_build_info_fixture(
+        "zoekt-index",
+        _go_build_info_bytes(
+            "zoekt-index",
+            settings=settings
+            + [{"Key": "DefaultGODEBUG", "Value": "asynctimerchan=1,http2client=0"}],
+        ),
+    )
+    assert len(valid.settings_sha256) == 64
+    with pytest.raises(runner.HostedRunnerError, match="DefaultGODEBUG"):
+        _parse_build_info_fixture(
+            "zoekt-index",
+            _go_build_info_bytes(
+                "zoekt-index",
+                settings=settings
+                + [{"Key": "DefaultGODEBUG", "Value": "http2client=0,http2client=1"}],
+            ),
+        )
+
+
+
+def test_build_info_observer_uses_exact_argv_and_rechecks_binary_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    go = (tmp_path / "go").resolve()
+    binary = (tmp_path / "zoekt-index").resolve()
+    go.write_bytes(b"pinned-go")
+    binary.write_bytes(b"built-binary")
+    go.chmod(0o755)
+    binary.chmod(0o755)
+    captured: dict[str, object] = {}
+
+    def fake_run_process(
+        argv: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        network_environment: dict[str, str],
+        timeout: float,
+        text: bool,
+        stdout: object = subprocess.PIPE,
+    ) -> runner.subprocess.CompletedProcess[bytes]:
+        del stdout
+        captured.update(
+            argv=list(argv),
+            cwd=cwd,
+            env=dict(env),
+            network_environment=dict(network_environment),
+            timeout=timeout,
+            text=text,
+        )
+        return runner.subprocess.CompletedProcess(
+            argv,
+            0,
+            stdout=_go_build_info_bytes("zoekt-index"),
+            stderr=b"",
+        )
+
+    monkeypatch.setattr(runner, "_run_phase_p_process", fake_run_process)
+    network_environment = runner._phase_p_client_environment(  # noqa: SLF001
+        "http://127.0.0.1:12345", tmp_path / "network-home"
+    )
+    environment = {
+        **network_environment,
+        "GOENV": "off",
+        "GOTOOLCHAIN": "local",
+    }
+    observed = runner._observe_go_build_info(  # noqa: SLF001
+        go_binary=go,
+        binary=binary,
+        role="zoekt-index",
+        cwd=tmp_path.resolve(),
+        env=environment,
+        network_environment=network_environment,
+    )
+    assert captured["argv"] == [
+        os.fspath(go),
+        "version",
+        "-m",
+        "-json",
+        os.fspath(binary),
+    ]
+    assert captured["cwd"] == tmp_path.resolve()
+    assert captured["timeout"] == runner.locks.GO_BUILD_INFO_TIMEOUT_SECONDS
+    assert captured["text"] is False
+    assert observed.binary_sha256 == hashlib.sha256(binary.read_bytes()).hexdigest()
+    assert observed.go_executable_sha256 == hashlib.sha256(go.read_bytes()).hexdigest()
+
+    def mutate_binary(*args: object, **kwargs: object):
+        del args, kwargs
+        binary.write_bytes(b"changed-after-observation")
+        binary.chmod(0o755)
+        return runner.subprocess.CompletedProcess(
+            [os.fspath(go)],
+            0,
+            stdout=_go_build_info_bytes("zoekt-index"),
+            stderr=b"",
+        )
+
+    monkeypatch.setattr(runner, "_run_phase_p_process", mutate_binary)
+    with pytest.raises(runner.HostedRunnerError, match="EXECUTABLE_DIGEST_MISMATCH"):
+        runner._observe_go_build_info(  # noqa: SLF001
+            go_binary=go,
+            binary=binary,
+            role="zoekt-index",
+            cwd=tmp_path.resolve(),
+            env=environment,
+            network_environment=network_environment,
+        )
+
+
+@pytest.mark.parametrize(
+    ("returncode", "stdout", "stderr", "match"),
+    [
+        (1, b"", b"failed", "pinned Go exited"),
+        (0, _go_build_info_bytes("zoekt-index"), b"warning", "emitted stderr"),
+        (
+            0,
+            b"x" * (runner.locks.GO_BUILD_INFO_MAX_STDOUT_BYTES + 1),
+            b"",
+            "stdout exceeded bound",
+        ),
+        (
+            0,
+            _go_build_info_bytes("zoekt-index"),
+            b"x" * (runner.locks.GO_BUILD_INFO_MAX_STDERR_BYTES + 1),
+            "stderr exceeded bound",
+        ),
+    ],
+)
+def test_build_info_observer_rejects_process_failures_and_output_overflow(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    returncode: int,
+    stdout: bytes,
+    stderr: bytes,
+    match: str,
+) -> None:
+    go = (tmp_path / "go").resolve()
+    binary = (tmp_path / "zoekt-index").resolve()
+    go.write_bytes(b"pinned-go")
+    binary.write_bytes(b"built-binary")
+    go.chmod(0o755)
+    binary.chmod(0o755)
+
+    def fake_run_process(*args: object, **kwargs: object):
+        del args, kwargs
+        return runner.subprocess.CompletedProcess(
+            [os.fspath(go)], returncode, stdout=stdout, stderr=stderr
+        )
+
+    monkeypatch.setattr(runner, "_run_phase_p_process", fake_run_process)
+    network_environment = runner._phase_p_client_environment(  # noqa: SLF001
+        "http://127.0.0.1:12345", tmp_path / "network-home"
+    )
+    with pytest.raises(runner.HostedRunnerError, match=match):
+        runner._observe_go_build_info(  # noqa: SLF001
+            go_binary=go,
+            binary=binary,
+            role="zoekt-index",
+            cwd=tmp_path.resolve(),
+            env={**network_environment, "GOENV": "off", "GOTOOLCHAIN": "local"},
+            network_environment=network_environment,
+        )
+
+
+def test_repeat_build_refuses_embedded_identity_disagreement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pinned_go = tmp_path / "pinned/go/bin/go"
+    pinned_go.parent.mkdir(parents=True)
+    pinned_go.write_bytes(b"pinned-go")
+    os.chmod(pinned_go, 0o755)
+
+    def fake_run_checked(
+        argv: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str] | None = None,
+        network_environment: dict[str, str] | None = None,
+        timeout: float = 60,
+    ) -> runner.subprocess.CompletedProcess[str]:
+        del cwd, env, network_environment, timeout
+        if "build" in argv:
+            target = Path(argv[argv.index("-o") + 1])
+            target.write_bytes(f"binary:{argv[-1]}".encode("ascii"))
+            os.chmod(target, 0o755)
+        stdout = (
+            '{"Path":"github.com/sourcegraph/zoekt","Main":true}\n'
+            if "list" in argv
+            else ""
+        )
+        return runner.subprocess.CompletedProcess(argv, 0, stdout=stdout, stderr="")
+
+    def fake_run_process(
+        argv: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        network_environment: dict[str, str],
+        timeout: float,
+        text: bool,
+        stdout: object = subprocess.PIPE,
+    ) -> runner.subprocess.CompletedProcess[bytes]:
+        del cwd, env, network_environment, timeout, stdout
+        assert text is False
+        target = Path(argv[-1])
+        dependencies = None
+        if target.parent.name == "build-2" and target.name == "zoekt-index":
+            dependencies = [
+                {
+                    "Path": "example.invalid/drift",
+                    "Version": "v1.0.0",
+                    "Sum": "h1:drift",
+                }
+            ]
+        return runner.subprocess.CompletedProcess(
+            argv,
+            0,
+            stdout=_go_build_info_bytes(
+                target.name, dependencies=dependencies
+            ),
+            stderr=b"",
+        )
+
+    monkeypatch.setattr(runner, "_run_phase_p_checked", fake_run_checked)
+    monkeypatch.setattr(runner, "_run_phase_p_process", fake_run_process)
+    source = tmp_path / "source"
+    source.mkdir()
+    payload_bin = tmp_path / "payload/bin"
+    payload_bin.mkdir(parents=True)
+
+    with pytest.raises(
+        runner.HostedRunnerError, match="NONDETERMINISTIC_BUILD_INFO"
+    ):
+        runner._repeat_build_zoekt(  # noqa: SLF001 - exact hostile boundary
+            source,
+            go_binary=pinned_go,
+            scratch=tmp_path / "scratch",
+            payload_bin=payload_bin,
+            network_environment=runner._phase_p_client_environment(  # noqa: SLF001
+                "http://127.0.0.1:12345", tmp_path / "network-home"
+            ),
+        )
 
 
 def test_zoekt_checkout_ignores_ambient_git_and_fetches_only_exact_commit(
@@ -3667,19 +4129,84 @@ def test_bundle_requires_selected_indexer_not_only_legacy_pair(tmp_path: Path) -
 
 def _bind_test_binary_provenance(root: Path) -> None:
     """Synthetic bytes exercise the real artifact contract, not a Go build."""
-    lock_path = Path(__file__).resolve().parents[2] / "research/code_intelligence_fabric/codeintel-experiment-toolchain-lock.v1.json"
+
+    lock_path = (
+        Path(__file__).resolve().parents[2]
+        / "research/code_intelligence_fabric/codeintel-experiment-toolchain-lock.v1.json"
+    )
     lock_bytes = lock_path.read_bytes()
     lock = runner.locks.load_toolchain_lock(lock_path)
     (root / "meta/toolchain-lock.json").write_bytes(lock_bytes)
-    binaries = {}
+    settings_sha256 = hashlib.sha256(
+        runner.locks.canonical_json_bytes(
+            [
+                [key, value]
+                for key, value in sorted(
+                    runner.locks.GO_BUILD_INFO_EXPECTED_SETTINGS.items()
+                )
+            ]
+        )
+    ).hexdigest()
+    dependencies_sha256 = hashlib.sha256(
+        runner.locks.canonical_json_bytes(
+            [
+                {
+                    "Path": "github.com/bmatcuk/doublestar/v4",
+                    "Version": "v4.10.0",
+                    "Sum": "h1:fixture",
+                }
+            ]
+        )
+    ).hexdigest()
+    binaries: dict[str, dict[str, object]] = {}
     for name in ("zoekt-git-index", "zoekt-index", "zoekt-webserver"):
         body = (root / "bin" / name).read_bytes()
-        binaries[name] = {
-            "sha256": hashlib.sha256(body).hexdigest(),
-            "size": len(body), "mode": "0755", "repeat_builds": 2,
-            "byte_identical": True, "package": "./cmd/" + name,
+        digest = hashlib.sha256(body).hexdigest()
+        row: dict[str, object] = {
+            "build_info_schema_version": runner.locks.GO_BUILD_INFO_SCHEMA_VERSION,
+            "sha256": digest,
+            "size": len(body),
+            "mode": "0755",
+            "repeat_builds": 2,
+            "byte_identical": True,
+            "package": runner.locks.ZOEKT_BINARY_PACKAGES[name],
             "source_commit": runner.locks.ZOEKT_COMMIT,
+            "source_tree": runner.locks.ZOEKT_TREE,
+            "go_executable_sha256": "f" * 64,
+            "observed_main_package": runner.locks.ZOEKT_EMBEDDED_MAIN_PACKAGES[name],
+            "observed_main_module": runner.locks.ZOEKT_MODULE_PATH,
+            "main_module_version": "(devel)",
+            "observed_go_version": f"go{runner.locks.GO_VERSION}",
+            "dependencies_sha256": dependencies_sha256,
+            "settings_sha256": settings_sha256,
         }
+        observation_payload = {
+            "schema_version": row["build_info_schema_version"],
+            "role": name,
+            "binary_sha256": row["sha256"],
+            "binary_size": row["size"],
+            "go_executable_sha256": row["go_executable_sha256"],
+            "go_version": row["observed_go_version"],
+            "main_package": row["observed_main_package"],
+            "main_module": row["observed_main_module"],
+            "main_module_version": row["main_module_version"],
+            "source_commit": row["source_commit"],
+            "source_tree": row["source_tree"],
+            "dependencies_sha256": row["dependencies_sha256"],
+            "settings_sha256": row["settings_sha256"],
+        }
+        row["build_info_sha256"] = hashlib.sha256(
+            runner.locks.canonical_json_bytes(observation_payload)
+        ).hexdigest()
+        binaries[name] = row
+    binary_build_info_sha256 = hashlib.sha256(
+        runner.locks.canonical_json_bytes(
+            {
+                name: row["build_info_sha256"]
+                for name, row in sorted(binaries.items())
+            }
+        )
+    ).hexdigest()
     sbom = {
         "schema_version": "mastermind.codeintel_go_module_inventory.v1",
         "main_module": runner.locks.ZOEKT_MODULE_PATH,
@@ -3687,6 +4214,7 @@ def _bind_test_binary_provenance(root: Path) -> None:
         "go_mod_blob_sha1": runner.locks.ZOEKT_GO_MOD_BLOB,
         "go_sum_blob_sha1": runner.locks.ZOEKT_GO_SUM_BLOB,
         "modules": [{"path": runner.locks.ZOEKT_MODULE_PATH, "main": True}],
+        "binary_build_info_sha256": binary_build_info_sha256,
         "binaries": binaries,
     }
     sbom_bytes = runner.locks.canonical_json_bytes(sbom) + b"\n"
@@ -3697,19 +4225,31 @@ def _bind_test_binary_provenance(root: Path) -> None:
         "lock_sha256": lock.sha256,
         "build_recipe_sha256": lock.build_recipe_sha256,
         "module_inventory_sha256": hashlib.sha256(sbom_bytes).hexdigest(),
+        "binary_build_info_sha256": binary_build_info_sha256,
         "binaries": binaries,
     }
-    (root / "meta/provenance.json").write_bytes(runner.locks.canonical_json_bytes(provenance) + b"\n")
+    (root / "meta/provenance.json").write_bytes(
+        runner.locks.canonical_json_bytes(provenance) + b"\n"
+    )
 
 
 def _payload_context(root: Path) -> dict[str, str]:
+    provenance = json.loads((root / "meta/provenance.json").read_text())
     return {
         "request_digest": _request().digest,
-        "lock_sha256": hashlib.sha256((root / "meta/toolchain-lock.json").read_bytes()).hexdigest(),
+        "lock_sha256": hashlib.sha256(
+            (root / "meta/toolchain-lock.json").read_bytes()
+        ).hexdigest(),
         "build_recipe_sha256": runner.locks.BUILD_RECIPE_SHA256,
-        "module_inventory_sha256": hashlib.sha256((root / "meta/sbom.json").read_bytes()).hexdigest(),
-        "provenance_sha256": hashlib.sha256((root / "meta/provenance.json").read_bytes()).hexdigest(),
+        "module_inventory_sha256": hashlib.sha256(
+            (root / "meta/sbom.json").read_bytes()
+        ).hexdigest(),
+        "binary_build_info_sha256": provenance["binary_build_info_sha256"],
+        "provenance_sha256": hashlib.sha256(
+            (root / "meta/provenance.json").read_bytes()
+        ).hexdigest(),
     }
+
 
 
 @pytest.mark.parametrize("change", ["copy", "swap", "package", "source", "missing_row", "missing_sbom", "repeat", "recipe", "size", "duplicate_json", "nonfinite"])
@@ -3761,6 +4301,97 @@ def test_selected_indexer_provenance_is_verified_before_bundle_publication(tmp_p
     with pytest.raises(runner.HostedRunnerError, match="BUNDLE_PROVENANCE_MISMATCH"):
         runner.create_content_addressed_bundle(root, tmp_path / "out", context=_payload_context(root))
     assert not (tmp_path / "out").exists()
+
+
+
+def test_bundle_rejects_fully_resigned_wrong_embedded_role_identity(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "payload"
+    _payload_tree(root)
+    provenance_path = root / "meta/provenance.json"
+    sbom_path = root / "meta/sbom.json"
+    provenance = json.loads(provenance_path.read_text())
+    sbom = json.loads(sbom_path.read_text())
+    row = provenance["binaries"]["zoekt-index"]
+    row["observed_main_package"] = runner.locks.ZOEKT_EMBEDDED_MAIN_PACKAGES[
+        "zoekt-git-index"
+    ]
+    observation_payload = {
+        "schema_version": row["build_info_schema_version"],
+        "role": "zoekt-index",
+        "binary_sha256": row["sha256"],
+        "binary_size": row["size"],
+        "go_executable_sha256": row["go_executable_sha256"],
+        "go_version": row["observed_go_version"],
+        "main_package": row["observed_main_package"],
+        "main_module": row["observed_main_module"],
+        "main_module_version": row["main_module_version"],
+        "source_commit": row["source_commit"],
+        "source_tree": row["source_tree"],
+        "dependencies_sha256": row["dependencies_sha256"],
+        "settings_sha256": row["settings_sha256"],
+    }
+    row["build_info_sha256"] = hashlib.sha256(
+        runner.locks.canonical_json_bytes(observation_payload)
+    ).hexdigest()
+    sbom["binaries"] = provenance["binaries"]
+    aggregate = hashlib.sha256(
+        runner.locks.canonical_json_bytes(
+            {
+                name: evidence["build_info_sha256"]
+                for name, evidence in sorted(provenance["binaries"].items())
+            }
+        )
+    ).hexdigest()
+    sbom["binary_build_info_sha256"] = aggregate
+    sbom_bytes = runner.locks.canonical_json_bytes(sbom) + b"\n"
+    sbom_path.write_bytes(sbom_bytes)
+    provenance["binary_build_info_sha256"] = aggregate
+    provenance["module_inventory_sha256"] = hashlib.sha256(sbom_bytes).hexdigest()
+    provenance_path.write_bytes(
+        runner.locks.canonical_json_bytes(provenance) + b"\n"
+    )
+
+    with pytest.raises(runner.HostedRunnerError, match="BUNDLE_PROVENANCE_MISMATCH"):
+        runner.create_content_addressed_bundle(
+            root, tmp_path / "out", context=_payload_context(root)
+        )
+    assert not (tmp_path / "out").exists()
+
+
+@pytest.mark.parametrize("location", ["manifest", "provenance", "sbom"])
+def test_three_role_build_info_seal_rejects_metadata_plane_drift(
+    tmp_path: Path, location: str
+) -> None:
+    root = tmp_path / "payload"
+    _payload_tree(root)
+    context = _payload_context(root)
+    if location == "manifest":
+        context["binary_build_info_sha256"] = "0" * 64
+    elif location == "provenance":
+        provenance_path = root / "meta/provenance.json"
+        provenance = json.loads(provenance_path.read_text())
+        provenance["binary_build_info_sha256"] = "0" * 64
+        provenance_path.write_bytes(
+            runner.locks.canonical_json_bytes(provenance) + b"\n"
+        )
+        context = _payload_context(root)
+    else:
+        sbom_path = root / "meta/sbom.json"
+        sbom = json.loads(sbom_path.read_text())
+        sbom["binary_build_info_sha256"] = "0" * 64
+        sbom_bytes = runner.locks.canonical_json_bytes(sbom) + b"\n"
+        sbom_path.write_bytes(sbom_bytes)
+        provenance_path = root / "meta/provenance.json"
+        provenance = json.loads(provenance_path.read_text())
+        provenance["module_inventory_sha256"] = hashlib.sha256(sbom_bytes).hexdigest()
+        provenance_path.write_bytes(
+            runner.locks.canonical_json_bytes(provenance) + b"\n"
+        )
+        context = _payload_context(root)
+    with pytest.raises(runner.HostedRunnerError, match="BUNDLE_PROVENANCE_MISMATCH"):
+        runner.create_content_addressed_bundle(root, tmp_path / "out", context=context)
 
 
 def test_extract_rechecks_manifest_before_creating_destination(tmp_path: Path) -> None:
