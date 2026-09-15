@@ -149,6 +149,8 @@ class GrokBotRoutineWakeDispatcher:
             )
 
         opaque_ids = tuple(wake.obligation_ids) + tuple(wake.attempt_command_ids)
+        submission_unknown = False
+        observation = None
         try:
             observation = await self.client.deliver_wake(
                 native_handle=native_handle,
@@ -163,14 +165,14 @@ class GrokBotRoutineWakeDispatcher:
                 exc.reason_code,
                 nudge_id=wake.nudge_id,
             )
-        except asyncio.CancelledError as exc:
+        except asyncio.CancelledError:
+            submission_unknown = True
+        except Exception:
+            submission_unknown = True
+        if submission_unknown:
             raise WakeEffectUnknownError(
                 "Grok routine submission effect is unknown after the client call began"
-            ) from exc
-        except Exception as exc:
-            raise WakeEffectUnknownError(
-                "Grok routine submission effect is unknown after the client call began"
-            ) from exc
+            )
 
         return self._receipt_from_observation(
             wake,
@@ -195,20 +197,18 @@ class GrokBotRoutineWakeDispatcher:
             raise WakeEffectUnknownError(
                 "Grok routine reconciliation has no observation source"
             )
+        observation_unavailable = False
+        observation = None
         try:
             observation = await source.observe_wake(
                 native_handle=native_handle,
                 nudge_id=wake.nudge_id,
             )
-        except asyncio.CancelledError as exc:
-            raise WakeEffectUnknownError(
-                "Grok routine submission effect remains unknown"
-            ) from exc
-        except Exception as exc:
-            raise WakeEffectUnknownError(
-                "Grok routine submission effect remains unknown"
-            ) from exc
-        if observation is None:
+        except asyncio.CancelledError:
+            observation_unavailable = True
+        except Exception:
+            observation_unavailable = True
+        if observation_unavailable or observation is None:
             raise WakeEffectUnknownError(
                 "Grok routine submission effect remains unknown"
             )

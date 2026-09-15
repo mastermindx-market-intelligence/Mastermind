@@ -339,3 +339,63 @@ def test_observation_rejects_non_string_opaque_identity_fields():
         GrokRoutineWakeObservation(
             "routine", "NUDGE-" + "b" * 32, True, request_id=7
         )
+
+
+def test_post_call_exception_does_not_expose_injected_client_details():
+    secret = "secret-token-value.not-for-logs"
+    client = _FakeClient(_observation(), fail=RuntimeError(secret))
+    dispatcher = GrokBotRoutineWakeDispatcher(client)
+
+    with pytest.raises(WakeEffectUnknownError, match="effect is unknown") as captured:
+        _nudge(dispatcher, _wake())
+
+    assert secret not in repr(captured.value)
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
+    assert len(client.calls) == 1
+
+
+def test_post_call_cancellation_does_not_expose_cancellation_details():
+    secret = "secret-token-value.not-for-logs"
+    client = _FakeClient(_observation(), fail=asyncio.CancelledError(secret))
+    dispatcher = GrokBotRoutineWakeDispatcher(client)
+
+    with pytest.raises(WakeEffectUnknownError, match="effect is unknown") as captured:
+        _nudge(dispatcher, _wake())
+
+    assert secret not in repr(captured.value)
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
+    assert len(client.calls) == 1
+
+
+def test_reconcile_error_does_not_expose_observation_source_details():
+    secret = "secret-provider-history.not-for-logs"
+    client = _FakeClient(_observation())
+    source = _FakeObservationSource(None, fail=RuntimeError(secret))
+    dispatcher = GrokBotRoutineWakeDispatcher(client, observation_source=source)
+
+    with pytest.raises(WakeEffectUnknownError, match="remains unknown") as captured:
+        _reconcile(dispatcher, _wake())
+
+    assert secret not in repr(captured.value)
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
+    assert client.calls == []
+    assert len(source.calls) == 1
+
+
+def test_reconcile_cancellation_does_not_expose_cancellation_details():
+    secret = "secret-provider-history.not-for-logs"
+    client = _FakeClient(_observation())
+    source = _FakeObservationSource(None, fail=asyncio.CancelledError(secret))
+    dispatcher = GrokBotRoutineWakeDispatcher(client, observation_source=source)
+
+    with pytest.raises(WakeEffectUnknownError, match="remains unknown") as captured:
+        _reconcile(dispatcher, _wake())
+
+    assert secret not in repr(captured.value)
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
+    assert client.calls == []
+    assert len(source.calls) == 1

@@ -462,8 +462,8 @@ def test_poster_exception_is_redacted_after_one_call_for_dispatcher_effect_unkno
         asyncio.run(dispatcher.nudge(_wake()))
     assert TOKEN not in repr(unknown.value)
     assert URL not in repr(unknown.value)
-    assert unknown.value.__cause__ is not None
-    assert unknown.value.__cause__.__context__ is None
+    assert unknown.value.__cause__ is None
+    assert unknown.value.__context__ is None
     assert len(poster.calls) == 2
 
 
