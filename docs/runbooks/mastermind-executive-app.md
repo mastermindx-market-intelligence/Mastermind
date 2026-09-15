@@ -285,15 +285,25 @@ successful ChatGPT call.
 ### Installed production binding
 
 The installed composition gives the network MCP process its own non-login
-service identity. `ceo_ingress_app_peer_uid`, `ceo_ingress_app_armed`, and
-`ceo_ingress_app_macro_root` must be supplied together in the existing protected
-control configuration. Its peer must differ from control, Operator, worker,
-and C1 identities. C1 retains its existing peer, grounding provider and arming
-setting.
+service identity. `ceo_ingress_app_peer_uid`, `ceo_ingress_app_armed`,
+`ceo_ingress_app_macro_root`, and `ceo_ingress_app_read_python` must be supplied
+together in the existing protected control configuration. The read Python must
+be the content-addressed Executive network runtime path under
+`/Library/Application Support/MastermindExecutive/network-runtimes/<64 hex>/bin/python`.
+Its peer must differ from control, Operator, worker, and C1 identities. C1 retains
+its existing peer, grounding provider and arming setting.
+
+For an already-installed three-field App binding, reinstall with the existing
+root-owned control config as `--control-config` and pass exactly one
+`--ceo-ingress-app-read-python <content-addressed-runtime>/bin/python`. The
+installer may only fill the missing fourth field. It refuses to originate an App
+binding, retarget an existing full binding, or accept a noncanonical/non-executable
+read Python path. Provision and verify that immutable runtime before the control
+reinstall; never add site-packages to the sealed control interpreter.
 
 The full-schema `control.json.template` includes an unarmed App binding and an
 explicit Macro snapshot placeholder. Supply the actual sealed snapshot when
-provisioning the App, or omit all three App fields when installing control
+provisioning the App, or omit all four App fields when installing control
 without it. The base installer does not add these optional fields by default.
 
 The App peer can use existing v2 submit/status frames and two closed internal
@@ -320,7 +330,33 @@ release directory, dedicated process uid, loopback port, real A1 policies and
 separate directories for the existing read/submit durable authentication audit
 sinks. It refuses user-writable installation configuration. Run it under a
 separately provisioned network Python environment with `-I -B`; the sealed
-Executive control Python remains SDK-free.
+Executive control Python remains SDK-free. The reviewed dependency closure for
+that edge is `requirements/executive-mcp-macos-arm64-py312.lock`. It includes
+PyYAML 6.0.3 because installed `executive_state`/`executive_inbox` invoke the
+canonical boot-packet CLI in that dependency-complete runtime. The control
+process itself stays `-I -S -B`: it does not import PyYAML or the MCP SDK.
+
+The installed reader executes `scripts/ceo_boot_packet.py` only from the
+root-owned immutable installed release. The separately configured Mastermind
+administrative checkout and Macro snapshot are data/grounding roots, never code
+roots. Immediately before and after each packet read, both data roots must have a
+single valid Git HEAD and a clean tracked/untracked status; the Mastermind HEAD
+must also equal the installed `proof_base_sha`. The packet's own Mastermind and
+Macro SHAs must equal the pre-read observations, and both observations must stay
+unchanged through the post-read check. Dirty bytes, untracked bytes, identity
+movement, wrong schema/root, timeout, invalid UTF-8, nonzero exit, output overflow,
+or cleanup uncertainty all refuse the read rather than falling back.
+
+The helper receives a minimal secret-free environment: fixed system `PATH`, no
+global/system Git config, one command-scoped `safe.directory` for the exact
+root-owned Macro snapshot, and `MACRO_MASTERMIND_REPO` pinned to the immutable
+installed Mastermind release so Macro's P0 join never reads executable/product
+state from the owner-writable administrative checkout. This keeps the Macro
+snapshot root-owned without wildcard Git trust. The installed packet gets a
+28-second total budget beneath the MCP read executor's 30-second ceiling; the
+inner Agent OS brief receives a further two-second-shorter budget so JSON
+serialization, pipe drain and process-group settlement remain inside the total
+read deadline.
 
 Deployment evidence belongs in the private operation receipt. Source tests do
 not establish an installed generation, accepted identity provider, live tunnel,

@@ -26,6 +26,7 @@ ALLOW_FROZEN_ACCEPTED_ANCESTOR="0"
 ARM_PRIVILEGED_BROKER="0"
 PRIVILEGED_BROKER_LIVE="0"
 CONTROL_CONFIG_SOURCE=""
+CEO_INGRESS_APP_READ_PYTHON=""
 OPERATOR_USER=""
 PYTHON_BINARY=""
 PYTHON_RUNTIME_ROOT=""
@@ -55,6 +56,7 @@ while [ "$#" -gt 0 ]; do
     --arm-privileged-broker) ARM_PRIVILEGED_BROKER="1"; shift ;;
     --operator-user) OPERATOR_USER="${2:-}"; shift 2 ;;
     --control-config) CONTROL_CONFIG_SOURCE="${2:-}"; shift 2 ;;
+    --ceo-ingress-app-read-python) CEO_INGRESS_APP_READ_PYTHON="${2:-}"; shift 2 ;;
     --python-binary) PYTHON_BINARY="${2:-}"; shift 2 ;;
     --python-runtime-root) PYTHON_RUNTIME_ROOT="${2:-}"; shift 2 ;;
     --python-team-identifier) PYTHON_TEAM_ID="${2:-}"; shift 2 ;;
@@ -103,6 +105,16 @@ for install_path in "$SOURCE_REPO" "$PYTHON_BINARY" "$PYTHON_RUNTIME_ROOT" "$COD
 done
 if [ -n "$CONTROL_CONFIG_SOURCE" ]; then
   case "$CONTROL_CONFIG_SOURCE" in /*) ;; *) /bin/echo "control config path must be absolute" >&2; exit 65 ;; esac
+fi
+if [ -n "$CEO_INGRESS_APP_READ_PYTHON" ]; then
+  [[ "$CEO_INGRESS_APP_READ_PYTHON" =~ ^/Library/Application\ Support/MastermindExecutive/network-runtimes/[0-9a-f]{64}/bin/python$ ]] || {
+    /bin/echo "App read Python path is invalid" >&2
+    exit 65
+  }
+  [ -x "$CEO_INGRESS_APP_READ_PYTHON" ] || {
+    /bin/echo "App read Python path is not executable" >&2
+    exit 65
+  }
 fi
 [ -x "$PYTHON_BINARY" ] && [ ! -L "$PYTHON_BINARY" ] || {
   /bin/echo "Python binary must be a direct executable file" >&2
@@ -858,7 +870,7 @@ fi
     "$CONTROL_RUNTIME_ROOT" "$ADMIN_CHECKOUT" "$WORKSPACE_ROOT" "$EXPECTED_SHA" \
     "$BACKUP_ROOT" "$RECEIPTS_ROOT" "$PROVIDER_HOME" "$RUN_ROOT" \
     "$CANARY_RECEIPT" "$CONTROL_ENV_ATTESTATION" "$CONTROL_UID" "$WORKER_UID" "$WORKER_GID" \
-    "$OPERATOR_UID" "$INSTALLED_HASH" "$CODEX_VERSION" <<'PY'
+    "$OPERATOR_UID" "$INSTALLED_HASH" "$CODEX_VERSION" "$CEO_INGRESS_APP_READ_PYTHON" <<'PY'
 import json, os, pathlib, re, sys
 release_root = sys.argv.pop(1)
 sys.path.insert(0, release_root)
@@ -887,6 +899,7 @@ from scripts.executive_os_phase1c import (
     operator_uid,
     operator_harness_binary_digest,
     operator_harness_version,
+    app_read_python,
 ) = sys.argv[1:]
 
 ceo_ingress_expected = {
@@ -915,6 +928,21 @@ if ceo_ingress_schema_keys and ceo_ingress_schema_keys != set(ceo_ingress_expect
 dialogue_bridge_schema_keys = set(dialogue_bridge_expected) & schema_keys
 if dialogue_bridge_schema_keys and dialogue_bridge_schema_keys != set(dialogue_bridge_expected):
     raise SystemExit("partial Executive Dialogue Bridge control-config schema")
+
+app_legacy_keys = {
+    "ceo_ingress_app_peer_uid",
+    "ceo_ingress_app_armed",
+    "ceo_ingress_app_macro_root",
+}
+app_read_key = "ceo_ingress_app_read_python"
+app_full_keys = app_legacy_keys | {app_read_key}
+app_schema_keys = app_full_keys & schema_keys
+if app_schema_keys and app_schema_keys != app_full_keys:
+    raise SystemExit("partial Executive App control-config schema")
+app_read_re = re.compile(
+    r"^/Library/Application Support/MastermindExecutive/"
+    r"network-runtimes/[0-9a-f]{64}/bin/python$"
+)
 
 expected = {
     "schema_version": CONTROL_CONFIG_SCHEMA_VERSION,
@@ -969,7 +997,30 @@ if source:
     value = json.loads(source_path.read_text(encoding="utf-8"))
     if not isinstance(value, dict):
         raise SystemExit("control config source must contain an object")
+    app_present = app_full_keys & set(value)
+    if app_present:
+        if (app_legacy_keys & set(value)) != app_legacy_keys:
+            raise SystemExit("partial Executive App source configuration")
+        if app_read_key in value:
+            existing_app_read_python = value[app_read_key]
+            if (
+                not isinstance(existing_app_read_python, str)
+                or app_read_re.fullmatch(existing_app_read_python) is None
+            ):
+                raise SystemExit("App read Python path is invalid")
+            if app_read_python and existing_app_read_python != app_read_python:
+                raise SystemExit("App read Python differs from the existing binding")
+        else:
+            if not app_read_python:
+                raise SystemExit("legacy Executive App binding requires App read Python migration")
+            if app_read_re.fullmatch(app_read_python) is None:
+                raise SystemExit("App read Python path is invalid")
+            value[app_read_key] = app_read_python
+    elif app_read_python:
+        raise SystemExit("App read Python requires an existing App binding")
 else:
+    if app_read_python:
+        raise SystemExit("App read Python requires an existing App binding")
     value = {**expected, **defaults}
 
 keys = set(value)

@@ -108,6 +108,10 @@ _CANONICAL_DIALOGUE_OBSERVATION_SOCKET = Path(
     "/var/run/mastermind-dialogue-observation/dialogue-observation.sock"
 )
 _BACKUP_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.sqlite3$")
+_APP_READ_PYTHON_RE = re.compile(
+    r"^/Library/Application Support/MastermindExecutive/"
+    r"network-runtimes/[0-9a-f]{64}/bin/python$"
+)
 _CONFIG_REQUIRED = frozenset(
     {
         "schema_version",
@@ -160,6 +164,7 @@ _CONFIG_OPTIONAL = frozenset(
         "ceo_ingress_app_peer_uid",
         "ceo_ingress_app_armed",
         "ceo_ingress_app_macro_root",
+        "ceo_ingress_app_read_python",
         "terminal_return_armed",
         "terminal_return_socket_path",
         "dialogue_observation_socket_path",
@@ -178,6 +183,7 @@ _CEO_INGRESS_CONFIG_KEYS = frozenset(
 )
 _CEO_INGRESS_APP_CONFIG_KEYS = frozenset({
     "ceo_ingress_app_peer_uid", "ceo_ingress_app_armed", "ceo_ingress_app_macro_root",
+    "ceo_ingress_app_read_python",
 })
 _TERMINAL_RETURN_CONFIG_KEYS = frozenset(
     {
@@ -394,6 +400,16 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
         config["ceo_ingress_app_macro_root"] = _path(
             config["ceo_ingress_app_macro_root"], "ceo_ingress_app_macro_root"
         )
+        config["ceo_ingress_app_read_python"] = _path(
+            config["ceo_ingress_app_read_python"], "ceo_ingress_app_read_python"
+        )
+        if (
+            _APP_READ_PYTHON_RE.fullmatch(
+                os.fspath(config["ceo_ingress_app_read_python"])
+            )
+            is None
+        ):
+            raise ServiceError("App read Python must be the dedicated Executive network runtime")
     if observation_present:
         config["dialogue_observation_peer_uid"] = _integer(
             config["dialogue_observation_peer_uid"],
@@ -1069,6 +1085,9 @@ def _service_from_config(
             repo_root=Path(raw["proof_source_repository"]),
             macro_root=Path(raw["ceo_ingress_app_macro_root"]),
             runtime_root=Path(raw["runtime_root"]),
+            packet_python=Path(raw["ceo_ingress_app_read_python"]),
+            code_root=Path(__file__).resolve().parents[1],
+            expected_source_sha=str(raw["proof_base_sha"]),
         )
         ceo_ingress_kwargs["ceo_ingress_app_binding"] = CeoIngressAppBinding(
             peer_uid=int(raw["ceo_ingress_app_peer_uid"]),

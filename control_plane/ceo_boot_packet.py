@@ -48,8 +48,11 @@ from __future__ import annotations
 
 import json
 import os
+import selectors
+import signal
 import subprocess
 import sys
+import time
 from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
@@ -81,6 +84,171 @@ DEFAULT_TIMEOUT = 60
 # explicitly opt into that runner contract.
 DEFAULT_MAX_OUTPUT_BYTES = 4 * 1024 * 1024
 Runner = Callable[..., Mapping[str, Any]]
+
+
+def _process_group_presence(pgid: int) -> bool | None:
+    """True/False for observed group presence; None means presence is uncertain."""
+    try:
+        os.killpg(pgid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return None
+
+
+def _wait_process_group_absent(pgid: int, *, timeout: float) -> bool:
+    deadline = time.monotonic() + max(0.0, timeout)
+    while True:
+        if _process_group_presence(pgid) is False:
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.01)
+
+
+def _positively_settled(proc: subprocess.Popen[bytes], *, timeout: float) -> bool:
+    deadline = time.monotonic() + max(0.0, timeout)
+    while True:
+        leader_done = proc.poll() is not None
+        group_gone = _process_group_presence(proc.pid) is False
+        if leader_done and group_gone:
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.005)
+
+
+def _terminate_owned_process_group(proc: subprocess.Popen[bytes]) -> None:
+    """Settle one owned session without suppressing an uncertain signal failure."""
+    proc.poll()  # Reap/settle a fast-exited leader before the group probe.
+    presence = _process_group_presence(proc.pid)
+    if presence is False and proc.returncode is not None:
+        return
+
+    signal_error: OSError | None = None
+    if presence is not False:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError as exc:
+            signal_error = exc
+            # Darwin can race a just-exited/new-session leader and return EPERM.
+            # Give that exact child a tiny bounded settlement window; only a
+            # positively reaped leader plus absent group makes the error harmless.
+            if _positively_settled(proc, timeout=0.05):
+                return
+
+    if signal_error is not None or (presence is False and proc.returncode is None):
+        # If the group signal raced session establishment, kill the exact Popen
+        # leader we own.  This cannot target a recycled pid while the Popen is live.
+        if proc.poll() is None:
+            try:
+                proc.kill()
+            except OSError as exc:
+                if not _positively_settled(proc, timeout=0.05):
+                    raise RuntimeError("owned process cleanup is uncertain") from exc
+        try:
+            proc.wait(timeout=0.5)
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError("owned process leader did not settle") from exc
+        if _process_group_presence(proc.pid) is False:
+            return
+        # A descendant can keep the owned pgid alive after its leader settles.
+        # Retry the group kill now that the setsid/fast-exit race is over.
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError as exc:
+            if _positively_settled(proc, timeout=0.05):
+                return
+            raise RuntimeError("owned process-group cleanup is uncertain") from exc
+
+    try:
+        proc.wait(timeout=0.5)
+    except subprocess.TimeoutExpired:
+        try:
+            proc.kill()
+        except OSError as exc:
+            if proc.poll() is None:
+                raise RuntimeError("owned process cleanup is uncertain") from exc
+        try:
+            proc.wait(timeout=0.5)
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError("owned process leader did not settle") from exc
+
+    if not _wait_process_group_absent(proc.pid, timeout=0.5):
+        raise RuntimeError("owned process group did not settle")
+
+
+def bounded_subprocess_runner(
+    argv: Sequence[str | os.PathLike[str]], *, cwd: Path, timeout: float, max_bytes: int,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Run one read-only helper with a hard combined output and lifecycle ceiling."""
+    proc = subprocess.Popen(
+        [os.fspath(item) for item in argv], cwd=os.fspath(cwd),
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        start_new_session=True, env=dict(env) if env is not None else None,
+    )
+    assert proc.stdout is not None and proc.stderr is not None
+    selector = selectors.DefaultSelector()
+    selector.register(proc.stdout, selectors.EVENT_READ, "stdout")
+    selector.register(proc.stderr, selectors.EVENT_READ, "stderr")
+    buffers = {"stdout": bytearray(), "stderr": bytearray()}
+    total = 0
+    timed_out = False
+    limit_exceeded = False
+    deadline = time.monotonic() + max(0.0, float(timeout))
+    try:
+        while selector.get_map():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                timed_out = True
+                break
+            for key, _mask in selector.select(min(0.1, remaining)):
+                chunk = os.read(key.fileobj.fileno(), min(65536, max_bytes + 1))
+                if not chunk:
+                    selector.unregister(key.fileobj)
+                    continue
+                buffers[key.data].extend(chunk)
+                total += len(chunk)
+                if total > max_bytes:
+                    limit_exceeded = True
+                    break
+            if limit_exceeded:
+                break
+
+        if not (timed_out or limit_exceeded) and proc.poll() is None:
+            remaining = max(0.0, deadline - time.monotonic())
+            try:
+                proc.wait(timeout=remaining)
+            except subprocess.TimeoutExpired:
+                timed_out = True
+    finally:
+        selector.close()
+        for pipe in (proc.stdout, proc.stderr):
+            if pipe is not None and not pipe.closed:
+                pipe.close()
+
+    # Always settle the owned process group.  This handles both timeout/overflow
+    # and a clean leader that forked a quiet descendant before exiting.
+    _terminate_owned_process_group(proc)
+
+    invalid_utf8 = False
+    decoded: dict[str, str] = {}
+    for name, raw in buffers.items():
+        if len(raw) > max_bytes:
+            del raw[max_bytes:]
+        try:
+            decoded[name] = raw.decode("utf-8", errors="strict")
+        except UnicodeDecodeError:
+            decoded[name] = ""
+            invalid_utf8 = True
+    return {
+        "code": proc.returncode, "stdout": decoded["stdout"],
+        "stderr": decoded["stderr"], "timed_out": timed_out,
+        "limit_exceeded": limit_exceeded, "invalid_utf8": invalid_utf8,
+    }
+
 
 #: Budget for the two ``git rev-parse`` probes.  A hung git is a degraded packet, not
 #: a hung CEO.
