@@ -1,18 +1,18 @@
 """Bounded Web-Sol continuation projection over existing Agent OS reads.
 
-This module owns no memory, lifecycle, transcript, queue, or provider session state.
-It reduces the already-authoritative ``collect_agentos`` result into a small,
-deterministic packet suitable for a fresh ChatGPT Web conversation.  Agent OS
-remains the durable organizational owner; Executive OS remains the runtime/effect
-owner.  The projection deliberately excludes record excerpts and raw tool output.
+This owns no memory, lifecycle, transcript, queue, or provider-session state. It
+reduces the already-authoritative ``collect_agentos`` result into a small,
+deterministic packet for a fresh ChatGPT Web conversation. Agent OS remains the
+durable organizational owner; Executive OS remains the runtime/effect owner.
+Record excerpts and raw tool output are deliberately excluded.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections.abc import Mapping
 from typing import Any
-
 
 SCHEMA = "mastermind.web_sol_continuation/v1"
 MAX_PACKET_BYTES = 8 * 1024
@@ -26,17 +26,13 @@ _WS_RE = re.compile(r"^WS:[A-Z0-9][A-Z0-9-]*$")
 
 
 class WebSolContinuationError(ValueError):
-    """Canonical Agent OS material cannot produce a safe bounded continuation."""
+    """Canonical Agent OS material cannot produce a safe continuation."""
 
 
 def canonical_bytes(value: Any) -> bytes:
     try:
         return json.dumps(
-            value,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-            allow_nan=False,
+            value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
         ).encode("utf-8")
     except (TypeError, ValueError, UnicodeEncodeError) as exc:
         raise WebSolContinuationError("continuation is not canonical JSON data") from exc
@@ -53,9 +49,7 @@ def _token(value: Any, *, name: str, maximum: int = 256) -> str:
 
 
 def _nullable_token(value: Any, *, name: str, maximum: int = 256) -> str | None:
-    if value is None:
-        return None
-    return _token(value, name=name, maximum=maximum)
+    return None if value is None else _token(value, name=name, maximum=maximum)
 
 
 def _bounded_text(value: Any, *, name: str, maximum_bytes: int) -> dict[str, Any] | None:
@@ -69,8 +63,6 @@ def _bounded_text(value: Any, *, name: str, maximum_bytes: int) -> dict[str, Any
         raise WebSolContinuationError(f"{name} is not UTF-8") from exc
     if len(encoded) <= maximum_bytes:
         return {"text": value, "truncated": False, "original_bytes": len(encoded)}
-
-    # Byte-bound without emitting invalid UTF-8.  Truncation is always explicit.
     prefix = encoded[:maximum_bytes]
     while prefix:
         try:
@@ -83,15 +75,28 @@ def _bounded_text(value: Any, *, name: str, maximum_bytes: int) -> dict[str, Any
     return {"text": text, "truncated": True, "original_bytes": len(encoded)}
 
 
+def _opaque_marker(value: Any, *, name: str) -> dict[str, Any] | None:
+    """Expose presence + digest, never arbitrary nested owner text."""
+
+    if value is None:
+        return None
+    encoded = canonical_bytes(value)
+    return {
+        "present": True,
+        "sha256": hashlib.sha256(encoded).hexdigest(),
+        "source_field": name,
+    }
+
+
 def _string_list(value: Any, *, name: str, maximum: int) -> list[str]:
     if value is None:
         return []
     if not isinstance(value, list):
         raise WebSolContinuationError(f"{name} must be a list")
-    result: list[str] = []
-    for index, item in enumerate(value[:maximum]):
-        result.append(_token(item, name=f"{name}[{index}]", maximum=256))
-    return result
+    return [
+        _token(item, name=f"{name}[{index}]", maximum=256)
+        for index, item in enumerate(value[:maximum])
+    ]
 
 
 def _find_workstream(state: Mapping[str, Any], workstream: str) -> Mapping[str, Any]:
@@ -110,9 +115,7 @@ def _find_context(contexts: Any, workstream: str) -> Mapping[str, Any]:
         raise WebSolContinuationError("Agent OS contexts must be a list")
     matches: list[Mapping[str, Any]] = []
     for context in contexts:
-        if not isinstance(context, Mapping):
-            continue
-        target = context.get("target")
+        target = context.get("target") if isinstance(context, Mapping) else None
         if isinstance(target, Mapping) and target.get("workstream") == workstream:
             matches.append(context)
     if len(matches) != 1:
@@ -148,14 +151,16 @@ def _wave_projection(row: Mapping[str, Any]) -> tuple[list[dict[str, Any]], list
                 "depends_on": _string_list(
                     wave.get("depends_on") or [], name=f"wave_detail[{index}].depends_on", maximum=16
                 ),
-                "deps_satisfied": wave.get("deps_satisfied") if isinstance(wave.get("deps_satisfied"), bool) else None,
+                "deps_satisfied": (
+                    wave.get("deps_satisfied") if isinstance(wave.get("deps_satisfied"), bool) else None
+                ),
                 "next_action": _bounded_text(
                     wave.get("next_action"),
                     name=f"wave_detail[{index}].next_action",
                     maximum_bytes=MAX_WAVE_ACTION_BYTES,
                 ),
                 "prs": prs[:16],
-                "wait": wave.get("wait") if isinstance(wave.get("wait"), Mapping) or wave.get("wait") is None else None,
+                "wait": _opaque_marker(wave.get("wait"), name=f"wave_detail[{index}].wait"),
             }
         )
     return active, do_not_redo
@@ -168,16 +173,12 @@ def _evidence_refs(context: Mapping[str, Any]) -> tuple[list[dict[str, Any]], in
     refs: list[dict[str, Any]] = []
     total = 0
     for section in sections:
-        if not isinstance(section, Mapping):
+        if not isinstance(section, Mapping) or not isinstance(section.get("items"), list):
             continue
-        items = section.get("items")
-        if not isinstance(items, list):
-            continue
-        for item in items:
+        for item in section["items"]:
             if not isinstance(item, Mapping):
                 continue
-            locator = item.get("locator")
-            path = item.get("path")
+            locator, path = item.get("locator"), item.get("path")
             if not isinstance(locator, str) or not locator or not isinstance(path, str) or not path:
                 continue
             total += 1
@@ -189,7 +190,9 @@ def _evidence_refs(context: Mapping[str, Any]) -> tuple[list[dict[str, Any]], in
                     "key": item.get("key") if isinstance(item.get("key"), str) else None,
                     "path": path,
                     "locator": locator,
-                    "authority_class": item.get("authority_class") if isinstance(item.get("authority_class"), str) else None,
+                    "authority_class": (
+                        item.get("authority_class") if isinstance(item.get("authority_class"), str) else None
+                    ),
                     "status": item.get("status") if isinstance(item.get("status"), str) else None,
                     "updated": item.get("updated") if isinstance(item.get("updated"), str) else None,
                 }
@@ -198,12 +201,7 @@ def _evidence_refs(context: Mapping[str, Any]) -> tuple[list[dict[str, Any]], in
 
 
 def build_continuation(agentos: Mapping[str, Any], workstream: str) -> dict[str, Any]:
-    """Build one strict continuation packet from ``collect_agentos`` output.
-
-    The packet is a read-only projection.  It does not become the owner of any
-    included fact and must be refreshed from Agent OS before modifying work after
-    a material gap.
-    """
+    """Build one strict read-only packet from ``collect_agentos`` output."""
 
     if not isinstance(workstream, str) or _WS_RE.fullmatch(workstream) is None:
         raise WebSolContinuationError("workstream must use exact WS:<KEY> form")
@@ -227,13 +225,18 @@ def build_continuation(agentos: Mapping[str, Any], workstream: str) -> dict[str,
         _bounded_text(item, name=f"blocked_by[{index}]", maximum_bytes=MAX_BLOCKER_BYTES)
         for index, item in enumerate(blockers_raw[:MAX_BLOCKERS])
     ]
+    warnings_raw = agentos.get("warnings") or []
+    if not isinstance(warnings_raw, list):
+        raise WebSolContinuationError("Agent OS warnings must be a list")
 
     packet = {
         "schema": SCHEMA,
         "workstream": workstream,
         "generated_at": context.get("generated_at") if isinstance(context.get("generated_at"), str) else None,
         "agentos_source_sha": source_sha,
-        "source_records_digest": context.get("source_records_digest") if isinstance(context.get("source_records_digest"), str) else None,
+        "source_records_digest": (
+            context.get("source_records_digest") if isinstance(context.get("source_records_digest"), str) else None
+        ),
         "state": {
             "status": _token(row.get("status"), name="workstream.status", maximum=64),
             "program": _nullable_token(row.get("program"), name="workstream.program"),
@@ -244,10 +247,10 @@ def build_continuation(agentos: Mapping[str, Any], workstream: str) -> dict[str,
             ),
             "blocked_by": blockers,
             "blocked_by_total": len(blockers_raw),
-            "wait": row.get("wait") if isinstance(row.get("wait"), Mapping) or row.get("wait") is None else None,
-            "needs_ceo": row.get("needs_ceo") if isinstance(row.get("needs_ceo"), Mapping) or row.get("needs_ceo") is None else None,
-            "claim": row.get("claim") if isinstance(row.get("claim"), Mapping) or row.get("claim") is None else None,
-            "collisions": row.get("collisions") if isinstance(row.get("collisions"), list) else [],
+            "wait": _opaque_marker(row.get("wait"), name="workstream.wait"),
+            "needs_ceo": _opaque_marker(row.get("needs_ceo"), name="workstream.needs_ceo"),
+            "claim": _opaque_marker(row.get("claim"), name="workstream.claim"),
+            "collisions": _opaque_marker(row.get("collisions"), name="workstream.collisions"),
             "source": _token(row.get("source"), name="workstream.source", maximum=1024),
         },
         "active_waves": active_waves,
@@ -255,7 +258,10 @@ def build_continuation(agentos: Mapping[str, Any], workstream: str) -> dict[str,
         "evidence_refs": refs,
         "evidence_ref_total": ref_total,
         "evidence_refs_truncated": ref_total > len(refs),
-        "warnings": [str(item) for item in (agentos.get("warnings") or [])][:8],
+        "warnings": [
+            _bounded_text(item, name=f"warnings[{index}]", maximum_bytes=256)
+            for index, item in enumerate(warnings_raw[:8])
+        ],
         "authority_note": (
             "Projection only: Agent OS owns organizational continuity; Executive OS owns runtime/effect truth. "
             "Refresh canonical owners before modifying work."
@@ -266,9 +272,4 @@ def build_continuation(agentos: Mapping[str, Any], workstream: str) -> dict[str,
         raise WebSolContinuationError(
             f"continuation exceeds strict {MAX_PACKET_BYTES}-byte ceiling ({size} bytes)"
         )
-    packet["packet_bytes"] = size
-    final_size = len(canonical_bytes(packet))
-    if final_size > MAX_PACKET_BYTES:
-        raise WebSolContinuationError("continuation exceeds strict byte ceiling after accounting")
-    packet["packet_bytes"] = final_size
     return packet
