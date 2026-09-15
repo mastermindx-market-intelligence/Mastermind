@@ -39,15 +39,29 @@ A route is economically rankable only after all required non-economic gates are 
 
 No amount of expiring quota makes an ineligible route eligible.
 
-## 4. Capacity is model-specific inventory, not an account percentage
+## 4. Capacity follows provider-native depletion identity
 
-Capacity ranking MUST preserve the finest provider-owned allocation unit that materially affects depletion. A provider-wide or account-wide percentage must not erase model-specific pools.
+Capacity ranking MUST preserve the finest provider-owned allocation unit that actually depletes independently. UI labels, advertised API-dollar equivalents, model menus, or an account-average percentage do not determine the ledger shape by themselves.
 
-When the provider exposes model-specific windows, reason over at least:
+Valid provider shapes can include:
 
-`entitlement × model × allocation/window × headroom × reset/expiry × concurrency/health`
+- model-scoped balances/windows that genuinely deplete independently;
+- shared account/workspace windows with different model-specific debit multipliers or rate functions;
+- shared credits across several models;
+- concurrency pools plus one or more usage windows;
+- provider-specific combinations of those resources.
 
-A total account utilization number is presentation only when it hides separately expiring model pools.
+When the provider exposes genuinely model-specific resources, reason over those model-scoped resources and never average them away. When the provider exposes a shared resource, **do not split that shared resource into fictional per-model wallets** merely because documentation presents per-model equivalent limits or request estimates.
+
+For a shared resource with model-dependent consumption, each eligible model option should bind to the SAME canonical resource identity while carrying its own reviewed native debit/cost function. Switching models does not refill shared capacity unless fresh provider evidence proves a distinct ledger.
+
+A useful resource identity is therefore closer to:
+
+`entitlement × native resource/window × scope × depletion/debit function × headroom × reset/expiry × concurrency/health`
+
+not universally `account × model`.
+
+Capacity evidence precedence is fail-closed. Authenticated/native quota observations and the reviewed provider contract establish what is actually depleted. Public plan tables and model-equivalent marketing rows may explain rates or consumption functions but MUST NOT manufacture separate balances. If current provider surfaces disagree about whether a resource is shared or independent, rank only from the intersection that is proven and mark the disputed dimension UNKNOWN until reconciled.
 
 ## 5. Fixed-fee capacity has a shadow cost
 
@@ -73,11 +87,13 @@ This is **not** a "burn quota at all costs" rule. Do not manufacture low-value w
 
 When two included routes are materially equivalent for the accepted outcome, prefer the route with the higher avoidable-expiry risk and lower portfolio opportunity cost.
 
+For shared provider windows, expiry pressure applies to the shared resource. Model choice inside that resource is then an efficiency/suitability decision using the model-specific debit function; it is not evidence that another model has a separate expiring wallet.
+
 ## 7. Scarcity-preservation rule
 
 Preserve capacity that is uniquely valuable for tasks other routes cannot reliably perform. A broadly capable premium/frontier lane should not absorb routine work merely because it is available.
 
-Likewise, an aggregator bucket for a model family should normally be preserved for diversification, overflow, resilience, independent review, or imminent expiry when Mastermind already owns a much larger direct fixed-fee pool for the same family.
+Likewise, aggregator capacity should normally be preserved for diversification, overflow, resilience, independent review, or imminent shared-resource expiry when Mastermind already owns a much larger direct fixed-fee pool for the same model family. Whether that aggregator capacity is model-scoped or shared MUST come from provider truth, not assumption.
 
 The inverse is also true: a large direct subscription that is safely eligible and materially underused SHOULD absorb suitable steady-state work before equivalent metered spend elsewhere.
 
@@ -85,10 +101,12 @@ The inverse is also true: a large direct subscription that is safely eligible an
 
 Treat diversified aggregators and direct provider memberships as different economic products:
 
-- **Aggregator subscription:** breadth, optionality, provider/model diversification, overflow, independent comparison/review, and cheap access to many non-fungible model buckets.
+- **Aggregator subscription:** breadth, optionality, provider/model diversification, overflow, independent comparison/review, and cheap access to many model choices whose quota may be shared, model-scoped, or mixed according to provider-native semantics.
 - **Direct subscription:** concentrated workhorse capacity, predictable continuity, higher same-model throughput/concurrency, and provider-native capabilities.
 
 Do not choose one category universally. Route by the actual mission and current capacity facts.
+
+A shared aggregator window has additional portfolio opportunity cost: spending it on a model family for which Mastermind owns abundant direct capacity can crowd out other model choices available only or most cheaply through that aggregator. That opportunity cost may justify preferring the direct pool when both routes meet the same quality floor.
 
 Buy or upgrade a direct plan when observed accepted-work demand for that model family repeatedly exceeds existing economical capacity, or when provider-native continuity/capability has material value that the aggregator cannot supply.
 
@@ -131,11 +149,11 @@ Promote a model into a broader cohort only from attributable accepted-result evi
 
 Pre-START placement may choose the best eligible capacity under current law. After START, exact carrier/session and effect-state law wins over small economic improvements.
 
-Do not restart, migrate, rotate provider/account/model, or replay a modifying operation merely because another bucket has more headroom. `EFFECT_UNKNOWN` blocks economic failover until canonically reconciled.
+Do not restart, migrate, rotate provider/account/model, or replay a modifying operation merely because another route has more headroom. `EFFECT_UNKNOWN` blocks economic failover until canonically reconciled.
 
 ## 12. Provider-specific application belongs in current facts, not this law
 
-Provider model lists, prices, quota numbers, reset schedules, plan names, promotions, terms, and supported clients change. Keep dated provider-specific findings in reviewed catalogs/research/Provider Control and refresh them before decisions.
+Provider model lists, prices, quota numbers, debit multipliers, reset schedules, plan names, promotions, terms, and supported clients change. Keep dated provider-specific findings in reviewed catalogs/research/Provider Control and refresh them before decisions.
 
 This law must remain valid when OpenCode, MiniMax, OpenAI, Anthropic, GLM, Alibaba, xAI, Cursor, or another provider changes its plans.
 
@@ -148,7 +166,10 @@ TASK_CLASS
 QUALITY_FLOOR / REQUIRED_CAPABILITIES
 ELIGIBLE_ROUTES_CONSIDERED
 CHOSEN_PROVIDER_MODEL_SURFACE
+NATIVE_RESOURCE_IDENTITIES_CONSUMED
 CAPACITY_EVIDENCE_FRESHNESS
+SHARED_VS_MODEL_SCOPED_SEMANTICS
+MODEL_DEBIT / COST EVIDENCE (when applicable)
 RESET_OR_EXPIRY_PRESSURE (known | unknown)
 MARGINAL_CASH_CLASS
 PORTFOLIO_SCARCITY_REASON
@@ -172,8 +193,10 @@ Measure economics on **accepted outcomes**, not provider turns. Reuse existing t
 - avoided metered spend estimate where a reviewed rate exists;
 - failure class and escalation route.
 
+For shared resources, attribute model-specific debit against the shared resource rather than fabricating a model balance. Corrections/retractions must update the existing evidence path rather than double-counting history.
+
 Use these observations to improve Model Router suitability and Capacity ranking. Do not let an LLM summary become quota authority or self-authorize purchases.
 
 ## 15. Default principle
 
-> **Pass policy, safety, capability, quality, continuity, and admission gates first. Then use the lowest-marginal-cost / least-scarce eligible route, harvesting useful expiring fixed-fee capacity without sacrificing accepted-result quality. Preserve uniquely scarce capacity, exploit large legitimate underused direct pools for steady work, use aggregators for breadth/overflow/independence, and scale subscriptions only from observed accepted-work demand.**
+> **Pass policy, safety, capability, quality, continuity, and admission gates first. Then use the lowest-marginal-cost / least-scarce eligible route, preserving the provider's real depletion identity and harvesting useful expiring fixed-fee capacity without sacrificing accepted-result quality. Preserve uniquely scarce capacity, exploit large legitimate underused direct pools for steady work, use aggregators for breadth/overflow/independence, and scale subscriptions only from observed accepted-work demand.**
