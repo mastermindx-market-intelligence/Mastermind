@@ -368,6 +368,17 @@ def test_current_subscription_profiles_cannot_be_composed_as_unattended_executiv
             )
 
 
+def test_openai_compatible_binding_cannot_exceed_spec_only_while_adapter_is_unimplemented():
+    descriptor = adapter_descriptor("openai-compatible")
+    assert descriptor.implemented is False
+
+    # While the openai-compatible adapter remains unimplemented, the production
+    # MiniMax row may not claim more than an unproven specification seam.
+    binding = get_binding("minimax-token-plan.openai-compatible")
+    assert binding.implementation_state == "SPEC_ONLY"
+    assert binding.autonomous_allowed is False
+
+
 def test_command_is_fixed_profile_secret_free_and_bash_free(tmp_path: Path):
     adapter = _adapter(tmp_path)
     spec, _workspace_path = _spec(tmp_path / "case")
