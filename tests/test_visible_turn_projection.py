@@ -15,6 +15,7 @@
   F6 — ``ReadResult.items`` is now a ``list``, breaking the frozen
        ``tuple[VisibleItem, ...]`` shape declared on the dataclass.
   F7 — render order test must distinguish source order from storage order.
+  F8 — render order is independent of publication order, not just storage order.
 
 Each test must finish within its own deterministic budget. No thread or Event in
 this file waits more than 2.0 s; the whole file runs in well under 15 s wall-clock
@@ -169,6 +170,53 @@ def test_page_renders_in_source_order_not_publication_order():
     assert result.items[1].state == "completed"
     assert result.items[1].text == "A-completed"
     # F6 — ReadResult.items is the frozen ``tuple[VisibleItem, ...]`` shape, never a list.
+    assert isinstance(result.items, tuple), (
+        f"ReadResult.items must be a tuple, got {type(result.items).__name__}"
+    )
+
+
+def test_page_render_order_is_independent_of_publication_order():
+    """F8 — render order is INDEPENDENT of publication order.
+
+    Discriminating scenario with NO upsert: publish A (source_sequence=1) as
+    a partial FIRST, then B (source_sequence=0) as completed. Publication
+    order is then [A@1, B@2] and independent source order is [B(0), A(1)]
+    — the two DISAGREE, and storage order [A, B] disagrees with source
+    order too, so this test discriminates on BOTH axes.
+    """
+    proj = VisibleTurnProjection()
+    key = _make_key()
+    grant = proj.mint_grant(key)
+
+    _publish(proj, key, source_id="A", source_sequence=1, state="partial", text="A-partial")
+    _publish(proj, key, source_id="B", source_sequence=0, state="completed", text="B-completed")
+
+    result = proj.read(key, reader_grant=grant, cursor=None, max_items=8)
+    assert len(result.items) == 2, f"expected 2 items, got {len(result.items)}"
+
+    # Source order: B (sequence 0) then A (sequence 1).
+    assert result.items[0].source_item_id == "B", (
+        f"expected B first (source_sequence=0), got {result.items[0].source_item_id!r}; "
+        f"the page rendered publication/storage order instead of independent source order"
+    )
+    assert result.items[1].source_item_id == "A", (
+        f"expected A second (source_sequence=1), got {result.items[1].source_item_id!r}"
+    )
+    assert result.items[0].source_sequence == 0
+    assert result.items[1].source_sequence == 1
+
+    # Pin that publication order really IS the opposite of the rendered order:
+    # A was published first (publication_sequence < B's). A publication-order
+    # render would put A first; source order puts B first, so this assertion
+    # cannot be satisfied by a publication-order render.
+    a_pub_seq = result.items[1].publication_sequence
+    b_pub_seq = result.items[0].publication_sequence
+    assert a_pub_seq < b_pub_seq, (
+        f"expected A.publication_sequence < B.publication_sequence to pin that "
+        f"publication order is opposite of rendered order, got A={a_pub_seq}, B={b_pub_seq}"
+    )
+
+    # F6 — ReadResult.items is the frozen ``tuple[VisibleItem, ...]`` shape.
     assert isinstance(result.items, tuple), (
         f"ReadResult.items must be a tuple, got {type(result.items).__name__}"
     )
