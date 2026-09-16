@@ -3,8 +3,11 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 import os
 import re
+import shutil
+import subprocess
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
@@ -195,8 +198,9 @@ def test_csp_is_content_bound_and_no_dynamic_egress():
     text = HTML.read_text()
     csp = re.search(r'<meta http-equiv="Content-Security-Policy" content="([^"]+)"', text).group(1)
     assert "connect-src 'none'" in csp and "form-action 'none'" in csp
-    for tag in ('style', 'script'):
-        value = re.search(fr'<{tag}>(.*?)</{tag}>', text, re.S).group(1)
+    blocks = re.findall(r'<(style|script)(?: [^>]*)?>(.*?)</\1>', text, re.S)
+    assert blocks, 'The actual inline application sources must be present'
+    for _tag, value in blocks:
         digest = base64.b64encode(hashlib.sha256(value.encode()).digest()).decode()
         assert "'sha256-" + digest + "'" in csp
     assert "'unsafe-inline'" not in csp
@@ -215,3 +219,145 @@ def test_responsive_routes_have_no_horizontal_overflow(page, route, viewport):
     page.goto(page.url.split('#')[0] + '#' + route)
     expect(page.locator('main h1')).to_be_visible()
     assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth'), (route, viewport)
+
+
+# These run the exact pure presentation module in Node, not a browser or a DOM.
+# They cannot establish CSS/layout, native dialog, CSP enforcement or accessibility.
+def run_presentation_expression(expression: str):
+    text = HTML.read_text()
+    found = re.search(r'<script data-purpose="presentation-model">(.*?)</script>', text, re.S)
+    assert found is not None, 'The shared executable relationship/focus model is missing'
+    node = shutil.which('node')
+    assert node is not None, 'Node is required for the source-only model checks'
+    driver = r"""
+const fs = require('node:fs');
+const vm = require('node:vm');
+const input = JSON.parse(fs.readFileSync(0, 'utf8'));
+const context = vm.createContext({});
+vm.runInContext(input.source, context, { timeout: 1000 });
+const result = vm.runInContext(input.expression, context, { timeout: 1000 });
+process.stdout.write(JSON.stringify(result));
+"""
+    result = subprocess.run(
+        [node, '-e', driver],
+        input=json.dumps({'source': found.group(1), 'expression': expression}),
+        text=True, capture_output=True, timeout=5, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)
+
+
+def test_presentation_model_has_real_typed_edges():
+    model = run_presentation_expression('ReferencePresentation.graph()')
+    assert {n['id'] for n in model['nodes']} == {'os', 'admission', 'fabric', 'consumer', 'continuity', 'proof'}
+    pairs = {(e['from'], e['to'], e['kind']) for e in model['edges']}
+    assert pairs == {
+        ('os', 'fabric', 'product_scope'), ('os', 'consumer', 'product_scope'),
+        ('admission', 'fabric', 'prerequisite'), ('fabric', 'consumer', 'observation'),
+        ('fabric', 'continuity', 'return_path'), ('consumer', 'proof', 'user_journey'),
+        ('continuity', 'proof', 'consumption'),
+    }
+    assert all(e['label'] and e['source'] and e['path'].startswith('M ') for e in model['edges'])
+    assert model['authority'] == 'DESIGN_REFERENCE_ONLY'
+
+
+def test_presentation_model_edges_touch_real_node_boundaries():
+    model = run_presentation_expression('ReferencePresentation.graph()')
+    nodes = {n['id']: n for n in model['nodes']}
+    for edge in model['edges']:
+        for point, identity in [(edge['start'], edge['from']), (edge['end'], edge['to'])]:
+            n = nodes[identity]
+            assert n['x'] <= point['x'] <= n['x'] + n['width']
+            assert n['y'] <= point['y'] <= n['y'] + n['height']
+            assert point['x'] in (n['x'], n['x'] + n['width']) or point['y'] in (n['y'], n['y'] + n['height'])
+    assert all(0 <= n['x'] and 0 <= n['y'] and n['x'] + n['width'] <= model['width'] and n['y'] + n['height'] <= model['height'] for n in nodes.values())
+
+
+@pytest.mark.parametrize('mutation', [
+    "edges[0].to = 'missing'",
+    "edges.push({...edges[0]})",
+    "edges[0].kind = 'runtime_admission'",
+    "nodes.push({...nodes[0]})",
+])
+def test_presentation_model_rejects_ambiguous_design_relationships(mutation):
+    expression = """(() => {
+      const base = ReferencePresentation.graph();
+      const nodes = base.nodes.map(n => ({...n}));
+      const edges = base.edges.map(e => ({...e}));
+      %s;
+      try { ReferencePresentation.compose(nodes, edges); return false; }
+      catch (error) { return error.message === 'INVALID_DESIGN_RELATIONSHIPS'; }
+    })()""" % mutation
+    assert run_presentation_expression(expression) is True
+
+
+def test_presentation_model_is_pure_and_repeatable():
+    assert run_presentation_expression("""(() => {
+      const base = ReferencePresentation.graph();
+      const before = JSON.stringify(base);
+      const a = ReferencePresentation.compose(base.nodes, base.edges);
+      const b = ReferencePresentation.compose(base.nodes, base.edges);
+      return JSON.stringify(a) === JSON.stringify(b) && before === JSON.stringify(base);
+    })()""") is True
+
+
+@pytest.mark.parametrize('origin_valid,fallback_valid,expected', [
+    (True, True, 'origin'), (False, True, 'fallback'), (False, False, None),
+])
+def test_presentation_model_selects_connected_focus_return(origin_valid, fallback_valid, expected):
+    # Minimal inputs test a pure choice, not mocked DOM focus behavior.
+    result = run_presentation_expression("""(() => {
+      const origin = { name: 'origin', isConnected: %s, focus() {} };
+      const fallback = { name: 'fallback', isConnected: %s, focus() {} };
+      const selected = ReferencePresentation.focusTarget(origin, fallback);
+      return selected === null ? null : selected.name;
+    })()""" % (json.dumps(origin_valid), json.dumps(fallback_valid)))
+    assert result == expected
+
+
+def test_presentation_model_does_not_choose_disabled_return_control():
+    assert run_presentation_expression("""(() => {
+      const origin = { isConnected: true, disabled: true, focus() {} };
+      const fallback = { isConnected: true, focus() {} };
+      return ReferencePresentation.focusTarget(origin, fallback) === fallback;
+    })()""") is True
+
+
+def test_graph_and_list_render_same_relationships(page):
+    page.goto(page.url.split('#')[0] + '#connections')
+    paths = page.locator('path[data-edge]')
+    expect(paths).to_have_count(7)
+    graph_ids = sorted(paths.evaluate_all('(rows) => rows.map(r => r.dataset.edge)'))
+    list_ids = sorted(page.locator('button[data-relation]').evaluate_all('(rows) => rows.map(r => r.dataset.relation)'))
+    assert graph_ids == list_ids
+    page.get_by_role('button', name='List view', exact=True).click()
+    expect(page.locator('path[data-edge]')).to_have_count(0)
+    assert sorted(page.locator('button[data-relation]').evaluate_all('(rows) => rows.map(r => r.dataset.relation)')) == graph_ids
+    expect(page.get_by_role('button', name='List view', exact=True)).to_be_focused()
+
+
+def test_skip_link_preserves_current_workspace(page):
+    page.goto(page.url.split('#')[0] + '#workspace')
+    skip = page.get_by_role('link', name='Skip to main content', exact=True)
+    skip.focus()
+    skip.press('Enter')
+    assert page.url.endswith('#workspace')
+    expect(page.get_by_role('heading', name='Execution Fabric', exact=True)).to_be_focused()
+
+
+def test_search_inspector_restores_search_input_not_removed_result(page):
+    search = page.get_by_label('Search recorded evidence', exact=True)
+    search.fill('autonomy')
+    page.get_by_role('button', name='Web CEO autonomy contract', exact=True).click()
+    page.get_by_role('button', name='Close inspector', exact=True).click()
+    expect(page.get_by_role('dialog')).not_to_be_visible()
+    expect(search).to_be_focused()
+
+
+def test_narrow_connections_default_to_readable_equivalent_list(page):
+    page.set_viewport_size({'width': 390, 'height': 844})
+    page.goto(page.url.split('#')[0] + '#connections')
+    expect(page.locator('path[data-edge]')).to_have_count(0)
+    expect(page.locator('button[data-relation]')).to_have_count(7)
+    expect(page.locator('[data-node]')).to_have_count(6)
+    expect(page.get_by_role('button', name='Graph view', exact=True)).to_be_disabled()

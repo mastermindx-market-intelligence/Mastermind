@@ -1,75 +1,144 @@
 {
   "record_type": "offline_reference_validation",
   "operation_key": "mastermind-os-rollout-contract-20260916-sol-001",
-  "source_pin": "8ba7deedde164c90298d3e88785d98e02fa5e2d2",
+  "round": "relationship-focus-source-repair",
+  "source_pin": "e8803ba3d3ee928d150d7dcac1a1e2bad2dc0d48",
+  "previous_candidate": "091592da12f28bb9a568b9ba0f668394b4bca4b1",
   "disposition": "DRAFT_HOLD_BUILT_NOT_PROVEN",
   "production_acceptance_granted": false,
   "runtime_or_provider_effect": false,
   "external_worker_started": false,
   "browser_policy_changed": false,
   "source_checks": {
-    "passed": 2,
+    "passed": 13,
     "failed": 0,
     "latest_exit_code": 0,
-    "javascript_syntax_exit_code": 0,
-    "javascript_source_equality": true
+    "scope": "actual pure inline JavaScript model + source existence + CSP hash consistency; not DOM/browser behavior",
+    "javascript_scripts": [
+      {
+        "script": 0,
+        "sha256": "3a312f24477799918ca000bdb811290d9450bf3ea03f77d5423da27ec309c66b",
+        "exit_code": 0
+      },
+      {
+        "script": 1,
+        "sha256": "771b48d24262a8208e88878dde2782dba10ba7696bdaead361a44b6ce456681f",
+        "exit_code": 0
+      }
+    ]
   },
   "test_collection": {
-    "total": 37,
-    "source_only": 2,
-    "browser_dependent": 35
+    "total": 52,
+    "source_only": 13,
+    "browser_dependent": 39
   },
   "red_evidence": {
-    "test": "test_reference_exists",
-    "outcome": "intended missing-HTML assertion failure before HTML creation",
-    "failed": 1,
+    "selection": "presentation_model",
+    "failed": 11,
     "passed": 0,
-    "log_sha256": "4fa53e3ea24070b54d19e610c38bae1e23f59b8eaf889c1c88dd91e15adc3d8a"
+    "reason": "shared executable relationship/focus module absent before implementation",
+    "log_sha256": "62478f274051a33db68aec9b351031cffc7b4ca677709a277a49c2691e609950"
   },
+  "green_evidence": {
+    "log_sha256": "911f76179c699720e3ce4c622ed7687d69a35bb5c1661cf8dc7a51e2d1076964"
+  },
+  "mutation_evidence": [
+    {
+      "mutant": "remove_duplicate_edge_guard",
+      "test_selection": "presentation_model_rejects_ambiguous_design_relationships",
+      "exit_code": 1,
+      "summary": "1 failed, 3 passed, 48 deselected in 0.29s",
+      "log_sha256": "42558fd38a4e12a01823ade60752391f1fb0ebebcf4450aa1bdb0f8f03f58334"
+    },
+    {
+      "mutant": "accept_disconnected_focus",
+      "test_selection": "presentation_model_selects_connected_focus_return",
+      "exit_code": 1,
+      "summary": "2 failed, 1 passed, 49 deselected in 0.32s",
+      "log_sha256": "6351a15a7cf295ca388f143f340a83ee7a9abd36cf6f53c81b5c078d1bd42f72"
+    },
+    {
+      "mutant": "erase_relationships",
+      "test_selection": "presentation_model_has_real_typed_edges",
+      "exit_code": 1,
+      "summary": "1 failed, 51 deselected in 0.18s",
+      "log_sha256": "9fd233ed39d47f9f605b43a2b09a774906ebcf0efa35707d24317fd0ed072bb9"
+    }
+  ],
   "browser_campaign": {
-    "status": "BLOCKED_NOT_VERIFIED",
-    "bundled_browser": "ABSENT",
-    "installed_chromium": "144.0.7559.96",
-    "file_navigation": "ERR_BLOCKED_BY_ADMINISTRATOR",
-    "loopback_navigation": "ERR_BLOCKED_BY_ADMINISTRATOR",
-    "latest_attempt_passed": 1,
-    "latest_attempt_errors": 1,
-    "latest_attempt_stopped_after_first_error": true,
+    "status": "NOT_RUN_ON_REPAIRED_CANDIDATE",
+    "reason": "Historical managed Chromium navigation refusal remains unresolved; no retry or workaround",
+    "historical_candidate": "091592da12f28bb9a568b9ba0f668394b4bca4b1",
+    "historical_file_navigation": "ERR_BLOCKED_BY_ADMINISTRATOR",
+    "historical_loopback_navigation": "ERR_BLOCKED_BY_ADMINISTRATOR",
     "screenshots_produced": 0,
     "visual_acceptance": false,
     "accessibility_acceptance": false,
-    "cross_host_browser_retry": false
+    "cross_host_browser_retry": false,
+    "dom_emulation_used": false
   },
   "environment": {
     "python": "3.13.5",
-    "pytest": "9.0.2",
-    "playwright": "1.57.0",
     "node": "v22.16.0"
   },
-  "open_source_review_risks": [
-    "Connections card layout does not draw real relation edges.",
-    "Search modal focus restoration and skip-link route/focus behavior need permitted browser verification and repair.",
-    "No current mission or authorized content API is connected."
+  "open_gates": [
+    "39 actual browser cases including DOM/event/focus/diagram layout/CSP enforcement are unverified",
+    "Exact real mission + authorized content producer/client contract must be consumed through current owners",
+    "R2 freeze #704 requires same-writer repair and independent exact-head review",
+    "No source-release, installed product or production acceptance"
   ],
-  "source_publication": {
-    "initial_four_record_head": "498b0bfe23109e7feddcce73f73f54e0583048da",
-    "first_native_html_attempt": "offline response; later exact path verified absent",
-    "reconciled_effect": "NONE before same-host repeat",
-    "native_html_hash_verified": true,
-    "final_head": "resolve from the containing Git commit; not self-referential"
-  },
   "integration_intake": {
     "carrier": "slack:C0BSBM78V1N/1789324397.992989",
-    "message_ts": "1789555914.549109",
-    "state": "DELIVERED_CONSUMPTION_NOT_PROVEN",
-    "new_child_assignment": false
+    "original_message_ts": "1789555914.549109",
+    "review_message_ts": "1789593323.110469",
+    "principal_consumption_ts": "1789593485.305139",
+    "state": "PRINCIPAL_CONSUMED_REPAIR_RELAY_REPORTED",
+    "new_child_assignment": false,
+    "repaired_head_acceptance": false
+  },
+  "review_evidence": {
+    "pr": 704,
+    "head": "8b94141106200f0c48b6d033cca19a8007ef0031",
+    "review": 5228415542,
+    "verdict": "REQUEST_CHANGES",
+    "producer_counterexample_sha256": "777d203f8e7348a882b4e93e80076ce45986b98863f2379e81e873b8852712af",
+    "follow_through": {
+      "head": "c09672fc50a5895e7552936d3e585455424d85ae",
+      "review": 5228672592,
+      "verdict": "REQUEST_CHANGES",
+      "repair_delivery_ts": "1789595166.330749",
+      "repair_completion_not_asserted": true
+    }
   },
   "artifact_sha256": {
-    "docs/superpowers/specs/2026-09-16-mastermind-os-integrated-rollout-design.md": "98d45933f606a57aa9b26bba66601cd034c711e50af47db24506bbdf88a78f29",
-    "docs/superpowers/plans/2026-09-16-mastermind-os-reference-workspace.md": "06593ff5c1b5e596c985e3716b721246eda8b61f5be5008ff7a96b0b445dc7a7",
-    "research/mastermind_os/README.md": "62a8ceadf3ac618c7e52e89d069a9ef02b550fcdc23694db7f212584d12412ad",
-    "research/mastermind_os/test_reference_workspace.py": "f3bfeaaad4d82087dca4202bbdd99654ffbf34cfa2dda2902d1c88d407e3c727",
-    "research/mastermind_os/reference_workspace.html": "160426f6d9105fa946520d6c51d967453ebb00746b78973d45bb27d410892353"
+    "docs/superpowers/specs/2026-09-16-mastermind-os-integrated-rollout-design.md": "0417fb7bcec57fb7d24b53e64257ebdf81f0fc79435f4914cc5d5a358a0a9621",
+    "docs/superpowers/plans/2026-09-16-mastermind-os-reference-workspace.md": "74b86d5e9ca702fe555e17c57430932e4810582dff0c1aca78439891f108578f",
+    "research/mastermind_os/README.md": "af47141a6f8b43d9a68994eb59ce399b13dbcbf767a68997b824c70375875a49",
+    "research/mastermind_os/test_reference_workspace.py": "f92db3c39e016caaad145165ed42e5657d2293057e206672630b98588c67b9db",
+    "research/mastermind_os/reference_workspace.html": "b62ea788538208d5200b81e4b57ac1bf5d2f1f3b82b29fd5457769e66e46a946"
   },
-  "next_action": "Review the exact producer mission/content contract and current CCR consumer; preserve browser and installed-product holds. No source merge or deployment from this receipt."
+  "next_action": "Consume the repaired #704 freeze plus exact incumbent reader/DF1 contracts, preserve source custody, and admit only the qualified real mission-workspace slice. Browser/installed gates remain open.",
+  "native_source_checks": {
+    "observed_at": "2026-09-16T22:09:30Z",
+    "passed": 13,
+    "failed": 0,
+    "exit_code": 0,
+    "stdout_sha256": "cfc14fd2dc11c362cccf5421245ca5ab0e9d286b54a604a80bd2dd5522f6feb9",
+    "python": "3.14.7",
+    "node": "v26.5.0",
+    "inline_script_syntax_exit_codes": [
+      0,
+      0
+    ],
+    "browser_selected": false,
+    "previous_timeouts_superseded_for_current_source_proof_only": true
+  },
+  "continuation_recovery": {
+    "procedure_pin": "5ee11ab1e993616f3568cfca4069cb21fa61fd8f",
+    "workspace_reused": true,
+    "prepared_files_match_checkpoint": true,
+    "source_test_or_help_process_matches": 0,
+    "source_write_uncertainty": false,
+    "original_published_head": "091592da12f28bb9a568b9ba0f668394b4bca4b1"
+  }
 }
