@@ -1804,17 +1804,526 @@ def test_ceo_submit_receipt_is_a_closed_projection_not_a_whole_file_digest():
     assert "token" not in serialized.lower()
 
 
+def test_writer_receipt_field_contract_and_document_parity():
+    assert set(control._CEO_SUBMIT_RECEIPT_FIELDS) == {
+        "schema_version",
+        "state",
+        "operation",
+        "projection",
+        "projection_digest",
+        "transaction_id",
+        "observed_at",
+        "tool_version",
+    }
+
+    armed = _armed_ceo_submit_host()
+    disarmed = _armed_ceo_submit_host()
+    control.execute_ceo_submit_disarm(
+        disarmed, _ceo_submit_request(), now=NOW + timedelta(minutes=1)
+    )
+
+    for host, armed_direction in ((armed, True), (disarmed, False)):
+        receipt = host.receipt
+        assert set(receipt) == control._CEO_SUBMIT_RECEIPT_FIELDS
+        assert (
+            control.validate_ceo_submit_receipt_document(
+                receipt, armed=armed_direction
+            )
+            is True
+        )
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["release_sha", "installed_sha"],
+)
+def test_receipt_document_requires_well_formed_release_and_installed_shas(field):
+    host = _armed_ceo_submit_host()
+    receipt = copy.deepcopy(host.receipt)
+    for value in (None, "", "not-a-sha", "0" * 39, "g" * 40):
+        receipt["projection"][field] = value
+        _recompute_receipt_digest(receipt)
+        assert (
+            control.validate_ceo_submit_receipt_document(receipt, armed=True)
+            is False
+        )
+        receipt = copy.deepcopy(host.receipt)
+
+
+def test_receipt_document_requires_a_canonical_timestamp():
+    host = _armed_ceo_submit_host()
+    receipt = copy.deepcopy(host.receipt)
+    for value in (
+        None,
+        1789548398,
+        "2026-08-24 12:00:00Z",
+        "2026-08-24T12:00:00+00:00",
+        "2026-08-24t12:00:00z",
+        "not-a-timestamp",
+    ):
+        receipt["observed_at"] = value
+        assert control.validate_ceo_submit_receipt_document(receipt, armed=True) is False
+
+
+def test_release_sha_rebinding_comes_from_expected_sha_not_the_receipt():
+    host = _armed_ceo_submit_host()
+    binding = host.executive_app_binding()
+    worker = copy.deepcopy(host.worker_config)
+    worker_sha = control.sha256_bytes(control.encode_config(worker))
+    receipt = copy.deepcopy(host.receipt)
+    receipt["projection"]["release_sha"] = "d" * 40
+    _recompute_receipt_digest(receipt)
+
+    assert control.validate_ceo_submit_receipt_document(receipt, armed=True) is True
+    assert (
+        control.ceo_submit_sink_eligible(
+            control_config=host.control_config,
+            worker_config=worker,
+            worker_config_sha256=worker_sha,
+            receipt=receipt,
+            binding=binding,
+            expected_sha=SHA,
+            installed_sha=SHA,
+        )
+        is False
+    )
+
+
+def test_sink_eligibility_requires_a_present_live_binding():
+    host = _armed_ceo_submit_host()
+    binding = dataclasses.replace(
+        host.executive_app_binding(), present=False, app_peer_uid=-1
+    )
+
+    assert (
+        control.ceo_submit_sink_eligible(
+            control_config=host.control_config,
+            worker_config=host.worker_config,
+            worker_config_sha256=control.sha256_bytes(
+                control.encode_config(host.worker_config)
+            ),
+            receipt=host.receipt,
+            binding=binding,
+            expected_sha=SHA,
+            installed_sha=SHA,
+        )
+        is False
+    )
+
+
+def test_writer_rejects_its_own_receipt_if_the_canonical_validator_refuses_it(monkeypatch):
+    host = FakeCeoSubmitHost()
+    configs = host.load_ceo_submit_configs(SHA)
+    admission = control.evaluate_ceo_submit_arm_admission(
+        host, control.CeoSubmitRequest(expected_sha=SHA), now=NOW
+    )
+    transaction = control.TransactionContext(
+        transaction_id=host.new_transaction_id(),
+        expected_sha=SHA,
+        prior_configs=configs,
+        candidates=control.derive_ceo_submit_candidate(configs, armed=True),
+        admission=None,
+    )
+    monkeypatch.setattr(
+        control,
+        "validate_ceo_submit_receipt_document",
+        lambda *_args, **_kwargs: False,
+    )
+    with pytest.raises(control.CeoSubmitAdmissionError) as raised:
+        control.build_ceo_submit_receipt(transaction, admission, armed=True, now=NOW)
+    assert raised.value.code == "ceo_submit_config_schema_drift"
+
+
+def _sealed_ceo_submit_evidence():
+    host = _armed_ceo_submit_host()
+    binding = host.executive_app_binding()
+    worker_config = copy.deepcopy(host.worker_config)
+    worker_config_sha256 = control.sha256_bytes(control.encode_config(worker_config))
+    return host, binding, worker_config, worker_config_sha256
+
+
+def _direct_ceo_submit_sink_eligible(
+    host,
+    binding,
+    worker_config,
+    worker_config_sha256,
+    receipt,
+    *,
+    installed_sha=SHA,
+):
+    return control.ceo_submit_sink_eligible(
+        control_config=host.control_config,
+        worker_config=worker_config,
+        worker_config_sha256=worker_config_sha256,
+        receipt=receipt,
+        binding=binding,
+        expected_sha=SHA,
+        installed_sha=installed_sha,
+    )
+
+
+def _recompute_receipt_digest(receipt):
+    receipt["projection_digest"] = control.ceo_submit_projection_digest(
+        receipt["projection"]
+    )
+
+
+@pytest.mark.parametrize("field", control._CEO_SUBMIT_RECEIPT_FIELDS)
+def test_missing_top_level_field_is_refused_at_every_level(field, capsys):
+    host, binding, worker, worker_sha = _sealed_ceo_submit_evidence()
+    receipt = copy.deepcopy(host.receipt)
+    del receipt[field]
+
+    assert control.validate_ceo_submit_receipt_document(receipt, armed=True) is False
+    assert (
+        _direct_ceo_submit_sink_eligible(
+            host, binding, worker, worker_sha, receipt
+        )
+        is False
+    )
+    host.receipt = receipt
+    host.reset_ledgers()
+    status = control.evaluate_ceo_submit_status(host, _ceo_submit_request())
+    assert status.state == "CEO_SUBMIT_ARMED_UNBOUND"
+    assert host.control_writes == host.worker_writes == host.receipt_writes == 0
+    assert host.marker is False
+    assert host.phases == []
+
+    exit_code = control.main(
+        ["ceo-submit-status", "--expected-sha", SHA], host=host, now=lambda: NOW
+    )
+    document = json.loads(capsys.readouterr().out)
+    assert exit_code == 2
+    assert document["code"] == "ceo_submit_armed_unbound"
+    assert document["state"] == "CEO_SUBMIT_ARMED_UNBOUND"
+    assert host.control_writes == host.worker_writes == host.receipt_writes == 0
+    assert host.marker is False
+    assert host.phases == []
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "outer_transaction_mismatch",
+        "outer_transaction_missing",
+        "outer_transaction_empty",
+        "outer_transaction_nonstring",
+        "outer_transaction_malformed",
+        "projection_transaction_recomputed",
+        "installed_sha_recomputed",
+        "release_sha_recomputed",
+        "observed_at_invalid",
+        "observed_at_noncanonical",
+        "observed_at_missing",
+        "observed_at_nonstring",
+        "tool_version_wrong",
+        "tool_version_missing",
+        "extra_top_level_field",
+        "renamed_top_level_field",
+        "wrong_schema_version",
+        "wrong_state",
+        "wrong_operation",
+        "state_operation_mismatch",
+        "projection_nonobject",
+        "receipt_nonobject",
+        "projection_field_missing",
+        "projection_field_extra",
+        "projection_digest_wrong",
+        "projection_digest_wrong_type",
+        "projection_digest_missing",
+    ],
+)
+def test_malformed_receipt_is_refused_at_every_level(case, capsys):
+    host, binding, worker, worker_sha = _sealed_ceo_submit_evidence()
+    receipt = copy.deepcopy(host.receipt)
+    expected_transaction = receipt["transaction_id"]
+
+    if case == "outer_transaction_mismatch":
+        receipt["transaction_id"] = "autonomy-0123456789ab"
+    elif case == "outer_transaction_missing":
+        del receipt["transaction_id"]
+    elif case == "outer_transaction_empty":
+        receipt["transaction_id"] = ""
+    elif case == "outer_transaction_nonstring":
+        receipt["transaction_id"] = 123
+    elif case == "outer_transaction_malformed":
+        receipt["transaction_id"] = "autonomy-not-a-hex-id"
+    elif case == "projection_transaction_recomputed":
+        receipt["projection"]["transaction_id"] = "autonomy-0123456789ab"
+        _recompute_receipt_digest(receipt)
+    elif case == "installed_sha_recomputed":
+        receipt["projection"]["installed_sha"] = "d" * 40
+        _recompute_receipt_digest(receipt)
+    elif case == "release_sha_recomputed":
+        receipt["projection"]["release_sha"] = "d" * 40
+        _recompute_receipt_digest(receipt)
+    elif case == "observed_at_invalid":
+        receipt["observed_at"] = "2026-02-30T12:00:00Z"
+    elif case == "observed_at_noncanonical":
+        receipt["observed_at"] = "2026-08-24t12:00:00z"
+    elif case == "observed_at_missing":
+        del receipt["observed_at"]
+    elif case == "observed_at_nonstring":
+        receipt["observed_at"] = 1789548398
+    elif case == "tool_version_wrong":
+        receipt["tool_version"] = None
+    elif case == "tool_version_missing":
+        del receipt["tool_version"]
+    elif case == "extra_top_level_field":
+        receipt["extra"] = "forbidden"
+    elif case == "renamed_top_level_field":
+        del receipt["tool_version"]
+        receipt["tool_versions"] = control.TOOL_VERSION
+    elif case == "wrong_schema_version":
+        receipt["schema_version"] = "mastermind.executive_ceo_submit_receipt/v2"
+    elif case == "wrong_state":
+        receipt["state"] = "CEO_SUBMIT_DISARMED"
+    elif case == "wrong_operation":
+        receipt["operation"] = "CEO_SUBMIT_DISARM"
+    elif case == "state_operation_mismatch":
+        receipt["state"] = "CEO_SUBMIT_DISARMED"
+        receipt["projection"]["ceo_submit_armed"] = False
+        _recompute_receipt_digest(receipt)
+    elif case == "projection_nonobject":
+        receipt["projection"] = []
+    elif case == "receipt_nonobject":
+        receipt = [receipt]
+    elif case == "projection_field_missing":
+        del receipt["projection"]["installed_sha"]
+    elif case == "projection_field_extra":
+        receipt["projection"]["extra"] = "forbidden"
+    elif case == "projection_digest_wrong":
+        receipt["projection_digest"] = "0" * 64
+    elif case == "projection_digest_wrong_type":
+        receipt["projection_digest"] = 64
+    elif case == "projection_digest_missing":
+        del receipt["projection_digest"]
+
+    assert (
+        control.validate_ceo_submit_receipt_document(receipt, armed=True)
+        is (case in {"installed_sha_recomputed", "release_sha_recomputed"})
+    )
+    assert (
+        _direct_ceo_submit_sink_eligible(
+            host, binding, worker, worker_sha, receipt
+        )
+        is False
+    )
+    host.receipt = receipt
+    host.reset_ledgers()
+    status = control.evaluate_ceo_submit_status(host, _ceo_submit_request())
+    assert status.state == "CEO_SUBMIT_ARMED_UNBOUND"
+    assert host.control_writes == host.worker_writes == host.receipt_writes == 0
+    assert host.marker is False
+    assert host.phases == []
+
+    control.main(["ceo-submit-status", "--expected-sha", SHA], host=host, now=lambda: NOW)
+    document = json.loads(capsys.readouterr().out)
+    assert document["code"] == "ceo_submit_armed_unbound"
+    assert document["state"] == "CEO_SUBMIT_ARMED_UNBOUND"
+    assert host.control_writes == host.worker_writes == host.receipt_writes == 0
+    assert host.marker is False
+    assert host.phases == []
+    assert expected_transaction == "autonomy-feedfacec0de"
+
+
+@pytest.mark.parametrize(
+    "value", [[{"schema_version": "x"}], "not-an-object", 17, None]
+)
+def test_nonobject_receipt_is_refused_at_every_level(value, capsys):
+    host, binding, worker, worker_sha = _sealed_ceo_submit_evidence()
+    assert control.validate_ceo_submit_receipt_document(value, armed=True) is False
+    assert (
+        _direct_ceo_submit_sink_eligible(host, binding, worker, worker_sha, value)
+        is False
+    )
+    host.receipt = value
+    host.reset_ledgers()
+    assert (
+        control.evaluate_ceo_submit_status(host, _ceo_submit_request()).state
+        == "CEO_SUBMIT_ARMED_UNBOUND"
+    )
+    control.main(["ceo-submit-status", "--expected-sha", SHA], host=host, now=lambda: NOW)
+    document = json.loads(capsys.readouterr().out)
+    assert document["code"] == "ceo_submit_armed_unbound"
+    assert host.control_writes == host.worker_writes == host.receipt_writes == 0
+    assert host.marker is False
+    assert host.phases == []
+
+
+def _strict_receipt_payload(raw):
+    host = control.ProductionCeoSubmitHost()
+    read = control._read_root_file
+
+    def bounded_read(*args, **kwargs):
+        if len(raw) > control._MAX_JSON_BYTES:
+            raise control.HostControlError("config_identity_unavailable")
+        return read(*args, **kwargs)
+
+    with mock.patch.object(control.Path, "exists", return_value=True), mock.patch.object(
+        control.Path, "is_symlink", return_value=False
+    ), mock.patch.object(
+        control, "_read_root_file", side_effect=bounded_read
+    ):
+        return host.existing_ceo_submit_receipt()
+
+
+class _RawReceiptCeoSubmitHost(FakeCeoSubmitHost):
+    def __init__(self, raw):
+        super().__init__()
+        self.control_config["ceo_submit_armed"] = True
+        self.raw_receipt = raw
+
+    def existing_ceo_submit_receipt(self):
+        return _strict_receipt_payload(self.raw_receipt)
+
+
+@pytest.mark.parametrize(
+    "case,raw",
+    [
+        ("duplicate_top_level_key", b'{"schema_version":"a","schema_version":"b"}'),
+        ("non_utf8", b"\xff\xfe"),
+        ("non_json", b"not-json"),
+        ("oversize", b"x" * (control._MAX_JSON_BYTES + 1)),
+    ],
+)
+def test_production_receipt_read_boundary_refuses_invalid_bytes(case, raw):
+    assert _strict_receipt_payload(raw) is None
+
+
+def test_production_receipt_read_boundary_refuses_duplicate_valid_keys():
+    host = _armed_ceo_submit_host()
+    raw = control._encoded_json(host.receipt)
+    last_transaction = raw.rfind(b'"transaction_id": "autonomy-feedfacec0de"')
+    assert last_transaction != -1
+    suffix_start = last_transaction + len(
+        b'"transaction_id": "autonomy-feedfacec0de"'
+    )
+    duplicated = (
+        raw[:suffix_start]
+        + b', "transaction_id": "autonomy-feedfacec0de"'
+        + raw[suffix_start:]
+    )
+    assert duplicated != raw
+    assert _strict_receipt_payload(duplicated) is None
+    json.loads(duplicated, object_pairs_hook=dict)
+
+
+@pytest.mark.parametrize(
+    "case,raw",
+    [
+        ("duplicate_top_level_key", b'{"schema_version":"a","schema_version":"b"}'),
+        ("non_utf8", b"\xff\xfe"),
+        ("non_json", b"not-json"),
+        ("oversize", b"x" * (control._MAX_JSON_BYTES + 1)),
+    ],
+)
+def test_invalid_raw_receipt_bytes_read_back_unbound_through_the_real_cli(case, raw, capsys):
+    host = _RawReceiptCeoSubmitHost(raw)
+    assert (
+        control.evaluate_ceo_submit_status(host, _ceo_submit_request()).state
+        == "CEO_SUBMIT_ARMED_UNBOUND"
+    )
+    assert host.control_writes == host.worker_writes == host.receipt_writes == 0
+    assert host.marker is False
+    assert host.phases == []
+    exit_code = control.main(
+        ["ceo-submit-status", "--expected-sha", SHA], host=host, now=lambda: NOW
+    )
+    document = json.loads(capsys.readouterr().out)
+    assert exit_code == 2
+    assert document["code"] == "ceo_submit_armed_unbound"
+    assert host.control_writes == host.worker_writes == host.receipt_writes == 0
+
+
+def test_canonical_real_writer_receipt_remains_eligible_and_armed(capsys):
+    host, binding, worker, worker_sha = _sealed_ceo_submit_evidence()
+    assert (
+        _direct_ceo_submit_sink_eligible(
+            host, binding, worker, worker_sha, host.receipt
+        )
+        is True
+    )
+    assert (
+        control.evaluate_ceo_submit_status(host, _ceo_submit_request()).state
+        == "CEO_SUBMIT_ARMED"
+    )
+    host.reset_ledgers()
+    assert (
+        control.main(
+            ["ceo-submit-status", "--expected-sha", SHA], host=host, now=lambda: NOW
+        )
+        == 0
+    )
+    document = json.loads(capsys.readouterr().out)
+    assert document["code"] == "ceo_submit_armed"
+    assert host.control_writes == host.worker_writes == host.receipt_writes == 0
+    assert host.marker is False
+    assert host.phases == []
+
+
+@pytest.mark.parametrize(
+    "case", ["worker_arm_true", "worker_byte_drift", "arm_fact_drift"]
+)
+def test_current_worker_drift_is_refused_at_every_level(case, capsys):
+    host, binding, worker, worker_sha = _sealed_ceo_submit_evidence()
+    receipt = copy.deepcopy(host.receipt)
+
+    if case == "worker_arm_true":
+        worker = {**worker, "operator_harness_armed": True}
+    elif case == "worker_byte_drift":
+        worker = {**worker, "unrelated": "byte-changing-value"}
+        worker_sha = control.sha256_bytes(control.encode_config(worker))
+    else:
+        worker = {**worker, "operator_harness_armed": True}
+        worker_sha = control.sha256_bytes(control.encode_config(worker))
+        receipt["projection"]["worker_operator_harness_armed"] = True
+        receipt["projection"]["worker_config_sha256"] = worker_sha
+        _recompute_receipt_digest(receipt)
+
+    assert (
+        _direct_ceo_submit_sink_eligible(host, binding, worker, worker_sha, receipt)
+        is False
+    )
+    host.worker_config = worker
+    host.receipt = receipt
+    host.reset_ledgers()
+    assert (
+        control.evaluate_ceo_submit_status(host, _ceo_submit_request()).state
+        == "CEO_SUBMIT_ARMED_UNBOUND"
+    )
+    assert host.control_writes == host.worker_writes == host.receipt_writes == 0
+    assert host.marker is False
+    assert host.phases == []
+
+    exit_code = control.main(
+        ["ceo-submit-status", "--expected-sha", SHA], host=host, now=lambda: NOW
+    )
+    document = json.loads(capsys.readouterr().out)
+    assert exit_code == 2
+    assert document["code"] == "ceo_submit_armed_unbound"
+    assert host.control_writes == host.worker_writes == host.receipt_writes == 0
+    assert host.marker is False
+    assert host.phases == []
+
+
 def test_unrelated_later_coo_field_change_does_not_invalidate_the_ceo_submit_receipt():
     host = FakeCeoSubmitHost()
     control.execute_ceo_submit_arm(host, _ceo_submit_request(), now=NOW)
     receipt = host.receipt
-    observed_projection = dict(receipt["projection"])
+    worker_config = copy.deepcopy(host.worker_config)
+    worker_config_sha256 = control.sha256_bytes(control.encode_config(worker_config))
+    binding = host.executive_app_binding()
 
     assert (
-        control.ceo_submit_receipt_binds(
-            receipt,
+        control.ceo_submit_sink_eligible(
             control_config=host.control_config,
-            admission_projection=observed_projection,
+            worker_config=worker_config,
+            worker_config_sha256=worker_config_sha256,
+            receipt=receipt,
+            binding=binding,
+            expected_sha=SHA,
+            installed_sha=SHA,
         )
         is True
     )
@@ -1827,29 +2336,41 @@ def test_unrelated_later_coo_field_change_does_not_invalidate_the_ceo_submit_rec
 
     assert whole_before != whole_after
     assert (
-        control.ceo_submit_receipt_binds(
-            receipt,
+        control.ceo_submit_sink_eligible(
             control_config=host.control_config,
-            admission_projection=observed_projection,
+            worker_config=worker_config,
+            worker_config_sha256=worker_config_sha256,
+            receipt=receipt,
+            binding=binding,
+            expected_sha=SHA,
+            installed_sha=SHA,
         )
         is True
     )
 
     host.control_config["ceo_submit_armed"] = False
     assert (
-        control.ceo_submit_receipt_binds(
-            receipt,
+        control.ceo_submit_sink_eligible(
             control_config=host.control_config,
-            admission_projection=observed_projection,
+            worker_config=worker_config,
+            worker_config_sha256=worker_config_sha256,
+            receipt=receipt,
+            binding=binding,
+            expected_sha=SHA,
+            installed_sha=SHA,
         )
         is False
     )
     host.control_config["ceo_submit_armed"] = True
     assert (
-        control.ceo_submit_receipt_binds(
-            receipt,
+        control.ceo_submit_sink_eligible(
             control_config={**host.control_config, "ceo_ingress_app_peer_uid": 459},
-            admission_projection=observed_projection,
+            worker_config=worker_config,
+            worker_config_sha256=worker_config_sha256,
+            receipt=receipt,
+            binding=binding,
+            expected_sha=SHA,
+            installed_sha=SHA,
         )
         is False
     )
@@ -2632,14 +3153,17 @@ def test_manual_config_edit_alone_does_not_make_the_ceo_submit_sink_eligible():
 
     assert (
         control.ceo_submit_sink_eligible(
-            control_config=hand_edited, receipt=None, binding=binding, expected_sha=SHA
+            control_config=hand_edited, worker_config=host.worker_config, worker_config_sha256=control.sha256_bytes(control.encode_config(host.worker_config)), receipt=None, binding=binding, expected_sha=SHA, installed_sha=SHA
         )
         is False
     )
     assert (
         control.ceo_submit_sink_eligible(
             control_config={**hand_edited, "coo_tick_interval_seconds": 15.0},
+            worker_config=host.worker_config,
+            worker_config_sha256=control.sha256_bytes(control.encode_config(host.worker_config)),
             receipt=None,
+            installed_sha=SHA,
             binding=binding,
             expected_sha=SHA,
         )
@@ -2648,7 +3172,10 @@ def test_manual_config_edit_alone_does_not_make_the_ceo_submit_sink_eligible():
     assert (
         control.ceo_submit_sink_eligible(
             control_config={"ceo_submit_armed": "true"},
+            worker_config=host.worker_config,
+            worker_config_sha256=control.sha256_bytes(control.encode_config(host.worker_config)),
             receipt=None,
+            installed_sha=SHA,
             binding=binding,
             expected_sha=SHA,
         )
@@ -2657,7 +3184,10 @@ def test_manual_config_edit_alone_does_not_make_the_ceo_submit_sink_eligible():
     assert (
         control.ceo_submit_sink_eligible(
             control_config={"ceo_submit_armed": False},
+            worker_config=host.worker_config,
+            worker_config_sha256=control.sha256_bytes(control.encode_config(host.worker_config)),
             receipt=None,
+            installed_sha=SHA,
             binding=binding,
             expected_sha=SHA,
         )
@@ -2690,7 +3220,10 @@ def test_direct_install_with_armed_config_does_not_make_the_ceo_submit_sink_elig
     assert (
         control.ceo_submit_sink_eligible(
             control_config=postimage,
+            worker_config=host.worker_config,
+            worker_config_sha256=control.sha256_bytes(control.encode_config(host.worker_config)),
             receipt=receipt,
+            installed_sha=other_sha,
             binding=binding,
             expected_sha=other_sha,
         )
@@ -2699,7 +3232,7 @@ def test_direct_install_with_armed_config_does_not_make_the_ceo_submit_sink_elig
     # The same armed config + the same receipt, but a DIFFERENT release identity.
     assert (
         control.ceo_submit_sink_eligible(
-            control_config=postimage, receipt=receipt, binding=binding, expected_sha=SHA
+            control_config=postimage, worker_config=host.worker_config, worker_config_sha256=control.sha256_bytes(control.encode_config(host.worker_config)), receipt=receipt, binding=binding, expected_sha=SHA, installed_sha=SHA
         )
         is False
     )
@@ -2710,7 +3243,10 @@ def test_direct_install_with_armed_config_does_not_make_the_ceo_submit_sink_elig
     assert (
         control.ceo_submit_sink_eligible(
             control_config=postimage,
+            worker_config=host.worker_config,
+            worker_config_sha256=control.sha256_bytes(control.encode_config(host.worker_config)),
             receipt=tampered,
+            installed_sha=other_sha,
             binding=binding,
             expected_sha=other_sha,
         )
@@ -2720,7 +3256,10 @@ def test_direct_install_with_armed_config_does_not_make_the_ceo_submit_sink_elig
     assert (
         control.ceo_submit_sink_eligible(
             control_config=drifted_config,
+            worker_config=host.worker_config,
+            worker_config_sha256=control.sha256_bytes(control.encode_config(host.worker_config)),
             receipt=receipt,
+            installed_sha=other_sha,
             binding=binding,
             expected_sha=other_sha,
         )
@@ -2730,7 +3269,10 @@ def test_direct_install_with_armed_config_does_not_make_the_ceo_submit_sink_elig
     assert (
         control.ceo_submit_sink_eligible(
             control_config=postimage,
+            worker_config=host.worker_config,
+            worker_config_sha256=control.sha256_bytes(control.encode_config(host.worker_config)),
             receipt={**receipt, "projection": {}},
+            installed_sha=other_sha,
             binding=binding,
             expected_sha=other_sha,
         )
@@ -2739,7 +3281,10 @@ def test_direct_install_with_armed_config_does_not_make_the_ceo_submit_sink_elig
     assert (
         control.ceo_submit_sink_eligible(
             control_config=postimage,
+            worker_config=host.worker_config,
+            worker_config_sha256=control.sha256_bytes(control.encode_config(host.worker_config)),
             receipt={**receipt, "schema_version": "not-the-schema"},
+            installed_sha=other_sha,
             binding=binding,
             expected_sha=other_sha,
         )
@@ -2759,7 +3304,7 @@ def test_only_the_transaction_produced_config_and_receipt_make_the_sink_eligible
 
     assert (
         control.ceo_submit_sink_eligible(
-            control_config=postimage, receipt=receipt, binding=binding, expected_sha=SHA
+            control_config=postimage, worker_config=host.worker_config, worker_config_sha256=control.sha256_bytes(control.encode_config(host.worker_config)), receipt=receipt, binding=binding, expected_sha=SHA, installed_sha=SHA
         )
         is True
     )
@@ -2767,20 +3312,23 @@ def test_only_the_transaction_produced_config_and_receipt_make_the_sink_eligible
     # Neighbouring states of the very same flow are all ineligible.
     assert (
         control.ceo_submit_sink_eligible(
-            control_config=postimage, receipt=None, binding=binding, expected_sha=SHA
+            control_config=postimage, worker_config=host.worker_config, worker_config_sha256=control.sha256_bytes(control.encode_config(host.worker_config)), receipt=None, binding=binding, expected_sha=SHA, installed_sha=SHA
         )
         is False
     )
     assert (
         control.ceo_submit_sink_eligible(
-            control_config=preimage, receipt=receipt, binding=binding, expected_sha=SHA
+            control_config=preimage, worker_config=host.worker_config, worker_config_sha256=control.sha256_bytes(control.encode_config(host.worker_config)), receipt=receipt, binding=binding, expected_sha=SHA, installed_sha=SHA
         )
         is False
     )
     assert (
         control.ceo_submit_sink_eligible(
             control_config={**postimage, "ceo_submit_armed": False},
+            worker_config=host.worker_config,
+            worker_config_sha256=control.sha256_bytes(control.encode_config(host.worker_config)),
             receipt=receipt,
+            installed_sha=SHA,
             binding=binding,
             expected_sha=SHA,
         )
@@ -2789,7 +3337,10 @@ def test_only_the_transaction_produced_config_and_receipt_make_the_sink_eligible
     assert (
         control.ceo_submit_sink_eligible(
             control_config=postimage,
+            worker_config=host.worker_config,
+            worker_config_sha256=control.sha256_bytes(control.encode_config(host.worker_config)),
             receipt=receipt,
+            installed_sha=SHA,
             binding=dataclasses.replace(binding, acl_valid=False),
             expected_sha=SHA,
         )
@@ -2798,7 +3349,10 @@ def test_only_the_transaction_produced_config_and_receipt_make_the_sink_eligible
     assert (
         control.ceo_submit_sink_eligible(
             control_config=postimage,
+            worker_config=host.worker_config,
+            worker_config_sha256=control.sha256_bytes(control.encode_config(host.worker_config)),
             receipt=receipt,
+            installed_sha=SHA,
             binding=dataclasses.replace(binding, present=False, app_peer_uid=-1),
             expected_sha=SHA,
         )
@@ -2815,7 +3369,10 @@ def test_only_the_transaction_produced_config_and_receipt_make_the_sink_eligible
     assert (
         control.ceo_submit_sink_eligible(
             control_config=disarmed.control_config,
+            worker_config=disarmed.worker_config,
+            worker_config_sha256=control.sha256_bytes(control.encode_config(disarmed.worker_config)),
             receipt=disarmed.receipt,
+            installed_sha=SHA,
             binding=disarmed.executive_app_binding(),
             expected_sha=SHA,
         )
@@ -2839,7 +3396,7 @@ def test_the_real_submit_ceo_intent_sink_admits_only_the_transaction_produced_st
     receipt = copy.deepcopy(host.receipt)
     assert (
         control.ceo_submit_sink_eligible(
-            control_config=postimage, receipt=receipt, binding=binding, expected_sha=SHA
+            control_config=postimage, worker_config=host.worker_config, worker_config_sha256=control.sha256_bytes(control.encode_config(host.worker_config)), receipt=receipt, binding=binding, expected_sha=SHA, installed_sha=SHA
         )
         is True
     )
@@ -2903,7 +3460,10 @@ def test_the_real_submit_ceo_intent_sink_admits_only_the_transaction_produced_st
     assert (
         control.ceo_submit_sink_eligible(
             control_config=hand_edited,
+            worker_config=host.worker_config,
+            worker_config_sha256=control.sha256_bytes(control.encode_config(host.worker_config)),
             receipt=None,
+            installed_sha=SHA,
             binding=binding,
             expected_sha=SHA,
         )

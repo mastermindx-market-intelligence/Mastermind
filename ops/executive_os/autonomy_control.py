@@ -207,6 +207,19 @@ _CEO_SUBMIT_PROJECTION_FIELDS = _CEO_SUBMIT_CONTROL_FIELDS | frozenset(
         "transaction_id",
     }
 )
+_CEO_SUBMIT_RECEIPT_FIELDS = frozenset(
+    {
+        "schema_version",
+        "state",
+        "operation",
+        "projection",
+        "projection_digest",
+        "transaction_id",
+        "observed_at",
+        "tool_version",
+    }
+)
+_CEO_SUBMIT_TRANSACTION_RE = re.compile(r"^autonomy-[0-9a-f]{12}$")
 
 
 def _fsync_directory(path: Path) -> None:
@@ -881,6 +894,63 @@ def ceo_submit_projection_digest(projection: Mapping[str, Any]) -> str:
     return sha256_bytes(_encoded_json(projection))
 
 
+def validate_ceo_submit_receipt_document(
+    receipt: Mapping[str, Any], *, armed: bool
+) -> bool:
+    """Validate the sealed receipt document without consulting live facts."""
+
+    if not isinstance(receipt, Mapping) or set(receipt) != _CEO_SUBMIT_RECEIPT_FIELDS:
+        return False
+    expected_state = "CEO_SUBMIT_ARMED" if armed else "CEO_SUBMIT_DISARMED"
+    expected_operation = "CEO_SUBMIT_ARM" if armed else "CEO_SUBMIT_DISARM"
+    if (
+        receipt.get("schema_version") != CEO_SUBMIT_RECEIPT_SCHEMA
+        or receipt.get("state") != expected_state
+        or receipt.get("operation") != expected_operation
+    ):
+        return False
+    projection = receipt.get("projection")
+    if (
+        not isinstance(projection, Mapping)
+        or set(projection) != _CEO_SUBMIT_PROJECTION_FIELDS
+    ):
+        return False
+    if projection.get("ceo_submit_armed") is not armed:
+        return False
+    transaction_id = receipt.get("transaction_id")
+    projected_transaction_id = projection.get("transaction_id")
+    if (
+        not isinstance(transaction_id, str)
+        or _CEO_SUBMIT_TRANSACTION_RE.fullmatch(transaction_id) is None
+        or transaction_id != projected_transaction_id
+    ):
+        return False
+    if any(
+        not isinstance(projection.get(field), str)
+        or _SHA_RE.fullmatch(projection[field]) is None
+        for field in ("release_sha", "installed_sha")
+    ):
+        return False
+    observed_at = receipt.get("observed_at")
+    if not isinstance(observed_at, str):
+        return False
+    try:
+        parsed_observed_at = datetime.strptime(
+            observed_at, "%Y-%m-%dT%H:%M:%SZ"
+        ).replace(tzinfo=UTC)
+    except (TypeError, ValueError):
+        return False
+    if _receipt_timestamp(parsed_observed_at) != observed_at:
+        return False
+    if receipt.get("tool_version") != TOOL_VERSION:
+        return False
+    try:
+        expected_digest = ceo_submit_projection_digest(projection)
+    except (TypeError, ValueError):
+        return False
+    return receipt.get("projection_digest") == expected_digest
+
+
 def build_ceo_submit_receipt(
     transaction: TransactionContext,
     admission: CeoSubmitAdmission,
@@ -889,7 +959,7 @@ def build_ceo_submit_receipt(
     now: datetime,
 ) -> dict[str, Any]:
     projection = ceo_submit_projection(transaction, admission, armed=armed)
-    return {
+    receipt = {
         "schema_version": CEO_SUBMIT_RECEIPT_SCHEMA,
         "state": "CEO_SUBMIT_ARMED" if armed else "CEO_SUBMIT_DISARMED",
         "operation": "CEO_SUBMIT_ARM" if armed else "CEO_SUBMIT_DISARM",
@@ -899,40 +969,9 @@ def build_ceo_submit_receipt(
         "observed_at": _receipt_timestamp(now),
         "tool_version": TOOL_VERSION,
     }
-
-
-def ceo_submit_receipt_binds(
-    receipt: Mapping[str, Any],
-    *,
-    control_config: Mapping[str, Any],
-    admission_projection: Mapping[str, Any],
-) -> bool:
-    """Re-derive the closed projection from the current config and re-bind.
-
-    Only the declared field set participates, so a later change to an unrelated
-    COO key leaves this True; a change to any authority-bearing field makes it
-    False.
-    """
-
-    if not isinstance(receipt, Mapping) or not isinstance(admission_projection, Mapping):
-        return False
-    if receipt.get("schema_version") != CEO_SUBMIT_RECEIPT_SCHEMA:
-        return False
-    projection = receipt.get("projection")
-    if not isinstance(projection, Mapping) or set(projection) != _CEO_SUBMIT_PROJECTION_FIELDS:
-        return False
-    recomputed = dict(admission_projection)
-    for field in _CEO_SUBMIT_CONTROL_FIELDS:
-        if field not in control_config:
-            return False
-        recomputed[field] = control_config[field]
-    if set(recomputed) != _CEO_SUBMIT_PROJECTION_FIELDS:
-        return False
-    try:
-        digest = ceo_submit_projection_digest(recomputed)
-    except (ArmTransactionError, TypeError, ValueError):
-        return False
-    return receipt.get("projection_digest") == digest
+    if not validate_ceo_submit_receipt_document(receipt, armed=armed):
+        raise CeoSubmitAdmissionError("ceo_submit_config_schema_drift")
+    return receipt
 
 
 def ceo_submit_effect_unknown_sticky(
@@ -1003,9 +1042,12 @@ def require_ceo_submit_preservation(
 def ceo_submit_sink_eligible(
     *,
     control_config: Mapping[str, Any],
+    worker_config: Mapping[str, Any],
+    worker_config_sha256: str,
     receipt: Mapping[str, Any] | None,
     binding: ExecutiveAppBinding,
     expected_sha: str,
+    installed_sha: str,
 ) -> bool:
     """SOURCE-side eligibility gate for the existing ``submit-ceo-intent`` sink.
 
@@ -1014,50 +1056,79 @@ def ceo_submit_sink_eligible(
     integration is a later wave -- so this function proves eligibility in source
     only and claims no runtime effect.
 
-    Eligible ONLY when the present control document arms the sink, a sealed ARM
-    receipt exists, that receipt names this exact release, the live host-observed
-    App binding still matches the receipt, and the closed projection recomputed
-    from (control config, binding, release sha) re-binds to the sealed digest.
-    A hand-edited ``ceo_submit_armed: true`` with no receipt, a receipt for a
-    different release, or a receipt that does not bind the present config is NOT
-    eligible.
+    Eligible ONLY when the present control and worker documents, exact installed
+    release, live host-observed App binding, and sealed ARM receipt independently
+    re-derive every authority-bearing projection field.  Unrelated control keys
+    remain outside that closed projection.
     """
 
     if not isinstance(control_config, Mapping) or control_config.get(
         "ceo_submit_armed"
     ) is not True:
         return False
-    if not isinstance(receipt, Mapping):
+    if not isinstance(worker_config, Mapping):
         return False
-    if receipt.get("schema_version") != CEO_SUBMIT_RECEIPT_SCHEMA:
+    worker_armed = worker_config.get("operator_harness_armed")
+    if worker_armed is not False:
         return False
-    if receipt.get("state") != "CEO_SUBMIT_ARMED" or receipt.get(
-        "operation"
-    ) != "CEO_SUBMIT_ARM":
-        return False
-    projection = receipt.get("projection")
     if (
-        not isinstance(projection, Mapping)
-        or set(projection) != _CEO_SUBMIT_PROJECTION_FIELDS
+        not isinstance(expected_sha, str)
+        or _SHA_RE.fullmatch(expected_sha) is None
+        or not isinstance(installed_sha, str)
+        or _SHA_RE.fullmatch(installed_sha) is None
+        or expected_sha != installed_sha
     ):
         return False
-    if projection.get("release_sha") != expected_sha:
+    if (
+        not isinstance(worker_config_sha256, str)
+        or len(worker_config_sha256) != 64
+    ):
         return False
+    if not validate_ceo_submit_receipt_document(receipt, armed=True):
+        return False
+    projection = receipt["projection"]
+    if (
+        projection["release_sha"] != expected_sha
+        or projection["installed_sha"] != installed_sha
+    ):
+        return False
+    projection_digest = receipt["projection_digest"]
     if not isinstance(binding, ExecutiveAppBinding) or not binding.present:
         return False
     if not _ceo_submit_binding_matches_control(control_config, binding):
         return False
-    recomputed = {
-        **dict(projection),
-        "release_sha": expected_sha,
-        "app_peer_user": binding.app_peer_user,
-        "app_binding_valid": binding.binding_valid,
-        "app_acl_valid": binding.acl_valid,
-        "app_topology_valid": binding.topology_valid,
-    }
-    return ceo_submit_receipt_binds(
-        receipt, control_config=control_config, admission_projection=recomputed
+    recomputed = {field: control_config[field] for field in _CEO_SUBMIT_CONTROL_FIELDS}
+    if set(recomputed) != _CEO_SUBMIT_CONTROL_FIELDS:
+        return False
+    recomputed.update(
+        {
+            "release_sha": expected_sha,
+            "installed_sha": installed_sha,
+            "app_peer_user": binding.app_peer_user,
+            "app_binding_valid": binding.binding_valid,
+            "app_acl_valid": binding.acl_valid,
+            "app_topology_valid": binding.topology_valid,
+            "worker_operator_harness_armed": worker_armed,
+            "worker_config_sha256": worker_config_sha256,
+            "transaction_id": receipt["transaction_id"],
+        }
     )
+    if set(recomputed) != _CEO_SUBMIT_PROJECTION_FIELDS:
+        return False
+    try:
+        digest = ceo_submit_projection_digest(recomputed)
+    except (ArmTransactionError, TypeError, ValueError):
+        return False
+    if (
+        projection["worker_operator_harness_armed"] is not worker_armed
+        or projection["worker_operator_harness_armed"] is not False
+    ):
+        return False
+    if worker_config_sha256 != projection["worker_config_sha256"]:
+        return False
+    if projection_digest != digest:
+        return False
+    return True
 
 
 _ACCEPTANCE_FIELDS = frozenset(
@@ -1640,9 +1711,12 @@ def evaluate_ceo_submit_status(
         )
     eligible = ceo_submit_sink_eligible(
         control_config=configs.control,
+        worker_config=configs.worker,
+        worker_config_sha256=configs.worker_sha256,
         receipt=receipt,
         binding=host.executive_app_binding(),
         expected_sha=request.expected_sha,
+        installed_sha=installed_sha,
     )
     state = "CEO_SUBMIT_ARMED" if eligible else "CEO_SUBMIT_ARMED_UNBOUND"
     return TransactionResult(
@@ -3366,10 +3440,24 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
         if not CEO_SUBMIT_RECEIPT.exists() or CEO_SUBMIT_RECEIPT.is_symlink():
             return None
         try:
-            payload, _raw = _root_json(
+            raw, _info = _read_root_file(
                 CEO_SUBMIT_RECEIPT, modes=frozenset({0o444}), uid=0, gid=0
             )
+
+            def object_pairs(pairs):
+                value = {}
+                for key, item in pairs:
+                    if key in value:
+                        raise ValueError("duplicate receipt field")
+                    value[key] = item
+                return value
+
+            payload = json.loads(raw.decode("utf-8"), object_pairs_hook=object_pairs)
         except HostControlError:
+            return None
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+            return None
+        if not isinstance(payload, dict):
             return None
         return payload
 
