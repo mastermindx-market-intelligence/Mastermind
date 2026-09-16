@@ -11,13 +11,16 @@ import ipaddress
 import re
 from pathlib import Path
 
-from control_plane.remote_worker_transport import MAX_FRAME_BYTES
+from control_plane.remote_worker_transport import (
+    MAX_FRAME_BYTES,
+    TransportValidationError,
+    validate_host_ref,
+)
 
 REMOTE_WORKER_GATEWAY_CONFIG_SCHEMA = "mastermind.remote_worker_gateway_config/v1"
 
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{1,127}$")
-_RESERVED_UNBOUND_HOST_REFS = frozenset({"local-unbound"})
 
 
 @dataclasses.dataclass(frozen=True)
@@ -41,13 +44,10 @@ class RemoteWorkerGatewayConfig:
     def __post_init__(self) -> None:
         if self.schema != REMOTE_WORKER_GATEWAY_CONFIG_SCHEMA:
             raise ValueError("remote worker gateway config schema is unsupported")
-        host_ref = self.host_ref
-        if (
-            not isinstance(host_ref, str)
-            or not _ID_RE.fullmatch(host_ref)
-            or host_ref in _RESERVED_UNBOUND_HOST_REFS
-        ):
-            raise ValueError("remote worker gateway host_ref is invalid")
+        try:
+            validate_host_ref(self.host_ref)
+        except TransportValidationError as exc:
+            raise ValueError("remote worker gateway host_ref is invalid") from exc
 
         try:
             listen_ip = ipaddress.ip_address(self.listen_host)

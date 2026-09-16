@@ -59,6 +59,11 @@ def test_transport_refuses_reserved_unbound_host_ref() -> None:
         build_request(_identity("local-unbound"), "status", {})
 
 
+def test_transport_refuses_host_ref_outside_owner_namespace() -> None:
+    with pytest.raises(TransportValidationError, match="transport identity is invalid"):
+        build_request(_identity("not-a-host-ref"), "status", {})
+
+
 def test_gateway_config_uses_same_opaque_host_ref_contract(tmp_path: Path) -> None:
     kwargs = _gateway_kwargs(tmp_path)
     config = RemoteWorkerGatewayConfig(host_ref=OPAQUE_HOST_REF, **kwargs)
@@ -66,6 +71,9 @@ def test_gateway_config_uses_same_opaque_host_ref_contract(tmp_path: Path) -> No
 
     with pytest.raises(ValueError, match="host_ref is invalid"):
         RemoteWorkerGatewayConfig(host_ref="local-unbound", **kwargs)
+
+    with pytest.raises(ValueError, match="host_ref is invalid"):
+        RemoteWorkerGatewayConfig(host_ref="not-a-host-ref", **kwargs)
 
 
 def test_gateway_config_does_not_coerce_non_string_host_identity(tmp_path: Path) -> None:

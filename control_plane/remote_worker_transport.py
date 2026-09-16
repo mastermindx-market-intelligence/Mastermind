@@ -21,6 +21,7 @@ REMOTE_BROKER_RESPONSE_SCHEMA = "mastermind.remote_worker_broker_response/v1"
 MAX_FRAME_BYTES = 1024 * 1024
 
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{1,127}$")
+_HOST_REF_RE = re.compile(r"^host-[A-Za-z0-9][A-Za-z0-9._-]{7,63}$")
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 _RESERVED_UNBOUND_HOST_REFS = frozenset({"local-unbound"})
 _REQUEST_KEYS = frozenset({
@@ -109,15 +110,22 @@ def _reject_non_finite(value: Any) -> None:
             _reject_non_finite(child)
 
 
+def validate_host_ref(value: Any) -> str:
+    if (
+        not isinstance(value, str)
+        or (
+            _HEX64_RE.fullmatch(value) is None
+            and _HOST_REF_RE.fullmatch(value) is None
+        )
+        or value in _RESERVED_UNBOUND_HOST_REFS
+    ):
+        raise TransportValidationError("transport identity is invalid")
+    return value
+
+
 def _validate_id(name: str, value: Any) -> str:
     if name == "host_ref":
-        if (
-            not isinstance(value, str)
-            or not _ID_RE.fullmatch(value)
-            or value in _RESERVED_UNBOUND_HOST_REFS
-        ):
-            raise TransportValidationError("transport identity is invalid")
-        return value
+        return validate_host_ref(value)
     if not isinstance(value, str) or not _ID_RE.fullmatch(value):
         raise TransportValidationError("transport identity is invalid")
     return value
