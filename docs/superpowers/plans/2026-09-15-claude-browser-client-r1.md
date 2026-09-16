@@ -72,3 +72,13 @@ For each of direct, scoped-child, sdk, denied and child-generated-deny, run the 
 Native acceptance requires exact final source/projection identities; permitted flows expose only the seven granted tools and return an actual snapshot/image; denied flows submit no form; broader parent permission cannot lift the generated child deny; native result is non-error and nonce-bound; the original parent consumes child results; owned process-group absence is observed. No real-account, fleet, browser-egress-firewall, full UID sweep or provider-surface single-fill acceptance follows.
 
 Publication is Draft/HOLD followed by independent exact-head review and current-base checks. The native Anthropic worker/PF1, credential owners #634/#663, Fleet #644, and held #473/#633 effects retain their owners. Real-account and Desktop integration are downstream capabilities, not excuses to weaken this source's boundaries.
+
+## Hosted-gate repair — September 16, 2026
+
+The first full hosted run (35058060537, job 104672301403) completed with one failure: D8 tokenized every non-test added line as Python and treated the report's HTTP status and synthetic character counts as service-account identities. The exact failure was reproduced on the same source workspace.
+
+The envelope adds `tests/test_ceo_submit_armed_composition.py` as a ninth path. Its original literal scanner, real topology defaults and positive identity-change controls remain intact. File-role classification excludes only Markdown under docs/research and JSON in the established non-runtime research/evidence subtree; executable code in those directories and other configuration paths remain guarded. The gate consumes per-file Git diffs instead of merging documentation and executable source into one token stream.
+
+Fourteen new classifier cases first failed. Eight real temporary-Git-repository cases verify documentation/evidence acceptance and source/config/script rejection through the actual D8 test. The full owning suite plus the existing three browser/capability suites passed 129 tests. No test is skipped, baselined, disabled or removed by this repair.
+
+Projector and native-fixture SHA-256 values still match the five completed native browser proofs. This repair does not rerun those provider-free proofs or claim new account, browser-resource, Desktop, credential or fleet activation. Publish on the same PR/branch, require fresh hosted CI and independent review of this guard change, and retain all production gates.

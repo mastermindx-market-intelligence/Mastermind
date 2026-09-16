@@ -96,6 +96,23 @@ def _added_line_numbers(path: Path, base: str) -> set[int]:
     return lines
 
 
+def _identity_guard_source_path(path: str) -> bool:
+    """Keep the identity guard on source/config, not narrative proof records.
+
+    Documentation is not Python source. Only the established non-runtime
+    research/evidence JSON subtree is exempted as data. Executable code under
+    either directory and every other configuration path remain guarded.
+    """
+    parts = Path(path).parts
+    if not parts or Path(path).is_absolute() or ".." in parts:
+        return True
+    if parts[0] in {"docs", "research"} and Path(path).suffix == ".md":
+        return False
+    if parts[:2] == ("research", "evidence") and Path(path).suffix == ".json":
+        return False
+    return True
+
+
 def _scan_added_identity_literals(added_lines: str) -> list[str]:
     flagged: list[str] = []
     for line in added_lines.splitlines():
@@ -441,14 +458,23 @@ def test_d8_template_topology_and_protected_defaults():
         ["git", "merge-base", "origin/master", "HEAD"], cwd=ROOT,
         check=True, capture_output=True, text=True,
     ).stdout.strip()
-    diff = subprocess.run(
-        ["git", "diff", "--unified=0", base, "HEAD", "--", ":!tests/"], cwd=ROOT,
-        check=True, capture_output=True, text=True,
+    changed = subprocess.run(
+        ["git", "diff", "--name-only", "-z", base, "HEAD", "--", ":!tests/"],
+        cwd=ROOT, check=True, capture_output=True, text=True,
     ).stdout
-    additions = "\n".join(
-        line[1:] for line in diff.splitlines()
-        if line.startswith("+") and not line.startswith("+++")
-    )
+    additions_by_path: dict[str, str] = {}
+    for path in changed.split("\0"):
+        if not path or not _identity_guard_source_path(path):
+            continue
+        diff = subprocess.run(
+            ["git", "diff", "--unified=0", base, "HEAD", "--", path], cwd=ROOT,
+            check=True, capture_output=True, text=True,
+        ).stdout
+        additions_by_path[path] = "\n".join(
+            line[1:] for line in diff.splitlines()
+            if line.startswith("+") and not line.startswith("+++")
+        )
+    additions = "\n".join(additions_by_path.values())
     positive = "\n".join(
         [
             "ceo_ingress_app_peer_uid = 459",
@@ -461,3 +487,71 @@ def test_d8_template_topology_and_protected_defaults():
     positive_hits = _scan_added_identity_literals(positive)
     assert positive_hits == ["459", "459", "501", "450", "459", "777"]
     assert _scan_added_identity_literals(additions) == []
+
+
+@pytest.mark.parametrize("path,guarded", [
+    ("docs/runbooks/browser.md", False),
+    ("research/browser-study.md", False),
+    ("research/evidence/browser-native.json", False),
+    ("scripts/new_account.py", True),
+    ("control_plane/new_account.py", True),
+    ("ops/executive_os/control.json.template", True),
+    ("config/new_identity.json", True),
+    ("app/new_identity.py", True),
+    ("docs/check_identity.py", True),
+    ("research/evidence/check_identity.py", True),
+    ("research/evidence/install.sh", True),
+    ("research/config/identity.json", True),
+    ("research/evidence-lookalike/identity.json", True),
+    ("other/research/evidence/identity.json", True),
+])
+def test_d8_identity_guard_scopes_non_runtime_records(path, guarded):
+    assert "_identity_guard_source_path" in globals(), "identity guard lacks file-role classification"
+    assert _identity_guard_source_path(path) is guarded
+
+
+def test_d8_identity_literal_positive_controls_remain_complete():
+    added = "peer_uid = 777\n_EXTRA_PEER = 459\nFALLBACK = 501\nALLOWED = (450, 459)"
+    assert _scan_added_identity_literals(added) == ["777", "459", "501", "450", "459"]
+
+
+@pytest.mark.parametrize("path,content,rejected", [
+    ("docs/runbooks/browser.md", "HTTP 401; input length 936\n", False),
+    ("research/evidence/browser.json", '{"char_count":936}\n', False),
+    ("scripts/identity.py", "peer_uid = 777\n", True),
+    ("config/identity.json", '{"peer_uid":777}\n', True),
+    ("ops/executive_os/identity.template", '{"peer_uid":459}\n', True),
+    ("docs/identity.py", "FALLBACK = 501\n", True),
+    ("research/evidence/identity.py", "ALLOWED = (450, 459)\n", True),
+    ("research/evidence/install.sh", "useradd -u 777 _mastermind_fixture\n", True),
+])
+def test_d8_real_git_diff_distinguishes_evidence_from_identity_changes(
+    tmp_path, monkeypatch, path, content, rejected,
+):
+    # This disposable Git repository is test data, not a company workspace.
+    root = tmp_path / "repo"
+    root.mkdir()
+    template = root / "control.json.template"
+    template.write_bytes(TEMPLATE.read_bytes())
+    def git(*args):
+        return subprocess.run(
+            ["git", "-c", "user.name=IdentityGuardFixture",
+             "-c", "user.email=fixture@example.invalid", *args],
+            cwd=root, check=True, capture_output=True, text=True,
+        )
+    git("init", "-q")
+    git("add", "--", "control.json.template")
+    git("commit", "-q", "-m", "fixture baseline")
+    git("update-ref", "refs/remotes/origin/master", "HEAD")
+    candidate = root / path
+    candidate.parent.mkdir(parents=True, exist_ok=True)
+    candidate.write_text(content)
+    git("add", "--", path)
+    git("commit", "-q", "-m", "fixture candidate")
+    monkeypatch.setitem(globals(), "ROOT", root)
+    monkeypatch.setitem(globals(), "TEMPLATE", template)
+    if rejected:
+        with pytest.raises(AssertionError):
+            test_d8_template_topology_and_protected_defaults()
+    else:
+        test_d8_template_topology_and_protected_defaults()
