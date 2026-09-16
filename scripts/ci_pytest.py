@@ -20,6 +20,7 @@ where the check name is untouched.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import re
 import subprocess
 import sys
@@ -200,11 +201,22 @@ def partition_modules(
 ) -> tuple[tuple[str, ...], ...]:
     """Split ``included`` into ``jobs`` shards that exactly re-cover it.
 
-    Round-robin over the caller's order rather than contiguous slicing: the
-    included set arrives sorted by path, so neighbouring modules tend to be
-    the same subsystem and therefore similar in cost. Dealing them out one at
-    a time spreads each subsystem across every shard, which keeps the shards
-    balanced without a committed timing file that could silently go stale.
+    A module's shard is a stable function of its own path, not of its position
+    in the list. Round-robin would be perfectly balanced, but adding a single
+    test file shifts every module after it into a different shard -- and since
+    sharding changes which modules share a pytest process, that reshuffle can
+    surface a latent cross-module ordering dependency in a completely unrelated
+    PR. (This is not hypothetical: `--jobs 4` exposed one on its first CI run,
+    where `tests/test_governance_ledger.py` was leaking `sys.modules` stubs.)
+    Hashing keeps that blast radius to the file actually being added or removed.
+
+    sha256 rather than ``hash()``: the builtin is salted per process, so the
+    same checkout would shard differently on every run and a failure would not
+    reproduce.
+
+    Balance is close enough without a committed timing file that could go
+    stale: 612 modules over 4 shards land within a few percent of even, and the
+    shard sizes are printed in the plan line so drift is visible.
     """
 
     if jobs < 1:
@@ -215,8 +227,9 @@ def partition_modules(
             f"({len(included)})"
         )
     buckets: list[list[str]] = [[] for _ in range(jobs)]
-    for index, path in enumerate(included):
-        buckets[index % jobs].append(path)
+    for path in included:
+        digest = hashlib.sha256(path.encode("utf-8")).digest()
+        buckets[int.from_bytes(digest[:8], "big") % jobs].append(path)
     shards = tuple(tuple(bucket) for bucket in buckets)
     verify_partition(included, shards)
     return shards

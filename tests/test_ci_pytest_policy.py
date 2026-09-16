@@ -923,18 +923,57 @@ def test_shard_plan_is_a_total_disjoint_cover(jobs):
     assert len(flattened) == len(set(flattened))
 
 
-@pytest.mark.parametrize("jobs", [2, 3, 4, 5, 8])
-def test_shard_plan_is_balanced_within_one_module(jobs):
-    included = tuple(f"tests/test_m{index:03d}.py" for index in range(37))
-    sizes = [len(shard) for shard in cip.partition_modules(included, jobs=jobs)]
-    assert max(sizes) - min(sizes) <= 1
+def test_real_shard_plan_stays_reasonably_balanced():
+    # Hash assignment trades exact evenness for stability, so pin the real
+    # repository's actual spread rather than an idealised one.
+    gate = cip.resolve_gate(_ROOT)
+    sizes = [len(shard) for shard in cip.partition_modules(gate["included"], jobs=4)]
+    assert min(sizes) >= 0.75 * (len(gate["included"]) / 4)
+    assert max(sizes) <= 1.25 * (len(gate["included"]) / 4)
 
 
-def test_shard_plan_is_deterministic():
+def test_shard_plan_is_deterministic_across_processes():
+    """sha256, never the salted builtin `hash()`.
+
+    A per-process salt would shard the same checkout differently on every run,
+    so a shard-specific failure could not be reproduced. Pin an exact expected
+    assignment: this fails if the hash function or its input ever changes.
+    """
     included = tuple(f"tests/test_m{index:03d}.py" for index in range(20))
-    assert cip.partition_modules(included, jobs=4) == cip.partition_modules(
-        included, jobs=4
-    )
+    first = cip.partition_modules(included, jobs=4)
+    assert first == cip.partition_modules(included, jobs=4)
+
+    import hashlib
+
+    expected: list[list[str]] = [[] for _ in range(4)]
+    for path in included:
+        digest = hashlib.sha256(path.encode("utf-8")).digest()
+        expected[int.from_bytes(digest[:8], "big") % 4].append(path)
+    assert first == tuple(tuple(bucket) for bucket in expected)
+
+
+def test_adding_a_module_does_not_move_the_others():
+    """The stability property that motivated hashing over round-robin.
+
+    Sharding changes which modules share a pytest process, so a reshuffle can
+    surface a latent cross-module ordering dependency. Round-robin moved every
+    module after an insertion; hashing moves only the inserted one, keeping
+    that blast radius on the PR that actually caused it.
+    """
+    before = tuple(f"tests/test_m{index:03d}.py" for index in range(40))
+    after = tuple(sorted(before + ("tests/test_aaa_brand_new.py",)))
+    placement_before = {
+        path: index
+        for index, shard in enumerate(cip.partition_modules(before, jobs=4))
+        for path in shard
+    }
+    placement_after = {
+        path: index
+        for index, shard in enumerate(cip.partition_modules(after, jobs=4))
+        for path in shard
+    }
+    moved = [p for p in before if placement_before[p] != placement_after[p]]
+    assert moved == []
 
 
 def test_single_job_shard_plan_is_the_whole_included_set():
@@ -988,7 +1027,11 @@ def test_plan_line_reports_shard_sizes_and_default_omits_them():
     )
     rendered = cip.format_plan(plan, shards=shards)
     assert "jobs=3" in rendered
-    assert "shard_modules=3,3,3" in rendered
+    # Sizes are whatever the hash produced; what the plan line must prove is
+    # that the printed per-shard counts still add up to `running`.
+    sizes = rendered.split("shard_modules=")[1].split()[0]
+    assert len(sizes.split(",")) == 3
+    assert sum(int(size) for size in sizes.split(",")) == plan["running"]
 
 
 def test_sharded_gate_runs_every_resolved_module_once(tmp_path, monkeypatch):
