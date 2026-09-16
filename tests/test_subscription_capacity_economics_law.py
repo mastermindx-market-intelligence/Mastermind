@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 
@@ -66,7 +67,7 @@ def test_capacity_law_forbids_quota_burn_theater_and_limit_circumvention() -> No
 def test_capacity_law_pins_vector_ordering_and_provider_preference_role() -> None:
     law = _text(LAW)
     for phrase in (
-        "Pareto/lexicographic",
+        "Ranking MUST preserve a **Pareto/lexicographic** decision boundary",
         "strictly dominated",
         "documented lexicographic ordering",
         "MUST NOT override a stronger stage",
@@ -87,6 +88,57 @@ def test_changing_external_numbers_are_not_routing_authority_without_receipts() 
         "receipt/snapshot digest",
     ):
         assert phrase in memo
+
+
+_DECISION_BEARING = re.compile(
+    r"\b(?:route|routing|size|sizing|allocate|allocation|rank|ranks|ranking|headroom|capacity_known)\b",
+    re.IGNORECASE,
+)
+_VOLATILE_QUANTITATIVE = re.compile(
+    r"(?:\$\s*\d|\b\d+(?:\.\d+)?\s*(?:%|[KMBT]\b|tokens?\b|agents?\b|lanes?\b|concurrent\b))",
+    re.IGNORECASE,
+)
+_ROUTING_AUTHORITY_MARKERS = (
+    "UNVERIFIED_FOR_ROUTING",
+    "fresh Provider Control",
+    "receipt/snapshot digest",
+    "immutable source commit",
+)
+
+
+def _unreceipted_decision_quantitative_claims(text: str) -> list[str]:
+    violations: list[str] = []
+    for paragraph in re.split(r"\n\s*\n", text):
+        for sentence in re.split(r"(?<=[.!?])\s+", paragraph):
+            if not _DECISION_BEARING.search(sentence):
+                continue
+            if not _VOLATILE_QUANTITATIVE.search(sentence):
+                continue
+            if any(marker in sentence for marker in _ROUTING_AUTHORITY_MARKERS):
+                continue
+            violations.append(sentence)
+    return violations
+
+
+def test_dated_application_routes_direct_minimax_only_from_fresh_provider_control() -> None:
+    memo = _text(MEMO)
+    assert (
+        "If a fresh Provider Control observation shows the direct MiniMax pool eligible with headroom, "
+        "test routine M3-family demand against that direct pool first under the ordering law; absent "
+        "that observation the pool ranks from UNKNOWN."
+    ) in memo
+    assert "while a large legitimate direct MiniMax pool is idle and eligible" not in memo
+
+
+def test_dated_application_rejects_unreceipted_quantitative_routing_claims() -> None:
+    memo = _text(MEMO)
+    assert _unreceipted_decision_quantitative_claims(memo) == []
+
+    violating_mutant = memo + """
+
+The MiniMax Ultra Token Plan provides 12.5B M3 tokens per month and 7 concurrent agents at $1,188/year. Size the M3 cohort at 6 concurrent lanes and route all routine M3 demand to the direct plan on that basis; this establishes current headroom for allocation.
+"""
+    assert _unreceipted_decision_quantitative_claims(violating_mutant)
 
 
 def test_capacity_law_distinguishes_direct_workhorse_and_aggregator_breadth() -> None:

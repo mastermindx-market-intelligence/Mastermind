@@ -180,7 +180,7 @@ MiniMax direct plans also expose M2.7. Treat it as a candidate economical fast/s
 
 For sustained MiniMax-family work, the direct Token Plan is the intended concentrated-workhorse candidate **only after fresh Provider Control evidence proves current entitlement, headroom, concurrency, and usage-policy eligibility**. OpenCode remains valuable access to MiniMax for diversification/overflow/review, but Go M3 consumes the same shared Go native windows used by Go's other models.
 
-Therefore, while a large legitimate direct MiniMax pool is idle and eligible, routine M3-family demand should generally be tested against that direct pool first. Spending shared Go allowance on M3 has a portfolio opportunity cost because it reduces the same Go resource available for Qwen/Kimi/GLM/DeepSeek/Grok choices.
+If a fresh Provider Control observation shows the direct MiniMax pool eligible with headroom, test routine M3-family demand against that direct pool first under the ordering law; absent that observation the pool ranks from UNKNOWN. Spending shared Go allowance on M3 has a portfolio opportunity cost because it reduces the same Go resource available for Qwen/Kimi/GLM/DeepSeek/Grok choices.
 
 OpenCode's economic advantage is **breadth under a shared fixed-fee resource with model-dependent debit economics**, not a sum of independent model wallets.
 
