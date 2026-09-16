@@ -664,6 +664,91 @@ def test_temporary_replaced_at_cleanup_boundary_is_not_unlinked(
         applier.os.close(parent_descriptor)
 
 
+def test_quarantine_replaced_after_validation_is_not_unlinked(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle, install_root = _bundle(tmp_path)
+    artifact = sorted(bundle.artifacts, key=lambda row: str(row.destination))[0]
+    artifact.destination.parent.mkdir(parents=True, mode=0o700)
+    prepared = applier.prepare_deployment(
+        bundle,
+        deployment.plan_deployment(bundle, {}),
+        install_root=install_root,
+        expected_uid=install_root.stat().st_uid,
+        expected_gid=install_root.stat().st_gid,
+        operation_key="web-sol-install1-transactional-applier-source-20260916-sol-001",
+    )
+    temporary_name = applier._temporary_path(artifact, prepared).name
+    quarantine_name = applier._cleanup_quarantine_name(temporary_name, prepared)
+    parent_descriptor = applier._open_verified_directory(
+        artifact.destination.parent,
+        prepared,
+    )
+    foreign_name = "foreign-cleanup-owner-file"
+    foreign = b"foreign-bytes-substituted-after-validation"
+    original_matches = applier._named_file_matches
+    injected = False
+
+    try:
+        applier._write_exact_temporary_at(
+            parent_descriptor,
+            temporary_name,
+            artifact.content,
+            artifact.mode,
+            prepared,
+        )
+        foreign_descriptor = applier.os.open(
+            foreign_name,
+            applier.os.O_WRONLY | applier.os.O_CREAT | applier.os.O_EXCL,
+            artifact.mode,
+            dir_fd=parent_descriptor,
+        )
+        try:
+            applier.os.write(foreign_descriptor, foreign)
+            applier.os.fsync(foreign_descriptor)
+        finally:
+            applier.os.close(foreign_descriptor)
+
+        def validate_then_replace(
+            descriptor: int,
+            name: str,
+            content: bytes,
+            mode: int,
+            current: applier.PreparedDeployment,
+        ) -> bool:
+            nonlocal injected
+            matched = original_matches(descriptor, name, content, mode, current)
+            if matched and name == quarantine_name and not injected:
+                injected = True
+                applier.os.rename(
+                    foreign_name,
+                    quarantine_name,
+                    src_dir_fd=descriptor,
+                    dst_dir_fd=descriptor,
+                )
+            return matched
+
+        monkeypatch.setattr(applier, "_named_file_matches", validate_then_replace)
+
+        with pytest.raises(
+            applier.WebSolDeploymentApplyError,
+            match="APPLY_EFFECT_UNKNOWN",
+        ):
+            applier._cleanup_exact_temporary_at(
+                parent_descriptor,
+                temporary_name,
+                artifact.content,
+                artifact.mode,
+                prepared,
+            )
+
+        assert injected is True
+        assert (artifact.destination.parent / temporary_name).read_bytes() == foreign
+    finally:
+        applier.os.close(parent_descriptor)
+
+
 def test_cleanup_quarantine_blocks_false_clean_reconciliation(
     tmp_path: Path,
 ) -> None:
