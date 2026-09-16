@@ -60,7 +60,15 @@ def test_transport_refuses_reserved_unbound_host_ref() -> None:
 
 
 def test_transport_refuses_host_ref_outside_owner_namespace() -> None:
-    for invalid in ("not-a-host-ref", "host-capacity-a1b2c3d4"):
+    invalid_values = (
+        "not-a-host-ref",
+        "host-capacity-a1b2c3d4",
+        "A" * 64,
+        "host-" + "B" * 64,
+        "host-" + "a" * 63,
+        "host-" + "a" * 65,
+    )
+    for invalid in invalid_values:
         with pytest.raises(TransportValidationError, match="transport identity is invalid"):
             build_request(_identity(invalid), "status", {})
 
@@ -70,10 +78,19 @@ def test_gateway_config_uses_same_opaque_host_ref_contract(tmp_path: Path) -> No
     config = RemoteWorkerGatewayConfig(host_ref=OPAQUE_HOST_REF, **kwargs)
     assert config.host_ref == OPAQUE_HOST_REF
 
-    with pytest.raises(ValueError, match="host_ref is invalid"):
-        RemoteWorkerGatewayConfig(host_ref="local-unbound", **kwargs)
+    legacy = RemoteWorkerGatewayConfig(host_ref="a" * 64, **kwargs)
+    assert legacy.host_ref == "a" * 64
 
-    for invalid in ("not-a-host-ref", "host-capacity-a1b2c3d4"):
+    invalid_values = (
+        "local-unbound",
+        "not-a-host-ref",
+        "host-capacity-a1b2c3d4",
+        "A" * 64,
+        "host-" + "B" * 64,
+        "host-" + "a" * 63,
+        "host-" + "a" * 65,
+    )
+    for invalid in invalid_values:
         with pytest.raises(ValueError, match="host_ref is invalid"):
             RemoteWorkerGatewayConfig(host_ref=invalid, **kwargs)
 
