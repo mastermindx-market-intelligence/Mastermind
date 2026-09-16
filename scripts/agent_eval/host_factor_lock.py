@@ -1,18 +1,26 @@
-"""Host-generation factor-lock verification for Agent Evaluation.
+"""Host-generation evidence-lock verification for Agent Evaluation.
 
 This module consumes existing finalized Agent Evaluation run receipts plus the
 canonical Executive host-capacity snapshot.  It does not persist a new schema,
 allocate hosts, choose routes, rank workers, or widen the evaluation lifecycle.
 
-A run proves a host observation only when its immutable ``evidence.artifacts``
-list already binds the exact SHA-256 digest of the canonical host-capacity
-snapshot bytes.  A pair is host-factor-locked only when both bound snapshots
-validate under the Executive owner and expose the same opaque ``host_ref`` and
-``boot_ref``.
+A run is *evidence-locked* to a host observation only when its immutable
+``evidence.artifacts`` list binds the exact SHA-256 digest of canonical
+``mastermind.host_capacity_snapshot/v1`` bytes.  A pair passes this verifier
+only when both bound snapshots validate under the Executive owner and expose
+the same opaque ``host_ref`` and ``boot_ref``.
 
-The resulting verdict is intentionally narrow: it proves host/boot identity
-parity for the pair.  It does not prove provider-principal, harness, model,
-context, tool, retry, or full environment parity and therefore cannot by itself
+Important proof ceiling: this does **not** prove that either run's process
+actually executed on the referenced host generation.  Current Agent Evaluation
+run v1 does not bind an Executive Job/Attempt/Worker identity or another
+owner-native process-to-host receipt strongly enough to make that causal claim.
+A later producer integration must supply that evidence before a comparison may
+claim full execution-host factor equality.
+
+The resulting verdict is intentionally narrow.  It proves immutable run-to-
+host-snapshot evidence binding plus snapshot identity parity.  It does not
+prove process-to-host causality, provider-principal, harness, model, context,
+tool, retry, or full environment parity and therefore cannot by itself
 establish a MODEL_EFFECT or HARNESS_EFFECT claim.
 """
 from __future__ import annotations
@@ -29,7 +37,7 @@ from control_plane.executive_host_capacity import (
 from scripts.agent_eval import contracts
 from scripts.agent_eval.errors import ContractDefect, ContractError
 
-HOST_FACTOR_LOCK_SCOPE = "HOST_FACTOR_LOCK_VERIFIED"
+HOST_FACTOR_EVIDENCE_LOCK_SCOPE = "HOST_FACTOR_EVIDENCE_LOCK_VERIFIED"
 
 
 def _refuse(path: str, code: str, message: str) -> None:
@@ -59,13 +67,13 @@ def host_capacity_snapshot_digest(snapshot: Mapping[str, Any]) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def _bound_host_identity(
+def _bound_host_evidence(
     run: Mapping[str, Any],
     snapshot: Mapping[str, Any],
     *,
     side: str,
 ) -> dict[str, Any]:
-    """Validate one run and prove it binds the supplied host snapshot."""
+    """Validate one run and prove it binds the supplied host snapshot bytes."""
 
     contracts.validate_run_shape(run)
     try:
@@ -107,22 +115,22 @@ def _bound_host_identity(
     }
 
 
-def verify_host_factor_lock(
+def verify_host_factor_evidence_lock(
     left_run: Mapping[str, Any],
     left_snapshot: Mapping[str, Any],
     right_run: Mapping[str, Any],
     right_snapshot: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Prove that two finalized runs used the same opaque host generation.
+    """Prove that two finalized runs bind the same host-generation evidence.
 
     This verifier is fail-closed.  A missing run-to-snapshot evidence binding,
     malformed owner snapshot, host mismatch, or boot mismatch refuses the
-    factor lock.  The returned projection deliberately omits artifact paths and
-    any routing/admission recommendation.
+    evidence lock.  The returned projection deliberately omits artifact paths,
+    any process-to-host assertion, and any routing/admission recommendation.
     """
 
-    left = _bound_host_identity(left_run, left_snapshot, side="left")
-    right = _bound_host_identity(right_run, right_snapshot, side="right")
+    left = _bound_host_evidence(left_run, left_snapshot, side="left")
+    right = _bound_host_evidence(right_run, right_snapshot, side="right")
 
     defects: list[ContractDefect] = []
     if left["host_ref"] != right["host_ref"]:
@@ -130,7 +138,7 @@ def verify_host_factor_lock(
             ContractDefect(
                 "$.host_ref",
                 "HOST_FACTOR_HOST_MISMATCH",
-                "factor-locked runs must use the same opaque host_ref",
+                "host-evidence-locked runs must reference the same opaque host_ref",
             )
         )
     if left["boot_ref"] != right["boot_ref"]:
@@ -138,14 +146,14 @@ def verify_host_factor_lock(
             ContractDefect(
                 "$.boot_ref",
                 "HOST_FACTOR_BOOT_MISMATCH",
-                "factor-locked runs must use the same boot_ref generation",
+                "host-evidence-locked runs must reference the same boot_ref generation",
             )
         )
     if defects:
         raise ContractError(defects)
 
     return {
-        "scope": HOST_FACTOR_LOCK_SCOPE,
+        "scope": HOST_FACTOR_EVIDENCE_LOCK_SCOPE,
         "host_ref": left["host_ref"],
         "boot_ref": left["boot_ref"],
         "left": {
@@ -164,7 +172,7 @@ def verify_host_factor_lock(
 
 
 __all__ = [
-    "HOST_FACTOR_LOCK_SCOPE",
+    "HOST_FACTOR_EVIDENCE_LOCK_SCOPE",
     "host_capacity_snapshot_digest",
-    "verify_host_factor_lock",
+    "verify_host_factor_evidence_lock",
 ]
