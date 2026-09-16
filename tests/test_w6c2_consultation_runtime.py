@@ -13,6 +13,7 @@ import pytest
 from common.agent_dialogue_consultation_contract import (
     CONSULTATION_SCHEMA,
     CONSULTATION_V2_SCHEMA,
+    GROK_CONSULTATION_SCHEMA,
     RECEIPT_KEYS,
     build_consultation,
     validate_consultation,
@@ -20,6 +21,7 @@ from common.agent_dialogue_consultation_contract import (
 from control_plane.consultation_runtime import (
     ConsultationConflict,
     ConsultationRuntime,
+    _consultation_intent_payload,
     consultation_projection,
 )
 from control_plane.dialogue_source_resolution import ConsultationSourceIdentity
@@ -692,6 +694,7 @@ def test_runtime_binding_id_grammar_accepts_exact_runtime_ids(tmp_path: Path) ->
 
     assert intent.event.event_type == "INTENT"
     assert intent.event.payload["recipient_binding"] == recipient_binding
+    assert intent.event.payload["consultation_schema"] == CONSULTATION_SCHEMA
     assert len(frame["recipient_binding"]["binding_id"]) == 45
 
 
@@ -1695,3 +1698,42 @@ def test_requester_consumption_requires_exact_calling_attempt(tmp_path: Path) ->
         observed_at="2026-09-14T00:05:00Z",
     )
     assert consumed.event.payload["requester_actor_ref"]["attempt_id"] == workers[0][1]
+
+
+def test_v3_intent_payload_is_exact_while_runtime_admission_stays_dark(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path)
+    consultations = _consultations(runtime, tmp_path)
+    workers = _workers(runtime)
+    frame, semantic_bundle = _frame(
+        tmp_path,
+        requester=workers[0],
+        recipient=workers[1],
+    )
+    grok = copy.deepcopy(frame)
+    grok["schema"] = GROK_CONSULTATION_SCHEMA
+    grok["recipient_binding"]["reasoning_surface"] = "grok-bot"
+    grok["fingerprint"] = ""
+    grok = build_consultation(grok)
+
+    payload = _consultation_intent_payload(
+        grok,
+        carrier_ref="dialogue://fixture/grok-identity",
+        observed_at="2026-09-14T00:00:00Z",
+    )
+    assert payload["consultation_schema"] == GROK_CONSULTATION_SCHEMA
+    assert payload["semantic_fingerprint"] == grok["fingerprint"]
+    assert payload["recipient_binding"]["reasoning_surface"] == "grok-bot"
+
+    with pytest.raises(StateConflict, match="current Runtime binding"):
+        consultations.intent(
+            grok,
+            requester_attempt_id=workers[0][1],
+            carrier_ref="dialogue://fixture/grok-identity",
+            observed_at="2026-09-14T00:00:00Z",
+            repository_root=semantic_bundle[1],
+        )
+    assert runtime.events.list_events(
+        aggregate_type="consultation", aggregate_id=grok["consultation_id"]
+    ) == []

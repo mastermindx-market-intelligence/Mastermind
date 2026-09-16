@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from common.agent_dialogue_consultation_contract import (
-    CONSULTATION_SCHEMA,
     CONSULTATION_V2_SCHEMA,
     canonical_consultation_json,
     validate_consultation,
@@ -130,6 +129,37 @@ def _question_message_key(item: Mapping[str, Any]) -> str:
     return str(item["correlation"]["request_message_key"])
 
 
+def _consultation_intent_payload(
+    item: Mapping[str, Any],
+    *,
+    carrier_ref: str,
+    observed_at: str,
+) -> dict[str, Any]:
+    return {
+        "schema_version": CONSULTATION_INTENT_SCHEMA,
+        "consultation_schema": item["schema"],
+        "message_key": item["message_key"],
+        "consultation_id": item["consultation_id"],
+        "semantic_fingerprint": item["fingerprint"],
+        "carrier_ref": str(carrier_ref),
+        "requester_actor_ref": copy.deepcopy(item["requester_actor_ref"]),
+        "recipient_actor_ref": copy.deepcopy(item["recipient_actor_ref"]),
+        "recipient_peer_ref": copy.deepcopy(item["recipient_peer_ref"]),
+        "recipient_binding": copy.deepcopy(item["recipient_binding"]),
+        "correlation": copy.deepcopy(item["correlation"]),
+        "artifact_revisions": copy.deepcopy(item["artifact_revisions"]),
+        "artifact_revision_digest": hashlib.sha256(
+            canonical_consultation_json(item["artifact_revisions"]).encode()
+        ).hexdigest(),
+        "valid_until": item["valid_until"],
+        "deadline_ms": item["deadline_ms"],
+        "response_budget": copy.deepcopy(item["response_budget"]),
+        "payload_digest": item["fingerprint"],
+        "question_digest": hashlib.sha256(item["question"].encode()).hexdigest(),
+        "observed_at": _utc(observed_at),
+    }
+
+
 class ConsultationRuntime:
     """Own consultation facts without changing Job/Attempt lifecycle state."""
 
@@ -208,29 +238,11 @@ class ConsultationRuntime:
         self._validate_artifact_revisions(item, repository_root)
         self._require_requester(item, requester_attempt_id)
         self._require_current_recipient(item)
-        payload = {
-            "schema_version": CONSULTATION_INTENT_SCHEMA,
-            "consultation_schema": CONSULTATION_SCHEMA,
-            "message_key": item["message_key"],
-            "consultation_id": item["consultation_id"],
-            "semantic_fingerprint": item["fingerprint"],
-            "carrier_ref": str(carrier_ref),
-            "requester_actor_ref": copy.deepcopy(item["requester_actor_ref"]),
-            "recipient_actor_ref": copy.deepcopy(item["recipient_actor_ref"]),
-            "recipient_peer_ref": copy.deepcopy(item["recipient_peer_ref"]),
-            "recipient_binding": copy.deepcopy(item["recipient_binding"]),
-            "correlation": copy.deepcopy(item["correlation"]),
-            "artifact_revisions": copy.deepcopy(item["artifact_revisions"]),
-            "artifact_revision_digest": hashlib.sha256(
-                canonical_consultation_json(item["artifact_revisions"]).encode()
-            ).hexdigest(),
-            "valid_until": item["valid_until"],
-            "deadline_ms": item["deadline_ms"],
-            "response_budget": copy.deepcopy(item["response_budget"]),
-            "payload_digest": item["fingerprint"],
-            "question_digest": hashlib.sha256(item["question"].encode()).hexdigest(),
-            "observed_at": trusted_observed_at,
-        }
+        payload = _consultation_intent_payload(
+            item,
+            carrier_ref=carrier_ref,
+            observed_at=trusted_observed_at,
+        )
         return self._append(
             item,
             "INTENT",

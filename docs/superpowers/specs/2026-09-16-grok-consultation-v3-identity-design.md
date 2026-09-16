@@ -32,7 +32,7 @@ Introduce an honest, versioned consultation QUESTION identity for the trusted `g
 
 ### Runtime receipt
 
-`ConsultationRuntime.intent` persists the exact validated `item["schema"]` rather than hard-coding v1. No dispatch, native-acceptance, provider, or credential behavior is added.
+`ConsultationRuntime.intent` persists the exact validated `item["schema"]` rather than hard-coding v1. The pure INTENT payload producer is tested with v3, while the full v3 runtime call must still fail current-recipient admission and emit zero events because this wave creates no Grok SessionTarget. No dispatch, native-acceptance, provider, or credential behavior is added.
 
 ### Session-target vocabulary
 

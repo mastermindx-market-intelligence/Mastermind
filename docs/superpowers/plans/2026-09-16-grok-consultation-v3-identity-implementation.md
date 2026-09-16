@@ -32,7 +32,7 @@
 - Consumes: protected master `0fe8074f...`; accepted W6-C2 head `de190b2c...`.
 - Produces: a passing dependency baseline on the same branch with obsolete v2 Grok semantics removed.
 
-- [ ] **Step 1: Commit the approved design and plan**
+- [x] **Step 1: Commit the approved design and plan**
 
 ```bash
 git add docs/superpowers/specs/2026-09-16-grok-consultation-v3-identity-design.md \
@@ -40,7 +40,7 @@ git add docs/superpowers/specs/2026-09-16-grok-consultation-v3-identity-design.m
 git commit -m "docs(grok): freeze consultation v3 identity design"
 ```
 
-- [ ] **Step 2: Merge the accepted repair and resolve obsolete feature paths to the repair side**
+- [x] **Step 2: Merge the accepted repair and resolve obsolete feature paths to the repair side**
 
 ```bash
 git merge --no-ff --no-commit de190b2c7e878fd5a4cf6ecb2fc58b34b058ee74
@@ -59,13 +59,13 @@ git add -A
 git commit -m "merge: compose accepted W6-C2 repair before Grok v3"
 ```
 
-- [ ] **Step 3: Merge current protected master**
+- [x] **Step 3: Merge current protected master**
 
 ```bash
 git merge --no-ff --no-edit 0fe8074ff953b2ced9025ed40f0f66019c759967
 ```
 
-- [ ] **Step 4: Verify the dependency baseline**
+- [x] **Step 4: Verify the dependency baseline**
 
 ```bash
 python3 -m pytest -q -p no:randomly -p no:cacheprovider -o addopts='' \
@@ -89,7 +89,7 @@ Expected: all tests pass; no Grok v2 producer constant or selector remains.
 - Consumes: protected `CONSULTATION_SCHEMA` v1 and `CONSULTATION_V2_SCHEMA` v2.
 - Produces: `GROK_CONSULTATION_SCHEMA`, `CONSULTATION_SCHEMA_REASONING_SURFACES`, and `consultation_schema_for_reasoning_surface(reasoning_surface: Any) -> str`.
 
-- [ ] **Step 1: Write failing compatibility and v3 tests**
+- [x] **Step 1: Write failing compatibility and v3 tests**
 
 ```python
 def test_v3_accepts_only_grok_question_shape() -> None:
@@ -118,7 +118,7 @@ def test_surface_selector_maps_grok_to_v3_without_widening_v2() -> None:
         validate_consultation(v2)
 ```
 
-- [ ] **Step 2: Run the new tests and confirm RED**
+- [x] **Step 2: Run the new tests and confirm RED**
 
 ```bash
 python3 -m pytest -q -p no:randomly -o addopts='' \
@@ -127,7 +127,7 @@ python3 -m pytest -q -p no:randomly -o addopts='' \
 
 Expected: import/name failures or `MESSAGE_INVALID` for the valid v3 QUESTION.
 
-- [ ] **Step 3: Implement schema-specific validation**
+- [x] **Step 3: Implement schema-specific validation**
 
 ```python
 GROK_CONSULTATION_SCHEMA = "mastermind.agent_dialogue_consultation.v3"
@@ -151,7 +151,7 @@ def consultation_schema_for_reasoning_surface(reasoning_surface: Any) -> str:
 
 In `validate_consultation`, preserve the existing v1 and v2 branches verbatim; add a v3 branch requiring `purpose == "QUESTION"`, the v1 closed key set, self-linked `correlation.request_message_key`, and exact `grok-bot` surface.
 
-- [ ] **Step 4: Run contract tests GREEN**
+- [x] **Step 4: Run contract tests GREEN**
 
 ```bash
 python3 -m pytest -q -p no:randomly -o addopts='' tests/test_agent_dialogue_consultation_contract.py
@@ -159,7 +159,7 @@ python3 -m pytest -q -p no:randomly -o addopts='' tests/test_agent_dialogue_cons
 
 Expected: all pass, including frozen v1 fingerprints and v2 correction identity.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add common/agent_dialogue_consultation_contract.py tests/test_agent_dialogue_consultation_contract.py
@@ -177,7 +177,7 @@ git commit -m "feat(grok): add closed consultation v3 question identity"
 - Consumes: `consultation_schema_for_reasoning_surface`.
 - Produces: `ConsultationPeer.consultation_schema: str` and internal `company.consult` dispatch field `consultation_schema`.
 
-- [ ] **Step 1: Write failing derivation and override tests**
+- [x] **Step 1: Write failing derivation and override tests**
 
 ```python
 def test_grok_peer_derives_v3_without_changing_public_projection() -> None:
@@ -199,18 +199,18 @@ def test_company_consult_carries_derived_v3_and_refuses_override() -> None:
 
 Keep the existing caller-override negative test and assert zero dispatcher calls.
 
-- [ ] **Step 2: Run tests RED**
+- [x] **Step 2: Run tests RED**
 
 ```bash
 python3 -m pytest -q -p no:randomly -o addopts='' \
   tests/test_company_consultation_mcp.py -k 'grok or consultation_schema or override'
 ```
 
-- [ ] **Step 3: Implement trusted derivation**
+- [x] **Step 3: Implement trusted derivation**
 
 Add a `ConsultationPeer.consultation_schema` property calling the selector. Permit `grok-bot` only in trusted binding validation. Add `"consultation_schema": peer.consultation_schema` to the internal `company.consult` request after peer resolution; do not add it to public tool arguments or peer projection.
 
-- [ ] **Step 4: Run tests GREEN and commit**
+- [x] **Step 4: Run tests GREEN and commit**
 
 ```bash
 python3 -m pytest -q -p no:randomly -o addopts='' tests/test_company_consultation_mcp.py
@@ -232,20 +232,20 @@ git commit -m "feat(grok): derive v3 consultation schema from trusted peer"
 - Consumes: validated v3 QUESTION frame.
 - Produces: INTENT payload field `consultation_schema == item["schema"]`; vocabulary token `grok-bot` with no target.
 
-- [ ] **Step 1: Write failing runtime and inertness tests**
+- [x] **Step 1: Write failing runtime and inertness tests**
 
 ```python
-def test_intent_persists_exact_v3_schema(tmp_path: Path) -> None:
-    runtime, consultations, workers, frame, semantic_bundle = _setup_canonical_intent_fixture(tmp_path)
-    frame["schema"] = GROK_CONSULTATION_SCHEMA
-    frame["recipient_binding"]["reasoning_surface"] = "grok-bot"
-    frame["fingerprint"] = ""
-    frame = build_consultation(frame)
-    event = consultations.intent(frame, requester_attempt_id=workers[0][1],
-                                 carrier_ref="dialogue://fixture/grok",
-                                 observed_at="2026-09-14T00:00:00Z",
-                                 repository_root=semantic_bundle[1])
-    assert event.event.payload["consultation_schema"] == GROK_CONSULTATION_SCHEMA
+def test_v3_intent_payload_is_exact_while_runtime_admission_stays_dark(tmp_path: Path) -> None:
+    frame = build_v3_grok_question_fixture(tmp_path)
+    payload = _consultation_intent_payload(
+        frame, carrier_ref="dialogue://fixture/grok", observed_at="2026-09-14T00:00:00Z"
+    )
+    assert payload["consultation_schema"] == GROK_CONSULTATION_SCHEMA
+    with pytest.raises(StateConflict, match="current Runtime binding"):
+        consultations.intent(frame, ...)
+    assert runtime.events.list_events(
+        aggregate_type="consultation", aggregate_id=frame["consultation_id"]
+    ) == []
 
 
 def test_grok_surface_adds_no_target_or_transport_implementation() -> None:
@@ -255,7 +255,7 @@ def test_grok_surface_adds_no_target_or_transport_implementation() -> None:
     assert transport_implemented("grok-computer") is False
 ```
 
-- [ ] **Step 2: Run tests RED**
+- [x] **Step 2: Run tests RED**
 
 ```bash
 python3 -m pytest -q -p no:randomly -o addopts='' \
@@ -263,11 +263,11 @@ python3 -m pytest -q -p no:randomly -o addopts='' \
   tests/test_executive_wake_fabric.py -k 'grok_surface'
 ```
 
-- [ ] **Step 3: Implement minimal runtime/vocabulary changes**
+- [x] **Step 3: Implement minimal runtime/vocabulary changes**
 
-Replace the INTENT payload's hard-coded consultation schema with `item["schema"]`. Add only `"grok-bot"` to `REASONING_SURFACES`; do not alter target config or wake transport implementation tables.
+Extract the existing INTENT payload construction into a pure private producer and replace the hard-coded consultation schema with `item["schema"]`. Keep current-recipient admission unchanged, so a real v3 INTENT still fails with zero events. Add only `"grok-bot"` to `REASONING_SURFACES`; do not alter target config or wake transport implementation tables.
 
-- [ ] **Step 4: Run GREEN and commit**
+- [x] **Step 4: Run GREEN and commit**
 
 ```bash
 python3 -m pytest -q -p no:randomly -o addopts='' \
