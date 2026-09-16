@@ -496,6 +496,12 @@ def _validate_probe(value: Any) -> dict[str, Any]:
     return probe
 
 
+def validate_probe(value: dict[str, Any]) -> dict[str, Any]:
+    """Validate one closed Web-Sol probe and return a detached copy."""
+
+    return copy.deepcopy(_validate_probe(value))
+
+
 def validate_request(value: dict[str, Any]) -> dict[str, Any]:
     """Validate structure only and return a detached normalized copy."""
 
