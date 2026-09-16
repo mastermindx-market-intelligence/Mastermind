@@ -30,6 +30,10 @@ They are intentionally distinct identities and must not be substituted for one a
 - Installed Executive control release: `4c148709f52ff036d71dd212abd2688212d91ed0`.
 - Installed Executive MCP component: `46bea20832a8f0d01559eb8bfb0e9b1406774956`.
 - Server contract: `mastermind-executive` version `1.0.0`.
+- Protected `master` at final compatibility review: `5ee11ab1e993616f3568cfca4069cb21fa61fd8f`.
+  Protected movement from the procedure pin changed no `docs/sol_skills/**` file. It
+  merged #697's sealed boot-context source repair, while the observed production host
+  remained on the installed releases named above.
 
 ## Exact production app and transport
 
@@ -320,16 +324,18 @@ This ruling does **not** mean:
 The plugin-finalization operation is terminal. Do not rerun its modifying canary or
 create another Job to strengthen an already-complete proof.
 
-The highest-leverage independent continuation is a separate repair operation for the
-installed reader's missing Agent OS brief and PyYAML-backed strategic-state input. That
+Protected master now contains #697's source-level sealed boot-context repair, but the
+observed production host remains on the older installed release recorded above. The
+highest-leverage independent continuation is to reconcile open PR #653 against merged
+#697, then install and production-prove the legitimate surviving reader repair. That
 work must preserve the existing Executive lifecycle, boot-packet, Agent OS, and
 strategic-state owners; it is not a reason to reopen or rebuild the plugin path.
 
 ## Projection collision held
 
 The natural runbook projection path,
-`docs/runbooks/mastermind-executive-app.md`, is concurrently modified by open PRs
-#653 and #697. This closeout deliberately does not edit that path, overwrite either
-carrier, or manufacture a third reconciliation branch. The production receipt remains
-canonical GitHub evidence; the runbook projection should be updated by the legitimate
-surviving runbook carrier after those PRs reconcile.
+`docs/runbooks/mastermind-executive-app.md`, was changed by merged PR #697 and remains
+in open PR #653's overlapping scope. This closeout deliberately does not edit that path,
+overwrite either history, or manufacture a third reconciliation branch. The production
+receipt remains canonical GitHub evidence; the surviving reader/runbook carrier owns any
+later projection after #653 is reconciled against protected master.
