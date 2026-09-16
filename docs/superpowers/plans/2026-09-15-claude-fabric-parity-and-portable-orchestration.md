@@ -1,0 +1,244 @@
+# Claude Fabric Parity and Portable Orchestration — Implementation Plan
+
+**Date:** 2026-09-15, America/New_York. Evidence collected across the corresponding UTC evening boundary.
+**State:** SPEC_ONLY / PROPOSED INTEGRATION CONTRACT. This packet changes no production configuration, credentials, provider activation, routing alias, quota balance, or organizational authority.
+**Current live directive:** initiate Claude integration, reproduce useful Claude Mac capabilities, make routing and quota use automatic, and qualify additional models for COO/orchestrator duties alongside Fable CEO B.
+**Existing parent:** `WS:EXECUTIVE-CAPACITY-FABRIC`.
+**Existing principal operation:** `agent-fabric-end-to-end-fable-integration-20260913-sol-001`.
+**Existing carrier:** Slack `C0BSBM78V1N / 1789324397.992989`; Fable CEO B is the incumbent Claude3 principal, reported seat prefix `7cd4fae1`.
+**Source-design operation:** `claude-fabric-parity-and-portable-orchestration-20260915-sol-001`. This is this session's source packet, not an admitted Executive Job or a newly assigned Fable child.
+**Source basis:** Mastermind protected `4709b9483182c20153868dac164e1f621aac505c`; Macro main `52bd0cde0669cd8ea396dfbe692399261dd5cfe5`. Re-pin at every modifying step; these are inspection identities, not perpetual activation preimages.
+
+## 1. Outcome, ownership and architecture
+
+A fresh, eligible orchestrator should receive a task and automatically acquire the right operating instructions, scoped tools, isolated workspace, legitimate capacity, and continuity path. It must delegate without choosing numbered accounts, verify child evidence, reconcile uncertainty, and deliver a result actually consumed by its original parent. Claude is one execution provider, not a second fabric.
+
+Sol owns this integration design, decomposition, current-source reconciliation, and acceptance requirements. Fable CEO B retains incumbent cross-system integration and existing child custody. Bounded implementation and review go through current placement owners; this document does not assign new independent children by being posted under the principal thread.
+
+Keep the existing ownership chain:
+
+`task intent -> Model Router suitability tier -> Capacity ranking -> Executive admission/atomic claim -> existing worker broker and qualified native adapter -> scoped native session -> normalized evidence/review -> exact parent consumption`.
+
+Shared AI Provider Control owns usage observations, native depletion identity and freshness. RuntimeBinding owns the concrete session identity. Agent OS owns durable organizational records. Relay/Wake owns delivery and attention; Slack is not proof of consumption. Local pool/host leases must compose with the accepted claim path, not provide an alternative way to launch the same job. No new router, scheduler, quota ledger, session registry, database, credential store, retry loop or orchestration daemon is authorized.
+
+### Mechanism choice
+
+**Chosen:** extend the existing Claude subscription/native worker and launch-profile compiler, with official Claude Code/Agent SDK features behind that boundary. Preserve the native agent execution foundation and explicitly materialize its environment.
+
+**Not the default:** rebuilding everything around raw API calls. It would needlessly recreate tool loops and complicate parity and subscription economics. An API route remains an explicitly qualified, budgeted route, not a hidden fallback.
+
+**Not the primary execution backend:** automating clicks in the Mac app. Use the UI for authorized human workflows and parity checks where necessary; do not make window titles, frontmost tabs or shared desktop state the session-addressing protocol.
+
+## 2. What is already present — and what is not proven
+
+| Existing owner/artifact | Inspected fact | Integration consequence |
+|---|---|---|
+| Mastermind #581 | Merged as `27a5d893ca28f7006c1007dffa51e677c9c7a4ab`; fixed-profile Claude worker and sealed interactive-canary seam exist. Production remains disarmed; hermetic tests are not provider proof. | Reuse `control_plane/claude_subscription_worker.py` and `control_plane/subscription_canary_admission.py`; no second Claude worker. |
+| Mastermind #632 | Merged as `e1f752a58df8f874efa12e30957d911627a0c4f8`; role-adaptive Web CEO policy is SPEC_ONLY, not INDEX/fleet enrolled. | Reuse the role policy and its existing enrollment owner. Do not copy it into an independently governing rulebook. |
+| Mastermind #671 | Open/Draft at `0764fcae055c028bc1faf482d2d40f54fc9c9388`; subscription economics proposal distinguishes native shared resources from model-specific debit. | Claude quota semantics extend this same economic model, not another allocator. |
+| Macro #7103 | Open at `6ce16e745064825969e70f15ce5e1aeb813179b4`; Provider Control plan/usage work. | Existing Provider Control owns acquisition and normalization. Account entitlement must be observed, not inferred from catalog text. |
+| Macro #7116 | Open/Draft at `4d7ddfd24a5f02b91375c074efdefc3b77a04c1a`; preview/consumer with a separately reported unpublished repair. | Preserve original source custody and publication refusal. Do not reproduce a refused publication through another host/transport. |
+| Macro #7114 | Incumbent compiled Claude/Fable profile and guard owner; latest principal review names `abacaeb474ccac5991b8ebc7e30198dd273244b0`. | Re-read current GitHub head before touching it. Existing CI wiring and fleet-adoption gates remain; this is not a second profile implementation. |
+| Mastermind #633 | Principal thread reports an external-fabric client with Auth0 DCR EFFECT_UNKNOWN. | Preserve same-operation reconciliation; no duplicate client or native fallback after uncertain external effect. |
+| Admission #667 / W1-H3 | Principal carrier places #667 in source release and identifies the separate CEO-submit arm transaction as a remaining dependency. | Reconcile current state. Do not install an armed config or skip the existing root-only transaction owner. |
+
+PR metadata and bodies can disagree: current API merged/draft state wins for Git facts; a body describing earlier Draft state is historical. Capability still requires runtime evidence.
+
+### Direct default-Mac-profile inventory
+
+A bounded Studio Direct read observed the following; it did not inspect credential values or start inference:
+
+- Executable `/opt/homebrew/bin/claude`, version **2.1.259**.
+- **43** user skill directories and **18** user agent Markdown files under the default user's `.claude` home.
+- Enabled plugin keys: `adobe-for-creativity`, `figma`, `frontend-design`, `playground` from the official marketplace.
+- User settings have `SessionStart` and `WorktreeCreate` hooks. Presence does not prove the hook is safe, correctly loaded or enforced for every worker.
+- Default global Claude Code config names `linear-server`; `.claude/.mcp.json` names `tradingview`. These are configured-name observations, not authenticated tool discovery or a complete cloud-connector inventory.
+- The default legacy Claude Desktop config has `coworkUserFilesPath` and `preferences`, with no `mcpServers` key. This does **not** mean cloud connectors or other account profiles have no tools.
+- `fable-mode/SKILL.md`: 393 lines, SHA-256 `2c890d25fbef05c36860734b06998ebae5f3cf4e39199bb8fb19f34ec78ee1b8`.
+- `agent-pools/SKILL.md`: 131 lines, SHA-256 `bd14042c7ae47fdb2f8c430b6dc91093b69176ef9ca0ead9cc203fc4dc959599`.
+- User `settings.json`: SHA-256 `6d9bcb01736ec13560c2c6cfd5f0c9e6231c426a0c70a053c1f12cf6109c4bb0`.
+
+**Scope limitation:** this is the default local profile, not an attestation of every Claude app/account or Fable CEO B's exact native session. Do not enroll another account from these facts.
+
+### Two specific instruction defects to reconcile
+
+The inspected `agent-pools` skill says never to use Cursor for orchestration, but later names Cursor in the operator tier that decomposes and adjudicates. It also embeds dated account caps/availability, including a disabled GLM entry. The canonical owner must resolve this contradiction and replace operational balances/availability with current owner queries. Preserve the valuable `POOL_ORCHESTRATOR_ID` inheritance and lease discipline.
+
+The Macro `config/fable_mode_core.md` contains useful evidence disciplines but also domain-specific **stateless, context-only, inert** clauses for another orchestrator. Do not transplant those clauses into an effectful Executive COO. Reuse approved behavioral criteria with provenance; do not fork a generic "Fable clone" or copy unrelated authority restrictions.
+
+## 3. Native quota semantics — shared total plus Fable sublimit
+
+Anthropic's current Fable support page says eligible Max/premium plans include Fable use up to 50% of the existing weekly allowance. Fable and other models share the overall weekly allowance. Pro/standard-seat treatment differs. This is **not** an independent 50% Fable wallet plus a guaranteed 50% Opus wallet [S1].
+
+Represent the provider's actual constraint vector: shared weekly resource; Fable-family sublimit where applicable; observed short windows; any other model restrictions; concurrency/rate constraints; and separately authorized paid credits. Models and application surfaces that draw from the same entitlement must reference the same native resource identity. Switching Chat, Code, SDK, Fable or Opus does not manufacture new allowance.
+
+Current official SDK notice says the proposed June 15 change was paused: Agent SDK, `claude -p`, and third-party app usage still draw from subscription usage limits; the previously announced monthly credit is unavailable [S2]. Do not add that fictional SDK credit wallet. The SDK's restriction on offering claude.ai login/rate limits in third-party products still needs its own policy gate [S3]. This internal fabric must not become a mechanism for reselling/shared subscription access or bypassing provider limits.
+
+Use the existing #7116 `Resource` and `Option` abstraction. `Resource.applies_to` identifies every consuming option; `Option.costs` must cover exactly its resource set. A Fable option can consume BOTH shared-total and Fable-sublimit constraints, while Opus consumes shared-total and any observed Opus constraints. These are intersecting constraints, not two billable balances to sum.
+
+For a resource r, admission must account for provider-reported remaining capacity, unobserved in-flight reservations and preserved reserves. A candidate is eligible only if every applicable resource can cover its conservatively estimated debit. Unknown duration/cost, stale observations, unknown entitlement or incompatible units are refusals, never zero cost or unlimited capacity. Observed provider percentages must retain their denominator; "50% of the Fable cap" is not necessarily 50% of total weekly usage. Never invent a token allowance from a percentage.
+
+**Synthetic example, not an account reading:** total weekly budget 100 normalized units, Fable subcap 50; prior Fable use 20 and other-model use 15. Shared remainder is 65, Fable remainder 30. Further Fable is constrained by both; Opus is constrained by shared remainder and its other real limits. There is no fixed remaining 50 for Opus. Preserve demand-driven Fable reserve only when justified; do not spend Fable merely to reach 50%.
+
+### Ranking after eligibility
+
+Model Router first fixes the lawful suitability tier. Capacity then ranks eligible candidates using expected cost **per accepted outcome**, including failed attempts, review, repair, native quota debit, explicit cash cost, wait time, expiry pressure, demand reserves, and opportunity cost of scarce alternatives. Host fit and continuity constrain placement. A cheap model that repeatedly requires repair is not necessarily economical.
+
+Shared-resource reservations must be atomic at the accepted claim boundary. Observation reconciliation must not subtract the same usage twice: reconcile reservation identity against a provider observation generation, retain unobserved holds, and quarantine ambiguous consumption. Reset events need provider window identity, not the local weekday. Forecasted rolling-window release is not a confirmed reset. Re-estimate on version/plan changes and keep uncertainty explicit.
+
+No account rotation to evade exhausted limits; no hidden API-key fallback; no automatic purchase or paid-credit opt-in. Quota exhaustion after START is a same-operation capacity blocker, not permission to resend the job elsewhere.
+
+## 4. Environment parity is a tested manifest, not a home-directory copy
+
+For each admitted realm, materialize an **existing-owner capability manifest** and launch receipt binding:
+
+- exact provider/model actually served, provider-plan generation and effective authentication category;
+- runtime/harness version, OS/host capabilities and enrolled realm;
+- immutable role/instruction/skill/profile hashes and their precedence;
+- project root, managed workspace ownership, branch/source preimage and scoped filesystem/tool permissions;
+- required MCP server/tool identities, permission scopes and authenticated harmless read results;
+- plugin versions and loaded components; required lifecycle/route hooks and conformance results;
+- concrete RuntimeBinding, original parent, existing lease and `POOL_ORCHESTRATOR_ID` inheritance;
+- capacity observation generation, native resource identities and expected debit vector;
+- approved continuation, cancellation, effect reconciliation and result-consumption path.
+
+This is a projection/receipt within existing owners, not a new database or registry. Missing required features fail before effects. Optional features may degrade only with an explicit capability loss visible to the parent.
+
+| Capability | Required treatment |
+|---|---|
+| CLAUDE.md/rules, skills and agents | Explicit approved source selection and hash provenance; preserve useful existing skills, load task-specific content on demand. No uncontrolled copy of personal histories. |
+| Settings and hooks | Existing launch compiler stages the complete reviewed bundle; required policy is enforced outside model discretion. A prompt saying "use the router" is not a gate. |
+| Plugins | Pin installed package identities and prove loaded commands/tools; marketplace installation alone is insufficient. |
+| MCP | Reuse approved endpoints and scoped OAuth consent. Official import can help discovery, but do not auto-import every server, duplicate names, or copy credentials. |
+| Native file/shell/code intelligence | Workspace-scoped permissions, host prerequisites, tested tool behavior; equivalent tool names do not prove equivalent effects. |
+| Browser/computer use | Qualify per platform and harness; acquire the existing exclusive desktop lease, avoid the user's active session, and clean up through existing owners. |
+| Projects, cloud memory, chat history, Cowork-specific behavior | Explicitly identify what cannot be ported directly; use sanctioned knowledge access/durable Agent OS artifacts, not cookie or private-transcript extraction. |
+| Schedules and wake | Existing Relay/Wake/RuntimeBinding only. A session-local cron declaration or Slack delivery is not proof that the exact session resumed. |
+| Artifacts and durable results | Existing workspace/evidence owner, exact source links and normalized output. UI-only artifacts must be exported through an approved path or marked unavailable. |
+
+Current SDK documentation says omitted `settingSources` inherits CLI sources; global config and automatic memory have additional loading behavior [S4]. Old advice that omission yields an empty environment is unsafe. Pin the actual installed SDK/runtime and test explicit configuration, parent-directory inheritance and memory behavior. Use the native Claude Code system-prompt preset when that is the chosen, qualified chassis; a minimal SDK prompt is not automatically the Mac app's complete operating environment. Do not indiscriminately disable managed security policy.
+
+## 5. Portable COO contract
+
+The role is **COO/operator within a bounded commission**, not a model name or automatic CEO authority. Fable, Opus, Grok, GLM, Astra and Sol should face the same outcome, evidence, permission and lifecycle requirements, expressed through their qualified native surfaces.
+
+The existing role compiler should produce one coherent instruction bundle. Its common core contains current-source bootstrap; mission decomposition; task-intent delegation; evidence verification; review independence; checkpoint/recovery; quota-aware planning; and explicit continue/stop behavior. Existing `fable-mode` supplies observable behavioral criteria, not a claim to recreate a model's internal reasoning or equalize intelligence.
+
+**Draft instruction body for the existing compiler (not installed/enrolled by this packet):**
+
+> Own the accepted mission outcome within the issued authority and workspace. Load the current protected bootstrap and the exact operation packet; distinguish current evidence, assumptions and unavailable capabilities. Preserve the incumbent source/session owner and original parent.
+>
+> Before action, verify the issued role, runtime, tools, source preimage, capacity generation and lease. Do not invent missing identities or request account selection from the Chairman. Use the existing task-intent interface; do not choose arbitrary endpoints, credentials, models or native spawn commands.
+>
+> Decompose only where work can be independently accepted. Give each child one objective, owned scope, constraints, executable acceptance, fixed return format and stop condition. Obtain fanout from Capacity and existing root budget, not from the model's desired parallelism. Children inherit the original orchestrator identity and cannot independently create new budget.
+>
+> Apply evidence over plausibility, explicit falsifiers, changed diagnosis before retry, complete-but-bounded scope, calibrated reporting and direct verification of delegate artifacts. A delegate summary, green check or delivered message is not proof of the claimed outcome.
+>
+> Keep builder and consequential reviewer independent. Inspect returned artifacts and run discriminating acceptance checks. Issue CONTINUE, REQUEST_REPAIR or STOP through the original carrier; do not silently leave a child waiting.
+>
+> On saturation, yield or advance an independent admissible task. On uncertainty, preserve the exact operation/session and reconcile. Never replay a possibly effectful task, steal a dirty workspace, resume another session by title, or widen permissions to make a missing feature appear available.
+>
+> Before context loss or external wait, write the existing durable checkpoint with source identity, effects, evidence, pending children and exact next action. Resume from current canonical facts. Stop/cancel only the intended child source, preserving unrelated principal/sibling resources.
+>
+> Report the strongest proven capability first, distinguish source-only from live proof, list remaining gates, and deliver the accepted artifact to the exact parent. Success requires parent consumption, not merely provider completion.
+
+Mandatory instructions must be loaded on start/resume and checked by the launch owner. Optional research/SEO/design skills should not inflate every orchestration prompt. Eliminate contradictory role sentences in the current pool skill through its owner; do not simply prepend another rule that hopes to win prompt precedence.
+
+## 6. Role assignment and qualification
+
+**Opus:** first candidate for bounded COO duties where the strategic boundary is fixed. Let it plan/delegate/review/repair a bounded program slice under Sol acceptance while Fable B retains the live fabric root. Existing Fable checkpoints already report Opus orchestration lanes; those are useful experience, not proof of a fully admitted autonomous COO.
+
+**Fable:** retain principal ambiguity resolution, difficult cross-system integration and exceptional adjudication. No permanent requirement to consume all Fable allowance.
+
+**Grok 4.6:** official xAI documentation identifies this model and tool-calling capability [S7]. It still needs the actual account/harness, tool, usage-policy and capacity qualification; a public model page does not enroll it.
+
+**GLM 5.3:** official ZCode documentation and release notes identify the family [S8]. Do not silently substitute 5.3-Flash, a legacy alias, or an aggregator's guessed endpoint. Verify the actual served model and product-specific entitlement.
+
+**Astra/Sol:** preserve the existing role-adaptive prior from #632; these are not fabricated provider API identifiers. Included Chat cognition remains the default subject to current policy; a metered API is not a silent replacement. Do not force every task through an Astra-to-Sol hierarchy or transfer a productive incumbent solely because of a model label.
+
+### Evaluation and promotion
+
+Use the existing evaluation/acceptance owners, not a new evaluator store. First run provider-free profile/permission/lifecycle regressions. Then test each candidate with six frozen representative pilot missions: two read-only investigations, two bounded build/repair tasks, and two multi-step coordination/recovery tasks. Give the candidate and comparison baseline equivalent information and permissions. The pilot is an initial filter, not statistical proof of equality.
+
+Score artifact correctness and independent acceptance first; separately record routing compliance, scope violations, duplicate effects, review independence, checkpoint/restart recovery, first-correct-request attempts, quota debit, repair cost, queue wait and parent-consumption latency. Runtime/effect/authority violations are hard failures, never averaged away by strong prose. Register cohort and promotion criteria before the comparative run; investigate failures before adding volume. Expand held-out testing for candidates that clear the pilot. Qualification is per task class/model version/harness/profile, not a universal title.
+
+## 7. Ordered delivery through existing owners
+
+### Wave A — Reconcile and materialize the exact Claude environment
+
+Owner: Fable B integration; current Claude launch/profile source owner (#7114 and #581 composition). Sol owns acceptance.
+
+1. Re-read the incumbent source branches, required checks, active writer and current protected bootstrap. Do not adopt the default-profile snapshot as another account's identity.
+2. Obtain a secret-safe manifest for the exact intended native realm: model/version, declared skills/plugins, hook/profile sources, authenticated tool names, writable scope, auth category and continuation ability.
+3. Add failing profile tests for missing required hook/skill, unexpected extra MCP privilege, wrong model, inherited parent config, changed package/source hash and unresolved template fields; retain one valid minimal profile positive control.
+4. Repair the existing compiler/launch path and the contradictory pool skill at their owned sources; publish the generated native bundle only after review. Do not hand-edit active global settings in place.
+5. Run existing native scripted-provider conformance plus the new controls on the installed runtime; prove refused cases create zero child effects. Source proof remains BUILT_NOT_PROVEN until the governed real path runs.
+
+### Wave B — Bind native Claude quota to existing resource algebra
+
+Owner: Shared AI Provider Control + #7116 economics/Capacity owner; #671 source-law integration.
+
+1. Reconcile exact plan tier/generation and policy. Capture one authorized, secret-safe native usage observation through the existing observation owner; missing observation is a visible gate.
+2. Represent shared total and Fable sublimit with common provider-native depletion identity and distinct applicable constraints. Preserve real short/model/credit limits and native units.
+3. Consume fixture cases Q01–Q12 in the existing economics/normalization tests. Add provider-denominator and observation-correction cases before changing consumer code.
+4. Integrate reservations and contention only through existing claim/lease ownership. Pure preview is not claim-time protection.
+5. Prove a legitimate quota-driven choice, actual before/after usage and reservation reconciliation. No extra inference merely to burn expiring quota.
+
+### Wave C — Complete the governed Claude worker vertical
+
+Owner: incumbent #581/broker/admission/realm owners under Fable B; preserve #633, #667/W1-H3 and credential custody.
+
+1. Close current source and installed admission gates using their existing transaction owners. Provider enrollment, credentials and safe arm are separate gates.
+2. Admit one bounded read-only task to the real Claude worker, with exact model/profile/realm/capacity binding; start only when the current canary contract permits it.
+3. Verify native discovery, tool use, normalized result and usage; obtain independent review and prove exact-parent consumption.
+4. Exercise duplicate request, changed payload, cancellation, lost reply and restart negatives. A send ACK or provider PONG is insufficient.
+5. Proceed to one isolated reversible file/test task only after read-only proof. Do not claim autonomous activation from an interactive canary.
+
+### Wave D — Opus COO pilot without replacing Fable B
+
+Owner: existing role compiler/placement owner, Sol acceptance, Fable B integration.
+
+1. Issue a new bounded, pre-effect operation through lawful placement; do not rebind the started fabric principal.
+2. Materialize the common COO contract and the exact qualified Opus profile. Start with one COO and at most two children as a proposed pilot ceiling, further limited by actual Capacity grants and root budgets.
+3. Make Opus delegate a real bounded task, consume independent review, request one deliberate repair when the seeded defect requires it, and deliver the corrected artifact to its original parent.
+4. Prove quota exhaustion and lost-reply handling without duplicate work; prove durable recovery and explicit child termination.
+5. Record the qualification result by cohort. A failed pilot stays unqualified; it does not gain production authority through its COO title.
+
+### Wave E — Model-portable orchestration and host balancing
+
+Owner: existing adapters/role compiler/Capacity/RuntimeBinding owners.
+
+1. Qualify Grok 4.6, the exact GLM 5.3 route, and permitted Astra/Sol surfaces one at a time using the same acceptance contract.
+2. Route by qualified capability and native resource availability, not Fable branding. Where a surface lacks a needed tool or sanctioned programmatic continuation, expose that gap instead of simulating parity.
+3. Select among enrolled hosts using current memory/CPU pressure, free disk, workspace availability, runtime/tool compatibility, network health, local privilege and desktop exclusivity. Historical hardware specifications are not current host capacity.
+4. Keep writable clones/workspaces isolated, preserve parent/lease identity across the permitted host boundary, and do not move effectful work merely because another host is idle.
+5. Expose concise current capacity and routing reasons through existing operator views: selected route, why eligible, constraining resource, reserve/hold, reset/freshness, queued versus started, actual result consumed and current blocker.
+
+### Parallelism and release boundaries
+
+Waves A and B may advance source-only on disjoint, unowned paths while admission is blocked. C needs admission/realm/tool/capacity gates. D depends on C and role/continuity proof. E expands qualified coverage, not a replacement architecture. Continue VTP-M1 and other existing children without stealing their source custody. #7116's known publication refusal remains an explicit boundary, not permission to republish its repair from this packet.
+
+Each source change needs a failing discriminator, a valid positive control, exact-head tests, independent review where required, normal protected release, then separate installed/live proof. Re-pin moved heads without ancestry-only churn. This packet's fixture validation is not those implementation tests.
+
+## 8. Acceptance record and stop condition
+
+The companion JSON contains 30 source-only acceptance scenarios. It is evaluation data, not runtime configuration, a scheduler or fabricated account telemetry. Every scenario names the owning boundary and an observable pass condition.
+
+Completion requires: one legitimate Claude route with required environment parity; authoritative shared/Fable usage and atomic constraint handling; one qualified Opus COO parent/child/reviewer/repair loop; truthful qualified/unqualified states for the other requested surfaces; failure/restart/stop proof; and actual intended-parent result consumption. Documentation, source merge and a sent Slack addendum do not satisfy this exit.
+
+The next principal checkpoint should return: exact owners/heads, manifest gaps, quota observation and policy state, #7114 repair/adoption state, #7116 custody/publication boundary, #667/W1-H3/#633 predecessors, next admissible canary, and consumed/unconsumed continuation status. New child execution requires its own lawful origin and pickup; this principal intake is not that assignment.
+
+## 9. Sources and reproducibility
+
+Internal evidence is pinned above. Observations are bounded to the named profile and files. No raw credentials, process dumps, histories or private reasoning are included.
+
+- S1 — Anthropic, Claude Fable models on your plan: https://support.claude.com/en/articles/15424964-claude-fable-models-on-your-plan (checked 2026-09-15 local date).
+- S2 — Anthropic, Use the Claude Agent SDK with your Claude plan, current top-of-page June 15 pause notice: https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan . Historical text below the notice is not the current policy.
+- S3 — Anthropic Agent SDK overview, third-party product authentication restriction: https://code.claude.com/docs/en/agent-sdk/overview . No blanket redistribution permission is inferred from S2.
+- S4 — Anthropic, Use Claude Code features in the SDK: https://code.claude.com/docs/en/agent-sdk/claude-code-features . Current defaults must be qualified against the installed version.
+- S5 — Anthropic, Claude Code Desktop and MCP: https://code.claude.com/docs/en/desktop ; https://code.claude.com/docs/en/mcp . Chat and Code configuration/history are not identical.
+- S6 — Anthropic, SDK plugins and authentication: https://code.claude.com/docs/en/agent-sdk/plugins ; https://code.claude.com/docs/en/authentication . Confirm effective auth without printing secrets; environment precedence must not silently introduce paid API billing.
+- S7 — xAI, Grok 4.6: https://docs.x.ai/developers/models/grok-4.6 . Model availability does not establish this fabric's enrollment.
+- S8 — Z.ai, ZCode GLM-5.3 documentation and release history: https://zcode.z.ai/en/docs/welcome ; https://zcode.z.ai/en/changelog . Verify exact served model, not marketing family alone.
+
+**Do not redo:** build another fabric, quota collector/ledger or session manager; copy active credentials/history; reactivate terminal children; take a writer's workspace; create another client after EFFECT_UNKNOWN; equate native PONG/fixture tests with production; ask the Chairman to allocate numbered accounts; or replace a functioning incumbent solely because a different model is available.
