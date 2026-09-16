@@ -403,8 +403,11 @@ class VisibleTurnProjection:
                 viewers.discard(reader_grant)
                 if not viewers:
                     self._viewers_by_turn.pop(grant.key, None)
-                    self._turns.pop(grant.key.native_turn_id, None)
-                    self._prebind = None
+                    # A late old-generation revoke cannot remove a newer turn.
+                    record = self._turns.get(grant.key.native_turn_id)
+                    if record is not None and record.key == grant.key:
+                        self._turns.pop(grant.key.native_turn_id, None)
+                        self._prebind = None
 
     def check_grant(self, reader_grant: object) -> TurnKey | None:
         if not isinstance(reader_grant, str):
@@ -497,9 +500,12 @@ class VisibleTurnProjection:
 
     def invalidate_generation(self, key: TurnKey, reason: str = "generation_invalid") -> None:
         with self._lock:
-            self._turns.pop(key.native_turn_id, None)
+            # Native turn IDs may repeat across epochs; compare the full key.
+            record = self._turns.get(key.native_turn_id)
+            if record is not None and record.key == key:
+                self._turns.pop(key.native_turn_id, None)
+                self._prebind = None
             self._viewers_by_turn.pop(key, None)
-            self._prebind = None
 
     def refusal_receipts(self) -> tuple[tuple[str, str, int], ...]:
         with self._lock:
