@@ -41,8 +41,9 @@ Two custody rules that govern every row above and are not negotiable by this map
 - **Owner**: Sol / Fable architecture responsibility (R35 §22 A).
 - **What exists at master**: nothing for the tree. `estimated_startable_jobs` is a scalar consumed by
   `control_plane/capacity_economics_projection.py:83`; there is no operator vocabulary, no resource identity, no
-  generation/freshness split, and no claim-side resource hold
-  (`control_plane/executive_runtime.py:1593` keys the claim on `(worker_id, quota_class)`).
+  generation/freshness split, and no claim-side **provider-capacity** hold
+  (`control_plane/executive_runtime.py:1593` keys the claim on `(worker_id, quota_class)`; the inactive
+  `_PHYSICAL_RESOURCE_SCHEMA_CANDIDATE` at `:2248` is a different resource domain — contract §8.2.1).
 - **What this PR contributes**: the contract proposal, its acceptance matrix, and this map — docs only. No `.py`,
   no `config/`, no `schema/`, and strict `provider_capacity.v1` untouched (contract §9.1).
 - **Who may write**: this lane wrote the three documents; the seat posts. **Release**: Sol architecture review of
@@ -167,7 +168,8 @@ R35 §22 B names three, each with an existing owner and an existing hold.
   number of eligible new-task claims. **Never migrate already-STARTed work for economics.**
 - **Blocked by**: the acceptance suite. The race tests are matrix class 6 (currently PARTIAL — worker-slot
   exclusion only) and the correction/reset tests are classes 7 and 8 (currently MISSING). H cannot open while
-  those three are not EXISTS.
+  those three are not EXISTS. Worth stating plainly because it sizes the remaining work: at this pin **no** class
+  of the twenty is fully EXISTS — eight are PARTIAL, twelve MISSING.
 
 ---
 

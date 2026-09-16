@@ -23,7 +23,7 @@ Status vocabulary, used strictly:
 - **MISSING** — no test falsifies this class, and the searches that ground that claim are named. Absence is
   reported with bounds, never bare.
 
-One class of twenty is EXISTS, seven are PARTIAL and twelve are MISSING. That distribution is the expected
+No class of twenty is fully EXISTS; eight are PARTIAL and twelve are MISSING. That distribution is the expected
 consequence of the contract not existing yet: twelve of the classes are statements *about a resource tree*, and
 at this pin there is no tree — `estimated_startable_jobs` arrives as a scalar
 (`control_plane/capacity_economics_projection.py:83`), so there is nothing for a composition test to attack.
@@ -103,7 +103,11 @@ composition fixtures must be built through the same seams rather than by constru
   `control_plane/executive_runtime.py:1594` `UNIQUE(held_attempt_id),` and `:1743`
   `CREATE UNIQUE INDEX one_lease_active_attempt_per_job` make two Attempts on one slot/job impossible. That is
   not the class: two claims on *different* workers that both debit one provider resource are unconstrained,
-  because the claim binds `(worker_id, quota_class)` (`:1593`) and no resource-hold ledger exists (contract §8.2).
+  because the claim binds `(worker_id, quota_class)` (`:1593`) and no **provider-capacity** hold ledger exists in
+  the claim path (contract §8.2, scoped at §8.2.1). Note for the implementer, not a status change: an inactive,
+  already-reviewed reservation-bundle design exists for the *physical* resource domain
+  (`control_plane/executive_runtime.py:2248`, `:2250`, `:2282`) and is the pattern contract §8.3 A2 proposes to
+  instantiate — so this class's eventual test should assert serialisation on allocation rows, not on a counter.
 
 ### Class 7 — stale pre-reset balance cannot authorize post-reset work
 - **Proposed test**: `test_observation_taken_before_a_reset_boundary_cannot_authorize_a_post_reset_claim`
@@ -244,11 +248,15 @@ composition fixtures must be built through the same seams rather than by constru
 - **Owner**: `control_plane/capacity_economics_projection.py` (economics inside the first lawful tier only).
 - **Fixture**: a first-tier option and a cheaper lower-tier option whose resource expires in one hour. Assert the
   lower tier is still refused, i.e. Stage E (stranding) never outranks suitability.
-- **Status at master**: **EXISTS** for the price half. `tests/test_capacity_economics_projection.py:53`
+- **Status at master**: **PARTIAL**. `tests/test_capacity_economics_projection.py:53`
   (`test_refuses_lower_tier_promotion`) and `:61`
-  (`test_refuses_later_tier_selection_while_option_remains_in_first_tier`) falsify the class as stated. The
-  expiry-pressure variant is the only addition the contract requires, because §11 Stage E is the new pressure
-  this contract introduces.
+  (`test_refuses_later_tier_selection_while_option_remains_in_first_tier`) falsify the *price* half and are
+  genuine coverage. Gap: the class as written is "low-price **/expiring**", and neither test supplies expiring
+  capacity or exercises expiry pressure at all — so the complete class is not falsified. *(An earlier draft
+  scored this row EXISTS; independent review corrected it, and the correction is kept here rather than
+  argued: a row that covers one of two named pressures is PARTIAL by this document's own vocabulary.)*
+  Expiry pressure is exactly what §11 Stage E introduces, so the missing half is created by this contract and
+  cannot pre-exist it.
 
 ### Class 18 — EFFECT_UNKNOWN prevents economic failover
 - **Proposed test**: `test_effect_unknown_holds_capacity_and_refuses_economic_failover`
@@ -290,11 +298,12 @@ composition fixtures must be built through the same seams rather than by constru
 
 | Status | Count | Classes |
 |---|---|---|
-| EXISTS | 1 | 17 |
-| PARTIAL | 7 | 2, 6, 9, 11, 12, 13, 19 |
+| EXISTS | 0 | — |
+| PARTIAL | 8 | 2, 6, 9, 11, 12, 13, 17, 19 |
 | MISSING | 12 | 1, 3, 4, 5, 7, 8, 10, 14, 15, 16, 18, 20 |
 
-1 + 7 + 12 = 20.
+0 + 8 + 12 = 20. **Not one of the twenty failure classes is fully falsified at master today.** Class 17 is the
+closest, and it covers one of its two named pressures.
 
 Two structural observations for the reviewer:
 

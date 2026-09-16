@@ -124,14 +124,39 @@ substituted for, observed remaining (failure class 20).
 
 ## 3. The expression language
 
-A **resource expression** `E` describes how one provider-lawful route's capacity depletes. Grammar:
+A **resource expression** `E` describes how one provider-lawful route's capacity depletes. Every node carries
+an `id` that is unique inside the enclosing expression, because a CEILING must be able to say *what it bounds*:
 
 ```
-E        := LEAF | ALL_OF(child, child, ...) | ORDERED_SPILL(stage, stage, ...)
-child    := { role: BUDGET | CEILING, expr: E }
-stage    := E
+E        := LEAF | ALL_OF(node, ...) | ORDERED_SPILL(node, ...) { stage_routing }
+node     := { id, role, expr: E }
+role     := BUDGET
+          | CEILING { bounds: <id>, limit, window?, next_reset_at?, generation, observation }
+          | STAGE                          # the only lawful role inside ORDERED_SPILL
 LEAF     := { resource_id, native_unit, generation, observation }
+observation := { observed_remaining | UNKNOWN, observed_at, next_reset_at, freshness, expires_at? }
+stage_routing := PARTITIONED | ATOMIC_FALLBACK        # provider-declared; see §3.3
 ```
+
+Four well-formedness rules make the grammar evaluable rather than suggestive:
+
+1. **`bounds` must resolve.** A CEILING's `bounds` names exactly one node that is a descendant of the same
+   enclosing `ALL_OF`. A CEILING may not bound itself, may not bound a node outside that subtree, and two
+   CEILINGs may bound the same node — in which case both apply and the tighter wins.
+2. **A CEILING is a fully dated resource, not a constant.** It carries its own `limit`, optional `window` and
+   `next_reset_at`, its own `generation`, and its own `observation`. A *windowed* ceiling therefore resets and
+   goes stale on exactly the same rules as a BUDGET (§2.3); a non-windowed ceiling simply has no
+   `next_reset_at`.
+3. **A proportional ceiling must be resolved to an absolute remainder.** A sublimit expressed as a fraction of
+   its parent (the Claude/Fable case, §5.5) is `limit = fraction × entitlement(parent, current generation)`, and
+   its *remaining* is `limit − consumed_by_the_bounded_subtree`. If `consumed_by_the_bounded_subtree` is not
+   observed, the ceiling's remaining is **UNKNOWN** and, by §4.5, so is the whole expression. This is the
+   contract-level statement of the standing rule that fresh shared-parent telemetry alone can never make a
+   subset `capacity_known`.
+4. **No resource is a BUDGET twice in one expression.** A `resource_id` may appear once as a BUDGET and may
+   additionally be *bounded* by any number of CEILINGs, but a second BUDGET occurrence of the same
+   `resource_id` is ill-formed — that is the aliasing shape that double-debits. A resource that is genuinely
+   both spent and bounding is written once as the BUDGET and referenced by `bounds` from the CEILING.
 
 ### 3.1 LEAF
 A leaf names one resource, its provider-native unit (Credits, provider quota units, requests, …), its generation,
@@ -168,15 +193,28 @@ One operation's cost may straddle a stage boundary: if `s1` has 3,000 units rema
 10,000, the operation debits 3,000 from `s1` and 7,000 from `s2`. The partition sums to exactly the cost — never
 10,000 from each (failure class 3).
 
-**Partitionability precondition (normative).** `ORDERED_SPILL` is lawful **only** where the provider actually
-partitions a single operation across the stages. If a single operation must be served wholly by one stage, that
-is not spill — it is **placement among sibling routes**, which is already owned by Capacity/Model Router and must
-never be written as a resource operator.
+**Stage routing is a provider-declared fact, not our inference (normative).** Ordered consumption comes in two
+provider shapes, and they do not evaluate the same way:
+
+- **`PARTITIONED`** — the provider splits *one* operation across stages, as above (Alibaba seat → shared pack).
+  `avail` sums across stages (§4.1), because one job may draw from several.
+- **`ATOMIC_FALLBACK`** — the provider itself serves one *indivisible* operation wholly from the first stage
+  with sufficient balance, and falls back to the next stage otherwise. This is still provider-owned deduction —
+  it is lawful `ORDERED_SPILL` — but no single operation may straddle, so `avail` for one operation is the
+  **max** over admissible stages, not the sum (§4.1).
+
+**Partitionability precondition (normative).** `ORDERED_SPILL` is lawful only where the provider declares one of
+those two routings for these stages. Where the provider declares neither — where *we* would be choosing which
+stage to send an operation to — that is **placement among sibling routes**, already owned by Capacity/Model
+Router, and it must never be written as a resource operator. The test is *who performs the fallback*: the
+provider, or us.
 
 This precondition is not pedantry; it is the difference between a true capacity number and a fiction. Three GLM
-Coding Plan Max accounts encoded as `ORDERED_SPILL` would evaluate to the *sum* of their 5-hour pools and would
-authorise a job whose cost exceeds any single account's remainder — a job that cannot actually run anywhere
-(§5.1).
+Coding Plan Max accounts encoded as a `PARTITIONED` spill would evaluate to the *sum* of their 5-hour pools and
+would authorise a job whose cost exceeds any single account's remainder — a job that cannot actually run anywhere
+(§5.1). GLM publishes no cross-account fallback, so those accounts are placement, not spill; were a provider to
+publish such a fallback, the correct encoding would be `ATOMIC_FALLBACK`, and the arithmetic would differ
+accordingly.
 
 ### 3.4 What the language deliberately cannot express
 There is no `ANY_OF` / alternation operator. Choosing among lawful routes is placement, and placement is an
@@ -193,17 +231,23 @@ set; never a cohort mean).
 ### 4.1 Available value
 `avail(E)` returns available **native value**, recursively:
 
+A stage or child is **admissible** for a given operation only if all four hold: its execution mode is
+policy-eligible (§7); its observation is FRESH (§2.3); its generation is current (§2.2); and its value does not
+expire before the operation's completion horizon. An inadmissible node contributes **zero** and is reported under
+a named `ineligible` / `expiring` component — never silently dropped, because a silent drop is indistinguishable
+from an exhausted resource and hides the bottleneck (R35 §17, §18).
+
 ```
-avail(LEAF)            = usable(LEAF)                              # §6.1
-avail(ALL_OF(...))     = min over BUDGET children of avail(child)
-                         , then capped by every CEILING child:
-                         min(that, remaining(ceiling_c)) for each CEILING c
-                           whose named subexpression carries the value
-avail(ORDERED_SPILL()) = SUM over stages of avail(stage)           # <= the operator blind min() gets wrong
+avail(LEAF)                              = usable(LEAF)                    # §6.1
+avail(ALL_OF(...))                       = min over admissible BUDGET children of avail(child)
+                                           , then, for each CEILING c, capped by remaining(c)
+                                             applied to the subtree named by c.bounds
+avail(ORDERED_SPILL, PARTITIONED)        = SUM over admissible stages of avail(stage)
+avail(ORDERED_SPILL, ATOMIC_FALLBACK)    = MAX over admissible stages of avail(stage)   # one operation
 ```
 
-`ORDERED_SPILL` **sums**. `ALL_OF` **minimises over BUDGETs and caps by CEILINGs**. Mixing the two up in either
-direction is the defect this contract exists to prevent.
+`ALL_OF` **minimises over BUDGETs and caps by CEILINGs**. A `PARTITIONED` spill **sums**; an `ATOMIC_FALLBACK`
+spill **maximises**. Mixing any of these up is the defect this contract exists to prevent.
 
 ### 4.2 startable_jobs is computed at the root, after the algebra
 ```
@@ -212,6 +256,14 @@ startable_jobs(c, E) = floor( avail(E) / q95(c) )
 Never `min` over per-leaf `floor(usable_r / q95)`. The division happens **once, at the root of the evaluated
 expression**, because a spill stage that is exhausted is not a constraint of zero — it is a depleted first stage
 whose successor still holds value.
+
+One exception follows from §3.3 and must be stated, because it is the only place the division is not at the
+root: under `ATOMIC_FALLBACK` no job may straddle, so whole jobs fit *per stage*:
+```
+startable_jobs(c, ORDERED_SPILL as ATOMIC_FALLBACK) = Σ over admissible stages of floor( avail(stage) / q95(c) )
+```
+The remainder below `q95(c)` in each stage is stranded-at-stage and is reported as such (§4.6), not silently
+summed into a job that could never be placed.
 
 ### 4.3 Concurrency is not a divisor
 Concurrency is an observed dynamic resource (§6.3), not a term inside `startable_jobs`. It bounds *simultaneity*,
@@ -228,7 +280,14 @@ one is a **rate** constraint and the long one a **budget** constraint over any h
 period. Receding-horizon planning (R35 §8) is out of scope for step A, but the contract must carry
 `next_reset_at` per leaf so that a later planner can do this without re-deriving the tree.
 
-### 4.5 Unknown fails closed
+### 4.5 Stranded value is reported, never rounded away
+Every evaluation additionally reports, per resource, the value that is real but unusable by this cohort, under a
+typed reason: `stranded_at_ceiling` (a CEILING blocks it), `stranded_at_stage` (an `ATOMIC_FALLBACK` remainder
+below `q95`), `stranded_below_cost` (a remainder below one job's cost), `ineligible_by_policy` (§7), and
+`expiring_before_horizon`. A zero `startable_jobs` with no stranding reason is an incomplete answer: R35 §17's
+"Alibaba: 68 % remaining" failure is precisely a number that conceals which resource is the bottleneck.
+
+### 4.6 Unknown fails closed
 If any leaf in `E` has UNKNOWN or STALE observation, unknown generation, or an unproven independence claim
 (§5.3), then `avail(E)` is **UNKNOWN**, not zero and not the entitlement. An UNKNOWN expression cannot size
 capacity, cannot authorise a claim, and cannot satisfy `capacity_known`. It also does not make the route
@@ -468,12 +527,44 @@ Read at master@0fe8074f:
 | An Attempt carries one scalar quota class | `control_plane/executive_runtime.py:1659` `quota_class TEXT NOT NULL,` (table at `:1654`) |
 | One live Attempt per Job | `control_plane/executive_runtime.py:1743` `CREATE UNIQUE INDEX one_lease_active_attempt_per_job` |
 | The claim receipt | `control_plane/executive_runtime.py:11236` `event_type="JOB_CLAIMED",` with `payload=claim_payload` |
-| **No resource-hold ledger exists** | searched `control_plane/`, `ops/`, `sql/` for `CREATE TABLE *hold*` / `*reserv*` / `resource_hold` / `capacity_hold` — the only match is `sql/0001_schema.sql:75` `holdout_touches`, which is a statistics guard, unrelated |
+| **No provider-capacity hold ledger exists in the claim path** | scope stated precisely in §8.2.1 — there IS an inactive reservation-bundle design in the tree, for a different resource domain |
 
 So the answer to R35 §14's conditional is: **the existing claim contract cannot express a resource-bundle hold.**
 It reserves a *worker slot*, keyed `(worker_id, quota_class)` — a mutual-exclusion lease over one of our own
 lifecycle objects. It never reserves a provider-native quantity, and `quota_class` is a scalar, so it cannot name
 a bundle.
+
+#### 8.2.1 Scope of that absence — there IS a reservation-bundle design in the tree, in another domain
+An earlier draft of this document claimed flatly that "no resource-hold ledger exists". That claim was too broad
+and is retracted here; independent review found the counter-evidence, and the corrected statement is narrower and
+more useful.
+
+`control_plane/executive_runtime.py:2248` defines `_PHYSICAL_RESOURCE_SCHEMA_CANDIDATE`, introduced by the
+comment at `:2246` — *"Inactive candidate only: deliberately NOT a member of `_MIGRATIONS`. A separately reviewed
+offline successor is required before any production installation."* It contains
+`CREATE TABLE physical_resource_commitments (` (`:2250`) and `CREATE TABLE physical_resource_demands (` (`:2282`),
+with the command family `reserve_physical` / `begin_physical` / `observe_physical` / `settle_physical` /
+`physical_status` at `control_plane/executive_runtime.py:16594` onward, and it is exercised at
+`tests/test_executive_os_sqlite.py:1852`.
+
+Two conclusions, and they point the same way:
+
+1. **It is a different resource domain and cannot be reused as-is.** Its demand rows are constrained to physical
+   dimensions — `dimension TEXT NOT NULL CHECK(dimension IN ('memory_bytes','disk_bytes','cpu_us_per_window',
+   'io_bytes_per_window','heavy_phase_count'))` at `control_plane/executive_runtime.py:2285` — which contains no
+   provider-quota dimension, and it is keyed by `host_id`, not by a provider resource identity. It is also
+   inactive, so nothing in the claim path reserves anything through it today. The narrow conclusion of §8.2
+   therefore stands unchanged.
+2. **It is nevertheless the right precedent, already reviewed in this codebase.** It carries exactly the
+   properties §8.3 needs and that a naive "add a table" proposal would have missed: an allocation *generation*
+   (`allocation_generation`), a fingerprinted **bundle** (`bundle_fingerprint`, `bundle_manifest_json`), a
+   per-dimension charge (`remaining_charge`), event-id provenance, immutability and transition-guard triggers,
+   permanent tombstones, and an effect-uncertain lifecycle
+   (`state TEXT NOT NULL CHECK(state IN ('RESERVED','EFFECT_MAY_HAVE_BEGUN','ACTIVE','RECONCILIATION_REQUIRED',
+   'SETTLED','ABANDONED_NO_EFFECT'))`, `control_plane/executive_runtime.py:2259`).
+
+So A2 below is not "invent a holds table". It is "instantiate the already-reviewed commitment/demand pattern in
+the provider-quota domain", which is both narrower and far better evidenced.
 
 ### 8.3 The narrow amendment (proposed, to be reviewed as a separate act)
 Smallest change that satisfies §8.1 without a second plane:
@@ -482,14 +573,27 @@ Smallest change that satisfies §8.1 without a second plane:
   `control_plane/executive_runtime.py:11236`) gains an immutable `capacity_hold` record: the evaluated expression
   identity, per-`resource_id` reserved native quantity, each resource's `generation`, and the `observed_at` of
   the observation the reservation was computed from.
-- **A2 — one holds table, debited inside the same transaction.** A table keyed by `resource_id` (not by
-  `worker_id`), written by `_claim_job_in_transaction` (`:11015`) in the same SQLite transaction as the existing
-  slot mutation — `control_plane/executive_runtime.py:11090` `updated = connection.execute(` / `:11093`
+- **A2 — one holds ledger, debited inside the same transaction, on the §8.2.1 pattern.** Written by
+  `_claim_job_in_transaction` (`:11015`) in the same SQLite transaction as the existing slot mutation —
+  `control_plane/executive_runtime.py:11090` `updated = connection.execute(` / `:11093`
   `SET status='BUSY',held_attempt_id=?,fence_counter=fence_counter+1,`. Two concurrent claims against one
-  `resource_id` then serialise on the same rows, which is what makes failure class 6 structurally impossible
-  rather than merely tested.
-- **A3 — one release path**, invoked exactly once on reconciliation, with `EFFECT_UNKNOWN` holding the reservation
-  rather than releasing it (§8.1 step 7).
+  resource then serialise on the same rows, which is what makes failure class 6 structurally impossible rather
+  than merely tested. Its identity and lifecycle are specified, not left to implementation:
+  - **Hold identity**: `hold_id`, derived deterministically from the claim (`attempt_id` plus the expression
+    identity), so a replayed claim re-derives the same `hold_id` and the write is idempotent rather than
+    additive.
+  - **Allocation rows**: one immutable row per `(hold_id, resource_id, generation)` carrying the reserved native
+    quantity and the `observed_at` it was computed against. `generation` is part of the key, so a generation
+    change (§2.2) cannot silently rebind an existing hold to a new resource epoch.
+  - **Aggregation**: the per-resource outstanding total of §6.1 is the SUM of un-settled allocation rows for that
+    `(resource_id, generation)` — never a single mutable counter, because a counter cannot express which claim
+    owns which portion and therefore cannot be released once.
+  - **Lifecycle**: the §8.2.1 state set, reused rather than re-minted —
+    `RESERVED → EFFECT_MAY_HAVE_BEGUN → ACTIVE → {SETTLED | RECONCILIATION_REQUIRED}`, with
+    `ABANDONED_NO_EFFECT` for a claim proven to have had no provider effect. `RECONCILIATION_REQUIRED` is the
+    state that satisfies §8.1 step 7: the hold stays outstanding and the capacity is not reused.
+- **A3 — one release path**, keyed on `hold_id` so it is idempotent, invoked exactly once on reconciliation,
+  with an uncertain effect moving the hold to `RECONCILIATION_REQUIRED` rather than releasing it (§8.1 step 7).
 
 **A1 is not a new idea — it is the already-designed direction, unimplemented.** The CF2F claim-evidence work
 already specifies a closed `JOB_CLAIMED.capacity_evidence` object:
@@ -652,7 +756,57 @@ There is no new stage, no new score, and no `capacity_score` scalar.
 
 ---
 
-## 12. Release condition
+## 12. Declared departures and refinements from the verbatim ruling
+
+R35 is the frozen requirement. Three places in this document say something the ruling's verbatim text does not,
+and each is declared here rather than left for the reviewer to discover. **Sol is asked to rule on each
+separately**; none of the three is assumed accepted.
+
+### D1 — Concurrency is an output, not a term inside `startable_jobs`
+- **Ruling text (§10)**: *"`startable_jobs(c) = minimum jobs_fit across every conjunctive resource, plus the
+  current concurrency limit.`"*
+- **This document (§4.3)**: `startable_jobs` counts jobs before exhaustion and excludes concurrency;
+  `safe_parallelism = min(observed_safe_concurrency, startable_jobs)` is published as a second output.
+- **Why**: a concurrency of 3 does not mean only 3 jobs may be started before the next reset. Folding it into the
+  same `min` conflates a simultaneity bound with a depletion count and understates throughput by the ratio of
+  total work to parallel work. The ruling's own §7 supports the split — *"Suggested parallelism is an output of
+  Capacity"* — so this reads as making the "plus" explicit rather than contradicting it.
+- **Risk if Sol rules the other way**: every consumer of the preview must be told which of the two numbers it is
+  reading. Master's existing consumer already carries both notions separately
+  (`control_plane/capacity_economics_projection.py:83` `estimated_startable_jobs` and the parallelism bound at
+  `:175`), so the split is expressible today; a merge back into one number would be the larger change.
+- **Open question for the reviewer**: does the ruling's "plus" mean a start-admission bound, a simultaneity
+  bound, or both? This document reads it as simultaneity.
+
+### D2 — OpenCode Go is three per-account expressions, not one shared set
+- **Ruling text (§2)**: *"OpenCode Go: `ALL_OF(go_shared_5h, go_shared_weekly, go_shared_monthly,
+  go_concurrency)`"* — singular.
+- **This document (§5.2)**: one such expression **per account**, with the accounts as sibling placement routes.
+- **Why**: the fabric holds three Go accounts, and one account's depletion does not deplete another's. Writing
+  them as one set would be the same "one entitlement duplicated into fictional capacity" error the ruling exists
+  to prevent, in reverse.
+- **Status**: offered as a refinement of the example, not of the operator set.
+
+### D3 — Generation and observation freshness are two clocks
+- **Ruling text**: §3 lists generation-invalidating events; §15 separately says a reset makes an observation
+  stale and must not manufacture capacity.
+- **This document (§2.3)**: makes the separation explicit — generation governs joins and calibration, freshness
+  governs usability of a number, and a reset moves only the second.
+- **Why**: the ruling implies the distinction but does not name it, and conflating them produces both of the bad
+  outcomes it warns about — a reset treated as a new generation discards valid calibration, while a generation
+  change treated as mere staleness keeps joining across an epoch boundary.
+- **Status**: offered as a clarification, with no change to either rule's effect.
+
+Two further constructs are additions rather than departures, and are flagged so the review does not mistake them
+for ruling text: the **BUDGET / CEILING child roles** (§3.2) and the **stage-routing declaration** with its
+partitionability precondition (§3.3). The ruling's §2 says *"The invariant is more important than the syntax"*
+and names the invariant as knowing *"whether provider resources are simultaneously depleted, shared, nested
+ceilings, or ordered overflow"* — these two constructs are this document's proposal for how to carry that
+invariant. If Sol prefers a different syntax for the same invariant, nothing else in this contract changes.
+
+---
+
+## 13. Release condition
 
 This document is a PROPOSAL and is HOLD-FOR-SOL. Its release condition is a Sol architecture review of
 **(a)** the contract shape — the two child roles, the partitionability precondition, the evaluation rules of §4,
