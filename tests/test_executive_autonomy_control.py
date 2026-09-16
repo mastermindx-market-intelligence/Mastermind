@@ -4210,3 +4210,75 @@ def test_ceo_submit_candidate_paths_are_distinct_and_returned_control_first():
     for rejected in ("autonomy-XYZ", "nope", ""):
         with pytest.raises(control.TransactionEffectUnknown):
             host._candidate_paths(rejected)
+
+
+def _drift_armed_ceo_submit_host():
+    """A really-armed host whose live App binding can then be drifted one fact at a time.
+
+    The ARM seals a receipt from the UNDRIFTED binding; mutating
+    ``binding_overrides`` afterwards changes only what ``executive_app_binding()``
+    reports live.  The status assertion here is the positive control: it proves
+    the fixture truly reached CEO_SUBMIT_ARMED before any drift, so a later
+    CEO_SUBMIT_ARMED_UNBOUND is the drift and not a broken fixture.
+    """
+
+    host = _armed_ceo_submit_host()
+    assert (
+        control.evaluate_ceo_submit_status(host, _ceo_submit_request()).state
+        == "CEO_SUBMIT_ARMED"
+    )
+    host.reset_ledgers()
+    return host
+
+
+_CEO_SUBMIT_LIVE_BINDING_DRIFT = [
+    ("app_peer_uid", 459),
+    ("ingress_peer_uid", 453),
+    ("app_armed", True),
+    ("app_macro_root", "/fixture/changed-macro"),
+    ("ingress_socket_path", "/fixture/changed-ingress.sock"),
+    ("launchd_socket_name", "ChangedIngress"),
+]
+
+
+@pytest.mark.parametrize("field,value", _CEO_SUBMIT_LIVE_BINDING_DRIFT)
+def test_status_rejects_each_live_binding_identity_drift(field, value):
+    host = _drift_armed_ceo_submit_host()
+    host.binding_overrides[field] = value
+    result = control.evaluate_ceo_submit_status(host, _ceo_submit_request())
+    assert result.state == "CEO_SUBMIT_ARMED_UNBOUND"
+    assert host.control_writes == host.worker_writes == host.receipt_writes == 0
+
+
+def test_unchanged_binding_remains_armed_without_writes():
+    host = _drift_armed_ceo_submit_host()
+    assert (
+        control.evaluate_ceo_submit_status(host, _ceo_submit_request()).state
+        == "CEO_SUBMIT_ARMED"
+    )
+    assert host.control_writes == host.worker_writes == host.receipt_writes == 0
+
+
+@pytest.mark.parametrize("field", ["binding_valid", "acl_valid", "topology_valid"])
+def test_existing_negative_binding_flags_are_still_refused(field):
+    host = _drift_armed_ceo_submit_host()
+    host.binding_overrides[field] = False
+    assert (
+        control.evaluate_ceo_submit_status(host, _ceo_submit_request()).state
+        == "CEO_SUBMIT_ARMED_UNBOUND"
+    )
+
+
+@pytest.mark.parametrize("field,value", _CEO_SUBMIT_LIVE_BINDING_DRIFT)
+def test_cli_status_does_not_report_ready_after_live_binding_drift(field, value, capsys):
+    host = _drift_armed_ceo_submit_host()
+    host.binding_overrides[field] = value
+    code = control.main(
+        ["ceo-submit-status", "--expected-sha", SHA], host=host, now=lambda: NOW
+    )
+    output = capsys.readouterr()
+    assert code == 2
+    document = json.loads(output.out)
+    assert document["state"] == "CEO_SUBMIT_ARMED_UNBOUND"
+    assert output.err == ""
+    assert host.control_writes == host.worker_writes == host.receipt_writes == 0

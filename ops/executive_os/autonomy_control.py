@@ -808,6 +808,21 @@ def build_transaction_receipt(
     }
 
 
+def _ceo_submit_binding_matches_control(
+    control: Mapping[str, Any], binding: ExecutiveAppBinding
+) -> bool:
+    """Compare all existing live-binding fields without adding receipt fields."""
+
+    return (
+        control.get("ceo_ingress_app_peer_uid") == binding.app_peer_uid
+        and control.get("ceo_ingress_app_armed") is binding.app_armed
+        and control.get("ceo_ingress_peer_uid") == binding.ingress_peer_uid
+        and control.get("ceo_ingress_app_macro_root") == binding.app_macro_root
+        and control.get("ceo_ingress_socket_path") == binding.ingress_socket_path
+        and control.get("ceo_ingress_launchd_socket_name") == binding.launchd_socket_name
+    )
+
+
 def ceo_submit_projection(
     transaction: TransactionContext,
     admission: CeoSubmitAdmission,
@@ -832,17 +847,7 @@ def ceo_submit_projection(
         values[field] = control[field]
     if values["ceo_submit_armed"] is not armed:
         raise CeoSubmitAdmissionError("ceo_submit_config_schema_drift")
-    if (
-        binding.present
-        and (
-            values["ceo_ingress_app_peer_uid"] != binding.app_peer_uid
-            or values["ceo_ingress_app_armed"] is not binding.app_armed
-            or values["ceo_ingress_peer_uid"] != binding.ingress_peer_uid
-            or values["ceo_ingress_app_macro_root"] != binding.app_macro_root
-            or values["ceo_ingress_socket_path"] != binding.ingress_socket_path
-            or values["ceo_ingress_launchd_socket_name"] != binding.launchd_socket_name
-        )
-    ):
+    if binding.present and not _ceo_submit_binding_matches_control(values, binding):
         # ASYMMETRY (R9): an ABSENT or invalid App binding refuses the ARM
         # direction but must never refuse the DISARM direction -- disarm is the
         # safe direction.  The binding facts are still carried into the
@@ -1039,6 +1044,8 @@ def ceo_submit_sink_eligible(
     if projection.get("release_sha") != expected_sha:
         return False
     if not isinstance(binding, ExecutiveAppBinding) or not binding.present:
+        return False
+    if not _ceo_submit_binding_matches_control(control_config, binding):
         return False
     recomputed = {
         **dict(projection),
