@@ -5,10 +5,10 @@ canonical Executive host-capacity snapshot.  It does not persist a new schema,
 allocate hosts, choose routes, rank workers, or widen the evaluation lifecycle.
 
 A run is *evidence-locked* to a host observation only when its immutable
-``evidence.artifacts`` list binds the exact SHA-256 digest of canonical
-``mastermind.host_capacity_snapshot/v1`` bytes.  A pair passes this verifier
-only when both bound snapshots validate under the Executive owner and expose
-the same opaque ``host_ref`` and ``boot_ref``.
+``evidence.artifacts`` list binds the exact canonical Agent Evaluation
+``sha256:<64 hex>`` digest of ``mastermind.host_capacity_snapshot/v1`` bytes.
+A pair passes this verifier only when both bound snapshots validate under the
+Executive owner and expose the same opaque ``host_ref`` and ``boot_ref``.
 
 Important proof ceiling: this does **not** prove that either run's process
 actually executed on the referenced host generation.  Current Agent Evaluation
@@ -45,8 +45,9 @@ def _refuse(path: str, code: str, message: str) -> None:
 
 
 def host_capacity_snapshot_digest(snapshot: Mapping[str, Any]) -> str:
-    """Return the digest of one valid canonical host-capacity snapshot.
+    """Return the canonical Agent Evaluation digest for one host snapshot.
 
+    Agent Evaluation's persisted digest contract is ``sha256:<64 lower hex>``.
     The Executive host-capacity owner remains authoritative for snapshot shape
     and normalization.  Hostile snapshot values are never echoed into Agent
     Evaluation errors.
@@ -64,7 +65,7 @@ def host_capacity_snapshot_digest(snapshot: Mapping[str, Any]) -> str:
                 )
             ]
         ) from exc
-    return hashlib.sha256(payload).hexdigest()
+    return "sha256:" + hashlib.sha256(payload).hexdigest()
 
 
 def _bound_host_evidence(
