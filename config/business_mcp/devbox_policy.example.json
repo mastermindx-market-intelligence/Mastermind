@@ -18,7 +18,7 @@
     "RS256"
   ],
   "clock_skew_seconds": 30,
-  "max_token_lifetime_seconds": 900,
+  "max_token_lifetime_seconds": 300,
   "jwks_cache_ttl_seconds": 300,
   "unknown_kid_refresh_cooldown_seconds": 30,
   "fetch_failure_backoff_seconds": 5

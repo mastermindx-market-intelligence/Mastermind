@@ -145,7 +145,8 @@ Put only the resulting 64-hex digest in `lease.expected_client_ref`. The accepte
 Use a state root outside the checkout; its parent must already exist. Example:
 
 ```bash
-mkdir -m 700 -p "$HOME/.mastermind-devbox-state"
+mkdir -p "$HOME/.mastermind-devbox-state"
+chmod u=rwx,go= "$HOME/.mastermind-devbox-state"
 python -m ops.devbox.run_codespace_devbox \
   --repo-root "$PWD" \
   --state-root "$HOME/.mastermind-devbox-state" \

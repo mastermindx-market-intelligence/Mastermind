@@ -390,7 +390,7 @@ def _is_exact_empty_private_operation_directory(op_dir: Path) -> bool:
             stat.S_ISLNK(info.st_mode)
             or not stat.S_ISDIR(info.st_mode)
             or info.st_uid != os.geteuid()
-            or stat.S_IMODE(info.st_mode) != 0o700
+            or stat.S_IMODE(info.st_mode) != stat.S_IRWXU
         ):
             return False
         with os.scandir(op_dir) as entries:
@@ -515,15 +515,15 @@ class CodespaceDevBoxRuntime:
             state_stat = _lstat_real_directory(state)
         else:
             try:
-                state.mkdir(parents=True, mode=0o700)
-                state.chmod(0o700)
+                state.mkdir(parents=True, mode=stat.S_IRWXU)
+                state.chmod(stat.S_IRWXU)
             except OSError as exc:
                 raise DevBoxRuntimeError("RUNTIME_UNQUALIFIED", "state root could not be created") from exc
             state_stat = _lstat_real_directory(state)
         state_real = state.resolve(strict=True)
         if _is_relative_to(state_real, repo_real) or _is_relative_to(repo_real, state_real):
             raise DevBoxRuntimeError("RUNTIME_UNQUALIFIED", "state and repository roots must be disjoint")
-        if state_stat.st_uid != os.geteuid() or stat.S_IMODE(state_stat.st_mode) != 0o700:
+        if state_stat.st_uid != os.geteuid() or stat.S_IMODE(state_stat.st_mode) != stat.S_IRWXU:
             raise DevBoxRuntimeError("RUNTIME_UNQUALIFIED", "state root must be owner-private mode 0700")
         shell = Path(shell_path)
         try:
@@ -600,11 +600,11 @@ class CodespaceDevBoxRuntime:
                     "working_tree_dirty": baseline_dirty,
                 },
             )
-        operations.mkdir(mode=0o700, exist_ok=True)
-        operations.chmod(0o700)
+        operations.mkdir(mode=stat.S_IRWXU, exist_ok=True)
+        operations.chmod(stat.S_IRWXU)
         home = state_real / "home"
-        home.mkdir(mode=0o700, exist_ok=True)
-        home.chmod(0o700)
+        home.mkdir(mode=stat.S_IRWXU, exist_ok=True)
+        home.chmod(stat.S_IRWXU)
         return cls(
             repo_root=repo_real,
             state_root=state_real,
@@ -732,8 +732,8 @@ class CodespaceDevBoxRuntime:
                     "SOURCE_DIRTY", "repository source changed before the first effect"
                 )
         try:
-            op_dir.mkdir(mode=0o700)
-            op_dir.chmod(0o700)
+            op_dir.mkdir(mode=stat.S_IRWXU)
+            op_dir.chmod(stat.S_IRWXU)
             created = True
         except FileExistsError:
             created = False

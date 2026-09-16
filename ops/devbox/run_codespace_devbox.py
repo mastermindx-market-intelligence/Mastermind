@@ -203,15 +203,15 @@ class CodespaceDevBoxService:
 def _open_audit_sink(state_root: Path, policy_id: str) -> DurableAuthAuditSink:
     directory = state_root / "auth-audit"
     try:
-        directory.mkdir(mode=0o700, exist_ok=True)
-        directory.chmod(0o700)
+        directory.mkdir(mode=stat.S_IRWXU, exist_ok=True)
+        directory.chmod(stat.S_IRWXU)
         info = directory.lstat()
     except OSError as exc:
         raise DevBoxServiceConfigurationError("audit directory could not be prepared") from exc
     if (
         not stat.S_ISDIR(info.st_mode)
         or info.st_uid != os.geteuid()
-        or stat.S_IMODE(info.st_mode) != 0o700
+        or stat.S_IMODE(info.st_mode) != stat.S_IRWXU
         or directory.is_symlink()
     ):
         _configuration("audit directory security refused")
