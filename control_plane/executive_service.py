@@ -5981,8 +5981,8 @@ class ExecutiveControlService:
             if self._service_state not in {"READY", "AWAITING_CANARY"}:
                 raise StateConflict(
                     f"Executive control service is {self._service_state}; "
-                    "only status, health, canary activation, backup, and "
-                    "verify-backup are available"
+                    "backup and verify-backup require service state READY or "
+                    "AWAITING_CANARY"
                 )
             if command == "backup":
                 self._exact_args(args, set())

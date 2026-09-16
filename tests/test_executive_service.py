@@ -9641,11 +9641,13 @@ def test_quarantined_state_refuses_backup_and_verify_backup(
             denied_backup = await _request(service, "backup")
             assert denied_backup["ok"] is False
             assert "QUARANTINED" in denied_backup["error"]["message"]
+            assert "require service state READY or AWAITING_CANARY" in denied_backup["error"]["message"]
             denied_verify = await _request(
                 service, "verify-backup", {"name": "fixture.sqlite3"}
             )
             assert denied_verify["ok"] is False
             assert "QUARANTINED" in denied_verify["error"]["message"]
+            assert "require service state READY or AWAITING_CANARY" in denied_verify["error"]["message"]
             assert backend.created == []
             assert backend.verified == []
             assert service.service_state == "QUARANTINED"
