@@ -105,7 +105,7 @@ The wrapper is an ergonomics and governance consumer, not a sandbox boundary for
 
 Current authority (this section) is required only for **first admission** of a new logical family. Reading an existing family — §8's existing-family-first recovery — requires none of the checks below; it is evidence retrieval, not authority admission.
 
-The controller first derives immutable host/release/policy facts **outside** the Runtime write transaction: installed `ServiceConfig.proof_base_sha`, one fully loaded `ExecutiveAuthorityPolicy` object plus its digest, and the kernel boot-session UUID. This preflight must refuse when macOS `kern.bootsessionuuid` is unavailable, empty, malformed, or falls back to the process-local `adapter-<pid>` identity. A PID-derived fallback never enters a binding. No policy-file read or `sysctl` subprocess occurs while a Runtime write transaction is held.
+The controller first derives immutable host/release/policy and Job-authority facts **outside** the Runtime write transaction: installed `ServiceConfig.proof_base_sha`, one fully loaded `ExecutiveAuthorityPolicy` object plus its digest, the kernel boot-session UUID, and one read-only snapshot of the Job's `requested_authorities`, `worktree`, `allowed_write_paths`, and `validation_commands`. It calls `authorize(...)` on that preflight snapshot before acquiring `BEGIN IMMEDIATE`, producing the exact `AuthorityDecision`; this keeps `Path.expanduser()`/`Path.resolve()` and every policy-file read outside the global Runtime write lock. Preflight refuses when macOS `kern.bootsessionuuid` is unavailable, empty, malformed, or falls back to the process-local `adapter-<pid>` identity. A PID-derived fallback never enters a binding. No filesystem resolution, policy-file read, or `sysctl` subprocess occurs while a Runtime write transaction is held.
 
 Current-attempt validation then runs inside one short `RuntimeStore.transaction()` before any broker I/O. `AttemptRegistry` gains one private token-agnostic join/currentness helper that validates active status, exact Job-status correspondence, fence/quota-fence equality, unexpired lease, and current Job/quota links. `_leased_row` calls that helper and adds only constant-time caller-token comparison. `current_authority_snapshot` calls the same helper, then separately adds caller-supplied `job_id` equality, worker/slot facts, and the P2-specific `SEALED_WORKER` gate. This preserves existing `OPERATOR_HARNESS` lease paths while keeping their epoch/generation currentness owner intact. P2-1 does not duplicate those private SQL invariants in the privileged controller and never exposes the stored token.
 
@@ -118,12 +118,12 @@ The transaction refuses unless all of the following are simultaneously true:
 5. `jobs.current_attempt_id` and `worker_quota_classes.held_attempt_id` both equal the Attempt.
 6. caller-supplied fence equals both `attempts.fence_generation` and the quota fence counter.
 7. the persisted lease is not expired at the Runtime clock. Its opaque token is never returned, logged, put in an event, or required from the model/operator request.
-8. Job, Attempt, and the preloaded immutable policy hashes agree.
-9. `authorize(...)` on the already-loaded policy object succeeds for the Job's stored authority/write/test scope and includes `REQUEST_WORKER_LOGIN_CHECK`; this performs no file I/O inside the transaction.
+8. the transaction's freshly re-read Job row has authority inputs exactly equal to the preflight snapshot (`requested_authorities`, `worktree`, `allowed_write_paths`, and `validation_commands`), and Job, Attempt, precomputed `AuthorityDecision`, and loaded policy hashes agree.
+9. the precomputed `AuthorityDecision` includes `REQUEST_WORKER_LOGIN_CHECK`; `authorize(...)`, path expansion, and path resolution are never called inside the transaction.
 10. the assigned Worker/Quota remains the current row and the Worker identity is not offline.
 11. assigned `worker_id` resolves through `get_slot(worker_id)` and the returned exact `slot_id` equals that worker; the caller cannot override either value.
 12. effective-grant validation reuses one canonical deterministic helper factored from `ExecutiveSupervisor._effective_grant`; it receives the already-authorized decision/policy facts as inputs and performs no policy load. The supervisor and P2-1 both call it. An orchestration Attempt missing or failing that grant refuses. Role-null legacy Jobs may use the freshly re-authorized Job grant.
-13. the preflight release and policy digest equal the in-memory installed `ServiceConfig` and loaded policy object used by the transaction, while the preflight boot UUID remains the process's validated boot fact. The transaction never re-runs `sysctl` or rereads policy bytes.
+13. the preflight release and policy digest equal the in-memory installed `ServiceConfig` and loaded policy object used by the transaction, while the preflight boot UUID remains the process's validated boot fact. The transaction never re-runs `sysctl`, rereads policy bytes, calls `authorize(...)`, or resolves filesystem paths.
 
 The root-installed control config gains two closed host-composition fields:
 
@@ -176,7 +176,7 @@ The canonical first-admission binding has exact keys:
 Both digests are recomputed identically from immutable stored fields:
 
 - Event aggregate type: `privileged_readiness`;
-- Event aggregate ID: the family aggregate ID (`pvrf-...`) — this gives an exact `WHERE aggregate_type='privileged_readiness' AND aggregate_id=?` lookup on the existing Event index, with no new index or schema migration, and prevents a release/boot/policy change from ever producing a second family for the same fence;
+- Event aggregate ID: the family aggregate ID (`pvrf-...`) — this gives an exact `WHERE aggregate_type='privileged_readiness' AND aggregate_id=?` lookup using the implicit index created by the existing `UNIQUE(aggregate_type, aggregate_id, sequence)` constraint, with no new index or schema migration, and prevents a release/boot/policy change from ever producing a second family for the same fence;
 - INTENT command ID: the operation/broker request ID (`pvr-...`);
 - later phase command IDs: `<operation_id>:attempted`, `:terminal`, `:broker_refused`, `:effect_unknown`, or `:reconciled`.
 
@@ -225,7 +225,7 @@ A validated broker terminal response appends `PRIVILEGED_READINESS_TERMINAL`. Ev
 
 ### Evidence currency
 
-Every result — fresh or replayed — carries `observed_at_ms` (the wall-clock instant the returned evidence was produced or last validated) and `evidence_currency: CURRENT | HISTORICAL`. `CURRENT` asserts only that the stored `boot_id`, `release_sha`, and `authority_policy_hash` in the family's binding equal freshly re-validated current host facts at `observed_at_ms`; any mismatch, or any inability to prove one of those three facts, yields `HISTORICAL`. The authority-free replay path may perform one bounded kernel boot-UUID observation per invocation outside any Runtime transaction. Neither currency value asserts READY, credential validity, or provider account identity — both remain point-in-time login-status evidence per §1.
+Every result — fresh or replayed — carries `observed_at_ms` (the wall-clock instant the returned evidence was produced or last validated) and `evidence_currency: CURRENT | HISTORICAL`. `CURRENT` asserts only that the stored `boot_id`, `release_sha`, and `authority_policy_hash` in the family's binding equal freshly re-validated current host facts at `observed_at_ms`; any mismatch, or any inability to prove one of those three facts, yields `HISTORICAL`. The authority-free replay path may perform one bounded kernel boot-UUID observation and one bounded current-policy load/digest read per invocation, both outside any Runtime transaction. Neither currency value asserts READY, credential validity, or provider account identity — both remain point-in-time login-status evidence per §1.
 
 ### Replay/reconciliation
 

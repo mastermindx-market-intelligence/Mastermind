@@ -172,7 +172,7 @@ Expected RED: API absent.
 - Add `current_authority_snapshot(connection, job_id, attempt_id, fence_generation, timestamp, statuses)` on `AttemptRegistry`; it calls the shared helper and then separately adds exact `job_id`, worker/slot facts, and `SEALED_WORKER` validation.
 - Perform all Job/Attempt/quota/worker reads on the caller's existing transaction connection.
 - Return a frozen dataclass; omit `lease_token` and raw provider credential material.
-- Scope parity tests to the shared helper's status/fence/expiry/current-link checks; separately test that only `current_authority_snapshot` rejects non-`SEALED_WORKER` modes.
+- Scope parity tests to the shared helper's status/fence/expiry/current-link checks; separately test that only `current_authority_snapshot` rejects non-`SEALED_WORKER` modes. Pin the deliberate post-refactor error precedence: shared stale-fence/status/currentness refusals occur before `_leased_row`'s invalid-token comparison.
 
 **Step 3 — write failing effective-grant and prompt tests**
 
@@ -327,24 +327,25 @@ Use a fake broker client and real RuntimeStore:
 - a singleflight miss (simulated second process) still cannot create a duplicate family, proven via the `BEGIN IMMEDIATE` transaction plus family aggregate-ID uniqueness alone;
 - failure before ATTEMPTED creates no operation family;
 - crash/exception after ATTEMPTED never becomes no-effect;
+- instrument `Path.resolve()`/`Path.expanduser()` and policy-file reads to prove all authority-decision filesystem work occurs before `connection.in_transaction` becomes true; a changed authority-input row inside the transaction refuses rather than recomputing the decision under the lock;
 - process crash simulated between the ATTEMPTED commit and the broker socket write leaves the family `EFFECT_UNKNOWN`, identical to a post-send transport loss, with no automatic retry;
 - `worker_id` resolves through `get_slot(worker_id)` imported via the existing `ops.executive_os` namespace-package seam from a production-style release-root composition (not a repo-relative import), and the returned slot id must equal the caller's worker.
 
 **Step 5 — implement controller admission and singleflight**
 
 - Query existing family first via the Step 3 seam.
-- For new work, load `ExecutiveAuthorityPolicy`, installed release identity, and the validated kernel boot UUID before opening any Runtime write transaction.
+- For new work, load `ExecutiveAuthorityPolicy`, installed release identity, and the validated kernel boot UUID before opening any Runtime write transaction. Read the Job's authority inputs through a read-only Runtime snapshot and call `authorize(...)` there, producing one precomputed `AuthorityDecision` before the write lock.
 - Use a process-local async singleflight registry keyed on the logical family key.
-- Inside one `BEGIN IMMEDIATE` Runtime transaction, recheck absence via the same Step 3 seam, call `current_authority_snapshot`, call `authorize(...)` on the already-loaded policy object, validate the effective grant with the pre-authorized decision, compare only in-memory release/policy/boot facts, append INTENT+ATTEMPTED, and return execute-once only to the owner task.
-- Do not call `ExecutiveAuthorityPolicy.load()`, `Path.read_bytes()`, `ProcessInspector.boot_session_id()`, sysctl, socket I/O or provider work while the Runtime transaction is held.
+- Inside one `BEGIN IMMEDIATE` Runtime transaction, recheck absence via the same Step 3 seam, call `current_authority_snapshot`, re-read and compare the exact Job authority inputs against the preflight snapshot, validate the effective grant with the precomputed decision, compare only in-memory release/policy/boot facts, append INTENT+ATTEMPTED, and return execute-once only to the owner task.
+- Do not call `ExecutiveAuthorityPolicy.load()`, `ExecutiveAuthorityPolicy.authorize()`, `Path.expanduser()`, `Path.resolve()`, `Path.read_bytes()`, `ProcessInspector.boot_session_id()`, sysctl, socket I/O or provider work while the Runtime transaction is held.
 
 **Step 6 — write RED tests for terminal and unknown-effect reconciliation**
 
 Cover:
-- terminal effect response -> TERMINAL once, with `observed_at_ms` set and `evidence_currency` computed from freshly re-validated boot/release/policy facts;
-- broker refusal -> BROKER_REFUSED once with closed reason;
-- transport loss -> EFFECT_UNKNOWN;
-- status terminal after loss -> RECONCILED with one total effect call;
+- terminal effect response -> append the `TERMINAL` Event phase once and return result state `TERMINAL`, with `observed_at_ms` set and `evidence_currency` computed from freshly re-validated boot/release/policy facts;
+- broker refusal -> append the `BROKER_REFUSED` Event phase once and return result state `REFUSED` with a closed reason;
+- transport loss -> append/retain the `EFFECT_UNKNOWN` Event phase and return result state `EFFECT_UNKNOWN`;
+- status terminal after loss -> append the `RECONCILED` Event phase with one total effect call and return result state `TERMINAL` plus `replayed: true`;
 - marker -> EFFECT_UNKNOWN;
 - NOT_FOUND after ATTEMPTED -> EFFECT_UNKNOWN;
 - repeated marker/NOT_FOUND/status observation appends no duplicate Event;
@@ -521,7 +522,10 @@ python3 -m pytest -o addopts='' -q \
   tests/test_executive_service.py \
   tests/test_c1_installer_control_config.py \
   tests/test_executive_launchd_config.py \
-  tests/test_executive_service_control.py
+  tests/test_executive_service_control.py \
+  tests/test_ceo_submit_armed_composition.py \
+  tests/test_c1_ceo_ingress_composition.py \
+  tests/test_worker_execution_contract.py
 python3 -m py_compile \
   control_plane/executive_authority.py \
   control_plane/executive_runtime.py \
