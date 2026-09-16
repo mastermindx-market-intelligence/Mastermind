@@ -509,16 +509,6 @@ def test_checked_in_aliases_split_surface_transport_and_stay_unarmed():
     assert "adapter_type" not in dumped
 
 
-def test_grok_bot_vocabulary_adds_no_target_binding_or_transport_implementation():
-    assert "grok-bot" in REASONING_SURFACES
-
-    registry = load_session_targets()
-    assert all(
-        target.reasoning_surface != "grok-bot" for target in registry.targets.values()
-    )
-    assert transport_implemented("grok-computer") is False
-
-
 def test_unknown_workstream_refuses_instead_of_seat_default():
     registry = load_session_targets()
     with pytest.raises(SessionTargetError, match="unknown workstream"):

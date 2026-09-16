@@ -58,7 +58,7 @@ _WORKSTREAM_ID_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 BINDING_ID_RE = re.compile(r"^bind-[a-z0-9][a-z0-9._-]{7,63}$")
 
 REASONING_SURFACES = frozenset(
-    {"chatgpt-sol", "codex", "claude", "workspace-agent", "human", "grok-bot"}
+    {"chatgpt-sol", "codex", "claude", "workspace-agent", "human"}
 )
 
 

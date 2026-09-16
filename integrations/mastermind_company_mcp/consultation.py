@@ -420,7 +420,6 @@ class CompanyConsultationGateway:
                     "schema": COMPANY_CONSULTATION_SCHEMA,
                     "operation": "consult",
                     "peer": peer.public_projection(),
-                    "consultation_schema": peer.consultation_schema,
                     "semantic": normalized,
                     "budget": {
                         "max_answers": 1,
