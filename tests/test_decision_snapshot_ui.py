@@ -528,6 +528,13 @@ def test_pr548_surfaced_from_real_contract_receipt_shape():
 def test_pr548_surfaced_from_real_sealed_gap_string():
     # Critical-2 Path B: the real #548 gap is the exact dependency_owned_elsewhere gap
     # decision_snapshot_sources.py emits, sealed to a string — not a live object.
+    #
+    # A bare "#548" substring check is not discriminating on its own: the gap table renders
+    # the raw gap content (including the literal "Mastermind PR #548" owner field) regardless
+    # of whether the pr548-detection `.some(...)` actually fired, so that assertion alone
+    # would still pass even if the detection path silently regressed back to rejecting
+    # strings. The second assertion checks the dependency-NOTE's distinctive copy, which only
+    # renders when `pr548` is actually true.
     gap = _seal_gap(
         code="DEPENDENCY_OWNED_ELSEWHERE",
         source_id="macro.sector_rotation",
@@ -536,6 +543,7 @@ def test_pr548_surfaced_from_real_sealed_gap_string():
     )
     out = _run_renderer({"status": "PARTIAL", "snapshot": _base_snapshot(gaps=[gap])})
     assert "#548" in out["html"]
+    assert "not repaired" in out["html"] or "尚未修复" in out["html"]
 
 
 def test_pr548_absent_when_no_dependency_signal():
