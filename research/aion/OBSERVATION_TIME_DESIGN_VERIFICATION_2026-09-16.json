@@ -1,0 +1,9 @@
+{
+  "kind": "design_arithmetic_verification",
+  "cases": 225,
+  "exact_fraction_arithmetic": true,
+  "market_data_used": false,
+  "production_code_changed": false,
+  "predictive_validation": false,
+  "source_pin": "0fe8074ff953b2ced9025ed40f0f66019c759967"
+}
