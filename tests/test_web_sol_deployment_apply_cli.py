@@ -844,3 +844,33 @@ def test_cli_persists_exact_abort_without_replay(
     assert second_error["code"] == "TRANSACTION_CONSUMED"
     assert second_error["target_effect"] == "NONE"
     assert list(install_root.rglob("*")) == []
+
+
+def test_private_state_preserves_cleanup_nonce(
+    tmp_path: Path,
+) -> None:
+    bundle, install_root = _bundle(tmp_path)
+    request_document = _request_document(bundle, install_root)
+    decoded_bundle, plan, metadata = cli._decode_request(request_document)
+    prepared = cli.applier.prepare_deployment(
+        decoded_bundle,
+        plan,
+        install_root=metadata["install_root"],
+        expected_uid=metadata["expected_uid"],
+        expected_gid=metadata["expected_gid"],
+        operation_key=metadata["operation_key"],
+    )
+    document = cli._private_state_document(
+        request_document=request_document,
+        prepared=prepared,
+        phase="PREPARED",
+    )
+
+    nonce = document["prepared"].get("cleanup_nonce")
+    assert type(nonce) is str and len(nonce) == 32
+    phase, _request, restored, applied, _digest = cli._decode_private_state(document)
+    assert phase == "PREPARED"
+    assert applied is None
+    assert cli.applier._cleanup_quarantine_name("fixed.tmp", restored) == (
+        cli.applier._cleanup_quarantine_name("fixed.tmp", prepared)
+    )

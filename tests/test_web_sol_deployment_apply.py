@@ -1485,3 +1485,210 @@ def test_prepare_refuses_unbounded_preimage_bytes_before_effect(
 
     for index, artifact in enumerate(artifacts):
         assert artifact.destination.read_bytes() == bytes([65 + index]) * 12
+
+
+def test_cleanup_quarantine_name_uses_private_nonce(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle, install_root = _bundle(tmp_path)
+    values = iter((b"A" * 16, b"B" * 16))
+    monkeypatch.setattr(applier.os, "urandom", lambda size: next(values))
+    kwargs = {
+        "install_root": install_root,
+        "expected_uid": install_root.stat().st_uid,
+        "expected_gid": install_root.stat().st_gid,
+        "operation_key": "web-sol-install1-transactional-applier-source-20260916-sol-001",
+    }
+
+    first = applier.prepare_deployment(
+        bundle,
+        deployment.plan_deployment(bundle, {}),
+        **kwargs,
+    )
+    second = applier.prepare_deployment(
+        bundle,
+        deployment.plan_deployment(bundle, {}),
+        **kwargs,
+    )
+
+    assert applier._cleanup_quarantine_name("fixed.tmp", first) != (
+        applier._cleanup_quarantine_name("fixed.tmp", second)
+    )
+    assert "cleanup_nonce" not in first.public_receipt
+
+
+def test_cleanup_quarantine_name_rejects_nul(
+    tmp_path: Path,
+) -> None:
+    bundle, install_root = _bundle(tmp_path)
+    prepared = applier.prepare_deployment(
+        bundle,
+        deployment.plan_deployment(bundle, {}),
+        install_root=install_root,
+        expected_uid=install_root.stat().st_uid,
+        expected_gid=install_root.stat().st_gid,
+        operation_key="web-sol-install1-transactional-applier-source-20260916-sol-001",
+    )
+
+    with pytest.raises(
+        applier.WebSolDeploymentApplyError,
+        match="APPLY_EFFECT_UNKNOWN",
+    ):
+        applier._cleanup_quarantine_name("bad\x00name", prepared)
+
+
+def test_partial_temporary_identity_swap_is_not_unlinked(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle, install_root = _bundle(tmp_path)
+    artifact = sorted(bundle.artifacts, key=lambda row: str(row.destination))[0]
+    artifact.destination.parent.mkdir(parents=True, mode=0o700)
+    prepared = applier.prepare_deployment(
+        bundle,
+        deployment.plan_deployment(bundle, {}),
+        install_root=install_root,
+        expected_uid=install_root.stat().st_uid,
+        expected_gid=install_root.stat().st_gid,
+        operation_key="web-sol-install1-transactional-applier-source-20260916-sol-001",
+    )
+    parent_descriptor = applier._open_verified_directory(
+        artifact.destination.parent,
+        prepared,
+    )
+    temporary_name = "partial-owned.tmp"
+    foreign_name = "partial-foreign.tmp"
+    foreign = b"foreign-partial-temporary"
+    original_stat = applier.os.stat
+    injected = False
+
+    try:
+        descriptor = applier.os.open(
+            temporary_name,
+            applier.os.O_WRONLY | applier.os.O_CREAT | applier.os.O_EXCL,
+            0o600,
+            dir_fd=parent_descriptor,
+        )
+        try:
+            applier.os.write(descriptor, b"owned-partial-temporary")
+            applier.os.fsync(descriptor)
+            created = applier.os.fstat(descriptor)
+        finally:
+            applier.os.close(descriptor)
+        foreign_descriptor = applier.os.open(
+            foreign_name,
+            applier.os.O_WRONLY | applier.os.O_CREAT | applier.os.O_EXCL,
+            0o600,
+            dir_fd=parent_descriptor,
+        )
+        try:
+            applier.os.write(foreign_descriptor, foreign)
+            applier.os.fsync(foreign_descriptor)
+        finally:
+            applier.os.close(foreign_descriptor)
+
+        def stat_then_swap(name, *args, **kwargs):
+            nonlocal injected
+            observed = original_stat(name, *args, **kwargs)
+            if (
+                not injected
+                and name == temporary_name
+                and kwargs.get("dir_fd") == parent_descriptor
+            ):
+                injected = True
+                applier.os.rename(
+                    foreign_name,
+                    temporary_name,
+                    src_dir_fd=parent_descriptor,
+                    dst_dir_fd=parent_descriptor,
+                )
+            return observed
+
+        monkeypatch.setattr(applier.os, "stat", stat_then_swap)
+
+        with pytest.raises(
+            applier.WebSolDeploymentApplyError,
+            match="APPLY_EFFECT_UNKNOWN",
+        ):
+            applier._remove_owned_partial_temporary_at(
+                parent_descriptor,
+                temporary_name,
+                created_dev=created.st_dev,
+                created_ino=created.st_ino,
+                prepared=prepared,
+            )
+
+        assert injected is True
+        assert (artifact.destination.parent / temporary_name).read_bytes() == foreign
+    finally:
+        applier.os.close(parent_descriptor)
+
+
+def test_created_directory_identity_swap_is_not_removed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle, install_root = _bundle(tmp_path)
+    prepared = applier.prepare_deployment(
+        bundle,
+        deployment.plan_deployment(bundle, {}),
+        install_root=install_root,
+        expected_uid=install_root.stat().st_uid,
+        expected_gid=install_root.stat().st_gid,
+        operation_key="web-sol-install1-transactional-applier-source-20260916-sol-001",
+    )
+    created: list[Path] = []
+    applier._create_parent_directories(prepared, created)
+    directory = max(created, key=lambda path: len(path.parts))
+    foreign = directory.with_name(f"{directory.name}-foreign")
+    displaced = directory.with_name(f"{directory.name}-displaced")
+    foreign.mkdir(mode=0o700)
+    original_listdir = applier.os.listdir
+    injected = False
+
+    def list_then_swap(descriptor: int) -> list[str]:
+        nonlocal injected
+        entries = original_listdir(descriptor)
+        if not injected:
+            injected = True
+            directory.rename(displaced)
+            foreign.rename(directory)
+        return entries
+
+    monkeypatch.setattr(applier.os, "listdir", list_then_swap)
+
+    with pytest.raises(
+        applier.WebSolDeploymentApplyError,
+        match="ROLLBACK_EFFECT_UNKNOWN",
+    ):
+        applier._remove_created_directory(directory, prepared)
+
+    assert injected is True
+    assert directory.is_dir()
+    assert displaced.is_dir()
+
+
+def test_atomic_rename_unavailable_refuses_before_target_effect(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle, install_root = _bundle(tmp_path)
+    prepared = applier.prepare_deployment(
+        bundle,
+        deployment.plan_deployment(bundle, {}),
+        install_root=install_root,
+        expected_uid=install_root.stat().st_uid,
+        expected_gid=install_root.stat().st_gid,
+        operation_key="web-sol-install1-transactional-applier-source-20260916-sol-001",
+    )
+    monkeypatch.setattr(applier.sys, "platform", "unsupported-platform")
+
+    with pytest.raises(
+        applier.WebSolDeploymentApplyError,
+        match="ATOMIC_RENAME_UNAVAILABLE",
+    ):
+        applier.apply_deployment(prepared)
+
+    assert prepared._state == "PREPARED"
+    assert list(install_root.rglob("*")) == []
