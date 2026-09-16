@@ -77,5 +77,16 @@ jobs:
           find scripts ops/executive_os -type f -name '*.sh' -print0 |
             xargs -0 -n1 bash -n
 
+      # `--jobs 4` is placement, not scope: scripts/ci_pytest.py resolves the
+      # same discovery-first module set first and refuses to start unless the
+      # shards are a total, disjoint cover of it. The gate had become a single
+      # ~27-minute serial pytest process (measured: 1629-1837s of a 26-31
+      # minute job, i.e. ~98% of the critical path) on a 4-vCPU hosted runner
+      # that was otherwise idle.
+      #
+      # Sharding deliberately stays INSIDE this one job. Branch protection on
+      # master requires the single check context `test` with enforce_admins
+      # true; a workflow matrix would rename the checks to `test (0)`...`test
+      # (3)`, leave `test` permanently unreported, and block every merge.
       - name: Run repository test gate
-        run: python scripts/ci_pytest.py
+        run: python scripts/ci_pytest.py --jobs 4
