@@ -20,6 +20,11 @@ from control_plane.executive_agent_capabilities import (
     ExecutionCapabilityRegistry,
 )
 from control_plane.executive_operator_harness_port import ExecutiveOperatorHarnessPort
+from control_plane.executive_operator_profile import (
+    OperatorImplementationSupport,
+    OperatorProfileResolutionError,
+    resolve_operator_execution_binding,
+)
 from control_plane.executive_orchestration_result import (
     canonical_bytes,
     canonical_digest,
@@ -69,7 +74,10 @@ from control_plane.operator_harness_wire import (
     observed_harness_attestation,
     requested_execution_profile,
 )
-from control_plane.remote_codex_operator_adapter import RemoteCodexOperatorAdapter
+from control_plane.remote_codex_operator_adapter import (
+    RemoteCodexOperatorAdapter,
+    codex_remote_capabilities,
+)
 from control_plane.executive_worker_broker import RemoteBrokerError
 from control_plane.worker_browser_b1 import BrowserReviewReceipt
 
@@ -83,6 +91,20 @@ RemoteAdapterFactory = Callable[
 ]
 
 
+def _default_codex_operator_support() -> OperatorImplementationSupport:
+    """Exact current implementation facts; routing never happens here."""
+
+    return OperatorImplementationSupport(
+        worker_provider="codex",
+        provider="openai-codex",
+        execution_surface="codex-app-server",
+        harness_kind="codex-app-server",
+        capability_auth_realm="dedicated-worker-account",
+        auth_realm_requirement=AuthRealmRequirement.SLOT_BOUND_V1,
+        remote_capabilities=codex_remote_capabilities(),
+    )
+
+
 class ExecutiveOperatorSupervisor:
     """Run only ``plan`` roles through the Runtime-owned OHF lifecycle."""
 
@@ -93,11 +115,13 @@ class ExecutiveOperatorSupervisor:
         adapter_factory: RemoteAdapterFactory,
         prompt_source: ExecutiveSupervisor,
         instance_id: str = "executive-coo-operator",
+        operator_support: OperatorImplementationSupport | None = None,
     ) -> None:
         self.runtime = runtime
         self.adapter_factory = adapter_factory
         self.prompt_source = prompt_source
         self.instance_id = instance_id
+        self.operator_support = operator_support or _default_codex_operator_support()
 
     @staticmethod
     def _git_head(workspace: Path) -> str:
@@ -172,48 +196,30 @@ class ExecutiveOperatorSupervisor:
             raise ExecutiveOperatorSupervisorError(
                 "operator planner quota disappeared after claim"
             )
-        identity_keys = (
-            "execution_profile_id",
-            "execution_profile_digest",
-            "capability_policy_version",
-            "capability_policy_digest",
-        )
-        if any(
-            quota.metadata.get(key) != job.constraints.get(key)
-            for key in identity_keys
-        ):
-            raise ExecutiveOperatorSupervisorError(
-                "operator quota execution-profile identity drifted"
-            )
-        harness_digest = str(job.constraints.get("harness_binary_digest") or "")
-        harness_version = str(job.constraints.get("harness_version") or "")
-        if (
-            quota.metadata.get("harness_binary_digest") != harness_digest
-            or quota.metadata.get("harness_version") != harness_version
-            or re.fullmatch(r"[0-9a-f]{64}", harness_digest) is None
-            or not harness_version
-        ):
-            raise ExecutiveOperatorSupervisorError(
-                "operator quota harness identity drifted"
-            )
         try:
             registry = ExecutionCapabilityRegistry.load()
-            profile = registry.resolve(
-                str(job.constraints.get("execution_profile_id") or "")
+            binding = resolve_operator_execution_binding(
+                job=job,
+                attempt=lease.attempt,
+                quota=quota,
+                capability_registry=registry,
+                implementation=self.operator_support,
             )
+            profile = registry.resolve(binding.capability_profile_id)
         except CapabilityPolicyError as exc:
             raise ExecutiveOperatorSupervisorError(
                 f"operator capability policy is invalid: {exc}"
             ) from exc
+        except OperatorProfileResolutionError as exc:
+            raise ExecutiveOperatorSupervisorError(
+                f"operator execution binding is invalid: {exc}"
+            ) from exc
+
+        # Current product-profile law remains in the supervisor. The pure
+        # resolver above moves only provider/harness/profile identity; it does
+        # not widen the two already-reviewed rich read-only planner profiles.
         common_profile_ok = (
-            registry.policy_version
-            == job.constraints.get("capability_policy_version")
-            and registry.policy_digest
-            == job.constraints.get("capability_policy_digest")
-            and profile.profile_digest
-            == job.constraints.get("execution_profile_digest")
-            and profile.execution_surface == "codex-app-server"
-            and profile.auth_realm == "dedicated-worker-account"
+            profile.profile_digest == binding.capability_profile_digest
             and profile.sandbox_policy == "read-only"
             and profile.approval_policy == "never"
             and not profile.write_capable
@@ -246,29 +252,23 @@ class ExecutiveOperatorSupervisor:
             raise ExecutiveOperatorSupervisorError(
                 "operator planner profile is not one reviewed rich read-only lane"
             )
-        if quota.model != job.constraints.get("model") or quota.effort != job.constraints.get(
-            "effort"
-        ):
-            raise ExecutiveOperatorSupervisorError(
-                "operator planner model/effort drifted after claim"
-            )
         return RequestedExecutionProfile(
             worker_id=lease.attempt.worker_id,
-            provider="openai-codex",
-            requested_model=str(quota.model),
-            harness_kind="codex-app-server",
-            harness_binary_digest=harness_digest,
-            harness_version=harness_version,
+            provider=binding.provider,
+            requested_model=binding.model,
+            harness_kind=binding.harness_kind,
+            harness_binary_digest=binding.harness_binary_digest,
+            harness_version=binding.harness_version,
             workspace=self._workspace_identity(job),
             sandbox_policy="read-only",
             approval_policy="never",
             network_policy=profile.network_policy,
             capabilities=profile.capability_manifest(
-                harness_binary_digest=harness_digest
+                harness_binary_digest=binding.harness_binary_digest
             ),
             native_helper_policy=profile.native_helper_policy,
             authority_policy_hash=lease.attempt.authority_policy_hash,
-            auth_realm_requirement=AuthRealmRequirement.SLOT_BOUND_V1,
+            auth_realm_requirement=binding.auth_realm_requirement,
             expected_config_digest=profile.expected_config_digest,
             allowed_write_paths=(),
             write_capable=False,

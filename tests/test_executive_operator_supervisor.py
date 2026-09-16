@@ -11,7 +11,11 @@ from pathlib import Path
 import pytest
 
 from control_plane.ceo_intent import INTENT_SCHEMA_V2, submit_intent
-from control_plane.executive_operator_supervisor import ExecutiveOperatorSupervisor
+from control_plane.executive_operator_profile import OperatorImplementationSupport
+from control_plane.executive_operator_supervisor import (
+    ExecutiveOperatorSupervisor,
+    ExecutiveOperatorSupervisorError,
+)
 from control_plane.executive_orchestration_principal import (
     OSProcessCredentialObservation,
     OperatorPrincipalObservation,
@@ -62,7 +66,10 @@ from control_plane.operator_harness_orchestrator import (
     OperatorSessionReceipt,
 )
 from control_plane.operator_harness_wire import to_wire
-from control_plane.remote_codex_operator_adapter import RemoteCodexOperatorAdapter
+from control_plane.remote_codex_operator_adapter import (
+    RemoteCodexOperatorAdapter,
+    codex_remote_capabilities,
+)
 from control_plane.worker_browser_b1 import BrowserReviewReceipt
 
 
@@ -707,6 +714,47 @@ def test_fresh_operator_planner_completes_one_session_and_releases_epoch(
             (attempt.attempt_id,),
         ).fetchone()
     assert epoch["state"] == "ABANDONED"
+
+
+def test_mismatched_realm_support_refuses_before_adapter_construction(
+    tmp_path: Path,
+) -> None:
+    runtime, root, planner = _seed_dispatchable_operator_planner(tmp_path)
+    factory_calls = 0
+
+    def factory(_loader):
+        nonlocal factory_calls
+        factory_calls += 1
+        raise AssertionError("adapter factory must not run on realm mismatch")
+
+    mismatched = OperatorImplementationSupport(
+        worker_provider="claude",
+        provider="claude",
+        execution_surface="claude-agent-sdk",
+        harness_kind="claude-agent-sdk",
+        capability_auth_realm="dedicated-worker-account",
+        auth_realm_requirement=AuthRealmRequirement.SLOT_BOUND_V1,
+        remote_capabilities=codex_remote_capabilities(),
+    )
+    supervisor = ExecutiveOperatorSupervisor(
+        runtime,
+        adapter_factory=factory,  # type: ignore[arg-type]
+        prompt_source=_PromptSource(),  # type: ignore[arg-type]
+        operator_support=mismatched,
+    )
+    with pytest.raises(
+        ExecutiveOperatorSupervisorError,
+        match="lacks the supplied operator implementation",
+    ):
+        asyncio.run(
+            supervisor.start_cycle_job(
+                planner.job_id,
+                command_id=(
+                    f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1"
+                ),
+            )
+        )
+    assert factory_calls == 0
 
 
 def test_active_operator_cancellation_finishes_cancelled_not_quarantined(
