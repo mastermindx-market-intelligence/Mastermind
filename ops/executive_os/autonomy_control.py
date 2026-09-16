@@ -949,6 +949,26 @@ def ceo_submit_effect_unknown_sticky(
     )
 
 
+def _hold_on_occupied_global_owner(host: CeoSubmitTransactionHost) -> None:
+    """R18-B4: refuse with ZERO writes unless the ONE global owner is FREE.
+
+    ``incomplete_transaction_operation()`` answers ``None`` both when the owner
+    is genuinely free AND when an extant marker cannot be classified, so it can
+    never on its own prove the owner free.  The EXISTING
+    ``require_transaction_absent()`` probe is what refuses an occupied owner: a
+    ``CEO_SUBMIT_ARM`` still in flight before its control replace, a COO
+    ``ARM``/``DISARM``, or an occupied-but-unclassifiable marker all become the
+    existing typed ``ceo_submit_transaction_incomplete`` HOLD.  This is a stat
+    probe on the one existing ``AUTONOMY_TRANSACTION``: no second lock, no
+    candidate, no receipt, no byte.
+    """
+
+    try:
+        host.require_transaction_absent()
+    except (HostControlError, ArmAdmissionError) as exc:
+        raise CeoSubmitAdmissionError("ceo_submit_transaction_incomplete") from exc
+
+
 def require_ceo_submit_preservation(
     prior: ConfigEvidence, candidates: CandidateConfigs
 ) -> None:
@@ -1424,8 +1444,9 @@ def evaluate_ceo_submit_disarm_admission(
     """Evaluate every CEO-submit disarm gate in fixed order, with no mutation.
 
     The fixed order is: root, installed release identity, config read (which may
-    short-circuit into a read-only REPLAY), separation/coexistence, the App
-    binding facts, then the extant-transaction HOLD.  Every refusal happens
+    short-circuit into a read-only REPLAY, but only across a proven-free global
+    transaction owner), separation/coexistence, the App binding facts, then the
+    extant-transaction HOLD.  Every refusal happens
     before the lock is acquired and before any byte is written.
     """
 
@@ -1440,6 +1461,20 @@ def evaluate_ceo_submit_disarm_admission(
     if not isinstance(armed_flag, bool):
         raise CeoSubmitAdmissionError("ceo_submit_config_schema_drift")
     if armed_flag is False:
+        # R18-B4: the already-disarmed REPLAY may only be taken across a FREE
+        # global owner.  Reconcile the ONE existing AUTONOMY_TRANSACTION first:
+        # a marker naming THIS verb stays the sticky EFFECT_UNKNOWN, and any
+        # DIFFERENT extant operation -- a CEO_SUBMIT_ARM still in flight before
+        # its control replace, a COO ARM/DISARM, or an occupied-but-
+        # unclassifiable marker -- is the existing typed HOLD with zero writes.
+        # Without this the replay answers CEO_SUBMIT_DISARMED while the in-flight
+        # arm goes on to arm the sink after that success response.
+        if ceo_submit_effect_unknown_sticky(
+            host.incomplete_transaction_operation(), "CEO_SUBMIT_DISARM"
+        ):
+            raise TransactionEffectUnknown()
+        _hold_on_occupied_global_owner(host)
+
         # REPLAY, not a refusal.  R9: "no independent receipt rewrite" -- the
         # existing receipt keeps its bytes, its object identity and its digest.
         # Nothing past this point is read: no lock, no candidate, no write.
@@ -1576,8 +1611,13 @@ def evaluate_ceo_submit_status(
     installed_sha = host.require_exact_install(request.expected_sha)
     if installed_sha != request.expected_sha:
         raise CeoSubmitAdmissionError("release_identity_mismatch")
+    # R18-B4: a verified CEO snapshot is never read THROUGH an occupied global
+    # owner.  Same-CEO-operation ambiguity keeps its EFFECT_UNKNOWN; any
+    # DIFFERENT occupied owner -- a COO ARM/DISARM or an unclassifiable marker --
+    # returns the existing typed unverified/HOLD through that same owner.
     if host.incomplete_transaction_operation() in CEO_SUBMIT_OPERATIONS:
         raise TransactionEffectUnknown()
+    _hold_on_occupied_global_owner(host)
     configs = host.load_ceo_submit_configs(request.expected_sha)
     armed_flag = dict(configs.control).get("ceo_submit_armed")
     if not isinstance(armed_flag, bool):

@@ -2097,7 +2097,8 @@ def test_repeated_ceo_submit_disarm_is_a_read_only_replay_that_never_rewrites_th
     # No phase was entered at all: no lock, no write, no service boundary.
     assert host.phases == []
     assert host.operations == []
-    assert host.calls == ["root", "install", "configs"]
+    # The extra gate is the R18-B4 read-only free-owner proof.
+    assert host.calls == ["root", "install", "configs", "transaction"]
     assert host.control_writes == 0
     assert host.worker_writes == 0
     assert host.receipt_writes == 0
@@ -2246,6 +2247,274 @@ def test_post_write_ambiguity_is_effect_unknown_and_sticky_to_the_same_operation
     assert armed.receipt_writes == 0
     assert armed.phases == []
 
+
+
+def test_ceo_submit_disarm_never_replays_across_an_in_flight_ceo_submit_arm():
+    # R18-B4: a CEO_SUBMIT_ARM still in flight before its control replace leaves
+    # an extant marker naming a DIFFERENT operation.  That is an occupied global
+    # owner, never a free one, so the disarmed REPLAY must be refused.
+    def _assert_zero_writes(host, before):
+        assert host.control_writes == 0
+        assert host.worker_writes == 0
+        assert host.receipt_writes == 0
+        assert host.reconcile_calls == 0
+        assert host.ready_calls == 0
+        assert host.phases == []
+        assert host.operations == []
+        assert host.marker is False
+        assert host.receipt is None
+        assert control.encode_config(host.control_config) == control.encode_config(
+            before
+        )
+
+    host = FakeCeoSubmitHost()
+    host.incomplete_marker_operation = "CEO_SUBMIT_ARM"
+    before = copy.deepcopy(host.control_config)
+
+    with pytest.raises(control.CeoSubmitAdmissionError) as refused:
+        control.execute_ceo_submit_disarm(host, _ceo_submit_request(), now=NOW)
+
+    assert refused.value.code == "ceo_submit_transaction_incomplete"
+    assert not isinstance(refused.value, control.TransactionEffectUnknown)
+    _assert_zero_writes(host, before)
+    # The seeded marker is untouched: the refusal read it, it did not consume it.
+    assert host.incomplete_marker_operation == "CEO_SUBMIT_ARM"
+
+    direct = FakeCeoSubmitHost()
+    direct.incomplete_marker_operation = "CEO_SUBMIT_ARM"
+    direct_before = copy.deepcopy(direct.control_config)
+
+    with pytest.raises(control.CeoSubmitAdmissionError) as admission_refused:
+        control.evaluate_ceo_submit_disarm_admission(
+            direct, _ceo_submit_request(), now=NOW
+        )
+
+    assert admission_refused.value.code == "ceo_submit_transaction_incomplete"
+    assert not isinstance(admission_refused.value, control.TransactionEffectUnknown)
+    _assert_zero_writes(direct, direct_before)
+    assert direct.incomplete_marker_operation == "CEO_SUBMIT_ARM"
+
+
+def test_ceo_submit_disarm_never_replays_across_a_coo_or_unclassifiable_global_owner():
+    # R18-B4: the already-disarmed REPLAY may only be taken across a FREE global
+    # owner.  A COO ARM/DISARM or an occupied-but-unclassifiable marker is the
+    # existing typed HOLD with zero writes, never a success response.
+    owners = (
+        ("ARM", "ARM"),
+        ("DISARM", "DISARM"),
+        ("unclassifiable", None),
+    )
+    for name, operation in owners:
+        host = FakeCeoSubmitHost()
+        if operation is None:
+            host.marker = True
+        else:
+            host.incomplete_marker_operation = operation
+        before = copy.deepcopy(host.control_config)
+
+        with pytest.raises(control.CeoSubmitAdmissionError) as refused:
+            control.execute_ceo_submit_disarm(host, _ceo_submit_request(), now=NOW)
+
+        assert refused.value.code == "ceo_submit_transaction_incomplete", name
+        assert not isinstance(refused.value, control.TransactionEffectUnknown), name
+        assert host.control_writes == 0, name
+        assert host.worker_writes == 0, name
+        assert host.receipt_writes == 0, name
+        assert host.reconcile_calls == 0, name
+        assert host.ready_calls == 0, name
+        assert host.phases == [], name
+        assert host.operations == [], name
+        assert host.receipt is None, name
+        assert control.encode_config(host.control_config) == control.encode_config(
+            before
+        ), name
+        assert host.incomplete_marker_operation == operation, name
+        assert host.marker is (operation is None), name
+
+
+def test_ceo_submit_status_never_reads_a_verified_state_through_an_occupied_global_owner(
+    capsys,
+):
+    # R18-B4: a verified CEO snapshot is never read THROUGH an occupied global
+    # owner.  Same-CEO-operation ambiguity keeps its EFFECT_UNKNOWN; any
+    # DIFFERENT occupied owner -- a COO ARM/DISARM or an unclassifiable marker --
+    # returns the existing typed unverified/HOLD through that same owner.
+    def observe(host):
+        """Return either the readback result or the refusal it raised."""
+
+        try:
+            return control.evaluate_ceo_submit_status(host, _ceo_submit_request())
+        except BaseException as exc:  # noqa: BLE001 - the refusal IS the evidence
+            return exc
+
+    def make_disarmed():
+        return FakeCeoSubmitHost()
+
+    def make_armed():
+        host = _armed_ceo_submit_host()
+        host.reset_ledgers()
+        return host
+
+    for label, make in (("disarmed", make_disarmed), ("armed", make_armed)):
+        for occupied in ("CEO_SUBMIT_ARM", "CEO_SUBMIT_DISARM"):
+            host = make()
+            host.incomplete_marker_operation = occupied
+            before = copy.deepcopy(host.control_config)
+
+            observed = observe(host)
+
+            assert isinstance(observed, control.TransactionEffectUnknown), (
+                label,
+                occupied,
+            )
+            assert observed.code == "effect_unknown", (label, occupied)
+            assert not isinstance(observed, control.TransactionResult), (
+                label,
+                occupied,
+            )
+            assert getattr(observed, "state", None) is None, (label, occupied)
+            assert host.control_writes == 0, (label, occupied)
+            assert host.receipt_writes == 0, (label, occupied)
+            assert host.phases == [], (label, occupied)
+            assert control.encode_config(host.control_config) == control.encode_config(
+                before
+            ), (label, occupied)
+
+        for occupied in ("ARM", "DISARM", None):
+            host = make()
+            if occupied is None:
+                host.marker = True
+            else:
+                host.incomplete_marker_operation = occupied
+            before = copy.deepcopy(host.control_config)
+
+            observed = observe(host)
+
+            assert isinstance(observed, control.CeoSubmitAdmissionError), (
+                label,
+                occupied,
+            )
+            assert observed.code == "ceo_submit_transaction_incomplete", (
+                label,
+                occupied,
+            )
+            assert not isinstance(observed, control.TransactionEffectUnknown), (
+                label,
+                occupied,
+            )
+            assert not isinstance(observed, control.TransactionResult), (
+                label,
+                occupied,
+            )
+            assert getattr(observed, "state", None) is None, (label, occupied)
+            assert host.control_writes == 0, (label, occupied)
+            assert host.receipt_writes == 0, (label, occupied)
+            assert host.phases == [], (label, occupied)
+            assert control.encode_config(host.control_config) == control.encode_config(
+                before
+            ), (label, occupied)
+
+    # The CLI surface answers the same typed HOLD, never a state claim.
+    cli_host = FakeCeoSubmitHost()
+    cli_host.incomplete_marker_operation = "ARM"
+
+    exit_code = control.main(
+        ["ceo-submit-status", "--expected-sha", SHA], host=cli_host, now=lambda: NOW
+    )
+
+    assert exit_code == 2
+    document = json.loads(capsys.readouterr().out)
+    assert document["code"] == "ceo_submit_transaction_incomplete"
+    assert document["state"] == "UNKNOWN"
+    assert document["status"] == "CEO_SUBMIT_UNVERIFIED"
+    assert document["transaction_id"] is None
+    assert document["replayed"] is False
+    assert cli_host.control_writes == 0
+    assert cli_host.receipt_writes == 0
+    assert cli_host.phases == []
+    assert cli_host.marker is False
+
+
+def test_ceo_submit_disarm_replay_across_a_free_owner_stays_read_only_and_byte_identical():
+    # R18-B4: across a genuinely FREE owner the replay still keeps every R9
+    # guarantee -- same object, same bytes, no lock, no write -- while proving
+    # the owner free through the ONE existing AUTONOMY_TRANSACTION stat probe.
+    host = _armed_ceo_submit_host()
+    first = control.execute_ceo_submit_disarm(host, _ceo_submit_request(), now=NOW)
+    assert first.replayed is False
+    sealed = host.receipt
+    sealed_bytes = control._encoded_json(sealed)
+    sealed_control_bytes = control.encode_config(host.control_config)
+    host.reset_ledgers()
+
+    replay = control.execute_ceo_submit_disarm(host, _ceo_submit_request(), now=NOW)
+
+    assert replay.replayed is True
+    assert replay.state == "CEO_SUBMIT_DISARMED"
+    assert replay.status == "CEO_SUBMIT_DISARMED"
+    assert replay.transaction_id == sealed["transaction_id"]
+    assert host.control_writes == 0
+    assert host.worker_writes == 0
+    assert host.receipt_writes == 0
+    assert host.reconcile_calls == 0
+    assert host.ready_calls == 0
+    assert host.phases == []
+    assert host.operations == []
+    assert host.marker is False
+    assert control.encode_config(host.control_config) == sealed_control_bytes
+    assert host.receipt is sealed
+    assert host.receipt == sealed
+    assert control._encoded_json(host.receipt) == sealed_bytes
+    # The free-owner proof actually ran: the read-only stat probe is the last call.
+    assert host.calls == ["root", "install", "configs", "transaction"]
+
+
+def test_ceo_submit_disarm_same_operation_marker_stays_sticky_effect_unknown_on_a_disarmed_host():
+    # R18-B4: the SAME-verb marker keeps R9 stickiness -- EFFECT_UNKNOWN, never a
+    # typed HOLD and never a replay admission -- even on a disarmed host.
+    direct = FakeCeoSubmitHost()
+    direct.incomplete_marker_operation = "CEO_SUBMIT_DISARM"
+    direct_before = copy.deepcopy(direct.control_config)
+
+    with pytest.raises(control.TransactionEffectUnknown) as admission_unknown:
+        control.evaluate_ceo_submit_disarm_admission(
+            direct, _ceo_submit_request(), now=NOW
+        )
+
+    assert admission_unknown.value.code == "effect_unknown"
+    assert not isinstance(admission_unknown.value, control.CeoSubmitAdmissionError)
+    assert direct.control_writes == 0
+    assert direct.receipt_writes == 0
+    assert direct.phases == []
+    assert direct.operations == []
+    assert direct.receipt is None
+    assert direct.incomplete_marker_operation == "CEO_SUBMIT_DISARM"
+    assert control.encode_config(direct.control_config) == control.encode_config(
+        direct_before
+    )
+
+    host = FakeCeoSubmitHost()
+    host.incomplete_marker_operation = "CEO_SUBMIT_DISARM"
+    before = copy.deepcopy(host.control_config)
+
+    for _ in range(2):
+        with pytest.raises(control.TransactionEffectUnknown) as refused:
+            control.execute_ceo_submit_disarm(host, _ceo_submit_request(), now=NOW)
+        assert refused.value.code == "effect_unknown"
+        assert not isinstance(refused.value, control.CeoSubmitAdmissionError)
+        assert host.control_writes == 0
+        assert host.worker_writes == 0
+        assert host.receipt_writes == 0
+        assert host.reconcile_calls == 0
+        assert host.ready_calls == 0
+        assert host.phases == []
+        assert host.operations == []
+        assert host.receipt is None
+        assert host.marker is False
+        assert control.encode_config(host.control_config) == control.encode_config(
+            before
+        )
+        assert host.incomplete_marker_operation == "CEO_SUBMIT_DISARM"
 
 def test_the_control_service_boundary_is_bounded_to_one_reconcile_and_one_readiness_probe():
     arm_host = FakeCeoSubmitHost()
