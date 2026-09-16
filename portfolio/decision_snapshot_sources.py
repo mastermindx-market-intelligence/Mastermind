@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -250,14 +251,38 @@ def _first_present_str(payload: Any, fields: tuple[str, ...]) -> str | None:
     return None
 
 
+def _is_usable_declared_generation_value(value: Any) -> bool:
+    """True for a scalar the declared-generation rule may hash: a non-empty, printable
+    string, an int, or a finite float. Booleans, empty/control-bearing strings, non-finite
+    floats, mappings, and sequences are all rejected."""
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, str):
+        return bool(value) and value.isprintable()
+    if isinstance(value, int):
+        return True
+    if isinstance(value, float):
+        return math.isfinite(value)
+    return False
+
+
 def _correction_generation(payload: Any, digest: str) -> str:
+    """Digest-shaped correction generation. When the source declares a usable scalar
+    ``revision``/``bundle_id``/``content_generation``, hash the declared field/value together
+    with the current ``artifact_digest`` — so a content change always changes the generation
+    even under an unchanged declared revision. Otherwise fall back to the artifact digest."""
     if isinstance(payload, Mapping):
         for name in _CORRECTION_DECLARED_FIELDS:
-            value = payload.get(name)
-            if isinstance(value, bool):
+            if name not in payload:
                 continue
-            if isinstance(value, (str, int, float)) and value != "":
-                return str(value)
+            value = payload[name]
+            if not _is_usable_declared_generation_value(value):
+                continue
+            return c.content_digest({
+                "declared_field": name,
+                "declared_value": value,
+                "artifact_digest": digest,
+            })
     return digest
 
 

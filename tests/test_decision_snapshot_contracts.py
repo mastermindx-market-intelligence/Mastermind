@@ -137,6 +137,22 @@ def test_verify_snapshot_rejects_tampering_and_mismatched_id():
         c.verify_snapshot(mismatched_id)
 
 
+def test_clock_bases_include_external_declared_and_unqualified():
+    assert "DECLARED_SOURCE_FIELD" in c.CLOCK_BASES
+    assert "UNQUALIFIED_EXTERNAL_CLOCK" in c.CLOCK_BASES
+    for basis in ("DECLARED_SOURCE_FIELD", "UNQUALIFIED_EXTERNAL_CLOCK"):
+        c.validate_source_receipt({**_receipt(), "clock_basis": basis})
+
+
+def test_authority_classes_accept_new_context_only_classes_but_reject_execution():
+    for authority in ("MARKET_RISK_CONTEXT", "CONTEXT_ONLY", "MEASUREMENT_ONLY", "DISPLAY_ONLY"):
+        assert authority in c.AUTHORITY_CLASSES
+        c.validate_source_receipt({**_receipt(), "authority_class": authority})
+    assert "EXECUTION" not in c.AUTHORITY_CLASSES
+    with pytest.raises(c.DecisionSnapshotContractError):
+        c.validate_source_receipt({**_receipt(), "authority_class": "EXECUTION"})
+
+
 def test_source_receipt_rejects_boolean_as_integer():
     bad_bytes = {**_receipt(), "bytes": True}
     with pytest.raises(c.DecisionSnapshotContractError):

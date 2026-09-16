@@ -219,3 +219,144 @@ def test_oversize_source_is_partial_without_parsing(repo_roots):
     receipt = _by_id(result["sources"])["macro.factor_betas"]
     assert receipt["status"] == "OVERSIZE"
     assert receipt["coverage_state"] == "PARTIAL"
+
+
+# ---------------------------------------------------------------------------
+# Pre-review interface closure — receipts must validate against Task 1's
+# closed contract, and declared correction generations must be digest-shaped.
+# ---------------------------------------------------------------------------
+
+def _full_capture_fixture(repo, macro) -> None:
+    _write_json(repo / "data/portfolios/autonomous/account.json", {
+        "starting_nav": 1_000_000.0,
+        "cash": 800_000.0,
+        "positions": {"AAPL": {"shares": 100.0, "avg_cost": 180.0}},
+    })
+    _write_json(repo / "data/portfolios/autonomous/latest.json", {
+        "as_of": "2026-09-15",
+        "positions": [{
+            "ticker": "AAPL",
+            "weight": 0.2,
+            "identity_status": "verified_common_stock",
+            "holding_mark_source": "live_quote",
+        }],
+    })
+    _write_json(macro / "site/riskdata/risk_envelope.json", {
+        "schema": "mastermind.risk_envelope/v1",
+        "definition_id": "grey-deer-v1-2026-08-19",
+        "generated_at": "2026-09-15T19:55:00Z",
+        "as_of": "2026-09-15",
+        "data_state": "FRESH",
+        "capital_policy": {"posture": "SELECTIVE"},
+    })
+    _write_json(macro / "site/sectordata/sector_central.json", {
+        "as_of": "2026-09-15",
+        "sectors": [{"id": "technology", "ticker": "XLK"}],
+    })
+    _write_json(macro / "site/factor_betas.json", {
+        "schema": "factor_betas.v1",
+        "generated_at": "2026-09-15T19:00:00Z",
+        "as_of": "2026-09-15",
+        "revision": "42",
+        "betas": {"AAPL": {"MKT": 1.0}},
+    })
+
+
+def test_every_emitted_receipt_validates_against_the_closed_contract(repo_roots):
+    repo, macro = repo_roots
+    _full_capture_fixture(repo, macro)
+    result = sources.capture_all(
+        "autonomous",
+        decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:01:00Z",
+    )
+    assert len(result["sources"]) > 1
+    for receipt in result["sources"]:
+        c.validate_source_receipt(receipt)
+
+
+def test_source_generation_set_from_receipts_satisfies_generation_rule(repo_roots):
+    repo, macro = repo_roots
+    _full_capture_fixture(repo, macro)
+    result = sources.capture_all(
+        "autonomous",
+        decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:01:00Z",
+    )
+    generation_set = [
+        {"source_id": r["source_id"], "correction_generation": r["correction_generation"]}
+        for r in result["sources"]
+    ]
+    c._validate_source_generation_set(generation_set)
+
+
+def test_declared_correction_generation_is_digest_shaped_and_stable(repo_roots):
+    _, macro = repo_roots
+    _write_json(macro / "site/factor_betas.json", {
+        "schema": "factor_betas.v1",
+        "generated_at": "2026-09-15T19:00:00Z",
+        "as_of": "2026-09-15",
+        "revision": "42",
+        "betas": {},
+    })
+    first = sources.capture_external_sources(
+        held_tickers=[], decision_cutoff="2026-09-15T20:00:00Z", recorded_at="2026-09-15T20:01:00Z",
+    )
+    receipt_1 = _by_id(first["sources"])["macro.factor_betas"]
+    c.validate_source_receipt(receipt_1)
+    assert receipt_1["correction_generation"] != "42"
+    assert receipt_1["correction_generation"].startswith("sha256:")
+
+    second = sources.capture_external_sources(
+        held_tickers=[], decision_cutoff="2026-09-15T20:00:00Z", recorded_at="2026-09-15T20:05:00Z",
+    )
+    receipt_2 = _by_id(second["sources"])["macro.factor_betas"]
+    assert receipt_2["correction_generation"] == receipt_1["correction_generation"]
+
+
+def test_declared_correction_generation_changes_when_content_changes_under_same_revision(repo_roots):
+    _, macro = repo_roots
+    path = macro / "site/factor_betas.json"
+    _write_json(path, {
+        "schema": "factor_betas.v1",
+        "generated_at": "2026-09-15T19:00:00Z",
+        "as_of": "2026-09-15",
+        "revision": "42",
+        "betas": {"AAPL": {"MKT": 1.0}},
+    })
+    first = sources.capture_external_sources(
+        held_tickers=["AAPL"], decision_cutoff="2026-09-15T20:00:00Z", recorded_at="2026-09-15T20:01:00Z",
+    )
+    receipt_1 = _by_id(first["sources"])["macro.factor_betas"]
+
+    _write_json(path, {
+        "schema": "factor_betas.v1",
+        "generated_at": "2026-09-15T19:00:00Z",
+        "as_of": "2026-09-15",
+        "revision": "42",
+        "betas": {"AAPL": {"MKT": 1.5}},
+    })
+    second = sources.capture_external_sources(
+        held_tickers=["AAPL"], decision_cutoff="2026-09-15T20:00:00Z", recorded_at="2026-09-15T20:02:00Z",
+    )
+    receipt_2 = _by_id(second["sources"])["macro.factor_betas"]
+
+    assert receipt_1["artifact_digest"] != receipt_2["artifact_digest"]
+    assert receipt_1["correction_generation"] != receipt_2["correction_generation"]
+
+
+@pytest.mark.parametrize("bad_revision", ["", "\x00bad", float("nan"), float("inf"), True, {}, []])
+def test_unusable_declared_generation_falls_back_to_artifact_digest(repo_roots, bad_revision):
+    _, macro = repo_roots
+    _write_json(macro / "site/factor_betas.json", {
+        "schema": "factor_betas.v1",
+        "generated_at": "2026-09-15T19:00:00Z",
+        "as_of": "2026-09-15",
+        "revision": bad_revision,
+        "betas": {},
+    })
+    result = sources.capture_external_sources(
+        held_tickers=[], decision_cutoff="2026-09-15T20:00:00Z", recorded_at="2026-09-15T20:01:00Z",
+    )
+    receipt = _by_id(result["sources"])["macro.factor_betas"]
+    assert receipt["correction_generation"] == receipt["artifact_digest"]
