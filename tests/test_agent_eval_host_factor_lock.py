@@ -207,5 +207,5 @@ def test_snapshot_digest_is_exact_canonical_owner_bytes() -> None:
     assert len(digest) == 64
     assert digest == host_factor_lock.host_capacity_snapshot_digest(copy.deepcopy(snapshot))
     changed = copy.deepcopy(snapshot)
-    changed["load1_milli"] += 1
+    changed["physical_memory_bytes"] += 1
     assert host_factor_lock.host_capacity_snapshot_digest(changed) != digest
