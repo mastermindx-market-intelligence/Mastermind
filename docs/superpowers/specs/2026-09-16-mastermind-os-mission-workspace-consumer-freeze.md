@@ -233,6 +233,43 @@ There is exactly one producer of visible turn text, and it is not a history stor
 - `control_plane/executive_dialogue_observation.py` is deliberately payload-free —
   `CanonicalTerminalWakeRead` is documented as a "public read-only terminal/Wake
   result with no provider or payload data" (`:381`) — so it is not an alternative.
+  Its terminal projection validates `candidate.summary` and then *omits* it from the
+  emitted wire, which is digests, ids and timestamps only (`:1071`).
+- Peer authorization on the broker is kernel UID equality against the Executive
+  control principal (`executive_worker_broker.py:1410`) — there is no bearer, session
+  or user identity to map a browser viewer onto.
+
+Three further properties make G3 worse than "not wired up yet", and each was
+confirmed against source:
+
+- **Capture is opt-in and prospective.** `publish()` returns immediately when the
+  turn has no viewer: `if not self._viewers_by_turn.get(key): return`
+  (`visible_turn_projection.py:353`). Content is retained only if a grant was minted
+  **before** it flowed. There is no backfill path, and `mint_observer_grant`
+  (`codex_operator_adapter.py:2122`) requires a live `_GenerationState`, so a grant
+  for a finished attempt cannot be minted at all.
+- **Eviction is silent.** Past `MAX_RETAINED_TURNS` the oldest record is dropped FIFO
+  with no tombstone and no gap record (`:560`); a holder of its grant simply gets
+  `TURN_NOT_BOUND`. Revoking the last viewer pops the record outright (`:405`).
+- **`ohf-observe-turn` has no production consumer.** `grep -rn
+  "ohf-observe-turn\|mint_observer_grant"` over the repo returns the two definition
+  sites and tests only. It is a fully specified read model — cursors, epochs, gap
+  records, refusal receipts — that nothing calls.
+
+**Two traps recorded for whichever wave eventually closes G3.**
+
+1. `ReadResult.resync_required` is `bool(gaps)` (`visible_turn_projection.py:498`,
+   forwarded verbatim by the broker at `:2227`). It does **not** mean "reset your
+   cursor" — the actual cursor reset is the `RESYNC_REQUIRED` *exception*, raised only
+   on a publication-epoch change (`:447`). A consumer that treats the boolean as a
+   reset signal will loop, because a retained gap keeps it true on every subsequent
+   page.
+2. `brain/advisor.py` has a real durable per-conversation chat store
+   (`load_history`/`append_turn`, JSON under `data/brain/chat_history/`, last 200
+   turns). It is the **portfolio-research advisor popup**, keyed by a `uuid4`
+   conversation id with no Job/Attempt identity, no cursor, no grant and
+   `except Exception: pass` on write. It is not a mission transcript and must never
+   be pressed into service as one.
 
 **Consequence, stated plainly:** for a *finished* mission — which is every mission a
 Chairman opens after the fact — **no conversation history exists anywhere in this
@@ -544,7 +581,7 @@ Each is owned by an existing owner. **None may be closed by the R2 consumer.**
 |---|---|---|---|
 | **G1** | per-child worker identity in `mastermind.fabric_job_view.v1` | Executive OS / `fabric_job_view` owner | `children[].worker_id` renders `null` + one `MISSING_PRODUCER` fact on `children.worker_id`, producer `executive_runtime`. A safe closure adds `worker_id` only — never `os_principal_uid` or `provider_home_identity`. |
 | **G2** | no producer for `CONTINUED` / `STOPPED` | dispatch-consumption owner + the Dialogue close-law owner | both render `NOT_PROJECTED`; never inferred from Slack text or watcher silence |
-| **G3** | no durable authorized visible-content/history resource for a finished mission | OHF / Fabric owner; organizationally ASD-A4 under `WS:CHAIRMAN-CONTROL-ROOM` | `conversation` section is `UNAVAILABLE / NOT_PROJECTED` with the stated reason code |
+| **G3** | no durable authorized visible-content/history resource for a finished mission; the one hot-window producer is prospective-capture-only, 4-turn FIFO, `agentMessage`-only, and its `ohf-observe-turn` surface has no production consumer | OHF / Fabric owner; organizationally ASD-A4 under `WS:CHAIRMAN-CONTROL-ROOM` (`status: todo`, gated behind ASD-A3 **and** P0B) | `conversation` section is `UNAVAILABLE / NOT_PROJECTED` with the stated reason code |
 | **G4** | no HTTP read path to `mastermind.fabric_job_view.v1` | this R2 consumer creates it as a route over the existing library — the *only* new surface R2 adds | n/a |
 | **G5** | no human-readable mission title on an Executive Job | Executive OS | `mission.title` null + `MISSING_PRODUCER`; never synthesized from the workstream title |
 | **G6** | `ceo_submit_armed` is `false` in the shipped control template, so no Chairman-authenticated admitted root exists on a production host | Chairman ceremony (host-owned), out of scope here | the acceptance run below uses a real Runtime with a real root, and the record states which host it was |
