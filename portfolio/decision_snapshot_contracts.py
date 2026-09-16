@@ -78,6 +78,13 @@ MAX_SECTION_RESPONSE_BYTES = 65_536
 MAX_SECTION_ROWS = 100
 MAX_SOURCE_BYTES = 8_388_608
 MAX_JSONL_TAIL_ROWS = 100
+# Ceiling on the total encoded filename metadata a single directory manifest may carry.
+# Deliberately far below MAX_SOURCE_BYTES: a manifest is metadata about an unbounded
+# directory, and an unbounded name census is not bounded capture.
+MAX_MANIFEST_METADATA_BYTES = 65_536
+
+# Clock bases that do not establish point-in-time knowledge of the source's content.
+UNQUALIFIED_CLOCK_BASES = frozenset({"UNKNOWN", "UNQUALIFIED_EXTERNAL_CLOCK"})
 
 _DIGEST_PREFIX = "sha256:"
 _DIGEST_HEX_LEN = 64
@@ -251,6 +258,18 @@ def validate_source_receipt(receipt: Mapping[str, Any]) -> None:
         value = receipt.get(field)
         if value is not None:
             _require_canonical_utc(value, field=f"{what}.{field}")
+    # AVAILABLE is a *point-in-time* claim: the snapshot asserts this source's content was
+    # true as of a knowable instant at or before the decision cutoff. A null known_at or an
+    # unqualified clock basis means no such instant is known, so the state may not be
+    # AVAILABLE — it must degrade to UNQUALIFIED_CLOCK or another lawful status instead.
+    if receipt.get("status") == "AVAILABLE":
+        if receipt.get("known_at") is None:
+            _fail(f"{what}.status=AVAILABLE requires a non-null known_at")
+        if receipt.get("clock_basis") in UNQUALIFIED_CLOCK_BASES:
+            _fail(
+                f"{what}.status=AVAILABLE cannot rest on "
+                f"clock_basis={receipt.get('clock_basis')!r}"
+            )
 
 
 _SECTION_FIELDS = frozenset({

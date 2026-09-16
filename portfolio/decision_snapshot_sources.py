@@ -16,6 +16,11 @@ Two distinct clock laws (Task 2 controller ruling):
     one of the source's own declared clock fields is present, in which case
     ``clock_basis=DECLARED_SOURCE_FIELD``; otherwise ``known_at=None``,
     ``clock_basis=UNQUALIFIED_EXTERNAL_CLOCK``, ``status=UNQUALIFIED_CLOCK``.
+
+The internal first-party settlement-receipt *directory* is read the same way: a no-follow,
+stable, bounded manifest whose clock is the newest of the directory's own mtime and every
+eligible entry's mtime. ``status=AVAILABLE`` is a point-in-time claim everywhere — the
+closed contract refuses it without a qualified non-null ``known_at``.
 """
 from __future__ import annotations
 
@@ -23,6 +28,7 @@ import hashlib
 import json
 import math
 import os
+import stat
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -37,10 +43,26 @@ _V = _ROOT / "vendor" / "macro"
 MAX_SOURCE_BYTES = c.MAX_SOURCE_BYTES
 MAX_JSONL_TAIL_ROWS = c.MAX_JSONL_TAIL_ROWS
 MAX_SECTION_ROWS = c.MAX_SECTION_ROWS
+MAX_MANIFEST_METADATA_BYTES = c.MAX_MANIFEST_METADATA_BYTES
 
 _EMPTY_DIGEST = "sha256:" + hashlib.sha256(b"").hexdigest()
 
 _CORRECTION_DECLARED_FIELDS = ("revision", "bundle_id", "content_generation")
+
+_EMPTY_PROJECTION_DETAIL = (
+    "artifact is present and parseable but declares none of the fields this projection "
+    "requires; absent content is not an empty complete source"
+)
+_PARTIAL_HELD_TICKER_DETAIL = (
+    "held-ticker basis is incomplete, so this held-ticker-filtered projection cannot be "
+    "reported as a complete view of the book"
+)
+
+# Projections whose rows are filtered by the book's derived held tickers. A book that
+# could not be fully projected silently narrows every one of them.
+_HELD_TICKER_PROJECTIONS = frozenset({
+    "factor_betas", "prophet", "neural_web", "portfolio_context", "held_ticker_bundle",
+})
 
 
 @dataclass(frozen=True)
@@ -218,10 +240,6 @@ def _digest(raw: bytes) -> str:
     return "sha256:" + hashlib.sha256(raw).hexdigest()
 
 
-def _utc_from_epoch_seconds(seconds: float) -> str:
-    return datetime.fromtimestamp(int(seconds), tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
 def _utc_from_mtime_ns(nanoseconds: int) -> str:
     """Floor an internal first-party ``st_mtime_ns`` to whole seconds in integer space.
 
@@ -298,6 +316,46 @@ def _correction_generation(payload: Any, digest: str) -> str:
                 "artifact_digest": digest,
             })
     return digest
+
+
+def _unavailable_generation(
+    *,
+    source_id: str,
+    status: str,
+    error_code: str | None,
+    size: int,
+    stat_result: Any | None = None,
+) -> str:
+    """Status-bearing correction generation for a source whose stable bytes are unavailable.
+
+    The generation set is what ``create_snapshot`` compares to decide whether a same-cutoff
+    retry may reuse an existing snapshot. A constant placeholder therefore collapses every
+    unavailable state onto one identity: an optional source going ABSENT -> OVERSIZE, or a
+    required source going MISSING -> INVALID, would reuse the prior snapshot and report
+    stale evidence as current.
+
+    Bytes are never read to break that tie (an oversize file must not be hashed). The
+    generation is derived from exactly the bounded metadata that *is* trustworthy: the
+    status, the error code, the advertised byte count, and — when a stat survived — the
+    exact nanosecond mtime and the dev/inode identity. Two materially different unavailable
+    states can then never present one generation, while an unchanged unavailable state
+    re-derives the same generation on every retry.
+    """
+    identity: dict[str, Any] = {
+        "generation_kind": "SOURCE_UNAVAILABLE",
+        "source_id": source_id,
+        "status": status,
+        "error_code": error_code,
+        "bytes": int(size),
+        "mtime_ns": None,
+        "device": None,
+        "inode": None,
+    }
+    if stat_result is not None:
+        identity["mtime_ns"] = int(getattr(stat_result, "st_mtime_ns", 0))
+        identity["device"] = int(getattr(stat_result, "st_dev", 0))
+        identity["inode"] = int(getattr(stat_result, "st_ino", 0))
+    return c.content_digest(identity)
 
 
 def _gap(
@@ -471,13 +529,124 @@ def _stable_first_party_read(path: Path) -> tuple[bytes | None, Any | None, int,
         os.close(fd)
 
 
+def _reject_non_finite_constant(token: str) -> float:
+    raise ValueError(f"non-finite JSON constant {token!r}")
+
+
+def _finite_float(text: str) -> float:
+    value = float(text)
+    if not math.isfinite(value):
+        raise ValueError(f"non-finite JSON number {text!r}")
+    return value
+
+
+def _loads_finite(text: str) -> Any:
+    """``json.loads`` closed against non-finite numbers.
+
+    Python's decoder accepts bare ``NaN``/``Infinity``/``-Infinity`` by default, and an
+    ordinary-looking overflow literal such as ``1e400`` also decodes to ``inf``. The
+    canonical serializer this module's output must survive is ``allow_nan=False``, so any
+    non-finite value that reaches a projected row raises a bare ``ValueError`` at seal time
+    — outside the contract's error type, producing no receipt and no gap, and collapsing
+    the whole composition into an opaque failure. A non-finite number is a malformed
+    artifact; it is rejected here, at ingestion, where the source law can degrade one
+    source to MALFORMED and let composition continue.
+    """
+    return json.loads(
+        text, parse_constant=_reject_non_finite_constant, parse_float=_finite_float
+    )
+
+
 def _parse_json(raw: bytes) -> tuple[Any | None, str | None]:
     try:
-        return json.loads(raw.decode("utf-8")), None
+        return _loads_finite(raw.decode("utf-8")), None
     except UnicodeDecodeError:
+        # A subclass of ValueError, so it must be caught before the broader clause below.
         return None, "MALFORMED"
-    except json.JSONDecodeError:
+    except ValueError:
+        # json.JSONDecodeError subclasses ValueError, as do the non-finite rejections above.
         return None, "MALFORMED"
+
+
+_MANIFEST_NAME_OVERHEAD_BYTES = 3  # JSON quoting plus one separator per encoded name
+
+
+def _stable_directory_manifest(directory: Path) -> dict[str, Any]:
+    """Fixed-path, no-follow, stable first-party directory-manifest read.
+
+    Returns ``{"names": sorted_names, "mtime_ns": int | None, "error_code": str | None}``.
+
+    ``is_dir()``/``glob()`` follow symlinks, expose no clock, and cannot detect a directory
+    mutating underneath the enumeration — so the manifest they produce is neither
+    point-in-time nor closed. This read instead:
+
+    * rejects a symlinked or non-directory source before opening anything, then opens the
+      directory itself with ``O_DIRECTORY|O_NOFOLLOW`` and enumerates through that fd, so a
+      path component swapped mid-read cannot redirect it;
+    * refuses any matching entry that is a symlink or not a regular file, failing closed
+      rather than returning partial truth about a directory it does not understand;
+    * bounds total encoded filename metadata, failing closed on overflow — a manifest is
+      metadata about an unbounded directory, and an unbounded name census is not bounded
+      capture;
+    * re-fstats the directory afterwards and rejects any identity or mtime change during
+      enumeration;
+    * reports a qualified first-party metadata clock: the newest of the directory's own
+      mtime and every eligible entry's mtime, which is the instant at which the manifest
+      became true. A receipt written after the decision cutoff therefore moves that clock
+      forward and is excluded, instead of being exposed as historical memory.
+    """
+    def _failed(code: str) -> dict[str, Any]:
+        return {"names": [], "mtime_ns": None, "error_code": code}
+
+    try:
+        dir_lstat = os.lstat(str(directory))
+    except FileNotFoundError:
+        return _failed("MISSING")
+    except OSError:
+        return _failed("INVALID")
+    if stat.S_ISLNK(dir_lstat.st_mode):
+        return _failed("SETTLEMENT_DIR_SYMLINK")
+    if not stat.S_ISDIR(dir_lstat.st_mode):
+        return _failed("SETTLEMENT_DIR_NOT_A_DIRECTORY")
+
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        dir_fd = os.open(str(directory), flags)
+    except FileNotFoundError:
+        return _failed("MISSING")
+    except OSError:
+        return _failed("INVALID")
+    try:
+        pre = os.fstat(dir_fd)
+        names: list[str] = []
+        newest_ns = pre.st_mtime_ns
+        encoded_bytes = 0
+        with os.scandir(dir_fd) as entries:
+            for entry in entries:
+                if not entry.name.endswith(".json"):
+                    continue
+                try:
+                    info = entry.stat(follow_symlinks=False)
+                except OSError:
+                    return _failed("SETTLEMENT_ENTRY_NOT_REGULAR")
+                if entry.is_symlink() or not stat.S_ISREG(info.st_mode):
+                    return _failed("SETTLEMENT_ENTRY_NOT_REGULAR")
+                encoded_bytes += len(entry.name.encode("utf-8")) + _MANIFEST_NAME_OVERHEAD_BYTES
+                if encoded_bytes > MAX_MANIFEST_METADATA_BYTES:
+                    return _failed("SETTLEMENT_MANIFEST_TOO_LARGE")
+                names.append(entry.name)
+                if info.st_mtime_ns > newest_ns:
+                    newest_ns = info.st_mtime_ns
+        post = os.fstat(dir_fd)
+        if (
+            pre.st_dev != post.st_dev
+            or pre.st_ino != post.st_ino
+            or pre.st_mtime_ns != post.st_mtime_ns
+        ):
+            return _failed("SOURCE_CHANGED_DURING_READ")
+    finally:
+        os.close(dir_fd)
+    return {"names": sorted(names), "mtime_ns": newest_ns, "error_code": None}
 
 
 def _parse_jsonl_tail(raw: bytes, *, max_rows: int = MAX_JSONL_TAIL_ROWS) -> dict[str, Any]:
@@ -485,7 +654,8 @@ def _parse_jsonl_tail(raw: bytes, *, max_rows: int = MAX_JSONL_TAIL_ROWS) -> dic
 
     Never re-reads or re-stats the source: rows, the caller's digest, and the caller's
     file-write clock must all describe the exact same bytes. Invalid lines increment
-    ``omitted_rows`` rather than vanishing from coverage.
+    ``omitted_rows`` rather than vanishing from coverage — including a row carrying a
+    non-finite number, which the canonical serializer would refuse at seal time.
     """
     text = raw.decode("utf-8", errors="replace")
     valid: list[Any] = []
@@ -495,8 +665,8 @@ def _parse_jsonl_tail(raw: bytes, *, max_rows: int = MAX_JSONL_TAIL_ROWS) -> dic
         if not line:
             continue
         try:
-            obj = json.loads(line)
-        except json.JSONDecodeError:
+            obj = _loads_finite(line)
+        except ValueError:
             omitted += 1
             continue
         if not isinstance(obj, dict):
@@ -531,19 +701,28 @@ def _book_dir(book: str) -> Path:
     return _ROOT / relative
 
 
-def _project_account(payload: Any) -> dict[str, Any] | None:
+def _project_account(payload: Any) -> tuple[dict[str, Any] | None, int]:
+    """Project the account row, returning ``(row, dropped_position_entries)``.
+
+    A position entry whose value is not an object cannot be projected. It is *counted* and
+    surfaced by the caller as a bounded gap rather than silently discarded: book truth is
+    required evidence, and a position that vanishes both understates the book and narrows
+    every held-ticker-filtered external projection derived from it.
+    """
     if not isinstance(payload, Mapping):
-        return None
+        return None, 0
     row: dict[str, Any] = {}
     if "cash" in payload:
         row["cash"] = payload.get("cash")
     if "starting_nav" in payload:
         row["starting_nav"] = payload.get("starting_nav")
+    dropped = 0
     positions = payload.get("positions")
     if isinstance(positions, Mapping):
         projected_positions: dict[str, Any] = {}
         for ticker, pos in positions.items():
             if not isinstance(pos, Mapping):
+                dropped += 1
                 continue
             projected_positions[ticker] = {
                 field: pos[field]
@@ -551,27 +730,39 @@ def _project_account(payload: Any) -> dict[str, Any] | None:
                 if field in pos
             }
         row["positions"] = projected_positions
-    return row
+    return row, dropped
 
 
-def _project_latest(payload: Any) -> dict[str, Any] | None:
+def _project_latest(payload: Any) -> tuple[dict[str, Any] | None, int]:
+    """Project the latest-marks row, returning ``(row, dropped_position_entries)``.
+
+    An entry that is not an object, or that carries no non-empty ticker, cannot identify a
+    holding; it is counted and reported exactly like a malformed account position.
+    """
     if not isinstance(payload, Mapping):
-        return None
+        return None, 0
     row: dict[str, Any] = {}
     if "as_of" in payload:
         row["as_of"] = payload.get("as_of")
+    dropped = 0
     positions = payload.get("positions")
     if isinstance(positions, list):
-        row["positions"] = [
-            {
+        projected: list[dict[str, Any]] = []
+        for pos in positions:
+            if not isinstance(pos, Mapping):
+                dropped += 1
+                continue
+            ticker = pos.get("ticker")
+            if not isinstance(ticker, str) or not ticker:
+                dropped += 1
+                continue
+            projected.append({
                 field: pos[field]
                 for field in ("ticker", "weight", "identity_status", "holding_mark_source")
                 if field in pos
-            }
-            for pos in positions
-            if isinstance(pos, Mapping)
-        ]
-    return row
+            })
+        row["positions"] = projected
+    return row, dropped
 
 
 def capture_book_state(book: str, *, decision_cutoff: str, recorded_at: str) -> dict[str, Any]:
@@ -609,6 +800,9 @@ def capture_book_state(book: str, *, decision_cutoff: str, recorded_at: str) -> 
         if error_code == "MISSING":
             receipt["status"] = "ABSENT_OPTIONAL" if not required else "MISSING"
             receipt["coverage_state"] = "COMPLETE" if not required else "PARTIAL"
+            receipt["correction_generation"] = _unavailable_generation(
+                source_id=source_id, status=receipt["status"], error_code=error_code, size=size,
+            )
             if required:
                 gaps_out.append(_gap("MISSING_REQUIRED_INTERNAL_SOURCE", source_id=source_id,
                                       section_id=section_id))
@@ -621,6 +815,10 @@ def capture_book_state(book: str, *, decision_cutoff: str, recorded_at: str) -> 
             receipt["status"] = "INVALID" if error_code == "SOURCE_CHANGED_DURING_READ" else error_code
             receipt["error_code"] = error_code
             receipt["coverage_state"] = "BLOCKED"
+            receipt["correction_generation"] = _unavailable_generation(
+                source_id=source_id, status=receipt["status"], error_code=error_code,
+                size=size, stat_result=stat_after,
+            )
             if stat_after is not None:
                 receipt["filesystem_observed_at"] = _utc_from_mtime_ns(stat_after.st_mtime_ns)
             gaps_out.append(_gap(error_code, source_id=source_id, section_id=section_id))
@@ -653,6 +851,9 @@ def capture_book_state(book: str, *, decision_cutoff: str, recorded_at: str) -> 
             receipt["status"] = "MALFORMED"
             receipt["error_code"] = parse_error
             receipt["coverage_state"] = "PARTIAL" if not required else "BLOCKED"
+            # Stable bytes exist even though they do not parse: the generation must track
+            # them, or two different malformed bodies read as one unchanged state.
+            receipt["correction_generation"] = receipt["artifact_digest"]
             gaps_out.append(_gap(parse_error, source_id=source_id, section_id=section_id))
             _merge_into_section(sections[section_id], rows=[], coverage_state=receipt["coverage_state"],
                                  omitted_rows=0,
@@ -665,20 +866,45 @@ def capture_book_state(book: str, *, decision_cutoff: str, recorded_at: str) -> 
         if as_of is not None:
             receipt["as_of"] = as_of
         receipt["status"] = "AVAILABLE"
-        receipt["coverage_state"] = "COMPLETE"
 
+        dropped_positions = 0
         if projection == "account":
-            row = _project_account(payload)
+            row, dropped_positions = _project_account(payload)
+            content_present = bool(row)
         elif projection == "latest":
-            row = _project_latest(payload)
+            row, dropped_positions = _project_latest(payload)
+            content_present = bool(row)
         else:
+            # A raw-object projection *is* the whole artifact, so a legitimately present
+            # empty object is complete content, not absent content.
             row = payload if isinstance(payload, (Mapping, list)) else {"value": payload}
+            content_present = True
 
-        rows = [row] if row is not None else []
+        rows = [row] if (content_present and row is not None) else []
+        coverage = "COMPLETE"
+        source_gaps: list[dict[str, Any]] = []
+        if not content_present:
+            coverage = "PARTIAL"
+            source_gaps.append(_gap("EMPTY_PROJECTION", source_id=source_id,
+                                     section_id=section_id, detail=_EMPTY_PROJECTION_DETAIL))
+        if dropped_positions:
+            coverage = "PARTIAL"
+            source_gaps.append(_gap(
+                "MALFORMED_POSITION_ENTRY", source_id=source_id, section_id=section_id,
+                # A bounded count and a fixed reason — never the excluded entries' own
+                # keys or values, which are arbitrary payload text.
+                detail=(
+                    f"{dropped_positions} position "
+                    f"{'entry' if dropped_positions == 1 else 'entries'} excluded: "
+                    "not a usable position object"
+                ),
+            ))
+        receipt["coverage_state"] = coverage
         receipt["rows_total"] = len(rows)
         receipt["rows_returned"] = len(rows)
-        _merge_into_section(sections[section_id], rows=rows, coverage_state="COMPLETE",
-                             omitted_rows=0, gaps=[])
+        gaps_out.extend(source_gaps)
+        _merge_into_section(sections[section_id], rows=rows, coverage_state=coverage,
+                             omitted_rows=0, gaps=list(source_gaps))
         sources_out.append(receipt)
 
     for source_id, rel_path, section_id in _INTERNAL_JSONL_SPECS:
@@ -703,6 +929,9 @@ def capture_book_state(book: str, *, decision_cutoff: str, recorded_at: str) -> 
         if error_code == "MISSING":
             receipt["status"] = "ABSENT_OPTIONAL"
             receipt["coverage_state"] = "COMPLETE"
+            receipt["correction_generation"] = _unavailable_generation(
+                source_id=source_id, status="ABSENT_OPTIONAL", error_code=error_code, size=size,
+            )
             sources_out.append(receipt)
             continue
 
@@ -710,6 +939,10 @@ def capture_book_state(book: str, *, decision_cutoff: str, recorded_at: str) -> 
             receipt["status"] = "INVALID" if error_code == "SOURCE_CHANGED_DURING_READ" else error_code
             receipt["error_code"] = error_code
             receipt["coverage_state"] = "BLOCKED"
+            receipt["correction_generation"] = _unavailable_generation(
+                source_id=source_id, status=receipt["status"], error_code=error_code,
+                size=size, stat_result=stat_after,
+            )
             if stat_after is not None:
                 receipt["filesystem_observed_at"] = _utc_from_mtime_ns(stat_after.st_mtime_ns)
             gaps_out.append(_gap(error_code, source_id=source_id, section_id=section_id))
@@ -738,6 +971,9 @@ def capture_book_state(book: str, *, decision_cutoff: str, recorded_at: str) -> 
             continue
 
         tail = _parse_jsonl_tail(raw)
+        # Stable bytes exist, so the generation is those bytes. A JSONL tail declares no
+        # revision field, so there is nothing else it could lawfully rest on.
+        receipt["correction_generation"] = receipt["artifact_digest"]
         receipt["status"] = "AVAILABLE"
         receipt["coverage_state"] = "COMPLETE"
         receipt["rows_total"] = tail["rows_total"]
@@ -762,23 +998,59 @@ def capture_book_state(book: str, *, decision_cutoff: str, recorded_at: str) -> 
     )
     sections.setdefault("historical_memory", _section("historical_memory", []))
     emit("historical_memory", _SETTLEMENT_RECEIPTS_SOURCE_ID)
-    if settlement_dir.is_dir():
-        names = sorted(p.name for p in settlement_dir.glob("*.json"))
-        bounded = names[-MAX_SECTION_ROWS:]
-        rows = [{"file": name} for name in bounded]
-        manifest_digest = _digest(json.dumps(bounded, sort_keys=True).encode("utf-8"))
-        receipt["artifact_digest"] = manifest_digest
-        receipt["correction_generation"] = manifest_digest
-        receipt["status"] = "AVAILABLE"
-        receipt["coverage_state"] = "COMPLETE"
-        receipt["rows_total"] = len(names)
-        receipt["rows_returned"] = len(bounded)
-        receipt["omitted_rows"] = len(names) - len(bounded)
-        _merge_into_section(sections["historical_memory"], rows=rows, coverage_state="COMPLETE",
-                             omitted_rows=len(names) - len(bounded), gaps=[])
-    else:
+    manifest = _stable_directory_manifest(settlement_dir)
+    manifest_error = manifest["error_code"]
+    names = manifest["names"]
+    if manifest_error == "MISSING":
         receipt["status"] = "ABSENT_OPTIONAL"
         receipt["coverage_state"] = "COMPLETE"
+        receipt["correction_generation"] = _unavailable_generation(
+            source_id=_SETTLEMENT_RECEIPTS_SOURCE_ID, status="ABSENT_OPTIONAL",
+            error_code=manifest_error, size=0,
+        )
+    elif manifest_error is not None:
+        receipt["status"] = (
+            "OVERSIZE" if manifest_error == "SETTLEMENT_MANIFEST_TOO_LARGE" else "INVALID"
+        )
+        receipt["error_code"] = manifest_error
+        receipt["coverage_state"] = "BLOCKED"
+        receipt["correction_generation"] = _unavailable_generation(
+            source_id=_SETTLEMENT_RECEIPTS_SOURCE_ID, status=receipt["status"],
+            error_code=manifest_error, size=0,
+        )
+        gap = _gap(manifest_error, source_id=_SETTLEMENT_RECEIPTS_SOURCE_ID,
+                   section_id="historical_memory")
+        gaps_out.append(gap)
+        _merge_into_section(sections["historical_memory"], rows=[], coverage_state="BLOCKED",
+                             omitted_rows=0, gaps=[gap])
+    else:
+        # Digest the entire eligible manifest, not just the displayed tail: a change to an
+        # omitted name is still a change in the evidence this receipt attests to.
+        manifest_digest = c.content_digest({"manifest": names})
+        receipt["artifact_digest"] = manifest_digest
+        receipt["correction_generation"] = manifest_digest
+        manifest_utc = _utc_from_mtime_ns(manifest["mtime_ns"])
+        receipt["known_at"] = manifest_utc
+        receipt["filesystem_observed_at"] = manifest_utc
+        receipt["clock_basis"] = "FILE_MTIME_FIRST_PARTY_STATE"
+        if manifest_utc > cutoff:
+            receipt["status"] = "FUTURE_AT_CUTOFF"
+            receipt["coverage_state"] = "BLOCKED"
+            gap = _gap("FUTURE_AT_CUTOFF", source_id=_SETTLEMENT_RECEIPTS_SOURCE_ID,
+                       section_id="historical_memory")
+            gaps_out.append(gap)
+            _merge_into_section(sections["historical_memory"], rows=[], coverage_state="BLOCKED",
+                                 omitted_rows=0, gaps=[gap])
+        else:
+            bounded = names[-MAX_SECTION_ROWS:]
+            rows = [{"file": name} for name in bounded]
+            receipt["status"] = "AVAILABLE"
+            receipt["coverage_state"] = "COMPLETE"
+            receipt["rows_total"] = len(names)
+            receipt["rows_returned"] = len(bounded)
+            receipt["omitted_rows"] = len(names) - len(bounded)
+            _merge_into_section(sections["historical_memory"], rows=rows, coverage_state="COMPLETE",
+                                 omitted_rows=len(names) - len(bounded), gaps=[])
     sources_out.append(receipt)
 
     return {"sources": sources_out, "sections": sections, "gaps": gaps_out}
@@ -788,15 +1060,34 @@ def capture_book_state(book: str, *, decision_cutoff: str, recorded_at: str) -> 
 # External Macro source capture
 # ---------------------------------------------------------------------------
 
-def _resolve_external_path(spec: SourceSpec):
+def _resolve_external_path(spec: SourceSpec) -> tuple[Path | None, str | None]:
+    """Resolve a contract key to a path *proven* to lie under the vendored Macro root.
+
+    Returns ``(path, None)`` or ``(None, error_code)``. ``config/contracts.yml`` is a shared
+    multi-owner registry: an absolute ``path:``, a ``..`` segment, or a symlink pointing out
+    of the tree would each silently move this module's read outside the root its docstring
+    claims closure over. Containment is enforced here, before any target read, so an
+    escaping entry produces a typed contract-unavailable receipt and touches nothing.
+    """
     from control_plane import contracts as contracts_module
     entry = contracts_module.contract(spec.contract_key)
     if not isinstance(entry, dict):
-        return None
+        return None, "CONTRACT_UNAVAILABLE"
     rel_path = entry.get("path")
     if not isinstance(rel_path, str) or not rel_path:
-        return None
-    return _V / rel_path
+        return None, "CONTRACT_UNAVAILABLE"
+    candidate = Path(rel_path)
+    if candidate.is_absolute():
+        return None, "CONTRACT_PATH_ESCAPE"
+    resolved_root = _V.resolve()
+    # ``resolve()`` collapses ``..`` and follows symlinks, so both escape routes are closed
+    # by the single containment check below. It reads link targets, never file content.
+    try:
+        resolved = (_V / candidate).resolve()
+        resolved.relative_to(resolved_root)
+    except (OSError, ValueError):
+        return None, "CONTRACT_PATH_ESCAPE"
+    return _V / candidate, None
 
 
 def _project_risk_envelope(payload: Any) -> dict[str, Any]:
@@ -837,15 +1128,20 @@ def _project_factor_betas(payload: Any, held_tickers: Sequence[str]) -> dict[str
     return row
 
 
-def _project_prophet(payload: Any, held_tickers: Sequence[str]) -> tuple[list[Any], int]:
+def _project_prophet(payload: Any, held_tickers: Sequence[str]) -> tuple[list[Any], int, bool]:
     """Held-ticker plans, then the first 50 non-held plans, in producer order within each
     group. A non-Mapping (malformed) plan is never silently dropped from coverage — it
-    always counts as an omitted row, exactly like an excess plan beyond either 50-cap."""
+    always counts as an omitted row, exactly like an excess plan beyond either 50-cap.
+
+    The third element reports whether the source declared a usable ``plans`` collection at
+    all: a present empty ``plans: []`` is a complete statement that there are no plans,
+    while an absent or unusable ``plans`` is missing content wearing the same zero rows.
+    """
     if not isinstance(payload, Mapping):
-        return [], 0
+        return [], 0, False
     plans = payload.get("plans")
     if not isinstance(plans, list):
-        return [], 0
+        return [], 0, False
     held = {t.upper() for t in held_tickers}
     held_plans: list[Any] = []
     non_held_plans: list[Any] = []
@@ -862,7 +1158,7 @@ def _project_prophet(payload: Any, held_tickers: Sequence[str]) -> tuple[list[An
     selected_non_held = non_held_plans[:50]
     selected = (selected_held + selected_non_held)[:MAX_SECTION_ROWS]
     omitted = (len(plans)) - len(selected)
-    return selected, max(omitted, 0)
+    return selected, max(omitted, 0), True
 
 
 def _project_neural_web(payload: Any, held_tickers: Sequence[str]) -> dict[str, Any]:
@@ -883,12 +1179,14 @@ def _project_neural_web(payload: Any, held_tickers: Sequence[str]) -> dict[str, 
 
 def _project_portfolio_context(
     payload: Any, held_tickers: Sequence[str]
-) -> dict[str, tuple[list[Any], int]]:
+) -> dict[str, tuple[list[Any], int, bool]]:
     """Held-ticker rows per domain, each independently capped at 100. Returns
-    ``{domain: (rows, omitted)}`` — ``omitted`` is the pre-slice held-ticker candidate
-    count beyond the 100-row cap, so a cap drop is always counted, never silently lost."""
+    ``{domain: (rows, omitted, content_present)}`` — ``omitted`` is the pre-slice
+    held-ticker candidate count beyond the 100-row cap, so a cap drop is always counted,
+    never silently lost, and ``content_present`` is per-domain: one absent domain key must
+    not make the domains that *are* present look incomplete, nor hide itself among them."""
     domains = ("fundamental_state", "positioning", "event_state", "priceability")
-    out: dict[str, tuple[list[Any], int]] = {domain: ([], 0) for domain in domains}
+    out: dict[str, tuple[list[Any], int, bool]] = {domain: ([], 0, False) for domain in domains}
     if not isinstance(payload, Mapping):
         return out
     held = {t.upper() for t in held_tickers}
@@ -900,19 +1198,24 @@ def _project_portfolio_context(
                 if isinstance(row, Mapping) and str(row.get("ticker", "")).upper() in held
             ]
             selected = filtered[:MAX_SECTION_ROWS]
-            out[domain] = (selected, len(filtered) - len(selected))
+            out[domain] = (selected, len(filtered) - len(selected), True)
     return out
 
 
-def _project_held_ticker_bundle(payload: Any, held_tickers: Sequence[str]) -> tuple[list[Any], int]:
+def _project_held_ticker_bundle(
+    payload: Any, held_tickers: Sequence[str]
+) -> tuple[list[Any], int, bool]:
     """The held-ticker rows from a ``{"tickers": {...}}`` bundle, capped at 100. The same
-    ``(rows, omitted)`` pair is mirrored into every sibling domain this source feeds —
-    callers must not multiply the counts by the number of domains."""
+    ``(rows, omitted, content_present)`` triple is mirrored into every sibling domain this
+    source feeds — callers must not multiply the counts by the number of domains.
+
+    ``content_present`` separates a bundle that has no row for any held ticker (a complete
+    answer) from one that carries no ``tickers`` map at all (absent content)."""
     if not isinstance(payload, Mapping):
-        return [], 0
+        return [], 0, False
     tickers = payload.get("tickers")
     if not isinstance(tickers, Mapping):
-        return [], 0
+        return [], 0, False
     held = {t.upper() for t in held_tickers}
     filtered = [
         {"ticker": ticker, **record}
@@ -920,11 +1223,30 @@ def _project_held_ticker_bundle(payload: Any, held_tickers: Sequence[str]) -> tu
         if ticker.upper() in held and isinstance(record, Mapping)
     ]
     selected = filtered[:MAX_SECTION_ROWS]
-    return selected, len(filtered) - len(selected)
+    return selected, len(filtered) - len(selected), True
+
+
+# Projections that yield at most one row. An empty row means the artifact declared none of
+# the fields the projection names — absent content, not an empty complete source.
+# (projection -> (projector, section_id, takes_held_tickers))
+_SINGLE_ROW_PROJECTIONS = {
+    "risk_envelope": (_project_risk_envelope, "risk_truth", False),
+    "regime": (_project_regime, "market_structure", False),
+    "covariance_spine": (_project_covariance_spine, "independence", False),
+    "factor_betas": (_project_factor_betas, "factor_risk", True),
+    "neural_web": (_project_neural_web, "relationships", True),
+}
 
 
 def capture_external_sources(*, held_tickers: Sequence[str], decision_cutoff: str,
-                              recorded_at: str) -> dict[str, Any]:
+                              recorded_at: str, held_tickers_complete: bool = True) -> dict[str, Any]:
+    """Capture the fixed external Macro artifacts.
+
+    ``held_tickers_complete`` is the honesty flag for the held-ticker basis. Every
+    held-ticker-filtered projection is only as complete as the book it was filtered by, so
+    when the caller could not fully project the book, those domains report PARTIAL with an
+    explicit gap instead of presenting a silently narrowed view as a complete one.
+    """
     observed_at = c.parse_utc_timestamp(recorded_at, field="recorded_at")
     cutoff = c.parse_utc_timestamp(decision_cutoff, field="decision_cutoff")
 
@@ -933,11 +1255,29 @@ def capture_external_sources(*, held_tickers: Sequence[str], decision_cutoff: st
     sources_out: list[dict[str, Any]] = []
     gaps_out: list[dict[str, Any]] = []
 
+    def merge_projection(receipt, spec, section_id, rows, *, omitted=0, content_present):
+        """Fold one projected domain into its section, degrading rather than overclaiming."""
+        coverage = "COMPLETE"
+        section_gaps: list[dict[str, Any]] = []
+        if not content_present:
+            coverage = "PARTIAL"
+            section_gaps.append(_gap("EMPTY_PROJECTION", source_id=spec.source_id,
+                                      section_id=section_id, detail=_EMPTY_PROJECTION_DETAIL))
+        if not held_tickers_complete and spec.projection in _HELD_TICKER_PROJECTIONS:
+            coverage = "PARTIAL"
+            section_gaps.append(_gap("PARTIAL_HELD_TICKER_BASIS", source_id=spec.source_id,
+                                      section_id=section_id,
+                                      detail=_PARTIAL_HELD_TICKER_DETAIL))
+        gaps_out.extend(section_gaps)
+        _merge_into_section(sections[section_id], rows=rows, coverage_state=coverage,
+                             omitted_rows=omitted, gaps=section_gaps)
+        receipt["coverage_state"] = _worse_coverage(receipt["coverage_state"], coverage)
+
     for spec in EXTERNAL_SOURCE_SPECS:
         for domain in spec.domains:
             sections[domain]["source_ids"].append(spec.source_id)
 
-        artifact_path = _resolve_external_path(spec)
+        artifact_path, resolve_error = _resolve_external_path(spec)
         receipt = _base_receipt(
             source_id=spec.source_id,
             domains=spec.domains,
@@ -952,8 +1292,11 @@ def capture_external_sources(*, held_tickers: Sequence[str], decision_cutoff: st
 
         if artifact_path is None:
             receipt["status"] = "INVALID"
-            receipt["error_code"] = "CONTRACT_UNAVAILABLE"
+            receipt["error_code"] = resolve_error
             receipt["coverage_state"] = "BLOCKED"
+            receipt["correction_generation"] = _unavailable_generation(
+                source_id=spec.source_id, status="INVALID", error_code=resolve_error, size=0,
+            )
             gaps_out.append(_gap("CONTRACT_UNAVAILABLE", source_id=spec.source_id))
             for domain in spec.domains:
                 _merge_into_section(sections[domain], rows=_risk_missing_placeholder(spec, domain),
@@ -964,15 +1307,22 @@ def capture_external_sources(*, held_tickers: Sequence[str], decision_cutoff: st
 
         raw, size, error_code = _read_json_bytes(artifact_path)
         receipt["bytes"] = size
+        fs_stat = None
         try:
-            fs_mtime = artifact_path.stat().st_mtime
-            receipt["filesystem_observed_at"] = _utc_from_epoch_seconds(fs_mtime)
+            fs_stat = artifact_path.stat()
+            # Integer nanosecond floor, never float st_mtime: at these epochs a float64
+            # rounds up across a second boundary, sealing an evidentiary timestamp one
+            # second late. This is the same law the internal path already proves.
+            receipt["filesystem_observed_at"] = _utc_from_mtime_ns(fs_stat.st_mtime_ns)
         except OSError:
             pass
 
         if error_code == "MISSING":
             receipt["status"] = "MISSING"
             receipt["coverage_state"] = "PARTIAL"
+            receipt["correction_generation"] = _unavailable_generation(
+                source_id=spec.source_id, status="MISSING", error_code=error_code, size=size,
+            )
             gaps_out.append(_gap("MISSING", source_id=spec.source_id))
             for domain in spec.domains:
                 placeholder = _risk_missing_placeholder(spec, domain)
@@ -988,6 +1338,12 @@ def capture_external_sources(*, held_tickers: Sequence[str], decision_cutoff: st
             receipt["status"] = error_code
             receipt["error_code"] = error_code
             receipt["coverage_state"] = "PARTIAL"
+            # No bytes to hash — an oversize file is never read merely to identify it —
+            # so the generation rests on the bounded metadata that is trustworthy.
+            receipt["correction_generation"] = _unavailable_generation(
+                source_id=spec.source_id, status=error_code, error_code=error_code,
+                size=size, stat_result=fs_stat,
+            )
             gaps_out.append(_gap(error_code, source_id=spec.source_id))
             for domain in spec.domains:
                 _merge_into_section(sections[domain], rows=[], coverage_state="PARTIAL",
@@ -1002,6 +1358,9 @@ def capture_external_sources(*, held_tickers: Sequence[str], decision_cutoff: st
             receipt["status"] = "MALFORMED"
             receipt["error_code"] = parse_error
             receipt["coverage_state"] = "PARTIAL"
+            # Stable bytes exist even though they do not parse: the generation tracks them,
+            # so two different malformed bodies are two different states of the world.
+            receipt["correction_generation"] = receipt["artifact_digest"]
             gaps_out.append(_gap(parse_error, source_id=spec.source_id))
             for domain in spec.domains:
                 _merge_into_section(sections[domain], rows=[], coverage_state="PARTIAL",
@@ -1070,60 +1429,36 @@ def capture_external_sources(*, held_tickers: Sequence[str], decision_cutoff: st
         receipt["status"] = "AVAILABLE"
         receipt["coverage_state"] = "COMPLETE"
 
-        if spec.projection == "risk_envelope":
-            row = _project_risk_envelope(payload)
+        if spec.projection in _SINGLE_ROW_PROJECTIONS:
+            project, section_id, needs_held = _SINGLE_ROW_PROJECTIONS[spec.projection]
+            row = project(payload, held_tickers) if needs_held else project(payload)
             rows = [row] if row else []
-            _merge_into_section(sections["risk_truth"], rows=rows, coverage_state="COMPLETE",
-                                 omitted_rows=0, gaps=[])
-            receipt["rows_total"] = receipt["rows_returned"] = len(rows)
-        elif spec.projection == "regime":
-            row = _project_regime(payload)
-            rows = [row] if row else []
-            _merge_into_section(sections["market_structure"], rows=rows, coverage_state="COMPLETE",
-                                 omitted_rows=0, gaps=[])
-            receipt["rows_total"] = receipt["rows_returned"] = len(rows)
-        elif spec.projection == "covariance_spine":
-            row = _project_covariance_spine(payload)
-            rows = [row] if row else []
-            _merge_into_section(sections["independence"], rows=rows, coverage_state="COMPLETE",
-                                 omitted_rows=0, gaps=[])
-            receipt["rows_total"] = receipt["rows_returned"] = len(rows)
-        elif spec.projection == "factor_betas":
-            row = _project_factor_betas(payload, held_tickers)
-            rows = [row] if row else []
-            _merge_into_section(sections["factor_risk"], rows=rows, coverage_state="COMPLETE",
-                                 omitted_rows=0, gaps=[])
+            merge_projection(receipt, spec, section_id, rows, content_present=bool(row))
             receipt["rows_total"] = receipt["rows_returned"] = len(rows)
         elif spec.projection == "prophet":
-            rows, omitted = _project_prophet(payload, held_tickers)
-            _merge_into_section(sections["candidate_geometry"], rows=rows, coverage_state="COMPLETE",
-                                 omitted_rows=omitted, gaps=[])
+            rows, omitted, present = _project_prophet(payload, held_tickers)
+            merge_projection(receipt, spec, "candidate_geometry", rows,
+                             omitted=omitted, content_present=present)
             receipt["rows_total"] = len(rows) + omitted
             receipt["rows_returned"] = len(rows)
             receipt["omitted_rows"] = omitted
-        elif spec.projection == "neural_web":
-            row = _project_neural_web(payload, held_tickers)
-            rows = [row] if row else []
-            _merge_into_section(sections["relationships"], rows=rows, coverage_state="COMPLETE",
-                                 omitted_rows=0, gaps=[])
-            receipt["rows_total"] = receipt["rows_returned"] = len(rows)
         elif spec.projection == "portfolio_context":
             by_domain = _project_portfolio_context(payload, held_tickers)
             total_returned = 0
             total_omitted = 0
-            for domain, (rows, omitted) in by_domain.items():
-                _merge_into_section(sections[domain], rows=rows, coverage_state="COMPLETE",
-                                     omitted_rows=omitted, gaps=[])
+            for domain, (rows, omitted, present) in by_domain.items():
+                merge_projection(receipt, spec, domain, rows,
+                                 omitted=omitted, content_present=present)
                 total_returned += len(rows)
                 total_omitted += omitted
             receipt["rows_returned"] = total_returned
             receipt["omitted_rows"] = total_omitted
             receipt["rows_total"] = total_returned + total_omitted
         elif spec.projection == "held_ticker_bundle":
-            rows, omitted = _project_held_ticker_bundle(payload, held_tickers)
+            rows, omitted, present = _project_held_ticker_bundle(payload, held_tickers)
             for domain in spec.domains:
-                _merge_into_section(sections[domain], rows=rows, coverage_state="COMPLETE",
-                                     omitted_rows=omitted, gaps=[])
+                merge_projection(receipt, spec, domain, rows,
+                                 omitted=omitted, content_present=present)
             receipt["rows_returned"] = len(rows)
             receipt["omitted_rows"] = omitted
             receipt["rows_total"] = len(rows) + omitted
@@ -1171,8 +1506,15 @@ def _held_tickers_from_book_sections(sections: Mapping[str, Any]) -> list[str]:
 def capture_all(book: str, *, decision_cutoff: str, recorded_at: str) -> dict[str, Any]:
     book_capture = capture_book_state(book, decision_cutoff=decision_cutoff, recorded_at=recorded_at)
     held_tickers = _held_tickers_from_book_sections(book_capture["sections"])
+    # A dropped position narrows the held-ticker set the external projections filter by, so
+    # every held-ticker-filtered domain must degrade with the book rather than present a
+    # silently narrowed view as a complete one.
+    held_tickers_complete = not any(
+        gap["code"] == "MALFORMED_POSITION_ENTRY" for gap in book_capture["gaps"]
+    )
     external_capture = capture_external_sources(
         held_tickers=held_tickers, decision_cutoff=decision_cutoff, recorded_at=recorded_at,
+        held_tickers_complete=held_tickers_complete,
     )
 
     sections: dict[str, dict[str, Any]] = {}

@@ -140,8 +140,17 @@ def test_verify_snapshot_rejects_tampering_and_mismatched_id():
 def test_clock_bases_include_external_declared_and_unqualified():
     assert "DECLARED_SOURCE_FIELD" in c.CLOCK_BASES
     assert "UNQUALIFIED_EXTERNAL_CLOCK" in c.CLOCK_BASES
-    for basis in ("DECLARED_SOURCE_FIELD", "UNQUALIFIED_EXTERNAL_CLOCK"):
-        c.validate_source_receipt({**_receipt(), "clock_basis": basis})
+    # Each basis is paired with a status it can lawfully carry: an unqualified external
+    # clock is precisely the state that cannot be AVAILABLE, so it is exercised on the
+    # UNQUALIFIED_CLOCK receipt it actually describes.
+    c.validate_source_receipt({**_receipt(), "clock_basis": "DECLARED_SOURCE_FIELD"})
+    c.validate_source_receipt({
+        **_receipt(),
+        "clock_basis": "UNQUALIFIED_EXTERNAL_CLOCK",
+        "status": "UNQUALIFIED_CLOCK",
+        "known_at": None,
+        "coverage_state": "PARTIAL",
+    })
 
 
 def test_authority_classes_accept_new_context_only_classes_but_reject_execution():
@@ -206,3 +215,48 @@ def test_contract_reuses_canonical_json_owner_and_has_no_hidden_io():
         "portfolio_intelligence",
     )
     assert not [token for token in forbidden if token in source]
+
+
+# ---------------------------------------------------------------------------
+# Task 8 repair R5 — AVAILABLE is a clock-qualified state, closed at the contract
+# ---------------------------------------------------------------------------
+
+def test_available_receipt_requires_a_non_null_known_at():
+    """``status=AVAILABLE`` asserts point-in-time knowledge; a null ``known_at`` means the
+    snapshot cannot say *when* the evidence was true, so it may never claim AVAILABLE."""
+    receipt = {**_receipt(), "known_at": None}
+    with pytest.raises(c.DecisionSnapshotContractError):
+        c.validate_source_receipt(receipt)
+
+
+@pytest.mark.parametrize("clock_basis", ["UNKNOWN", "UNQUALIFIED_EXTERNAL_CLOCK"])
+def test_available_receipt_cannot_rest_on_an_unqualified_clock(clock_basis):
+    receipt = {**_receipt(), "clock_basis": clock_basis}
+    with pytest.raises(c.DecisionSnapshotContractError):
+        c.validate_source_receipt(receipt)
+
+
+@pytest.mark.parametrize(
+    "status,known_at,clock_basis",
+    [
+        ("ABSENT_OPTIONAL", None, "UNKNOWN"),
+        ("MISSING", None, "UNKNOWN"),
+        ("OVERSIZE", None, "UNKNOWN"),
+        ("MALFORMED", None, "UNKNOWN"),
+        ("INVALID", None, "UNKNOWN"),
+        ("UNQUALIFIED_CLOCK", None, "UNQUALIFIED_EXTERNAL_CLOCK"),
+        ("DEPENDENCY_PARTIAL", None, "UNQUALIFIED_EXTERNAL_CLOCK"),
+        ("FUTURE_AT_CUTOFF", "2026-09-15T21:00:00Z", "FILE_MTIME_FIRST_PARTY_STATE"),
+    ],
+)
+def test_non_available_states_keep_their_lawful_unqualified_clocks(status, known_at, clock_basis):
+    """The AVAILABLE invariant must not collaterally outlaw the degraded states the
+    source law depends on — every one of these stays valid."""
+    receipt = {
+        **_receipt(),
+        "status": status,
+        "known_at": known_at,
+        "clock_basis": clock_basis,
+        "coverage_state": "PARTIAL",
+    }
+    c.validate_source_receipt(receipt)

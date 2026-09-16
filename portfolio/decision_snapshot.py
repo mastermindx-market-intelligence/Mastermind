@@ -82,6 +82,12 @@ def _read_regular_file_bytes(path: Path) -> bytes | None:
         return None
     if not stat.S_ISREG(pre.st_mode):
         raise SnapshotCorrupt(f"{path} is not a regular file")
+    # Refuse before opening, not after reading: a sibling may be arbitrarily large (a
+    # sparse file advertises an enormous st_size while occupying almost no blocks), and a
+    # snapshot can never lawfully exceed this ceiling, so reading one to discover it is
+    # corrupt would allocate attacker-chosen memory for no evidentiary gain.
+    if pre.st_size > c.MAX_SNAPSHOT_BYTES:
+        raise SnapshotCorrupt(f"{path} exceeds the {c.MAX_SNAPSHOT_BYTES}-byte snapshot limit")
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     try:
         fd = os.open(str(path), flags)
@@ -93,6 +99,12 @@ def _read_regular_file_bytes(path: Path) -> bytes | None:
         post = os.fstat(fd)
         if post.st_dev != pre.st_dev or post.st_ino != pre.st_ino:
             raise SnapshotCorrupt(f"{path} identity changed between stat and open")
+        # Re-check against the opened descriptor: the pre-open lstat is advisory, and the
+        # read below is sized from st_size.
+        if post.st_size > c.MAX_SNAPSHOT_BYTES:
+            raise SnapshotCorrupt(
+                f"{path} exceeds the {c.MAX_SNAPSHOT_BYTES}-byte snapshot limit"
+            )
         chunks: list[bytes] = []
         remaining = post.st_size
         while remaining > 0:

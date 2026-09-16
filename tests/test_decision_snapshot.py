@@ -653,3 +653,161 @@ def test_section_gaps_are_sorted_and_sealed_like_root_gaps():
         canonical_json_bytes(gap_a).decode("ascii"),
         canonical_json_bytes(gap_z).decode("ascii"),
     ]
+
+
+# ---------------------------------------------------------------------------
+# Task 8 repair R1 — changed evidence always mints a correction, never a reuse
+# ---------------------------------------------------------------------------
+
+def _seed_account(cash: float = 1.0) -> Path:
+    account_path = sources._ROOT / "data" / "portfolios" / "autonomous" / "account.json"
+    account_path.parent.mkdir(parents=True, exist_ok=True)
+    account_path.write_text(json.dumps({"cash": cash, "positions": {}}), encoding="utf-8")
+    os.utime(account_path, (_PRE_CUTOFF_EPOCH, _PRE_CUTOFF_EPOCH))
+    return account_path
+
+
+def _artifacts() -> list:
+    return sorted(p.name for p in snapshots.snapshot_dir("autonomous").glob("*.json"))
+
+
+def test_changed_malformed_evidence_at_one_cutoff_mints_a_correction(snapshot_root):
+    """Two different malformed bodies are two different states of the world. Reusing the
+    first snapshot for the second would report stale evidence as current."""
+    _seed_account()
+    betas = sources._V / "site" / "factor_betas.json"
+    betas.parent.mkdir(parents=True, exist_ok=True)
+
+    def compose(body: bytes, recorded_at: str) -> dict:
+        betas.write_bytes(body)
+        os.utime(betas, (_PRE_CUTOFF_EPOCH, _PRE_CUTOFF_EPOCH))
+        return snapshots.create_snapshot(
+            "autonomous",
+            decision_cutoff="2026-09-15T20:00:00Z",
+            recorded_at=recorded_at,
+        )
+
+    original = compose(b"{broken-one", "2026-09-15T20:01:00Z")
+    assert original["created"] is True
+
+    corrected = compose(b"{broken-two", "2026-09-15T20:10:00Z")
+    assert corrected["created"] is True
+    assert corrected["snapshot_id"] != original["snapshot_id"]
+    assert corrected["correction"]["status"] == "CORRECTED"
+    assert corrected["correction"]["same_cutoff_prior_snapshot_ids"] == [original["snapshot_id"]]
+
+    # The original bytes are preserved, not replaced: corrections are additive.
+    assert len(_artifacts()) == 2
+    preserved = snapshots.load_snapshot("autonomous", original["snapshot_id"])
+    assert preserved["snapshot_id"] == original["snapshot_id"]
+
+    # Identical malformed bytes at the same cutoff stay idempotent.
+    retry = compose(b"{broken-two", "2026-09-15T20:20:00Z")
+    assert retry["created"] is False
+    assert retry["snapshot_id"] == corrected["snapshot_id"]
+    assert len(_artifacts()) == 2
+
+
+def test_optional_source_going_absent_to_oversize_is_not_reusable_truth(snapshot_root):
+    _seed_account()
+    original = snapshots.create_snapshot(
+        "autonomous", decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:01:00Z",
+    )
+    assert original["created"] is True
+
+    pending = sources._ROOT / "data" / "portfolios" / "autonomous" / "pending_target.json"
+    pending.write_bytes(b"x" * (c.MAX_SOURCE_BYTES + 1))
+    os.utime(pending, (_PRE_CUTOFF_EPOCH, _PRE_CUTOFF_EPOCH))
+
+    corrected = snapshots.create_snapshot(
+        "autonomous", decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:10:00Z",
+    )
+    assert corrected["created"] is True
+    assert corrected["snapshot_id"] != original["snapshot_id"]
+    assert corrected["correction"]["same_cutoff_prior_snapshot_ids"] == [original["snapshot_id"]]
+    assert len(_artifacts()) == 2
+
+
+# ---------------------------------------------------------------------------
+# Task 8 repair R2 — a non-finite number degrades one source, not the vertical
+# ---------------------------------------------------------------------------
+
+def test_non_finite_number_in_a_source_still_seals_a_snapshot(snapshot_root):
+    _seed_account()
+    betas = sources._V / "site" / "factor_betas.json"
+    betas.parent.mkdir(parents=True, exist_ok=True)
+    betas.write_text(
+        '{"schema":"factor_betas.v1","known_at":"2026-09-15T19:00:00Z","betas":{"AAPL":NaN}}',
+        encoding="utf-8",
+    )
+    os.utime(betas, (_PRE_CUTOFF_EPOCH, _PRE_CUTOFF_EPOCH))
+
+    result = snapshots.create_snapshot(
+        "autonomous", decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:01:00Z",
+    )
+    assert result["snapshot_id"].startswith("sha256:")
+    receipt = next(r for r in result["sources"] if r["source_id"] == "macro.factor_betas")
+    assert receipt["status"] == "MALFORMED"
+    assert result["state"] in ("PARTIAL", "BLOCKED")
+    c.verify_snapshot(snapshots.load_snapshot("autonomous", result["snapshot_id"]))
+
+
+# ---------------------------------------------------------------------------
+# Task 8 repair R7 — the sibling read path is bounded and fails closed
+# ---------------------------------------------------------------------------
+
+def _decoy_path(directory: Path, char: str = "f") -> Path:
+    return directory / (char * 64 + ".json")
+
+
+def _read_request_recorder(monkeypatch) -> list:
+    """Record every ``os.read`` length the snapshot store asks for, so a test can prove the
+    ceiling is enforced *before* allocation rather than after a full read."""
+    requested: list = []
+    real_read = snapshots.os.read
+
+    def recording_read(fd, n):
+        requested.append(n)
+        return real_read(fd, n)
+
+    monkeypatch.setattr(snapshots.os, "read", recording_read)
+    return requested
+
+
+def test_oversize_snapshot_sibling_is_refused_before_it_is_read(snapshot_root, monkeypatch):
+    snapshots.persist_snapshot(_sealed_snapshot())
+    decoy = _decoy_path(snapshots.snapshot_dir("autonomous"))
+    decoy.write_bytes(b"{" + b"x" * c.MAX_SNAPSHOT_BYTES)
+    requested = _read_request_recorder(monkeypatch)
+    with pytest.raises(snapshots.SnapshotCorrupt):
+        snapshots.list_snapshots("autonomous")
+    with pytest.raises(snapshots.SnapshotCorrupt):
+        snapshots.latest_snapshot("autonomous")
+    assert max(requested, default=0) <= c.MAX_SNAPSHOT_BYTES
+
+
+def test_sparse_snapshot_sibling_is_refused_without_allocating_its_size(snapshot_root, monkeypatch):
+    """A sparse file advertises an enormous ``st_size`` while occupying almost no blocks —
+    the ceiling must be enforced on the advertised size, before any allocation."""
+    snapshots.persist_snapshot(_sealed_snapshot())
+    decoy = _decoy_path(snapshots.snapshot_dir("autonomous"), "e")
+    with open(decoy, "wb") as handle:
+        handle.truncate(1 << 30)
+    assert decoy.stat().st_size == 1 << 30
+    requested = _read_request_recorder(monkeypatch)
+    with pytest.raises(snapshots.SnapshotCorrupt):
+        snapshots.list_snapshots("autonomous")
+    assert max(requested, default=0) <= c.MAX_SNAPSHOT_BYTES
+
+
+def test_corrupt_regular_sibling_is_never_silently_hidden_by_list_or_latest(snapshot_root):
+    snapshots.persist_snapshot(_sealed_snapshot())
+    decoy = _decoy_path(snapshots.snapshot_dir("autonomous"), "b")
+    decoy.write_bytes(b'{"schema": "not-a-snapshot"}')
+    with pytest.raises(snapshots.SnapshotCorrupt):
+        snapshots.list_snapshots("autonomous")
+    with pytest.raises(snapshots.SnapshotCorrupt):
+        snapshots.latest_snapshot("autonomous")
