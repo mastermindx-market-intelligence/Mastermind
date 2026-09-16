@@ -4,7 +4,7 @@ import copy
 
 import pytest
 
-from control_plane import web_sol_rotation_classifier as classifier
+from integrations.chairman_surfaces import web_sol_rotation_classifier as classifier
 
 
 FP = "a" * 64
