@@ -230,12 +230,36 @@ composition fixtures must be built through the same seams rather than by constru
 ### Class 14 — unknown model-resource sharing never becomes independent wallets
 - **Proposed test**: `test_unproven_view_independence_contributes_zero_additional_capacity`
 - **Owner**: the view/resource distinction (contract §5.3).
-- **Fixture**: a `/token_plan/remains`-shaped payload with two model rows over one plan, `independence: UNPROVEN`.
-  Assert `avail` equals the underlying resource, that the rows are preserved for display, and that a summing
-  mutant is killed. Independence remains UNPROVEN by default. Promotion requires explicit provider contract
-  evidence or a reviewed repeated causal experiment declaring observation resolution, lag budget, same
-  `resource_generation`, isolated attribution, and correction/retraction handling; one observation pair is
-  explicitly insufficient. A generation change resets it to UNPROVEN.
+- **Fixture**: four deterministic runs over one `/token_plan/remains`-shaped plan. The shared plan holds
+  100,000 units; the two model views are **oversubscribed** — M3 80,000 and M2.7 80,000, summing to
+  160,000 — which is what makes sharing and independence numerically distinguishable at all.
+  `independence: UNPROVEN`.
+  **Run 1 — baseline.** Assert whole-job capacity is bounded by the shared plan at **100,000**, that both
+  rows are preserved for display, and that the **summing mutant** returning `80,000 + 80,000 = 160,000` is
+  killed.
+  **Run 2 — the one-pair trap, which is what B4 is about.** Present exactly ONE observation pair that looks
+  like clean evidence of independence: debit 5,000 against M3, then observe M3 at 75,000 and M2.7 unchanged
+  at 80,000. The unchanged sibling proves nothing — under sharing M2.7 reads `min(80,000, 95,000) = 80,000`
+  and under independence it reads 80,000, so **the observation has no discriminating power by
+  construction**. Assert independence stays **UNPROVEN** and that the M2.7 row contributes no independent
+  capacity. **Named mutant to kill: `promote_independence_on_first_pair`** — an evaluator that reads the
+  unchanged sibling row as proof of a separate wallet. Four confounders must each be falsifiable on their
+  own in the fixture: an observation resolution coarser than the 5,000 debit would hide a shared draw; a
+  lag budget shorter than the provider's propagation delay would show a row that is merely not-yet-updated;
+  a concurrent unattributed debit could produce the same two numbers; and a later provider correction could
+  retract the observation entirely.
+  **Run 3 — repetition is not an experiment.** Present a SECOND pair of the same shape and assert
+  independence is still UNPROVEN. Repeating an observation with no discriminating power does not accumulate
+  into the repeated causal experiment B5 requires.
+  **Run 4 — what the premature promotion actually costs.** Debit 75,000 against M3, leaving the shared plan
+  at 25,000 and the M3 row at 5,000. Under sharing M2.7 is now `min(80,000, 25,000) = 25,000`; the mutant
+  promoted at run 2 still reports **80,000**, over-committing by **55,000** against a plan that holds
+  25,000. Assert the unmutated evaluator reports 25,000.
+  **The valid path, asserted separately.** Supply either provider contract semantics declaring the rows
+  independent, or a reviewed repeated causal experiment declaring observation resolution, lag budget, same
+  `resource_generation`, isolated attribution, and correction/retraction handling. Only then assert
+  independence is PROVEN and the rows are separate resources. Then bump `resource_generation` and assert
+  independence resets to UNPROVEN and run 1's arithmetic returns.
 - **Status at master**: **MISSING**. Bounded by `rg -n -i "token_plan|remains|wallet" control_plane ops config
   tests` — the #7103 parser that preserves those rows is a Macro-side PR, not at Mastermind master.
 
