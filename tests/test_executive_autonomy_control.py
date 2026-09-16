@@ -3431,3 +3431,326 @@ def test_ceo_submit_cli_subprocess_contract():
     assert coo_flag.stdout.strip() == ""
     assert "usage:" in coo_flag.stderr
     assert "Traceback" not in coo_flag.stderr
+
+
+# ---------------------------------------------------------------------------
+# T14 (W1H3R6F): the CEO-submit CLI OUTCOME TABLE.
+#
+# ``_run_ceo_submit_command`` maps every outcome class to a typed document AND
+# an exit code.  Before this test only the ``privilege_required`` refusal path
+# (and, incidentally, the hand-edited-config UNBOUND status path) was pinned, so
+# ``except TransactionEffectUnknown: exit_code = 2`` could be flipped to ``0``
+# with the whole file still green: the subprocess contract test never reaches
+# that handler because the root refusal fires first.  Every branch is driven
+# here through ``control.main`` and pinned to BOTH its exact parsed JSON
+# document and its exact return value.
+#
+# Root is injected through the fake host's ``effective_uid()``; the uid of the
+# process running this suite is never read.
+# ---------------------------------------------------------------------------
+
+_CEO_SUBMIT_CLI_ARM = ["ceo-submit-arm", "--expected-sha", SHA]
+_CEO_SUBMIT_CLI_DISARM = ["ceo-submit-disarm", "--expected-sha", SHA]
+_CEO_SUBMIT_CLI_STATUS = ["ceo-submit-status", "--expected-sha", SHA]
+_CEO_SUBMIT_CLI_TRANSACTION_ID = "autonomy-feedfacec0de"
+
+
+def _ceo_submit_cli_document(code, state, status, transaction_id, replayed=False):
+    """The exact operation document, spelled out rather than derived."""
+
+    return {
+        "schema_version": control.OPERATION_SCHEMA_VERSION,
+        "code": code,
+        "state": state,
+        "status": status,
+        "transaction_id": transaction_id,
+        "replayed": replayed,
+    }
+
+
+def _ceo_submit_cli_unverified(code):
+    return _ceo_submit_cli_document(
+        code, "UNKNOWN", "CEO_SUBMIT_UNVERIFIED", None
+    )
+
+
+def _ceo_submit_cli_effect_unknown():
+    return _ceo_submit_cli_document(
+        "effect_unknown", "UNKNOWN", "EFFECT_UNKNOWN", None
+    )
+
+
+class _CeoSubmitArmAdmissionRefusingHost(FakeCeoSubmitHost):
+    """A CEO-submit host whose config read raises the COO arm-admission type.
+
+    ``_run_ceo_submit_command`` catches ``ArmAdmissionError`` alongside the
+    host and CEO-submit admission types because all three ride the one
+    ``AUTONOMY_TRANSACTION`` owner; a Protocol-conforming host can raise it.
+    """
+
+    def load_ceo_submit_configs(self, expected_sha):
+        raise control.ArmAdmissionError("configs_gate_failed")
+
+
+class _CeoSubmitBoomHost(FakeCeoSubmitHost):
+    """A CEO-submit host whose config read raises an UNTYPED error."""
+
+    def load_ceo_submit_configs(self, expected_sha):
+        raise RuntimeError("boom")
+
+
+def _ceo_submit_cli_effect_unknown_host():
+    # R9 stickiness: a marker for THIS verb means a prior attempt may already
+    # have written, so the callee raises TransactionEffectUnknown before any
+    # admission gate -- exactly the handler the R6 finding is about.
+    host = FakeCeoSubmitHost()
+    host.incomplete_marker_operation = "CEO_SUBMIT_ARM"
+    return host
+
+
+def _ceo_submit_cli_root_refusing_host():
+    return FakeCeoSubmitHost(uid=501)
+
+
+def _ceo_submit_cli_already_armed_host():
+    host = _armed_ceo_submit_host()
+    # The ARM happened during SETUP; reset the ledgers so the counters describe
+    # only the refused ``main`` invocation under test.
+    host.reset_ledgers()
+    return host
+
+
+def _ceo_submit_cli_arm_admission_refusing_host():
+    return _CeoSubmitArmAdmissionRefusingHost()
+
+
+def _ceo_submit_cli_rollback_host():
+    # A fault after the control-config write with a WORKING rollback becomes
+    # ArmTransactionError("arm_rolled_back").
+    return FakeCeoSubmitHost(fail_after="control")
+
+
+def _ceo_submit_cli_boom_host():
+    return _CeoSubmitBoomHost()
+
+
+def _ceo_submit_cli_armed_host():
+    return _armed_ceo_submit_host()
+
+
+def _ceo_submit_cli_disarmed_host():
+    return FakeCeoSubmitHost()
+
+
+def _ceo_submit_cli_disarm_replay_host():
+    # A real DISARM transaction first, then a second DISARM is the read-only
+    # REPLAY: the sealed receipt keeps its transaction id.
+    host = _armed_ceo_submit_host()
+    replayed = control.execute_ceo_submit_disarm(
+        host, _ceo_submit_request(), now=NOW
+    )
+    assert replayed.replayed is False
+    assert host.control_config["ceo_submit_armed"] is False
+    host.reset_ledgers()
+    return host
+
+
+def _ceo_submit_cli_unbound_host():
+    host = FakeCeoSubmitHost()
+    host.control_config["ceo_submit_armed"] = True
+    return host
+
+
+_CEO_SUBMIT_CLI_OUTCOME_CASES = [
+    # -- REFUSALS (exit code 2) --------------------------------------------
+    pytest.param(
+        _CEO_SUBMIT_CLI_ARM,
+        _ceo_submit_cli_effect_unknown_host,
+        _ceo_submit_cli_effect_unknown(),
+        2,
+        True,
+        id="refusal_effect_unknown_via_arm_stickiness",
+    ),
+    pytest.param(
+        _CEO_SUBMIT_CLI_STATUS,
+        _ceo_submit_cli_effect_unknown_host,
+        _ceo_submit_cli_effect_unknown(),
+        2,
+        True,
+        id="refusal_effect_unknown_via_status_stickiness",
+    ),
+    pytest.param(
+        _CEO_SUBMIT_CLI_ARM,
+        _ceo_submit_cli_root_refusing_host,
+        _ceo_submit_cli_unverified("privilege_required"),
+        2,
+        True,
+        id="refusal_privilege_required",
+    ),
+    pytest.param(
+        _CEO_SUBMIT_CLI_ARM,
+        _ceo_submit_cli_already_armed_host,
+        _ceo_submit_cli_unverified("ceo_submit_already_armed"),
+        2,
+        True,
+        id="refusal_ceo_submit_admission_already_armed",
+    ),
+    pytest.param(
+        _CEO_SUBMIT_CLI_ARM,
+        _ceo_submit_cli_arm_admission_refusing_host,
+        _ceo_submit_cli_unverified("configs_gate_failed"),
+        2,
+        True,
+        id="refusal_arm_admission_error",
+    ),
+    pytest.param(
+        _CEO_SUBMIT_CLI_ARM,
+        _ceo_submit_cli_rollback_host,
+        _ceo_submit_cli_unverified("arm_rolled_back"),
+        2,
+        False,
+        id="refusal_arm_transaction_rolled_back",
+    ),
+    pytest.param(
+        _CEO_SUBMIT_CLI_ARM,
+        _ceo_submit_cli_boom_host,
+        _ceo_submit_cli_effect_unknown(),
+        2,
+        True,
+        id="refusal_untyped_runtime_error_catch_all",
+    ),
+    # -- SUCCESS PATHS -----------------------------------------------------
+    pytest.param(
+        _CEO_SUBMIT_CLI_ARM,
+        _ceo_submit_cli_disarmed_host,
+        _ceo_submit_cli_document(
+            "ceo_submit_armed",
+            "CEO_SUBMIT_ARMED",
+            "CEO_SUBMIT_ARMED",
+            _CEO_SUBMIT_CLI_TRANSACTION_ID,
+        ),
+        0,
+        False,
+        id="success_arm",
+    ),
+    pytest.param(
+        _CEO_SUBMIT_CLI_DISARM,
+        _ceo_submit_cli_armed_host,
+        _ceo_submit_cli_document(
+            "ceo_submit_disarmed",
+            "CEO_SUBMIT_DISARMED",
+            "CEO_SUBMIT_DISARMED",
+            _CEO_SUBMIT_CLI_TRANSACTION_ID,
+        ),
+        0,
+        False,
+        id="success_disarm",
+    ),
+    pytest.param(
+        _CEO_SUBMIT_CLI_DISARM,
+        _ceo_submit_cli_disarm_replay_host,
+        _ceo_submit_cli_document(
+            "ceo_submit_already_disarmed",
+            "CEO_SUBMIT_DISARMED",
+            "CEO_SUBMIT_DISARMED",
+            _CEO_SUBMIT_CLI_TRANSACTION_ID,
+            replayed=True,
+        ),
+        0,
+        False,
+        id="success_disarm_replayed",
+    ),
+    pytest.param(
+        _CEO_SUBMIT_CLI_STATUS,
+        _ceo_submit_cli_disarmed_host,
+        _ceo_submit_cli_document(
+            "ceo_submit_disarmed",
+            "CEO_SUBMIT_DISARMED",
+            "CEO_SUBMIT_DISARMED",
+            None,
+        ),
+        0,
+        False,
+        id="success_status_disarmed",
+    ),
+    pytest.param(
+        _CEO_SUBMIT_CLI_STATUS,
+        _ceo_submit_cli_armed_host,
+        _ceo_submit_cli_document(
+            "ceo_submit_armed",
+            "CEO_SUBMIT_ARMED",
+            "CEO_SUBMIT_ARMED",
+            _CEO_SUBMIT_CLI_TRANSACTION_ID,
+        ),
+        0,
+        False,
+        id="success_status_armed_and_bound",
+    ),
+    pytest.param(
+        _CEO_SUBMIT_CLI_STATUS,
+        _ceo_submit_cli_unbound_host,
+        _ceo_submit_cli_document(
+            "ceo_submit_armed_unbound",
+            "CEO_SUBMIT_ARMED_UNBOUND",
+            "CEO_SUBMIT_ARMED_UNBOUND",
+            None,
+        ),
+        2,
+        True,
+        id="refusal_status_armed_but_unbound",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "argv, build_host, expected_document, expected_exit, refusal_writes_nothing",
+    _CEO_SUBMIT_CLI_OUTCOME_CASES,
+)
+def test_ceo_submit_cli_pins_every_outcome_class_document_and_exit_code(
+    argv, build_host, expected_document, expected_exit, refusal_writes_nothing,
+    capsys,
+):
+    host = build_host()
+    result = control.main(list(argv), host=host, now=lambda: NOW)
+    captured = capsys.readouterr()
+
+    # EXACT exit code for this outcome class.
+    assert result == expected_exit
+
+    # EXACTLY one line of JSON on stdout, no traceback text anywhere.
+    assert captured.out.endswith("\n")
+    assert captured.out.count("\n") == 1
+    lines = captured.out.splitlines()
+    assert len(lines) == 1
+    assert "Traceback" not in captured.out
+    assert "Traceback" not in captured.err
+    assert captured.err == ""
+
+    # EXACT document, byte-for-byte in canonical form.
+    document = json.loads(lines[0])
+    assert document == expected_document
+    assert set(document) == {
+        "schema_version",
+        "code",
+        "state",
+        "status",
+        "transaction_id",
+        "replayed",
+    }
+    assert lines[0] == json.dumps(
+        expected_document, sort_keys=True, separators=(",", ":")
+    )
+
+    if expected_exit != 0:
+        # No refusal may leave a transaction marker behind.
+        assert host.marker is False
+        # ...and the refusals that stop BEFORE the lock write nothing at all.
+        # (The rollback refusal is the one class that legitimately entered the
+        # transaction before its typed refusal; its restored state is pinned by
+        # the dedicated rollback tests.)
+        if refusal_writes_nothing:
+            assert host.control_writes == 0
+            assert host.worker_writes == 0
+            assert host.worker_replace_calls == 0
+            assert host.receipt_writes == 0
+            assert host.phases == []
