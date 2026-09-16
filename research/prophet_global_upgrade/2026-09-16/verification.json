@@ -1,0 +1,49 @@
+{
+  "command": "python3 research/prophet_global_upgrade/2026-09-16/reproduce.py --fossil-ranks",
+  "executed_at_utc": "2026-09-16T09:33:03.794676+00:00",
+  "exit_code": 0,
+  "result": {
+    "source_pin": "11485597cc53b3137346084aae4623cceed28a3f",
+    "status": "RESEARCH_ONLY_NO_PROMOTION",
+    "us_v3": {
+      "matured_episodes": 209,
+      "positive_outcomes": 73,
+      "origin_dates": 8,
+      "unique_tickers": 181,
+      "win_pct": 34.92822966507177,
+      "mean_pnl_pct_from_rounded_rows": -2.0138755980861243,
+      "mean_excess_pct_from_rounded_rows": -1.8322966507177036
+    },
+    "us_matured_definitions": {
+      "confluence": 280,
+      "us_prophet_v3": 209,
+      "bottoming-alignment": 174,
+      "us_prophet_v2": 112,
+      "us_prophet_v1": 68
+    },
+    "suspension_probes": {
+      "fresh_one_day": true,
+      "month_gap_then_five_prints": false,
+      "five_nan_rows": false
+    },
+    "suspension_flag_counts": {
+      "hk": 81,
+      "ca": 87
+    },
+    "canada_clock": {
+      "earliest_h21_endpoint": "2026-09-21",
+      "observed_through_sep11": 15
+    },
+    "fossil_rank_reconciliation": {
+      "matched": 209,
+      "different_rank": 149,
+      "source_bytes": 57157509,
+      "source_sha256": "0b58bb38d292ec34737d2886134b1d32177493912171e35889ee4931c0b5fed4",
+      "snapshot_lines": 38
+    },
+    "verification": "PASS"
+  },
+  "reproduce_py_sha256": "c59e0604ec01339fc340639484a193c86b38c5339782faa715c2f87f5ee9d140",
+  "evidence_json_sha256": "1efe22314c5e7d9fd1c08d5a7d0edb38f56701b5c15b00a31f412da70c9d4e21",
+  "scope": "Pinned research data and pure-function probes only; no production behavior changed."
+}
