@@ -1,12 +1,15 @@
 import hashlib
 import json
 import os
+from pathlib import Path
 
 import pytest
 
 from portfolio import decision_snapshot as snapshots
 from portfolio import decision_snapshot_sources as sources
 from scripts import portfolio_decision_snapshot as cli
+
+_RUNBOOK_PATH = Path(__file__).resolve().parent.parent / "docs" / "runbooks" / "portfolio-v3-decision-snapshot.md"
 
 
 # ---------------------------------------------------------------------------
@@ -427,3 +430,43 @@ def test_compose_then_status_then_show_round_trip(snapshot_root, capsys):
     assert section_out["section"]["section_id"] == "risk_truth"
     assert isinstance(section_out["section"]["rows"], list)
     assert _tree_fingerprint(snapshot_root) == tree_before_reads
+
+
+# ---------------------------------------------------------------------------
+# Runbook content locks: corrupt-sibling reconciliation must stay terminal,
+# and the bounded scan's truncation limit must stay non-probative.
+# ---------------------------------------------------------------------------
+
+def _runbook_normalized_text() -> str:
+    """Whitespace-collapsed, lowercased runbook text, so line-wrap and case never
+    affect these content-lock substring checks."""
+    return " ".join(_RUNBOOK_PATH.read_text().split()).lower()
+
+
+def test_runbook_corrupt_sibling_procedure_is_terminal_not_loopback():
+    text = _runbook_normalized_text()
+    assert "the same as step 2" not in text
+    assert "reconcile which cutoff the corrupt file was for before deciding" not in text
+    for required in (
+        "do not loop back to step 2",
+        "fail closed together",
+        "escalate to the immutable snapshot-store owner",
+        "independently authorized store-repair operation",
+        "raw/unverified json bytes directly",
+        "delete, quarantine, or rewrite it",
+        "re-run `compose`",
+        "move the operation to a different carrier or session",
+        "newer, unrelated snapshot",
+    ):
+        assert required in text
+
+
+def test_runbook_truncated_scan_is_documented_as_non_probative():
+    text = _runbook_normalized_text()
+    assert "source generation set — never before" not in text
+    for required in (
+        "hard clamp, not a page size",
+        "non-probative",
+        "never expose a source generation set",
+    ):
+        assert required in text

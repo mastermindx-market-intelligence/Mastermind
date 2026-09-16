@@ -119,7 +119,11 @@ State the real limitation up front: `status` can identify only the single curren
 snapshot for the book. It does not answer "does a snapshot for cutoff `T1` exist" once a
 later cutoff `T2` has since been composed, and `show` has no `--decision-cutoff` selector
 — only `--snapshot-id`, which an operator whose receipt was never printed does not have.
-Reconcile in this order:
+This runbook never authorizes retrying an ambiguous `compose` on the strength of this
+procedure alone: it only reconciles a receipt that can be proven to already exist under
+canonical verification. Any genuine `not_found` conclusion, and the retry it would
+license, belongs to a separately authorized reconciliation operation — never to this
+section by itself. Reconcile in this order:
 
 1. Run `status --book autonomous`. If its manifest's `decision_cutoff` equals the
    interrupted invocation's `--decision-cutoff`, the interrupted compose *is* the current
@@ -143,25 +147,38 @@ Reconcile in this order:
    ```
 
    This calls the same accepted, verified read path (`decision_snapshot.list_snapshots`)
-   the CLI itself is built on, bounded to 100 rows to match its closed limit, and prints
-   only manifest rows — it opens nothing for writing and creates nothing. It is a
-   diagnostic snippet run from the repository root, not a fourth CLI subcommand; do not
-   wire this into `scripts/portfolio_decision_snapshot.py`. Scan the printed rows for the
-   interrupted `decision_cutoff`.
+   the CLI itself is built on, and prints only manifest rows — it opens nothing for writing
+   and creates nothing. It is a diagnostic snippet run from the repository root, not a
+   fourth CLI subcommand; do not wire this into `scripts/portfolio_decision_snapshot.py`.
+   `limit=100` is a hard clamp, not a page size: a result of exactly 100 rows may be
+   truncated, and any cutoff past the clamp is simply invisible to this scan. Treat a full
+   100-row result as **non-probative** for anything not among the rows actually printed —
+   it proves nothing, and is never grounds to conclude the interrupted cutoff is absent.
 3. If a printed row's `decision_cutoff` matches, the interrupted compose completed — do
-   not run it again. If no row matches after this scan, classify the outcome
-   `EFFECT_UNKNOWN` and **stop**. Do not recommend a fresh `compose`, and do not hand the
-   operation to another carrier or session on the theory that "it probably didn't write" —
-   an `O_EXCL` write that completed and then failed only to print its receipt is
-   indistinguishable from "never started" without this scan. A fresh `compose` for that
-   exact `(book, decision_cutoff)` becomes lawful only once this exact canonical
-   reconciliation proves `not_found` for that cutoff and its source generation set — never
-   before.
-4. If `status` or `show` instead raise a typed `corrupt_snapshot` error for a partially
-   written sibling file, that is a distinct, already-reported condition: the store's
-   create-once (`O_EXCL`) persistence guarantees a genuinely partial write is never
-   silently adopted as valid. Treat it the same as step 2 — reconcile which cutoff the
-   corrupt file was for before deciding anything — never as automatic license to retry.
+   not run it again. In every other case — fewer than 100 rows with no match, or a full,
+   possibly-truncated 100-row result — classify the outcome `EFFECT_UNKNOWN` and **stop**.
+   Do not recommend a fresh `compose`, and do not hand the operation to another carrier or
+   session on the theory that "it probably didn't write." Manifest rows never expose a
+   source generation set, so this scan cannot certify `not_found` either way; only a
+   separately authorized reconciliation operation with its own canonical proof may ever
+   conclude `not_found` and clear a new `compose` at that cutoff. This runbook grants no
+   such authority by itself.
+4. If `status`, bare `show`, or the step-2 scan instead raise a typed `corrupt_snapshot`
+   error, **stop immediately — do not loop back to step 2 and do not try it again.**
+   `decision_snapshot` verifies every `*.json` file under the book's directory as part of
+   any aggregate verified read: `latest_snapshot` (used by `status` and bare `show`) and
+   `list_snapshots` (the step-2 scan) both scan the whole directory with no per-file
+   exception, so one truncated or tampered sibling file makes every one of those reads —
+   including the step-2 scan itself — fail closed together. No verified path documented in
+   this runbook can identify which cutoff the corrupt file belonged to, or read past it to
+   the rest of the directory. Preserve the interrupted operation as `EFFECT_UNKNOWN` and
+   escalate to the immutable snapshot-store owner for a bounded forensic reconciliation
+   outside this CLI. Do not, as a workaround: parse the corrupt file's raw/unverified JSON
+   bytes directly; delete, quarantine, or rewrite it; re-run `compose`; move the operation
+   to a different carrier or session; or infer the interrupted cutoff's effect from the
+   existence of a newer, unrelated snapshot. Any repair of the corrupt file, and any retry
+   decision that follows from it, requires an independently authorized store-repair
+   operation with its own canonical proof — this runbook does not grant that authority.
 5. A same-cutoff retry with an *unchanged* source generation set is documented above as an
    idempotent no-op. That fact describes what happens for a cutoff you have already
    reconciled by steps 1–3; it is not permission to skip that reconciliation and retry a
