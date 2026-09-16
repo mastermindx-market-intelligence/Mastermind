@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import re
-import socket
 import sys
 import uuid
 from pathlib import Path
@@ -19,20 +17,20 @@ if str(_RELEASE_ROOT) not in sys.path:
 from control_plane.executive_privileged_action import (
     REQUEST_SCHEMA,
     STATUS_REQUEST_SCHEMA,
-    canonical_request_bytes,
     validate_request,
     validate_status_request,
 )
-from control_plane.executive_privileged_broker import (
+from control_plane.executive_privileged_client import (
     BrokerTrustError,
-    WIRE_RESPONSE_SCHEMA,
-    validate_terminal_receipt,
+    DEFAULT_CLIENT_TIMEOUT_SECONDS,
+    DEFAULT_SOCKET,
+    send_effect,
+    send_status,
+    validate_effect_response,
+    validate_status_response,
 )
 
 
-DEFAULT_SOCKET = Path("/var/run/mastermind-executive/privileged.sock")
-DEFAULT_CLIENT_TIMEOUT_SECONDS = 660
-_MAX_RESPONSE_BYTES = 128 * 1024
 _ACTIONS = (
     "executive.services.start",
     "executive.services.stop",
@@ -97,42 +95,13 @@ def build_status_request(argv: Sequence[str]) -> dict[str, object]:
     return validate_status_request(raw).to_dict()
 
 
-def _read_response(connection: socket.socket) -> dict[str, object]:
-    buffer = bytearray()
-    while True:
-        chunk = connection.recv(min(4096, _MAX_RESPONSE_BYTES + 1 - len(buffer)))
-        if not chunk:
-            raise RuntimeError("privileged broker closed before a response")
-        buffer.extend(chunk)
-        if len(buffer) > _MAX_RESPONSE_BYTES:
-            raise RuntimeError("privileged broker response exceeded the client bound")
-        newline = buffer.find(b"\n")
-        if newline >= 0:
-            if newline != len(buffer) - 1:
-                raise RuntimeError("privileged broker returned multiple frames")
-            break
-    value = json.loads(bytes(buffer[:-1]).decode("utf-8", errors="strict"))
-    if not isinstance(value, dict) or not isinstance(value.get("ok"), bool):
-        raise RuntimeError("privileged broker returned an invalid response")
-    return value
-
-
 def send_request(
     request: dict[str, object],
     *,
     socket_path: Path = DEFAULT_SOCKET,
     timeout_seconds: int = DEFAULT_CLIENT_TIMEOUT_SECONDS,
 ) -> dict[str, object]:
-    validated = validate_request(request)
-    payload = (json.dumps(validated.to_dict(), sort_keys=True, separators=(",", ":")) + "\n").encode("ascii")
-    connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    try:
-        connection.settimeout(timeout_seconds)
-        connection.connect(str(socket_path))
-        connection.sendall(payload)
-        return _read_response(connection)
-    finally:
-        connection.close()
+    return send_effect(request, socket_path=socket_path, timeout_seconds=timeout_seconds)
 
 
 def send_status_request(
@@ -141,44 +110,23 @@ def send_status_request(
     socket_path: Path = DEFAULT_SOCKET,
     timeout_seconds: int = DEFAULT_CLIENT_TIMEOUT_SECONDS,
 ) -> dict[str, object]:
-    validated = validate_status_request(request)
-    payload = (json.dumps(validated.to_dict(), sort_keys=True, separators=(",", ":")) + "\n").encode("ascii")
-    connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    try:
-        connection.settimeout(timeout_seconds)
-        connection.connect(str(socket_path))
-        connection.sendall(payload)
-        return _read_response(connection)
-    finally:
-        connection.close()
+    return send_status(request, socket_path=socket_path, timeout_seconds=timeout_seconds)
+
+
+def _expected_release_sha() -> str | None:
+    release_name = _RELEASE_ROOT.name
+    return release_name if re.fullmatch(r"[0-9a-f]{40}", release_name) else None
 
 
 def _status_exit_code(response: dict[str, object], request_id: str) -> int:
     # A successful query is not evidence that the historical effect succeeded.
     # Correlate it before exposing a terminal/successful retrieval to callers.
-    if (
-        response.get("schema") != "mastermind.executive_privileged_action_response.v1"
-        or response.get("ok") is not True
-        or response.get("query") is not True
-        or response.get("request_id") != request_id
-        or not isinstance(response.get("installed_release_sha"), str)
-        or re.fullmatch(r"[0-9a-f]{40}", response["installed_release_sha"]) is None
-    ):
+    try:
+        validated = validate_status_response(response, expected_request_id=request_id)
+    except RuntimeError:
         return 1
-    status = response.get("status")
+    status = validated["status"]
     if status == "TERMINAL":
-        receipt = response.get("receipt")
-        if not isinstance(receipt, dict) or receipt.get("request_id") != request_id:
-            return 1
-        exit_code = receipt.get("exit_code")
-        outcome = receipt.get("outcome")
-        if (
-            isinstance(exit_code, bool)
-            or not isinstance(exit_code, int)
-            or outcome not in ("SUCCEEDED", "FAILED")
-            or (outcome == "SUCCEEDED") != (exit_code == 0)
-        ):
-            return 1
         return 0
     if status == "EFFECT_UNKNOWN":
         return 75
@@ -190,32 +138,10 @@ def _status_exit_code(response: dict[str, object], request_id: str) -> int:
 def _effect_exit_code(
     response: dict[str, object], request: dict[str, object]
 ) -> int:
-    if response.get("schema") != WIRE_RESPONSE_SCHEMA or not isinstance(response.get("ok"), bool):
-        raise RuntimeError("privileged broker returned an invalid effect response")
-    if response["ok"] is False:
-        if frozenset(response) != frozenset({"schema", "ok", "error", "detail"}):
-            raise RuntimeError("privileged broker returned an invalid refusal response")
-        if not isinstance(response.get("error"), str) or not isinstance(response.get("detail"), str):
-            raise RuntimeError("privileged broker returned an invalid refusal response")
-        return 75 if response["error"] == "EFFECT_UNKNOWN" else 1
-    if (
-        frozenset(response) != frozenset({"schema", "ok", "replayed", "receipt"})
-        or not isinstance(response.get("replayed"), bool)
-        or not isinstance(response.get("receipt"), dict)
-    ):
-        raise RuntimeError("privileged broker returned an invalid success response")
-    validated = validate_request(request)
-    digest = hashlib.sha256(canonical_request_bytes(validated)).hexdigest()
-    release_name = _RELEASE_ROOT.name
-    expected_release = release_name if re.fullmatch(r"[0-9a-f]{40}", release_name) else None
-    receipt = validate_terminal_receipt(
-        response["receipt"],
-        expected_request_id=validated.request_id,
-        expected_request_sha256=digest,
-        expected_release_sha=expected_release,
-        expected_action=validated.action,
-    )
-    return 0 if receipt["outcome"] == "SUCCEEDED" else 1
+    validated = validate_effect_response(response, request, expected_release_sha=_expected_release_sha())
+    if validated["ok"] is False:
+        return 75 if validated["error"] == "EFFECT_UNKNOWN" else 1
+    return 0 if validated["receipt"]["outcome"] == "SUCCEEDED" else 1
 
 
 def _main_status(values: Sequence[str], namespace: argparse.Namespace) -> int:
