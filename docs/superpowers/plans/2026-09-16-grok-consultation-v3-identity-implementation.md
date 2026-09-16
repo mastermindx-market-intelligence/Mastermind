@@ -286,7 +286,7 @@ git commit -m "feat(grok): persist v3 identity without arming execution"
 
 **Interfaces:**
 - Consumes: Tasks 1-4.
-- Produces: immutable branch head, current-base proof, independent review packet, draft PR.
+- Produces: immutable branch head, current-base proof, independent review packet, and one stacked draft PR whose base is the accepted W6-C2 repair branch until that dependency lands.
 
 - [ ] **Step 1: Run focused and compatibility suites**
 
@@ -333,13 +333,17 @@ Expected: no checked-in Grok target, credential, endpoint, route, implemented tr
 
 Review against the version law, protected v1/v2 vectors, caller-override refusal, zero-target/transport boundary, and capability honesty. Any owned semantic change after review requires a fresh exact-head review.
 
-- [ ] **Step 6: Push and create one draft PR on the existing branch**
+- [ ] **Step 6: Push and create one stacked draft PR on the existing branch**
 
 ```bash
 git push -u origin HEAD:sol/grok-consultation-v2-g1b-20260915
-gh pr create --draft --base master --head sol/grok-consultation-v2-g1b-20260915 \
+gh pr create --draft \
+  --base sol/w6c2-postmerge-integrity-repair-20260914-sol-001 \
+  --head sol/grok-consultation-v2-g1b-20260915 \
   --title "[GROK-G1B] Add honest v3 consultation identity without execution" \
   --body-file /path/to/final-pr-body.md
 ```
 
-The PR body must state `BUILT_NOT_PROVEN / PRODUCTION_INERT`, exact head/base/integration identities, tests, review verdict, and every non-goal.
+The stacked base must read back at accepted W6-C2 head `de190b2c7e878fd5a4cf6ecb2fc58b34b058ee74`. Opening directly against `master` while PR #681 remains unmerged is forbidden because it would duplicate that repair carrier's five owned paths. After PR #681 lands, retarget this same PR to `master`, refresh current-base integration proof, and apply review-reuse law; do not create a replacement PR or ancestry-only source commit.
+
+The PR body must state `BUILT_NOT_PROVEN / PRODUCTION_INERT`, exact semantic head, stacked base/head, current-master integrated candidate, tests, review verdict, dependency gate, and every non-goal.

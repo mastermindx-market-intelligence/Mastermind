@@ -11,6 +11,10 @@ Introduce an honest, versioned consultation QUESTION identity for the trusted `g
 - Existing carrier to preserve: branch `sol/grok-consultation-v2-g1b-20260915`, prior head `b0b4b48d6c4e61255d8f6a93554c6b64e2fb9b57`.
 - The branch name is historical carrier identity. It is not authority to reuse consultation v2.
 
+## Pull-request carrier law
+
+While accepted W6-C2 repair PR #681 remains unmerged, the Grok identity PR is stacked on its exact remote branch/head rather than opened directly against `master`. This keeps the Grok PR limited to the new v3 identity capability and avoids duplicating W6-C2's five-path repair carrier. After #681 lands, the same Grok PR may be retargeted to `master` only with refreshed latest-base integration proof and review-reuse classification; no replacement PR, rebase-for-freshness, or ancestry-only source commit is required.
+
 ## Version law
 
 - `mastermind.agent_dialogue_consultation.v1` remains byte- and behavior-compatible. It retains the protected closed key set and the existing `codex`/`claude` recipient-surface law.
