@@ -56,9 +56,11 @@ The production app initially returned an expired-connection error. `Reconnect` w
 invoked from the exact app page identified by
 `plugin_asdk_app_6aa89de1c45c81918b192d0a18dcfc15`; the same app remained selected in
 the Business conversation that then invoked live Executive tools through the production
-tunnel. That proves usable bearer forwarding and refresh-capable authorization for the
-named app identity, rather than a different client registration. No credential, token,
-password, or raw subject value is retained in this receipt.
+tunnel. Those authenticated tool calls establish a usable authorization and bearer path
+for the named app identity, rather than a different client registration. Token expiry and
+subsequent reconnect remain normal auth-lifecycle states, not evidence that authorization
+can never expire. No credential, token, password, or raw subject value is retained in
+this receipt.
 
 ## Exact tool discovery
 
@@ -72,15 +74,98 @@ The registered Business app advertised exactly these five tools and no sixth too
 
 ## Four-reader production proof
 
-| Tool | Production result |
-|---|---|
-| `executive_state` | Live installed-runtime envelope; baseline was 2 Jobs, both `QUEUED`, 0 Attempts, 0 Workers. |
-| `executive_inbox` | Live installed-runtime inbox envelope with canonical grounding and runtime counts. |
-| `executive_job` | Read `JOB-001`, `JOB-002`, and post-canary `JOB-003` through typed registries, not raw SQL. |
-| `ceo_intent_status` | Resolved durable intent receipts for accepted Jobs through `control_plane.ceo_intent.resolve_intent`. |
+Reader proof was gathered in explicit pre-canary and post-canary phases. A read of the
+new `JOB-003` is post-effect reconciliation and is not represented as evidence that the
+Job existed before admission.
 
-The reader envelopes identified their runtime as
-`readonly:installed-executive-runtime`. `executive_job` identified its source as
+| Tool | Phase | Production result |
+|---|---|---|
+| `executive_state` | Pre-canary baseline and post-canary reconciliation | Before submit: 2 Jobs, both `QUEUED`, 0 Attempts, 0 Workers. After canaries: 3 Jobs, all `QUEUED`, 0 Attempts, 0 Workers. |
+| `executive_inbox` | Authenticated read-only reconciliation | `attention_count=0`; 3 typed degraded facts; runtime counts were 3 `QUEUED` Jobs, 0 Attempts, and 0 Workers; runtime grounding was `readonly:installed-executive-runtime`. |
+| `executive_job` | Existing-job proof, then post-effect readback | The reader was exercised on pre-existing `JOB-001` and `JOB-002`. A fresh compact read of `JOB-001` returned `QUEUED`, no current Attempt, no assigned Worker, and `attempt_count=0`. `JOB-003` was read only after its accepted submit and is recorded under post-effect reconciliation. |
+| `ceo_intent_status` | Existing-intent proof, then post-effect readback | Existing intent `auto-7e10a5d196b414c8194276797a202a47` resolved to accepted `JOB-001`, `QUEUED`, `dispatched=false`. The canary intent was resolved separately after admission. |
+
+Selected exact fields from the compact `executive_inbox` read were:
+
+```json
+{
+  "attention_count": 0,
+  "degraded": [
+    "boot_packet: agentos brief exited 1: <no stderr>",
+    "boot_packet: strategic state unreadable: /Library/Application Support/MastermindExecutive/releases/4c148709f52ff036d71dd212abd2688212d91ed0/config/strategic_state.yml: PyYAML is required to read the strategic state",
+    "boot packet carries no Agent OS brief; CEO attention not projected"
+  ],
+  "runtime_counts": {
+    "attempts": {
+      "by_status": {
+        "CANCELLED": 0,
+        "CANCEL_REQUESTED": 0,
+        "CHECKPOINTED": 0,
+        "CLAIMED": 0,
+        "COMPLETED": 0,
+        "FAILED": 0,
+        "LOST": 0,
+        "RATE_LIMITED": 0,
+        "RUNNING": 0
+      },
+      "total": 0
+    },
+    "jobs": {
+      "by_status": {
+        "CANCELLED": 0,
+        "CANCEL_REQUESTED": 0,
+        "CHECKPOINTED": 0,
+        "COMPLETED": 0,
+        "FAILED": 0,
+        "LOST": 0,
+        "QUEUED": 3,
+        "RATE_LIMITED": 0,
+        "RUNNING": 0
+      },
+      "total": 3
+    },
+    "workers": {
+      "by_status": {
+        "AVAILABLE": 0,
+        "BUSY": 0,
+        "DRAINING": 0,
+        "ERROR": 0,
+        "OFFLINE": 0,
+        "RATE_LIMITED": 0
+      },
+      "total": 0
+    }
+  },
+  "grounding_runtime": "readonly:installed-executive-runtime",
+  "grounding_source": null,
+  "generated_at": "2026-09-16T21:07:43Z",
+  "ok": true,
+  "schema": "mastermind.executive_mcp_result.v1",
+  "tool": "executive_inbox"
+}
+```
+
+The existing-intent read returned:
+
+```json
+{
+  "accepted": true,
+  "dispatched": false,
+  "duplicate": false,
+  "intent_id": "auto-7e10a5d196b414c8194276797a202a47",
+  "job_id": "JOB-001",
+  "status": "QUEUED",
+  "fingerprint": "f05ab8f37fdc2d89494ad34bd98c0dc129a3efef73393a7b0d9658159e7fee78",
+  "grounding_runtime": "readonly:installed-executive-runtime",
+  "grounding_source": "control_plane.ceo_intent.resolve_intent",
+  "generated_at": "2026-09-16T21:08:12Z",
+  "ok": true,
+  "schema": "mastermind.executive_mcp_result.v1",
+  "tool": "ceo_intent_status"
+}
+```
+
+`executive_job` identified its source as
 `control_plane.executive_runtime registries (no raw SQL)`.
 
 ## Queue-only canary request
@@ -120,9 +205,11 @@ The receipt grounded Mastermind at the installed control release and Macro at
 ## Duplicate and conflict canaries
 
 The same operation key and the same normalized intent payload were submitted once more
-through the same app/conversation carrier. Executive identity uses SHA-256 over the
-canonical JSON of the whole normalized envelope, so this is canonical-payload equality,
-not a claim about transport-byte formatting. The duplicate result was:
+through the same app/conversation carrier. The reviewed
+`control_plane.ceo_intent.canonical_bytes` / `intent_fingerprint` contract serializes the
+whole validated envelope as canonical JSON and hashes it with SHA-256. The replay then
+returned the same fingerprint shown below, so the evidence is normalized-envelope
+identity, not a claim about raw transport-byte formatting. The duplicate result was:
 
 ```json
 {
@@ -182,14 +269,15 @@ exactly one additional queued Job.
 
 ## Residual degraded inputs
 
-The readers truthfully exposed pre-existing degradation unrelated to app transport:
+The authenticated reader envelopes also exposed these pre-existing degraded inputs:
 
 - Agent OS brief unavailable from the installed boot-packet path;
 - strategic-state YAML unreadable because PyYAML is absent in that installed reader path;
 - therefore CEO attention projection is incomplete.
 
-Those facts remain `PARTIAL` for broader Executive context quality. They do not negate the
-successful OAuth, five-tool, four-read, admission, idempotency, and conflict production path.
+This receipt does not infer their root cause from the app proof. It scopes them separately:
+the broader Executive context quality remains `PARTIAL`, while the OAuth, five-tool,
+four-read, admission, idempotency, and conflict path is production-proven.
 
 ## Completion-ruler adjudication
 
