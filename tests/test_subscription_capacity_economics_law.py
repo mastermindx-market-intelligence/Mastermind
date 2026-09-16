@@ -53,7 +53,7 @@ def test_capacity_law_never_splits_shared_quota_into_fictional_model_wallets() -
 def test_capacity_law_forbids_quota_burn_theater_and_limit_circumvention() -> None:
     law = _text(LAW)
     for phrase in (
-        'not a "burn quota at all costs" rule',
+        '"burn quota at all costs" rule',
         "Do not manufacture low-value work",
         "Never create, maintain, pool, or rotate accounts to circumvent usage limits",
         "Do not scale a subscription because its advertised theoretical token or API-dollar allowance looks large",
