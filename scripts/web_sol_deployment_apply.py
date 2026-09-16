@@ -392,7 +392,7 @@ def _private_state_document(
     phase: str,
     applied: applier.AppliedDeployment | None = None,
 ) -> dict[str, object]:
-    if phase not in {"PREPARED", "APPLIED", "ROLLED_BACK"}:
+    if phase not in {"PREPARED", "APPLIED", "ROLLED_BACK", "CONFLICT"}:
         raise applier.WebSolDeploymentApplyError("STATE_INVALID")
     applied_row: dict[str, object] | None = None
     if applied is not None:
@@ -465,6 +465,33 @@ def _assert_state_outside_install_root(
     raise applier.WebSolDeploymentApplyError(error_code)
 
 
+def _apply_and_persist_conflict(
+    *,
+    request_document: dict[str, Any],
+    prepared: applier.PreparedDeployment,
+    state_path: Path,
+    expected_state_digest: str,
+) -> applier.AppliedDeployment:
+    """Apply once and seal a definite preimage conflict against replay."""
+
+    try:
+        return applier.apply_deployment(prepared)
+    except applier.WebSolDeploymentApplyError as exc:
+        if exc.code != "PREIMAGE_CONFLICT" or prepared._state != "CONFLICT":
+            raise
+        conflict_state = _private_state_document(
+            request_document=request_document,
+            prepared=prepared,
+            phase="CONFLICT",
+        )
+        _write_private_state(
+            state_path,
+            conflict_state,
+            expected_digest=expected_state_digest,
+        )
+        raise
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
@@ -528,12 +555,17 @@ def main(argv: list[str] | None = None) -> int:
                 applier.verify_applied_deployment(state_applied)
                 _emit(state_applied.public_receipt)
                 return 0
-            if phase == "ROLLED_BACK":
+            if phase in {"ROLLED_BACK", "CONFLICT"}:
                 raise applier.WebSolDeploymentApplyError("TRANSACTION_CONSUMED")
             if phase == "PREPARED" and state_applied is None:
                 reconciled = applier.reconcile_prepared_deployment(state_prepared)
                 resumed = (
-                    applier.apply_deployment(state_prepared)
+                    _apply_and_persist_conflict(
+                        request_document=state_request,
+                        prepared=state_prepared,
+                        state_path=args.state,
+                        expected_state_digest=_state_digest,
+                    )
                     if reconciled is None
                     else reconciled
                 )
@@ -573,7 +605,12 @@ def main(argv: list[str] | None = None) -> int:
                 phase="PREPARED",
             )
             _write_private_state(args.state, initial_state, expected_digest=None)
-            applied = applier.apply_deployment(prepared)
+            applied = _apply_and_persist_conflict(
+                request_document=request_document,
+                prepared=prepared,
+                state_path=args.state,
+                expected_state_digest=initial_state["state_digest"],
+            )
             applied_state = _private_state_document(
                 request_document=request_document,
                 prepared=prepared,
@@ -1004,7 +1041,7 @@ def _decode_private_state(
     if hashlib.sha256(_canonical_bytes(unsigned)).hexdigest() != provided_digest:
         raise applier.WebSolDeploymentApplyError("STATE_INVALID")
     phase = _string(row["phase"], maximum=16)
-    if phase not in {"PREPARED", "APPLIED", "ROLLED_BACK"}:
+    if phase not in {"PREPARED", "APPLIED", "ROLLED_BACK", "CONFLICT"}:
         raise applier.WebSolDeploymentApplyError("STATE_INVALID")
     request_document = row["request"]
     if type(request_document) is not dict:
@@ -1057,9 +1094,11 @@ def _decode_private_state(
         raise applier.WebSolDeploymentApplyError("STATE_INVALID")
     applied_value = row["applied"]
     applied: applier.AppliedDeployment | None = None
-    if phase == "PREPARED":
+    if phase in {"PREPARED", "CONFLICT"}:
         if applied_value is not None:
             raise applier.WebSolDeploymentApplyError("STATE_INVALID")
+        if phase == "CONFLICT":
+            prepared._state = "CONFLICT"
     else:
         applied_row = _exact_dict(
             applied_value,

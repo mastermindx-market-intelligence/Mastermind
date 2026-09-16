@@ -1056,6 +1056,7 @@ def apply_deployment(prepared: PreparedDeployment) -> AppliedDeployment:
     changes = {str(item.path): item for item in prepared.plan.changes}
     changed: list[Path] = []
     reconciled: list[Path] = []
+    preserved_conflicts: set[Path] = set()
 
     try:
         _create_parent_directories(prepared, created_directories)
@@ -1064,7 +1065,8 @@ def apply_deployment(prepared: PreparedDeployment) -> AppliedDeployment:
             change = changes[str(row.path)]
             if change.action == "UNCHANGED":
                 if not _current_matches_artifact(artifact, prepared):
-                    raise WebSolDeploymentApplyError("READBACK_MISMATCH")
+                    preserved_conflicts.add(row.path)
+                    raise WebSolDeploymentApplyError("PREIMAGE_CONFLICT")
                 continue
             temporary = _temporary_path(artifact, prepared)
             parent_descriptor = _open_verified_directory(
@@ -1081,6 +1083,14 @@ def apply_deployment(prepared: PreparedDeployment) -> AppliedDeployment:
                     artifact.mode,
                     prepared,
                 )
+                if not _named_preimage_matches(
+                    parent_descriptor,
+                    target_name,
+                    row,
+                    prepared,
+                ):
+                    preserved_conflicts.add(row.path)
+                    raise WebSolDeploymentApplyError("PREIMAGE_CONFLICT")
                 try:
                     os.replace(
                         temporary_name,
@@ -1123,10 +1133,16 @@ def apply_deployment(prepared: PreparedDeployment) -> AppliedDeployment:
             changed.append(artifact.destination)
     except (WebSolDeploymentApplyError, OSError) as exc:
         try:
-            _abort_partial_apply(prepared, created_directories)
+            _abort_partial_apply(
+                prepared,
+                created_directories,
+                preserved_conflicts=preserved_conflicts,
+            )
         except (WebSolDeploymentApplyError, OSError) as abort_exc:
             prepared._state = "EFFECT_UNKNOWN"
             raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN") from abort_exc
+        if preserved_conflicts:
+            raise WebSolDeploymentApplyError("PREIMAGE_CONFLICT") from exc
         raise WebSolDeploymentApplyError("APPLY_ABORTED_ROLLED_BACK") from exc
 
     applied = AppliedDeployment(
@@ -1344,9 +1360,15 @@ def _remove_created_directory(
 def _abort_partial_apply(
     prepared: PreparedDeployment,
     created_directories: list[Path],
+    *,
+    preserved_conflicts: set[Path] | None = None,
 ) -> None:
-    """Reconcile one failed apply and restore every exact preimage once."""
+    """Reconcile one failed apply while preserving unacted foreign targets."""
 
+    preserved = set() if preserved_conflicts is None else set(preserved_conflicts)
+    if not preserved.issubset({row.path for row in prepared.preimages}):
+        prepared._state = "EFFECT_UNKNOWN"
+        raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN")
     artifacts = {
         str(item.destination): item for item in prepared.bundle.artifacts
     }
@@ -1366,6 +1388,8 @@ def _abort_partial_apply(
                     artifact.mode,
                     prepared,
                 )
+                if row.path in preserved:
+                    continue
                 if _named_preimage_matches(
                     parent_descriptor,
                     artifact.destination.name,
@@ -1392,7 +1416,8 @@ def _abort_partial_apply(
             _remove_created_directory(directory, prepared)
         if (
             any(
-                not _current_matches_preimage(row, prepared)
+                row.path not in preserved
+                and not _current_matches_preimage(row, prepared)
                 for row in prepared.preimages
             )
             or any(
@@ -1407,7 +1432,7 @@ def _abort_partial_apply(
     except OSError as exc:
         prepared._state = "EFFECT_UNKNOWN"
         raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN") from exc
-    prepared._state = "ABORTED_ROLLED_BACK"
+    prepared._state = "CONFLICT" if preserved else "ABORTED_ROLLED_BACK"
 
 
 def rollback_deployment(applied: AppliedDeployment) -> dict[str, object]:

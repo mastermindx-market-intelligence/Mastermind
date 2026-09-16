@@ -411,7 +411,7 @@ def test_target_changed_after_temporary_write_is_not_overwritten(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     bundle, install_root = _bundle(tmp_path)
-    target = sorted(bundle.artifacts, key=lambda row: str(row.destination))[0]
+    target = sorted(bundle.artifacts, key=lambda row: str(row.destination))[1]
     target.destination.parent.mkdir(parents=True, mode=0o700)
     prior = b"approved-preimage-before-temporary"
     target.destination.write_bytes(prior)

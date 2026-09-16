@@ -66,8 +66,12 @@ def _bundle(tmp_path: Path) -> tuple[deployment.DeploymentBundle, Path]:
 def _request_document(
     bundle: deployment.DeploymentBundle,
     install_root: Path,
+    current_files: dict[str, bytes] | None = None,
 ) -> dict[str, object]:
-    plan = deployment.plan_deployment(bundle, {})
+    plan = deployment.plan_deployment(
+        bundle,
+        {} if current_files is None else current_files,
+    )
     artifacts = [
         {
             "kind": row.kind,
@@ -686,3 +690,97 @@ def test_cli_request_parent_swap_never_reads_outside_private_file(
         receipt = json.loads(output.out)
         assert receipt["operation_key"] != "outside-substituted-operation"
     assert list(install_root.rglob("*")) == []
+
+
+
+def test_cli_persists_preimage_conflict_without_replay(
+    tmp_path: Path,
+    capsys,
+    monkeypatch,
+) -> None:
+    bundle, install_root = _bundle(tmp_path)
+    target = sorted(bundle.artifacts, key=lambda row: str(row.destination))[1]
+    target.destination.parent.mkdir(parents=True, mode=0o700)
+    target.destination.parent.chmod(0o700)
+    prior = b"approved-cli-preimage-before-temporary"
+    target.destination.write_bytes(prior)
+    target.destination.chmod(target.mode)
+
+    request = tmp_path / "request.json"
+    state = tmp_path / "state.json"
+    _write_private(
+        request,
+        _request_document(
+            bundle,
+            install_root,
+            current_files={str(target.destination): prior},
+        ),
+    )
+
+    original_write = cli.applier._write_exact_temporary_at
+    foreign = b"concurrent-cli-owner-change"
+    injected = False
+
+    def write_then_change_target(*args, **kwargs) -> None:
+        nonlocal injected
+        original_write(*args, **kwargs)
+        parent_descriptor, temporary_name = args[:2]
+        prepared = args[4]
+        if (
+            injected
+            or temporary_name
+            != cli.applier._temporary_path(target, prepared).name
+        ):
+            return
+        injected = True
+        flags = cli.applier.os.O_WRONLY | cli.applier.os.O_TRUNC
+        if hasattr(cli.applier.os, "O_NOFOLLOW"):
+            flags |= cli.applier.os.O_NOFOLLOW
+        descriptor = cli.applier.os.open(
+            target.destination.name,
+            flags,
+            dir_fd=parent_descriptor,
+        )
+        try:
+            view = memoryview(foreign)
+            offset = 0
+            while offset < len(view):
+                written = cli.applier.os.write(descriptor, view[offset:])
+                assert written > 0
+                offset += written
+            cli.applier.os.fsync(descriptor)
+        finally:
+            cli.applier.os.close(descriptor)
+
+    monkeypatch.setattr(
+        cli.applier,
+        "_write_exact_temporary_at",
+        write_then_change_target,
+    )
+
+    assert cli.main(
+        ["apply", "--request", str(request), "--state", str(state)]
+    ) == 2
+    first_output = capsys.readouterr()
+    assert first_output.out == ""
+    first_error = json.loads(first_output.err)
+    assert first_error["code"] == "PREIMAGE_CONFLICT"
+    assert first_error["target_effect"] == "NONE"
+    assert injected is True
+    assert target.destination.read_bytes() == foreign
+    assert json.loads(state.read_text(encoding="utf-8"))["phase"] == "CONFLICT"
+
+    def forbidden_replay(_prepared):
+        raise AssertionError("terminal conflict replayed target effects")
+
+    monkeypatch.setattr(cli.applier, "apply_deployment", forbidden_replay)
+
+    assert cli.main(
+        ["apply", "--request", str(request), "--state", str(state)]
+    ) == 2
+    second_output = capsys.readouterr()
+    assert second_output.out == ""
+    second_error = json.loads(second_output.err)
+    assert second_error["code"] == "TRANSACTION_CONSUMED"
+    assert second_error["target_effect"] == "NONE"
+    assert target.destination.read_bytes() == foreign
