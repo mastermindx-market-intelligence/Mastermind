@@ -130,7 +130,7 @@ def test_app_reads_share_admitted_runtime_and_c1_cannot_read_them(tmp_path, shor
     asyncio.run(exercise())
 
 
-def test_installed_boot_helper_is_isolated_and_grounded(tmp_path, monkeypatch):
+def test_installed_boot_helper_delegates_to_canonical_boot_owner(tmp_path, monkeypatch):
     from control_plane import ceo_boot_packet
     from integrations.executive_mcp import installed as installed_module
 
@@ -140,29 +140,14 @@ def test_installed_boot_helper_is_isolated_and_grounded(tmp_path, monkeypatch):
     for path in (repo, macro, runtime):
         path.mkdir()
     boot_python = tmp_path / 'sealed-python'
-    mastermind_sha = 'a' * 40
-    macro_sha = 'b' * 40
-    packet = {
-        'schema': ceo_boot_packet.SCHEMA,
-        'mastermind': {'sha': mastermind_sha},
-        'macro': {'sha': macro_sha},
-    }
+    expected = {'schema': ceo_boot_packet.SCHEMA, 'degraded': []}
     seen = {}
 
-    class Result:
-        returncode = 0
-        stdout = json.dumps(packet)
+    def fake_builder(**kwargs):
+        seen.update(kwargs)
+        return expected
 
-    def fake_run(argv, **kwargs):
-        seen['argv'] = list(argv)
-        seen['kwargs'] = dict(kwargs)
-        return Result()
-
-    def fake_sha(path):
-        return mastermind_sha if path.resolve() == repo.resolve() else macro_sha
-
-    monkeypatch.setattr(installed_module.subprocess, 'run', fake_run)
-    monkeypatch.setattr(installed_module.ceo_boot_packet, 'git_sha', fake_sha)
+    monkeypatch.setattr(ceo_boot_packet, 'build_packet_in_interpreter', fake_builder)
     readers = installed_module.InstalledExecutiveReaders(
         repo_root=repo, macro_root=macro, runtime_root=runtime,
         boot_python=boot_python,
@@ -172,43 +157,30 @@ def test_installed_boot_helper_is_isolated_and_grounded(tmp_path, monkeypatch):
             repo_root=repo, macro_root_flag=str(macro), timeout=3.0,
             now='2026-09-16T10:00:00Z',
         )
-        assert result == packet
-        assert seen['argv'][:3] == [str(boot_python), '-I', '-B']
-        env = seen['kwargs']['env']
-        assert 'HOME' not in env
-        assert env['PYTHONNOUSERSITE'] == '1'
-        assert env['GIT_CONFIG_COUNT'] == '2'
-        assert {env['GIT_CONFIG_VALUE_0'], env['GIT_CONFIG_VALUE_1']} == {
-            str(repo.resolve()), str(macro.resolve()),
+        assert result == expected
+        assert seen == {
+            'boot_python': boot_python.resolve(),
+            'repo_root': repo.resolve(),
+            'macro_root': macro.resolve(),
+            'timeout': 3.0,
+            'now': '2026-09-16T10:00:00Z',
         }
-        assert env['MACRO_MASTERMIND_REPO'] == str(repo.resolve())
     finally:
         asyncio.run(readers.aclose())
 
 
-def test_installed_boot_helper_grounding_mismatch_degrades(tmp_path, monkeypatch):
+def test_installed_boot_helper_binding_mismatch_degrades_locally(tmp_path, monkeypatch):
     from control_plane import ceo_boot_packet
     from integrations.executive_mcp import installed as installed_module
 
     repo = tmp_path / 'mastermind'
     macro = tmp_path / 'macro'
     runtime = tmp_path / 'runtime'
-    for path in (repo, macro, runtime):
+    other = tmp_path / 'other'
+    for path in (repo, macro, runtime, other):
         path.mkdir()
-    packet = {
-        'schema': ceo_boot_packet.SCHEMA,
-        'mastermind': {'sha': 'c' * 40},
-        'macro': {'sha': 'd' * 40},
-    }
-
-    class Result:
-        returncode = 0
-        stdout = json.dumps(packet)
-
-    monkeypatch.setattr(installed_module.subprocess, 'run', lambda *a, **k: Result())
-    monkeypatch.setattr(installed_module.ceo_boot_packet, 'git_sha', lambda _p: 'a' * 40)
     monkeypatch.setattr(
-        installed_module.ceo_boot_packet, 'build_packet',
+        ceo_boot_packet, 'build_packet',
         lambda **_kwargs: {'schema': ceo_boot_packet.SCHEMA, 'degraded': []},
     )
     readers = installed_module.InstalledExecutiveReaders(
@@ -217,10 +189,10 @@ def test_installed_boot_helper_grounding_mismatch_degrades(tmp_path, monkeypatch
     )
     try:
         result = readers._installed_packet(
-            repo_root=repo, macro_root_flag=str(macro), timeout=3.0,
+            repo_root=other, macro_root_flag=str(macro), timeout=3.0,
         )
         assert result['degraded'] == [
-            'installed boot helper unavailable: grounding_mismatch'
+            'installed boot helper unavailable: source_binding_mismatch'
         ]
     finally:
         asyncio.run(readers.aclose())

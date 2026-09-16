@@ -360,6 +360,88 @@ def git_branch(path: Path) -> str | None:
     return _git_branch(path)
 
 
+def build_packet_in_interpreter(
+    *,
+    boot_python: Path | None,
+    repo_root: Path,
+    macro_root: Path,
+    timeout: float = DEFAULT_TIMEOUT,
+    now: str | None = None,
+) -> dict[str, Any]:
+    """Build one grounded packet in a sealed YAML-capable read interpreter.
+
+    This is an orientation-only process boundary owned by the canonical boot-packet
+    module.  It never enters the MCP integration package, never inherits HOME or
+    ambient Git configuration, and accepts child output only when schema plus both
+    repository SHAs match fresh host observations.
+    """
+    root = Path(repo_root).resolve()
+    macro = Path(macro_root).resolve()
+
+    def fallback(reason: str) -> dict[str, Any]:
+        packet = build_packet(
+            repo_root=root, macro_root_flag=os.fspath(macro), now=now, timeout=timeout
+        )
+        packet["degraded"] = [
+            f"installed boot helper unavailable: {reason}",
+            *(str(item) for item in (packet.get("degraded") or [])),
+        ]
+        return packet
+
+    if boot_python is None:
+        return fallback("interpreter_not_configured")
+    python = Path(boot_python).resolve()
+    argv = [
+        os.fspath(python), "-I", "-B",
+        os.fspath(root / "scripts" / "ceo_boot_packet.py"),
+        "--json", "--macro-root", os.fspath(macro),
+        "--timeout", str(timeout),
+    ]
+    if now is not None:
+        argv.extend(["--now", str(now)])
+    env = {
+        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONNOUSERSITE": "1",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_CONFIG_COUNT": "2",
+        "GIT_CONFIG_KEY_0": "safe.directory",
+        "GIT_CONFIG_VALUE_0": os.fspath(root),
+        "GIT_CONFIG_KEY_1": "safe.directory",
+        "GIT_CONFIG_VALUE_1": os.fspath(macro),
+        "GIT_OPTIONAL_LOCKS": "0",
+        "GIT_TERMINAL_PROMPT": "0",
+        "MACRO_MASTERMIND_REPO": os.fspath(root),
+    }
+    try:
+        process = subprocess.run(
+            argv, cwd=os.fspath(root), env=env, capture_output=True, text=True,
+            check=False, timeout=timeout + 10.0,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return fallback("process_unavailable")
+    if process.returncode != 0:
+        return fallback("process_failed")
+    try:
+        packet = json.loads(process.stdout)
+    except (TypeError, ValueError):
+        return fallback("invalid_json")
+    if not isinstance(packet, dict) or packet.get("schema") != SCHEMA:
+        return fallback("schema_mismatch")
+    expected_mastermind = git_sha(root)
+    expected_macro = git_sha(macro)
+    if (
+        not expected_mastermind or not expected_macro
+        or (packet.get("mastermind") or {}).get("sha") != expected_mastermind
+        or (packet.get("macro") or {}).get("sha") != expected_macro
+    ):
+        return fallback("grounding_mismatch")
+    return packet
+
+
 def load_strategic_summary() -> tuple[dict[str, Any] | None, str | None]:
     """Project ``config/strategic_state.yml`` down to the boot-packet summary.
 
