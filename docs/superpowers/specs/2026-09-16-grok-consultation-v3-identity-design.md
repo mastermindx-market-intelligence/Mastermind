@@ -6,14 +6,14 @@ Introduce an honest, versioned consultation QUESTION identity for the trusted `g
 
 ## Current authority
 
-- W6-C2 repair source acceptance: PR #681, exact head `de190b2c7e878fd5a4cf6ecb2fc58b34b058ee74`.
-- Protected master at design freeze: `0fe8074ff953b2ced9025ed40f0f66019c759967`; current proof pin: `8ba7deedde164c90298d3e88785d98e02fa5e2d2`.
+- W6-C2 repair semantic source acceptance: PR #681, exact semantic head `de190b2c7e878fd5a4cf6ecb2fc58b34b058ee74`; current PR carrier head at latest verification: `5b9a868f897a7f5296765591dfbb1a7d78257361`.
+- Protected master at design freeze: `0fe8074ff953b2ced9025ed40f0f66019c759967`; first current-base proof pin: `8ba7deedde164c90298d3e88785d98e02fa5e2d2`; latest verification pin: `bf843961c0e1b5bd45fa481f0138c71f2a87d4e2`.
 - Existing carrier to preserve: branch `sol/grok-consultation-v2-g1b-20260915`, prior head `b0b4b48d6c4e61255d8f6a93554c6b64e2fb9b57`.
 - The branch name is historical carrier identity. It is not authority to reuse consultation v2.
 
 ## Pull-request carrier law
 
-The existing Grok branch composes accepted W6-C2 repair head `de190b2c7e878fd5a4cf6ecb2fc58b34b058ee74`. Its draft PR therefore targets `master` but remains dependency-held until PR #681 lands. Before that merge, GitHub may display the five inherited W6-C2 repair paths; they are not Grok-owned scope and grant no duplicate repair or merge authority. Basing on PR #681's stale branch is rejected because that branch predates unrelated protected-master changes and would project foreign paths. Review uses an immutable synthetic base containing current protected master plus accepted W6-C2, which isolates the actual Grok delta. After #681 lands, the same PR's diff must shrink to that Grok-only delta and receive refreshed latest-base integration proof under review-reuse law; no replacement PR, rebase-for-freshness, or ancestry-only source commit is required.
+The existing Grok branch composes accepted W6-C2 semantic head `de190b2c7e878fd5a4cf6ecb2fc58b34b058ee74`. Its draft PR therefore targets `master` but remains dependency-held until PR #681 lands. Before that merge, GitHub may display the inherited W6-C2 repair paths; they are not Grok-owned scope and grant no duplicate repair or merge authority. Retargeting to PR #681's dependency branch is rejected because dependency-branch topology must not replace protected `master` as the publication truth. Review uses an immutable synthetic base containing the latest protected master plus the current PR #681 carrier head, which isolates the actual Grok delta while preserving the immutable semantic source head. At the latest verification those identities are `bf843961c0e1b5bd45fa481f0138c71f2a87d4e2` and `5b9a868f897a7f5296765591dfbb1a7d78257361`. After #681 lands, the same PR's diff must shrink to that Grok-only delta and receive refreshed latest-base integration proof under review-reuse law; no replacement PR, rebase-for-freshness, or ancestry-only source commit is required.
 
 ## Version law
 
