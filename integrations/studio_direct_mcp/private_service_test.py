@@ -204,8 +204,9 @@ class TestIdentity(unittest.TestCase):
     def test_reserved_funnel_port(self):
         self.assertEqual(svc.RESERVED_FUNNEL_PORT, 45017)
 
-    def test_idle_timeout_is_five_hours(self):
-        self.assertEqual(svc.IDLE_TIMEOUT_MS, 18_000_000)
+    def test_private_runtime_timeouts_match_live_business_seats(self):
+        self.assertEqual(svc.IDLE_TIMEOUT_MS, 1_800_000)
+        self.assertEqual(svc.REQUEST_TIMEOUT_MS, 300_000)
 
 
 # -------------------------------------------------------------------
@@ -329,8 +330,8 @@ class TestBuildConfig(unittest.TestCase):
             self.assertEqual(config["childEnv"]["NODE_OPTIONS"], "")
             self.assertEqual(config["stateDir"], str(state_dir))
             self.assertEqual(config["maxSessions"], 64)
-            self.assertEqual(config["requestTimeoutMs"], 60000)
-            self.assertEqual(config["idleTimeoutMs"], 18_000_000)
+            self.assertEqual(config["requestTimeoutMs"], 300_000)
+            self.assertEqual(config["idleTimeoutMs"], 1_800_000)
             self.assertEqual(
                 config["gitPublish"],
                 {
@@ -423,7 +424,8 @@ class TestStage(unittest.TestCase):
                 self.assertEqual(config["accountLabel"], "test-account")
                 self.assertEqual(config["port"], 45018)
                 self.assertNotIn("publicUrl", config)
-                self.assertEqual(config["idleTimeoutMs"], 18_000_000)
+                self.assertEqual(config["idleTimeoutMs"], 1_800_000)
+                self.assertEqual(config["requestTimeoutMs"], 300_000)
                 self.assertEqual(config["maxSessions"], 64)
                 self.assertEqual(config["gitPublish"]["enabled"], True)
                 self.assertEqual(
