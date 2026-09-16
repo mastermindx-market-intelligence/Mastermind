@@ -1,0 +1,476 @@
+from pathlib import Path
+
+import pytest
+
+from control_plane.wake_events import canonical_json_bytes
+from portfolio import decision_snapshot as snapshots
+from portfolio import decision_snapshot_contracts as c
+from portfolio import decision_snapshot_sources as sources
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+def _receipt(source_id: str, section_id: str, *, generation: str) -> dict:
+    return {
+        "schema": c.SOURCE_RECEIPT_SCHEMA,
+        "source_id": source_id,
+        "domains": [section_id],
+        "producer": "test_fixture",
+        "owner": "test_fixture",
+        "artifact": f"test/{source_id}",
+        "source_schema": None,
+        "schema_version": None,
+        "definition_id": None,
+        "artifact_digest": "sha256:" + "0" * 64,
+        "observed_at": "2026-09-15T20:01:00Z",
+        "known_at": "2026-09-15T19:00:00Z",
+        "as_of": "2026-09-15",
+        "generated_at": None,
+        "filesystem_observed_at": "2026-09-15T19:00:00Z",
+        "correction_generation": generation,
+        "freshness_state": "FRESH",
+        "coverage_state": "COMPLETE",
+        "rights_class": "FIRST_PARTY_INTERNAL",
+        "authority_class": "BOOK_STATE",
+        "status": "AVAILABLE",
+        "required": False,
+        "bytes": 10,
+        "rows_total": 1,
+        "rows_returned": 1,
+        "omitted_rows": 0,
+        "clock_basis": "FILE_MTIME_FIRST_PARTY_STATE",
+        "error_code": None,
+    }
+
+
+def _section_row(section_id: str, source_ids: list) -> dict:
+    rows = [{"value": section_id}]
+    return {
+        "schema": c.SECTION_SCHEMA,
+        "section_id": section_id,
+        "coverage_state": "COMPLETE",
+        "source_ids": list(source_ids),
+        "rows_total": len(rows),
+        "rows_returned": len(rows),
+        "omitted_rows": 0,
+        "rows": rows,
+        "gaps": [],
+    }
+
+
+def _capture(*, generation: str = "sha256:" + "0" * 64) -> dict:
+    sources_out = [
+        _receipt(f"source.{sid}", sid, generation=generation) for sid in c.SECTION_IDS
+    ]
+    sections_out = {sid: _section_row(sid, [f"source.{sid}"]) for sid in c.SECTION_IDS}
+    return {"sources": sources_out, "sections": sections_out, "gaps": []}
+
+
+def _sealed_snapshot(*, generation: str = "sha256:" + "a" * 64, prior: list | None = None) -> dict:
+    return snapshots.compose_snapshot(
+        "autonomous",
+        decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:01:00Z",
+        capture=_capture(generation=generation),
+        same_cutoff_prior_snapshot_ids=prior or [],
+    )
+
+
+@pytest.fixture
+def snapshot_root(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    macro = tmp_path / "macro"
+    storage = tmp_path / "storage"
+    repo.mkdir()
+    macro.mkdir()
+    storage.mkdir()
+    monkeypatch.setattr(sources, "_ROOT", repo)
+    monkeypatch.setattr(sources, "_V", macro)
+    monkeypatch.setattr(snapshots, "_ROOT", storage)
+    return storage
+
+
+# ---------------------------------------------------------------------------
+# Step 1: deterministic composition
+# ---------------------------------------------------------------------------
+
+def test_same_capture_and_clocks_produce_same_snapshot_id():
+    first = snapshots.compose_snapshot(
+        "autonomous",
+        decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:01:00Z",
+        capture=_capture(),
+        same_cutoff_prior_snapshot_ids=[],
+    )
+    second = snapshots.compose_snapshot(
+        "autonomous",
+        decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:01:00Z",
+        capture=_capture(),
+        same_cutoff_prior_snapshot_ids=[],
+    )
+    assert first == second
+    assert first["snapshot_id"] == second["snapshot_id"]
+
+
+def test_state_is_partial_when_any_required_domain_is_unqualified():
+    capture = _capture()
+    capture["sections"]["risk_truth"]["coverage_state"] = "PARTIAL"
+    capture["gaps"].append({
+        "code": "UNQUALIFIED_CLOCK",
+        "source_id": "macro.risk_envelope",
+        "section_id": "risk_truth",
+        "owner": "macro",
+        "detail": "known_at unavailable",
+    })
+    result = snapshots.compose_snapshot(
+        "autonomous",
+        decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:01:00Z",
+        capture=capture,
+        same_cutoff_prior_snapshot_ids=[],
+    )
+    assert result["state"] == "PARTIAL"
+    assert result["coverage_state"] == "PARTIAL"
+
+
+def test_same_cutoff_same_generation_reuses_existing_snapshot_despite_later_recorded_at(
+    snapshot_root,
+):
+    first = snapshots.create_snapshot(
+        "autonomous",
+        decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:01:00Z",
+    )
+    second = snapshots.create_snapshot(
+        "autonomous",
+        decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:10:00Z",
+    )
+    assert second["snapshot_id"] == first["snapshot_id"]
+    assert second["created"] is False
+    assert len(list(snapshots.snapshot_dir("autonomous").glob("*.json"))) == 1
+
+
+def test_same_cutoff_new_generation_is_explicit_correction():
+    # Controller ruling overrides the plan's example: correction.status must stay inside
+    # the closed CORRECTION_STATUSES vocabulary ("CORRECTED"), not duplicate the root
+    # "state" label ("CORRECTED_GENERATION_AVAILABLE").
+    original = snapshots.compose_snapshot(
+        "autonomous",
+        decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:01:00Z",
+        capture=_capture(generation="sha256:" + "a" * 64),
+        same_cutoff_prior_snapshot_ids=[],
+    )
+    corrected = snapshots.compose_snapshot(
+        "autonomous",
+        decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:10:00Z",
+        capture=_capture(generation="sha256:" + "b" * 64),
+        same_cutoff_prior_snapshot_ids=[original["snapshot_id"]],
+    )
+    assert corrected["state"] == "CORRECTED_GENERATION_AVAILABLE"
+    assert corrected["coverage_state"] == "COMPLETE"
+    assert corrected["correction"] == {
+        "status": "CORRECTED",
+        "same_cutoff_prior_snapshot_ids": [original["snapshot_id"]],
+    }
+    assert corrected["snapshot_id"] != original["snapshot_id"]
+
+
+def test_gaps_are_sealed_as_sorted_canonical_strings():
+    capture = _capture()
+    gap_b = {"code": "B", "source_id": "z", "section_id": None, "owner": None, "detail": None}
+    gap_a = {"code": "A", "source_id": "y", "section_id": None, "owner": None, "detail": None}
+    capture["gaps"] = [gap_b, gap_a]
+    result = snapshots.compose_snapshot(
+        "autonomous",
+        decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:01:00Z",
+        capture=capture,
+        same_cutoff_prior_snapshot_ids=[],
+    )
+    assert result["gaps"] == [
+        canonical_json_bytes(gap_a).decode("ascii"),
+        canonical_json_bytes(gap_b).decode("ascii"),
+    ]
+
+
+def test_recorded_at_before_decision_cutoff_is_invalid():
+    with pytest.raises(snapshots.SnapshotInvalidRequest):
+        snapshots.compose_snapshot(
+            "autonomous",
+            decision_cutoff="2026-09-15T20:00:00Z",
+            recorded_at="2026-09-15T19:59:00Z",
+            capture=_capture(),
+            same_cutoff_prior_snapshot_ids=[],
+        )
+
+
+def test_capture_shape_outside_exact_keys_is_invalid():
+    capture = _capture()
+    capture["extra"] = {}
+    with pytest.raises(snapshots.SnapshotInvalidRequest):
+        snapshots.compose_snapshot(
+            "autonomous",
+            decision_cutoff="2026-09-15T20:00:00Z",
+            recorded_at="2026-09-15T20:01:00Z",
+            capture=capture,
+            same_cutoff_prior_snapshot_ids=[],
+        )
+
+
+def test_duplicate_source_id_is_invalid():
+    capture = _capture()
+    capture["sources"].append(dict(capture["sources"][0]))
+    with pytest.raises(snapshots.SnapshotInvalidRequest):
+        snapshots.compose_snapshot(
+            "autonomous",
+            decision_cutoff="2026-09-15T20:00:00Z",
+            recorded_at="2026-09-15T20:01:00Z",
+            capture=capture,
+            same_cutoff_prior_snapshot_ids=[],
+        )
+
+
+def test_missing_section_is_invalid():
+    capture = _capture()
+    del capture["sections"]["book_truth"]
+    with pytest.raises(snapshots.SnapshotInvalidRequest):
+        snapshots.compose_snapshot(
+            "autonomous",
+            decision_cutoff="2026-09-15T20:00:00Z",
+            recorded_at="2026-09-15T20:01:00Z",
+            capture=capture,
+            same_cutoff_prior_snapshot_ids=[],
+        )
+
+
+def test_extra_section_is_invalid():
+    capture = _capture()
+    capture["sections"]["not_a_real_section"] = capture["sections"]["book_truth"]
+    with pytest.raises(snapshots.SnapshotInvalidRequest):
+        snapshots.compose_snapshot(
+            "autonomous",
+            decision_cutoff="2026-09-15T20:00:00Z",
+            recorded_at="2026-09-15T20:01:00Z",
+            capture=capture,
+            same_cutoff_prior_snapshot_ids=[],
+        )
+
+
+def test_section_key_mismatch_is_invalid():
+    capture = _capture()
+    capture["sections"]["book_truth"]["section_id"] = "risk_truth"
+    with pytest.raises(snapshots.SnapshotInvalidRequest):
+        snapshots.compose_snapshot(
+            "autonomous",
+            decision_cutoff="2026-09-15T20:00:00Z",
+            recorded_at="2026-09-15T20:01:00Z",
+            capture=capture,
+            same_cutoff_prior_snapshot_ids=[],
+        )
+
+
+# ---------------------------------------------------------------------------
+# Step 2: immutable persistence
+# ---------------------------------------------------------------------------
+
+def test_persist_is_create_once_and_exact_retry_is_noop(snapshot_root):
+    payload = _sealed_snapshot()
+    first = snapshots.persist_snapshot(payload)
+    before = Path(first["path"]).read_bytes()
+    second = snapshots.persist_snapshot(payload)
+    assert second["created"] is False
+    assert Path(second["path"]).read_bytes() == before
+
+
+def test_existing_content_address_with_wrong_bytes_freezes(snapshot_root):
+    payload = _sealed_snapshot()
+    path = snapshots._snapshot_path("autonomous", payload["snapshot_id"])
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"{}")
+    with pytest.raises(snapshots.SnapshotCorrupt):
+        snapshots.persist_snapshot(payload)
+    assert path.read_bytes() == b"{}"
+
+
+def test_old_snapshot_remains_byte_identical_after_correction(snapshot_root):
+    original = _sealed_snapshot(generation="sha256:" + "a" * 64)
+    corrected = _sealed_snapshot(
+        generation="sha256:" + "b" * 64, prior=[original["snapshot_id"]]
+    )
+    snapshots.persist_snapshot(original)
+    old_path = snapshots._snapshot_path("autonomous", original["snapshot_id"])
+    old_bytes = old_path.read_bytes()
+    snapshots.persist_snapshot(corrected)
+    assert old_path.read_bytes() == old_bytes
+    assert snapshots.load_snapshot("autonomous", original["snapshot_id"]) == original
+
+
+@pytest.mark.parametrize(
+    "book,snapshot_id",
+    [
+        ("../autonomous", "sha256:" + "a" * 64),
+        ("AUTONOMOUS", "sha256:" + "a" * 64),
+        ("autonomous", "../../secret"),
+        ("autonomous", "sha256:" + "g" * 64),
+    ],
+)
+def test_storage_identity_rejects_path_control(book, snapshot_id):
+    with pytest.raises(snapshots.SnapshotInvalidRequest):
+        snapshots.load_snapshot(book, snapshot_id)
+
+
+def test_load_missing_snapshot_raises_not_found(snapshot_root):
+    with pytest.raises(snapshots.SnapshotNotFound):
+        snapshots.load_snapshot("autonomous", "sha256:" + "c" * 64)
+
+
+def test_load_rejects_symlinked_snapshot_file(snapshot_root):
+    payload = _sealed_snapshot()
+    real_path = snapshots._snapshot_path("autonomous", payload["snapshot_id"])
+    real_path.parent.mkdir(parents=True, exist_ok=True)
+    real_path.write_bytes(canonical_json_bytes(payload))
+
+    decoy_id = "sha256:" + "d" * 64
+    decoy_path = snapshots._snapshot_path("autonomous", decoy_id)
+    decoy_path.symlink_to(real_path)
+    with pytest.raises(snapshots.SnapshotCorrupt):
+        snapshots.load_snapshot("autonomous", decoy_id)
+
+
+def test_load_rejects_tampered_bytes(snapshot_root):
+    payload = _sealed_snapshot()
+    snapshots.persist_snapshot(payload)
+    path = snapshots._snapshot_path("autonomous", payload["snapshot_id"])
+    raw = path.read_bytes()
+    tampered = raw.replace(b'"COMPLETE"', b'"BLOCKED"', 1)
+    assert tampered != raw
+    # Bypass persist_snapshot's create-once guard directly to simulate on-disk corruption.
+    path.unlink()
+    path.write_bytes(tampered)
+    with pytest.raises(snapshots.SnapshotCorrupt):
+        snapshots.load_snapshot("autonomous", payload["snapshot_id"])
+
+
+# ---------------------------------------------------------------------------
+# Step 6: listing and section paging
+# ---------------------------------------------------------------------------
+
+def test_list_snapshots_refuses_symlinked_sibling(snapshot_root):
+    payload = _sealed_snapshot()
+    snapshots.persist_snapshot(payload)
+    directory = snapshots.snapshot_dir("autonomous")
+    decoy = directory / ("f" * 64 + ".json")
+    decoy.symlink_to(directory / (payload["snapshot_id"].split(":", 1)[1] + ".json"))
+    with pytest.raises(snapshots.SnapshotCorrupt):
+        snapshots.list_snapshots("autonomous")
+
+
+def test_list_snapshots_clamps_limit_and_sorts_descending(snapshot_root):
+    first = snapshots.create_snapshot(
+        "autonomous", decision_cutoff="2026-09-15T19:00:00Z", recorded_at="2026-09-15T19:01:00Z",
+    )
+    second = snapshots.create_snapshot(
+        "autonomous", decision_cutoff="2026-09-15T20:00:00Z", recorded_at="2026-09-15T20:01:00Z",
+    )
+    clamped = snapshots.list_snapshots("autonomous", limit=0)
+    assert [r["snapshot_id"] for r in clamped] == [second["snapshot_id"]]
+    full = snapshots.list_snapshots("autonomous", limit=1000)
+    assert [r["snapshot_id"] for r in full] == [second["snapshot_id"], first["snapshot_id"]]
+
+
+def test_section_page_rejects_boolean_offset_and_limit():
+    snap = _sealed_snapshot()
+    with pytest.raises(snapshots.SnapshotInvalidRequest):
+        snapshots.section_page(snap, "book_truth", offset=True, limit=10)
+    with pytest.raises(snapshots.SnapshotInvalidRequest):
+        snapshots.section_page(snap, "book_truth", offset=0, limit=True)
+
+
+def test_section_page_rejects_unknown_section_id():
+    snap = _sealed_snapshot()
+    with pytest.raises(snapshots.SnapshotInvalidRequest):
+        snapshots.section_page(snap, "not_a_section", offset=0, limit=10)
+
+
+def test_section_page_paginates_and_reports_next_offset():
+    rows = [{"i": i} for i in range(5)]
+    capture = _capture()
+    capture["sections"]["book_truth"]["rows"] = rows
+    capture["sections"]["book_truth"]["rows_total"] = 5
+    capture["sections"]["book_truth"]["rows_returned"] = 5
+    snap = snapshots.compose_snapshot(
+        "autonomous",
+        decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:01:00Z",
+        capture=capture,
+        same_cutoff_prior_snapshot_ids=[],
+    )
+    page = snapshots.section_page(snap, "book_truth", offset=0, limit=2)
+    assert page["rows"] == rows[:2]
+    assert page["next_offset"] == 2
+
+    last_page = snapshots.section_page(snap, "book_truth", offset=4, limit=2)
+    assert last_page["rows"] == rows[4:5]
+    assert last_page["next_offset"] is None
+
+
+# ---------------------------------------------------------------------------
+# read_projection
+# ---------------------------------------------------------------------------
+
+def test_read_projection_defaults_to_latest_snapshot_and_full_root(snapshot_root):
+    created = snapshots.create_snapshot(
+        "autonomous", decision_cutoff="2026-09-15T20:00:00Z", recorded_at="2026-09-15T20:01:00Z",
+    )
+    result = snapshots.read_projection(
+        "autonomous", snapshot_id=None, section_id=None, offset=0, limit=10,
+    )
+    assert result["snapshot"]["snapshot_id"] == created["snapshot_id"]
+    assert "sections" not in result["snapshot"]
+
+
+def test_read_projection_raises_not_found_when_no_snapshot_exists(snapshot_root):
+    with pytest.raises(snapshots.SnapshotNotFound):
+        snapshots.read_projection(
+            "autonomous", snapshot_id=None, section_id=None, offset=0, limit=10,
+        )
+
+
+def test_read_projection_section_page_by_explicit_snapshot_id(snapshot_root):
+    created = snapshots.create_snapshot(
+        "autonomous", decision_cutoff="2026-09-15T20:00:00Z", recorded_at="2026-09-15T20:01:00Z",
+    )
+    result = snapshots.read_projection(
+        "autonomous", snapshot_id=created["snapshot_id"], section_id="book_truth",
+        offset=0, limit=10,
+    )
+    assert result["section"]["section_id"] == "book_truth"
+
+
+# ---------------------------------------------------------------------------
+# Boundary: no caller path/root/url/filename parameters anywhere in the module
+# ---------------------------------------------------------------------------
+
+def test_no_public_function_accepts_a_path_or_root_argument():
+    import inspect
+
+    for fn in (
+        snapshots.compose_snapshot,
+        snapshots.create_snapshot,
+        snapshots.persist_snapshot,
+        snapshots.load_snapshot,
+        snapshots.list_snapshots,
+        snapshots.latest_snapshot,
+        snapshots.section_page,
+        snapshots.read_projection,
+        snapshots.snapshot_dir,
+    ):
+        assert not {"path", "root", "url", "filename"} & set(
+            inspect.signature(fn).parameters
+        )
