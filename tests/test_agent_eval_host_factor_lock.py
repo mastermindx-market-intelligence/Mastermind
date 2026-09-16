@@ -1,7 +1,8 @@
-"""A2 host-generation factor-lock conformance tests.
+"""A2 host-generation evidence-lock conformance tests.
 
 Synthetic PUBLIC_SAFE fixtures only.  No provider calls, credentials, process
-spawn, routing, placement, or production effect.
+spawn, routing, placement, or production effect.  These tests prove immutable
+run-to-snapshot evidence binding, not process-to-host causality.
 """
 from __future__ import annotations
 
@@ -103,15 +104,15 @@ def _codes(excinfo) -> set[str]:
     return {defect.code for defect in excinfo.value.defects}
 
 
-def test_same_host_and_boot_generation_is_verified() -> None:
+def test_same_host_and_boot_evidence_generation_is_verified() -> None:
     scenario, config_a, config_b, experiment = _graph()
     snapshot = _snapshot()
     left = _finalized_run(scenario, config_a, experiment, arm_id="arm_a", snapshot=snapshot)
     right = _finalized_run(scenario, config_b, experiment, arm_id="arm_b", snapshot=snapshot)
 
-    result = host_factor_lock.verify_host_factor_lock(left, snapshot, right, snapshot)
+    result = host_factor_lock.verify_host_factor_evidence_lock(left, snapshot, right, snapshot)
 
-    assert result["scope"] == "HOST_FACTOR_LOCK_VERIFIED"
+    assert result["scope"] == "HOST_FACTOR_EVIDENCE_LOCK_VERIFIED"
     assert result["host_ref"] == HOST_REF
     assert result["boot_ref"] == BOOT_REF
     assert result["left"]["run_id"] == left["run_id"]
@@ -120,10 +121,12 @@ def test_same_host_and_boot_generation_is_verified() -> None:
     assert result["right"]["run_digest"] == right["run_digest"]
     assert "artifact_ref" not in result["left"]
     assert "artifact_ref" not in result["right"]
+    assert "execution_host_proven" not in result
+    assert "process_host_binding" not in result
     assert set(result) == {"scope", "host_ref", "boot_ref", "left", "right"}
 
 
-def test_host_mismatch_refuses_factor_lock() -> None:
+def test_host_mismatch_refuses_evidence_lock() -> None:
     scenario, config_a, config_b, experiment = _graph()
     left_snapshot = _snapshot()
     right_snapshot = _snapshot(host_ref=OTHER_HOST_REF)
@@ -131,12 +134,12 @@ def test_host_mismatch_refuses_factor_lock() -> None:
     right = _finalized_run(scenario, config_b, experiment, arm_id="arm_b", snapshot=right_snapshot)
 
     with pytest.raises(ContractError) as excinfo:
-        host_factor_lock.verify_host_factor_lock(left, left_snapshot, right, right_snapshot)
+        host_factor_lock.verify_host_factor_evidence_lock(left, left_snapshot, right, right_snapshot)
 
     assert "HOST_FACTOR_HOST_MISMATCH" in _codes(excinfo)
 
 
-def test_boot_generation_mismatch_refuses_factor_lock() -> None:
+def test_boot_generation_mismatch_refuses_evidence_lock() -> None:
     scenario, config_a, config_b, experiment = _graph()
     left_snapshot = _snapshot()
     right_snapshot = _snapshot(boot_ref=OTHER_BOOT_REF)
@@ -144,7 +147,7 @@ def test_boot_generation_mismatch_refuses_factor_lock() -> None:
     right = _finalized_run(scenario, config_b, experiment, arm_id="arm_b", snapshot=right_snapshot)
 
     with pytest.raises(ContractError) as excinfo:
-        host_factor_lock.verify_host_factor_lock(left, left_snapshot, right, right_snapshot)
+        host_factor_lock.verify_host_factor_evidence_lock(left, left_snapshot, right, right_snapshot)
 
     assert "HOST_FACTOR_BOOT_MISMATCH" in _codes(excinfo)
 
@@ -157,7 +160,7 @@ def test_run_must_bind_exact_snapshot_digest() -> None:
 
     forged_snapshot = _snapshot(boot_ref=OTHER_BOOT_REF)
     with pytest.raises(ContractError) as excinfo:
-        host_factor_lock.verify_host_factor_lock(left, forged_snapshot, right, snapshot)
+        host_factor_lock.verify_host_factor_evidence_lock(left, forged_snapshot, right, snapshot)
 
     assert "HOST_CAPACITY_EVIDENCE_MISSING" in _codes(excinfo)
 
@@ -179,7 +182,7 @@ def test_missing_host_snapshot_evidence_refuses() -> None:
     )
 
     with pytest.raises(ContractError) as excinfo:
-        host_factor_lock.verify_host_factor_lock(unbound, snapshot, right, snapshot)
+        host_factor_lock.verify_host_factor_evidence_lock(unbound, snapshot, right, snapshot)
 
     assert "HOST_CAPACITY_EVIDENCE_MISSING" in _codes(excinfo)
     assert left["run_id"] != unbound["run_id"]
@@ -194,7 +197,7 @@ def test_malformed_host_snapshot_refuses_without_echo() -> None:
     hostile["extra_secret_like_value"] = "SECRET_SENTINEL_DO_NOT_ECHO"
 
     with pytest.raises(ContractError) as excinfo:
-        host_factor_lock.verify_host_factor_lock(left, hostile, right, snapshot)
+        host_factor_lock.verify_host_factor_evidence_lock(left, hostile, right, snapshot)
 
     assert "HOST_CAPACITY_SNAPSHOT_INVALID" in _codes(excinfo)
     assert "SECRET_SENTINEL_DO_NOT_ECHO" not in str(excinfo.value)
