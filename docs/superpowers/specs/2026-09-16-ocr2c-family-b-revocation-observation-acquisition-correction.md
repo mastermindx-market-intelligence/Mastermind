@@ -174,6 +174,7 @@ capacity_capability_id
 capability_generation
 registration_receipt_digest
 host_ref
+boot_ref
 realm_generation
 enrollment_receipt_digest
 os_principal_ref
@@ -204,6 +205,8 @@ public source_receipt_digest treated as producer authentication
 caller chooses capability/host/realm/principal/custody/release identity
 registration digest or generation mismatch
 cross-host enrollment or preflight receipt substitution
+missing/stale/wrong boot_ref or pre-reboot readiness accepted after reboot
+Provider Capacity boot provenance treated as physical admission authority
 stale observation or stale producer release accepted as fresh
 unavailable producer treated as available
 source-quality downgrade silently widened to exact/provider-domain evidence

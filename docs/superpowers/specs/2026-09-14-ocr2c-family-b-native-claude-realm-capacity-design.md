@@ -184,6 +184,7 @@ schema = mastermind.provider_native_realm_observation/v1
 capacity_capability_id
 capability_generation
 host_ref
+boot_ref
 realm_generation
 enrollment_receipt_digest
 observed_at
@@ -196,6 +197,8 @@ source_receipt_digest
 ```
 
 Scope distinguishes `provider_domain`, `realm` and `unknown` where applicable.
+
+`boot_ref` is the exact current physical boot-generation reference already owned by FP1B/host-capacity. It is readiness provenance, not provider identity, enrollment identity, quota identity or a new Family-B generation. B2 enrollment remains stable across an ordinary reboot; neither `capability_generation` nor `realm_generation` advances merely because `boot_ref` changes. A B3/B4 observation from an earlier boot is ineligible for new execution after the host advances to another current boot.
 
 This is source evidence only. It cannot create a provider capability, rank workers, set another provider domain cooling, assert Executive completion or replace claim-time worker/realm readiness.
 
@@ -211,6 +214,7 @@ V2 preserves the V1 top-level semantic model and evidence laws and adds one clos
 realm_binding = null
   | {
       capability_generation,
+      boot_ref,
       realm_generation,
       enrollment_receipt_digest
     }
@@ -239,6 +243,7 @@ One provider-capability domain may have several host realms:
 ```text
 quota evidence key = (capacity_capability_id, capability_generation)
 execution realm key = (host_ref, capacity_capability_id, realm_generation)
+current readiness provenance key = (host_ref, boot_ref, capacity_capability_id, realm_generation)
 ```
 
 No consumer may sum host rows into aggregate quota.
@@ -256,23 +261,27 @@ Accepted CF2-F already freezes the production pattern. Family B extends it rathe
 ```text
 strict Provider Capacity V2 snapshot
         +
-current provider-realm V2 / realm-local readiness evidence
+current provider-realm V2 / boot-bound realm-local readiness evidence
+        +
+incumbent FP1B physical qualification + fresh host-capacity/pressure evidence
         |
         v
 immutable (host_ref, capacity_capability_id) join
 + capability_generation + realm_generation validation
++ byte-exact host_ref == host_id and boot_ref == boot_id
++ current capacity_pool_ref + qualification_revision validation
         |
         v
 strict Mastermind V2 consumer
 + deterministic ranking of already-lawful candidates
         |
         v
-existing Executive atomic claim
-+ immutable V2 capacity evidence
-+ historical replay without current provider re-read/rerank
+existing Executive atomic claim / ResourceBroker BEGIN path
++ separately bound provider-capacity and FP1B physical evidence
++ historical replay without current provider or physical re-read/rerank
 ```
 
-The claim-evidence successor binds at minimum Provider Capacity V2 schema/hash/freshness identity, selected `capacity_capability_id + capability_generation`, selected `host_ref + realm_generation`, enrollment/source receipt digests, and existing deterministic policy/reason-code evidence.
+The claim-evidence successor binds at minimum Provider Capacity V2 schema/hash/freshness identity, selected `capacity_capability_id + capability_generation`, selected `host_ref + boot_ref + realm_generation`, enrollment/source receipt digests, and existing deterministic policy/reason-code evidence. It also binds the incumbent FP1B request/result identities required by the existing physical owner, including current `capacity_pool_ref`, `host_qualification_revision`, host-capacity snapshot digest/freshness and BEGIN pressure snapshot digest. Family B references those accepted physical facts; it does not mint a second physical receipt or make Provider Capacity the admission authority.
 
 Use the existing event/claim/placement owner. No second capacity ledger, selector DB or replay plane.
 
@@ -320,6 +329,14 @@ provider-domain usage-limit cools only reporting realm
 stale realm generation is accepted under current capability generation
 stale capability generation is accepted under current realm generation
 host B enrollment is substituted for host A
+pre-reboot readiness is accepted after current boot_ref changes
+reboot incorrectly advances capability_generation or realm_generation
+Provider Capacity boot_ref is treated as physical admission authority
+provider host_ref/boot_ref differs from FP1B host_id/boot_id
+stale or wrong capacity_pool_ref / qualification_revision is accepted
+stale/incomplete host-capacity or mismatched BEGIN pressure evidence is accepted
+physical host failure is widened to provider-domain cooling
+historical replay re-reads current physical qualification
 Provider Capacity V1 changes because V2 definitions exist
 V1 is accepted as V2 by structural superset
 CapacityOwnerFact substitutes for production V2 claim evidence

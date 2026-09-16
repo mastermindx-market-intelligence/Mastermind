@@ -99,6 +99,10 @@ Macro Provider Control supplies `capacity_capability_id + capability_generation`
 
 Existing V1 realm receipts remain valid for existing consumers; V2 is additive.
 
+## Boot currentness composes after stable enrollment
+
+`boot_ref` is the existing FP1B/host-capacity boot-generation reference. It is not a fourth Family-B generation and does not enter B2 enrollment identity. An ordinary reboot changes current physical readiness, not the logical provider domain or the enrolled host/principal/config realm; therefore reboot alone advances neither `capability_generation` nor `realm_generation`. B3/B4 readiness is bound to exact current `boot_ref`, and old-boot readiness is ineligible for new work after reboot.
+
 ## Preserve the accepted slot and CF2 join law
 
 Native Claude V2 executable slot identity remains:
@@ -114,10 +118,13 @@ The accepted CF2 production architecture remains the model for B5:
 ```text
 strict Macro Provider Capacity snapshot
         +
-realm-local readiness / provider-realm evidence
+boot-bound realm-local readiness / provider-realm evidence
+        +
+incumbent FP1B physical qualification and fresh host evidence
         |
         v
 immutable (host_ref, capacity_capability_id) join
++ exact host_ref/boot_ref composition with FP1B host_id/boot_id
         |
         v
 Mastermind strict consumer + deterministic rank of already-lawful candidates
@@ -141,7 +148,7 @@ Facts belong to `capacity_capability_id + capability_generation` only when sourc
 
 ### Realm/host scoped
 
-Facts belong to `(host_ref, capacity_capability_id, realm_generation)`:
+Realm enrollment facts belong to `(host_ref, capacity_capability_id, realm_generation)`; current readiness facts additionally bind exact `boot_ref`:
 
 - Claude binary/install readiness;
 - local credential/auth readability;
@@ -160,6 +167,7 @@ capability_id = capacity_capability_id
 host_ref = exact opaque host
 realm_binding = {
   capability_generation,
+  boot_ref,
   realm_generation,
   enrollment_receipt_digest
 }
@@ -173,10 +181,11 @@ Quota aggregation key:
 (capacity_capability_id, capability_generation)
 ```
 
-Execution realm key:
+Execution realm and current-readiness keys:
 
 ```text
-(host_ref, capacity_capability_id, realm_generation)
+execution realm = (host_ref, capacity_capability_id, realm_generation)
+current readiness = (host_ref, boot_ref, capacity_capability_id, realm_generation)
 ```
 
 No consumer may sum host rows to estimate quota.
@@ -194,11 +203,13 @@ This is not permission to build an account database.
 B5 must not manufacture a new “Capacity owner fact bridge” simply because `CapacityOwnerFact` exists elsewhere. Its production mission is:
 
 1. acquire/validate the accepted `mastermind.provider_capacity.v2` through a bounded successor of the current CF2 source-acquisition contract;
-2. validate current provider-realm V2 enrollment/readiness through the existing owner boundary;
-3. join the two at exact `(host_ref, capacity_capability_id)` while independently verifying `capability_generation` and `realm_generation`;
-4. rank only already-lawful candidates under the existing Model Router/Capacity policy;
-5. bind the selected Provider Capacity V2 snapshot digest, provider-domain coordinate, realm coordinate and deterministic reason codes into the **existing CF2 claim/placement evidence path**;
-6. preserve historical replay without re-reading current provider state.
+2. validate current provider-realm V2 enrollment and boot-bound readiness through the existing owner boundary;
+3. separately consume the incumbent FP1B physical qualification/result and its fresh host-capacity/pressure evidence;
+4. join at exact `(host_ref, capacity_capability_id)`, verify `capability_generation + realm_generation`, and require byte-exact `host_ref == host_id` plus `boot_ref == boot_id`;
+5. require current `capacity_pool_ref`, `qualification_revision` and accepted physical freshness before provider claim/BEGIN consumption;
+6. rank only already-lawful candidates under the existing Model Router/Capacity policy;
+7. bind provider evidence and the existing FP1B evidence separately into the **existing CF2 claim/placement and ResourceBroker path**;
+8. preserve historical replay without re-reading current provider or physical state.
 
 The current interactive `SubscriptionCanaryAdmission` may remain a separate B6/B7 activation canary if still useful. It does not become production placement authority.
 
@@ -243,6 +254,14 @@ account usage-limit cools only the reporting host when scope is proven domain-wi
 stale realm generation accepted under current capability generation
 stale capability generation accepted under fresh realm generation
 host B receipt substituted for host A
+pre-reboot readiness accepted after boot_ref changes
+reboot advances provider or realm generation instead of only readiness currentness
+Provider Capacity boot_ref treated as FP1B admission authority
+provider host_ref/boot_ref mismatches FP1B host_id/boot_id
+wrong/stale capacity_pool_ref or qualification_revision accepted
+stale/incomplete host-capacity or mismatched pressure evidence accepted
+physical failure widened to provider-domain cooling
+historical replay re-reads current physical state
 one host re-provisioned to logical account B while retaining account A capability identity
 capability generation increment forces unrelated realm generation increment
 realm generation increment silently creates a new quota domain
