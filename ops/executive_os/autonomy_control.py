@@ -73,6 +73,12 @@ AUTONOMY_TRANSACTION = CONFIG_ROOT / "autonomy-transaction.lock"
 CEO_SUBMIT_RECEIPT = CONFIG_ROOT / "ceo-submit-state-v1.json"
 CEO_SUBMIT_RECEIPT_SCHEMA = "mastermind.executive_ceo_submit_receipt/v1"
 CEO_SUBMIT_OPERATIONS = frozenset({"CEO_SUBMIT_ARM", "CEO_SUBMIT_DISARM"})
+# R17 B1: the CEO-submit operation domain as it is reachable from THIS CLI.  A
+# closed set, so `main` can route the three verbs with one membership test and no
+# string prefix matching.
+CEO_SUBMIT_COMMANDS = frozenset(
+    {"ceo-submit-status", "ceo-submit-arm", "ceo-submit-disarm"}
+)
 EXECUTIVE_APP_USER = "_mastermind_executive_mcp"
 CEO_INGRESS_LAUNCHD_SOCKET_NAME = "CeoIngress"
 CEO_INGRESS_SOCKET_PATH = "/var/run/mastermind-executive/ceo-ingress.sock"
@@ -607,6 +613,31 @@ def _parser() -> argparse.ArgumentParser:
 
     disarm = sub.add_parser("disarm", help="Converge both arm bits to false.")
     disarm.add_argument(
+        "--expected-sha", type=_exact_sha, action=_StoreOnce, required=True
+    )
+
+    # The CEO-submit operation domain: root-only, bounded to the release identity
+    # and to nothing else.  No Gate B receipt, no credential, no path and no label
+    # is caller-selectable here -- the CEO sink is armed from the installed
+    # release and the dedicated App binding alone.
+    ceo_status = sub.add_parser(
+        "ceo-submit-status", help="Read back the CEO-submit sink state (read-only)."
+    )
+    ceo_status.add_argument(
+        "--expected-sha", type=_exact_sha, action=_StoreOnce, required=True
+    )
+
+    ceo_arm = sub.add_parser(
+        "ceo-submit-arm", help="Arm only the CEO-submit sink."
+    )
+    ceo_arm.add_argument(
+        "--expected-sha", type=_exact_sha, action=_StoreOnce, required=True
+    )
+
+    ceo_disarm = sub.add_parser(
+        "ceo-submit-disarm", help="Disarm only the CEO-submit sink."
+    )
+    ceo_disarm.add_argument(
         "--expected-sha", type=_exact_sha, action=_StoreOnce, required=True
     )
     return parser
@@ -1524,6 +1555,51 @@ def execute_ceo_submit_disarm(
         status="CEO_SUBMIT_DISARMED",
         transaction_id=transaction.transaction_id,
         replayed=False,
+    )
+
+
+def evaluate_ceo_submit_status(
+    host: CeoSubmitTransactionHost, request: CeoSubmitRequest
+) -> TransactionResult:
+    """Read-only CEO-submit readback: no lock, no write, no receipt rewrite.
+
+    R9's source tests must kill the manual-config shortcut, so an armed FLAG is
+    not reported as armed on its own: the sealed receipt must still bind the
+    present config and the live App binding through
+    ``ceo_submit_sink_eligible``.  A hand-edited ``ceo_submit_armed: true`` with
+    no sealed receipt reads back CEO_SUBMIT_ARMED_UNBOUND, never CEO_SUBMIT_ARMED.
+    """
+
+    require_root_privilege(host.effective_uid())
+    if _SHA_RE.fullmatch(request.expected_sha) is None:
+        raise CeoSubmitAdmissionError("release_identity_mismatch")
+    installed_sha = host.require_exact_install(request.expected_sha)
+    if installed_sha != request.expected_sha:
+        raise CeoSubmitAdmissionError("release_identity_mismatch")
+    if host.incomplete_transaction_operation() in CEO_SUBMIT_OPERATIONS:
+        raise TransactionEffectUnknown()
+    configs = host.load_ceo_submit_configs(request.expected_sha)
+    armed_flag = dict(configs.control).get("ceo_submit_armed")
+    if not isinstance(armed_flag, bool):
+        raise CeoSubmitAdmissionError("ceo_submit_config_schema_drift")
+    receipt = host.existing_ceo_submit_receipt()
+    transaction_id = _sealed_ceo_submit_transaction_id(receipt)
+    if not armed_flag:
+        return TransactionResult(
+            state="CEO_SUBMIT_DISARMED",
+            status="CEO_SUBMIT_DISARMED",
+            transaction_id=transaction_id,
+            replayed=False,
+        )
+    eligible = ceo_submit_sink_eligible(
+        control_config=configs.control,
+        receipt=receipt,
+        binding=host.executive_app_binding(),
+        expected_sha=request.expected_sha,
+    )
+    state = "CEO_SUBMIT_ARMED" if eligible else "CEO_SUBMIT_ARMED_UNBOUND"
+    return TransactionResult(
+        state=state, status=state, transaction_id=transaction_id, replayed=False
     )
 
 
@@ -3251,6 +3327,81 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
         return payload
 
 
+def _run_ceo_submit_command(
+    host: CeoSubmitTransactionHost, args: argparse.Namespace, *, now: datetime
+) -> int:
+    """The one closed, root-only CEO-submit operation domain on the CLI.
+
+    Every refusal is TYPED: the caller never receives a bare traceback and never
+    receives a state claim the module did not verify.  Nothing here starts a
+    provider call, a Job or a worker effect.
+    """
+
+    request = CeoSubmitRequest(expected_sha=args.expected_sha)
+    try:
+        if args.command == "ceo-submit-status":
+            result = evaluate_ceo_submit_status(host, request)
+            code = {
+                "CEO_SUBMIT_ARMED": "ceo_submit_armed",
+                "CEO_SUBMIT_DISARMED": "ceo_submit_disarmed",
+                "CEO_SUBMIT_ARMED_UNBOUND": "ceo_submit_armed_unbound",
+            }[result.state]
+            exit_code = 0 if result.state != "CEO_SUBMIT_ARMED_UNBOUND" else 2
+        elif args.command == "ceo-submit-arm":
+            result = execute_ceo_submit_arm(host, request, now=now)
+            code = "ceo_submit_armed"
+            exit_code = 0
+        else:
+            result = execute_ceo_submit_disarm(host, request, now=now)
+            code = (
+                "ceo_submit_already_disarmed"
+                if result.replayed
+                else "ceo_submit_disarmed"
+            )
+            exit_code = 0
+        document = operation_document(
+            code=code,
+            state=result.state,
+            status=result.status,
+            transaction_id=result.transaction_id,
+            replayed=result.replayed,
+        )
+    except TransactionEffectUnknown:
+        document = operation_document(
+            code="effect_unknown",
+            state="UNKNOWN",
+            status="EFFECT_UNKNOWN",
+            transaction_id=None,
+        )
+        exit_code = 2
+    except (HostControlError, CeoSubmitAdmissionError, ArmAdmissionError) as exc:
+        document = operation_document(
+            code=exc.code,
+            state="UNKNOWN",
+            status="CEO_SUBMIT_UNVERIFIED",
+            transaction_id=None,
+        )
+        exit_code = 2
+    except ArmTransactionError as exc:
+        document = operation_document(
+            code=exc.code,
+            state="UNKNOWN",
+            status="CEO_SUBMIT_UNVERIFIED",
+            transaction_id=None,
+        )
+        exit_code = 2
+    except Exception:
+        document = operation_document(
+            code="effect_unknown",
+            state="UNKNOWN",
+            status="EFFECT_UNKNOWN",
+            transaction_id=None,
+        )
+        exit_code = 2
+    print(json.dumps(document, sort_keys=True, separators=(",", ":")))
+    return exit_code
+
+
 def main(
     argv: Sequence[str] | None = None,
     *,
@@ -3270,6 +3421,10 @@ def main(
         document = status_document(snapshot, now=current)
         print(json.dumps(document, sort_keys=True, separators=(",", ":")))
         return 0 if document["status"] in {UNARMED, ARMED_READY} else 2
+
+    if args.command in CEO_SUBMIT_COMMANDS:
+        ceo_host = ProductionCeoSubmitHost() if host is None else host
+        return _run_ceo_submit_command(ceo_host, args, now=current)
 
     transaction_host = ProductionTransactionHost() if host is None else host
     try:
