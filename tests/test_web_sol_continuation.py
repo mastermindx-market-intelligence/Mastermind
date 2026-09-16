@@ -106,8 +106,37 @@ def test_continuation_preserves_do_not_redo_and_evidence_coordinates() -> None:
             "authority_class": "A4",
             "status": "active",
             "updated": "2026-09-15",
+            "occurrences": 1,
         }
     ]
+    assert packet["evidence_ref_total"] == 1
+    assert packet["evidence_ref_unique_total"] == 1
+    assert packet["evidence_refs_truncated"] is False
+
+
+def test_duplicate_evidence_coordinates_collapse_without_losing_multiplicity() -> None:
+    agentos = _agentos(huge=True)
+    original = agentos["contexts"][0]["sections"][0]["items"][0]
+    agentos["contexts"][0]["sections"][0]["items"] = [
+        {
+            **original,
+            "excerpt": f"distinct source excerpt {index} " + "x" * 20_000,
+            "why_included": f"distinct inclusion reason {index} " + "x" * 20_000,
+        }
+        for index in range(30)
+    ]
+
+    packet = build_continuation(agentos, "WS:TARGET")
+    raw = canonical_bytes(packet)
+
+    assert len(raw) <= MAX_PACKET_BYTES
+    assert len(packet["evidence_refs"]) == 1
+    assert packet["evidence_refs"][0]["occurrences"] == 30
+    assert packet["evidence_ref_total"] == 30
+    assert packet["evidence_ref_unique_total"] == 1
+    assert packet["evidence_refs_truncated"] is False
+    assert b'"excerpt"' not in raw
+    assert b'"why_included"' not in raw
 
 
 def test_opaque_owner_state_is_digest_only() -> None:

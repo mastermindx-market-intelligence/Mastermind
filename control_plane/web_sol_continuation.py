@@ -166,12 +166,17 @@ def _wave_projection(row: Mapping[str, Any]) -> tuple[list[dict[str, Any]], list
     return active, do_not_redo
 
 
-def _evidence_refs(context: Mapping[str, Any]) -> tuple[list[dict[str, Any]], int]:
+def _evidence_refs(
+    context: Mapping[str, Any],
+) -> tuple[list[dict[str, Any]], int, int]:
     sections = context.get("sections")
     if not isinstance(sections, list):
         raise WebSolContinuationError("Agent OS context sections must be a list")
     refs: list[dict[str, Any]] = []
+    emitted: dict[tuple[Any, ...], dict[str, Any]] = {}
+    seen: set[tuple[Any, ...]] = set()
     total = 0
+    unique_total = 0
     for section in sections:
         if not isinstance(section, Mapping) or not isinstance(section.get("items"), list):
             continue
@@ -182,22 +187,32 @@ def _evidence_refs(context: Mapping[str, Any]) -> tuple[list[dict[str, Any]], in
             if not isinstance(locator, str) or not locator or not isinstance(path, str) or not path:
                 continue
             total += 1
+            projection = {
+                "kind": item.get("kind") if isinstance(item.get("kind"), str) else None,
+                "key": item.get("key") if isinstance(item.get("key"), str) else None,
+                "path": path,
+                "locator": locator,
+                "authority_class": (
+                    item.get("authority_class") if isinstance(item.get("authority_class"), str) else None
+                ),
+                "status": item.get("status") if isinstance(item.get("status"), str) else None,
+                "updated": item.get("updated") if isinstance(item.get("updated"), str) else None,
+            }
+            identity = tuple(projection.values())
+            existing = emitted.get(identity)
+            if existing is not None:
+                existing["occurrences"] += 1
+                continue
+            if identity in seen:
+                continue
+            seen.add(identity)
+            unique_total += 1
             if len(refs) >= MAX_EVIDENCE_REFS:
                 continue
-            refs.append(
-                {
-                    "kind": item.get("kind") if isinstance(item.get("kind"), str) else None,
-                    "key": item.get("key") if isinstance(item.get("key"), str) else None,
-                    "path": path,
-                    "locator": locator,
-                    "authority_class": (
-                        item.get("authority_class") if isinstance(item.get("authority_class"), str) else None
-                    ),
-                    "status": item.get("status") if isinstance(item.get("status"), str) else None,
-                    "updated": item.get("updated") if isinstance(item.get("updated"), str) else None,
-                }
-            )
-    return refs, total
+            projection["occurrences"] = 1
+            refs.append(projection)
+            emitted[identity] = projection
+    return refs, total, unique_total
 
 
 def build_continuation(agentos: Mapping[str, Any], workstream: str) -> dict[str, Any]:
@@ -217,7 +232,7 @@ def build_continuation(agentos: Mapping[str, Any], workstream: str) -> dict[str,
         raise WebSolContinuationError("Agent OS context schema is incompatible")
 
     active_waves, do_not_redo = _wave_projection(row)
-    refs, ref_total = _evidence_refs(context)
+    refs, ref_total, ref_unique_total = _evidence_refs(context)
     blockers_raw = row.get("blocked_by") or []
     if not isinstance(blockers_raw, list):
         raise WebSolContinuationError("workstream blocked_by must be a list")
@@ -257,7 +272,8 @@ def build_continuation(agentos: Mapping[str, Any], workstream: str) -> dict[str,
         "do_not_redo": do_not_redo,
         "evidence_refs": refs,
         "evidence_ref_total": ref_total,
-        "evidence_refs_truncated": ref_total > len(refs),
+        "evidence_ref_unique_total": ref_unique_total,
+        "evidence_refs_truncated": ref_unique_total > len(refs),
         "warnings": [
             _bounded_text(item, name=f"warnings[{index}]", maximum_bytes=256)
             for index, item in enumerate(warnings_raw[:8])
