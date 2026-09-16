@@ -173,7 +173,6 @@ def test_missing_host_snapshot_evidence_refuses() -> None:
     left = _finalized_run(scenario, config_a, experiment, arm_id="arm_a", snapshot=snapshot)
     right = _finalized_run(scenario, config_b, experiment, arm_id="arm_b", snapshot=snapshot)
 
-    # Re-finalize a valid run that has no host-capacity evidence artifact.
     draft = build_run_draft(scenario, config_a, experiment, arm_id="arm_a", replicate_index=2)
     unbound = validity.finalize_run_receipt(
         scenario,
@@ -188,6 +187,29 @@ def test_missing_host_snapshot_evidence_refuses() -> None:
 
     assert "HOST_CAPACITY_EVIDENCE_MISSING" in _codes(excinfo)
     assert left["run_id"] != unbound["run_id"]
+
+
+def test_duplicate_host_snapshot_digest_refuses_as_ambiguous() -> None:
+    scenario, config_a, config_b, experiment = _graph()
+    snapshot = _snapshot()
+    right = _finalized_run(scenario, config_b, experiment, arm_id="arm_b", snapshot=snapshot)
+
+    draft = build_run_draft(scenario, config_a, experiment, arm_id="arm_a", replicate_index=2)
+    first = _host_artifact("arm_a", snapshot)
+    second = {**first, "artifact_ref": f"{REPO_REF_BASE}#fixtures/arm_a/duplicate-host-capacity.json"}
+    draft["evidence"]["artifacts"] = [first, second]
+    ambiguous = validity.finalize_run_receipt(
+        scenario,
+        config_a,
+        experiment,
+        draft,
+        **VALIDATOR_KW,
+    )
+
+    with pytest.raises(ContractError) as excinfo:
+        host_factor_lock.verify_host_factor_evidence_lock(ambiguous, snapshot, right, snapshot)
+
+    assert "HOST_CAPACITY_EVIDENCE_AMBIGUOUS" in _codes(excinfo)
 
 
 def test_post_finalization_evidence_injection_refuses_stale_run_digest() -> None:
@@ -231,7 +253,8 @@ def test_snapshot_digest_is_exact_canonical_owner_bytes() -> None:
     snapshot = _snapshot()
     digest = host_factor_lock.host_capacity_snapshot_digest(snapshot)
 
-    assert len(digest) == 64
+    assert digest.startswith("sha256:")
+    assert len(digest) == len("sha256:") + 64
     assert digest == host_factor_lock.host_capacity_snapshot_digest(copy.deepcopy(snapshot))
     changed = copy.deepcopy(snapshot)
     changed["physical_memory_bytes"] += 1
