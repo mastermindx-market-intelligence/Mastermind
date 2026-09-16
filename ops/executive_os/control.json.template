@@ -29,6 +29,7 @@
   "control_uid": 450,
   "cost_class": "standard",
   "coo_autonomy_armed": false,
+  "ceo_submit_armed": false,
   "coo_operator_harness_armed": false,
   "coo_default_quota_class": "codex-coo-default",
   "coo_model_alias": "coo.sealed",

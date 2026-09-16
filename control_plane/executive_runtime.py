@@ -178,6 +178,13 @@ V2_HOST_EXECUTION_BINDING_KEYS = frozenset(
     }
     | OPERATOR_HARNESS_BINDING_KEYS
 )
+HOST_EXECUTION_BINDING_VERSION_KEY = "host_execution_binding_version"
+HOST_EXECUTION_BINDING_V2 = "mastermind.host_execution_binding/v2"
+HOST_EXECUTION_BINDING_V3 = "mastermind.host_execution_binding/v3"
+V3_HOST_EXECUTION_BINDING_KEYS = frozenset(
+    V2_HOST_EXECUTION_BINDING_KEYS | {"work_placement_union"}
+)
+WORK_PLACEMENT_UNION_MAX_MEMBERS = 8
 EXECUTIVE_DIALOGUE_SOURCE_SCHEMA = "mastermind.executive_dialogue_source/v1"
 _EXECUTIVE_DIALOGUE_SOURCE_KEYS = frozenset(
     {
@@ -544,7 +551,11 @@ def _normalise_capabilities(
     )
 
 
-def _normalise_constraints(value: dict[str, Any] | None) -> dict[str, Any]:
+def _normalise_constraints(
+    value: dict[str, Any] | None,
+    *,
+    host_admitted_placement_union: bool = False,
+) -> dict[str, Any]:
     if value is not None and not isinstance(value, dict):
         raise StateConflict("job constraints must be a mapping")
     raw = value or {}
@@ -756,7 +767,60 @@ def _normalise_constraints(value: dict[str, Any] | None) -> dict[str, Any]:
         result["operator_harness_binary_digest"] = harness_digest
         result["operator_harness_version"] = harness_version
         result["operator_harness_armed"] = raw["operator_harness_armed"]
+    if host_admitted_placement_union and "work_placement_union" in raw:
+        result["work_placement_union"] = _normalise_work_placement_union(
+            raw["work_placement_union"]
+        )
     return result
+
+
+def _normalise_work_placement_union(
+    value: Any,
+) -> list[dict[str, str]]:
+    if not isinstance(value, (list, tuple)) or len(value) > (
+        WORK_PLACEMENT_UNION_MAX_MEMBERS
+    ):
+        raise StateConflict("host work-placement union must be a bounded list")
+    if not value:
+        raise StateConflict(
+            "host work-placement union must admit at least one placement"
+        )
+    members: list[dict[str, str]] = []
+    identities: set[tuple[str, str]] = set()
+    for member in value:
+        if not isinstance(member, Mapping) or set(member) != {
+            "provider_realm",
+            "quota_class",
+        }:
+            raise StateConflict(
+                "host work-placement union member must name exactly "
+                "a provider realm and quota class"
+            )
+        normalized_member = {
+            key: str(member[key]).strip()
+            for key in ("provider_realm", "quota_class")
+        }
+        if any(
+            _ROUTING_VALUE_RE.fullmatch(item) is None
+            for item in normalized_member.values()
+        ):
+            raise StateConflict(
+                "host work-placement union member values are invalid"
+            )
+        identity = (
+            normalized_member["provider_realm"],
+            normalized_member["quota_class"],
+        )
+        if identity in identities:
+            raise StateConflict(
+                "host work-placement union members must be distinct"
+            )
+        identities.add(identity)
+        members.append(normalized_member)
+    return sorted(
+        members,
+        key=lambda item: (item["provider_realm"], item["quota_class"]),
+    )
 
 
 def _normalise_seat(value: str, *, field: str) -> str:
@@ -3761,7 +3825,8 @@ def _job_from_row(row: sqlite3.Row) -> Job:
         created_at=_iso(int(row["created_at_ms"])),
         updated_at=_iso(int(row["updated_at_ms"])),
         constraints=_normalise_constraints(
-            _json_loads(row["constraints_json"], fallback={})
+            _json_loads(row["constraints_json"], fallback={}),
+            host_admitted_placement_union=row["orchestration_role"] == "aggregation",
         ),
         current_attempt_id=row["current_attempt_id"],
         attempt_count=int(row["attempt_count"]),
@@ -8662,13 +8727,37 @@ class JobRegistry:
         contract = normalized["execution_contract"]
         constraints = dict(contract.get("constraints") or {})
         if execution_binding is not None:
-            if not isinstance(execution_binding, dict) or set(execution_binding) != set(
+            version = execution_binding.get(
+                HOST_EXECUTION_BINDING_VERSION_KEY,
+                HOST_EXECUTION_BINDING_V2,
+            )
+            if version not in {HOST_EXECUTION_BINDING_V2, HOST_EXECUTION_BINDING_V3}:
+                raise StateConflict("host execution binding version is unknown")
+            carried = dict(execution_binding)
+            carried.pop(HOST_EXECUTION_BINDING_VERSION_KEY, None)
+            admitted_union = None
+            if version == HOST_EXECUTION_BINDING_V3:
+                if not isinstance(execution_binding, dict) or set(carried) != set(
+                    V3_HOST_EXECUTION_BINDING_KEYS
+                ):
+                    raise StateConflict(
+                        "v2 host execution binding fields are incomplete or drifted"
+                    )
+                if "work_placement_union" in constraints:
+                    raise StateConflict(
+                        "caller constraint work_placement_union conflicts "
+                        "with reviewed host composition"
+                    )
+                admitted_union = _normalise_work_placement_union(
+                    carried.pop("work_placement_union")
+                )
+            if not isinstance(execution_binding, dict) or set(carried) != set(
                 V2_HOST_EXECUTION_BINDING_KEYS
             ):
                 raise StateConflict(
                     "v2 host execution binding fields are incomplete or drifted"
                 )
-            bound = _normalise_constraints(execution_binding)
+            bound = _normalise_constraints(carried)
             if set(bound) != set(V2_HOST_EXECUTION_BINDING_KEYS):
                 raise StateConflict(
                     "v2 host execution binding did not normalize exactly"
@@ -8680,7 +8769,14 @@ class JobRegistry:
                         f"caller constraint {key} conflicts with reviewed host composition"
                     )
             normalized_caller.update(bound)
-            constraints = _normalise_constraints(normalized_caller)
+            if admitted_union is not None:
+                normalized_caller["work_placement_union"] = admitted_union
+                constraints = _normalise_constraints(
+                    normalized_caller,
+                    host_admitted_placement_union=True,
+                )
+            else:
+                constraints = _normalise_constraints(normalized_caller)
         worktree = contract.get("worktree")
         if worktree is not None:
             if workspace_root is None:
@@ -10200,7 +10296,13 @@ class JobRegistry:
             raise StateConflict(
                 f"escalation_target={escalation_target!r} requires its typed executive provenance"
             )
-        normalized_constraints = _normalise_constraints(constraints)
+        normalized_constraints = _normalise_constraints(
+            constraints,
+            host_admitted_placement_union=(
+                orchestration_role == "aggregation"
+                and _v2_root_capability is _V2_ROOT_CREATION_CAPABILITY
+            ),
+        )
         try:
             authority = ExecutiveAuthorityPolicy.load().authorize(
                 ["READ"] if requested_authorities is None else requested_authorities,
@@ -18798,7 +18900,12 @@ __all__ = [
     "RuntimeStore",
     "SCHEMA_VERSION",
     "StateConflict",
+    "HOST_EXECUTION_BINDING_V2",
+    "HOST_EXECUTION_BINDING_V3",
+    "HOST_EXECUTION_BINDING_VERSION_KEY",
     "V2_HOST_EXECUTION_BINDING_KEYS",
+    "V3_HOST_EXECUTION_BINDING_KEYS",
+    "WORK_PLACEMENT_UNION_MAX_MEMBERS",
     "ValidatedRoleCompletion",
     "Worker",
     "WorkerQuotaClass",

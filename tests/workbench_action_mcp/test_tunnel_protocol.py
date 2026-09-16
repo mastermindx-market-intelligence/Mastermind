@@ -71,6 +71,101 @@ runpy.run_path(sys.argv[0], run_name="__main__")
         assert b"WORKBENCH_MCP_INVALID_REQUEST" in process.stderr()
 
 
+def _modern_meta():
+    return {
+        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+        "io.modelcontextprotocol/clientInfo": {"name": "chatgpt-web-test", "version": "1"},
+        "io.modelcontextprotocol/clientCapabilities": {},
+    }
+
+
+def _modern_request(process, request_id, method, params):
+    process.send({
+        "jsonrpc": "2.0", "id": request_id, "method": method, "params": params,
+    })
+    reply = process.receive()
+    assert reply["id"] == request_id
+    return reply
+
+
+def test_production_child_serves_modern_discovery_and_effects(tmp_path):
+    path, document, project, _ = config_file(tmp_path)
+    meta = _modern_meta()
+    with child([sys.executable, str(LAUNCHER), "--config", str(path)]) as process:
+        discovered = _modern_request(
+            process, "openai-mcp-discover", "server/discover", {"_meta": meta}
+        )["result"]
+        assert discovered["resultType"] == "complete"
+        assert discovered["supportedVersions"] == ["2026-07-28"]
+        assert discovered["capabilities"] == {"tools": {"listChanged": False}}
+        assert discovered["_meta"]["io.modelcontextprotocol/serverInfo"] == {
+            "name": "Mastermind Workbench Action Tunnel", "version": "0.1.0",
+        }
+
+        listed = _modern_request(
+            process, "openai-tools-list", "tools/list", {"_meta": meta}
+        )["result"]
+        assert listed["resultType"] == "complete"
+        assert [tool["name"] for tool in listed["tools"]] == [
+            "workspace_manifest", "read_project_file", "preview_text_replace",
+            "prepare_text_patch", "commit_text_patch", "reconcile_text_patch",
+            "prepare_project_command", "run_project_command",
+            "read_action_result", "reconcile_action",
+        ]
+
+        manifest = _modern_request(
+            process, "manifest", "tools/call",
+            {"_meta": meta, "name": "workspace_manifest", "arguments": {}},
+        )["result"]
+        assert manifest["resultType"] == "complete"
+        assert manifest["structuredContent"]["ok"] is True
+
+        prepared = _modern_request(
+            process, "prepare", "tools/call",
+            {
+                "_meta": meta, "name": "prepare_text_patch",
+                "arguments": {
+                    "project_ref": document["lease"]["project_ref"],
+                    "relative_path": "sample.py", "mode": "CREATE",
+                    "new_text": "modern-valid\n",
+                },
+            },
+        )["result"]["structuredContent"]
+        assert prepared["status"] == "PREPARED"
+        for request_id, name in (("commit", "commit_text_patch"),
+                                 ("reconcile", "reconcile_text_patch")):
+            effect = _modern_request(
+                process, request_id, "tools/call",
+                {
+                    "_meta": meta, "name": name,
+                    "arguments": {"action_ref": prepared["action_ref"]},
+                },
+            )["result"]
+            assert effect["resultType"] == "complete"
+            assert effect["structuredContent"]["effect_state"] == "APPLIED"
+            assert effect["structuredContent"]["cleanup_state"] == "CLEAN"
+        assert (project / "sample.py").read_text() == "modern-valid\n"
+        process.assert_exit(0)
+
+
+def test_modern_unknown_method_is_correlated_and_session_recovers(tmp_path):
+    path, _, _, _ = config_file(tmp_path)
+    meta = _modern_meta()
+    with child([sys.executable, str(LAUNCHER), "--config", str(path)]) as process:
+        _modern_request(
+            process, "openai-mcp-discover", "server/discover", {"_meta": meta}
+        )
+        refused = _modern_request(
+            process, "unsupported-modern", "resources/list", {"_meta": meta}
+        )
+        assert refused["error"] == {"code": -32601, "message": "method not found"}
+        listed = _modern_request(
+            process, "after-refusal", "tools/list", {"_meta": meta}
+        )["result"]
+        assert len(listed["tools"]) == 10
+        process.assert_exit(0)
+
+
 def _read_signal(fd, expected):
     ready, _, _ = select.select([fd], [], [], 5)
     assert ready, "native physical lifecycle signal timed out"
