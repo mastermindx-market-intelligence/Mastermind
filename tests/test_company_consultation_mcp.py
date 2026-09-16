@@ -3,8 +3,11 @@ from __future__ import annotations
 import asyncio
 import copy
 import dataclasses
+import hashlib
 
 import pytest
+
+import integrations.mastermind_company_mcp.consultation as consultation_contract
 
 from control_plane.executive_delegation_identity import ExecutiveDelegationIdentity
 from control_plane.executive_runtime import AttemptStatus, WorkerStatus
@@ -910,3 +913,220 @@ def test_grok_peer_binding_composes_into_v3_contract() -> None:
 
     assert validated["schema"] == GROK_CONSULTATION_SCHEMA
     assert validated["recipient_binding"] == peer.binding
+
+
+def test_company_consult_dispatch_request_has_own_closed_versioned_contract() -> None:
+    builder = getattr(
+        consultation_contract, "build_company_consult_dispatch_request", None
+    )
+    validator = getattr(
+        consultation_contract, "validate_company_consult_dispatch_request", None
+    )
+    assert callable(builder), "company.consult needs a dedicated dispatch builder"
+    assert callable(validator), "company.consult needs a dedicated dispatch validator"
+
+    request = builder(
+        peer=_peer().public_projection(),
+        consultation_schema=CONSULTATION_SCHEMA,
+        semantic={
+            "to": _peer().peer_ref,
+            "question": "What fields are frozen?",
+            "evidence_refs": [],
+            "artifact_revisions": [_artifact()],
+        },
+        valid_until="2026-09-14T00:00:00Z",
+    )
+
+    assert request == {
+        "schema": "mastermind.company_consult_dispatch.v1",
+        "operation": "consult",
+        "consultation_schema": CONSULTATION_SCHEMA,
+        "peer": _peer().public_projection(),
+        "semantic": {
+            "to": _peer().peer_ref,
+            "question": "What fields are frozen?",
+            "evidence_refs": [],
+            "artifact_revisions": [_artifact()],
+        },
+        "budget": {
+            "max_answers": 1,
+            "max_evidence_reads": 4,
+            "max_forward_hops": 0,
+            "max_payload_bytes": 32768,
+        },
+        "valid_until": "2026-09-14T00:00:00Z",
+    }
+    assert validator(request) == request
+
+
+def test_company_consult_gateway_emits_only_the_frozen_dispatch_contract() -> None:
+    peer = _grok_peer()
+    gateway, sink = _gateway([peer])
+
+    response = _run(
+        gateway.call(
+            "company.consult",
+            {
+                "to": peer.peer_ref,
+                "question": "Use the frozen dispatcher contract.",
+                "evidence_refs": [],
+                "artifact_revisions": [_artifact()],
+            },
+        )
+    )
+
+    assert response["ok"] is True
+    assert len(sink.calls) == 1
+    operation, request = sink.calls[0]
+    assert operation == "company.consult"
+    assert request["schema"] == consultation_contract.COMPANY_CONSULT_DISPATCH_SCHEMA
+    assert set(request) == {
+        "schema",
+        "operation",
+        "consultation_schema",
+        "peer",
+        "semantic",
+        "budget",
+        "valid_until",
+    }
+    assert consultation_contract.validate_company_consult_dispatch_request(request) == request
+
+
+def test_company_consult_dispatch_schema_snapshot_is_frozen_and_separate() -> None:
+    snapshot_fn = getattr(
+        consultation_contract, "company_consult_dispatch_schema_snapshot", None
+    )
+    digest_fn = getattr(
+        consultation_contract, "company_consult_dispatch_schema_digest", None
+    )
+    assert callable(snapshot_fn), "dispatch contract needs a frozen schema snapshot"
+    assert callable(digest_fn), "dispatch contract needs a deterministic schema digest"
+
+    expected = {
+        "type": "object",
+        "properties": {
+            "schema": {
+                "type": "string",
+                "const": "mastermind.company_consult_dispatch.v1",
+            },
+            "operation": {"type": "string", "const": "consult"},
+            "consultation_schema": {
+                "type": "string",
+                "enum": [CONSULTATION_SCHEMA, GROK_CONSULTATION_SCHEMA],
+            },
+            "peer": {
+                "type": "object",
+                "properties": {
+                    "peer_ref": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": r"^peer-[0-9a-f]{32}$",
+                    },
+                    "display_name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                    },
+                },
+                "required": ["peer_ref", "display_name"],
+                "additionalProperties": False,
+            },
+            "semantic": next(
+                spec.input_schema
+                for spec in COMPANY_CONSULTATION_TOOL_SPECS
+                if spec.name == "company.consult"
+            ),
+            "budget": {
+                "type": "object",
+                "properties": {
+                    "max_answers": {"type": "integer", "const": 1},
+                    "max_evidence_reads": {"type": "integer", "const": 4},
+                    "max_forward_hops": {"type": "integer", "const": 0},
+                    "max_payload_bytes": {"type": "integer", "const": 32768},
+                },
+                "required": [
+                    "max_answers",
+                    "max_evidence_reads",
+                    "max_forward_hops",
+                    "max_payload_bytes",
+                ],
+                "additionalProperties": False,
+            },
+            "valid_until": {
+                "type": "string",
+                "minLength": 20,
+                "maxLength": 20,
+                "pattern": r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$",
+            },
+        },
+        "required": [
+            "schema",
+            "operation",
+            "consultation_schema",
+            "peer",
+            "semantic",
+            "budget",
+            "valid_until",
+        ],
+        "additionalProperties": False,
+    }
+    snapshot = snapshot_fn()
+    assert snapshot == expected
+    expected_digest = hashlib.sha256(
+        canonical_company_consultation_json(expected)
+    ).hexdigest()
+    assert digest_fn() == expected_digest
+    assert consultation_contract.COMPANY_CONSULT_DISPATCH_SCHEMA_DIGEST == expected_digest
+    assert COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST == (
+        "f9463e714240c5ac347bb029788b88d5556ad9d77c69eabcec1b7038e210a722"
+    )
+
+
+def test_company_consult_dispatch_builder_freezes_nested_inputs() -> None:
+    peer = _peer().public_projection()
+    semantic = {
+        "to": _peer().peer_ref,
+        "question": "Freeze this request.",
+        "evidence_refs": [
+            "https://github.com/mastermindx-market-intelligence/Mastermind/pull/709"
+        ],
+        "artifact_revisions": [_artifact()],
+    }
+    request = consultation_contract.build_company_consult_dispatch_request(
+        peer=peer,
+        consultation_schema=CONSULTATION_SCHEMA,
+        semantic=semantic,
+        valid_until="2026-09-14T00:00:00Z",
+    )
+
+    peer["display_name"] = "Mutated"
+    semantic["evidence_refs"].append(
+        "https://github.com/mastermindx-market-intelligence/Mastermind/pull/681"
+    )
+    semantic["artifact_revisions"][0]["path"] = "mutated.py"
+
+    assert request["peer"]["display_name"] == "Peer 7bdf"
+    assert request["semantic"]["evidence_refs"] == [
+        "https://github.com/mastermindx-market-intelligence/Mastermind/pull/709"
+    ]
+    assert request["semantic"]["artifact_revisions"][0]["path"] == (
+        "integrations/mastermind_company_mcp/consultation.py"
+    )
+
+
+def test_company_consult_dispatch_refuses_impossible_utc_timestamp() -> None:
+    with pytest.raises(CompanyConsultationToolError) as exc_info:
+        consultation_contract.build_company_consult_dispatch_request(
+            peer=_peer().public_projection(),
+            consultation_schema=CONSULTATION_SCHEMA,
+            semantic={
+                "to": _peer().peer_ref,
+                "question": "Reject impossible time.",
+                "evidence_refs": [],
+                "artifact_revisions": [],
+            },
+            valid_until="2026-13-40T25:61:61Z",
+        )
+
+    assert exc_info.value.code == "INVALID_REQUEST"

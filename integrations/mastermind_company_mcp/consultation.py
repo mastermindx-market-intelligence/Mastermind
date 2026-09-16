@@ -1,6 +1,8 @@
 """Frozen four-tool Company MCP consultation facet (hermetic producer slice)."""
 from __future__ import annotations
 
+import copy
+import datetime as dt
 import dataclasses
 import hashlib
 import json
@@ -8,12 +10,17 @@ import re
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
+from common.agent_dialogue_consultation_contract import (
+    CONSULTATION_SCHEMA,
+    GROK_CONSULTATION_SCHEMA,
+)
 from integrations.slack_agent_dialogue.company_consultation_peer_resolver import (
     CompanyConsultationPeerResolver,
     ConsultationPeerRefused,
 )
 
 COMPANY_CONSULTATION_SCHEMA = "mastermind.company_consultation_mcp.v1"
+COMPANY_CONSULT_DISPATCH_SCHEMA = "mastermind.company_consult_dispatch.v1"
 COMPANY_CONSULTATION_CAPABILITY = COMPANY_CONSULTATION_SCHEMA
 COMPANY_CONSULTATION_SERVER_NAME = "mastermind-company-consultation"
 COMPANY_CONSULTATION_SERVER_IDENTITY = "mastermind-company-consultation-mcp"
@@ -37,6 +44,13 @@ COMPANY_CONSULTATION_ERROR_CODES = frozenset(
 _COMPANY_CONSULTATION_INTERNAL = frozenset({"EFFECT_UNKNOWN", "INTERNAL_ERROR"})
 _PEER_REF_RE = re.compile(r"\Apeer-[0-9a-f]{32}\Z")
 _CONSULTATION_REF_RE = re.compile(r"\Aconsult-[0-9a-f]{32}\Z")
+_UTC_SECOND_RE = re.compile(r"\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\Z")
+_COMPANY_CONSULT_DISPATCH_BUDGET = {
+    "max_answers": 1,
+    "max_evidence_reads": 4,
+    "max_forward_hops": 0,
+    "max_payload_bytes": 32768,
+}
 _SECRET_RE = re.compile(
     r"(?i)(?:xox[a-z]-[A-Za-z0-9-]{10,}|xapp-[A-Za-z0-9-]{10,}|"
     r"github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|"
@@ -312,6 +326,100 @@ def _validated_artifact_revisions(value: Any) -> list[dict[str, str]]:
     return revisions
 
 
+def _validated_dispatch_peer(value: Any) -> dict[str, str]:
+    if not isinstance(value, Mapping) or set(value) != {"peer_ref", "display_name"}:
+        raise CompanyConsultationToolError("INVALID_REQUEST")
+    peer_ref = value.get("peer_ref")
+    display_name = value.get("display_name")
+    if not isinstance(peer_ref, str) or _PEER_REF_RE.fullmatch(peer_ref) is None:
+        raise CompanyConsultationToolError("INVALID_REQUEST")
+    if (
+        not isinstance(display_name, str)
+        or not display_name.strip()
+        or display_name.strip() != display_name
+        or len(display_name) > 128
+        or any(ord(character) < 32 or ord(character) == 127 for character in display_name)
+        or _SECRET_RE.search(display_name)
+    ):
+        raise CompanyConsultationToolError("INVALID_REQUEST")
+    return {"peer_ref": peer_ref, "display_name": display_name}
+
+
+def _validated_dispatch_budget(value: Any) -> dict[str, int]:
+    if not isinstance(value, Mapping) or set(value) != set(_COMPANY_CONSULT_DISPATCH_BUDGET):
+        raise CompanyConsultationToolError("INVALID_REQUEST")
+    for key, expected in _COMPANY_CONSULT_DISPATCH_BUDGET.items():
+        if type(value.get(key)) is not int or value.get(key) != expected:
+            raise CompanyConsultationToolError("INVALID_REQUEST")
+    return dict(_COMPANY_CONSULT_DISPATCH_BUDGET)
+
+
+def validate_company_consult_dispatch_request(value: Any) -> dict[str, Any]:
+    """Validate the closed provider-free request consumed by a future dispatcher."""
+    required = {
+        "schema",
+        "operation",
+        "consultation_schema",
+        "peer",
+        "semantic",
+        "budget",
+        "valid_until",
+    }
+    if not isinstance(value, Mapping) or set(value) != required:
+        raise CompanyConsultationToolError("INVALID_REQUEST")
+    if value.get("schema") != COMPANY_CONSULT_DISPATCH_SCHEMA:
+        raise CompanyConsultationToolError("INVALID_REQUEST")
+    if value.get("operation") != "consult":
+        raise CompanyConsultationToolError("INVALID_REQUEST")
+    consultation_schema = value.get("consultation_schema")
+    if consultation_schema not in {CONSULTATION_SCHEMA, GROK_CONSULTATION_SCHEMA}:
+        raise CompanyConsultationToolError("INVALID_REQUEST")
+    valid_until = value.get("valid_until")
+    if not isinstance(valid_until, str) or _UTC_SECOND_RE.fullmatch(valid_until) is None:
+        raise CompanyConsultationToolError("INVALID_REQUEST")
+    try:
+        dt.datetime.strptime(valid_until, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError:
+        raise CompanyConsultationToolError("INVALID_REQUEST") from None
+    request = {
+        "schema": COMPANY_CONSULT_DISPATCH_SCHEMA,
+        "operation": "consult",
+        "consultation_schema": consultation_schema,
+        "peer": _validated_dispatch_peer(value.get("peer")),
+        "semantic": copy.deepcopy(
+            validate_company_consultation_tool_arguments(
+                "company.consult", value.get("semantic")
+            )
+        ),
+        "budget": _validated_dispatch_budget(value.get("budget")),
+        "valid_until": valid_until,
+    }
+    if len(canonical_company_consultation_json(request)) > COMPANY_CONSULTATION_MAX_REQUEST_BYTES:
+        raise CompanyConsultationToolError("INVALID_REQUEST")
+    return request
+
+
+def build_company_consult_dispatch_request(
+    *,
+    peer: Mapping[str, Any],
+    consultation_schema: str,
+    semantic: Mapping[str, Any],
+    valid_until: str,
+) -> dict[str, Any]:
+    """Build one exact internal ``company.consult`` dispatcher request."""
+    return validate_company_consult_dispatch_request(
+        {
+            "schema": COMPANY_CONSULT_DISPATCH_SCHEMA,
+            "operation": "consult",
+            "consultation_schema": consultation_schema,
+            "peer": dict(peer),
+            "semantic": dict(semantic),
+            "budget": dict(_COMPANY_CONSULT_DISPATCH_BUDGET),
+            "valid_until": valid_until,
+        }
+    )
+
+
 def company_consultation_tool_schema_snapshot() -> list[dict[str, Any]]:
     return [
         {
@@ -330,7 +438,77 @@ def company_consultation_tool_schema_digest() -> str:
     ).hexdigest()
 
 
+def company_consult_dispatch_schema_snapshot() -> dict[str, Any]:
+    """Return a fresh closed schema for the internal ``company.consult`` request."""
+    consult_input = next(
+        spec.input_schema
+        for spec in COMPANY_CONSULTATION_TOOL_SPECS
+        if spec.name == "company.consult"
+    )
+    return _object(
+        {
+            "schema": {
+                "type": "string",
+                "const": COMPANY_CONSULT_DISPATCH_SCHEMA,
+            },
+            "operation": {"type": "string", "const": "consult"},
+            "consultation_schema": {
+                "type": "string",
+                "enum": [CONSULTATION_SCHEMA, GROK_CONSULTATION_SCHEMA],
+            },
+            "peer": _object(
+                {
+                    "peer_ref": _string(
+                        128, pattern=r"^peer-[0-9a-f]{32}$"
+                    ),
+                    "display_name": _string(128),
+                },
+                ("peer_ref", "display_name"),
+            ),
+            "semantic": copy.deepcopy(consult_input),
+            "budget": _object(
+                {
+                    "max_answers": {"type": "integer", "const": 1},
+                    "max_evidence_reads": {"type": "integer", "const": 4},
+                    "max_forward_hops": {"type": "integer", "const": 0},
+                    "max_payload_bytes": {"type": "integer", "const": 32768},
+                },
+                (
+                    "max_answers",
+                    "max_evidence_reads",
+                    "max_forward_hops",
+                    "max_payload_bytes",
+                ),
+            ),
+            "valid_until": {
+                "type": "string",
+                "minLength": 20,
+                "maxLength": 20,
+                "pattern": r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$",
+            },
+        },
+        (
+            "schema",
+            "operation",
+            "consultation_schema",
+            "peer",
+            "semantic",
+            "budget",
+            "valid_until",
+        ),
+    )
+
+
+def company_consult_dispatch_schema_digest() -> str:
+    return hashlib.sha256(
+        canonical_company_consultation_json(
+            company_consult_dispatch_schema_snapshot()
+        )
+    ).hexdigest()
+
+
 COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST = company_consultation_tool_schema_digest()
+COMPANY_CONSULT_DISPATCH_SCHEMA_DIGEST = company_consult_dispatch_schema_digest()
 
 
 def _capped_envelope(envelope: dict[str, Any]) -> dict[str, Any]:
@@ -416,20 +594,12 @@ class CompanyConsultationGateway:
                 return _result(tool_name, {"peers": peers})
             if tool_name == "company.consult":
                 peer = self.peer_resolver.resolve(normalized["to"], program_ref=self.program_ref)
-                request = {
-                    "schema": COMPANY_CONSULTATION_SCHEMA,
-                    "consultation_schema": peer.consultation_schema,
-                    "operation": "consult",
-                    "peer": peer.public_projection(),
-                    "semantic": normalized,
-                    "budget": {
-                        "max_answers": 1,
-                        "max_evidence_reads": 4,
-                        "max_forward_hops": 0,
-                        "max_payload_bytes": 32768,
-                    },
-                    "valid_until": self.utc_now(),
-                }
+                request = build_company_consult_dispatch_request(
+                    peer=peer.public_projection(),
+                    consultation_schema=peer.consultation_schema,
+                    semantic=normalized,
+                    valid_until=self.utc_now(),
+                )
                 response = await self.dispatcher(tool_name, request)
                 return _result(tool_name, self._service_data(response))
             request = {
@@ -453,6 +623,8 @@ class CompanyConsultationGateway:
 
 __all__ = [
     "COMPANY_CONSULTATION_CAPABILITY",
+    "COMPANY_CONSULT_DISPATCH_SCHEMA",
+    "COMPANY_CONSULT_DISPATCH_SCHEMA_DIGEST",
     "COMPANY_CONSULTATION_ERROR_CODES",
     "COMPANY_CONSULTATION_RESULT_SCHEMA",
     "COMPANY_CONSULTATION_SCHEMA",
@@ -464,5 +636,9 @@ __all__ = [
     "CompanyConsultationGateway",
     "CompanyConsultationToolError",
     "CompanyConsultationToolSpec",
+    "build_company_consult_dispatch_request",
+    "company_consult_dispatch_schema_digest",
+    "company_consult_dispatch_schema_snapshot",
+    "validate_company_consult_dispatch_request",
     "validate_company_consultation_tool_arguments",
 ]
