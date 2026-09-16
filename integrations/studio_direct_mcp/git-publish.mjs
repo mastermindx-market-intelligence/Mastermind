@@ -55,9 +55,10 @@ export const STUDIO_GIT_COMMIT_CURRENT_CHANGES_TOOL = Object.freeze({
     'Create exactly one local commit from all current committable changes in one existing Mastermind ' +
     'attended Web workspace. The host resolves the workspace and branch from canonical mmx-workspace ' +
     'registration. The caller supplies only the operation id, exact expected current HEAD and a bounded ' +
-    'single-line commit message. Ignored files stay uncommitted. A private temporary index prevents this ' +
-    'tool from mutating the caller\'s real Git index, and compare-and-swap ref update prevents stale-head ' +
-    'publication. It never pushes, accepts paths, changes remotes, or accepts shell commands.',
+    'single-line commit message. Ignored files stay uncommitted. A private temporary index prevents ' +
+    'pre-commit staging side effects; after the fenced ref update is known applied, the real index is ' +
+    'synchronized to that exact commit. Compare-and-swap ref update prevents stale-head publication. ' +
+    'It never pushes, accepts paths, changes remotes, or accepts shell commands.',
   inputSchema: {
     type: 'object',
     properties: {
