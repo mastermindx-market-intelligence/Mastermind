@@ -11,6 +11,11 @@ Companions: `…_RESOURCE_COMPOSITION_CONTRACT_2026-09-16.md`, `…_ADVERSARIAL_
 EXECUTIVE-CAPACITY-FABRIC." Steps B–H are mapped so that a successor can see the shape; none is commissioned
 here, and no custody is claimed over any PR listed below.
 
+Protected master has moved to `8ba7deedde164c90298d3e88785d98e02fa5e2d2`; the census anchor remains
+`master@0fe8074f…` for existing receipts. #682 (`52bb6026`) and #683 (`a78b8fe2`) are path-disjoint,
+capacity-adjacent physical-resource precedents only. They do not supply provider-resource composition, provider
+holds, or any provider-capacity acceptance class.
+
 ---
 
 ## 0. Custody ledger (read live 2026-09-16, one `gh pr list` call per repository)
@@ -47,7 +52,8 @@ Two custody rules that govern every row above and are not negotiable by this map
 - **What this PR contributes**: the contract proposal, its acceptance matrix, and this map — docs only. No `.py`,
   no `config/`, no `schema/`, and strict `provider_capacity.v1` untouched (contract §9.1).
 - **Who may write**: this lane wrote the three documents; the seat posts. **Release**: Sol architecture review of
-  the contract shape + schema name/version + the Provider Capacity V2 embedding/binding decision (contract §9.0).
+  the contract shape + the still-UNFROZEN domain-explicit schema candidate + the Provider Capacity V2
+  embedding/binding decision (contract §9.0).
   The seat does not release.
 - **Blocked by**: nothing. This is the step that unblocks the rest.
 - **Not done here**: the machine-readable schema file. A schema file is a later reviewed act; freezing semantics
@@ -57,11 +63,19 @@ Two custody rules that govern every row above and are not negotiable by this map
 
 R35 §22 B names three, each with an existing owner and an existing hold.
 
+Step B is FROZEN here as a shape, reference only: deterministic receding-horizon over the CURRENT authorized
+Executive READY set; hard gates first; constrainedness-before-convenience planning order; conservative debit
+plans simulated per C1-top-tied candidate; one-route-per-demand-unit provisional reserves (no multi-provider
+double reserve); lexicographic comparison a–i; an ADVISORY plan bound to READY-set identity, C1 inputs, Provider
+Capacity V2/resource graph, hold set, cost-calibration generation, routing/policy generation, and
+as-of/fresh-until digests; #657-style preference only for the exact current C1 tie; recompute on material events;
+no long-lived planner state. **Do not implement Step B before #688's Step-A freeze.**
+
 ### B/#7103 — reconcile current generation axes
 - **What exists**: the subscription source and the `/token_plan/remains` parser that preserves per-model rows.
 - **What step B asks**: reconcile current GLM / Alibaba Team / MiniMax `capability_generation`,
-  `resource_generation`, `composition_generation`, and `rate_generation` facts; retain historical generations;
-  **do not infer enrollment**.
+  `resource_generation`, `composition_generation`, and `model_harness_cost_generation` facts; retain historical
+  generations; **do not infer enrollment**.
 - **Custody**: RELEASE HOLD at `6ce16e745064`; the seat removed the arms (R13). Its writer keeps it.
 - **Blocked by**: the hold. Composition dependency: contract §2.2 defines the generation axes, and
   §5.3 defines that its per-model rows are views, not wallets — so B/#7103 should not be released before A is
@@ -90,7 +104,8 @@ R35 §22 B names three, each with an existing owner and an existing hold.
 - **Owner**: Provider Control, without exposing credentials.
 - **What step C asks**: for every purchased provider recover actual product; tier; the six
   generation/freshness axes of contract §2.2 (`capability_generation`, `resource_generation`,
-  `composition_generation`, `realm_generation`, `rate_generation`, `observed_at`/reset boundary); seat/realm
+  `composition_generation`, `realm_binding_generation`, `model_harness_cost_generation`,
+  `observed_at`/reset boundary); seat/realm
   binding; billing/reset generation; shared-pack identity where applicable; usage-policy class. R35 §22 C:
   "Do not infer this from what we remember buying."
 - **What exists at master**: the *shape* of a credential ceremony and realm receipts, all hermetic —
@@ -134,8 +149,16 @@ R35 §22 B names three, each with an existing owner and an existing hold.
   `measured_native_delta` admitted as a burn method (`control_plane/provider_model_economics.py:21`) and the
   declaration-without-balances rule pinned (`tests/test_provider_model_economics.py:91`).
 - **What is missing**: Alibaba **Team** model entries (the catalog's Alibaba surface is
-  `alibaba_token_plan_personal`), and cohort keys that bind model *and* harness *and* `rate_generation`
+  `alibaba_token_plan_personal`), and cohort keys that bind model *and* harness *and* `model_harness_cost_generation`
   (contract §2.2; matrix class 15).
+- **CF2-I / incumbent C1 note**: #657 (head `bc89980c7e06e81a883da8078660d3bf208e68eb`, OPEN,
+  BUILT_NOT_PROVEN / REPAIR_REQUIRED) is the incumbent candidate seam; repair it on its own branch after Step A.
+  CF2-I is downstream integration/adoption owner. End state: Model Router first lawful tier → concrete C1 Worker
+  candidates → Capacity resource/economics source → #657-style preference receipt → CF2-I / C1-v2 → C2 /
+  Executive atomic resource+worker commitment → existing broker/adapter. RF1 receipts:
+  `docs/EXECUTIVE_WORKER_ROUTING.md:74@8ba7deed` and `:95@8ba7deed`. Never mint a worker selector, second
+  model-to-worker registry, or provider scheduler, and never reorder `preferred_model_aliases` on economics
+  grounds.
 - **Blocked by**: step C for the Team entries; step A for the cohort-key definition.
 
 ## 6. Step F — Shadow portfolio planner
@@ -150,6 +173,8 @@ R35 §22 B names three, each with an existing owner and an existing hold.
 - **Blocked by**: A (the planner needs a tree to plan over), C+D (it needs real observations to be a shadow of
   anything), E (it needs cohort costs).
 - **Not authorised here**: any live placement, and any scheduler/daemon.
+- **Adversarial additions**: time-bound offer expiry and surface mismatch (matrix classes 31–32) must be on the
+  frozen Step-B test list; a promotion change invalidates the advisory plan digest.
 
 ## 7. Step G — Bounded real canaries
 
@@ -165,6 +190,13 @@ R35 §22 B names three, each with an existing owner and an existing hold.
   adapters work).
 - **Standing precedent**: an interactive canary never flips a flag (R18 (2)); `claude -p` headless is UNATTENDED
   unless a policy receipt admits that exact mode (R13).
+- **Frozen qualification-order reference, NOT commissioned**: after Step A, (1) GLM Coding Plan through
+  protected #581's hermetic `interactive_canary` admission seam; binding
+  `glm-coding-plan.claude-code-anthropic` remains SPEC_ONLY, and this is a bounded interactive canary, not a flag
+  flip. (2) MiniMax M3 as a utilization target in an interactive/tool lane on the #665 incumbent path; host
+  wrapper remains M2.7. (3) Alibaba Team as an INTERACTIVE_TOOL capacity domain only because provider terms
+  prohibit automated backends and the protected profile still says Personal against the Chairman's Team; that
+  enrollment identity must be fixed before any plan-specific canary.
 
 ## 8. Step H — Small live fleet
 
@@ -174,7 +206,7 @@ R35 §22 B names three, each with an existing owner and an existing hold.
 - **Blocked by**: the acceptance suite. The race tests are matrix class 6 (currently PARTIAL — worker-slot
   exclusion only) and the correction/reset tests are classes 7 and 8 (currently MISSING). H cannot open while
   those three are not EXISTS. Worth stating plainly because it sizes the remaining work: at this pin **no** class
-  of the twenty is fully EXISTS — eight are PARTIAL, twelve MISSING.
+  of the thirty-two is fully EXISTS — ten are PARTIAL, twenty-two MISSING.
 
 ---
 

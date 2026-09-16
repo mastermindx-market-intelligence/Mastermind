@@ -3,10 +3,12 @@
 STATUS: PROPOSAL — HOLD-FOR-SOL
 Census anchor: master@0fe8074ff953b2ced9025ed40f0f66019c759967 (every `file:line` in this document was read at
 that commit; nothing here was asserted from memory).
-Authority: Sol capacity-routing architecture ruling relayed 2026-09-16T06:52:49Z, consumed as R35. This document
+Authority: Sol capacity-routing architecture ruling relayed 2026-09-16T06:52:49Z, consumed as R35; formal review
+5220216985, addendum 5694353522, and R42/R51/R52 are additionally binding on this repair. This document
 discharges **step A only** ("Freeze resource-composition + execution-mode semantics").
 Proposed schema name/version (subject to the architecture review that is this document's release condition):
-`mastermind.provider_resource_composition/v1` — **not as an independently acquired capacity truth**. The graph
+`mastermind.provider_capacity_resource_composition/v1`, **UNFROZEN pending the repaired semantics** — **not as
+an independently acquired capacity truth**. The name is deliberately domain-explicit. The graph
 must be embedded as Provider Capacity V2's closed sub-contract or cryptographically bound to exactly one V2
 observation (§9.0).
 Owner: the existing Shared AI Provider Control / Capacity authority. **No new owner is proposed.**
@@ -67,6 +69,10 @@ R35 §1 requires five facts to stay distinct. Naming them here because every lat
 4. **SCHEDULABLE** — observed minus holds, reserves, uncertainty margin, cooling, concurrency (§6).
 5. **EFFECTIVE WORK** — how many accepted jobs of a cohort that schedulable capacity is expected to produce (§6).
 
+Additional hard separation: **EXECUTION_LANES != ENTITLEMENT_RESOURCES.** Worker wrappers, process slots, and
+host lanes are execution surfaces. They never multiply one provider resource or its `remaining`. Concurrency is
+modelled separately as `safe_parallelism` (§4.3), never by minting another wallet (§5.3, matrix class 29).
+
 A single percentage collapses all five and is therefore never a capacity fact. A provider can report 90 %
 remaining and supply **zero** lawful autonomous capacity because (3) fails; it can report 5 % remaining and still
 be the only lawful route for a hard job.
@@ -88,9 +94,13 @@ provider-enforced bound. Identity is minted by Provider Control and is never der
 the logical quota domain and `host_ref + capacity_capability_id + realm_generation` as the executable local realm
 (R15). Resource identity is minted **inside** that namespace, not beside it:
 
-> `resource_id := (capacity_capability_id, resource_key)` — where `resource_key` is a provider-scoped name for
-> the specific bucket (`plan_5h`, `plan_weekly`, `seat_monthly`, `shared_pack:<pack_generation>`,
+> `resource_id := (capacity_capability_id, resource_key)` — where stable `resource_key` is a provider-scoped
+> name for the specific bucket (`plan_5h`, `plan_weekly`, `seat_monthly`, `shared_pack:<pack_id>`,
 > `member_pack_cap`, `concurrency`).
+
+A stable identity plus a generation — never identity-with-generation-baked-in. A pack's epoch is carried in its
+own `resource_generation`; it is not encoded into `resource_key`, which is stable across that epoch. Encoding
+both would double-date identity and let a join silently mint a new wallet.
 
 The consequence is the point of the whole exercise: **two `host_ref`s that resolve to the same
 `capacity_capability_id` resolve to the same `resource_id`, and therefore to one set of numbers.** Host replicas
@@ -111,8 +121,8 @@ axis states what it does **not** invalidate:
 | `capability_generation` | What the subscription contract grants: product, tier, and seat entitlement. | Provider Control enrollment | Freshness alone; a bucket's identity unless that bucket is replaced; calibration governed by other axes. |
 | `resource_generation` | The identity epoch of the bucket or wallet itself. It moves only when that bucket is replaced by a different bucket. | Provider Control resource identity | The bucket merely because it refilled; live holds; cohort/debit calibration. |
 | `composition_generation` | The shape of the tree: which resources exist, in which operator, in which order, including seat-before-pack, nearest-expiry ordering, and presence of a member ceiling. | Provider Control deduction policy | Observed remaining in an unchanged bucket; live holds; rate/cohort calibration. |
-| `realm_generation` | The existing Family-B key/API/realm binding currentness. This contract does not re-mint it. | Family-B realm owner | Quota amount, bucket identity, observed remaining, or holds bound to the resource epoch. |
-| `rate_generation` | Model alias/version, debit multipliers, and rate card. | Model catalog / economics owner | The underlying shared wallet's balance or identity; live holds. |
+| `realm_binding_generation` | The existing Family-B `realm_generation` field, renamed here only to identify this axis. This contract does not re-mint or replace that field. | Family-B realm owner | Quota amount, bucket identity, observed remaining, or holds bound to the resource epoch. |
+| `model_harness_cost_generation` | Model alias/version, harness, debit multipliers, and rate card (or exact digests). | Model catalog / economics owner | The underlying shared wallet's balance or identity; live holds. |
 | observation freshness | Not a generation: `observed_at`, the reset boundary, and staleness. It governs usability of a number. | Provider Control observation | Joins, hold binding, or calibration; crossing a reset only makes the old number stale. |
 
 The required non-effects are normative:
@@ -120,16 +130,21 @@ The required non-effects are normative:
 - **Ordinary reset or renewal does not automatically create a new resource epoch.** A five-hour reset, weekly
   reset, or ordinary same-tier subscription renewal makes the observation STALE and requires a fresh observation.
   It does not bump `resource_generation`, does not orphan live holds, and does not reset calibration.
-- **Key/API realm rotation is realm currentness, not new quota.** Bumping `realm_generation` invalidates the
+- **Key/API realm rotation is realm currentness, not new quota.** Bumping `realm_binding_generation` invalidates the
   executable binding; it does not create a new wallet, does not change observed remaining, and does not release
   or orphan holds bound to the resource epoch.
-- **Model alias/version and rate-card changes invalidate cohort/debit evidence, not the underlying shared
-  wallet.** Bumping `rate_generation` retires q95/cost calibration to historical and reverts new placement to
-  conservative; the resource's balance, identity, and live holds are untouched.
+- **Model, harness, and cost changes invalidate cohort/debit evidence, not the underlying shared wallet.**
+  Bumping `model_harness_cost_generation` retires q95/cost calibration to historical and reverts new placement
+  to conservative; the resource's balance, identity, and live holds are untouched.
 - **Holds bind the resource epoch plus immutable composition/debit evidence.** A hold is keyed by
   `(resource_id, resource_generation)` and additionally records, immutably, the `composition_generation` and
-  `rate_generation` under which it was computed. Bumping composition or rate re-dates FUTURE evaluation; it never
-  rebinds or orphans a live hold.
+  `model_harness_cost_generation` under which it was computed. Bumping composition or cost re-dates FUTURE
+  evaluation; it never rebinds or orphans a live hold.
+- **A generation bump is never a reservation release.** Before a new `resource_generation` may authorize any
+  claim, every nonterminal old-generation hold must be reconciled, conservatively carried/mapped forward, or the
+  resource remains BLOCKED. Carrying the hold preserves its quantity and evidence; it does not rewrite history.
+- **Claim evidence binds every applicable axis.** A claim receipt names all axes it was computed under, including
+  `realm_binding_generation` and `model_harness_cost_generation`; absence is incomplete evidence, not zero.
 - **Never orphan live holds or reset calibration by bumping the wrong axis.** That is the governing rule.
 
 The old G1–G8 event list remains fully mapped; no event is lost:
@@ -139,11 +154,11 @@ The old G1–G8 event list remains fully mapped; no event is lost:
 | G1 plan generation change (tier up/down, plan replacement) | `capability_generation`; a plan replacement that replaces the bucket also moves `resource_generation`; an ordinary same-tier renewal moves neither. | Same-tier renewal is freshness-only and neither orphans holds nor resets calibration. |
 | G2 seat assignment/reassignment | `capability_generation`; `resource_generation` only where the seat's bucket is a different bucket; UNKNOWN for Alibaba until enrollment is proven. | Reassignment alone does not create quota or change a surviving wallet's balance. |
 | G3 subscription renewal / re-purchase | FRESHNESS ONLY for ordinary renewal at the same entitlement; `capability_generation` only if entitlement changed; a re-purchase that mints a new bucket creates a new `resource_id`. | A new shared pack is not an epoch bump on an existing resource; it is a new resource. |
-| G4 API-key or realm binding change (including rotation) | `realm_generation` ONLY. | No new wallet, no changed remaining, no hold release/orphaning. |
-| G5 provider model generation change (including silent alias update) | `rate_generation` ONLY. | Shared-wallet balance, identity, and live holds are untouched. |
+| G4 API-key or realm binding change (including rotation) | `realm_binding_generation` ONLY. | No new wallet, no changed remaining, no hold release/orphaning. |
+| G5 provider model generation change (including silent alias update) | `model_harness_cost_generation` ONLY. | Shared-wallet balance, identity, and live holds are untouched. |
 | G6 shared-pack generation (pack purchased/retired) | `composition_generation`; a new pack gets a new `resource_id`. | Existing packs' `resource_generation` is unchanged. |
 | G7 provider deduction-policy change | `composition_generation`. | This re-dates future evaluation and does not rebind or orphan live holds. |
-| G8 rate-card generation change | `rate_generation`. | It invalidates cohort/debit evidence, not the shared wallet or live holds. |
+| G8 model/harness/rate-card generation change | `model_harness_cost_generation`. | It invalidates cohort/debit evidence, not the shared wallet or live holds. |
 
 ### 2.3 Generation is not freshness — reset ≠ observed refill
 The generation axes and observation freshness are deliberately separate, because conflating them is how a reset
@@ -178,24 +193,26 @@ E        := LEAF | ALL_OF(node, ...) | ORDERED_SPILL(node, ...) { stage_routing 
 node     := { id, role, expr: E }
 role     := BUDGET
           | CEILING { bounds: <id>, limit, window?, next_reset_at?, capability_generation,
-                      resource_generation, composition_generation, rate_generation, observation }
+                      resource_generation, composition_generation, realm_binding_generation,
+                      model_harness_cost_generation, native_unit, cost_r(c), observation }
           | STAGE                          # the only lawful role inside ORDERED_SPILL
 LEAF     := { resource_id, native_unit, capability_generation, resource_generation,
-              composition_generation, rate_generation, observation }
+              composition_generation, realm_binding_generation, model_harness_cost_generation,
+              cost(c), observation }
 observation := { observed_remaining | UNKNOWN, observed_at, next_reset_at, freshness, expires_at? }
 stage_routing := PARTITIONED | ATOMIC_FALLBACK        # provider-declared; see §3.3
 ```
 
-Four well-formedness rules make the grammar evaluable rather than suggestive:
+Five well-formedness rules make the grammar evaluable rather than suggestive:
 
 1. **`bounds` must resolve.** A CEILING's `bounds` names exactly one node that is a descendant of the same
    enclosing `ALL_OF`. A CEILING may not bound itself, may not bound a node outside that subtree, and two
    CEILINGs may bound the same node — in which case both apply and the tighter wins.
-2. **A CEILING is a fully dated resource, not a constant.** It carries its own `limit`, optional `window` and
-   `next_reset_at`, the §2.2 generations relevant to its entitlement, composition, and debit evidence, and its
-   own `observation`. A *windowed* ceiling therefore resets and
-   goes stale on exactly the same rules as a BUDGET (§2.3); a non-windowed ceiling simply has no
-   `next_reset_at`.
+2. **A CEILING is a fully dated, unit-bound resource, not a constant.** It carries its stable `resource_id`,
+   own `native_unit`, per-cohort cost vector, applicable §2.2 generations, `limit`, optional `window` and
+   `next_reset_at`, and own `observation`. A *windowed* ceiling resets and goes stale on exactly the same rules
+   as a BUDGET (§2.3); a non-windowed ceiling simply has no `next_reset_at`. Its `native_unit` must equal the
+   unit of the entire subtree named by `bounds`; a mismatch is ill-formed.
 3. **A proportional ceiling must be resolved to an absolute remainder.** A sublimit expressed as a fraction of
    its parent (the Claude/Fable case, §5.5) is
    `limit = fraction × entitlement(parent, current capability_generation)`, and its *remaining* is
@@ -207,6 +224,11 @@ Four well-formedness rules make the grammar evaluable rather than suggestive:
    additionally be *bounded* by any number of CEILINGs, but a second BUDGET occurrence of the same
    `resource_id` is ill-formed — that is the aliasing shape that double-debits. A resource that is genuinely
    both spent and bounding is written once as the BUDGET and referenced by `bounds` from the CEILING.
+5. **Units are explicit and mismatches are ill-formed.** Every BUDGET and CEILING carries a stable
+   `resource_id`, `native_unit`, applicable generation axes, and a per-cohort debit requirement `cost_r(c)` in
+   that resource's native unit (or an explicit reviewed conversion). All stages of one `ORDERED_SPILL` must be
+   unit-compatible. Tokens, requests, currency, and concurrency are not one unit; the evaluator never invents a
+   conversion.
 
 ### 3.1 LEAF
 A leaf names one resource, its provider-native unit (Credits, provider quota units, requests, …), its §2.2
@@ -238,6 +260,12 @@ class 2).
 `ORDERED_SPILL(s1, s2, …, sk)` means: the provider's own deduction rule consumes from `s1` until `s1` is
 exhausted, then `s2`, and so on, in the order given. Order is provider-defined and is part of the contract — for
 Alibaba shared packs the order is **nearest expiry first** (failure class 5).
+
+That order is provider policy, not an evaluator heuristic. Provider Control (the producer) publishes a
+**canonical stage order** with its own policy `composition_generation` and provenance. The evaluator validates
+and consumes that order; it must never sort stages generically by expiry. A generic expiry policy is lawful only
+when the provider contract explicitly defines it for those exact stages. Input that is not the published
+canonical order is refused or flagged as ill-formed/inadmissible, never re-sorted.
 
 One operation's cost may straddle a stage boundary: if `s1` has 3,000 units remaining and the operation costs
 10,000, the operation debits 3,000 from `s1` and 7,000 from `s2`. The partition sums to exactly the cost — never
@@ -280,47 +308,65 @@ existing owner's job. Adding alternation here would quietly move the allocator i
 
 ## 4. Evaluation semantics
 
-Let `c` be a task cohort and `q95(c)` its conservative upper native cost for the resource's unit (R35 §11 — a
-conservative upper estimate keyed on task class, model/harness `rate_generation`, effort, context band and tool
-set; never a cohort mean).
+Let `c` be a task cohort. `q95(c)` names the conservative **estimator** that produces each per-resource debit
+requirement `cost_r(c)`, keyed on task class, model/harness `model_harness_cost_generation`, effort, context
+band, and tool set (R35 §11). It is an upper estimate, never a cohort mean, and never one scalar imposed across
+heterogeneous resources.
 
-### 4.1 Available value
-`avail(E)` returns available **native value**, recursively:
-
-A stage or child is **admissible** for a given operation only if all four hold: its execution mode is
-policy-eligible (§7); its observation is FRESH (§2.3); every §2.2 generation relevant to its resource identity,
-composition, executable binding, and debit evidence is current; and its value does not expire before the
-operation's completion horizon. An inadmissible node contributes **zero** and is reported under a named
-`ineligible` / `expiring` component — never silently dropped, because a silent drop is indistinguishable from an
-exhausted resource and hides the bottleneck (R35 §17, §18).
+### 4.1 Typed evaluation and single-operation feasibility
+Evaluation returns:
 
 ```
-avail(LEAF)                              = usable(LEAF)                    # §6.1
-avail(ALL_OF(...))                       = min over admissible BUDGET children of avail(child)
-                                           , then, for each CEILING c, capped by remaining(c)
-                                             applied to the subtree named by c.bounds
-avail(ORDERED_SPILL, PARTITIONED)        = SUM over admissible stages of avail(stage)
-avail(ORDERED_SPILL, ATOMIC_FALLBACK)    = MAX over admissible stages of avail(stage)   # one operation
+EvalResult := KNOWN(value) | KNOWN_ZERO(reason) | INELIGIBLE(reason) | UNKNOWN(reason) | STALE(reason)
 ```
 
-`ALL_OF` **minimises over BUDGETs and caps by CEILINGs**. A `PARTITIONED` spill **sums**; an `ATOMIC_FALLBACK`
-spill **maximises**. Mixing any of these up is the defect this contract exists to prevent.
+Every non-KNOWN result carries a typed refusal reason and is reported, never silently zeroed. `avail(E)` is
+retained only as the single-operation feasibility and reporting quantity; it is no longer the sizing primitive,
+and `startable_jobs` is never `floor(avail/q95)` at the root.
 
-### 4.2 startable_jobs is computed at the root, after the algebra
-```
-startable_jobs(c, E) = floor( avail(E) / q95(c) )
-```
-Never `min` over per-leaf `floor(usable_r / q95)`. The division happens **once, at the root of the evaluated
-expression**, because a spill stage that is exhausted is not a constraint of zero — it is a depleted first stage
-whose successor still holds value.
+A stage or child is eligible only if its execution mode is policy-eligible (§7), observation is FRESH (§2.3),
+applicable §2.2 generations are current, its units are well formed, and it does not expire before the operation's
+completion horizon. A required `ALL_OF` child is never filtered out: if any child is `INELIGIBLE` or
+`KNOWN_ZERO`, the parent is `KNOWN_ZERO` with that child's reason; if any child is `UNKNOWN` or `STALE`, the
+parent is correspondingly `UNKNOWN` or `STALE` with that reason. "Admissible" may never mean "omitted from the
+min."
 
-One exception follows from §3.3 and must be stated, because it is the only place the division is not at the
-root: under `ATOMIC_FALLBACK` no job may straddle, so whole jobs fit *per stage*:
+An `ORDERED_SPILL` stage may be skipped only under the provider-declared fallback contract. An UNKNOWN, STALE, or
+otherwise undecidable earlier stage may not be treated as exhausted; the spill is UNKNOWN from that stage onward.
+For homogeneous single-unit reporting:
+
 ```
-startable_jobs(c, ORDERED_SPILL as ATOMIC_FALLBACK) = Σ over admissible stages of floor( avail(stage) / q95(c) )
+avail(LEAF)                           = usable(LEAF)                         # §6.1
+avail(ALL_OF(...))                    = min over BUDGET children, then each CEILING caps its bounded subtree
+avail(ORDERED_SPILL, PARTITIONED)     = SUM over admissible stages
+avail(ORDERED_SPILL, ATOMIC_FALLBACK) = MAX over admissible stages          # one indivisible operation
 ```
-The remainder below `q95(c)` in each stage is stranded-at-stage and is reported as such (§4.6), not silently
-summed into a job that could never be placed.
+
+There is no lawful scalar `avail` for heterogeneous simultaneous budgets: each requirement remains in its own
+`native_unit`, and whole-job count is evaluated by §4.2.
+
+### 4.2 Recursive whole-job count
+`jobs_fit(c, E)` is the sizing primitive and is evaluated per admitted execution mode (§7):
+
+```
+jobs_fit(c, LEAF) = floor(usable(LEAF) / cost_LEAF(c))
+
+jobs_fit(c, ALL_OF(...)) =
+    min over BUDGET children of jobs_fit(c, child)
+    , then for each CEILING k capped by
+      floor(remaining(k) / cost_k(c)) applied to the subtree named by k.bounds
+
+jobs_fit(c, ORDERED_SPILL as PARTITIONED) =
+    floor(SUM over admissible stages of avail(stage) / cost(c))
+
+jobs_fit(c, ORDERED_SPILL as ATOMIC_FALLBACK) =
+    SUM over admissible stages of jobs_fit(c, stage)
+```
+
+`startable_jobs(c, E) = jobs_fit(c, E)`. Heterogeneous simultaneous budgets use
+`jobs_fit = min over r of floor(usable_r / cost_r(c))`, never `min(raw avail) / one q95`. A `PARTITIONED` spill
+divides once over its stage sum because a job may straddle; `ATOMIC_FALLBACK` sums whole jobs per stage because
+no job may straddle. That asymmetry is the point.
 
 ### 4.3 Concurrency is not a divisor
 Concurrency is an observed dynamic resource (§6.3), not a term inside `startable_jobs`. It bounds *simultaneity*,
@@ -344,13 +390,19 @@ below `q95`), `stranded_below_cost` (a remainder below one job's cost), `ineligi
 `expiring_before_horizon`. A zero `startable_jobs` with no stranding reason is an incomplete answer: R35 §17's
 "Alibaba: 68 % remaining" failure is precisely a number that conceals which resource is the bottleneck.
 
+These reasons are diagnostics carried alongside `EvalResult`, not substitutes for it. `ineligible_by_policy` and
+`expiring_before_horizon` correspond to `INELIGIBLE(reason)` when a required child is blocked; an exhausted or
+policy-blocked required child yields `KNOWN_ZERO(reason)` only under §4.1's propagation rules. Stranded value is
+reported even when the typed result is UNKNOWN or STALE, but it never converts that result into capacity.
+
 ### 4.6 Unknown fails closed
 If any leaf in `E` has UNKNOWN or STALE observation; unknown `capability_generation`, `resource_generation`,
-`composition_generation`, `realm_generation`, or `rate_generation`; unproven distinct entitlement/account
-resource status (§5.1–§5.2); unproven view independence (§5.3); or UNKNOWN provider-declared `stage_routing`
-(§3.3, §5.4), then `avail(E)` is **UNKNOWN**, not zero and not the entitlement. An UNKNOWN expression cannot size
-capacity, cannot authorise a claim, and cannot satisfy `capacity_known`. It also does not make the route unusable
-for a *human-attended* act — it makes it unusable as **autonomous Fabric capacity**.
+`composition_generation`, `realm_binding_generation`, or `model_harness_cost_generation`; an unreconciled
+`resource_generation` transition; unproven distinct entitlement/account resource status (§5.1–§5.2); unproven
+view independence (§5.3); or UNKNOWN provider-declared `stage_routing` (§3.3, §5.4), the expression returns the
+corresponding typed `UNKNOWN(reason)` / `STALE(reason)`, never zero and never entitlement. Such a result cannot
+size capacity, authorise a claim, or satisfy `capacity_known`. It also does not make the route unusable for a
+*human-attended* act — it makes it unusable as **autonomous Fabric capacity**.
 
 ---
 
@@ -426,23 +478,29 @@ E_minimax = ALL_OF(
     BUDGET minimax_plan_5h[capability_generation],
     BUDGET minimax_plan_weekly[capability_generation]
 )
-views(E_minimax) = { "MiniMax-M3": <row>, "MiniMax-M2.7": <row>, ... }   # independence: UNPROVEN
+views(E_minimax) = { "MiniMax-M2.7": <row>, "MiniMax-M3": <row>, ... }  # independence: UNPROVEN
 ```
 `/token_plan/remains` exposes model-oriented remaining rows and the #7103 parser preserves them. Preserving a row
 is not establishing a wallet. Normative rules:
 
 - A view with `independence: UNPROVEN` contributes **zero** additional available value. `avail` is computed from
   the underlying resources only. Views may be displayed; they may never be summed (failure class 14).
-- Independence is proven only by a **discriminating observation pair**: an operation attributed to view A must
-  leave view B's remaining unchanged across two observations of the same `resource_generation`, with the same
-  `composition_generation` and `rate_generation`. Until that evidence exists at those current generations,
-  independence is UNPROVEN and fails closed.
+- Independence defaults to **UNPROVEN**. Promotion requires either explicit provider contract evidence or a
+  reviewed, repeated causal experiment that declares observation resolution, lag budget, the same
+  `resource_generation`, isolated operation attribution, and correction/retraction handling. A single observation
+  pair is insufficient: reporting lag, rounding, caching, or attribution delay can make view A move while view B
+  appears unchanged. Until that evidence exists at current `composition_generation` and
+  `model_harness_cost_generation`, independence remains UNPROVEN and fails closed.
 - Master already refuses the adjacent error: `config/provider_model_economics.v1.json` records for
   `minimax.minimax-m3` that the Token Plan "is governed by 5-hour rolling, weekly, billing-cycle token allocation
   and concurrency resources", and `tests/test_provider_model_economics.py:91`
   (`test_subscription_burn_method_is_declared_without_quota_balances`) pins that the catalog declares a burn
   *method* without carrying balances.
 - The plan's `capability_generation` itself is **UNKNOWN** at this pin (§9).
+- **OBSERVED INVENTORY, not enrollment and not authorization:** the installed MiniMax wrapper pins
+  **MiniMax-M2.7**, not M3; the installed Alibaba wrapper pins **qwen3.8-max** with no flash/plus/max cohort
+  split yet. Counts such as "7/7 minimax idle" or "6/6 bailian" are execution lanes, not entitlement wallets. No
+  wrapper change is authorized here.
 
 ### 5.4 Alibaba Team — seat → member ceiling → packs by nearest expiry
 ```
@@ -494,18 +552,27 @@ with a sublimit, not two wallets (R14). Therefore:
 ## 6. Usable value, holds, reserves, concurrency
 
 ### 6.1 usable
-Per R35 §10, for each leaf:
+Every allocation binds the **exact observation identity/digest** it was computed against. Per R35 §10, for each
+leaf:
 ```
 usable_r = observed_remaining_r
-         - outstanding_holds_r        # §8, this fabric's own un-reconciled claims
+         - unreflected_holds_r        # §8, own claims not yet covered by this observation
+         - known_unobserved_debits_r  # known actual debit awaiting a covering observation
          - hard_reserve_r             # policy floor
          - soft_reserve_r             # scarcity reserve derived from the READY graph (advisory, later step)
          - uncertainty_margin_r       # observation-freshness and accounting-lag margin
 ```
 `usable_r` is clamped at zero and is never negative-signalled as debt.
 
+A hold is **reflected** once a covering observation exists — same `resource_generation`, `observed_at` at or
+after the debit's effective time plus the provider's declared accounting-lag budget, and compatible observation
+identity/digest semantics. A reflected hold is never subtracted twice. If an actual debit is KNOWN but the
+observation is older, it is retained/transformed as an unobserved debit until a covering observation arrives.
+If reflectedness cannot be decided, accounting lag and ambiguity stay conservative and the hold counts as
+unreflected — never zero.
+
 ### 6.2 Reserve with a conservative cost
-Reservations use `q95(c)` (or the reviewed policy quantile), never the cohort mean; failed work stays in the cost
+Reservations use the q95 estimator (or reviewed policy quantile), never the cohort mean; failed work stays in the cost
 of reaching an accepted result; ambiguous shared-consumption attribution is rejected rather than learned from
 (R35 §11, failure class 16). A candidate without comparable evidence stays in SHADOW/CANARY rather than receiving
 production placement.
@@ -517,11 +584,35 @@ evidence. Suggested parallelism is an **output** of Capacity (§4.3), not static
 
 - A concurrency reduction or a 429/cooling signal **reduces new starts** and must never move work that has
   already STARTed (failure classes 10, 11), and must never be reported as a credential failure.
-- Learned safe parallelism is keyed to `capability_generation` + `realm_generation` (§2.2) and the relevant
+- Learned safe parallelism is keyed to `capability_generation` + `realm_binding_generation` (§2.2) and the relevant
   provider scope, so either axis changing resets it conservatively rather than inheriting a stale number.
 - Master already carries the shape of the guard on the consumer side:
-  `control_plane/capacity_economics_projection.py:175` refuses a preview whose `suggested_parallelism` exceeds
-  `estimated_startable_jobs`.
+`control_plane/capacity_economics_projection.py:175` refuses a preview whose `suggested_parallelism` exceeds
+`estimated_startable_jobs`.
+
+### 6.4 Time-bound capacity overlays
+A provider campaign is modeled as a time / surface / model-qualified **resource-and-debit overlay**, never as a
+resource. The current provider campaign facts — not Mastermind enrollment facts — are: GLM-5.3-Flash, 3–20
+September 2026, daily 23:00–09:00 Singapore time, on ZCode >= 3.10; Flash consumes zero plan quota on that
+surface; other supported Agents get plan quota doubled; GLM-5.3 debits normally; and the campaign is unavailable
+once the ordinary 5-hour / weekly limit is already hit.
+
+An overlay carries `effective_from`, `effective_until`, its daily window, the exact supported surface (product
+and minimum version), model qualification, a campaign generation/digest, and a HARD expiry. The underlying
+entitlement and `resource_generation` are unchanged; an overlay never mints, forks, or replaces a resource.
+
+- "Zero quota consumption" never means numeric infinity. For the exact admitted surface and window, the ordinary
+  Flash usage-budget resource is NON-BINDING. READY demand, dynamic concurrency, and policy/quality/host
+  constraints still bound starts, so `jobs_fit` remains finite and is still computed.
+- "Doubled quota" is a temporary LIMIT overlay, never a second wallet, and never survives the window.
+- An overlay is consumed through the existing provider-offer / economics / Provider-Control fact path. It does
+  not authorize a promotion scheduler or promotions catalog.
+- A promotion change invalidates the advisory plan digest.
+- A surface mismatch (wrong product or version below minimum) or a clock outside the window means the overlay
+  does not apply; ordinary resource rules bind, fail-closed under §4.6 if surface or window cannot be established.
+
+Harvesting Flash on supported tools before 20 September is genuinely valuable, but it is not permission to arm
+autonomous routing or invent work.
 
 ---
 
@@ -551,20 +642,29 @@ harness**, resolved through the existing policy owners at the current `capabilit
   aggressively for provider-compliant supported-tool workflows while another execution mode uses PAYG or another
   lawful provider.
 - "Supports agent tools" must never be reinterpreted as "all unattended automation is allowed."
+- Execution mode is a dimension of the capacity quantity itself, not metadata beside one number. One entitlement
+  can expose zero `UNATTENDED_BACKGROUND` capacity and simultaneously positive
+  `SUPPORTED_TOOL_INTERACTIVE` capacity. `avail`, `jobs_fit`, and `usable` are evaluated per admitted execution
+  mode, and a value computed for one mode may never be read as capacity for another.
+- Capacity ranks only within the job's admitted execution mode. A candidate whose admitted modes do not include
+  the requested mode is excluded by this hard gate before economics sees it (§11.1 step 1); economics never
+  compares across modes.
 
 ### 7.3 Binding precedent to fold in
 R13 (MiniMax headless ruling) is normative here and is restated so the contract carries it: **`claude -p` one-act
 headless runs are UNATTENDED execution** for Mastermind policy unless a current provider-policy receipt
 explicitly admits that exact mode under the plan. "Attended in causation" is insufficient. Kit headless runs are
 engineering evidence, not governed capacity. An interactive canary never flips a flag (R18 (2)).
+Reachability is not entitlement, and a working adapter is not a policy receipt. A technically reachable wrapper
+must never be converted into autonomous capacity.
 
 ### 7.4 What master already encodes, and what is missing
 `config/subscription_provider_profiles.v1.json` (schema `mastermind.subscription_provider_profiles/v1`) carries
 three profiles, each with a boolean policy set — `glm-coding-plan` at line 5, `alibaba-token-plan-personal` at
 line 33, `minimax-token-plan` at line 62; `autonomous_allowed: false` at lines 24, 52, 81; and a `usage_policy`
 block with `interactive_only: true`, `unattended_background_allowed: false`,
-`production_backend_allowed: false` at lines 28–30, 56–58 and 85–87. `tests/test_subscription_provider_profiles.py:142`
-(`test_usage_policy_cannot_omit_or_weaken_baseline_fences`) and
+`production_backend_allowed: false` at lines 28–30, 56–58 and 85–87.
+`tests/test_subscription_provider_profiles.py:142` (`test_usage_policy_cannot_omit_or_weaken_baseline_fences`) and
 `tests/test_subscription_provider_profiles.py:34`
 (`test_purchased_subscription_profiles_are_not_eligible_for_unattended_production`) defend them.
 
@@ -584,7 +684,8 @@ enough.
 1. Revalidate every §2.2 generation axis and observation freshness (§2.2, §2.3).
 2. Resolve the exact resource expression `E` for the chosen route.
 3. Compute the conservative required native capacity per resource, by evaluating the debit partition of §3 for
-   one operation of cost `q95(c)` (the same partition §10 works numerically).
+   one operation using the per-resource `cost_r(c)` vector produced by `q95(c)` (the same partition §10 works
+   numerically).
 4. **Atomically reserve the internal resource bundle together with the existing Executive claim** — one
    transaction, not two.
 5. Persist the capacity evidence/reasoning receipt with `JOB_CLAIMED`.
@@ -592,6 +693,11 @@ enough.
    **once**; update outcome/cost evidence.
 7. If provider accounting lags or the effect is uncertain (`EFFECT_UNKNOWN`), **do not reuse the held capacity**
    and do not economically fail over (failure class 18).
+
+Steps 1, 4, and 7 also bind observation identity/digest and reflectedness: a reflected hold is not subtracted
+twice, while an unreflected hold or known unobserved debit remains charged to `usable` (§6.1). A generation
+rollover is evaluated before authorization: reconcile or conservatively carry every nonterminal old-generation
+hold, or return BLOCKED (§2.2). A bump alone is not release.
 
 ### 8.2 What master's claim contract can express today — and what it cannot
 Read at master@0fe8074f:
@@ -678,12 +784,15 @@ The narrow amendment is therefore:
 - **A1 — one required field on the claim receipt.** `JOB_CLAIMED`'s payload (written at
   `control_plane/executive_runtime.py:11236`) gains an immutable `capacity_hold` record: the evaluated expression
   identity and its digest; per-`resource_id` reserved native quantity; `resource_generation`; the immutable
-  `composition_generation` and `rate_generation` under which the debit partition was computed; the source
-  identity; and `observed_at`.
+  `composition_generation` and `model_harness_cost_generation` under which the debit partition was computed; the
+  source identity; exact observation identity/digest and `observed_at`; reflectedness evidence; and every
+  applicable generation axis.
 - **A2 — canonical primitive rows.** Provider-quota holds are demands on the one canonical primitive selected
   above. A hold is keyed by `(resource_id, resource_generation)` and additionally records immutable
-  `composition_generation` and `rate_generation` evidence. Concurrent claims serialize on that primitive's rows;
-  there is no separately re-minted provider-quota lifecycle.
+  `composition_generation` and `model_harness_cost_generation` evidence. Concurrent claims serialize on that
+  primitive's rows; there is no separately re-minted provider-quota lifecycle. Before a new
+  `resource_generation` authorizes, every nonterminal hold from the old generation is reconciled or carried
+  forward conservatively; otherwise the resource remains BLOCKED.
 - **A3 — settlement folds into the canonical primitive's settlement path.** It is not a separate release
   mechanism. Uncertain effect keeps the canonical hold in `RECONCILIATION_REQUIRED`, outstanding and unavailable
   for reuse, until Provider Control reconciles it (§8.1 step 7).
@@ -709,6 +818,8 @@ committed in the claim's transaction.
 ### 9.0 Binding to Provider Capacity V2
 The graph is **not independently acquired capacity truth**. Exactly two admissible publication forms are
 possible; the reviewer chooses one:
+The preferred domain-explicit candidate remains
+`mastermind.provider_capacity_resource_composition/v1`, UNFROZEN pending the repaired semantics.
 
 1. **Embedded closed sub-contract.** The resource graph is a closed sub-contract inside Provider Capacity V2,
    acquired and published by V2's own producer, in V2's own snapshot, under V2's capability generation. There is
@@ -732,7 +843,7 @@ it in place, or redefine any of its fields. It is a **new, separately versioned 
 There is also a mechanical reason the in-place edit is forbidden, receipted at this pin: the capacity producer is
 a **Macro-side** artifact consumed through a hash-pinned source closure.
 `ops/executive_os/capacity_source_contract.py:49` pins `"engine/provider_capacity.py"` and `:52` pins
-`"scripts/build_provider_capacity.py"`; `:69` sets `ENTRYPOINT = SOURCE_ROOT / "scripts" / "build_provider_capacity.py"`;
+`"scripts/build_provider_capacity.py"`; `:69` sets `ENTRYPOINT` to that same script;
 `:92` pins `ENTRYPOINT_GIT_BLOB`. Editing the strict v1 producer in place invalidates that closure and the host
 preparation receipts built on it (`tests/test_executive_capacity_source_contract.py:444`,
 `tests/test_executive_capacity_host_preparation.py:178`).
@@ -754,6 +865,16 @@ preparation receipts built on it (`tests/test_executive_capacity_source_contract
 | Family-B joined identity not present as one construct | PARTIAL | `capacity_capability_id` appears once, at `ops/executive_os/capacity_broker_topology.py:205`; `realm_generation` lives in `control_plane/subscription_canary_admission.py:128`; `host_ref` exists only in `control_plane/executive_recovery_readiness.py:492` (recovery, not capacity). #662 is OPEN/DRAFT; B0 unaccepted |
 | Resource-bundle hold | MISSING | §8.2 |
 | Typed execution-mode enum | MISSING | §7.4 (booleans exist; classification does not) |
+
+### 9.2.1 Current protected master and path-disjoint precedents
+Protected master has moved to `8ba7deedde164c90298d3e88785d98e02fa5e2d2`. The documents' census anchor
+`master@0fe8074f…` remains the commit at which their existing master `file:line` receipts were read; that census
+pin is not re-anchored. Movement since the census is path-disjoint but capacity-adjacent: #682 (merged
+`52bb6026`) binds fresh HP0 evidence to the existing physical-resource BEGIN boundary, and #683 (merged
+`a78b8fe2`) adds a bounded read-only host-capacity snapshot. They are useful physical-resource precedents for
+freshness, explicit unknowns, host/boot binding, and no implicit placement authority. They do **not** supply
+provider-resource composition, provider holds, or any proposed provider-capacity acceptance class, and must not
+be relabeled as provider-capacity proof.
 
 ### 9.3 UNKNOWN — written as UNKNOWN, per R35 §22 C ("Do not infer this from what we remember buying")
 - **U1 — Alibaba `stage_routing`**: PARTITIONED versus ATOMIC_FALLBACK. **UNKNOWN.**
@@ -826,9 +947,9 @@ nevertheless exhausted at 3,000 because of the member ceiling.
 
 ### 10.4 The same state under ATOMIC_FALLBACK
 Under ATOMIC_FALLBACK, per-stage whole jobs: the seat holds `floor(3,000 / 10,000) = 0`; the pack subtree holds
-`min(ceiling 40,000, max(25,000, 600,000)) = 40,000`, so it holds `floor(40,000 / 10,000) = 4`. Total
-`startable_jobs = 4`, the same count as PARTITIONED — but the debit walk differs (no job straddles; each job is
-served wholly from one stage), and the stranding report differs: ATOMIC_FALLBACK strands 3,000
+`min(floor(25,000 / 10,000) + floor(600,000 / 10,000), floor(40,000 / 10,000)) = min(62, 4) = 4`. Total
+`startable_jobs = 0 + 4 = 4`, the same count as PARTITIONED — but the debit walk differs (no job straddles; each
+job is served wholly from one stage), and the stranding report differs: ATOMIC_FALLBACK strands 3,000
 `stranded_at_stage` at the seat and 5,000 `stranded_at_stage` at pack_A, where PARTITIONED strands 3,000
 `stranded_at_ceiling`. A matching startable count is **not evidence of routing**; that is exactly why
 `stage_routing` must be provider-DECLARED and never inferred from a number that agrees.
@@ -858,6 +979,31 @@ The mirror error is equally available and worse. Flatten by **summing** every le
 ```
 That is a 16.5× capacity fiction, produced by double-counting the CEILING as value and ignoring it as a bound.
 
+### 10.6 Nested atomic fallback — the scalar-avail error
+The recursive rule is not cosmetic. Let a shared BUDGET have 100 units, an `ATOMIC_FALLBACK` spill have two
+stages of 60 and 60 units, and each whole job cost 50 units. A scalar root formula would answer
+`floor(min(100, max(60, 60)) / 50) = 1`, but two whole jobs can actually run — one per stage — while respecting
+the shared budget:
+
+```
+jobs_fit(stage_1) = floor(60 / 50) = 1
+jobs_fit(stage_2) = floor(60 / 50) = 1
+jobs_fit(ALL_OF)  = min(floor(100 / 50), 1 + 1)
+                  = min(2, 2) = 2
+```
+
+The shared BUDGET constrains the aggregate; the stage sum proves whole-job feasibility per stage. Neither number
+alone carries the answer.
+
+### 10.7 Generation rollover — a bump is not release
+Resource R is at generation n with `observed_remaining = 100` and one nonterminal hold of 70 keyed `(R, n)`. The
+generation bumps to n+1 while `observed_remaining` is again 100. A naive generation-keyed join stops matching
+the old hold and authorizes another 70-unit job, committing `70 + 70 = 140` against 100.
+
+The lawful outcomes are exactly two: BLOCK the new generation until reconciliation is complete, or conservatively
+carry/map the hold forward so `usable = 100 − 70 = 30`. The rollover never releases the hold, never treats the
+old observation as proof of settlement, and never authorizes capacity from ambiguity.
+
 Two further blind-`min()` errors the algebra also removes:
 - **Concurrency folded into the min.** Adding `concurrency = 3` as a fifth term would give `min(…, 3)` and
   answer "3 jobs before exhaustion". Concurrency bounds simultaneity, not total count (§4.3); the correct outputs
@@ -884,6 +1030,16 @@ This contract contributes to exactly three places and nowhere else:
 There is no new stage, no new score, and no `capacity_score` scalar.
 
 ### 11.1 Composition with the existing CAP-C1 placement seam
+Mastermind #657 (head `bc89980c7e06e81a883da8078660d3bf208e68eb`, OPEN, "feat(capacity): resolve exact
+placement ties with source-owned preference") is the **incumbent candidate seam**. It adds
+`mastermind.executive_placement_selection.v2` additively and mints
+`mastermind.capacity_placement_preference.v1` only for an exact V1 `TIE_ABSTAINED` result. Its receipt binds
+`responsibility_ref`, V1 selection-input digest, tied worker set/order, a Capacity-owned CURRENT source ref, and
+a preference generation. V2 validates the winner against V1 evidence and keeps
+`selection_is_commitment = false`. #657 is BUILT_NOT_PROVEN / REPAIR_REQUIRED (old base, hosted test failed at
+head, no independent review) and resumes/repairs on its own incumbent branch after this PR's Step-A freeze. Do
+not invent a new tie/preference contract here or reimplement it in #688/#7116.
+
 C1 already owns the tie/preference seam. `control_plane/executive_placement_selection.py:39-44@a78b8fe2` records
 Sol addendum (A): C1 has no tie-breaker authority; an exact top tie among eligible candidates always abstains
 (`TIE_ABSTAINED`); `select_placement` refuses any non-`None` `accepted_tie_breaker`; and `tie_breaker_used` is a
@@ -898,13 +1054,13 @@ The normative order is exactly this:
 
 1. **Model Router's first lawful suitability tier and hard gates**, including §7's execution-mode intersection,
    review independence, and every existing C1 exclusion gate. Economics never promotes a model out of a lower
-   suitability tier.
+   suitability tier and never compares candidates across execution modes.
 2. **Capacity economics preference/evidence**, as the lexicographic Stages A–G above. This produces a typed
    preference with its evidence; it never produces a selection.
-3. **The existing reserved C1 tie/preference seam.** Capacity preference reaches `select_placement` only through
-   `accepted_tie_breaker` / `tie_breaker_used`, as a typed, source-owned ruling receipt, when and only when a
-   later wave has minted that type and named its source owner. Until then C1 abstains on an exact tie and
-   Capacity has no way to break it.
+3. **The incumbent #657-style preference receipt.** It stays generic and binds responsibility, exact V1
+   selection-input digest, tied worker set/order, current source ref, and preference generation. Provider
+   entitlement/resource/model/rate epochs do not belong in that receipt; they live in the exact, content-addressed
+   Capacity SOURCE artifact referencing Provider Capacity V2, the resource graph, and economics output.
 4. **Ordinary C2 / Executive commitment**, namely §8's atomic claim, unchanged.
 
 There is **no second selector**. Capacity does not rank candidates, does not choose among them, and implements no
@@ -922,6 +1078,19 @@ Economics must not smuggle preference through back channels:
 For §5.1/§5.2 sibling accounts, choosing among three GLM or three Go accounts is therefore **placement**: C1's
 decision reached by the order above. This contract supplies only economics evidence. Where evidence does not
 discriminate, the lawful outcome is C1's abstention — not a Capacity tie-break.
+
+CF2-I is the downstream integration/adoption owner. Its chain is: hard gates → first lawful Model Router tier →
+Capacity ranks candidates inside that tier → Executive atomically claims one Worker. Economics must ultimately
+output concrete WORKER IDs through existing Worker / Runtime / Model-Router facts; WorkerRegistry/quota metadata
+(model alias, provider alias, routing policy/profile/capability digests) is the lawful router-alias-to-worker
+join. Never mint a capacity-worker-selector, second model-to-worker registry, or provider scheduler, and never
+reorder `preferred_model_aliases` on economics grounds. RF1 compatibility receipts are
+`docs/EXECUTIVE_WORKER_ROUTING.md:74@8ba7deed` ("### RF1 — provider-neutral suitability tiers") and
+`docs/EXECUTIVE_WORKER_ROUTING.md:95@8ba7deed` ("preferred_model_aliases ... projects *only the first tier*").
+
+End state, stated once: **Model Router first lawful tier → concrete C1 Worker candidates → Capacity
+resource/economics source → #657-style preference receipt → CF2-I / C1-v2 → C2 / Executive atomic
+resource+worker commitment → existing broker/adapter.**
 
 ---
 
@@ -981,13 +1150,16 @@ invariant. If Sol prefers a different syntax for the same invariant, nothing els
 
 This document is a PROPOSAL and is HOLD-FOR-SOL. Its release condition is a Sol architecture review of
 **(a)** the contract shape — the two child roles, the partitionability precondition, the evaluation rules of §4,
-the generation axes/freshness rules of §2.2–§2.3, and the claim amendment of §8.3 — and **(b)** the schema
-name/version and its Provider Capacity V2 embedding-or-binding decision (§9.0). It stays in `research/` while
+the generation axes/freshness rules of §2.2–§2.3, typed evaluation and recursive `jobs_fit`, per-resource units,
+hold reflectedness and generation rollover, execution-mode dimensions, time-bound overlays, and the claim
+amendment of §8.3 — and **(b)** the still-UNFROZEN schema name/version and its Provider Capacity V2
+embedding-or-binding decision (§9.0). It stays in `research/` while
 HOLD and is not promoted to `docs/superpowers/specs/`, protected source-law, or any spec location merely to look
 final. The earlier census recommendation of `docs/superpowers/specs/` is superseded for now; final placement is
 Sol's call at release (§9.3 U4). The seat does not release it.
 
 Companion documents in this proposal:
 - `research/MASTERMIND_EXECUTIVE_CAPACITY_COMPOSITION_ADVERSARIAL_ACCEPTANCE_MATRIX_2026-09-16.md` — the 20
-  required failure classes mapped to tests, owners, fixtures and current status at this pin.
+  R35-minimum failure classes plus the additional classes required by formal review 5220216985 and its addendum,
+  mapped to tests, owners, fixtures and current status at this pin.
 - `research/MASTERMIND_EXECUTIVE_CAPACITY_COMPOSITION_CRITICAL_PATH_MAP_2026-09-16.md` — steps A–H with custody.

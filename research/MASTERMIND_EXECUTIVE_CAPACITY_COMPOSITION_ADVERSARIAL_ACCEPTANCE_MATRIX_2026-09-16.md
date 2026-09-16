@@ -5,7 +5,9 @@ Census anchor: master@0fe8074ff953b2ced9025ed40f0f66019c759967. Every EXISTS / P
 `file:line` receipt that was read at that commit and re-verified by this lane; every MISSING row names the search
 that bounds the claim. Nothing is asserted from memory.
 Companion: `research/MASTERMIND_EXECUTIVE_CAPACITY_RESOURCE_COMPOSITION_CONTRACT_2026-09-16.md` (the contract).
-Source of the 20 classes: Sol capacity-routing architecture ruling (R35) §23, verbatim ordering preserved.
+Source of classes 1–20: Sol capacity-routing architecture ruling (R35) §23, verbatim ordering preserved. Those
+twenty are the ruling's minimum; classes 21–32 are additions required by Sol formal review 5220216985, addendum
+5694353522, and R42/R52.
 
 ---
 
@@ -23,8 +25,9 @@ Status vocabulary, used strictly:
 - **MISSING** — no test falsifies this class, and the searches that ground that claim are named. Absence is
   reported with bounds, never bare.
 
-No class of twenty is fully EXISTS; eight are PARTIAL and twelve are MISSING. That distribution is the expected
-consequence of the contract not existing yet: twelve of the classes are statements *about a resource tree*, and
+No class of the thirty-two is fully EXISTS; ten are PARTIAL and twenty-two are MISSING. That distribution is
+the expected consequence of the contract not existing yet: the added classes are also statements about a
+resource tree, hold lifecycle, offer overlay, or integration invariant, and
 at this pin there is no tree — `estimated_startable_jobs` arrives as a scalar
 (`control_plane/capacity_economics_projection.py:83`), so there is nothing for a composition test to attack.
 **These tests are not writable before the contract is frozen.** That ordering is the reason step A precedes
@@ -43,8 +46,8 @@ composition fixtures must be built through the same seams rather than by constru
 - **Proposed test**: `test_two_host_refs_in_one_capability_domain_resolve_to_one_resource_identity`
 - **Owner**: Provider Control resource-identity minting (contract §2.1), composed with the Family-B realm owner.
 - **Fixture**: two `host_ref` values bound to one `capacity_capability_id`, each carrying its own
-  `realm_generation`; one resource observation of 10,000 units. Assert `avail` of the union is 10,000, not 20,000,
-  and that both hosts resolve to the same `resource_id`.
+  existing Family-B `realm_generation`; one resource observation of 10,000 units. Assert `avail` of the union
+  is 10,000, not 20,000, and that both hosts resolve to the same `resource_id`.
 - **Status at master**: **MISSING**. Bounded by: `rg -n "capacity_capability_id|host_ref" control_plane ops config
   integrations tests` — `capacity_capability_id` occurs once
   (`ops/executive_os/capacity_broker_topology.py:205`), `host_ref` only in recovery
@@ -85,12 +88,15 @@ composition fixtures must be built through the same seams rather than by constru
   — R35 §17's "Alibaba: 68% remaining" concealment is exactly what a reason-free zero reproduces.
 - **Status at master**: **MISSING**. Same bounds as class 3.
 
-### Class 5 — nearest-expiring shared pack order is preserved
-- **Proposed test**: `test_shared_pack_spill_consumes_nearest_expiry_first`
-- **Owner**: the composition evaluator's stage ordering (contract §3.3).
-- **Fixture**: pack_A expiring 2026-09-30 with 25,000, pack_B expiring 2026-10-31 with 600,000, presented to the
-  evaluator in *reverse* order in the input document. Assert consumption still starts at pack_A, i.e. the order
-  is provider-declared expiry, not input order. Mutant: sort by remaining, or by insertion.
+### Class 5 — provider-declared canonical stage order is preserved
+- **Proposed test**: `test_shared_pack_spill_consumes_provider_declared_canonical_order_without_resorting`
+- **Owner**: Provider Control deduction-policy production (contract §3.3); evaluator validates and consumes.
+- **Fixture**: Provider Control publishes canonical order `[pack_A expiring 2026-09-30, pack_B expiring
+  2026-10-31]` with `composition_generation` and provenance; an input document presents pack_B before pack_A.
+  Assert the evaluator refuses or flags the noncanonical input rather than re-sorting it. With canonical input,
+  consumption starts at pack_A. A provider contract that itself defines nearest-expiry-first may use that rule,
+  but the evaluator still consumes the declared canonical order. Mutants: evaluator sorts by expiry, remaining,
+  or insertion.
 - **Status at master**: **MISSING**. Bounded by `rg -n -i "nearest.expir|expiry order|expires_at" config
   control_plane ops tests` (composition scope).
 
@@ -142,10 +148,13 @@ composition fixtures must be built through the same seams rather than by constru
 - **Proposed test**: `test_generation_axis_change_moves_only_its_required_effects_and_no_others`
 - **Owner**: the six generation/freshness axes (contract §2.2).
 - **Fixture**: a fully dated resource and live hold; parametrise over `capability_generation`,
-  `resource_generation`, `composition_generation`, `realm_generation`, `rate_generation`, and observation
+  `resource_generation`, `composition_generation`, `realm_binding_generation`,
+  `model_harness_cost_generation`, and observation
   staleness. Assert each axis's required effect **and every required non-effect**: a reset does not invalidate a
   resource epoch, hold, or calibration; key rotation does not create quota or orphan a resource-epoch hold; a
-  rate-card change retires cohort/debit calibration but does not move the wallet or orphan a hold. Historical
+  model/harness/cost change retires cohort/debit calibration but does not move the wallet or orphan a hold; a
+  resource-generation rollover reconciles or conservatively carries a nonterminal hold before authorization.
+  Historical
   receipts remain readable and immutable, and refusals name the exact axis/freshness failure.
 - **Status at master**: **PARTIAL**, and this is the strongest existing coverage of any class. Generation/digest
   invalidation is genuinely defended for the *canary admission* object:
@@ -154,7 +163,8 @@ composition fixtures must be built through the same seams rather than by constru
   (`test_seal_refuses_unenrolled_realm`); `tests/test_executive_model_router.py:383`
   (`test_runtime_refuses_capacity_with_a_different_capability_profile_digest`). Gap: none of these is keyed to
   the full provider `resource_generation`/`composition_generation` model, and none covers renewal-only freshness,
-  shared-pack composition, deduction policy, or `rate_generation`, which have no representation at master at all.
+  shared-pack composition, deduction policy, or `model_harness_cost_generation`, which have no representation at
+  master at all.
 
 ### Class 10 — dynamic concurrency reduction prevents new starts without moving current STARTed work
 - **Proposed test**: `test_concurrency_reduction_blocks_new_starts_and_never_moves_started_attempts`
@@ -220,17 +230,19 @@ composition fixtures must be built through the same seams rather than by constru
 - **Owner**: the view/resource distinction (contract §5.3).
 - **Fixture**: a `/token_plan/remains`-shaped payload with two model rows over one plan, `independence: UNPROVEN`.
   Assert `avail` equals the underlying resource, that the rows are preserved for display, and that a summing
-  mutant is killed. Independence-proving case: a discriminating observation pair where a debit attributed to view
-  A leaves view B unchanged flips `independence` to PROVEN for that generation only — and a generation change
-  resets it to UNPROVEN.
+  mutant is killed. Independence remains UNPROVEN by default. Promotion requires explicit provider contract
+  evidence or a reviewed repeated causal experiment declaring observation resolution, lag budget, same
+  `resource_generation`, isolated attribution, and correction/retraction handling; one observation pair is
+  explicitly insufficient. A generation change resets it to UNPROVEN.
 - **Status at master**: **MISSING**. Bounded by `rg -n -i "token_plan|remains|wallet" control_plane ops config
   tests` — the #7103 parser that preserves those rows is a Macro-side PR, not at Mastermind master.
 
-### Class 15 — model/harness `rate_generation` change invalidates stale quality/cost calibration
+### Class 15 — model/harness `model_harness_cost_generation` change invalidates stale quality/cost calibration
 - **Proposed test**: `test_model_or_harness_generation_change_retires_calibration_to_historical`
-- **Owner**: model economics catalog + Outcome Learning cohort keys (contract §2.2 `rate_generation`).
+- **Owner**: model economics catalog + Outcome Learning cohort keys (contract §2.2
+  `model_harness_cost_generation`).
 - **Fixture**: a cohort with calibrated `q95`; then each of: provider alias silently updated, model version
-  changed, harness changed, thinking-mode changed, `rate_generation` changed. Assert new placement reverts to
+  changed, harness changed, thinking-mode changed, generation changed. Assert new placement reverts to
   conservative, old evidence remains queryable as historical, and the two are never mixed in one estimate.
 - **Status at master**: **MISSING**. The adjacent defence is about *cutover determinism*, not calibration:
   `tests/test_provider_offer_economics.py:107`
@@ -271,7 +283,8 @@ composition fixtures must be built through the same seams rather than by constru
   is **not** released, the resource's `usable` stays reduced, and no alternative route is selected on economic
   grounds. The refusing hold state is the canonical primitive's `RECONCILIATION_REQUIRED` state, not a re-minted
   provider-quota state machine. Discriminator: a successfully reconciled attempt releases exactly once and
-  failover becomes available.
+  failover becomes available. Generation rollover and undecided hold reflectedness are also EFFECT_UNKNOWN-class
+  blockers, never release events.
 - **Status at master**: **MISSING in the capacity path**. The vocabulary exists and should be reused rather than
   re-minted: `control_plane/operator_continuity_projection.py:61` and `control_plane/executive_steward.py:54`
   both define `EFFECT_UNKNOWN`, and `control_plane/executive_steward.py:1026` refuses to proceed on a blocker
@@ -309,10 +322,10 @@ composition fixtures must be built through the same seams rather than by constru
 | Status | Count | Classes |
 |---|---|---|
 | EXISTS | 0 | — |
-| PARTIAL | 8 | 2, 6, 9, 11, 12, 13, 17, 19 |
-| MISSING | 12 | 1, 3, 4, 5, 7, 8, 10, 14, 15, 16, 18, 20 |
+| PARTIAL | 10 | 2, 6, 9, 11, 12, 13, 17, 19, 25, 26 |
+| MISSING | 22 | 1, 3–5, 7, 8, 10, 14–16, 18, 20–24, 27, 28, 30–32 |
 
-0 + 8 + 12 = 20. **Not one of the twenty failure classes is fully falsified at master today.** Class 17 is the
+0 + 10 + 22 = 32. **Not one of the thirty-two failure classes is fully falsified at master today.** Class 17 is the
 closest, and it covers one of its two named pressures.
 
 Two structural observations for the reviewer:
@@ -326,6 +339,113 @@ Two structural observations for the reviewer:
    `estimated_startable_jobs` would produce tests that pass vacuously — the worst possible outcome, because a
    green acceptance suite would then certify a fabric that still cannot express the resource graph.
 
-The reviewable question this matrix puts to Sol is therefore narrow: **is the 20-class suite the right acceptance
-gate for step A's contract, and is this the right allocation of each class to an owner?** It is not a request to
-write the tests now.
+The reviewable question this matrix puts to Sol is therefore narrow: **is the 32-class suite — R35's twenty-class
+minimum plus the review-required additions — the right acceptance gate for step A's contract, and is this the
+right allocation of each class to an owner?** It is not a request to write the tests now.
+
+### Class 21 — mixed-unit `ALL_OF` stays vector-valued
+- **Proposed test**: `test_mixed_unit_all_of_uses_per_resource_costs_and_never_one_scalar_q95`
+- **Owner**: composition evaluator (contract §3, §4.2).
+- **Fixture**: one route simultaneously constrained by tokens, requests, currency, and concurrency resources,
+  each with stable `resource_id`, `native_unit`, generation axes, and `cost_r(c)`. Assert
+  `jobs_fit = min(floor(usable_r/cost_r))`; scalar `avail/q95` and raw-unit `min` mutants are killed. Unit
+  mismatch without reviewed conversion is ill-formed.
+- **Status at master**: **MISSING**. Bounded by `rg -n "native_unit|cost_r|jobs_fit|estimated_startable_jobs"
+  control_plane ops tests` (composition scope).
+
+### Class 22 — graph/balance epoch mismatch is inadmissible
+- **Proposed test**: `test_resource_graph_and_balances_from_different_v2_snapshots_are_inadmissible`
+- **Owner**: Provider Capacity V2 binding (contract §9.0).
+- **Fixture**: graph from V2 snapshot X and balances from snapshot Y with different digests. Assert
+  INADMISSIBLE with digest reason; no partial join, freshness-only downgrade, or fallback observation.
+- **Status at master**: **MISSING**. Bounded by `rg -n "snapshot.*digest|graph.*balance|Provider Capacity V2"
+  control_plane ops tests` (capacity-composition scope).
+
+### Class 23 — reflected hold is not subtracted twice
+- **Proposed test**: `test_hold_reflected_by_covering_observation_is_not_subtracted_twice`
+- **Owner**: observation/hold reconciliation (contract §6.1, §8.3).
+- **Fixture**: debit 30 at effective time T; provider-declared accounting lag 2 minutes; observation at T+3
+  already reflects it. Assert `usable` subtracts the observation only, not the reflected hold. Ambiguous
+  observation at T+1 keeps the hold unreflected.
+- **Status at master**: **MISSING**. Bounded by `rg -n "reflected|accounting.*lag|unobserved.*debit|
+  outstanding_holds" control_plane ops tests`.
+
+### Class 24 — completed debit not yet reflected remains unobserved
+- **Proposed test**: `test_known_completed_debit_older_than_observation_is_retained_as_unobserved`
+- **Owner**: observation/hold reconciliation (contract §6.1, §8.3).
+- **Fixture**: known actual debit 40 after an older observation showing 100. Assert `usable <= 60`, the debit
+  remains an unobserved debit, and no route is authorized until a covering observation arrives.
+- **Status at master**: **MISSING**. Bounded by the class-23 search plus
+  `rg -n "EFFECT_UNKNOWN|RECONCILIATION_REQUIRED" control_plane ops tests` (provider-capacity scope).
+
+### Class 25 — wrong-axis invalidation does not move wallet or hold
+- **Proposed test**: `test_realm_or_model_cost_change_does_not_move_wallet_or_free_hold`
+- **Owner**: generation-axis policy (contract §2.2).
+- **Fixture**: a live hold; bump `realm_binding_generation`, then `model_harness_cost_generation`. Assert
+  executable-binding / calibration invalidation respectively, while wallet `resource_generation`, observed
+  remaining, and hold quantity remain unchanged. Mutants that release the hold or fork a wallet are killed.
+- **Status at master**: **PARTIAL**. Existing realm/capability-digest guards defend a different object:
+  `control_plane/subscription_canary_admission.py:128`, `:283`, and
+  `tests/test_executive_model_router.py:383`. None models a provider wallet or live provider-capacity hold.
+  Bounded by `rg -n "resource_generation|resource_key|capacity_hold" control_plane ops tests`.
+
+### Class 26 — C1 economics preference smuggling is refused
+- **Proposed test**: `test_capacity_economics_cannot_smuggle_preference_through_state_or_order`
+- **Owner**: C1 / CF2-I integration (contract §11.1).
+- **Fixture**: exact tied concrete Worker candidates. Vary `capacity_state`, account/file order, and candidate
+  order. Assert no resulting preference and no change to `preferred_model_aliases`; economics may supply only a
+  #657-style exact-tie source receipt.
+- **Status at master**: **PARTIAL**. C1's reserved-slot guards exist, but no #657 V2 acceptance path and no
+  capacity-to-concrete-worker economics source are proven at protected master. Bounded by class 19's existing
+  receipt plus `rg -n "capacity_placement_preference|selection_is_commitment" control_plane ops tests`.
+
+### Class 27 — duplicate provider commitment lifecycle is refused
+- **Proposed test**: `test_second_provider_quota_state_machine_is_refused`
+- **Owner**: one canonical Executive commitment primitive (contract §8.3).
+- **Fixture**: one installed canonical primitive plus a proposed provider-quota lifecycle. Assert installation
+  refuses the duplicate; provider-quota holds become demands on the canonical primitive and settle through its
+  one path.
+- **Status at master**: **MISSING in provider capacity**. The inactive physical-resource candidate and
+  consolidation target are receipted in contract §8.2.1/§8.3; bounded by
+  `rg -n "provider.*quota|capacity_hold|physical_resource_commitments" control_plane ops tests`.
+
+### Class 28 — nonterminal old-generation hold survives rollover
+- **Proposed test**: `test_resource_generation_bump_does_not_release_nonterminal_old_hold`
+- **Owner**: generation rollover and canonical holds (contract §2.2, §6.1, §8.3).
+- **Fixture**: R generation n, observed 100, nonterminal hold 70; bump to n+1 with observed 100. Assert BLOCKED
+  or carried hold with `usable = 30`, never `usable = 100` or a second 70-unit authorization (contract §10.7).
+- **Status at master**: **MISSING**. Bounded by `rg -n "resource_generation|generation.*rollover|capacity_hold"
+  control_plane ops tests` (provider-capacity scope).
+
+### Class 29 — execution lanes are not entitlement resources
+- **Proposed test**: `test_execution_lanes_do_not_multiply_entitlement_resources`
+- **Owner**: Provider Control identity + Worker runtime inventory (contract §1, §5.3; CF2-I adoption).
+- **Fixture**: seven wrappers/process slots over one provider resource with remaining 100. Assert one resource,
+  remaining 100, and `jobs_fit` bounded once; concurrency is reported separately as `safe_parallelism`.
+- **Status at master**: **PARTIAL**. Worker slots are distinct execution lifecycle objects
+  (`control_plane/executive_runtime.py:1593`), but no provider-resource identity joins them to one entitlement;
+  bounded by `rg -n "resource_key|capacity_capability_id|worker_id.*quota_class" control_plane ops config tests`.
+
+### Class 30 — nested `ATOMIC_FALLBACK` is compositional
+- **Proposed test**: `test_nested_atomic_fallback_counts_whole_jobs_per_stage_and_shared_budget`
+- **Owner**: composition evaluator (contract §4.2, §10.6).
+- **Fixture**: shared BUDGET 100; `ATOMIC_FALLBACK` stages 60 and 60; cohort cost 50. Assert
+  `jobs_fit = min(2, 1+1) = 2`, not scalar `floor(min(100, max(60,60))/50) = 1`. A root-scalar mutant is killed.
+- **Status at master**: **MISSING**. Bounded by
+  `rg -n "ATOMIC_FALLBACK|ORDERED_SPILL|jobs_fit" control_plane ops tests`.
+
+### Class 31 — expired overlay contributes no relief
+- **Proposed test**: `test_expired_or_out_of_window_overlay_uses_ordinary_limits`
+- **Owner**: time-bound overlays through Provider Control facts (contract §6.4).
+- **Fixture**: a zero-quota/double-limit overlay with `effective_until` in the past, then outside its daily
+  window. Assert the overlay does not apply, ordinary resource limits bind, and the advisory digest changes.
+- **Status at master**: **MISSING**. Bounded by
+  `rg -n "effective_until|daily.*window|offer.*overlay|promotion" control_plane ops config tests`.
+
+### Class 32 — surface mismatch refusal names surface
+- **Proposed test**: `test_overlay_surface_or_version_mismatch_is_refused_for_surface_reason`
+- **Owner**: time-bound overlays through Provider Control facts (contract §6.4).
+- **Fixture**: a ZCode >= 3.10 overlay claimed for another product or ZCode 3.9. Assert refusal, a reason naming
+  the exact product/version surface rather than quota, and ordinary rules binding.
+- **Status at master**: **MISSING**. Bounded by the class-31 search plus
+  `rg -n "minimum.*version|surface.*digest" control_plane ops config tests`.
