@@ -1649,6 +1649,130 @@ def api_forward_evaluation(portfolio: str | None = None,
         }, status_code=400)
 
 
+_DECISION_SNAPSHOT_STATUS_SCHEMA = "mastermind.portfolio_decision_snapshot.status.v1"
+_DECISION_SNAPSHOT_BOOK = "autonomous"
+_DECISION_SNAPSHOT_NO_STORE = {"Cache-Control": "no-store"}
+_DECISION_SNAPSHOT_MAX_SECTION_BYTES = 65_536
+_DECISION_SNAPSHOT_HARD_FALSE_AUTHORITY = {
+    "write_permitted": False,
+    "execution_authority": False,
+    "numeric_target_authority": False,
+}
+
+
+def _decision_snapshot_envelope(*, book: str, status: str, error: str | None = None,
+                                 extra: dict | None = None) -> dict:
+    body: dict[str, Any] = {
+        "schema": _DECISION_SNAPSHOT_STATUS_SCHEMA,
+        "book": book,
+        "status": status,
+        **_DECISION_SNAPSHOT_HARD_FALSE_AUTHORITY,
+    }
+    if error is not None:
+        body["error"] = error
+    if extra:
+        body.update(extra)
+    return body
+
+
+def _decision_snapshot_error(status_code: int, *, book: str, error: str) -> JSONResponse:
+    return JSONResponse(
+        _decision_snapshot_envelope(book=book, status="INVALID", error=error),
+        status_code=status_code,
+        headers=_DECISION_SNAPSHOT_NO_STORE,
+    )
+
+
+@router.get("/api/decision-snapshot")
+def api_decision_snapshot(
+    book: str = _DECISION_SNAPSHOT_BOOK,
+    snapshot_id: str | None = None,
+    section: str | None = None,
+    offset: str = "0",
+    limit: str = "50",
+) -> JSONResponse:
+    """Read-only V3 Decision Snapshot status/projection for the ``autonomous`` book.
+
+    Calls only ``decision_snapshot.read_projection`` — no other Portfolio subsystem is
+    imported or invoked from this handler. ``offset`` and ``limit`` are parsed manually
+    (rather than declared as ``int``) so every rejection — including a wrong-typed or
+    out-of-range query — stays inside this handler and always carries
+    ``Cache-Control: no-store``, instead of falling through to FastAPI's default
+    validation error response.
+    """
+    if book != _DECISION_SNAPSHOT_BOOK:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": "unsupported_snapshot_book", "allowed": [_DECISION_SNAPSHOT_BOOK]},
+            headers=_DECISION_SNAPSHOT_NO_STORE,
+        )
+
+    try:
+        if isinstance(offset, bool):
+            raise ValueError("offset must not be boolean")
+        offset_int = int(offset)
+        if isinstance(limit, bool):
+            raise ValueError("limit must not be boolean")
+        limit_int = int(limit)
+    except (TypeError, ValueError):
+        return _decision_snapshot_error(400, book=book, error="invalid_request")
+    if offset_int < 0 or not (1 <= limit_int <= 100):
+        return _decision_snapshot_error(400, book=book, error="invalid_request")
+
+    from portfolio import decision_snapshot
+
+    try:
+        payload = decision_snapshot.read_projection(
+            book=book,
+            snapshot_id=snapshot_id,
+            section_id=section,
+            offset=offset_int,
+            limit=limit_int,
+        )
+    except decision_snapshot.SnapshotNotFound:
+        if snapshot_id is None:
+            return JSONResponse(
+                _decision_snapshot_envelope(book=book, status="NO_SNAPSHOT"),
+                headers=_DECISION_SNAPSHOT_NO_STORE,
+            )
+        return _decision_snapshot_error(404, book=book, error="snapshot_not_found")
+    except decision_snapshot.SnapshotInvalidRequest:
+        return _decision_snapshot_error(400, book=book, error="invalid_request")
+    except decision_snapshot.SnapshotCorrupt:
+        return _decision_snapshot_error(503, book=book, error="corrupt_snapshot")
+    except Exception:
+        _log.exception("Unexpected decision-snapshot read failure")
+        return _decision_snapshot_error(500, book=book, error="internal_error")
+
+    if section is None:
+        snapshot = payload.get("snapshot")
+        if not isinstance(snapshot, dict) or \
+                snapshot.get("authority") != _DECISION_SNAPSHOT_HARD_FALSE_AUTHORITY:
+            return _decision_snapshot_error(503, book=book, error="corrupt_snapshot")
+        body = _decision_snapshot_envelope(
+            book=book,
+            status=snapshot.get("state", "INVALID"),
+            extra={"snapshot": dict(snapshot)},
+        )
+        return JSONResponse(body, headers=_DECISION_SNAPSHOT_NO_STORE)
+
+    body = _decision_snapshot_envelope(
+        book=book,
+        status=payload.get("state", "INVALID"),
+        extra={
+            "snapshot_id": payload.get("snapshot_id"),
+            "decision_cutoff": payload.get("decision_cutoff"),
+            "recorded_at": payload.get("recorded_at"),
+            "coverage_state": payload.get("coverage_state"),
+            "correction": payload.get("correction"),
+            "section": payload.get("section"),
+        },
+    )
+    if len(json.dumps(body).encode("utf-8")) > _DECISION_SNAPSHOT_MAX_SECTION_BYTES:
+        return _decision_snapshot_error(503, book=book, error="invalid_projection")
+    return JSONResponse(body, headers=_DECISION_SNAPSHOT_NO_STORE)
+
+
 @router.get("/api/decisions")
 def api_decisions(portfolio: str = "autonomous", limit: int = 60) -> JSONResponse:
     """Mastermind Portfolio's structured daily decision journal for an active or archived Brain."""
