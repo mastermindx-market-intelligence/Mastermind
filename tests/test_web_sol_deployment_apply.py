@@ -405,6 +405,72 @@ def test_file_changed_after_prepare_is_refused_before_replace(
     assert target.destination.read_bytes() == b"external-change"
 
 
+
+def test_target_changed_after_temporary_write_is_not_overwritten(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle, install_root = _bundle(tmp_path)
+    target = sorted(bundle.artifacts, key=lambda row: str(row.destination))[0]
+    target.destination.parent.mkdir(parents=True, mode=0o700)
+    prior = b"approved-preimage-before-temporary"
+    target.destination.write_bytes(prior)
+    target.destination.chmod(target.mode)
+    prepared = applier.prepare_deployment(
+        bundle,
+        deployment.plan_deployment(bundle, {str(target.destination): prior}),
+        install_root=install_root,
+        expected_uid=install_root.stat().st_uid,
+        expected_gid=install_root.stat().st_gid,
+        operation_key="web-sol-install1-transactional-applier-source-20260916-sol-001",
+    )
+    original_write = applier._write_exact_temporary_at
+    foreign = b"concurrent-owner-change-after-temporary"
+    injected = False
+
+    def write_then_change_target(*args, **kwargs) -> None:
+        nonlocal injected
+        original_write(*args, **kwargs)
+        parent_descriptor, temporary_name = args[:2]
+        if injected or temporary_name != applier._temporary_path(target, prepared).name:
+            return
+        injected = True
+        flags = applier.os.O_WRONLY | applier.os.O_TRUNC
+        if hasattr(applier.os, "O_NOFOLLOW"):
+            flags |= applier.os.O_NOFOLLOW
+        descriptor = applier.os.open(
+            target.destination.name,
+            flags,
+            dir_fd=parent_descriptor,
+        )
+        try:
+            applier.os.write(descriptor, foreign)
+            applier.os.fsync(descriptor)
+        finally:
+            applier.os.close(descriptor)
+
+    monkeypatch.setattr(
+        applier,
+        "_write_exact_temporary_at",
+        write_then_change_target,
+    )
+
+    with pytest.raises(
+        applier.WebSolDeploymentApplyError,
+        match="PREIMAGE_CONFLICT",
+    ):
+        applier.apply_deployment(prepared)
+
+    assert injected is True
+    assert target.destination.read_bytes() == foreign
+    assert prepared._state == "CONFLICT"
+    assert all(
+        not artifact.destination.exists()
+        for artifact in bundle.artifacts
+        if artifact.destination != target.destination
+    )
+
+
 def test_apply_and_rollback_are_single_consumption_boundaries(
     tmp_path: Path,
 ) -> None:
