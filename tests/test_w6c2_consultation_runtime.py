@@ -49,6 +49,14 @@ QUESTION = (
 )
 
 
+@dataclass
+class _ManualClock:
+    value: str
+
+    def __call__(self) -> str:
+        return self.value
+
+
 def _actor(job: str, attempt: str, worker: str) -> dict[str, str]:
     return {
         "kind": "worker_attempt",
@@ -64,6 +72,19 @@ def _digest(value: str) -> str:
 
 def _runtime_at(root: Path) -> Runtime:
     return Runtime.at(root, lease_seconds=3600)
+
+
+def _consultations(
+    runtime: Runtime,
+    repository_root: Path,
+    *,
+    clock: _ManualClock | None = None,
+) -> ConsultationRuntime:
+    return ConsultationRuntime(
+        runtime,
+        repository_root=repository_root,
+        clock=clock or _ManualClock("2026-09-14T00:00:00Z"),
+    )
 
 
 def _binding(attempt_epoch: str, generation: int = 1) -> dict[str, object]:
@@ -648,7 +669,7 @@ def _credited_path(runtime: Runtime, consultations: ConsultationRuntime, frame: 
 
 def test_runtime_binding_id_grammar_accepts_exact_runtime_ids(tmp_path: Path) -> None:
     runtime = _runtime_at(tmp_path)
-    consultations = ConsultationRuntime(runtime, repository_root=tmp_path)
+    consultations = _consultations(runtime, tmp_path)
     (
         (requester_job, requester_attempt, _requester_worker, _binding_value),
         (recipient_job, recipient_attempt, _recipient_worker, recipient_binding),
@@ -676,7 +697,7 @@ def test_runtime_binding_id_grammar_accepts_exact_runtime_ids(tmp_path: Path) ->
 
 def test_r1_repair_discriminators(tmp_path: Path) -> None:
     runtime = _runtime_at(tmp_path)
-    consultations = ConsultationRuntime(runtime, repository_root=tmp_path)
+    consultations = _consultations(runtime, tmp_path)
     workers = _workers(runtime)
     frame, semantic_bundle = _frame(
         tmp_path,
@@ -745,7 +766,7 @@ def test_r1_v1_contract_fixture_accepts_original_answer_shape(tmp_path: Path) ->
 
 def test_r1_wake_projection_and_exact_answer_transaction(tmp_path: Path) -> None:
     runtime = _runtime_at(tmp_path)
-    consultations = ConsultationRuntime(runtime, repository_root=tmp_path)
+    consultations = _consultations(runtime, tmp_path)
     workers = _workers(runtime)
     frame, semantic_bundle = _frame(
         tmp_path,
@@ -846,7 +867,7 @@ def _answer_frame(frame: dict, suffix: str, semantic: dict) -> dict:
 
 def test_stale_recipient_binding_is_refused_before_receipt(tmp_path: Path) -> None:
     runtime = _runtime_at(tmp_path)
-    consultations = ConsultationRuntime(runtime, repository_root=tmp_path)
+    consultations = _consultations(runtime, tmp_path)
     (
         (requester_job, requester_attempt, _requester_worker, _requester_binding),
         (recipient_job, recipient_attempt, _recipient_worker, recipient_binding),
@@ -911,7 +932,7 @@ def test_persisted_wake_carrier_holds_exact_peer_binding_and_refuses_stale_gener
     )
 
     runtime = _runtime_at(tmp_path)
-    consultations = ConsultationRuntime(runtime, repository_root=tmp_path)
+    consultations = _consultations(runtime, tmp_path)
     (
         (_requester_job, _requester_attempt, _requester_worker, _requester_binding),
         (recipient_job, recipient_attempt, _recipient_worker, recipient_binding),
@@ -1056,9 +1077,11 @@ def _single_target_registry(target, obligation):
 
 
 
-def _setup_canonical_intent(tmp_path: Path):
+def _setup_canonical_intent(
+    tmp_path: Path, *, clock: _ManualClock | None = None
+):
     runtime = _runtime_at(tmp_path)
-    consultations = ConsultationRuntime(runtime, repository_root=tmp_path)
+    consultations = _consultations(runtime, tmp_path, clock=clock)
     workers = _workers(runtime)
     frame, semantic_bundle = _frame(
         tmp_path,
@@ -1346,7 +1369,7 @@ def test_concurrent_answers_reserve_exactly_one_current_answer(tmp_path: Path) -
     barrier = threading.Barrier(2)
 
     def reserve(answer):
-        local = ConsultationRuntime(_runtime_at(tmp_path), repository_root=tmp_path)
+        local = _consultations(_runtime_at(tmp_path), tmp_path)
         barrier.wait()
         return local.answer_available(answer, observed_at="2026-09-14T00:04:00Z")
 
@@ -1367,7 +1390,10 @@ def test_concurrent_answers_reserve_exactly_one_current_answer(tmp_path: Path) -
 
 def test_deadline_and_correction_history_never_receive_current_credit(tmp_path: Path) -> None:
     runtime, consultations, _workers_value, frame, semantic_bundle = (
-        _setup_canonical_intent(tmp_path / "late")
+        _setup_canonical_intent(
+            tmp_path / "late",
+            clock=_ManualClock("2026-09-16T00:00:00Z"),
+        )
     )
     _credited_path(runtime, consultations, frame)
     late = _answer_frame(frame, "late", semantic_bundle[0])
@@ -1445,3 +1471,65 @@ def test_consultation_fits_pr600_policy_arithmetic(tmp_path: Path) -> None:
     assert len(children) == 2
     assert all(job.depth == 1 for job in children)
     assert len(children) <= 16
+
+def test_trusted_clock_prevents_caller_backdating_current_credit(tmp_path: Path) -> None:
+    clock = _ManualClock("2026-09-14T00:00:00Z")
+    runtime = _runtime_at(tmp_path / "availability")
+    consultations = ConsultationRuntime(
+        runtime, repository_root=tmp_path / "availability", clock=clock
+    )
+    workers = _workers(runtime)
+    frame, semantic_bundle = _frame(
+        tmp_path / "availability", requester=workers[0], recipient=workers[1]
+    )
+    consultations.intent(
+        frame,
+        requester_attempt_id=workers[0][1],
+        carrier_ref="dialogue://fixture/consultation",
+        observed_at="2026-09-14T00:00:00Z",
+        repository_root=semantic_bundle[1],
+    )
+    _credited_path(runtime, consultations, frame)
+    answer = _answer_frame(frame, "trusted-clock-late", semantic_bundle[0])
+
+    clock.value = "2026-09-16T00:00:00Z"
+    available = consultations.answer_available(
+        answer, observed_at="2026-09-14T00:04:00Z"
+    )
+    assert available.event.payload["historical"] is True
+    assert available.event.payload["observed_at"] == clock.value
+    with pytest.raises(StateConflict, match="expired"):
+        consultations.consumed_by_requester(
+            answer, observed_at="2026-09-14T00:05:00Z"
+        )
+
+    consume_clock = _ManualClock("2026-09-14T00:00:00Z")
+    consume_runtime = _runtime_at(tmp_path / "consumption")
+    consume_consultations = ConsultationRuntime(
+        consume_runtime, repository_root=tmp_path / "consumption", clock=consume_clock
+    )
+    consume_workers = _workers(consume_runtime)
+    consume_frame, consume_semantic = _frame(
+        tmp_path / "consumption",
+        requester=consume_workers[0],
+        recipient=consume_workers[1],
+    )
+    consume_consultations.intent(
+        consume_frame,
+        requester_attempt_id=consume_workers[0][1],
+        carrier_ref="dialogue://fixture/consultation",
+        observed_at="2026-09-14T00:00:00Z",
+        repository_root=consume_semantic[1],
+    )
+    _credited_path(consume_runtime, consume_consultations, consume_frame)
+    current_answer = _answer_frame(
+        consume_frame, "trusted-clock-consume", consume_semantic[0]
+    )
+    consume_consultations.answer_available(
+        current_answer, observed_at="2026-09-14T00:04:00Z"
+    )
+    consume_clock.value = "2026-09-16T00:00:00Z"
+    with pytest.raises(StateConflict, match="expired"):
+        consume_consultations.consumed_by_requester(
+            current_answer, observed_at="2026-09-14T00:05:00Z"
+        )

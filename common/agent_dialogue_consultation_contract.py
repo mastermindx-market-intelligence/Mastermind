@@ -242,10 +242,7 @@ def validate_consultation(value: Any) -> dict[str, Any]:
         question_key = item["question_message_key"]
         if not isinstance(question_key, str) or _MESSAGE_KEY_RE.fullmatch(question_key) is None:
             raise DialogueContractError("MESSAGE_INVALID")
-        if (
-            item["purpose"] == "ANSWER"
-            and item["message_key"] == question_key
-        ):
+        if item["message_key"] == question_key:
             raise DialogueContractError("MESSAGE_INVALID")
     elif item["schema"] != CONSULTATION_SCHEMA:
         raise DialogueContractError("MESSAGE_INVALID")
@@ -323,6 +320,15 @@ def validate_consultation(value: Any) -> dict[str, Any]:
     ):
         raise DialogueContractError("MESSAGE_INVALID")
     if (item["purpose"] == "CORRECTION") != (supersedes is not None):
+        raise DialogueContractError("MESSAGE_INVALID")
+    if (
+        item["schema"] == CONSULTATION_V2_SCHEMA
+        and item["purpose"] == "CORRECTION"
+        and supersedes in {
+            item["message_key"],
+            item["question_message_key"],
+        }
+    ):
         raise DialogueContractError("MESSAGE_INVALID")
     item["supersedes_message_key"] = supersedes
 

@@ -21,7 +21,6 @@ from control_plane.executive_worker_broker import (
     WorkerBrokerClient,
 )
 from control_plane.operator_harness_contract import (
-    ATTENTION_TURN_INSTRUCTION,
     OPERATOR_HARNESS_INTERFACE_VERSION,
     AttentionTurnObservation,
     CandidateResult,

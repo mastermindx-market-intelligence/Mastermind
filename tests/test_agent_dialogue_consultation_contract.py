@@ -7,6 +7,8 @@ import pytest
 from common.agent_dialogue_consultation_contract import (
     _BINDING_ID_RE,
     CONSULTATION_PURPOSES,
+    CONSULTATION_SCHEMA,
+    CONSULTATION_V2_SCHEMA,
     RECEIPT_KEYS,
     RESPONSE_BUDGET_MAXIMA,
     DuplicateClassification,
@@ -147,10 +149,11 @@ def test_consultation_rejects_unknown_privileged_or_secret_shapes(
 def test_consultation_enforces_purpose_and_frozen_budget_bounds() -> None:
     answer = {"text": "The closed field list and refusal list.", "evidence_refs": []}
     correction = raw_consultation(
+        message_key="asd-consultation-correction-0001",
         purpose="CORRECTION",
         question=None,
         answer=answer,
-        supersedes_message_key="asd-consultation-0000000000000000",
+        supersedes_message_key="asd-consultation-answer-0001",
     )
     correction["schema"] = "mastermind.agent_dialogue_consultation.v2"
     assert validate_consultation(correction)["purpose"] == "CORRECTION"
@@ -279,3 +282,66 @@ def test_protected_v1_frame_and_fingerprint_remain_admitted_unchanged() -> None:
     ]
     with pytest.raises(DialogueContractError):
         validate_consultation(foreign_request_link)
+
+    legacy_correction = copy.deepcopy(protected)
+    legacy_correction.update(
+        {
+            "purpose": "CORRECTION",
+            "question": None,
+            "answer": {"text": "legacy correction", "evidence_refs": []},
+            "supersedes_message_key": protected["message_key"],
+            "fingerprint": "",
+        }
+    )
+    built_legacy_correction = build_consultation(legacy_correction)
+    assert built_legacy_correction["schema"] == CONSULTATION_SCHEMA
+    assert built_legacy_correction["supersedes_message_key"] == protected[
+        "message_key"
+    ]
+    assert built_legacy_correction["fingerprint"] == (
+        "e659d12d195ad987aebdff5eaf62dc6e68abf3d851490ddde46ae0e5695221a8"
+    )
+
+def test_v2_correction_message_identity_is_closed() -> None:
+    request = build_consultation(raw_consultation())
+    answer = copy.deepcopy(request)
+    answer.update(
+        {
+            "schema": CONSULTATION_V2_SCHEMA,
+            "message_key": "asd-consultation-answer-0001",
+            "purpose": "ANSWER",
+            "question": None,
+            "answer": {"text": "closed answer", "evidence_refs": []},
+            "question_message_key": request["message_key"],
+            "fingerprint": "",
+        }
+    )
+    answer["correlation"]["request_message_key"] = request["message_key"]
+    answer = build_consultation(answer)
+
+    correction = copy.deepcopy(answer)
+    correction.update(
+        {
+            "message_key": "asd-consultation-correction-0001",
+            "purpose": "CORRECTION",
+            "supersedes_message_key": answer["message_key"],
+            "answer": {"text": "corrected answer", "evidence_refs": []},
+            "fingerprint": "",
+        }
+    )
+    assert validate_consultation(correction)["purpose"] == "CORRECTION"
+
+    reused_request_key = copy.deepcopy(correction)
+    reused_request_key["message_key"] = request["message_key"]
+    with pytest.raises(DialogueContractError):
+        validate_consultation(reused_request_key)
+
+    self_superseding = copy.deepcopy(correction)
+    self_superseding["supersedes_message_key"] = correction["message_key"]
+    with pytest.raises(DialogueContractError):
+        validate_consultation(self_superseding)
+
+    supersedes_request = copy.deepcopy(correction)
+    supersedes_request["supersedes_message_key"] = request["message_key"]
+    with pytest.raises(DialogueContractError):
+        validate_consultation(supersedes_request)

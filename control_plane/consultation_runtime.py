@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from common.agent_dialogue_consultation_contract import (
     CONSULTATION_SCHEMA,
@@ -41,6 +41,7 @@ from control_plane.wake_events import (
     SourceKind,
     WakeKind,
     mint_obligation,
+    utc_now_iso,
 )
 from control_plane.wake_persist import WakeLedgerRepository
 
@@ -126,13 +127,28 @@ def _question_message_key(item: Mapping[str, Any]) -> str:
 class ConsultationRuntime:
     """Own consultation facts without changing Job/Attempt lifecycle state."""
 
-    def __init__(self, runtime: Runtime, *, repository_root: Path) -> None:
+    def __init__(
+        self,
+        runtime: Runtime,
+        *,
+        repository_root: Path,
+        clock: Callable[[], str] | None = None,
+    ) -> None:
         if not isinstance(runtime, Runtime):
             raise TypeError("runtime must be the existing Executive Runtime")
+        if clock is not None and not callable(clock):
+            raise TypeError("clock must be callable")
         self.runtime = runtime
+        self._clock = clock or utc_now_iso
         self._context = _ConsultationRuntimeContext(
             Path(repository_root).resolve()
         )
+
+    def _trusted_observed_at(self, claimed_observed_at: str) -> str:
+        """Validate the compatibility claim but derive authority from trusted time."""
+
+        _utc(claimed_observed_at)
+        return _utc(self._clock())
 
     def intent(
         self,
@@ -147,7 +163,7 @@ class ConsultationRuntime:
         if item["purpose"] != "QUESTION":
             raise StateConflict("INTENT requires a QUESTION frame")
         _require_normalized(item)
-        _utc(observed_at)
+        trusted_observed_at = self._trusted_observed_at(observed_at)
         self._context = replace(
             self._context, consultation_id=item["consultation_id"]
         )
@@ -175,7 +191,7 @@ class ConsultationRuntime:
             "response_budget": copy.deepcopy(item["response_budget"]),
             "payload_digest": item["fingerprint"],
             "question_digest": hashlib.sha256(item["question"].encode()).hexdigest(),
-            "observed_at": _utc(observed_at),
+            "observed_at": trusted_observed_at,
         }
         return self._append(
             item,
@@ -199,6 +215,7 @@ class ConsultationRuntime:
             raise StateConflict("ANSWER_AVAILABLE requires an ANSWER frame")
         _require_normalized(item)
         with self.runtime.store.transaction() as connection:
+            trusted_observed_at = self._trusted_observed_at(observed_at)
             request = self._request_for_answer_on_connection(item, connection)
             if item["requester_actor_ref"] != request["requester_actor_ref"]:
                 raise StateConflict("answer requester actor drifted")
@@ -265,7 +282,7 @@ class ConsultationRuntime:
                 == item["supersedes_message_key"]
             )
             historical = _expired(
-                str(request["valid_until"]), observed_at
+                str(request["valid_until"]), trusted_observed_at
             )
             if (
                 reserved is not None
@@ -282,7 +299,9 @@ class ConsultationRuntime:
                         item,
                         "ANSWER_AVAILABLE",
                         self._answer_payload(
-                            item, historical=True, observed_at=observed_at
+                            item,
+                            historical=True,
+                            observed_at=trusted_observed_at,
                         ),
                         actor="dialogue-carrier",
                         connection=connection,
@@ -298,7 +317,7 @@ class ConsultationRuntime:
                     "historical": True,
                     "conflict": "ANSWER_ALREADY_RESERVED",
                     "supersedes_message_key": item["supersedes_message_key"],
-                    "observed_at": _utc(observed_at),
+                    "observed_at": trusted_observed_at,
                 }
                 return self._append_on_connection(
                     item,
@@ -326,7 +345,9 @@ class ConsultationRuntime:
                 item,
                 "ANSWER_AVAILABLE",
                 self._answer_payload(
-                    item, historical=historical, observed_at=observed_at
+                    item,
+                    historical=historical,
+                    observed_at=trusted_observed_at,
                 ),
                 actor="dialogue-carrier",
                 connection=connection,
@@ -364,6 +385,7 @@ class ConsultationRuntime:
             self._context, consultation_id=item["consultation_id"]
         )
         with self.runtime.store.transaction() as connection:
+            trusted_observed_at = self._trusted_observed_at(observed_at)
             request = self._request_for_answer_on_connection(item, connection)
             if item["requester_actor_ref"] != request["requester_actor_ref"]:
                 raise StateConflict("answer requester actor drifted")
@@ -379,7 +401,9 @@ class ConsultationRuntime:
                 raise StateConflict("answer request identity drifted")
             if self._artifact_digest(item) != self._artifact_digest(request):
                 raise StateConflict("answer evidence revisions drifted")
-            if _expired(str(request["valid_until"]), observed_at):
+            if _expired(
+                str(request["valid_until"]), trusted_observed_at
+            ):
                 raise StateConflict("answer expired before requester consumption")
             reserved = next(
                 (
@@ -431,7 +455,7 @@ class ConsultationRuntime:
                     "correlation_digest": _identity_digest(request["correlation"]),
                     "evidence_revision_digest": self._artifact_digest(item),
                     "requester_actor_ref": copy.deepcopy(item["requester_actor_ref"]),
-                    "observed_at": _utc(observed_at),
+                    "observed_at": trusted_observed_at,
                 },
                 actor="requester-runtime",
                 connection=connection,
