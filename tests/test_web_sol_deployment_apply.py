@@ -471,6 +471,86 @@ def test_target_changed_after_temporary_write_is_not_overwritten(
     )
 
 
+def test_target_changed_after_final_preimage_check_is_not_overwritten(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle, install_root = _bundle(tmp_path)
+    target = sorted(bundle.artifacts, key=lambda row: str(row.destination))[1]
+    target.destination.parent.mkdir(parents=True, mode=0o700)
+    prior = b"approved-preimage-before-final-check"
+    target.destination.write_bytes(prior)
+    target.destination.chmod(target.mode)
+    prepared = applier.prepare_deployment(
+        bundle,
+        deployment.plan_deployment(bundle, {str(target.destination): prior}),
+        install_root=install_root,
+        expected_uid=install_root.stat().st_uid,
+        expected_gid=install_root.stat().st_gid,
+        operation_key="web-sol-install1-transactional-applier-source-20260916-sol-001",
+    )
+    original_matches = applier._named_preimage_matches
+    temporary_name = applier._temporary_path(target, prepared).name
+    foreign = b"concurrent-owner-change-after-final-check"
+    injected = False
+
+    def match_then_change_target(
+        parent_descriptor: int,
+        name: str,
+        row: applier.ArtifactPreimage,
+        current: applier.PreparedDeployment,
+    ) -> bool:
+        nonlocal injected
+        matched = original_matches(parent_descriptor, name, row, current)
+        if injected or not matched or name != target.destination.name:
+            return matched
+        try:
+            applier.os.stat(
+                temporary_name,
+                dir_fd=parent_descriptor,
+                follow_symlinks=False,
+            )
+        except OSError:
+            return matched
+        injected = True
+        flags = applier.os.O_WRONLY | applier.os.O_TRUNC
+        if hasattr(applier.os, "O_NOFOLLOW"):
+            flags |= applier.os.O_NOFOLLOW
+        descriptor = applier.os.open(name, flags, dir_fd=parent_descriptor)
+        try:
+            view = memoryview(foreign)
+            offset = 0
+            while offset < len(view):
+                written = applier.os.write(descriptor, view[offset:])
+                assert written > 0
+                offset += written
+            applier.os.fsync(descriptor)
+        finally:
+            applier.os.close(descriptor)
+        return matched
+
+    monkeypatch.setattr(
+        applier,
+        "_named_preimage_matches",
+        match_then_change_target,
+    )
+
+    with pytest.raises(
+        applier.WebSolDeploymentApplyError,
+        match="PREIMAGE_CONFLICT",
+    ):
+        applier.apply_deployment(prepared)
+
+    assert injected is True
+    assert target.destination.read_bytes() == foreign
+    assert prepared._state == "CONFLICT"
+    assert all(
+        not artifact.destination.exists()
+        for artifact in bundle.artifacts
+        if artifact.destination != target.destination
+    )
+
+
 def test_apply_and_rollback_are_single_consumption_boundaries(
     tmp_path: Path,
 ) -> None:
