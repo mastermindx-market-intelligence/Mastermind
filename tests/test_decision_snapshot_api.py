@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import hashlib
 import inspect
+import io
 import os
 import re
 import stat
+import tokenize
 from pathlib import Path
 
 import pytest
@@ -701,6 +703,34 @@ def test_route_only_imports_and_calls_decision_snapshot_read_projection():
     assert calls == {"read_projection"}, calls
 
 
+def test_route_uses_named_http_status_constants_not_reserved_numeric_literals():
+    from app import web
+
+    source = "\n".join([
+        inspect.getsource(web.api_decision_snapshot),
+        inspect.getsource(web._decision_snapshot_envelope),
+        inspect.getsource(web._decision_snapshot_error),
+        inspect.getsource(web._decision_snapshot_response),
+    ])
+    reserved = []
+    for line in source.splitlines():
+        try:
+            tokens = tokenize.generate_tokens(io.StringIO(line + "\n").readline)
+            for token in tokens:
+                if token.type != tokenize.NUMBER:
+                    continue
+                try:
+                    value = int(token.string, 0)
+                except ValueError:
+                    continue
+                if 400 <= value <= 999:
+                    reserved.append(token.string)
+        except (IndentationError, tokenize.TokenError):
+            continue
+
+    assert reserved == []
+
+
 # ---------------------------------------------------------------------------
 # Closed envelope: `extra` must never be able to override the fixed keys
 # ---------------------------------------------------------------------------
@@ -802,7 +832,9 @@ def test_fingerprint_detects_file_to_symlink_swap(snapshot_root):
     original_stat = path.stat()
     parent_dir = path.parent
     parent_original_stat = parent_dir.stat()
-    target = snapshot_root / "elsewhere.json"
+    target = snapshot_root.parent / "decision-snapshot-symlink-target.json"
+    assert snapshot_root not in target.parents
+    assert not target.exists()
     try:
         target.write_bytes(original_bytes)
         os.utime(target, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
@@ -815,6 +847,7 @@ def test_fingerprint_detects_file_to_symlink_swap(snapshot_root):
         if path.is_symlink():
             path.unlink()
         path.write_bytes(original_bytes)
+        path.chmod(stat.S_IMODE(original_stat.st_mode))
         os.utime(path, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
         target.unlink(missing_ok=True)
         # Creating/removing directory entries above moves the parent directory's own

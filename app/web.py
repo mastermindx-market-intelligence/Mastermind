@@ -13,7 +13,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 
@@ -1706,7 +1706,8 @@ def _decision_snapshot_response(body: dict, *, book: str) -> JSONResponse:
     except (TypeError, ValueError):
         _log.exception("Unexpected decision-snapshot response serialization failure")
         return _decision_snapshot_error(
-            500, book=book, error="internal_error", status="internal_error"
+            status.HTTP_500_INTERNAL_SERVER_ERROR, book=book, error="internal_error",
+            status="internal_error",
         )
 
 
@@ -1729,7 +1730,7 @@ def api_decision_snapshot(
     """
     if book != _DECISION_SNAPSHOT_BOOK:
         raise HTTPException(
-            status_code=404,
+            status_code=status.HTTP_404_NOT_FOUND,
             detail={"error": "unsupported_snapshot_book", "allowed": [_DECISION_SNAPSHOT_BOOK]},
             headers=_DECISION_SNAPSHOT_NO_STORE,
         )
@@ -1743,11 +1744,13 @@ def api_decision_snapshot(
         limit_int = int(limit)
     except (TypeError, ValueError):
         return _decision_snapshot_error(
-            400, book=book, error="invalid_request", status="invalid_request"
+            status.HTTP_400_BAD_REQUEST, book=book, error="invalid_request",
+            status="invalid_request",
         )
     if offset_int < 0 or not (1 <= limit_int <= 100):
         return _decision_snapshot_error(
-            400, book=book, error="invalid_request", status="invalid_request"
+            status.HTTP_400_BAD_REQUEST, book=book, error="invalid_request",
+            status="invalid_request",
         )
 
     from portfolio import decision_snapshot
@@ -1766,25 +1769,32 @@ def api_decision_snapshot(
                 _decision_snapshot_envelope(book=book, status="NO_SNAPSHOT"), book=book,
             )
         return _decision_snapshot_error(
-            404, book=book, error="snapshot_not_found", status="not_found"
+            status.HTTP_404_NOT_FOUND, book=book, error="snapshot_not_found",
+            status="not_found",
         )
     except decision_snapshot.SnapshotInvalidRequest:
         return _decision_snapshot_error(
-            400, book=book, error="invalid_request", status="invalid_request"
+            status.HTTP_400_BAD_REQUEST, book=book, error="invalid_request",
+            status="invalid_request",
         )
     except decision_snapshot.SnapshotCorrupt:
-        return _decision_snapshot_error(503, book=book, error="corrupt_snapshot")
+        return _decision_snapshot_error(
+            status.HTTP_503_SERVICE_UNAVAILABLE, book=book, error="corrupt_snapshot",
+        )
     except Exception:
         _log.exception("Unexpected decision-snapshot read failure")
         return _decision_snapshot_error(
-            500, book=book, error="internal_error", status="internal_error"
+            status.HTTP_500_INTERNAL_SERVER_ERROR, book=book, error="internal_error",
+            status="internal_error",
         )
 
     if section is None:
         snapshot = payload.get("snapshot")
         if not isinstance(snapshot, dict) or \
                 snapshot.get("authority") != _DECISION_SNAPSHOT_HARD_FALSE_AUTHORITY:
-            return _decision_snapshot_error(503, book=book, error="corrupt_snapshot")
+            return _decision_snapshot_error(
+                status.HTTP_503_SERVICE_UNAVAILABLE, book=book, error="corrupt_snapshot",
+            )
         body = _decision_snapshot_envelope(
             book=book,
             status=snapshot.get("state", "INVALID"),
@@ -1809,10 +1819,13 @@ def api_decision_snapshot(
     except (TypeError, ValueError):
         _log.exception("Unexpected decision-snapshot response serialization failure")
         return _decision_snapshot_error(
-            500, book=book, error="internal_error", status="internal_error"
+            status.HTTP_500_INTERNAL_SERVER_ERROR, book=book, error="internal_error",
+            status="internal_error",
         )
     if encoded_len > _DECISION_SNAPSHOT_MAX_SECTION_BYTES:
-        return _decision_snapshot_error(503, book=book, error="invalid_projection")
+        return _decision_snapshot_error(
+            status.HTTP_503_SERVICE_UNAVAILABLE, book=book, error="invalid_projection",
+        )
     return _decision_snapshot_response(body, book=book)
 
 
