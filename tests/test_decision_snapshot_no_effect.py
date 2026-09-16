@@ -120,9 +120,18 @@ _V2_STATE_FILES = {
 # Fixtures and small helpers
 # ---------------------------------------------------------------------------
 
+# Fixed, pre-cutoff epoch (2026-09-15T19:00:00Z) so every seeded V2 fixture's mtime never
+# depends on the host wall clock landing before the "2026-09-15T20:00:00Z" decision_cutoff
+# the tests below use — otherwise a run on or after 2026-09-16 would see every internal
+# first-party source as FUTURE_AT_CUTOFF and this file's whole-system negative proof would
+# silently stop exercising a populated book.
+_PRE_CUTOFF_EPOCH = 1_789_498_800
+
+
 def _write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
+    os.utime(path, (_PRE_CUTOFF_EPOCH, _PRE_CUTOFF_EPOCH))
 
 
 def _hashes(paths) -> dict:
@@ -197,6 +206,14 @@ def test_create_snapshot_preserves_v2_state_and_writes_exactly_one_artifact(
     # vanished, or changed type anywhere under the book's data directory.
     assert _hashes(state_paths.values()) == before_hashes
     assert _tree_fingerprint(book_dir) == before_tree
+
+    # The zero-effect proof must exercise an actually populated, eligible capture — not
+    # merely succeed vacuously because every internal source came back FUTURE_AT_CUTOFF.
+    account_receipt = next(r for r in receipt["sources"] if r["source_id"] == "book.account")
+    assert account_receipt["status"] == "AVAILABLE"
+    assert account_receipt["coverage_state"] == "COMPLETE"
+    assert receipt["sections"]["book_truth"]["coverage_state"] == "COMPLETE"
+    assert receipt["sections"]["book_truth"]["rows"] != []
 
     snapshot_dir = snapshots.snapshot_dir("autonomous")
     created = sorted(snapshot_dir.glob("*.json"))

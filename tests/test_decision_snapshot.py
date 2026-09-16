@@ -484,20 +484,32 @@ def test_no_public_function_accepts_a_path_or_root_argument():
 
 # Critical 1: same-cutoff/same-generation reuse must survive an existing correction.
 
+# Fixed, pre-cutoff epoch (2026-09-15T19:00:00Z) so account.json's mtime never depends on
+# the host wall clock landing before the "2026-09-15T20:00:00Z" decision_cutoff used below.
+_PRE_CUTOFF_EPOCH = 1_789_498_800
+
+
+def _account_receipt(snapshot: dict) -> dict:
+    return next(r for r in snapshot["sources"] if r["source_id"] == "book.account")
+
+
 def test_same_cutoff_same_generation_after_correction_reuses_corrected_snapshot(
     snapshot_root,
 ):
     account_path = sources._ROOT / "data" / "portfolios" / "autonomous" / "account.json"
     account_path.parent.mkdir(parents=True, exist_ok=True)
     account_path.write_text(json.dumps({"cash": 1.0}), encoding="utf-8")
+    os.utime(account_path, (_PRE_CUTOFF_EPOCH, _PRE_CUTOFF_EPOCH))
 
     original = snapshots.create_snapshot(
         "autonomous",
         decision_cutoff="2026-09-15T20:00:00Z",
         recorded_at="2026-09-15T20:01:00Z",
     )
+    assert _account_receipt(original)["status"] == "AVAILABLE"
 
     account_path.write_text(json.dumps({"cash": 2.0}), encoding="utf-8")
+    os.utime(account_path, (_PRE_CUTOFF_EPOCH, _PRE_CUTOFF_EPOCH))
     corrected = snapshots.create_snapshot(
         "autonomous",
         decision_cutoff="2026-09-15T20:00:00Z",
@@ -506,6 +518,7 @@ def test_same_cutoff_same_generation_after_correction_reuses_corrected_snapshot(
     assert corrected["snapshot_id"] != original["snapshot_id"]
     assert corrected["created"] is True
     assert corrected["correction"]["same_cutoff_prior_snapshot_ids"] == [original["snapshot_id"]]
+    assert _account_receipt(corrected)["status"] == "AVAILABLE"
 
     # account.json is unchanged since the correction — a later retry of the same (already
     # corrected) generation must return the corrected snapshot, not mint a third one.
@@ -516,6 +529,7 @@ def test_same_cutoff_same_generation_after_correction_reuses_corrected_snapshot(
     )
     assert retry["snapshot_id"] == corrected["snapshot_id"]
     assert retry["created"] is False
+    assert _account_receipt(retry)["status"] == "AVAILABLE"
     assert len(list(snapshots.snapshot_dir("autonomous").glob("*.json"))) == 2
 
 

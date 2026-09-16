@@ -456,7 +456,9 @@ def test_historical_memory_overflow_counts_all_cap_drops_exactly_once(repo_roots
     settlement_dir = repo / "data/portfolios/autonomous/settlement_receipts"
     settlement_dir.mkdir(parents=True, exist_ok=True)
     for i in range(10):
-        (settlement_dir / f"receipt_{i:03d}.json").write_text("{}", encoding="utf-8")
+        receipt_path = settlement_dir / f"receipt_{i:03d}.json"
+        receipt_path.write_text("{}", encoding="utf-8")
+        _set_pre_cutoff_mtime(receipt_path)
 
     result = sources.capture_book_state(
         "autonomous",
@@ -600,6 +602,10 @@ def test_required_account_after_cutoff_is_future_and_blocks_book_truth(repo_root
         gap["code"] == "FUTURE_AT_CUTOFF" and gap["source_id"] == "book.account"
         for gap in result["gaps"]
     )
+    assert any(
+        gap["code"] == "FUTURE_AT_CUTOFF" and gap["source_id"] == "book.account"
+        for gap in result["sections"]["book_truth"]["gaps"]
+    )
 
 
 def test_optional_latest_after_cutoff_cannot_contribute_rows(repo_roots):
@@ -693,7 +699,12 @@ def test_future_at_cutoff_receipt_retains_first_party_clock_digest_and_generatio
     assert receipt["known_at"] == "2026-09-15T20:05:00Z"
     assert receipt["known_at"] == receipt["filesystem_observed_at"]
     assert receipt["artifact_digest"] == sources._digest(raw)
-    assert receipt["correction_generation"].startswith("sha256:")
+    assert (
+        receipt["correction_generation"]
+        == receipt["artifact_digest"]
+        == sources._digest(raw)
+        != sources._EMPTY_DIGEST
+    )
     assert receipt["rows_total"] == 0
     assert receipt["rows_returned"] == 0
     assert receipt["omitted_rows"] == 0
@@ -702,3 +713,32 @@ def test_future_at_cutoff_receipt_retains_first_party_clock_digest_and_generatio
         and gap["section_id"] == "book_truth"
         for gap in result["gaps"]
     )
+    assert any(
+        gap["code"] == "FUTURE_AT_CUTOFF" and gap["source_id"] == "book.account"
+        for gap in result["sections"]["book_truth"]["gaps"]
+    )
+
+
+def test_mtime_one_ns_below_next_second_stays_in_prior_second_and_eligible(repo_roots):
+    """Regression for float-precision loss in nanosecond-to-second conversion.
+
+    A file written 1 ns before the second *after* the cutoff second is still, in whole
+    seconds, exactly at the cutoff — eligible, not future. ``st_mtime_ns / 1e9`` as a
+    float can round that fractional nanosecond count up across the second boundary
+    before truncation, wrongly reporting the next second and excluding an eligible file.
+    """
+    repo, _ = repo_roots
+    path = repo / "data/portfolios/autonomous/account.json"
+    _write_json(path, {"cash": 1_000_000.0, "positions": {}})
+    one_ns_below_next_second = (_EQUAL_EPOCH + 1) * 1_000_000_000 - 1
+    os.utime(path, ns=(one_ns_below_next_second, one_ns_below_next_second))
+
+    result = sources.capture_book_state(
+        "autonomous",
+        decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:06:00Z",
+    )
+    receipt = _by_id(result["sources"])["book.account"]
+    assert receipt["status"] == "AVAILABLE"
+    assert receipt["known_at"] == "2026-09-15T20:00:00Z"
+    assert result["sections"]["book_truth"]["rows"] != []

@@ -222,6 +222,20 @@ def _utc_from_epoch_seconds(seconds: float) -> str:
     return datetime.fromtimestamp(int(seconds), tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _utc_from_mtime_ns(nanoseconds: int) -> str:
+    """Floor an internal first-party ``st_mtime_ns`` to whole seconds in integer space.
+
+    ``nanoseconds`` is a Python int of magnitude ~1.8e18, well beyond float64's ~2^53
+    exact-integer range; a float division (``nanoseconds / 1e9``) can round the fractional
+    part up across a second boundary before ``int()`` truncates it, so a file written near
+    the end of a second can appear to have landed in the next one. Integer floor division
+    never loses precision.
+    """
+    return datetime.fromtimestamp(nanoseconds // 1_000_000_000, tz=timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+
+
 def _canonical_or_none(value: Any) -> str | None:
     if not isinstance(value, str) or not value:
         return None
@@ -608,7 +622,7 @@ def capture_book_state(book: str, *, decision_cutoff: str, recorded_at: str) -> 
             receipt["error_code"] = error_code
             receipt["coverage_state"] = "BLOCKED"
             if stat_after is not None:
-                receipt["filesystem_observed_at"] = _utc_from_epoch_seconds(stat_after.st_mtime_ns / 1e9)
+                receipt["filesystem_observed_at"] = _utc_from_mtime_ns(stat_after.st_mtime_ns)
             gaps_out.append(_gap(error_code, source_id=source_id, section_id=section_id))
             _merge_into_section(sections[section_id], rows=[], coverage_state="BLOCKED",
                                  omitted_rows=0,
@@ -617,7 +631,7 @@ def capture_book_state(book: str, *, decision_cutoff: str, recorded_at: str) -> 
             continue
 
         # Stable read succeeded.
-        mtime_utc = _utc_from_epoch_seconds(stat_after.st_mtime_ns / 1e9)
+        mtime_utc = _utc_from_mtime_ns(stat_after.st_mtime_ns)
         receipt["known_at"] = mtime_utc
         receipt["filesystem_observed_at"] = mtime_utc
         receipt["clock_basis"] = "FILE_MTIME_FIRST_PARTY_STATE"
@@ -697,7 +711,7 @@ def capture_book_state(book: str, *, decision_cutoff: str, recorded_at: str) -> 
             receipt["error_code"] = error_code
             receipt["coverage_state"] = "BLOCKED"
             if stat_after is not None:
-                receipt["filesystem_observed_at"] = _utc_from_epoch_seconds(stat_after.st_mtime_ns / 1e9)
+                receipt["filesystem_observed_at"] = _utc_from_mtime_ns(stat_after.st_mtime_ns)
             gaps_out.append(_gap(error_code, source_id=source_id, section_id=section_id))
             _merge_into_section(sections[section_id], rows=[], coverage_state="BLOCKED",
                                  omitted_rows=0,
@@ -706,7 +720,7 @@ def capture_book_state(book: str, *, decision_cutoff: str, recorded_at: str) -> 
             continue
 
         # Stable read succeeded — rows, digest, and mtime all come from the same bytes.
-        mtime_utc = _utc_from_epoch_seconds(stat_after.st_mtime_ns / 1e9)
+        mtime_utc = _utc_from_mtime_ns(stat_after.st_mtime_ns)
         receipt["known_at"] = mtime_utc
         receipt["filesystem_observed_at"] = mtime_utc
         receipt["clock_basis"] = "FILE_MTIME_FIRST_PARTY_STATE"
