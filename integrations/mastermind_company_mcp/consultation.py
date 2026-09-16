@@ -8,6 +8,7 @@ import hashlib
 import json
 import re
 from collections.abc import Awaitable, Callable, Mapping
+from types import MappingProxyType
 from typing import Any
 
 from common.agent_dialogue_consultation_contract import (
@@ -45,12 +46,14 @@ _COMPANY_CONSULTATION_INTERNAL = frozenset({"EFFECT_UNKNOWN", "INTERNAL_ERROR"})
 _PEER_REF_RE = re.compile(r"\Apeer-[0-9a-f]{32}\Z")
 _CONSULTATION_REF_RE = re.compile(r"\Aconsult-[0-9a-f]{32}\Z")
 _UTC_SECOND_RE = re.compile(r"\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\Z")
-_COMPANY_CONSULT_DISPATCH_BUDGET = {
-    "max_answers": 1,
-    "max_evidence_reads": 4,
-    "max_forward_hops": 0,
-    "max_payload_bytes": 32768,
-}
+_COMPANY_CONSULT_DISPATCH_BUDGET = MappingProxyType(
+    {
+        "max_answers": 1,
+        "max_evidence_reads": 4,
+        "max_forward_hops": 0,
+        "max_payload_bytes": 32768,
+    }
+)
 _SECRET_RE = re.compile(
     r"(?i)(?:xox[a-z]-[A-Za-z0-9-]{10,}|xapp-[A-Za-z0-9-]{10,}|"
     r"github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|"
@@ -246,6 +249,8 @@ def validate_company_consultation_tool_arguments(
     if tool_name == "company.consult":
         if _PEER_REF_RE.fullmatch(raw["to"] if isinstance(raw.get("to"), str) else "") is None:
             raise CompanyConsultationToolError("INVALID_REQUEST")
+        if len(raw["question"]) > 16000:
+            raise CompanyConsultationToolError("INVALID_REQUEST")
         _validated_text(raw["question"])
         _validated_evidence_refs(raw["evidence_refs"])
         _validated_artifact_revisions(raw["artifact_revisions"])
@@ -355,7 +360,11 @@ def _validated_dispatch_budget(value: Any) -> dict[str, int]:
 
 
 def validate_company_consult_dispatch_request(value: Any) -> dict[str, Any]:
-    """Validate the closed provider-free request consumed by a future dispatcher."""
+    """Validate the closed provider-free request consumed by a future dispatcher.
+
+    ``valid_until`` is an exact trusted-owner cutoff. This inert source wave
+    validates its representation but grants no temporal admission or dispatch.
+    """
     required = {
         "schema",
         "operation",
@@ -398,6 +407,8 @@ def validate_company_consult_dispatch_request(value: Any) -> dict[str, Any]:
         "budget": _validated_dispatch_budget(value.get("budget")),
         "valid_until": valid_until,
     }
+    if request["semantic"]["to"] != request["peer"]["peer_ref"]:
+        raise CompanyConsultationToolError("INVALID_REQUEST")
     if len(canonical_company_consultation_json(request)) > COMPANY_CONSULTATION_MAX_REQUEST_BYTES:
         raise CompanyConsultationToolError("INVALID_REQUEST")
     return request
@@ -410,7 +421,11 @@ def build_company_consult_dispatch_request(
     semantic: Mapping[str, Any],
     valid_until: str,
 ) -> dict[str, Any]:
-    """Build one exact internal ``company.consult`` dispatcher request."""
+    """Build one exact internal ``company.consult`` dispatcher request.
+
+    The caller supplies the trusted cutoff; this wave deliberately invents no
+    TTL and has no live dispatcher that can consume the request.
+    """
     return validate_company_consult_dispatch_request(
         {
             "schema": COMPANY_CONSULT_DISPATCH_SCHEMA,
@@ -472,17 +487,10 @@ def company_consult_dispatch_schema_snapshot() -> dict[str, Any]:
             "semantic": copy.deepcopy(consult_input),
             "budget": _object(
                 {
-                    "max_answers": {"type": "integer", "const": 1},
-                    "max_evidence_reads": {"type": "integer", "const": 4},
-                    "max_forward_hops": {"type": "integer", "const": 0},
-                    "max_payload_bytes": {"type": "integer", "const": 32768},
+                    key: {"type": "integer", "const": value}
+                    for key, value in _COMPANY_CONSULT_DISPATCH_BUDGET.items()
                 },
-                (
-                    "max_answers",
-                    "max_evidence_reads",
-                    "max_forward_hops",
-                    "max_payload_bytes",
-                ),
+                tuple(_COMPANY_CONSULT_DISPATCH_BUDGET),
             ),
             "valid_until": {
                 "type": "string",
@@ -598,14 +606,18 @@ class CompanyConsultationGateway:
                 return _result(tool_name, {"peers": peers})
             if tool_name == "company.consult":
                 peer = self.peer_resolver.resolve(normalized["to"], program_ref=self.program_ref)
+                consultation_schema = peer.consultation_schema
                 try:
+                    valid_until = self.utc_now()
                     request = build_company_consult_dispatch_request(
                         peer=peer.public_projection(),
-                        consultation_schema=peer.consultation_schema,
+                        consultation_schema=consultation_schema,
                         semantic=normalized,
-                        valid_until=self.utc_now(),
+                        valid_until=valid_until,
                     )
                 except CompanyConsultationToolError:
+                    return _error(tool_name, "INTERNAL_ERROR")
+                except Exception:
                     return _error(tool_name, "INTERNAL_ERROR")
                 response = await self.dispatcher(tool_name, request)
                 return _result(tool_name, self._service_data(response))

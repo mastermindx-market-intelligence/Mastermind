@@ -56,6 +56,7 @@ from integrations.slack_agent_dialogue.company_dialogue_runtime_binding import (
 )
 from common.agent_dialogue_consultation_contract import (
     CONSULTATION_SCHEMA,
+    CONSULTATION_V2_SCHEMA,
     GROK_CONSULTATION_SCHEMA,
     validate_consultation,
 )
@@ -1078,6 +1079,9 @@ def test_company_consult_dispatch_schema_snapshot_is_frozen_and_separate() -> No
     ).hexdigest()
     assert digest_fn() == expected_digest
     assert consultation_contract.COMPANY_CONSULT_DISPATCH_SCHEMA_DIGEST == expected_digest
+    assert consultation_contract.COMPANY_CONSULT_DISPATCH_SCHEMA_DIGEST == (
+        "3efbf163cb5ee674182a82d8d23b1ce522888c634183c141909b2a793eb709b0"
+    )
     assert COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST == (
         "f9463e714240c5ac347bb029788b88d5556ad9d77c69eabcec1b7038e210a722"
     )
@@ -1176,3 +1180,209 @@ def test_company_consult_dispatch_validator_refuses_unhashable_schema_as_typed_e
         consultation_contract.validate_company_consult_dispatch_request(request)
 
     assert exc_info.value.code == "INVALID_REQUEST"
+
+
+def test_company_consult_dispatch_binds_semantic_target_to_trusted_peer() -> None:
+    with pytest.raises(CompanyConsultationToolError) as exc_info:
+        consultation_contract.build_company_consult_dispatch_request(
+            peer=_peer().public_projection(),
+            consultation_schema=CONSULTATION_SCHEMA,
+            semantic={
+                "to": "peer-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "question": "Do not allow a second peer identity.",
+                "evidence_refs": [],
+                "artifact_revisions": [],
+            },
+            valid_until="2026-09-14T00:00:00Z",
+        )
+
+    assert exc_info.value.code == "INVALID_REQUEST"
+
+
+def test_company_consult_dispatch_budget_source_is_immutable() -> None:
+    budget = consultation_contract._COMPANY_CONSULT_DISPATCH_BUDGET
+
+    with pytest.raises(TypeError):
+        budget["max_answers"] = 2
+
+
+def test_company_consult_public_validator_enforces_declared_question_length() -> None:
+    gateway, sink = _gateway()
+
+    response = _run(
+        gateway.call(
+            "company.consult",
+            {
+                "to": _peer().peer_ref,
+                "question": "x" * 16001,
+                "evidence_refs": [],
+                "artifact_revisions": [],
+            },
+        )
+    )
+
+    assert response["ok"] is False
+    assert response["error"]["code"] == "INVALID_REQUEST"
+    assert sink.calls == []
+
+
+def _valid_company_consult_dispatch_request() -> dict:
+    return consultation_contract.build_company_consult_dispatch_request(
+        peer=_peer().public_projection(),
+        consultation_schema=CONSULTATION_SCHEMA,
+        semantic={
+            "to": _peer().peer_ref,
+            "question": "Validate the closed request.",
+            "evidence_refs": [],
+            "artifact_revisions": [],
+        },
+        valid_until="2026-09-14T00:00:00Z",
+    )
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda request: request.__setitem__(
+            "consultation_schema", CONSULTATION_V2_SCHEMA
+        ),
+        lambda request: request.__setitem__(
+            "consultation_schema", "mastermind.agent_dialogue_consultation.v99"
+        ),
+        lambda request: request.__setitem__("operation", "reply"),
+        lambda request: request.__setitem__("unexpected", True),
+        lambda request: request["budget"].__setitem__("max_answers", True),
+        lambda request: request["budget"].__setitem__("max_forward_hops", False),
+    ],
+    ids=[
+        "v2-response-schema",
+        "unknown-schema",
+        "wrong-operation",
+        "extra-outer-field",
+        "bool-answer-budget",
+        "bool-forward-budget",
+    ],
+)
+def test_company_consult_dispatch_refuses_closed_contract_mutations(mutate) -> None:
+    request = _valid_company_consult_dispatch_request()
+    mutate(request)
+
+    with pytest.raises(CompanyConsultationToolError) as exc_info:
+        consultation_contract.validate_company_consult_dispatch_request(request)
+
+    assert exc_info.value.code == "INVALID_REQUEST"
+
+
+@pytest.mark.parametrize(
+    "invalid_timestamp",
+    [
+        "2026-09-14T00:00:00+00:00",
+        "2026-02-30T00:00:00Z",
+        "2026-09-14T00:00:60Z",
+    ],
+    ids=["offset", "invalid-calendar-day", "leap-second"],
+)
+def test_company_consult_dispatch_refuses_noncanonical_or_impossible_time(
+    invalid_timestamp: str,
+) -> None:
+    request = _valid_company_consult_dispatch_request()
+    request["valid_until"] = invalid_timestamp
+
+    with pytest.raises(CompanyConsultationToolError) as exc_info:
+        consultation_contract.validate_company_consult_dispatch_request(request)
+
+    assert exc_info.value.code == "INVALID_REQUEST"
+
+
+def test_company_consult_clock_failure_is_definite_pre_dispatch_internal_error() -> None:
+    def broken_clock() -> str:
+        raise RuntimeError("clock unavailable")
+
+    sink = _Dispatcher()
+    gateway = CompanyConsultationGateway(
+        peer_resolver=_resolver(),
+        dispatcher=sink,
+        observed_tool_schema_digest=COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST,
+        utc_now=broken_clock,
+    )
+
+    response = _run(
+        gateway.call(
+            "company.consult",
+            {
+                "to": _peer().peer_ref,
+                "question": "Do not claim an effect before the clock resolves.",
+                "evidence_refs": [],
+                "artifact_revisions": [],
+            },
+        )
+    )
+
+    assert response["ok"] is False
+    assert response["error"]["code"] == "INTERNAL_ERROR"
+    assert sink.calls == []
+
+
+def test_company_consult_dispatch_failure_after_invocation_remains_effect_unknown() -> None:
+    class FailingDispatcher:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict]] = []
+
+        async def __call__(self, operation: str, request: dict) -> dict:
+            self.calls.append((operation, copy.deepcopy(request)))
+            raise RuntimeError("provider result lost")
+
+    sink = FailingDispatcher()
+    gateway = CompanyConsultationGateway(
+        peer_resolver=_resolver(),
+        dispatcher=sink,
+        observed_tool_schema_digest=COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST,
+        utc_now=lambda: "2026-09-14T00:00:00Z",
+    )
+
+    response = _run(
+        gateway.call(
+            "company.consult",
+            {
+                "to": _peer().peer_ref,
+                "question": "Preserve post-effect uncertainty.",
+                "evidence_refs": [],
+                "artifact_revisions": [],
+            },
+        )
+    )
+
+    assert response["ok"] is False
+    assert response["error"]["code"] == "EFFECT_UNKNOWN"
+    assert len(sink.calls) == 1
+
+
+def test_maximum_declared_company_consult_input_fits_dispatch_envelope() -> None:
+    evidence_refs = [
+        "https://github.com/" + (chr(97 + index) * 469)
+        for index in range(4)
+    ]
+    artifacts = [
+        {
+            "repository": ("a" * 99) + "/" + (chr(98 + index) * 100),
+            "path": chr(97 + index) + ("p" * 254),
+            "commit": format(index + 1, "040x"),
+            "content_sha256": format(index + 1, "064x"),
+        }
+        for index in range(8)
+    ]
+    request = consultation_contract.build_company_consult_dispatch_request(
+        peer=_peer().public_projection(),
+        consultation_schema=CONSULTATION_SCHEMA,
+        semantic={
+            "to": _peer().peer_ref,
+            "question": "q" * 16000,
+            "evidence_refs": evidence_refs,
+            "artifact_revisions": artifacts,
+        },
+        valid_until="2026-09-14T00:00:00Z",
+    )
+
+    assert len(canonical_company_consultation_json(request)) <= (
+        consultation_contract.COMPANY_CONSULTATION_MAX_REQUEST_BYTES
+    )
