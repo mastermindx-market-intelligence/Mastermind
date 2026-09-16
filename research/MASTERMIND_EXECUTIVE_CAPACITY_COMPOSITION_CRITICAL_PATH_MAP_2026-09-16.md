@@ -24,7 +24,7 @@ holds, or any provider-capacity acceptance class.
 |---|---|---|---|---|---|---|---|
 | #7116 | macro | `4d7ddfd24a5f` | OPEN, DRAFT | none | null | `sol/provider-subscription-catalog-20260913` | **WRITE WITHHELD** (R19 (6), R13). Quota-economics preview across subscriptions. Note it is **not** based on `main` — it stacks on the catalog branch. |
 | #7103 | macro | `6ce16e745064` | OPEN, DRAFT | none | null | `main` | **RELEASE HOLD** (R13; seat removed the arms). GLM/Alibaba/MiniMax subscription source; owns the `/token_plan/remains` parser. |
-| #7142 | macro | `fe4dd5b142b1` | OPEN, DRAFT | none | null | `main` | **RELEASE HOLD** (R13). Provider account pool selector. |
+| #7142 | macro | `fe4dd5b142b1` | OPEN, DRAFT | none | null | `main` | **RELEASE HOLD** (R13). Provider account pool selector; subordinate candidate-selection kernel only (contract §11.1). |
 | #7162 | macro | `814a58d2c200` | OPEN, DRAFT | none | null | `main` | Family-B, macro half. **B0 gate**: B0 not accepted; do not start B1–B5 (R15). |
 | #662 | Mastermind | `fc5bbcf15a4f` | OPEN, DRAFT | none | null | `master` | Family-B, Mastermind half. Same B0 gate. Paired review child `ocr2c-family-b-paired-architecture-review-20260914-sol-001` is PRE_START on its own carrier — **do not steal it** (R15). *(R15 recorded `30f8a4c1`; the head has since moved — this row is the live read.)* |
 | #671 | Mastermind | `0cdb3ba422a5` | OPEN, DRAFT | none | null | `master` | **Sol-authored, Sol's writer only.** Accepted at its ceiling: APPROVE_AS_SPEC_ONLY, R2-B1/B2 closed (R34 (1)). Source law for capacity harvesting. |
@@ -70,6 +70,10 @@ double reserve); lexicographic comparison a–i; an ADVISORY plan bound to READY
 Capacity V2/resource graph, hold set, cost-calibration generation, routing/policy generation, and
 as-of/fresh-until digests; #657-style preference only for the exact current C1 tie; recompute on material events;
 no long-lived planner state. **Do not implement Step B before #688's Step-A freeze.**
+
+The frozen shape gains a `portfolio_optionality_cost` lexicographic stage, derived from the number and value of
+differentiated future routes that share the same resource. It is a stage in the lexicographic order, **not a
+universal score**.
 
 ### B/#7103 — reconcile current generation axes
 - **What exists**: the subscription source and the `/token_plan/remains` parser that preserves per-model rows.
@@ -117,7 +121,8 @@ no long-lived planner state. **Do not implement Step B before #688's Step-A free
   models Personal (`config/subscription_provider_profiles.v1.json:33`
   `"alibaba-token-plan-personal"`) — `stage_routing` (PARTITIONED versus ATOMIC_FALLBACK), seat tier,
   shared-pack identity/count/expiry, member cap; MiniMax plan `capability_generation`; GLM per-account
-  `capability_generation` as a Provider-Control fact.
+  `capability_generation` as a Provider-Control fact; OpenCode Go actual enrollment and pool-membership policy
+  eligibility (schedulable entitlement count: 1 proven-at-most, actual enrollment UNKNOWN).
 - **Blocked by**: not by a hold — by the absence of a live evidence path. R15: the realm/capacity facts are
   fixture-only, so today's minting is interactive-canary evidence, not production enrollment. R27 additionally
   records the Executive web→MCP connector at `401 Manual reauthentication required`, so the authenticated surface
@@ -175,6 +180,9 @@ no long-lived planner state. **Do not implement Step B before #688's Step-A free
 - **Not authorised here**: any live placement, and any scheduler/daemon.
 - **Adversarial additions**: time-bound offer expiry and surface mismatch (matrix classes 31–32) must be on the
   frozen Step-B test list; a promotion change invalidates the advisory plan digest.
+- **Rollout-order reference, FROZEN, not commissioned**: Codex → OpenCode Go coding-agent API (only after
+  #7143, this resource contract, and CF2-I) → GLM direct where that execution mode is admitted → direct MiniMax
+  and Alibaba only in lawful modes. **Do not activate Go yet.**
 
 ## 7. Step G — Bounded real canaries
 
@@ -190,13 +198,17 @@ no long-lived planner state. **Do not implement Step B before #688's Step-A free
   adapters work).
 - **Standing precedent**: an interactive canary never flips a flag (R18 (2)); `claude -p` headless is UNATTENDED
   unless a policy receipt admits that exact mode (R13).
-- **Frozen qualification-order reference, NOT commissioned**: after Step A, (1) GLM Coding Plan through
-  protected #581's hermetic `interactive_canary` admission seam; binding
-  `glm-coding-plan.claude-code-anthropic` remains SPEC_ONLY, and this is a bounded interactive canary, not a flag
-  flip. (2) MiniMax M3 as a utilization target in an interactive/tool lane on the #665 incumbent path; host
-  wrapper remains M2.7. (3) Alibaba Team as an INTERACTIVE_TOOL capacity domain only because provider terms
-  prohibit automated backends and the protected profile still says Personal against the Chairman's Team; that
-  enrollment identity must be fixed before any plan-specific canary.
+- **Frozen heterogeneous-canary #1, NOT commissioned**: Codex plus **ONE single-account OpenCode Go /
+  MiniMax-M3 worker**, through protected #622's single-account path — not direct MiniMax.
+- **Gates before any START, in order**: (1) #688's own Step-A resource-semantics freeze — this document is
+  gate 1 of the chain; (2) #7103/#7143 reconciliation, with #7143 OPEN/DRAFT at `facf7074`,
+  BUILT_NOT_PROVEN, owing one authorized real-account usage observation and exact-head CI; (3) exactly one
+  lawful Go entitlement; (4) fresh Go offer/model/privacy digests, with no paid overflow; (5) concrete Go-M3
+  Worker registration and harness qualification through the existing adapter/binding owners — no model→worker
+  registry; (6) the C1 first-tier candidate set, the #657 preference receipt, CF2-I, and C2 atomic commitment
+  (a bounded explicit canary may use a reviewed fixed Worker under canary law and must never be mislabeled as
+  general routing); (7) result → usage delta → Provider Control observation → hold settlement.
+- **Frozen direct-subscription canary #1, NOT commissioned**: GLM Coding Plan. Neither canary is activated.
 
 ## 8. Step H — Small live fleet
 
@@ -206,7 +218,7 @@ no long-lived planner state. **Do not implement Step B before #688's Step-A free
 - **Blocked by**: the acceptance suite. The race tests are matrix class 6 (currently PARTIAL — worker-slot
   exclusion only) and the correction/reset tests are classes 7 and 8 (currently MISSING). H cannot open while
   those three are not EXISTS. Worth stating plainly because it sizes the remaining work: at this pin **no** class
-  of the thirty-two is fully EXISTS — ten are PARTIAL, twenty-two MISSING.
+  of the thirty-seven is fully EXISTS — eleven are PARTIAL, twenty-six MISSING.
 
 ---
 
@@ -230,8 +242,8 @@ not a step in this chain, and its paired review child is PRE_START on its own ca
 - That any B–H step is started. None is. This document maps them.
 - That a PR listed in §0 may be edited, armed, marked Ready, rebased or merged by the holder of this map. None
   may.
-- That the three GLM accounts, the three OpenCode Go accounts, or any kit-side pool number is a Provider Control
-  capacity fact. They are local telemetry and are `UNVERIFIED_FOR_ROUTING` until a dated Provider-Control receipt
-  exists (R13-B2).
+- That local GLM/OpenCode Go credential counts or any kit-side pool number is a Provider Control capacity fact.
+  They are local telemetry and are `UNVERIFIED_FOR_ROUTING` until a dated Provider-Control receipt exists
+  (R13-B2).
 - That an UNKNOWN in §3/§9.3 of the contract may be closed by inference. R35 §22 C forbids exactly that, and the
   contract writes every one of them as UNKNOWN for that reason.

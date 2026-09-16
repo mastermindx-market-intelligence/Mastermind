@@ -90,6 +90,13 @@ provider-enforced bound. Identity is minted by Provider Control and is never der
 - a worker id or a Mastermind quota class (those are *our* lifecycle objects),
 - an API-key slot (a key is a binding to a resource, not the resource).
 
+Provider Control also owns account identity, enrollment, policy mode, and usage. One login is one opaque
+realm/account identity with its own native authentication/configuration partition (for example, one
+`CLAUDE_CONFIG_DIR`). **No credential bytes ever live in Executive, Capacity, or Agent OS.** Four logins are
+not four entitlements until each is proven lawful and carries `pool_membership_policy_eligible = true`: this is
+the credential form of `EXECUTION_LANES != ENTITLEMENT_RESOURCES` (matrix class 29) and the D2 limit. Processes,
+credentials, and views are the three forms of the same multiplication error; §5.2 and §5.3 close them together.
+
 **Composition with Family-B.** Family-B (Mastermind #662 / Macro #7162) introduces `capacity_capability_id` as
 the logical quota domain and `host_ref + capacity_capability_id + realm_generation` as the executable local realm
 (R15). Resource identity is minted **inside** that namespace, not beside it:
@@ -448,29 +455,40 @@ for acct in {chairman-max, chairman-max-2, chairman-max-3}:
   *(Kit observation, not a Provider Control receipt; by R13-B2 such numbers are `UNVERIFIED_FOR_ROUTING`.
   Recorded as evidence of the defect, never as an enrollment fact.)*
 
-### 5.2 OpenCode Go — per-account window triple, per-model debit weight, monthly policy gate
+### 5.2 OpenCode Go — one entitlement, three windows, per-model debit weight, policy gate
 ```
-for acct in {C1, C2, C3}:
-    E_go[acct] = ALL_OF(
-        BUDGET go_rolling_5h[acct],
-        BUDGET go_weekly[acct],
-        BUDGET go_monthly[acct]
-    )
+E_go = ALL_OF(
+    BUDGET go_rolling_5h,
+    BUDGET go_weekly,
+    BUDGET go_monthly
+)
 ```
 - A request for model `m` debits `w(m)` normalised units, `w ∈ {1, 2, 4}` by published tier ($60/$30/$15 monthly
   per model per account). The weight is a **unit conversion inside one resource**, not a separate resource — this
   is the canonical example of R35 §5's "shared credit system with model-specific debit", and of failure class 2:
-  the per-model request tables are conversion rates over one account-wide quota, not per-model pools.
+  the per-model request tables are conversion rates over one account-wide quota, not per-model pools. They are
+  **DEBIT VIEWS over that one allowance, never separate wallets**, under the same rule as MiniMax's views (§5.3).
+  The 5-hour, weekly, and monthly windows ($12/$30/$60 equivalents) meter one shared entitlement.
 - The frontier budget gate (a weight-4 model refused once the account's monthly used percent reaches its
   threshold) is a **policy gate on placement**, not a capacity fact. It belongs to §7, not to `avail`.
-- **Refinement flagged for Sol.** R35 §2 writes this as `ALL_OF(go_shared_5h, go_shared_weekly, go_shared_monthly,
-  go_concurrency)` — singular. That expression is correct *per account*; the fabric holds three of them, so the
-  same "sibling routes, not a pool" rule as GLM applies. This is offered as a refinement of the example, not a
-  contradiction of the operator set.
-- The three Go accounts are three expressions **only where each is a proven distinct entitlement/account
-  resource**. Multiple sessions, hosts, dashboards, or model views of one account remain one expression — never
-  three. Where distinctness is not proven, the accounts collapse to one expression and fail closed under §4.6. At
-  this pin, that proof is a Provider Control fact we do not hold.
+- **MULTI-ACCOUNT POOLING IS HELD.** Go's terms prohibit using multiple accounts to circumvent limits, and its
+  documentation says one member per workspace may subscribe. Admission requires
+  `pool_membership_policy_eligible = true`, issued by Provider Control, **before any multi-member use**. Without
+  that policy evidence there is no lawful pooled entitlement — not a smaller one, none. The schedulable Go
+  entitlement count is therefore **1 proven-at-most; actual enrollment is UNKNOWN** (§9.3 U5).
+- The first Go proof is exactly **ONE enrolled account** — no rollover, no account-A-to-account-B transfer, and
+  no “3x.” **Never multiply limits by key or account count.** This is the same failure as
+  `EXECUTION_LANES != ENTITLEMENT_RESOURCES`, arriving through credentials instead of processes (matrix classes
+  29 and 33); a reader may not close one form and leave the other open.
+- Go is an aggregator **OPTIONALITY** resource, not a cheap wallet. Preserve it for model families that are
+  unavailable, ineligible, or exhausted on a direct route; cross-provider review independence; and overflow. Do
+  not default Go to Luna, GLM, or MiniMax while abundant lawful direct capacity exists. Conversely, when direct
+  MiniMax or Alibaba is UNATTENDED-ineligible, Go's MiniMax-M3 or Qwen route may be the lawful autonomous one:
+  **policy eligibility beats prepaid size** (§7 is a hard gate, not a tag).
+- Go's provider-intended mode is coding-agent / API use: it validates Claude Code, expects a coding-agent user
+  agent, and expects a stable `x-opencode-session`. The mode admitted for Mastermind is therefore bounded
+  `CODING_AGENT_API` (§7.1): coding-agent request/result consumption with stable sessions — not scraping,
+  extraction, dataset generation, or multi-account pooling.
 
 ### 5.3 MiniMax Token Plan — per-model rows are EVIDENCE VIEWS, never wallets
 ```
@@ -577,6 +595,9 @@ of reaching an accepted result; ambiguous shared-consumption attribution is reje
 (R35 §11, failure class 16). A candidate without comparable evidence stays in SHADOW/CANARY rather than receiving
 production placement.
 
+Cohort keys bind provider **SURFACE** + `model_harness_cost_generation` + harness. Go/M3 evidence is not
+direct-M3 evidence, and the two may never be pooled into one estimate (matrix classes 15 and 35).
+
 ### 6.3 Concurrency is an observed dynamic resource
 Marketing concurrency values are not scheduler truth (R35 §7). Provider Control owns: observed concurrency
 availability, provider cooling/throttle state, last successful parallelism, freshness, and dynamic safety
@@ -627,10 +648,15 @@ PROVIDER_USAGE_MODE :=
   | SUPPORTED_TOOL_AGENT_SESSION   # a provider-supported agent session, human-initiated and attended
   | UNATTENDED_BACKGROUND          # our Fabric starting work with no attending human
   | APPLICATION_BACKEND            # serving an application/product backend
+  | CODING_AGENT_API               # bounded coding-agent request/result use with stable sessions
   | PROVIDER_USAGE_MODE_UNKNOWN    # the policy owner cannot prove the mode is admitted
 ```
 The vocabulary is offered for freezing at review (R35 §6: "The exact vocabulary can be frozen during contract
 review").
+
+`CODING_AGENT_API` is admitted only for coding-agent request/result consumption with stable sessions (including
+the expected coding-agent user agent and stable `x-opencode-session`). It is **not** scraping, extraction,
+dataset generation, or multi-account pooling. Its admission is per surface, exactly as every other mode is.
 
 ### 7.2 The gate
 At admission, a job's **requested mode** must intersect the **plan policy's admitted modes for this exact
@@ -887,8 +913,16 @@ be relabeled as provider-capacity proof.
 - Claude: Fable-family sublimit remaining per account. **UNKNOWN.**
 - **U4 — Document placement**: `research/` while HOLD (R41 ruling 1) versus the earlier census recommendation of
   `docs/superpowers/specs/`. **UNKNOWN; Sol's call at release.**
+- **U5 — OpenCode Go enrollment/pool membership**: whether even one Go account is enrolled, and whether any
+  multi-member use is policy-eligible. The schedulable entitlement count remains **1 proven-at-most; actual
+  enrollment UNKNOWN** (§5.2).
 - Every provider: whether our exact autonomous invocation mode is policy-admitted. **PROVIDER_USAGE_MODE_UNKNOWN**
   until a current policy receipt says otherwise.
+
+Provider privacy and retention labels are **DATED OBSERVATIONS, not standing guarantees**. For example, the
+DeepSeek V4 Flash zero-data-retention label was stated only through 31 August 2026 and is therefore **STALE /
+UNKNOWN** now. A label past its observation date fails closed like any other stale observation (§2.3; B4's typed
+STALE; matrix class 36).
 
 ---
 
@@ -1075,9 +1109,9 @@ Economics must not smuggle preference through back channels:
 - **Candidate ordering** — the order candidates are supplied to `select_placement` is never a preference signal;
   the source comment already forbids recency, label text, and title.
 
-For §5.1/§5.2 sibling accounts, choosing among three GLM or three Go accounts is therefore **placement**: C1's
-decision reached by the order above. This contract supplies only economics evidence. Where evidence does not
-discriminate, the lawful outcome is C1's abstention — not a Capacity tie-break.
+For §5.1 sibling GLM accounts, choosing among proven lawful accounts is therefore **placement**: C1's decision
+reached by the order above. This contract supplies only economics evidence. Where evidence does not discriminate,
+the lawful outcome is C1's abstention — not a Capacity tie-break.
 
 CF2-I is the downstream integration/adoption owner. Its chain is: hard gates → first lawful Model Router tier →
 Capacity ranks candidates inside that tier → Executive atomically claims one Worker. Economics must ultimately
@@ -1091,6 +1125,13 @@ reorder `preferred_model_aliases` on economics grounds. RF1 compatibility receip
 End state, stated once: **Model Router first lawful tier → concrete C1 Worker candidates → Capacity
 resource/economics source → #657-style preference receipt → CF2-I / C1-v2 → C2 / Executive atomic
 resource+worker commitment → existing broker/adapter.**
+
+**Placement authority for account pools is the #688 resource graph → the #657 candidate-preference seam → the
+CF2-I consumer / C2 commitment; Macro #7142 is a subordinate candidate-selection kernel and never a second
+capacity or account owner.** Protected #622 retains the pooled transport (source-protected `25ea63b7`), but
+admission carries the §5.2 policy gate. Macro #7142 remains production-inert and must gain that gate; its
+`build_snapshot()` carries no policy field, and legitimacy may never be inferred from a caller-supplied member
+count.
 
 ---
 
@@ -1115,16 +1156,17 @@ generation-axis correction.
   (`control_plane/capacity_economics_projection.py:83` `estimated_startable_jobs` and the parallelism bound at
   `:175`), and any presentation that merges them back into one number is defective.
 
-### D2 — OpenCode Go is three per-account expressions, not one shared set
+### D2 — OpenCode Go is one proven-at-most entitlement, not a shared set or credential pool
 - **Ruling text (§2)**: *"OpenCode Go: `ALL_OF(go_shared_5h, go_shared_weekly, go_shared_monthly,
   go_concurrency)`"* — singular.
-- **This document (§5.2)**: one such expression **per account**, with the accounts as sibling placement routes.
-- **Why**: the fabric holds three Go accounts, and one account's depletion does not deplete another's. Writing
-  them as one set would be the same "one entitlement duplicated into fictional capacity" error the ruling exists
-  to prevent, in reverse.
-- **Sol ruling**: APPROVED ONLY per proven distinct entitlement/account resource. Multiple sessions, hosts,
-  dashboards, or model views of one account remain one expression — never three. Without proven distinctness,
-  the accounts collapse to one expression and fail closed under §4.6.
+- **This document (§5.2)**: exactly that singular entitlement shape, with **1 proven-at-most schedulable
+  entitlement** and actual enrollment UNKNOWN.
+- **Why**: Go's terms prohibit multiple accounts used to circumvent limits, and its documentation says one member
+  per workspace may subscribe. Multi-account pooling is HELD pending `pool_membership_policy_eligible = true`
+  from Provider Control.
+- **Sol rulings**: R41 approved distinctness only as a generic D2 limit; R55 supplies the narrower Go-specific
+  answer. Multiple sessions, hosts, dashboards, model views, keys, or logins never multiply the entitlement.
+- **Superseded draft**: the prior text treating three Go accounts as three sibling expressions is withdrawn.
 
 ### D3 — Generation and observation freshness are two clocks
 - **Ruling text**: §3 lists generation-invalidating events; §15 separately says a reset makes an observation

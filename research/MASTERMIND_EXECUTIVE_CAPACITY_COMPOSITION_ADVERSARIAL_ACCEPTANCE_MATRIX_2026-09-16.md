@@ -7,7 +7,7 @@ that bounds the claim. Nothing is asserted from memory.
 Companion: `research/MASTERMIND_EXECUTIVE_CAPACITY_RESOURCE_COMPOSITION_CONTRACT_2026-09-16.md` (the contract).
 Source of classes 1–20: Sol capacity-routing architecture ruling (R35) §23, verbatim ordering preserved. Those
 twenty are the ruling's minimum; classes 21–32 are additions required by Sol formal review 5220216985, addendum
-5694353522, and R42/R52.
+5694353522, and R42/R52; classes 33–37 are additions required by R54/R55.
 
 ---
 
@@ -25,7 +25,7 @@ Status vocabulary, used strictly:
 - **MISSING** — no test falsifies this class, and the searches that ground that claim are named. Absence is
   reported with bounds, never bare.
 
-No class of the thirty-two is fully EXISTS; ten are PARTIAL and twenty-two are MISSING. That distribution is
+No class of the thirty-seven is fully EXISTS; eleven are PARTIAL and twenty-six are MISSING. That distribution is
 the expected consequence of the contract not existing yet: the added classes are also statements about a
 resource tree, hold lifecycle, offer overlay, or integration invariant, and
 at this pin there is no tree — `estimated_startable_jobs` arrives as a scalar
@@ -239,11 +239,11 @@ composition fixtures must be built through the same seams rather than by constru
 
 ### Class 15 — model/harness `model_harness_cost_generation` change invalidates stale quality/cost calibration
 - **Proposed test**: `test_model_or_harness_generation_change_retires_calibration_to_historical`
-- **Owner**: model economics catalog + Outcome Learning cohort keys (contract §2.2
-  `model_harness_cost_generation`).
-- **Fixture**: a cohort with calibrated `q95`; then each of: provider alias silently updated, model version
-  changed, harness changed, thinking-mode changed, generation changed. Assert new placement reverts to
-  conservative, old evidence remains queryable as historical, and the two are never mixed in one estimate.
+- **Owner**: model economics catalog + Outcome Learning cohort keys (contract §2.2, §6.2).
+- **Fixture**: a cohort with calibrated `q95`; then each of: provider surface changed (Go/M3 versus direct M3),
+  provider alias silently updated, model version changed, harness changed, thinking-mode changed, generation
+  changed. Assert new placement reverts to conservative, old evidence remains queryable as historical, and the
+  two surfaces/generations are never mixed in one estimate.
 - **Status at master**: **MISSING**. The adjacent defence is about *cutover determinism*, not calibration:
   `tests/test_provider_offer_economics.py:107`
   (`test_explicit_promotion_cutover_not_guessed_from_prose`). Bounded by `rg -n -i "calibration|cohort|
@@ -322,10 +322,10 @@ composition fixtures must be built through the same seams rather than by constru
 | Status | Count | Classes |
 |---|---|---|
 | EXISTS | 0 | — |
-| PARTIAL | 10 | 2, 6, 9, 11, 12, 13, 17, 19, 25, 26 |
-| MISSING | 22 | 1, 3–5, 7, 8, 10, 14–16, 18, 20–24, 27, 28, 30–32 |
+| PARTIAL | 11 | 2, 6, 9, 11–13, 17, 19, 25, 26, 29 |
+| MISSING | 26 | 1, 3–5, 7, 8, 10, 14–16, 18, 20–24, 27, 28, 30–37 |
 
-0 + 10 + 22 = 32. **Not one of the thirty-two failure classes is fully falsified at master today.** Class 17 is the
+0 + 11 + 26 = 37. **Not one of the thirty-seven failure classes is fully falsified at master today.** Class 17 is the
 closest, and it covers one of its two named pressures.
 
 Two structural observations for the reviewer:
@@ -333,13 +333,14 @@ Two structural observations for the reviewer:
 1. **The PARTIALs cluster on policy and identity, the MISSINGs cluster on resource algebra.** Master defends the
    *gates* (autonomy flags, realm digests, base-URL shape, tier promotion) comparatively well and defends the
    *tree* not at all — which is precisely R35 §21's finding restated as test coverage.
-2. **Twelve of the MISSING classes cannot be written before the contract is frozen.** Classes 1, 3, 4, 5, 14 and
+2. **Seventeen of the MISSING classes cannot be written before the contract is frozen.** Classes 1, 3, 4, 5, 14 and
    20 attack operators that do not exist; classes 6, 8 and 18 attack a claim-hold receipt that does not exist;
-   classes 7 and 15 attack generation-axis/freshness splits that do not exist. Writing them against today's scalar
+   classes 7 and 15 attack generation-axis/freshness splits that do not exist; classes 22 and 33–37 attack
+   composition/policy objects that do not exist. Writing them against today's scalar
    `estimated_startable_jobs` would produce tests that pass vacuously — the worst possible outcome, because a
    green acceptance suite would then certify a fabric that still cannot express the resource graph.
 
-The reviewable question this matrix puts to Sol is therefore narrow: **is the 32-class suite — R35's twenty-class
+The reviewable question this matrix puts to Sol is therefore narrow: **is the 37-class suite — R35's twenty-class
 minimum plus the review-required additions — the right acceptance gate for step A's contract, and is this the
 right allocation of each class to an owner?** It is not a request to write the tests now.
 
@@ -449,3 +450,54 @@ right allocation of each class to an owner?** It is not a request to write the t
   the exact product/version surface rather than quota, and ordinary rules binding.
 - **Status at master**: **MISSING**. Bounded by the class-31 search plus
   `rg -n "minimum.*version|surface.*digest" control_plane ops config tests`.
+
+### Class 33 — Go multi-account pooling without policy eligibility yields one or zero entitlements
+- **Proposed test**: `test_go_credentials_without_pool_policy_eligibility_yield_one_or_zero_entitlements`
+- **Owner**: Provider Control enrollment/policy gate (contract §2.1, §5.2).
+- **Fixture**: three technically healthy Go credentials with no `pool_membership_policy_eligible` receipt, then
+  an explicitly ineligible receipt. Assert one schedulable entitlement in the former case and zero multi-member
+  entitlement in the latter; the refusal names the missing/ineligible policy evidence rather than a quota
+  shortfall; and a mutant summing three limits is killed.
+- **Status at master**: **MISSING** for the admission gate. Protected #622 transport tests exercise account
+  choice and effect safety but carry no policy-eligibility field; bounded by
+  `rg -n "pool_membership_policy_eligible|member_count" control_plane ops config tests`.
+
+### Class 34 — Go model tables are debit views over three windows, never extra wallets
+- **Proposed test**: `test_go_model_tables_debit_views_do_not_sum_into_capacity`
+- **Owner**: Provider Control view/resource distinction (contract §5.2, §5.3).
+- **Fixture**: one Go entitlement metered by 5-hour, weekly, and monthly windows with several per-model debit
+  tables. Assert the tables debit the same allowance, `ALL_OF` never sums it, and a mutant adding model-table
+  capacities or multiplying by key/account count is killed.
+- **Status at master**: **MISSING**. Existing Go transport and offer tests do not model a composed entitlement
+  or its three windows. Bounded by
+  `rg -n -i "debit view|shared entitlement|monthly.*weekly.*5h" control_plane ops config tests`.
+
+### Class 35 — Go/M3 calibration is surface-separated from direct M3
+- **Proposed test**: `test_go_m3_and_direct_m3_calibration_never_pool`
+- **Owner**: model economics catalog + Outcome Learning cohort keys (contract §6.2).
+- **Fixture**: otherwise-identical Go/M3 and direct-M3 cohorts with distinct provider surfaces and the same
+  `model_harness_cost_generation` and harness. Assert separate estimates, conservative handling when one side
+  lacks evidence, and a pooled-estimate mutant is killed.
+- **Status at master**: **MISSING**. Existing offer tests distinguish surface digests, not outcome-cost
+  cohorts. Bounded by
+  `rg -n -i "provider_surface|model_harness_cost_generation|direct.*m3|go.*m3" control_plane ops tests`.
+
+### Class 36 — expired privacy-retention observation is STALE/UNKNOWN
+- **Proposed test**: `test_retention_label_past_observation_date_is_stale_unknown`
+- **Owner**: Provider Control dated policy observation (contract §2.3, §9.3).
+- **Fixture**: a DeepSeek V4 Flash zero-data-retention label observed through 31 August 2026, evaluated after
+  that date. Assert STALE/UNKNOWN and fail-closed routing; a mutant treating the label as a current guarantee is
+  killed.
+- **Status at master**: **MISSING**. Existing offer tests carry effective end dates, not privacy observations
+  with observation dates. Bounded by
+  `rg -n -i "retention|privacy.*observed_at|zero.data.retention" control_plane ops config tests`.
+
+### Class 37 — coding-agent surface refuses non-coding-agent extraction requests
+- **Proposed test**: `test_coding_agent_api_refuses_scraping_extraction_or_dataset_generation`
+- **Owner**: typed execution-mode gate (contract §7.1).
+- **Fixture**: a surface admitted only for bounded `CODING_AGENT_API`, then scraping, extraction, and
+  dataset-generation requests using otherwise valid quota and stable sessions. Assert each is refused for its
+  execution class — not quota — and a mutant admitting it because quota remains is killed.
+- **Status at master**: **MISSING**. Existing Go stream tests validate stable sessions but not request-class
+  bounds. Bounded by
+  `rg -n "CODING_AGENT_API|SUPPORTED_TOOL_AGENT_SESSION|UNATTENDED_BACKGROUND" control_plane ops config tests`.
