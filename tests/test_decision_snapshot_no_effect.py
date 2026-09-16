@@ -31,12 +31,6 @@ _S0_SOURCE_MODULES = (
     _REPO_ROOT / "scripts" / "portfolio_decision_snapshot.py",
 )
 
-_CLOCK_SCANNED_MODULES = (
-    _REPO_ROOT / "portfolio" / "decision_snapshot_contracts.py",
-    _REPO_ROOT / "portfolio" / "decision_snapshot_sources.py",
-    _REPO_ROOT / "portfolio" / "decision_snapshot.py",
-)
-
 _FORBIDDEN_IMPORT_MODULES = (
     "brain.client",
     "brain.provider_waterfall",
@@ -139,25 +133,43 @@ def _hashes(paths) -> dict:
 
 
 def _tree_fingerprint(root: Path) -> dict:
-    """Map every path under ``root`` to a (kind, content-or-target) tuple.
+    """Map every path under ``root`` to a (kind, mode, mtime_ns, size, content) tuple.
 
     Catches a new file of any name, a deleted file, changed bytes in an existing
-    file, and a directory/symlink type change — not just a ``*.json`` count.
+    file, and a directory/symlink type change — not just a ``*.json`` count. ``mtime_ns``
+    is part of the tuple because file mtime is *evidentiary state* in this system: a
+    first-party mtime becomes a receipt's ``known_at``, so an ``os.utime`` touch that
+    leaves every byte alone is still a real effect on the V2 book.
     """
     fingerprint = {}
     if not root.exists():
         return fingerprint
     for path in sorted(root.rglob("*")):
         rel = str(path.relative_to(root))
+        info = path.lstat()
+        common = (oct(stat.S_IMODE(info.st_mode)), info.st_mtime_ns)
         if path.is_symlink():
-            fingerprint[rel] = ("symlink", os.readlink(path))
+            fingerprint[rel] = ("symlink", *common, 0, os.readlink(path))
         elif path.is_dir():
-            fingerprint[rel] = ("dir", None)
-        elif path.is_file():
-            fingerprint[rel] = ("file", hashlib.sha256(path.read_bytes()).hexdigest())
+            fingerprint[rel] = ("dir", *common, 0, None)
+        elif stat.S_ISREG(info.st_mode):
+            fingerprint[rel] = (
+                "file", *common, info.st_size,
+                hashlib.sha256(path.read_bytes()).hexdigest(),
+            )
         else:
-            fingerprint[rel] = ("other", None)
+            fingerprint[rel] = ("other", *common, 0, None)
     return fingerprint
+
+
+def _non_directory_paths(root: Path) -> set:
+    """Every non-directory path anywhere below ``root``, relative and normalized.
+
+    The single-artifact proof must be a census of the *whole* redirected storage root, not
+    a ``*.json`` glob of one leaf directory: an out-of-leaf ``latest.json``, an extensionless
+    ``INDEX`` sidecar, and a nested second store all escape the glob.
+    """
+    return {rel for rel, entry in _tree_fingerprint(root).items() if entry[0] != "dir"}
 
 
 @pytest.fixture
@@ -215,10 +227,22 @@ def test_create_snapshot_preserves_v2_state_and_writes_exactly_one_artifact(
     assert receipt["sections"]["book_truth"]["coverage_state"] == "COMPLETE"
     assert receipt["sections"]["book_truth"]["rows"] != []
 
+    # Not a reused same-generation read: this fresh isolated root must have *created*
+    # the artifact, or every assertion below would hold vacuously.
+    assert receipt["created"] is True
+
     snapshot_dir = snapshots.snapshot_dir("autonomous")
     created = sorted(snapshot_dir.glob("*.json"))
     assert len(created) == 1
     artifact = created[0]
+
+    # Whole-storage-root census: the content-addressed snapshot is the *only* non-directory
+    # artifact anywhere under the redirected storage root — no out-of-leaf mutable index,
+    # no non-JSON sidecar, no nested second store.
+    storage_root = redirected_roots["storage"]
+    assert _non_directory_paths(storage_root) == {
+        str(artifact.relative_to(storage_root))
+    }
     mode = artifact.lstat().st_mode
     assert not artifact.is_symlink()
     assert stat.S_ISREG(mode)
@@ -241,15 +265,39 @@ def test_create_snapshot_preserves_v2_state_and_writes_exactly_one_artifact(
 # Step 2: provider / network / process fuses
 # ---------------------------------------------------------------------------
 
+class _ForbiddenCall(BaseException):
+    """Unswallowable by construction.
+
+    A fuse that raised ``AssertionError`` could be absorbed by any ``except Exception``
+    on the call path (the CLI has one at ``scripts/portfolio_decision_snapshot.py``), which
+    would turn a proven live-book effect into a quiet ``internal_error``. ``BaseException``
+    cannot be caught by an ``except Exception`` handler.
+    """
+
+
 def _forbidden(*_args, **_kwargs):
-    raise AssertionError("decision_snapshot.create_snapshot reached a forbidden call")
+    raise _ForbiddenCall("decision_snapshot.create_snapshot reached a forbidden call")
 
 
-def test_create_snapshot_never_touches_provider_network_or_process(
-    redirected_roots, monkeypatch,
-):
-    _seed_v2_state(redirected_roots["repo"])
+# Every paper-account entrypoint that mutates, recovers, prices, or stages live book state.
+_FUSED_PAPER_ACCOUNT_ENTRYPOINTS = (
+    "_current_price",
+    "_load_account",
+    "rebalance",
+    "queue_orders",
+    "save_pending_target",
+    "settle_target",
+    "mark",
+    "execute_fill",
+    # Account recovery is a named capability item: ``bot/settle.py`` calls
+    # ``recover_paper_transaction`` directly in four places, so the direct form is the
+    # idiomatic one in this codebase and must be fused alongside the unlocked inner form.
+    "recover_paper_transaction",
+    "_recover_paper_transaction_unlocked",
+)
 
+
+def _install_forbidden_call_fuses(monkeypatch):
     monkeypatch.setattr(socket.socket, "connect", _forbidden)
     monkeypatch.setattr(socket, "create_connection", _forbidden)
     monkeypatch.setattr(subprocess, "run", _forbidden)
@@ -267,14 +315,16 @@ def test_create_snapshot_never_touches_provider_network_or_process(
     monkeypatch.setattr(provider_waterfall, "run", _forbidden, raising=False)
     monkeypatch.setattr(paper_account, "queue_target", _forbidden, raising=False)
 
-    monkeypatch.setattr(paper_account, "_current_price", _forbidden)
-    monkeypatch.setattr(paper_account, "_load_account", _forbidden)
-    monkeypatch.setattr(paper_account, "rebalance", _forbidden)
-    monkeypatch.setattr(paper_account, "queue_orders", _forbidden)
-    monkeypatch.setattr(paper_account, "save_pending_target", _forbidden)
-    monkeypatch.setattr(paper_account, "settle_target", _forbidden)
-    monkeypatch.setattr(paper_account, "mark", _forbidden)
-    monkeypatch.setattr(paper_account, "execute_fill", _forbidden)
+    for name in _FUSED_PAPER_ACCOUNT_ENTRYPOINTS:
+        monkeypatch.setattr(paper_account, name, _forbidden)
+    return paper_account
+
+
+def test_create_snapshot_never_touches_provider_network_or_process(
+    redirected_roots, monkeypatch,
+):
+    _seed_v2_state(redirected_roots["repo"])
+    _install_forbidden_call_fuses(monkeypatch)
 
     receipt = snapshots.create_snapshot(
         "autonomous",
@@ -283,6 +333,37 @@ def test_create_snapshot_never_touches_provider_network_or_process(
     )
     assert receipt["snapshot_id"].startswith("sha256:")
     assert len(list(snapshots.snapshot_dir("autonomous").glob("*.json"))) == 1
+
+
+# The capability sentence names these explicitly. Asserting the required set separately from
+# the fuse loop keeps the proof non-circular: shrinking _FUSED_PAPER_ACCOUNT_ENTRYPOINTS
+# would otherwise shrink the test along with it.
+_REQUIRED_FUSED_ENTRYPOINTS = frozenset({
+    "_current_price", "_load_account", "rebalance", "queue_orders", "save_pending_target",
+    "settle_target", "mark", "execute_fill",
+    "recover_paper_transaction", "_recover_paper_transaction_unlocked",
+})
+
+
+def test_every_live_book_entrypoint_including_recovery_is_actually_fused(monkeypatch):
+    """Discriminator for the fuse set itself: each named entrypoint must, once fused, raise
+    the dedicated unswallowable error — and that error must survive an ``except Exception``
+    exactly like the one the CLI wraps its command dispatch in."""
+    assert _REQUIRED_FUSED_ENTRYPOINTS <= set(_FUSED_PAPER_ACCOUNT_ENTRYPOINTS)
+    paper_account = _install_forbidden_call_fuses(monkeypatch)
+    for name in _FUSED_PAPER_ACCOUNT_ENTRYPOINTS:
+        with pytest.raises(_ForbiddenCall):
+            getattr(paper_account, name)("autonomous")
+
+    swallowed = False
+    try:
+        try:
+            paper_account.recover_paper_transaction("autonomous")
+        except Exception:  # noqa: BLE001 - deliberately mirrors the CLI's broad handler
+            swallowed = True
+    except _ForbiddenCall:
+        pass
+    assert swallowed is False
 
 
 # ---------------------------------------------------------------------------
@@ -306,14 +387,95 @@ def _imported_module_forms(source_path: Path) -> set[str]:
     return forms
 
 
+def _matches_forbidden(form: str, forbidden: str) -> bool:
+    """``from portfolio.paper_account import _load_account`` resolves to the form
+    ``portfolio.paper_account._load_account``, which never equals the forbidden module name.
+    A forbidden module must therefore match its own name *or any descendant form*."""
+    return form == forbidden or form.startswith(forbidden + ".")
+
+
+def _forbidden_import_violations(source_path: Path) -> list[str]:
+    forms = _imported_module_forms(source_path)
+    return [
+        forbidden for forbidden in _FORBIDDEN_IMPORT_MODULES
+        if any(_matches_forbidden(form, forbidden) for form in forms)
+    ]
+
+
 def test_s0_source_modules_import_no_forbidden_owner_module_ast_based():
     violations = []
     for path in _S0_SOURCE_MODULES:
-        forms = _imported_module_forms(path)
-        for forbidden in _FORBIDDEN_IMPORT_MODULES:
-            if forbidden in forms:
-                violations.append(f"{path.relative_to(_REPO_ROOT)} imports {forbidden}")
+        for forbidden in _forbidden_import_violations(path):
+            violations.append(f"{path.relative_to(_REPO_ROOT)} imports {forbidden}")
     assert violations == []
+
+
+def test_forbidden_import_matcher_catches_the_from_import_member_form(tmp_path):
+    """Discriminator: the exact-equality matcher this replaces passed a module that did
+    ``from portfolio.paper_account import _load_account``."""
+    original = (_REPO_ROOT / "portfolio" / "decision_snapshot_sources.py").read_text(
+        encoding="utf-8"
+    )
+    mutated = tmp_path / "mutated_sources.py"
+    mutated.write_text(
+        "from portfolio.paper_account import _load_account\n" + original, encoding="utf-8"
+    )
+    assert _forbidden_import_violations(mutated) == ["portfolio.paper_account"]
+    # The unmutated original is still clean under the widened matcher.
+    assert _forbidden_import_violations(
+        _REPO_ROOT / "portfolio" / "decision_snapshot_sources.py"
+    ) == []
+
+
+_DYNAMIC_IMPORT_CALLS = {"import_module", "__import__"}
+
+
+def _dynamic_import_violations(source_path: Path) -> list[str]:
+    """Flag ``importlib.import_module(...)``, a bare ``import_module(...)``, and
+    ``__import__(...)``.
+
+    Static import allowlists and per-owner fuses are both bypassed by a dynamic import, so
+    S0 modules must not contain one at all — that is the mechanism by which a mutation can
+    reach ``paper_account.recover_paper_transaction`` with no import statement to catch.
+    """
+    tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
+    violations = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "importlib" or alias.name.startswith("importlib."):
+                    violations.append(f"{source_path.name}:{node.lineno}:import {alias.name}")
+        elif isinstance(node, ast.ImportFrom):
+            if node.module and node.module.split(".", 1)[0] == "importlib":
+                violations.append(f"{source_path.name}:{node.lineno}:from {node.module}")
+        elif isinstance(node, ast.Call):
+            func = node.func
+            name = func.attr if isinstance(func, ast.Attribute) else (
+                func.id if isinstance(func, ast.Name) else None
+            )
+            if name in _DYNAMIC_IMPORT_CALLS:
+                violations.append(f"{source_path.name}:{node.lineno}:{name}()")
+    return violations
+
+
+def test_s0_source_modules_contain_no_dynamic_import_escape_hatch():
+    violations = []
+    for path in _S0_SOURCE_MODULES:
+        violations.extend(_dynamic_import_violations(path))
+    assert violations == []
+
+
+@pytest.mark.parametrize("body", [
+    "import importlib\n",
+    "from importlib import import_module\n",
+    "def f(b):\n    return importlib.import_module('portfolio.paper_account')\n",
+    "def f(b):\n    return import_module('portfolio.paper_account')\n",
+    "def f(b):\n    return __import__('portfolio.paper_account')\n",
+])
+def test_dynamic_import_scan_catches_every_bypass_form(tmp_path, body):
+    probe = tmp_path / "probe.py"
+    probe.write_text(body, encoding="utf-8")
+    assert _dynamic_import_violations(probe) != []
 
 
 def _project_import_violations(source_path: Path, allowed: set[str]) -> list[str]:
@@ -353,35 +515,95 @@ def test_s0_source_modules_import_only_their_declared_project_owners():
 # Step 4: no-hidden-clock proof (AST-based, semantic not textual)
 # ---------------------------------------------------------------------------
 
-_BANNED_CLOCK_ATTRS = {"now", "utcnow", "today"}
+_BANNED_CLOCK_ATTRS = {
+    "now", "utcnow", "today",
+    # A hidden clock does not have to be wall-clock-shaped to poison determinism.
+    "time", "time_ns", "monotonic", "monotonic_ns", "perf_counter", "perf_counter_ns",
+}
+_NONDETERMINISTIC_IDENTITY_MODULES = {"random", "uuid"}
 
 
 def _clock_violations(source_path: Path) -> list[str]:
-    """Flag ``X.now()``/``X.utcnow()``/``date.today()``/``time.time()`` calls.
+    """Flag every current-clock read and every non-deterministic identity source.
 
-    ``datetime.fromtimestamp`` is a distinct attribute name and is never scanned —
-    it is the allowed fixed-file-metadata conversion, not a banned current-clock read.
+    Covers dotted forms (``datetime.now()``, ``time.time_ns()``, ``dt.datetime.utcnow()``),
+    bare from-import aliases (``from time import monotonic as m; m()``), and ``random``/
+    ``uuid`` imports or calls — snapshot identity is a content digest, never a draw.
+
+    ``datetime.fromtimestamp`` is a distinct attribute name and is never scanned — it is the
+    allowed fixed-file-metadata conversion, not a banned current-clock read.
     """
     tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
     violations = []
+    clock_aliases: dict[str, str] = {}
+
     for node in ast.walk(tree):
-        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.split(".", 1)[0] in _NONDETERMINISTIC_IDENTITY_MODULES:
+                    violations.append(f"{source_path.name}:{node.lineno}:import {alias.name}")
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            if node.module.split(".", 1)[0] in _NONDETERMINISTIC_IDENTITY_MODULES:
+                violations.append(f"{source_path.name}:{node.lineno}:from {node.module}")
+            for alias in node.names:
+                if alias.name in _BANNED_CLOCK_ATTRS:
+                    clock_aliases[alias.asname or alias.name] = alias.name
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
             continue
-        attr = node.func.attr
-        base = node.func.value
-        base_name = base.id if isinstance(base, ast.Name) else getattr(base, "attr", None)
-        if attr in _BANNED_CLOCK_ATTRS:
-            violations.append(f"{source_path.name}:{node.lineno}:{base_name}.{attr}()")
-        elif attr == "time" and base_name == "time":
-            violations.append(f"{source_path.name}:{node.lineno}:time.time()")
+        func = node.func
+        if isinstance(func, ast.Attribute):
+            base = func.value
+            base_name = base.id if isinstance(base, ast.Name) else getattr(base, "attr", None)
+            if func.attr in _BANNED_CLOCK_ATTRS:
+                violations.append(f"{source_path.name}:{node.lineno}:{base_name}.{func.attr}()")
+            elif base_name in _NONDETERMINISTIC_IDENTITY_MODULES:
+                violations.append(f"{source_path.name}:{node.lineno}:{base_name}.{func.attr}()")
+        elif isinstance(func, ast.Name) and func.id in clock_aliases:
+            violations.append(
+                f"{source_path.name}:{node.lineno}:{func.id}() [{clock_aliases[func.id]}]"
+            )
     return violations
 
 
 def test_s0_state_and_source_modules_call_no_hidden_current_clock():
     violations = []
-    for path in _CLOCK_SCANNED_MODULES:
+    for path in _S0_SOURCE_MODULES:
         violations.extend(_clock_violations(path))
     assert violations == []
+
+
+@pytest.mark.parametrize("body", [
+    "import datetime\nx = datetime.datetime.now()\n",
+    "import time\nx = time.time()\n",
+    "import time\nx = time.time_ns()\n",
+    "import time\nx = time.monotonic()\n",
+    "import time\nx = time.perf_counter()\n",
+    "from time import time as _t\nx = _t()\n",
+    "from time import monotonic\nx = monotonic()\n",
+    "import random\n",
+    "import uuid\nx = uuid.uuid4()\n",
+    "from uuid import uuid4\n",
+    "from random import choice\n",
+])
+def test_clock_and_identity_scan_catches_every_hidden_form(tmp_path, body):
+    probe = tmp_path / "probe.py"
+    probe.write_text(body, encoding="utf-8")
+    assert _clock_violations(probe) != []
+
+
+def test_clock_scan_still_permits_proven_file_metadata_conversion(tmp_path):
+    """``datetime.fromtimestamp`` over a proven file mtime is the one lawful conversion;
+    banning it would outlaw the first-party clock law itself."""
+    probe = tmp_path / "probe.py"
+    probe.write_text(
+        "from datetime import datetime, timezone\n"
+        "def f(ns):\n"
+        "    return datetime.fromtimestamp(ns // 1_000_000_000, tz=timezone.utc)\n",
+        encoding="utf-8",
+    )
+    assert _clock_violations(probe) == []
 
 
 # ---------------------------------------------------------------------------
@@ -420,3 +642,84 @@ def test_clock_law_distinguishes_first_party_mtime_from_external_mtime(
     assert external_receipt["filesystem_observed_at"] is not None
     assert external_receipt["clock_basis"] == "UNQUALIFIED_EXTERNAL_CLOCK"
     assert external_receipt["status"] == "UNQUALIFIED_CLOCK"
+
+
+# ---------------------------------------------------------------------------
+# Task 8 repair R6 — meta-proofs that the strengthened guards actually discriminate
+# ---------------------------------------------------------------------------
+
+def _isolated(tmp_path: Path) -> Path:
+    """A subdirectory of ``tmp_path`` this file owns outright.
+
+    ``tmp_path`` itself is shared with repository-wide autouse fixtures that seed their own
+    files into it, which would make a whole-root census non-deterministic.
+    """
+    root = tmp_path / "fingerprint_probe"
+    root.mkdir()
+    return root
+
+
+def test_tree_fingerprint_detects_an_mtime_only_touch(tmp_path):
+    """A bytes-preserving ``os.utime`` is a real effect on V2 state: a first-party mtime
+    becomes a receipt's ``known_at``. A content-only fingerprint would call this unchanged."""
+    tmp_path = _isolated(tmp_path)
+    target = tmp_path / "account.json"
+    target.write_text("{}", encoding="utf-8")
+    os.utime(target, (_PRE_CUTOFF_EPOCH, _PRE_CUTOFF_EPOCH))
+    before = _tree_fingerprint(tmp_path)
+
+    os.utime(target, (_PRE_CUTOFF_EPOCH + 1, _PRE_CUTOFF_EPOCH + 1))
+    assert target.read_text(encoding="utf-8") == "{}"
+    assert _tree_fingerprint(tmp_path) != before
+
+
+def test_tree_fingerprint_detects_a_mode_only_change(tmp_path):
+    tmp_path = _isolated(tmp_path)
+    target = tmp_path / "account.json"
+    target.write_text("{}", encoding="utf-8")
+    os.chmod(target, 0o600)
+    os.utime(target, (_PRE_CUTOFF_EPOCH, _PRE_CUTOFF_EPOCH))
+    before = _tree_fingerprint(tmp_path)
+
+    os.chmod(target, 0o644)
+    os.utime(target, (_PRE_CUTOFF_EPOCH, _PRE_CUTOFF_EPOCH))
+    assert _tree_fingerprint(tmp_path) != before
+
+
+def test_storage_census_catches_out_of_leaf_and_non_json_sidecars(tmp_path):
+    """Discriminator for the whole-root census: the ``*.json``-glob proof it replaces saw
+    none of these — an out-of-leaf mutable index, an extensionless cursor inside the leaf,
+    or a nested second store."""
+    tmp_path = _isolated(tmp_path)
+    leaf = tmp_path / "data" / "shadow" / "decision_snapshots" / "autonomous"
+    leaf.mkdir(parents=True)
+    artifact = leaf / ("a" * 64 + ".json")
+    artifact.write_text("{}", encoding="utf-8")
+    assert _non_directory_paths(tmp_path) == {str(artifact.relative_to(tmp_path))}
+
+    (leaf.parent / "latest.json").write_text("{}", encoding="utf-8")
+    (leaf / "INDEX").write_text("cursor", encoding="utf-8")
+    (leaf / "nested").mkdir()
+    (leaf / "nested" / "second_store.db").write_text("x", encoding="utf-8")
+
+    census = _non_directory_paths(tmp_path)
+    assert str(artifact.relative_to(tmp_path)) in census
+    assert len(census) == 4
+    # The old proof's instrument sees only one of the four.
+    assert len(sorted(leaf.glob("*.json"))) == 1
+
+
+def test_recovery_reached_by_dynamic_import_still_trips_the_fuse(monkeypatch):
+    """The exact bypass the import allowlist cannot see. A mutation inside
+    ``capture_book_state`` of the shape
+    ``importlib.import_module("portfolio.paper_account").recover_paper_transaction(book)``
+    has no import statement to catch and no ``_load_account`` hop to borrow a fuse from, so
+    the recovery entrypoints must be fused as callables in their own right."""
+    import importlib
+
+    _install_forbidden_call_fuses(monkeypatch)
+    module = importlib.import_module("portfolio.paper_account")
+    with pytest.raises(_ForbiddenCall):
+        module.recover_paper_transaction("autonomous")
+    with pytest.raises(_ForbiddenCall):
+        module._recover_paper_transaction_unlocked("autonomous")
