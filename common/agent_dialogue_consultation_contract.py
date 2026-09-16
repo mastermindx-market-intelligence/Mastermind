@@ -280,7 +280,6 @@ def validate_consultation(value: Any) -> dict[str, Any]:
             raise DialogueContractError("MESSAGE_INVALID")
     if (
         item["schema"] == CONSULTATION_SCHEMA
-        and item["purpose"] == "QUESTION"
         and correlation["request_message_key"] != item["message_key"]
     ):
         raise DialogueContractError("MESSAGE_INVALID")

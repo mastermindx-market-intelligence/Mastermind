@@ -246,7 +246,36 @@ def test_protected_v1_frame_and_fingerprint_remain_admitted_unchanged() -> None:
 
     assert "question_message_key" not in built
     assert validate_consultation(built) is not built
+    assert built["fingerprint"] == (
+        "f63e2e0e2e64939b47e03fc4008115064bca4a51ef6cb02b8ab7025c2cdd19b1"
+    )
     assert built["fingerprint"] == consultation_semantic_fingerprint(built)
 
     replay = copy.deepcopy(built)
     assert classify_duplicate(built, replay) is DuplicateClassification.IDEMPOTENT
+
+    historical_answer = copy.deepcopy(protected)
+    historical_answer.update(
+        {
+            "message_key": "asd-consultation-original-answer",
+            "purpose": "ANSWER",
+            "question": None,
+            "answer": {"text": "closed answer", "evidence_refs": []},
+            "fingerprint": "",
+        }
+    )
+    historical_answer["correlation"]["request_message_key"] = historical_answer[
+        "message_key"
+    ]
+    built_answer = build_consultation(historical_answer)
+    assert "question_message_key" not in built_answer
+    assert built_answer["fingerprint"] == (
+        "b410fc5189d244c7b94ef74affff676a0c74703a76e9d87cf4efe4cc0b451afc"
+    )
+
+    foreign_request_link = copy.deepcopy(historical_answer)
+    foreign_request_link["correlation"]["request_message_key"] = protected[
+        "message_key"
+    ]
+    with pytest.raises(DialogueContractError):
+        validate_consultation(foreign_request_link)

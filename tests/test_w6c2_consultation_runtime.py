@@ -11,6 +11,8 @@ from pathlib import Path
 import pytest
 
 from common.agent_dialogue_consultation_contract import (
+    CONSULTATION_SCHEMA,
+    CONSULTATION_V2_SCHEMA,
     RECEIPT_KEYS,
     build_consultation,
     validate_consultation,
@@ -35,6 +37,7 @@ from control_plane.operator_harness_contract import (
     WorkspaceIdentity,
 )
 from control_plane.wake_persist import WakeLedgerRepository
+from control_plane.wake_ledger import LedgerPhase, attempt_record
 from integrations.slack_agent_dialogue.persisted_wake_carrier import (
     ConsultationWakeExtension,
 )
@@ -601,6 +604,48 @@ def _persisted_wake_attempt(
     return extension, attempt
 
 
+def _wake_records(runtime: Runtime, extension):
+    return WakeLedgerRepository(runtime).list_records(
+        extension.obligation().obligation_id
+    )
+
+
+def _credited_path(runtime: Runtime, consultations: ConsultationRuntime, frame: dict):
+    from control_plane.wake_ledger import (
+        AckMode,
+        TrustedAckContext,
+        ack_record,
+        acknowledge,
+    )
+
+    extension, attempt = _persisted_wake_attempt(
+        runtime, consultations, frame
+    )
+    obligation = extension.obligation()
+    delivered = attempt_record(attempt, LedgerPhase.DELIVERED)
+    ack = acknowledge(
+        obligation,
+        trusted=TrustedAckContext(
+            ack_mode=AckMode.REASONING_SESSION,
+            target_seat=obligation.declared_target_seat,
+            session_alias=attempt.session_alias,
+            reasoning_surface=attempt.reasoning_surface,
+            binding_id=attempt.binding_id,
+            binding_generation=attempt.binding_generation,
+            acknowledged_at="2026-09-14T00:03:00Z",
+        ),
+        claimed_obligation_ids=(obligation.obligation_id,),
+        delivered_command_id=delivered.command_id,
+    )
+    WakeLedgerRepository(runtime).append_records_atomic(
+        [
+            (delivered, obligation),
+            (ack_record(obligation, ack), obligation),
+        ]
+    )
+    return extension, attempt
+
+
 def test_runtime_binding_id_grammar_accepts_exact_runtime_ids(tmp_path: Path) -> None:
     runtime = _runtime_at(tmp_path)
     consultations = ConsultationRuntime(runtime, repository_root=tmp_path)
@@ -629,232 +674,118 @@ def test_runtime_binding_id_grammar_accepts_exact_runtime_ids(tmp_path: Path) ->
     assert len(frame["recipient_binding"]["binding_id"]) == 45
 
 
-def test_consultation_runtime_restart_effect_unknown_and_late_answer(
-    tmp_path: Path,
-) -> None:
+def test_r1_repair_discriminators(tmp_path: Path) -> None:
     runtime = _runtime_at(tmp_path)
     consultations = ConsultationRuntime(runtime, repository_root=tmp_path)
-    (
-        (requester_job, requester_attempt, _requester_worker, _requester_binding),
-        (recipient_job, recipient_attempt, _recipient_worker, recipient_binding),
-        root,
-    ) = _workers(runtime)
+    workers = _workers(runtime)
     frame, semantic_bundle = _frame(
         tmp_path,
-        requester=(requester_job, requester_attempt, _requester_worker, _requester_binding),
-        recipient=(recipient_job, recipient_attempt, _recipient_worker, recipient_binding),
+        requester=workers[0],
+        recipient=workers[1],
     )
-    fixture_repo = semantic_bundle[1]
-    original = consultations.intent(
+    consultations.intent(
         frame,
-        requester_attempt_id=requester_attempt,
+        requester_attempt_id=workers[0][1],
         carrier_ref="dialogue://fixture/consultation",
         observed_at="2026-09-14T00:00:00Z",
-        repository_root=fixture_repo,
+        repository_root=semantic_bundle[1],
     )
-    duplicate = consultations.intent(
-        frame,
-        requester_attempt_id=requester_attempt,
-        carrier_ref="dialogue://fixture/consultation",
-        observed_at="2026-09-14T00:01:00Z",
-        repository_root=fixture_repo,
-    )
-    assert duplicate.inserted is False
-    assert duplicate.event.created_at == original.event.created_at
 
-    changed = copy.deepcopy(frame)
-    changed["question"] = QUESTION + " changed"
-    changed["fingerprint"] = ""
-    changed = build_consultation(changed)
-    with pytest.raises(ConsultationConflict, match="CONFLICT"):
+    blank = copy.deepcopy(frame)
+    blank["fingerprint"] = ""
+    with pytest.raises(StateConflict, match="nonblank fingerprint"):
         consultations.intent(
-            changed,
-            requester_attempt_id=requester_attempt,
+            blank,
+            requester_attempt_id=workers[0][1],
             carrier_ref="dialogue://fixture/consultation",
-            observed_at="2026-09-14T00:02:00Z",
-            repository_root=fixture_repo,
-        )
-
-    _extension, attempt = _persisted_wake_attempt(
-        runtime, consultations, frame
-    )
-    dispatch = consultations.dispatch_attempt(
-        frame, wake_attempt=attempt, observed_at="2026-09-14T00:03:00Z"
-    )
-    assert dispatch.event.event_type == "DISPATCH_ATTEMPT"
-    reopened = ConsultationRuntime(_runtime_at(tmp_path), repository_root=tmp_path)
-    unknown = reopened.resolve_restart(frame)
-    assert unknown == "EFFECT_UNKNOWN"
-    # The first persisted Wake attempt remains unsettled until exact evidence.
-
-    native = reopened.native_accepted(
-        frame,
-        native_thread_id="thread-recipient-1",
-        native_turn_id="turn-recipient",
-        wake_attempt_command_id=attempt.attempt_command_id,
-        observed_at="2026-09-14T00:05:00Z",
-    )
-    assert native.event.event_type == "NATIVE_ACCEPTED"
-    assert native.event.payload["evidence"]["accepted"] is True
-    consumed = reopened.consumed_by_recipient(
-        frame,
-        native_thread_id="thread-recipient-1",
-        native_turn_id="turn-recipient",
-        observed_at="2026-09-14T00:06:00Z",
-    )
-    assert consumed.event.event_type == "CONSUMED_BY_RECIPIENT"
-
-    semantic, fixture_repo = semantic_bundle
-    answer_one = _answer_frame(frame, "v1", semantic)
-    answer_two = _answer_frame(frame, "v2", semantic)
-    late_semantic = copy.deepcopy(semantic)
-    late_semantic["refused"] = late_semantic["refused"] + ["runtime_binding"]
-    late = _answer_frame(frame, "late", late_semantic)
-    first_available = reopened.answer_available(
-        answer_one, observed_at="2026-09-14T00:07:00Z", historical=False
-    )
-    request_one = reopened.consumed_by_requester(
-        answer_one, observed_at="2026-09-14T00:08:00Z"
-    )
-    available_commands = {
-        event.command_id
-        for event in reopened.events(frame)
-        if event.event_type == "ANSWER_AVAILABLE"
-    }
-    assert len(available_commands) == 1
-    assert available_commands == {
-        f"consult:{frame['consultation_id']}:ANSWER_AVAILABLE:{answer_one['message_key']}"
-    }
-    assert first_available.event.event_type == "ANSWER_AVAILABLE"
-    assert request_one.event.event_type == "CONSUMED_BY_REQUESTER"
-    second_available = reopened.answer_available(
-        answer_two, observed_at="2026-09-14T00:09:00Z"
-    )
-    late_receipt = reopened.answer_available(
-        answer_two, observed_at="2026-09-14T00:10:00Z"
-    )
-    expected_refused_command = (
-        f"consult:{frame['consultation_id']}:"
-        f"ANSWER_REFUSED:{answer_two['message_key']}"
-    )
-    assert expected_refused_command in {
-        event.command_id for event in reopened.events(frame)
-    }
-    with pytest.raises(StateConflict, match="reserved answer"):
-        reopened.consumed_by_requester(
-            answer_two, observed_at="2026-09-14T00:10:00Z"
-        )
-    forged_answer = _answer_frame(frame, "forged", semantic)
-    forged_answer["requester_actor_ref"] = _actor(
-        root, "ROOT", "root-worker"
-    )
-    forged_answer["correlation"]["requester_actor_digest"] = _digest(
-        "root-worker" + "ROOT"
-    )
-    forged_answer["fingerprint"] = ""
-    forged_answer = build_consultation(forged_answer)
-    assert second_available.event.event_type == "ANSWER_REFUSED"
-    assert second_available.inserted is True
-    assert second_available.event.command_id == (
-        f"consult:{frame['consultation_id']}:"
-        f"ANSWER_REFUSED:{answer_two['message_key']}"
-    )
-    with pytest.raises(StateConflict, match="answer requester actor drifted"):
-        reopened.consumed_by_requester(
-            forged_answer, observed_at="2026-09-14T00:10:30Z"
-        )
-    assert late_receipt.event.event_type == "ANSWER_REFUSED"
-    assert late_receipt.inserted is False
-    assert late_receipt.event.payload["historical"] is True
-    assert late_receipt.event.payload["conflict"] == "ANSWER_ALREADY_RESERVED"
-    assert late_receipt.event.payload["refused_message_key"] == answer_two["message_key"]
-    assert late_receipt.event.payload["answer_fingerprint"] == answer_two["fingerprint"]
-
-    projection = consultation_projection(runtime)
-    assert len(projection) == 1
-    assert projection[0]["question_digest"] == _digest(frame["question"])
-    assert projection[0]["receipt_stage"] == "CONSUMED_BY_REQUESTER"
-    assert projection[0]["blocker"] is None
-    assert [event.event_type for event in reopened.events(frame)] == [
-        "INTENT",
-        "DISPATCH_ATTEMPT",
-        "NATIVE_ACCEPTED",
-        "CONSUMED_BY_RECIPIENT",
-        "ANSWER_AVAILABLE",
-        "CONSUMED_BY_REQUESTER",
-        "ANSWER_REFUSED",
-    ]
-
-
-def test_b1_intent_only_restart_is_not_dispatched_and_may_redispatch(
-    tmp_path: Path,
-) -> None:
-    runtime = _runtime_at(tmp_path)
-    consultations = ConsultationRuntime(runtime, repository_root=tmp_path)
-    (
-        (requester_job, requester_attempt, _requester_worker, _requester_binding),
-        (recipient_job, recipient_attempt, _recipient_worker, recipient_binding),
-        _root,
-    ) = _workers(runtime)
-    frame, semantic_bundle = _frame(
-        tmp_path,
-        requester=(requester_job, requester_attempt, _requester_worker, _requester_binding),
-        recipient=(recipient_job, recipient_attempt, _recipient_worker, recipient_binding),
-    )
-    consultations.intent(
-        frame,
-        requester_attempt_id=requester_attempt,
-        carrier_ref="dialogue://fixture/consultation",
-        observed_at="2026-09-14T00:00:00Z",
-        repository_root=semantic_bundle[1],
-    )
-    reopened = ConsultationRuntime(_runtime_at(tmp_path), repository_root=tmp_path)
-
-    assert reopened.resolve_restart(frame) == "NOT_DISPATCHED"
-    _extension, attempt = _persisted_wake_attempt(
-        runtime, consultations, frame
-    )
-    dispatch = reopened.dispatch_attempt(
-        frame, wake_attempt=attempt, observed_at="2026-09-14T00:01:00Z"
-    )
-
-    assert dispatch.inserted is True
-    assert dispatch.event.event_type == "DISPATCH_ATTEMPT"
-    assert reopened.resolve_restart(frame) == "EFFECT_UNKNOWN"
-
-
-def test_b2_native_acceptance_requires_dispatch_attempt(tmp_path: Path) -> None:
-    runtime = _runtime_at(tmp_path)
-    consultations = ConsultationRuntime(runtime, repository_root=tmp_path)
-    (
-        (requester_job, requester_attempt, _requester_worker, _requester_binding),
-        (recipient_job, recipient_attempt, _recipient_worker, recipient_binding),
-        _root,
-    ) = _workers(runtime)
-    frame, semantic_bundle = _frame(
-        tmp_path,
-        requester=(requester_job, requester_attempt, _requester_worker, _requester_binding),
-        recipient=(recipient_job, recipient_attempt, _recipient_worker, recipient_binding),
-    )
-    consultations.intent(
-        frame,
-        requester_attempt_id=requester_attempt,
-        carrier_ref="dialogue://fixture/consultation",
-        observed_at="2026-09-14T00:00:00Z",
-        repository_root=semantic_bundle[1],
-    )
-    _extension, attempt = _persisted_wake_attempt(runtime, consultations, frame)
-
-    with pytest.raises(StateConflict, match="DISPATCH_ATTEMPT"):
-        consultations.native_accepted(
-            frame,
-            native_thread_id="thread-recipient-1",
-            native_turn_id="turn-recipient",
-            wake_attempt_command_id=attempt.attempt_command_id,
             observed_at="2026-09-14T00:01:00Z",
+            repository_root=semantic_bundle[1],
+        )
+    assert len(list(runtime.events.list_events(
+        aggregate_type="consultation", aggregate_id=blank["consultation_id"]
+    ))) == 1
+
+    extension, attempt = _persisted_wake_attempt(runtime, consultations, frame)
+    assert consultations.resolve_restart(frame) == "RECONCILIATION_REQUIRED"
+    assert not hasattr(consultations, "dispatch_attempt")
+    assert not hasattr(consultations, "native_accepted")
+
+    answer = _answer_frame(frame, "r1", semantic_bundle[0])
+    with pytest.raises(StateConflict):
+        consultations.answer_available(answer, observed_at="2026-09-14T00:05:00Z")
+
+
+def test_r1_v1_contract_fixture_accepts_original_answer_shape(tmp_path: Path) -> None:
+    runtime = _runtime_at(tmp_path)
+    workers = _workers(runtime)
+    frame, semantic_bundle = _frame(
+        tmp_path,
+        requester=workers[0],
+        recipient=workers[1],
+    )
+    raw = copy.deepcopy(frame)
+    raw.update(
+        {
+            "message_key": "asd-consultation-original-answer",
+            "purpose": "ANSWER",
+            "question": None,
+            "answer": {
+                "text": json.dumps(semantic_bundle[0], sort_keys=True),
+                "evidence_refs": frame["evidence_refs"],
+            },
+            "fingerprint": "",
+        }
+    )
+    raw["correlation"]["request_message_key"] = raw["message_key"]
+    item = validate_consultation(build_consultation(raw))
+    assert item["schema"] == CONSULTATION_SCHEMA
+    assert "question_message_key" not in item
+    assert item["correlation"]["request_message_key"] == item["message_key"]
+
+
+def test_r1_wake_projection_and_exact_answer_transaction(tmp_path: Path) -> None:
+    runtime = _runtime_at(tmp_path)
+    consultations = ConsultationRuntime(runtime, repository_root=tmp_path)
+    workers = _workers(runtime)
+    frame, semantic_bundle = _frame(
+        tmp_path,
+        requester=workers[0],
+        recipient=workers[1],
+    )
+    consultations.intent(
+        frame,
+        requester_attempt_id=workers[0][1],
+        carrier_ref="dialogue://fixture/consultation",
+        observed_at="2026-09-14T00:00:00Z",
+        repository_root=semantic_bundle[1],
+    )
+    _extension, _attempt = _credited_path(runtime, consultations, frame)
+
+    answer = _answer_frame(frame, "exact", semantic_bundle[0])
+    available = consultations.answer_available(
+        answer, observed_at="2026-09-14T00:04:00Z"
+    )
+    assert available.event.payload["historical"] is False
+
+    foreign = _answer_frame(frame, "foreign", semantic_bundle[0])
+    foreign["requester_actor_ref"]["worker_id"] = "foreign-requester"
+    foreign["fingerprint"] = ""
+    foreign = build_consultation(foreign)
+    with pytest.raises(StateConflict):
+        consultations.consumed_by_requester(
+            foreign, observed_at="2026-09-14T00:05:00Z"
         )
 
-    assert [event.event_type for event in consultations.events(frame)] == ["INTENT"]
+    consumed = consultations.consumed_by_requester(
+        answer, observed_at="2026-09-14T00:06:00Z"
+    )
+    assert consumed.event.payload["answer_fingerprint"] == answer["fingerprint"]
+
+
+
+
+
+
 
 
 def _drifted_frame(
@@ -876,135 +807,8 @@ def _changed_frame(frame: dict, field: str, value: object) -> dict:
     return build_consultation(changed)
 
 
-def test_b3_dispatch_refuses_changed_stale_frame_and_current_binding(
-    tmp_path: Path,
-) -> None:
-    runtime = _runtime_at(tmp_path)
-    consultations = ConsultationRuntime(runtime, repository_root=tmp_path)
-    (
-        (requester_job, requester_attempt, _requester_worker, requester_binding),
-        (recipient_job, recipient_attempt, _recipient_worker, recipient_binding),
-        _root,
-    ) = _workers(runtime)
-    frame, semantic_bundle = _frame(
-        tmp_path,
-        requester=(requester_job, requester_attempt, _requester_worker, requester_binding),
-        recipient=(recipient_job, recipient_attempt, _recipient_worker, recipient_binding),
-    )
-    fixture_repo = semantic_bundle[1]
-    consultations.intent(
-        frame,
-        requester_attempt_id=requester_attempt,
-        carrier_ref="dialogue://fixture/consultation",
-        observed_at="2026-09-14T00:00:00Z",
-        repository_root=fixture_repo,
-    )
-    _extension, attempt = _persisted_wake_attempt(
-        runtime, consultations, frame
-    )
-    stale = copy.deepcopy(recipient_binding)
-    stale["binding_generation"] = 2
-    changed_requester_actor = copy.deepcopy(frame["requester_actor_ref"])
-    changed_requester_actor["worker_id"] = "changed-requester"
-    changed_recipient_actor = copy.deepcopy(frame["recipient_actor_ref"])
-    changed_recipient_actor["worker_id"] = "changed-recipient"
-    changed_revision = copy.deepcopy(frame["artifact_revisions"])
-    changed_revision[0]["content_sha256"] = "b" * 64
-    drifted_frames = {
-        "semantic": _changed_frame(frame, "question", QUESTION + " changed"),
-        "requester_actor_ref": _changed_frame(
-            frame, "requester_actor_ref", changed_requester_actor
-        ),
-        "recipient_actor_ref": _changed_frame(
-            frame, "recipient_actor_ref", changed_recipient_actor
-        ),
-        "artifact_revision_digest": _changed_frame(
-            frame, "artifact_revisions", changed_revision
-        ),
-        "recipient_binding": _changed_frame(frame, "recipient_binding", stale),
-    }
-
-    for changed in drifted_frames.values():
-        with pytest.raises(StateConflict, match="frame identity drifted"):
-            consultations.dispatch_attempt(
-                changed,
-                wake_attempt=attempt,
-                observed_at="2026-09-14T00:01:00Z",
-            )
-
-    _release_recipient_writer(runtime)
-    with pytest.raises(StateConflict, match="current Runtime binding|current actionable OHF writer"):
-        consultations.dispatch_attempt(
-            frame,
-            wake_attempt=attempt,
-            observed_at="2026-09-14T00:02:00Z",
-        )
-
-    assert consultations.events(frame) == [
-        event for event in consultations.events(frame) if event.event_type == "INTENT"
-    ]
 
 
-def test_b4_recipient_consumption_refuses_changed_stale_frame_and_current_binding(
-    tmp_path: Path,
-) -> None:
-    runtime = _runtime_at(tmp_path)
-    consultations = ConsultationRuntime(runtime, repository_root=tmp_path)
-    (
-        (requester_job, requester_attempt, _requester_worker, requester_binding),
-        (recipient_job, recipient_attempt, _recipient_worker, recipient_binding),
-        _root,
-    ) = _workers(runtime)
-    frame, semantic_bundle = _frame(
-        tmp_path,
-        requester=(requester_job, requester_attempt, _requester_worker, requester_binding),
-        recipient=(recipient_job, recipient_attempt, _recipient_worker, recipient_binding),
-    )
-    fixture_repo = semantic_bundle[1]
-    consultations.intent(
-        frame,
-        requester_attempt_id=requester_attempt,
-        carrier_ref="dialogue://fixture/consultation",
-        observed_at="2026-09-14T00:00:00Z",
-        repository_root=fixture_repo,
-    )
-    _extension, attempt = _persisted_wake_attempt(
-        runtime, consultations, frame
-    )
-    consultations.dispatch_attempt(
-        frame, wake_attempt=attempt, observed_at="2026-09-14T00:01:00Z"
-    )
-    consultations.native_accepted(
-        frame,
-        native_thread_id="thread-recipient-1",
-        native_turn_id="turn-recipient",
-        wake_attempt_command_id=attempt.attempt_command_id,
-        observed_at="2026-09-14T00:02:00Z",
-    )
-    stale = copy.deepcopy(recipient_binding)
-    stale["binding_generation"] = 2
-    changed = _drifted_frame(frame, field="recipient_binding", value=stale)
-
-    with pytest.raises(StateConflict, match="frame identity drifted"):
-        consultations.consumed_by_recipient(
-            changed,
-            native_thread_id="thread-recipient-1",
-            native_turn_id="turn-recipient",
-            observed_at="2026-09-14T00:03:00Z",
-        )
-
-    _release_recipient_writer(runtime)
-    with pytest.raises(StateConflict, match="current Runtime binding|current actionable OHF writer"):
-        consultations.consumed_by_recipient(
-            frame,
-            native_thread_id="thread-recipient-1",
-            native_turn_id="turn-recipient",
-            observed_at="2026-09-14T00:04:00Z",
-        )
-
-    assert "CONSUMED_BY_RECIPIENT" not in {
-        event.event_type for event in consultations.events(frame)
-    }
 
 
 def _release_recipient_writer(runtime: Runtime) -> None:
@@ -1034,7 +838,7 @@ def _answer_frame(frame: dict, suffix: str, semantic: dict) -> dict:
         "evidence_refs": frame["evidence_refs"],
     }
     raw["correlation"]["request_message_key"] = "asd-consultation-0000000000000001"
-    raw["schema"] = "mastermind.agent_dialogue_consultation.v2"
+    raw["schema"] = CONSULTATION_V2_SCHEMA
     raw["question_message_key"] = frame["message_key"]
     raw["fingerprint"] = ""
     return build_consultation(raw)
@@ -1152,87 +956,6 @@ def test_persisted_wake_carrier_holds_exact_peer_binding_and_refuses_stale_gener
         stale.current_binding_matches()
 
 
-def test_remote_codex_consultation_ingress_idle_active_and_unqualified_claude() -> None:
-
-    from control_plane.operator_harness_contract import (
-        AttentionTurnObservation,
-        ProcessGenerationRef,
-    )
-    from control_plane.remote_codex_operator_adapter import (
-        CodexConsultationIngress,
-        ConsultationIngressRefused,
-        ConsultationIngressUnavailable,
-    )
-
-    generation = ProcessGenerationRef(
-        "generation-recipient",
-        "ohf-epoch-recipient",
-        1,
-        "recipient",
-    )
-
-    @dataclass
-    class FakeAdapter:
-        active: bool = False
-        fail: bool = False
-        calls: list[dict] = field(default_factory=list)
-
-        def deliver_attention(self, **kwargs):
-            self.calls.append(kwargs)
-            if self.fail:
-                raise RuntimeError("provider call began")
-            return AttentionTurnObservation(
-                process_generation_id=generation.process_generation_id,
-                provider_session_id="thread-recipient",
-                nudge_id=kwargs["nudge_id"],
-                provider_native_turn_id="turn-recipient",
-                accepted=True,
-                delivered=True,
-            )
-
-    ingress = CodexConsultationIngress(
-        adapter=FakeAdapter(),
-        generation=generation,
-        attempt_id="ATT-" + "2" * 32,
-        binding_id="bind-" + "2" * 40,
-        binding_generation=1,
-        provider_session_id="thread-recipient",
-        surface="codex",
-    )
-    accepted = ingress.deliver(
-        consultation_ref="consult-6bdf4a6f9a664bbcf1a93d67a41ba51d",
-        message_key="asd-consultation-0000000000000001",
-        semantic_fingerprint="a" * 64,
-        wake_obligation_id="WAKE-" + "1" * 32,
-    )
-    assert accepted["native_thread_id"] == "thread-recipient"
-    assert accepted["native_turn_id"] == "turn-recipient"
-    assert accepted["accepted"] is True
-    from control_plane.operator_harness_contract import ATTENTION_TURN_INSTRUCTION
-
-    assert ingress.adapter.calls[0]["instruction"] == ATTENTION_TURN_INSTRUCTION
-    ingress.adapter.calls.clear()
-
-    active = ingress.with_active_turn(True)
-    assert len(active.adapter.calls) == 0
-    with pytest.raises(ConsultationIngressRefused, match="active consultation"):
-        active.deliver(
-            consultation_ref="consult-6bdf4a6f9a664bbcf1a93d67a41ba51d",
-            message_key="asd-consultation-0000000000000001",
-            semantic_fingerprint="a" * 64,
-            wake_obligation_id="WAKE-" + "1" * 32,
-        )
-
-    with pytest.raises(ConsultationIngressUnavailable, match="UNQUALIFIED"):
-        CodexConsultationIngress(
-            adapter=FakeAdapter(),
-            generation=generation,
-            attempt_id="ATT-" + "2" * 32,
-            binding_id="bind-" + "2" * 40,
-            binding_generation=1,
-            provider_session_id="thread-recipient",
-            surface="claude",
-        )
 
 
 def _wake_route(runtime: Runtime, frame: dict | None = None):
@@ -1264,7 +987,7 @@ def _wake_route(runtime: Runtime, frame: dict | None = None):
         message_key=identity.message_key,
         semantic_fingerprint=identity.semantic_fingerprint,
         current_binding=RuntimeBinding(
-            session_alias="WORKER-RECIPIENT",
+            session_alias="CONSULTATION-RECIPIENT",
             binding_id=str(question["recipient_binding"]["binding_id"]),
             binding_generation=int(question["recipient_binding"]["binding_generation"]),
             native_handle="thread-recipient-1",
@@ -1294,7 +1017,7 @@ def _wake_route_for(obligation, extension):
     from control_plane.session_targets import SessionTarget, route_obligation
 
     target = SessionTarget(
-        session_alias="WORKER-RECIPIENT",
+        session_alias="CONSULTATION-RECIPIENT",
         target_seat="coo",
         reasoning_surface="codex",
         wake_transport="codex-app-server",
@@ -1324,266 +1047,391 @@ def _single_target_registry(target, obligation):
     )
 
 
-def test_dispatch_and_late_reconciliation_derive_from_exact_wake_attempt(tmp_path):
+
+
+
+
+
+
+
+
+
+def _setup_canonical_intent(tmp_path: Path):
     runtime = _runtime_at(tmp_path)
     consultations = ConsultationRuntime(runtime, repository_root=tmp_path)
-    (
-        (requester_job, requester_attempt, _requester_worker, _requester_binding),
-        (recipient_job, recipient_attempt, _recipient_worker, recipient_binding),
-        _root,
-    ) = _workers(runtime)
+    workers = _workers(runtime)
     frame, semantic_bundle = _frame(
         tmp_path,
-        requester=(requester_job, requester_attempt, _requester_worker, _requester_binding),
-        recipient=(recipient_job, recipient_attempt, _recipient_worker, recipient_binding),
+        requester=workers[0],
+        recipient=workers[1],
     )
     consultations.intent(
         frame,
-        requester_attempt_id=requester_attempt,
+        requester_attempt_id=workers[0][1],
         carrier_ref="dialogue://fixture/consultation",
         observed_at="2026-09-14T00:00:00Z",
         repository_root=semantic_bundle[1],
     )
-
-    from control_plane.wake_ledger import attempt_record, requested_record, LedgerPhase
-    from control_plane.wake_persist import WakeLedgerRepository
-
-    extension, attempt = _persisted_wake_attempt(
-        runtime, consultations, frame
-    )
-    repository = WakeLedgerRepository(runtime)
-
-    dispatch = consultations.dispatch_attempt(
-        frame,
-        wake_attempt=attempt,
-        observed_at="2026-09-14T00:01:00Z",
-    )
-    assert dispatch.event.payload["wake_attempt_command_id"] == attempt.attempt_command_id
-    reopened = ConsultationRuntime(_runtime_at(tmp_path), repository_root=tmp_path)
-    with pytest.raises(StateConflict, match="EFFECT_UNKNOWN"):
-        reopened.dispatch_attempt(
-            frame,
-            wake_attempt=attempt,
-            observed_at="2026-09-14T00:02:00Z",
-        )
-
-    native = reopened.native_accepted(
-        frame,
-        native_thread_id="thread-recipient-1",
-        native_turn_id="turn-recipient",
-        wake_attempt_command_id=attempt.attempt_command_id,
-        observed_at="2026-09-14T00:03:00Z",
-    )
-    assert native.inserted is True
-    assert reopened.resolve_restart(frame) == "RESOLVED"
-    assert sum(
-        event.record.phase.value == "DELIVERY_ATTEMPT"
-        for event in repository.list_records(extension.obligation().obligation_id)
-    ) == 1
+    return runtime, consultations, workers, frame, semantic_bundle
 
 
-def test_answer_identity_expiry_correction_replay_and_atomic_credit(tmp_path):
-    runtime = _runtime_at(tmp_path)
-    consultations = ConsultationRuntime(runtime, repository_root=tmp_path)
-    (
-        (requester_job, requester_attempt, _requester_worker, _requester_binding),
-        (recipient_job, recipient_attempt, _recipient_worker, recipient_binding),
-        _root,
-    ) = _workers(runtime)
-    frame, semantic_bundle = _frame(
-        tmp_path,
-        requester=(requester_job, requester_attempt, _requester_worker, _requester_binding),
-        recipient=(recipient_job, recipient_attempt, _recipient_worker, recipient_binding),
+def _append_delivered_only(runtime: Runtime, extension, attempt):
+    obligation = extension.obligation()
+    delivered = attempt_record(attempt, LedgerPhase.DELIVERED)
+    WakeLedgerRepository(runtime).append_records_atomic([(delivered, obligation)])
+    return obligation, delivered
+
+
+def _append_target_ack(runtime: Runtime, obligation, attempt, delivered) -> None:
+    from control_plane.wake_ledger import (
+        AckMode,
+        TrustedAckContext,
+        ack_record,
+        acknowledge,
     )
-    consultations.intent(
-        frame,
-        requester_attempt_id=requester_attempt,
-        carrier_ref="dialogue://fixture/consultation",
-        observed_at="2026-09-14T00:00:00Z",
-        repository_root=semantic_bundle[1],
+
+    ack = acknowledge(
+        obligation,
+        trusted=TrustedAckContext(
+            ack_mode=AckMode.REASONING_SESSION,
+            target_seat=obligation.declared_target_seat,
+            session_alias=attempt.session_alias,
+            reasoning_surface=attempt.reasoning_surface,
+            binding_id=attempt.binding_id,
+            binding_generation=attempt.binding_generation,
+            acknowledged_at="2026-09-14T00:03:00Z",
+        ),
+        claimed_obligation_ids=(obligation.obligation_id,),
+        delivered_command_id=delivered.command_id,
     )
-    _extension, attempt = _persisted_wake_attempt(
-        runtime, consultations, frame
+    WakeLedgerRepository(runtime).append_records_atomic(
+        [(ack_record(obligation, ack), obligation)]
     )
-    consultations.dispatch_attempt(
-        frame, wake_attempt=attempt, observed_at="2026-09-14T00:01:00Z"
+
+
+def test_canonical_wake_state_projection_and_ack_gate(tmp_path: Path) -> None:
+    runtime, consultations, _workers_value, frame, semantic_bundle = (
+        _setup_canonical_intent(tmp_path)
     )
-    consultations.native_accepted(
-        frame,
-        native_thread_id="thread-recipient-1",
-        native_turn_id="turn-recipient",
-        wake_attempt_command_id=attempt.attempt_command_id,
-        observed_at="2026-09-14T00:02:00Z",
-    )
-    consultations.consumed_by_recipient(
-        frame,
-        native_thread_id="thread-recipient-1",
-        native_turn_id="turn-recipient",
-        observed_at="2026-09-14T00:03:00Z",
-    )
-    answer = _answer_frame(frame, "v1", semantic_bundle[0])
-    foreign = _answer_frame(frame, "foreign", semantic_bundle[0])
-    foreign["recipient_actor_ref"]["worker_id"] = "foreign-recipient"
-    foreign["fingerprint"] = ""
-    foreign = build_consultation(foreign)
-    with pytest.raises(StateConflict, match="answer recipient actor drifted"):
-        consultations.answer_available(foreign, observed_at="2026-09-14T00:04:00Z")
+
+    assert consultations.resolve_restart(frame) == "NOT_SEEN"
+    projection = consultation_projection(runtime)
+    assert len(projection) == 1
+    assert projection[0]["current_wake_state"] == "NOT_SEEN"
+    assert projection[0]["wake_state"] == consultations.resolve_restart(frame)
+    assert projection[0]["blocker"] == "NOT_SEEN"
+
+    extension, attempt = _persisted_wake_attempt(runtime, consultations, frame)
+    assert consultations.resolve_restart(frame) == "RECONCILIATION_REQUIRED"
+    projection = consultation_projection(runtime)[0]
+    assert projection["wake_state"] == "RECONCILIATION_REQUIRED"
+    assert projection["blocker"] == "RECONCILIATION_REQUIRED"
+
+    obligation, delivered = _append_delivered_only(runtime, extension, attempt)
+    assert consultations.resolve_restart(frame) == "DELIVERED_UNACKNOWLEDGED"
+    projection = consultation_projection(runtime)[0]
+    assert projection["wake_state"] == "DELIVERED_UNACKNOWLEDGED"
+    assert projection["blocker"] == "DELIVERED_UNACKNOWLEDGED"
+    answer = _answer_frame(frame, "ack-gate", semantic_bundle[0])
+    with pytest.raises(StateConflict, match="TARGET_ACKNOWLEDGED"):
+        consultations.answer_available(answer, observed_at="2026-09-14T00:02:00Z")
+
+    _append_target_ack(runtime, obligation, attempt, delivered)
+    assert consultations.resolve_restart(frame) == "TARGET_ACKNOWLEDGED"
+    projection = consultation_projection(runtime)[0]
+    assert projection["wake_state"] == "TARGET_ACKNOWLEDGED"
+    assert projection["blocker"] is None
+    assert set(projection) == {
+        "consultation_id",
+        "sender_digest",
+        "recipient_digest",
+        "question_digest",
+        "evidence_revision_digest",
+        "current_wake_state",
+        "wake_state",
+        "deadline",
+        "blocker",
+    }
 
     available = consultations.answer_available(
         answer, observed_at="2026-09-14T00:04:00Z"
     )
-    assert available.event.payload["historical"] is False
-    with pytest.raises(StateConflict, match="expired"):
-        consultations.consumed_by_requester(
-            answer, observed_at="2026-09-16T00:00:01Z"
-        )
-    late = consultations.answer_available(
-        answer, observed_at="2026-09-16T00:00:01Z"
-    )
-    assert late.inserted is False
-    assert late.event.created_at == available.event.created_at
-
-    replay = consultations.answer_available(
+    consumed = consultations.consumed_by_requester(
         answer, observed_at="2026-09-14T00:05:00Z"
     )
-    assert replay.inserted is False
-    assert replay.event.created_at == available.event.created_at
+    assert available.event.payload["historical"] is False
+    assert consumed.event.payload["answer_fingerprint"] == answer["fingerprint"]
 
-    second = _answer_frame(frame, "v2", {**semantic_bundle[0], "second": True})
-    refused = consultations.answer_available(
-        second, observed_at="2026-09-14T00:06:00Z"
+
+def test_failed_and_source_resolved_wake_states_never_credit_answer(tmp_path: Path) -> None:
+    failed_root = tmp_path / "failed"
+    runtime, consultations, _workers_value, frame, semantic_bundle = (
+        _setup_canonical_intent(failed_root)
     )
-    assert refused.event.event_type == "ANSWER_REFUSED"
-    assert refused.event.payload["historical"] is True
-    with pytest.raises(StateConflict, match="reserved answer"):
-        consultations.consumed_by_requester(
-            second, observed_at="2026-09-14T00:06:30Z"
+    extension, attempt = _persisted_wake_attempt(runtime, consultations, frame)
+    WakeLedgerRepository(runtime).append_records_atomic(
+        [(attempt_record(attempt, LedgerPhase.FAILED), extension.obligation())]
+    )
+    assert consultations.resolve_restart(frame) == "ATTEMPTED"
+    projection = consultation_projection(runtime)[0]
+    assert projection["wake_state"] == "ATTEMPTED"
+    assert projection["blocker"] == "ATTEMPTED"
+    with pytest.raises(StateConflict, match="TARGET_ACKNOWLEDGED"):
+        consultations.answer_available(
+            _answer_frame(frame, "failed", semantic_bundle[0]),
+            observed_at="2026-09-14T00:04:00Z",
         )
 
-    correction = _answer_frame(frame, "correction", semantic_bundle[0])
+    resolved_root = tmp_path / "resolved"
+    runtime, consultations, _workers_value, frame, semantic_bundle = (
+        _setup_canonical_intent(resolved_root)
+    )
+    extension, attempt = _credited_path(runtime, consultations, frame)
+    from control_plane.wake_ledger import (
+        SourceReadHealth,
+        expected_resolution_code,
+        resolve_source,
+        resolved_record,
+    )
+
+    obligation = extension.obligation()
+    resolution = resolve_source(
+        obligation,
+        code=expected_resolution_code(obligation),
+        health=SourceReadHealth.HEALTHY,
+        source_present=False,
+        snapshot_digest="a" * 16,
+        resolved_at="2026-09-14T00:04:00Z",
+    )
+    WakeLedgerRepository(runtime).append_records_atomic(
+        [(resolved_record(obligation, resolution), obligation)]
+    )
+    assert consultations.resolve_restart(frame) == "SOURCE_RESOLVED"
+    with pytest.raises(StateConflict, match="TARGET_ACKNOWLEDGED"):
+        consultations.answer_available(
+            _answer_frame(frame, "resolved", semantic_bundle[0]),
+            observed_at="2026-09-14T00:05:00Z",
+        )
+
+
+def test_wake_route_and_current_binding_are_exact_authority(tmp_path: Path) -> None:
+    runtime, consultations, _workers_value, frame, semantic_bundle = (
+        _setup_canonical_intent(tmp_path / "forged")
+    )
+    from control_plane.wake_ledger import requested_record
+
+    extension, attempt = _wake_route(runtime, frame)
+    forged = replace(attempt, binding_generation=attempt.binding_generation + 1)
+    obligation = extension.obligation()
+    WakeLedgerRepository(runtime).append_records_atomic(
+        [
+            (requested_record(obligation), obligation),
+            (attempt_record(forged, LedgerPhase.DELIVERY_ATTEMPT), None),
+        ]
+    )
+    with pytest.raises(StateConflict, match="current RuntimeBinding"):
+        consultations.resolve_restart(frame)
+    assert {event.event_type for event in consultations.events(frame)} == {"INTENT"}
+
+    runtime, consultations, _workers_value, frame, semantic_bundle = (
+        _setup_canonical_intent(tmp_path / "stale")
+    )
+    _credited_path(runtime, consultations, frame)
+    _release_recipient_writer(runtime)
+    answer = _answer_frame(frame, "stale", semantic_bundle[0])
+    with pytest.raises(StateConflict, match="current|actionable|binding|writer"):
+        consultations.answer_available(answer, observed_at="2026-09-14T00:04:00Z")
+    assert "ANSWER_AVAILABLE" not in {
+        event.event_type for event in consultations.events(frame)
+    }
+
+
+def test_answer_identity_replay_conflict_and_exact_consumption(tmp_path: Path) -> None:
+    drift_cases = (
+        "requester_actor_ref",
+        "recipient_actor_ref",
+        "recipient_peer_ref",
+        "recipient_binding",
+        "correlation",
+        "artifact_revisions",
+    )
+    for index, field in enumerate(drift_cases, start=1):
+        root = tmp_path / f"drift-{field}"
+        runtime, consultations, _workers_value, frame, semantic_bundle = (
+            _setup_canonical_intent(root)
+        )
+        _credited_path(runtime, consultations, frame)
+        answer = _answer_frame(frame, f"d{index}", semantic_bundle[0])
+        changed = copy.deepcopy(answer)
+        if field in {"requester_actor_ref", "recipient_actor_ref"}:
+            changed[field]["worker_id"] = f"foreign-{field}"
+        elif field == "recipient_peer_ref":
+            changed[field] = "peer-foreign-answer-0001"
+        elif field == "recipient_binding":
+            changed[field]["binding_generation"] += 1
+        elif field == "correlation":
+            changed[field]["parent_fingerprint"] = "d" * 64
+        else:
+            changed[field][0]["content_sha256"] = "e" * 64
+        changed["fingerprint"] = ""
+        changed = build_consultation(changed)
+        with pytest.raises(StateConflict):
+            consultations.answer_available(
+                changed, observed_at="2026-09-14T00:04:00Z"
+            )
+        assert "ANSWER_AVAILABLE" not in {
+            event.event_type for event in consultations.events(frame)
+        }
+
+    runtime, consultations, _workers_value, frame, semantic_bundle = (
+        _setup_canonical_intent(tmp_path / "reservation")
+    )
+    _credited_path(runtime, consultations, frame)
+    answer_a = _answer_frame(frame, "a", semantic_bundle[0])
+    first = consultations.answer_available(
+        answer_a, observed_at="2026-09-14T00:04:00Z"
+    )
+    replay = consultations.answer_available(
+        answer_a, observed_at="2026-09-14T00:09:00Z"
+    )
+    assert replay.inserted is False
+    assert replay.event.created_at == first.event.created_at
+    assert replay.event.payload["observed_at"] == first.event.payload["observed_at"]
+
+    changed_a = copy.deepcopy(answer_a)
+    changed_semantic = json.loads(changed_a["answer"]["text"])
+    changed_semantic["variant"] = "changed"
+    changed_a["answer"]["text"] = json.dumps(
+        changed_semantic, sort_keys=True, separators=(",", ":")
+    )
+    changed_a["fingerprint"] = ""
+    changed_a = build_consultation(changed_a)
+    with pytest.raises(ConsultationConflict, match="CONFLICT|conflict"):
+        consultations.answer_available(
+            changed_a, observed_at="2026-09-14T00:05:00Z"
+        )
+
+    answer_b = _answer_frame(frame, "b", semantic_bundle[0])
+    refused = consultations.answer_available(
+        answer_b, observed_at="2026-09-14T00:06:00Z"
+    )
+    assert refused.event.event_type == "ANSWER_REFUSED"
+    with pytest.raises(StateConflict, match="exact reserved answer"):
+        consultations.consumed_by_requester(
+            answer_b, observed_at="2026-09-14T00:07:00Z"
+        )
+
+    consumed = consultations.consumed_by_requester(
+        answer_a, observed_at="2026-09-14T00:07:00Z"
+    )
+    replay_consumed = consultations.consumed_by_requester(
+        answer_a, observed_at="2026-09-14T00:08:00Z"
+    )
+    assert replay_consumed.inserted is False
+    assert replay_consumed.event.created_at == consumed.event.created_at
+
+
+def test_concurrent_answers_reserve_exactly_one_current_answer(tmp_path: Path) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
+
+    runtime, consultations, _workers_value, frame, semantic_bundle = (
+        _setup_canonical_intent(tmp_path)
+    )
+    _credited_path(runtime, consultations, frame)
+    answers = (
+        _answer_frame(frame, "race-a", semantic_bundle[0]),
+        _answer_frame(frame, "race-b", semantic_bundle[0]),
+    )
+    barrier = threading.Barrier(2)
+
+    def reserve(answer):
+        local = ConsultationRuntime(_runtime_at(tmp_path), repository_root=tmp_path)
+        barrier.wait()
+        return local.answer_available(answer, observed_at="2026-09-14T00:04:00Z")
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = tuple(executor.map(reserve, answers))
+    assert sorted(result.event.event_type for result in results) == [
+        "ANSWER_AVAILABLE",
+        "ANSWER_REFUSED",
+    ]
+    current = [
+        event
+        for event in consultations.events(frame)
+        if event.event_type == "ANSWER_AVAILABLE"
+        and event.payload.get("historical") is False
+    ]
+    assert len(current) == 1
+
+
+def test_deadline_and_correction_history_never_receive_current_credit(tmp_path: Path) -> None:
+    runtime, consultations, _workers_value, frame, semantic_bundle = (
+        _setup_canonical_intent(tmp_path / "late")
+    )
+    _credited_path(runtime, consultations, frame)
+    late = _answer_frame(frame, "late", semantic_bundle[0])
+    result = consultations.answer_available(
+        late, observed_at="2026-09-16T00:00:00Z"
+    )
+    assert result.event.payload["historical"] is True
+    with pytest.raises(StateConflict, match="expired|historical"):
+        consultations.consumed_by_requester(
+            late, observed_at="2026-09-16T00:01:00Z"
+        )
+
+    runtime, consultations, _workers_value, frame, semantic_bundle = (
+        _setup_canonical_intent(tmp_path / "correction")
+    )
+    _credited_path(runtime, consultations, frame)
+    answer = _answer_frame(frame, "original", semantic_bundle[0])
+    consultations.answer_available(answer, observed_at="2026-09-14T00:04:00Z")
+
+    correction = copy.deepcopy(answer)
+    correction["message_key"] = "asd-consultation-correction-0001"
     correction["purpose"] = "CORRECTION"
     correction["supersedes_message_key"] = answer["message_key"]
+    corrected_semantic = json.loads(correction["answer"]["text"])
+    corrected_semantic["revision"] = 1
+    correction["answer"]["text"] = json.dumps(
+        corrected_semantic, sort_keys=True, separators=(",", ":")
+    )
     correction["fingerprint"] = ""
     correction = build_consultation(correction)
     corrected = consultations.answer_available(
-        correction, observed_at="2026-09-14T00:07:00Z", historical=True
+        correction, observed_at="2026-09-14T00:05:00Z"
     )
-    assert corrected.event.event_type == "ANSWER_AVAILABLE"
     assert corrected.event.payload["historical"] is True
-    assert corrected.event.payload["supersedes_message_key"] == answer["message_key"]
-    with pytest.raises(StateConflict, match="historical"):
+    with pytest.raises(ConsultationConflict, match="historical"):
         consultations.consumed_by_requester(
-            correction, observed_at="2026-09-14T00:07:30Z"
+            correction, observed_at="2026-09-14T00:06:00Z"
         )
 
-
-def test_correction_requires_its_exact_answer_predecessor(tmp_path: Path) -> None:
-    runtime = _runtime_at(tmp_path)
-    consultations = ConsultationRuntime(runtime, repository_root=tmp_path)
-    (
-        (requester_job, requester_attempt, _requester_worker, _requester_binding),
-        (recipient_job, recipient_attempt, _recipient_worker, recipient_binding),
-        _root,
-    ) = _workers(runtime)
-    frame, semantic_bundle = _frame(
-        tmp_path,
-        requester=(requester_job, requester_attempt, _requester_worker, _requester_binding),
-        recipient=(recipient_job, recipient_attempt, _recipient_worker, recipient_binding),
+    second = copy.deepcopy(correction)
+    second["message_key"] = "asd-consultation-correction-0002"
+    second_semantic = json.loads(second["answer"]["text"])
+    second_semantic["revision"] = 2
+    second["answer"]["text"] = json.dumps(
+        second_semantic, sort_keys=True, separators=(",", ":")
     )
-    consultations.intent(
-        frame,
-        requester_attempt_id=requester_attempt,
-        carrier_ref="dialogue://fixture/consultation",
-        observed_at="2026-09-14T00:00:00Z",
-        repository_root=semantic_bundle[1],
-    )
-    _extension, attempt = _persisted_wake_attempt(runtime, consultations, frame)
-    consultations.dispatch_attempt(
-        frame, wake_attempt=attempt, observed_at="2026-09-14T00:01:00Z"
-    )
-    consultations.native_accepted(
-        frame,
-        native_thread_id="thread-recipient-1",
-        native_turn_id="turn-recipient",
-        wake_attempt_command_id=attempt.attempt_command_id,
-        observed_at="2026-09-14T00:02:00Z",
-    )
-    consultations.consumed_by_recipient(
-        frame,
-        native_thread_id="thread-recipient-1",
-        native_turn_id="turn-recipient",
-        observed_at="2026-09-14T00:03:00Z",
-    )
-    answer = _answer_frame(frame, "v1", semantic_bundle[0])
-    consultations.answer_available(answer, observed_at="2026-09-14T00:04:00Z")
-
-    forged = _answer_frame(frame, "forged", semantic_bundle[0])
-    forged["purpose"] = "CORRECTION"
-    forged["supersedes_message_key"] = "asd-consultation-foreign-0001"
-    forged["fingerprint"] = ""
-    forged = build_consultation(forged)
-    with pytest.raises(StateConflict, match="exact predecessor"):
-        consultations.answer_available(forged, observed_at="2026-09-14T00:05:00Z")
-    assert forged["message_key"] not in {
-        event.payload.get("message_key", event.payload.get("refused_message_key"))
-        for event in consultations.events(frame)
-    }
-
-    replacement = _answer_frame(frame, "replacement", semantic_bundle[0])
-    replacement["purpose"] = "CORRECTION"
-    replacement["supersedes_message_key"] = answer["message_key"]
-    replacement["fingerprint"] = ""
-    replacement = build_consultation(replacement)
-    historical = consultations.answer_available(
-        replacement, observed_at="2026-09-14T00:06:00Z", historical=True
-    )
-    assert historical.event.payload["historical"] is True
-
-    competing = _answer_frame(frame, "competing", semantic_bundle[0])
-    competing["purpose"] = "CORRECTION"
-    competing["supersedes_message_key"] = answer["message_key"]
-    competing["fingerprint"] = ""
-    competing = build_consultation(competing)
-    with pytest.raises(StateConflict, match="chain is not deterministic"):
+    second["fingerprint"] = ""
+    second = build_consultation(second)
+    with pytest.raises(StateConflict, match="deterministic"):
         consultations.answer_available(
-            competing, observed_at="2026-09-14T00:07:00Z", historical=True
+            second, observed_at="2026-09-14T00:07:00Z"
         )
 
 
-def test_native_acceptance_requires_the_exact_wake_attempt(tmp_path: Path) -> None:
-    runtime = _runtime_at(tmp_path)
-    consultations = ConsultationRuntime(runtime, repository_root=tmp_path)
-    (
-        (requester_job, requester_attempt, _requester_worker, _requester_binding),
-        (recipient_job, recipient_attempt, _recipient_worker, recipient_binding),
-        _root,
-    ) = _workers(runtime)
-    frame, _semantic_bundle = _frame(
-        tmp_path,
-        requester=(requester_job, requester_attempt, _requester_worker, _requester_binding),
-        recipient=(recipient_job, recipient_attempt, _recipient_worker, recipient_binding),
-    )
-    consultations.intent(
-        frame,
-        requester_attempt_id=requester_attempt,
-        carrier_ref="dialogue://fixture/consultation",
-        observed_at="2026-09-14T00:00:00Z",
-        repository_root=_semantic_bundle[1],
-    )
-    _extension, attempt = _persisted_wake_attempt(runtime, consultations, frame)
-    dispatch = consultations.dispatch_attempt(
-        frame, wake_attempt=attempt, observed_at="2026-09-14T00:01:00Z"
-    )
-    assert dispatch.event.payload["wake_attempt_command_id"] == attempt.attempt_command_id
+def test_alternate_consultation_provider_ingress_is_absent() -> None:
+    import control_plane.remote_codex_operator_adapter as remote_adapter
+    from control_plane.operator_harness_contract import ATTENTION_TURN_INSTRUCTION
+    from integrations.executive_wake.codex_app_server import CODEX_WAKE_INSTRUCTION
 
-    with pytest.raises(StateConflict, match="Wake attempt"):
-        consultations.native_accepted(
-            frame,
-            native_thread_id="thread-recipient-1",
-            native_turn_id="turn-recipient",
-            observed_at="2026-09-14T00:02:00Z",
-            wake_attempt_command_id="wake:foreign",
-        )
+    assert not hasattr(remote_adapter, "CodexConsultationIngress")
+    assert not hasattr(remote_adapter, "ConsultationIngressRefused")
+    assert not hasattr(remote_adapter, "ConsultationIngressUnavailable")
+    assert CODEX_WAKE_INSTRUCTION == ATTENTION_TURN_INSTRUCTION
+
 
 def test_consultation_fits_pr600_policy_arithmetic(tmp_path: Path) -> None:
     runtime = _runtime_at(tmp_path)
