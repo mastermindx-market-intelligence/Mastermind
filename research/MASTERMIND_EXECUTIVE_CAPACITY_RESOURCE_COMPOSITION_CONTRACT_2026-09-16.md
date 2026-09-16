@@ -46,7 +46,7 @@ This contract is **a description language plus its evaluation rules**. It is exp
 | NON-GOAL | Why it is excluded |
 |---|---|
 | A scheduler | Executive OS owns Job/Attempt/claim lifecycle. This contract produces inputs to a claim, never a claim. |
-| A balancer or router | Model Router owns suitability; Capacity owns economic placement inside the first lawful tier. Unchanged. |
+| A balancer or router | Model Router owns suitability; Capacity owns the economic **evidence** for placement inside the first lawful tier, and the existing C1 seam owns the placement act itself (§11.1). Unchanged. |
 | A quota database | Provider Control already owns observation. This contract adds a *shape* to what Provider Control publishes, not a second store. |
 | A daemon or queue | R35 §7: "Do NOT create a concurrency daemon." §8: "Do this without creating another queue." |
 | A new owner | R35 §2: "Do not invent a parallel owner." Every construct below is minted under an existing authority. |
@@ -296,8 +296,9 @@ Alibaba expression fails closed under §4.6 (§5.4, §9.3 U1).
 
 **Partitionability precondition (normative).** `ORDERED_SPILL` is lawful only where the provider declares one of
 those two routings for these stages. Where the provider declares neither — where *we* would be choosing which
-stage to send an operation to — that is **placement among sibling routes**, already owned by Capacity/Model
-Router, and it must never be written as a resource operator. The test is *who performs the fallback*: the
+stage to send an operation to — that is **placement among sibling routes**, already owned by Model Router's
+gates and the existing C1 placement seam (§11.1), and it must never be written as a resource
+operator. The test is *who performs the fallback*: the
 provider, or us.
 
 This precondition is not pedantry; it is the difference between a true capacity number and a fiction. Three GLM
@@ -672,9 +673,12 @@ harness**, resolved through the existing policy owners at the current `capabilit
   can expose zero `UNATTENDED_BACKGROUND` capacity and simultaneously positive
   `SUPPORTED_TOOL_INTERACTIVE` capacity. `avail`, `jobs_fit`, and `usable` are evaluated per admitted execution
   mode, and a value computed for one mode may never be read as capacity for another.
-- Capacity ranks only within the job's admitted execution mode. A candidate whose admitted modes do not include
-  the requested mode is excluded by this hard gate before economics sees it (§11.1 step 1); economics never
-  compares across modes.
+- Capacity ranks only within the job's admitted execution mode (Sol R51, verbatim). A candidate whose admitted
+  modes do not include the requested mode is excluded by this hard gate before economics sees it (§11.1 step 1);
+  economics never compares across modes. **Read "ranks" exactly as R51 means it**: Capacity orders its own
+  economic *evidence*, scoped to one admitted mode, and emits it as a typed preference. It does not rank
+  candidates for selection and does not choose among them — §11.1's no-second-selector rule governs, and the
+  one selector remains `select_placement`.
 
 ### 7.3 Binding precedent to fold in
 R13 (MiniMax headless ruling) is normative here and is restated so the contract carries it: **`claude -p` one-act
@@ -816,7 +820,10 @@ The narrow amendment is therefore:
 - **A2 — canonical primitive rows.** Provider-quota holds are demands on the one canonical primitive selected
   above. A hold is keyed by `(resource_id, resource_generation)` and additionally records immutable
   `composition_generation` and `model_harness_cost_generation` evidence. Concurrent claims serialize on that
-  primitive's rows; there is no separately re-minted provider-quota lifecycle. Before a new
+  primitive's rows. **The parallel provider-quota `RESERVED / COMMITTED / SETTLED` lifecycle proposed in the
+  pre-R41 draft of this section is RETRACTED and does not exist in this contract**: it is not deferred, not
+  optional, and not available to a later implementer — there is exactly one commitment lifecycle, and it is
+  the canonical Executive primitive selected above (Sol R41 ruling 5). Before a new
   `resource_generation` authorizes, every nonterminal hold from the old generation is reconciled or carried
   forward conservatively; otherwise the resource remains BLOCKED.
 - **A3 — settlement folds into the canonical primitive's settlement path.** It is not a separate release

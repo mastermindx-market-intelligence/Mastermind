@@ -242,7 +242,7 @@ universal score**.
 - **Blocked by**: the acceptance suite. The race tests are matrix class 6 (currently PARTIAL — worker-slot
   exclusion only) and the correction/reset tests are classes 7 and 8 (currently MISSING). H cannot open while
   those three are not EXISTS. Worth stating plainly because it sizes the remaining work: at this pin **no** class
-  of the thirty-eight is fully EXISTS — eleven are PARTIAL, twenty-seven MISSING.
+  of the thirty-nine is fully EXISTS — eleven are PARTIAL, twenty-eight MISSING.
 
 ---
 

@@ -8,7 +8,8 @@ Companion: `research/MASTERMIND_EXECUTIVE_CAPACITY_RESOURCE_COMPOSITION_CONTRACT
 Source of classes 1–20: Sol capacity-routing architecture ruling (R35) §23, verbatim ordering preserved. Those
 twenty are the ruling's minimum; classes 21–32 are additions required by Sol formal review 5220216985, addendum
 5694353522, and R42/R52; classes 33–37 are additions required by R54/R55; class 38 is the hostile test for
-the typed required-child rule of §4.1, added under Sol's exact-head re-review at `4d181fda`.
+the typed required-child rule of §4.1 and class 39 the dead-producer test for the consumer chain, both added
+under Sol's exact-head re-review at `4d181fda`.
 
 ---
 
@@ -26,7 +27,7 @@ Status vocabulary, used strictly:
 - **MISSING** — no test falsifies this class, and the searches that ground that claim are named. Absence is
   reported with bounds, never bare.
 
-No class of the thirty-eight is fully EXISTS; eleven are PARTIAL and twenty-seven are MISSING. That distribution is
+No class of the thirty-nine is fully EXISTS; eleven are PARTIAL and twenty-eight are MISSING. That distribution is
 the expected consequence of the contract not existing yet: the added classes are also statements about a
 resource tree, hold lifecycle, offer overlay, or integration invariant, and
 at this pin there is no tree — `estimated_startable_jobs` arrives as a scalar
@@ -324,9 +325,9 @@ composition fixtures must be built through the same seams rather than by constru
 |---|---|---|
 | EXISTS | 0 | — |
 | PARTIAL | 11 | 2, 6, 9, 11–13, 17, 19, 25, 26, 29 |
-| MISSING | 27 | 1, 3–5, 7, 8, 10, 14–16, 18, 20–24, 27, 28, 30–38 |
+| MISSING | 28 | 1, 3–5, 7, 8, 10, 14–16, 18, 20–24, 27, 28, 30–39 |
 
-0 + 11 + 27 = 38. **Not one of the thirty-eight failure classes is fully falsified at master today.** Class 17 is the
+0 + 11 + 28 = 39. **Not one of the thirty-nine failure classes is fully falsified at master today.** Class 17 is the
 closest, and it covers one of its two named pressures.
 
 Two structural observations for the reviewer:
@@ -334,14 +335,14 @@ Two structural observations for the reviewer:
 1. **The PARTIALs cluster on policy and identity, the MISSINGs cluster on resource algebra.** Master defends the
    *gates* (autonomy flags, realm digests, base-URL shape, tier promotion) comparatively well and defends the
    *tree* not at all — which is precisely R35 §21's finding restated as test coverage.
-2. **Eighteen of the MISSING classes cannot be written before the contract is frozen.** Classes 1, 3, 4, 5, 14 and
+2. **Nineteen of the MISSING classes cannot be written before the contract is frozen.** Classes 1, 3, 4, 5, 14 and
    20 attack operators that do not exist; classes 6, 8 and 18 attack a claim-hold receipt that does not exist;
-   classes 7 and 15 attack generation-axis/freshness splits that do not exist; classes 22, 33–37 and 38 attack
+   classes 7 and 15 attack generation-axis/freshness splits that do not exist; classes 22, 33–37, 38 and 39 attack
    composition/policy objects that do not exist. Writing them against today's scalar
    `estimated_startable_jobs` would produce tests that pass vacuously — the worst possible outcome, because a
    green acceptance suite would then certify a fabric that still cannot express the resource graph.
 
-The reviewable question this matrix puts to Sol is therefore narrow: **is the 38-class suite — R35's twenty-class
+The reviewable question this matrix puts to Sol is therefore narrow: **is the 39-class suite — R35's twenty-class
 minimum plus the review-required additions — the right acceptance gate for step A's contract, and is this the
 right allocation of each class to an owner?** It is not a request to write the tests now.
 
@@ -525,3 +526,23 @@ right allocation of each class to an owner?** It is not a request to write the t
   `estimated_startable_jobs` path has no child-level reason to carry. Bounded by
   `rg -n "ALL_OF|EvalResult|KNOWN_ZERO|INELIGIBLE|admissible" control_plane ops config tests` — no hit
   outside this proposal's own text.
+
+### Class 39 — a preference receipt naming an unresolvable producer is INADMISSIBLE
+- **Proposed test**: `test_preference_receipt_naming_an_unresolvable_producer_is_inadmissible`
+- **Owner**: #657's tie/abstention preference seam consuming the exact, content-addressed Capacity SOURCE
+  artifact (contract §11.1); CF2-I as the downstream consumer.
+- **Fixture**: one candidate set, two runs, same seam head. **Run 1 (live producer)**: the preference receipt
+  names the Capacity SOURCE artifact by exact content address and that address resolves at the seam's own head.
+  Assert the receipt is admissible and that the emitted chain is exactly `Model Router lawful tier → concrete
+  C1 Worker candidates → Capacity evidence → #657 tie/abstention seam → CF2-I → C2 atomic worker+resource
+  commitment`, with no other participant. **Run 2 (dead producer)**: the identical receipt names a producer that
+  does not resolve at that head. Assert `INADMISSIBLE` with a reason naming the unresolved producer, assert C1
+  abstains (`TIE_ABSTAINED`), and assert **no placement is emitted at all**. **Mutants to kill**: one that
+  downgrades the dead producer to `STALE` and proceeds on last-good evidence; one that falls back to a locally
+  computed ranking when the producer is missing — the second selector, and the reason this class exists; and
+  one that resolves the producer through a mutable ref (branch name or tag) instead of the exact content
+  address, so a later push silently changes what the receipt meant.
+- **Status at master**: **MISSING**. #657 is OPEN and BUILT_NOT_PROVEN at `bc89980c`, CF2-I is UNBUILT, and
+  §8.3's canonical C2 primitive is not chosen — three of the chain's six links do not exist, so this class
+  cannot be written before step A is frozen. Bounded by
+  `rg -n "preference_receipt|selection_input_digest|source_ref|TIE_ABSTAINED" control_plane ops config tests`.
