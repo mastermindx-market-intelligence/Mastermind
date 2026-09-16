@@ -5,7 +5,9 @@ import asyncio
 import importlib
 import io
 import json
+import math
 import os
+import re
 import subprocess
 import tokenize
 from pathlib import Path
@@ -99,9 +101,9 @@ def _added_line_numbers(path: Path, base: str) -> set[int]:
 def _identity_guard_source_path(path: str) -> bool:
     """Keep the identity guard on source/config, not narrative proof records.
 
-    Documentation is not Python source. Only the established non-runtime
-    research/evidence JSON subtree is exempted as data. Executable code under
-    either directory and every other configuration path remain guarded.
+    Markdown prose is not Python source. Evidence JSON is routed through the
+    structural identity check below, never exempted from identity checking.
+    Executable code and all other configuration retain the generic token guard.
     """
     parts = Path(path).parts
     if not parts or Path(path).is_absolute() or ".." in parts:
@@ -111,6 +113,81 @@ def _identity_guard_source_path(path: str) -> bool:
     if parts[:2] == ("research", "evidence") and Path(path).suffix == ".json":
         return False
     return True
+
+
+def _identity_guard_evidence_json_path(path: str) -> bool:
+    parts = Path(path).parts
+    return (not Path(path).is_absolute() and ".." not in parts
+            and parts[:2] == ("research", "evidence") and Path(path).suffix == ".json")
+
+
+def _scan_evidence_identity_literals(document: str) -> list[str]:
+    """Check identity-bearing JSON values without treating all metrics as UIDs.
+
+    This is a bounded literal guard, not whole-program dataflow analysis. Runtime
+    admission remains authoritative. Malformed/duplicate-key evidence fails closed.
+    """
+    assert len(document.encode("utf-8")) <= 1024 * 1024, "evidence JSON exceeds limit"
+
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate JSON member")
+            result[key] = value
+        return result
+
+    def reject_constant(_value):
+        raise ValueError("non-finite JSON value")
+
+    try:
+        value = json.loads(document, object_pairs_hook=unique_object,
+                           parse_constant=reject_constant)
+    except (ValueError, RecursionError) as exc:
+        raise AssertionError("evidence JSON is not an unambiguous document") from exc
+    assert isinstance(value, dict), "evidence JSON must be an object record"
+    identity_words = {"uid", "uids", "gid", "gids", "euid", "egid", "suid", "sgid",
+                      "peer", "peers", "account", "accounts", "principal", "principals",
+                      "user", "users", "group", "groups", "identity", "identities",
+                      "owner", "owners"}
+    flagged = []
+    pending = [(value, False, 0)]
+    visited = 0
+    while pending:
+        item, identity, depth = pending.pop()
+        visited += 1
+        assert depth <= 32 and visited <= 10000, "evidence JSON structure exceeds limit"
+        if isinstance(item, float):
+            assert math.isfinite(item), "evidence JSON contains a non-finite number"
+        if isinstance(item, dict):
+            for key, child in item.items():
+                words = set(re.split(r"[^a-z0-9]+", re.sub(
+                    r"(?<=[a-z0-9])(?=[A-Z])", "_", key).lower()))
+                child_identity = identity or bool(words & identity_words)
+                pending.append((child, child_identity, depth + 1))
+                if identity:
+                    pending.append((key, True, depth + 1))
+        elif isinstance(item, list):
+            pending.extend((child, identity, depth + 1) for child in item)
+        elif identity and not isinstance(item, bool) and item is not None:
+            if isinstance(item, str) and item.startswith("_mastermind_"):
+                flagged.append(item)
+                continue
+            try:
+                if isinstance(item, str):
+                    try:
+                        number = int(item.strip(), 0)
+                    except ValueError:
+                        number = int(item.strip(), 10)
+                elif isinstance(item, (int, float)) and int(item) == item:
+                    number = int(item)
+                else:
+                    continue
+            except (ValueError, OverflowError):
+                continue
+            if 400 <= number <= 999:
+                flagged.append(str(item))
+    return flagged
 
 
 def _scan_added_identity_literals(added_lines: str) -> list[str]:
@@ -459,12 +536,21 @@ def test_d8_template_topology_and_protected_defaults():
         check=True, capture_output=True, text=True,
     ).stdout.strip()
     changed = subprocess.run(
-        ["git", "diff", "--name-only", "-z", base, "HEAD", "--", ":!tests/"],
+        ["git", "diff", "--diff-filter=ACMRT", "--name-only", "-z", base, "HEAD", "--", ":!tests/"],
         cwd=ROOT, check=True, capture_output=True, text=True,
     ).stdout
     additions_by_path: dict[str, str] = {}
     for path in changed.split("\0"):
-        if not path or not _identity_guard_source_path(path):
+        if not path:
+            continue
+        if _identity_guard_evidence_json_path(path):
+            document = subprocess.run(
+                ["git", "show", f"HEAD:{path}"], cwd=ROOT,
+                check=True, capture_output=True, text=True,
+            ).stdout
+            assert _scan_evidence_identity_literals(document) == [], path
+            continue
+        if not _identity_guard_source_path(path):
             continue
         diff = subprocess.run(
             ["git", "diff", "--unified=0", base, "HEAD", "--", path], cwd=ROOT,
@@ -555,3 +641,81 @@ def test_d8_real_git_diff_distinguishes_evidence_from_identity_changes(
             test_d8_template_topology_and_protected_defaults()
     else:
         test_d8_template_topology_and_protected_defaults()
+
+
+def _run_d8_evidence_and_loader_fixture(tmp_path, monkeypatch, payload):
+    """Exercise the real guard on committed JSON plus a real source consumer."""
+    root = tmp_path / "repo"
+    root.mkdir()
+    template = root / "control.json.template"
+    template.write_bytes(TEMPLATE.read_bytes())
+    def git(*args):
+        return subprocess.run(
+            ["git", "-c", "user.name=IdentityGuardFixture",
+             "-c", "user.email=fixture@example.invalid", *args],
+            cwd=root, check=True, capture_output=True, text=True,
+        )
+    git("init", "-q")
+    git("add", "--", "control.json.template")
+    git("commit", "-q", "-m", "fixture baseline")
+    git("update-ref", "refs/remotes/origin/master", "HEAD")
+    evidence = root / "research/evidence/identity.json"
+    evidence.parent.mkdir(parents=True)
+    evidence.write_text(payload, encoding="utf-8")
+    source = root / "control_plane/load_identity.py"
+    source.parent.mkdir()
+    source.write_text("import json\nfrom pathlib import Path\nCONFIG = json.loads(Path('research/evidence/identity.json').read_text())\n")
+    git("add", "--", str(evidence.relative_to(root)), str(source.relative_to(root)))
+    git("commit", "-q", "-m", "fixture candidate")
+    monkeypatch.setitem(globals(), "ROOT", root)
+    monkeypatch.setitem(globals(), "TEMPLATE", template)
+    test_d8_template_topology_and_protected_defaults()
+
+
+@pytest.mark.parametrize("payload", [
+    '{"peer_uid":459}',
+    '{"nested":{"allowed_peer_uids":[450,459]}}',
+    '{"worker_gid":"0x1cb"}',
+    '{"account":{"id":"459"}}',
+    '{"principal":{"name":"_mastermind_shadow"}}',
+    '{"allowedPeerUIDs":[459]}',
+    '{"peer_uid":459,"peer_uid":null}',
+    '{"peer_uid":459} trailing text',
+])
+def test_d8_evidence_json_cannot_supply_runtime_identity(tmp_path, monkeypatch, payload):
+    with pytest.raises(AssertionError):
+        _run_d8_evidence_and_loader_fixture(tmp_path, monkeypatch, payload)
+
+
+def test_d8_benign_evidence_metrics_remain_accepted_with_a_consumer(tmp_path, monkeypatch):
+    _run_d8_evidence_and_loader_fixture(
+        tmp_path, monkeypatch,
+        '{"http_status":401,"char_count":936,"bytes":777,"sha256":"' + "a" * 64 + '"}',
+    )
+
+
+@pytest.mark.parametrize("document", [
+    "459", "[459]", '"_mastermind_shadow"',
+    '{"char_count":1e10000}',
+])
+def test_d8_evidence_requires_finite_object_records(document):
+    with pytest.raises(AssertionError):
+        _scan_evidence_identity_literals(document)
+
+
+@pytest.mark.parametrize("document", [
+    '{"peer_uid":true,"account":null}',
+    '{"http_status":401,"char_count":936,"byte_count":777,"hash":"459"}',
+    '{"measurements":[{"status":401},{"bytes":936}],"note":"HTTP 401"}',
+])
+def test_d8_evidence_non_identity_metrics_are_not_uid_literals(document):
+    assert _scan_evidence_identity_literals(document) == []
+
+
+@pytest.mark.parametrize("document", [
+    '{"peer_uid":"0459"}', '{"peer_uid":459.0}',
+    '{"groups":{"459":"service"}}', '{"worker-user":"_mastermind_shadow"}',
+    '{"accountId":459}', '{"effective_uid":501}',
+])
+def test_d8_evidence_authority_key_and_value_encodings_are_checked(document):
+    assert _scan_evidence_identity_literals(document)
