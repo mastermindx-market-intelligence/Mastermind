@@ -10,6 +10,7 @@ import os
 import re
 import subprocess
 import tokenize
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -170,20 +171,30 @@ def _scan_evidence_identity_literals(document: str) -> list[str]:
         elif isinstance(item, list):
             pending.extend((child, identity, depth + 1) for child in item)
         elif identity and not isinstance(item, bool) and item is not None:
-            if isinstance(item, str) and item.startswith("_mastermind_"):
-                flagged.append(item)
-                continue
+            if isinstance(item, str):
+                item = item.strip()
+                assert len(item) <= 256, "evidence identity string exceeds limit"
+                if item.startswith("_mastermind_"):
+                    flagged.append(item)
+                    continue
             try:
                 if isinstance(item, str):
                     try:
-                        number = int(item.strip(), 0)
+                        number = int(item, 0)
                     except ValueError:
-                        number = int(item.strip(), 10)
+                        # Decimal construction is exact; do not pass through float
+                        # or apply context rounding. Bound before integer expansion.
+                        decimal_value = Decimal(item)
+                        if (not decimal_value.is_finite()
+                                or not 400 <= decimal_value <= 999
+                                or decimal_value != decimal_value.to_integral_value()):
+                            continue
+                        number = int(decimal_value)
                 elif isinstance(item, (int, float)) and int(item) == item:
                     number = int(item)
                 else:
                     continue
-            except (ValueError, OverflowError):
+            except (ValueError, OverflowError, InvalidOperation):
                 continue
             if 400 <= number <= 999:
                 flagged.append(str(item))
@@ -719,3 +730,46 @@ def test_d8_evidence_non_identity_metrics_are_not_uid_literals(document):
 ])
 def test_d8_evidence_authority_key_and_value_encodings_are_checked(document):
     assert _scan_evidence_identity_literals(document)
+
+
+@pytest.mark.parametrize("payload", [
+    '{"peer_uid":"4.59e2"}',
+    '{"peer_uid":"0459.0"}',
+    '{"user":" _mastermind_shadow"}',
+])
+def test_d8_normalized_identity_loader_is_rejected(tmp_path, monkeypatch, payload):
+    with pytest.raises(AssertionError):
+        _run_d8_evidence_and_loader_fixture(tmp_path, monkeypatch, payload)
+
+
+@pytest.mark.parametrize("encoded", [
+    "4.59e2", "0459.0", " +4.5900E+2 ", "45900e-2", "0x1cb", "0459",
+    "4e2", "9.99e2", "４５９.０", "\t_mastermind_shadow\n",
+])
+def test_d8_normalized_identity_literals_are_detected(encoded):
+    assert _scan_evidence_identity_literals(json.dumps({"peer_uid": encoded}))
+
+
+@pytest.mark.parametrize("encoded", [
+    "399.0", "1000.0", "459.1", "459.0000000000000000000000000001",
+    "1e999999", "1e-999999", "NaN", "sNaN", "Infinity", "a_service_label",
+])
+def test_d8_exact_numeric_normalization_preserves_nonidentity_values(encoded):
+    assert _scan_evidence_identity_literals(json.dumps({"peer_uid": encoded})) == []
+
+
+def test_d8_identity_normalization_is_bounded_before_integer_conversion():
+    with pytest.raises(AssertionError, match="identity string"):
+        _scan_evidence_identity_literals(json.dumps({"peer_uid": "9" * 257}))
+    assert _scan_evidence_identity_literals(json.dumps({"hash": "9" * 257})) == []
+
+
+def test_d8_decimal_context_cannot_round_fraction_into_an_identity():
+    from decimal import Inexact, ROUND_UP, localcontext
+    with localcontext() as context:
+        context.prec = 2
+        context.rounding = ROUND_UP
+        context.traps[Inexact] = True
+        assert _scan_evidence_identity_literals('{"peer_uid":"4.59e2"}')
+        assert _scan_evidence_identity_literals(
+            '{"peer_uid":"459.0000000000000000000000000001"}') == []
