@@ -149,6 +149,24 @@ def test_consultation_rejects_unknown_privileged_or_secret_shapes(
     assert field
 
 
+@pytest.mark.parametrize(
+    "schema",
+    [
+        "mastermind.agent_dialogue_consultation.v99",
+        "",
+        None,
+        1,
+        ["mastermind.agent_dialogue_consultation.v1"],
+    ],
+    ids=["unreserved", "empty", "none", "int", "list"],
+)
+def test_validate_consultation_refuses_unreserved_or_non_string_schema(schema) -> None:
+    with pytest.raises(DialogueContractError) as exc_info:
+        validate_consultation(raw_consultation(schema=schema))
+
+    assert exc_info.value.code == "MESSAGE_INVALID"
+
+
 def test_consultation_enforces_purpose_and_frozen_budget_bounds() -> None:
     answer = {"text": "The closed field list and refusal list.", "evidence_refs": []}
     correction = raw_consultation(
