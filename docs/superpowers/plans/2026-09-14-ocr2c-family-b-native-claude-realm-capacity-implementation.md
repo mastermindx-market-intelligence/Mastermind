@@ -93,7 +93,7 @@ CREATE config/provider_native_capabilities.v1.json
 schema = mastermind.provider_native_capability_registry/v1
 ```
 
-Closed row:
+Closed current row:
 
 ```text
 capacity_capability_id
@@ -102,8 +102,10 @@ provider = claude
 billing_mode = subscription
 credential_kind = attached_login
 execution_surface = native_cli
-registration_state = registered
+registration_state = registered | revoked
 ```
+
+Exactly one current row exists per `capacity_capability_id`. `revoked` is the deterministic current-state tombstone; removal is not revocation. The implementation compares the candidate registry with the immediately preceding accepted Provider Control release and refuses generation reuse, decrement, rollback, resurrection or reversion. Re-enrollment after `revoked(g)` requires `registered(g2)` with `g2 > g`.
 
 Typed export:
 
@@ -129,11 +131,13 @@ RED-first tests:
 
 - closed schema/refusal of extras;
 - duplicate/non-opaque/ordinal-like ids refuse under frozen policy;
-- generation >= 1 and explicit correction law;
+- owner-issued generation >= 1 and comparison with the immediately preceding accepted release;
+- `registered(g) -> revoked(g)` and `revoked(g) -> registered(g2)` only when `g2 > g`;
+- removal, generation reuse/decrement, rollback, resurrection and source reversion refuse;
 - secret/PII/path-shaped contamination refuses;
 - deterministic receipt/source digest;
 - V1 capacity projection remains byte/semantic identical with registry present;
-- caller cannot mint/override id/generation.
+- caller cannot mint/override id/generation/state.
 
 Production proof ceiling: `BUILT_NOT_PROVEN / PROVIDER_CAPABILITY_REGISTRY_PROVEN / NO PROVIDER EFFECT`.
 
@@ -163,7 +167,7 @@ host_ref
 os_principal_ref
 config_custody_ref
 enrollment_state
-capacity_identity_receipt_digest
+registration_receipt_digest
 source_receipt_digest
 receipt_id
 receipt_digest
@@ -175,6 +179,7 @@ Rules:
 - raw config path never enters public receipt;
 - `config_custody_ref` is not provider identity or auth-isolation proof;
 - Provider Control supplies id/generation; caller cannot choose them;
+- `registration_receipt_digest` is the exact current B1 export digest; alternate names and mismatched documents refuse;
 - V1 provider-realm receipts remain valid for their current consumers.
 
 Tests must reject stale capability generation, stale realm generation, wrong host/principal/custody, swapped B-host receipt, forged Provider-Control registration digest and V1/V2 confusion.

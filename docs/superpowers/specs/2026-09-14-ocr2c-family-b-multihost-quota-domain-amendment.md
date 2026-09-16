@@ -87,11 +87,13 @@ host_ref
 os_principal_ref
 config_custody_ref
 enrollment_state = enrolled | unenrolled
-capacity_identity_receipt_digest
+registration_receipt_digest
 source_receipt_digest
 receipt_id
 receipt_digest
 ```
+
+`registration_receipt_digest` is the canonical B1 registration digest. The withdrawn `capacity_identity_receipt_digest` name has no alias or mapping and must be rejected.
 
 Macro Provider Control supplies `capacity_capability_id + capability_generation`. The existing provider-realm owner supplies/seals `realm_generation + host/principal/config custody`. Neither side mints a competing account identity.
 

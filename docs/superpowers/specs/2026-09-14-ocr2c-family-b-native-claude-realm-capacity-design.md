@@ -98,8 +98,10 @@ provider = claude
 billing_mode = subscription
 credential_kind = attached_login
 execution_surface = native_cli
-registration_state = registered
+registration_state = registered | revoked
 ```
+
+Exactly one current row exists per capability identity. `revoked` is the source-owned tombstone for the current generation; removal, reuse, rollback and resurrection refuse against the immediately preceding accepted Provider Control release. Re-enrollment requires a strictly newer owner-issued generation.
 
 `capacity_capability_id` is opaque, non-ordinal and non-PII. It must not encode account email/id/org, host, Worker, config path, token/secret, Keychain label, app clone or `claude_code_oauth_N`.
 
@@ -139,11 +141,13 @@ host_ref
 os_principal_ref
 config_custody_ref
 enrollment_state = enrolled | unenrolled
-capacity_identity_receipt_digest
+registration_receipt_digest
 source_receipt_digest
 receipt_id
 receipt_digest
 ```
+
+`registration_receipt_digest` is the canonical B1 registration digest. The withdrawn `capacity_identity_receipt_digest` name has no alias or mapping and must be rejected.
 
 Provider Control supplies the provider-domain coordinate. Mastermind seals the host realm and custody. Neither side mints a second account identity.
 
