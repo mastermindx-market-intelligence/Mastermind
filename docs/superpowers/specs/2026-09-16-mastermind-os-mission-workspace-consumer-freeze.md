@@ -1,294 +1,441 @@
 ---
-schema: mastermind.mission_workspace_consumer_freeze.v1
+schema: mastermind.mission_workspace_consumer_freeze.v2
 operation_key: mastermind-os-mission-workspace-freeze-20260916-claude-001
 workstream: WS:CHAIRMAN-CONTROL-ROOM
 parent_operation: mastermind-os-rollout-contract-20260916-sol-001
 parent_carrier: Mastermind#702
-source_pin: bf843961cd6bbd3e5c4cbd68df43bbba2d05b98f
+carrier: Mastermind#704
+repairs_review: 5228415542
+inspected_commit: bf843961c0e1b5bd45fa481f0138c71f2a87d4e2
+current_protected_commit: e8803ba3d3ee928d150d7dcac1a1e2bad2dc0d48
+installed_generation: UNKNOWN
 capability_state: SPEC_ONLY
 production_effect: NONE
 architecture_family: CONSUMER_CONTRACT_FREEZE
 disposition: DRAFT / HOLD-FOR-SOL / NOT_IMPLEMENTED
+slice: R2A (bounded local mission tree) — NOT full R2
 ---
 
-# Mission workspace — consumer contract freeze (R2 first vertical)
+# Mission workspace — consumer contract freeze (R2A first sub-slice)
 
-**Date:** 2026-09-16
-**Parent:** Mastermind #702 `[OS][DRAFT][HOLD-FOR-SOL] Integrated rollout contract and
-offline mission-workspace reference` (candidate `091592da`, six additive paths).
-**What this record adds to #702:** #702 §7 fixes *which questions* to close at each
+**Date:** 2026-09-16 · **v2, repaired** against exact-head review
+[5228415542](https://github.com/mastermindx-market-intelligence/Mastermind/pull/704#pullrequestreview-5228415542)
+(REQUEST_CHANGES at `8b94141106200f0c48b6d033cca19a8007ef0031`).
+**Parent:** Mastermind #702 (candidate `091592da`, six additive paths).
+
+**What this record adds to #702.** #702 §7 fixes *which questions* to close at each
 existing owner and §15 names the next boundary as "obtain the incumbent producer
 owner's exact mission-observation and authorized visible-content/history contract."
-This record answers that: the producer contracts were recovered from source, every
-field of the proposed workspace is classified against them, and the consumer contract
-is frozen so one engineering worker can implement R2 without inventing a schema.
+This record answers that: producer contracts recovered from source, every proposed
+field classified against them, and a consumer contract frozen so one engineering
+worker can implement a bounded first sub-slice without inventing a schema.
 
-**What this record is not.** It creates no runtime, no route, no reducer, no store,
-no lifecycle, no Job, no grant, no installation. It edits no existing producer. It
-does not merge, reopen, retarget or take over #702, #523, #595, #600, #653, #677,
-#684, #688, AD-RET2, CCTX-1, PF1 or DF1, and it does not modify Macro #7120/#7181.
-Every line below is a reading of protected source at the pin, not an installed fact.
+**What this record is not.** It creates no runtime, route, reducer, store, lifecycle,
+Job, grant or installation. It edits no producer. It does not merge, reopen, retarget
+or take over #702, #523, #595, #600, #653, #677, #684, #688, #697, H3e, AD-RET2,
+CCTX-1, PF1 or DF1, and does not modify Macro #7120/#7181. It claims no source-writer
+release, worker, provider, credential, install or production acceptance.
 
 ---
 
-## 0. The correction this freeze had to make first
+## 0. Source reconciliation — three generations, kept apart
+
+v1 of this record named a source pin that **does not exist**. `bf843961cd6bbd3e5c…`
+returns 404; it was a fabricated 40-character expansion of the short SHA `bf843961`.
+That is corrected here, and the correction is recorded rather than quietly rewritten,
+because the whole document claims to be a reading of protected source.
+
+| Generation | Value | Meaning |
+|---|---|---|
+| **Inspected commit** | `bf843961c0e1b5bd45fa481f0138c71f2a87d4e2` | the commit this checkout was at when every citation below was read |
+| **Current protected** | `e8803ba3d3ee928d150d7dcac1a1e2bad2dc0d48` | protected `master` at repair time; the inspected commit is a verified ancestor |
+| **Installed generation** | `UNKNOWN` | no installed-host evidence is held by this record. Source protection is not installation. |
+
+Every cited module was compared blob-for-blob across those two commits. **All nine are
+byte-identical**, so every line reference in this record is valid at current protected
+head. The only files that moved between them are `consultation_runtime.py`,
+`remote_codex_operator_adapter.py` and two of their tests — none cited here.
+
+| Module | blob (identical at both commits) |
+|---|---|
+| `control_plane/fabric_job_view.py` | `c69e44785e28ee191639b7af05d0fe5e22fbf24d` |
+| `control_plane/chairman_control_room.py` | `cbe93fb6c3aa…` |
+| `control_plane/autonomy_control_room_projection.py` | `1e716364cc75…` |
+| `control_plane/visible_turn_projection.py` | `77a23ad9eeb5…` |
+| `control_plane/executive_worker_broker.py` | `ce691178cabf…` |
+| `control_plane/chairman_control_room_remote.py` | `dfd6b9a72f6c…` |
+| `control_plane/executive_steward.py` | `90ecd34cdd79…` |
+| `scripts/chairman_control_room.py` | `9260d006c2bf…` |
+| `app/static/chairman_control/control_room.js` | `c95f9befdc4c…` |
+| DF1 plan (open Draft #523) | commit `3c0a933b`, not merged |
+| #702 candidate | commit `091592da`, not merged |
+
+The review's own receipts — module blob `c69e44785e28…` and source projection blob
+`77a23ad9…` — equal the values above, so the two readings corroborate independently.
+
+---
+
+## 1. The correction the first pass had to make
 
 #702's reference workspace (`research/mastermind_os/reference_workspace.html`) has
 **no mission data model**. Its two embedded collections are `sources[]` (seven
-architecture/evidence links: `{id,title,owner,status,detail,ref,date,url}`) and
-`nodeData[]` (six design-relationship nodes: `{id,kind,title,owner,needs,source}`).
-Its workspace view renders prose timeline rows, a disabled **Send instruction**
-button and the literal string `Conversation is not connected`.
+architecture/evidence links) and `nodeData[]` (six design-relationship nodes). Its
+workspace view renders prose timeline rows, a disabled **Send instruction** button and
+the literal string `Conversation is not connected`.
 
-That is honest, and it is also why the reference cannot be "wired up": there is no
-field set to bind. The vertical therefore has to be specified from the producer side,
-which is what §2–§4 do. The reference remains useful as interaction/copy evidence for
-the empty, missing-source, effect-unknown and corrected states.
+That is honest, and it is why the reference cannot simply be "wired up": there is no
+field set to bind. The vertical therefore had to be specified from the producer side.
+The reference remains useful as interaction and copy evidence for empty, missing-source,
+effect-unknown and corrected states.
 
 ---
 
-## 1. Entity binding — what a Program and a mission actually are
+## 2. Entity binding — what a Program and a mission actually are
 
-No new identity is minted. The two nouns bind to existing canonical identities:
+No new identity is minted.
 
 | Product noun | Canonical identity | Owner | Producer key |
 |---|---|---|---|
 | **Program** | a workstream ref `WS:<KEY>` | Macro Agent OS (`agentos/workstreams/WS-<KEY>.md`) | `work[].work_ref` in `mastermind.chairman_control_room.v1`; `responsibility_ref` in `mastermind.autonomy_control_room.v1` |
 | **mission** | an Executive Runtime **root** — a `Job` whose `root_job_id == job_id` | Executive OS (`control_plane/executive_runtime.py`) | `root_job_id`; rendered by `mastermind.fabric_job_view.v1` |
-| **principal** | the responsibility's accountable seat + its current runtime evidence | Agent OS (seat) + Executive OS/RuntimeBinding (runtime) | `accountable_seat`, `current_worker`, `current_sol_target` on the autonomy card |
+| **principal** | the responsibility's accountable seat + its current runtime evidence | Agent OS (seat) + Executive OS / RuntimeBinding (runtime) | `accountable_seat`, `current_worker`, `current_sol_target` |
 | **child** | a non-root `Job` under that root, with `orchestration_role` | Executive OS | `children[]` in `mastermind.fabric_job_view.v1` |
 
-**The join key is the pair, always.** `control_plane/autonomy_control_room_projection.py`
-Law 1 already fixes it: rows match a card on `responsibility_ref` **AND** `root_job_id`
-together — "never title, provider label, newest timestamp, or recency"
-(`autonomy_control_room_projection.py:2404`). The mission workspace inherits that key
-verbatim. A Program with no resolved root is a Program the workspace can open and a
-mission it cannot: see `runtime_root_state` in §4.
+**The join key is the pair, always.** `autonomy_control_room_projection.py:2404` already
+fixes it: rows match a card on `responsibility_ref` **AND** `root_job_id` together —
+"never title, provider label, newest timestamp, or recency". This consumer inherits that
+verbatim. Two individually valid identifiers are not a join and are not a permission:
+the pair must be shown to exist, and the named Job must actually be a root
+(`root_job_id == job_id`), before anything is rendered.
 
-`orchestration_role` is a closed set enforced by a SQLite trigger:
-`plan | work | review | repair | aggregation`
-(`control_plane/executive_runtime.py:2062`; same set as `ROLES`,
-`control_plane/executive_orchestration_result.py:25`). The workspace never invents a
-sixth role and never renames these.
+`orchestration_role` is a closed set enforced by a SQLite trigger —
+`plan | work | review | repair | aggregation` (`executive_runtime.py:2062`; same set as
+`ROLES`, `executive_orchestration_result.py:25`). No sixth role, no renaming.
 
 ---
 
-## 2. Current source/producer map
-
-Each row is the producer that already owns the question, read at the pin. "Reachable"
-answers the only question an implementer cares about: can a web consumer obtain this
-today, and through what.
+## 3. Current source/producer map
 
 | # | Question | Canonical producer | Document / callable | Reachable by a browser today? |
 |---|---|---|---|---|
-| 1 | mission identity and hierarchy | Executive OS | `control_plane/fabric_job_view.py` → `mastermind.fabric_job_view.v1`; `read_fabric_view()`, `list_roots()`, `compose_fabric_view()` (pure) | **No.** Library + `scripts/fabric_job_view.py` CLI only. No HTTP route exists. |
-| 2 | principal identity + current state | Agent OS (seat) + Executive Steward/RuntimeBinding | `mastermind.autonomy_control_room.v1` card fields `accountable_seat`, `current_worker`, `current_sol_target`, `runtime_root_state`, `root_job_candidates`, `root_job_ambiguous` | **Partly.** Present in the local `/api/state` document; **stripped** from remote X1 (§7). |
-| 3 | child identity + current state | Executive OS | `children[]` job cards (`JOB_CARD_KEYS`, `fabric_job_view.py:127`) | **No** (same as row 1). Also see gap **G1**: job cards carry no worker identity. |
-| 4 | assignment / pickup / START / return / CONTINUE / STOP | `project_dispatch_consumption` | `mastermind.autonomy_dispatch_consumption.v1`, 13-token `DISPATCH_STATES` (`autonomy_control_room_projection.py:2415`) | **Partly** — attached to `autonomy` in the local document. Gap **G2**: 2 of 13 tokens have no producer. |
-| 5 | visible message/content history | OHF worker broker + `VisibleTurnProjection` | `ohf-observe-turn` on the broker socket; `control_plane/visible_turn_projection.py` | **No**, and only ever for a *live* turn. Gap **G3** — the central finding, §3.5. |
-| 6 | permitted outputs / artifacts | Executive OS | `result{state,summary,artifacts,errors,next_actions}` on each job card (`fabric_job_view.py:518`) | **No** (row 1). Available in the document once row 1 is reachable. |
-| 7 | review disposition | Executive OS | `review{required,reviews_job_id,verdict}`; verdict ∈ `approve \| reject \| NOT_YET` (`fabric_job_view.py:473`) | **No** (row 1). |
-| 8 | result / parent consumption | W3C canonical terminal/Wake read | `CanonicalTerminalWakeRead` (`control_plane/executive_dialogue_observation.py:381`), consumed by `_classify_dispatch_row` | **Partly** — surfaces as `dispatch_state` + the `w3c` sub-object on the dispatch card. |
-| 9 | capability / proof state | `fabric_job_view` capability + `armed` bits | `capability{state,installed,version,detail}`, states `PROVEN\|PARTIAL\|UNSUPPORTED\|NOT_INSTALLED`; `armed` = the five arm bits + `source` | **No** (row 1). |
-| 10 | correction / retraction | Steward issue codes + `missingness[]` facts + `disagreements[]` | `MISSINGNESS_CLASSES` (`fabric_job_view.py:166`); `_AMBIGUOUS_ISSUE_FIELD`, `_RECONCILIATION_REQUIRED` | Partly, per row. |
-| 11 | unavailable / null / unknown | same as row 10 + DF1 source/coverage vocabulary | `MISSING_PRODUCER \| NULL_BY_DESIGN \| EXCLUDED \| OMITTED \| DEGRADED`; DF1 `CURRENT\|PARTIAL\|HISTORICAL\|UNAVAILABLE\|CONFLICT\|NOT_PROJECTED\|NOT_APPLICABLE` | Frozen vocabulary, no gap. |
-| 12 | ordering and pagination | Executive OS (jobs); `VisibleTurnProjection` (items) | jobs: deterministic `_job_sort_key`, bounded by `UNJOINED_JOB_ID_LIMIT`/`LIST_ROOTS_LIMIT` = 50. items: `publication_sequence` cursor + `RESYNC_REQUIRED` | jobs yes; items behind G3. |
-| 13 | retention / revocation | `VisibleTurnProjection` (content); surface bindings (navigation) | `MAX_RETAINED_TURNS = 4`, `MAX_VIEWERS = 2`, in-memory; grants are "projection-scoped reader handles… not user or authentication tokens" (`visible_turn_projection.py:11`) | behind G3. |
-| 14 | source provenance | CCR `sources{}` + Steward `SourceRef` + DF1 evidence-ref contract | `{owner,ref,field,source_revision,source_time,observed_at,freshness_state}`, nine closed owners (DF1 spec §11) | Yes — frozen vocabulary. |
-| 15 | auth / grant boundaries | CCR local server; X1 remote; E1 Executive MCP | §7 below | Yes, and §7 is the load-bearing constraint on R2. |
+| 1 | mission identity and hierarchy | Executive OS | `fabric_job_view.py` → `mastermind.fabric_job_view.v1`; `read_fabric_view()`, `list_roots()`, pure `compose_fabric_view()` | **No.** Library + `scripts/fabric_job_view.py` CLI only. No HTTP route. |
+| 2 | principal identity + current state | Agent OS (seat) + Steward / RuntimeBinding | autonomy card `accountable_seat`, `current_worker`, `current_sol_target`, `runtime_root_state`, `root_job_candidates`, `root_job_ambiguous` | **Partly.** In the local `/api/state` document; **stripped** from remote X1 (§8). |
+| 3 | child identity + current state | Executive OS | `children[]` job cards (`JOB_CARD_KEYS`, `fabric_job_view.py:127`) | **No** (row 1). Gap **G1**: no worker identity on job cards. |
+| 4 | assignment / pickup / START / return / CONTINUE / STOP | `project_dispatch_consumption` | `mastermind.autonomy_dispatch_consumption.v1`, 13-token `DISPATCH_STATES` (`:2415`) | **Partly** — attached to `autonomy` locally. Gap **G2**: 2 of 13 tokens have no producer. |
+| 5 | visible message/content history | OHF worker broker + `VisibleTurnProjection` | `ohf-observe-turn`; `visible_turn_projection.py` | **No.** Live turn only, with a prospectively minted grant. Gap **G3**, §4.5. |
+| 6 | permitted outputs / artifacts | Executive OS | `result{state,summary,artifacts,errors,next_actions}` (`fabric_job_view.py:518`) | **No** (row 1). |
+| 7 | review disposition | Executive OS | `review{required,reviews_job_id,verdict}`; `approve \| reject \| NOT_YET` (`:473`) | **No** (row 1). |
+| 8 | transport / obligation consumption | W3C canonical terminal/Wake read | `CanonicalTerminalWakeRead` (`executive_dialogue_observation.py:381`) via `_classify_dispatch_row` | **Partly** — `dispatch_state` + the `w3c` sub-object. |
+| 9 | **product / artifact acceptance** | *no producer* | — | **No.** Gap **G7**, §5.3 — distinct from rows 7 and 8. |
+| 10 | capability / proof state | `fabric_job_view` | `capability{state,installed,version,detail}`; `armed` five bits + `source` | **No** (row 1). |
+| 11 | correction / retraction | Steward issue codes + `missingness[]` + `disagreements[]` | `MISSINGNESS_CLASSES` (`:166`); `_AMBIGUOUS_ISSUE_FIELD`; `_RECONCILIATION_REQUIRED` | Partly, per row. |
+| 12 | unavailable / null / unknown | same, plus DF1 vocabulary | `MISSING_PRODUCER \| NULL_BY_DESIGN \| EXCLUDED \| OMITTED \| DEGRADED`; DF1 `CURRENT\|PARTIAL\|HISTORICAL\|UNAVAILABLE\|CONFLICT\|NOT_PROJECTED\|NOT_APPLICABLE` | Frozen vocabulary. |
+| 13 | ordering and pagination | Executive OS (jobs); `VisibleTurnProjection` (items) | jobs: `_job_sort_key`, bounds 50. items: `publication_sequence` cursor + `RESYNC_REQUIRED` | jobs yes; items behind G3. |
+| 14 | retention / revocation | `VisibleTurnProjection`; surface bindings | `MAX_RETAINED_TURNS = 4`, `MAX_VIEWERS = 2`, in-memory; grants "are not user or authentication tokens" (`:11`) | behind G3. |
+| 15 | source provenance | CCR `sources{}` + Steward `SourceRef` + DF1 evidence-ref | `{owner,ref,field,source_revision,source_time,observed_at,freshness_state}` | Yes — frozen vocabulary. |
+| 16 | auth / grant boundaries | CCR local; X1 remote; E1 Executive MCP | §8 | Yes — and §8 bounds the slice. |
 
-### 2.1 The consumer side that already exists
+### 3.1 The consumer side that already exists
 
-- **`mastermind.chairman_control_room.v1`** (`control_plane/chairman_control_room.py:206`)
-  — closed `OUTPUT_KEYS` `{schema, generated_at, sources, degraded, attention, work,
+- **`mastermind.chairman_control_room.v1`** (`chairman_control_room.py:206`) — closed
+  `OUTPUT_KEYS` `{schema, generated_at, sources, degraded, attention, work,
   unjoined_open_prs, unbound_surfaces, binding_conflicts, placement_selection,
   autonomy}`. Composed once at startup, served from a process-memory cache with
   single-flight background refresh; `composed_at`, `refresh_in_flight` and
   `state_refresh_error` travel in the envelope.
-- **Local server routes** (`scripts/chairman_control_room.py:1103`, verified by
-  reading the dispatcher): `GET /`, `GET /static/control_room.{js,css}`,
-  `GET /favicon.ico`, `GET /api/state`†, `GET /api/discover`†, `POST /api/open`†,
-  `POST /api/bind`†, `POST /api/unbind`†, `POST /api/refresh-builds`†
-  († require `X-CCR-Token`). `/api/state` returns
+- **Local routes** (`scripts/chairman_control_room.py:1103`, read from the dispatcher):
+  `GET /`, `GET /static/control_room.{js,css}`, `GET /favicon.ico`, `GET /api/state`†,
+  `GET /api/discover`†, `POST /api/open`†, `POST /api/bind`†, `POST /api/unbind`†,
+  `POST /api/refresh-builds`† († require `X-CCR-Token`). `/api/state` returns
   `{control_room, capabilities, live_builds_active, composed_at, refresh_in_flight,
   state_refresh_error, source_validity}`. **There is no per-mission route.**
-- **A Program drilldown already ships, and R2 must not rebuild it.**
-  `app/static/chairman_control/control_room.js` is a single scrolling page with five
-  anchors (`#today #autonomy #work #surfaces #system`, `index.html:44`) plus a shared
-  detail drawer. `openDetail(card, opener)` (`:1196`) sets `STATE.selectedWork` and
-  `renderDetail(card)` (`:1084`) renders, keyed on `card.work_ref`, the recorded next
-  action and three evidence rails — Agent OS, Executive (`jobs[].job_id` + status,
-  `joined_by`) and GitHub PRs — plus attention, source drift and navigation surfaces.
-  A sibling drawer `openAutonomyDetail` (`:2206`) / `renderAutonomyDetail` (`:2057`)
+- **A Program drilldown already ships, and must not be rebuilt.** `control_room.js` is
+  a single scrolling page with five anchors plus a shared drawer. `openDetail`
+  (`:1196`) / `renderDetail` (`:1084`) render, keyed on `card.work_ref`, the recorded
+  next action and three evidence rails — Agent OS, Executive (`jobs[].job_id` + status,
+  `joined_by`), GitHub PRs — plus attention, source drift and navigation surfaces. A
+  sibling drawer `openAutonomyDetail` (`:2206`) / `renderAutonomyDetail` (`:2057`)
   renders the autonomy card with a **Dispatch proof** rail. `renderAutonomy` (`:2229`)
   renders `doc.autonomy`; `auDispatchChip` (`:1618`) renders `card.dispatch
-  .dispatch_state` through the closed label maps `AU_DISPATCH` / `AU_DISPATCH_VARIANT`
-  (`:1525`), and `AU_DISPATCH_UNSAFE` / `dispatchUnsafe` (`:1609`) already suppress
+  .dispatch_state` through closed label maps `AU_DISPATCH` / `AU_DISPATCH_VARIANT`
+  (`:1525`); `AU_DISPATCH_UNSAFE` / `dispatchUnsafe` (`:1609`) already suppress
   owed-action controls for stale, unacknowledged, watch-unproven,
   binding-reconciliation and effect-unknown states while keeping detail reachable.
-  **So the Program lens, the principal lens and the dispatch lens are already built.**
-  The one lens with no web consumer at all is the *mission tree* — see the next bullet.
+  **The Program lens, the principal lens and the dispatch lens are already built.**
 - **`mastermind.fabric_job_view.v1` has no web consumer.** `grep -rn fabric_job_view`
-  over the repo hits only its module, its CLI and its tests; zero `.js`/`.html`
-  references. `control_room.js:2154` renders the bare string `"root job " +
-  card.root_job_id` and `:2155` renders `root_job_ambiguous` with a candidate count —
-  a single id, with no navigation into the tree. That dangling id is the exact seam
-  R2 fills.
-- **DF1** is the accepted *shape* for adding a new read surface: a pure reducer plus
-  one token-gated JSON route plus local-only assets. Its design spec is merged
-  (PR #521, `185dc742`); its plan is **open Draft PR #523** (`3c0a933b`); its
-  implementation does **not exist** — `control_plane/chairman_brief.py` is absent and
-  `app/static/chairman_control/` holds only `control_room.css`, `control_room.js`,
-  `index.html`, `remote.html`. R2 must not assume DF1 has landed.
+  hits only its module, CLI and tests; zero `.js`/`.html` references.
+  `control_room.js:2154` renders the bare string `"root job " + card.root_job_id` and
+  `:2155` renders `root_job_ambiguous` with a candidate count — a single id, with no
+  navigation into the tree. That dangling id is the seam this sub-slice fills, and §10.1
+  is where it must actually be closed for a real person.
+- **DF1** is the accepted *shape* for a new read surface: a pure reducer, one
+  token-gated JSON route, local-only assets. Its design spec is merged (PR #521,
+  `185dc742`); its plan is **open Draft #523** (`3c0a933b`); its implementation does
+  **not exist** — `control_plane/chairman_brief.py` is absent and
+  `app/static/chairman_control/` holds only `control_room.{css,js}`, `index.html`,
+  `remote.html`. This record must not assume DF1 has landed.
 
 ---
 
-## 3. Field-by-field classification
+## 4. Field-by-field classification
 
-Four classes, applied to every field the workspace proposes to show:
-**A** = already available from a canonical owner · **D** = deterministically derivable
-from A-class inputs · **M** = missing, requires producer work · **N** = deliberately
-not projected in R2.
+**A** = available from a canonical owner · **D** = deterministically derivable from
+A-class inputs · **M** = missing, requires producer work · **N** = deliberately not
+projected in this sub-slice.
 
-### 3.1 Mission header
+### 4.1 Mission header
 
 | Field | Class | Source / derivation |
 |---|---|---|
 | `program.work_ref` | A | CCR `work[].work_ref` |
-| `program.title`, `program.state`, `program.next_action` | A | `agent_os` entry on the work card (Macro `agent_os_state.v1`) |
-| `mission.root_job_id` | A | autonomy card `root_job_id` (resolved only when exactly one candidate) |
-| `mission.root_job_candidates`, `root_job_ambiguous`, `runtime_root_state` | A | autonomy card (`RESOLVED \| CONFLICT \| UNKNOWN`) |
-| `mission.status`, `depth`, `orchestration_role`, `plan_step_id` | A | root job card |
+| `program.title`, `.state`, `.next_action` | A | `agent_os` entry on the work card |
+| `mission.root_job_id` | A | autonomy card (resolved only when exactly one candidate) |
+| `mission.root_job_candidates`, `.root_job_ambiguous`, `.runtime_root_state` | A | autonomy card (`RESOLVED \| CONFLICT \| UNKNOWN`) |
+| `mission.status`, `.depth`, `.orchestration_role`, `.plan_step_id` | A | root job card |
+| `mission.submission_availability` | D | see §5.2 — replaces the false existential copy |
 | `mission.armed` (5 bits + `source`) | A | `fabric_job_view.armed`; `null` when `control.json` is absent, **never `false`** |
 | `mission.capability` | A | `fabric_job_view.capability` |
-| `mission.title` | **M** | Executive OS `Job` has no human title. Do **not** synthesize one from the Agent OS workstream title — that is a different object. Render the `root_job_id` until a producer supplies it. |
+| `mission.title` | **M** | Executive OS `Job` has no human title. Do **not** synthesize one from the Agent OS workstream title — a different object. Render `root_job_id` until a producer supplies it (**G5**). |
+| `mission.runtime_root` (the absolute path) | **N** | never emitted — see §8.2 |
 
-### 3.2 Principal and children
+### 4.2 Principal and children
 
 | Field | Class | Source / derivation |
 |---|---|---|
 | `principal.accountable_seat` | A | autonomy card; `chairman\|ceo\|coo\|worker` |
-| `principal.current_worker`, `principal.current_sol_target` | A | autonomy card (Steward `RuntimeFact` projection) |
-| `principal.owed_turn{seat,…}` | A | autonomy card |
+| `principal.current_worker`, `.current_sol_target`, `.owed_turn` | A | autonomy card |
 | `children[].job_id`, `.status`, `.parent_job_id`, `.depth`, `.orchestration_role`, `.plan_step_id`, `.attempt_count`, `.attempt_limit`, `.current_attempt_id` | A | `fabric_job_view.children[]` |
-| `children[].latest_attempt{attempt_id,attempt_number,status,started_at,finished_at,exit_code,has_result,error}` | A | `ATTEMPT_CARD_KEYS` (`fabric_job_view.py:146`) |
-| `children[].worker_id` / who is executing this child | **M** | **Gap G1.** `grep -n worker control_plane/fabric_job_view.py` returns zero hits: neither `JOB_CARD_KEYS` nor `ATTEMPT_CARD_KEYS` carries a worker identity. `mastermind.execution_principal_snapshot/v1` (`executive_orchestration_principal.py:266`) has `worker_id`/`provider`/`account_label` per attempt, but it is Runtime-sealed evidence with no read projection — and it also carries `os_principal_uid` and `provider_home_identity`, which must never reach a browser. |
-| `children[].is_ambiguous` | D | `len(root_job_candidates) > 1` on the parent |
-| `unjoined_job_count`, `unjoined_job_ids` (≤50) | A | `fabric_job_view`; `len(children) + unjoined_job_count` = scope size, so the tree is never a silent subset |
+| `children[].latest_attempt{attempt_id,attempt_number,status,started_at,finished_at,exit_code,has_result}` | A | `ATTEMPT_CARD_KEYS` (`:146`) |
+| `children[].latest_attempt.error` | **N→D** | the raw first-line error is **not** emitted (§8.2). A fixed `error_present: bool` plus an allowlisted classification is emitted instead. |
+| `children[].worker_id` | **M** | **G1.** `grep -n worker control_plane/fabric_job_view.py` returns zero hits: neither `JOB_CARD_KEYS` nor `ATTEMPT_CARD_KEYS` carries a worker identity. `mastermind.execution_principal_snapshot/v1` (`executive_orchestration_principal.py:266`) has `worker_id`/`provider`/`account_label` per attempt, but it is Runtime-sealed with no read projection and also carries `os_principal_uid` and `provider_home_identity`, which must never reach a browser. |
+| `unjoined_job_count`, `unjoined_job_ids` (≤50) | A | `len(children) + unjoined_job_count` = scope size, so the tree is never a silent subset |
 
-### 3.3 Work state (assignment → consumption)
-
-| Field | Class | Source / derivation |
-|---|---|---|
-| `dispatch.state` | A | `dispatch_state`, one of 13 `DISPATCH_STATES` |
-| `dispatch.reason` | A | machine reason token, e.g. `attempt_in_progress:RUNNING`, `canonical_terminal_wake_acknowledged` |
-| `dispatch.historical` | A | true when the contributing source is not `CURRENT` |
-| `dispatch.actionable` | A | `state == "RETURNED" and not historical` — the **only** actionable combination |
-| `dispatch.watch_proven`, `dispatch.carrier`, `dispatch.w3c{state,reason,terminal_state,wake_state,terminal_applied,source_receipt}` | A | dispatch card |
-| `dispatch.state == CONTINUED` / `STOPPED` | **M** | **Gap G2.** Both are in the closed vocabulary (`:2417`) but `_classify_dispatch_row` can return only 11 tokens — enumerated over lines 2520–2660: `WAITING_CAPACITY, RECEIVER_SELECTED, DELIVERY_SENT, PICKUP_ACKNOWLEDGED, STARTED, RETURNED, DELIVERY_UNCONSUMED, WATCH_UNPROVEN, RUNTIME_BINDING_RECONCILIATION_REQUIRED, EFFECT_UNKNOWN, UNKNOWN`. `SOL CONTINUE` / `SOL STOP` are Slack-carrier edges under `docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md` §2.1/§2.2; no Executive producer emits them. R2 renders both as `NOT_PROJECTED`, never as an inferred `STOPPED`. |
-| `blocked` vs `waiting` vs `effect-unknown` vs `complete` | D | the required four-way distinction is a **pure function of already-available fields** — see §4.3. No new state machine. |
-
-### 3.4 Output, review, consumption
+### 4.3 Execution, transport and review — three separate facets
 
 | Field | Class | Source / derivation |
 |---|---|---|
-| `result.state` | A | `NOT_STARTED \| IN_PROGRESS \| ACCEPTED \| CANCELLED \| FAILED \| LOST \| RATE_LIMITED`. Admitted-but-never-claimed is `NOT_STARTED`, never `RUNNING`, never `FAILED` (`fabric_job_view.py:423`) |
-| `result.summary`, `.artifacts[]`, `.errors[]`, `.next_actions[]` | A | job card `result` block |
+| `execution.state` | A | `NOT_STARTED \| IN_PROGRESS \| ACCEPTED \| CANCELLED \| FAILED \| LOST \| RATE_LIMITED`. **Read `ACCEPTED` as "execution terminated COMPLETED", nothing more** — §5.3. Admitted-but-never-claimed is `NOT_STARTED`, never `RUNNING`, never `FAILED` (`:423`). |
+| `execution.summary_present`, `.artifacts[]`, `.errors_present`, `.next_actions[]` | A/D | from the `result` block, allowlisted per §8.2 |
 | `review.required`, `.reviews_job_id`, `.verdict` | A | `approve \| reject \| NOT_YET`; absent **and** empty verdict both read `NOT_YET` |
-| "was it reviewed" | D | `review.verdict != "NOT_YET"` |
-| "did the parent consume it" | A | `dispatch.state == RETURNED` with `w3c.terminal_applied` and `w3c.wake_state ∈ {TARGET_ACKNOWLEDGED, SOURCE_RESOLVED}` — the **only** evidence of consumption |
-| "returned but not consumed" | A | `DELIVERY_UNCONSUMED` with reason `canonical_wake_unacknowledged` |
+| `transport.dispatch_state` | A | one of 13 `DISPATCH_STATES` |
+| `transport.reason`, `.historical`, `.actionable`, `.watch_proven`, `.carrier`, `.w3c{…}` | A | dispatch card. `actionable` is `state == "RETURNED" and not historical`, copied not recomputed. |
+| `transport.dispatch_state == CONTINUED` / `STOPPED` | **M** | **G2.** Both are in the closed vocabulary (`:2417`) but `_classify_dispatch_row` can emit only 11 tokens, enumerated over lines 2520–2660: `WAITING_CAPACITY, RECEIVER_SELECTED, DELIVERY_SENT, PICKUP_ACKNOWLEDGED, STARTED, RETURNED, DELIVERY_UNCONSUMED, WATCH_UNPROVEN, RUNTIME_BINDING_RECONCILIATION_REQUIRED, EFFECT_UNKNOWN, UNKNOWN`. `SOL CONTINUE` / `SOL STOP` are Slack-carrier edges under `docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md` §2.1/§2.2. Both render `NOT_PROJECTED`; never inferred, and **no new token is minted**. |
+| `acceptance.*` | **M** | **G7**, §5.3 |
+
+### 4.4 Evidence
+
+| Field | Class | Source |
+|---|---|---|
 | `evidence.prs[]` | A | CCR `work[].github.prs` |
 | `evidence.attention_ids[]` | A | CCR `work[].attention_ids` |
 | `evidence.disagreements[]` | A | CCR `work[].disagreements` + autonomy `disagreements[]` |
 
-### 3.5 Conversation / content history — the central gap
+### 4.5 Conversation / content history — bounded, not permanently absent
 
-**Classification: M (Gap G3), and N for R2.**
+**Classification: M (G3) for after-the-fact history; N for this sub-slice; the live
+hot window remains the accepted first-release target under its incumbent owner.**
 
-There is exactly one producer of visible turn text, and it is not a history store:
+v1 of this record concluded that `conversation` is `NOT_PROJECTED` "throughout R2". That
+over-generalised a verified narrow fact into a product definition, and it silently
+equated *every Chairman mission* with *a finished mission*. The verified facts and the
+corrected scope are separated below.
 
-- `control_plane/visible_turn_projection.py` is an **in-memory, process-local
-  hot window**. Its own docstring is explicit: viewer grants "are internal,
-  projection-scoped reader handles… not user or authentication tokens and confer no
-  permission to send anything to the provider", and "when the last viewer for a turn
-  is revoked, its bounded in-memory hot-window state is discarded; **it is not
-  history**" (`:11`–`:14`).
+**Verified about the one producer of visible turn text:**
+
+- `visible_turn_projection.py` is an **in-memory, process-local hot window**. Its
+  docstring: viewer grants "are internal, projection-scoped reader handles… not user or
+  authentication tokens and confer no permission to send anything to the provider", and
+  when the last viewer is revoked the state "is discarded; **it is not history**"
+  (`:11`–`:14`).
 - Bounds: `MAX_RETAINED_TURNS = 4`, `MAX_ITEMS_PER_TURN = 256`,
   `MAX_ITEM_BYTES = 16_384`, `MAX_VIEWERS = 2`, `MAX_READ_ITEMS = 64`.
-- The only production callers are `control_plane/codex_operator_adapter.py`
-  (which constructs one per adapter) and `control_plane/executive_worker_broker.py`,
-  which exposes it as the broker operation **`ohf-observe-turn`** (`:1470`, handler
-  `:2115`). That handler returns real `text`, plus `next_cursor`, `gaps[]`,
-  `terminal`, `publication_epoch`, `retained_scope`, `resync_required` (`:2201`).
-- Every read is fenced on the **live** generation: `attempt`, `epoch`,
-  `generation`, `generation_number` and `worker_id` must all equal the currently
-  active generation, or the call refuses `GENERATION_INVALID`; an unbound turn
-  refuses `TURN_NOT_BOUND`; a revoked grant refuses `READER_REVOKED`.
-- The transport is an AF_UNIX / mTLS broker socket, not HTTP. A browser cannot
-  reach it. And `ohf-observe-turn` is **not** in
+- Production callers are `codex_operator_adapter.py` (constructs one per adapter) and
+  `executive_worker_broker.py`, which exposes it as broker operation
+  **`ohf-observe-turn`** (`:1470`, handler `:2115`). That handler returns real `text`
+  plus `next_cursor`, `gaps[]`, `terminal`, `publication_epoch`, `retained_scope`,
+  `resync_required` (`:2201`).
+- Reads are fenced on the **live** generation — `attempt`, `epoch`, `generation`,
+  `generation_number`, `worker_id` must all match, else `GENERATION_INVALID`; an unbound
+  turn is `TURN_NOT_BOUND`; a revoked grant is `READER_REVOKED`. Peer authorization is
+  kernel UID equality against the Executive control principal
+  (`executive_worker_broker.py:1410`) — there is no user identity to map a viewer onto.
+- Transport is AF_UNIX / mTLS, not HTTP; `ohf-observe-turn` is **not** in
   `remote_worker_broker_client._READ_ONLY_OPERATIONS` (`:30`, which holds only
-  `ohf-identity` and `ohf-materialization-status`), so remotely it is treated as a
-  modifying operation with uncertainty handling.
-- `control_plane/executive_dialogue_observation.py` is deliberately payload-free —
-  `CanonicalTerminalWakeRead` is documented as a "public read-only terminal/Wake
-  result with no provider or payload data" (`:381`) — so it is not an alternative.
-  Its terminal projection validates `candidate.summary` and then *omits* it from the
-  emitted wire, which is digests, ids and timestamps only (`:1071`).
-- Peer authorization on the broker is kernel UID equality against the Executive
-  control principal (`executive_worker_broker.py:1410`) — there is no bearer, session
-  or user identity to map a browser viewer onto.
-
-Three further properties make G3 worse than "not wired up yet", and each was
-confirmed against source:
-
-- **Capture is opt-in and prospective.** `publish()` returns immediately when the
-  turn has no viewer: `if not self._viewers_by_turn.get(key): return`
-  (`visible_turn_projection.py:353`). Content is retained only if a grant was minted
-  **before** it flowed. There is no backfill path, and `mint_observer_grant`
-  (`codex_operator_adapter.py:2122`) requires a live `_GenerationState`, so a grant
-  for a finished attempt cannot be minted at all.
-- **Eviction is silent.** Past `MAX_RETAINED_TURNS` the oldest record is dropped FIFO
-  with no tombstone and no gap record (`:560`); a holder of its grant simply gets
-  `TURN_NOT_BOUND`. Revoking the last viewer pops the record outright (`:405`).
+  `ohf-identity` and `ohf-materialization-status`).
+- `executive_dialogue_observation.py` is payload-free by construction: its terminal
+  projection validates `candidate.summary` and then omits it from the emitted wire,
+  which is digests, ids and timestamps only (`:1071`).
+- **Capture is prospective.** `publish()` returns immediately when the turn has no
+  viewer (`:353`). Content is retained only if a grant existed **before** it flowed, and
+  `mint_observer_grant` (`codex_operator_adapter.py:2122`) requires a live
+  `_GenerationState`, so no grant can be minted for a finished attempt.
+- **Eviction is silent.** Past 4 turns the oldest record is dropped FIFO with no
+  tombstone and no gap record (`:560`); a grant holder then gets `TURN_NOT_BOUND`.
 - **`ohf-observe-turn` has no production consumer.** `grep -rn
-  "ohf-observe-turn\|mint_observer_grant"` over the repo returns the two definition
-  sites and tests only. It is a fully specified read model — cursors, epochs, gap
-  records, refusal receipts — that nothing calls.
+  "ohf-observe-turn\|mint_observer_grant"` returns the two definition sites and tests.
 
-**Two traps recorded for whichever wave eventually closes G3.**
+**Corrected scope.** The accepted OS product direction already selects the **bounded
+authorized hot window with explicit gaps** as the first live content release, with full
+authorized history a later integration through existing owners. This record therefore
+states only that **after-the-fact history is not proven through the admitted path** —
+not that "no history exists anywhere" — and it does **not** define conversation as
+permanently unavailable. The live-content lane stays bound to the incumbent connected
+reader and content-resource work; this record builds no second reader, no transcript
+store, and **mints no covert viewer grant to manufacture retention**. `conversation` is
+`N` in R2A because R2A is the *mission-tree* sub-slice, not because content is absent
+from the product.
 
-1. `ReadResult.resync_required` is `bool(gaps)` (`visible_turn_projection.py:498`,
-   forwarded verbatim by the broker at `:2227`). It does **not** mean "reset your
-   cursor" — the actual cursor reset is the `RESYNC_REQUIRED` *exception*, raised only
-   on a publication-epoch change (`:447`). A consumer that treats the boolean as a
-   reset signal will loop, because a retained gap keeps it true on every subsequent
-   page.
-2. `brain/advisor.py` has a real durable per-conversation chat store
-   (`load_history`/`append_turn`, JSON under `data/brain/chat_history/`, last 200
-   turns). It is the **portfolio-research advisor popup**, keyed by a `uuid4`
-   conversation id with no Job/Attempt identity, no cursor, no grant and
-   `except Exception: pass` on write. It is not a mission transcript and must never
-   be pressed into service as one.
+**Two traps recorded for whichever wave closes G3.**
 
-**Consequence, stated plainly:** for a *finished* mission — which is every mission a
-Chairman opens after the fact — **no conversation history exists anywhere in this
-repository.** The #702 reference's `Conversation is not connected` is not a
-placeholder to be filled in R2; it is the accurate terminal state of the current
-estate. R2 renders `conversation` as
-`{state: "UNAVAILABLE", coverage: "NOT_PROJECTED", reason_codes:
-["VISIBLE_CONTENT_HISTORY_NOT_PROJECTED"]}` and says so in copy. Building a durable
-transcript store is forbidden here: `WS:CHAIRMAN-CONTROL-ROOM` `do_not_redo` bans
-"a dialogue DB, Slack-owned lifecycle state, mutable thread cursor, second queue,
-automatic retry ledger or another session identity plane", and ASD-A4 (the accepted
-read-only dialogue-attention projection) is `status: todo` and gated behind
-ASD-A3 **and** P0B.
+1. `ReadResult.resync_required` is `bool(gaps)` (`visible_turn_projection.py:498`),
+   forwarded verbatim by the broker (`:2227`). It does **not** mean "reset your cursor";
+   the actual reset is the `RESYNC_REQUIRED` *exception*, raised only on a
+   publication-epoch change (`:447`). A consumer treating the boolean as a reset will
+   loop, because a retained gap keeps it true on every later page.
+2. `brain/advisor.py` has a durable per-conversation chat store (`load_history` /
+   `append_turn`, JSON under `data/brain/chat_history/`, last 200 turns). It is the
+   **portfolio-research advisor popup**, keyed by a `uuid4` conversation id, with no
+   Job/Attempt identity, no cursor, no grant and `except Exception: pass` on write. It
+   is not a mission transcript and must never be pressed into service as one.
 
 ---
 
-## 4. The consumer contract — `mastermind.mission_workspace.v1`
+## 5. The three repaired predicates
 
-### 4.1 Shape
+### 5.1 Why v1 was wrong, shown against the real producer
+
+Run against the protected pure producer `compose_fabric_view` with synthetic objects —
+no Runtime database, no provider, no grant, no host, no effect:
+
+```
+CASE A: COMPLETED job, review_required=True, NO review job, ceo_submit_armed=False
+  result.state   = ACCEPTED
+  review.verdict = NOT_YET
+  root returned? = True  (JOB-X)
+  degraded       = ['ceo_submit_armed: false; no Chairman-authenticated
+                    admitted job can exist yet']
+
+CASE B: COMPLETED job, empty result payload
+  result.state   = ACCEPTED
+  result.summary = None
+  missingness    = [('DEGRADED','result.summary'), ('EXCLUDED','return_path'),
+                    ('NULL_BY_DESIGN','runtime.identity')]
+```
+
+Case A and Case B each falsify a v1 predicate, and Case A falsifies two at once.
+
+The mechanism is in the source: `_TERMINAL_RESULT_STATES` maps `"COMPLETED": "ACCEPTED"`
+unconditionally (`fabric_job_view.py:198`–`204`), and `_result_state` (`:423`) inspects
+job status and attempts only — it contains no reference to review, decision or
+acceptance. So `result.state == ACCEPTED` means **"execution terminated COMPLETED"**
+and nothing else. v1's §4.3 table made `COMPLETE` fire on `RETURNED` + not historical +
+`ACCEPTED`, which declares a Chairman-facing *completion* for an unreviewed job with an
+empty payload. v1's own prose said the opposite; the table is what an implementer codes,
+so the table was the defect.
+
+### 5.2 Arm state — B2
+
+`ceo_submit_armed=false` prohibits a **new** governed submission. It does not, and
+cannot, prove that a previously admitted Job does not exist — Case A returns the root
+*and* emits the contrary sentence in the same document. The shipped-template value is
+also not installed-host evidence.
+
+The producer's `_UNARMED_ENTRY` string (`fabric_job_view.py:207`, emitted unconditionally
+at `:636` and `:859` whenever the bit is `False`) is therefore **an actual upstream
+source defect**, not a fact to copy. v1 copied it into §4.2, G6 and negative case 15.
+
+**Repair.**
+- Existing roots, children, attempts and results are **retained and rendered** after
+  DISARM. Prior evidence is never withdrawn because a submission gate closed.
+- New-submission unavailability is explained on its own field,
+  `mission.submission_availability`, derived only from the arm bits:
+  `UNAVAILABLE_NEW_SUBMISSION` when `ceo_submit_armed is False`; `UNKNOWN` when it is
+  `null`; `AVAILABLE` when `True`. It carries no existential claim about existing Jobs.
+- The producer's degraded sentence is **not** echoed in the workspace. It is recorded
+  here as a defect against its existing owner, with the reproduction above. **This
+  records child takes no source custody of `fabric_job_view.py`** and does not repair it;
+  correcting display copy downstream does not repair upstream source, and this record
+  does not pretend otherwise.
+- Required tests: `admission → DISARM → read existing root` (root still returned,
+  no existential claim rendered), and `absent config ≠ false` (all bits `null`,
+  `armed.source == "absent"`, availability `UNKNOWN`).
+- No real JOB-001 is replayed, duplicated or retried by this record or its implementation.
+
+### 5.3 Acceptance is a fourth facet with no producer — B1 / G7
+
+Four facts are kept structurally separate and are never aliased to one another:
+
+| Facet | Question | Owner | Today |
+|---|---|---|---|
+| **execution** | did the process terminate, and how | Executive OS | available |
+| **review** | did an independent review Job decide | Executive OS | available |
+| **transport** | was the return delivered and the obligation acknowledged | W3C / Wake | available |
+| **acceptance** | did the accountable owner accept *this artifact revision* as the product | *no producer* | **NOT_PROJECTED** |
+
+W3C `TARGET_ACKNOWLEDGED` / `SOURCE_RESOLVED` is transport and obligation evidence. A
+review verdict is a review. Neither is an artifact/product acceptance ruling, and
+`result.state == ACCEPTED` is an execution alias. **No combination of the three existing
+facets may be displayed as product completion.**
+
+The acceptance facet is populated only by the existing acceptance/decision owner, and
+only with an exact mission/brief reference, the exact artifact revision, and the ruling.
+Until such a projection exists, `acceptance` is
+`{state: "NOT_PROJECTED", reason_codes: ["ACCEPTANCE_OWNER_NOT_PROJECTED"], ruling: null,
+artifact_revision: null, owner: null}`. **No universal acceptance store is created, and
+no new `DISPATCH_STATES` token is minted.**
+
+### 5.4 The total truth table
+
+`posture` is a consumer-side presentation value — it is not a `DISPATCH_STATES` member
+and never widens that vocabulary. Rules are evaluated **in order**; the first match wins;
+the table is total because rule 12 is unconditional.
+
+| # | Condition | `posture` |
+|---|---|---|
+| 1 | `transport.dispatch_state ∈ {EFFECT_UNKNOWN, RUNTIME_BINDING_RECONCILIATION_REQUIRED}` | `EFFECT_UNKNOWN` |
+| 2 | source generation conflict, or `runtime_root_state == CONFLICT` | `RECONCILIATION_REQUIRED` |
+| 3 | `execution.state == FAILED` | `EXECUTION_FAILED` |
+| 4 | `execution.state == CANCELLED` | `EXECUTION_CANCELLED` |
+| 5 | `execution.state == LOST` | `EXECUTION_LOST` |
+| 6 | `execution.state == RATE_LIMITED` | `EXECUTION_RATE_LIMITED` |
+| 7 | a Steward `blocker` or Agent-OS `declared_blocker` is present | `BLOCKED` |
+| 8 | `dispatch_state == DELIVERY_UNCONSUMED` | `DELIVERED_UNCONSUMED` |
+| 9 | `dispatch_state == STARTED` | `RUNNING` |
+| 10 | `dispatch_state ∈ {WAITING_CAPACITY, RECEIVER_SELECTED, DELIVERY_SENT, PICKUP_ACKNOWLEDGED}` | `WAITING` |
+| 11 | `execution.state == NOT_STARTED` and no delivery evidence | `NOT_STARTED` |
+| 12 | otherwise → **the terminal ladder below** | see 12a–12e |
+
+Rule 12, also ordered and total, is where v1 collapsed four distinct worlds into
+`COMPLETE`:
+
+| # | Condition | `posture` | says |
+|---|---|---|---|
+| 12a | `dispatch_state == WATCH_UNPROVEN`, **or** `dispatch_state == RETURNED` with `historical == true`, **or** `dispatch_state == UNKNOWN` | `CONSUMPTION_UNKNOWN` | we cannot currently tell whether the return was consumed — **not** that it was not |
+| 12b | `execution.state == ACCEPTED`, `dispatch_state == RETURNED`, `historical == false`, and `review.verdict == "reject"` | `REVIEW_REJECTED` | executed and returned; review rejected it |
+| 12c | same as 12b but `review.verdict == "NOT_YET"` | `RETURNED_UNREVIEWED` | executed and returned; **no review decision exists** |
+| 12d | same as 12b but `review.verdict == "approve"` and `acceptance.state != "ACCEPTED"` | `REVIEWED_NOT_ACCEPTED` | executed, returned, reviewed — **no acceptance owner has ruled** |
+| 12e | 12d **and** `acceptance.state == "ACCEPTED"` with an exact artifact revision and ruling | `ACCEPTED_PRODUCT` | the accountable owner accepted this revision |
+
+**Today, 12e is unreachable**, because G7 has no producer: the honest ceiling of the
+current estate is `REVIEWED_NOT_ACCEPTED`. That is the point — the workspace must be
+unable to render product completion it cannot evidence, rather than rendering it from
+an execution alias.
+
+Two further constraints on this table:
+
+- **A `DEGRADED` missingness fact on `result.summary` never upgrades a posture.** Case B
+  (`ACCEPTED` with `summary=None`) reaches 12c/12d on its review verdict like any other
+  row, and the damage fact renders beside it. It is not silently promoted, and it is not
+  silently demoted either — the fact is what carries the damage.
+- **Discrimination is required, not illustration.** Every one of rules 1–12e must have a
+  distinct rendered outcome and at least one counterexample in the test matrix (§11).
+  A table that renders two of these identically has failed.
+
+---
+
+## 6. The consumer contract — `mastermind.mission_workspace.v1`
+
+### 6.1 Shape
 
 One **pure reducer**, mirroring `compose_chairman_brief` in the DF1 plan §6:
 
@@ -301,14 +448,14 @@ def compose_mission_workspace(
     root_job_id: str | None,
     source_validity: Mapping[str, Any] | None,
     cache_currentness: Mapping[str, Any] | None,
+    source_generation: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
     """Pure deterministic read-only mission workspace projection."""
 ```
 
-No I/O, no environment, no clock, no randomness, no mutation, no provider inspection,
-no second join. Same argument + same inputs ⇒ byte-identical
-`json.dumps(doc, sort_keys=True)`. Enforced by an AST anti-authority test, as
-`tests/test_fabric_job_view.py` D6 and the DF1 plan both already do.
+No I/O, environment, clock, randomness, mutation, provider inspection or second join.
+Same inputs ⇒ byte-identical `json.dumps(doc, sort_keys=True)`. Enforced by an AST
+anti-authority test, as `tests/test_fabric_job_view.py` D6 and the DF1 plan both do.
 
 Closed top-level key set:
 
@@ -316,359 +463,421 @@ Closed top-level key set:
 {
   "schema": "mastermind.mission_workspace.v1",
   "generated_at": "…Z",
-  "source": {
-    "control_room_schema": "mastermind.chairman_control_room.v1",
-    "control_room_generated_at": "…Z",
-    "fabric_view_schema": "mastermind.fabric_job_view.v1",
-    "fabric_view_generated_at": "…Z",
-    "source_coverage": []
-  },
-  "read_state": {"state": "CURRENT", "reason_codes": [], "usable_sections": []},
-  "program":      {"work_ref": "WS:…", "title": null, "state": null, "next_action": null,
+  "source": {"control_room_schema": "…", "control_room_generated_at": "…Z",
+             "fabric_view_schema": "…", "fabric_view_generated_at": "…Z",
+             "source_generation": {}, "source_coverage": []},
+  "read_state":   {"state": "CURRENT", "reason_codes": [], "usable_sections": []},
+  "program":      {"work_ref": "WS:…", "title": null, "state": null,
+                   "next_action": null, "evidence": []},
+  "mission":      {"root_job_id": null, "root_job_candidates": [],
+                   "root_job_ambiguous": false, "runtime_root_state": "UNKNOWN",
+                   "status": null, "orchestration_role": null, "plan_step_id": null,
+                   "depth": null, "title": null, "armed": {},
+                   "submission_availability": "UNKNOWN", "capability": {},
                    "evidence": []},
-  "mission":      {"root_job_id": null, "root_job_candidates": [], "root_job_ambiguous": false,
-                   "runtime_root_state": "UNKNOWN", "status": null, "orchestration_role": null,
-                   "plan_step_id": null, "depth": null, "title": null,
-                   "armed": {}, "capability": {}, "evidence": []},
-  "principal":    {"accountable_seat": null, "current_worker": null, "current_sol_target": null,
-                   "owed_turn": null, "evidence": []},
-  "children":     {"state": "…", "coverage": "…", "reason_codes": [], "total_count": null,
-                   "items": [], "overflow_count": null},
-  "work_state":   {"dispatch_state": "UNKNOWN", "reason": null, "actionable": false,
-                   "historical": true, "watch_proven": null, "carrier": null, "w3c": null,
-                   "posture": "EFFECT_UNKNOWN", "evidence": []},
-  "output":       {"state": "…", "coverage": "…", "reason_codes": [], "total_count": null,
-                   "items": [], "overflow_count": null},
+  "principal":    {"accountable_seat": null, "current_worker": null,
+                   "current_sol_target": null, "owed_turn": null, "evidence": []},
+  "children":     {"state": "…", "coverage": "…", "reason_codes": [],
+                   "total_count": null, "items": [], "overflow_count": null},
+  "execution":    {"state": "NOT_STARTED", "summary_present": false, "artifacts": [],
+                   "errors_present": false, "next_actions": [], "evidence": []},
   "review":       {"required": null, "reviews_job_id": null, "verdict": "NOT_YET",
                    "evidence": []},
-  "consumption":  {"state": "UNKNOWN", "reason": null, "evidence": []},
+  "transport":    {"dispatch_state": "UNKNOWN", "reason": null, "actionable": false,
+                   "historical": true, "watch_proven": null, "carrier": null,
+                   "w3c": null, "evidence": []},
+  "acceptance":   {"state": "NOT_PROJECTED",
+                   "reason_codes": ["ACCEPTANCE_OWNER_NOT_PROJECTED"],
+                   "owner": null, "artifact_revision": null, "ruling": null,
+                   "evidence": []},
+  "posture":      {"value": "UNKNOWN", "rule": null, "evidence": []},
   "conversation": {"state": "UNAVAILABLE", "coverage": "NOT_PROJECTED",
-                   "reason_codes": ["VISIBLE_CONTENT_HISTORY_NOT_PROJECTED"],
+                   "reason_codes": ["MISSION_TREE_SUBSLICE_EXCLUDES_CONTENT"],
                    "total_count": null, "items": [], "overflow_count": null},
   "missingness":  [],
   "degraded":     [],
+  "budget":       {},
   "feature_gates": {"conversation": "UNAVAILABLE", "actions": "READ_ONLY",
                     "advanced": "AVAILABLE"}
 }
 ```
 
 Every list section uses the **DF1 §8.3 envelope verbatim** —
-`{state, coverage, reason_codes, total_count, items, overflow_count}` — with DF1's own
-rules: `COMPLETE` permits exact integers; `INCOMPLETE` requires
-`total_count = null` **and** `overflow_count = null` while known items stay visible;
-`NOT_PROJECTED` is never a zero; `EMPTY` is legal only when coverage is complete and
-the exact total is zero. Section states are DF1's five
-(`AVAILABLE|EMPTY|PARTIAL|HISTORICAL|UNAVAILABLE`); read states DF1's four
-(`CURRENT|PARTIAL|HISTORICAL|UNAVAILABLE`). **Do not mint a parallel vocabulary.**
+`{state, coverage, reason_codes, total_count, items, overflow_count}` — with DF1's rules:
+`COMPLETE` permits exact integers; `INCOMPLETE` requires `total_count = null` **and**
+`overflow_count = null` while known items stay visible; `NOT_PROJECTED` is never a zero;
+`EMPTY` only when coverage is complete and the exact total is zero. Section states are
+DF1's five; read states DF1's four. **No parallel vocabulary is minted.**
 
-`missingness[]` uses the `fabric_job_view` fact shape verbatim:
-`{missingness_class, target_field, producer_owner, reason}` with
-`missingness_class ∈ {MISSING_PRODUCER, NULL_BY_DESIGN, EXCLUDED, OMITTED, DEGRADED}`.
+`missingness[]` uses the `fabric_job_view` fact shape verbatim —
+`{missingness_class, target_field, producer_owner, reason}`, class ∈
+`{MISSING_PRODUCER, NULL_BY_DESIGN, EXCLUDED, OMITTED, DEGRADED}`.
 
 Every `evidence[]` entry uses the DF1 §11 tuple verbatim —
-`{owner, ref, field, source_revision, source_time, observed_at, freshness_state}` —
-with DF1's nine closed owners, 0–32 refs per item, no arbitrary URL or filesystem
-path, `source_revision` null rather than fabricated, and dedupe by the complete tuple.
+`{owner, ref, field, source_revision, source_time, observed_at, freshness_state}` — with
+DF1's nine closed owners, 0–32 refs per item, no arbitrary URL or filesystem path,
+`source_revision` null rather than fabricated, dedupe by the complete tuple.
 
-### 4.2 Field semantics that are not obvious
+### 6.2 Field semantics that are not obvious
 
-- **`armed.*` is tri-state.** Absent or unreadable `control.json` ⇒ every bit `null`
-  and `armed.source == "absent"` — **never `false`**. A `false` bit is a positive
-  fact that the host asserted; `null` is ignorance. When `ceo_submit_armed is False`
-  the workspace must show the degraded entry "no Chairman-authenticated admitted job
-  can exist yet" rather than an empty mission.
+- **`armed.*` is tri-state.** Absent or unreadable `control.json` ⇒ every bit `null` and
+  `armed.source == "absent"` — **never `false`**. A `false` bit is a positive fact the
+  host asserted; `null` is ignorance. The workspace renders
+  `mission.submission_availability` (§5.2) and **never** the producer's existential
+  sentence.
 - **`runtime_root_state`** separates three cases that all leave `root_job_id` null:
-  `RESOLVED` (exactly one candidate), `CONFLICT` (2+ — reconciliation required, never
-  a pick), `UNKNOWN` (no runtime evidence at all).
-- **`children` coverage is `INCOMPLETE` whenever `unjoined_job_count > 0`.** Those
-  jobs exist under the root but carry no CEO-intent workstream provenance; they are
-  counted and listed (first 50), never dropped, and their presence forbids an exact
-  total.
-- **`consumption`** is read only from the dispatch card's W3C branch. A terminal
-  Attempt, a watcher receipt, a raw `APPLIED` marker and a Slack delivery are each
-  explicitly *not* a return: the classifier emits `WATCH_UNPROVEN` with reason
-  `canonical_w3c_evidence_required` in exactly that case.
-- **`work_state.actionable`** is `dispatch_state == "RETURNED" and not historical`,
-  copied, not recomputed.
-
-### 4.3 The required four-way posture — derived, not invented
-
-The brief requires the Chairman to distinguish blocked / waiting / effect-unknown /
-complete. This is a pure total function over `dispatch_state` and `result.state`,
-evaluated in order; nothing new is produced:
-
-| `posture` | Condition |
-|---|---|
-| `EFFECT_UNKNOWN` | `dispatch_state ∈ {EFFECT_UNKNOWN, RUNTIME_BINDING_RECONCILIATION_REQUIRED}` — checked first, before every other signal, mirroring Law 8's "EFFECT_UNKNOWN outranks optimistic progress" |
-| `BLOCKED` | a Steward `blocker` or an Agent-OS `declared_blocker` is present, or `dispatch_state == DELIVERY_UNCONSUMED` |
-| `WAITING` | `dispatch_state ∈ {WAITING_CAPACITY, RECEIVER_SELECTED, DELIVERY_SENT, PICKUP_ACKNOWLEDGED}` |
-| `RUNNING` | `dispatch_state == STARTED` |
-| `RETURNED_UNCONSUMED` | `dispatch_state == WATCH_UNPROVEN`, or `RETURNED` with `historical` true |
-| `COMPLETE` | `dispatch_state == RETURNED`, `historical` false, and `result.state == ACCEPTED` |
-| `UNKNOWN` | everything else, including `dispatch_state == UNKNOWN` |
-
-`COMPLETE` requires **both** the canonical consumption evidence and an accepted
-result. A `COMPLETED` Job with no result payload already carries a `DEGRADED`
-missingness fact on `result.summary`; the workspace shows `RETURNED_UNCONSUMED` plus
-that fact, never `COMPLETE`.
+  `RESOLVED` (exactly one candidate), `CONFLICT` (2+, reconciliation required, never a
+  pick), `UNKNOWN` (no runtime evidence at all).
+- **`children` coverage is `INCOMPLETE` whenever `unjoined_job_count > 0`** — counted and
+  listed (first 50), never dropped, and their presence forbids an exact total.
+- **`execution.state == ACCEPTED` is an execution alias**, not acceptance (§5.3).
+- **`posture.rule`** names the exact table row (§5.4) that fired, so any rendered posture
+  is traceable to its predicate rather than to a reader's inference.
 
 ---
 
-## 5. Null, missing and correction rules
+## 7. Null, missing and correction rules
 
-1. **Null is not zero.** `NOT_PROJECTED` (no producer in this generation),
-   `UNAVAILABLE` (producer exists, this read failed), and `EMPTY` (complete coverage,
-   exact total zero) are three different states and never collapse.
-2. **Absence is never completion.** An item that disappears between two generations
-   does not imply it finished or was cancelled. The workspace states the gap.
-3. **Known subset is not the queue.** Under `INCOMPLETE`, items may render but totals
-   and overflow are `null`, and the copy says the list is known-subset evidence.
+1. **Null is not zero.** `NOT_PROJECTED` (no producer in this generation), `UNAVAILABLE`
+   (producer exists, this read failed) and `EMPTY` (complete coverage, exact total zero)
+   are three states and never collapse.
+2. **Absence is never completion.** An item that disappears between two generations does
+   not imply it finished or was cancelled. The workspace states the gap.
+3. **Known subset is not the queue.** Under `INCOMPLETE`, items may render but totals and
+   overflow are `null`, and the copy says the list is known-subset evidence.
 4. **A correction preserves identity.** A field whose earlier claim is no longer
    supported keeps its identity and gains a `DEGRADED` missingness fact naming the
    producer; it is never silently rewritten and never silently dropped.
-5. **Freshness never renews itself.** `observed_at` comes from the producer;
-   rendering does not refresh it. `generated_at` is injected into the reducer, never
-   sampled — this is what makes staleness visible instead of cosmetic.
-6. **Source time and observation time stay distinct**, and `source_revision` is
-   `null` when unavailable rather than invented.
-7. **A refusal is a rendered state.** `query_status ∈ {ok, degraded, unknown,
-   refused}` and `capability.state ∈ {PROVEN, PARTIAL, UNSUPPORTED, NOT_INSTALLED}`
-   both render. An absent runtime is a typed refusal with `root: null` and
-   `children: []`; it must never read as "no work".
-8. **Revocation invalidates the read.** A cached page must not keep serving content
-   whose grant was revoked. In R2 this is trivially satisfied: there is no content.
+5. **Freshness never renews itself.** `observed_at` comes from the producer; rendering
+   does not refresh it. `generated_at` is injected, never sampled.
+6. **Source time and observation time stay distinct**, and `source_revision` is `null`
+   when unavailable rather than invented. This record's own §0 is the worked example of
+   what happens when that rule is broken.
+7. **A refusal is a rendered state.** `query_status ∈ {ok, degraded, unknown, refused}`
+   and `capability.state ∈ {PROVEN, PARTIAL, UNSUPPORTED, NOT_INSTALLED}` both render. An
+   absent runtime is a typed refusal with `root: null` and `children: []`; it must never
+   read as "no work".
+8. **An upstream source defect is recorded, not laundered.** Where a producer emits a
+   statement this consumer knows to be false (§5.2), the consumer declines to echo it,
+   records the defect against its owner with a reproduction, and does **not** claim the
+   omission repairs the producer.
 
 ---
 
-## 6. Deterministic vs model-generated
+## 8. Auth, exposure and redaction boundaries
 
-**Deterministic (the whole of `mastermind.mission_workspace.v1`):** identity
-resolution and joins; every state, coverage and posture value; ordering; totals and
-overflow; evidence binding; missingness facts; redaction and size limits; all
-copy keyed off a closed vocabulary.
+### 8.1 Surfaces
 
-**Model-generated: nothing in R2.** No summary, no narrative, no "what changed".
-DF1 §17 already binds this and is inherited verbatim: model output "cannot populate
-authoritative options/recommendation, admit/suppress an item, decide currentness,
-enable action, or close anything." If a later wave adds narration it renders in a
-separately labelled region, cites structured refs, and carries zero authority.
-
----
-
-## 7. Auth boundaries
-
-| Surface | Boundary | R2 disposition |
+| Surface | Boundary | Disposition |
 |---|---|---|
-| **Local P0A** (`scripts/chairman_control_room.py`) | loopback-only bind, Host allowlist, CSP + nosniff, `X-CCR-Token`. The token is a **per-process browser-origin/CSRF capability nonce, not authentication**: `GET /` is unauthenticated and is what delivers it, so any same-user local process can read it — that adversary is explicitly outside the threat boundary. | **R2 ships here, and only here.** |
-| **Remote X1** (`chairman_control_room_remote.v1`) | a closed-allowlist re-projection that keeps only `{schema, observed_at, code_identity, source_freshness, degraded, attention, work, unjoined_open_prs}` and **drops `sources`, `unbound_surfaces`, `binding_conflicts`, `placement_selection` and `autonomy`**; served on a UNIX socket under systemd with group `caddy` — authentication belongs to the fronting proxy, not to this code. Its own read routes are statics + `/healthz` + `/api/state`, no POST and no token, and `remote.html` ships a 3-anchor nav (`#today #work #system`) with Autonomy and Surfaces structurally absent. | **Excluded.** DF1 §23.3 already holds remote X1 from decision-first changes without a separate redaction/route/package/install/production-proof operation. R2 inherits that hold. Note the sharper reason: X1 strips `autonomy`, so most of §4's work-state fields are structurally absent there. |
-| **E1 / Executive MCP** | four static readers (`executive_state`, `executive_inbox`, `executive_job`, `ceo_intent_status`) over authenticated `POST /mcp`; envelope `mastermind.executive_mcp_result.v1`; 64 KiB request / 256 KiB response ceilings; typed errors; no submit route. | **Not used by R2.** It is a CEO-seat tool surface, not a browser surface, and `executive_job` takes a single `job_id` with no tree. |
-| **Worker broker** (`ohf-*`) | AF_UNIX / mTLS, generation-fenced, reader grants. | **Not used by R2** (§3.5). Proxying it into a web route would be new producer *and* new security work. |
-| **BSC-E1 public edge** | `IDENTITY_PROVIDER_SELECTION_REQUIRED`: no production policy, no IdP owner, no OpenAI-reachable public edge on the Studio. | **Blocks any "authenticated remote" reading of R2.** "Authenticated" in the acceptance target below means the local P0A token-gated path, and the record says so rather than implying an IdP exists. |
+| **Local P0A** (`scripts/chairman_control_room.py`) | loopback-only bind, Host allowlist, CSP + nosniff, `X-CCR-Token`. The token is a **per-process browser-origin/CSRF capability nonce, not authentication of a user**: `GET /` is unauthenticated and is what delivers it, so any same-user local process can read it — that adversary is explicitly outside the threat boundary. | **R2A ships here, and only here — as partial evidence.** |
+| **Remote X1** | closed-allowlist re-projection keeping only `{schema, observed_at, code_identity, source_freshness, degraded, attention, work, unjoined_open_prs}`, **dropping `sources`, `unbound_surfaces`, `binding_conflicts`, `placement_selection` and `autonomy`**; UNIX socket under systemd, group `caddy`; read routes are statics + `/healthz` + `/api/state`, no POST and no token; `remote.html` ships a 3-anchor nav with Autonomy and Surfaces structurally absent. | **Excluded.** DF1 §23.3 holds X1 from decision-first change without a separate redaction/route/package/install/production-proof operation. |
+| **E1 / Executive MCP** | four static readers over authenticated `POST /mcp`; 64 KiB request / 256 KiB response ceilings; typed errors; no submit route. `executive_job` takes one `job_id` and returns no tree. | **Not used by R2A.** |
+| **Worker broker** (`ohf-*`) | AF_UNIX / mTLS, generation-fenced, kernel peer-UID equality. | **Not used by R2A** (§4.5). |
 
-**Invariants.** Reads never start/resume a provider, drain notifications, acknowledge
-an obligation, claim work, renew a lease, or keep a worker alive. A thousand viewers
-create zero schedulers. No browser input ever becomes a path, host, endpoint, argv or
-profile. All source-derived strings pass one sanitizer and are placed by safe DOM
-construction, never HTML interpolation.
+### 8.2 The four proof levels, never substituted for one another
+
+v1's error was to call the local token path "authenticated" and then treat a local
+canary as the acceptance of the approved journey. Corrected:
+
+| Level | What it proves | State |
+|---|---|---|
+| **L1 build** | source compiles, reducer is pure, tests green | achievable now |
+| **L2 local token-gated proof** | the mission tree renders and matches producers behind the loopback CSRF nonce | **this is R2A's ceiling** |
+| **L3 authenticated client proof** | a real authenticated principal reads a real mission over the existing auth/resource boundary | **not closed here**; uses the existing auth owner; no new identity provider or auth store is created |
+| **L4 product acceptance** | the accountable owner accepts the journey | separate, and gated on G7 |
+
+Current public-edge readiness is **UNKNOWN to this record**. Earlier host census material
+describes a state that is not re-verified here, and an old source description cannot
+establish current readiness. L3 requires a fresh reading by its owner, not an inference
+from this document.
+
+### 8.3 Bounded read and allowlisted exposure — B6
+
+**Neither a byte cap nor a later measurement bounds request work.** Both must be fixed
+before exposure:
+
+- **Bind the existing gather/cache owner.** The mission read uses the same single-flight
+  cache discipline the CCR owner already implements. No new cache authority, no
+  scheduler, no second gather.
+- **Explicit budgets, in the contract, echoed into `budget`:** max roots per request (1),
+  max child rows, max attempts per child, max total rows, wall-clock deadline, and byte
+  ceiling. A missing budget is a refusal, never "unbounded". Exceeding any budget yields
+  a typed refusal plus `coverage: INCOMPLETE` — never a silent truncation.
+- **Source-generation vector.** The read carries the owning generation before and after;
+  any movement makes every derived join historical and non-actionable, matching the
+  discipline `_gather_dispatch_evidence` already applies.
+- **Allowlist, not escaping.** `textContent` prevents HTML execution; it does **not**
+  prevent disclosure. The raw producer carries an absolute filesystem path
+  (`runtime.root`, `fabric_job_view.py:645`), raw first-line errors
+  (`_bounded(error)`, `:403`) and arbitrary model-authored result/artifact strings. The
+  workspace emits a **finite allowlisted view**: `runtime.root` is never emitted;
+  `attempt.error` becomes `error_present` plus an allowlisted classification; free-text
+  fields pass the **existing** redaction owner
+  (`chairman_control_room_remote._reject_sensitive_values`, `:497` — email, private host,
+  path, session, `X-CCR-Token`, `traceback`) using its established
+  redact-to-fixed-token idiom (`_project_agent_os_freeform`, `:520`), not a new
+  sanitizer and not a new policy owner. Errors shown to the viewer are fixed strings.
+- **"Field-for-field" means allowed fields.** §11's cross-check compares the semantics of
+  the allowlisted projection against its sources. It must never be satisfied by leaking
+  a raw field, and a field that is deliberately not projected is checked as
+  *correctly withheld*.
+- **Negative controls are mandatory**: a secret-shaped string, an absolute path, and an
+  oversize document must each be proven absent from JSON *and* DOM.
 
 ---
 
-## 8. No-rebuild boundaries
+## 9. No-rebuild boundaries
 
 Do not create: a second Job/Attempt/Worker lifecycle or store; a conversation or
-transcript database; a provider-session registry; an evidence store; an auth plane; a
-graph authority; a second freshness clock, cursor DB, queue, retry ledger or
-scheduler; a universal `/api/mission` invoke endpoint; a second sanitizer or
-redaction owner; a parallel state/coverage vocabulary.
+transcript archive; a second connected reader; a provider-session registry; an evidence
+store; an auth plane or identity provider; a graph authority; a universal acceptance
+store; a second freshness clock, cursor DB, queue, retry ledger, cache authority or
+scheduler; a universal `/api/mission` invoke endpoint; a second sanitizer, redaction or
+label authority; a parallel state/coverage vocabulary; a new `DISPATCH_STATES` token.
 
-Do not edit: `index.html`, `control_room.js`, `control_room.css` (DF1 plan §4 already
-fences these); any producer module in §2; any X1 route, static asset, package or
-install closure; `.github/workflows/`; any Figma file (the existing pause stands).
+Do not edit: any producer module in §3; any X1 route, static asset, package or install
+closure; `.github/workflows/`; any Figma file.
 
-Do not take over: #702's six paths, #523's DF1 plan, #595, #600, #653, #677, #684,
-#688, AD-RET2, CCTX-1, PF1, DF1, Macro #7120 or #7181.
+Do not take over: #702's six paths, #523's DF1 plan, the incumbent connected-reader work,
+#595, #600, #653, #677, #684, #688, #697, H3e, AD-RET2, CCTX-1, PF1, DF1, Macro #7120 or
+#7181. Source custody of `fabric_job_view.py` stays with its owner (§5.2).
 
 ---
 
-## 9. One implementation path list
+## 10. Implementation path list
 
 Create:
 
-1. `control_plane/mission_workspace.py` — the pure reducer of §4.
+1. `control_plane/mission_workspace.py` — the pure reducer of §6.
 2. `app/static/chairman_control/mission.html`
 3. `app/static/chairman_control/mission.js`
 4. `app/static/chairman_control/mission.css`
-5. `tests/test_mission_workspace.py` — reducer + AST anti-authority test.
-6. `tests/test_chairman_control_room_mission_server.py` — route/auth/size tests.
+5. `tests/test_mission_workspace.py` — reducer, total-truth-table matrix, AST anti-authority test.
+6. `tests/test_chairman_control_room_mission_server.py` — route, query, auth, budget, size.
 7. `tests/test_chairman_control_room_mission_ui.py` — browser tests.
-8. `docs/superpowers/plans/<date>-mastermind-os-r2-mission-workspace.md` — the plan.
+8. `docs/superpowers/plans/<date>-mastermind-os-r2a-mission-workspace.md` — the plan.
 
 Modify:
 
 9. `scripts/chairman_control_room.py` — add exactly four routes.
 10. `docs/CHAIRMAN_CONTROL_ROOM.md` — document them.
 
-An eleventh path is `DECISION_REQUEST PATH_BOUNDARY_REQUIRED`.
+Plus **path 11**, which is not optional and is not this record's to grant — see §10.1.
 
-Routes, following DF1 §5 exactly:
+Routes, following DF1 §5:
 
 ```text
-GET /mission?work_ref=<ref>&root_job_id=<id>     token-injected mission.html, same CSP as /
-GET /api/mission?work_ref=<ref>&root_job_id=<id> token + Host + Origin + no-store gated JSON
+GET /mission?work_ref=<ref>&root_job_id=<id>      token-injected mission.html, same CSP as /
+GET /api/mission?work_ref=<ref>&root_job_id=<id>  token + Host + Origin + no-store gated JSON
 GET /static/mission.js
 GET /static/mission.css
 ```
 
-Rules: `/api/mission` reads the one cached CCR snapshot (no synchronous composition)
-and performs **one** bounded `read_fabric_view(runtime_root, root_job_id,
-control_config_path=…)` call; canonical-encoded; maximum successful body exactly
-262144 bytes; larger returns HTTP 503 with
-`{"schema":"mastermind.mission_workspace_error.v1","error":"MISSION_WORKSPACE_RESPONSE_TOO_LARGE"}`;
-no partial success bytes; no new POST; `/` remains Advanced.
+### 10.0 The query decision — RESOLVED, with conditions
 
-**One cost the implementer must not discover in production.** `read_fabric_view` is
-the only I/O in the request path and it is *not* free: `_gather_jobs` calls
-`runtime.jobs.list_jobs()`, which takes no arguments and is a **full table scan**,
-with the root filter applied in Python (`docs/FABRIC_JOB_VIEW.md`, implementation
-notes). It must be opened with `Runtime.at(root, create=False)` — a bare
-`Runtime.at(root)` defaults to `create=True` and would manufacture an empty database
-and then report a quiet, job-free company. The route therefore: (a) calls it once per
-request and never in a loop; (b) is measured against the largest real runtime
-available before acceptance, with the number recorded in the receipt; (c) if that
-measurement exceeds a request budget, the fix is a bounded cache in the *existing*
-cache owner, never a new store and never a second gather. `compose_fabric_view` itself
-is pure and accepts an injected `generated_at`, so the reducer stays deterministic.
+v1 returned `PATH_BOUNDARY_REQUIRED`. Review 5228415542 resolves it: **a finite query is
+allowed for the NEW `/mission` and `/api/mission` resources only.** DF1's `/brief` and
+`/api/brief` keep their exact reject-every-query rule; there is **no global relaxation**.
+The allowance is bounded by all of the following, every one of which precedes any read:
 
-**The one query-string deviation from DF1 must be stated, not smuggled.** DF1's
-`/brief` and `/api/brief` reject every non-empty query string. `/api/mission` needs
-two parameters. They are validated as a closed pair before any read: `work_ref`
-against `chairman_control_room._WS_TOKEN_RE`, `root_job_id` against the Runtime job-ref
-grammar, both required, no other key accepted, neither ever used to build a path.
-Any other query shape is a 400. This narrowing needs Sol's ruling, not an
-implementer's judgement.
+- **exactly one occurrence each** of the two accepted keys; a repeated key is a refusal,
+  not a last-value-wins;
+- **length bounds checked before decoding**;
+- strict rejection of malformed percent-escapes, invalid UTF-8, blank values, and any
+  unknown key;
+- current owner grammar for each value (`_WS_TOKEN_RE` for the work ref; the Runtime
+  job-ref grammar for the root id);
+- **no path, host, argv, endpoint or profile is ever constructed from either value**;
+- the exact `(work_ref, root_job_id)` pair is verified to exist as an authorized
+  relation, and the named Job is verified to be an actual root — **two individually
+  valid ids are neither a join nor a permission**;
+- the owning source generation is revalidated; a conflicting or stale relation stays
+  refused/unknown rather than rendered.
 
-Order of work: reducer + tests red-then-green → server route + tests → assets + UI
-tests → browser acceptance → receipt. Return state `DRAFT / HOLD-FOR-SOL /
-BUILT_NOT_PROVEN`.
+Any other query shape is a 400 before any read. This closes the boundary question for
+this query shape only. It is **not** a source START, not an implementation admission,
+and not a release gate.
 
-### 9.1 What R2 must NOT re-render
+Other route rules: `/api/mission` reads the one cached CCR snapshot (no synchronous
+composition) and performs **one** budgeted `read_fabric_view` call under §8.3;
+canonical-encoded; maximum successful body exactly 262144 bytes; larger returns HTTP 503
+with `{"schema":"mastermind.mission_workspace_error.v1",
+"error":"MISSION_WORKSPACE_RESPONSE_TOO_LARGE"}`; no partial success bytes; no new POST;
+`/` remains Advanced.
+
+**A cost the implementer must not discover in production.** `read_fabric_view` is the
+only I/O in the request path and it is not free: `_gather_jobs` calls
+`runtime.jobs.list_jobs()`, which takes no arguments and is a **full table scan**, with
+the root filter applied in Python, and then reads per-job attempts and provenance. One
+scan per viewer is **not** a scaling contract — §8.3's budgets and the existing cache
+owner are what bound it, and the measurement is a check on that binding, not a substitute
+for it. It must be opened with `Runtime.at(root, create=False)`: a bare `Runtime.at(root)`
+defaults to `create=True` and would manufacture an empty database and then report a quiet,
+job-free company.
+
+### 10.1 The entry journey — path 11, owned elsewhere
+
+The ten paths above produce a **route**, not a journey. §3.1 found a dangling
+`root_job_id` string in the existing drawer that navigates nowhere; a browser scenario
+that hand-constructs `/mission?work_ref=…&root_job_id=…` in the address bar leaves that
+dangling id exactly as it was and proves nothing about the persona.
+
+Two admissible dispositions, and the implementer must land on one explicitly:
+
+- **(a) Close it.** Reconcile with the incumbent DF1 / Control Room writer and freeze
+  **one** exact mission link in the existing Program or autonomy drawer, under that
+  owner's custody, as path 11. No broad index or style rewrite, no default cutover, no
+  second navigation model.
+- **(b) Declare it.** If that reconciliation is not granted, the slice ships as
+  **route-only and explicitly NOT user-complete**, and says so in the receipt and in the
+  UI copy. It does not get described as a Chairman journey.
+
+**The label maps are not the implementer's to clone.** v1 said `mission.js` would carry
+its own copy of `AU_DISPATCH` / `AU_DISPATCH_VARIANT` because the path ceiling forbids
+editing `control_room.js`, and called that a recorded cost. That is a second label
+authority created for path-ceiling convenience, which §9 forbids. Corrected: either
+consume the existing map or qualified projection, or freeze a **shared extraction with
+its owner** as part of path 11. An inconvenient ceiling is a reconciliation to request,
+not a licence to fork a vocabulary.
+
+### 10.2 What R2A must not re-render
 
 Because the shipped inspector already has a work-ref drawer and an autonomy drawer
-(§2.1), the mission page is **only the tree and its per-job evidence**:
-mission header, principal summary, `children[]` with roles and attempts, output,
-review, consumption posture, the `conversation` refusal, and the missingness list.
+(§3.1), the mission page is **only the tree and its per-job facets**: mission header,
+principal summary, `children[]` with roles and attempts, execution, review, transport,
+acceptance, posture, the conversation exclusion, and the missingness list. It must not
+re-implement the Agent OS / GitHub / attention / source-drift / navigation rails — link
+back to `/#work` and `/#autonomy` — and it introduces no action controls at all
+(`feature_gates.actions: READ_ONLY`), so `dispatchUnsafe`'s suppression rule is inherited
+by a later wave, never re-derived.
 
-- It must **not** re-implement the Agent OS / GitHub / attention / source-drift /
-  navigation rails — `renderDetail` already owns those; link back to `/#work` and
-  `/#autonomy` instead.
-- It must **not** re-implement dispatch chips or their label maps. The closed
-  vocabulary and the unsafe-state suppression already live in `control_room.js:1525`
-  and `:1609`. `mission.js` carries its own copy only because the DF1 path ceiling
-  forbids editing `control_room.js`; that duplication is a **deliberate, recorded**
-  cost of the fence, not an invitation to diverge. If the two label maps ever
-  disagree, the shipped one wins and the mission copy is the bug.
-- It must **not** introduce a second refusal rule for owed actions. R2 has no action
-  controls at all (`feature_gates.actions: READ_ONLY`), so the question cannot arise;
-  a later wave inherits `dispatchUnsafe`, it does not re-derive it.
+Order of work: reducer + truth-table matrix red-then-green → server route, query and
+budget tests → assets and UI tests → path-11 disposition → browser proof → receipt.
+Return state `DRAFT / HOLD-FOR-SOL / BUILT_NOT_PROVEN`.
 
 ---
 
-## 10. Required producer gaps
+## 11. Required producer gaps
 
-Each is owned by an existing owner. **None may be closed by the R2 consumer.**
+Each is owned by an existing owner. **None may be closed by this consumer.**
 
-| Gap | What is missing | Owner | R2 behaviour until closed |
+| Gap | What is missing | Owner | Behaviour until closed |
 |---|---|---|---|
-| **G1** | per-child worker identity in `mastermind.fabric_job_view.v1` | Executive OS / `fabric_job_view` owner | `children[].worker_id` renders `null` + one `MISSING_PRODUCER` fact on `children.worker_id`, producer `executive_runtime`. A safe closure adds `worker_id` only — never `os_principal_uid` or `provider_home_identity`. |
-| **G2** | no producer for `CONTINUED` / `STOPPED` | dispatch-consumption owner + the Dialogue close-law owner | both render `NOT_PROJECTED`; never inferred from Slack text or watcher silence |
-| **G3** | no durable authorized visible-content/history resource for a finished mission; the one hot-window producer is prospective-capture-only, 4-turn FIFO, `agentMessage`-only, and its `ohf-observe-turn` surface has no production consumer | OHF / Fabric owner; organizationally ASD-A4 under `WS:CHAIRMAN-CONTROL-ROOM` (`status: todo`, gated behind ASD-A3 **and** P0B) | `conversation` section is `UNAVAILABLE / NOT_PROJECTED` with the stated reason code |
-| **G4** | no HTTP read path to `mastermind.fabric_job_view.v1` | this R2 consumer creates it as a route over the existing library — the *only* new surface R2 adds | n/a |
+| **G1** | per-child worker identity in `mastermind.fabric_job_view.v1` | Executive OS / `fabric_job_view` owner | `children[].worker_id` null + one `MISSING_PRODUCER` fact. A safe closure adds `worker_id` only — never `os_principal_uid` or `provider_home_identity`. |
+| **G2** | no producer for `CONTINUED` / `STOPPED` | dispatch-consumption owner + dialogue close-law owner | both `NOT_PROJECTED`; never inferred from Slack text or watcher silence; no new token |
+| **G3** | no authorized after-the-fact content history through the admitted path; the hot window is prospective-capture-only, 4-turn FIFO, `agentMessage`-only, and `ohf-observe-turn` has no production consumer | incumbent connected-reader / content-resource owner; organizationally ASD-A4 (`status: todo`, behind ASD-A3 **and** P0B) | bounded authorized hot window with explicit gaps remains the accepted first live-content release under its owner; this sub-slice simply excludes content |
+| **G4** | no HTTP read path to `mastermind.fabric_job_view.v1` | this consumer creates it — the only new surface R2A adds | n/a |
 | **G5** | no human-readable mission title on an Executive Job | Executive OS | `mission.title` null + `MISSING_PRODUCER`; never synthesized from the workstream title |
-| **G6** | `ceo_submit_armed` is `false` in the shipped control template, so no Chairman-authenticated admitted root exists on a production host | Chairman ceremony (host-owned), out of scope here | the acceptance run below uses a real Runtime with a real root, and the record states which host it was |
+| **G6** | *(withdrawn as stated in v1)* the arm-state claim was a copied upstream defect, not a gap. Recorded in §5.2 against `fabric_job_view.py`'s owner. | `fabric_job_view` owner | existing roots retained after DISARM; the producer's existential sentence is not echoed |
+| **G7** | **no product/artifact acceptance producer at all** | the existing acceptance/decision owner | `acceptance.state: NOT_PROJECTED`; posture ceiling is `REVIEWED_NOT_ACCEPTED`; `ACCEPTED_PRODUCT` is unreachable |
 
 ---
 
-## 11. Browser acceptance scenario
+## 12. Proof obligations
 
-Local P0A path, real browser, one real Runtime root. Screenshots are attachments,
-never production captures.
+### 12.1 L2 — local token-gated mission-tree proof (R2A's ceiling)
+
+Local P0A path, real browser, one real Runtime root. Screenshots are attachments, never
+production captures.
 
 1. Start the local Control Room against a checkout whose
-   `data/control_plane/executive.sqlite3` contains at least one real root; obtain a
-   root id with `python3 scripts/fabric_job_view.py --list-roots --runtime-root <abs>`.
-2. Open `/` (Advanced). Confirm the token is delivered and the cached state loads.
-3. Navigate to `/mission?work_ref=<WS:…>&root_job_id=<id>` for a Program whose
-   autonomy card resolves exactly that root.
-4. Assert on screen: the Program title and state; `root_job_id` with
-   `runtime_root_state: RESOLVED`; the accountable seat and `current_worker`;
-   the child list with each `orchestration_role` and `latest_attempt.status`;
-   the posture chip; `review.verdict`; `result.state` with artifacts;
-   the consumption line derived from `dispatch_state` + `w3c`;
-   the `conversation` section reading *not projected*, with its reason;
-   every `MISSING_PRODUCER` fact from §10 visible rather than hidden.
-5. Cross-check every rendered value against the underlying evidence in the same
-   session: `python3 scripts/fabric_job_view.py --runtime-root <abs> --root-job-id
-   <id> --json` for the mission tree, and the `autonomy` block of `GET /api/state`
-   for the principal/dispatch fields. **The page and the producers must agree
-   field-for-field** — this, not a green suite, is the acceptance.
-6. Prove at least one negative from §12 on the same page.
-7. Prove read-only-ness: no POST is issued, no storage is written, and no
-   provider/runtime mutation occurs during the whole run.
-8. Desktop 1440, tablet 1024 and mobile 390 widths: no horizontal overflow, keyboard
-   activation of every known target, focus restoration after any dialog, no
-   colour-only state.
+   `data/control_plane/executive.sqlite3` holds at least one real root; find a root id
+   with `python3 scripts/fabric_job_view.py --list-roots --runtime-root <abs>`.
+2. Open `/` (Advanced); confirm the token is delivered and cached state loads.
+3. Reach the mission page **through path 11's disposition** — the frozen drawer link if
+   §10.1(a) was granted; otherwise record explicitly that entry was hand-constructed and
+   the slice is not user-complete.
+4. Assert on screen: Program title and state; `root_job_id` with `runtime_root_state`;
+   accountable seat and `current_worker`; the child list with each `orchestration_role`
+   and `latest_attempt.status`; the posture chip **with its firing rule**; `review
+   .verdict`; `execution.state`; `transport.dispatch_state`; `acceptance` reading
+   *not projected*; `conversation` reading *excluded from this sub-slice*; every
+   `MISSING_PRODUCER` fact visible rather than hidden.
+5. **Cross-check the allowlisted projection against its producers in the same session**:
+   `python3 scripts/fabric_job_view.py --runtime-root <abs> --root-job-id <id> --json`
+   for the tree, and the `autonomy` block of `GET /api/state` for principal and
+   transport. Every projected field must agree; every deliberately withheld field must
+   be confirmed **absent** from JSON and DOM.
+6. Prove the §12.3 negatives that the available fixtures can reach.
+7. Prove read-only-ness: no POST, no storage write, no provider or runtime mutation.
+8. Desktop 1440, tablet 1024, mobile 390: no horizontal overflow, keyboard activation of
+   every known target, focus restoration after any dialog, no colour-only state.
 
-Not acceptance: a green test suite, a screenshot, a merged PR, or a rendered page
-whose values were never compared to the producers.
+Not proof: a green suite, a screenshot, a merged PR, or a page whose values were never
+compared to the producers.
 
----
+### 12.2 L3 → L4 sequence
 
-## 12. Negative cases (each must render distinctly)
+`R2A (L2)` → **authorized live content through the incumbent owner** → `L3 authenticated
+client proof` → `L4 product acceptance`. The content stage carries its own obligations,
+which this record names rather than performs: **one real observed output before native
+terminal completion**; **viewer revoke, reconnect and gap behaviour** proven; and **one
+terminal result consumed by the original controller**. No covert viewer grant may be
+minted to manufacture retention. L4 additionally requires G7.
 
-1. **Absent runtime** — `db_present: false`, `capability.state: NOT_INSTALLED`,
-   `root: null`, `children: []`, typed refusal. No directory, file or journal is
-   created by the read. Must not read as "no work".
-2. **Unreadable runtime** — `capability.state: UNSUPPORTED`, `degraded` names
-   `jobs unreadable: <first line>`. Distinct from case 1.
-3. **Unknown root** — `MISSING_PRODUCER` on `root` plus a degraded entry naming the
-   id. Not a 404 blank page.
-4. **Stale state** — the cached CCR snapshot is past TTL and the background refresh
-   failed: `read_state: HISTORICAL`, `state_refresh_error` surfaced, dated. A
-   retained stale empty section must **not** become a clear/complete zero.
-5. **Ambiguous root** — 2+ candidates: `runtime_root_state: CONFLICT`,
-   `root_job_ambiguous: true`, candidates listed, `root_job_id` stays `null`.
-   Reconciliation required; never a pick by recency.
-6. **Unjoined children** — `unjoined_job_count > 0`: coverage `INCOMPLETE`, totals
-   `null`, ids listed, gap named. Never a silent subset.
-7. **Effect unknown** — `EFFECT_UNKNOWN` outranks every optimistic signal; every
-   actuator stays disabled; copy says *reconcile the original operation, do not
+### 12.3 Negative matrix — each must render distinctly
+
+Truth-table discrimination (§5.4) — one counterexample per rule:
+
+1. **EFFECT_UNKNOWN outranks optimistic progress**, checked before every other signal;
+   every actuator stays disabled; copy says *reconcile the original operation, do not
    resend*.
-8. **Runtime generation conflict** — `runtime_generation_state: CONFLICT` ⇒
-   `RUNTIME_BINDING_RECONCILIATION_REQUIRED`, `historical: true`, even when an
-   earlier generation looked terminal.
-9. **Unconsumed delivery** — `DELIVERY_UNCONSUMED` with
-   `canonical_wake_unacknowledged`: delivered, never acknowledged. Must not render as
-   active, started, executing or waiting-on-worker.
-10. **Terminal Attempt without canonical return** — `WATCH_UNPROVEN` /
-    `canonical_w3c_evidence_required`. A `COMPLETED` Attempt is historical context,
-    never a return.
-11. **Corrected evidence** — a `COMPLETED` job with no result payload:
-    `result.state: ACCEPTED`, `summary: null`, plus the `DEGRADED` fact. Posture is
-    `RETURNED_UNCONSUMED`, not `COMPLETE`.
-12. **Undecided review** — absent and empty verdicts both read `NOT_YET` with a
-    `MISSING_PRODUCER` fact; never `reject`, never `false`.
-13. **Terminal STOP** — `CONTINUED`/`STOPPED` render `NOT_PROJECTED` with G2's
-    reason. A terminal child wave never implies the parent Program is terminal, and a
-    child STOP never disarms a sibling or aggregate lane.
-14. **Missing source** — `control.json` absent: all five `armed` bits `null`,
-    `armed.source: "absent"`, one degraded entry. Never `false`.
-15. **Unarmed submit** — `ceo_submit_armed: false`: the degraded entry explains why
-    no admitted job can exist, rather than showing an empty mission.
-16. **Hostile text** — a job summary containing HTML, a Slack mention or a
-    ` ` renders as inert text; no interpolation, no execution.
-17. **Oversize** — a document past 262144 bytes returns the typed 503 before any
-    partial bytes are written.
-18. **Bad query** — a missing, extra or malformed parameter is a 400 before any read.
+2. **Runtime generation conflict** ⇒ `RECONCILIATION_REQUIRED`, `historical: true`, even
+   when an earlier generation looked terminal.
+3–6. **FAILED / CANCELLED / LOST / RATE_LIMITED** execution each render as themselves,
+   never as a return and never as a completion.
+7. **Blocked** — Steward blocker or Agent-OS declared blocker present.
+8. **Unconsumed delivery** — `DELIVERY_UNCONSUMED` / `canonical_wake_unacknowledged`:
+   delivered, never acknowledged; must not render as active, started or waiting.
+9. **STARTED** ≠ pickup: `PICKUP_ACKNOWLEDGED` alone never renders `RUNNING`.
+10. **Waiting** — the four pre-return transport states.
+11. **NOT_STARTED** — admitted, never claimed; never `RUNNING`, never `FAILED`.
+12a. **Consumption unknown** — `WATCH_UNPROVEN`, and separately a stale `RETURNED`: both
+   render *we cannot tell*, **not** *unconsumed*.
+12b. **Review rejected.**
+12c. **Returned, unreviewed** — Case A of §5.1: `execution.state == ACCEPTED`,
+   `review.verdict == NOT_YET`. Must **not** render completion.
+12d. **Reviewed, not accepted** — the honest ceiling of the current estate.
+12e. **Accepted product** — unreachable today; the test asserts it is unreachable while
+   `acceptance.state == NOT_PROJECTED`.
+
+Source, coverage and identity:
+
+13. **Absent runtime** — `db_present: false`, `capability.state: NOT_INSTALLED`,
+    `root: null`, `children: []`; no directory, file or journal is created; never reads
+    as "no work".
+14. **Unreadable runtime** — `capability.state: UNSUPPORTED`; distinct from 13.
+15. **Unknown root** — `MISSING_PRODUCER` on `root` plus a named degraded entry.
+16. **Stale state** — cached snapshot past TTL with a failed refresh: `read_state:
+    HISTORICAL`, dated; a retained stale empty section must **not** become a clear zero.
+17. **Ambiguous root** — 2+ candidates: `CONFLICT`, candidates listed, `root_job_id`
+    stays null; never a pick by recency.
+18. **Unjoined children** — coverage `INCOMPLETE`, totals null, ids listed, gap named.
+19. **Corrected evidence** — Case B of §5.1: `ACCEPTED` with `summary: None` plus the
+    `DEGRADED` fact; posture follows its review verdict and the fact renders beside it.
+20. **Undecided review** — absent and empty verdicts both `NOT_YET`; never `reject`.
+21. **Terminal STOP** — `CONTINUED`/`STOPPED` render `NOT_PROJECTED` (G2). A terminal
+    child wave never implies the parent Program is terminal, and a child STOP never
+    disarms a sibling or aggregate lane.
+22. **admission → DISARM → read existing root** — the root is still returned; new-submission
+    unavailability is explained; **no existential claim is rendered** (§5.2).
+23. **Absent config ≠ false** — all five bits `null`, `armed.source: "absent"`,
+    `submission_availability: UNKNOWN`.
+
+Query, budget and exposure:
+
+24. **Bad query** — missing, extra, blank, duplicated, over-length, malformed-escape or
+    invalid-UTF-8 parameter: 400 before any read.
+25. **Valid ids, invalid join** — two individually well-formed values whose pair is not an
+    authorized relation, and a well-formed job id that is not a root: both refused.
+26. **Budget exceeded** — typed refusal plus `coverage: INCOMPLETE`; never silent
+    truncation.
+27. **Oversize** — past 262144 bytes, the typed 503 before any partial bytes.
+28. **Secret-shaped and path-shaped material upstream** — absent from JSON **and** DOM;
+    `runtime.root` never emitted; `attempt.error` never emitted raw.
+29. **Hostile text** — a summary containing HTML, a Slack mention or a ` ` renders
+    inert; no interpolation, no execution.
 
 No negative may collapse to a spinner, a blank card, a false zero or a green badge.
 
@@ -677,70 +886,71 @@ No negative may collapse to a spinner, a blank card, a false zero or a green bad
 ## 13. Follow-on handoff
 
 ```text
-HANDOFF 5 — Mastermind OS R2 mission-workspace implementation
-PREFERRED_AVENUE: bounded engineering worker (Sonnet-class or equivalent);
-  Opus/Fable not required — this freeze removed the open architecture questions.
+HANDOFF 5 — Mastermind OS R2A mission-tree implementation
+PREFERRED_AVENUE: bounded engineering worker (Sonnet-class or equivalent)
 RECEIVER_BINDING_MODE: CAPACITY_SELECTABLE
 PARENT: mastermind-os-rollout-contract-20260916-sol-001 (Mastermind #702)
+CARRIER: Mastermind #704
 CONTRACT: docs/superpowers/specs/2026-09-16-mastermind-os-mission-workspace-consumer-freeze.md
+GATE: this freeze must clear one non-author exact-head review before implementation starts.
 
 Mission
-  Implement mastermind.mission_workspace.v1 exactly as frozen in §4, on the local
-  P0A path only, using the ten-path ceiling in §9.
+  Implement mastermind.mission_workspace.v1 exactly as frozen in §6, on the local
+  P0A path only, using the path ceiling in §10.
 
 Sequence
-  1. Write the plan at docs/superpowers/plans/<date>-mastermind-os-r2-mission-workspace.md.
-  2. Reducer + tests first: observe the intended RED, then green. AST anti-authority
-     test proving no I/O, clock, environment, randomness or mutation.
-  3. Server route + auth/size tests. Four routes, no POST.
+  1. Plan at docs/superpowers/plans/<date>-mastermind-os-r2a-mission-workspace.md.
+  2. Reducer + the §5.4 total-truth-table matrix first: observe the intended RED, then
+     green. AST anti-authority test proving no I/O, clock, environment, randomness or
+     mutation.
+  3. Server route, query validation (§10.0), budget and auth tests. Four routes, no POST.
   4. Assets + UI tests. Do not touch index.html / control_room.{js,css}.
-  5. Browser acceptance per §11 against a real Runtime root, with the field-for-field
-     producer cross-check. Record the host.
-  6. Publish one Draft/HOLD PR with a receipt; do not merge, install or deploy.
+  5. Settle path 11 (§10.1) with the incumbent DF1/Control Room writer: either the frozen
+     drawer link, or an explicit route-only NOT-user-complete declaration.
+  6. L2 proof per §12.1 against a real Runtime root, with the allowlisted cross-check.
+  7. One Draft/HOLD PR with a receipt. Do not merge, install or deploy.
 
 Binding constraints
-  - Consume producers; create none. §8 no-rebuild list is binding.
-  - Reuse DF1's source-state, coverage, section-envelope and evidence-ref
-    vocabularies verbatim. Do not mint a parallel vocabulary.
-  - G1, G2, G3, G5 stay open and render as typed missingness. Closing any of them
+  - Consume producers; create none. §9 is binding.
+  - Reuse DF1's source-state, coverage, section-envelope and evidence-ref vocabularies
+    verbatim, and fabric_job_view's missingness fact shape verbatim.
+  - Never display product completion from execution, review or transport aliases (§5.3).
+  - Never echo the producer's arm-state existential sentence (§5.2).
+  - Never clone the dispatch label maps (§10.1).
+  - Bound request work before exposure; allowlist before escaping (§8.3).
+  - G1, G2, G3, G5, G7 stay open and render as typed missingness. Closing any of them
     inside this consumer is out of scope and is a blocker to surface, not to fix.
-  - Remote X1 unchanged (§7).
-
-Blocker to return before coding
-  §9's query-string narrowing of DF1's "reject every non-empty query string" rule
-  needs an explicit Sol ruling. Return PATH_BOUNDARY_REQUIRED and wait if it is
-  not granted.
+  - Remote X1 unchanged. No JOB-001 replay, no provider effect, no credential, no install.
 
 Completion
   An implementation worker can build this without inventing a schema or an authority.
-  Acceptance is §11 step 5 — the page agreeing field-for-field with the producers —
-  plus at least one §12 negative. A green suite, a screenshot or a merged PR is not
-  acceptance.
+  L2 acceptance is §12.1 step 5 — the allowlisted projection agreeing with its producers,
+  and every withheld field proven absent — plus the §12.3 discrimination matrix. A green
+  suite, a screenshot or a merged PR is not acceptance. R2A is not R2.
 ```
 
 ---
 
 ## Sources
 
-Read at pin `bf843961cd6bbd3e5c4cbd68df43bbba2d05b98f`, this checkout:
+Read at inspected commit `bf843961c0e1b5bd45fa481f0138c71f2a87d4e2`; all cited blobs
+verified identical at current protected `e8803ba3d3ee928d150d7dcac1a1e2bad2dc0d48` (§0).
 
 - `control_plane/fabric_job_view.py`, `docs/FABRIC_JOB_VIEW.md`
 - `control_plane/chairman_control_room.py`, `scripts/chairman_control_room.py`,
-  `docs/CHAIRMAN_CONTROL_ROOM.md`
-- `control_plane/autonomy_control_room_projection.py`
-- `control_plane/executive_steward.py`
+  `docs/CHAIRMAN_CONTROL_ROOM.md`, `app/static/chairman_control/control_room.js`
+- `control_plane/autonomy_control_room_projection.py`, `control_plane/executive_steward.py`
 - `control_plane/chairman_control_room_remote.py`, `ops/control_room_remote/install.sh`
 - `control_plane/visible_turn_projection.py`, `control_plane/executive_worker_broker.py`,
   `control_plane/remote_worker_broker_client.py`,
   `control_plane/executive_dialogue_observation.py`
 - `control_plane/executive_orchestration_principal.py`,
   `control_plane/executive_orchestration_result.py`,
-  `control_plane/executive_terminal_return.py`,
-  `control_plane/runtime_binding_projection.py`
+  `control_plane/executive_terminal_return.py`, `control_plane/runtime_binding_projection.py`
 - `control_plane/executive_inbox.py`, `docs/EXECUTIVE_INBOX.md`, `docs/EXECUTIVE_MCP.md`
 - `docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md`, `docs/OPERATION_LIVENESS_SOUNDNESS_LAW.md`
 - `docs/superpowers/specs/2026-09-07-chairman-control-room-decision-first-experience-design.md`
   (merged, `185dc742`) and its H1A supersession addendum
-- DF1 plan at `3c0a933b` (open Draft PR #523)
-- Mastermind #702 at `091592da` (all six paths)
+- DF1 plan at `3c0a933b` (open Draft #523); Mastermind #702 at `091592da`
 - Macro `agentos/workstreams/WS-CHAIRMAN-CONTROL-ROOM.md` at `0f62daf54571`
+- Review 5228415542 at `8b94141106200f0c48b6d033cca19a8007ef0031`
