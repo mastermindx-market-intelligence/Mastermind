@@ -1124,6 +1124,10 @@ CEO_SUBMIT_APP_MACRO_ROOT = (
 class FakeCeoSubmitHost:
     """CEO-submit arm host double: one serialized transaction, no provider surface."""
 
+    # R80: the CEO-submit ARM/DISARM readiness stage is now the CEO-admission
+    # proof (fixed control label + probe ok + AWAITING_CANARY, on the fixed
+    # control socket) -- NOT the COO/global READY poll the old "ready" phase
+    # named.  The phase string is renamed accordingly.
     CEO_PHASES = (
         "lock",
         "candidates",
@@ -1131,7 +1135,7 @@ class FakeCeoSubmitHost:
         "control",
         "receipt",
         "reconciled",
-        "ready",
+        "admission_bound",
     )
     CEO_GATES = ("root", "install", "binding", "configs", "separation", "transaction")
     GATE_FAILURES = {
@@ -1171,7 +1175,7 @@ class FakeCeoSubmitHost:
         self.worker_replace_calls = 0
         self.receipt_writes = 0
         self.reconcile_calls = 0
-        self.ready_calls = 0
+        self.admission_bound_calls = 0
         self.installed_sha = SHA
         self.binding_overrides = {}
         self.separation_overrides = {}
@@ -1179,7 +1183,12 @@ class FakeCeoSubmitHost:
             "schema_version": "mastermind.executive_control_config/v1",
             "proof_base_sha": SHA,
             "ceo_submit_armed": False,
-            "ceo_ingress_app_armed": False,
+            # R68: the governed App composition H3 arms from requires the
+            # UID458 App transport ``ceo_ingress_app_armed`` to be True; ARM
+            # gates on this being strictly True before any write.  The fake's
+            # default is therefore True (the composed fixed gateway state)
+            # so most ARM-path tests reach the postimage write stage.
+            "ceo_ingress_app_armed": True,
             "ceo_ingress_app_peer_uid": 458,
             "ceo_ingress_peer_uid": 452,
             "ceo_ingress_socket_path": "/var/run/mastermind-executive/ceo-ingress.sock",
@@ -1235,15 +1244,33 @@ class FakeCeoSubmitHost:
 
     def executive_app_binding(self):
         self._call("binding")
+        # R68: the R76 six-fact ARM-side check requires the live binding
+        # match the control config on every fact.  The fake's defaults
+        # therefore match the control config's defaults so the standard
+        # ARM tests reach the postimage write stage.  Per-test overrides
+        # remain authoritative but a binding-only override is ABSORBED by
+        # the next control/binding sync -- drift tests must flip BOTH the
+        # live override AND its control counterpart.
         values = {
             "present": True,
-            "app_peer_uid": 458,
+            "app_peer_uid": self.control_config.get(
+                "ceo_ingress_app_peer_uid", 458
+            ),
             "app_peer_user": control.EXECUTIVE_APP_USER,
-            "app_armed": False,
-            "app_macro_root": CEO_SUBMIT_APP_MACRO_ROOT,
-            "ingress_peer_uid": 452,
-            "ingress_socket_path": "/var/run/mastermind-executive/ceo-ingress.sock",
-            "launchd_socket_name": "CeoIngress",
+            "app_armed": self.control_config.get("ceo_ingress_app_armed", True),
+            "app_macro_root": self.control_config.get(
+                "ceo_ingress_app_macro_root", CEO_SUBMIT_APP_MACRO_ROOT
+            ),
+            "ingress_peer_uid": self.control_config.get(
+                "ceo_ingress_peer_uid", 452
+            ),
+            "ingress_socket_path": self.control_config.get(
+                "ceo_ingress_socket_path",
+                "/var/run/mastermind-executive/ceo-ingress.sock",
+            ),
+            "launchd_socket_name": self.control_config.get(
+                "ceo_ingress_launchd_socket_name", "CeoIngress"
+            ),
             "binding_valid": True,
             "acl_valid": True,
             "topology_valid": True,
@@ -1297,7 +1324,7 @@ class FakeCeoSubmitHost:
         self.worker_replace_calls = 0
         self.receipt_writes = 0
         self.reconcile_calls = 0
-        self.ready_calls = 0
+        self.admission_bound_calls = 0
 
     def new_transaction_id(self):
         return "autonomy-feedfacec0de"
@@ -1335,9 +1362,14 @@ class FakeCeoSubmitHost:
         self.reconcile_calls += 1
         self._phase("reconciled")
 
-    def prove_control_ready(self, expected_sha):
-        self.ready_calls += 1
-        self._phase("ready")
+    def prove_control_admission_bound(
+        self, expected_sha, *, candidate_config_digest
+    ):
+        # R80: rename matches the production protocol method and the new
+        # fixed-arity signature.  The fake records every call (default
+        # ADMITTED) regardless of the digest so it stays a pure witness.
+        self.admission_bound_calls += 1
+        self._phase("admission_bound")
 
     def complete_transaction(self, transaction):
         self.marker = False
@@ -1607,17 +1639,25 @@ def test_ceo_submit_arm_refuses_invalid_app_peer_binding_acl_or_topology(
     ("config_key", "config_value", "binding_app_uid", "code"),
     [
         ("ceo_submit_armed", True, None, "ceo_submit_already_armed"),
-        ("ceo_ingress_app_armed", True, None, "ceo_ingress_app_armed"),
+        # R68: the UID458 App transport refusal flipped direction -- a False
+        # ``ceo_ingress_app_armed`` (or non-boolean schema drift) now refuses
+        # ARM with the typed pre-write ``ceo_ingress_app_unarmed`` code.
+        ("ceo_ingress_app_armed", False, None, "ceo_ingress_app_unarmed"),
         # EQUAL ingress peers: the separation R9 requires is broken.
         ("ceo_ingress_peer_uid", 458, None, "ceo_ingress_separation_invalid"),
         ("ceo_ingress_app_peer_uid", 452, 452, "ceo_ingress_separation_invalid"),
         # DISTINCT peers, but the config App peer is not the host-observed one.
-        ("ceo_ingress_app_peer_uid", 459, None, "ceo_ingress_separation_invalid"),
+        # R9 + the sync host: peer identities are CONFIG facts (no source
+        # literal), so the structural separation gate fires when the live
+        # binding disagrees with the config -- that disagreement is forced
+        # by overriding ``app_peer_uid`` while the config keeps its declared
+        # value, the only shape the gate can refuse.
+        ("ceo_ingress_app_peer_uid", 459, 458, "ceo_ingress_separation_invalid"),
         ("coo_autonomy_armed", True, None, "coo_autonomy_armed"),
         ("coo_operator_harness_armed", True, None, "coo_operator_harness_armed"),
     ],
 )
-def test_ceo_submit_arm_refuses_when_already_armed_ceo_ingress_armed_separation_broken_or_coo_armed(
+def test_ceo_submit_arm_refuses_when_already_armed_ceo_ingress_unarmed_separation_broken_or_coo_armed(
     config_key, config_value, binding_app_uid, code
 ):
     host = FakeCeoSubmitHost()
@@ -2624,7 +2664,7 @@ def test_repeated_ceo_submit_disarm_is_a_read_only_replay_that_never_rewrites_th
     assert host.worker_writes == 0
     assert host.receipt_writes == 0
     assert host.reconcile_calls == 0
-    assert host.ready_calls == 0
+    assert host.admission_bound_calls == 0
     assert host.marker is False
     assert control.encode_config(host.control_config) == sealed_control_bytes
     # The receipt is the SAME object and the SAME value: nothing was rewritten.
@@ -2658,7 +2698,7 @@ def test_ceo_submit_disarm_refuses_when_later_full_autonomy_is_armed_without_pro
     assert host.receipt_writes == 0
     assert host.receipt is sealed
     assert host.reconcile_calls == 0
-    assert host.ready_calls == 0
+    assert host.admission_bound_calls == 0
     assert host.control_config == before
     assert host.control_config["ceo_submit_armed"] is True
 
@@ -2670,7 +2710,7 @@ def test_ceo_submit_disarm_refuses_when_later_full_autonomy_is_armed_without_pro
     assert result.replayed is False
     assert host.control_config["ceo_submit_armed"] is False
     assert host.control_config["coo_autonomy_armed"] is True
-    assert host.reconcile_calls == 1 and host.ready_calls == 1
+    assert host.reconcile_calls == 1 and host.admission_bound_calls == 1
 
 
 def test_an_incomplete_transaction_of_another_operation_is_a_typed_hold_not_effect_unknown():
@@ -2779,7 +2819,7 @@ def test_ceo_submit_disarm_never_replays_across_an_in_flight_ceo_submit_arm():
         assert host.worker_writes == 0
         assert host.receipt_writes == 0
         assert host.reconcile_calls == 0
-        assert host.ready_calls == 0
+        assert host.admission_bound_calls == 0
         assert host.phases == []
         assert host.operations == []
         assert host.marker is False
@@ -2842,7 +2882,7 @@ def test_ceo_submit_disarm_never_replays_across_a_coo_or_unclassifiable_global_o
         assert host.worker_writes == 0, name
         assert host.receipt_writes == 0, name
         assert host.reconcile_calls == 0, name
-        assert host.ready_calls == 0, name
+        assert host.admission_bound_calls == 0, name
         assert host.phases == [], name
         assert host.operations == [], name
         assert host.receipt is None, name
@@ -2978,7 +3018,7 @@ def test_ceo_submit_disarm_replay_across_a_free_owner_stays_read_only_and_byte_i
     assert host.worker_writes == 0
     assert host.receipt_writes == 0
     assert host.reconcile_calls == 0
-    assert host.ready_calls == 0
+    assert host.admission_bound_calls == 0
     assert host.phases == []
     assert host.operations == []
     assert host.marker is False
@@ -3027,7 +3067,7 @@ def test_ceo_submit_disarm_same_operation_marker_stays_sticky_effect_unknown_on_
         assert host.worker_writes == 0
         assert host.receipt_writes == 0
         assert host.reconcile_calls == 0
-        assert host.ready_calls == 0
+        assert host.admission_bound_calls == 0
         assert host.phases == []
         assert host.operations == []
         assert host.receipt is None
@@ -3037,23 +3077,23 @@ def test_ceo_submit_disarm_same_operation_marker_stays_sticky_effect_unknown_on_
         )
         assert host.incomplete_marker_operation == "CEO_SUBMIT_DISARM"
 
-def test_the_control_service_boundary_is_bounded_to_one_reconcile_and_one_readiness_probe():
+def test_the_control_service_boundary_is_bounded_to_one_reconcile_and_one_admission_bound():
     arm_host = FakeCeoSubmitHost()
     control.execute_ceo_submit_arm(arm_host, _ceo_submit_request(), now=NOW)
     assert arm_host.reconcile_calls == 1
-    assert arm_host.ready_calls == 1
+    assert arm_host.admission_bound_calls == 1
     assert arm_host.phases.count("reconciled") == 1
-    assert arm_host.phases.count("ready") == 1
+    assert arm_host.phases.count("admission_bound") == 1
 
     disarm_host = _armed_ceo_submit_host()
     disarm_host.reset_ledgers()
     control.execute_ceo_submit_disarm(disarm_host, _ceo_submit_request(), now=NOW)
     assert disarm_host.reconcile_calls == 1
-    assert disarm_host.ready_calls == 1
+    assert disarm_host.admission_bound_calls == 1
     assert disarm_host.phases.count("reconciled") == 1
-    assert disarm_host.phases.count("ready") == 1
+    assert disarm_host.phases.count("admission_bound") == 1
 
-    # Structurally: exactly one reconcile call and one readiness probe, no loop.
+    # Structurally: exactly one reconcile call and one admission-bound probe, no loop.
     source = Path(control.__file__).read_text(encoding="utf-8")
     for function in ("def execute_ceo_submit_arm(", "def execute_ceo_submit_disarm("):
         body = source.split(function, 1)[1].split("\ndef ", 1)[0]
@@ -3061,9 +3101,16 @@ def test_the_control_service_boundary_is_bounded_to_one_reconcile_and_one_readin
         assert [
             line for line in lines if "reconcile_control_service" in line
         ] == ["host.reconcile_control_service(request.expected_sha)"]
-        assert [line for line in lines if "prove_control_ready" in line] == [
-            "host.prove_control_ready(request.expected_sha)"
+        # R80: ARM/DISARM ride the renamed CEO-admission proof; the candidate
+        # config digest is the freshly-derived postimage's control_sha256.
+        bound_lines = [
+            line
+            for line in lines
+            if "prove_control_admission_bound" in line
+            and "host.prove_control_admission_bound(request.expected_sha," in line
         ]
+        assert len(bound_lines) == 1
+        assert "candidate_config_digest=transaction.candidates.control_sha256" in bound_lines[0]
         assert not any(line.startswith(("while ", "for ")) for line in lines)
 
     def disarm_root(host):
@@ -3116,7 +3163,7 @@ def test_the_control_service_boundary_is_bounded_to_one_reconcile_and_one_readin
             control.execute_ceo_submit_disarm(host, _ceo_submit_request(), now=NOW)
         assert raised.value.code == code
         assert host.reconcile_calls == 0
-        assert host.ready_calls == 0
+        assert host.admission_bound_calls == 0
         assert host.phases == []
 
     arm_refusals = (
@@ -3142,7 +3189,7 @@ def test_the_control_service_boundary_is_bounded_to_one_reconcile_and_one_readin
             control.execute_ceo_submit_arm(host, _ceo_submit_request(), now=NOW)
         assert raised.value.code == code
         assert host.reconcile_calls == 0
-        assert host.ready_calls == 0
+        assert host.admission_bound_calls == 0
         assert host.phases == []
 
 
@@ -3652,19 +3699,32 @@ class _RollbackProbeHost(control.ProductionCeoSubmitHost):
     """Runs the real rollback body with every OS seam recorded.
 
     No root, no launchd, no network and no write outside ``tmp_path``: the
-    production ``rollback_ceo_submit`` body executes unchanged and every seam it
-    reaches (the label probe, the control-only boundary, the readiness poll, the
-    phase writer, the receipt writer, the disk re-read and the marker removal)
-    answers through this ledger instead of the host OS.
+    production ``rollback_ceo_submit`` body executes unchanged and every seam
+    it reaches (the label probe, the control-only boundary, the CEO-admission
+    probe, the phase writer, the receipt writer, the disk re-read and the
+    marker removal) answers through this ledger instead of the host OS.
+
+    R80: the rollback now proves the live control service with the SAME
+    CEO-admission-bound probe that ARM/DISARM use (see
+    ``prove_control_admission_bound``); the recorded seam is the inner
+    probe call so the test reads ``("probe", sha, digest)`` and binds to
+    the RESTORED preimage's digest.
     """
 
-    def __init__(self, *, loaded=True, configs=None, reconcile_error=None, ready_error=None):
+    def __init__(
+        self,
+        *,
+        loaded=True,
+        configs=None,
+        reconcile_error=None,
+        probe_error=None,
+    ):
         super().__init__()
         self.ledger = []
         self._loaded_value = loaded
         self._configs_value = configs
         self._reconcile_error = reconcile_error
-        self._ready_error = ready_error
+        self._probe_error = probe_error
 
     def _loaded(self, label):
         self.ledger.append(("loaded", label))
@@ -3675,10 +3735,11 @@ class _RollbackProbeHost(control.ProductionCeoSubmitHost):
         if self._reconcile_error is not None:
             raise self._reconcile_error
 
-    def _await_control_ready(self, expected_sha):
-        self.ledger.append(("ready", expected_sha))
-        if self._ready_error is not None:
-            raise self._ready_error
+    def _ceo_admission_probe(self, expected_sha, *, candidate_config_digest):
+        self.ledger.append(("probe", expected_sha, candidate_config_digest))
+        if self._probe_error is not None:
+            raise self._probe_error
+        return True
 
     def _persist_phase(self, transaction, phase, *, operation=None):
         self.ledger.append(("phase", phase))
@@ -3793,12 +3854,14 @@ def test_ceo_submit_rollback_proves_the_live_control_service_before_removing_the
     host.rollback_ceo_submit(transaction, _rollback_receipt(transaction, armed=False))
 
     ledger = [entry for entry in host.ledger if entry[0] != "atomic"]
+    probe_digest = prior.control_sha256
     assert ledger == [
         ("receipt", None),
         ("configs", None),
         ("loaded", control.CONTROL_LABEL),
         ("reconcile", SHA),
-        ("ready", SHA),
+        ("probe", SHA, probe_digest),
+        ("phase", "ADMISSION_BOUND"),
         ("phase", "ROLLBACK_CONTROL_PROVEN"),
         ("complete", None),
     ]
@@ -3811,9 +3874,9 @@ def test_ceo_submit_rollback_proves_the_live_control_service_before_removing_the
     )
     kinds = [entry[0] for entry in ledger]
     assert "reconcile" in kinds
-    assert "ready" in kinds
+    assert "probe" in kinds
     assert kinds.index("reconcile") < kinds.index("complete")
-    assert kinds.index("ready") < kinds.index("complete")
+    assert kinds.index("probe") < kinds.index("complete")
 
     source = Path(control.__file__).read_text(encoding="utf-8")
     production = source.split("class ProductionCeoSubmitHost", 1)[1]
@@ -3822,11 +3885,20 @@ def test_ceo_submit_rollback_proves_the_live_control_service_before_removing_the
     assert body.index("_prove_rolled_back_control_live") < body.index(
         "complete_transaction"
     )
+    # R80: the live proof renames ``_await_control_ready`` to the CEO-admission
+    # probe and persists the ``ADMISSION_BOUND`` phase rather than the old
+    # ``READY_PROVEN``.
+    assert "_await_control_ready" not in body
+    assert (
+        "prove_control_admission_bound" not in body
+        or "candidate_config_digest=transaction.prior_configs.control_sha256"
+        in body
+    )
 
 
 @pytest.mark.parametrize(
     "failure",
-    ["reconcile", "ready"],
+    ["reconcile", "probe"],
 )
 def test_ceo_submit_rollback_stays_effect_unknown_when_the_live_proof_fails(
     monkeypatch, tmp_path, failure
@@ -3849,7 +3921,13 @@ def test_ceo_submit_rollback_stays_effect_unknown_when_the_live_proof_fails(
     assert ("complete", None) not in host.ledger
     assert ("phase", "ROLLBACK_CONTROL_PROVEN") not in host.ledger
     assert ("reconcile", SHA) in host.ledger
-    assert host.ledger[-1] == (failure, SHA)
+    # The ledger's last entry depends on the failure mode: a reconcile
+    # error lands the reconcile tag; a probe error lands the probe tag.
+    probe_digest = prior.control_sha256
+    if failure == "probe":
+        assert host.ledger[-1] == ("probe", SHA, probe_digest)
+    else:
+        assert host.ledger[-1] == (failure, SHA)
 
 
 def test_ceo_submit_rollback_needs_no_live_proof_when_no_control_service_is_registered(
@@ -3863,7 +3941,7 @@ def test_ceo_submit_rollback_needs_no_live_proof_when_no_control_service_is_regi
 
     host.rollback_ceo_submit(transaction, _rollback_receipt(transaction, armed=False))
 
-    assert not [entry for entry in host.ledger if entry[0] in {"reconcile", "ready"}]
+    assert not [entry for entry in host.ledger if entry[0] in {"reconcile", "probe"}]
     assert host.ledger[-1] == ("complete", None)
 
 
@@ -4586,16 +4664,17 @@ def test_ceo_submit_cli_pins_every_outcome_class_document_and_exit_code(
 
 
 # ---------------------------------------------------------------------------
-# R7 coverage: the REAL readiness poll and the candidate-path contract.
+# R7 / R80 coverage: the REAL CEO-admission poll and the candidate-path
+# contract.
 #
-# ``ProductionCeoSubmitHost._await_control_ready`` is the single readiness seam
-# behind BOTH ``prove_control_ready`` (the ARM/DISARM readiness stage) and
-# ``_prove_rolled_back_control_live`` (the R17 B3 live rollback proof).  The
-# rollback tests above override that seam on a probe subclass, so before these
-# tests the real loop had no behavioural coverage at all: inverting its loop
-# condition left the whole file green.  These tests drive the real method over a
-# recorded subclass with a deterministic fake clock -- no sleeping, no wall
-# clock, no root, no launchd and no network.
+# ``ProductionCeoSubmitHost._await_control_admission_bound`` is the single
+# CEO-admission seam behind BOTH ``prove_control_admission_bound`` (the
+# ARM/DISARM CEO-admission proof) and ``_prove_rolled_back_control_live``
+# (the R17 B3 / R80 live rollback proof).  The rollback tests above override
+# the inner probe seam on a probe subclass, so before these tests the real
+# loop had no behavioural coverage at all.  These tests drive the real method
+# over a recorded subclass with a deterministic fake clock -- no sleeping,
+# no wall clock, no root, no launchd and no network.
 # ---------------------------------------------------------------------------
 
 
@@ -4634,27 +4713,31 @@ def _install_fake_clock(monkeypatch):
     return clock, sleeps
 
 
-class _ReadinessProbeHost(control.ProductionCeoSubmitHost):
-    """The real readiness poll with every OS seam recorded and none reached.
+class _AdmissionProbeHost(control.ProductionCeoSubmitHost):
+    """The real CEO-admission poll with every OS seam recorded and none reached.
 
-    ``_loaded`` always answers True, ``_control_ready`` answers False for the
-    first ``ready_after - 1`` polls and True on the ``ready_after``-th (never,
-    when ``ready_after`` is None), and ``_persist_phase`` records.
+    R80: ``_loaded`` always answers True, ``_ceo_admission_probe`` answers
+    False for the first ``ready_after - 1`` polls and True on the
+    ``ready_after``-th (never, when ``ready_after`` is None), and
+    ``_persist_phase`` records.  The probe seam is the new one
+    ``_await_control_admission_bound`` polls.
     """
 
     def __init__(self, *, ready_after=None):
         super().__init__()
         self.ledger = []
         self.ready_calls = 0
+        self.last_digest = None
         self._ready_after = ready_after
 
     def _loaded(self, label):
         self.ledger.append(("loaded", label))
         return True
 
-    def _control_ready(self, expected_sha):
+    def _ceo_admission_probe(self, expected_sha, *, candidate_config_digest):
         self.ready_calls += 1
-        self.ledger.append(("ready", expected_sha))
+        self.ledger.append(("probe", expected_sha, candidate_config_digest))
+        self.last_digest = candidate_config_digest
         if self._ready_after is None:
             return False
         return self.ready_calls >= self._ready_after
@@ -4675,40 +4758,56 @@ def _readiness_transaction():
     )
 
 
-def test_ceo_submit_control_readiness_polls_until_ready_and_raises_only_after_the_deadline(
+def test_ceo_submit_control_admission_bound_polls_until_ready_and_raises_only_after_the_deadline(
     monkeypatch,
 ):
-    # (a) READY ON THE THIRD POLL: the method must actually POLL, then return.
+    # R80: the CEO ARM/DISARM readiness stage is now the CEO-admission proof.
+    candidate_digest = "f" * 64
+    # (a) ADMITTED ON THE THIRD POLL: the method must actually POLL, then return.
     _clock, sleeps = _install_fake_clock(monkeypatch)
-    third_poll = _ReadinessProbeHost(ready_after=3)
+    third_poll = _AdmissionProbeHost(ready_after=3)
 
-    assert third_poll._await_control_ready(SHA) is None
+    assert (
+        third_poll._await_control_admission_bound(
+            SHA, candidate_config_digest=candidate_digest
+        )
+        is None
+    )
 
-    assert third_poll.ledger.count(("ready", SHA)) == 3
+    assert third_poll.ledger.count(("probe", SHA, candidate_digest)) == 3
     assert third_poll.ready_calls == 3
+    assert third_poll.last_digest == candidate_digest
     assert len(sleeps.calls) == 2
     # The label probe runs inside the poll, and only on the control boundary.
     assert third_poll.ledger.count(("loaded", control.CONTROL_LABEL)) == 3
     assert third_poll.ledger.count(("loaded", control.WORKER_LABEL)) == 0
 
-    # (b) READY IMMEDIATELY: one poll and not one sleep.
+    # (b) ADMITTED IMMEDIATELY: one poll and not one sleep.
     _clock, sleeps = _install_fake_clock(monkeypatch)
-    immediate = _ReadinessProbeHost(ready_after=1)
+    immediate = _AdmissionProbeHost(ready_after=1)
 
-    assert immediate._await_control_ready(SHA) is None
+    assert (
+        immediate._await_control_admission_bound(
+            SHA, candidate_config_digest=candidate_digest
+        )
+        is None
+    )
 
-    assert immediate.ledger.count(("ready", SHA)) == 1
+    assert immediate.ledger.count(("probe", SHA, candidate_digest)) == 1
     assert immediate.ready_calls == 1
     assert sleeps.calls == []
 
-    # (c) NEVER READY: the deadline ends the loop, and it ends LOOPING.
+    # (c) NEVER ADMITTED: the deadline ends the loop, and it ends LOOPING.
     clock, sleeps = _install_fake_clock(monkeypatch)
-    never = _ReadinessProbeHost(ready_after=None)
+    never = _AdmissionProbeHost(ready_after=None)
 
     with pytest.raises(RuntimeError) as raised:
-        never._await_control_ready(SHA)
+        never._await_control_admission_bound(
+            SHA, candidate_config_digest=candidate_digest
+        )
 
-    assert "did not reach READY" in str(raised.value)
+    assert "did not bind" in str(raised.value)
+    assert "ADMISSION" in str(raised.value).upper() or "admission" in str(raised.value)
     assert not isinstance(raised.value, control.TransactionEffectUnknown)
     # Bounded: the fake clock advances 1.0s per read against a 45.0s budget, so
     # a poll that keeps re-reading the clock can never exceed 46 body passes.
@@ -4716,29 +4815,41 @@ def test_ceo_submit_control_readiness_polls_until_ready_and_raises_only_after_th
     assert clock.calls > never.ready_calls
     assert len(sleeps.calls) >= 1
 
-    # ``prove_control_ready`` DELEGATES: the phase is persisted exactly once,
-    # AFTER the readiness poll returned, and only inside a transaction.
+    # ``prove_control_admission_bound`` DELEGATES: the phase is persisted
+    # exactly once, AFTER the probe returned, and only inside a transaction.
     _clock, sleeps = _install_fake_clock(monkeypatch)
-    bound = _ReadinessProbeHost(ready_after=2)
+    bound = _AdmissionProbeHost(ready_after=2)
     bound._active_transaction = _readiness_transaction()
 
-    assert bound.prove_control_ready(SHA) is None
+    assert (
+        bound.prove_control_admission_bound(
+            SHA, candidate_config_digest=candidate_digest
+        )
+        is None
+    )
 
     ready_positions = [
-        index for index, entry in enumerate(bound.ledger) if entry[0] == "ready"
+        index
+        for index, entry in enumerate(bound.ledger)
+        if entry[0] == "probe"
     ]
-    assert bound.ledger.count(("phase", "READY_PROVEN")) == 1
+    assert bound.ledger.count(("phase", "ADMISSION_BOUND")) == 1
     assert ready_positions
-    assert max(ready_positions) < bound.ledger.index(("phase", "READY_PROVEN"))
+    assert max(ready_positions) < bound.ledger.index(("phase", "ADMISSION_BOUND"))
     assert len(sleeps.calls) == 1
 
     _clock, _sleeps = _install_fake_clock(monkeypatch)
-    unbound = _ReadinessProbeHost(ready_after=1)
+    unbound = _AdmissionProbeHost(ready_after=1)
     unbound._active_transaction = None
 
-    assert unbound.prove_control_ready(SHA) is None
+    assert (
+        unbound.prove_control_admission_bound(
+            SHA, candidate_config_digest=candidate_digest
+        )
+        is None
+    )
 
-    assert unbound.ledger.count(("ready", SHA)) == 1
+    assert unbound.ledger.count(("probe", SHA, candidate_digest)) == 1
     assert all(entry[0] != "phase" for entry in unbound.ledger)
 
 
@@ -4794,17 +4905,61 @@ def _drift_armed_ceo_submit_host():
 _CEO_SUBMIT_LIVE_BINDING_DRIFT = [
     ("app_peer_uid", 459),
     ("ingress_peer_uid", 453),
-    ("app_armed", True),
+    # R68: the post-ARM App drift the contract names is TRUE->FALSE
+    # (the live transport was lost while the control still says armed),
+    # not a True->True override that the helper cannot distinguish from a
+    # fixture no-op.  The marker is True (control still says armed), the
+    # binding override is False (live transport lost), the six-fact
+    # comparison fails, and status reads back ARMED_UNBOUND.
+    ("app_armed", False),
     ("app_macro_root", "/fixture/changed-macro"),
     ("ingress_socket_path", "/fixture/changed-ingress.sock"),
     ("launchd_socket_name", "ChangedIngress"),
 ]
 
 
+# Maps each live-binding field to its CONTROL config counterpart.  The
+# fake's binding reads the control's value by default (so ARM's R76
+# six-fact check passes), which means a binding-only override is
+# ABSORBED by the next sync read.  True drift requires both the live
+# override AND a DIFFERENT control value.
+_DRIFT_CONTROL_COUNTERPART = {
+    "app_peer_uid": ("ceo_ingress_app_peer_uid", int, 458),
+    "ingress_peer_uid": ("ceo_ingress_peer_uid", int, 452),
+    "app_armed": ("ceo_ingress_app_armed", bool, True),
+    "app_macro_root": (
+        "ceo_ingress_app_macro_root",
+        str,
+        "drift-marker-app_macro_root",
+    ),
+    "ingress_socket_path": (
+        "ceo_ingress_socket_path",
+        str,
+        "drift-marker-ingress_socket_path",
+    ),
+    "launchd_socket_name": (
+        "ceo_ingress_launchd_socket_name",
+        str,
+        "drift-marker-launchd_socket_name",
+    ),
+}
+
+
+def _drift_one_field(host, field, value):
+    """Drift exactly one fact: live binding overridden, control at a marker."""
+
+    control_field, _kind, marker = _DRIFT_CONTROL_COUNTERPART[field]
+    host.binding_overrides[field] = value
+    # Keep the control's value DIFFERENT from the binding override by
+    # pinning it to a marker that the ``_ceo_submit_binding_matches_control``
+    # comparison is guaranteed NOT to match.
+    host.control_config[control_field] = marker
+
+
 @pytest.mark.parametrize("field,value", _CEO_SUBMIT_LIVE_BINDING_DRIFT)
 def test_status_rejects_each_live_binding_identity_drift(field, value):
     host = _drift_armed_ceo_submit_host()
-    host.binding_overrides[field] = value
+    _drift_one_field(host, field, value)
     result = control.evaluate_ceo_submit_status(host, _ceo_submit_request())
     assert result.state == "CEO_SUBMIT_ARMED_UNBOUND"
     assert host.control_writes == host.worker_writes == host.receipt_writes == 0

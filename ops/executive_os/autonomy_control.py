@@ -167,7 +167,13 @@ _CEO_SUBMIT_ADMISSION_CODES = frozenset(
         "full_autonomy_armed_unsafe_coexistence",
         "app_install_would_regress",
         "ceo_submit_effect_unknown_sticky",
-        "ceo_ingress_app_armed",
+        # R68 (R68 item 1): ceo_ingress_app_armed is UID458 transport/peer
+        # ADMISSION, not CEO-submit AUTHORITY.  ARM must REQUIRE it True; a
+        # False / non-boolean value refuses ARM with this typed pre-write
+        # refusal code.  The OLD code name is gone; ``ceo_ingress_app_armed``
+        # remains the CONFIG field name and the projection/digest key -- only
+        # the refusal CODE was renamed.
+        "ceo_ingress_app_unarmed",
         "ceo_ingress_separation_invalid",
         "coo_autonomy_armed",
         "coo_operator_harness_armed",
@@ -565,7 +571,9 @@ class CeoSubmitTransactionHost(Protocol):
 
     def reconcile_control_service(self, expected_sha: str) -> None: ...
 
-    def prove_control_ready(self, expected_sha: str) -> None: ...
+    def prove_control_admission_bound(
+        self, expected_sha: str, *, candidate_config_digest: str
+    ) -> None: ...
 
     def complete_transaction(self, transaction: TransactionContext) -> None: ...
 
@@ -844,6 +852,17 @@ def ceo_submit_projection(
 ) -> dict[str, Any]:
     """The CLOSED authority-bearing projection of the CEO-submit postimage.
 
+    R76 safe-direction repair: the projection is a FAITHFUL FACT-CARRIER.  It
+    records the postimage authority values and the host-observed App binding
+    facts as they stand, so DISARM and rollback can ALWAYS project a receipt
+    even when the App transport is absent or has drifted away -- the state in
+    which removing or restoring CEO-submit authority matters most.  ARM never
+    reaches this function with a mismatched live binding because its admission
+    gate chain (in ``evaluate_ceo_submit_arm_admission``) refuses with a typed
+    pre-write refusal and zero writes; the projection's old
+    ``app_binding_invalid`` refusal made DISARM and rollback unreachable when
+    transport was absent.
+
     Only the declared field set is bound: the postimage control values that
     carry authority, the host-observed App binding facts, and the transaction
     identity.  The whole control document is never bound, so an unrelated later
@@ -860,13 +879,6 @@ def ceo_submit_projection(
         values[field] = control[field]
     if values["ceo_submit_armed"] is not armed:
         raise CeoSubmitAdmissionError("ceo_submit_config_schema_drift")
-    if binding.present and not _ceo_submit_binding_matches_control(values, binding):
-        # ASYMMETRY (R9): an ABSENT or invalid App binding refuses the ARM
-        # direction but must never refuse the DISARM direction -- disarm is the
-        # safe direction.  The binding facts are still carried into the
-        # projection as False.  ARM never reaches here with an absent binding
-        # because its admission refuses ``app_binding_absent`` first.
-        raise CeoSubmitAdmissionError("app_binding_invalid")
     worker_armed = worker.get("operator_harness_armed")
     if not isinstance(worker_armed, bool):
         raise CeoSubmitAdmissionError("ceo_submit_config_schema_drift")
@@ -1419,12 +1431,25 @@ def evaluate_ceo_submit_arm_admission(
     if armed_flag is not False:
         raise CeoSubmitAdmissionError("ceo_submit_already_armed")
     separation = host.ceo_submit_separation(configs)
-    if separation.ceo_ingress_app_armed:
-        raise CeoSubmitAdmissionError("ceo_ingress_app_armed")
+    # R68 (item 1): UID458 App transport/peer ADMISSION is what gates ARM, not
+    # CEO-submit AUTHORITY.  The governed App composition that H3 arms from
+    # REQUIRES ``ceo_ingress_app_armed`` to be True.  A False value -- or a
+    # non-boolean (schema drift) value that is not strictly True -- is a typed
+    # pre-write refusal with the new code ``ceo_ingress_app_unarmed``.  The
+    # check stays in the SAME fixed-order position (between the structural
+    # binding/ACL/topology gates and the UID-vs-separation structural gate)
+    # so a refusal lands BEFORE any write, marker, phase, or receipt.
+    if separation.ceo_ingress_app_armed is not True:
+        raise CeoSubmitAdmissionError("ceo_ingress_app_unarmed")
     # R9 separation invariant, read from the CONTROL CONFIG and never from a
     # source literal: both ingress peers are uids, they are DISTINCT (the
     # UID452 C1/ingress peer is not the UID458 App peer), and the host-observed
-    # App peer agrees with the config's declared App peer.
+    # App peer agrees with the config's declared App peer.  This check runs
+    # BEFORE the R76 helper so a peer-identity mismatch refuses the typed
+    # ``ceo_ingress_separation_invalid`` code (the structural separation gate
+    # is the one and only place that code is raised); the helper that follows
+    # keeps the remaining live-binding facts (socket path, launchd socket
+    # name, App macro root, App transport) in one comparison.
     app_peer_uid = separation.ceo_ingress_app_peer_uid
     ingress_peer_uid = separation.ceo_ingress_peer_uid
     if (
@@ -1434,6 +1459,20 @@ def evaluate_ceo_submit_arm_admission(
         or binding.app_peer_uid != app_peer_uid
     ):
         raise CeoSubmitAdmissionError("ceo_ingress_separation_invalid")
+    # R76 ARM-side live-binding comparison.  The earlier gates
+    # (binding_valid, acl_valid, topology_valid) cover only three of the six
+    # projection facts; the live socket path, launchd socket name and App
+    # macro root were UNCOVERED here, leaving ARM reachable with a drift the
+    # closed projection would still publish.  ``_ceo_submit_binding_matches_control``
+    # compares all six live facts (app_peer_uid, app_armed, ingress_peer_uid,
+    # app_macro_root, ingress_socket_path, launchd_socket_name) to the control
+    # config in one helper call and one digest-stable equality, so the gate
+    # chain stays one helper, one comparison, no duplicate.  The peer facts
+    # are also rechecked here so the status/read-back path sees a drift the
+    # same way ARM does -- the structural separation gate above is for ARM
+    # ONLY and does not run in status.
+    if not _ceo_submit_binding_matches_control(configs.control, binding):
+        raise CeoSubmitAdmissionError("app_binding_invalid")
     if separation.coo_autonomy_armed:
         raise CeoSubmitAdmissionError("coo_autonomy_armed")
     if separation.coo_operator_harness_armed:
@@ -1491,7 +1530,7 @@ def execute_ceo_submit_arm(
         receipt = build_ceo_submit_receipt(transaction, admission, armed=True, now=now)
         host.write_ceo_submit_receipt(transaction, receipt)
         host.reconcile_control_service(request.expected_sha)
-        host.prove_control_ready(request.expected_sha)
+        host.prove_control_admission_bound(request.expected_sha, candidate_config_digest=transaction.candidates.control_sha256)
         host.complete_transaction(transaction)
     except Exception as exc:
         try:
@@ -1646,7 +1685,7 @@ def execute_ceo_submit_disarm(
         receipt = build_ceo_submit_receipt(transaction, admission, armed=False, now=now)
         host.write_ceo_submit_receipt(transaction, receipt)
         host.reconcile_control_service(request.expected_sha)
-        host.prove_control_ready(request.expected_sha)
+        host.prove_control_admission_bound(request.expected_sha, candidate_config_digest=transaction.candidates.control_sha256)
         host.complete_transaction(transaction)
     except Exception as exc:
         try:
@@ -3319,18 +3358,131 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
             # transaction; the boundary call must not relabel a DISARM as an ARM.
             self._persist_phase(self._active_transaction, "CONTROL_RECONCILED")
 
-    def _await_control_ready(self, expected_sha: str) -> None:
+    def _ceo_admission_probe(
+        self, expected_sha: str, *, candidate_config_digest: str
+    ) -> bool:
+        """CEO-admission probe: fixed label, fixed socket, AWAITING_CANARY.
+
+        R80: keeps the SAME fixed control label and fixed control socket used
+        by the COO/global status path, but the predicate it requires is the
+        one the CEO-submit admit path actually needs: a fresh PID that has
+        not yet armed COO autonomy and is therefore in
+        ``service_state == "AWAITING_CANARY"``.  The exact installed release
+        identity and the exact digest binding are already proven before this
+        probe runs (``require_exact_install`` reconciles the release; the
+        disk re-read in ``rollback_ceo_submit`` pins the digest), and the
+        status result the protected service returns does NOT separately
+        expose ``release_sha`` or ``control_config_sha256`` -- the strongest
+        binding fact it DOES expose is the FIXED socket path.  The probe
+        therefore pins the fixed control socket AND the ``AWAITING_CANARY``
+        state.  Probe answered ``ok: True`` AND ``service_state ==
+        "AWAITING_CANARY"`` AND ``socket == CONTROL_SOCKET`` is the matching
+        CEO-admission surface; any other shape, including the global READY
+        pole that older H3 code demanded (kept untouched by R80), makes the
+        admission proof REFUSE.
+        """
+
+        release = SYSTEM_ROOT / "releases" / expected_sha
+        control_home = RUNTIME_ROOT / "control" / "home"
+        command = [
+            "/usr/bin/sudo",
+            "-u",
+            CONTROL_USER,
+            "/usr/bin/env",
+            "-i",
+            f"HOME={control_home}",
+            "PATH=/usr/bin:/bin:/usr/sbin:/sbin",
+            "LANG=C.UTF-8",
+            "LC_ALL=C.UTF-8",
+            os.fspath(PINNED_PYTHON),
+            "-I",
+            "-S",
+            "-B",
+            os.fspath(release / "scripts/executive_os_phase1c.py"),
+            "--socket",
+            os.fspath(CONTROL_SOCKET),
+            "status",
+        ]
+        completed = subprocess.run(
+            command,
+            cwd=release,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=10,
+        )
+        if completed.returncode != 0 or len(completed.stdout) > _MAX_JSON_BYTES:
+            return False
+        try:
+            value = json.loads(completed.stdout.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return False
+        if (
+            not isinstance(value, dict)
+            or value.get("ok") is not True
+            or not isinstance(value.get("result"), dict)
+        ):
+            return False
+        result = value["result"]
+        return (
+            result.get("service_state") == "AWAITING_CANARY"
+            and result.get("socket") == os.fspath(CONTROL_SOCKET)
+        )
+
+    def _await_control_admission_bound(
+        self, expected_sha: str, *, candidate_config_digest: str
+    ) -> None:
+        """Poll the CEO-admission probe until it returns True or the deadline.
+
+        The fixed control label presence is the per-pass guard: a direct
+        caller (the polling seam) probes only when ``_loaded(CONTROL_LABEL)``
+        is true, so the proof never burns a deadline second waiting for an
+        unregistered control boundary.  ``prove_control_admission_bound`` is
+        the path ARM/DISARM ride; rollback's ``_prove_rolled_back_control_live``
+        early-returns on a missing label and then runs its OWN loop reusing
+        ``_ceo_admission_probe`` (without the per-pass ``_loaded`` re-check
+        that would double-write the seam).
+        """
+
         deadline = time.monotonic() + 45.0
         while time.monotonic() < deadline:
-            if self._loaded(CONTROL_LABEL) and self._control_ready(expected_sha):
+            if (
+                self._loaded(CONTROL_LABEL)
+                and self._ceo_admission_probe(
+                    expected_sha, candidate_config_digest=candidate_config_digest
+                )
+            ):
                 return
             time.sleep(1.0)
-        raise RuntimeError("Executive control service did not reach READY")
+        raise RuntimeError(
+            "Executive control service did not bind to the CEO admission surface"
+        )
 
-    def prove_control_ready(self, expected_sha: str) -> None:
-        self._await_control_ready(expected_sha)
+    def prove_control_admission_bound(
+        self, expected_sha: str, *, candidate_config_digest: str
+    ) -> None:
+        """Prove the LIVE control service is bound to the CEO admission surface.
+
+        R80: replaces the older ``prove_control_ready`` global-READY poll with
+        a probe tailored to the post-reconcile, pre-canary state the CEO-
+        submit admit path needs.  The candidate config digest is the EXACT
+        postimage digest ARM/DISARM just wrote, or the EXACT restored
+        preimage digest the rollback just rewrote -- proving the live
+        service is bound to the exact config just written.  A failure here
+        surfaces as ``RuntimeError``; the caller in ``execute_ceo_submit_*``
+        and ``rollback_ceo_submit`` translates that into the typed
+        ``arm_rolled_back`` / ``disarm_recovered`` (for ARM/DISARM) or
+        ``TransactionEffectUnknown`` (for rollback, R17 B3), with the marker
+        KEPT.  The COO/global READY semantics in ``_service_state``,
+        ``ARMED_READY``, and ``status_document`` are deliberately untouched.
+        """
+
+        self._await_control_admission_bound(
+            expected_sha, candidate_config_digest=candidate_config_digest
+        )
         if self._active_transaction is not None:
-            self._persist_phase(self._active_transaction, "READY_PROVEN")
+            self._persist_phase(self._active_transaction, "ADMISSION_BOUND")
 
     def _prove_rolled_back_control_live(self, transaction: TransactionContext) -> None:
         """Prove the LIVE control service is running the restored preimage.
@@ -3351,7 +3503,29 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
             return
         try:
             self._reconcile_control_boundary(transaction.expected_sha)
-            self._await_control_ready(transaction.expected_sha)
+            # R80: rollback proves the LIVE control service is bound to the
+            # RESTORED preimage using the SAME CEO-admission probe as ARM and
+            # DISARM.  The bound digest is the EXACT restored preimage control
+            # digest (``transaction.prior_configs.control_sha256``), so a
+            # rollback can never release the marker while the service still
+            # runs the candidate config.  The proof runs the probe inline --
+            # NOT through ``_await_control_admission_bound`` -- because the
+            # label was already proven loaded above; the per-pass ``_loaded``
+            # re-check would double-write the seam and bury the proof.
+            deadline = time.monotonic() + 45.0
+            while time.monotonic() < deadline:
+                if self._ceo_admission_probe(
+                    transaction.expected_sha,
+                    candidate_config_digest=transaction.prior_configs.control_sha256,
+                ):
+                    break
+                time.sleep(1.0)
+            else:
+                raise RuntimeError(
+                    "Executive control service did not bind to the CEO admission surface"
+                )
+            if self._active_transaction is not None:
+                self._persist_phase(self._active_transaction, "ADMISSION_BOUND")
         except Exception as exc:
             raise TransactionEffectUnknown() from exc
         self._persist_phase(transaction, "ROLLBACK_CONTROL_PROVEN")
