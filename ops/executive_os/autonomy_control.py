@@ -3135,10 +3135,42 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
         if self._active_transaction is not None:
             self._persist_phase(self._active_transaction, "READY_PROVEN")
 
+    def _prove_rolled_back_control_live(self, transaction: TransactionContext) -> None:
+        """Prove the LIVE control service is running the restored preimage.
+
+        R17 B3: disk agreement is not proof.  If the control boundary was already
+        reconciled the service consumed the candidate config, so a rollback that
+        only rewrites bytes leaves an armed service behind an ``arm_rolled_back``
+        answer.  A REGISTERED control service is therefore reconciled onto the
+        restored preimage through the control-only boundary and re-proven READY
+        before the transaction marker may be removed.  If no control service is
+        registered there is no live consumer of ``control.json`` and the restored
+        disk state IS the live state.  Anything else is EFFECT_UNKNOWN, and the
+        marker is deliberately KEPT so the ambiguity stays sticky to this
+        operation.
+        """
+
+        if not self._loaded(CONTROL_LABEL):
+            return
+        try:
+            self._reconcile_control_boundary(transaction.expected_sha)
+            self._await_control_ready(transaction.expected_sha)
+        except Exception as exc:
+            raise TransactionEffectUnknown() from exc
+        self._persist_phase(transaction, "ROLLBACK_CONTROL_PROVEN")
+
     def rollback_ceo_submit(
         self, transaction: TransactionContext, receipt: Mapping[str, Any]
     ) -> None:
-        """Restore the archived preimage and prove it, or stay EFFECT_UNKNOWN."""
+        """Restore the archived preimage, prove it LIVE, then release the marker.
+
+        R17 B3: disk agreement is not proof.  The restored preimage is proven
+        against the REGISTERED control service (control-only reconcile, then a
+        readiness re-probe) before this carrier may release the transaction
+        marker, so a rollback can never answer ``arm_rolled_back`` /
+        ``disarm_recovered`` while the live control service still runs the
+        candidate config.
+        """
 
         self._active_transaction = transaction
         control_candidate, _worker_candidate = self._candidate_paths(
@@ -3161,6 +3193,9 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
             replace=CONTROL_CONFIG.exists() or CONTROL_CONFIG.is_symlink(),
         )
         self.write_ceo_submit_receipt(transaction, receipt)
+        expected_armed = dict(transaction.candidates.control).get("ceo_submit_armed")
+        if not isinstance(expected_armed, bool):
+            raise TransactionEffectUnknown()
         (
             control,
             _worker,
@@ -3170,11 +3205,12 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
             _worker_raw,
         ) = self._configs()
         if (
-            control.get("ceo_submit_armed") is not False
+            control.get("ceo_submit_armed") is not expected_armed
             or control_digest != transaction.prior_configs.control_sha256
             or worker_digest != transaction.prior_configs.worker_sha256
         ):
             raise TransactionEffectUnknown()
+        self._prove_rolled_back_control_live(transaction)
         self.complete_transaction(transaction)
 
     def proves_safe_coexistence(self, configs: ConfigEvidence) -> bool:

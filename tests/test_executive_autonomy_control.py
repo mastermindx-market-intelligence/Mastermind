@@ -8,7 +8,9 @@ import dataclasses
 import json
 import os
 import socket
+import stat
 import subprocess
+import types
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest import mock
@@ -2683,3 +2685,292 @@ def test_ceo_submit_control_boundary_source_never_names_the_worker_or_the_lifecy
         "_require_control_plist_safe",
     ):
         assert token in boundary
+
+
+class _RollbackProbeHost(control.ProductionCeoSubmitHost):
+    """Runs the real rollback body with every OS seam recorded.
+
+    No root, no launchd, no network and no write outside ``tmp_path``: the
+    production ``rollback_ceo_submit`` body executes unchanged and every seam it
+    reaches (the label probe, the control-only boundary, the readiness poll, the
+    phase writer, the receipt writer, the disk re-read and the marker removal)
+    answers through this ledger instead of the host OS.
+    """
+
+    def __init__(self, *, loaded=True, configs=None, reconcile_error=None, ready_error=None):
+        super().__init__()
+        self.ledger = []
+        self._loaded_value = loaded
+        self._configs_value = configs
+        self._reconcile_error = reconcile_error
+        self._ready_error = ready_error
+
+    def _loaded(self, label):
+        self.ledger.append(("loaded", label))
+        return self._loaded_value
+
+    def _reconcile_control_boundary(self, expected_sha):
+        self.ledger.append(("reconcile", expected_sha))
+        if self._reconcile_error is not None:
+            raise self._reconcile_error
+
+    def _await_control_ready(self, expected_sha):
+        self.ledger.append(("ready", expected_sha))
+        if self._ready_error is not None:
+            raise self._ready_error
+
+    def _persist_phase(self, transaction, phase, *, operation=None):
+        self.ledger.append(("phase", phase))
+
+    def write_ceo_submit_receipt(self, transaction, receipt):
+        self.ledger.append(("receipt", None))
+
+    def _configs(self):
+        self.ledger.append(("configs", None))
+        return self._configs_value
+
+    def complete_transaction(self, transaction):
+        self.ledger.append(("complete", None))
+
+
+def _ceo_submit_evidence(*, armed):
+    """The control/worker evidence pair, in ``FakeCeoSubmitHost``'s shapes."""
+
+    host = FakeCeoSubmitHost()
+    host.control_config["ceo_submit_armed"] = armed
+    return control.ConfigEvidence(
+        control_sha256=control.sha256_bytes(control.encode_config(host.control_config)),
+        worker_sha256=control.sha256_bytes(control.encode_config(host.worker_config)),
+        control=copy.deepcopy(host.control_config),
+        worker=copy.deepcopy(host.worker_config),
+        control_bytes=control.encode_config(host.control_config),
+        worker_bytes=control.encode_config(host.worker_config),
+    )
+
+
+def _configs_tuple(evidence):
+    """The exact 6-tuple the production ``_configs()`` re-read returns."""
+
+    return (
+        copy.deepcopy(dict(evidence.control)),
+        copy.deepcopy(dict(evidence.worker)),
+        evidence.control_sha256,
+        evidence.worker_sha256,
+        evidence.control_bytes,
+        evidence.worker_bytes,
+    )
+
+
+def _armed_rollback_carrier(prior):
+    """The DISARM rollback carrier: the RESTORED preimage, byte-exact.
+
+    ``execute_ceo_submit_disarm`` rebuilds its rollback carrier with
+    ``derive_ceo_submit_candidate(prior_configs, armed=True)`` and that call is
+    refused by that function's own "already armed" admission guard, so the ARMED
+    carrier a rollback carries is assembled here from the identical
+    ``CandidateConfigs`` contract: the preimage control/worker pair, re-encoded.
+    """
+
+    control_value = copy.deepcopy(dict(prior.control))
+    control_value["ceo_submit_armed"] = True
+    control_bytes = control.encode_config(control_value)
+    return control.CandidateConfigs(
+        control=control_value,
+        worker=prior.worker,
+        control_bytes=control_bytes,
+        worker_bytes=prior.worker_bytes,
+        control_sha256=control.sha256_bytes(control_bytes),
+        worker_sha256=prior.worker_sha256,
+    )
+
+
+def _rollback_transaction(prior, candidates):
+    return control.TransactionContext(
+        transaction_id="autonomy-9f9f9f9f9f9f",
+        expected_sha=SHA,
+        prior_configs=prior,
+        candidates=candidates,
+        admission=None,
+    )
+
+
+def _rollback_probe(monkeypatch, tmp_path, transaction, **host_kwargs):
+    """A probe host whose writes land in ``tmp_path`` and are recorded, not made."""
+
+    monkeypatch.setattr(control, "CONFIG_ROOT", tmp_path / "config")
+    monkeypatch.setattr(
+        control, "CONTROL_CONFIG", tmp_path / "config" / "control.json"
+    )
+    monkeypatch.setattr(
+        control.grp, "getgrnam", lambda name: types.SimpleNamespace(gr_gid=0)
+    )
+    host_kwargs.setdefault("configs", _configs_tuple(transaction.prior_configs))
+    host = _RollbackProbeHost(**host_kwargs)
+
+    def _record_atomic(path, payload, *, mode, uid, gid, replace):
+        host.ledger.append(("atomic", path))
+
+    monkeypatch.setattr(control, "_atomic_file", _record_atomic)
+    return host
+
+
+def _rollback_receipt(transaction, *, armed):
+    """A minimal rollback receipt: only the shape the probe host records."""
+
+    return {"state": "CEO_SUBMIT_ARMED" if armed else "CEO_SUBMIT_DISARMED"}
+
+
+def test_ceo_submit_rollback_proves_the_live_control_service_before_removing_the_marker(
+    monkeypatch, tmp_path
+):
+    prior = _ceo_submit_evidence(armed=False)
+    transaction = _rollback_transaction(
+        prior, control.derive_ceo_submit_candidate(prior, armed=False)
+    )
+    host = _rollback_probe(monkeypatch, tmp_path, transaction, loaded=True)
+
+    host.rollback_ceo_submit(transaction, _rollback_receipt(transaction, armed=False))
+
+    ledger = [entry for entry in host.ledger if entry[0] != "atomic"]
+    assert ledger == [
+        ("receipt", None),
+        ("configs", None),
+        ("loaded", control.CONTROL_LABEL),
+        ("reconcile", SHA),
+        ("ready", SHA),
+        ("phase", "ROLLBACK_CONTROL_PROVEN"),
+        ("complete", None),
+    ]
+    assert host.ledger[-1] == ("complete", None)
+    assert [entry for entry in host.ledger if entry[0] == "atomic"] == [
+        ("atomic", control.CONTROL_CONFIG)
+    ]
+    assert host.ledger.index(("atomic", control.CONTROL_CONFIG)) < host.ledger.index(
+        ("complete", None)
+    )
+    kinds = [entry[0] for entry in ledger]
+    assert "reconcile" in kinds
+    assert "ready" in kinds
+    assert kinds.index("reconcile") < kinds.index("complete")
+    assert kinds.index("ready") < kinds.index("complete")
+
+    source = Path(control.__file__).read_text(encoding="utf-8")
+    production = source.split("class ProductionCeoSubmitHost", 1)[1]
+    body = production.split("def rollback_ceo_submit", 1)[1].split("\n    def ", 1)[0]
+    assert "_prove_rolled_back_control_live" in body
+    assert body.index("_prove_rolled_back_control_live") < body.index(
+        "complete_transaction"
+    )
+
+
+@pytest.mark.parametrize(
+    "failure",
+    ["reconcile", "ready"],
+)
+def test_ceo_submit_rollback_stays_effect_unknown_when_the_live_proof_fails(
+    monkeypatch, tmp_path, failure
+):
+    prior = _ceo_submit_evidence(armed=False)
+    transaction = _rollback_transaction(
+        prior, control.derive_ceo_submit_candidate(prior, armed=False)
+    )
+    host = _rollback_probe(
+        monkeypatch,
+        tmp_path,
+        transaction,
+        loaded=True,
+        **{f"{failure}_error": RuntimeError("boom")},
+    )
+
+    with pytest.raises(control.TransactionEffectUnknown):
+        host.rollback_ceo_submit(transaction, _rollback_receipt(transaction, armed=False))
+
+    assert ("complete", None) not in host.ledger
+    assert ("phase", "ROLLBACK_CONTROL_PROVEN") not in host.ledger
+    assert ("reconcile", SHA) in host.ledger
+    assert host.ledger[-1] == (failure, SHA)
+
+
+def test_ceo_submit_rollback_needs_no_live_proof_when_no_control_service_is_registered(
+    monkeypatch, tmp_path
+):
+    prior = _ceo_submit_evidence(armed=False)
+    transaction = _rollback_transaction(
+        prior, control.derive_ceo_submit_candidate(prior, armed=False)
+    )
+    host = _rollback_probe(monkeypatch, tmp_path, transaction, loaded=False)
+
+    host.rollback_ceo_submit(transaction, _rollback_receipt(transaction, armed=False))
+
+    assert not [entry for entry in host.ledger if entry[0] in {"reconcile", "ready"}]
+    assert host.ledger[-1] == ("complete", None)
+
+
+def test_ceo_submit_rollback_expects_the_restored_preimage_flag_not_a_constant(
+    monkeypatch, tmp_path
+):
+    # (a) DISARM-rollback shape: the restored preimage is the ARMED config.
+    armed_prior = _ceo_submit_evidence(armed=True)
+    transaction = _rollback_transaction(
+        armed_prior, _armed_rollback_carrier(armed_prior)
+    )
+    host = _rollback_probe(monkeypatch, tmp_path, transaction, loaded=True)
+
+    host.rollback_ceo_submit(transaction, _rollback_receipt(transaction, armed=True))
+
+    assert host.ledger[-1] == ("complete", None)
+
+    # (b) MISMATCH: the disk flag is the OPPOSITE of the restored preimage flag.
+    disarmed = _ceo_submit_evidence(armed=False)
+    mismatch = _rollback_transaction(armed_prior, _armed_rollback_carrier(armed_prior))
+    host = _rollback_probe(
+        monkeypatch,
+        tmp_path,
+        mismatch,
+        loaded=True,
+        configs=_configs_tuple(disarmed),
+    )
+
+    with pytest.raises(control.TransactionEffectUnknown):
+        host.rollback_ceo_submit(mismatch, _rollback_receipt(mismatch, armed=True))
+
+    assert ("complete", None) not in host.ledger
+
+
+def _control_plist_stub(mode, *, uid=0, gid=0, nlink=1, error=None):
+    class _Stub:
+        def lstat(self):
+            if error is not None:
+                raise error
+            return types.SimpleNamespace(
+                st_mode=mode, st_uid=uid, st_gid=gid, st_nlink=nlink
+            )
+
+    return _Stub()
+
+
+@pytest.mark.parametrize(
+    ("case", "stub_kwargs", "refused"),
+    [
+        ("regular_root_0644", {"mode": stat.S_IFREG | 0o644}, False),
+        ("missing", {"mode": 0, "error": OSError("absent")}, True),
+        ("symlink", {"mode": stat.S_IFLNK | 0o777}, True),
+        ("not_root_uid", {"mode": stat.S_IFREG | 0o644, "uid": 501}, True),
+        ("not_root_gid", {"mode": stat.S_IFREG | 0o644, "gid": 20}, True),
+        ("group_writable", {"mode": stat.S_IFREG | 0o664}, True),
+        ("other_writable", {"mode": stat.S_IFREG | 0o646}, True),
+        ("hard_linked", {"mode": stat.S_IFREG | 0o644, "nlink": 2}, True),
+    ],
+)
+def test_ceo_submit_control_plist_validator_refuses_an_unsafe_bootstrap_target(
+    monkeypatch, case, stub_kwargs, refused
+):
+    monkeypatch.setattr(
+        control, "CONTROL_PLIST", _control_plist_stub(**stub_kwargs)
+    )
+    validator = control.ProductionCeoSubmitHost._require_control_plist_safe
+    if refused:
+        with pytest.raises(control.TransactionEffectUnknown):
+            validator()
+    else:
+        assert validator() is None
