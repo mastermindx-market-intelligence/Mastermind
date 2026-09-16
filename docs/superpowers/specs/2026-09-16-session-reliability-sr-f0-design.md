@@ -1,9 +1,9 @@
 # Mastermind Session Reliability SR-F0 Design
 
-**Operation:** `session-reliability-sr-f0-20260916-sol-001`  
-**Existing owner:** `WS:CHAIRMAN-CONTROL-ROOM` / MAS-198  
-**Carrier:** Mastermind PR #706 / `sol/compact-continuation-anti-rehydration-20260916`  
-**State after merge:** protected procedure available; transport enforcement remains `SPEC_ONLY`  
+**Operation:** `session-reliability-sr-f0-20260916-sol-001`
+**Existing owner:** `WS:CHAIRMAN-CONTROL-ROOM` / MAS-198
+**Carrier:** Mastermind PR #706 / `sol/compact-continuation-anti-rehydration-20260916`
+**State after merge:** protected procedure available; transport enforcement remains `SPEC_ONLY`
 **Authority:** records/procedure only; no runtime, provider, transport, or lifecycle effect
 
 ## Outcome
