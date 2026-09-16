@@ -3,6 +3,13 @@
 The status path is implemented first and is strictly read-only.  Arm and
 disarm share this fixed parser but do not acquire mutation behavior until their
 transaction gates are implemented and tested in the following plan tasks.
+
+The CEO-submit operation domain (ARM/DISARM of the chair-default ingress sink)
+rides the one existing ``AUTONOMY_TRANSACTION`` owner.  ``ceo_submit_sink_eligible``
+is the SOURCE-side eligibility gate for the existing ``submit-ceo-intent`` sink:
+``control_plane/executive_service.py`` does not yet consult it -- that integration
+is a later wave -- so that function proves eligibility in source only and claims
+no runtime effect.
 """
 
 from __future__ import annotations
@@ -149,6 +156,13 @@ _CEO_SUBMIT_ADMISSION_CODES = frozenset(
         "app_topology_invalid",
         "app_binding_absent",
         "ceo_submit_already_armed",
+        # Declared by R9 for the DISARM vocabulary.  ``ceo_submit_already_disarmed``
+        # is deliberately unreachable: an already-False arm flag is a read-only
+        # REPLAY, never a refusal, and the other three are the disarm refusals.
+        "ceo_submit_already_disarmed",
+        "full_autonomy_armed_unsafe_coexistence",
+        "app_install_would_regress",
+        "ceo_submit_effect_unknown_sticky",
         "ceo_ingress_app_armed",
         "ceo_ingress_separation_invalid",
         "coo_autonomy_armed",
@@ -410,9 +424,14 @@ class CeoSubmitRequest:
 class CeoSubmitAdmission:
     expected_sha: str
     installed_sha: str
-    binding: ExecutiveAppBinding
-    separation: CeoSubmitSeparation
-    configs: ConfigEvidence
+    binding: ExecutiveAppBinding | None = None
+    separation: CeoSubmitSeparation | None = None
+    configs: ConfigEvidence | None = None
+    # A DISARM request against an already-False arm flag is a REPLAY: read-only,
+    # no lock, no write and no receipt rewrite (R9).  The payload fields above are
+    # left unset on that branch on purpose -- nothing was read past the arm flag.
+    replayed: bool = False
+    replay_transaction_id: str | None = None
 
 
 class StatusHost(Protocol):
@@ -502,6 +521,12 @@ class CeoSubmitTransactionHost(Protocol):
     def ceo_submit_separation(
         self, configs: ConfigEvidence
     ) -> CeoSubmitSeparation: ...
+
+    def proves_safe_coexistence(self, configs: ConfigEvidence) -> bool: ...
+
+    def incomplete_transaction_operation(self) -> str | None: ...
+
+    def existing_ceo_submit_receipt(self) -> Mapping[str, Any] | None: ...
 
     def require_transaction_absent(self) -> None: ...
 
@@ -779,13 +804,21 @@ def ceo_submit_projection(
     if values["ceo_submit_armed"] is not armed:
         raise CeoSubmitAdmissionError("ceo_submit_config_schema_drift")
     if (
-        values["ceo_ingress_app_peer_uid"] != binding.app_peer_uid
-        or values["ceo_ingress_app_armed"] is not binding.app_armed
-        or values["ceo_ingress_peer_uid"] != binding.ingress_peer_uid
-        or values["ceo_ingress_app_macro_root"] != binding.app_macro_root
-        or values["ceo_ingress_socket_path"] != binding.ingress_socket_path
-        or values["ceo_ingress_launchd_socket_name"] != binding.launchd_socket_name
+        binding.present
+        and (
+            values["ceo_ingress_app_peer_uid"] != binding.app_peer_uid
+            or values["ceo_ingress_app_armed"] is not binding.app_armed
+            or values["ceo_ingress_peer_uid"] != binding.ingress_peer_uid
+            or values["ceo_ingress_app_macro_root"] != binding.app_macro_root
+            or values["ceo_ingress_socket_path"] != binding.ingress_socket_path
+            or values["ceo_ingress_launchd_socket_name"] != binding.launchd_socket_name
+        )
     ):
+        # ASYMMETRY (R9): an ABSENT or invalid App binding refuses the ARM
+        # direction but must never refuse the DISARM direction -- disarm is the
+        # safe direction.  The binding facts are still carried into the
+        # projection as False.  ARM never reaches here with an absent binding
+        # because its admission refuses ``app_binding_absent`` first.
         raise CeoSubmitAdmissionError("app_binding_invalid")
     worker_armed = worker.get("operator_harness_armed")
     if not isinstance(worker_armed, bool):
@@ -866,6 +899,109 @@ def ceo_submit_receipt_binds(
     except (ArmTransactionError, TypeError, ValueError):
         return False
     return receipt.get("projection_digest") == digest
+
+
+def ceo_submit_effect_unknown_sticky(
+    marker_operation: str | None, requested_operation: str
+) -> bool:
+    """R9 stickiness: ambiguity is EFFECT_UNKNOWN for the SAME operation only.
+
+    ``marker_operation`` is the operation named by an extant (therefore
+    incomplete) transaction marker -- ``None`` when the owner is free.  A marker
+    for this exact CEO-submit verb means a prior attempt of this verb may already
+    have written: the ambiguity is sticky and the operation must never be
+    re-attempted.  A marker for any OTHER operation (a COO ``ARM``/``DISARM``, or
+    the other CEO-submit verb) is a different ambiguity and stays the typed HOLD.
+    """
+
+    return (
+        marker_operation in CEO_SUBMIT_OPERATIONS
+        and marker_operation == requested_operation
+    )
+
+
+def require_ceo_submit_preservation(
+    prior: ConfigEvidence, candidates: CandidateConfigs
+) -> None:
+    """R9 preservation: only ``ceo_submit_armed`` may move; worker bytes never.
+
+    A CEO-submit candidate that also clears COO authority, drops (or adds) a key,
+    or rewrites the worker document would regress the UID458 App install/ACL and
+    the unrelated control values.  Any such delta is refused before any write.
+    """
+
+    if set(prior.control) != set(candidates.control):
+        raise CeoSubmitAdmissionError("app_install_would_regress")
+    changed = {
+        key
+        for key in prior.control
+        if prior.control[key] != candidates.control[key]
+    }
+    if changed != {"ceo_submit_armed"}:
+        raise CeoSubmitAdmissionError("app_install_would_regress")
+    if (
+        candidates.worker_bytes != prior.worker_bytes
+        or candidates.worker_sha256 != prior.worker_sha256
+    ):
+        raise CeoSubmitAdmissionError("app_install_would_regress")
+
+
+def ceo_submit_sink_eligible(
+    *,
+    control_config: Mapping[str, Any],
+    receipt: Mapping[str, Any] | None,
+    binding: ExecutiveAppBinding,
+    expected_sha: str,
+) -> bool:
+    """SOURCE-side eligibility gate for the existing ``submit-ceo-intent`` sink.
+
+    HONEST LIMIT: this predicate is the SOURCE-side gate; the runtime sink in
+    ``control_plane/executive_service.py`` does not yet consult it -- that
+    integration is a later wave -- so this function proves eligibility in source
+    only and claims no runtime effect.
+
+    Eligible ONLY when the present control document arms the sink, a sealed ARM
+    receipt exists, that receipt names this exact release, the live host-observed
+    App binding still matches the receipt, and the closed projection recomputed
+    from (control config, binding, release sha) re-binds to the sealed digest.
+    A hand-edited ``ceo_submit_armed: true`` with no receipt, a receipt for a
+    different release, or a receipt that does not bind the present config is NOT
+    eligible.
+    """
+
+    if not isinstance(control_config, Mapping) or control_config.get(
+        "ceo_submit_armed"
+    ) is not True:
+        return False
+    if not isinstance(receipt, Mapping):
+        return False
+    if receipt.get("schema_version") != CEO_SUBMIT_RECEIPT_SCHEMA:
+        return False
+    if receipt.get("state") != "CEO_SUBMIT_ARMED" or receipt.get(
+        "operation"
+    ) != "CEO_SUBMIT_ARM":
+        return False
+    projection = receipt.get("projection")
+    if (
+        not isinstance(projection, Mapping)
+        or set(projection) != _CEO_SUBMIT_PROJECTION_FIELDS
+    ):
+        return False
+    if projection.get("release_sha") != expected_sha:
+        return False
+    if not isinstance(binding, ExecutiveAppBinding) or not binding.present:
+        return False
+    recomputed = {
+        **dict(projection),
+        "release_sha": expected_sha,
+        "app_peer_user": binding.app_peer_user,
+        "app_binding_valid": binding.binding_valid,
+        "app_acl_valid": binding.acl_valid,
+        "app_topology_valid": binding.topology_valid,
+    }
+    return ceo_submit_receipt_binds(
+        receipt, control_config=control_config, admission_projection=recomputed
+    )
 
 
 _ACCEPTANCE_FIELDS = frozenset(
@@ -1188,12 +1324,23 @@ def execute_ceo_submit_arm(
 ) -> TransactionResult:
     """Arm exactly the CEO-submit sink inside the one serialized transaction."""
 
+    # R9 stickiness: a marker for THIS verb means a prior attempt may already have
+    # written.  Never retry it and never silently succeed; stay EFFECT_UNKNOWN.
+    if ceo_submit_effect_unknown_sticky(
+        host.incomplete_transaction_operation(), "CEO_SUBMIT_ARM"
+    ):
+        raise TransactionEffectUnknown()
     admission = evaluate_ceo_submit_arm_admission(host, request, now=now)
+    configs = admission.configs
+    if not isinstance(configs, ConfigEvidence):
+        raise CeoSubmitAdmissionError("ceo_submit_config_schema_drift")
+    candidates = derive_ceo_submit_candidate(configs, armed=True)
+    require_ceo_submit_preservation(configs, candidates)
     transaction = TransactionContext(
         transaction_id=host.new_transaction_id(),
         expected_sha=request.expected_sha,
-        prior_configs=admission.configs,
-        candidates=derive_ceo_submit_candidate(admission.configs, armed=True),
+        prior_configs=configs,
+        candidates=candidates,
         admission=None,
     )
     try:
@@ -1230,6 +1377,146 @@ def execute_ceo_submit_arm(
     return TransactionResult(
         state="CEO_SUBMIT_ARMED",
         status="CEO_SUBMIT_ARMED",
+        transaction_id=transaction.transaction_id,
+        replayed=False,
+    )
+
+
+def evaluate_ceo_submit_disarm_admission(
+    host: CeoSubmitTransactionHost, request: CeoSubmitRequest, *, now: datetime
+) -> CeoSubmitAdmission:
+    """Evaluate every CEO-submit disarm gate in fixed order, with no mutation.
+
+    The fixed order is: root, installed release identity, config read (which may
+    short-circuit into a read-only REPLAY), separation/coexistence, the App
+    binding facts, then the extant-transaction HOLD.  Every refusal happens
+    before the lock is acquired and before any byte is written.
+    """
+
+    require_root_privilege(host.effective_uid())
+    if _SHA_RE.fullmatch(request.expected_sha) is None:
+        raise CeoSubmitAdmissionError("release_identity_mismatch")
+    installed_sha = host.require_exact_install(request.expected_sha)
+    if installed_sha != request.expected_sha:
+        raise CeoSubmitAdmissionError("release_identity_mismatch")
+    configs = host.load_ceo_submit_configs(request.expected_sha)
+    armed_flag = dict(configs.control).get("ceo_submit_armed")
+    if not isinstance(armed_flag, bool):
+        raise CeoSubmitAdmissionError("ceo_submit_config_schema_drift")
+    if armed_flag is False:
+        # REPLAY, not a refusal.  R9: "no independent receipt rewrite" -- the
+        # existing receipt keeps its bytes, its object identity and its digest.
+        # Nothing past this point is read: no lock, no candidate, no write.
+        return CeoSubmitAdmission(
+            expected_sha=request.expected_sha,
+            installed_sha=installed_sha,
+            replayed=True,
+            replay_transaction_id=_sealed_ceo_submit_transaction_id(
+                host.existing_ceo_submit_receipt()
+            ),
+        )
+    separation = host.ceo_submit_separation(configs)
+    if separation.coo_autonomy_armed and not host.proves_safe_coexistence(configs):
+        # Later full autonomy is armed: refuse unless the SOURCE proves that
+        # coexistence is safe.  The default is refuse.
+        raise CeoSubmitAdmissionError("full_autonomy_armed_unsafe_coexistence")
+    binding = host.executive_app_binding()
+    # ASYMMETRY (R9): an absent or invalid App binding must NOT block disarm --
+    # disarm is the safe direction.  The binding facts are still recorded in the
+    # receipt projection, which is why no binding gate appears here.
+    try:
+        host.require_transaction_absent()
+    except (HostControlError, ArmAdmissionError) as exc:
+        raise CeoSubmitAdmissionError("ceo_submit_transaction_incomplete") from exc
+    return CeoSubmitAdmission(
+        expected_sha=request.expected_sha,
+        installed_sha=installed_sha,
+        binding=binding,
+        separation=separation,
+        configs=configs,
+    )
+
+
+def _sealed_ceo_submit_transaction_id(receipt: Mapping[str, Any] | None) -> str | None:
+    """The transaction id of the sealed receipt, or None.  Read-only."""
+
+    if not isinstance(receipt, Mapping):
+        return None
+    if receipt.get("schema_version") != CEO_SUBMIT_RECEIPT_SCHEMA:
+        return None
+    transaction_id = receipt.get("transaction_id")
+    if not isinstance(transaction_id, str):
+        return None
+    if re.fullmatch(r"autonomy-[0-9a-f]{12}", transaction_id) is None:
+        return None
+    return transaction_id
+
+
+def execute_ceo_submit_disarm(
+    host: CeoSubmitTransactionHost, request: CeoSubmitRequest, *, now: datetime
+) -> TransactionResult:
+    """Disarm exactly the CEO-submit sink inside the one serialized transaction."""
+
+    # R9 stickiness, before anything else: a marker for THIS verb is ambiguity
+    # sticky to this operation, so it is neither replayed nor retried.
+    if ceo_submit_effect_unknown_sticky(
+        host.incomplete_transaction_operation(), "CEO_SUBMIT_DISARM"
+    ):
+        raise TransactionEffectUnknown()
+    admission = evaluate_ceo_submit_disarm_admission(host, request, now=now)
+    if admission.replayed:
+        return TransactionResult(
+            state="CEO_SUBMIT_DISARMED",
+            status="CEO_SUBMIT_DISARMED",
+            transaction_id=admission.replay_transaction_id,
+            replayed=True,
+        )
+    configs = admission.configs
+    if not isinstance(configs, ConfigEvidence):
+        raise CeoSubmitAdmissionError("ceo_submit_config_schema_drift")
+    candidates = derive_ceo_submit_candidate(configs, armed=False)
+    require_ceo_submit_preservation(configs, candidates)
+    transaction = TransactionContext(
+        transaction_id=host.new_transaction_id(),
+        expected_sha=request.expected_sha,
+        prior_configs=configs,
+        candidates=candidates,
+        admission=None,
+    )
+    try:
+        host.begin_ceo_submit_transaction(transaction, operation="CEO_SUBMIT_DISARM")
+    except CeoSubmitAdmissionError:
+        # A marker that appeared between the read-only admission check and the
+        # atomic mkdir belongs to another root transaction.  Never "recover" it
+        # through this operation's rollback carrier.
+        raise
+    try:
+        host.write_candidates(transaction)
+        host.validate_candidates(transaction)
+        host.replace_control_config(transaction)
+        receipt = build_ceo_submit_receipt(transaction, admission, armed=False, now=now)
+        host.write_ceo_submit_receipt(transaction, receipt)
+        host.reconcile_control_service(request.expected_sha)
+        host.prove_control_ready(request.expected_sha)
+        host.complete_transaction(transaction)
+    except Exception as exc:
+        try:
+            rollback = dataclasses.replace(
+                transaction,
+                candidates=derive_ceo_submit_candidate(
+                    transaction.prior_configs, armed=True
+                ),
+            )
+            host.rollback_ceo_submit(
+                rollback,
+                build_ceo_submit_receipt(rollback, admission, armed=True, now=now),
+            )
+        except Exception as rollback_exc:
+            raise TransactionEffectUnknown() from rollback_exc
+        raise ArmTransactionError("disarm_recovered") from exc
+    return TransactionResult(
+        state="CEO_SUBMIT_DISARMED",
+        status="CEO_SUBMIT_DISARMED",
         transaction_id=transaction.transaction_id,
         replayed=False,
     )
@@ -2807,10 +3094,11 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
         if not self._loaded(CONTROL_LABEL):
             raise TransactionEffectUnknown()
         if self._active_transaction is not None:
+            # The manifest keeps whichever CEO-submit verb opened this
+            # transaction; the boundary call must not relabel a DISARM as an ARM.
             self._persist_phase(
                 self._active_transaction,
                 "CONTROL_RECONCILED",
-                operation="CEO_SUBMIT_ARM",
             )
 
     def prove_control_ready(self, expected_sha: str) -> None:
@@ -2821,7 +3109,6 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
                     self._persist_phase(
                         self._active_transaction,
                         "READY_PROVEN",
-                        operation="CEO_SUBMIT_ARM",
                     )
                 return
             time.sleep(1.0)
@@ -2868,6 +3155,43 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
         ):
             raise TransactionEffectUnknown()
         self.complete_transaction(transaction)
+
+    def proves_safe_coexistence(self, configs: ConfigEvidence) -> bool:
+        """Default is REFUSE: no source today proves coexistence with full autonomy."""
+
+        return False
+
+    def incomplete_transaction_operation(self) -> str | None:
+        """The operation of an extant marker, or None when the owner is free.
+
+        Read-only, and deliberately narrow: only a marker naming THIS exact
+        CEO-submit verb is evidence that the same operation is ambiguous.
+        """
+
+        self.effective_uid()
+        if not self._transaction_present():
+            return None
+        try:
+            operation = self._manifest().get("operation")
+        except TransactionEffectUnknown:
+            # An extant marker whose manifest cannot be classified is not proof
+            # that this operation is ambiguous: fall through to the typed HOLD in
+            # ``require_transaction_absent``.
+            return None
+        return operation if isinstance(operation, str) else None
+
+    def existing_ceo_submit_receipt(self) -> Mapping[str, Any] | None:
+        """The already-sealed receipt document, or None.  Strictly read-only."""
+
+        if not CEO_SUBMIT_RECEIPT.exists() or CEO_SUBMIT_RECEIPT.is_symlink():
+            return None
+        try:
+            payload, _raw = _root_json(
+                CEO_SUBMIT_RECEIPT, modes=frozenset({0o444}), uid=0, gid=0
+            )
+        except HostControlError:
+            return None
+        return payload
 
 
 def main(

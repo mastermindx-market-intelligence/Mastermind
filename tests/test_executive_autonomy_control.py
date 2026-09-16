@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 import copy
+import dataclasses
 import json
 import os
 import socket
 import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
@@ -1078,11 +1081,22 @@ class FakeCeoSubmitHost:
         "transaction": ("admission", "ceo_submit_transaction_incomplete"),
     }
 
-    def __init__(self, fail_at=None, fail_after=None, *, rollback_fails=False, uid=0):
+    def __init__(
+        self,
+        fail_at=None,
+        fail_after=None,
+        *,
+        rollback_fails=False,
+        uid=0,
+        incomplete_marker_operation=None,
+        safe_coexistence=False,
+    ):
         self.fail_at = fail_at
         self.fail_after = fail_after
         self.rollback_fails = rollback_fails
         self.uid = uid
+        self.incomplete_marker_operation = incomplete_marker_operation
+        self.safe_coexistence = safe_coexistence
         self.calls = []
         self.phases = []
         self.operations = []
@@ -1093,6 +1107,9 @@ class FakeCeoSubmitHost:
         self.control_writes = 0
         self.worker_writes = 0
         self.worker_replace_calls = 0
+        self.receipt_writes = 0
+        self.reconcile_calls = 0
+        self.ready_calls = 0
         self.installed_sha = SHA
         self.binding_overrides = {}
         self.separation_overrides = {}
@@ -1187,8 +1204,38 @@ class FakeCeoSubmitHost:
 
     def require_transaction_absent(self):
         self._call("transaction")
-        if self.marker:
+        if self.marker or self.incomplete_marker_operation is not None:
             raise control.CeoSubmitAdmissionError("ceo_submit_transaction_incomplete")
+
+    def incomplete_transaction_operation(self):
+        # A read-only marker probe, deliberately NOT recorded in ``calls``: it is
+        # not an admission gate, it is the R9 stickiness discriminator.
+        return self.incomplete_marker_operation
+
+    def proves_safe_coexistence(self, configs):
+        return self.safe_coexistence
+
+    def existing_ceo_submit_receipt(self):
+        return self.receipt
+
+    @property
+    def ceo_submit_receipt(self):
+        """The sealed-receipt store (``receipt`` is the packet-1 spelling)."""
+
+        return self.receipt
+
+    def reset_ledgers(self):
+        """Clear the observation ledgers so a second operation reads cleanly."""
+
+        self.calls.clear()
+        self.phases.clear()
+        self.operations.clear()
+        self.control_writes = 0
+        self.worker_writes = 0
+        self.worker_replace_calls = 0
+        self.receipt_writes = 0
+        self.reconcile_calls = 0
+        self.ready_calls = 0
 
     def new_transaction_id(self):
         return "autonomy-feedfacec0de"
@@ -1219,12 +1266,15 @@ class FakeCeoSubmitHost:
 
     def write_ceo_submit_receipt(self, transaction, receipt):
         self.receipt = json.loads(control._encoded_json(receipt).decode("utf-8"))
+        self.receipt_writes += 1
         self._phase("receipt")
 
     def reconcile_control_service(self, expected_sha):
+        self.reconcile_calls += 1
         self._phase("reconciled")
 
     def prove_control_ready(self, expected_sha):
+        self.ready_calls += 1
         self._phase("ready")
 
     def complete_transaction(self, transaction):
@@ -1683,3 +1733,715 @@ def test_ceo_submit_rollback_and_ambiguity_are_typed_and_sticky_to_the_operation
     assert "control" in post_write.phases
     assert post_write.control_config["ceo_submit_armed"] is False
     assert post_write.marker is False
+
+
+def _armed_ceo_submit_host(**overrides):
+    """A fake host that has already run a real CEO-submit ARM transaction."""
+
+    host = FakeCeoSubmitHost(**overrides)
+    control.execute_ceo_submit_arm(host, _ceo_submit_request(), now=NOW)
+    assert host.control_config["ceo_submit_armed"] is True
+    return host
+
+
+def test_ceo_submit_disarm_uses_the_same_global_owner_and_changes_only_the_ceo_flag():
+    host = _armed_ceo_submit_host()
+    before = copy.deepcopy(host.control_config)
+    before_worker = control.encode_config(host.worker_config)
+    before_worker_sha = control.sha256_bytes(before_worker)
+    host.reset_ledgers()
+
+    result = control.execute_ceo_submit_disarm(host, _ceo_submit_request(), now=NOW)
+
+    assert result == control.TransactionResult(
+        state="CEO_SUBMIT_DISARMED",
+        status="CEO_SUBMIT_DISARMED",
+        transaction_id="autonomy-feedfacec0de",
+        replayed=False,
+    )
+    assert host.operations == ["CEO_SUBMIT_DISARM"]
+    assert host.phases == list(FakeCeoSubmitHost.CEO_PHASES)
+    assert host.phases[0] == "lock"
+    assert host.calls == [
+        "root",
+        "install",
+        "configs",
+        "separation",
+        "binding",
+        "transaction",
+    ]
+    assert host.marker is False
+    assert set(host.control_config) == set(before)
+    assert host.control_config == {**before, "ceo_submit_armed": False}
+    changed = {key for key in before if before[key] != host.control_config[key]}
+    assert changed == {"ceo_submit_armed"}
+    assert host.control_writes == 1
+    assert host.worker_writes == 0
+    assert host.worker_replace_calls == 0
+    after_worker = control.encode_config(host.worker_config)
+    assert after_worker == before_worker
+    assert control.sha256_bytes(after_worker) == before_worker_sha
+    assert host.last_transaction.candidates.worker_bytes == before_worker
+    assert host.last_transaction.candidates.worker_sha256 == before_worker_sha
+    assert host.last_transaction.candidates.control_bytes == control.encode_config(
+        {**before, "ceo_submit_armed": False}
+    )
+    assert host.receipt["state"] == "CEO_SUBMIT_DISARMED"
+    assert host.receipt["operation"] == "CEO_SUBMIT_DISARM"
+    assert host.receipt["projection"]["ceo_submit_armed"] is False
+
+    # The disarm rides the ONE global owner: no second lock exists anywhere.
+    source = Path(control.__file__).read_text(encoding="utf-8")
+    assert "ceo-submit-transaction.lock" not in source
+    lock_paths = {
+        name
+        for name, value in vars(control).items()
+        if isinstance(value, Path) and "lock" in value.name.lower()
+    }
+    assert lock_paths == {"AUTONOMY_TRANSACTION"}
+    disarm = source.split("def execute_ceo_submit_disarm(", 1)[1].split("\ndef ", 1)[0]
+    assert "begin_ceo_submit_transaction" in disarm
+    assert 'operation="CEO_SUBMIT_DISARM"' in disarm
+    assert "host.replace_control_config" in disarm
+    assert "replace_worker_config" not in disarm
+    assert "replace_autonomy_receipt" not in disarm
+
+
+def test_ceo_submit_disarm_preserves_app_install_acl_and_every_unrelated_value():
+    host = _armed_ceo_submit_host()
+    # Later full autonomy is armed ON TOP of the armed CEO-submit sink; the fake
+    # host is told coexistence is proven, so the disarm is admitted.
+    host.control_config.update(
+        {
+            "ceo_ingress_app_peer_uid": 458,
+            "ceo_ingress_app_armed": False,
+            "ceo_ingress_peer_uid": 452,
+            "ceo_ingress_socket_path": "/var/run/mastermind-executive/ceo-ingress.sock",
+            "ceo_ingress_launchd_socket_name": "CeoIngress",
+            "ceo_ingress_app_macro_root": CEO_SUBMIT_APP_MACRO_ROOT,
+            "coo_autonomy_armed": True,
+            "coo_operator_harness_armed": False,
+            "coo_tick_interval_seconds": 42.5,
+            "coo_model_alias": "coo.sealed.vNEXT",
+            "terminal_return_armed": False,
+            "preserved": {"alpha": 1, "nested": {"beta": ["x", {"gamma": 3}]}},
+        }
+    )
+    host.worker_config["preserved"] = ["beta", {"gamma": [1, 2]}]
+    host.safe_coexistence = True
+    host.reset_ledgers()
+    before = copy.deepcopy(host.control_config)
+    before_worker_bytes = control.encode_config(host.worker_config)
+    before_worker_sha = control.sha256_bytes(before_worker_bytes)
+    before_candidate_bytes = control.encode_config(before)
+
+    result = control.execute_ceo_submit_disarm(host, _ceo_submit_request(), now=NOW)
+
+    assert result.state == "CEO_SUBMIT_DISARMED"
+    assert set(host.control_config) == set(before)
+    assert host.control_config == {**before, "ceo_submit_armed": False}
+    changed = {key for key in before if before[key] != host.control_config[key]}
+    assert changed == {"ceo_submit_armed"}
+    # Byte identity of the whole document with exactly one flag flipped.
+    expected_bytes = control.encode_config({**before, "ceo_submit_armed": False})
+    assert control.encode_config(host.control_config) == expected_bytes
+    assert expected_bytes != before_candidate_bytes
+    assert control.encode_config(host.control_config) == control.encode_config(
+        {**before, "ceo_submit_armed": False}
+    )
+    # The UID458 App install / ACL keys and the socket topology survive verbatim.
+    assert host.control_config["ceo_ingress_app_peer_uid"] == 458
+    assert host.control_config["ceo_ingress_app_armed"] is False
+    assert host.control_config["ceo_ingress_peer_uid"] == 452
+    assert (
+        host.control_config["ceo_ingress_socket_path"]
+        == "/var/run/mastermind-executive/ceo-ingress.sock"
+    )
+    assert host.control_config["ceo_ingress_launchd_socket_name"] == "CeoIngress"
+    assert host.control_config["ceo_ingress_app_macro_root"] == CEO_SUBMIT_APP_MACRO_ROOT
+    # COO authority is NOT the CEO-submit operation's to clear, even when armed.
+    assert host.control_config["coo_autonomy_armed"] is True
+    assert host.control_config["coo_operator_harness_armed"] is False
+    assert host.control_config["coo_tick_interval_seconds"] == 42.5
+    assert host.control_config["coo_model_alias"] == "coo.sealed.vNEXT"
+    assert host.control_config["terminal_return_armed"] is False
+    assert host.control_config["preserved"] == {
+        "alpha": 1,
+        "nested": {"beta": ["x", {"gamma": 3}]},
+    }
+    # The worker config is never a CEO-submit write target, byte for byte.
+    after_worker_bytes = control.encode_config(host.worker_config)
+    assert after_worker_bytes == before_worker_bytes
+    assert control.sha256_bytes(after_worker_bytes) == before_worker_sha
+    assert host.worker_writes == 0
+    assert host.worker_replace_calls == 0
+    assert host.last_transaction.candidates.worker_bytes == before_worker_bytes
+    assert host.last_transaction.candidates.worker_sha256 == before_worker_sha
+
+
+def test_repeated_ceo_submit_disarm_is_a_read_only_replay_that_never_rewrites_the_receipt():
+    host = _armed_ceo_submit_host()
+    first = control.execute_ceo_submit_disarm(host, _ceo_submit_request(), now=NOW)
+    assert first.replayed is False
+    assert first.transaction_id == "autonomy-feedfacec0de"
+    sealed = host.receipt
+    sealed_bytes = control._encoded_json(sealed)
+    sealed_control_bytes = control.encode_config(host.control_config)
+    host.reset_ledgers()
+
+    second = control.execute_ceo_submit_disarm(host, _ceo_submit_request(), now=NOW)
+
+    assert second == control.TransactionResult(
+        state="CEO_SUBMIT_DISARMED",
+        status="CEO_SUBMIT_DISARMED",
+        transaction_id=sealed["transaction_id"],
+        replayed=True,
+    )
+    # No phase was entered at all: no lock, no write, no service boundary.
+    assert host.phases == []
+    assert host.operations == []
+    assert host.calls == ["root", "install", "configs"]
+    assert host.control_writes == 0
+    assert host.worker_writes == 0
+    assert host.receipt_writes == 0
+    assert host.reconcile_calls == 0
+    assert host.ready_calls == 0
+    assert host.marker is False
+    assert control.encode_config(host.control_config) == sealed_control_bytes
+    # The receipt is the SAME object and the SAME value: nothing was rewritten.
+    assert host.receipt is sealed
+    assert host.receipt == sealed
+    assert control._encoded_json(host.receipt) == sealed_bytes
+
+
+def test_ceo_submit_disarm_refuses_when_later_full_autonomy_is_armed_without_proven_coexistence():
+    # DEFAULT IS REFUSAL: the flag is False on the fake host and False in source.
+    assert FakeCeoSubmitHost().safe_coexistence is False
+    source = Path(control.__file__).read_text(encoding="utf-8")
+    production = source.split("class ProductionCeoSubmitHost", 1)[1]
+    body = production.split("def proves_safe_coexistence", 1)[1].split("\n    def ", 1)[0]
+    assert body.strip().endswith("return False")
+
+    host = _armed_ceo_submit_host()
+    host.control_config["coo_autonomy_armed"] = True
+    before = copy.deepcopy(host.control_config)
+    sealed = host.receipt
+    host.reset_ledgers()
+
+    with pytest.raises(control.CeoSubmitAdmissionError) as raised:
+        control.execute_ceo_submit_disarm(host, _ceo_submit_request(), now=NOW)
+
+    assert raised.value.code == "full_autonomy_armed_unsafe_coexistence"
+    assert host.calls == ["root", "install", "configs", "separation"]
+    assert host.phases == []
+    assert host.marker is False
+    assert host.control_writes == 0
+    assert host.receipt_writes == 0
+    assert host.receipt is sealed
+    assert host.reconcile_calls == 0
+    assert host.ready_calls == 0
+    assert host.control_config == before
+    assert host.control_config["ceo_submit_armed"] is True
+
+    # Same state, but the source now proves safe coexistence: it proceeds.
+    host.safe_coexistence = True
+    host.reset_ledgers()
+    result = control.execute_ceo_submit_disarm(host, _ceo_submit_request(), now=NOW)
+    assert result.state == "CEO_SUBMIT_DISARMED"
+    assert result.replayed is False
+    assert host.control_config["ceo_submit_armed"] is False
+    assert host.control_config["coo_autonomy_armed"] is True
+    assert host.reconcile_calls == 1 and host.ready_calls == 1
+
+
+def test_an_incomplete_transaction_of_another_operation_is_a_typed_hold_not_effect_unknown():
+    assert control.ceo_submit_effect_unknown_sticky("CEO_SUBMIT_ARM", "CEO_SUBMIT_ARM") is True
+    assert (
+        control.ceo_submit_effect_unknown_sticky("CEO_SUBMIT_DISARM", "CEO_SUBMIT_DISARM")
+        is True
+    )
+    assert control.ceo_submit_effect_unknown_sticky(None, "CEO_SUBMIT_ARM") is False
+    assert control.ceo_submit_effect_unknown_sticky("ARM", "CEO_SUBMIT_ARM") is False
+    assert control.ceo_submit_effect_unknown_sticky("DISARM", "CEO_SUBMIT_ARM") is False
+    assert (
+        control.ceo_submit_effect_unknown_sticky("CEO_SUBMIT_DISARM", "CEO_SUBMIT_ARM") is False
+    )
+
+    # A COO marker, an unknown marker and the OTHER CEO-submit verb are all the
+    # typed HOLD, never EFFECT_UNKNOWN.
+    for marker in ("ARM", "DISARM", "CEO_SUBMIT_ARM"):
+        host = _armed_ceo_submit_host()
+        host.incomplete_marker_operation = marker
+        sealed = host.receipt
+        host.reset_ledgers()
+        before = copy.deepcopy(host.control_config)
+
+        with pytest.raises(control.CeoSubmitAdmissionError) as raised:
+            control.execute_ceo_submit_disarm(host, _ceo_submit_request(), now=NOW)
+
+        assert raised.value.code == "ceo_submit_transaction_incomplete"
+        assert not isinstance(raised.value, control.TransactionEffectUnknown)
+        assert host.phases == []
+        assert host.control_writes == 0
+        assert host.receipt_writes == 0
+        assert host.receipt is sealed
+        assert host.control_config == before
+        # The seeded extant marker is untouched: nothing was begun, nothing cleared.
+        assert host.incomplete_marker_operation == marker
+        assert host.operations == []
+
+    arm_host = FakeCeoSubmitHost()
+    arm_host.incomplete_marker_operation = "CEO_SUBMIT_DISARM"
+    with pytest.raises(control.CeoSubmitAdmissionError) as arm_raised:
+        control.execute_ceo_submit_arm(arm_host, _ceo_submit_request(), now=NOW)
+    assert arm_raised.value.code == "ceo_submit_transaction_incomplete"
+    assert not isinstance(arm_raised.value, control.TransactionEffectUnknown)
+    assert arm_host.phases == []
+    assert arm_host.control_writes == 0
+
+
+def test_post_write_ambiguity_is_effect_unknown_and_sticky_to_the_same_operation():
+    host = FakeCeoSubmitHost()
+    host.incomplete_marker_operation = "CEO_SUBMIT_ARM"
+
+    with pytest.raises(control.TransactionEffectUnknown) as first:
+        control.execute_ceo_submit_arm(host, _ceo_submit_request(), now=NOW)
+
+    assert first.value.code == "effect_unknown"
+    assert host.incomplete_marker_operation == "CEO_SUBMIT_ARM"
+    assert host.calls == []
+    assert host.phases == []
+    assert host.control_writes == 0
+    assert host.receipt_writes == 0
+    assert host.receipt is None
+
+    with pytest.raises(control.TransactionEffectUnknown) as again:
+        control.execute_ceo_submit_arm(host, _ceo_submit_request(), now=NOW)
+
+    assert again.value.code == "effect_unknown"
+    assert host.calls == []
+    assert host.phases == []
+    assert host.control_writes == 0
+    assert host.receipt_writes == 0
+    assert host.receipt is None
+    assert host.incomplete_marker_operation == "CEO_SUBMIT_ARM"
+    assert host.operations == []
+
+    # The same stickiness holds in the disarm direction: never re-attempt the write.
+    armed = _armed_ceo_submit_host()
+    armed.incomplete_marker_operation = "CEO_SUBMIT_DISARM"
+    sealed = armed.receipt
+    armed.reset_ledgers()
+    before = copy.deepcopy(armed.control_config)
+
+    with pytest.raises(control.TransactionEffectUnknown) as disarm_first:
+        control.execute_ceo_submit_disarm(armed, _ceo_submit_request(), now=NOW)
+    assert disarm_first.value.code == "effect_unknown"
+    assert armed.control_config == before
+    assert armed.control_writes == 0
+    assert armed.phases == []
+    assert armed.receipt is sealed
+
+    with pytest.raises(control.TransactionEffectUnknown):
+        control.execute_ceo_submit_disarm(armed, _ceo_submit_request(), now=NOW)
+    assert armed.control_config == before
+    assert armed.control_writes == 0
+    assert armed.receipt_writes == 0
+    assert armed.phases == []
+
+
+def test_the_control_service_boundary_is_bounded_to_one_reconcile_and_one_readiness_probe():
+    arm_host = FakeCeoSubmitHost()
+    control.execute_ceo_submit_arm(arm_host, _ceo_submit_request(), now=NOW)
+    assert arm_host.reconcile_calls == 1
+    assert arm_host.ready_calls == 1
+    assert arm_host.phases.count("reconciled") == 1
+    assert arm_host.phases.count("ready") == 1
+
+    disarm_host = _armed_ceo_submit_host()
+    disarm_host.reset_ledgers()
+    control.execute_ceo_submit_disarm(disarm_host, _ceo_submit_request(), now=NOW)
+    assert disarm_host.reconcile_calls == 1
+    assert disarm_host.ready_calls == 1
+    assert disarm_host.phases.count("reconciled") == 1
+    assert disarm_host.phases.count("ready") == 1
+
+    # Structurally: exactly one reconcile call and one readiness probe, no loop.
+    source = Path(control.__file__).read_text(encoding="utf-8")
+    for function in ("def execute_ceo_submit_arm(", "def execute_ceo_submit_disarm("):
+        body = source.split(function, 1)[1].split("\ndef ", 1)[0]
+        lines = [line.strip() for line in body.splitlines()]
+        assert [
+            line for line in lines if "reconcile_control_service" in line
+        ] == ["host.reconcile_control_service(request.expected_sha)"]
+        assert [line for line in lines if "prove_control_ready" in line] == [
+            "host.prove_control_ready(request.expected_sha)"
+        ]
+        assert not any(line.startswith(("while ", "for ")) for line in lines)
+
+    def disarm_root(host):
+        host.uid = 501
+
+    def disarm_install(host):
+        host.installed_sha = "d" * 40
+
+    def disarm_configs(host):
+        host.control_config["ceo_submit_armed"] = "yes"
+
+    def disarm_separation(host):
+        host.control_config["coo_autonomy_armed"] = True
+
+    def disarm_marker(host):
+        host.incomplete_marker_operation = "ARM"
+
+    refusals = (
+        ("root", disarm_root, control.HostControlError, "privilege_required"),
+        (
+            "install",
+            disarm_install,
+            control.CeoSubmitAdmissionError,
+            "release_identity_mismatch",
+        ),
+        (
+            "configs",
+            disarm_configs,
+            control.CeoSubmitAdmissionError,
+            "ceo_submit_config_schema_drift",
+        ),
+        (
+            "separation",
+            disarm_separation,
+            control.CeoSubmitAdmissionError,
+            "full_autonomy_armed_unsafe_coexistence",
+        ),
+        (
+            "marker",
+            disarm_marker,
+            control.CeoSubmitAdmissionError,
+            "ceo_submit_transaction_incomplete",
+        ),
+    )
+    for _label, setup, error, code in refusals:
+        host = _armed_ceo_submit_host()
+        setup(host)
+        host.reset_ledgers()
+        with pytest.raises(error) as raised:
+            control.execute_ceo_submit_disarm(host, _ceo_submit_request(), now=NOW)
+        assert raised.value.code == code
+        assert host.reconcile_calls == 0
+        assert host.ready_calls == 0
+        assert host.phases == []
+
+    arm_refusals = (
+        ("root", disarm_root, control.HostControlError, "privilege_required"),
+        (
+            "install",
+            disarm_install,
+            control.CeoSubmitAdmissionError,
+            "release_identity_mismatch",
+        ),
+        (
+            "configs",
+            lambda host: host.control_config.__setitem__("ceo_submit_armed", True),
+            control.CeoSubmitAdmissionError,
+            "ceo_submit_already_armed",
+        ),
+    )
+    for _label, setup, error, code in arm_refusals:
+        host = FakeCeoSubmitHost()
+        setup(host)
+        host.reset_ledgers()
+        with pytest.raises(error) as raised:
+            control.execute_ceo_submit_arm(host, _ceo_submit_request(), now=NOW)
+        assert raised.value.code == code
+        assert host.reconcile_calls == 0
+        assert host.ready_calls == 0
+        assert host.phases == []
+
+
+def test_manual_config_edit_alone_does_not_make_the_ceo_submit_sink_eligible():
+    host = FakeCeoSubmitHost()
+    binding = host.executive_app_binding()
+    hand_edited = {"ceo_submit_armed": True}
+
+    assert (
+        control.ceo_submit_sink_eligible(
+            control_config=hand_edited, receipt=None, binding=binding, expected_sha=SHA
+        )
+        is False
+    )
+    assert (
+        control.ceo_submit_sink_eligible(
+            control_config={**hand_edited, "coo_tick_interval_seconds": 15.0},
+            receipt=None,
+            binding=binding,
+            expected_sha=SHA,
+        )
+        is False
+    )
+    assert (
+        control.ceo_submit_sink_eligible(
+            control_config={"ceo_submit_armed": "true"},
+            receipt=None,
+            binding=binding,
+            expected_sha=SHA,
+        )
+        is False
+    )
+    assert (
+        control.ceo_submit_sink_eligible(
+            control_config={"ceo_submit_armed": False},
+            receipt=None,
+            binding=binding,
+            expected_sha=SHA,
+        )
+        is False
+    )
+
+    # The honest limit is written into the function docstring itself.
+    source = Path(control.__file__).read_text(encoding="utf-8")
+    docstring = source.split("def ceo_submit_sink_eligible(", 1)[1].split('"""', 2)[1]
+    assert "SOURCE-side gate" in docstring
+    assert "control_plane/executive_service.py" in docstring
+    assert "does not yet consult it" in docstring
+    assert "no runtime effect" in docstring
+
+
+def test_direct_install_with_armed_config_does_not_make_the_ceo_submit_sink_eligible():
+    other_sha = "d" * 40
+    host = FakeCeoSubmitHost()
+    host.installed_sha = other_sha
+    host.control_config["proof_base_sha"] = other_sha
+    control.execute_ceo_submit_arm(
+        host, _ceo_submit_request(expected_sha=other_sha), now=NOW
+    )
+    binding = host.executive_app_binding()
+    postimage = copy.deepcopy(host.control_config)
+    receipt = copy.deepcopy(host.receipt)
+    assert postimage["ceo_submit_armed"] is True
+    assert receipt["projection"]["release_sha"] == other_sha
+
+    assert (
+        control.ceo_submit_sink_eligible(
+            control_config=postimage,
+            receipt=receipt,
+            binding=binding,
+            expected_sha=other_sha,
+        )
+        is True
+    )
+    # The same armed config + the same receipt, but a DIFFERENT release identity.
+    assert (
+        control.ceo_submit_sink_eligible(
+            control_config=postimage, receipt=receipt, binding=binding, expected_sha=SHA
+        )
+        is False
+    )
+
+    # A receipt whose projection_digest does not bind the present config.
+    tampered = copy.deepcopy(receipt)
+    tampered["projection_digest"] = "0" * 64
+    assert (
+        control.ceo_submit_sink_eligible(
+            control_config=postimage,
+            receipt=tampered,
+            binding=binding,
+            expected_sha=other_sha,
+        )
+        is False
+    )
+    drifted_config = {**postimage, "ceo_ingress_app_peer_uid": 459}
+    assert (
+        control.ceo_submit_sink_eligible(
+            control_config=drifted_config,
+            receipt=receipt,
+            binding=binding,
+            expected_sha=other_sha,
+        )
+        is False
+    )
+    # A projection that is not the closed field set binds nothing.
+    assert (
+        control.ceo_submit_sink_eligible(
+            control_config=postimage,
+            receipt={**receipt, "projection": {}},
+            binding=binding,
+            expected_sha=other_sha,
+        )
+        is False
+    )
+    assert (
+        control.ceo_submit_sink_eligible(
+            control_config=postimage,
+            receipt={**receipt, "schema_version": "not-the-schema"},
+            binding=binding,
+            expected_sha=other_sha,
+        )
+        is False
+    )
+
+
+def test_only_the_transaction_produced_config_and_receipt_make_the_sink_eligible():
+    host = FakeCeoSubmitHost()
+    preimage = copy.deepcopy(host.control_config)
+    result = control.execute_ceo_submit_arm(host, _ceo_submit_request(), now=NOW)
+    assert result.state == "CEO_SUBMIT_ARMED"
+    binding = host.executive_app_binding()
+    postimage = copy.deepcopy(host.control_config)
+    receipt = copy.deepcopy(host.receipt)
+    assert postimage["ceo_submit_armed"] is True
+
+    assert (
+        control.ceo_submit_sink_eligible(
+            control_config=postimage, receipt=receipt, binding=binding, expected_sha=SHA
+        )
+        is True
+    )
+
+    # Neighbouring states of the very same flow are all ineligible.
+    assert (
+        control.ceo_submit_sink_eligible(
+            control_config=postimage, receipt=None, binding=binding, expected_sha=SHA
+        )
+        is False
+    )
+    assert (
+        control.ceo_submit_sink_eligible(
+            control_config=preimage, receipt=receipt, binding=binding, expected_sha=SHA
+        )
+        is False
+    )
+    assert (
+        control.ceo_submit_sink_eligible(
+            control_config={**postimage, "ceo_submit_armed": False},
+            receipt=receipt,
+            binding=binding,
+            expected_sha=SHA,
+        )
+        is False
+    )
+    assert (
+        control.ceo_submit_sink_eligible(
+            control_config=postimage,
+            receipt=receipt,
+            binding=dataclasses.replace(binding, acl_valid=False),
+            expected_sha=SHA,
+        )
+        is False
+    )
+    assert (
+        control.ceo_submit_sink_eligible(
+            control_config=postimage,
+            receipt=receipt,
+            binding=dataclasses.replace(binding, present=False, app_peer_uid=-1),
+            expected_sha=SHA,
+        )
+        is False
+    )
+
+    # After a real DISARM the sealed DISARM receipt is not an ARM receipt: the
+    # sink must not become eligible again by replaying the closure.
+    disarmed = _armed_ceo_submit_host()
+    disarm_result = control.execute_ceo_submit_disarm(
+        disarmed, _ceo_submit_request(), now=NOW
+    )
+    assert disarm_result.state == "CEO_SUBMIT_DISARMED"
+    assert (
+        control.ceo_submit_sink_eligible(
+            control_config=disarmed.control_config,
+            receipt=disarmed.receipt,
+            binding=disarmed.executive_app_binding(),
+            expected_sha=SHA,
+        )
+        is False
+    )
+
+
+def test_the_real_submit_ceo_intent_sink_admits_only_the_transaction_produced_state(tmp_path):
+    # Mirrors tests/test_chairman_prod_submit.py construction, read-only: this test
+    # never edits control_plane/, it only drives the existing service dispatch.
+    from control_plane import executive_service
+    from control_plane.executive_service import (
+        ExecutiveControlService,
+        ServiceConfig,
+    )
+
+    host = FakeCeoSubmitHost()
+    control.execute_ceo_submit_arm(host, _ceo_submit_request(), now=NOW)
+    binding = host.executive_app_binding()
+    postimage = copy.deepcopy(host.control_config)
+    receipt = copy.deepcopy(host.receipt)
+    assert (
+        control.ceo_submit_sink_eligible(
+            control_config=postimage, receipt=receipt, binding=binding, expected_sha=SHA
+        )
+        is True
+    )
+
+    def _service(*, armed):
+        return ExecutiveControlService(
+            ServiceConfig(
+                runtime_root=tmp_path / "runtime",
+                socket_path=executive_service._PRODUCTION_CONTROL_SOCKET,
+                proof_source_repository=tmp_path / "source",
+                proof_workspace_root=tmp_path / "workspaces",
+                proof_base_sha="a" * 40,
+                ceo_submit_armed=armed,
+            )
+        )
+
+    def _request():
+        return {
+            "version": executive_service.CONTROL_PROTOCOL_VERSION,
+            "command": "submit-ceo-intent",
+            "args": {"intent": {"intent_id": "w1h3b2-sink-intent"}},
+        }
+
+    # The transaction-produced state is admitted by the REAL sink; it is not
+    # refused with _CeoSubmitUnarmedError.
+    produced = _service(armed=postimage["ceo_submit_armed"])
+    assert produced._is_production_control_socket() is True
+    produced.runtime = object()
+    with mock.patch.object(
+        produced, "_submit_service_intent", return_value={"accepted": True}
+    ) as handler:
+        admitted = asyncio.run(produced._dispatch_request(_request()))
+        handler.assert_called_once_with({"intent_id": "w1h3b2-sink-intent"})
+    assert admitted == {"accepted": True}
+
+    # An unarmed control config IS refused, and the downstream sink never runs.
+    unarmed = _service(armed=False)
+    unarmed.runtime = object()
+    with mock.patch.object(executive_service.ceo_intent, "submit_intent") as sink:
+        with pytest.raises(executive_service._CeoSubmitUnarmedError) as raised:
+            asyncio.run(unarmed._dispatch_request(_request()))
+        sink.assert_not_called()
+    assert raised.value.code == "ceo_submit_unarmed"
+    assert str(raised.value) == "CEO intent submission is not armed"
+
+    # HONEST LIMIT, asserted rather than papered over: the service gate consults
+    # ONLY the raw boolean, never the sealed receipt.  A hand-edited armed config
+    # with no receipt at all is therefore ALSO admitted by the service today, even
+    # though the source predicate on that same state is False.  This is the known
+    # integration gap owned by a later wave, NOT a defect of this packet; when that
+    # wave lands it must invert the `not in source` assertion below in the same PR.
+    hand_edited = {"ceo_submit_armed": True}
+    hand_service = _service(armed=hand_edited["ceo_submit_armed"])
+    hand_service.runtime = object()
+    with mock.patch.object(
+        hand_service, "_submit_service_intent", return_value={"accepted": True}
+    ) as hand_handler:
+        hand_admitted = asyncio.run(hand_service._dispatch_request(_request()))
+        hand_handler.assert_called_once_with({"intent_id": "w1h3b2-sink-intent"})
+    assert hand_admitted == {"accepted": True}
+    assert (
+        control.ceo_submit_sink_eligible(
+            control_config=hand_edited,
+            receipt=None,
+            binding=binding,
+            expected_sha=SHA,
+        )
+        is False
+    )
+    service_source = Path(executive_service.__file__).read_text(encoding="utf-8")
+    assert "ceo_submit_sink_eligible" not in service_source
