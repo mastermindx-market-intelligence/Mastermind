@@ -96,7 +96,17 @@ def test_continuation_preserves_do_not_redo_and_evidence_coordinates() -> None:
     packet = build_continuation(_agentos(), "WS:TARGET")
     assert packet["do_not_redo"] == ["DONE-1"]
     assert packet["active_waves"][0]["id"] == "W2"
-    assert packet["active_waves"][0]["depends_on"] == ["DONE-1"]
+    wave = packet["active_waves"][0]
+    assert wave["depends_on"] == ["DONE-1"]
+    assert wave["depends_on_total"] == 1
+    assert wave["depends_on_truncated"] is False
+    assert wave["prs"] == [2, 3]
+    assert wave["prs_total"] == 2
+    assert wave["prs_truncated"] is False
+    assert packet["state"]["blocked_by_total"] == 1
+    assert packet["state"]["blocked_by_truncated"] is False
+    assert packet["warnings_total"] == 0
+    assert packet["warnings_truncated"] is False
     assert packet["evidence_refs"] == [
         {
             "kind": "workstream",
@@ -157,6 +167,31 @@ def test_refuses_wrong_or_unavailable_canonical_source() -> None:
         bad = _agentos()
         bad["state"]["workstreams"] = []
         build_continuation(bad, "WS:TARGET")
+
+
+def test_collection_limits_are_explicit_not_silent() -> None:
+    agentos = _agentos()
+    row = agentos["state"]["workstreams"][0]
+    row["blocked_by"] = [f"blocker-{index}" for index in range(9)]
+    row["wave_detail"][1]["depends_on"] = [f"D{index}" for index in range(20)]
+    row["wave_detail"][1]["prs"] = list(range(1, 21))
+    agentos["warnings"] = [f"warning-{index}" for index in range(11)]
+
+    packet = build_continuation(agentos, "WS:TARGET")
+    wave = packet["active_waves"][0]
+
+    assert len(packet["state"]["blocked_by"]) == 6
+    assert packet["state"]["blocked_by_total"] == 9
+    assert packet["state"]["blocked_by_truncated"] is True
+    assert len(wave["depends_on"]) == 16
+    assert wave["depends_on_total"] == 20
+    assert wave["depends_on_truncated"] is True
+    assert len(wave["prs"]) == 16
+    assert wave["prs_total"] == 20
+    assert wave["prs_truncated"] is True
+    assert len(packet["warnings"]) == 8
+    assert packet["warnings_total"] == 11
+    assert packet["warnings_truncated"] is True
 
 
 def test_refuses_packet_that_cannot_fit_without_dropping_required_state() -> None:

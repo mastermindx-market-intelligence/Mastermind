@@ -144,13 +144,17 @@ def _wave_projection(row: Mapping[str, Any]) -> tuple[list[dict[str, Any]], list
         prs = wave.get("prs") or []
         if not isinstance(prs, list) or any(type(item) is not int or item < 1 for item in prs):
             raise WebSolContinuationError(f"wave_detail[{index}].prs must contain positive integers")
+        depends_on_raw = wave.get("depends_on") or []
+        depends_on = _string_list(
+            depends_on_raw, name=f"wave_detail[{index}].depends_on", maximum=16
+        )
         active.append(
             {
                 "id": wave_id,
                 "status": status,
-                "depends_on": _string_list(
-                    wave.get("depends_on") or [], name=f"wave_detail[{index}].depends_on", maximum=16
-                ),
+                "depends_on": depends_on,
+                "depends_on_total": len(depends_on_raw),
+                "depends_on_truncated": len(depends_on_raw) > len(depends_on),
                 "deps_satisfied": (
                     wave.get("deps_satisfied") if isinstance(wave.get("deps_satisfied"), bool) else None
                 ),
@@ -160,6 +164,8 @@ def _wave_projection(row: Mapping[str, Any]) -> tuple[list[dict[str, Any]], list
                     maximum_bytes=MAX_WAVE_ACTION_BYTES,
                 ),
                 "prs": prs[:16],
+                "prs_total": len(prs),
+                "prs_truncated": len(prs) > 16,
                 "wait": _opaque_marker(wave.get("wait"), name=f"wave_detail[{index}].wait"),
             }
         )
@@ -262,6 +268,7 @@ def build_continuation(agentos: Mapping[str, Any], workstream: str) -> dict[str,
             ),
             "blocked_by": blockers,
             "blocked_by_total": len(blockers_raw),
+            "blocked_by_truncated": len(blockers_raw) > len(blockers),
             "wait": _opaque_marker(row.get("wait"), name="workstream.wait"),
             "needs_ceo": _opaque_marker(row.get("needs_ceo"), name="workstream.needs_ceo"),
             "claim": _opaque_marker(row.get("claim"), name="workstream.claim"),
@@ -278,6 +285,8 @@ def build_continuation(agentos: Mapping[str, Any], workstream: str) -> dict[str,
             _bounded_text(item, name=f"warnings[{index}]", maximum_bytes=256)
             for index, item in enumerate(warnings_raw[:8])
         ],
+        "warnings_total": len(warnings_raw),
+        "warnings_truncated": len(warnings_raw) > 8,
         "authority_note": (
             "Projection only: Agent OS owns organizational continuity; Executive OS owns runtime/effect truth. "
             "Refresh canonical owners before modifying work."
