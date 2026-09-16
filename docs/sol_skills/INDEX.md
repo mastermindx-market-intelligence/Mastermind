@@ -91,6 +91,14 @@ Mandatory after current-state recovery for substantial continuing or modifying C
 active session. It keeps Sol on the highest-leverage unblocked critical-path dependency, prevents
 status/artifact substitution and repeated tool rediscovery, and applies the final-response gate.
 
+### `WEB_CEO_DELEGATION.md`
+Mandatory companion to `ACTIVE_EXECUTION.md` for substantial Web CEO work that requires
+principal-duty selection, delegation economics, worker packets, capacity-aware routing, or
+evidence/continuity handling. Load it from the same pinned Skillpack revision. ACTIVE_EXECUTION
+remains the sole active-turn, no-delta and finalization owner; this companion does not select a
+provider, account, credential, host, model setting, or reasoning mode, and grants no lifecycle,
+admission, retry, transfer, effect, or production authority.
+
 ### `REVIEW_RETURN.md`
 Use when a worker/Fable/Claude/Codex/Grok session returns code, a PR, research or a claimed
 completion. Reviews against original outcome, not merely implementation quality.
