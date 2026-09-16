@@ -4997,3 +4997,663 @@ def test_cli_status_does_not_report_ready_after_live_binding_drift(field, value,
     assert document["state"] == "CEO_SUBMIT_ARMED_UNBOUND"
     assert output.err == ""
     assert host.control_writes == host.worker_writes == host.receipt_writes == 0
+
+
+# ---------------------------------------------------------------------------
+# R80 GAP CLOSURE: the production CEO-admission probe predicate itself
+# ---------------------------------------------------------------------------
+#
+# Every other test in this suite that touches the live proof seam overrides
+# ``_ceo_admission_probe`` (FakeCeoSubmitHost records it as a phase,
+# _AdmissionProbeHost and _RollbackProbeHost short-circuit it).  The
+# production probe body in ``ProductionCeoSubmitHost._ceo_admission_probe``
+# therefore runs ONLY when these overrides are bypassed; mutating its
+# predicate (for example, switching the AWAITING_CANARY discriminator to
+# READY) leaves every other test green, which is the gap these tests close.
+#
+# These tests exercise the REAL ``ProductionCeoSubmitHost._ceo_admission_probe``
+# by monkeypatching ``subprocess.run`` (the single seam it uses) to return a
+# controlled JSON status body.  No ``skipif``, no ``sys.platform``, no real
+# launchd, no real subprocess and no network -- the platform check the
+# production ``_require_host`` would normally enforce is never reached.
+
+
+class _FakeCompletedProcess:
+    """The minimum CompletedProcess surface the probe consumes."""
+
+    def __init__(self, *, returncode=0, stdout=b""):
+        self.returncode = returncode
+        self.stdout = stdout
+
+
+def _probe_status_body(*, service_state, socket_path):
+    """The status response body the probe parses."""
+
+    return json.dumps(
+        {
+            "ok": True,
+            "result": {
+                "service_state": service_state,
+                "socket": socket_path,
+            },
+        },
+        sort_keys=True,
+    ).encode("utf-8")
+
+
+def _patch_probe_subprocess(monkeypatch, *, returncode=0, stdout=b""):
+    """Replace ``subprocess.run`` so the probe consumes a fixed payload."""
+
+    calls = []
+
+    def fake_run(*args, **kwargs):
+        calls.append((args, kwargs))
+        return _FakeCompletedProcess(returncode=returncode, stdout=stdout)
+
+    monkeypatch.setattr(control.subprocess, "run", fake_run)
+    return calls
+
+
+def test_production_ceo_admission_probe_accepts_awaiting_canary_on_the_fixed_control_socket(
+    monkeypatch,
+):
+    """R80 positive path: AWAITING_CANARY + ok True + the fixed control socket."""
+
+    host = control.ProductionCeoSubmitHost()
+    digest = "f" * 64
+    calls = _patch_probe_subprocess(
+        monkeypatch,
+        returncode=0,
+        stdout=_probe_status_body(
+            service_state="AWAITING_CANARY",
+            socket_path=os.fspath(control.CONTROL_SOCKET),
+        ),
+    )
+
+    assert host._ceo_admission_probe(SHA, candidate_config_digest=digest) is True
+    # The probe really did reach the OS seam exactly once.
+    assert len(calls) == 1
+    argv = calls[0][0][0]
+    assert os.fspath(control.CONTROL_SOCKET) in argv
+    assert "status" in argv
+    # The probe argv is the contract: fixed label + fixed socket + status verb,
+    # with stdin/stdout/stderr pinned to DEVNULL or PIPE and a bounded timeout.
+    assert calls[0][1].get("stdin") is subprocess.DEVNULL
+    assert calls[0][1].get("stderr") is subprocess.DEVNULL
+    assert calls[0][1].get("stdout") is subprocess.PIPE
+    assert calls[0][1].get("check") is False
+    assert calls[0][1].get("timeout") == 10
+
+
+def test_production_ceo_admission_probe_refuses_ready_service_state(monkeypatch):
+    """R80 mutant: READY is the retired global-READY shape; this probe REFUSES.
+
+    Flipping the production predicate from ``AWAITING_CANARY`` to ``READY``
+    must turn this test RED.  Restoring it turns it GREEN.
+    """
+
+    host = control.ProductionCeoSubmitHost()
+    digest = "f" * 64
+    _patch_probe_subprocess(
+        monkeypatch,
+        returncode=0,
+        stdout=_probe_status_body(
+            service_state="READY",
+            socket_path=os.fspath(control.CONTROL_SOCKET),
+        ),
+    )
+
+    assert host._ceo_admission_probe(SHA, candidate_config_digest=digest) is False
+
+
+def test_production_ceo_admission_probe_refuses_a_non_fixed_control_socket(monkeypatch):
+    """The fixed control socket is part of the CEO-admission identity."""
+
+    host = control.ProductionCeoSubmitHost()
+    digest = "f" * 64
+    _patch_probe_subprocess(
+        monkeypatch,
+        returncode=0,
+        stdout=_probe_status_body(
+            service_state="AWAITING_CANARY",
+            socket_path="/var/run/some-other.sock",
+        ),
+    )
+
+    assert host._ceo_admission_probe(SHA, candidate_config_digest=digest) is False
+
+
+def test_production_ceo_admission_probe_refuses_ok_false(monkeypatch):
+    host = control.ProductionCeoSubmitHost()
+    digest = "f" * 64
+    _patch_probe_subprocess(
+        monkeypatch,
+        returncode=0,
+        stdout=json.dumps({"ok": False, "result": {}}, sort_keys=True).encode("utf-8"),
+    )
+
+    assert host._ceo_admission_probe(SHA, candidate_config_digest=digest) is False
+
+
+def test_production_ceo_admission_probe_refuses_non_zero_return_code(monkeypatch):
+    host = control.ProductionCeoSubmitHost()
+    digest = "f" * 64
+    _patch_probe_subprocess(
+        monkeypatch,
+        returncode=2,
+        stdout=_probe_status_body(
+            service_state="AWAITING_CANARY",
+            socket_path=os.fspath(control.CONTROL_SOCKET),
+        ),
+    )
+
+    assert host._ceo_admission_probe(SHA, candidate_config_digest=digest) is False
+
+
+def test_production_ceo_admission_probe_refuses_oversize_body(monkeypatch):
+    host = control.ProductionCeoSubmitHost()
+    digest = "f" * 64
+    _patch_probe_subprocess(
+        monkeypatch,
+        returncode=0,
+        stdout=b"x" * (control._MAX_JSON_BYTES + 1),
+    )
+
+    assert host._ceo_admission_probe(SHA, candidate_config_digest=digest) is False
+
+
+def test_production_ceo_admission_probe_refuses_non_json_body(monkeypatch):
+    host = control.ProductionCeoSubmitHost()
+    digest = "f" * 64
+    _patch_probe_subprocess(monkeypatch, returncode=0, stdout=b"not-json")
+
+    assert host._ceo_admission_probe(SHA, candidate_config_digest=digest) is False
+
+
+def test_production_ceo_admission_probe_refuses_non_dict_body(monkeypatch):
+    host = control.ProductionCeoSubmitHost()
+    digest = "f" * 64
+    _patch_probe_subprocess(monkeypatch, returncode=0, stdout=b"[1, 2, 3]")
+
+    assert host._ceo_admission_probe(SHA, candidate_config_digest=digest) is False
+
+
+def test_production_ceo_admission_probe_refuses_non_dict_result(monkeypatch):
+    host = control.ProductionCeoSubmitHost()
+    digest = "f" * 64
+    _patch_probe_subprocess(
+        monkeypatch,
+        returncode=0,
+        stdout=json.dumps(
+            {"ok": True, "result": "not-a-dict"}, sort_keys=True
+        ).encode("utf-8"),
+    )
+
+    assert host._ceo_admission_probe(SHA, candidate_config_digest=digest) is False
+
+
+def test_production_ceo_admission_probe_drops_service_state_silently_when_awaiting_canary_missing(
+    monkeypatch,
+):
+    """A missing ``service_state`` is the same REFUSAL as the wrong value."""
+
+    host = control.ProductionCeoSubmitHost()
+    digest = "f" * 64
+    _patch_probe_subprocess(
+        monkeypatch,
+        returncode=0,
+        stdout=json.dumps(
+            {
+                "ok": True,
+                "result": {"socket": os.fspath(control.CONTROL_SOCKET)},
+            },
+            sort_keys=True,
+        ).encode("utf-8"),
+    )
+
+    assert host._ceo_admission_probe(SHA, candidate_config_digest=digest) is False
+
+
+def test_production_ceo_admission_probe_pins_the_fixed_control_label_and_socket_in_the_argv(
+    monkeypatch,
+):
+    """The probe argv is the contract: fixed label + fixed socket + status verb."""
+
+    host = control.ProductionCeoSubmitHost()
+    digest = "f" * 64
+    calls = _patch_probe_subprocess(
+        monkeypatch,
+        returncode=0,
+        stdout=_probe_status_body(
+            service_state="AWAITING_CANARY",
+            socket_path=os.fspath(control.CONTROL_SOCKET),
+        ),
+    )
+
+    host._ceo_admission_probe(SHA, candidate_config_digest=digest)
+
+    argv = calls[0][0][0]
+    assert os.fspath(control.PINNED_PYTHON) in argv
+    assert "status" in argv
+    assert os.fspath(control.CONTROL_SOCKET) in argv
+    assert "--socket" in argv
+    # The release identity is pinned in argv via the script path, never via
+    # the payload -- the probe never exposes ``release_sha`` in the result.
+    assert any(str(arg).endswith("executive_os_phase1c.py") for arg in argv)
+    for forbidden in (
+        "release_sha",
+        "control_config_sha256",
+    ):
+        assert forbidden not in calls[0][0][0]
+
+
+# ---------------------------------------------------------------------------
+# R76 GAP CLOSURE: the safe-direction projection repair under a drifted
+# App binding, end-to-end (DISARM, rollback, ARMED_UNBOUND readback, ARM
+# refusal)
+# ---------------------------------------------------------------------------
+#
+# ``FakeCeoSubmitHost.executive_app_binding`` mirrors the control config on
+# every read, so ``_ceo_submit_binding_matches_control`` is structurally
+# impossible to violate through the fake alone.  R76 exists to UNBLOCK
+# DISARM and rollback when the live App binding has actually drifted (or is
+# absent), while ARM keeps its typed pre-write refusal.  The fake
+# ``_DriftedBindingCeoSubmitHost`` below is the missing test surface: its
+# ``executive_app_binding`` reads from a LIVE-ONLY override that is never
+# synced back into ``control_config``.
+
+
+class _DriftedBindingCeoSubmitHost(FakeCeoSubmitHost):
+    """A fake whose live App binding is INDEPENDENT of ``control_config``.
+
+    ``FakeCeoSubmitHost.executive_app_binding`` syncs every fact from
+    ``control_config`` so the ARM R76 six-fact check can never trip.  This
+    subclass applies a LIVE-ONLY drift on top of that sync, leaving
+    ``control_config`` unchanged -- a genuine live-vs-config mismatch is
+    then expressible, which is the shape R76 exists to unblock for DISARM
+    and rollback.
+
+    The drift never touches ``app_peer_uid``, ``ingress_peer_uid``,
+    ``app_peer_user`` or any structural fact that DISARM admission still
+    consults (root, separation).  Only the App transport flag and the
+    socket topology drift, which is exactly the failure mode R76 names.
+    """
+
+    def __init__(self, *args, binding_drift=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._binding_drift = dict(binding_drift or {})
+
+    def executive_app_binding(self):
+        self._call("binding")
+        values = {
+            "present": True,
+            "app_peer_uid": self.control_config.get(
+                "ceo_ingress_app_peer_uid", 458
+            ),
+            "app_peer_user": control.EXECUTIVE_APP_USER,
+            "app_armed": self.control_config.get("ceo_ingress_app_armed", True),
+            "app_macro_root": self.control_config.get(
+                "ceo_ingress_app_macro_root", CEO_SUBMIT_APP_MACRO_ROOT
+            ),
+            "ingress_peer_uid": self.control_config.get(
+                "ceo_ingress_peer_uid", 452
+            ),
+            "ingress_socket_path": self.control_config.get(
+                "ceo_ingress_socket_path",
+                "/var/run/mastermind-executive/ceo-ingress.sock",
+            ),
+            "launchd_socket_name": self.control_config.get(
+                "ceo_ingress_launchd_socket_name", "CeoIngress"
+            ),
+            "binding_valid": True,
+            "acl_valid": True,
+            "topology_valid": True,
+        }
+        # LIVE-ONLY drift: applied AFTER the sync, so the live binding
+        # genuinely disagrees with control_config and with the sealed
+        # receipt's projection.
+        values.update(self._binding_drift)
+        return control.ExecutiveAppBinding(**values)
+
+
+def test_ceo_submit_disarm_succeeds_under_a_drifted_live_binding_and_preserves_every_unrelated_byte(
+    capsys,
+):
+    """R76 safe-direction repair: DISARM under drift must still SUCCEED.
+
+    The drift is the shape R76 names -- the App transport was lost (live
+    ``app_armed`` is False) while the control config still says armed.  The
+    CEO-submit DISARM is the safe direction: it clears the arm flag, leaves
+    the App transport state untouched in the control config, preserves every
+    unrelated control byte, and produces a sealed receipt whose projection
+    carries the drifted binding facts as they stand.
+    """
+
+    host = _DriftedBindingCeoSubmitHost(
+        binding_drift={"app_armed": False},
+    )
+    host.control_config["ceo_submit_armed"] = True
+    # Sanity-check the drift is actually expressing a live-vs-config
+    # mismatch BEFORE we call DISARM -- otherwise the test would not
+    # exercise the safe-direction code path at all.
+    live = host.executive_app_binding()
+    assert live.app_armed is False
+    assert host.control_config["ceo_ingress_app_armed"] is True
+    assert live.app_peer_uid == host.control_config["ceo_ingress_app_peer_uid"]
+
+    before = copy.deepcopy(host.control_config)
+    before_worker_bytes = control.encode_config(host.worker_config)
+    before_worker_sha = control.sha256_bytes(before_worker_bytes)
+    host.reset_ledgers()
+
+    result = control.execute_ceo_submit_disarm(host, _ceo_submit_request(), now=NOW)
+
+    assert result == control.TransactionResult(
+        state="CEO_SUBMIT_DISARMED",
+        status="CEO_SUBMIT_DISARMED",
+        transaction_id="autonomy-feedfacec0de",
+        replayed=False,
+    )
+    # Arm flag cleared; App transport NOT turned back on.
+    assert host.control_config["ceo_submit_armed"] is False
+    assert host.control_config["ceo_ingress_app_armed"] is True
+    # Every unrelated control key is byte-for-byte preserved.
+    changed = {
+        key
+        for key in before
+        if before[key] != host.control_config[key]
+    }
+    assert changed == {"ceo_submit_armed"}
+    expected_bytes = control.encode_config({**before, "ceo_submit_armed": False})
+    assert control.encode_config(host.control_config) == expected_bytes
+    # Worker config never a CEO-submit write target.
+    after_worker_bytes = control.encode_config(host.worker_config)
+    assert after_worker_bytes == before_worker_bytes
+    assert control.sha256_bytes(after_worker_bytes) == before_worker_sha
+    assert host.worker_writes == 0
+    assert host.worker_replace_calls == 0
+    # The phase list still ends at ADMISSION_BOUND; rollback did NOT run
+    # because the safe-direction disarm succeeds without rolling back.
+    assert host.phases == list(FakeCeoSubmitHost.CEO_PHASES)
+    assert host.marker is False
+    # The sealed receipt recorded the drifted binding facts.  The receipt
+    # itself is sealed and well-formed -- the document validator accepts it
+    # for the armed=False state.
+    sealed = host.receipt
+    assert sealed["state"] == "CEO_SUBMIT_DISARMED"
+    assert sealed["operation"] == "CEO_SUBMIT_DISARM"
+    assert sealed["projection"]["ceo_submit_armed"] is False
+    assert sealed["projection"]["transaction_id"] == "autonomy-feedfacec0de"
+
+    # The real CLI renders this exact shape with the closed document schema
+    # BEFORE the disarm completes (the state was armed-with-drift; the CLI
+    # reports the pre-disarm readback as ARMED_UNBOUND because the live
+    # binding does not match the control config even though the flag is
+    # still True).  After DISARM the flag is False, so a second CLI call
+    # would replay as DISARMED; we don't re-run it here.
+    code = control.main(
+        ["ceo-submit-status", "--expected-sha", SHA], host=host, now=lambda: NOW
+    )
+    output = capsys.readouterr()
+    assert code == 0
+    document = json.loads(output.out)
+    assert document["state"] == "CEO_SUBMIT_DISARMED"
+
+
+def test_ceo_submit_rollback_projection_is_unblocked_under_a_drifted_live_binding(
+    monkeypatch, tmp_path,
+):
+    """R76 rollback projection repair: the projection must not refuse drift.
+
+    Re-inserting the old ``app_binding_invalid`` refusal at the top of
+    ``ceo_submit_projection`` would make this test RED -- rollback would
+    raise ``CeoSubmitAdmissionError("app_binding_invalid")`` and the
+    ``TransactionEffectUnknown`` translator in ``execute_*`` would surface
+    it as the sticky effect-unknown.  With the R76 repair in place, the
+    projection accepts the drifted facts, the receipt seals, and the
+    rollback carrier builds cleanly.
+    """
+
+    host = _DriftedBindingCeoSubmitHost(
+        binding_drift={"app_armed": False, "ingress_socket_path": "/drift/path.sock"},
+    )
+    # ARM rollback restores the DISARMED preimage, so the prior and the
+    # rollback candidates are BOTH disarmed -- the receipt seals as
+    # CEO_SUBMIT_DISARMED even though the live binding has drifted.
+    host.control_config["ceo_submit_armed"] = False
+    prior = control.ConfigEvidence(
+        control_sha256=control.sha256_bytes(
+            control.encode_config(host.control_config)
+        ),
+        worker_sha256=control.sha256_bytes(
+            control.encode_config(host.worker_config)
+        ),
+        control=copy.deepcopy(host.control_config),
+        worker=copy.deepcopy(host.worker_config),
+        control_bytes=control.encode_config(host.control_config),
+        worker_bytes=control.encode_config(host.worker_config),
+    )
+    candidates = control.derive_ceo_submit_candidate(prior, armed=False)
+    admission = control.CeoSubmitAdmission(
+        expected_sha=SHA,
+        installed_sha=SHA,
+        binding=host.executive_app_binding(),
+        separation=host.ceo_submit_separation(prior),
+        configs=prior,
+    )
+
+    projection = control.ceo_submit_projection(
+        control.TransactionContext(
+            transaction_id="autonomy-deadbeefcafe",
+            expected_sha=SHA,
+            prior_configs=prior,
+            candidates=candidates,
+            admission=None,
+        ),
+        admission,
+        armed=False,
+    )
+
+    # The projection records the drifted facts as they stand; it does not
+    # raise ``app_binding_invalid``.  The receipt is well-formed for the
+    # validator -- rollback can therefore seal it.
+    assert projection["release_sha"] == SHA
+    assert projection["installed_sha"] == SHA
+    assert projection["transaction_id"] == "autonomy-deadbeefcafe"
+    assert projection["ceo_submit_armed"] is False
+    assert projection["app_peer_user"] == control.EXECUTIVE_APP_USER
+    receipt = {
+        "schema_version": control.CEO_SUBMIT_RECEIPT_SCHEMA,
+        "state": "CEO_SUBMIT_DISARMED",
+        "operation": "CEO_SUBMIT_DISARM",
+        "projection": dict(projection),
+        "projection_digest": control.ceo_submit_projection_digest(projection),
+        "transaction_id": projection["transaction_id"],
+        "observed_at": "2026-08-24T12:00:00Z",
+        "tool_version": control.TOOL_VERSION,
+    }
+    assert control.validate_ceo_submit_receipt_document(receipt, armed=False) is True
+
+    # Drive a real rollback carrier through ``build_ceo_submit_receipt``
+    # with the same drifted admission.  Re-inserting the projection refusal
+    # would raise here (and the rollback carrier in ``execute_*`` would
+    # surface it as ``TransactionEffectUnknown``); with R76 the receipt is
+    # sealed and the document is bound.
+    transaction = control.TransactionContext(
+        transaction_id="autonomy-deadbeefcafe",
+        expected_sha=SHA,
+        prior_configs=prior,
+        candidates=candidates,
+        admission=None,
+    )
+    sealed = control.build_ceo_submit_receipt(
+        transaction, admission, armed=False, now=NOW
+    )
+    assert sealed["state"] == "CEO_SUBMIT_DISARMED"
+    assert sealed["projection"]["transaction_id"] == "autonomy-deadbeefcafe"
+
+
+def test_ceo_submit_status_reads_an_armed_drifted_state_as_unbound_and_keeps_sink_ineligible(
+    capsys,
+):
+    """An ARMED receipt whose live binding has drifted reads back ARMED_UNBOUND.
+
+    The sink eligibility and the CLI status readback must both refuse to
+    treat the drifted-armed state as armed-and-eligible.  This is the
+    "drifted receipt is unusable" half of R76: the projection faithfully
+    recorded the drift, the readback faithfully reports the disconnect.
+    """
+
+    # (a) ARM first against a synced binding to seal a real receipt.
+    synced = FakeCeoSubmitHost()
+    arm_result = control.execute_ceo_submit_arm(synced, _ceo_submit_request(), now=NOW)
+    assert arm_result.state == "CEO_SUBMIT_ARMED"
+    sealed = synced.receipt
+
+    # (b) Move the sealed ARMED state onto a host whose live binding has
+    # drifted -- same control bytes, same sealed receipt, but the live
+    # binding now disagrees with the control.
+    drifted = _DriftedBindingCeoSubmitHost(
+        binding_drift={"app_armed": False, "ingress_socket_path": "/drift/path.sock"},
+    )
+    drifted.control_config = copy.deepcopy(synced.control_config)
+    drifted.worker_config = copy.deepcopy(synced.worker_config)
+    drifted.receipt = copy.deepcopy(sealed)
+    drifted.calls = []
+    drifted.phases = []
+    drifted.receipt_writes = 0
+    drifted.control_writes = 0
+    drifted.worker_writes = 0
+
+    # Sanity: the drift is genuinely expressed.
+    live = drifted.executive_app_binding()
+    assert live.app_armed is False
+    assert drifted.control_config["ceo_ingress_app_armed"] is True
+
+    # (c) Status readback is ARMED_UNBOUND.
+    result = control.evaluate_ceo_submit_status(drifted, _ceo_submit_request())
+    assert result.state == "CEO_SUBMIT_ARMED_UNBOUND"
+    assert result.status == "CEO_SUBMIT_ARMED_UNBOUND"
+    assert drifted.control_writes == drifted.worker_writes == drifted.receipt_writes == 0
+
+    # (d) Sink eligibility is False -- the receipt cannot grant admission
+    # to a live binding that no longer matches its sealed projection.
+    eligible = control.ceo_submit_sink_eligible(
+        control_config=drifted.control_config,
+        worker_config=drifted.worker_config,
+        worker_config_sha256=control.sha256_bytes(
+            control.encode_config(drifted.worker_config)
+        ),
+        receipt=drifted.receipt,
+        binding=drifted.executive_app_binding(),
+        expected_sha=SHA,
+        installed_sha=SHA,
+    )
+    assert eligible is False
+
+    # (e) The real CLI also reports the unbound state with the closed
+    # document schema and a nonzero exit.
+    code = control.main(
+        ["ceo-submit-status", "--expected-sha", SHA],
+        host=drifted,
+        now=lambda: NOW,
+    )
+    output = capsys.readouterr()
+    assert code == 2
+    document = json.loads(output.out)
+    assert document["state"] == "CEO_SUBMIT_ARMED_UNBOUND"
+    assert output.err == ""
+
+
+def test_ceo_submit_arm_is_refused_under_a_drifted_live_binding_with_a_typed_pre_write_refusal():
+    """ARM still refuses with ``app_binding_invalid`` under drift, zero writes.
+
+    The refusal moved out of the projection (R76) and into the ARM
+    admission chain, so the operator gets the typed refusal BEFORE any lock,
+    marker, phase, candidate, config, or receipt is written.  This test
+    proves the refusal is typed, pre-write, and zero-effect.
+    """
+
+    host = _DriftedBindingCeoSubmitHost(
+        binding_drift={"app_armed": False, "ingress_socket_path": "/drift/path.sock"},
+    )
+    host.control_config["ceo_submit_armed"] = False  # eligible for ARM
+    before = copy.deepcopy(host.control_config)
+    # Sanity: the drift is genuinely expressed and would fail the R76
+    # six-fact check at admission.
+    live = host.executive_app_binding()
+    assert live.app_armed is False
+    assert host.control_config["ceo_ingress_app_armed"] is True
+    # Drop the sanity call so the post-ARM calls list is the clean CEO_GATES
+    # prefix the admission gate actually walked.
+    host.reset_ledgers()
+
+    with pytest.raises(control.CeoSubmitAdmissionError) as raised:
+        control.execute_ceo_submit_arm(host, _ceo_submit_request(), now=NOW)
+
+    assert raised.value.code == "app_binding_invalid"
+    # Zero writes: no lock, no marker, no phase, no candidate, no config, no receipt.
+    assert host.phases == []
+    # The R76 six-fact check fires BETWEEN separation and transaction, so the
+    # clean gate prefix is root, install, binding, configs, separation -- the
+    # ``transaction`` gate is reachable only on the success path.
+    separation_index = FakeCeoSubmitHost.CEO_GATES.index("separation")
+    assert host.calls == list(FakeCeoSubmitHost.CEO_GATES[: separation_index + 1])
+    assert host.control_writes == 0
+    assert host.worker_writes == 0
+    assert host.receipt_writes == 0
+    assert host.marker is False
+    assert host.control_config == before
+
+
+def test_ceo_submit_projection_digest_under_drift_matches_what_ceo_submit_projection_produces():
+    """R76: the projection's closed fact-carrier digest is well-formed for drift.
+
+    This is the smallest possible invariant of the safe-direction repair:
+    feeding the projection facts from a drifted binding into the digest
+    function produces a stable digest that the validator accepts.
+    """
+
+    drifted = _DriftedBindingCeoSubmitHost(
+        binding_drift={"app_armed": False, "ingress_socket_path": "/drift/path.sock"},
+    )
+    # ARM candidate from the DISARMED prior, exactly the carrier the ARM
+    # rollback path builds once the live binding has drifted.
+    drifted.control_config["ceo_submit_armed"] = False
+    prior = control.ConfigEvidence(
+        control_sha256=control.sha256_bytes(
+            control.encode_config(drifted.control_config)
+        ),
+        worker_sha256=control.sha256_bytes(
+            control.encode_config(drifted.worker_config)
+        ),
+        control=copy.deepcopy(drifted.control_config),
+        worker=copy.deepcopy(drifted.worker_config),
+        control_bytes=control.encode_config(drifted.control_config),
+        worker_bytes=control.encode_config(drifted.worker_config),
+    )
+    candidates = control.derive_ceo_submit_candidate(prior, armed=True)
+    admission = control.CeoSubmitAdmission(
+        expected_sha=SHA,
+        installed_sha=SHA,
+        binding=drifted.executive_app_binding(),
+        separation=drifted.ceo_submit_separation(prior),
+        configs=prior,
+    )
+    projection = control.ceo_submit_projection(
+        control.TransactionContext(
+            transaction_id="autonomy-feedfacec0de",
+            expected_sha=SHA,
+            prior_configs=prior,
+            candidates=candidates,
+            admission=None,
+        ),
+        admission,
+        armed=True,
+    )
+
+    digest = control.ceo_submit_projection_digest(projection)
+
+    assert isinstance(digest, str)
+    assert len(digest) == 64
+    assert digest == control.sha256_bytes(control._encoded_json(projection))
