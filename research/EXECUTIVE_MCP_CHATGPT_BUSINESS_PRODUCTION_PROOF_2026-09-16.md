@@ -12,11 +12,16 @@ A real ChatGPT Business conversation used the installed private **Mastermind Exe
 app to authenticate, discover exactly five tools, call all four readers against the
 installed Executive runtime, and exercise the queue-only CEO-intent admission contract.
 The accepted canary remained `QUEUED`, reported `dispatched=false`, and produced no
-Attempt or Worker. Same-payload replay reconciled to the same Job; changed payload under
-the same operation identity was refused as `operation_conflict`.
+Attempt or Worker. Same normalized-payload replay reconciled to the same Job; changed
+payload under the same operation identity was refused as `operation_conflict`.
 
 This receipt qualifies the authenticated app/tool path only. It does not claim that every
 upstream Executive information source is healthy or that queued work executed.
+
+The document-level operation identifies the non-effectful finalization/closeout carrier.
+The later `executive-os-plugin-live-canary-20260916-sol-003` operation key identifies the
+single modifying production canary performed within that authorized finalization scope.
+They are intentionally distinct identities and must not be substituted for one another.
 
 ## Procedure and release identity
 
@@ -32,7 +37,6 @@ upstream Executive information source is healthy or that queued work executed.
 - App display/version: `Mastermind Executive` / `1.0.0`.
 - Production tunnel: `tunnel_6a966926e4b48191b93e5b5df2457afd`.
 - Authorization server: `https://dev-eo0jf8us5mup7wd5.us.auth0.com/`.
-- Proof conversation: `https://chatgpt.com/c/6aaaf383-c830-83ea-9a61-00715bce563b`.
 - MCP loopback listener: `127.0.0.1:8443`.
 
 Two older fixture profiles were explicitly excluded from production evidence:
@@ -41,15 +45,20 @@ Two older fixture profiles were explicitly excluded from production evidence:
 - `mastermind-executive-chatgpt3` / `tunnel_6a9d32826bf08191b37a0e2a45942dcd`.
 
 Those profiles invoke the historical fixture script in `--mode fixture`. They did not
-supply any acceptance evidence in this operation.
+supply any acceptance evidence in this operation. No
+`mastermind-executive-chatgpt2` Executive fixture profile existed in the inspected
+`tunnel-client` configuration; similarly numbered ChatGPT 2 labels belong to Studio
+Direct transport and are unrelated to this Executive app/tunnel proof.
 
 ## OAuth result
 
-The production app initially returned an expired-connection error. The native ChatGPT
-`Reconnect` path completed successfully. The same Business conversation then invoked
-live Executive tools through the production tunnel, proving usable bearer forwarding
-and refresh-capable authorization. No credential, token, password, or raw subject value
-is retained in this receipt.
+The production app initially returned an expired-connection error. `Reconnect` was
+invoked from the exact app page identified by
+`plugin_asdk_app_6aa89de1c45c81918b192d0a18dcfc15`; the same app remained selected in
+the Business conversation that then invoked live Executive tools through the production
+tunnel. That proves usable bearer forwarding and refresh-capable authorization for the
+named app identity, rather than a different client registration. No credential, token,
+password, or raw subject value is retained in this receipt.
 
 ## Exact tool discovery
 
@@ -110,13 +119,24 @@ The receipt grounded Mastermind at the installed control release and Macro at
 
 ## Duplicate and conflict canaries
 
-The same operation key and byte-equivalent semantic payload was submitted once more
-through the same app/conversation carrier. It returned:
+The same operation key and the same normalized intent payload were submitted once more
+through the same app/conversation carrier. Executive identity uses SHA-256 over the
+canonical JSON of the whole normalized envelope, so this is canonical-payload equality,
+not a claim about transport-byte formatting. The duplicate result was:
 
-- `duplicate=true`;
-- the same `JOB-003`;
-- the same intent ID, request reference, fingerprint, creation time, and grounding;
-- `dispatched=false` and `status=QUEUED`.
+```json
+{
+  "accepted": true,
+  "created_at_ms": 1789589352082,
+  "dispatched": false,
+  "duplicate": true,
+  "fingerprint": "bd9ccfd53abda2320ce0e36de0d4cb34c9a6bed6e3add6c74b987d2e66f72fb6",
+  "intent_id": "auto-61a72bb12b6a65d5ca317831fedc40dc",
+  "job_id": "JOB-003",
+  "request_ref": "req-5e7a696ee0eb98c18d51169e57aa5a6a",
+  "status": "QUEUED"
+}
+```
 
 The same operation key was then submitted with a deliberately changed objective. It
 returned no acceptance receipt and exactly:
@@ -183,7 +203,7 @@ successful OAuth, five-tool, four-read, admission, idempotency, and conflict pro
 | `dispatched == false` | PASS. |
 | Attempts remain `0` | PASS. |
 | Workers remain `0` | PASS. |
-| Same-payload retry reconciles as duplicate | PASS — same durable identity and Job. |
+| Same normalized-payload replay reconciles as duplicate | PASS — same canonical fingerprint, durable identity, and Job. |
 | Changed payload under same operation conflicts/refuses | PASS — `operation_conflict`. |
 | No unresolved modifying uncertainty | PASS — post-effect state and intent were reread canonically. |
 | Sanitized durable production receipt exists | PASS — this artifact. |
