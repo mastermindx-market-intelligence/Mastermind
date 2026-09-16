@@ -30,7 +30,7 @@ def probe(**overrides):
 
 def failure(index: int, **overrides):
     value = {
-        "attempt_id": f"turn-attempt-{index}",
+        "turn_id": f"turn-{index}",
         "conversation_fingerprint": FP,
         "observed_at": f"2026-09-16T0{index}:00:00Z",
         "provider_error_present": True,
@@ -94,13 +94,13 @@ def test_three_corroborated_consecutive_failed_turns_require_rotation():
     assert result.distinct_terminal_failures == classifier.REPEATED_FAILURE_THRESHOLD
 
 
-def test_duplicate_poll_of_same_failed_attempt_cannot_inflate_threshold():
+def test_duplicate_poll_of_same_failed_turn_cannot_inflate_threshold():
     result = classify(
         current=probe(provider_error_present=True),
         failures=[
             failure(1),
             failure(2),
-            failure(3, attempt_id="turn-attempt-2"),
+            failure(3, turn_id="turn-2"),
         ],
     )
     assert result.state is classifier.SessionHealth.ROTATION_SUSPECTED
@@ -145,6 +145,16 @@ def test_failure_evidence_must_be_strictly_chronological():
 def test_raw_or_unknown_failure_fields_are_refused():
     row = failure(1)
     row["error_text"] = "Thinking failed"
+    with pytest.raises(
+        classifier.WebSolRotationClassifierError,
+        match="invalid fields",
+    ):
+        classify(current=probe(provider_error_present=True), failures=[row])
+
+
+def test_executive_attempt_id_cannot_substitute_for_per_turn_identity():
+    row = failure(1)
+    row["attempt_id"] = row.pop("turn_id")
     with pytest.raises(
         classifier.WebSolRotationClassifierError,
         match="invalid fields",
