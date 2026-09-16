@@ -1,0 +1,19 @@
+{
+  "name": "@mastermind/private-studio-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node gateway.mjs",
+    "test": "node --test *.test.mjs",
+    "smoke": "node smoke.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.25.1",
+    "express": "4.22.1",
+    "zod": "3.25.76"
+  }
+}
