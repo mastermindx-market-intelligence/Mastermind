@@ -13,7 +13,7 @@ Introduce an honest, versioned consultation QUESTION identity for the trusted `g
 
 ## Pull-request carrier law
 
-While accepted W6-C2 repair PR #681 remains unmerged, the Grok identity PR is stacked on its exact remote branch/head rather than opened directly against `master`. This keeps the Grok PR limited to the new v3 identity capability and avoids duplicating W6-C2's five-path repair carrier. After #681 lands, the same Grok PR may be retargeted to `master` only with refreshed latest-base integration proof and review-reuse classification; no replacement PR, rebase-for-freshness, or ancestry-only source commit is required.
+The existing Grok branch composes accepted W6-C2 repair head `de190b2c7e878fd5a4cf6ecb2fc58b34b058ee74`. Its draft PR therefore targets `master` but remains dependency-held until PR #681 lands. Before that merge, GitHub may display the five inherited W6-C2 repair paths; they are not Grok-owned scope and grant no duplicate repair or merge authority. Basing on PR #681's stale branch is rejected because that branch predates unrelated protected-master changes and would project foreign paths. Review uses an immutable synthetic base containing current protected master plus accepted W6-C2, which isolates the actual Grok delta. After #681 lands, the same PR's diff must shrink to that Grok-only delta and receive refreshed latest-base integration proof under review-reuse law; no replacement PR, rebase-for-freshness, or ancestry-only source commit is required.
 
 ## Version law
 

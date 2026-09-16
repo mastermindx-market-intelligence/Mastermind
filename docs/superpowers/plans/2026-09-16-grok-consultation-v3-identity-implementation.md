@@ -286,7 +286,7 @@ git commit -m "feat(grok): persist v3 identity without arming execution"
 
 **Interfaces:**
 - Consumes: Tasks 1-4.
-- Produces: immutable branch head, current-base proof, independent review packet, and one stacked draft PR whose base is the accepted W6-C2 repair branch until that dependency lands.
+- Produces: immutable branch head, dependency-isolated and current-base proof, independent review packet, and one draft PR against `master` that remains held until accepted W6-C2 PR #681 lands.
 
 - [ ] **Step 1: Run focused and compatibility suites**
 
@@ -333,17 +333,15 @@ Expected: no checked-in Grok target, credential, endpoint, route, implemented tr
 
 Review against the version law, protected v1/v2 vectors, caller-override refusal, zero-target/transport boundary, and capability honesty. Any owned semantic change after review requires a fresh exact-head review.
 
-- [ ] **Step 6: Push and create one stacked draft PR on the existing branch**
+- [ ] **Step 6: Push and create one dependency-held draft PR on the existing branch**
 
 ```bash
 git push -u origin HEAD:sol/grok-consultation-v2-g1b-20260915
-gh pr create --draft \
-  --base sol/w6c2-postmerge-integrity-repair-20260914-sol-001 \
-  --head sol/grok-consultation-v2-g1b-20260915 \
+gh pr create --draft --base master --head sol/grok-consultation-v2-g1b-20260915 \
   --title "[GROK-G1B] Add honest v3 consultation identity without execution" \
   --body-file /path/to/final-pr-body.md
 ```
 
-The stacked base must read back at accepted W6-C2 head `de190b2c7e878fd5a4cf6ecb2fc58b34b058ee74`. Opening directly against `master` while PR #681 remains unmerged is forbidden because it would duplicate that repair carrier's five owned paths. After PR #681 lands, retarget this same PR to `master`, refresh current-base integration proof, and apply review-reuse law; do not create a replacement PR or ancestry-only source commit.
+The source branch composes accepted W6-C2 head `de190b2c7e878fd5a4cf6ecb2fc58b34b058ee74`, so the draft PR may temporarily display those five dependency paths while PR #681 remains unmerged. That is an inherited dependency, not Grok-owned scope and not merge authority. The PR must remain draft and release-blocked until #681 lands; afterward GitHub's diff must shrink to the dependency-isolated Grok delta, current-base integration proof must be refreshed, and review-reuse law must be applied. Do not retarget to the stale #681 branch, because it predates unrelated protected-master commits and would project 99 foreign paths. Do not create a replacement PR or ancestry-only source commit.
 
-The PR body must state `BUILT_NOT_PROVEN / PRODUCTION_INERT`, exact semantic head, stacked base/head, current-master integrated candidate, tests, review verdict, dependency gate, and every non-goal.
+The PR body must state `BUILT_NOT_PROVEN / PRODUCTION_INERT`, exact semantic head, inherited dependency head, dependency-isolated Grok path set, current-master integrated candidate, tests, review verdict, dependency gate, and every non-goal.
