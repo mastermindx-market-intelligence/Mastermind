@@ -13,6 +13,12 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from .executive_host_pressure import (
+    HostPressureContractError,
+    canonical_host_pressure_json,
+    validate_host_pressure_snapshot,
+)
+
 POLICY_SCHEMA = "mastermind.physical_resource_policy.v1"
 DEFAULT_POLICY_PATH = Path(__file__).resolve().parent.parent / "config" / "executive_physical_resources.json"
 INT64_MAX = (1 << 63) - 1
@@ -418,6 +424,42 @@ def evaluate_reservation(request, *, policy, current_charges, observations, deci
     return {"admitted": True, "code": "RESERVED", "request_fingerprint": physical_request_fingerprint(request), "fresh_begin": False, "charges": new_charges}
 
 
+def _validate_host_pressure_begin_evidence(*, request, policy, observations, decision_time_ms):
+    evidence = observations.get("host_pressure_evidence")
+    if evidence is None:
+        _refuse("HOST_PRESSURE_MISSING", "fresh host-pressure evidence is required at begin")
+    if type(evidence) is not dict or set(evidence) != {"snapshot", "snapshot_sha256"}:
+        _refuse("HOST_PRESSURE_SCHEMA_INVALID", "host-pressure evidence contract is invalid")
+    digest = evidence.get("snapshot_sha256")
+    if type(digest) is not str or _HEX64.fullmatch(digest) is None:
+        _refuse("HOST_PRESSURE_SCHEMA_INVALID", "host-pressure digest is not canonical")
+    try:
+        snapshot = validate_host_pressure_snapshot(evidence.get("snapshot"))
+        canonical = canonical_host_pressure_json(snapshot)
+    except (HostPressureContractError, TypeError, ValueError):
+        _refuse("HOST_PRESSURE_SCHEMA_INVALID", "host-pressure snapshot is invalid")
+    actual_digest = hashlib.sha256(canonical).hexdigest()
+    if digest != actual_digest:
+        _refuse("HOST_PRESSURE_HASH_MISMATCH", "host-pressure snapshot digest does not match")
+    if snapshot["telemetry_status"] != "COMPLETE" or snapshot["unknown_fields"]:
+        _refuse("HOST_PRESSURE_INCOMPLETE", "host-pressure telemetry is incomplete")
+    if snapshot["host_ref"] != request["host_id"]:
+        _refuse("HOST_BINDING_MISMATCH", "host-pressure snapshot belongs to another host")
+    if snapshot["boot_ref"] != request["boot_id"]:
+        _refuse("BOOT_GENERATION_MISMATCH", "host-pressure snapshot belongs to another boot")
+    now = _uint(decision_time_ms, "decision_time_ms")
+    observed_at = snapshot["observed_at_ms"]
+    if observed_at > now:
+        _refuse("HOST_PRESSURE_FUTURE_DATED", "host-pressure snapshot is future dated")
+    max_age = _uint(policy["freshness"].get("sample_max_age_ms"), "sample_max_age_ms")
+    if now - observed_at > max_age:
+        _refuse("HOST_PRESSURE_STALE", "host-pressure snapshot is stale")
+    return {
+        "host_pressure_snapshot_sha256": actual_digest,
+        "host_pressure_observed_at_ms": observed_at,
+    }
+
+
 def evaluate_begin(request, *, policy, current_charges, observations, decision_time_ms):
     """Evaluate additive capacity after the broker proves the owned reservation.
 
@@ -427,8 +469,18 @@ def evaluate_begin(request, *, policy, current_charges, observations, decision_t
     conditional accounting evidence, not an independently usable resource grant.
     """
     normalized, policy = _admission_context(request, policy, observations, decision_time_ms)
+    host_pressure = _validate_host_pressure_begin_evidence(
+        request=normalized, policy=policy, observations=observations, decision_time_ms=decision_time_ms
+    )
     _check_capacity(policy, observations, current_charges)
-    return {"admitted": True, "code": "FRESH_BEGIN", "request_fingerprint": physical_request_fingerprint(request), "fresh_begin": True, "charges": _request_charges(normalized)}
+    return {
+        "admitted": True,
+        "code": "FRESH_BEGIN",
+        "request_fingerprint": physical_request_fingerprint(request),
+        "fresh_begin": True,
+        "charges": _request_charges(normalized),
+        **host_pressure,
+    }
 
 
 def apply_physical_observation(demands, observation):
