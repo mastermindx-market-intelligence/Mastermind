@@ -52,13 +52,16 @@ def _installed_child_env(*, code_root: Path, macro_root: Path) -> dict[str, str]
         "GIT_CONFIG_KEY_0": "safe.directory",
         "GIT_CONFIG_VALUE_0": os.fspath(macro_root),
         # Macro Agent OS reads P0 state from the immutable installed release,
-        # never from the control-owned administrative checkout.
+        # never from the control-owned administrative checkout.  Pin Terminal to a
+        # deliberately absent child so ambient sibling discovery cannot make the
+        # installed brief depend on another checkout outside this composition.
         "MACRO_MASTERMIND_REPO": os.fspath(code_root),
+        "MACRO_TERMINAL_REPO": os.fspath(code_root / ".executive-no-terminal-repo"),
     }
 
 
 def _git_blob_oid(payload: bytes) -> str:
-    digest = hashlib.sha1()  # Git repository uses SHA-1 object ids (40 hex chars).
+    digest = hashlib.sha1(usedforsecurity=False)  # Git object ids are SHA-1 (40 hex chars).
     digest.update(f"blob {len(payload)}\0".encode("ascii"))
     digest.update(payload)
     return digest.hexdigest()
@@ -101,7 +104,7 @@ def _raw_worktree_blob_oid(path: Path, *, mode: str) -> str:
         expected_exec = mode == "100755"
         if bool(before.st_mode & 0o111) != expected_exec:
             raise OSError("tracked executable mode differs")
-        digest = hashlib.sha1()
+        digest = hashlib.sha1(usedforsecurity=False)
         digest.update(f"blob {before.st_size}\0".encode("ascii"))
         total = 0
         while True:
@@ -122,10 +125,51 @@ def _raw_worktree_blob_oid(path: Path, *, mode: str) -> str:
         os.close(fd)
 
 
+_MACRO_BRIEF_FIXED_CONTENT = frozenset({
+    "scripts/__init__.py",
+    "scripts/agentos.py",
+    "scripts/audit_stranded_work.py",
+    "config/mastermind_programs.yml",
+    "data/governance/active_builds.json",
+    "data/governance/.ceo_brief_last",
+})
+_MACRO_RECORD_DIRS = (
+    "agentos/workstreams/",
+    "agentos/decisions/",
+    "agentos/discoveries/",
+    "agentos/handoffs/",
+)
+
+
+def _macro_brief_content_paths(paths: set[str]) -> set[str]:
+    """Tracked bytes that ``agentos.py brief --json --no-remember`` can consume."""
+    selected = set(paths & _MACRO_BRIEF_FIXED_CONTENT)
+    for rel in paths:
+        for prefix in _MACRO_RECORD_DIRS:
+            if not rel.startswith(prefix):
+                continue
+            leaf = rel[len(prefix):]
+            if leaf.endswith(".md") and "/" not in leaf:
+                selected.add(rel)
+            break
+    return selected
+
+
+def _content_paths_for_scope(paths: set[str], scope: str) -> set[str]:
+    if scope == "all":
+        return set(paths)
+    if scope == "identity":
+        return set()
+    if scope == "macro_brief":
+        return _macro_brief_content_paths(paths)
+    raise ValueError(f"unknown installed snapshot content scope: {scope}")
+
+
 def _clean_git_snapshot(
     path: Path, *, runner: PacketRunner, env: Mapping[str, str], label: str,
+    content_scope: str = "all",
 ) -> str:
-    """Return exact HEAD only when raw worktree leaves equal the committed tree."""
+    """Bind HEAD plus raw path existence, hashing only bytes the named reader consumes."""
     git_metadata = path / ".git"
     real_checkout = git_metadata.exists() or git_metadata.is_symlink()
 
@@ -184,7 +228,7 @@ def _clean_git_snapshot(
 
     tree = observe(
         ["ls-tree", "-r", "-z", "--full-tree", head],
-        max_bytes=8 * 1024 * 1024,
+        max_bytes=32 * 1024 * 1024,
     )
     expected: dict[str, tuple[str, str]] = {}
     for record in tree.split("\0"):
@@ -214,7 +258,14 @@ def _clean_git_snapshot(
     if actual != set(expected):
         raise GatewayError("backend_unavailable", f"installed {label} worktree bytes differ")
 
-    for rel, (mode, expected_oid) in expected.items():
+    try:
+        content_paths = _content_paths_for_scope(set(expected), content_scope)
+    except ValueError as exc:
+        raise GatewayError(
+            "backend_unavailable", f"installed {label} content scope is invalid"
+        ) from exc
+    for rel in sorted(content_paths):
+        mode, expected_oid = expected[rel]
         try:
             observed_oid = _raw_worktree_blob_oid(path / rel, mode=mode)
         except OSError as exc:
@@ -267,9 +318,11 @@ class InstalledBootPacketCollector:
     def _snapshot_pair(self, env: Mapping[str, str]) -> tuple[str, str]:
         source_sha = _clean_git_snapshot(
             self._source_root, runner=self._runner, env=env, label="Mastermind source",
+            content_scope="identity",
         )
         macro_sha = _clean_git_snapshot(
             self._macro_root, runner=self._runner, env=env, label="Macro source",
+            content_scope="macro_brief",
         )
         if self._expected_source_sha is not None and source_sha != self._expected_source_sha:
             raise GatewayError("backend_unavailable", "installed Mastermind source SHA changed")

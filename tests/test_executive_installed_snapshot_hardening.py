@@ -151,3 +151,73 @@ def test_clean_snapshot_refuses_untracked_file_hidden_by_info_exclude(tmp_path: 
         _clean_git_snapshot(
             repo, runner=_default_packet_runner, env=env, label="Mastermind source",
         )
+
+
+def _commit_path(repo: Path, relative: str, content: str) -> Path:
+    path = repo / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    _git(repo, "add", relative)
+    _git(repo, "commit", "-q", "-m", f"add {relative}")
+    return path
+
+
+def test_macro_brief_scope_hashes_records_but_not_unread_tracked_bytes(tmp_path: Path):
+    from integrations.executive_mcp.installed import (
+        _clean_git_snapshot,
+        _default_packet_runner,
+        _installed_child_env,
+    )
+    from integrations.executive_mcp.schemas import GatewayError
+
+    repo, unrelated = _clean_repo(tmp_path)
+    record = _commit_path(
+        repo, "agentos/workstreams/WS-TEST.md", "---\nkey: TEST\n---\nbody\n"
+    )
+    env = _installed_child_env(code_root=repo, macro_root=repo)
+
+    # Content outside the brief's byte-reading closure does not affect its result;
+    # path existence is still bound by the whole-tree leaf comparison.
+    unrelated.write_text("modified but unread\n", encoding="utf-8")
+    observed = _clean_git_snapshot(
+        repo, runner=_default_packet_runner, env=env,
+        label="Macro source", content_scope="macro_brief",
+    )
+    assert len(observed) == 40
+
+    record.write_text("---\nkey: TEST\n---\nchanged\n", encoding="utf-8")
+    with pytest.raises(GatewayError, match="worktree bytes differ"):
+        _clean_git_snapshot(
+            repo, runner=_default_packet_runner, env=env,
+            label="Macro source", content_scope="macro_brief",
+        )
+
+
+def test_macro_brief_scope_refuses_hidden_extra_anywhere(tmp_path: Path):
+    from integrations.executive_mcp.installed import (
+        _clean_git_snapshot,
+        _default_packet_runner,
+        _installed_child_env,
+    )
+    from integrations.executive_mcp.schemas import GatewayError
+
+    repo, _tracked = _clean_repo(tmp_path)
+    hidden = repo / "ignored" / "phantom.txt"
+    hidden.parent.mkdir()
+    hidden.write_text("can alter path-existence joins\n", encoding="utf-8")
+    (repo / ".git" / "info" / "exclude").write_text("ignored/\n", encoding="utf-8")
+    env = _installed_child_env(code_root=repo, macro_root=repo)
+
+    with pytest.raises(GatewayError, match="worktree bytes differ"):
+        _clean_git_snapshot(
+            repo, runner=_default_packet_runner, env=env,
+            label="Macro source", content_scope="macro_brief",
+        )
+
+
+def test_installed_child_env_disables_ambient_terminal_sibling(tmp_path: Path):
+    from integrations.executive_mcp.installed import _installed_child_env
+
+    env = _installed_child_env(code_root=tmp_path / "code", macro_root=tmp_path / "macro")
+    assert env["MACRO_TERMINAL_REPO"].endswith("/.executive-no-terminal-repo")
+    assert env["GIT_NO_REPLACE_OBJECTS"] == "1"

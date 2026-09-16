@@ -339,24 +339,38 @@ process itself stays `-I -S -B`: it does not import PyYAML or the MCP SDK.
 The installed reader executes `scripts/ceo_boot_packet.py` only from the
 root-owned immutable installed release. The separately configured Mastermind
 administrative checkout and Macro snapshot are data/grounding roots, never code
-roots. Immediately before and after each packet read, both data roots must have a
-single valid Git HEAD and a clean tracked/untracked status; the Mastermind HEAD
-must also equal the installed `proof_base_sha`. The packet's own Mastermind and
-Macro SHAs must equal the pre-read observations, and both observations must stay
-unchanged through the post-read check. Dirty bytes, untracked bytes, identity
+roots. Immediately before and after each packet read, each root must resolve one
+exact Git HEAD; the Mastermind HEAD must also equal the installed `proof_base_sha`.
+The verifier compares the entire raw filesystem leaf set outside top-level `.git`
+with the exact `HEAD` tree, so ignored/untracked additions and missing paths cannot
+change any path-existence join. It does not depend on the mutable index, local
+attributes, clean filters, fsmonitor, hooks, or ignore rules.
+
+Only bytes the installed brief can actually consume are re-hashed on every read:
+`scripts/agentos.py`, its local `audit_stranded_work` import/package marker,
+`config/mastermind_programs.yml`, `data/governance/active_builds.json`, the optional
+CEO check-in marker when tracked, and the direct `*.md` records under the four
+Agent OS record directories. Their raw Git-blob identities must equal the exact
+`HEAD` tree. Other tracked Macro bytes can affect the brief only through existence,
+which the whole-tree leaf-set equality already binds. The owner-writable Mastermind
+administrative checkout contributes identity only; product/strategy bytes used by
+the packet come from the immutable installed release. Packet-reported Mastermind
+and Macro SHAs must equal the pre-read observations and remain stable through the
+post-read check. Any path-set difference, load-bearing byte difference, identity
 movement, wrong schema/root, timeout, invalid UTF-8, nonzero exit, output overflow,
-or cleanup uncertainty all refuse the read rather than falling back.
+or cleanup uncertainty refuses the read rather than falling back.
 
 The helper receives a minimal secret-free environment: fixed system `PATH`, no
-global/system Git config, one command-scoped `safe.directory` for the exact
-root-owned Macro snapshot, and `MACRO_MASTERMIND_REPO` pinned to the immutable
-installed Mastermind release so Macro's P0 join never reads executable/product
-state from the owner-writable administrative checkout. This keeps the Macro
-snapshot root-owned without wildcard Git trust. The installed packet gets a
-28-second total budget beneath the MCP read executor's 30-second ceiling; the
-inner Agent OS brief receives a further two-second-shorter budget so JSON
-serialization, pipe drain and process-group settlement remain inside the total
-read deadline.
+global/system Git config, replacement objects disabled, one command-scoped
+`safe.directory` for the exact root-owned Macro snapshot,
+`MACRO_MASTERMIND_REPO` pinned to the immutable installed Mastermind release, and
+`MACRO_TERMINAL_REPO` pinned to an absent path so ambient sibling discovery cannot
+change the brief. This keeps the Macro snapshot root-owned without wildcard Git
+trust while preventing the owner-writable administrative checkout from supplying
+product state. The installed packet gets a 28-second total budget beneath the MCP
+read executor's 30-second ceiling; the inner Agent OS brief receives a further
+two-second-shorter budget so JSON serialization, pipe drain and process-group
+settlement remain inside the total read deadline.
 
 Deployment evidence belongs in the private operation receipt. Source tests do
 not establish an installed generation, accepted identity provider, live tunnel,

@@ -288,15 +288,18 @@ def test_installed_collector_scopes_git_trust_and_mastermind_sibling(tmp_path: P
     env = observed["env"]
     assert set(env) == {
         "PATH", "LANG", "LC_ALL", "PYTHONDONTWRITEBYTECODE",
-        "GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_COUNT",
-        "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0", "MACRO_MASTERMIND_REPO",
+        "GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM", "GIT_NO_REPLACE_OBJECTS",
+        "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0",
+        "MACRO_MASTERMIND_REPO", "MACRO_TERMINAL_REPO",
     }
     assert env["GIT_CONFIG_GLOBAL"] == "/dev/null"
     assert env["GIT_CONFIG_NOSYSTEM"] == "1"
+    assert env["GIT_NO_REPLACE_OBJECTS"] == "1"
     assert env["GIT_CONFIG_COUNT"] == "1"
     assert env["GIT_CONFIG_KEY_0"] == "safe.directory"
     assert env["GIT_CONFIG_VALUE_0"] == str(macro)
     assert env["MACRO_MASTERMIND_REPO"] == str(repo)
+    assert env["MACRO_TERMINAL_REPO"] == str(repo / ".executive-no-terminal-repo")
 
 
 def test_default_packet_runner_uses_explicit_environment(tmp_path: Path):
@@ -352,7 +355,9 @@ def test_installed_grounding_observer_uses_scoped_git_trust(tmp_path: Path):
     for _cwd, env in calls:
         assert env["GIT_CONFIG_VALUE_0"] == str(macro)
         assert env["MACRO_MASTERMIND_REPO"] == str(repo)
+        assert env["MACRO_TERMINAL_REPO"] == str(repo / ".executive-no-terminal-repo")
         assert env["GIT_CONFIG_GLOBAL"] == "/dev/null"
+        assert env["GIT_NO_REPLACE_OBJECTS"] == "1"
 
 
 def _git_status_result(sha: str, *, dirty: str = "") -> dict[str, object]:
