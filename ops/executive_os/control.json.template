@@ -6,6 +6,7 @@
   "backup_root": "/var/db/mastermind-executive/control/backups",
   "broker_timeout_seconds": 30.0,
   "ceo_ingress_app_armed": false,
+  "ceo_ingress_app_boot_python": "/Library/Application Support/MastermindExecutive/capacity-runtimes/__BOOT_RUNTIME__/bin/python3.12",
   "ceo_ingress_app_macro_root": "/Library/Application Support/MastermindExecutive/macro-sources/__MACRO_SHA__",
   "ceo_ingress_app_peer_uid": 458,
   "ceo_ingress_launchd_socket_name": "CeoIngress",

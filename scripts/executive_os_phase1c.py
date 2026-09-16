@@ -160,6 +160,7 @@ _CONFIG_OPTIONAL = frozenset(
         "ceo_ingress_app_peer_uid",
         "ceo_ingress_app_armed",
         "ceo_ingress_app_macro_root",
+        "ceo_ingress_app_boot_python",
         "terminal_return_armed",
         "terminal_return_socket_path",
         "dialogue_observation_socket_path",
@@ -293,6 +294,37 @@ def _path(value: Any, name: str) -> Path:
     return Path(value).resolve(strict=False)
 
 
+def _sealed_root_executable(value: Any, name: str) -> Path:
+    """Require one root-owned executable behind no symlink/writable ancestor."""
+    if not isinstance(value, str) or not Path(value).is_absolute():
+        raise ServiceError(f"control config {name} must be an absolute path")
+    path = Path(value)
+    try:
+        if path.resolve(strict=True) != path:
+            raise ServiceError(f"control config {name} must not traverse symlinks")
+        for node in (path, *path.parents):
+            info = node.lstat()
+            if stat.S_ISLNK(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+                raise ServiceError(
+                    f"control config {name} must be root-owned and sealed through its path"
+                )
+            if node == path:
+                if (not stat.S_ISREG(info.st_mode) or not info.st_mode & 0o111
+                        or info.st_nlink != 1):
+                    raise ServiceError(
+                        f"control config {name} must name one sealed executable file"
+                    )
+            elif not stat.S_ISDIR(info.st_mode):
+                raise ServiceError(
+                    f"control config {name} has a non-directory ancestor"
+                )
+    except ServiceError:
+        raise
+    except OSError as exc:
+        raise ServiceError(f"control config {name} is unavailable") from exc
+    return path
+
+
 def _integer(value: Any, name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise ServiceError(f"control config {name} must be a non-negative integer")
@@ -326,6 +358,8 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
         or ceo_ingress_present != _CEO_INGRESS_CONFIG_KEYS
     ):
         raise ServiceError("App binding requires all App and CeoIngress configuration fields")
+    if "ceo_ingress_app_boot_python" in keys and app_present != _CEO_INGRESS_APP_CONFIG_KEYS:
+        raise ServiceError("App boot interpreter requires the complete App binding")
     terminal_return_present = keys & _TERMINAL_RETURN_CONFIG_KEYS
     if terminal_return_present and terminal_return_present != _TERMINAL_RETURN_CONFIG_KEYS:
         raise ServiceError("terminal-return control config fields must be supplied together")
@@ -394,6 +428,10 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
         config["ceo_ingress_app_macro_root"] = _path(
             config["ceo_ingress_app_macro_root"], "ceo_ingress_app_macro_root"
         )
+        if "ceo_ingress_app_boot_python" in config:
+            config["ceo_ingress_app_boot_python"] = _sealed_root_executable(
+                config["ceo_ingress_app_boot_python"], "ceo_ingress_app_boot_python"
+            )
     if observation_present:
         config["dialogue_observation_peer_uid"] = _integer(
             config["dialogue_observation_peer_uid"],
@@ -1069,6 +1107,8 @@ def _service_from_config(
             repo_root=Path(raw["proof_source_repository"]),
             macro_root=Path(raw["ceo_ingress_app_macro_root"]),
             runtime_root=Path(raw["runtime_root"]),
+            boot_python=(Path(raw["ceo_ingress_app_boot_python"])
+                         if "ceo_ingress_app_boot_python" in raw else None),
         )
         ceo_ingress_kwargs["ceo_ingress_app_binding"] = CeoIngressAppBinding(
             peer_uid=int(raw["ceo_ingress_app_peer_uid"]),

@@ -291,10 +291,25 @@ control configuration. Its peer must differ from control, Operator, worker,
 and C1 identities. C1 retains its existing peer, grounding provider and arming
 setting.
 
-The full-schema `control.json.template` includes an unarmed App binding and an
-explicit Macro snapshot placeholder. Supply the actual sealed snapshot when
-provisioning the App, or omit all three App fields when installing control
-without it. The base installer does not add these optional fields by default.
+The full-schema `control.json.template` includes an unarmed App binding, an
+explicit Macro snapshot placeholder, and an optional `ceo_ingress_app_boot_python`
+coordinate. The three App identity/arm/Macro fields remain the binding atom; the
+boot interpreter is additive so an older install can still start and degrade
+honestly instead of failing closed during rollout. Production should bind it to a
+root-owned, executable, non-group/other-writable Python runtime that already carries
+the read-only YAML dependency. The control process itself remains `-I -S -B` and
+never imports that third-party package tree.
+
+When configured, `InstalledExecutiveReaders` runs the existing
+`scripts/ceo_boot_packet.py` under that interpreter with `-I -B`, a closed
+environment, no HOME/global Git configuration, exact `safe.directory` bindings for
+the installed Mastermind and Macro roots, and `MACRO_MASTERMIND_REPO` pinned to the
+same Mastermind root. The returned packet is accepted only when its schema and both
+repository SHAs match fresh host observations. Process failure, malformed output, or
+grounding drift falls back to the prior stdlib-only packet with an explicit degraded
+reason; it never changes admission state. Supply the actual sealed Macro snapshot
+when provisioning the App, or omit all App fields when installing control without
+it. The base installer does not add these optional fields by default.
 
 The App peer can use existing v2 submit/status frames and two closed internal
 read frames on the same CeoIngress socket. The four public tools and schemas
