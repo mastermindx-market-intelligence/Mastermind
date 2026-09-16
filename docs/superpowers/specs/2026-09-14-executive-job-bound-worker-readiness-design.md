@@ -61,7 +61,9 @@ Its policy scope is exactly:
 current_attempt_assigned_worker_slot
 ```
 
-This capability means “the trusted controller may ask the fixed broker to verify the current Attempt's already-assigned reviewed slot.” It does **not** mean `SERVICE_CONTROL`, `CREDENTIAL_ADMIN`, credential enrollment, recovery, arbitrary slot inspection, or permission to call the broker directly.
+This capability means “the trusted controller may ask the fixed broker to verify the current Attempt's already-assigned reviewed slot.” It grants no `SERVICE_CONTROL`, `CREDENTIAL_ADMIN`, credential enrollment, recovery, arbitrary slot selection, or dedicated-worker permission to call the broker directly.
+
+P2-1 does **not** narrow the pre-existing P1 operator bridge. The installed operator UID is already an allowed privileged-broker peer, and the installed `mmx-admin` exposes the full reviewed six-action catalog. That inherited operator-admin grant is an accepted residual of the merged broker design: `mmx-control` adds a durable Job-bound consumption path and ergonomics, not host-level containment of the operator principal. Dedicated worker UIDs remain excluded from the privileged socket.
 
 Existing mandatory denies remain, including `SERVICE_CONTROL` and `CREDENTIAL_ADMIN`. Adding a YAML string alone remains insufficient: `ExecutiveAuthorityPolicy.load()` must pin the exact revised allow-list and scope value in code. The scope string is declarative policy metadata, not slot evidence; only the deterministic controller's current Job/Attempt join enforces the current-assigned-slot boundary. No caller or model may treat an `AuthorityDecision` containing this capability as proof of a worker, slot, fence, host or root action.
 
@@ -93,17 +95,19 @@ The control request arguments are exactly:
 
 No caller field may name an action, worker, slot, executable, path, host, release, request ID, credential kind, credential material, expiry, retry instruction or force flag. `fence_generation` must be a positive JSON integer, never boolean/string/float.
 
-The command is available only when the control service is `READY`, `privileged_readiness_armed` is true in the root-installed control config, and the request arrives through its existing peer-authenticated Unix socket. Worker UIDs do not gain access to the privileged broker. The installer publishes one fixed non-root `mmx-control` wrapper to the exact installed release and control socket so attended Codex/Claude orchestrators running as the approved operator UID can invoke the command for a named Executive Job/Attempt without discovering a mutable source path. This first consumer is acting on behalf of the selected durable Job; it does not prove that an arbitrary dedicated worker can invoke the command itself. A later bounded dedicated-worker tool must bind the caller to its own current Attempt before submitting the same typed request through the current control owner.
+The command is available only when the control service is `READY`, `privileged_readiness_armed` is true in the root-installed control config, and the request arrives through its existing peer-authenticated Unix socket. Worker UIDs do not gain access to the privileged broker. The installer publishes one fixed non-root `mmx-control` wrapper to the exact installed release and control socket so attended Codex/Claude orchestrators running as the approved operator UID can invoke the command for a named Executive Job/Attempt without discovering a mutable source path. This first consumer acts on behalf of the selected durable Job; it does not prove that an arbitrary dedicated worker can invoke the command itself. A later bounded dedicated-worker tool must bind the caller to its own current Attempt before submitting the same typed request through the current control owner.
 
 The installed `mmx-control` consumer is a dedicated closed wrapper for `check-current-worker-login` only; it exposes no other subcommand. It accepts exactly three positional arguments, `JOB_ID ATTEMPT_ID FENCE_GENERATION`, in that order, and rejects any argument beginning with `-` before dispatch. The wrapper pins the canonical control socket path and the fixed subcommand internally; it never forwards caller-selected global options, an alternate socket/path, or another subcommand, and performs no argv passthrough beyond the three positional values it validates itself.
+
+The wrapper is an ergonomics and governance consumer, not a sandbox boundary for the operator UID. Any process already running as an allowed control/operator socket peer can construct the same closed control request directly, and the operator UID retains the pre-existing direct `mmx-admin` path to all six broker actions. P2-1 neither widens nor falsely claims to remove that inherited operator authority.
 
 ## 6. Deterministic current-attempt admission
 
 Current authority (this section) is required only for **first admission** of a new logical family. Reading an existing family — §8's existing-family-first recovery — requires none of the checks below; it is evidence retrieval, not authority admission.
 
-The controller first derives immutable host/release/policy facts **outside** the Runtime write transaction: installed `proof_base_sha`, the checked-in authority policy plus digest, and the kernel boot-session UUID. This preflight must refuse when macOS `kern.bootsessionuuid` is unavailable, empty, malformed, or falls back to the process-local `adapter-<pid>` identity. A PID-derived fallback never enters a binding.
+The controller first derives immutable host/release/policy facts **outside** the Runtime write transaction: installed `ServiceConfig.proof_base_sha`, one fully loaded `ExecutiveAuthorityPolicy` object plus its digest, and the kernel boot-session UUID. This preflight must refuse when macOS `kern.bootsessionuuid` is unavailable, empty, malformed, or falls back to the process-local `adapter-<pid>` identity. A PID-derived fallback never enters a binding. No policy-file read or `sysctl` subprocess occurs while a Runtime write transaction is held.
 
-Current-attempt validation then runs inside one short `RuntimeStore.transaction()` before any broker I/O. `AttemptRegistry` gains a token-free current-row helper on the same canonical owner as `_leased_row`; `_leased_row` delegates its shared currentness/fence/lease/link checks to that helper and adds only caller-token possession. P2-1 does not duplicate those private SQL invariants in the privileged controller and never exposes the stored token.
+Current-attempt validation then runs inside one short `RuntimeStore.transaction()` before any broker I/O. `AttemptRegistry` gains one private token-agnostic join/currentness helper that validates active status, exact Job-status correspondence, fence/quota-fence equality, unexpired lease, and current Job/quota links. `_leased_row` calls that helper and adds only constant-time caller-token comparison. `current_authority_snapshot` calls the same helper, then separately adds caller-supplied `job_id` equality, worker/slot facts, and the P2-specific `SEALED_WORKER` gate. This preserves existing `OPERATOR_HARNESS` lease paths while keeping their epoch/generation currentness owner intact. P2-1 does not duplicate those private SQL invariants in the privileged controller and never exposes the stored token.
 
 The transaction refuses unless all of the following are simultaneously true:
 
@@ -115,11 +119,11 @@ The transaction refuses unless all of the following are simultaneously true:
 6. caller-supplied fence equals both `attempts.fence_generation` and the quota fence counter.
 7. the persisted lease is not expired at the Runtime clock. Its opaque token is never returned, logged, put in an event, or required from the model/operator request.
 8. Job, Attempt, and the preloaded immutable policy hashes agree.
-9. fresh `ExecutiveAuthorityPolicy.authorize(...)` succeeds for the Job's stored authority/write/test scope and includes `REQUEST_WORKER_LOGIN_CHECK`.
+9. `authorize(...)` on the already-loaded policy object succeeds for the Job's stored authority/write/test scope and includes `REQUEST_WORKER_LOGIN_CHECK`; this performs no file I/O inside the transaction.
 10. the assigned Worker/Quota remains the current row and the Worker identity is not offline.
 11. assigned `worker_id` resolves through `get_slot(worker_id)` and the returned exact `slot_id` equals that worker; the caller cannot override either value.
-12. effective-grant validation reuses one canonical pure helper factored from `ExecutiveSupervisor._effective_grant`; the supervisor and P2-1 both call it. An orchestration Attempt missing or failing that grant refuses. Role-null legacy Jobs may use the freshly re-authorized Job grant.
-13. the preflight release, boot UUID and policy digest still equal the immutable service/policy facts observed by the transaction.
+12. effective-grant validation reuses one canonical deterministic helper factored from `ExecutiveSupervisor._effective_grant`; it receives the already-authorized decision/policy facts as inputs and performs no policy load. The supervisor and P2-1 both call it. An orchestration Attempt missing or failing that grant refuses. Role-null legacy Jobs may use the freshly re-authorized Job grant.
+13. the preflight release and policy digest equal the in-memory installed `ServiceConfig` and loaded policy object used by the transaction, while the preflight boot UUID remains the process's validated boot fact. The transaction never re-runs `sysctl` or rereads policy bytes.
 
 The root-installed control config gains two closed host-composition fields:
 
@@ -180,7 +184,7 @@ All fit existing Event and broker request grammars. Recomputing either input mus
 
 ## 8. Event and external-effect state machine
 
-P2-1 uses the existing EventStore; no sidecar file/table is introduced.
+P2-1 uses the existing Runtime Event plane; no sidecar file/table is introduced.
 
 ### Existing-family-first recovery
 
@@ -194,7 +198,7 @@ This lookup is the restart and Attempt-turnover seam. Current authority is requi
 
 Existing-family-first recovery is a deliberate **authority-free operator evidence path**: once a family exists, any caller may read it, subject to nothing but the exact aggregate lookup above. It creates no new family, performs no effect, and enumerates no other family, Job, or Attempt — it returns previously recorded evidence only. For a family in `ATTEMPTED` or `EFFECT_UNKNOWN`, it performs **at most one** broker status query per invocation, never a retry loop, and returns the result explicitly marked `replayed: true` and currency-labelled per the Evidence currency subsection below.
 
-Both the outside-transaction family lookup here and the inside-transaction absence recheck in first admission below call the same Runtime/Event-owner API seam (§13's `EventRegistry`/`EventStore` transaction-aware `list_events(..., connection=...)`); `control_plane/executive_privileged_authority.py` contains no raw `SELECT ... FROM events`.
+Both the outside-transaction family lookup here and the inside-transaction absence recheck in first admission below call the same Runtime/Event-owner API seam (§13's `RuntimeStore.list_events(..., connection=None)` with `EventRegistry.list_events` delegating); `control_plane/executive_privileged_authority.py` contains no raw `SELECT ... FROM events`.
 
 ### Process-local coalescing and first admission
 
@@ -221,7 +225,7 @@ A validated broker terminal response appends `PRIVILEGED_READINESS_TERMINAL`. Ev
 
 ### Evidence currency
 
-Every result — fresh or replayed — carries `observed_at_ms` (the wall-clock instant the returned evidence was produced or last validated) and `evidence_currency: CURRENT | HISTORICAL`. `CURRENT` asserts only that the stored `boot_id`, `release_sha`, and `authority_policy_hash` in the family's binding equal freshly re-validated current host facts at `observed_at_ms`; any mismatch, or any inability to prove one of those three facts, yields `HISTORICAL`. Neither value asserts READY, credential validity, or provider account identity — both remain point-in-time login-status evidence per §1.
+Every result — fresh or replayed — carries `observed_at_ms` (the wall-clock instant the returned evidence was produced or last validated) and `evidence_currency: CURRENT | HISTORICAL`. `CURRENT` asserts only that the stored `boot_id`, `release_sha`, and `authority_policy_hash` in the family's binding equal freshly re-validated current host facts at `observed_at_ms`; any mismatch, or any inability to prove one of those three facts, yields `HISTORICAL`. The authority-free replay path may perform one bounded kernel boot-UUID observation per invocation outside any Runtime transaction. Neither currency value asserts READY, credential validity, or provider account identity — both remain point-in-time login-status evidence per §1.
 
 ### Replay/reconciliation
 
@@ -285,6 +289,7 @@ Allowed login-check result states are `TERMINAL`, `REFUSED`, and `EFFECT_UNKNOWN
 - broker transport ambiguity: `EFFECT_UNKNOWN`; status-only reconciliation;
 - process crash after `ATTEMPTED` commits but before the broker socket write: identical to transport loss, `EFFECT_UNKNOWN`; stays `EFFECT_UNKNOWN` until a later status query proves terminal, or until Attempt/fence turnover or a separately frozen recovery design resolves it — no automatic retry of the same operation either way;
 - current Attempt changes after the `ATTEMPTED` authority cut: existing-family-first recovery remains available, while the receipt stays bound to the original operation and grants the successor Attempt nothing;
+- control-service shutdown/cancellation while the synchronous broker call may still be running: preserve `ATTEMPTED`/`EFFECT_UNKNOWN`; the 10-second service shutdown grace is not proof that a broker call with a 660-second client bound had no effect;
 - provider/vendor failure: terminal failed receipt; not converted to authority or success;
 - broker `NOT_FOUND` after an attempted/unknown operation: remain `EFFECT_UNKNOWN`; no no-effect assertion or automatic retry;
 - repeated identical status observation: no duplicate Event append.
@@ -300,7 +305,7 @@ Every admission, binding, ID, policy check, slot selection, Event phase, broker 
 3. `_validate_execution_profile`'s write-capable/admission gate — keep the full unfiltered authority set; this gate must see the real grant to enforce it;
 4. the durable launch attestation — keep the full unfiltered authority set as historical evidence.
 
-The canonical Job/effective grant persisted in Runtime always retains the full capability; only sites 1 and 2 above filter the model/worker-facing projection. The dedicated worker cannot invoke the capability and must not be shown unusable apparent authority. Attended operator-UID orchestrators consume the separate fixed control CLI. No model can select the root action, slot, release, host, request ID or retry semantics. Model text, Job prose, A7 labels, Slack messages and metadata booleans grant nothing.
+The canonical Job/effective grant persisted in Runtime always retains the full capability; only sites 1 and 2 above filter the model/worker-facing projection. The dedicated worker cannot invoke the capability and must not be shown unusable apparent authority. Attended operator-UID orchestrators consume the separate fixed control CLI, while that same operator principal still retains the inherited direct six-action `mmx-admin` broker bridge. P2-1 makes the Job-bound path durable and auditable; it is not a containment boundary for the operator UID. No model can select the root action, slot, release, host, request ID or retry semantics through the P2 controller. Model text, Job prose, A7 labels, Slack messages and metadata booleans grant nothing.
 
 ## 13. Source units
 
@@ -308,7 +313,7 @@ P2-1 changes only these responsibilities:
 
 - `config/authority_map.yml`: checked-in capability and exact scope.
 - `control_plane/executive_authority.py`: hard-coded revised allow-list and scope validation.
-- `control_plane/executive_runtime.py`: token-free current-attempt validator factored on the existing Attempt owner; `_leased_row` reuses it. Also the one transaction-aware Event-owner API seam (`EventRegistry`/`EventStore.list_events(..., connection=...)`) that both the outside-transaction family lookup and the inside-transaction absence recheck call; `executive_privileged_authority.py` never issues a raw `SELECT ... FROM events`.
+- `control_plane/executive_runtime.py`: token-free current-attempt validator factored on the existing Attempt owner; `_leased_row` reuses it. Also the one transaction-aware Event-owner API seam (`RuntimeStore.list_events(..., connection=None)` with `EventRegistry.list_events` delegating) that both the outside-transaction family lookup and the inside-transaction absence recheck call; `executive_privileged_authority.py` never issues a raw `SELECT ... FROM events`.
 - `control_plane/executive_supervisor.py`: factor/reuse canonical effective-grant validation and filter controller-only authority from exactly the two model/worker-facing projection sites (`_prompt` JSON and `WorkerLaunchSpec.authorities`); `_validate_execution_profile`'s admission gate and the durable launch attestation keep the full unfiltered grant.
 - `control_plane/executive_privileged_client.py`: reusable one-send broker client.
 - `control_plane/executive_privileged_authority.py`: exact binding, Runtime/Event admission, singleflight and phase/reconciliation controller.
@@ -351,7 +356,8 @@ Production proof is separate and occurs only after the exact protected release c
 - observe the root broker execute only `verify_only` for that Attempt's assigned slot;
 - verify the exact login-status observation independently of the child exit code and confirm no READY claim is emitted;
 - read terminal result after control-client interruption without another effect;
-- prove stale fence, wrong Job/Attempt and unauthorized direct worker socket access refuse;
+- prove stale fence, wrong Job/Attempt and direct dedicated-worker broker socket access refuse;
+- read back the installed broker policy and record that the operator UID still has the inherited direct six-action `mmx-admin` grant; do not claim the `mmx-control` wrapper contains that principal;
 - prove no password prompt after the one-time bootstrap.
 
 Until that path is observed, P2-1 is `BUILT_NOT_PROVEN`, not live autonomy.
@@ -365,6 +371,7 @@ P2-1 intentionally defers:
 - transaction recovery to a separate correction capability;
 - authenticated installer/update/rollback and online grant revocation to P4;
 - multi-host identity/selection and second-host proof to P5;
-- direct arbitrary worker access to the root broker permanently.
+- direct arbitrary worker access to the root broker permanently;
+- narrowing or removing the operator UID's inherited direct six-action broker grant. That host-containment change requires a separate reviewed P4/P2 hardening wave because it changes the already-merged bootstrap and emergency-administration contract.
 
 The next dependency after P2-1 is one secret-free credential renewal vertical, not expansion into generic administrator access.

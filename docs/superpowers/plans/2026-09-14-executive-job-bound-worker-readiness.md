@@ -73,7 +73,7 @@ gh pr list --repo mastermindx-market-intelligence/Mastermind \
 # gh pr view NUMBER --repo mastermindx-market-intelligence/Mastermind --json headRefOid,files
 ```
 
-At the current protected pin `8ba7deedde164c90298d3e88785d98e02fa5e2d2`, PR #655 and PR #667 have merged material Runtime/config changes; implementation must use that protected source, not pre-#655 assumptions. PR #653 at `959b37b329c44d81874dc23944746a5bd594e3b7` remains the active writer on `ops/executive_os/install.sh` and `scripts/executive_os_phase1c.py`; hold Task 6 and every overlapping edit until it merges/closes and current protected compatibility is re-established. PR #690 overlaps only `tests/test_executive_os_sqlite.py`, so P2 uses its new owning test files and rechecks before integration. PR #124 is a broad behind/failing historical branch, not a current ownership source, but its overlap must be rechecked before release. Any newly active overlap is a stop/reconcile gate, not permission for a second writer.
+At the current protected pin `8ba7deedde164c90298d3e88785d98e02fa5e2d2`, PR #655 and PR #667 have merged material Runtime/config changes; implementation must use that protected source, not pre-#655 assumptions. PR #653 at `959b37b329c44d81874dc23944746a5bd594e3b7` remains the active writer on `ops/executive_os/install.sh` and `scripts/executive_os_phase1c.py`; hold **Task 5** and every overlapping edit until it merges/closes and current protected compatibility is re-established. PR #690 overlaps `tests/test_executive_os_sqlite.py`, so Tasks 2 and 4 create new owning test files and do not edit that incumbent path; recheck before integration. PR #124 is a broad behind/failing historical branch, not a current ownership source, but its overlap must be rechecked before release. Any newly active overlap is a stop/reconcile gate, not permission for a second writer.
 
 **Step 3 — baseline the merged broker, revocation and current Executive owners**
 
@@ -147,7 +147,7 @@ git commit -m 'feat(executive): admit controller-only readiness requests'
 **Files:**
 - Modify: `control_plane/executive_runtime.py`
 - Modify: `control_plane/executive_supervisor.py`
-- Modify: `tests/test_executive_os_sqlite.py`
+- Create: `tests/test_executive_runtime_current_attempt.py`
 - Modify: `tests/test_executive_supervisor.py`
 
 **Step 1 — write failing Runtime tests**
@@ -160,25 +160,24 @@ Add tests for a new frozen `CurrentAttemptAuthoritySnapshot` and `AttemptRegistr
 - proves `_leased_row` and the new helper share the same currentness/fence/expiry logic by mutation/negative parity.
 
 ```bash
-python3 -m pytest -o addopts='' -q tests/test_executive_os_sqlite.py \
-  -k 'current_authority_snapshot or leased_row_parity'
+python3 -m pytest -o addopts='' -q tests/test_executive_runtime_current_attempt.py
 ```
 
 Expected RED: API absent.
 
 **Step 2 — implement the token-free owner seam**
 
-- Factor the existing `_leased_row` join/currentness checks into one private helper on `AttemptRegistry`.
-- Make `_leased_row` call it, then perform only constant-time token comparison.
-- Add `current_authority_snapshot(connection, job_id, attempt_id, fence_generation, timestamp, statuses)` on `AttemptRegistry`.
+- Factor the existing `_leased_row` join/currentness checks into one private token-agnostic helper on `AttemptRegistry`. The shared helper validates only active status, exact Job-status correspondence, fence/quota-fence equality, unexpired lease, and current Job/quota links; it performs no Job-id or execution-mode restriction.
+- Make `_leased_row` call the shared helper, then perform only constant-time token comparison. Existing `OPERATOR_HARNESS` callers must remain valid.
+- Add `current_authority_snapshot(connection, job_id, attempt_id, fence_generation, timestamp, statuses)` on `AttemptRegistry`; it calls the shared helper and then separately adds exact `job_id`, worker/slot facts, and `SEALED_WORKER` validation.
 - Perform all Job/Attempt/quota/worker reads on the caller's existing transaction connection.
 - Return a frozen dataclass; omit `lease_token` and raw provider credential material.
-- Reject non-`SEALED_WORKER` modes.
+- Scope parity tests to the shared helper's status/fence/expiry/current-link checks; separately test that only `current_authority_snapshot` rejects non-`SEALED_WORKER` modes.
 
 **Step 3 — write failing effective-grant and prompt tests**
 
 `executive_supervisor.py` has exactly four current authority-projection sites: `_prompt`'s JSON authorities list, `WorkerLaunchSpec.authorities`, `_validate_execution_profile`'s write-capable/admission gate, and the durable launch attestation. Add tests that assert:
-- a module-level canonical validator produces the same result currently returned by `ExecutiveSupervisor._effective_grant`;
+- a module-level canonical validator, given an already-authorized `AuthorityDecision`, produces the same result currently returned by `ExecutiveSupervisor._effective_grant`;
 - malformed/digest/policy/role/job/widened grants fail identically;
 - `REQUEST_WORKER_LOGIN_CHECK` is removed from `_prompt`'s JSON authorities and from `WorkerLaunchSpec.authorities`, whether sourced from the Job or effective grant;
 - `_validate_execution_profile`'s admission gate and the durable launch attestation both still see the full unfiltered authority set, including `REQUEST_WORKER_LOGIN_CHECK` — negative test that filtering does not leak into either;
@@ -193,7 +192,7 @@ Expected RED: helper/filter absent.
 
 **Step 4 — implement the shared grant validator and packet filter**
 
-- Factor current `_effective_grant` validation into one module-level pure function in `executive_supervisor.py`; keep the existing method as a delegating compatibility seam.
+- Factor current `_effective_grant` validation into one module-level deterministic function in `executive_supervisor.py` that accepts an already-authorized `AuthorityDecision` and performs no policy-file load; keep the existing method as a delegating compatibility seam that obtains its decision before calling the helper.
 - Add a closed `CONTROLLER_ONLY_AUTHORITIES = {"REQUEST_WORKER_LOGIN_CHECK"}` projection rule.
 - Apply the filter only at the two model/worker-facing projection sites (`_prompt` JSON, `WorkerLaunchSpec.authorities`); leave `_validate_execution_profile`'s admission gate and the durable launch attestation on the full unfiltered grant; never rewrite durable Job or Attempt authority evidence.
 
@@ -201,7 +200,7 @@ Expected RED: helper/filter absent.
 
 ```bash
 python3 -m pytest -o addopts='' -q \
-  tests/test_executive_os_sqlite.py \
+  tests/test_executive_runtime_current_attempt.py \
   tests/test_executive_supervisor.py
 git diff --check
 ```
@@ -210,7 +209,7 @@ git diff --check
 
 ```bash
 git add control_plane/executive_runtime.py control_plane/executive_supervisor.py \
-  tests/test_executive_os_sqlite.py tests/test_executive_supervisor.py
+  tests/test_executive_runtime_current_attempt.py tests/test_executive_supervisor.py
 git commit -m 'refactor(executive): expose token-free current attempt validation'
 ```
 
@@ -282,7 +281,7 @@ git commit -m 'refactor(executive): share privileged broker client validation'
 - Create: `control_plane/executive_privileged_authority.py`
 - Create: `tests/test_executive_privileged_authority.py`
 - Modify: `control_plane/executive_runtime.py` for the required transaction-aware Event-list seam
-- Modify: `tests/test_executive_os_sqlite.py` for that Event seam
+- Create: `tests/test_executive_runtime_events.py` for that Event seam
 
 **Step 1 — write contract and binding RED tests**
 
@@ -308,7 +307,7 @@ Load release, policy and boot facts outside Runtime write transactions.
 
 **Step 3 — add the required Runtime/Event-owner seam and write RED tests for existing-family-first recovery**
 
-Add a transaction-aware `EventStore.list_events(..., connection=...)` on the existing Event owner and make `EventRegistry.list_events` delegate to it; this one seam is reused for both the outside-transaction family lookup and the inside-transaction absence recheck in Step 5. `executive_privileged_authority.py` must never issue a raw `SELECT ... FROM events`.
+Add `RuntimeStore.list_events(..., connection: sqlite3.Connection | None = None)` on the existing Runtime/Event owner and make `EventRegistry.list_events` delegate to it; this one seam is reused for both the outside-transaction family lookup and the inside-transaction absence recheck in Step 5. Do not introduce an `EventStore` class. `executive_privileged_authority.py` must never issue a raw `SELECT ... FROM events`.
 
 Cover:
 - the family is found by exact `aggregate_type='privileged_readiness'` + `aggregate_id=<family aggregate ID>` lookup (not a job_id/attempt_id scan) after Attempt completion/requeue;
@@ -334,9 +333,10 @@ Use a fake broker client and real RuntimeStore:
 **Step 5 — implement controller admission and singleflight**
 
 - Query existing family first via the Step 3 seam.
-- For new work, use a process-local async singleflight registry keyed on the logical family key.
-- Inside one `BEGIN IMMEDIATE` Runtime transaction, recheck absence via the same Step 3 seam, call `current_authority_snapshot`, revalidate policy/effective grant/slot/preflight facts, append INTENT+ATTEMPTED, and return execute-once only to the owner task.
-- Do not hold the Runtime transaction over sysctl, file reads, socket I/O or provider work.
+- For new work, load `ExecutiveAuthorityPolicy`, installed release identity, and the validated kernel boot UUID before opening any Runtime write transaction.
+- Use a process-local async singleflight registry keyed on the logical family key.
+- Inside one `BEGIN IMMEDIATE` Runtime transaction, recheck absence via the same Step 3 seam, call `current_authority_snapshot`, call `authorize(...)` on the already-loaded policy object, validate the effective grant with the pre-authorized decision, compare only in-memory release/policy/boot facts, append INTENT+ATTEMPTED, and return execute-once only to the owner task.
+- Do not call `ExecutiveAuthorityPolicy.load()`, `Path.read_bytes()`, `ProcessInspector.boot_session_id()`, sysctl, socket I/O or provider work while the Runtime transaction is held.
 
 **Step 6 — write RED tests for terminal and unknown-effect reconciliation**
 
@@ -363,7 +363,7 @@ Use only the shared client's status method after ATTEMPTED. Validate event-famil
 ```bash
 python3 -m pytest -o addopts='' -q \
   tests/test_executive_privileged_authority.py \
-  tests/test_executive_os_sqlite.py \
+  tests/test_executive_runtime_events.py \
   tests/test_executive_privileged_client.py \
   tests/test_executive_privileged_broker.py
 python3 -m py_compile control_plane/executive_privileged_authority.py
@@ -374,13 +374,15 @@ git diff --check
 
 ```bash
 git add control_plane/executive_privileged_authority.py tests/test_executive_privileged_authority.py \
-  control_plane/executive_runtime.py tests/test_executive_os_sqlite.py
+  control_plane/executive_runtime.py tests/test_executive_runtime_events.py
 git commit -m 'feat(executive): authorize job-bound worker readiness checks'
 ```
 
 ---
 
 ## Task 5: Compose the closed control command and default-off host configuration
+
+**Blocking source-custody precondition:** Do not start or edit any Task 5 path while PR #653 remains an active writer on `ops/executive_os/install.sh` or `scripts/executive_os_phase1c.py`. Re-read its exact state/files and current protected source. Proceed only after it merges/closes and this carrier is reconciled; never create a second writer.
 
 **Files:**
 - Modify: `control_plane/executive_service.py`
@@ -424,7 +426,7 @@ Expected RED: fields/guards absent.
 Pin exact request:
 
 ```json
-{"command":"check_current_worker_login","args":{"job_id":"JOB-...","attempt_id":"ATT-...","fence_generation":1}}
+{"command":"check-current-worker-login","args":{"job_id":"JOB-...","attempt_id":"ATT-...","fence_generation":1}}
 ```
 
 Prove exact keys/types, no extra fields, no caller action/slot/socket/path, service-`READY`-only dispatch, existing kernel peer gate, typed controller errors, and an exact JSON result that includes `family_id`, `operation_id`, `observed_at_ms`, and `evidence_currency` and never a `ready`/`READY` field.
@@ -449,6 +451,7 @@ Prove:
 - installer creates root-owned exact-release `/Library/Application Support/MastermindExecutive/bin/mmx-control` with fixed control socket/config and no user-controlled path/socket/action interpolation;
 - the wrapper exposes exactly one operation (`check-current-worker-login`), accepts exactly three positional arguments `JOB_ID ATTEMPT_ID FENCE_GENERATION`, and rejects any argument beginning with `-` before dispatch;
 - the wrapper never forwards a caller-supplied global option, an alternate socket/path, or another subcommand — no argv passthrough beyond the three validated positional values;
+- tests and docs identify the wrapper as an ergonomics/governance consumer, not containment: the operator UID retains the merged direct six-action `mmx-admin` broker grant, while dedicated worker UIDs remain denied;
 - cleanup/rollback removes or leaves inert the wrapper when arming fails;
 - ordinary control/worker service startup remains separately controlled.
 
@@ -482,6 +485,8 @@ git commit -m 'feat(executive): expose armed job-bound readiness control'
 
 ## Task 6: Prove the complete source vertical and rollout gates
 
+**Preflight:** Re-read PR #653 and all current owned-path collisions before Step 2. Task 6 itself owns no `install.sh` or `scripts/executive_os_phase1c.py` edit, but its proof must consume the reconciled Task 5 result rather than an overlapping branch.
+
 **Files:**
 - Modify: `ops/executive_os/HOST_PREREQUISITES.md`
 - Modify: `docs/superpowers/specs/2026-09-14-executive-job-bound-worker-readiness-design.md` only for proven implementation facts, never to weaken acceptance
@@ -505,7 +510,8 @@ Place the test in `tests/test_executive_service.py` or a narrowly named new inte
 umask 022
 python3 -m pytest -o addopts='' -q \
   tests/test_executive_authority.py \
-  tests/test_executive_os_sqlite.py \
+  tests/test_executive_runtime_current_attempt.py \
+  tests/test_executive_runtime_events.py \
   tests/test_executive_supervisor.py \
   tests/test_executive_privileged_action.py \
   tests/test_executive_privileged_broker.py \
@@ -597,8 +603,8 @@ This task is **not** delegated to an ordinary coding worker.
 6. Create/claim one real bounded Job with `REQUEST_WORKER_LOGIN_CHECK` for `codex-01`.
 7. Invoke installed `mmx-control` as the non-root operator and prove exact root `verify_only`, the exact login-status observation, and absence of any READY claim.
 8. Reconcile a deliberately lost client response through the control command with exactly one broker effect.
-9. Prove wrong Job, stale fence, unauthorized worker socket and arbitrary action/slot/path all refuse.
-10. Prove a fresh native Codex orchestrator discovers and consumes the command without asking for sudo/password. Add Claude attended-orchestrator proof only if the provider session is available; do not claim dedicated Claude worker-slot coverage until the slot catalog supports it.
+9. Prove wrong Job, stale fence, and direct dedicated-worker broker socket access refuse. Separately read back the installed broker policy and record the accepted residual that the operator UID retains direct access to all six reviewed `mmx-admin` actions and slots; do not claim `mmx-control` contains that principal.
+10. Prove a fresh native Codex orchestrator discovers and consumes the Job-bound command without asking for sudo/password. Add Claude attended-orchestrator proof only if the provider session is available; do not claim dedicated Claude worker-slot coverage until the slot catalog supports it.
 11. Record exact Runtime Events, broker receipt/request ID, merged release SHA, host/boot identity, no-prompt evidence and remaining P3/P4/P5 gates in durable owners.
 
 Only after these observations may P2-1 become `PROVEN_LIVE` on the Studio. Then advance directly to the P3 secret-free credential-renewal vertical.
