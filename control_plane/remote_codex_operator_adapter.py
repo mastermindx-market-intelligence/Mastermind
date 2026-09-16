@@ -9,8 +9,6 @@ rechecked on both sides of the Unix socket.
 from __future__ import annotations
 
 from collections.abc import Mapping
-import dataclasses
-from uuid import uuid4
 from typing import Any, Callable
 
 from control_plane.executive_orchestration_principal import (
@@ -74,77 +72,6 @@ from control_plane.worker_browser_b1 import (
 
 
 TurnInputLoader = Callable[[TurnRef], str]
-
-
-class ConsultationIngressUnavailable(RuntimeError):
-    """The requested native consultation surface is not qualified."""
-
-
-class ConsultationIngressRefused(RuntimeError):
-    """The managed Codex writer refused before provider I/O."""
-
-
-@dataclasses.dataclass(frozen=True)
-class CodexConsultationIngress:
-    """Start one reference-only consultation turn on an idle managed thread."""
-
-    adapter: object
-    generation: ProcessGenerationRef
-    attempt_id: str
-    binding_id: str
-    binding_generation: int
-    provider_session_id: str
-    surface: str
-    active_turn: bool = False
-
-    def __post_init__(self) -> None:
-        if self.surface != "codex":
-            raise ConsultationIngressUnavailable(
-                "consultation recipient is UNQUALIFIED for claude"
-            )
-        if not callable(getattr(self.adapter, "deliver_attention", None)):
-            raise TypeError("adapter must support managed Codex attention")
-
-    def with_active_turn(self, active: bool) -> "CodexConsultationIngress":
-        return dataclasses.replace(self, active_turn=active)
-
-    def deliver(
-        self,
-        *,
-        consultation_ref: str,
-        message_key: str,
-        semantic_fingerprint: str,
-        wake_obligation_id: str,
-    ) -> dict[str, object]:
-        if self.active_turn:
-            raise ConsultationIngressRefused(
-                "active consultation recipient turn refused before provider I/O"
-            )
-        instruction = (
-            "Company consultation reference only; no authority is granted:\n"
-            f"consultation_id={consultation_ref}\n"
-            f"message_key={message_key}\n"
-            f"semantic_fingerprint={semantic_fingerprint}\n"
-            f"opaque_wake_id={wake_obligation_id}"
-        )
-        observation = self.adapter.deliver_attention(
-            generation=self.generation,
-            attempt_id=self.attempt_id,
-            binding_id=self.binding_id,
-            binding_generation=self.binding_generation,
-            provider_session_id=self.provider_session_id,
-            nudge_id="consult-" + uuid4().hex,
-            opaque_ids=(wake_obligation_id,),
-            instruction=instruction,
-            completion_timeout_seconds=15.0,
-        )
-        if not isinstance(observation, AttentionTurnObservation):
-            raise ConsultationIngressUnavailable("adapter returned untyped evidence")
-        return {
-            "native_thread_id": observation.provider_session_id,
-            "native_turn_id": observation.provider_native_turn_id,
-            "accepted": observation.accepted,
-        }
 
 
 class RemoteCodexOperatorAdapter:
