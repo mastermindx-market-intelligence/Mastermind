@@ -291,25 +291,38 @@ control configuration. Its peer must differ from control, Operator, worker,
 and C1 identities. C1 retains its existing peer, grounding provider and arming
 setting.
 
-The full-schema `control.json.template` includes an unarmed App binding, an
-explicit Macro snapshot placeholder, and an optional `ceo_ingress_app_boot_python`
-coordinate. The three App identity/arm/Macro fields remain the binding atom; the
-boot interpreter is additive so an older install can still start and degrade
-honestly instead of failing closed during rollout. Production should bind it to a
-root-owned, executable, non-group/other-writable Python runtime that already carries
-the read-only YAML dependency. The control process itself remains `-I -S -B` and
-never imports that third-party package tree.
+The full-schema `control.json.template` includes the unarmed App binding and Macro
+snapshot placeholder but deliberately **omits** `ceo_ingress_app_boot_python`. The
+three App identity/arm/Macro fields remain the binding atom; the boot interpreter is
+an additive host binding and must not make a generic/fresh install fail at service
+startup. Add that key only after the target host proves the exact interpreter path
+is absolute, symlink-free through every component, root-owned, non-group/other-
+writable through every ancestor, a single-link regular executable, and already
+carries the read-only YAML dependency. A venv whose `bin/python3.12` is a symlink
+does not satisfy this contract; provision a copied/sealed interpreter instead. The
+currently qualified Executive Studio runtime is
+`/Library/Application Support/MastermindExecutive/capacity-runtimes/`
+`cf1-pyyaml-6.0.3-cp312-arm64/bin/python3.12`; its full ancestry is validated before
+binding. The control process itself remains `-I -S -B` and never imports that
+third-party package tree.
 
-When configured, `InstalledExecutiveReaders` runs the existing
-`scripts/ceo_boot_packet.py` under that interpreter with `-I -B`, a closed
-environment, no HOME/global Git configuration, exact `safe.directory` bindings for
-the installed Mastermind and Macro roots, and `MACRO_MASTERMIND_REPO` pinned to the
-same Mastermind root. The returned packet is accepted only when its schema and both
-repository SHAs match fresh host observations. Process failure, malformed output, or
-grounding drift falls back to the prior stdlib-only packet with an explicit degraded
-reason; it never changes admission state. Supply the actual sealed Macro snapshot
-when provisioning the App, or omit all App fields when installing control without
-it. The base installer does not add these optional fields by default.
+When configured, `InstalledExecutiveReaders` derives its code root from the immutable
+root-owned release that loaded `integrations/executive_mcp/installed.py`. It runs that
+release's existing `scripts/ceo_boot_packet.py` under the sealed interpreter with
+`-I -B`; the mutable admin checkout named by `proof_source_repository` is grounding
+data only and is never executed or placed on `sys.path`. The helper revalidates the
+interpreter, installed code root, exact Mastermind boot/strategy files, Macro snapshot
+root, and `scripts/agentos.py` at execution time. Its environment has no HOME/global
+Git configuration, exact `safe.directory` bindings for the grounding checkout and
+Macro snapshot, and `MACRO_MASTERMIND_REPO` pinned to the immutable installed release.
+The child JSON is bounded before write and the installed read caps the primary helper
+execution at 20 seconds under the public 30-second read timeout. A child packet is
+preferred only when its schema and both repository SHAs match fresh host
+observations **and** it contains a real strategic-state mapping plus `ceo_brief.v1`.
+Process failure, malformed/oversized output, missing orientation, or grounding drift
+falls back to the prior stdlib-only packet with an explicit degraded reason; it never
+changes admission state. Supply the actual sealed Macro snapshot when provisioning
+the App, or omit all App fields when installing control without it.
 
 The App peer can use existing v2 submit/status frames and two closed internal
 read frames on the same CeoIngress socket. The four public tools and schemas

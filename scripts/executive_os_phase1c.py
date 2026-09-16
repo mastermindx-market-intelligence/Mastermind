@@ -29,6 +29,7 @@ _ROOT = Path(__file__).resolve().parents[1]
 if os.fspath(_ROOT) not in sys.path:
     sys.path.insert(0, os.fspath(_ROOT))
 
+from control_plane import ceo_boot_packet
 from control_plane.executive_runtime import RuntimeProofError, RuntimeStore
 from control_plane.executive_autonomy import (
     AutonomyRefusal,
@@ -295,34 +296,15 @@ def _path(value: Any, name: str) -> Path:
 
 
 def _sealed_root_executable(value: Any, name: str) -> Path:
-    """Require one root-owned executable behind no symlink/writable ancestor."""
-    if not isinstance(value, str) or not Path(value).is_absolute():
+    """Apply the canonical execution-time sealing law at config load too."""
+    if not isinstance(value, str):
         raise ServiceError(f"control config {name} must be an absolute path")
-    path = Path(value)
     try:
-        if path.resolve(strict=True) != path:
-            raise ServiceError(f"control config {name} must not traverse symlinks")
-        for node in (path, *path.parents):
-            info = node.lstat()
-            if stat.S_ISLNK(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
-                raise ServiceError(
-                    f"control config {name} must be root-owned and sealed through its path"
-                )
-            if node == path:
-                if (not stat.S_ISREG(info.st_mode) or not info.st_mode & 0o111
-                        or info.st_nlink != 1):
-                    raise ServiceError(
-                        f"control config {name} must name one sealed executable file"
-                    )
-            elif not stat.S_ISDIR(info.st_mode):
-                raise ServiceError(
-                    f"control config {name} has a non-directory ancestor"
-                )
-    except ServiceError:
-        raise
-    except OSError as exc:
-        raise ServiceError(f"control config {name} is unavailable") from exc
-    return path
+        return ceo_boot_packet.require_sealed_root_path(
+            Path(value), kind="file", executable=True
+        )
+    except ValueError as exc:
+        raise ServiceError(f"control config {name}: {exc}") from exc
 
 
 def _integer(value: Any, name: str) -> int:

@@ -739,18 +739,28 @@ def test_module_imports_no_execution_plane():
     assert not forbidden, f"read-only bridge must not import {sorted(forbidden)}"
 
 
+def _allow_test_sealing(monkeypatch):
+    monkeypatch.setattr(
+        mod, "require_sealed_root_path", lambda path, **_kwargs: Path(path).resolve()
+    )
+
+
 def test_build_packet_in_interpreter_isolated_and_grounded(tmp_path, monkeypatch):
     repo = tmp_path / "mastermind"
-    macro = tmp_path / "macro"
-    repo.mkdir()
-    macro.mkdir()
-    boot_python = tmp_path / "sealed-python"
     mastermind_sha = "a" * 40
     macro_sha = "b" * 40
+    code = tmp_path / "release" / mastermind_sha
+    macro = tmp_path / "macro" / macro_sha
+    repo.mkdir()
+    code.mkdir(parents=True)
+    macro.mkdir(parents=True)
+    boot_python = tmp_path / "sealed-python"
     packet = {
         "schema": SCHEMA,
         "mastermind": {"sha": mastermind_sha},
         "macro": {"sha": macro_sha},
+        "strategic_state": {"company_phase": "TEST"},
+        "brief": {"schema": mod.BRIEF_SCHEMA},
     }
     seen = {}
 
@@ -766,17 +776,24 @@ def test_build_packet_in_interpreter_isolated_and_grounded(tmp_path, monkeypatch
     def fake_sha(path):
         return mastermind_sha if path.resolve() == repo.resolve() else macro_sha
 
+    _allow_test_sealing(monkeypatch)
     monkeypatch.setattr(mod.subprocess, "run", fake_run)
     monkeypatch.setattr(mod, "git_sha", fake_sha)
     result = mod.build_packet_in_interpreter(
         boot_python=boot_python,
+        code_root=code,
         repo_root=repo,
         macro_root=macro,
         timeout=3.0,
         now="2026-09-16T10:00:00Z",
     )
     assert result == packet
-    assert seen["argv"][:3] == [str(boot_python.resolve()), "-I", "-B"]
+    assert seen["argv"][:4] == [
+        str(boot_python.resolve()), "-I", "-B",
+        str(code.resolve() / "scripts" / "ceo_boot_packet.py"),
+    ]
+    assert "--repo-root" in seen["argv"]
+    assert str(repo.resolve()) in seen["argv"]
     env = seen["kwargs"]["env"]
     assert "HOME" not in env
     assert env["PYTHONNOUSERSITE"] == "1"
@@ -784,14 +801,17 @@ def test_build_packet_in_interpreter_isolated_and_grounded(tmp_path, monkeypatch
     assert {env["GIT_CONFIG_VALUE_0"], env["GIT_CONFIG_VALUE_1"]} == {
         str(repo.resolve()), str(macro.resolve()),
     }
-    assert env["MACRO_MASTERMIND_REPO"] == str(repo.resolve())
+    assert env["MACRO_MASTERMIND_REPO"] == str(code.resolve())
 
 
 def test_build_packet_in_interpreter_grounding_mismatch_degrades(tmp_path, monkeypatch):
     repo = tmp_path / "mastermind"
-    macro = tmp_path / "macro"
+    expected_sha = "a" * 40
+    code = tmp_path / "release" / expected_sha
+    macro = tmp_path / "macro" / expected_sha
     repo.mkdir()
-    macro.mkdir()
+    code.mkdir(parents=True)
+    macro.mkdir(parents=True)
     packet = {
         "schema": SCHEMA,
         "mastermind": {"sha": "c" * 40},
@@ -802,6 +822,7 @@ def test_build_packet_in_interpreter_grounding_mismatch_degrades(tmp_path, monke
         returncode = 0
         stdout = json.dumps(packet)
 
+    _allow_test_sealing(monkeypatch)
     monkeypatch.setattr(mod.subprocess, "run", lambda *a, **k: Result())
     monkeypatch.setattr(mod, "git_sha", lambda _p: "a" * 40)
     monkeypatch.setattr(
@@ -809,6 +830,7 @@ def test_build_packet_in_interpreter_grounding_mismatch_degrades(tmp_path, monke
     )
     result = mod.build_packet_in_interpreter(
         boot_python=tmp_path / "sealed-python",
+        code_root=code,
         repo_root=repo,
         macro_root=macro,
         timeout=3.0,
@@ -816,3 +838,92 @@ def test_build_packet_in_interpreter_grounding_mismatch_degrades(tmp_path, monke
     assert result["degraded"] == [
         "installed boot helper unavailable: grounding_mismatch"
     ]
+
+
+def test_build_packet_in_interpreter_requires_strategy_and_brief(tmp_path, monkeypatch):
+    repo = tmp_path / "mastermind"
+    mastermind_sha = "a" * 40
+    macro_sha = "b" * 40
+    code = tmp_path / "release" / mastermind_sha
+    macro = tmp_path / "macro" / macro_sha
+    repo.mkdir()
+    code.mkdir(parents=True)
+    macro.mkdir(parents=True)
+    packets = [
+        {
+            "schema": SCHEMA,
+            "mastermind": {"sha": mastermind_sha},
+            "macro": {"sha": macro_sha},
+            "strategic_state": None,
+            "brief": {"schema": mod.BRIEF_SCHEMA},
+        },
+        {
+            "schema": SCHEMA,
+            "mastermind": {"sha": mastermind_sha},
+            "macro": {"sha": macro_sha},
+            "strategic_state": {"company_phase": "TEST"},
+            "brief": None,
+        },
+    ]
+
+    class Result:
+        returncode = 0
+        stdout = ""
+
+    _allow_test_sealing(monkeypatch)
+    monkeypatch.setattr(
+        mod, "git_sha",
+        lambda path: mastermind_sha if path.resolve() == repo.resolve() else macro_sha,
+    )
+    monkeypatch.setattr(
+        mod, "build_packet", lambda **_kwargs: {"schema": SCHEMA, "degraded": []}
+    )
+    reasons = []
+    for packet in packets:
+        Result.stdout = json.dumps(packet)
+        monkeypatch.setattr(mod.subprocess, "run", lambda *a, **k: Result())
+        result = mod.build_packet_in_interpreter(
+            boot_python=tmp_path / "sealed-python",
+            code_root=code, repo_root=repo, macro_root=macro, timeout=3.0,
+        )
+        reasons.append(result["degraded"][0])
+    assert reasons == [
+        "installed boot helper unavailable: strategic_state_unavailable",
+        "installed boot helper unavailable: agentos_brief_unavailable",
+    ]
+
+
+def test_build_packet_in_interpreter_refuses_wrong_code_generation(tmp_path, monkeypatch):
+    repo = tmp_path / "mastermind"
+    code = tmp_path / "release" / ("f" * 40)
+    macro = tmp_path / "macro" / ("b" * 40)
+    repo.mkdir()
+    code.mkdir(parents=True)
+    macro.mkdir(parents=True)
+    _allow_test_sealing(monkeypatch)
+    monkeypatch.setattr(
+        mod, "git_sha",
+        lambda path: "a" * 40 if path.resolve() == repo.resolve() else "b" * 40,
+    )
+    monkeypatch.setattr(
+        mod, "build_packet", lambda **_kwargs: {"schema": SCHEMA, "degraded": []}
+    )
+    monkeypatch.setattr(
+        mod.subprocess, "run",
+        lambda *a, **k: pytest.fail("wrong code generation must refuse before launch"),
+    )
+    result = mod.build_packet_in_interpreter(
+        boot_python=tmp_path / "sealed-python",
+        code_root=code, repo_root=repo, macro_root=macro, timeout=3.0,
+    )
+    assert result["degraded"] == [
+        "installed boot helper unavailable: code_grounding_mismatch"
+    ]
+
+
+def test_cli_json_output_cap_refuses_before_write(monkeypatch, capsys):
+    from scripts import ceo_boot_packet as cli
+
+    monkeypatch.setattr(cli, "build_packet", lambda **_kwargs: {"schema": SCHEMA, "x": "y"})
+    assert cli.main(["--json", "--max-json-bytes", "1"]) == 3
+    assert capsys.readouterr().out == ""

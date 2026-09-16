@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import subprocess
 import sys
 from collections.abc import Callable, Mapping, Sequence
@@ -360,27 +361,70 @@ def git_branch(path: Path) -> str | None:
     return _git_branch(path)
 
 
+def require_sealed_root_path(
+    path: Path, *, kind: str, executable: bool = False
+) -> Path:
+    """Return one root-owned immutable path or raise ``ValueError``.
+
+    The path and every ancestor must be literal (no symlink traversal), root-owned,
+    and non-group/other-writable.  The leaf is additionally constrained to the
+    requested kind.  This is the shared sealing primitive for the installed boot
+    helper; config-time validation and execution-time validation use the same law.
+    """
+    candidate = Path(path)
+    if not candidate.is_absolute():
+        raise ValueError("sealed path must be absolute")
+    try:
+        if candidate.resolve(strict=True) != candidate:
+            raise ValueError("sealed path must not traverse symlinks")
+        for node in (candidate, *candidate.parents):
+            info = node.lstat()
+            mode = stat.S_IMODE(info.st_mode)
+            if stat.S_ISLNK(info.st_mode) or info.st_uid != 0 or mode & 0o022:
+                raise ValueError("sealed path must be root-owned and immutable through its ancestry")
+            if node == candidate:
+                if kind == "file":
+                    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                        raise ValueError("sealed file must be one regular single-link file")
+                    if executable and not mode & 0o111:
+                        raise ValueError("sealed executable must have an execute bit")
+                elif kind == "directory":
+                    if not stat.S_ISDIR(info.st_mode):
+                        raise ValueError("sealed directory must be a directory")
+                else:
+                    raise ValueError("sealed path kind is invalid")
+            elif not stat.S_ISDIR(info.st_mode):
+                raise ValueError("sealed path ancestor must be a directory")
+    except ValueError:
+        raise
+    except OSError as exc:
+        raise ValueError("sealed path is unavailable") from exc
+    return candidate
+
+
 def build_packet_in_interpreter(
     *,
     boot_python: Path | None,
+    code_root: Path,
     repo_root: Path,
     macro_root: Path,
     timeout: float = DEFAULT_TIMEOUT,
     now: str | None = None,
+    max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES,
 ) -> dict[str, Any]:
     """Build one grounded packet in a sealed YAML-capable read interpreter.
 
-    This is an orientation-only process boundary owned by the canonical boot-packet
-    module.  It never enters the MCP integration package, never inherits HOME or
-    ambient Git configuration, and accepts child output only when schema plus both
-    repository SHAs match fresh host observations.
+    Executable code comes only from ``code_root`` (the immutable installed release)
+    and the sealed Macro snapshot. ``repo_root`` is grounding/data only: it supplies
+    Git identity but is never placed on ``sys.path`` or executed.
     """
     root = Path(repo_root).resolve()
     macro = Path(macro_root).resolve()
 
     def fallback(reason: str) -> dict[str, Any]:
         packet = build_packet(
-            repo_root=root, macro_root_flag=os.fspath(macro), now=now, timeout=timeout
+            repo_root=root, macro_root_flag=os.fspath(macro), now=now,
+            timeout=min(float(timeout), 5.0),
         )
         packet["degraded"] = [
             f"installed boot helper unavailable: {reason}",
@@ -390,19 +434,41 @@ def build_packet_in_interpreter(
 
     if boot_python is None:
         return fallback("interpreter_not_configured")
-    python = Path(boot_python).resolve()
+    try:
+        python = require_sealed_root_path(Path(boot_python), kind="file", executable=True)
+        source = require_sealed_root_path(Path(code_root), kind="directory")
+        script = require_sealed_root_path(source / "scripts" / "ceo_boot_packet.py", kind="file")
+        require_sealed_root_path(source / "control_plane" / "ceo_boot_packet.py", kind="file")
+        require_sealed_root_path(source / "control_plane" / "strategic_state.py", kind="file")
+        require_sealed_root_path(source / "config" / "strategic_state.yml", kind="file")
+        require_sealed_root_path(macro, kind="directory")
+        require_sealed_root_path(macro / "scripts" / "agentos.py", kind="file")
+    except ValueError:
+        return fallback("sealing_invalid")
+
+    if type(max_output_bytes) is not int or max_output_bytes <= 0:
+        return fallback("output_limit_invalid")
+    expected_mastermind = git_sha(root)
+    expected_macro = git_sha(macro)
+    if not expected_mastermind or not expected_macro:
+        return fallback("grounding_unavailable")
+    if source.name != expected_mastermind:
+        return fallback("code_grounding_mismatch")
+    if macro.name != expected_macro:
+        return fallback("macro_grounding_mismatch")
     argv = [
-        os.fspath(python), "-I", "-B",
-        os.fspath(root / "scripts" / "ceo_boot_packet.py"),
-        "--json", "--macro-root", os.fspath(macro),
+        os.fspath(python), "-I", "-B", os.fspath(script),
+        "--json", "--repo-root", os.fspath(root),
+        "--macro-root", os.fspath(macro),
         "--timeout", str(timeout),
+        "--max-json-bytes", str(max_output_bytes),
     ]
     if now is not None:
         argv.extend(["--now", str(now)])
     env = {
         "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
-        "LANG": "C.UTF-8",
-        "LC_ALL": "C.UTF-8",
+        "LANG": "C",
+        "LC_ALL": "C",
         "PYTHONDONTWRITEBYTECODE": "1",
         "PYTHONNOUSERSITE": "1",
         "GIT_CONFIG_NOSYSTEM": "1",
@@ -414,14 +480,19 @@ def build_packet_in_interpreter(
         "GIT_CONFIG_VALUE_1": os.fspath(macro),
         "GIT_OPTIONAL_LOCKS": "0",
         "GIT_TERMINAL_PROMPT": "0",
-        "MACRO_MASTERMIND_REPO": os.fspath(root),
+        # Macro sibling checks see immutable Mastermind code, never the mutable admin checkout.
+        "MACRO_MASTERMIND_REPO": os.fspath(source),
     }
     try:
         process = subprocess.run(
-            argv, cwd=os.fspath(root), env=env, capture_output=True, text=True,
-            check=False, timeout=timeout + 10.0,
+            argv, cwd=os.fspath(source), env=env, capture_output=True, text=True,
+            check=False, timeout=timeout,
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except subprocess.TimeoutExpired:
+        return fallback("process_timeout")
+    except UnicodeError:
+        return fallback("invalid_utf8")
+    except OSError:
         return fallback("process_unavailable")
     if process.returncode != 0:
         return fallback("process_failed")
@@ -431,14 +502,16 @@ def build_packet_in_interpreter(
         return fallback("invalid_json")
     if not isinstance(packet, dict) or packet.get("schema") != SCHEMA:
         return fallback("schema_mismatch")
-    expected_mastermind = git_sha(root)
-    expected_macro = git_sha(macro)
     if (
-        not expected_mastermind or not expected_macro
-        or (packet.get("mastermind") or {}).get("sha") != expected_mastermind
+        (packet.get("mastermind") or {}).get("sha") != expected_mastermind
         or (packet.get("macro") or {}).get("sha") != expected_macro
     ):
         return fallback("grounding_mismatch")
+    if not isinstance(packet.get("strategic_state"), Mapping):
+        return fallback("strategic_state_unavailable")
+    brief = packet.get("brief")
+    if not isinstance(brief, Mapping) or brief.get("schema") != BRIEF_SCHEMA:
+        return fallback("agentos_brief_unavailable")
     return packet
 
 

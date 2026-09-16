@@ -32,6 +32,9 @@ class InstalledExecutiveReaders(ExecutiveMcpGateway):
         self._installed_runtime_root = Path(runtime_root).resolve()
         self._source_root = Path(repo_root).resolve()
         self._macro_root = Path(macro_root).resolve()
+        # The imported module itself identifies the immutable installed release.
+        # Never execute helper code from the mutable admin/grounding checkout.
+        self._code_root = Path(__file__).resolve().parents[2]
         self._boot_python = Path(boot_python).resolve() if boot_python is not None else None
         super().__init__(
             GatewayConfig(
@@ -57,9 +60,11 @@ class InstalledExecutiveReaders(ExecutiveMcpGateway):
             return packet
         return ceo_boot_packet.build_packet_in_interpreter(
             boot_python=self._boot_python,
+            code_root=self._code_root,
             repo_root=self._source_root,
             macro_root=self._macro_root,
-            timeout=float(kwargs.get("timeout", ceo_boot_packet.DEFAULT_TIMEOUT)),
+            # Keep the primary helper below the public 30s read timeout.
+            timeout=min(float(kwargs.get("timeout", ceo_boot_packet.DEFAULT_TIMEOUT)), 20.0),
             now=kwargs.get("now"),
         )
 

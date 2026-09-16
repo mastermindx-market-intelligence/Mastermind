@@ -177,3 +177,12 @@ def test_app_boot_python_without_app_binding_is_refused(tmp_path):
     raw['ceo_ingress_app_boot_python'] = '/Library/Application Support/MastermindExecutive/capacity-runtimes/example/bin/python3.12'
     with pytest.raises(module.ServiceError, match='complete App binding'):
         module.load_control_config(_write_config(tmp_path, raw))
+
+
+def test_generic_control_template_omits_host_specific_boot_interpreter():
+    template = (
+        Path(__file__).resolve().parents[1]
+        / "ops" / "executive_os" / "control.json.template"
+    )
+    raw = json.loads(template.read_text(encoding="utf-8"))
+    assert "ceo_ingress_app_boot_python" not in raw

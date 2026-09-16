@@ -2,6 +2,7 @@
 import asyncio
 import json
 import os
+from pathlib import Path
 
 import pytest
 
@@ -160,11 +161,13 @@ def test_installed_boot_helper_delegates_to_canonical_boot_owner(tmp_path, monke
         assert result == expected
         assert seen == {
             'boot_python': boot_python.resolve(),
+            'code_root': Path(installed_module.__file__).resolve().parents[2],
             'repo_root': repo.resolve(),
             'macro_root': macro.resolve(),
             'timeout': 3.0,
             'now': '2026-09-16T10:00:00Z',
         }
+        assert seen['code_root'] != repo.resolve()
     finally:
         asyncio.run(readers.aclose())
 

@@ -27,6 +27,7 @@ if os.fspath(_ROOT) not in sys.path:
     sys.path.insert(0, os.fspath(_ROOT))
 
 from control_plane.ceo_boot_packet import (  # noqa: E402  (after sys.path bootstrap)
+    DEFAULT_MAX_OUTPUT_BYTES,
     DEFAULT_TIMEOUT,
     ENV_MACRO_ROOT,
     build_packet,
@@ -43,6 +44,10 @@ def _parser() -> argparse.ArgumentParser:
         help="emit the mastermind.ceo_boot_packet.v1 document instead of text",
     )
     parser.add_argument(
+        "--repo-root", type=Path,
+        help="Mastermind checkout used only for grounding/git identity",
+    )
+    parser.add_argument(
         "--macro-root",
         help=f"Macro checkout to read Agent OS from (overrides ${ENV_MACRO_ROOT})",
     )
@@ -56,6 +61,10 @@ def _parser() -> argparse.ArgumentParser:
         "--timeout", type=float, default=DEFAULT_TIMEOUT,
         help=f"seconds allowed for the Agent OS brief (default {DEFAULT_TIMEOUT})",
     )
+    parser.add_argument(
+        "--max-json-bytes", type=int, default=DEFAULT_MAX_OUTPUT_BYTES,
+        help="maximum UTF-8 bytes permitted for JSON output",
+    )
     return parser
 
 
@@ -63,6 +72,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
 
     packet = build_packet(
+        repo_root=args.repo_root,
         macro_root_flag=args.macro_root,
         since=args.since,
         now=args.now,
@@ -70,7 +80,10 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     if args.json:
-        sys.stdout.write(json.dumps(packet, indent=2, sort_keys=True) + "\n")
+        payload = json.dumps(packet, indent=2, sort_keys=True) + "\n"
+        if args.max_json_bytes <= 0 or len(payload.encode("utf-8")) > args.max_json_bytes:
+            return 3
+        sys.stdout.write(payload)
     else:
         sys.stdout.write(render_packet(packet))
 
