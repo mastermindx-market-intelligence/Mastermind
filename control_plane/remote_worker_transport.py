@@ -21,7 +21,7 @@ REMOTE_BROKER_RESPONSE_SCHEMA = "mastermind.remote_worker_broker_response/v1"
 MAX_FRAME_BYTES = 1024 * 1024
 
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{1,127}$")
-_HOST_REF_RE = re.compile(r"^host-[A-Za-z0-9][A-Za-z0-9._-]{7,63}$")
+_HOST_REF_RE = re.compile(r"^host-[0-9a-f]{64}$")
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 _RESERVED_UNBOUND_HOST_REFS = frozenset({"local-unbound"})
 _REQUEST_KEYS = frozenset({

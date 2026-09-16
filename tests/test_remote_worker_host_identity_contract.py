@@ -15,7 +15,7 @@ from ops.executive_os.remote_worker_gateway_config import (
 )
 
 
-OPAQUE_HOST_REF = "host-capacity-a1b2c3d4"
+OPAQUE_HOST_REF = "host-" + "b" * 64
 
 
 def _identity(host_ref: str) -> dict[str, str]:
@@ -49,7 +49,7 @@ def _gateway_kwargs(tmp_path: Path) -> dict[str, object]:
     }
 
 
-def test_transport_accepts_owner_supplied_opaque_capacity_host_ref() -> None:
+def test_transport_accepts_owner_supplied_opaque_host_ref() -> None:
     request = build_request(_identity(OPAQUE_HOST_REF), "status", {})
     assert request["host_ref"] == OPAQUE_HOST_REF
 
@@ -60,8 +60,9 @@ def test_transport_refuses_reserved_unbound_host_ref() -> None:
 
 
 def test_transport_refuses_host_ref_outside_owner_namespace() -> None:
-    with pytest.raises(TransportValidationError, match="transport identity is invalid"):
-        build_request(_identity("not-a-host-ref"), "status", {})
+    for invalid in ("not-a-host-ref", "host-capacity-a1b2c3d4"):
+        with pytest.raises(TransportValidationError, match="transport identity is invalid"):
+            build_request(_identity(invalid), "status", {})
 
 
 def test_gateway_config_uses_same_opaque_host_ref_contract(tmp_path: Path) -> None:
@@ -72,8 +73,9 @@ def test_gateway_config_uses_same_opaque_host_ref_contract(tmp_path: Path) -> No
     with pytest.raises(ValueError, match="host_ref is invalid"):
         RemoteWorkerGatewayConfig(host_ref="local-unbound", **kwargs)
 
-    with pytest.raises(ValueError, match="host_ref is invalid"):
-        RemoteWorkerGatewayConfig(host_ref="not-a-host-ref", **kwargs)
+    for invalid in ("not-a-host-ref", "host-capacity-a1b2c3d4"):
+        with pytest.raises(ValueError, match="host_ref is invalid"):
+            RemoteWorkerGatewayConfig(host_ref=invalid, **kwargs)
 
 
 def test_gateway_config_does_not_coerce_non_string_host_identity(tmp_path: Path) -> None:
