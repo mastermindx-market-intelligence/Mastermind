@@ -1362,12 +1362,10 @@ class FakeCeoSubmitHost:
         self.reconcile_calls += 1
         self._phase("reconciled")
 
-    def prove_control_admission_bound(
-        self, expected_sha, *, candidate_config_digest
-    ):
+    def prove_control_admission_bound(self, expected_sha):
         # R80: rename matches the production protocol method and the new
         # fixed-arity signature.  The fake records every call (default
-        # ADMITTED) regardless of the digest so it stays a pure witness.
+        # ADMITTED) so it stays a pure witness.
         self.admission_bound_calls += 1
         self._phase("admission_bound")
 
@@ -3101,16 +3099,19 @@ def test_the_control_service_boundary_is_bounded_to_one_reconcile_and_one_admiss
         assert [
             line for line in lines if "reconcile_control_service" in line
         ] == ["host.reconcile_control_service(request.expected_sha)"]
-        # R80: ARM/DISARM ride the renamed CEO-admission proof; the candidate
-        # config digest is the freshly-derived postimage's control_sha256.
+        # R80: ARM/DISARM ride the renamed CEO-admission proof; the probe
+        # carries NO candidate_config_digest parameter (the live phase1c
+        # status response exposes socket + service_state, never the loaded
+        # control config bytes -- the disk re-read inside ARM/DISARM and
+        # rollback is what binds the live state to the EXACT bytes).
         bound_lines = [
             line
             for line in lines
             if "prove_control_admission_bound" in line
-            and "host.prove_control_admission_bound(request.expected_sha," in line
+            and "host.prove_control_admission_bound(request.expected_sha)" in line
         ]
         assert len(bound_lines) == 1
-        assert "candidate_config_digest=transaction.candidates.control_sha256" in bound_lines[0]
+        assert "candidate_config_digest" not in bound_lines[0]
         assert not any(line.startswith(("while ", "for ")) for line in lines)
 
     def disarm_root(host):
@@ -3735,8 +3736,8 @@ class _RollbackProbeHost(control.ProductionCeoSubmitHost):
         if self._reconcile_error is not None:
             raise self._reconcile_error
 
-    def _ceo_admission_probe(self, expected_sha, *, candidate_config_digest):
-        self.ledger.append(("probe", expected_sha, candidate_config_digest))
+    def _ceo_admission_probe(self, expected_sha):
+        self.ledger.append(("probe", expected_sha))
         if self._probe_error is not None:
             raise self._probe_error
         return True
@@ -3854,13 +3855,12 @@ def test_ceo_submit_rollback_proves_the_live_control_service_before_removing_the
     host.rollback_ceo_submit(transaction, _rollback_receipt(transaction, armed=False))
 
     ledger = [entry for entry in host.ledger if entry[0] != "atomic"]
-    probe_digest = prior.control_sha256
     assert ledger == [
         ("receipt", None),
         ("configs", None),
         ("loaded", control.CONTROL_LABEL),
         ("reconcile", SHA),
-        ("probe", SHA, probe_digest),
+        ("probe", SHA),
         ("phase", "ADMISSION_BOUND"),
         ("phase", "ROLLBACK_CONTROL_PROVEN"),
         ("complete", None),
@@ -3887,13 +3887,11 @@ def test_ceo_submit_rollback_proves_the_live_control_service_before_removing_the
     )
     # R80: the live proof renames ``_await_control_ready`` to the CEO-admission
     # probe and persists the ``ADMISSION_BOUND`` phase rather than the old
-    # ``READY_PROVEN``.
+    # ``READY_PROVEN``.  The probe carries no candidate_config_digest
+    # parameter; the restored-preimage digest is pinned by the disk re-read
+    # in ``rollback_ceo_submit``.
     assert "_await_control_ready" not in body
-    assert (
-        "prove_control_admission_bound" not in body
-        or "candidate_config_digest=transaction.prior_configs.control_sha256"
-        in body
-    )
+    assert "candidate_config_digest" not in body
 
 
 @pytest.mark.parametrize(
@@ -3923,9 +3921,8 @@ def test_ceo_submit_rollback_stays_effect_unknown_when_the_live_proof_fails(
     assert ("reconcile", SHA) in host.ledger
     # The ledger's last entry depends on the failure mode: a reconcile
     # error lands the reconcile tag; a probe error lands the probe tag.
-    probe_digest = prior.control_sha256
     if failure == "probe":
-        assert host.ledger[-1] == ("probe", SHA, probe_digest)
+        assert host.ledger[-1] == ("probe", SHA)
     else:
         assert host.ledger[-1] == (failure, SHA)
 
@@ -4734,10 +4731,10 @@ class _AdmissionProbeHost(control.ProductionCeoSubmitHost):
         self.ledger.append(("loaded", label))
         return True
 
-    def _ceo_admission_probe(self, expected_sha, *, candidate_config_digest):
+    def _ceo_admission_probe(self, expected_sha):
         self.ready_calls += 1
-        self.ledger.append(("probe", expected_sha, candidate_config_digest))
-        self.last_digest = candidate_config_digest
+        self.ledger.append(("probe", expected_sha))
+        self.last_digest = None
         if self._ready_after is None:
             return False
         return self.ready_calls >= self._ready_after
@@ -4762,21 +4759,15 @@ def test_ceo_submit_control_admission_bound_polls_until_ready_and_raises_only_af
     monkeypatch,
 ):
     # R80: the CEO ARM/DISARM readiness stage is now the CEO-admission proof.
-    candidate_digest = "f" * 64
     # (a) ADMITTED ON THE THIRD POLL: the method must actually POLL, then return.
     _clock, sleeps = _install_fake_clock(monkeypatch)
     third_poll = _AdmissionProbeHost(ready_after=3)
 
-    assert (
-        third_poll._await_control_admission_bound(
-            SHA, candidate_config_digest=candidate_digest
-        )
-        is None
-    )
+    assert third_poll._await_control_admission_bound(SHA) is None
 
-    assert third_poll.ledger.count(("probe", SHA, candidate_digest)) == 3
+    assert third_poll.ledger.count(("probe", SHA)) == 3
     assert third_poll.ready_calls == 3
-    assert third_poll.last_digest == candidate_digest
+    assert third_poll.last_digest is None
     assert len(sleeps.calls) == 2
     # The label probe runs inside the poll, and only on the control boundary.
     assert third_poll.ledger.count(("loaded", control.CONTROL_LABEL)) == 3
@@ -4786,14 +4777,9 @@ def test_ceo_submit_control_admission_bound_polls_until_ready_and_raises_only_af
     _clock, sleeps = _install_fake_clock(monkeypatch)
     immediate = _AdmissionProbeHost(ready_after=1)
 
-    assert (
-        immediate._await_control_admission_bound(
-            SHA, candidate_config_digest=candidate_digest
-        )
-        is None
-    )
+    assert immediate._await_control_admission_bound(SHA) is None
 
-    assert immediate.ledger.count(("probe", SHA, candidate_digest)) == 1
+    assert immediate.ledger.count(("probe", SHA)) == 1
     assert immediate.ready_calls == 1
     assert sleeps.calls == []
 
@@ -4802,9 +4788,7 @@ def test_ceo_submit_control_admission_bound_polls_until_ready_and_raises_only_af
     never = _AdmissionProbeHost(ready_after=None)
 
     with pytest.raises(RuntimeError) as raised:
-        never._await_control_admission_bound(
-            SHA, candidate_config_digest=candidate_digest
-        )
+        never._await_control_admission_bound(SHA)
 
     assert "did not bind" in str(raised.value)
     assert "ADMISSION" in str(raised.value).upper() or "admission" in str(raised.value)
@@ -4821,12 +4805,7 @@ def test_ceo_submit_control_admission_bound_polls_until_ready_and_raises_only_af
     bound = _AdmissionProbeHost(ready_after=2)
     bound._active_transaction = _readiness_transaction()
 
-    assert (
-        bound.prove_control_admission_bound(
-            SHA, candidate_config_digest=candidate_digest
-        )
-        is None
-    )
+    assert bound.prove_control_admission_bound(SHA) is None
 
     ready_positions = [
         index
@@ -4842,14 +4821,9 @@ def test_ceo_submit_control_admission_bound_polls_until_ready_and_raises_only_af
     unbound = _AdmissionProbeHost(ready_after=1)
     unbound._active_transaction = None
 
-    assert (
-        unbound.prove_control_admission_bound(
-            SHA, candidate_config_digest=candidate_digest
-        )
-        is None
-    )
+    assert unbound.prove_control_admission_bound(SHA) is None
 
-    assert unbound.ledger.count(("probe", SHA, candidate_digest)) == 1
+    assert unbound.ledger.count(("probe", SHA)) == 1
     assert all(entry[0] != "phase" for entry in unbound.ledger)
 
 
@@ -5070,7 +5044,7 @@ def test_production_ceo_admission_probe_accepts_awaiting_canary_on_the_fixed_con
         ),
     )
 
-    assert host._ceo_admission_probe(SHA, candidate_config_digest=digest) is True
+    assert host._ceo_admission_probe(SHA) is True
     # The probe really did reach the OS seam exactly once.
     assert len(calls) == 1
     argv = calls[0][0][0]
@@ -5103,7 +5077,7 @@ def test_production_ceo_admission_probe_refuses_ready_service_state(monkeypatch)
         ),
     )
 
-    assert host._ceo_admission_probe(SHA, candidate_config_digest=digest) is False
+    assert host._ceo_admission_probe(SHA) is False
 
 
 def test_production_ceo_admission_probe_refuses_a_non_fixed_control_socket(monkeypatch):
@@ -5120,7 +5094,7 @@ def test_production_ceo_admission_probe_refuses_a_non_fixed_control_socket(monke
         ),
     )
 
-    assert host._ceo_admission_probe(SHA, candidate_config_digest=digest) is False
+    assert host._ceo_admission_probe(SHA) is False
 
 
 def test_production_ceo_admission_probe_refuses_ok_false(monkeypatch):
@@ -5132,7 +5106,7 @@ def test_production_ceo_admission_probe_refuses_ok_false(monkeypatch):
         stdout=json.dumps({"ok": False, "result": {}}, sort_keys=True).encode("utf-8"),
     )
 
-    assert host._ceo_admission_probe(SHA, candidate_config_digest=digest) is False
+    assert host._ceo_admission_probe(SHA) is False
 
 
 def test_production_ceo_admission_probe_refuses_non_zero_return_code(monkeypatch):
@@ -5147,7 +5121,7 @@ def test_production_ceo_admission_probe_refuses_non_zero_return_code(monkeypatch
         ),
     )
 
-    assert host._ceo_admission_probe(SHA, candidate_config_digest=digest) is False
+    assert host._ceo_admission_probe(SHA) is False
 
 
 def test_production_ceo_admission_probe_refuses_oversize_body(monkeypatch):
@@ -5159,7 +5133,7 @@ def test_production_ceo_admission_probe_refuses_oversize_body(monkeypatch):
         stdout=b"x" * (control._MAX_JSON_BYTES + 1),
     )
 
-    assert host._ceo_admission_probe(SHA, candidate_config_digest=digest) is False
+    assert host._ceo_admission_probe(SHA) is False
 
 
 def test_production_ceo_admission_probe_refuses_non_json_body(monkeypatch):
@@ -5167,7 +5141,7 @@ def test_production_ceo_admission_probe_refuses_non_json_body(monkeypatch):
     digest = "f" * 64
     _patch_probe_subprocess(monkeypatch, returncode=0, stdout=b"not-json")
 
-    assert host._ceo_admission_probe(SHA, candidate_config_digest=digest) is False
+    assert host._ceo_admission_probe(SHA) is False
 
 
 def test_production_ceo_admission_probe_refuses_non_dict_body(monkeypatch):
@@ -5175,7 +5149,7 @@ def test_production_ceo_admission_probe_refuses_non_dict_body(monkeypatch):
     digest = "f" * 64
     _patch_probe_subprocess(monkeypatch, returncode=0, stdout=b"[1, 2, 3]")
 
-    assert host._ceo_admission_probe(SHA, candidate_config_digest=digest) is False
+    assert host._ceo_admission_probe(SHA) is False
 
 
 def test_production_ceo_admission_probe_refuses_non_dict_result(monkeypatch):
@@ -5189,7 +5163,7 @@ def test_production_ceo_admission_probe_refuses_non_dict_result(monkeypatch):
         ).encode("utf-8"),
     )
 
-    assert host._ceo_admission_probe(SHA, candidate_config_digest=digest) is False
+    assert host._ceo_admission_probe(SHA) is False
 
 
 def test_production_ceo_admission_probe_drops_service_state_silently_when_awaiting_canary_missing(
@@ -5211,7 +5185,7 @@ def test_production_ceo_admission_probe_drops_service_state_silently_when_awaiti
         ).encode("utf-8"),
     )
 
-    assert host._ceo_admission_probe(SHA, candidate_config_digest=digest) is False
+    assert host._ceo_admission_probe(SHA) is False
 
 
 def test_production_ceo_admission_probe_pins_the_fixed_control_label_and_socket_in_the_argv(
@@ -5230,7 +5204,7 @@ def test_production_ceo_admission_probe_pins_the_fixed_control_label_and_socket_
         ),
     )
 
-    host._ceo_admission_probe(SHA, candidate_config_digest=digest)
+    host._ceo_admission_probe(SHA)
 
     argv = calls[0][0][0]
     assert os.fspath(control.PINNED_PYTHON) in argv
@@ -5245,6 +5219,226 @@ def test_production_ceo_admission_probe_pins_the_fixed_control_label_and_socket_
         "control_config_sha256",
     ):
         assert forbidden not in calls[0][0][0]
+
+
+def test_ceo_admission_probe_signature_carries_no_candidate_config_digest_parameter(
+    monkeypatch,
+):
+    """B1 limit pin: the LIVE admission probe proves label+socket+release+
+    AWAITING_CANARY only.  It is structurally incapable of accepting a
+    candidate config digest and silently ignoring it.
+
+    The probe was previously declared with ``candidate_config_digest`` in
+    its signature but never consumed it in the response predicate; an
+    attacker (or a regression) that bound the live service to the WRONG
+    control config would still pass.  R8 closed that hole by REMOVING the
+    parameter from the probe (the disk re-read inside ARM/DISARM and
+    rollback is what binds the live state to the EXACT bytes; the probe
+    is the post-restart, pre-canary LIVENESS witness only).  The two
+    structural fences below pin the limit so the lie cannot silently
+    re-grow:
+
+      (a) The signature is fixed at one positional ``expected_sha``; a
+          future patch cannot reintroduce a keyword-only
+          ``candidate_config_digest`` parameter without this test going
+          RED at import/inspect time.
+      (b) Even when the live service reports the
+          AWAITING_CANARY + fixed socket shape, the probe does NOT read
+          the response payload for any ``config_sha256``-shaped field --
+          the status result the protected service returns simply does not
+          carry that fact, and the probe therefore CANNOT consume it even
+          if a future caller passed it.
+    """
+
+    host = control.ProductionCeoSubmitHost()
+
+    # (a) The signature is exactly (self, expected_sha).  No extra
+    # positional, no keyword-only, no var-kwargs.
+    import inspect
+
+    parameters = inspect.signature(host._ceo_admission_probe).parameters
+    assert list(parameters) == ["expected_sha"]
+    for name, parameter in parameters.items():
+        assert parameter.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD, name
+
+    # (b) A response that DOES carry a config_sha256 fact must still be
+    # accepted only on label+socket+state; the extra field is silently
+    # dropped because the predicate never reads it.
+    calls = _patch_probe_subprocess(
+        monkeypatch,
+        returncode=0,
+        stdout=json.dumps(
+            {
+                "ok": True,
+                "result": {
+                    "service_state": "AWAITING_CANARY",
+                    "socket": os.fspath(control.CONTROL_SOCKET),
+                    # Even if the live service exposed a digest, the probe
+                    # does not consult it -- this is the honest limit.
+                    "control_config_sha256": "a" * 64,
+                    "release_sha": "b" * 40,
+                },
+            },
+            sort_keys=True,
+        ).encode("utf-8"),
+    )
+
+    assert host._ceo_admission_probe(SHA) is True
+    # The probe argv still has NO config_digest, release_sha, or
+    # control_config_sha256 argument: the fixed argv is the only thing
+    # the operator can rely on for "what was asked".
+    argv = calls[0][0][0]
+    assert "config_sha256" not in " ".join(argv)
+    assert "release_sha" not in argv
+    assert "control_config_sha256" not in argv
+
+    # (c) A response that LACKS the service_state is REFUSED even when
+    # it carries a config digest that happens to match: the probe is
+    # the post-restart, pre-canary LIVENESS witness, NOT a digest check.
+    _patch_probe_subprocess(
+        monkeypatch,
+        returncode=0,
+        stdout=json.dumps(
+            {
+                "ok": True,
+                "result": {
+                    "socket": os.fspath(control.CONTROL_SOCKET),
+                    "control_config_sha256": "a" * 64,
+                },
+            },
+            sort_keys=True,
+        ).encode("utf-8"),
+    )
+    assert host._ceo_admission_probe(SHA) is False
+
+
+def test_ceo_submit_receipt_outer_id_canonical_equals_projection_id_and_digest_over_outer(
+    monkeypatch,
+):
+    """B2 contract pin (recording, not repairing): the receipt carries a
+    well-formed outer transaction_id that MUST equal the projection's
+    transaction_id, and the projection_digest is sealed over the
+    projection -- which contains that transaction_id.  Sol R48 item 3
+    REQUIRES the projection carry one ("well-formed outer transaction ID
+    equal to projection transaction ID"); R48 also forbids "a
+    replacement child, receipt, lock, controller or validation plane",
+    so this test pins the current contract while Sol adjudicates.
+
+    The attacker model is the one the reviewer demonstrated: rewrite
+    BOTH the outer AND the projection transaction_id to a new canonical
+    value, recompute the projection_digest over the new projection, and
+    the receipt must STILL validate.  That is the contract today.  What
+    the test pins is what that gives the attacker: the rewritten receipt
+    grants EXACTLY the same authority as a legitimate receipt, because
+    every other authority field (release_sha, installed_sha, the six
+    live App binding facts, the current worker digest, the current
+    worker arm fact, the current control values) is independently
+    re-derived from current evidence inside
+    ``ceo_submit_sink_eligible`` -- the tampered receipt gives NO
+    authority beyond a legitimate receipt.
+    """
+
+    host = _armed_ceo_submit_host()
+    receipt = copy.deepcopy(host.receipt)
+    legitimate_projection = copy.deepcopy(receipt["projection"])
+
+    # 1) Outer transaction_id MUST be canonical ``autonomy-<12hex>``.
+    legitimate_outer = receipt["transaction_id"]
+    assert control._CEO_SUBMIT_TRANSACTION_RE.fullmatch(legitimate_outer)
+
+    # 2) Outer transaction_id MUST equal the projection's transaction_id.
+    assert legitimate_projection["transaction_id"] == legitimate_outer
+
+    # 3) The projection_digest is over the projection (which carries the
+    # transaction_id), so any projection mutation invalidates the digest
+    # and the validator refuses.
+    expected_digest = control.ceo_submit_projection_digest(legitimate_projection)
+    assert receipt["projection_digest"] == expected_digest
+
+    # 4) Attacker model: rewrite BOTH outer AND projection to a new
+    # canonical value, recompute the digest over the new projection.
+    # This MUST pass the document validator -- the contract permits it.
+    tampered = copy.deepcopy(receipt)
+    new_outer = "autonomy-aaaaaaaaaaaa"
+    tampered["transaction_id"] = new_outer
+    tampered["projection"] = copy.deepcopy(legitimate_projection)
+    tampered["projection"]["transaction_id"] = new_outer
+    tampered["projection_digest"] = control.ceo_submit_projection_digest(
+        tampered["projection"]
+    )
+
+    # The document validator accepts the tampered receipt: outer is
+    # canonical, outer == projection, digest over outer value.
+    assert control.validate_ceo_submit_receipt_document(tampered, armed=True) is True
+
+    # 5) The tampered receipt grants NO authority beyond a legitimate
+    # receipt: every other authority field is independently re-derived
+    # from CURRENT evidence inside ``ceo_submit_sink_eligible``.  The
+    # same predicate answers False against current evidence as it would
+    # against the legitimate receipt when evidence is absent.
+    binding = host.executive_app_binding()
+    worker_sha = control.sha256_bytes(control.encode_config(host.worker_config))
+
+    # Legitimate receipt against current evidence: True (the canonical
+    # happy path -- the live arm proof).
+    assert (
+        control.ceo_submit_sink_eligible(
+            control_config=host.control_config,
+            worker_config=host.worker_config,
+            worker_config_sha256=worker_sha,
+            receipt=receipt,
+            binding=binding,
+            expected_sha=SHA,
+            installed_sha=SHA,
+        )
+        is True
+    )
+
+    # Tampered receipt against current evidence: also True -- it grants
+    # EXACTLY the same authority as the legitimate receipt, because the
+    # only authority-bearing projection field the receipt can rewrite is
+    # the transaction_id (which is a seal, not an authority fact).
+    assert (
+        control.ceo_submit_sink_eligible(
+            control_config=host.control_config,
+            worker_config=host.worker_config,
+            worker_config_sha256=worker_sha,
+            receipt=tampered,
+            binding=binding,
+            expected_sha=SHA,
+            installed_sha=SHA,
+        )
+        is True
+    )
+
+    # 6) When CURRENT evidence refuses, the tampered receipt also
+    # refuses -- it cannot grant authority beyond what current evidence
+    # authorizes.  Drop the live binding; both receipts are refused.
+    absent_binding = dataclasses.replace(binding, present=False)
+    assert (
+        control.ceo_submit_sink_eligible(
+            control_config=host.control_config,
+            worker_config=host.worker_config,
+            worker_config_sha256=worker_sha,
+            receipt=receipt,
+            binding=absent_binding,
+            expected_sha=SHA,
+            installed_sha=SHA,
+        )
+        is False
+    )
+    assert (
+        control.ceo_submit_sink_eligible(
+            control_config=host.control_config,
+            worker_config=host.worker_config,
+            worker_config_sha256=worker_sha,
+            receipt=tampered,
+            binding=absent_binding,
+            expected_sha=SHA,
+            installed_sha=SHA,
+        )
+        is False
+    )
 
 
 # ---------------------------------------------------------------------------
