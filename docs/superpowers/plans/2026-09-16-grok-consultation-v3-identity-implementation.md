@@ -317,13 +317,13 @@ python3 -m py_compile \
   control_plane/session_targets.py \
   integrations/mastermind_company_mcp/consultation.py \
   integrations/slack_agent_dialogue/company_consultation_peer_resolver.py
-git diff --check a78b8fe23d8e1ed129880ac47e97ebe96afa8aea HEAD
+git diff --check 8ba7deedde164c90298d3e88785d98e02fa5e2d2 HEAD
 ```
 
 - [x] **Step 4: Verify negative capability boundaries**
 
 ```bash
-git diff --name-only a78b8fe23d8e1ed129880ac47e97ebe96afa8aea HEAD
+git diff --name-only 8ba7deedde164c90298d3e88785d98e02fa5e2d2 HEAD
 grep -R "grok-bot" config control_plane integrations common tests | sed -n '1,200p'
 ```
 

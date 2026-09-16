@@ -7,7 +7,7 @@ Introduce an honest, versioned consultation QUESTION identity for the trusted `g
 ## Current authority
 
 - W6-C2 repair source acceptance: PR #681, exact head `de190b2c7e878fd5a4cf6ecb2fc58b34b058ee74`.
-- Protected master at design freeze: `0fe8074ff953b2ced9025ed40f0f66019c759967`; current proof pin: `a78b8fe23d8e1ed129880ac47e97ebe96afa8aea`.
+- Protected master at design freeze: `0fe8074ff953b2ced9025ed40f0f66019c759967`; current proof pin: `8ba7deedde164c90298d3e88785d98e02fa5e2d2`.
 - Existing carrier to preserve: branch `sol/grok-consultation-v2-g1b-20260915`, prior head `b0b4b48d6c4e61255d8f6a93554c6b64e2fb9b57`.
 - The branch name is historical carrier identity. It is not authority to reuse consultation v2.
 
