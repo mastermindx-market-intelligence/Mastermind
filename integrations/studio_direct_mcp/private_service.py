@@ -27,8 +27,10 @@ FILE_MODE = 0o600
 # Funnel/OAuth listener. A private job must never take it.
 RESERVED_FUNNEL_PORT = 45017
 
-# 5h session idle; gateway.mjs clamps idleTimeoutMs up to 30 days.
-IDLE_TIMEOUT_MS = 18_000_000
+# Preserve the proven private-seat runtime timeouts: 30 minutes idle and 5 minutes per request.
+# These values match the currently deployed Business-seat configuration and avoid restage regressions.
+IDLE_TIMEOUT_MS = 1_800_000
+REQUEST_TIMEOUT_MS = 300_000
 
 # Preserve the live Business-seat capacity already proven on this host. The
 # gateway itself validates up to 1024; this helper owns the installed default.
@@ -317,7 +319,7 @@ def _build_config(
         "childEnv": {"NODE_OPTIONS": ""},
         "stateDir": str(state_dir),
         "maxSessions": MAX_SESSIONS,
-        "requestTimeoutMs": 60000,
+        "requestTimeoutMs": REQUEST_TIMEOUT_MS,
         "idleTimeoutMs": IDLE_TIMEOUT_MS,
         "gitPublish": _typed_git_config(user_root),
     }
