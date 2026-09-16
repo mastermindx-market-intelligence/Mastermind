@@ -35,7 +35,7 @@ FAMILY_ID_PREFIX = "pvrf-"
 OPERATION_ID_PREFIX = "pvr-"
 _ID_HEX_LENGTH = 48
 
-_JOB_ID_RE = re.compile(r"^JOB-[0-9]+$")
+_JOB_ID_RE = re.compile(r"^JOB-(?:(?!000$)[0-9]{3}|[1-9][0-9]{3,17})$")
 _ATTEMPT_ID_RE = re.compile(r"^ATT-[0-9a-f]{32}$")
 _SAFE_ID_RE = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
 _SHA256_HEX_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -44,6 +44,7 @@ _BOOT_UUID_RE = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 )
 _ADAPTER_FALLBACK_RE = re.compile(r"^adapter-[0-9]+$")
+_NIL_BOOT_UUID = "00000000-0000-0000-0000-000000000000"
 
 BINDING_CANONICAL_KEYS = frozenset(
     {
@@ -132,7 +133,12 @@ def validate_effective_grant_digest(value: Any) -> str | None:
 
 
 def validate_boot_id(value: Any) -> str:
-    """Validate a real kernel boot-session UUID; reject the adapter-<pid> fallback."""
+    """Validate a real kernel boot-session UUID; reject the adapter-<pid> fallback.
+
+    UUID case is representation, not identity: the real macOS kernel returns
+    uppercase text, so both spellings are accepted and normalized to the same
+    lowercase canonical string, ensuring one boot session hashes to one ID.
+    """
 
     if not isinstance(value, str) or not value:
         raise PrivilegedReadinessError("boot_id is not a real kernel boot-session identity")
@@ -140,7 +146,10 @@ def validate_boot_id(value: Any) -> str:
         raise PrivilegedReadinessError("boot_id cannot be a process-local adapter fallback")
     if _BOOT_UUID_RE.fullmatch(value) is None:
         raise PrivilegedReadinessError("boot_id must be a canonical kernel boot-session UUID")
-    return value
+    canonical = value.lower()
+    if canonical == _NIL_BOOT_UUID:
+        raise PrivilegedReadinessError("boot_id cannot be the nil UUID")
+    return canonical
 
 
 @dataclasses.dataclass(frozen=True)
@@ -240,7 +249,9 @@ class ReadinessBinding:
         validate_sha256_hex(self.authority_policy_hash, "authority_policy_hash")
         validate_effective_grant_digest(self.effective_grant_digest)
         validate_release_sha(self.release_sha)
-        validate_boot_id(self.boot_id)
+        canonical_boot_id = validate_boot_id(self.boot_id)
+        if canonical_boot_id != self.boot_id:
+            object.__setattr__(self, "boot_id", canonical_boot_id)
         validate_safe_id(self.slot_id, "slot_id")
         if self.schema_version != BINDING_SCHEMA:
             raise PrivilegedReadinessError("binding schema_version is not the reviewed binding schema")

@@ -9,6 +9,7 @@ mutation, broker call, or controller logic is exercised here.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import inspect
 import json
 import math
@@ -134,6 +135,11 @@ def test_fixed_action_constant():
     assert epa.FIXED_ACTION == "executive.worker_auth.verify_only"
 
 
+def test_family_and_operation_id_prefixes_are_pinned_literals():
+    assert epa.FAMILY_ID_PREFIX == "pvrf-"
+    assert epa.OPERATION_ID_PREFIX == "pvr-"
+
+
 def test_observation_scope_constant_has_no_ready_assertion():
     assert epa.OBSERVATION_SCOPE == "LOGIN_STATUS_ONLY_NO_READY_ASSERTION"
 
@@ -176,6 +182,16 @@ def test_family_key_canonical_dict_has_exact_keys():
     assert set(payload) == {"schema_version", "action", "job_id", "attempt_id", "fence_generation"}
     assert payload["action"] == epa.FIXED_ACTION
     assert payload["schema_version"] == epa.FAMILY_KEY_SCHEMA
+
+
+def test_family_key_constructor_refuses_action_override():
+    with pytest.raises(epa.PrivilegedReadinessError):
+        epa.ReadinessFamilyKey(
+            job_id="JOB-001",
+            attempt_id="ATT-" + "a" * 32,
+            fence_generation=1,
+            action="executive.worker_auth.login",
+        )
 
 
 def test_family_id_format_and_stability():
@@ -229,11 +245,31 @@ def test_boot_id_accepts_canonical_uuid_text():
 
 @pytest.mark.parametrize(
     "bad_boot_id",
-    ["", "   ", "not-a-uuid", "adapter-1234", "adapter-0", "12345678-1234-1234-1234", None, 123],
+    [
+        "",
+        "   ",
+        "not-a-uuid",
+        "adapter-1234",
+        "adapter-0",
+        "12345678-1234-1234-1234",
+        None,
+        123,
+        "00000000-0000-0000-0000-000000000000",
+    ],
 )
 def test_boot_id_rejects_empty_malformed_and_adapter_fallback(bad_boot_id):
     with pytest.raises(epa.PrivilegedReadinessError):
         epa.validate_boot_id(bad_boot_id)
+
+
+def test_boot_id_accepts_real_macos_uppercase_shape_and_canonicalizes_lowercase():
+    upper = "6F9D2FBC-6D31-4EBE-9E1D-A0B21D31EEDB"
+    assert epa.validate_boot_id(upper) == VALID_BOOT_ID
+
+
+def test_boot_id_upper_and_lower_spellings_are_the_same_identity():
+    upper = VALID_BOOT_ID.upper()
+    assert epa.validate_boot_id(upper) == epa.validate_boot_id(VALID_BOOT_ID) == VALID_BOOT_ID
 
 
 # ---------------------------------------------------------------------------
@@ -296,6 +332,17 @@ def test_binding_canonical_dict_has_exact_keys():
     assert payload["schema_version"] == epa.BINDING_SCHEMA
     assert payload["action"] == epa.FIXED_ACTION
     assert payload["effective_grant_digest"] is None
+    assert set(payload) == epa.BINDING_CANONICAL_KEYS
+
+
+def test_binding_constructor_refuses_action_override():
+    with pytest.raises(epa.PrivilegedReadinessError):
+        epa.ReadinessBinding(**_valid_binding_kwargs(action="executive.worker_auth.login"))
+
+
+def test_binding_constructor_refuses_schema_version_override():
+    with pytest.raises(epa.PrivilegedReadinessError):
+        epa.ReadinessBinding(**_valid_binding_kwargs(schema_version="other/v2"))
 
 
 def test_binding_serializes_only_secret_free_fields():
@@ -342,7 +389,7 @@ def test_operation_id_sensitive_to_release_boot_and_policy():
     base = epa.ReadinessBinding(**_valid_binding_kwargs())
     other_release = epa.ReadinessBinding(**_valid_binding_kwargs(release_sha="d" * 40))
     other_boot = epa.ReadinessBinding(
-        **_valid_binding_kwargs(boot_id="00000000-0000-0000-0000-000000000000")
+        **_valid_binding_kwargs(boot_id="0f9d2fbc-6d31-4ebe-9e1d-a0b21d31eedb")
     )
     other_policy = epa.ReadinessBinding(**_valid_binding_kwargs(authority_policy_hash="e" * 64))
     other_grant = epa.ReadinessBinding(**_valid_binding_kwargs(effective_grant_digest=VALID_GRANT_DIGEST))
@@ -356,6 +403,14 @@ def test_operation_id_sensitive_to_release_boot_and_policy():
     assert len(ids) == 5
 
 
+def test_operation_id_identical_for_upper_and_lower_boot_id_spelling():
+    lower = epa.ReadinessBinding(**_valid_binding_kwargs(boot_id=VALID_BOOT_ID))
+    upper = epa.ReadinessBinding(**_valid_binding_kwargs(boot_id=VALID_BOOT_ID.upper()))
+    assert lower.operation_id == upper.operation_id
+    assert lower.to_canonical_dict() == upper.to_canonical_dict()
+    assert upper.boot_id == VALID_BOOT_ID
+
+
 def test_family_id_unaffected_by_release_boot_policy_movement():
     key = epa.ReadinessFamilyKey(job_id="JOB-001", attempt_id="ATT-" + "a" * 32, fence_generation=1)
     base = epa.ReadinessBinding(**_valid_binding_kwargs())
@@ -364,6 +419,34 @@ def test_family_id_unaffected_by_release_boot_policy_movement():
     assert key.family_id == epa.ReadinessFamilyKey(
         job_id="JOB-001", attempt_id="ATT-" + "a" * 32, fence_generation=1
     ).family_id
+
+
+def test_family_id_known_answer_vector():
+    key = epa.ReadinessFamilyKey(job_id="JOB-001", attempt_id="ATT-" + "a" * 32, fence_generation=1)
+    assert key.family_id == "pvrf-bedfa0cbb1c9d169c73d632da05cddd59b5de0ea6adfc8ea"
+
+
+def test_operation_id_known_answer_vector():
+    binding = epa.ReadinessBinding(**_valid_binding_kwargs())
+    assert binding.operation_id == "pvr-5d43b77045ea6be5f77d1c547792f4c067f758dddf01e07a"
+
+
+def test_family_id_known_answer_vector_breaks_if_hash_algorithm_changes():
+    key = epa.ReadinessFamilyKey(job_id="JOB-001", attempt_id="ATT-" + "a" * 32, fence_generation=1)
+    payload = key.to_canonical_dict()
+    sha256_digest = hashlib.sha256(epa.canonical_json_bytes(payload)).hexdigest()
+    sha512_digest = hashlib.sha512(epa.canonical_json_bytes(payload)).hexdigest()
+    assert key.family_id == f"{epa.FAMILY_ID_PREFIX}{sha256_digest[:48]}"
+    assert key.family_id != f"{epa.FAMILY_ID_PREFIX}{sha512_digest[:48]}"
+
+
+def test_operation_id_known_answer_vector_breaks_if_encoding_is_noncanonical():
+    binding = epa.ReadinessBinding(**_valid_binding_kwargs())
+    payload = binding.to_canonical_dict()
+    canonical_digest = hashlib.sha256(epa.canonical_json_bytes(payload)).hexdigest()
+    noncanonical_digest = hashlib.sha256(repr(payload).encode("utf-8")).hexdigest()
+    assert binding.operation_id == f"{epa.OPERATION_ID_PREFIX}{canonical_digest[:48]}"
+    assert binding.operation_id != f"{epa.OPERATION_ID_PREFIX}{noncanonical_digest[:48]}"
 
 
 def test_family_and_operation_ids_differ_and_separate_namespaces():
@@ -392,6 +475,31 @@ def test_job_id_rejects_malformed_values(bad_job_id):
     raw = dict(VALID_REQUEST, job_id=bad_job_id)
     with pytest.raises(epa.PrivilegedReadinessError):
         epa.validate_readiness_request(raw)
+
+
+@pytest.mark.parametrize(
+    "bad_job_id",
+    [
+        pytest.param("JOB-000", id="zero_three_digit"),
+        pytest.param("JOB-1", id="one_digit"),
+        pytest.param("JOB-01", id="two_digit_leading_zero"),
+        pytest.param("JOB-0001", id="four_digit_leading_zero"),
+        pytest.param("JOB-0100", id="four_digit_leading_zero_alt"),
+        pytest.param("JOB-" + "1" * 19, id="nineteen_digits_too_long"),
+        pytest.param("JOB-" + "1" * 10000, id="unbounded_ten_thousand_digits"),
+    ],
+)
+def test_job_id_rejects_aliases_and_unbounded_shapes(bad_job_id):
+    with pytest.raises(epa.PrivilegedReadinessError):
+        epa.validate_job_id(bad_job_id)
+
+
+@pytest.mark.parametrize(
+    "good_job_id",
+    ["JOB-001", "JOB-999", "JOB-1000", "JOB-9999", "JOB-1" + "2" * 17],
+)
+def test_job_id_accepts_canonical_runtime_shapes(good_job_id):
+    assert epa.validate_job_id(good_job_id) == good_job_id
 
 
 @pytest.mark.parametrize("bad_attempt_id", ["", "att-" + "a" * 32, "ATT-" + "g" * 32, "ATT-short"])
