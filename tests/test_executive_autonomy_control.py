@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import copy
 import dataclasses
@@ -10,6 +11,7 @@ import os
 import socket
 import stat
 import subprocess
+import sys
 import types
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -93,6 +95,51 @@ def test_parser_exposes_only_closed_commands_and_bounded_arguments():
     disarm = parser.parse_args(["disarm", "--expected-sha", SHA])
     assert vars(disarm) == {"command": "disarm", "expected_sha": SHA}
 
+    # R17 B1: the CEO-submit operation domain is the SAME parser, three verbs,
+    # each bounded to --expected-sha alone.
+    assert vars(parser.parse_args(["ceo-submit-status", "--expected-sha", SHA])) == {
+        "command": "ceo-submit-status",
+        "expected_sha": SHA,
+    }
+    assert vars(parser.parse_args(["ceo-submit-arm", "--expected-sha", SHA])) == {
+        "command": "ceo-submit-arm",
+        "expected_sha": SHA,
+    }
+    assert vars(parser.parse_args(["ceo-submit-disarm", "--expected-sha", SHA])) == {
+        "command": "ceo-submit-disarm",
+        "expected_sha": SHA,
+    }
+
+    # The command set is EXACTLY the closed six: no seventh verb exists, and the
+    # three legacy verbs are still present.
+    subparser_actions = [
+        action
+        for action in parser._actions
+        if isinstance(action, argparse._SubParsersAction)
+    ]
+    assert len(subparser_actions) == 1
+    assert set(subparser_actions[0].choices) == {
+        "status",
+        "arm",
+        "disarm",
+        "ceo-submit-status",
+        "ceo-submit-arm",
+        "ceo-submit-disarm",
+    }
+
+    # A CEO verb carries no COO authority flag: the arm admission surface of the
+    # legacy verb must not be reachable from the CEO domain.
+    for coo_flag, value in (
+        ("--gate-b-receipt", "/private/tmp/gate-b.json"),
+        ("--expected-credential-kind", "device-auth"),
+        ("--workspace-binding-class", "company-workspace-admin-attested"),
+        ("--credential-expires-at", "2026-08-25T12:00:00Z"),
+    ):
+        with pytest.raises(SystemExit):
+            parser.parse_args(
+                ["ceo-submit-arm", "--expected-sha", SHA, coo_flag, value]
+            )
+
     help_text = parser.format_help()
     for forbidden in (
         "--system-root",
@@ -104,6 +151,19 @@ def test_parser_exposes_only_closed_commands_and_bounded_arguments():
         "--command-path",
     ):
         assert forbidden not in help_text
+
+    for verb in ("ceo-submit-status", "ceo-submit-arm", "ceo-submit-disarm"):
+        ceo_help = subparser_actions[0].choices[verb].format_help()
+        for forbidden in (
+            "--system-root",
+            "--runtime-root",
+            "--config-path",
+            "--receipt-path",
+            "--service-label",
+            "--release-root",
+            "--command-path",
+        ):
+            assert forbidden not in ceo_help
 
 
 @pytest.mark.parametrize("bad_sha", ["", "abc", "C" * 40, "f" * 39, "g" * 40])
@@ -2974,3 +3034,253 @@ def test_ceo_submit_control_plist_validator_refuses_an_unsafe_bootstrap_target(
             validator()
     else:
         assert validator() is None
+
+
+def test_main_routes_only_the_ceo_verbs_to_the_ceo_submit_host_and_leaves_legacy_dispatch_identical(
+    capsys,
+):
+    # (a) BEHAVIOUR.  A legacy COO verb rides the COO transaction host and emits
+    # the pre-existing closed documents, byte for byte.
+    legacy_arm_argv = [
+        "arm",
+        "--expected-sha",
+        SHA,
+        "--gate-b-receipt",
+        str(GATE_PATH),
+        "--expected-credential-kind",
+        "device-auth",
+        "--workspace-binding-class",
+        "company-workspace-admin-attested",
+        "--credential-expires-at",
+        "2026-08-25T12:00:00Z",
+    ]
+    host = FakeTransactionHost()
+    arm_result = control.main(legacy_arm_argv, host=host, now=lambda: NOW)
+    assert arm_result == 0
+    armed = json.loads(capsys.readouterr().out)
+    assert armed == {
+        "code": "armed",
+        "replayed": False,
+        "schema_version": control.OPERATION_SCHEMA_VERSION,
+        "state": "ARMED",
+        "status": "ARMED_READY",
+        "transaction_id": "autonomy-deadbeefcafe",
+    }
+    # The legacy verb ran the COO transaction owner, not a CEO-submit path.
+    assert host.transaction_calls == list(FakeTransactionHost.PHASES)
+    assert host.marker is False
+
+    host.fail_after = None
+    host.transaction_calls.clear()
+    disarm_result = control.main(
+        ["disarm", "--expected-sha", SHA], host=host, now=lambda: NOW
+    )
+    assert disarm_result == 0
+    disarmed = json.loads(capsys.readouterr().out)
+    assert disarmed["code"] == "disarmed"
+    assert disarmed["state"] == "DISARMED"
+    assert disarmed["status"] == "UNARMED"
+    assert disarmed == {
+        "code": "disarmed",
+        "replayed": False,
+        "schema_version": control.OPERATION_SCHEMA_VERSION,
+        "state": "DISARMED",
+        "status": "UNARMED",
+        "transaction_id": "autonomy-deadbeefcafe",
+    }
+    # Disarm rides the same COO owner and stops before the service phases.
+    assert host.transaction_calls == list(FakeTransactionHost.PHASES[:6])
+
+    # (b) SOURCE CONTRACT.  ``main`` names each host exactly once and the CEO host
+    # is reachable only inside the ``CEO_SUBMIT_COMMANDS`` branch.
+    source = Path(control.__file__).read_text(encoding="utf-8")
+    body = source.split("def main(", 1)[1].split("\ndef ", 1)[0]
+    assert body.count("ProductionCeoSubmitHost") == 1
+    assert body.count("ProductionTransactionHost") == 1
+    assert (
+        body.index("CEO_SUBMIT_COMMANDS")
+        < body.index("ProductionCeoSubmitHost")
+        < body.index("ProductionTransactionHost")
+    )
+    assert "ceo-submit" not in body.split("ProductionTransactionHost", 1)[1]
+
+
+@pytest.mark.parametrize(
+    "verb", ["ceo-submit-status", "ceo-submit-arm", "ceo-submit-disarm"]
+)
+def test_ceo_submit_cli_is_root_only_with_the_uid_injected_by_the_host(verb, capsys):
+    # Root-only is proven by INJECTING the uid through the fake host.  The uid of
+    # the process running this suite is never read.
+    assert control.require_root_privilege(0) is None
+    with pytest.raises(control.HostControlError) as refusal:
+        control.require_root_privilege(501)
+    assert refusal.value.code == "privilege_required"
+
+    host = FakeCeoSubmitHost(uid=501)
+    assert control.main([verb, "--expected-sha", SHA], host=host, now=lambda: NOW) == 2
+    document = json.loads(capsys.readouterr().out)
+    assert document == {
+        "schema_version": control.OPERATION_SCHEMA_VERSION,
+        "code": "privilege_required",
+        "state": "UNKNOWN",
+        "status": "CEO_SUBMIT_UNVERIFIED",
+        "transaction_id": None,
+        "replayed": False,
+    }
+    # A refused CLI call writes nothing at all: no candidate, no worker byte, no
+    # receipt, no marker and no durable phase.
+    assert host.control_writes == 0
+    assert host.worker_writes == 0
+    assert host.receipt_writes == 0
+    assert host.marker is False
+    assert host.phases == []
+
+
+def test_ceo_submit_status_readback_refuses_the_hand_edited_config_shortcut(capsys):
+    request = _ceo_submit_request()
+
+    # (a) A disarmed sink reads back DISARMED, with no transaction id.
+    disarmed_host = FakeCeoSubmitHost()
+    disarmed = control.evaluate_ceo_submit_status(disarmed_host, request)
+    assert disarmed == control.TransactionResult(
+        state="CEO_SUBMIT_DISARMED",
+        status="CEO_SUBMIT_DISARMED",
+        transaction_id=None,
+        replayed=False,
+    )
+    assert disarmed_host.control_writes == 0
+    assert disarmed_host.receipt_writes == 0
+    assert disarmed_host.marker is False
+    assert disarmed_host.phases == []
+
+    # (b) A sink armed by a REAL transaction reads back ARMED and reports the
+    # SEALED receipt's transaction id.
+    armed_host = _armed_ceo_submit_host()
+    sealed_transaction_id = armed_host.receipt["transaction_id"]
+    assert sealed_transaction_id == "autonomy-feedfacec0de"
+    armed_host.reset_ledgers()
+    armed = control.evaluate_ceo_submit_status(armed_host, request)
+    assert armed == control.TransactionResult(
+        state="CEO_SUBMIT_ARMED",
+        status="CEO_SUBMIT_ARMED",
+        transaction_id=sealed_transaction_id,
+        replayed=False,
+    )
+    assert armed_host.control_writes == 0
+    assert armed_host.receipt_writes == 0
+    assert armed_host.marker is False
+    assert armed_host.phases == []
+
+    # (c) A hand-edited ``ceo_submit_armed: true`` with no sealed receipt is
+    # NEVER reported as armed: the manual-config shortcut is refused.
+    edited_host = FakeCeoSubmitHost()
+    edited_host.control_config["ceo_submit_armed"] = True
+    unbound = control.evaluate_ceo_submit_status(edited_host, request)
+    assert unbound == control.TransactionResult(
+        state="CEO_SUBMIT_ARMED_UNBOUND",
+        status="CEO_SUBMIT_ARMED_UNBOUND",
+        transaction_id=None,
+        replayed=False,
+    )
+    assert (
+        control.main(
+            ["ceo-submit-status", "--expected-sha", SHA],
+            host=edited_host,
+            now=lambda: NOW,
+        )
+        == 2
+    )
+    document = json.loads(capsys.readouterr().out)
+    assert document == {
+        "schema_version": control.OPERATION_SCHEMA_VERSION,
+        "code": "ceo_submit_armed_unbound",
+        "state": "CEO_SUBMIT_ARMED_UNBOUND",
+        "status": "CEO_SUBMIT_ARMED_UNBOUND",
+        "transaction_id": None,
+        "replayed": False,
+    }
+    assert edited_host.control_writes == 0
+    assert edited_host.receipt_writes == 0
+    assert edited_host.marker is False
+    assert edited_host.phases == []
+
+
+def _cli_repository_root() -> Path:
+    """Walk up from the module until a directory holding both ``ops``/``tests``."""
+
+    for parent in Path(control.__file__).resolve().parents:
+        if (parent / "ops").is_dir() and (parent / "tests").is_dir():
+            return parent
+    raise AssertionError("cannot locate the repository root for the CLI subprocess")
+
+
+def test_ceo_submit_cli_subprocess_contract():
+    # The REAL module, as a REAL subprocess, under the current NON-ROOT test
+    # identity.  No launchd, no root, no network, no writes outside the checkout.
+    if os.geteuid() == 0:
+        pytest.fail(
+            "this contract proof asserts the non-root refusal document; a root "
+            "runner would make that assertion meaningless (no skipif is permitted)"
+        )
+
+    repo_root = Path(control.__file__).resolve().parents[2]
+    # Receipt for the chosen root: it holds this repo's two anchor directories and
+    # agrees with the walk-up resolver above.
+    assert (repo_root / "ops").is_dir()
+    assert (repo_root / "tests").is_dir()
+    assert repo_root == _cli_repository_root()
+
+    def _cli(*args):
+        return subprocess.run(
+            [sys.executable, "-m", "ops.executive_os.autonomy_control", *args],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env={
+                **os.environ,
+                "PYTHONPATH": str(repo_root),
+                "PYTHONDONTWRITEBYTECODE": "1",
+            },
+        )
+
+    help_run = _cli("--help")
+    assert help_run.returncode == 0
+    for verb in (
+        "status",
+        "arm",
+        "disarm",
+        "ceo-submit-status",
+        "ceo-submit-arm",
+        "ceo-submit-disarm",
+    ):
+        assert verb in help_run.stdout
+
+    refusal = {
+        "schema_version": control.OPERATION_SCHEMA_VERSION,
+        "code": "privilege_required",
+        "state": "UNKNOWN",
+        "status": "CEO_SUBMIT_UNVERIFIED",
+        "transaction_id": None,
+        "replayed": False,
+    }
+    for verb in ("ceo-submit-status", "ceo-submit-arm", "ceo-submit-disarm"):
+        run = _cli(verb, "--expected-sha", SHA)
+        assert run.returncode == 2
+        assert json.loads(run.stdout) == refusal
+        assert "Traceback" not in run.stderr
+
+    for bad_sha in ("abc", "F" * 40):
+        run = _cli("ceo-submit-status", "--expected-sha", bad_sha)
+        assert run.returncode != 0
+        assert run.stdout.strip() == ""
+        assert "usage:" in run.stderr
+        assert "Traceback" not in run.stderr
+
+    coo_flag = _cli(
+        "ceo-submit-arm", "--expected-sha", SHA, "--gate-b-receipt", "/tmp/x"
+    )
+    assert coo_flag.returncode != 0
+    assert coo_flag.stdout.strip() == ""
+    assert "usage:" in coo_flag.stderr
+    assert "Traceback" not in coo_flag.stderr
