@@ -17,11 +17,11 @@ from integrations.chairman_surfaces import web_sol_protocol as wsp
 
 REPEATED_FAILURE_THRESHOLD = 3
 MAX_FAILURE_EVIDENCE = 8
-_ATTEMPT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{2,255}$")
+_TURN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{2,255}$")
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 _FAILURE_KEYS = frozenset(
     {
-        "attempt_id",
+        "turn_id",
         "conversation_fingerprint",
         "observed_at",
         "provider_error_present",
@@ -56,7 +56,7 @@ class RotationReason(str, Enum):
 
 @dataclass(frozen=True)
 class TerminalGenerationFailure:
-    attempt_id: str
+    turn_id: str
     conversation_fingerprint: str
     observed_at: datetime
     provider_error_present: bool
@@ -109,10 +109,10 @@ def _parse_zulu(value: Any, *, field: str) -> datetime:
 def _terminal_failure(value: Mapping[str, Any]) -> TerminalGenerationFailure:
     if not isinstance(value, Mapping) or set(value) != _FAILURE_KEYS:
         raise WebSolRotationClassifierError("terminal failure evidence has invalid fields")
-    attempt_id = value["attempt_id"]
+    turn_id = value["turn_id"]
     fingerprint = value["conversation_fingerprint"]
-    if not isinstance(attempt_id, str) or _ATTEMPT_RE.fullmatch(attempt_id) is None:
-        raise WebSolRotationClassifierError("attempt_id is not a bounded opaque token")
+    if not isinstance(turn_id, str) or _TURN_RE.fullmatch(turn_id) is None:
+        raise WebSolRotationClassifierError("turn_id is not a bounded opaque token")
     if not isinstance(fingerprint, str) or _HEX64_RE.fullmatch(fingerprint) is None:
         raise WebSolRotationClassifierError("conversation_fingerprint must be lowercase hex64")
     if value["provider_error_present"] is not True:
@@ -125,7 +125,7 @@ def _terminal_failure(value: Mapping[str, Any]) -> TerminalGenerationFailure:
     if composer is not None and type(composer) is not bool:
         raise WebSolRotationClassifierError("composer_available must be boolean or null")
     return TerminalGenerationFailure(
-        attempt_id=attempt_id,
+        turn_id=turn_id,
         conversation_fingerprint=fingerprint,
         observed_at=_parse_zulu(value["observed_at"], field="observed_at"),
         provider_error_present=True,
@@ -179,9 +179,11 @@ def classify_session_health(
 ) -> RotationClassification:
     """Classify one exact bound ChatGPT conversation without performing effects.
 
-    ``consecutive_terminal_failures`` contains one closed record per failed turn
-    attempt since the last successful turn. Repeated polling of one failed turn
-    must reuse its attempt_id; duplicate attempt ids therefore cannot inflate the
+    ``consecutive_terminal_failures`` contains one closed record per failed
+    provider/model turn since the last successful turn. When Executive OHF owns
+    the caller, this identity is its canonical ``TurnRef.turn_id``; it is never
+    the Executive ``attempt_id``. Repeated polling of one failed turn
+    must reuse its turn_id; duplicate turn ids therefore cannot inflate the
     rotation threshold.
     """
 
@@ -206,7 +208,7 @@ def classify_session_health(
         consecutive_terminal_failures,
         conversation_fingerprint=conversation_fingerprint,
     )
-    distinct_failures = len({row.attempt_id for row in failures})
+    distinct_failures = len({row.turn_id for row in failures})
 
     if manual_retirement:
         return _result(
