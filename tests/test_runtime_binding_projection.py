@@ -27,7 +27,10 @@ from control_plane.operator_harness_contract import (
     TurnStartObservation,
     WorkspaceIdentity,
 )
-from control_plane.runtime_binding_projection import project_runtime_binding
+from control_plane.runtime_binding_projection import (
+    _PROVIDER_TO_REASONING_SURFACE,
+    project_runtime_binding,
+)
 from control_plane.session_targets import SessionTarget
 
 
@@ -560,6 +563,9 @@ def test_projection_refuses_provider_session_drift_and_unknown_provider(tmp_path
 
 
 def test_projection_refuses_grok_bot_provider_with_no_surface_mapping(tmp_path):
+    assert "grok-bot" not in _PROVIDER_TO_REASONING_SURFACE
+    assert "grok-bot" not in set(_PROVIDER_TO_REASONING_SURFACE.values())
+
     runtime, _dispatch, sealed, _epoch, _generation, _process, _profile_value = _admitted_runtime(
         tmp_path, provider="grok-bot"
     )
