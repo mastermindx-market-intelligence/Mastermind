@@ -198,8 +198,9 @@ Four well-formedness rules make the grammar evaluable rather than suggestive:
    `next_reset_at`.
 3. **A proportional ceiling must be resolved to an absolute remainder.** A sublimit expressed as a fraction of
    its parent (the Claude/Fable case, §5.5) is
-   `limit = fraction × entitlement(parent, current capability_generation)`, and its *remaining* is `limit − consumed_by_the_bounded_subtree`. If `consumed_by_the_bounded_subtree` is not
-   observed, the ceiling's remaining is **UNKNOWN** and, by §4.5, so is the whole expression. This is the
+   `limit = fraction × entitlement(parent, current capability_generation)`, and its *remaining* is
+   `limit − consumed_by_the_bounded_subtree`. If `consumed_by_the_bounded_subtree` is not observed, the
+   ceiling's remaining is **UNKNOWN** and, by §4.5, so is the whole expression. This is the
    contract-level statement of the standing rule that fresh shared-parent telemetry alone can never make a
    subset `capacity_known`.
 4. **No resource is a BUDGET twice in one expression.** A `resource_id` may appear once as a BUDGET and may
@@ -469,8 +470,8 @@ expression fails closed under §4.6.
 ATOMIC_FALLBACK), the Team seat tier (Alibaba documents 25k / 100k / 250k Credits per seat per subscription
 month and 625k per shared pack, but which we hold is not evidenced at master), seat realm binding, subscription
 `capability_generation`, how many packs exist, their identities/expiries, and the member cap value. Official
-docs prove order and the member ceiling, not straddling. Master models **Personal**, not Team (§9). Do not rename the profile to
-close this gap — R35 §16: bind the actual enrolled Team facts through Provider Control.
+docs prove order and the member ceiling, not straddling. Master models **Personal**, not Team (§9). Do not
+rename the profile to close this gap — R35 §16: bind the actual enrolled Team facts through Provider Control.
 
 ### 5.5 Claude / Fable subset ceiling — a ceiling, not a second wallet
 ```
