@@ -25,7 +25,7 @@ Shared AI Provider Control owns usage observations, native depletion identity an
 
 ### Mechanism choice
 
-**Chosen:** extend the existing Claude subscription/native worker and launch-profile compiler, with official Claude Code/Agent SDK features behind that boundary. Preserve the native agent execution foundation and explicitly materialize its environment.
+**Chosen:** complete the existing **PF1 native Anthropic `claude-code` worker** boundary and extend the existing launch-profile compiler, with qualified official Claude Code/Agent SDK features behind that boundary. Reuse provider-neutral helpers where reviewed, but do not confuse a Claude Code harness with its model provider. #581's Claude-compatible external-provider adapter is not the native Fable/Opus route. Preserve the native agent execution foundation and explicitly materialize its environment.
 
 **Not the default:** rebuilding everything around raw API calls. It would needlessly recreate tool loops and complicate parity and subscription economics. An API route remains an explicitly qualified, budgeted route, not a hidden fallback.
 
@@ -35,7 +35,8 @@ Shared AI Provider Control owns usage observations, native depletion identity an
 
 | Existing owner/artifact | Inspected fact | Integration consequence |
 |---|---|---|
-| Mastermind #581 | Merged as `27a5d893ca28f7006c1007dffa51e677c9c7a4ab`; fixed-profile Claude worker and sealed interactive-canary seam exist. Production remains disarmed; hermetic tests are not provider proof. | Reuse `control_plane/claude_subscription_worker.py` and `control_plane/subscription_canary_admission.py`; no second Claude worker. |
+| Mastermind #581 | Merged as `27a5d893ca28f7006c1007dffa51e677c9c7a4ab`; fixed-profile **Claude-compatible third-party** worker for GLM/Alibaba/MiniMax and hermetic canary seam exist. Native Anthropic is not in its catalog. | Reuse only reviewed provider-neutral contract/helper work where applicable. Its private external-provider credential loader and profile catalog are not the native Fable/Opus auth or quota path. |
+| PF1 native Claude owner | Native plan is protected, but `control_plane/claude_worker.py`, its named test module and the `claude-code` adapter descriptor are absent at `7642aea1`: native worker **NOT_BUILT in the inspected protected tree**. PF1-F0 #455 remains Open/Draft/HOLD at `0a368935ece318c1b7f3301337f75d3a58d61006`. | Preserve the incumbent PF1 source/continuation owner and its current RF1/HF1/protocol gates. F0 is a provider-free protocol falsifier, not an implemented worker. No replacement PF1 branch, child or adapter authority. |
 | Mastermind #632 | Merged as `e1f752a58df8f874efa12e30957d911627a0c4f8`; role-adaptive Web CEO policy is SPEC_ONLY, not INDEX/fleet enrolled. | Reuse the role policy and its existing enrollment owner. Do not copy it into an independently governing rulebook. |
 | Mastermind #671 | Open/Draft at `bf06ef8f2453b7592c4312d65f770292446ea141`; R2 REQUEST_CHANGES / release held. Repaired proposal preserves suitability, Pareto dominance and lexicographic ordering; it is not protected law. | Claude quota semantics extend this same economic model, not another allocator. The ordering requirement below is explicit in this design; it does not enroll #671. |
 | Macro #7103 | Open/Draft at `6ce16e745064825969e70f15ce5e1aeb813179b4`; Provider Control plan/usage work, release held. | Existing Provider Control owns acquisition and normalization. Account entitlement must be observed, not inferred from catalog text. |
@@ -48,6 +49,12 @@ Shared AI Provider Control owns usage observations, native depletion identity an
 PR metadata and bodies can disagree: current API merged/draft state wins for Git facts; a body describing earlier Draft state is historical. Capability still requires runtime evidence.
 
 **Historical superseded inspection heads:** #671 `0764fcae055c028bc1faf482d2d40f54fc9c9388` and #7114 `abacaeb474ccac5991b8ebc7e30198dd273244b0` describe the initial packet, not current pickup targets. Their independently re-read current candidate heads are in the table. #675 is protected at `7642aea155d2817219135b24246b55c1d7611c66`; do not revive its terminal source child.
+
+### Native provider and execution-harness distinction
+
+Native Anthropic Fable/Opus MUST use the existing PF1 `claude-code` boundary under `docs/superpowers/plans/2026-08-27-hybrid-workforce-pf1-claude-worker.md` and current accepted provider source law. #581 MUST NOT be represented as the native Anthropic subscription worker: `config/subscription_provider_profiles.v1.json` at this pin contains only GLM, Alibaba and MiniMax, all using a Claude-compatible protocol. A native executable, `opus` label or Anthropic-compatible API does not establish native Anthropic entitlement, served model, authentication or Fable/Opus quota. E11 discriminates this exact confusion.
+
+Native subscription authentication MUST remain with the dedicated worker principal through Claude's approved native mechanism; Mastermind must not copy/export its credentials or substitute #581's external-provider credential loader. Model, provider, harness, entitlement, auth category and quota resource identity stay independently attested. PF1-F0 retains its existing sticky operation/carrier (`pf1f0-nested-cache-consistency-repair-20260907-sol-001`, `C0BSBM78V1N/1788797971.486229`); this packet does not revive, reassign or continue that child. Its current owner must reconcile any retained candidate before later PF1 implementation. The native first-call gate remains with PF1 and current Executive/Capacity owners.
 
 ### Direct default-Mac-profile inventory
 
@@ -178,7 +185,7 @@ Score artifact correctness and independent acceptance first; separately record r
 
 ### Wave A — Reconcile and materialize the exact Claude environment
 
-Owner: Fable B integration; current Claude launch/profile source owner (#7114 and #581 composition). Sol owns acceptance.
+Owner: Fable B integration; current native Claude PF1 owner and #7114 launch/profile owner. #581 contributes only separately reviewed provider-neutral helpers, not native Anthropic auth or entitlement. Sol owns acceptance.
 
 1. Re-read the incumbent source branches, required checks, active writer and current protected bootstrap. Do not adopt the default-profile snapshot as another account's identity.
 2. Obtain a secret-safe manifest for the exact intended native realm: model/version, declared skills/plugins, hook/profile sources, authenticated tool names, writable scope, auth category and continuation ability.
@@ -198,10 +205,10 @@ Owner: Shared AI Provider Control + #7116 economics/Capacity owner; #671 source-
 
 ### Wave C — Complete the governed Claude worker vertical
 
-Owner: incumbent #581/broker/admission/realm owners under Fable B; preserve #633, #667/W1-H3 and credential custody.
+Owner: incumbent **PF1 native Claude** / common broker / admission / realm owners under Fable B; preserve PF1-F0, #633, #667/W1-H3 and credential custody. The required `ClaudeCodeWorkerAdapter` is not the #581 `ClaudeSubscriptionWorkerAdapter`.
 
-1. Close current source and installed admission gates using their existing transaction owners. Explicitly establish the accepted production realm/generation and Provider Capacity V2/atomic-claim owner path named in §3; #581 fixture receipts cannot satisfy it. Family-B candidates need their own B0 and later source/host acceptance; do not START B1+ here. Provider enrollment, credentials, safe arm and usage-policy permission are separate gates. The fixture ExecutiveMcpGateway is not the production Business-App submit path.
-2. Admit one bounded read-only task to the real Claude worker only with exact model/profile/realm/current-owner-generation/capacity binding AND the §4 usage_policy_mode and provider_policy_receipt_ref. Reconcile actual interactive versus headless/unattended behavior before admission; start only when that exact mode and the current canary contract are permitted. A headless run cannot masquerade as interactive_canary.
+1. Reconcile and accept the incumbent PF1-F0/protocol and RF1/HF1 prerequisites under current source law; then complete and review the native `claude-code` adapter on that existing owner path. No #581 descriptor/profile relabeling or replacement PF1 child. Close current source and installed admission gates using their existing transaction owners. Explicitly establish the accepted production realm/generation and Provider Capacity V2/atomic-claim owner path named in §3; #581 fixture receipts cannot satisfy it. Family-B candidates need their own B0 and later source/host acceptance; do not START B1+ here. Provider enrollment, credentials, safe arm and usage-policy permission are separate gates. The fixture ExecutiveMcpGateway is not the production Business-App submit path.
+2. Admit one bounded read-only task to the real native Anthropic Claude worker through the separately implemented and qualified PF1 `claude-code` binding, only with exact model/provider/harness/entitlement/profile/realm/current-owner-generation/capacity binding AND the §4 usage_policy_mode and provider_policy_receipt_ref. Reconcile actual interactive versus headless/unattended behavior before admission; start only when that exact mode and the current canary contract are permitted. A headless run cannot masquerade as interactive_canary.
 3. Verify native discovery, tool use, normalized result and usage; obtain independent review and prove exact-parent consumption.
 4. Exercise duplicate request, changed payload, cancellation, lost reply and restart negatives. A send ACK or provider PONG is insufficient.
 5. Proceed to one isolated reversible file/test task only after read-only proof. Do not claim autonomous activation from an interactive canary.
@@ -234,11 +241,11 @@ Waves A and B may advance source-only on disjoint, unowned paths while admission
 
 Each source change needs a failing discriminator, a valid positive control, exact-head tests, independent review where required, normal protected release, then separate installed/live proof. A non-author lane MUST execute independent acceptance of the exact candidate and its claimed real-path evidence; Sol adjudicates the outcome but cannot count author-only runs as that independent acceptance. Re-pin moved heads without ancestry-only churn. This packet's fixture validation is not those implementation tests.
 
-Explicit wave-to-case mapping: **A: E01–E08**; **B: Q01–Q15**; **C: E09–E10, O04–O07**; **D: O01–O08, O10**; **E: Q14, E05, E07–E08, O09–O10**. Repeated cases test composition at another boundary, not another runtime operation.
+Explicit wave-to-case mapping: **A: E01–E08**; **B: Q01–Q15**; **C: E09–E11, O04–O07**; **D: O01–O08, O10**; **E: Q14, E05, E07–E08, O09–O10**. Repeated cases test composition at another boundary, not another runtime operation.
 
 ## 8. Acceptance record and stop condition
 
-The companion JSON contains **35 source-only acceptance scenarios**. It is evaluation data, not runtime configuration, a scheduler or fabricated account telemetry. Every scenario names the owning boundary and an observable pass condition. `tests/test_claude_fabric_parity_acceptance.py` consumes the actual JSON and this plan: it checks parse/schema, closed unique IDs, non-live flags, bounded case shape, the 65/30 synthetic arithmetic, new falsifiers and normative source boundaries. It creates no runtime evaluator, quota algorithm or provider call. Static validation passing does not mean that any of the 35 provider/COO scenarios has executed; those remain owed to their named owners.
+The companion JSON contains **36 source-only acceptance scenarios**. It is evaluation data, not runtime configuration, a scheduler or fabricated account telemetry. Every scenario names the owning boundary and an observable pass condition. `tests/test_claude_fabric_parity_acceptance.py` consumes the actual JSON and this plan: it checks parse/schema, closed unique IDs, non-live flags, bounded case shape, the 65/30 synthetic arithmetic, new falsifiers and normative source boundaries. It creates no runtime evaluator, quota algorithm or provider call. Static validation passing does not mean that any of the 36 provider/COO scenarios has executed; those remain owed to their named owners.
 
 Completion requires: one legitimate Claude route with required environment parity; authoritative shared/Fable usage and atomic constraint handling; one qualified Opus COO parent/child/reviewer/repair loop; truthful qualified/unqualified states for the other requested surfaces; failure/restart/stop proof; and actual intended-parent result consumption. Documentation, source merge and a sent Slack addendum do not satisfy this exit.
 
