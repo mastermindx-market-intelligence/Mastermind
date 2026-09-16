@@ -1508,17 +1508,22 @@ def test_ceo_submit_arm_refuses_a_stale_or_mismatched_release_before_mutation():
 
 
 @pytest.mark.parametrize(
-    ("overrides", "code"),
+    ("overrides", "code", "gates"),
     [
-        ({"present": False}, "app_binding_absent"),
-        ({"app_peer_uid": 459}, "app_peer_invalid"),
-        ({"app_peer_user": "someone_else"}, "app_peer_invalid"),
-        ({"binding_valid": False}, "app_binding_invalid"),
-        ({"acl_valid": False}, "app_acl_invalid"),
-        ({"topology_valid": False}, "app_topology_invalid"),
+        ({"present": False}, "app_binding_absent", 3),
+        ({"app_peer_user": "someone_else"}, "app_peer_invalid", 3),
+        ({"binding_valid": False}, "app_binding_invalid", 3),
+        ({"acl_valid": False}, "app_acl_invalid", 3),
+        ({"topology_valid": False}, "app_topology_invalid", 3),
+        # A host-observed App peer that disagrees with the config's declared App
+        # peer is no longer a source-literal comparison at the binding gate: it
+        # is refused by the gate-5 structural separation invariant (D8/R9).
+        ({"app_peer_uid": 459}, "ceo_ingress_separation_invalid", 5),
     ],
 )
-def test_ceo_submit_arm_refuses_invalid_app_peer_binding_acl_or_topology(overrides, code):
+def test_ceo_submit_arm_refuses_invalid_app_peer_binding_acl_or_topology(
+    overrides, code, gates
+):
     host = FakeCeoSubmitHost()
     host.binding_overrides = overrides
     before_control = copy.deepcopy(host.control_config)
@@ -1528,7 +1533,7 @@ def test_ceo_submit_arm_refuses_invalid_app_peer_binding_acl_or_topology(overrid
         control.execute_ceo_submit_arm(host, _ceo_submit_request(), now=NOW)
 
     assert raised.value.code == code
-    assert host.calls == list(FakeCeoSubmitHost.CEO_GATES[:3])
+    assert host.calls == list(FakeCeoSubmitHost.CEO_GATES[:gates])
     assert host.phases == []
     assert host.marker is False
     assert host.control_config == before_control
@@ -1537,21 +1542,28 @@ def test_ceo_submit_arm_refuses_invalid_app_peer_binding_acl_or_topology(overrid
 
 
 @pytest.mark.parametrize(
-    ("config_key", "config_value", "code"),
+    ("config_key", "config_value", "binding_app_uid", "code"),
     [
-        ("ceo_submit_armed", True, "ceo_submit_already_armed"),
-        ("ceo_ingress_app_armed", True, "ceo_ingress_app_armed"),
-        ("ceo_ingress_peer_uid", 451, "ceo_ingress_separation_invalid"),
-        ("ceo_ingress_app_peer_uid", 452, "ceo_ingress_separation_invalid"),
-        ("coo_autonomy_armed", True, "coo_autonomy_armed"),
-        ("coo_operator_harness_armed", True, "coo_operator_harness_armed"),
+        ("ceo_submit_armed", True, None, "ceo_submit_already_armed"),
+        ("ceo_ingress_app_armed", True, None, "ceo_ingress_app_armed"),
+        # EQUAL ingress peers: the separation R9 requires is broken.
+        ("ceo_ingress_peer_uid", 458, None, "ceo_ingress_separation_invalid"),
+        ("ceo_ingress_app_peer_uid", 452, 452, "ceo_ingress_separation_invalid"),
+        # DISTINCT peers, but the config App peer is not the host-observed one.
+        ("ceo_ingress_app_peer_uid", 459, None, "ceo_ingress_separation_invalid"),
+        ("coo_autonomy_armed", True, None, "coo_autonomy_armed"),
+        ("coo_operator_harness_armed", True, None, "coo_operator_harness_armed"),
     ],
 )
 def test_ceo_submit_arm_refuses_when_already_armed_ceo_ingress_armed_separation_broken_or_coo_armed(
-    config_key, config_value, code
+    config_key, config_value, binding_app_uid, code
 ):
     host = FakeCeoSubmitHost()
     host.control_config[config_key] = config_value
+    if binding_app_uid is not None:
+        # Keep the EQUALITY case a pure equality case: the host-observed peer
+        # tracks the config so only the structural invariant can refuse it.
+        host.binding_overrides = {"app_peer_uid": binding_app_uid}
     before = copy.deepcopy(host.control_config)
 
     with pytest.raises(control.CeoSubmitAdmissionError) as raised:
@@ -1572,6 +1584,81 @@ def test_ceo_submit_arm_refuses_when_already_armed_ceo_ingress_armed_separation_
     assert worker_armed.phases == []
     assert worker_armed.worker_config == before_worker
     assert worker_armed.control_writes == 0
+
+
+def test_ceo_submit_arm_derives_peer_identities_from_config_not_from_source_literals():
+    """R9 + D8: the ingress peer identities are CONFIG facts, never constants.
+
+    The identity UIDs are pinned once, in the composed control config asserted by
+    tests/test_ceo_submit_armed_composition.py.  This module must therefore expose
+    no ``CEO_INGRESS_*_PEER_UID`` literals at all and must enforce the separation
+    structurally: any two DISTINCT ints the installed host agrees with -- and no
+    pair that violates the invariant -- decide admission.
+    """
+
+    assert not hasattr(control, "CEO_INGRESS_APP_PEER_UID")
+    assert not hasattr(control, "CEO_INGRESS_PEER_UID")
+
+    def _refusal(host):
+        before = copy.deepcopy(host.control_config)
+        with pytest.raises(control.CeoSubmitAdmissionError) as raised:
+            control.execute_ceo_submit_arm(host, _ceo_submit_request(), now=NOW)
+        # No refusal may ever land after a durable phase or a write.
+        assert host.phases == []
+        assert host.operations == []
+        assert host.marker is False
+        assert host.control_writes == 0
+        assert host.worker_writes == 0
+        assert host.receipt is None
+        assert host.control_config == before
+        return raised.value.code
+
+    # (1) EQUAL ingress uids destroy the C1-vs-App separation R9 requires, for
+    #     the shipped pair and for any other pair alike.
+    for equal_uid in (458, 452, 470):
+        host = FakeCeoSubmitHost()
+        host.control_config["ceo_ingress_app_peer_uid"] = equal_uid
+        host.control_config["ceo_ingress_peer_uid"] = equal_uid
+        host.binding_overrides = {
+            "app_peer_uid": equal_uid,
+            "ingress_peer_uid": equal_uid,
+        }
+        assert _refusal(host) == "ceo_ingress_separation_invalid"
+
+    # (2) A peer identity that is not an int (bool included) is refused.
+    for bad_value in ("458", True, 458.0, None):
+        for key in ("ceo_ingress_app_peer_uid", "ceo_ingress_peer_uid"):
+            host = FakeCeoSubmitHost()
+            host.control_config[key] = bad_value
+            assert _refusal(host) == "ceo_ingress_separation_invalid"
+
+    # (3) The host-observed App peer must AGREE with the config's App peer.
+    host = FakeCeoSubmitHost()
+    host.binding_overrides = {"app_peer_uid": 459}
+    assert _refusal(host) == "ceo_ingress_separation_invalid"
+
+    # (4) The dedicated caller is still checked IDENTITY-BY-NAME at the binding
+    #     gate, before the config is ever loaded.
+    host = FakeCeoSubmitHost()
+    host.binding_overrides = {"app_peer_user": "someone_else"}
+    assert _refusal(host) == "app_peer_invalid"
+    assert host.calls == list(FakeCeoSubmitHost.CEO_GATES[:3])
+
+    # (5) Any two DISTINCT uids the host agrees with are ADMITTED, proving the
+    #     module binds the invariant and not the magic numbers.
+    for app_uid, ingress_uid in ((470, 471), (459, 458), (1001, 1002)):
+        host = FakeCeoSubmitHost()
+        host.control_config["ceo_ingress_app_peer_uid"] = app_uid
+        host.control_config["ceo_ingress_peer_uid"] = ingress_uid
+        host.binding_overrides = {
+            "app_peer_uid": app_uid,
+            "ingress_peer_uid": ingress_uid,
+        }
+        result = control.execute_ceo_submit_arm(host, _ceo_submit_request(), now=NOW)
+        assert result.status == "CEO_SUBMIT_ARMED"
+        assert host.control_config["ceo_ingress_app_peer_uid"] == app_uid
+        assert host.control_config["ceo_ingress_peer_uid"] == ingress_uid
+        assert host.phases == list(FakeCeoSubmitHost.CEO_PHASES)
 
 
 def test_ceo_submit_arm_requires_no_provider_readiness_gate_b_or_credential():

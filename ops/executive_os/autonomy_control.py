@@ -73,8 +73,6 @@ AUTONOMY_TRANSACTION = CONFIG_ROOT / "autonomy-transaction.lock"
 CEO_SUBMIT_RECEIPT = CONFIG_ROOT / "ceo-submit-state-v1.json"
 CEO_SUBMIT_RECEIPT_SCHEMA = "mastermind.executive_ceo_submit_receipt/v1"
 CEO_SUBMIT_OPERATIONS = frozenset({"CEO_SUBMIT_ARM", "CEO_SUBMIT_DISARM"})
-CEO_INGRESS_APP_PEER_UID = 458
-CEO_INGRESS_PEER_UID = 452
 EXECUTIVE_APP_USER = "_mastermind_executive_mcp"
 CEO_INGRESS_LAUNCHD_SOCKET_NAME = "CeoIngress"
 CEO_INGRESS_SOCKET_PATH = "/var/run/mastermind-executive/ceo-ingress.sock"
@@ -1274,10 +1272,10 @@ def evaluate_ceo_submit_arm_admission(
     binding = host.executive_app_binding()
     if not binding.present:
         raise CeoSubmitAdmissionError("app_binding_absent")
-    if (
-        binding.app_peer_uid != CEO_INGRESS_APP_PEER_UID
-        or binding.app_peer_user != EXECUTIVE_APP_USER
-    ):
+    # IDENTITY BY NAME, never by uid literal (D8): the host-observed App peer is
+    # pinned to its dedicated account here; the uid identities are structural
+    # facts of the composed config and are checked at the separation gate below.
+    if binding.app_peer_user != EXECUTIVE_APP_USER:
         raise CeoSubmitAdmissionError("app_peer_invalid")
     if not binding.binding_valid:
         raise CeoSubmitAdmissionError("app_binding_invalid")
@@ -1294,10 +1292,17 @@ def evaluate_ceo_submit_arm_admission(
     separation = host.ceo_submit_separation(configs)
     if separation.ceo_ingress_app_armed:
         raise CeoSubmitAdmissionError("ceo_ingress_app_armed")
+    # R9 separation invariant, read from the CONTROL CONFIG and never from a
+    # source literal: both ingress peers are uids, they are DISTINCT (the
+    # UID452 C1/ingress peer is not the UID458 App peer), and the host-observed
+    # App peer agrees with the config's declared App peer.
+    app_peer_uid = separation.ceo_ingress_app_peer_uid
+    ingress_peer_uid = separation.ceo_ingress_peer_uid
     if (
-        separation.ceo_ingress_peer_uid != CEO_INGRESS_PEER_UID
-        or separation.ceo_ingress_app_peer_uid != CEO_INGRESS_APP_PEER_UID
-        or separation.ceo_ingress_peer_uid == separation.ceo_ingress_app_peer_uid
+        type(app_peer_uid) is not int
+        or type(ingress_peer_uid) is not int
+        or app_peer_uid == ingress_peer_uid
+        or binding.app_peer_uid != app_peer_uid
     ):
         raise CeoSubmitAdmissionError("ceo_ingress_separation_invalid")
     if separation.coo_autonomy_armed:
