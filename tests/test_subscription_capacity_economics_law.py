@@ -79,6 +79,11 @@ def test_capacity_law_pins_vector_ordering_and_provider_preference_role() -> Non
 
 def test_changing_external_numbers_are_not_routing_authority_without_receipts() -> None:
     memo = _text(MEMO)
+    assert "This is current research only, **not routing authority**." in memo
+    assert (
+        "No consumer may size capacity, choose a route, authorize a purchase, or satisfy `capacity_known` "
+        "from this memo."
+    ) in memo
     assert memo.count("UNVERIFIED_FOR_ROUTING") >= 4
     for phrase in (
         "MUST NOT size capacity, choose a route, authorize a purchase",

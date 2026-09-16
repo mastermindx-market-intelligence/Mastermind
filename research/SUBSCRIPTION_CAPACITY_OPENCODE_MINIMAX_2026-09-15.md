@@ -4,7 +4,7 @@
 
 Apply `docs/EXECUTIVE_SUBSCRIPTION_CAPACITY_ECONOMICS_LAW.md` to two visibly underused fixed-fee avenues without inventing a new router, quota ledger, worker lifecycle, account pool, or provider permission.
 
-This is current research / routing input. It does not arm a provider, approve a purchase, merge a quarantine-release PR, or satisfy a provider usage-policy gate.
+This is current research only, **not routing authority**. No consumer may size capacity, choose a route, authorize a purchase, or satisfy `capacity_known` from this memo. Any routing decision must re-enter the canonical Model Router / Shared AI Provider Control / Capacity owners with current accepted evidence. This memo does not arm a provider, approve a purchase, merge a quarantine-release PR, or satisfy a provider usage-policy gate.
 
 Original branch base: Mastermind `8e25bb32601ef5f40a689da6d6f24149e79e31fa`. Reconciled current protected Mastermind during the quota-semantics correction: `e1f752a58df8f874efa12e30957d911627a0c4f8`.
 
