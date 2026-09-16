@@ -5,9 +5,12 @@ import asyncio
 import importlib
 import io
 import json
+import math
 import os
+import re
 import subprocess
 import tokenize
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -94,6 +97,108 @@ def _added_line_numbers(path: Path, base: str) -> set[int]:
         amount = int(count) if count else 1
         lines.update(range(first, first + amount))
     return lines
+
+
+def _identity_guard_source_path(path: str) -> bool:
+    """Keep the identity guard on source/config, not narrative proof records.
+
+    Markdown prose is not Python source. Evidence JSON is routed through the
+    structural identity check below, never exempted from identity checking.
+    Executable code and all other configuration retain the generic token guard.
+    """
+    parts = Path(path).parts
+    if not parts or Path(path).is_absolute() or ".." in parts:
+        return True
+    if parts[0] in {"docs", "research"} and Path(path).suffix == ".md":
+        return False
+    if parts[:2] == ("research", "evidence") and Path(path).suffix == ".json":
+        return False
+    return True
+
+
+def _identity_guard_evidence_json_path(path: str) -> bool:
+    parts = Path(path).parts
+    return (not Path(path).is_absolute() and ".." not in parts
+            and parts[:2] == ("research", "evidence") and Path(path).suffix == ".json")
+
+
+def _scan_evidence_identity_literals(document: str) -> list[str]:
+    """Check identity-bearing JSON values without treating all metrics as UIDs.
+
+    This is a bounded literal guard, not whole-program dataflow analysis. Runtime
+    admission remains authoritative. Malformed/duplicate-key evidence fails closed.
+    """
+    assert len(document.encode("utf-8")) <= 1024 * 1024, "evidence JSON exceeds limit"
+
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate JSON member")
+            result[key] = value
+        return result
+
+    def reject_constant(_value):
+        raise ValueError("non-finite JSON value")
+
+    try:
+        value = json.loads(document, object_pairs_hook=unique_object,
+                           parse_constant=reject_constant)
+    except (ValueError, RecursionError) as exc:
+        raise AssertionError("evidence JSON is not an unambiguous document") from exc
+    assert isinstance(value, dict), "evidence JSON must be an object record"
+    identity_words = {"uid", "uids", "gid", "gids", "euid", "egid", "suid", "sgid",
+                      "peer", "peers", "account", "accounts", "principal", "principals",
+                      "user", "users", "group", "groups", "identity", "identities",
+                      "owner", "owners"}
+    flagged = []
+    pending = [(value, False, 0)]
+    visited = 0
+    while pending:
+        item, identity, depth = pending.pop()
+        visited += 1
+        assert depth <= 32 and visited <= 10000, "evidence JSON structure exceeds limit"
+        if isinstance(item, float):
+            assert math.isfinite(item), "evidence JSON contains a non-finite number"
+        if isinstance(item, dict):
+            for key, child in item.items():
+                words = set(re.split(r"[^a-z0-9]+", re.sub(
+                    r"(?<=[a-z0-9])(?=[A-Z])", "_", key).lower()))
+                child_identity = identity or bool(words & identity_words)
+                pending.append((child, child_identity, depth + 1))
+                if identity:
+                    pending.append((key, True, depth + 1))
+        elif isinstance(item, list):
+            pending.extend((child, identity, depth + 1) for child in item)
+        elif identity and not isinstance(item, bool) and item is not None:
+            if isinstance(item, str):
+                item = item.strip()
+                assert len(item) <= 256, "evidence identity string exceeds limit"
+                if item.startswith("_mastermind_"):
+                    flagged.append(item)
+                    continue
+            try:
+                if isinstance(item, str):
+                    try:
+                        number = int(item, 0)
+                    except ValueError:
+                        # Decimal construction is exact; do not pass through float
+                        # or apply context rounding. Bound before integer expansion.
+                        decimal_value = Decimal(item)
+                        if (not decimal_value.is_finite()
+                                or not 400 <= decimal_value <= 999
+                                or decimal_value != decimal_value.to_integral_value()):
+                            continue
+                        number = int(decimal_value)
+                elif isinstance(item, (int, float)) and int(item) == item:
+                    number = int(item)
+                else:
+                    continue
+            except (ValueError, OverflowError, InvalidOperation):
+                continue
+            if 400 <= number <= 999:
+                flagged.append(str(item))
+    return flagged
 
 
 def _scan_added_identity_literals(added_lines: str) -> list[str]:
@@ -441,14 +546,32 @@ def test_d8_template_topology_and_protected_defaults():
         ["git", "merge-base", "origin/master", "HEAD"], cwd=ROOT,
         check=True, capture_output=True, text=True,
     ).stdout.strip()
-    diff = subprocess.run(
-        ["git", "diff", "--unified=0", base, "HEAD", "--", ":!tests/"], cwd=ROOT,
-        check=True, capture_output=True, text=True,
+    changed = subprocess.run(
+        ["git", "diff", "--diff-filter=ACMRT", "--name-only", "-z", base, "HEAD", "--", ":!tests/"],
+        cwd=ROOT, check=True, capture_output=True, text=True,
     ).stdout
-    additions = "\n".join(
-        line[1:] for line in diff.splitlines()
-        if line.startswith("+") and not line.startswith("+++")
-    )
+    additions_by_path: dict[str, str] = {}
+    for path in changed.split("\0"):
+        if not path:
+            continue
+        if _identity_guard_evidence_json_path(path):
+            document = subprocess.run(
+                ["git", "show", f"HEAD:{path}"], cwd=ROOT,
+                check=True, capture_output=True, text=True,
+            ).stdout
+            assert _scan_evidence_identity_literals(document) == [], path
+            continue
+        if not _identity_guard_source_path(path):
+            continue
+        diff = subprocess.run(
+            ["git", "diff", "--unified=0", base, "HEAD", "--", path], cwd=ROOT,
+            check=True, capture_output=True, text=True,
+        ).stdout
+        additions_by_path[path] = "\n".join(
+            line[1:] for line in diff.splitlines()
+            if line.startswith("+") and not line.startswith("+++")
+        )
+    additions = "\n".join(additions_by_path.values())
     positive = "\n".join(
         [
             "ceo_ingress_app_peer_uid = 459",
@@ -461,3 +584,192 @@ def test_d8_template_topology_and_protected_defaults():
     positive_hits = _scan_added_identity_literals(positive)
     assert positive_hits == ["459", "459", "501", "450", "459", "777"]
     assert _scan_added_identity_literals(additions) == []
+
+
+@pytest.mark.parametrize("path,guarded", [
+    ("docs/runbooks/browser.md", False),
+    ("research/browser-study.md", False),
+    ("research/evidence/browser-native.json", False),
+    ("scripts/new_account.py", True),
+    ("control_plane/new_account.py", True),
+    ("ops/executive_os/control.json.template", True),
+    ("config/new_identity.json", True),
+    ("app/new_identity.py", True),
+    ("docs/check_identity.py", True),
+    ("research/evidence/check_identity.py", True),
+    ("research/evidence/install.sh", True),
+    ("research/config/identity.json", True),
+    ("research/evidence-lookalike/identity.json", True),
+    ("other/research/evidence/identity.json", True),
+])
+def test_d8_identity_guard_scopes_non_runtime_records(path, guarded):
+    assert "_identity_guard_source_path" in globals(), "identity guard lacks file-role classification"
+    assert _identity_guard_source_path(path) is guarded
+
+
+def test_d8_identity_literal_positive_controls_remain_complete():
+    added = "peer_uid = 777\n_EXTRA_PEER = 459\nFALLBACK = 501\nALLOWED = (450, 459)"
+    assert _scan_added_identity_literals(added) == ["777", "459", "501", "450", "459"]
+
+
+@pytest.mark.parametrize("path,content,rejected", [
+    ("docs/runbooks/browser.md", "HTTP 401; input length 936\n", False),
+    ("research/evidence/browser.json", '{"char_count":936}\n', False),
+    ("scripts/identity.py", "peer_uid = 777\n", True),
+    ("config/identity.json", '{"peer_uid":777}\n', True),
+    ("ops/executive_os/identity.template", '{"peer_uid":459}\n', True),
+    ("docs/identity.py", "FALLBACK = 501\n", True),
+    ("research/evidence/identity.py", "ALLOWED = (450, 459)\n", True),
+    ("research/evidence/install.sh", "useradd -u 777 _mastermind_fixture\n", True),
+])
+def test_d8_real_git_diff_distinguishes_evidence_from_identity_changes(
+    tmp_path, monkeypatch, path, content, rejected,
+):
+    # This disposable Git repository is test data, not a company workspace.
+    root = tmp_path / "repo"
+    root.mkdir()
+    template = root / "control.json.template"
+    template.write_bytes(TEMPLATE.read_bytes())
+    def git(*args):
+        return subprocess.run(
+            ["git", "-c", "user.name=IdentityGuardFixture",
+             "-c", "user.email=fixture@example.invalid", *args],
+            cwd=root, check=True, capture_output=True, text=True,
+        )
+    git("init", "-q")
+    git("add", "--", "control.json.template")
+    git("commit", "-q", "-m", "fixture baseline")
+    git("update-ref", "refs/remotes/origin/master", "HEAD")
+    candidate = root / path
+    candidate.parent.mkdir(parents=True, exist_ok=True)
+    candidate.write_text(content)
+    git("add", "--", path)
+    git("commit", "-q", "-m", "fixture candidate")
+    monkeypatch.setitem(globals(), "ROOT", root)
+    monkeypatch.setitem(globals(), "TEMPLATE", template)
+    if rejected:
+        with pytest.raises(AssertionError):
+            test_d8_template_topology_and_protected_defaults()
+    else:
+        test_d8_template_topology_and_protected_defaults()
+
+
+def _run_d8_evidence_and_loader_fixture(tmp_path, monkeypatch, payload):
+    """Exercise the real guard on committed JSON plus a real source consumer."""
+    root = tmp_path / "repo"
+    root.mkdir()
+    template = root / "control.json.template"
+    template.write_bytes(TEMPLATE.read_bytes())
+    def git(*args):
+        return subprocess.run(
+            ["git", "-c", "user.name=IdentityGuardFixture",
+             "-c", "user.email=fixture@example.invalid", *args],
+            cwd=root, check=True, capture_output=True, text=True,
+        )
+    git("init", "-q")
+    git("add", "--", "control.json.template")
+    git("commit", "-q", "-m", "fixture baseline")
+    git("update-ref", "refs/remotes/origin/master", "HEAD")
+    evidence = root / "research/evidence/identity.json"
+    evidence.parent.mkdir(parents=True)
+    evidence.write_text(payload, encoding="utf-8")
+    source = root / "control_plane/load_identity.py"
+    source.parent.mkdir()
+    source.write_text("import json\nfrom pathlib import Path\nCONFIG = json.loads(Path('research/evidence/identity.json').read_text())\n")
+    git("add", "--", str(evidence.relative_to(root)), str(source.relative_to(root)))
+    git("commit", "-q", "-m", "fixture candidate")
+    monkeypatch.setitem(globals(), "ROOT", root)
+    monkeypatch.setitem(globals(), "TEMPLATE", template)
+    test_d8_template_topology_and_protected_defaults()
+
+
+@pytest.mark.parametrize("payload", [
+    '{"peer_uid":459}',
+    '{"nested":{"allowed_peer_uids":[450,459]}}',
+    '{"worker_gid":"0x1cb"}',
+    '{"account":{"id":"459"}}',
+    '{"principal":{"name":"_mastermind_shadow"}}',
+    '{"allowedPeerUIDs":[459]}',
+    '{"peer_uid":459,"peer_uid":null}',
+    '{"peer_uid":459} trailing text',
+])
+def test_d8_evidence_json_cannot_supply_runtime_identity(tmp_path, monkeypatch, payload):
+    with pytest.raises(AssertionError):
+        _run_d8_evidence_and_loader_fixture(tmp_path, monkeypatch, payload)
+
+
+def test_d8_benign_evidence_metrics_remain_accepted_with_a_consumer(tmp_path, monkeypatch):
+    _run_d8_evidence_and_loader_fixture(
+        tmp_path, monkeypatch,
+        '{"http_status":401,"char_count":936,"bytes":777,"sha256":"' + "a" * 64 + '"}',
+    )
+
+
+@pytest.mark.parametrize("document", [
+    "459", "[459]", '"_mastermind_shadow"',
+    '{"char_count":1e10000}',
+])
+def test_d8_evidence_requires_finite_object_records(document):
+    with pytest.raises(AssertionError):
+        _scan_evidence_identity_literals(document)
+
+
+@pytest.mark.parametrize("document", [
+    '{"peer_uid":true,"account":null}',
+    '{"http_status":401,"char_count":936,"byte_count":777,"hash":"459"}',
+    '{"measurements":[{"status":401},{"bytes":936}],"note":"HTTP 401"}',
+])
+def test_d8_evidence_non_identity_metrics_are_not_uid_literals(document):
+    assert _scan_evidence_identity_literals(document) == []
+
+
+@pytest.mark.parametrize("document", [
+    '{"peer_uid":"0459"}', '{"peer_uid":459.0}',
+    '{"groups":{"459":"service"}}', '{"worker-user":"_mastermind_shadow"}',
+    '{"accountId":459}', '{"effective_uid":501}',
+])
+def test_d8_evidence_authority_key_and_value_encodings_are_checked(document):
+    assert _scan_evidence_identity_literals(document)
+
+
+@pytest.mark.parametrize("payload", [
+    '{"peer_uid":"4.59e2"}',
+    '{"peer_uid":"0459.0"}',
+    '{"user":" _mastermind_shadow"}',
+])
+def test_d8_normalized_identity_loader_is_rejected(tmp_path, monkeypatch, payload):
+    with pytest.raises(AssertionError):
+        _run_d8_evidence_and_loader_fixture(tmp_path, monkeypatch, payload)
+
+
+@pytest.mark.parametrize("encoded", [
+    "4.59e2", "0459.0", " +4.5900E+2 ", "45900e-2", "0x1cb", "0459",
+    "4e2", "9.99e2", "４５９.０", "\t_mastermind_shadow\n",
+])
+def test_d8_normalized_identity_literals_are_detected(encoded):
+    assert _scan_evidence_identity_literals(json.dumps({"peer_uid": encoded}))
+
+
+@pytest.mark.parametrize("encoded", [
+    "399.0", "1000.0", "459.1", "459.0000000000000000000000000001",
+    "1e999999", "1e-999999", "NaN", "sNaN", "Infinity", "a_service_label",
+])
+def test_d8_exact_numeric_normalization_preserves_nonidentity_values(encoded):
+    assert _scan_evidence_identity_literals(json.dumps({"peer_uid": encoded})) == []
+
+
+def test_d8_identity_normalization_is_bounded_before_integer_conversion():
+    with pytest.raises(AssertionError, match="identity string"):
+        _scan_evidence_identity_literals(json.dumps({"peer_uid": "9" * 257}))
+    assert _scan_evidence_identity_literals(json.dumps({"hash": "9" * 257})) == []
+
+
+def test_d8_decimal_context_cannot_round_fraction_into_an_identity():
+    from decimal import Inexact, ROUND_UP, localcontext
+    with localcontext() as context:
+        context.prec = 2
+        context.rounding = ROUND_UP
+        context.traps[Inexact] = True
+        assert _scan_evidence_identity_literals('{"peer_uid":"4.59e2"}')
+        assert _scan_evidence_identity_literals(
+            '{"peer_uid":"459.0000000000000000000000000001"}') == []
