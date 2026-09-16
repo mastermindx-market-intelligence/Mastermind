@@ -147,7 +147,7 @@ def test_clean_snapshot_refuses_untracked_file_hidden_by_info_exclude(tmp_path: 
     assert all(not line or line.startswith("# ") for line in status.stdout.splitlines())
 
     env = _installed_child_env(code_root=repo, macro_root=repo)
-    with pytest.raises(GatewayError, match="worktree bytes differ"):
+    with pytest.raises(GatewayError, match="worktree path set differs"):
         _clean_git_snapshot(
             repo, runner=_default_packet_runner, env=env, label="Mastermind source",
         )
@@ -208,7 +208,30 @@ def test_macro_brief_scope_refuses_hidden_extra_anywhere(tmp_path: Path):
     (repo / ".git" / "info" / "exclude").write_text("ignored/\n", encoding="utf-8")
     env = _installed_child_env(code_root=repo, macro_root=repo)
 
-    with pytest.raises(GatewayError, match="worktree bytes differ"):
+    with pytest.raises(GatewayError, match="worktree path set differs"):
+        _clean_git_snapshot(
+            repo, runner=_default_packet_runner, env=env,
+            label="Macro source", content_scope="macro_brief",
+        )
+
+
+def test_macro_brief_scope_refuses_untracked_empty_directory(tmp_path: Path):
+    from integrations.executive_mcp.installed import (
+        _clean_git_snapshot,
+        _default_packet_runner,
+        _installed_child_env,
+    )
+    from integrations.executive_mcp.schemas import GatewayError
+
+    repo, _tracked = _clean_repo(tmp_path)
+    empty = repo / "phantom-empty"
+    empty.mkdir()
+    # Git status cannot report an empty directory; Path.exists() in Agent OS can.
+    status = _git(repo, "status", "--porcelain=v2", "--branch", "--untracked-files=all")
+    assert all(not line or line.startswith("# ") for line in status.stdout.splitlines())
+    env = _installed_child_env(code_root=repo, macro_root=repo)
+
+    with pytest.raises(GatewayError, match="worktree path set differs"):
         _clean_git_snapshot(
             repo, runner=_default_packet_runner, env=env,
             label="Macro source", content_scope="macro_brief",

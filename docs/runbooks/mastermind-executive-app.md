@@ -341,9 +341,9 @@ root-owned immutable installed release. The separately configured Mastermind
 administrative checkout and Macro snapshot are data/grounding roots, never code
 roots. Immediately before and after each packet read, each root must resolve one
 exact Git HEAD; the Mastermind HEAD must also equal the installed `proof_base_sha`.
-The verifier compares the entire raw filesystem leaf set outside top-level `.git`
-with the exact `HEAD` tree, so ignored/untracked additions and missing paths cannot
-change any path-existence join. It does not depend on the mutable index, local
+The verifier compares the entire raw filesystem leaf and directory path sets outside
+top-level `.git` with the exact paths implied by the `HEAD` tree, so ignored/untracked
+additions, empty directories, and missing paths cannot change any path-existence join. It does not depend on the mutable index, local
 attributes, clean filters, fsmonitor, hooks, or ignore rules.
 
 Only bytes the installed brief can actually consume are re-hashed on every read:

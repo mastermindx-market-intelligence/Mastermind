@@ -67,9 +67,10 @@ def _git_blob_oid(payload: bytes) -> str:
     return digest.hexdigest()
 
 
-def _worktree_leaf_paths(root: Path) -> set[str]:
-    """Return every filesystem leaf below root except the repository's top-level .git."""
+def _worktree_path_sets(root: Path) -> tuple[set[str], set[str]]:
+    """Return raw leaf and directory paths, excluding only the top-level Git metadata."""
     leaves: set[str] = set()
+    directories: set[str] = set()
     stack: list[tuple[Path, str]] = [(root, "")]
     while stack:
         directory, prefix = stack.pop()
@@ -79,10 +80,21 @@ def _worktree_leaf_paths(root: Path) -> set[str]:
                     continue
                 rel = f"{prefix}/{entry.name}" if prefix else entry.name
                 if entry.is_dir(follow_symlinks=False):
+                    directories.add(rel)
                     stack.append((Path(entry.path), rel))
                 else:
                     leaves.add(rel)
-    return leaves
+    return leaves, directories
+
+
+def _tree_directory_paths(leaves: set[str]) -> set[str]:
+    """Directories Git implies from tracked leaf paths; Git has no empty-directory objects."""
+    directories: set[str] = set()
+    for rel in leaves:
+        parts = rel.split("/")
+        for depth in range(1, len(parts)):
+            directories.add("/".join(parts[:depth]))
+    return directories
 
 
 def _raw_worktree_blob_oid(path: Path, *, mode: str) -> str:
@@ -249,14 +261,16 @@ def _clean_git_snapshot(
             raise GatewayError("backend_unavailable", f"installed {label} tree is unsupported")
         expected[rel] = (mode, oid)
 
+    expected_leaves = set(expected)
+    expected_directories = _tree_directory_paths(expected_leaves)
     try:
-        actual = _worktree_leaf_paths(path)
+        actual_leaves, actual_directories = _worktree_path_sets(path)
     except OSError as exc:
         raise GatewayError(
             "backend_unavailable", f"installed {label} worktree observation failed"
         ) from exc
-    if actual != set(expected):
-        raise GatewayError("backend_unavailable", f"installed {label} worktree bytes differ")
+    if actual_leaves != expected_leaves or actual_directories != expected_directories:
+        raise GatewayError("backend_unavailable", f"installed {label} worktree path set differs")
 
     try:
         content_paths = _content_paths_for_scope(set(expected), content_scope)
