@@ -11,7 +11,7 @@ CORPUS = ROOT / "research/fixtures/claude_fabric_parity_acceptance_2026-09-15.js
 PLAN = ROOT / "docs/superpowers/plans/2026-09-15-claude-fabric-parity-and-portable-orchestration.md"
 CASE_IDS = tuple(
     f"{prefix}{i:02d}"
-    for prefix, count in (("Q", 15), ("E", 10), ("O", 10))
+    for prefix, count in (("Q", 15), ("E", 11), ("O", 10))
     for i in range(1, count + 1)
 )
 
@@ -43,7 +43,7 @@ def test_corpus_is_proposed_data_not_runtime_or_observed_proof():
 def test_corpus_has_exact_ordered_unique_case_set():
     ids = tuple(row["case_id"] for row in corpus()["cases"])
     assert ids == CASE_IDS
-    assert len(ids) == len(set(ids)) == 35
+    assert len(ids) == len(set(ids)) == 36
 
 
 @pytest.mark.parametrize("case_id", CASE_IDS)
@@ -81,6 +81,7 @@ def test_quota_example_expected_numbers_follow_its_own_inputs():
     ("Q15", "MUST preserve strict dominance and the frozen lexicographic ordering"),
     ("E09", "MUST reject caller-selected, stale or wrong-realm generation"),
     ("E10", "MUST refuse unattended execution without an exact current usage-policy receipt"),
+    ("E11", "MUST NOT treat a third-party Claude-compatible profile as native Anthropic capacity"),
 ])
 def test_new_falsifiers_preserve_normative_expected_outcomes(case_id, required):
     rows = {row["case_id"]: row for row in corpus()["cases"]}
@@ -93,6 +94,9 @@ def test_new_falsifiers_preserve_normative_expected_outcomes(case_id, required):
     "A scalar MAY operate only inside one already-frozen lexicographic stage or as a display aid",
     "Static provider preference MUST be a deterministic tie-break only",
     "Usage debit is not usage-policy permission",
+    "Native Anthropic Fable/Opus MUST use the existing PF1 claude-code boundary",
+    "#581 MUST NOT be represented as the native Anthropic subscription worker",
+    "Native subscription authentication MUST remain with the dedicated worker principal",
     "Headless claude -p and equivalent noninteractive SDK execution MUST be classified as unattended",
     "An interactive canary MUST NOT flip unattended or autonomous policy flags",
     "usage_policy_mode and provider_policy_receipt_ref",
@@ -132,11 +136,11 @@ def test_current_owner_heads_and_proposed_family_b_are_distinguished():
 def test_every_case_has_an_explicit_wave_mapping():
     text = PLAN.read_text(encoding="utf-8")
     for mapping in (
-        "A: E01–E08", "B: Q01–Q15", "C: E09–E10, O04–O07",
+        "A: E01–E08", "B: Q01–Q15", "C: E09–E11, O04–O07",
         "D: O01–O08, O10", "E: Q14, E05, E07–E08, O09–O10",
     ):
         assert mapping in text
-    assert "35 source-only acceptance scenarios" in text
+    assert "36 source-only acceptance scenarios" in text
 
 
 def test_validation_is_source_only_and_has_no_execution_imports_or_calls():
