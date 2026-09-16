@@ -1,4 +1,6 @@
+import hashlib
 import json
+import os
 
 import pytest
 
@@ -10,6 +12,26 @@ from scripts import portfolio_decision_snapshot as cli
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
+def _tree_fingerprint(root):
+    """Map every path under ``root`` to a (kind, content-or-target) tuple.
+
+    Unlike a bare ``*.json`` count, this catches a new mutable file of any
+    name (``latest.json``, an index, a cache), a deleted file, changed bytes
+    in an existing file, and a directory/symlink type change.
+    """
+    fingerprint = {}
+    for path in sorted(root.rglob("*")):
+        rel = str(path.relative_to(root))
+        if path.is_symlink():
+            fingerprint[rel] = ("symlink", os.readlink(path))
+        elif path.is_dir():
+            fingerprint[rel] = ("dir", None)
+        elif path.is_file():
+            fingerprint[rel] = ("file", hashlib.sha256(path.read_bytes()).hexdigest())
+        else:
+            fingerprint[rel] = ("other", None)
+    return fingerprint
 
 @pytest.fixture
 def snapshot_root(tmp_path, monkeypatch):
@@ -378,16 +400,22 @@ def test_compose_then_status_then_show_round_trip(snapshot_root, capsys):
     assert second_out["snapshot_id"] == snapshot_id
     assert len(list(snapshots.snapshot_dir("autonomous").glob("*.json"))) == 1
 
+    # Captured after both composes, before any read-only command: the strengthened
+    # discriminator for Important-2 (status/show must not touch this tree at all).
+    tree_before_reads = _tree_fingerprint(snapshot_root)
+
     rc = cli.main(["status", "--book", "autonomous"])
     assert rc == 0
     status_out = json.loads(capsys.readouterr().out)
     assert status_out["status"] == "OK"
     assert status_out["manifest"]["snapshot_id"] == snapshot_id
+    assert _tree_fingerprint(snapshot_root) == tree_before_reads
 
     rc = cli.main(["show", "--book", "autonomous"])
     assert rc == 0
     show_out = json.loads(capsys.readouterr().out)
     assert show_out["manifest"]["snapshot_id"] == snapshot_id
+    assert _tree_fingerprint(snapshot_root) == tree_before_reads
 
     rc = cli.main([
         "show", "--book", "autonomous",
@@ -398,3 +426,4 @@ def test_compose_then_status_then_show_round_trip(snapshot_root, capsys):
     assert section_out["snapshot_id"] == snapshot_id
     assert section_out["section"]["section_id"] == "risk_truth"
     assert isinstance(section_out["section"]["rows"], list)
+    assert _tree_fingerprint(snapshot_root) == tree_before_reads

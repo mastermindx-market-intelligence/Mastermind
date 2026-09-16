@@ -113,20 +113,60 @@ itself.
 If a `compose` invocation is interrupted (killed, timed out, the operator's connection
 drops) before its receipt is observed, its on-disk effect is ambiguous: the write may have
 completed, partially completed, or never started. **Do not blindly re-run `compose` and do
-not blindly treat it as failed.** Reconcile on the same carrier first:
+not blindly treat it as failed.**
 
-1. Run `status --book autonomous` (and, if you know the decision cutoff, `show --book
-   autonomous` with that cutoff's expected identity) to see whether a verified snapshot
-   already exists for that decision.
-2. If a verified snapshot for that exact `decision_cutoff` is present, the operation
-   already completed — treat the interrupted invocation as `EFFECT_UNKNOWN` resolved to
-   `APPLIED`, and do not compose again.
-3. If no snapshot is present, or `status`/`show` raise a typed `corrupt_snapshot` error
-   for a partially written sibling file, only then is a fresh `compose` for that same
-   decision cutoff appropriate. The store's create-once (`O_EXCL`) persistence guarantees
-   a genuinely partial write is never silently adopted as valid: a corrupt or short file on
-   disk is reported, never treated as the recorded evidence.
-4. Never guess at intent across two different decision cutoffs or two different books —
+State the real limitation up front: `status` can identify only the single current latest
+snapshot for the book. It does not answer "does a snapshot for cutoff `T1` exist" once a
+later cutoff `T2` has since been composed, and `show` has no `--decision-cutoff` selector
+— only `--snapshot-id`, which an operator whose receipt was never printed does not have.
+Reconcile in this order:
+
+1. Run `status --book autonomous`. If its manifest's `decision_cutoff` equals the
+   interrupted invocation's `--decision-cutoff`, the interrupted compose *is* the current
+   latest snapshot: it completed. Take the `snapshot_id` from that manifest and, if you
+   need the full verified detail, fetch it with `show --book autonomous --snapshot-id
+   <id-from-status>`. Do not compose again for that cutoff.
+2. If `status`'s `decision_cutoff` does not match the interrupted cutoff — including a
+   `NO_SNAPSHOT` result, or a newer cutoff that could be hiding the interrupted older one
+   — `status`/`show` alone cannot prove or disprove that the interrupted cutoff was ever
+   written. Fall back to a read-only scan of the fixed storage directory, verifying each
+   candidate's own canonical `decision_cutoff` field rather than guessing from filenames or
+   listing order:
+
+   ```bash
+   python3 -c "
+   import json
+   from portfolio import decision_snapshot as ds
+   for row in ds.list_snapshots('autonomous', limit=100):
+       print(json.dumps(row, sort_keys=True))
+   "
+   ```
+
+   This calls the same accepted, verified read path (`decision_snapshot.list_snapshots`)
+   the CLI itself is built on, bounded to 100 rows to match its closed limit, and prints
+   only manifest rows — it opens nothing for writing and creates nothing. It is a
+   diagnostic snippet run from the repository root, not a fourth CLI subcommand; do not
+   wire this into `scripts/portfolio_decision_snapshot.py`. Scan the printed rows for the
+   interrupted `decision_cutoff`.
+3. If a printed row's `decision_cutoff` matches, the interrupted compose completed — do
+   not run it again. If no row matches after this scan, classify the outcome
+   `EFFECT_UNKNOWN` and **stop**. Do not recommend a fresh `compose`, and do not hand the
+   operation to another carrier or session on the theory that "it probably didn't write" —
+   an `O_EXCL` write that completed and then failed only to print its receipt is
+   indistinguishable from "never started" without this scan. A fresh `compose` for that
+   exact `(book, decision_cutoff)` becomes lawful only once this exact canonical
+   reconciliation proves `not_found` for that cutoff and its source generation set — never
+   before.
+4. If `status` or `show` instead raise a typed `corrupt_snapshot` error for a partially
+   written sibling file, that is a distinct, already-reported condition: the store's
+   create-once (`O_EXCL`) persistence guarantees a genuinely partial write is never
+   silently adopted as valid. Treat it the same as step 2 — reconcile which cutoff the
+   corrupt file was for before deciding anything — never as automatic license to retry.
+5. A same-cutoff retry with an *unchanged* source generation set is documented above as an
+   idempotent no-op. That fact describes what happens for a cutoff you have already
+   reconciled by steps 1–3; it is not permission to skip that reconciliation and retry a
+   cutoff whose effect is still unknown.
+6. Never guess at intent across two different decision cutoffs or two different books —
    reconcile the exact same `(book, decision_cutoff)` pair the interrupted call used.
 
 ## Rollback
