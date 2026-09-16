@@ -784,3 +784,63 @@ def test_cli_persists_preimage_conflict_without_replay(
     assert second_error["code"] == "TRANSACTION_CONSUMED"
     assert second_error["target_effect"] == "NONE"
     assert target.destination.read_bytes() == foreign
+
+
+
+def test_cli_persists_exact_abort_without_replay(
+    tmp_path: Path,
+    capsys,
+    monkeypatch,
+) -> None:
+    bundle, install_root = _bundle(tmp_path)
+    request = tmp_path / "request.json"
+    state = tmp_path / "state.json"
+    _write_private(request, _request_document(bundle, install_root))
+
+    original_write = cli.applier._write_exact_temporary_at
+    calls = 0
+
+    def fail_after_second_temporary(*args, **kwargs) -> None:
+        nonlocal calls
+        original_write(*args, **kwargs)
+        calls += 1
+        if calls == 2:
+            raise cli.applier.WebSolDeploymentApplyError(
+                "TEMPORARY_WRITE_FAILED"
+            )
+
+    monkeypatch.setattr(
+        cli.applier,
+        "_write_exact_temporary_at",
+        fail_after_second_temporary,
+    )
+
+    assert cli.main(
+        ["apply", "--request", str(request), "--state", str(state)]
+    ) == 2
+    first_output = capsys.readouterr()
+    assert first_output.out == ""
+    first_error = json.loads(first_output.err)
+    assert first_error["code"] == "APPLY_ABORTED_ROLLED_BACK"
+    assert first_error["target_effect"] == "NONE"
+    assert calls == 2
+    assert list(install_root.rglob("*")) == []
+    assert (
+        json.loads(state.read_text(encoding="utf-8"))["phase"]
+        == "ABORTED_ROLLED_BACK"
+    )
+
+    def forbidden_replay(_prepared):
+        raise AssertionError("exactly rolled-back apply was replayed")
+
+    monkeypatch.setattr(cli.applier, "apply_deployment", forbidden_replay)
+
+    assert cli.main(
+        ["apply", "--request", str(request), "--state", str(state)]
+    ) == 2
+    second_output = capsys.readouterr()
+    assert second_output.out == ""
+    second_error = json.loads(second_output.err)
+    assert second_error["code"] == "TRANSACTION_CONSUMED"
+    assert second_error["target_effect"] == "NONE"
+    assert list(install_root.rglob("*")) == []
