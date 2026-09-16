@@ -143,161 +143,80 @@ class _HTTPRepresentation:
 class _ConditionalObservation:
     url: str
     etag: str
-    semantics: object
+    roster_semantics: object
 
 
-# Sentinels for conditional semantic revalidation. ``_UNPROVABLE`` means this
-# adapter cannot prove semantic equivalence for the representation at all, so a
-# changed representation must fail closed. ``_ABSENT`` marks a field the payload
-# does not carry, so appearing and disappearing are both semantic movement.
+# A changed HTTP 200 is semantically revalidatable only for the open-PR roster
+# pages used by the collision census. Every other endpoint keeps the original
+# unconditional changed-representation refusal required by #346.
 _UNPROVABLE = object()
-_ABSENT = object()
 
 
-def _semantic_field(payload: object, *names: str) -> object:
-    current = payload
-    for name in names:
-        if not isinstance(current, dict) or name not in current:
-            return _ABSENT
-        current = current[name]
-    return current
-
-
-def _pull_semantics(payload: object) -> object:
-    if not isinstance(payload, dict):
+def _open_pull_roster_semantics(url: object, payload: object) -> object:
+    if not isinstance(url, str) or not url.startswith(_API_ROOT + "/repos/"):
         return _UNPROVABLE
-    return (
-        _semantic_field(payload, "state"),
-        _hold_from_pr(payload),
-        _semantic_field(payload, "head", "ref"),
-        _semantic_field(payload, "head", "sha"),
-        _semantic_field(payload, "head", "repo", "full_name"),
-        _semantic_field(payload, "base", "ref"),
-    )
-
-
-def _open_pulls_semantics(payload: object) -> object:
-    if not isinstance(payload, list):
+    path, separator, query = url.partition("?")
+    if separator != "?":
         return _UNPROVABLE
-    rows: list[tuple[object, ...]] = []
+    segments = path[len(_API_ROOT) + 1 :].split("/")
+    if len(segments) != 4 or segments[0] != "repos" or segments[3] != "pulls":
+        return _UNPROVABLE
+
+    pairs: list[tuple[str, str]] = []
+    for raw_part in query.split("&"):
+        key, equals, value = raw_part.partition("=")
+        if equals != "=" or not key:
+            return _UNPROVABLE
+        pairs.append((key, value))
+    if len(pairs) != 3 or len({key for key, _ in pairs}) != 3:
+        return _UNPROVABLE
+    params = dict(pairs)
+    page = params.get("page")
+    if (
+        params.get("state") != "open"
+        or params.get("per_page") != str(_PAGE_SIZE)
+        or page is None
+        or not page.isdigit()
+        or int(page) <= 0
+        or int(page) > _MAX_PAGES
+    ):
+        return _UNPROVABLE
+
+    if not isinstance(payload, list) or len(payload) > _PAGE_SIZE:
+        return _UNPROVABLE
+    rows: list[tuple[int, str, str, str, str]] = []
+    seen_numbers: set[int] = set()
     for row in payload:
         if not isinstance(row, dict):
             return _UNPROVABLE
-        rows.append(
-            (
-                _semantic_field(row, "number"),
-                _semantic_field(row, "state"),
-                _hold_from_pr(row),
-                _semantic_field(row, "head", "ref"),
-                _semantic_field(row, "head", "sha"),
-                _semantic_field(row, "head", "repo", "full_name"),
-                _semantic_field(row, "base", "ref"),
-                _semantic_field(row, "base", "sha"),
-                _semantic_field(row, "base", "repo", "full_name"),
-            )
-        )
-    return tuple(sorted(rows, key=repr))
-
-
-def _pull_files_semantics(payload: object) -> object:
-    if not isinstance(payload, list):
-        return _UNPROVABLE
-    rows: list[tuple[object, ...]] = []
-    for row in payload:
-        if not isinstance(row, dict):
+        number = row.get("number")
+        head = row.get("head")
+        base = row.get("base")
+        if type(number) is not int or number <= 0 or number in seen_numbers:
             return _UNPROVABLE
-        rows.append(
-            (
-                _semantic_field(row, "filename"),
-                _semantic_field(row, "status"),
-                _semantic_field(row, "previous_filename"),
-            )
-        )
-    return tuple(rows)
-
-
-def _branch_semantics(payload: object) -> object:
-    if not isinstance(payload, dict):
-        return _UNPROVABLE
-    return (_semantic_field(payload, "commit", "sha"),)
-
-
-def _commit_semantics(payload: object) -> object:
-    if not isinstance(payload, dict):
-        return _UNPROVABLE
-    return (
-        _semantic_field(payload, "sha"),
-        _semantic_field(payload, "tree", "sha"),
-    )
-
-
-def _compare_semantics(payload: object) -> object:
-    if not isinstance(payload, dict):
-        return _UNPROVABLE
-    return (
-        _semantic_field(payload, "url"),
-        _semantic_field(payload, "base_commit", "sha"),
-        _semantic_field(payload, "merge_base_commit", "sha"),
-    )
-
-
-def _tree_semantics(payload: object) -> object:
-    if not isinstance(payload, dict):
-        return _UNPROVABLE
-    rows = payload.get("tree")
-    if not isinstance(rows, list):
-        return _UNPROVABLE
-    entries: list[tuple[object, ...]] = []
-    for row in rows:
-        if not isinstance(row, dict):
+        if not isinstance(head, dict) or not isinstance(base, dict):
             return _UNPROVABLE
-        entries.append(
-            (
-                _semantic_field(row, "path"),
-                _semantic_field(row, "mode"),
-                _semantic_field(row, "type"),
-                _semantic_field(row, "sha"),
-            )
-        )
-    return (
-        _semantic_field(payload, "sha"),
-        _semantic_field(payload, "truncated"),
-        tuple(sorted(entries, key=repr)),
-    )
-
-
-def _semantic_projection(url: object, payload: object) -> object:
-    """Project one observed representation onto the canonical facts it owns.
-
-    Returns ``_UNPROVABLE`` for any endpoint shape or payload shape this adapter
-    cannot reduce to the evidence a receipt consumes; the caller then refuses a
-    changed representation instead of guessing equivalence.
-    """
-    if not isinstance(url, str) or not url.startswith(_API_ROOT + "/"):
-        return _UNPROVABLE
-    segments = url[len(_API_ROOT) + 1 :].partition("?")[0].split("/")
-    if len(segments) < 4 or segments[0] != "repos":
-        return _UNPROVABLE
-    tail = tuple(segments[3:])
-    if tail == ("pulls",):
-        kind, projected = "open_pulls", _open_pulls_semantics(payload)
-    elif len(tail) == 2 and tail[0] == "pulls":
-        kind, projected = "pull", _pull_semantics(payload)
-    elif len(tail) == 3 and tail[0] == "pulls" and tail[2] == "files":
-        kind, projected = "pull_files", _pull_files_semantics(payload)
-    elif len(tail) == 2 and tail[0] == "branches":
-        kind, projected = "branch", _branch_semantics(payload)
-    elif len(tail) == 3 and tail[:2] == ("git", "commits"):
-        kind, projected = "commit", _commit_semantics(payload)
-    elif len(tail) == 3 and tail[:2] == ("git", "trees"):
-        kind, projected = "tree", _tree_semantics(payload)
-    elif len(tail) == 2 and tail[0] == "compare":
-        kind, projected = "compare", _compare_semantics(payload)
-    else:
-        return _UNPROVABLE
-    if projected is _UNPROVABLE:
-        return _UNPROVABLE
-    return (kind, projected)
+        head_repo = head.get("repo")
+        base_repo = base.get("repo")
+        if not isinstance(head_repo, dict) or not isinstance(base_repo, dict):
+            return _UNPROVABLE
+        head_sha = head.get("sha")
+        base_sha = base.get("sha")
+        head_repository = head_repo.get("full_name")
+        base_repository = base_repo.get("full_name")
+        if (
+            not _is_sha(head_sha)
+            or not _is_sha(base_sha)
+            or not _is_safe_repository(head_repository)
+            or not _is_safe_repository(base_repository)
+        ):
+            return _UNPROVABLE
+        state = row.get("state")
+        if state is not None and state != "open":
+            return _UNPROVABLE
+        seen_numbers.add(number)
+        rows.append((number, head_sha, head_repository, base_sha, base_repository))
+    return tuple(sorted(rows))
 
 
 class _BoundedHTTPGet:
@@ -396,13 +315,13 @@ class _BoundedHTTPGet:
                 raise _RemoteProbeError()
             representation = payload
             self._account_payload(representation.payload)
-            semantics = _semantic_projection(url, representation.payload)
+            roster_semantics = _open_pull_roster_semantics(url, representation.payload)
             with self._lock:
                 self._conditional_observations.append(
                     _ConditionalObservation(
                         url=url,
                         etag=representation.etag,
-                        semantics=semantics,
+                        roster_semantics=roster_semantics,
                     )
                 )
             return representation.payload
@@ -434,16 +353,17 @@ class _BoundedHTTPGet:
                     raise _RemoteProbeError()
                 continue
             if payload.not_modified is False:
-                # A changed representation is accounted like any other body, then
-                # re-proved only against the canonical evidence this endpoint owns.
+                # Account every changed body before deciding. Only an open-PR roster
+                # page may survive changed representation, and only with identical
+                # collision-roster semantics. All other endpoints refuse here.
                 self._account_payload(payload.payload)
                 with self._lock:
                     self._semantic_revalidations.append(observation.url)
-                if observation.semantics is _UNPROVABLE:
+                if observation.roster_semantics is _UNPROVABLE:
                     return False
                 if (
-                    _semantic_projection(observation.url, payload.payload)
-                    != observation.semantics
+                    _open_pull_roster_semantics(observation.url, payload.payload)
+                    != observation.roster_semantics
                 ):
                     return False
                 continue
