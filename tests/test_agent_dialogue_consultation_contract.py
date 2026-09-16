@@ -6,6 +6,7 @@ import pytest
 
 from common.agent_dialogue_consultation_contract import (
     _BINDING_ID_RE,
+    _PRODUCER_SCHEMA_BY_REASONING_SURFACE,
     CONSULTATION_PURPOSES,
     CONSULTATION_SCHEMA,
     CONSULTATION_SCHEMA_REASONING_SURFACES,
@@ -451,6 +452,16 @@ def test_v1_and_v2_do_not_gain_grok_surface_authority() -> None:
 
 
 def test_surface_selector_reserves_v3_for_grok_without_widening_v2() -> None:
+    assert dict(CONSULTATION_SCHEMA_REASONING_SURFACES) == {
+        CONSULTATION_SCHEMA: frozenset({"codex", "claude"}),
+        CONSULTATION_V2_SCHEMA: frozenset({"codex", "claude"}),
+        GROK_CONSULTATION_SCHEMA: frozenset({"grok-bot"}),
+    }
+    assert set(_PRODUCER_SCHEMA_BY_REASONING_SURFACE) == {
+        "codex",
+        "claude",
+        "grok-bot",
+    }
     assert consultation_schema_for_reasoning_surface("codex") == CONSULTATION_SCHEMA
     assert consultation_schema_for_reasoning_surface("claude") == CONSULTATION_SCHEMA
     assert consultation_schema_for_reasoning_surface("grok-bot") == GROK_CONSULTATION_SCHEMA

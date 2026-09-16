@@ -238,7 +238,9 @@ git commit -m "feat(grok): derive v3 consultation schema from trusted peer"
 def test_v3_intent_payload_is_exact_while_runtime_admission_stays_dark(tmp_path: Path) -> None:
     frame = build_v3_grok_question_fixture(tmp_path)
     payload = _consultation_intent_payload(
-        frame, carrier_ref="dialogue://fixture/grok", observed_at="2026-09-14T00:00:00Z"
+        frame,
+        carrier_ref="dialogue://fixture/grok",
+        trusted_observed_at="2026-09-14T00:00:00Z",
     )
     assert payload["consultation_schema"] == GROK_CONSULTATION_SCHEMA
     with pytest.raises(StateConflict, match="current Runtime binding"):
@@ -286,7 +288,7 @@ git commit -m "feat(grok): persist v3 identity without arming execution"
 
 **Interfaces:**
 - Consumes: Tasks 1-4.
-- Produces: immutable branch head, dependency-isolated and current-base proof, independent review packet, and one draft PR against `master` that remains held until accepted W6-C2 PR #681 lands.
+- Produces: immutable branch head, dependency-isolated and current-base proof, independent review packet, and one production-inert draft PR against protected `master` after merged W6-C2 PR #681 is reconciled.
 
 - [x] **Step 1: Run focused and compatibility suites**
 
@@ -298,13 +300,14 @@ python3 -m pytest -q -p no:randomly -p no:cacheprovider -o addopts='' \
   tests/test_mastermind_company_mcp.py \
   tests/test_executive_wake_fabric.py \
   tests/test_w6b_native_round_trip.py \
-  tests/test_visible_turn_projection.py
+  tests/test_visible_turn_projection.py \
+  tests/test_runtime_binding_projection.py
 ```
 
 - [x] **Step 2: Run every present importer of touched owners**
 
 ```bash
-FILES=$(grep -IlE 'agent_dialogue_consultation_contract|consultation_runtime|session_targets|company_consultation_peer_resolver|mastermind_company_mcp.consultation' tests/*.py | sort)
+FILES=$(grep -IlE 'agent_dialogue_consultation_contract|consultation_runtime|session_targets|company_consultation_peer_resolver|mastermind_company_mcp.consultation|runtime_binding_projection' tests/*.py | sort)
 printf '%s\n' "$FILES" | xargs python3 -m pytest -q -p no:randomly -p no:cacheprovider -o addopts=''
 ```
 
@@ -335,7 +338,7 @@ Expected: no checked-in Grok target, credential, endpoint, route, implemented tr
 
 Review against the version law, protected v1/v2 vectors, caller-override refusal, zero-target/transport boundary, and capability honesty. Any owned semantic change after review requires a fresh exact-head review.
 
-- [ ] **Step 6: Push and create one dependency-held draft PR on the existing branch**
+- [ ] **Step 6: Push and create one production-inert draft PR on the existing branch**
 
 ```bash
 git push -u origin HEAD:sol/grok-consultation-v2-g1b-20260915
@@ -344,6 +347,6 @@ gh pr create --draft --base master --head sol/grok-consultation-v2-g1b-20260915 
   --body-file /path/to/final-pr-body.md
 ```
 
-The source branch composes accepted W6-C2 head `de190b2c7e878fd5a4cf6ecb2fc58b34b058ee74`, so the draft PR may temporarily display those five dependency paths while PR #681 remains unmerged. That is an inherited dependency, not Grok-owned scope and not merge authority. The PR must remain draft and release-blocked until #681 lands; afterward GitHub's diff must shrink to the dependency-isolated Grok delta, current-base integration proof must be refreshed, and review-reuse law must be applied. Do not retarget to the dependency branch: protected `master` remains publication truth, and dependency-branch topology may project unrelated paths. Do not create a replacement PR or ancestry-only source commit.
+PR #681 has merged and the existing branch is reconciled onto its protected W6-C2 generation. Before publication, confirm the GitHub three-dot diff contains only the dependency-isolated Grok paths and refresh current-base proof against protected `master`. Keep the PR draft and production-inert. Protected `master` remains publication truth; synthetic candidates are immutable review instruments only. Do not retarget to a dependency branch, create a replacement PR, rebase for freshness, or add an ancestry-only source commit.
 
-The PR body must state `BUILT_NOT_PROVEN / PRODUCTION_INERT`, exact semantic head, inherited dependency head, dependency-isolated Grok path set, current-master integrated candidate, tests, review verdict, dependency gate, and every non-goal.
+The PR body must state `BUILT_NOT_PROVEN / PRODUCTION_INERT`, the exact protected W6-C2 merge identity, exact semantic and branch heads, the 12-path Grok delta, current-master integration proof, tests, review verdict, and every non-goal.
