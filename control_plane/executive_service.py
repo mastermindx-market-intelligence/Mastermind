@@ -5988,8 +5988,8 @@ class ExecutiveControlService:
                 self._exact_args(args, set())
                 if self.config.backup_root is None:
                     raise ServiceError("backup_root is not configured")
-                self.config.backup_root.mkdir(mode=0o700, parents=True, exist_ok=True)
-                self.config.backup_root.chmod(0o700)
+                self.config.backup_root.mkdir(mode=stat.S_IRWXU, parents=True, exist_ok=True)
+                self.config.backup_root.chmod(stat.S_IRWXU)
                 return _jsonable(
                     await asyncio.to_thread(
                         self._backup_backend.create_online_backup,
