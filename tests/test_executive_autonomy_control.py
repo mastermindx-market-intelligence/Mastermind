@@ -1384,6 +1384,54 @@ def test_ceo_submit_arm_mutates_only_control_json_and_leaves_worker_byte_identic
     assert "raise TransactionEffectUnknown()" in fence
 
 
+def test_ceo_submit_candidate_passes_the_installed_worker_bytes_through_without_re_encoding():
+    """R9: the candidate carries the INSTALLED worker bytes, never a re-derivation.
+
+    The sibling byte-identity tests compare ``encode_config(...)`` on both sides,
+    so a refactor to ``worker_bytes=encode_config(dict(configs.worker))`` stayed
+    green.  Here the installed worker document is deliberately NON-CANONICAL —
+    insertion key order and a different indent — so canonicalizing it is visible.
+    ``candidate.worker`` is asserted by VALUE (``==``), not object identity: R9
+    constrains the bytes, and this module never promised the same dict object.
+    """
+
+    host = FakeCeoSubmitHost()
+    worker = dict(host.worker_config)
+    installed_worker_bytes = (
+        json.dumps(worker, sort_keys=False, indent=4, ensure_ascii=False) + "\n"
+    ).encode("utf-8")
+    # The installed bytes really are that document, and they are NOT the canonical
+    # encoding of it — otherwise this test could not discriminate.
+    assert json.loads(installed_worker_bytes.decode("utf-8")) == worker
+    assert installed_worker_bytes != control.encode_config(worker)
+
+    configs = control.ConfigEvidence(
+        control_sha256=control.sha256_bytes(
+            control.encode_config(host.control_config)
+        ),
+        worker_sha256=control.sha256_bytes(installed_worker_bytes),
+        control=dict(host.control_config),
+        worker=worker,
+        control_bytes=control.encode_config(host.control_config),
+        worker_bytes=installed_worker_bytes,
+    )
+
+    for armed in (True, False):
+        candidate = control.derive_ceo_submit_candidate(configs, armed=armed)
+        # Byte equality with the INPUT bytes, and provably not a re-encode.
+        assert candidate.worker_bytes == installed_worker_bytes
+        assert candidate.worker_bytes != control.encode_config(worker)
+        assert candidate.worker_sha256 == configs.worker_sha256
+        assert candidate.worker_sha256 == control.sha256_bytes(
+            installed_worker_bytes
+        )
+        assert candidate.worker == configs.worker
+        assert candidate.control["ceo_submit_armed"] is armed
+        assert candidate.control_bytes == control.encode_config(
+            {**host.control_config, "ceo_submit_armed": armed}
+        )
+
+
 def test_ceo_submit_arm_changes_only_the_ceo_submit_flag_in_control():
     host = FakeCeoSubmitHost()
     before = copy.deepcopy(host.control_config)
