@@ -38,6 +38,7 @@ if os.fspath(_ROOT) not in sys.path:
     sys.path.insert(0, os.fspath(_ROOT))
 
 from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
+from control_plane.codex_worker import ProcessInspector
 
 from control_plane.executive_autonomy import (
     ARMED_READY,
@@ -59,6 +60,7 @@ from control_plane.executive_autonomy import (
 from ops.executive_os import release_manifest
 from ops.executive_os import git_handoff_preflight
 from ops.executive_os import provider_readiness
+from scripts import executive_os_phase1c_control_wrapper as control_wrapper
 
 
 STATUS_SCHEMA_VERSION = "mastermind.executive_autonomy_status/v1"
@@ -571,7 +573,9 @@ class CeoSubmitTransactionHost(Protocol):
 
     def reconcile_control_service(self, expected_sha: str) -> None: ...
 
-    def prove_control_admission_bound(self, expected_sha: str) -> None: ...
+    def prove_control_admission_bound(
+        self, expected_sha: str, expected_control_sha256: str
+    ) -> None: ...
 
     def complete_transaction(self, transaction: TransactionContext) -> None: ...
 
@@ -1525,7 +1529,9 @@ def execute_ceo_submit_arm(
         receipt = build_ceo_submit_receipt(transaction, admission, armed=True, now=now)
         host.write_ceo_submit_receipt(transaction, receipt)
         host.reconcile_control_service(request.expected_sha)
-        host.prove_control_admission_bound(request.expected_sha)
+        host.prove_control_admission_bound(
+            request.expected_sha, transaction.candidates.control_sha256
+        )
         host.complete_transaction(transaction)
     except Exception as exc:
         try:
@@ -1680,7 +1686,9 @@ def execute_ceo_submit_disarm(
         receipt = build_ceo_submit_receipt(transaction, admission, armed=False, now=now)
         host.write_ceo_submit_receipt(transaction, receipt)
         host.reconcile_control_service(request.expected_sha)
-        host.prove_control_admission_bound(request.expected_sha)
+        host.prove_control_admission_bound(
+            request.expected_sha, transaction.candidates.control_sha256
+        )
         host.complete_transaction(transaction)
     except Exception as exc:
         try:
@@ -3353,35 +3361,27 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
             # transaction; the boundary call must not relabel a DISARM as an ARM.
             self._persist_phase(self._active_transaction, "CONTROL_RECONCILED")
 
-    def _ceo_admission_probe(self, expected_sha: str) -> bool:
-        """CEO-admission probe: fixed label, fixed socket, AWAITING_CANARY.
+    def _ceo_admission_probe(
+        self, expected_sha: str, expected_control_sha256: str
+    ) -> bool:
+        """CEO-admission probe: fixed label + fixed socket + AWAITING_CANARY +
+        wrapper-owned attestation validator.
 
-        HONEST LIMIT: the phase1c status response exposes the FIXED socket
-        path, the service_state, the protocol, the instance_id, the pid,
-        the started_at, the active_dispatches, the dispatch_errors, the
-        startup_reconciliation list and the coo_autonomy sub-document.  It
-        does NOT expose ``release_sha``, it does NOT expose
-        ``control_config_sha256``, and it does NOT expose any other exact
-        fact that would identify which control config bytes the live
-        service loaded -- so this probe proves label + socket + release +
-        AWAITING_CANARY only, never the exact config digest the live
-        service is running.  The exact installed release identity is
-        proven upstream by ``require_exact_install`` and the exact disk
-        bytes are pinned by the post-write re-read inside ARM/DISARM and
-        ``rollback_ceo_submit``, so the only thing the LIVE probe can
-        PROVE is: a fresh control PID is bound to the FIXED control
-        socket AND is in the post-restart, pre-canary
-        ``service_state == "AWAITING_CANARY"`` pole.  Any other shape,
-        including the global READY pole that older H3 code demanded (kept
-        untouched by R80 in ``_service_state`` / ``ARMED_READY`` /
-        ``status_document``), makes the admission proof REFUSE.
+        The phase1c status response exposes the FIXED socket path and the
+        service_state, so the live liveness witness (label + socket +
+        AWAITING_CANARY) is unchanged.  R80 then closes the
+        kickstart-no-op hole by ALSO consulting the wrapper-owned live
+        attestation document: the document proves that the live process
+        with the ``pid`` the status response just reported is the SAME
+        process that wrote the attestation document, that its process /
+        boot identity is fresh, and that the document's
+        ``config_sha256`` / ``release_commit_sha`` match the bytes H3
+        hashed.  Anything else makes the admission proof REFUSE.
 
-        The probe therefore carries no candidate-config-digest parameter:
-        it would have been silently ignored, and a wrong-config binding
-        would have been accepted whenever ``service_state`` and
-        ``socket`` were right.  The disk agreement of ARM/DISARM and
-        rollback is what binds the live state to the EXACT bytes; this
-        probe is the post-restart, pre-canary liveness witness only.
+        The probe therefore carries one extra keyword-only parameter
+        (``expected_control_sha256``); the live ``service_state`` +
+        ``socket`` + status ``pid`` + the on-disk attestation document
+        MUST all align on the EXACT bytes, or the probe refuses.
         """
 
         release = SYSTEM_ROOT / "releases" / expected_sha
@@ -3427,12 +3427,61 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
         ):
             return False
         result = value["result"]
-        return (
-            result.get("service_state") == "AWAITING_CANARY"
-            and result.get("socket") == os.fspath(CONTROL_SOCKET)
-        )
+        if result.get("service_state") != "AWAITING_CANARY":
+            return False
+        if result.get("socket") != os.fspath(CONTROL_SOCKET):
+            return False
+        status_pid = result.get("pid")
+        if (
+            type(status_pid) is not int
+            or isinstance(status_pid, bool)
+            or not (0 < status_pid <= 2**31 - 1)
+        ):
+            return False
+        try:
+            control_gid = grp.getgrnam(CONTROL_GROUP).gr_gid
+            control, _raw = _root_json(
+                CONTROL_CONFIG, modes=frozenset({0o440}), gid=control_gid
+            )
+            attestation_path = control.get("control_environment_attestation_path")
+            if (
+                not isinstance(attestation_path, str)
+                or not attestation_path
+                or not os.path.isabs(attestation_path)
+            ):
+                return False
+            control_uid = control.get("control_uid")
+            if type(control_uid) is not int:
+                return False
+            attestation_bytes, _info = _read_root_file(
+                Path(attestation_path),
+                modes=frozenset({0o400}),
+                uid=int(control_uid),
+                gid=None,
+            )
+            document = json.loads(attestation_bytes.decode("utf-8"))
+            control_wrapper.validate_control_environment_attestation(
+                document,
+                expected_config_sha256=expected_control_sha256,
+                expected_release_commit_sha=expected_sha,
+                expected_pid=status_pid,
+                inspector=ProcessInspector(),
+            )
+        except (
+            HostControlError,
+            control_wrapper.ControlWrapperError,
+            OSError,
+            ValueError,
+            TypeError,
+            KeyError,
+            json.JSONDecodeError,
+        ):
+            return False
+        return True
 
-    def _await_control_admission_bound(self, expected_sha: str) -> None:
+    def _await_control_admission_bound(
+        self, expected_sha: str, expected_control_sha256: str
+    ) -> None:
         """Poll the CEO-admission probe until it returns True or the deadline.
 
         The fixed control label presence is the per-pass guard: a direct
@@ -3449,7 +3498,7 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
         while time.monotonic() < deadline:
             if (
                 self._loaded(CONTROL_LABEL)
-                and self._ceo_admission_probe(expected_sha)
+                and self._ceo_admission_probe(expected_sha, expected_control_sha256)
             ):
                 return
             time.sleep(1.0)
@@ -3457,26 +3506,26 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
             "Executive control service did not bind to the CEO admission surface"
         )
 
-    def prove_control_admission_bound(self, expected_sha: str) -> None:
+    def prove_control_admission_bound(
+        self, expected_sha: str, expected_control_sha256: str
+    ) -> None:
         """Prove the LIVE control service is bound to the CEO admission surface.
 
         R80: replaces the older ``prove_control_ready`` global-READY poll with
         a probe tailored to the post-reconcile, pre-canary state the CEO-
         submit admit path needs.  The proof is post-restart, pre-canary
-        LIVENESS only -- the phase1c status response exposes the fixed
-        socket and the service_state, not the loaded control config bytes;
-        the exact postimage (or restored preimage) digest is pinned by the
-        disk re-read inside ARM/DISARM and ``rollback_ceo_submit``, NOT by
-        this probe.  A failure here surfaces as ``RuntimeError``; the
-        caller in ``execute_ceo_submit_*`` and ``rollback_ceo_submit``
-        translates that into the typed ``arm_rolled_back`` /
-        ``disarm_recovered`` (for ARM/DISARM) or ``TransactionEffectUnknown``
-        (for rollback, R17 B3), with the marker KEPT.  The COO/global READY
-        semantics in ``_service_state``, ``ARMED_READY``, and
-        ``status_document`` are deliberately untouched.
+        LIVENESS plus a wrapper-owned attestation validator that proves the
+        live process consumed the exact candidate/restored control bytes.
+        A failure here surfaces as ``RuntimeError``; the caller in
+        ``execute_ceo_submit_*`` and ``rollback_ceo_submit`` translates that
+        into the typed ``arm_rolled_back`` / ``disarm_recovered`` (for
+        ARM/DISARM) or ``TransactionEffectUnknown`` (for rollback, R17 B3),
+        with the marker KEPT.  The COO/global READY semantics in
+        ``_service_state``, ``ARMED_READY``, and ``status_document`` are
+        deliberately untouched.
         """
 
-        self._await_control_admission_bound(expected_sha)
+        self._await_control_admission_bound(expected_sha, expected_control_sha256)
         if self._active_transaction is not None:
             self._persist_phase(self._active_transaction, "ADMISSION_BOUND")
 
@@ -3512,7 +3561,10 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
             # bury the proof.
             deadline = time.monotonic() + 45.0
             while time.monotonic() < deadline:
-                if self._ceo_admission_probe(transaction.expected_sha):
+                if self._ceo_admission_probe(
+                    transaction.expected_sha,
+                    transaction.prior_configs.control_sha256,
+                ):
                     break
                 time.sleep(1.0)
             else:

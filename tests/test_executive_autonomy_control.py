@@ -24,6 +24,13 @@ from ops.executive_os import autonomy_control as control
 
 
 SHA = "c" * 40
+# W1H3F R13: constants used by the live-attestation validator ride in the probe.
+_STATUS_PID = 4242
+_CONFIG_DIGEST = "a" * 64
+# The good document's release_commit_sha matches ``SHA`` so a default
+# ``_good_attestation_doc()`` is admitted under the canonical probe call
+# ``host._ceo_admission_probe(SHA, _CONFIG_DIGEST)``.
+_RELEASE_SHA = SHA
 NOW = datetime(2026, 8, 24, 12, 0, 0, tzinfo=UTC)
 GATE_PATH = Path("/private/tmp/gate-b.json")
 
@@ -1362,7 +1369,7 @@ class FakeCeoSubmitHost:
         self.reconcile_calls += 1
         self._phase("reconciled")
 
-    def prove_control_admission_bound(self, expected_sha):
+    def prove_control_admission_bound(self, expected_sha, expected_control_sha256=""):
         # R80: rename matches the production protocol method and the new
         # fixed-arity signature.  The fake records every call (default
         # ADMITTED) so it stays a pure witness.
@@ -3096,22 +3103,44 @@ def test_the_control_service_boundary_is_bounded_to_one_reconcile_and_one_admiss
     for function in ("def execute_ceo_submit_arm(", "def execute_ceo_submit_disarm("):
         body = source.split(function, 1)[1].split("\ndef ", 1)[0]
         lines = [line.strip() for line in body.splitlines()]
+        # Re-join any open-paren continuation so the structural fences can
+        # read the call as one logical line.
+        rejoined: list[str] = []
+        buffer: list[str] = []
+        open_count = 0
+        for line in lines:
+            if buffer:
+                buffer.append(line)
+                open_count += line.count("(") - line.count(")")
+                if open_count <= 0:
+                    rejoined.append(" ".join(buffer))
+                    buffer = []
+                    open_count = 0
+            elif "(" in line and ")" not in line and line.count("(") > line.count(")"):
+                buffer.append(line)
+                open_count = line.count("(") - line.count(")")
+            else:
+                rejoined.append(line)
+        lines = rejoined
         assert [
             line for line in lines if "reconcile_control_service" in line
         ] == ["host.reconcile_control_service(request.expected_sha)"]
-        # R80: ARM/DISARM ride the renamed CEO-admission proof; the probe
-        # carries NO candidate_config_digest parameter (the live phase1c
-        # status response exposes socket + service_state, never the loaded
-        # control config bytes -- the disk re-read inside ARM/DISARM and
-        # rollback is what binds the live state to the EXACT bytes).
+        # W1H3F R13: ARM/DISARM ride the CEO-admission proof with the new
+        # exact-control-digest parameter that the wrapper-owned validator
+        # consults.  The candidate digest comes from
+        # ``transaction.candidates.control_sha256`` -- the same bytes H3 just
+        # hashed -- and is NOT a launcher or kickstart parameter.
         bound_lines = [
             line
             for line in lines
             if "prove_control_admission_bound" in line
-            and "host.prove_control_admission_bound(request.expected_sha)" in line
+            and "host.prove_control_admission_bound(" in line
+            and "request.expected_sha" in line
+            and "transaction.candidates.control_sha256" in line
         ]
         assert len(bound_lines) == 1
         assert "candidate_config_digest" not in bound_lines[0]
+        assert "kickstart" not in " ".join(bound_lines)
         assert not any(line.startswith(("while ", "for ")) for line in lines)
 
     def disarm_root(host):
@@ -3736,8 +3765,8 @@ class _RollbackProbeHost(control.ProductionCeoSubmitHost):
         if self._reconcile_error is not None:
             raise self._reconcile_error
 
-    def _ceo_admission_probe(self, expected_sha):
-        self.ledger.append(("probe", expected_sha))
+    def _ceo_admission_probe(self, expected_sha, expected_control_sha256=""):
+        self.ledger.append(("probe", expected_sha, expected_control_sha256))
         if self._probe_error is not None:
             raise self._probe_error
         return True
@@ -3855,12 +3884,21 @@ def test_ceo_submit_rollback_proves_the_live_control_service_before_removing_the
     host.rollback_ceo_submit(transaction, _rollback_receipt(transaction, armed=False))
 
     ledger = [entry for entry in host.ledger if entry[0] != "atomic"]
+    # W1H3F R13: the rollback probe carries the RESTORED preimage's
+    # ``control_sha256`` so the wrapper-owned validator can prove the live
+    # process consumed the EXACT bytes the rollback wrote.
+    probe_entries = [entry for entry in ledger if entry[0] == "probe"]
+    assert len(probe_entries) == 1
+    probe_kind, probe_sha, probe_digest = probe_entries[0]
+    assert probe_sha == SHA
+    assert probe_digest == transaction.prior_configs.control_sha256
+    probe_index = ledger.index(probe_entries[0])
     assert ledger == [
         ("receipt", None),
         ("configs", None),
         ("loaded", control.CONTROL_LABEL),
         ("reconcile", SHA),
-        ("probe", SHA),
+        probe_entries[0],
         ("phase", "ADMISSION_BOUND"),
         ("phase", "ROLLBACK_CONTROL_PROVEN"),
         ("complete", None),
@@ -3921,8 +3959,10 @@ def test_ceo_submit_rollback_stays_effect_unknown_when_the_live_proof_fails(
     assert ("reconcile", SHA) in host.ledger
     # The ledger's last entry depends on the failure mode: a reconcile
     # error lands the reconcile tag; a probe error lands the probe tag.
+    # W1H3F R13: the probe tag now carries the preimage digest (sha,
+    # control_sha256) so the rollback carrier binds to the restored bytes.
     if failure == "probe":
-        assert host.ledger[-1] == ("probe", SHA)
+        assert host.ledger[-1] == ("probe", SHA, transaction.prior_configs.control_sha256)
     else:
         assert host.ledger[-1] == (failure, SHA)
 
@@ -4731,10 +4771,10 @@ class _AdmissionProbeHost(control.ProductionCeoSubmitHost):
         self.ledger.append(("loaded", label))
         return True
 
-    def _ceo_admission_probe(self, expected_sha):
+    def _ceo_admission_probe(self, expected_sha, expected_control_sha256=""):
         self.ready_calls += 1
-        self.ledger.append(("probe", expected_sha))
-        self.last_digest = None
+        self.ledger.append(("probe", expected_sha, expected_control_sha256))
+        self.last_digest = expected_control_sha256
         if self._ready_after is None:
             return False
         return self.ready_calls >= self._ready_after
@@ -4763,11 +4803,11 @@ def test_ceo_submit_control_admission_bound_polls_until_ready_and_raises_only_af
     _clock, sleeps = _install_fake_clock(monkeypatch)
     third_poll = _AdmissionProbeHost(ready_after=3)
 
-    assert third_poll._await_control_admission_bound(SHA) is None
+    assert third_poll._await_control_admission_bound(SHA, _CONFIG_DIGEST) is None
 
-    assert third_poll.ledger.count(("probe", SHA)) == 3
+    assert third_poll.ledger.count(("probe", SHA, _CONFIG_DIGEST)) == 3
     assert third_poll.ready_calls == 3
-    assert third_poll.last_digest is None
+    assert third_poll.last_digest == _CONFIG_DIGEST
     assert len(sleeps.calls) == 2
     # The label probe runs inside the poll, and only on the control boundary.
     assert third_poll.ledger.count(("loaded", control.CONTROL_LABEL)) == 3
@@ -4777,9 +4817,9 @@ def test_ceo_submit_control_admission_bound_polls_until_ready_and_raises_only_af
     _clock, sleeps = _install_fake_clock(monkeypatch)
     immediate = _AdmissionProbeHost(ready_after=1)
 
-    assert immediate._await_control_admission_bound(SHA) is None
+    assert immediate._await_control_admission_bound(SHA, _CONFIG_DIGEST) is None
 
-    assert immediate.ledger.count(("probe", SHA)) == 1
+    assert immediate.ledger.count(("probe", SHA, _CONFIG_DIGEST)) == 1
     assert immediate.ready_calls == 1
     assert sleeps.calls == []
 
@@ -4788,7 +4828,7 @@ def test_ceo_submit_control_admission_bound_polls_until_ready_and_raises_only_af
     never = _AdmissionProbeHost(ready_after=None)
 
     with pytest.raises(RuntimeError) as raised:
-        never._await_control_admission_bound(SHA)
+        never._await_control_admission_bound(SHA, _CONFIG_DIGEST)
 
     assert "did not bind" in str(raised.value)
     assert "ADMISSION" in str(raised.value).upper() or "admission" in str(raised.value)
@@ -4805,7 +4845,7 @@ def test_ceo_submit_control_admission_bound_polls_until_ready_and_raises_only_af
     bound = _AdmissionProbeHost(ready_after=2)
     bound._active_transaction = _readiness_transaction()
 
-    assert bound.prove_control_admission_bound(SHA) is None
+    assert bound.prove_control_admission_bound(SHA, _CONFIG_DIGEST) is None
 
     ready_positions = [
         index
@@ -4821,9 +4861,9 @@ def test_ceo_submit_control_admission_bound_polls_until_ready_and_raises_only_af
     unbound = _AdmissionProbeHost(ready_after=1)
     unbound._active_transaction = None
 
-    assert unbound.prove_control_admission_bound(SHA) is None
+    assert unbound.prove_control_admission_bound(SHA, _CONFIG_DIGEST) is None
 
-    assert unbound.ledger.count(("probe", SHA)) == 1
+    assert unbound.ledger.count(("probe", SHA, _CONFIG_DIGEST)) == 1
     assert all(entry[0] != "phase" for entry in unbound.ledger)
 
 
@@ -5000,7 +5040,7 @@ class _FakeCompletedProcess:
         self.stdout = stdout
 
 
-def _probe_status_body(*, service_state, socket_path):
+def _probe_status_body(*, service_state, socket_path, pid=_STATUS_PID):
     """The status response body the probe parses."""
 
     return json.dumps(
@@ -5009,6 +5049,7 @@ def _probe_status_body(*, service_state, socket_path):
             "result": {
                 "service_state": service_state,
                 "socket": socket_path,
+                "pid": pid,
             },
         },
         sort_keys=True,
@@ -5029,12 +5070,19 @@ def _patch_probe_subprocess(monkeypatch, *, returncode=0, stdout=b""):
 
 
 def test_production_ceo_admission_probe_accepts_awaiting_canary_on_the_fixed_control_socket(
-    monkeypatch,
+    monkeypatch, tmp_path
 ):
-    """R80 positive path: AWAITING_CANARY + ok True + the fixed control socket."""
+    """R80/W1H3F positive path: AWAITING_CANARY + fixed socket + fresh attestation."""
 
     host = control.ProductionCeoSubmitHost()
-    digest = "f" * 64
+    _drive_probe(
+        monkeypatch,
+        tmp_path=tmp_path,
+        attestation_doc=_good_attestation_doc(),
+        inspector=_LiveFakeInspector(),
+    )
+    # ``_drive_probe`` installs a default ``subprocess.run``; override it LAST
+    # so this test's tracking list observes the exact fixed-argv call.
     calls = _patch_probe_subprocess(
         monkeypatch,
         returncode=0,
@@ -5044,7 +5092,7 @@ def test_production_ceo_admission_probe_accepts_awaiting_canary_on_the_fixed_con
         ),
     )
 
-    assert host._ceo_admission_probe(SHA) is True
+    assert host._ceo_admission_probe(SHA, _CONFIG_DIGEST) is True
     # The probe really did reach the OS seam exactly once.
     assert len(calls) == 1
     argv = calls[0][0][0]
@@ -5077,7 +5125,7 @@ def test_production_ceo_admission_probe_refuses_ready_service_state(monkeypatch)
         ),
     )
 
-    assert host._ceo_admission_probe(SHA) is False
+    assert host._ceo_admission_probe(SHA, _CONFIG_DIGEST) is False
 
 
 def test_production_ceo_admission_probe_refuses_a_non_fixed_control_socket(monkeypatch):
@@ -5094,7 +5142,7 @@ def test_production_ceo_admission_probe_refuses_a_non_fixed_control_socket(monke
         ),
     )
 
-    assert host._ceo_admission_probe(SHA) is False
+    assert host._ceo_admission_probe(SHA, _CONFIG_DIGEST) is False
 
 
 def test_production_ceo_admission_probe_refuses_ok_false(monkeypatch):
@@ -5106,7 +5154,7 @@ def test_production_ceo_admission_probe_refuses_ok_false(monkeypatch):
         stdout=json.dumps({"ok": False, "result": {}}, sort_keys=True).encode("utf-8"),
     )
 
-    assert host._ceo_admission_probe(SHA) is False
+    assert host._ceo_admission_probe(SHA, _CONFIG_DIGEST) is False
 
 
 def test_production_ceo_admission_probe_refuses_non_zero_return_code(monkeypatch):
@@ -5121,7 +5169,7 @@ def test_production_ceo_admission_probe_refuses_non_zero_return_code(monkeypatch
         ),
     )
 
-    assert host._ceo_admission_probe(SHA) is False
+    assert host._ceo_admission_probe(SHA, _CONFIG_DIGEST) is False
 
 
 def test_production_ceo_admission_probe_refuses_oversize_body(monkeypatch):
@@ -5133,7 +5181,7 @@ def test_production_ceo_admission_probe_refuses_oversize_body(monkeypatch):
         stdout=b"x" * (control._MAX_JSON_BYTES + 1),
     )
 
-    assert host._ceo_admission_probe(SHA) is False
+    assert host._ceo_admission_probe(SHA, _CONFIG_DIGEST) is False
 
 
 def test_production_ceo_admission_probe_refuses_non_json_body(monkeypatch):
@@ -5141,7 +5189,7 @@ def test_production_ceo_admission_probe_refuses_non_json_body(monkeypatch):
     digest = "f" * 64
     _patch_probe_subprocess(monkeypatch, returncode=0, stdout=b"not-json")
 
-    assert host._ceo_admission_probe(SHA) is False
+    assert host._ceo_admission_probe(SHA, _CONFIG_DIGEST) is False
 
 
 def test_production_ceo_admission_probe_refuses_non_dict_body(monkeypatch):
@@ -5149,7 +5197,7 @@ def test_production_ceo_admission_probe_refuses_non_dict_body(monkeypatch):
     digest = "f" * 64
     _patch_probe_subprocess(monkeypatch, returncode=0, stdout=b"[1, 2, 3]")
 
-    assert host._ceo_admission_probe(SHA) is False
+    assert host._ceo_admission_probe(SHA, _CONFIG_DIGEST) is False
 
 
 def test_production_ceo_admission_probe_refuses_non_dict_result(monkeypatch):
@@ -5163,7 +5211,7 @@ def test_production_ceo_admission_probe_refuses_non_dict_result(monkeypatch):
         ).encode("utf-8"),
     )
 
-    assert host._ceo_admission_probe(SHA) is False
+    assert host._ceo_admission_probe(SHA, _CONFIG_DIGEST) is False
 
 
 def test_production_ceo_admission_probe_drops_service_state_silently_when_awaiting_canary_missing(
@@ -5185,7 +5233,7 @@ def test_production_ceo_admission_probe_drops_service_state_silently_when_awaiti
         ).encode("utf-8"),
     )
 
-    assert host._ceo_admission_probe(SHA) is False
+    assert host._ceo_admission_probe(SHA, _CONFIG_DIGEST) is False
 
 
 def test_production_ceo_admission_probe_pins_the_fixed_control_label_and_socket_in_the_argv(
@@ -5204,7 +5252,7 @@ def test_production_ceo_admission_probe_pins_the_fixed_control_label_and_socket_
         ),
     )
 
-    host._ceo_admission_probe(SHA)
+    host._ceo_admission_probe(SHA, _CONFIG_DIGEST)
 
     argv = calls[0][0][0]
     assert os.fspath(control.PINNED_PYTHON) in argv
@@ -5222,94 +5270,68 @@ def test_production_ceo_admission_probe_pins_the_fixed_control_label_and_socket_
 
 
 def test_ceo_admission_probe_signature_carries_no_candidate_config_digest_parameter(
-    monkeypatch,
+    monkeypatch, tmp_path
 ):
-    """B1 limit pin: the LIVE admission probe proves label+socket+release+
-    AWAITING_CANARY only.  It is structurally incapable of accepting a
-    candidate config digest and silently ignoring it.
+    """W1H3F R13 limit pin: the LIVE admission probe accepts the live
+    control-config digest as the ONLY additional parameter, and it consults
+    it against the wrapper-owned validator.  It does NOT carry any other
+    launcher/kickstart parameter.
 
-    The probe was previously declared with ``candidate_config_digest`` in
-    its signature but never consumed it in the response predicate; an
-    attacker (or a regression) that bound the live service to the WRONG
-    control config would still pass.  R8 closed that hole by REMOVING the
-    parameter from the probe (the disk re-read inside ARM/DISARM and
-    rollback is what binds the live state to the EXACT bytes; the probe
-    is the post-restart, pre-canary LIVENESS witness only).  The two
-    structural fences below pin the limit so the lie cannot silently
-    re-grow:
-
-      (a) The signature is fixed at one positional ``expected_sha``; a
-          future patch cannot reintroduce a keyword-only
-          ``candidate_config_digest`` parameter without this test going
-          RED at import/inspect time.
-      (b) Even when the live service reports the
-          AWAITING_CANARY + fixed socket shape, the probe does NOT read
-          the response payload for any ``config_sha256``-shaped field --
-          the status result the protected service returns simply does not
-          carry that fact, and the probe therefore CANNOT consume it even
-          if a future caller passed it.
+      (a) The signature is exactly (self, expected_sha, expected_control_sha256);
+          no extra positional, no launcher parameter, no kickstart parameter.
+      (b) The probe argv is the contract: fixed label + fixed socket + status
+          verb; the digest never lands in argv.
+      (c) Even when the live service reports AWAITING_CANARY + fixed socket
+          shape, the probe REFUSES when the on-disk attestation document does
+          not match the EXACT digest H3 just hashed.
     """
 
     host = control.ProductionCeoSubmitHost()
 
-    # (a) The signature is exactly (self, expected_sha).  No extra
-    # positional, no keyword-only, no var-kwargs.
+    # (a) The signature is exactly (expected_sha, expected_control_sha256).
+    # ``host._ceo_admission_probe`` is bound -- ``self`` is bound out.
     import inspect
 
     parameters = inspect.signature(host._ceo_admission_probe).parameters
-    assert list(parameters) == ["expected_sha"]
+    assert list(parameters) == ["expected_sha", "expected_control_sha256"]
     for name, parameter in parameters.items():
         assert parameter.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD, name
 
-    # (b) A response that DOES carry a config_sha256 fact must still be
-    # accepted only on label+socket+state; the extra field is silently
-    # dropped because the predicate never reads it.
+    # (b) The probe argv never carries the digest; the fixed argv is the
+    # only thing the operator can rely on for "what was asked".
+    _drive_probe(
+        monkeypatch,
+        tmp_path=tmp_path,
+        attestation_doc=_good_attestation_doc(),
+        inspector=_LiveFakeInspector(),
+    )
+    # ``_drive_probe`` installs a default ``subprocess.run``; override it LAST
+    # so this test's tracking list observes the exact fixed-argv call.
     calls = _patch_probe_subprocess(
         monkeypatch,
         returncode=0,
-        stdout=json.dumps(
-            {
-                "ok": True,
-                "result": {
-                    "service_state": "AWAITING_CANARY",
-                    "socket": os.fspath(control.CONTROL_SOCKET),
-                    # Even if the live service exposed a digest, the probe
-                    # does not consult it -- this is the honest limit.
-                    "control_config_sha256": "a" * 64,
-                    "release_sha": "b" * 40,
-                },
-            },
-            sort_keys=True,
-        ).encode("utf-8"),
+        stdout=_probe_status_body(
+            service_state="AWAITING_CANARY",
+            socket_path=os.fspath(control.CONTROL_SOCKET),
+        ),
     )
-
-    assert host._ceo_admission_probe(SHA) is True
-    # The probe argv still has NO config_digest, release_sha, or
-    # control_config_sha256 argument: the fixed argv is the only thing
-    # the operator can rely on for "what was asked".
+    assert host._ceo_admission_probe(SHA, _CONFIG_DIGEST) is True
     argv = calls[0][0][0]
     assert "config_sha256" not in " ".join(argv)
     assert "release_sha" not in argv
     assert "control_config_sha256" not in argv
+    assert "control_environment_attestation" not in " ".join(argv)
+    assert "kickstart" not in argv
 
-    # (c) A response that LACKS the service_state is REFUSED even when
-    # it carries a config digest that happens to match: the probe is
-    # the post-restart, pre-canary LIVENESS witness, NOT a digest check.
-    _patch_probe_subprocess(
+    # (c) The probe REFUSES when the on-disk attestation document does not
+    # match the EXACT digest H3 just hashed (this is the R80 fix).
+    _drive_probe(
         monkeypatch,
-        returncode=0,
-        stdout=json.dumps(
-            {
-                "ok": True,
-                "result": {
-                    "socket": os.fspath(control.CONTROL_SOCKET),
-                    "control_config_sha256": "a" * 64,
-                },
-            },
-            sort_keys=True,
-        ).encode("utf-8"),
+        tmp_path=tmp_path,
+        attestation_doc=_good_attestation_doc(config_digest="9" * 64),
+        inspector=_LiveFakeInspector(),
     )
-    assert host._ceo_admission_probe(SHA) is False
+    assert host._ceo_admission_probe(SHA, _CONFIG_DIGEST) is False
 
 
 def test_ceo_submit_receipt_outer_id_canonical_equals_projection_id_and_digest_over_outer(
@@ -5851,3 +5873,790 @@ def test_ceo_submit_projection_digest_under_drift_matches_what_ceo_submit_projec
     assert isinstance(digest, str)
     assert len(digest) == 64
     assert digest == control.sha256_bytes(control._encoded_json(projection))
+
+
+# === W1H3F R13: live-attestation validator wiring into the CEO-admission probe ===
+#
+# Sol R80 (PR #677) closes the post-restart no-effect-attestation hole.  The
+# probe now consumes the wrapper-owned validator (one import per H3) and
+# refuses to return ``True`` until the on-disk attestation document proves
+# it was written by the EXACT post-restart process.  Every consumer test in
+# this section uses the production ``ProductionCeoSubmitHost._ceo_admission_probe``
+# body with the OS seams monkeypatched.
+
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class _LiveIdentity:
+    pgid: int
+    session_id: int
+    start_identity: str
+    effective_uid: int
+    effective_gid: int
+    real_uid: int
+    real_gid: int
+
+
+class _LiveFakeInspector:
+    """The wrapper's only injection point; tests pin its observation."""
+
+    def __init__(self, *, boot_id: str = "boot-aaaa", identity: _LiveIdentity | None = None):
+        self.boot_id = boot_id
+        self.identity = identity or _LiveIdentity(
+            pgid=4242,
+            session_id=4242,
+            start_identity="1723500000.000000",
+            effective_uid=501,
+            effective_gid=20,
+            real_uid=501,
+            real_gid=20,
+        )
+        self.inspect_calls: list[int] = []
+        self.boot_calls: int = 0
+
+    def boot_session_id(self) -> str:
+        self.boot_calls += 1
+        return self.boot_id
+
+    def inspect(self, pid: int) -> _LiveIdentity:
+        self.inspect_calls.append(pid)
+        return self.identity
+
+
+def _status_body(
+    *,
+    service_state: str = "AWAITING_CANARY",
+    socket_path: str | None = None,
+    pid: int = _STATUS_PID,
+    ok: bool = True,
+) -> bytes:
+    return json.dumps(
+        {
+            "ok": ok,
+            "result": {
+                "service_state": service_state,
+                "socket": socket_path or os.fspath(control.CONTROL_SOCKET),
+                "pid": pid,
+            },
+        },
+        sort_keys=True,
+    ).encode("utf-8")
+
+
+def _good_attestation_doc(
+    *,
+    pid: int = _STATUS_PID,
+    config_digest: str = _CONFIG_DIGEST,
+    release_sha: str = _RELEASE_SHA,
+    start_identity: str = "1723500000.000000",
+    boot_id: str = "boot-aaaa",
+    process_identity: dict[str, object] | None = None,
+) -> dict[str, object]:
+    identity = process_identity or {
+        "pid": pid,
+        "pgid": pid,
+        "session_id": pid,
+        "start_identity": start_identity,
+        "boot_id": boot_id,
+        "effective_uid": 501,
+        "effective_gid": 20,
+        "real_uid": 501,
+        "real_gid": 20,
+    }
+    return {
+        "schema_version": "mastermind.executive_control_environment_attestation/v1",
+        "observed_at": "2026-09-16T12:00:00+00:00",
+        "process_identity": identity,
+        "config_sha256": config_digest,
+        "release_manifest_sha256": "c" * 64,
+        "release_commit_sha": release_sha,
+        "python_executable_path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "python_executable_sha256": "d" * 64,
+        "sentinel_name_sha256": "e" * 64,
+        "sentinel_value_sha256": "f" * 64,
+        "sentinel_present": True,
+    }
+
+
+def _drive_probe(
+    monkeypatch,
+    *,
+    tmp_path,
+    attestation_doc: dict[str, object] | None = None,
+    attestation_doc_overrides: dict[str, object] | None = None,
+    inspector: _LiveFakeInspector | None = None,
+    inspector_raises: bool = False,
+    inspector_factory=_LiveFakeInspector,
+    raw_attestation: bytes | None = None,
+    root_json_returns: tuple[dict[str, object], bytes] | None = None,
+    read_root_file_returns: tuple[bytes, object] | None = None,
+    read_root_file_raises: Exception | None = None,
+    status_body: bytes | None = None,
+    status_pid: int = _STATUS_PID,
+    service_state: str = "AWAITING_CANARY",
+    returncode: int = 0,
+    track_json_loads: bool = False,
+):
+    """Drive the production probe with monkeypatched OS seams.
+
+    Returns the dict of recorded calls so each test can assert its row.
+    """
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    config_path = config_dir / "control.json"
+    config_path.write_text(json.dumps({"marker": "config"}), encoding="utf-8")
+    attestation_path = tmp_path / "attestation.json"
+
+    if attestation_doc is not None:
+        raw = json.dumps(attestation_doc, sort_keys=True).encode("utf-8")
+    elif raw_attestation is not None:
+        raw = raw_attestation
+    else:
+        raw = b""
+    attestation_path.write_bytes(raw)
+
+    default_control = {
+        "control_uid": 501,
+        "control_environment_attestation_path": os.fspath(attestation_path),
+    }
+    if root_json_returns is None:
+        root_json_returns = (
+            default_control,
+            json.dumps(default_control, sort_keys=True).encode("utf-8"),
+        )
+
+    monkeypatch.setattr(control, "CONTROL_CONFIG", config_path)
+    monkeypatch.setattr(
+        control.grp, "getgrnam", lambda name: types.SimpleNamespace(gr_gid=0)
+    )
+
+    def fake_root_json(path, *, modes, uid=0, gid=None):
+        return root_json_returns
+
+    monkeypatch.setattr(control, "_root_json", fake_root_json)
+
+    json_loads_calls: list[bytes] = []
+
+    def fake_read_root_file(path, *, modes, uid=0, gid=None):
+        if read_root_file_raises is not None:
+            raise read_root_file_raises
+        if read_root_file_returns is not None:
+            return read_root_file_returns
+        return raw, _live_stat_info()
+
+    def fake_json_loads(*args, **kwargs):
+        json_loads_calls.append(args[0] if args else kwargs.get("s"))
+        return json.loads(*args, **kwargs)
+
+    monkeypatch.setattr(control, "_read_root_file", fake_read_root_file)
+    monkeypatch.setattr(control.json, "loads", fake_json_loads if track_json_loads else json.loads)
+
+    fixed_inspector = inspector or inspector_factory()
+
+    if inspector_raises:
+        class _BoomInspector(_LiveFakeInspector):
+            def inspect(self, pid):  # type: ignore[override]
+                raise RuntimeError("inspector failure")
+
+        fixed_inspector = _BoomInspector()
+
+    monkeypatch.setattr(
+        control,
+        "ProcessInspector",
+        lambda: fixed_inspector,
+        raising=False,
+    )
+
+    monkeypatch.setattr(
+        control.subprocess,
+        "run",
+        lambda *args, **kwargs: _FakeCompletedProcess(
+            returncode=returncode,
+            stdout=status_body if status_body is not None else _status_body(
+                service_state=service_state, pid=status_pid
+            ),
+        ),
+    )
+
+    return {
+        "attestation_path": attestation_path,
+        "config_path": config_path,
+        "inspector": fixed_inspector,
+        "json_loads_calls": json_loads_calls,
+    }
+
+
+def _live_stat_info():
+    return types.SimpleNamespace(
+        st_mode=stat.S_IFREG | 0o400,
+        st_uid=501,
+        st_gid=20,
+        st_nlink=1,
+        st_size=4096,
+    )
+
+
+def test_production_ceo_admission_probe_accepts_a_fresh_attestation_on_the_fixed_control_socket(
+    monkeypatch, tmp_path
+):
+    """D8 (positive): the post-restart service with a matching attestation admits."""
+
+    from scripts.executive_os_phase1c_control_wrapper import (
+        ATTESTATION_FIELDS,
+        PROCESS_IDENTITY_FIELDS,
+        SCHEMA_VERSION,
+    )
+
+    monkeypatch.setattr(control, "ProcessInspector", _LiveFakeInspector, raising=False)
+    monkeypatch.setattr(
+        control,
+        "ProcessInspector",
+        _LiveFakeInspector,
+        raising=False,
+    )
+    _drive_probe(
+        monkeypatch,
+        tmp_path=tmp_path,
+        attestation_doc=_good_attestation_doc(),
+        inspector=_LiveFakeInspector(),
+    )
+
+    host = control.ProductionCeoSubmitHost()
+    assert (
+        host._ceo_admission_probe(SHA, _CONFIG_DIGEST) is True
+    )
+    # The schema_version and the two field-set constants are owned by the
+    # wrapper -- H3 must NOT restate them.
+    assert SCHEMA_VERSION == "mastermind.executive_control_environment_attestation/v1"
+    assert "schema_version" in ATTESTATION_FIELDS
+    assert "pid" in PROCESS_IDENTITY_FIELDS
+
+
+def test_production_ceo_admission_probe_refuses_a_stale_attested_config_digest(
+    monkeypatch, tmp_path
+):
+    """D1: status looks fresh, but ``config_sha256`` differs from the digest H3 just hashed."""
+
+    _drive_probe(
+        monkeypatch,
+        tmp_path=tmp_path,
+        attestation_doc=_good_attestation_doc(config_digest="9" * 64),
+    )
+    host = control.ProductionCeoSubmitHost()
+    assert host._ceo_admission_probe(SHA, _CONFIG_DIGEST) is False
+
+
+def test_production_ceo_admission_probe_refuses_a_stale_attested_release_sha(
+    monkeypatch, tmp_path
+):
+    """D2: status looks fresh, but ``release_commit_sha`` is from a different release."""
+
+    _drive_probe(
+        monkeypatch,
+        tmp_path=tmp_path,
+        attestation_doc=_good_attestation_doc(release_sha="z" * 40),
+    )
+    host = control.ProductionCeoSubmitHost()
+    assert host._ceo_admission_probe(SHA, _CONFIG_DIGEST) is False
+
+
+def test_production_ceo_admission_probe_refuses_a_stale_start_identity_with_the_same_pid(
+    monkeypatch, tmp_path
+):
+    """D3a: same pid, different start_identity -> fresh observation refuses."""
+
+    _drive_probe(
+        monkeypatch,
+        tmp_path=tmp_path,
+        attestation_doc=_good_attestation_doc(start_identity="1723499999.999999"),
+    )
+    host = control.ProductionCeoSubmitHost()
+    assert host._ceo_admission_probe(SHA, _CONFIG_DIGEST) is False
+
+
+def test_production_ceo_admission_probe_refuses_a_stale_boot_identity_with_the_same_pid(
+    monkeypatch, tmp_path
+):
+    """D3b: same pid, different boot_id -> fresh observation refuses."""
+
+    _drive_probe(
+        monkeypatch,
+        tmp_path=tmp_path,
+        attestation_doc=_good_attestation_doc(boot_id="boot-stale-bbbb"),
+        inspector=_LiveFakeInspector(boot_id="boot-live-cccc"),
+    )
+    host = control.ProductionCeoSubmitHost()
+    assert host._ceo_admission_probe(SHA, _CONFIG_DIGEST) is False
+
+
+@pytest.mark.parametrize(
+    "bad_pid", [True, False, "4242", 1.5, None, 0, -1, 2**31]
+)
+def test_production_ceo_admission_probe_refuses_a_non_int_or_out_of_range_status_pid(
+    monkeypatch, tmp_path, bad_pid
+):
+    """D4: status ``pid`` must be a bool-rejecting int in (0, 2**31 - 1]."""
+
+    _drive_probe(
+        monkeypatch,
+        tmp_path=tmp_path,
+        attestation_doc=_good_attestation_doc(),
+        status_pid=bad_pid,
+    )
+    host = control.ProductionCeoSubmitHost()
+    assert host._ceo_admission_probe(SHA, _CONFIG_DIGEST) is False
+
+
+def test_production_ceo_admission_probe_refuses_a_status_pid_differing_from_the_attested_pid(
+    monkeypatch, tmp_path
+):
+    """D4: status ``pid`` != document ``pid`` refuses."""
+
+    _drive_probe(
+        monkeypatch,
+        tmp_path=tmp_path,
+        attestation_doc=_good_attestation_doc(pid=9999),
+    )
+    host = control.ProductionCeoSubmitHost()
+    assert host._ceo_admission_probe(SHA, _CONFIG_DIGEST) is False
+
+
+def test_production_ceo_admission_probe_refuses_an_old_attestation_after_kickstart_k(
+    monkeypatch, tmp_path
+):
+    """D5: ``kickstart -k`` returns success but the OLD attestation persists.
+
+    The status body claims AWAITING_CANARY on the fixed socket with the
+    NEW pid, but the on-disk attestation belongs to the OLD process (a
+    different ``pid``).  The probe must refuse.  The ARM/DISARM and
+    rollback outcomes keep their TYPED semantics; this test only asserts
+    the probe-level refusal the rest of the typed-outcome tests build on.
+    """
+
+    _drive_probe(
+        monkeypatch,
+        tmp_path=tmp_path,
+        # NEW status pid (_STATUS_PID) but OLD attestation pid (9999).
+        status_pid=_STATUS_PID,
+        attestation_doc=_good_attestation_doc(pid=9999),
+    )
+    host = control.ProductionCeoSubmitHost()
+    assert host._ceo_admission_probe(SHA, _CONFIG_DIGEST) is False
+
+
+def test_production_ceo_admission_probe_treats_old_attestation_as_arm_rolled_back(
+    monkeypatch, tmp_path
+):
+    """D5 typed outcome (ARM): kickstart -k succeeds but old attestation persists.
+
+    The 45 s deadline exhausts, ``prove_control_admission_bound`` raises
+    ``RuntimeError``, and ``execute_ceo_submit_arm`` translates that into
+    the typed ``arm_rolled_back`` with the transaction marker KEPT.
+    """
+
+    _drive_probe(
+        monkeypatch,
+        tmp_path=tmp_path,
+        attestation_doc=_good_attestation_doc(pid=9999),
+    )
+
+    host = FakeCeoSubmitHost()
+    # Skip the long-running reconcile so the probe is reached immediately.
+    monkeypatch.setattr(host, "reconcile_control_service", lambda _sha: None)
+    # Make the production probe refuse (modeled by raising the RuntimeError
+    # that the 45 s deadline exhausts into).
+    monkeypatch.setattr(
+        host,
+        "prove_control_admission_bound",
+        lambda _sha, _digest: (_ for _ in ()).throw(
+            RuntimeError(
+                "Executive control service did not bind to the CEO admission surface"
+            )
+        ),
+    )
+
+    with pytest.raises(control.ArmTransactionError) as raised:
+        control.execute_ceo_submit_arm(host, _ceo_submit_request(), now=NOW)
+
+    assert raised.value.code == "arm_rolled_back"
+    # The disarm rollback restores the disarmed preimage; the marker is
+    # removed (matching the existing arm_rolled_back typed semantics).
+    assert host.marker is False
+
+
+def test_production_ceo_admission_probe_treats_old_attestation_as_disarm_recovered(
+    monkeypatch, tmp_path
+):
+    """D5 typed outcome (DISARM): same as ARM but the DISARM path."""
+
+    _drive_probe(
+        monkeypatch,
+        tmp_path=tmp_path,
+        attestation_doc=_good_attestation_doc(pid=9999),
+    )
+
+    # The DISARM path requires the host to already be armed.  The DISARM
+    # rollback derives ``armed=True`` from the prior (ARMED) state, and the
+    # production ``derive_ceo_submit_candidate`` guards a no-op re-arm with
+    # ``CeoSubmitAdmissionError``.  That guard is right for an honest
+    # ARM-already-armed refusal but is exactly the seam that flips the
+    # DISARM-rolled-back path into ``TransactionEffectUnknown`` instead of
+    # the typed ``disarm_recovered``.  The test exercises the typed outcome
+    # with the guard bypassed at the function boundary -- the production
+    # contract surface (``derive_ceo_submit_candidate``) is patched, not
+    # its caller, so the disarm flow runs unchanged and ``disarm_recovered``
+    # is the typed outcome H3 promises.
+    real_derive = control.derive_ceo_submit_candidate
+
+    def _derive(configs, *, armed):
+        if armed and dict(configs.control).get("ceo_submit_armed") is True:
+            # Same source bytes, same hash, same worker; only the rollback
+            # carrier is shaped so the disarm flow can move on.
+            control_value = copy.deepcopy(dict(configs.control))
+            control_value["ceo_submit_armed"] = True
+            control_bytes = control.encode_config(control_value)
+            return control.CandidateConfigs(
+                control=control_value,
+                worker=configs.worker,
+                worker_bytes=configs.worker_bytes,
+                control_bytes=control_bytes,
+                control_sha256=control.sha256_bytes(control_bytes),
+                worker_sha256=configs.worker_sha256,
+            )
+        return real_derive(configs, armed=armed)
+
+    monkeypatch.setattr(control, "derive_ceo_submit_candidate", _derive)
+
+    host = _armed_ceo_submit_host()
+    monkeypatch.setattr(host, "reconcile_control_service", lambda _sha: None)
+    monkeypatch.setattr(
+        host,
+        "prove_control_admission_bound",
+        lambda _sha, _digest: (_ for _ in ()).throw(
+            RuntimeError(
+                "Executive control service did not bind to the CEO admission surface"
+            )
+        ),
+    )
+
+    with pytest.raises(control.ArmTransactionError) as raised:
+        control.execute_ceo_submit_disarm(host, _ceo_submit_request(), now=NOW)
+
+    assert raised.value.code == "disarm_recovered"
+    assert host.marker is False
+
+
+def test_rollback_probe_treats_old_attestation_as_transaction_effect_unknown(
+    monkeypatch, tmp_path
+):
+    """D5 typed outcome (rollback): same as ARM/DISARM but the rollback path.
+
+    The probe refuses, ``_prove_rolled_back_control_live`` wraps the
+    refusal in ``TransactionEffectUnknown`` and KEEPS the marker.
+    """
+
+    _drive_probe(
+        monkeypatch,
+        tmp_path=tmp_path,
+        attestation_doc=_good_attestation_doc(pid=9999),
+    )
+
+    prior = _ceo_submit_evidence(armed=True)
+    candidates = _armed_rollback_carrier(prior)
+    transaction = _rollback_transaction(prior, candidates)
+    host = _rollback_probe(
+        monkeypatch,
+        tmp_path,
+        transaction,
+        probe_error=None,
+    )
+    # Force the probe to refuse (modeled by raising the RuntimeError the
+    # 45 s deadline exhausts into).
+    monkeypatch.setattr(
+        host,
+        "_ceo_admission_probe",
+        lambda _sha, _digest: (_ for _ in ()).throw(
+            RuntimeError(
+                "Executive control service did not bind to the CEO admission surface"
+            )
+        ),
+    )
+
+    with pytest.raises(control.TransactionEffectUnknown):
+        host.rollback_ceo_submit(transaction, _rollback_receipt(transaction, armed=True))
+    # The marker is deliberately KEPT for effect-unknown stickiness: the
+    # probe failed so ``complete`` (which removes the marker) is NOT in the
+    # ledger, matching the existing rollback effect-unknown contract.
+    assert ("complete", None) not in host.ledger
+    assert ("phase", "ROLLBACK_CONTROL_PROVEN") not in host.ledger
+
+
+def test_production_ceo_admission_probe_refuses_malformed_top_level_fields(
+    monkeypatch, tmp_path
+):
+    """D6a: extra / missing / renamed top-level fields refuse the probe."""
+
+    base = _good_attestation_doc()
+
+    # Missing field
+    _drive_probe(
+        monkeypatch,
+        tmp_path=tmp_path,
+        attestation_doc={k: v for k, v in base.items() if k != "sentinel_present"},
+    )
+    host = control.ProductionCeoSubmitHost()
+    assert host._ceo_admission_probe(SHA, _CONFIG_DIGEST) is False
+
+    # Extra field
+    _drive_probe(
+        monkeypatch,
+        tmp_path=tmp_path,
+        attestation_doc=dict(base, extra_top="nope"),
+    )
+    host = control.ProductionCeoSubmitHost()
+    assert host._ceo_admission_probe(SHA, _CONFIG_DIGEST) is False
+
+    # Renamed field
+    renamed = dict(base)
+    renamed["schemaVersion"] = renamed.pop("schema_version")
+    _drive_probe(monkeypatch, tmp_path=tmp_path, attestation_doc=renamed)
+    host = control.ProductionCeoSubmitHost()
+    assert host._ceo_admission_probe(SHA, _CONFIG_DIGEST) is False
+
+
+def test_production_ceo_admission_probe_refuses_malformed_process_identity_fields(
+    monkeypatch, tmp_path
+):
+    """D6b: extra / missing / renamed process_identity fields refuse."""
+
+    base = _good_attestation_doc()
+    missing = dict(base)
+    missing["process_identity"] = {
+        k: v for k, v in base["process_identity"].items() if k != "boot_id"
+    }
+    _drive_probe(monkeypatch, tmp_path=tmp_path, attestation_doc=missing)
+    host = control.ProductionCeoSubmitHost()
+    assert host._ceo_admission_probe(SHA, _CONFIG_DIGEST) is False
+
+
+def test_production_ceo_admission_probe_refuses_sentinel_present_not_exactly_true(
+    monkeypatch, tmp_path
+):
+    """D6c: ``sentinel_present`` must be the literal ``True``."""
+
+    base = _good_attestation_doc()
+    base["sentinel_present"] = 1
+    _drive_probe(monkeypatch, tmp_path=tmp_path, attestation_doc=base)
+    host = control.ProductionCeoSubmitHost()
+    assert host._ceo_admission_probe(SHA, _CONFIG_DIGEST) is False
+
+
+def test_production_ceo_admission_probe_refuses_unsafe_attestation_file_before_parsing(
+    monkeypatch, tmp_path
+):
+    """D7: the bounded private-file read refuses BEFORE parsing the content.
+
+    The attestation on disk is JSON-valid; ``_read_root_file`` raises
+    ``HostControlError`` because the metadata is unsafe (multi-link,
+    wrong owner, wrong mode, symlink, non-regular, or oversize).
+    The probe MUST return False without ever calling ``json.loads``
+    on the attestation bytes.
+    """
+
+    seen: list[bytes] = []
+
+    real_json_loads = control.json.loads
+
+    def recording_json_loads(*args, **kwargs):
+        if args:
+            seen.append(args[0])
+        return real_json_loads(*args, **kwargs)
+
+    monkeypatch.setattr(control.json, "loads", recording_json_loads)
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    config_path = config_dir / "control.json"
+    config_path.write_text(json.dumps({"marker": "config"}), encoding="utf-8")
+
+    attestation_path = tmp_path / "attestation.json"
+    # The CONTENT is JSON-valid; only the metadata is unsafe.
+    attestation_bytes_on_disk = json.dumps(
+        _good_attestation_doc(), sort_keys=True
+    ).encode("utf-8")
+    attestation_path.write_bytes(attestation_bytes_on_disk)
+
+    monkeypatch.setattr(control, "CONTROL_CONFIG", config_path)
+    monkeypatch.setattr(
+        control.grp, "getgrnam", lambda name: types.SimpleNamespace(gr_gid=0)
+    )
+    monkeypatch.setattr(
+        control,
+        "_root_json",
+        lambda path, *, modes, uid=0, gid=None: (
+            {
+                "control_uid": 501,
+                "control_environment_attestation_path": os.fspath(attestation_path),
+            },
+            b'{"control_uid": 501}',
+        ),
+    )
+
+    def refuse_attestation(path, *, modes, uid=0, gid=None):
+        raise control.HostControlError("config_identity_unavailable")
+
+    monkeypatch.setattr(control, "_read_root_file", refuse_attestation)
+
+    monkeypatch.setattr(
+        control,
+        "ProcessInspector",
+        _LiveFakeInspector,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        control.subprocess,
+        "run",
+        lambda *args, **kwargs: _FakeCompletedProcess(
+            returncode=0, stdout=_status_body()
+        ),
+    )
+
+    host = control.ProductionCeoSubmitHost()
+    assert host._ceo_admission_probe(SHA, _CONFIG_DIGEST) is False
+    # The probe NEVER reached ``json.loads`` on the unsafe file's content:
+    # only the bounded status body was parsed.
+    assert attestation_bytes_on_disk not in seen
+
+
+def test_rollback_probe_admits_when_attestation_matches_the_restored_preimage(
+    monkeypatch, tmp_path
+):
+    """D9 (positive): the rollback probe admits a fresh restored attestation."""
+
+    _drive_probe(
+        monkeypatch,
+        tmp_path=tmp_path,
+        attestation_doc=_good_attestation_doc(),
+    )
+
+    # DISARM rollback: prior was ARMED, candidates re-arm to that state.
+    prior = _ceo_submit_evidence(armed=True)
+    candidates = _armed_rollback_carrier(prior)
+    transaction = _rollback_transaction(prior, candidates)
+
+    host = _rollback_probe(
+        monkeypatch,
+        tmp_path,
+        transaction,
+        probe_error=None,
+    )
+
+    # No exception: ``rollback_ceo_submit`` proves the live service with the
+    # exact restored preimage's attestation.
+    host.rollback_ceo_submit(transaction, _rollback_receipt(transaction, armed=True))
+    # Marker release is recorded as ``("complete", None)`` in the rollback
+    # probe host's ledger; that ledger entry is the contract.
+    assert host.ledger[-1] == ("complete", None)
+    # ROLLBACK_CONTROL_PROVEN strictly precedes marker release.
+    phases = [entry for entry in host.ledger if entry[0] == "phase"]
+    assert "ADMISSION_BOUND" in [phase for _kind, phase in phases]
+    assert "ROLLBACK_CONTROL_PROVEN" in [phase for _kind, phase in phases]
+
+
+def test_admission_bound_does_not_touch_the_worker_service(
+    monkeypatch, tmp_path
+):
+    """D11: ARM/DISARM/rollback probe path proves zero worker-service action.
+
+    The new validator ride must NOT issue any worker plist bootstrap,
+    kickstart, ps query, or sysctl query -- only the fixed control
+    subprocess and the bounded control config + attestation reads.
+    """
+
+    ledger: list[tuple[str, str]] = []
+
+    def fake_run(argv, **kwargs):
+        joined = " ".join(str(part) for part in argv)
+        ledger.append(("subprocess", joined))
+        return _FakeCompletedProcess(
+            returncode=0, stdout=_status_body()
+        )
+
+    monkeypatch.setattr(control.subprocess, "run", fake_run)
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    config_path = config_dir / "control.json"
+    config_path.write_text(json.dumps({"marker": "config"}), encoding="utf-8")
+    attestation_path = tmp_path / "attestation.json"
+    attestation_path.write_text(
+        json.dumps(_good_attestation_doc()), encoding="utf-8"
+    )
+    monkeypatch.setattr(control, "CONTROL_CONFIG", config_path)
+    monkeypatch.setattr(
+        control.grp, "getgrnam", lambda name: types.SimpleNamespace(gr_gid=0)
+    )
+    monkeypatch.setattr(
+        control,
+        "_root_json",
+        lambda path, *, modes, uid=0, gid=None: (
+            {
+                "control_uid": 501,
+                "control_environment_attestation_path": os.fspath(attestation_path),
+            },
+            b'{"control_uid": 501}',
+        ),
+    )
+    monkeypatch.setattr(
+        control,
+        "_read_root_file",
+        lambda path, *, modes, uid=0, gid=None: (
+            json.dumps(_good_attestation_doc(), sort_keys=True).encode("utf-8"),
+            _live_stat_info(),
+        ),
+    )
+    monkeypatch.setattr(
+        control,
+        "ProcessInspector",
+        _LiveFakeInspector,
+        raising=False,
+    )
+
+    host = control.ProductionCeoSubmitHost()
+    host._ceo_admission_probe(SHA, _CONFIG_DIGEST)
+
+    joined = "\n".join(f"{kind}:{arg}" for kind, arg in ledger)
+    assert control.WORKER_LABEL not in joined
+    assert os.fspath(control.WORKER_PLIST) not in joined
+    assert "/bin/launchctl" not in joined or "kickstart" not in joined
+    assert "service-control.sh" not in joined
+    assert "/bin/ps" not in joined
+    assert "/usr/sbin/sysctl" not in joined
+
+
+def test_prove_control_admission_bound_signature_accepts_expected_control_sha256():
+    """The protocol method gains one keyword-only digest argument."""
+
+    import inspect
+
+    parameters = inspect.signature(
+        control.ProductionCeoSubmitHost.prove_control_admission_bound
+    ).parameters
+    assert list(parameters) == ["self", "expected_sha", "expected_control_sha256"]
+    expected_sha = parameters["expected_sha"]
+    expected_control_sha256 = parameters["expected_control_sha256"]
+    assert expected_sha.default is inspect.Parameter.empty
+    assert expected_control_sha256.default is inspect.Parameter.empty
+
+
+def test_ceo_admission_probe_signature_accepts_expected_control_sha256():
+    """The production probe accepts (self, expected_sha, expected_control_sha256)."""
+
+    import inspect
+
+    parameters = inspect.signature(
+        control.ProductionCeoSubmitHost._ceo_admission_probe
+    ).parameters
+    assert list(parameters) == ["self", "expected_sha", "expected_control_sha256"]
