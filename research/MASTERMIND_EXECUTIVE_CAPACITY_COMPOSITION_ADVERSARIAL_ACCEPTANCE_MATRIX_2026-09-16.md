@@ -139,7 +139,7 @@ composition fixtures must be built through the same seams rather than by constru
   `_claim_job_in_transaction` (`control_plane/executive_runtime.py:11015`).
 
 ### Class 9 — generation-axis changes move only their required effects
-- **Proposed test**: `test_generation_change_invalidates_stale_resource_joins_for_new_claims_only`
+- **Proposed test**: `test_generation_axis_change_moves_only_its_required_effects_and_no_others`
 - **Owner**: the six generation/freshness axes (contract §2.2).
 - **Fixture**: a fully dated resource and live hold; parametrise over `capability_generation`,
   `resource_generation`, `composition_generation`, `realm_generation`, `rate_generation`, and observation

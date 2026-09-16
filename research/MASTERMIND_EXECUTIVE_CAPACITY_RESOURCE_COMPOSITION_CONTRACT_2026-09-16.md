@@ -197,8 +197,8 @@ Four well-formedness rules make the grammar evaluable rather than suggestive:
    goes stale on exactly the same rules as a BUDGET (§2.3); a non-windowed ceiling simply has no
    `next_reset_at`.
 3. **A proportional ceiling must be resolved to an absolute remainder.** A sublimit expressed as a fraction of
-   its parent (the Claude/Fable case, §5.5) is `limit = fraction × entitlement(parent, current generation)`, and
-   its *remaining* is `limit − consumed_by_the_bounded_subtree`. If `consumed_by_the_bounded_subtree` is not
+   its parent (the Claude/Fable case, §5.5) is
+   `limit = fraction × entitlement(parent, current capability_generation)`, and its *remaining* is `limit − consumed_by_the_bounded_subtree`. If `consumed_by_the_bounded_subtree` is not
    observed, the ceiling's remaining is **UNKNOWN** and, by §4.5, so is the whole expression. This is the
    contract-level statement of the standing rule that fresh shared-parent telemetry alone can never make a
    subset `capacity_known`.
@@ -245,16 +245,18 @@ One operation's cost may straddle a stage boundary: if `s1` has 3,000 units rema
 **Stage routing is a provider-declared fact, not our inference (normative).** Ordered consumption comes in two
 provider shapes, and they do not evaluate the same way:
 
-- **`PARTITIONED`** — the provider splits *one* operation across stages, as above. For Alibaba Team the declared
-  `stage_routing` is **UNKNOWN**: official Team docs prove seat-first → shared-pack → nearest-expiring-pack
-  deduction order and the per-member pack ceiling, but not that one request can straddle seat and pack. Until
-  provider evidence or an authorized real observation proves PARTITIONED versus ATOMIC_FALLBACK, Alibaba's
-  `stage_routing` is UNKNOWN and fails closed under §4.6.
-  `avail` sums across stages (§4.1), because one job may draw from several.
+- **`PARTITIONED`** — the provider splits *one* operation across stages, as above. `avail` sums across stages
+  (§4.1), because one job may draw from several.
 - **`ATOMIC_FALLBACK`** — the provider itself serves one *indivisible* operation wholly from the first stage
   with sufficient balance, and falls back to the next stage otherwise. This is still provider-owned deduction —
   it is lawful `ORDERED_SPILL` — but no single operation may straddle, so `avail` for one operation is the
   **max** over admissible stages, not the sum (§4.1).
+
+**Alibaba Team's stage routing is UNKNOWN, and this contract does not guess it.** Official Team docs prove the
+deduction ORDER — seat first, then shared packs nearest expiry first — and the per-member shared-pack ceiling.
+They do **not** prove that one request can straddle seat and pack. Until provider evidence or an authorized real
+observation proves `PARTITIONED` versus `ATOMIC_FALLBACK`, Alibaba's `stage_routing` is **UNKNOWN** and every
+Alibaba expression fails closed under §4.6 (§5.4, §9.3 U1).
 
 **Partitionability precondition (normative).** `ORDERED_SPILL` is lawful only where the provider declares one of
 those two routings for these stages. Where the provider declares neither — where *we* would be choosing which
@@ -420,8 +422,8 @@ for acct in {C1, C2, C3}:
 ### 5.3 MiniMax Token Plan — per-model rows are EVIDENCE VIEWS, never wallets
 ```
 E_minimax = ALL_OF(
-    BUDGET minimax_plan_5h[plan_generation],
-    BUDGET minimax_plan_weekly[plan_generation]
+    BUDGET minimax_plan_5h[capability_generation],
+    BUDGET minimax_plan_weekly[capability_generation]
 )
 views(E_minimax) = { "MiniMax-M3": <row>, "MiniMax-M2.7": <row>, ... }   # independence: UNPROVEN
 ```
@@ -449,8 +451,9 @@ E_alibaba[seat] = ALL_OF(
                 ALL_OF(
                     CEILING member_shared_pack_cap[seat] over the spill below,
                     BUDGET  ORDERED_SPILL(pack_nearest_expiry, pack_next_expiry, ...)
+                            { stage_routing: UNKNOWN }
                 )
-            )
+            ) { stage_routing: UNKNOWN }
 )
 ```
 This is R35 §2's expression written with the §3.2 roles made explicit. The member cap is a CEILING over the
@@ -465,8 +468,8 @@ expression fails closed under §4.6.
 **Everything about our actual enrollment here is UNKNOWN**: `stage_routing` (PARTITIONED versus
 ATOMIC_FALLBACK), the Team seat tier (Alibaba documents 25k / 100k / 250k Credits per seat per subscription
 month and 625k per shared pack, but which we hold is not evidenced at master), seat realm binding, subscription
-generation, how many packs exist, their identities/expiries, and the member cap value. Official docs prove order
-and the member ceiling, not straddling. Master models **Personal**, not Team (§9). Do not rename the profile to
+`capability_generation`, how many packs exist, their identities/expiries, and the member cap value. Official
+docs prove order and the member ceiling, not straddling. Master models **Personal**, not Team (§9). Do not rename the profile to
 close this gap — R35 §16: bind the actual enrolled Team facts through Provider Control.
 
 ### 5.5 Claude / Fable subset ceiling — a ceiling, not a second wallet
@@ -753,8 +756,8 @@ preparation receipts built on it (`tests/test_executive_capacity_source_contract
 
 ### 9.3 UNKNOWN — written as UNKNOWN, per R35 §22 C ("Do not infer this from what we remember buying")
 - **U1 — Alibaba `stage_routing`**: PARTITIONED versus ATOMIC_FALLBACK. **UNKNOWN.**
-- **U2 — Alibaba Team-tier seat/pack facts**: seat tier, seat realm binding, subscription generation,
-  shared-pack identity/count/expiries, member shared-pack cap. **UNKNOWN.**
+- **U2 — Alibaba Team-tier seat/pack facts**: seat tier, seat realm binding, subscription
+  `capability_generation`, shared-pack identity/count/expiries, member shared-pack cap. **UNKNOWN.**
 - **U3 — MiniMax**: plan `capability_generation`; whether per-model rows are independent resources.
   **UNKNOWN / UNPROVEN.**
 - GLM: per-account entitlement generation and reset anchors as *Provider-Control* facts (the kit's numbers are
@@ -774,7 +777,8 @@ This whole example is **GENERIC and ILLUSTRATIVE**. It assumes `stage_routing = 
 quantities are likewise illustrative and assert no enrollment.
 
 ### 10.1 State
-One Alibaba Team seat `S1`, expression as §5.4:
+One **hypothetical** Alibaba Team seat `S1`, expression as §5.4 but with `stage_routing` assumed
+`PARTITIONED` for the exercise:
 
 | Resource | Role | Observed remaining |
 |---|---|---|
@@ -955,8 +959,8 @@ generation-axis correction.
 ### D3 — Generation and observation freshness are two clocks
 - **Ruling text**: §3 lists generation-invalidating events; §15 separately says a reset makes an observation
   stale and must not manufacture capacity.
-- **This document (§2.3)**: makes the separation explicit — generation governs joins and calibration, freshness
-  governs usability of a number, and a reset moves only the second.
+- **This document (§2.2–§2.3)**: makes the separation explicit — the generation axes govern joins, bindings and
+  calibration, freshness governs usability of a number, and a reset moves only the second.
 - **Why**: the ruling implies the distinction but does not name it, and conflating them produces both of the bad
   outcomes it warns about — a reset treated as a new generation discards valid calibration, while a generation
   change treated as mere staleness keeps joining across an epoch boundary.
