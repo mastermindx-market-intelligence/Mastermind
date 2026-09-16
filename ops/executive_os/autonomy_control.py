@@ -63,6 +63,14 @@ CONTROL_CONFIG = CONFIG_ROOT / "control.json"
 WORKER_CONFIG = CONFIG_ROOT / "worker-codex.json"
 AUTONOMY_RECEIPT = CONFIG_ROOT / "autonomy-state-v1.json"
 AUTONOMY_TRANSACTION = CONFIG_ROOT / "autonomy-transaction.lock"
+CEO_SUBMIT_RECEIPT = CONFIG_ROOT / "ceo-submit-state-v1.json"
+CEO_SUBMIT_RECEIPT_SCHEMA = "mastermind.executive_ceo_submit_receipt/v1"
+CEO_SUBMIT_OPERATIONS = frozenset({"CEO_SUBMIT_ARM", "CEO_SUBMIT_DISARM"})
+CEO_INGRESS_APP_PEER_UID = 458
+CEO_INGRESS_PEER_UID = 452
+EXECUTIVE_APP_USER = "_mastermind_executive_mcp"
+CEO_INGRESS_LAUNCHD_SOCKET_NAME = "CeoIngress"
+CEO_INGRESS_SOCKET_PATH = "/var/run/mastermind-executive/ceo-ingress.sock"
 PROVIDER_READINESS_RECEIPT = CONFIG_ROOT / "provider-readiness-v2.json"
 CONTROL_PLIST = Path("/Library/LaunchDaemons/com.mastermind.executive.control.plist")
 WORKER_PLIST = Path("/Library/LaunchDaemons/com.mastermind.executive.worker.codex.plist")
@@ -131,6 +139,56 @@ _ARM_ADMISSION_CODES = frozenset(
 )
 _MAX_JSON_BYTES = 1024 * 1024
 _TRANSACTION_SCHEMA = "mastermind.executive_autonomy_transaction/v1"
+_TRANSACTION_OPERATIONS = frozenset({"ARM", "DISARM"}) | CEO_SUBMIT_OPERATIONS
+_CEO_SUBMIT_ADMISSION_CODES = frozenset(
+    {
+        "release_identity_mismatch",
+        "app_peer_invalid",
+        "app_binding_invalid",
+        "app_acl_invalid",
+        "app_topology_invalid",
+        "app_binding_absent",
+        "ceo_submit_already_armed",
+        "ceo_ingress_app_armed",
+        "ceo_ingress_separation_invalid",
+        "coo_autonomy_armed",
+        "coo_operator_harness_armed",
+        "worker_operator_harness_armed",
+        "ceo_submit_transaction_incomplete",
+        "ceo_submit_config_schema_drift",
+    }
+)
+# The CEO-submit receipt binds a CLOSED semantic projection.  ``..._CONTROL_FIELDS``
+# are the authority-bearing keys read from the postimage ``control.json``;
+# ``..._PROJECTION_FIELDS`` adds the host-observed identity/binding facts.  Nothing
+# outside this set is ever digest-bound, so an unrelated later COO field cannot
+# invalidate the receipt, and the receipt never carries the whole control document.
+_CEO_SUBMIT_CONTROL_FIELDS = frozenset(
+    {
+        "ceo_submit_armed",
+        "ceo_ingress_app_peer_uid",
+        "ceo_ingress_app_armed",
+        "ceo_ingress_peer_uid",
+        "ceo_ingress_socket_path",
+        "ceo_ingress_launchd_socket_name",
+        "ceo_ingress_app_macro_root",
+        "coo_autonomy_armed",
+        "coo_operator_harness_armed",
+    }
+)
+_CEO_SUBMIT_PROJECTION_FIELDS = _CEO_SUBMIT_CONTROL_FIELDS | frozenset(
+    {
+        "release_sha",
+        "installed_sha",
+        "app_peer_user",
+        "app_binding_valid",
+        "app_acl_valid",
+        "app_topology_valid",
+        "worker_operator_harness_armed",
+        "worker_config_sha256",
+        "transaction_id",
+    }
+)
 
 
 def _fsync_directory(path: Path) -> None:
@@ -208,6 +266,14 @@ class ArmAdmissionError(RuntimeError):
     def __init__(self, code: str):
         if code not in _ARM_ADMISSION_CODES:
             raise ValueError("unknown arm-admission refusal")
+        self.code = code
+        super().__init__(code)
+
+
+class CeoSubmitAdmissionError(RuntimeError):
+    def __init__(self, code: str):
+        if code not in _CEO_SUBMIT_ADMISSION_CODES:
+            raise ValueError("unknown ceo-submit admission refusal")
         self.code = code
         super().__init__(code)
 
@@ -306,6 +372,49 @@ class TransactionResult:
     replayed: bool
 
 
+@dataclasses.dataclass(frozen=True)
+class ExecutiveAppBinding:
+    """Host-observed identity of the dedicated Executive App caller."""
+
+    present: bool
+    app_peer_uid: int
+    app_peer_user: str
+    app_armed: bool
+    app_macro_root: str
+    ingress_peer_uid: int
+    ingress_socket_path: str
+    launchd_socket_name: str
+    binding_valid: bool
+    acl_valid: bool
+    topology_valid: bool
+
+
+@dataclasses.dataclass(frozen=True)
+class CeoSubmitSeparation:
+    """The disarmed-separation facts a CEO-submit arm must observe first."""
+
+    ceo_ingress_app_armed: bool
+    ceo_ingress_app_peer_uid: int
+    ceo_ingress_peer_uid: int
+    coo_autonomy_armed: bool
+    coo_operator_harness_armed: bool
+    worker_operator_harness_armed: bool
+
+
+@dataclasses.dataclass(frozen=True)
+class CeoSubmitRequest:
+    expected_sha: str
+
+
+@dataclasses.dataclass(frozen=True)
+class CeoSubmitAdmission:
+    expected_sha: str
+    installed_sha: str
+    binding: ExecutiveAppBinding
+    separation: CeoSubmitSeparation
+    configs: ConfigEvidence
+
+
 class StatusHost(Protocol):
     def collect_status(
         self, expected_sha: str, *, now: datetime
@@ -372,6 +481,55 @@ class TransactionHost(ArmAdmissionHost, Protocol):
     ) -> None: ...
 
     def begin_disarm(self, expected_sha: str, transaction_id: str) -> ConfigEvidence: ...
+
+
+class CeoSubmitTransactionHost(Protocol):
+    """The CEO-submit operation domain rides the one existing transaction owner.
+
+    Every mutating method here is served by the same ``AUTONOMY_TRANSACTION``
+    serialization/atomic-write owner as the COO arm path.  There is deliberately
+    no second lock, no controller, no daemon and no JSON editor.
+    """
+
+    def effective_uid(self) -> int: ...
+
+    def require_exact_install(self, expected_sha: str) -> str: ...
+
+    def load_ceo_submit_configs(self, expected_sha: str) -> ConfigEvidence: ...
+
+    def executive_app_binding(self) -> ExecutiveAppBinding: ...
+
+    def ceo_submit_separation(
+        self, configs: ConfigEvidence
+    ) -> CeoSubmitSeparation: ...
+
+    def require_transaction_absent(self) -> None: ...
+
+    def new_transaction_id(self) -> str: ...
+
+    def begin_ceo_submit_transaction(
+        self, transaction: TransactionContext, *, operation: str
+    ) -> None: ...
+
+    def write_candidates(self, transaction: TransactionContext) -> None: ...
+
+    def validate_candidates(self, transaction: TransactionContext) -> None: ...
+
+    def replace_control_config(self, transaction: TransactionContext) -> None: ...
+
+    def write_ceo_submit_receipt(
+        self, transaction: TransactionContext, receipt: Mapping[str, Any]
+    ) -> None: ...
+
+    def reconcile_control_service(self, expected_sha: str) -> None: ...
+
+    def prove_control_ready(self, expected_sha: str) -> None: ...
+
+    def complete_transaction(self, transaction: TransactionContext) -> None: ...
+
+    def rollback_ceo_submit(
+        self, transaction: TransactionContext, receipt: Mapping[str, Any]
+    ) -> None: ...
 
 
 class _StoreOnce(argparse.Action):
@@ -441,6 +599,13 @@ def sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
+def require_root_privilege(effective_uid: int) -> None:
+    """Root-only gate with the effective uid injected by the caller."""
+
+    if effective_uid != 0:
+        raise HostControlError("privilege_required")
+
+
 def encode_config(value: Mapping[str, Any]) -> bytes:
     try:
         return (
@@ -485,6 +650,45 @@ def derive_candidate_configs(
 
 def _receipt_timestamp(now: datetime) -> str:
     return now.astimezone(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _ceo_submit_only_flag_differs(
+    prior: Mapping[str, Any], candidate: Mapping[str, Any]
+) -> bool:
+    """True when the postimage differs from the preimage only in the arm flag."""
+
+    if set(prior) != set(candidate):
+        return False
+    return all(
+        key == "ceo_submit_armed" or candidate[key] == prior[key] for key in prior
+    )
+
+
+def derive_ceo_submit_candidate(
+    configs: ConfigEvidence, *, armed: bool
+) -> CandidateConfigs:
+    """Derive the CEO-submit postimage: ``control.json`` only, worker untouched."""
+
+    control_value = copy.deepcopy(dict(configs.control))
+    if not isinstance(control_value.get("ceo_submit_armed"), bool):
+        raise CeoSubmitAdmissionError("ceo_submit_config_schema_drift")
+    control_value["ceo_submit_armed"] = armed
+    if not _ceo_submit_only_flag_differs(dict(configs.control), control_value):
+        raise CeoSubmitAdmissionError("ceo_submit_config_schema_drift")
+    if armed and dict(configs.control) == control_value:
+        raise CeoSubmitAdmissionError("ceo_submit_config_schema_drift")
+    try:
+        control_bytes = encode_config(control_value)
+    except ArmTransactionError as exc:
+        raise CeoSubmitAdmissionError("ceo_submit_config_schema_drift") from exc
+    return CandidateConfigs(
+        control=control_value,
+        worker=configs.worker,
+        worker_bytes=configs.worker_bytes,
+        control_bytes=control_bytes,
+        control_sha256=sha256_bytes(control_bytes),
+        worker_sha256=configs.worker_sha256,
+    )
 
 
 def build_transaction_receipt(
@@ -548,6 +752,120 @@ def build_transaction_receipt(
         "tool_version": TOOL_VERSION,
         "predicates": predicates,
     }
+
+
+def ceo_submit_projection(
+    transaction: TransactionContext,
+    admission: CeoSubmitAdmission,
+    *,
+    armed: bool,
+) -> dict[str, Any]:
+    """The CLOSED authority-bearing projection of the CEO-submit postimage.
+
+    Only the declared field set is bound: the postimage control values that
+    carry authority, the host-observed App binding facts, and the transaction
+    identity.  The whole control document is never bound, so an unrelated later
+    COO field cannot invalidate the receipt.
+    """
+
+    control = transaction.candidates.control
+    worker = transaction.candidates.worker
+    binding = admission.binding
+    values: dict[str, Any] = {}
+    for field in _CEO_SUBMIT_CONTROL_FIELDS:
+        if field not in control:
+            raise CeoSubmitAdmissionError("ceo_submit_config_schema_drift")
+        values[field] = control[field]
+    if values["ceo_submit_armed"] is not armed:
+        raise CeoSubmitAdmissionError("ceo_submit_config_schema_drift")
+    if (
+        values["ceo_ingress_app_peer_uid"] != binding.app_peer_uid
+        or values["ceo_ingress_app_armed"] is not binding.app_armed
+        or values["ceo_ingress_peer_uid"] != binding.ingress_peer_uid
+        or values["ceo_ingress_app_macro_root"] != binding.app_macro_root
+        or values["ceo_ingress_socket_path"] != binding.ingress_socket_path
+        or values["ceo_ingress_launchd_socket_name"] != binding.launchd_socket_name
+    ):
+        raise CeoSubmitAdmissionError("app_binding_invalid")
+    worker_armed = worker.get("operator_harness_armed")
+    if not isinstance(worker_armed, bool):
+        raise CeoSubmitAdmissionError("ceo_submit_config_schema_drift")
+    values.update(
+        {
+            "release_sha": transaction.expected_sha,
+            "installed_sha": admission.installed_sha,
+            "app_peer_user": binding.app_peer_user,
+            "app_binding_valid": binding.binding_valid,
+            "app_acl_valid": binding.acl_valid,
+            "app_topology_valid": binding.topology_valid,
+            "worker_operator_harness_armed": worker_armed,
+            "worker_config_sha256": transaction.candidates.worker_sha256,
+            "transaction_id": transaction.transaction_id,
+        }
+    )
+    if set(values) != _CEO_SUBMIT_PROJECTION_FIELDS:
+        raise CeoSubmitAdmissionError("ceo_submit_config_schema_drift")
+    return values
+
+
+def ceo_submit_projection_digest(projection: Mapping[str, Any]) -> str:
+    """Digest the closed projection, never the whole control document."""
+
+    return sha256_bytes(_encoded_json(projection))
+
+
+def build_ceo_submit_receipt(
+    transaction: TransactionContext,
+    admission: CeoSubmitAdmission,
+    *,
+    armed: bool,
+    now: datetime,
+) -> dict[str, Any]:
+    projection = ceo_submit_projection(transaction, admission, armed=armed)
+    return {
+        "schema_version": CEO_SUBMIT_RECEIPT_SCHEMA,
+        "state": "CEO_SUBMIT_ARMED" if armed else "CEO_SUBMIT_DISARMED",
+        "operation": "CEO_SUBMIT_ARM" if armed else "CEO_SUBMIT_DISARM",
+        "projection": dict(projection),
+        "projection_digest": ceo_submit_projection_digest(projection),
+        "transaction_id": transaction.transaction_id,
+        "observed_at": _receipt_timestamp(now),
+        "tool_version": TOOL_VERSION,
+    }
+
+
+def ceo_submit_receipt_binds(
+    receipt: Mapping[str, Any],
+    *,
+    control_config: Mapping[str, Any],
+    admission_projection: Mapping[str, Any],
+) -> bool:
+    """Re-derive the closed projection from the current config and re-bind.
+
+    Only the declared field set participates, so a later change to an unrelated
+    COO key leaves this True; a change to any authority-bearing field makes it
+    False.
+    """
+
+    if not isinstance(receipt, Mapping) or not isinstance(admission_projection, Mapping):
+        return False
+    if receipt.get("schema_version") != CEO_SUBMIT_RECEIPT_SCHEMA:
+        return False
+    projection = receipt.get("projection")
+    if not isinstance(projection, Mapping) or set(projection) != _CEO_SUBMIT_PROJECTION_FIELDS:
+        return False
+    recomputed = dict(admission_projection)
+    for field in _CEO_SUBMIT_CONTROL_FIELDS:
+        if field not in control_config:
+            return False
+        recomputed[field] = control_config[field]
+    if set(recomputed) != _CEO_SUBMIT_PROJECTION_FIELDS:
+        return False
+    try:
+        digest = ceo_submit_projection_digest(recomputed)
+    except (ArmTransactionError, TypeError, ValueError):
+        return False
+    return receipt.get("projection_digest") == digest
 
 
 _ACCEPTANCE_FIELDS = frozenset(
@@ -795,6 +1113,123 @@ def execute_disarm(
     return TransactionResult(
         state="DISARMED",
         status="UNARMED",
+        transaction_id=transaction.transaction_id,
+        replayed=False,
+    )
+
+
+def evaluate_ceo_submit_arm_admission(
+    host: CeoSubmitTransactionHost, request: CeoSubmitRequest, *, now: datetime
+) -> CeoSubmitAdmission:
+    """Evaluate every CEO-submit arm gate in fixed order, with no mutation.
+
+    Deliberately absent: provider readiness, Gate B, worker credentials and any
+    service/runtime quiescence gate.  R9 arms the CEO-submit sink only from the
+    installed release, the dedicated App caller binding and the disarmed
+    separation facts.
+    """
+
+    require_root_privilege(host.effective_uid())
+    if _SHA_RE.fullmatch(request.expected_sha) is None:
+        raise CeoSubmitAdmissionError("release_identity_mismatch")
+    installed_sha = host.require_exact_install(request.expected_sha)
+    if installed_sha != request.expected_sha:
+        raise CeoSubmitAdmissionError("release_identity_mismatch")
+    binding = host.executive_app_binding()
+    if not binding.present:
+        raise CeoSubmitAdmissionError("app_binding_absent")
+    if (
+        binding.app_peer_uid != CEO_INGRESS_APP_PEER_UID
+        or binding.app_peer_user != EXECUTIVE_APP_USER
+    ):
+        raise CeoSubmitAdmissionError("app_peer_invalid")
+    if not binding.binding_valid:
+        raise CeoSubmitAdmissionError("app_binding_invalid")
+    if not binding.acl_valid:
+        raise CeoSubmitAdmissionError("app_acl_invalid")
+    if not binding.topology_valid:
+        raise CeoSubmitAdmissionError("app_topology_invalid")
+    configs = host.load_ceo_submit_configs(request.expected_sha)
+    armed_flag = dict(configs.control).get("ceo_submit_armed")
+    if not isinstance(armed_flag, bool):
+        raise CeoSubmitAdmissionError("ceo_submit_config_schema_drift")
+    if armed_flag is not False:
+        raise CeoSubmitAdmissionError("ceo_submit_already_armed")
+    separation = host.ceo_submit_separation(configs)
+    if separation.ceo_ingress_app_armed:
+        raise CeoSubmitAdmissionError("ceo_ingress_app_armed")
+    if (
+        separation.ceo_ingress_peer_uid != CEO_INGRESS_PEER_UID
+        or separation.ceo_ingress_app_peer_uid != CEO_INGRESS_APP_PEER_UID
+        or separation.ceo_ingress_peer_uid == separation.ceo_ingress_app_peer_uid
+    ):
+        raise CeoSubmitAdmissionError("ceo_ingress_separation_invalid")
+    if separation.coo_autonomy_armed:
+        raise CeoSubmitAdmissionError("coo_autonomy_armed")
+    if separation.coo_operator_harness_armed:
+        raise CeoSubmitAdmissionError("coo_operator_harness_armed")
+    if separation.worker_operator_harness_armed:
+        raise CeoSubmitAdmissionError("worker_operator_harness_armed")
+    try:
+        host.require_transaction_absent()
+    except (HostControlError, ArmAdmissionError) as exc:
+        raise CeoSubmitAdmissionError("ceo_submit_transaction_incomplete") from exc
+    return CeoSubmitAdmission(
+        expected_sha=request.expected_sha,
+        installed_sha=installed_sha,
+        binding=binding,
+        separation=separation,
+        configs=configs,
+    )
+
+
+def execute_ceo_submit_arm(
+    host: CeoSubmitTransactionHost, request: CeoSubmitRequest, *, now: datetime
+) -> TransactionResult:
+    """Arm exactly the CEO-submit sink inside the one serialized transaction."""
+
+    admission = evaluate_ceo_submit_arm_admission(host, request, now=now)
+    transaction = TransactionContext(
+        transaction_id=host.new_transaction_id(),
+        expected_sha=request.expected_sha,
+        prior_configs=admission.configs,
+        candidates=derive_ceo_submit_candidate(admission.configs, armed=True),
+        admission=None,
+    )
+    try:
+        host.begin_ceo_submit_transaction(transaction, operation="CEO_SUBMIT_ARM")
+    except CeoSubmitAdmissionError:
+        # A marker that appeared between the read-only admission check and the
+        # atomic mkdir belongs to another root transaction. Never "recover" it
+        # through this operation's rollback carrier.
+        raise
+    try:
+        host.write_candidates(transaction)
+        host.validate_candidates(transaction)
+        host.replace_control_config(transaction)
+        receipt = build_ceo_submit_receipt(transaction, admission, armed=True, now=now)
+        host.write_ceo_submit_receipt(transaction, receipt)
+        host.reconcile_control_service(request.expected_sha)
+        host.prove_control_ready(request.expected_sha)
+        host.complete_transaction(transaction)
+    except Exception as exc:
+        try:
+            rollback = dataclasses.replace(
+                transaction,
+                candidates=derive_ceo_submit_candidate(
+                    transaction.prior_configs, armed=False
+                ),
+            )
+            host.rollback_ceo_submit(
+                rollback,
+                build_ceo_submit_receipt(rollback, admission, armed=False, now=now),
+            )
+        except Exception as rollback_exc:
+            raise TransactionEffectUnknown() from rollback_exc
+        raise ArmTransactionError("arm_rolled_back") from exc
+    return TransactionResult(
+        state="CEO_SUBMIT_ARMED",
+        status="CEO_SUBMIT_ARMED",
         transaction_id=transaction.transaction_id,
         replayed=False,
     )
@@ -1501,7 +1936,7 @@ class ProductionTransactionHost(ProductionArmHost):
         if (
             set(value) != required
             or value.get("schema_version") != _TRANSACTION_SCHEMA
-            or value.get("operation") not in {"ARM", "DISARM"}
+            or value.get("operation") not in _TRANSACTION_OPERATIONS
             or not isinstance(value.get("phase"), str)
             or re.fullmatch(
                 r"autonomy-[0-9a-f]{12}", str(value.get("transaction_id", ""))
@@ -2041,6 +2476,395 @@ class ProductionTransactionHost(ProductionArmHost):
             or worker_digest != transaction.candidates.worker_sha256
             or self._loaded(CONTROL_LABEL)
             or self._loaded(WORKER_LABEL)
+        ):
+            raise TransactionEffectUnknown()
+        self.complete_transaction(transaction)
+
+
+class ProductionCeoSubmitHost(ProductionTransactionHost):
+    """Root-only CEO-submit arm owner inside the one global autonomy transaction.
+
+    The CEO-submit operation domain is a distinct operation inside the existing
+    serialized controller: it reuses ``AUTONOMY_TRANSACTION``, that marker's
+    manifest, the atomic candidate writer, the postimage verifier and the
+    completion path.  It opens no second lock, never writes
+    ``worker-codex.json``, and never consults provider readiness, Gate B or a
+    worker credential.
+    """
+
+    def effective_uid(self) -> int:
+        uid = os.geteuid()
+        require_root_privilege(uid)
+        return uid
+
+    def require_exact_install(self, expected_sha: str) -> str:
+        try:
+            self._require_host()
+        except HostControlError as exc:
+            if exc.code == "privilege_required":
+                raise
+            raise CeoSubmitAdmissionError("release_identity_mismatch") from exc
+        try:
+            return self._release_identity(expected_sha)
+        except HostControlError as exc:
+            raise CeoSubmitAdmissionError("release_identity_mismatch") from exc
+
+    def load_ceo_submit_configs(self, expected_sha: str) -> ConfigEvidence:
+        try:
+            (
+                control,
+                worker,
+                control_digest,
+                worker_digest,
+                control_raw,
+                worker_raw,
+            ) = self._configs()
+        except (HostControlError, KeyError, OSError) as exc:
+            raise CeoSubmitAdmissionError("ceo_submit_config_schema_drift") from exc
+        if control.get("proof_base_sha") != expected_sha:
+            raise CeoSubmitAdmissionError("release_identity_mismatch")
+        return ConfigEvidence(
+            control_sha256=control_digest,
+            worker_sha256=worker_digest,
+            control=control,
+            worker=worker,
+            control_bytes=control_raw,
+            worker_bytes=worker_raw,
+        )
+
+    def executive_app_binding(self) -> ExecutiveAppBinding:
+        binding_values: dict[str, Any] = {
+            "present": False,
+            "app_peer_uid": -1,
+            "app_peer_user": "",
+            "app_armed": False,
+            "app_macro_root": "",
+            "ingress_peer_uid": -1,
+            "ingress_socket_path": "",
+            "launchd_socket_name": "",
+            "binding_valid": False,
+            "acl_valid": False,
+            "topology_valid": False,
+        }
+        try:
+            identity = pwd.getpwnam(EXECUTIVE_APP_USER)
+        except KeyError:
+            return ExecutiveAppBinding(**binding_values)
+        binding_values["present"] = True
+        binding_values["app_peer_user"] = identity.pw_name
+        try:
+            control_gid = grp.getgrnam(CONTROL_GROUP).gr_gid
+            control, _raw = _root_json(
+                CONTROL_CONFIG, modes=frozenset({0o440}), gid=control_gid
+            )
+        except (HostControlError, KeyError, OSError):
+            return ExecutiveAppBinding(**binding_values)
+        app_peer_uid = control.get("ceo_ingress_app_peer_uid")
+        app_armed = control.get("ceo_ingress_app_armed")
+        ingress_peer_uid = control.get("ceo_ingress_peer_uid")
+        app_macro_root = control.get("ceo_ingress_app_macro_root")
+        socket_path = control.get("ceo_ingress_socket_path")
+        launchd_name = control.get("ceo_ingress_launchd_socket_name")
+        if (
+            type(app_peer_uid) is not int
+            or type(ingress_peer_uid) is not int
+            or type(app_armed) is not bool
+            or not all(
+                isinstance(value, str) and value
+                for value in (app_macro_root, socket_path, launchd_name)
+            )
+        ):
+            return ExecutiveAppBinding(**binding_values)
+        reserved: set[Any] = {
+            control.get("control_uid"),
+            ingress_peer_uid,
+            control.get("worker_uid"),
+        }
+        allowed = control.get("allowed_peer_uids")
+        if isinstance(allowed, (list, tuple)):
+            reserved.update(value for value in allowed if type(value) is int)
+        binding_values.update(
+            {
+                "app_peer_uid": app_peer_uid,
+                "app_armed": app_armed,
+                "app_macro_root": app_macro_root,
+                "ingress_peer_uid": ingress_peer_uid,
+                "ingress_socket_path": socket_path,
+                "launchd_socket_name": launchd_name,
+            }
+        )
+        binding_values["binding_valid"] = (
+            app_peer_uid == identity.pw_uid and app_peer_uid not in reserved
+        )
+        binding_values["acl_valid"] = not _has_acl(CONTROL_CONFIG) and not _has_acl(
+            CONTROL_PLIST
+        )
+        binding_values["topology_valid"] = (
+            launchd_name == CEO_INGRESS_LAUNCHD_SOCKET_NAME
+            and socket_path == CEO_INGRESS_SOCKET_PATH
+            and launchd_name != control.get("launchd_socket_name")
+            and socket_path != control.get("control_socket_path")
+            and Path(app_macro_root).is_absolute()
+            and os.path.dirname(app_macro_root)
+            == os.fspath(SYSTEM_ROOT / "macro-sources")
+            and re.fullmatch(r"[0-9a-f]{40}", Path(app_macro_root).name) is not None
+        )
+        return ExecutiveAppBinding(**binding_values)
+
+    def ceo_submit_separation(self, configs: ConfigEvidence) -> CeoSubmitSeparation:
+        control = dict(configs.control)
+        worker = dict(configs.worker)
+        app_armed = control.get("ceo_ingress_app_armed")
+        coo_armed = control.get("coo_autonomy_armed")
+        operator_armed = control.get("coo_operator_harness_armed")
+        worker_armed = worker.get("operator_harness_armed")
+        ingress_peer_uid = control.get("ceo_ingress_peer_uid")
+        app_peer_uid = control.get("ceo_ingress_app_peer_uid")
+        if (
+            type(app_armed) is not bool
+            or type(coo_armed) is not bool
+            or type(operator_armed) is not bool
+            or type(worker_armed) is not bool
+            or type(ingress_peer_uid) is not int
+            or type(app_peer_uid) is not int
+        ):
+            raise CeoSubmitAdmissionError("ceo_submit_config_schema_drift")
+        return CeoSubmitSeparation(
+            ceo_ingress_app_armed=app_armed,
+            ceo_ingress_app_peer_uid=app_peer_uid,
+            ceo_ingress_peer_uid=ingress_peer_uid,
+            coo_autonomy_armed=coo_armed,
+            coo_operator_harness_armed=operator_armed,
+            worker_operator_harness_armed=worker_armed,
+        )
+
+    def require_transaction_absent(self) -> None:
+        try:
+            present = self._transaction_present()
+        except HostControlError as exc:
+            raise CeoSubmitAdmissionError("ceo_submit_transaction_incomplete") from exc
+        if present:
+            raise CeoSubmitAdmissionError("ceo_submit_transaction_incomplete")
+
+    def new_transaction_id(self) -> str:
+        if AUTONOMY_TRANSACTION.exists() and not AUTONOMY_TRANSACTION.is_symlink():
+            return str(self._manifest()["transaction_id"])
+        return f"autonomy-{secrets.token_hex(6)}"
+
+    def begin_ceo_submit_transaction(
+        self, transaction: TransactionContext, *, operation: str
+    ) -> None:
+        if operation not in CEO_SUBMIT_OPERATIONS:
+            raise CeoSubmitAdmissionError("ceo_submit_transaction_incomplete")
+        if AUTONOMY_TRANSACTION.exists() or AUTONOMY_TRANSACTION.is_symlink():
+            raise CeoSubmitAdmissionError("ceo_submit_transaction_incomplete")
+        self._active_transaction = transaction
+        try:
+            self._create_marker(transaction, operation=operation)
+        except FileExistsError as exc:
+            self._active_transaction = None
+            raise CeoSubmitAdmissionError("ceo_submit_transaction_incomplete") from exc
+
+    def write_candidates(self, transaction: TransactionContext) -> None:
+        self._active_transaction = transaction
+        control_candidate, _worker_candidate = self._candidate_paths(
+            transaction.transaction_id
+        )
+        _atomic_file(
+            control_candidate,
+            transaction.candidates.control_bytes,
+            mode=0o440,
+            uid=0,
+            gid=grp.getgrnam(CONTROL_GROUP).gr_gid,
+            replace=False,
+        )
+        self._persist_phase(transaction, "CANDIDATES_WRITTEN")
+
+    def validate_candidates(self, transaction: TransactionContext) -> None:
+        release = SYSTEM_ROOT / "releases" / transaction.expected_sha
+        control_candidate, _worker_candidate = self._candidate_paths(
+            transaction.transaction_id
+        )
+        control_home = RUNTIME_ROOT / "control" / "home"
+        control_gid = grp.getgrnam(CONTROL_GROUP).gr_gid
+        worker_gid = grp.getgrnam(WORKER_GROUP).gr_gid
+        expected_armed = self._manifest().get("operation") == "CEO_SUBMIT_ARM"
+        self._run_fixed(
+            [
+                "/usr/bin/sudo",
+                "-u",
+                CONTROL_USER,
+                "/usr/bin/env",
+                "-i",
+                f"HOME={control_home}",
+                "PATH=/usr/bin:/bin:/usr/sbin:/sbin",
+                "LANG=C.UTF-8",
+                "LC_ALL=C.UTF-8",
+                "PYTHONDONTWRITEBYTECODE=1",
+                os.fspath(PINNED_PYTHON),
+                "-I",
+                "-S",
+                "-B",
+                "-c",
+                (
+                    "import sys;sys.path.insert(0,sys.argv[1]);"
+                    "from scripts.executive_os_phase1c import load_control_config;"
+                    "load_control_config(sys.argv[2])"
+                ),
+                os.fspath(release),
+                os.fspath(control_candidate),
+            ],
+            cwd=release,
+        )
+        candidate_control, candidate_raw = _root_json(
+            control_candidate, modes=frozenset({0o440}), uid=0, gid=control_gid
+        )
+        worker_raw, _worker_info = _read_root_file(
+            WORKER_CONFIG, modes=frozenset({0o440}), gid=worker_gid
+        )
+        if (
+            sha256_bytes(candidate_raw) != transaction.candidates.control_sha256
+            or candidate_control.get("ceo_submit_armed") is not expected_armed
+            or not _ceo_submit_only_flag_differs(
+                transaction.prior_configs.control, candidate_control
+            )
+            or sha256_bytes(worker_raw) != transaction.candidates.worker_sha256
+            or sha256_bytes(worker_raw) != transaction.prior_configs.worker_sha256
+        ):
+            raise TransactionEffectUnknown()
+        self._persist_phase(transaction, "CANDIDATES_VALIDATED")
+
+    def replace_worker_config(self, transaction: TransactionContext) -> None:
+        # The CEO-submit domain never owns the worker config, even by accident.
+        raise TransactionEffectUnknown()
+
+    def write_ceo_submit_receipt(
+        self, transaction: TransactionContext, receipt: Mapping[str, Any]
+    ) -> None:
+        if _parse_timestamp(receipt.get("observed_at")) is None:
+            raise TransactionEffectUnknown()
+        projection = receipt.get("projection")
+        if (
+            receipt.get("schema_version") != CEO_SUBMIT_RECEIPT_SCHEMA
+            or receipt.get("operation") not in CEO_SUBMIT_OPERATIONS
+            or receipt.get("state") not in {"CEO_SUBMIT_ARMED", "CEO_SUBMIT_DISARMED"}
+            or receipt.get("transaction_id") != transaction.transaction_id
+            or not isinstance(projection, Mapping)
+            or set(projection) != _CEO_SUBMIT_PROJECTION_FIELDS
+            or receipt.get("projection_digest")
+            != ceo_submit_projection_digest(projection)
+            or projection.get("transaction_id") != transaction.transaction_id
+            or projection.get("release_sha") != transaction.expected_sha
+            or (receipt.get("state") == "CEO_SUBMIT_ARMED")
+            is not projection.get("ceo_submit_armed")
+        ):
+            raise TransactionEffectUnknown()
+        replace = CEO_SUBMIT_RECEIPT.exists() or CEO_SUBMIT_RECEIPT.is_symlink()
+        if replace and _receipt_metadata(CEO_SUBMIT_RECEIPT) != ReceiptMetadata(
+            uid=0,
+            gid=0,
+            mode=0o444,
+            nlink=1,
+            is_regular=True,
+            is_symlink=False,
+            has_acl=False,
+        ):
+            raise TransactionEffectUnknown()
+        _atomic_file(
+            CEO_SUBMIT_RECEIPT,
+            _encoded_json(dict(receipt)),
+            mode=0o444,
+            uid=0,
+            gid=0,
+            replace=replace,
+        )
+        self._persist_phase(transaction, "RECEIPT_REPLACED")
+
+    def reconcile_control_service(self, expected_sha: str) -> None:
+        """Converge only the control boundary onto the replaced config.
+
+        The reviewed lifecycle controller exposes no control-only verb, so the
+        reload uses the one fixed control label through ``launchctl kickstart``.
+        The worker boundary is never reloaded by this ARM path; both arm bits are
+        still false afterwards, so a running worker cannot execute anything.
+        """
+
+        if self._loaded(CONTROL_LABEL):
+            self._run_fixed(
+                ["/bin/launchctl", "kickstart", "-k", f"system/{CONTROL_LABEL}"]
+            )
+        else:
+            release = SYSTEM_ROOT / "releases" / expected_sha
+            self._run_fixed(
+                [
+                    "/bin/bash",
+                    os.fspath(release / "ops/executive_os/service-control.sh"),
+                    "start",
+                ],
+                cwd=release,
+                timeout=45.0,
+            )
+        if not self._loaded(CONTROL_LABEL):
+            raise TransactionEffectUnknown()
+        if self._active_transaction is not None:
+            self._persist_phase(
+                self._active_transaction,
+                "CONTROL_RECONCILED",
+                operation="CEO_SUBMIT_ARM",
+            )
+
+    def prove_control_ready(self, expected_sha: str) -> None:
+        deadline = time.monotonic() + 45.0
+        while time.monotonic() < deadline:
+            if self._loaded(CONTROL_LABEL) and self._control_ready(expected_sha):
+                if self._active_transaction is not None:
+                    self._persist_phase(
+                        self._active_transaction,
+                        "READY_PROVEN",
+                        operation="CEO_SUBMIT_ARM",
+                    )
+                return
+            time.sleep(1.0)
+        raise RuntimeError("Executive control service did not reach READY")
+
+    def rollback_ceo_submit(
+        self, transaction: TransactionContext, receipt: Mapping[str, Any]
+    ) -> None:
+        """Restore the archived preimage and prove it, or stay EFFECT_UNKNOWN."""
+
+        self._active_transaction = transaction
+        control_candidate, _worker_candidate = self._candidate_paths(
+            transaction.transaction_id
+        )
+        self._remove_candidate(control_candidate)
+        prior_control_bytes = transaction.prior_configs.control_bytes or encode_config(
+            transaction.prior_configs.control
+        )
+        if (
+            sha256_bytes(prior_control_bytes) != transaction.prior_configs.control_sha256
+        ):
+            raise TransactionEffectUnknown()
+        _atomic_file(
+            CONTROL_CONFIG,
+            prior_control_bytes,
+            mode=0o440,
+            uid=0,
+            gid=grp.getgrnam(CONTROL_GROUP).gr_gid,
+            replace=CONTROL_CONFIG.exists() or CONTROL_CONFIG.is_symlink(),
+        )
+        self.write_ceo_submit_receipt(transaction, receipt)
+        (
+            control,
+            _worker,
+            control_digest,
+            worker_digest,
+            _control_raw,
+            _worker_raw,
+        ) = self._configs()
+        if (
+            control.get("ceo_submit_armed") is not False
+            or control_digest != transaction.prior_configs.control_sha256
+            or worker_digest != transaction.prior_configs.worker_sha256
         ):
             raise TransactionEffectUnknown()
         self.complete_transaction(transaction)
