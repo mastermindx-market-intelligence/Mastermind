@@ -746,3 +746,171 @@ def test_lost_response_after_first_directory_create_is_effect_unknown(
     assert calls == 1
     assert first_directory.is_dir()
     assert prepared._state == "EFFECT_UNKNOWN"
+
+
+
+def test_prepare_parent_swap_never_reads_outside_install_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle, install_root = _bundle(tmp_path)
+    target = sorted(bundle.artifacts, key=lambda row: str(row.destination))[0]
+    target.destination.parent.mkdir(parents=True, mode=0o700)
+    target.destination.parent.chmod(0o700)
+    prior = b"admitted-prior-bytes"
+    target.destination.write_bytes(prior)
+    target.destination.chmod(target.mode)
+    current = {str(target.destination): prior}
+    plan = deployment.plan_deployment(bundle, current)
+
+    outside = tmp_path / "outside-prepare"
+    outside.mkdir(mode=0o700)
+    outside_secret = b"outside-secret-must-not-be-read"
+    (outside / target.destination.name).write_bytes(outside_secret)
+    displaced = tmp_path / "displaced-prepare-parent"
+    original_lstat = Path.lstat
+    original_read_bytes = Path.read_bytes
+    injected = False
+    outside_read = False
+
+    def swap_parent_after_target_lstat(self: Path):
+        nonlocal injected
+        info = original_lstat(self)
+        if self == target.destination and not injected:
+            injected = True
+            target.destination.parent.rename(displaced)
+            target.destination.parent.symlink_to(outside, target_is_directory=True)
+        return info
+
+    def track_path_read(self: Path) -> bytes:
+        nonlocal outside_read
+        if self == target.destination and injected:
+            outside_read = True
+        return original_read_bytes(self)
+
+    monkeypatch.setattr(Path, "lstat", swap_parent_after_target_lstat)
+    monkeypatch.setattr(Path, "read_bytes", track_path_read)
+
+    prepared = None
+    try:
+        prepared = applier.prepare_deployment(
+            bundle,
+            plan,
+            install_root=install_root,
+            expected_uid=install_root.stat().st_uid,
+            expected_gid=install_root.stat().st_gid,
+            operation_key="web-sol-install1-transactional-applier-source-20260916-sol-001",
+        )
+    except applier.WebSolDeploymentApplyError as exc:
+        assert exc.code in {
+            "PREIMAGE_CONFLICT",
+            "DIRECTORY_PREIMAGE_CONFLICT",
+            "TARGET_READ_FAILED",
+        }
+
+    assert outside_read is False
+    if prepared is not None:
+        captured = next(row for row in prepared.preimages if row.path == target.destination)
+        assert captured.prior_bytes == prior
+    assert (outside / target.destination.name).read_bytes() == outside_secret
+
+
+
+def test_apply_preimage_parent_swap_never_reads_outside_install_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle, install_root = _bundle(tmp_path)
+    target = sorted(bundle.artifacts, key=lambda row: str(row.destination))[0]
+    target.destination.parent.mkdir(parents=True, mode=0o700)
+    target.destination.parent.chmod(0o700)
+    prior = b"admitted-prior-before-apply"
+    target.destination.write_bytes(prior)
+    target.destination.chmod(target.mode)
+    prepared = applier.prepare_deployment(
+        bundle,
+        deployment.plan_deployment(bundle, {str(target.destination): prior}),
+        install_root=install_root,
+        expected_uid=install_root.stat().st_uid,
+        expected_gid=install_root.stat().st_gid,
+        operation_key="web-sol-install1-transactional-applier-source-20260916-sol-001",
+    )
+
+    outside = tmp_path / "outside-apply-preimage"
+    outside.mkdir(mode=0o700)
+    outside_secret = b"outside-apply-secret-must-not-be-read"
+    (outside / target.destination.name).write_bytes(outside_secret)
+    displaced = tmp_path / "displaced-apply-preimage-parent"
+    original_lstat = Path.lstat
+    original_read_bytes = Path.read_bytes
+    injected = False
+    outside_read = False
+
+    def swap_parent_after_target_lstat(self: Path):
+        nonlocal injected
+        info = original_lstat(self)
+        if self == target.destination and not injected:
+            injected = True
+            target.destination.parent.rename(displaced)
+            target.destination.parent.symlink_to(outside, target_is_directory=True)
+        return info
+
+    def track_path_read(self: Path) -> bytes:
+        nonlocal outside_read
+        if self == target.destination and injected:
+            outside_read = True
+        return original_read_bytes(self)
+
+    monkeypatch.setattr(Path, "lstat", swap_parent_after_target_lstat)
+    monkeypatch.setattr(Path, "read_bytes", track_path_read)
+
+    applied = None
+    try:
+        applied = applier.apply_deployment(prepared)
+    except applier.WebSolDeploymentApplyError as exc:
+        assert exc.code in {
+            "PREIMAGE_CONFLICT",
+            "APPLY_ABORTED_ROLLED_BACK",
+            "APPLY_EFFECT_UNKNOWN",
+        }
+
+    assert outside_read is False
+    assert (outside / target.destination.name).read_bytes() == outside_secret
+    if applied is not None:
+        applier.rollback_deployment(applied)
+
+
+
+def test_prepare_refuses_unbounded_preimage_bytes_before_effect(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle, install_root = _bundle(tmp_path)
+    artifacts = sorted(bundle.artifacts, key=lambda row: str(row.destination))[:2]
+    current: dict[str, bytes] = {}
+    for index, artifact in enumerate(artifacts):
+        artifact.destination.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+        artifact.destination.parent.chmod(0o700)
+        prior = bytes([65 + index]) * 12
+        artifact.destination.write_bytes(prior)
+        artifact.destination.chmod(artifact.mode)
+        current[str(artifact.destination)] = prior
+
+    monkeypatch.setattr(applier, "MAX_PREIMAGE_BYTES", 16, raising=False)
+    monkeypatch.setattr(applier, "MAX_TOTAL_PREIMAGE_BYTES", 20, raising=False)
+
+    with pytest.raises(
+        applier.WebSolDeploymentApplyError,
+        match="PREIMAGE_TOO_LARGE",
+    ):
+        applier.prepare_deployment(
+            bundle,
+            deployment.plan_deployment(bundle, current),
+            install_root=install_root,
+            expected_uid=install_root.stat().st_uid,
+            expected_gid=install_root.stat().st_gid,
+            operation_key="web-sol-install1-transactional-applier-source-20260916-sol-001",
+        )
+
+    for index, artifact in enumerate(artifacts):
+        assert artifact.destination.read_bytes() == bytes([65 + index]) * 12

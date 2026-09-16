@@ -19,6 +19,8 @@ from typing import Any
 from . import web_sol_deployment as deployment
 
 PREPARED_RECEIPT_SCHEMA = "mastermind.web_sol_deployment_prepared_receipt.v1"
+MAX_PREIMAGE_BYTES = 1_048_576
+MAX_TOTAL_PREIMAGE_BYTES = 4_194_304
 
 _OPERATION_RE = re.compile(r"\A[a-z0-9][a-z0-9-]{0,127}\Z")
 
@@ -211,6 +213,77 @@ def _capture_directory_preimages(
     return tuple(rows)
 
 
+def _read_named_regular_file_at(
+    parent_descriptor: int,
+    name: str,
+    *,
+    expected_uid: int,
+    expected_gid: int,
+) -> tuple[os.stat_result, bytes]:
+    """Read one exact regular file through an already-confined parent fd."""
+
+    if not name or name in {".", ".."} or "/" in name or "\x00" in name:
+        raise WebSolDeploymentApplyError("TARGET_READ_FAILED")
+    try:
+        named = os.stat(name, dir_fd=parent_descriptor, follow_symlinks=False)
+    except OSError as exc:
+        raise WebSolDeploymentApplyError("TARGET_READ_FAILED") from exc
+    if stat.S_ISLNK(named.st_mode) or not stat.S_ISREG(named.st_mode):
+        raise WebSolDeploymentApplyError("TARGET_SYMLINK_REFUSED")
+    if named.st_size > MAX_PREIMAGE_BYTES:
+        raise WebSolDeploymentApplyError("PREIMAGE_TOO_LARGE")
+    if named.st_nlink != 1:
+        raise WebSolDeploymentApplyError("TARGET_LINK_COUNT_INVALID")
+    if named.st_uid != expected_uid or named.st_gid != expected_gid:
+        raise WebSolDeploymentApplyError("TARGET_OWNER_MISMATCH")
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise WebSolDeploymentApplyError("DIRECTORY_DESCRIPTOR_UNAVAILABLE")
+    try:
+        descriptor = os.open(
+            name,
+            os.O_RDONLY | os.O_NOFOLLOW,
+            dir_fd=parent_descriptor,
+        )
+    except OSError as exc:
+        raise WebSolDeploymentApplyError("TARGET_READ_FAILED") from exc
+    try:
+        opened = os.fstat(descriptor)
+        if (
+            (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)
+            or not stat.S_ISREG(opened.st_mode)
+            or opened.st_nlink != 1
+            or opened.st_uid != expected_uid
+            or opened.st_gid != expected_gid
+        ):
+            raise WebSolDeploymentApplyError("PREIMAGE_CONFLICT")
+        payload = bytearray()
+        while True:
+            chunk = os.read(descriptor, 65536)
+            if not chunk:
+                break
+            if len(payload) + len(chunk) > MAX_PREIMAGE_BYTES:
+                raise WebSolDeploymentApplyError("PREIMAGE_TOO_LARGE")
+            payload.extend(chunk)
+        final = os.fstat(descriptor)
+        if (
+            final.st_dev,
+            final.st_ino,
+            final.st_size,
+            final.st_mtime_ns,
+        ) != (
+            opened.st_dev,
+            opened.st_ino,
+            opened.st_size,
+            opened.st_mtime_ns,
+        ) or len(payload) != final.st_size:
+            raise WebSolDeploymentApplyError("PREIMAGE_CONFLICT")
+        return final, bytes(payload)
+    except OSError as exc:
+        raise WebSolDeploymentApplyError("TARGET_READ_FAILED") from exc
+    finally:
+        os.close(descriptor)
+
+
 def _prepared_digest_from_state(
     *,
     operation_key: str,
@@ -308,19 +381,62 @@ def prepare_deployment(
         expected_gid=expected_gid,
     )
 
+    provisional = PreparedDeployment(
+        operation_key=operation,
+        bundle=bundle,
+        plan=plan,
+        install_root=root,
+        expected_uid=expected_uid,
+        expected_gid=expected_gid,
+        preimages=(),
+        directory_preimages=directory_preimages,
+        prepared_digest="",
+    )
+    directories_by_path = {row.path: row for row in directory_preimages}
+
     preimages: list[ArtifactPreimage] = []
-    digest_rows: list[dict[str, object]] = []
+    total_preimage_bytes = 0
     for artifact in artifacts:
         target = artifact.destination
         change = rows[str(target)]
         if change.next_sha256 != artifact.sha256 or change.mode != artifact.mode:
             raise WebSolDeploymentApplyError("PLAN_MISMATCH")
-        try:
-            info = target.lstat()
-        except FileNotFoundError:
-            info = None
-        except OSError as exc:
-            raise WebSolDeploymentApplyError("TARGET_READ_FAILED") from exc
+
+        chain = _parent_chain(target, root)
+        parent_absent = any(
+            directories_by_path[path].prior_state == "ABSENT"
+            for path in chain
+        )
+        info: os.stat_result | None = None
+        content: bytes | None = None
+        if not parent_absent:
+            parent_descriptor = _open_verified_directory(target.parent, provisional)
+            try:
+                try:
+                    os.stat(
+                        target.name,
+                        dir_fd=parent_descriptor,
+                        follow_symlinks=False,
+                    )
+                except FileNotFoundError:
+                    pass
+                except OSError as exc:
+                    raise WebSolDeploymentApplyError("TARGET_READ_FAILED") from exc
+                else:
+                    info, content = _read_named_regular_file_at(
+                        parent_descriptor,
+                        target.name,
+                        expected_uid=expected_uid,
+                        expected_gid=expected_gid,
+                    )
+                if not _directory_binding_current(
+                    parent_descriptor,
+                    target.parent,
+                    provisional,
+                ):
+                    raise WebSolDeploymentApplyError("PREIMAGE_CONFLICT")
+            finally:
+                os.close(parent_descriptor)
 
         if info is None:
             if change.action != "CREATE" or change.prior_sha256 is not None:
@@ -337,14 +453,11 @@ def prepare_deployment(
                 prior_gid=None,
             )
         else:
-            if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
-                raise WebSolDeploymentApplyError("TARGET_SYMLINK_REFUSED")
-            if info.st_uid != expected_uid or info.st_gid != expected_gid:
-                raise WebSolDeploymentApplyError("TARGET_OWNER_MISMATCH")
-            try:
-                content = target.read_bytes()
-            except OSError as exc:
-                raise WebSolDeploymentApplyError("TARGET_READ_FAILED") from exc
+            if content is None:
+                raise WebSolDeploymentApplyError("TARGET_READ_FAILED")
+            total_preimage_bytes += len(content)
+            if total_preimage_bytes > MAX_TOTAL_PREIMAGE_BYTES:
+                raise WebSolDeploymentApplyError("PREIMAGE_TOO_LARGE")
             prior_sha = _sha256(content)
             expected_action = "UNCHANGED" if content == artifact.content else "UPDATE"
             if change.action != expected_action or change.prior_sha256 != prior_sha:
@@ -364,20 +477,6 @@ def prepare_deployment(
                 prior_gid=info.st_gid,
             )
         preimages.append(row)
-        digest_rows.append(
-            {
-                "kind": row.kind,
-                "path_digest": row.path_digest,
-                "prior_state": row.prior_state,
-                "prior_sha256": row.prior_sha256,
-                "prior_mode": row.prior_mode,
-                "prior_uid": row.prior_uid,
-                "prior_gid": row.prior_gid,
-                "action": change.action,
-                "next_sha256": change.next_sha256,
-                "next_mode": change.mode,
-            }
-        )
 
     prepared_digest = _prepared_digest_from_state(
         operation_key=operation,
@@ -404,6 +503,8 @@ def prepare_deployment(
 __all__ = [
     "ArtifactPreimage",
     "DirectoryPreimage",
+    "MAX_PREIMAGE_BYTES",
+    "MAX_TOTAL_PREIMAGE_BYTES",
     "PREPARED_RECEIPT_SCHEMA",
     "PreparedDeployment",
     "WebSolDeploymentApplyError",
@@ -545,47 +646,97 @@ def _parent_chain(target: Path, root: Path) -> tuple[Path, ...]:
     return tuple(rows)
 
 
-def _current_matches_directory_preimage(row: DirectoryPreimage) -> bool:
-    try:
-        info = row.path.lstat()
-    except FileNotFoundError:
-        return row.prior_state == "ABSENT"
-    except OSError:
-        return False
-    if row.prior_state != "PRESENT":
-        return False
-    return (
-        stat.S_ISDIR(info.st_mode)
-        and not stat.S_ISLNK(info.st_mode)
-        and info.st_dev == row.prior_dev
-        and info.st_ino == row.prior_ino
-        and stat.S_IMODE(info.st_mode) == row.prior_mode
-        and info.st_uid == row.prior_uid
-        and info.st_gid == row.prior_gid
-    )
+def _deepest_present_directory_ancestor(
+    path: Path,
+    prepared: PreparedDeployment,
+) -> DirectoryPreimage:
+    candidates = [
+        row
+        for row in prepared.directory_preimages
+        if row.prior_state == "PRESENT"
+        and (row.path == path or row.path in path.parents)
+    ]
+    if not candidates:
+        raise WebSolDeploymentApplyError("PREPARED_INTEGRITY_MISMATCH")
+    return max(candidates, key=lambda row: len(row.path.parts))
 
 
-def _current_matches_preimage(row: ArtifactPreimage) -> bool:
+def _current_matches_directory_preimage(
+    row: DirectoryPreimage,
+    prepared: PreparedDeployment,
+) -> bool:
     try:
-        info = row.path.lstat()
-    except FileNotFoundError:
-        return row.prior_state == "ABSENT"
-    except OSError:
+        if row.prior_state == "PRESENT":
+            descriptor = _open_verified_directory(row.path, prepared)
+            try:
+                return _directory_binding_current(
+                    descriptor,
+                    row.path,
+                    prepared,
+                )
+            finally:
+                os.close(descriptor)
+        if row.prior_state != "ABSENT":
+            return False
+        ancestor = _deepest_present_directory_ancestor(row.path, prepared)
+        relative = row.path.relative_to(ancestor.path)
+        if not relative.parts:
+            return False
+        descriptor = _open_verified_directory(ancestor.path, prepared)
+        try:
+            return (
+                _named_entry_absent(descriptor, relative.parts[0])
+                and _directory_binding_current(
+                    descriptor,
+                    ancestor.path,
+                    prepared,
+                )
+            )
+        finally:
+            os.close(descriptor)
+    except (OSError, WebSolDeploymentApplyError, ValueError):
         return False
-    if row.prior_state != "PRESENT":
-        return False
-    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
-        return False
-    if (
-        info.st_uid != row.prior_uid
-        or info.st_gid != row.prior_gid
-        or stat.S_IMODE(info.st_mode) != row.prior_mode
-    ):
-        return False
+
+
+def _current_matches_preimage(
+    row: ArtifactPreimage,
+    prepared: PreparedDeployment,
+) -> bool:
+    absent_parents = [
+        directory
+        for directory in prepared.directory_preimages
+        if directory.prior_state == "ABSENT"
+        and (
+            directory.path == row.path.parent
+            or directory.path in row.path.parent.parents
+        )
+    ]
     try:
-        return row.path.read_bytes() == row.prior_bytes
-    except OSError:
-        return False
+        descriptor = _open_verified_directory(row.path.parent, prepared)
+    except (OSError, WebSolDeploymentApplyError):
+        if row.prior_state != "ABSENT" or not absent_parents:
+            return False
+        shallowest = min(absent_parents, key=lambda item: len(item.path.parts))
+        return _current_matches_directory_preimage(shallowest, prepared)
+    try:
+        if row.prior_state == "ABSENT":
+            matches = _named_entry_absent(descriptor, row.path.name)
+        elif row.prior_state == "PRESENT":
+            matches = _named_preimage_matches(
+                descriptor,
+                row.path.name,
+                row,
+                prepared,
+            )
+        else:
+            return False
+        return matches and _directory_binding_current(
+            descriptor,
+            row.path.parent,
+            prepared,
+        )
+    finally:
+        os.close(descriptor)
 
 
 def _current_matches_artifact(
@@ -593,21 +744,29 @@ def _current_matches_artifact(
     prepared: PreparedDeployment,
 ) -> bool:
     try:
-        info = artifact.destination.lstat()
-    except OSError:
-        return False
-    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
-        return False
-    if (
-        info.st_uid != prepared.expected_uid
-        or info.st_gid != prepared.expected_gid
-        or stat.S_IMODE(info.st_mode) != artifact.mode
-    ):
+        descriptor = _open_verified_directory(
+            artifact.destination.parent,
+            prepared,
+        )
+    except (OSError, WebSolDeploymentApplyError):
         return False
     try:
-        return artifact.destination.read_bytes() == artifact.content
-    except OSError:
-        return False
+        return (
+            _named_file_matches(
+                descriptor,
+                artifact.destination.name,
+                artifact.content,
+                artifact.mode,
+                prepared,
+            )
+            and _directory_binding_current(
+                descriptor,
+                artifact.destination.parent,
+                prepared,
+            )
+        )
+    finally:
+        os.close(descriptor)
 
 
 def _validate_prepared_digest(prepared: PreparedDeployment) -> None:
@@ -638,11 +797,14 @@ def _assert_prepared_integrity(prepared: PreparedDeployment) -> None:
 def _assert_prepared(prepared: PreparedDeployment) -> None:
     _assert_prepared_integrity(prepared)
     if any(
-        not _current_matches_directory_preimage(row)
+        not _current_matches_directory_preimage(row, prepared)
         for row in prepared.directory_preimages
     ):
         raise WebSolDeploymentApplyError("PREIMAGE_CONFLICT")
-    if any(not _current_matches_preimage(row) for row in prepared.preimages):
+    if any(
+        not _current_matches_preimage(row, prepared)
+        for row in prepared.preimages
+    ):
         raise WebSolDeploymentApplyError("PREIMAGE_CONFLICT")
 
 
@@ -1123,7 +1285,7 @@ def _restore_file(
     finally:
         os.close(parent_descriptor)
 
-    if not _current_matches_preimage(row):
+    if not _current_matches_preimage(row, prepared):
         raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN")
 
 
@@ -1229,9 +1391,12 @@ def _abort_partial_apply(
         ):
             _remove_created_directory(directory, prepared)
         if (
-            any(not _current_matches_preimage(row) for row in prepared.preimages)
+            any(
+                not _current_matches_preimage(row, prepared)
+                for row in prepared.preimages
+            )
             or any(
-                not _current_matches_directory_preimage(row)
+                not _current_matches_directory_preimage(row, prepared)
                 for row in prepared.directory_preimages
             )
         ):
@@ -1259,7 +1424,7 @@ def rollback_deployment(applied: AppliedDeployment) -> dict[str, object]:
     changed_paths = set(applied.changed_paths)
     for row in reversed(applied.prepared.preimages):
         if row.path not in changed_paths:
-            if not _current_matches_preimage(row):
+            if not _current_matches_preimage(row, applied.prepared):
                 raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN")
             continue
         _restore_file(row, artifacts[str(row.path)], applied.prepared)
@@ -1274,7 +1439,7 @@ def rollback_deployment(applied: AppliedDeployment) -> dict[str, object]:
     ):
         _remove_created_directory(directory, applied.prepared)
     for row in applied.prepared.preimages:
-        if not _current_matches_preimage(row):
+        if not _current_matches_preimage(row, applied.prepared):
             raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN")
     applied._state = "ROLLED_BACK"
     applied.prepared._state = "ROLLED_BACK"
@@ -1294,45 +1459,73 @@ def _current_matches_post_directory(
     row: DirectoryPreimage,
     prepared: PreparedDeployment,
 ) -> bool:
-    if row.prior_state == "PRESENT":
-        return _current_matches_directory_preimage(row)
     try:
-        info = row.path.lstat()
-    except OSError:
+        descriptor = _open_verified_directory(row.path, prepared)
+    except (OSError, WebSolDeploymentApplyError):
         return False
-    return (
-        stat.S_ISDIR(info.st_mode)
-        and not stat.S_ISLNK(info.st_mode)
-        and info.st_uid == prepared.expected_uid
-        and info.st_gid == prepared.expected_gid
-        and stat.S_IMODE(info.st_mode) == _PRIVATE_DIRECTORY_MODE
-    )
+    try:
+        return _directory_binding_current(descriptor, row.path, prepared)
+    finally:
+        os.close(descriptor)
 
 
 def _transaction_temporaries_absent(prepared: PreparedDeployment) -> bool:
     for artifact in prepared.bundle.artifacts:
-        apply_temp = _temporary_path(artifact, prepared)
-        rollback_temp = artifact.destination.with_name(
-            f".{artifact.destination.name}.mmx-"
-            f"{prepared.prepared_digest[:16]}.rollback.tmp"
-        )
-        if (
-            apply_temp.exists()
-            or apply_temp.is_symlink()
-            or rollback_temp.exists()
-            or rollback_temp.is_symlink()
-        ):
-            return False
+        try:
+            descriptor = _open_verified_directory(
+                artifact.destination.parent,
+                prepared,
+            )
+        except (OSError, WebSolDeploymentApplyError):
+            absent_parents = [
+                row
+                for row in prepared.directory_preimages
+                if row.prior_state == "ABSENT"
+                and (
+                    row.path == artifact.destination.parent
+                    or row.path in artifact.destination.parent.parents
+                )
+            ]
+            if not absent_parents:
+                return False
+            shallowest = min(
+                absent_parents,
+                key=lambda row: len(row.path.parts),
+            )
+            if not _current_matches_directory_preimage(shallowest, prepared):
+                return False
+            continue
+        try:
+            apply_temp = _temporary_path(artifact, prepared)
+            rollback_temp = artifact.destination.with_name(
+                f".{artifact.destination.name}.mmx-"
+                f"{prepared.prepared_digest[:16]}.rollback.tmp"
+            )
+            if not (
+                _named_entry_absent(descriptor, apply_temp.name)
+                and _named_entry_absent(descriptor, rollback_temp.name)
+                and _directory_binding_current(
+                    descriptor,
+                    artifact.destination.parent,
+                    prepared,
+                )
+            ):
+                return False
+        finally:
+            os.close(descriptor)
     return True
 
 
 def _preimage_complete(prepared: PreparedDeployment) -> bool:
     return (
         all(
-            _current_matches_directory_preimage(row)
+            _current_matches_directory_preimage(row, prepared)
             for row in prepared.directory_preimages
         )
-        and all(_current_matches_preimage(row) for row in prepared.preimages)
+        and all(
+            _current_matches_preimage(row, prepared)
+            for row in prepared.preimages
+        )
         and _transaction_temporaries_absent(prepared)
     )
 

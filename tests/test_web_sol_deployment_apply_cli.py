@@ -577,3 +577,112 @@ def test_cli_rollback_refuses_state_through_symlinked_parent_before_target_effec
     assert error["code"] == "STATE_INVALID"
     for artifact in bundle.artifacts:
         assert artifact.destination.read_bytes() == artifact.content
+
+
+
+def test_cli_refuses_state_inside_install_root_before_target_effect(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    bundle, install_root = _bundle(tmp_path)
+    request = tmp_path / "request.json"
+    state = install_root / "transaction-state.json"
+    _write_private(request, _request_document(bundle, install_root))
+
+    result = cli.main(
+        ["apply", "--request", str(request), "--state", str(state)]
+    )
+
+    assert result == 2
+    error = json.loads(capsys.readouterr().err)
+    assert error == {
+        "schema": cli.ERROR_SCHEMA,
+        "status": "REFUSED",
+        "code": "INVALID_INPUT",
+        "target_effect": "NONE",
+        "production_acceptance_granted": False,
+    }
+    assert not state.exists()
+    assert list(install_root.rglob("*")) == []
+
+
+
+def test_cli_refuses_state_capsule_larger_than_its_read_limit_before_effect(
+    tmp_path: Path,
+    capsys,
+    monkeypatch,
+) -> None:
+    bundle, install_root = _bundle(tmp_path)
+    request = tmp_path / "request.json"
+    state = tmp_path / "state.json"
+    request_document = _request_document(bundle, install_root)
+    _write_private(request, request_document)
+    monkeypatch.setattr(cli, "MAX_JSON_BYTES", len(request.read_bytes()) + 128)
+
+    result = cli.main(
+        ["apply", "--request", str(request), "--state", str(state)]
+    )
+
+    assert result == 2
+    error = json.loads(capsys.readouterr().err)
+    assert error == {
+        "schema": cli.ERROR_SCHEMA,
+        "status": "REFUSED",
+        "code": "STATE_INVALID",
+        "target_effect": "NONE",
+        "production_acceptance_granted": False,
+    }
+    assert not state.exists()
+    assert list(install_root.rglob("*")) == []
+
+
+
+def test_cli_request_parent_swap_never_reads_outside_private_file(
+    tmp_path: Path,
+    capsys,
+    monkeypatch,
+) -> None:
+    bundle, install_root = _bundle(tmp_path)
+    request_parent = tmp_path / "request-parent"
+    request_parent.mkdir(mode=0o700)
+    request = request_parent / "request.json"
+    _write_private(request, _request_document(bundle, install_root))
+
+    outside = tmp_path / "outside-request"
+    outside.mkdir(mode=0o700)
+    alternate = _request_document(bundle, install_root)
+    alternate["operation_key"] = "outside-substituted-operation"
+    _write_private(outside / request.name, alternate)
+    displaced = tmp_path / "displaced-request-parent"
+    original_lstat = Path.lstat
+    original_open = Path.open
+    injected = False
+    outside_read = False
+
+    def swap_parent_after_request_lstat(self: Path):
+        nonlocal injected
+        info = original_lstat(self)
+        if self == request and not injected:
+            injected = True
+            request_parent.rename(displaced)
+            request_parent.symlink_to(outside, target_is_directory=True)
+        return info
+
+    def track_path_open(self: Path, *args, **kwargs):
+        nonlocal outside_read
+        if self == request and injected:
+            outside_read = True
+        return original_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "lstat", swap_parent_after_request_lstat)
+    monkeypatch.setattr(Path, "open", track_path_open)
+
+    result = cli.main(["preflight", "--request", str(request)])
+    output = capsys.readouterr()
+
+    assert result in {0, 2}
+    assert outside_read is False
+    if result == 0:
+        receipt = json.loads(output.out)
+        assert receipt["operation_key"] != "outside-substituted-operation"
+    assert list(install_root.rglob("*")) == []

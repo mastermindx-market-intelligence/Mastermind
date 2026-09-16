@@ -85,21 +85,20 @@ def _decode_private_json_payload(payload: bytes) -> Any:
 
 def _private_json_file(path: Path) -> Any:
     try:
-        info = path.lstat()
-        if (
-            stat.S_ISLNK(info.st_mode)
-            or not stat.S_ISREG(info.st_mode)
-            or info.st_nlink != 1
-            or stat.S_IMODE(info.st_mode) & 0o077
-        ):
+        parent, parent_descriptor = _open_state_parent(path)
+    except applier.WebSolDeploymentApplyError as exc:
+        raise applier.WebSolDeploymentApplyError("INVALID_INPUT") from exc
+    try:
+        value, _payload = _private_json_at(
+            parent_descriptor,
+            path.name,
+            error_code="INVALID_INPUT",
+        )
+        if not _state_parent_binding_current(parent, parent_descriptor):
             raise applier.WebSolDeploymentApplyError("INVALID_INPUT")
-        with path.open("rb") as stream:
-            payload = stream.read(MAX_JSON_BYTES + 1)
-        return _decode_private_json_payload(payload)
-    except applier.WebSolDeploymentApplyError:
-        raise
-    except OSError:
-        raise applier.WebSolDeploymentApplyError("INVALID_INPUT") from None
+        return value
+    finally:
+        os.close(parent_descriptor)
 
 
 def _exact_dict(value: object, keys: frozenset[str]) -> dict[str, Any]:
@@ -418,6 +417,8 @@ def _private_state_document(
         "production_acceptance_granted": False,
     }
     body["state_digest"] = hashlib.sha256(_canonical_bytes(body)).hexdigest()
+    if len(_canonical_bytes(body)) + 1 > MAX_JSON_BYTES:
+        raise applier.WebSolDeploymentApplyError("STATE_INVALID")
     return body
 
 
@@ -449,6 +450,21 @@ def _emit(value: object, *, stream: object | None = None) -> None:
     )
 
 
+def _assert_state_outside_install_root(
+    state_path: Path,
+    install_root: Path,
+    *,
+    error_code: str,
+) -> None:
+    if not state_path.is_absolute() or ".." in state_path.parts:
+        raise applier.WebSolDeploymentApplyError(error_code)
+    try:
+        state_path.relative_to(install_root)
+    except ValueError:
+        return
+    raise applier.WebSolDeploymentApplyError(error_code)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
@@ -457,6 +473,11 @@ def main(argv: list[str] | None = None) -> int:
                 raise applier.WebSolDeploymentApplyError("INVALID_INPUT")
             phase, request_document, prepared, applied, state_digest = (
                 _decode_private_state(_private_state_file(args.state))
+            )
+            _assert_state_outside_install_root(
+                args.state,
+                prepared.install_root,
+                error_code="STATE_INVALID",
             )
             if phase != "APPLIED" or applied is None:
                 raise applier.WebSolDeploymentApplyError("TRANSACTION_CONSUMED")
@@ -487,6 +508,12 @@ def main(argv: list[str] | None = None) -> int:
             raise applier.WebSolDeploymentApplyError("INVALID_INPUT")
         request_document = _private_json_file(args.request)
         bundle, plan, request_meta = _decode_request(request_document)
+        if args.state is not None:
+            _assert_state_outside_install_root(
+                args.state,
+                request_meta["install_root"],
+                error_code="INVALID_INPUT",
+            )
         if (
             args.mode == "apply"
             and args.state is not None
@@ -768,6 +795,8 @@ def _write_private_state(
             raise applier.WebSolDeploymentApplyError("STATE_CONFLICT")
 
         payload = _canonical_bytes(document) + b"\n"
+        if len(payload) > MAX_JSON_BYTES:
+            raise applier.WebSolDeploymentApplyError("STATE_INVALID")
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
         descriptor = -1
         try:
@@ -865,12 +894,15 @@ def _decode_preimage(
             raise applier.WebSolDeploymentApplyError("STATE_INVALID")
         content = None
     elif state == "PRESENT":
-        if type(encoded) is not str or len(encoded) > 2 * MAX_ARTIFACT_BYTES:
+        encoded_limit = 4 * ((applier.MAX_PREIMAGE_BYTES + 2) // 3)
+        if type(encoded) is not str or len(encoded) > encoded_limit:
             raise applier.WebSolDeploymentApplyError("STATE_INVALID")
         try:
             content = base64.b64decode(encoded, validate=True)
         except (ValueError, TypeError):
             raise applier.WebSolDeploymentApplyError("STATE_INVALID") from None
+        if len(content) > applier.MAX_PREIMAGE_BYTES:
+            raise applier.WebSolDeploymentApplyError("STATE_INVALID")
         prior_sha = _digest(prior_sha)
         if hashlib.sha256(content).hexdigest() != prior_sha:
             raise applier.WebSolDeploymentApplyError("STATE_INVALID")
@@ -987,7 +1019,12 @@ def _decode_private_state(
         _decode_preimage(item, artifacts)
         for item in _exact_list(prepared_row["preimages"])
     )
-    if len(preimages) != len(artifacts) or len({str(row.path) for row in preimages}) != len(preimages):
+    if (
+        len(preimages) != len(artifacts)
+        or len({str(row.path) for row in preimages}) != len(preimages)
+        or sum(len(row.prior_bytes or b"") for row in preimages)
+        > applier.MAX_TOTAL_PREIMAGE_BYTES
+    ):
         raise applier.WebSolDeploymentApplyError("STATE_INVALID")
     allowed_directories = _directory_paths(request_meta["install_root"], bundle)
     directory_preimages = tuple(
