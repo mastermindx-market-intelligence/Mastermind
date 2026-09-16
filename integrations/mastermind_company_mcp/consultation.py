@@ -372,7 +372,11 @@ def validate_company_consult_dispatch_request(value: Any) -> dict[str, Any]:
     if value.get("operation") != "consult":
         raise CompanyConsultationToolError("INVALID_REQUEST")
     consultation_schema = value.get("consultation_schema")
-    if consultation_schema not in {CONSULTATION_SCHEMA, GROK_CONSULTATION_SCHEMA}:
+    if (
+        not isinstance(consultation_schema, str)
+        or consultation_schema
+        not in (CONSULTATION_SCHEMA, GROK_CONSULTATION_SCHEMA)
+    ):
         raise CompanyConsultationToolError("INVALID_REQUEST")
     valid_until = value.get("valid_until")
     if not isinstance(valid_until, str) or _UTC_SECOND_RE.fullmatch(valid_until) is None:
@@ -594,12 +598,15 @@ class CompanyConsultationGateway:
                 return _result(tool_name, {"peers": peers})
             if tool_name == "company.consult":
                 peer = self.peer_resolver.resolve(normalized["to"], program_ref=self.program_ref)
-                request = build_company_consult_dispatch_request(
-                    peer=peer.public_projection(),
-                    consultation_schema=peer.consultation_schema,
-                    semantic=normalized,
-                    valid_until=self.utc_now(),
-                )
+                try:
+                    request = build_company_consult_dispatch_request(
+                        peer=peer.public_projection(),
+                        consultation_schema=peer.consultation_schema,
+                        semantic=normalized,
+                        valid_until=self.utc_now(),
+                    )
+                except CompanyConsultationToolError:
+                    return _error(tool_name, "INTERNAL_ERROR")
                 response = await self.dispatcher(tool_name, request)
                 return _result(tool_name, self._service_data(response))
             request = {

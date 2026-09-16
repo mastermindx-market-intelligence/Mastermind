@@ -1130,3 +1130,49 @@ def test_company_consult_dispatch_refuses_impossible_utc_timestamp() -> None:
         )
 
     assert exc_info.value.code == "INVALID_REQUEST"
+
+
+def test_company_consult_pre_dispatch_contract_failure_is_definite_internal_error() -> None:
+    sink = _Dispatcher()
+    gateway = CompanyConsultationGateway(
+        peer_resolver=_resolver(),
+        dispatcher=sink,
+        observed_tool_schema_digest=COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST,
+        utc_now=lambda: "2026-13-40T25:61:61Z",
+    )
+
+    response = _run(
+        gateway.call(
+            "company.consult",
+            {
+                "to": _peer().peer_ref,
+                "question": "Do not claim an unknown effect before dispatch.",
+                "evidence_refs": [],
+                "artifact_revisions": [],
+            },
+        )
+    )
+
+    assert response["ok"] is False
+    assert response["error"]["code"] == "INTERNAL_ERROR"
+    assert sink.calls == []
+
+
+def test_company_consult_dispatch_validator_refuses_unhashable_schema_as_typed_error() -> None:
+    request = consultation_contract.build_company_consult_dispatch_request(
+        peer=_peer().public_projection(),
+        consultation_schema=CONSULTATION_SCHEMA,
+        semantic={
+            "to": _peer().peer_ref,
+            "question": "Refuse malformed schema.",
+            "evidence_refs": [],
+            "artifact_revisions": [],
+        },
+        valid_until="2026-09-14T00:00:00Z",
+    )
+    request["consultation_schema"] = []
+
+    with pytest.raises(CompanyConsultationToolError) as exc_info:
+        consultation_contract.validate_company_consult_dispatch_request(request)
+
+    assert exc_info.value.code == "INVALID_REQUEST"
