@@ -43,6 +43,12 @@ They are intentionally distinct identities and must not be substituted for one a
 - Authorization server: `https://dev-eo0jf8us5mup7wd5.us.auth0.com/`.
 - MCP loopback listener: `127.0.0.1:8443`.
 
+The Auth0 hostname is retained verbatim because it is the issuer configured by the
+installed Executive MCP policy and the issuer used by the successful ChatGPT
+authorization flow. This receipt does not infer deployment tier from the provider's
+`dev-` tenant-name prefix; “production” refers to the exact installed app, tunnel,
+service, runtime, and canonical-effect path identified here.
+
 Two older fixture profiles were explicitly excluded from production evidence:
 
 - `mastermind-executive-chatgpt1` / `tunnel_6a9d2e22e01c819189d7574645e52873`;
@@ -78,9 +84,10 @@ The registered Business app advertised exactly these five tools and no sixth too
 
 ## Four-reader production proof
 
-Reader proof spans pre-canary and post-canary evidence. The table names the phase
-actually used for each tool. A read of the new `JOB-003` is post-effect reconciliation
-and is not represented as evidence that the Job existed before admission.
+Reader proof spans pre-canary and post-canary evidence. The table is an operation-wide
+summary and names the phase actually used for each tool; the modifying admission receipt
+appears in the immediately following section. A read of the new `JOB-003` is post-effect
+reconciliation and is not represented as evidence that the Job existed before admission.
 
 | Tool | Phase | Production result |
 |---|---|---|
@@ -212,12 +219,14 @@ The receipt grounded Mastermind at the installed control release and Macro at
 
 ## Duplicate and conflict canaries
 
-The same operation key and the same normalized intent payload were submitted once more
-through the same app/conversation carrier. The reviewed
+The same submitted `operation_key` and the same normalized intent payload were sent once
+more through the same app/conversation carrier. The reviewed app contract derives the
+stable `request_ref` from that `operation_key`; the
 `control_plane.ceo_intent.canonical_bytes` / `intent_fingerprint` contract serializes the
 whole validated envelope as canonical JSON and hashes it with SHA-256. The replay then
-returned the same fingerprint shown below, so the evidence is normalized-envelope
-identity, not a claim about raw transport-byte formatting. The duplicate result was:
+returned the same request reference and fingerprint shown below, so the evidence is
+normalized-envelope identity, not a claim about raw transport-byte formatting. The
+duplicate result was:
 
 ```json
 {
@@ -263,9 +272,11 @@ After acceptance, duplicate reconciliation, and changed-payload conflict:
 - `JOB-003.status=QUEUED`;
 - durable intent status: accepted, `dispatched=false`, `JOB-003`, `QUEUED`.
 
-The two Jobs present before this operation (`JOB-001`, `JOB-002`) were already queued
-harmless canaries. They were read but not modified. The delta from this operation was
-exactly one additional queued Job.
+Aggregate pre-canary state showed two queued Jobs. `JOB-001` was individually read and
+identified as a harmless admission-path canary; `JOB-002` was observed only through the
+aggregate count and is not individually characterized by this receipt. No submit in this
+operation targeted either pre-existing Job, and the canonical state delta was exactly one
+additional queued Job: `JOB-003`.
 
 ## Provider-surface interaction proof
 
