@@ -288,7 +288,7 @@ git commit -m "feat(grok): persist v3 identity without arming execution"
 - Consumes: Tasks 1-4.
 - Produces: immutable branch head, dependency-isolated and current-base proof, independent review packet, and one draft PR against `master` that remains held until accepted W6-C2 PR #681 lands.
 
-- [ ] **Step 1: Run focused and compatibility suites**
+- [x] **Step 1: Run focused and compatibility suites**
 
 ```bash
 python3 -m pytest -q -p no:randomly -p no:cacheprovider -o addopts='' \
@@ -301,14 +301,14 @@ python3 -m pytest -q -p no:randomly -p no:cacheprovider -o addopts='' \
   tests/test_visible_turn_projection.py
 ```
 
-- [ ] **Step 2: Run every present importer of touched owners**
+- [x] **Step 2: Run every present importer of touched owners**
 
 ```bash
 FILES=$(grep -IlE 'agent_dialogue_consultation_contract|consultation_runtime|session_targets|company_consultation_peer_resolver|mastermind_company_mcp.consultation' tests/*.py | sort)
 printf '%s\n' "$FILES" | xargs python3 -m pytest -q -p no:randomly -p no:cacheprovider -o addopts=''
 ```
 
-- [ ] **Step 3: Run syntax and diff checks**
+- [x] **Step 3: Run syntax and diff checks**
 
 ```bash
 python3 -m py_compile \
@@ -317,13 +317,13 @@ python3 -m py_compile \
   control_plane/session_targets.py \
   integrations/mastermind_company_mcp/consultation.py \
   integrations/slack_agent_dialogue/company_consultation_peer_resolver.py
-git diff --check 0fe8074ff953b2ced9025ed40f0f66019c759967 HEAD
+git diff --check a78b8fe23d8e1ed129880ac47e97ebe96afa8aea HEAD
 ```
 
-- [ ] **Step 4: Verify negative capability boundaries**
+- [x] **Step 4: Verify negative capability boundaries**
 
 ```bash
-git diff --name-only 0fe8074ff953b2ced9025ed40f0f66019c759967 HEAD
+git diff --name-only a78b8fe23d8e1ed129880ac47e97ebe96afa8aea HEAD
 grep -R "grok-bot" config control_plane integrations common tests | sed -n '1,200p'
 ```
 

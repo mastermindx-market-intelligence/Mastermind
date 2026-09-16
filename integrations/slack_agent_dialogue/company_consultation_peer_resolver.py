@@ -118,7 +118,12 @@ class CompanyConsultationPeerResolver:
             or binding.get("binding_generation") < 1
         ):
             raise ConsultationPeerRefused("BINDING_UNAVAILABLE")
-        peer.consultation_schema
+        try:
+            consultation_schema_for_reasoning_surface(
+                binding.get("reasoning_surface")
+            )
+        except DialogueContractError:
+            raise ConsultationPeerRefused("BINDING_UNAVAILABLE") from None
 
 
 @dataclasses.dataclass(frozen=True)

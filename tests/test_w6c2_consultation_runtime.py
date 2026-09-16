@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import inspect
 import json
 import os
 import subprocess
@@ -1700,6 +1701,13 @@ def test_requester_consumption_requires_exact_calling_attempt(tmp_path: Path) ->
     assert consumed.event.payload["requester_actor_ref"]["attempt_id"] == workers[0][1]
 
 
+def test_intent_payload_requires_explicit_trusted_time_keyword() -> None:
+    parameters = inspect.signature(_consultation_intent_payload).parameters
+
+    assert "trusted_observed_at" in parameters
+    assert "observed_at" not in parameters
+
+
 def test_v3_intent_payload_is_exact_while_runtime_admission_stays_dark(
     tmp_path: Path,
 ) -> None:
@@ -1720,7 +1728,7 @@ def test_v3_intent_payload_is_exact_while_runtime_admission_stays_dark(
     payload = _consultation_intent_payload(
         grok,
         carrier_ref="dialogue://fixture/grok-identity",
-        observed_at="2026-09-14T00:00:00Z",
+        trusted_observed_at="2026-09-14T00:00:00Z",
     )
     assert payload["consultation_schema"] == GROK_CONSULTATION_SCHEMA
     assert payload["semantic_fingerprint"] == grok["fingerprint"]

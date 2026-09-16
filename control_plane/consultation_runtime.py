@@ -133,7 +133,7 @@ def _consultation_intent_payload(
     item: Mapping[str, Any],
     *,
     carrier_ref: str,
-    observed_at: str,
+    trusted_observed_at: str,
 ) -> dict[str, Any]:
     return {
         "schema_version": CONSULTATION_INTENT_SCHEMA,
@@ -156,7 +156,7 @@ def _consultation_intent_payload(
         "response_budget": copy.deepcopy(item["response_budget"]),
         "payload_digest": item["fingerprint"],
         "question_digest": hashlib.sha256(item["question"].encode()).hexdigest(),
-        "observed_at": _utc(observed_at),
+        "observed_at": _utc(trusted_observed_at),
     }
 
 
@@ -241,7 +241,7 @@ class ConsultationRuntime:
         payload = _consultation_intent_payload(
             item,
             carrier_ref=carrier_ref,
-            observed_at=trusted_observed_at,
+            trusted_observed_at=trusted_observed_at,
         )
         return self._append(
             item,

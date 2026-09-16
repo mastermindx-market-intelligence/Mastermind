@@ -7,7 +7,7 @@ Introduce an honest, versioned consultation QUESTION identity for the trusted `g
 ## Current authority
 
 - W6-C2 repair source acceptance: PR #681, exact head `de190b2c7e878fd5a4cf6ecb2fc58b34b058ee74`.
-- Protected master at design freeze: `0fe8074ff953b2ced9025ed40f0f66019c759967`.
+- Protected master at design freeze: `0fe8074ff953b2ced9025ed40f0f66019c759967`; current proof pin: `a78b8fe23d8e1ed129880ac47e97ebe96afa8aea`.
 - Existing carrier to preserve: branch `sol/grok-consultation-v2-g1b-20260915`, prior head `b0b4b48d6c4e61255d8f6a93554c6b64e2fb9b57`.
 - The branch name is historical carrier identity. It is not authority to reuse consultation v2.
 
@@ -32,11 +32,11 @@ The existing Grok branch composes accepted W6-C2 repair head `de190b2c7e878fd5a4
 
 ### Peer resolution and Company MCP
 
-`ConsultationPeer` derives its consultation QUESTION schema from the trusted binding surface. `company.consult` carries the derived schema in its internal dispatch request. Callers cannot supply or override that field. `company.peers` remains byte-shape compatible and does not expose schema metadata.
+`ConsultationPeer` derives its consultation QUESTION schema from the trusted binding surface. `company.consult` carries the derived schema in its internal dispatch request. Callers cannot supply or override that field. `company.peers` remains byte-shape compatible and does not expose schema metadata. This is an additive field on the currently hermetic internal v1 dispatch record; before any real dispatcher is introduced, that internal record must receive its own frozen/versioned contract.
 
 ### Runtime receipt
 
-`ConsultationRuntime.intent` persists the exact validated `item["schema"]` rather than hard-coding v1. The pure INTENT payload producer is tested with v3, while the full v3 runtime call must still fail current-recipient admission and emit zero events because this wave creates no Grok SessionTarget. No dispatch, native-acceptance, provider, or credential behavior is added.
+`ConsultationRuntime.intent` persists the exact validated `item["schema"]` rather than hard-coding v1. The pure INTENT payload producer is tested with v3, while the full v3 runtime call must still fail current-recipient admission and emit zero events because that admission owner remains explicitly codex-only; this wave also creates no Grok SessionTarget. No dispatch, native-acceptance, provider, or credential behavior is added.
 
 ### Session-target vocabulary
 
