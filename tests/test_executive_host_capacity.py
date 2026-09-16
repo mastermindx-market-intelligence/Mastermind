@@ -54,7 +54,7 @@ def _snapshot() -> dict:
         "boot_ref": BOOT_REF,
         "observed_at_ms": 1_788_992_000_000,
         "sample_window_ms": 4,
-        "total_observation_window_ms": 1_004,
+        "total_observation_window_ms": 1_003,
         "capacity_pool_ref": POOL_REF,
         "hp0_sha256": HP0_DIGEST,
         "hp0_observed_at_ms": 1_788_991_999_000,
@@ -97,6 +97,12 @@ def test_snapshot_contract_is_closed_and_canonical() -> None:
         value, sort_keys=True, separators=(",", ":"), ensure_ascii=True
     ).encode("ascii") + b"\n"
     assert len(payload) <= MAX_SNAPSHOT_BYTES
+
+
+def test_snapshot_contract_rejects_internally_inconsistent_total_observation_window() -> None:
+    value = _snapshot()
+    value["total_observation_window_ms"] += 1
+    _refuse(value, "TOTAL_WINDOW_MISMATCH")
 
 
 def test_snapshot_contract_rejects_extra_missing_and_schema_drift() -> None:

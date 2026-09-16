@@ -178,6 +178,10 @@ def validate_host_capacity_snapshot(value: Mapping[str, Any]) -> dict[str, Any]:
         minimum=1,
         maximum=5_000,
     )
+    hp0_start_ms = hp0_observed_at_ms - hp0_sample_window_ms
+    expected_total_observation_window_ms = observed_at_ms - hp0_start_ms
+    if total_observation_window_ms != expected_total_observation_window_ms:
+        _refuse("TOTAL_WINDOW_MISMATCH")
     logical_cpu_count = _integer(
         value.get("logical_cpu_count"),
         code="HP0_FACT_INVALID",
