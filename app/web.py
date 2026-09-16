@@ -1658,29 +1658,56 @@ _DECISION_SNAPSHOT_HARD_FALSE_AUTHORITY = {
     "execution_authority": False,
     "numeric_target_authority": False,
 }
+_DECISION_SNAPSHOT_RESERVED_ENVELOPE_KEYS = frozenset(
+    {"schema", "book", "status", "error", *_DECISION_SNAPSHOT_HARD_FALSE_AUTHORITY}
+)
 
 
 def _decision_snapshot_envelope(*, book: str, status: str, error: str | None = None,
                                  extra: dict | None = None) -> dict:
+    """Build a closed status envelope.
+
+    The fixed keys (``schema``/``book``/``status``/``error``/the three hard-false
+    authority flags) always win: any ``extra`` entry colliding with one of them is
+    dropped first, rather than being allowed to overwrite it afterward.
+    """
     body: dict[str, Any] = {
-        "schema": _DECISION_SNAPSHOT_STATUS_SCHEMA,
-        "book": book,
-        "status": status,
-        **_DECISION_SNAPSHOT_HARD_FALSE_AUTHORITY,
+        k: v for k, v in (extra or {}).items()
+        if k not in _DECISION_SNAPSHOT_RESERVED_ENVELOPE_KEYS
     }
+    body["schema"] = _DECISION_SNAPSHOT_STATUS_SCHEMA
+    body["book"] = book
+    body["status"] = status
+    body.update(_DECISION_SNAPSHOT_HARD_FALSE_AUTHORITY)
     if error is not None:
         body["error"] = error
-    if extra:
-        body.update(extra)
     return body
 
 
-def _decision_snapshot_error(status_code: int, *, book: str, error: str) -> JSONResponse:
+def _decision_snapshot_error(status_code: int, *, book: str, error: str,
+                              status: str = "INVALID") -> JSONResponse:
+    """Closed error envelope. ``status`` defaults to the snapshot-state token
+    ``"INVALID"`` only for the two paths where the snapshot/projection itself is
+    invalid (corrupt, oversize); request/resource/internal failures must pass an
+    explicit non-snapshot-state token so a healthy snapshot is never misreported.
+    """
     return JSONResponse(
-        _decision_snapshot_envelope(book=book, status="INVALID", error=error),
+        _decision_snapshot_envelope(book=book, status=status, error=error),
         status_code=status_code,
         headers=_DECISION_SNAPSHOT_NO_STORE,
     )
+
+
+def _decision_snapshot_response(body: dict, *, book: str) -> JSONResponse:
+    """Render a success envelope, refusing rather than letting a serialization
+    failure (e.g. a non-finite float) escape the handler as an unheadered 500."""
+    try:
+        return JSONResponse(body, headers=_DECISION_SNAPSHOT_NO_STORE)
+    except (TypeError, ValueError):
+        _log.exception("Unexpected decision-snapshot response serialization failure")
+        return _decision_snapshot_error(
+            500, book=book, error="internal_error", status="internal_error"
+        )
 
 
 @router.get("/api/decision-snapshot")
@@ -1715,9 +1742,13 @@ def api_decision_snapshot(
             raise ValueError("limit must not be boolean")
         limit_int = int(limit)
     except (TypeError, ValueError):
-        return _decision_snapshot_error(400, book=book, error="invalid_request")
+        return _decision_snapshot_error(
+            400, book=book, error="invalid_request", status="invalid_request"
+        )
     if offset_int < 0 or not (1 <= limit_int <= 100):
-        return _decision_snapshot_error(400, book=book, error="invalid_request")
+        return _decision_snapshot_error(
+            400, book=book, error="invalid_request", status="invalid_request"
+        )
 
     from portfolio import decision_snapshot
 
@@ -1731,18 +1762,23 @@ def api_decision_snapshot(
         )
     except decision_snapshot.SnapshotNotFound:
         if snapshot_id is None:
-            return JSONResponse(
-                _decision_snapshot_envelope(book=book, status="NO_SNAPSHOT"),
-                headers=_DECISION_SNAPSHOT_NO_STORE,
+            return _decision_snapshot_response(
+                _decision_snapshot_envelope(book=book, status="NO_SNAPSHOT"), book=book,
             )
-        return _decision_snapshot_error(404, book=book, error="snapshot_not_found")
+        return _decision_snapshot_error(
+            404, book=book, error="snapshot_not_found", status="not_found"
+        )
     except decision_snapshot.SnapshotInvalidRequest:
-        return _decision_snapshot_error(400, book=book, error="invalid_request")
+        return _decision_snapshot_error(
+            400, book=book, error="invalid_request", status="invalid_request"
+        )
     except decision_snapshot.SnapshotCorrupt:
         return _decision_snapshot_error(503, book=book, error="corrupt_snapshot")
     except Exception:
         _log.exception("Unexpected decision-snapshot read failure")
-        return _decision_snapshot_error(500, book=book, error="internal_error")
+        return _decision_snapshot_error(
+            500, book=book, error="internal_error", status="internal_error"
+        )
 
     if section is None:
         snapshot = payload.get("snapshot")
@@ -1754,7 +1790,7 @@ def api_decision_snapshot(
             status=snapshot.get("state", "INVALID"),
             extra={"snapshot": dict(snapshot)},
         )
-        return JSONResponse(body, headers=_DECISION_SNAPSHOT_NO_STORE)
+        return _decision_snapshot_response(body, book=book)
 
     body = _decision_snapshot_envelope(
         book=book,
@@ -1768,9 +1804,16 @@ def api_decision_snapshot(
             "section": payload.get("section"),
         },
     )
-    if len(json.dumps(body).encode("utf-8")) > _DECISION_SNAPSHOT_MAX_SECTION_BYTES:
+    try:
+        encoded_len = len(json.dumps(body, allow_nan=False).encode("utf-8"))
+    except (TypeError, ValueError):
+        _log.exception("Unexpected decision-snapshot response serialization failure")
+        return _decision_snapshot_error(
+            500, book=book, error="internal_error", status="internal_error"
+        )
+    if encoded_len > _DECISION_SNAPSHOT_MAX_SECTION_BYTES:
         return _decision_snapshot_error(503, book=book, error="invalid_projection")
-    return JSONResponse(body, headers=_DECISION_SNAPSHOT_NO_STORE)
+    return _decision_snapshot_response(body, book=book)
 
 
 @router.get("/api/decisions")

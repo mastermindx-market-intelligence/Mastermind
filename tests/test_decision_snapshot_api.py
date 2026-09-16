@@ -10,8 +10,11 @@ and that a GET never touches the filesystem store.
 """
 from __future__ import annotations
 
+import hashlib
 import inspect
+import os
 import re
+import stat
 from pathlib import Path
 
 import pytest
@@ -166,13 +169,28 @@ def snapshot_root(tmp_path, monkeypatch) -> Path:
 
 
 def _tree_fingerprint(root: Path) -> dict:
+    """A complete, type-aware fingerprint of every node under ``root``.
+
+    Uses ``lstat`` (never following symlinks) so a file-to-symlink swap changes the
+    recorded mode even when the link's target has identical size/mtime, and hashes
+    regular-file content so a same-size, mtime-restored rewrite is still caught.
+    Directories and any other node type are included (no ``is_file()`` filter).
+    """
     if not root.exists():
         return {}
-    return {
-        str(p.relative_to(root)): (p.stat().st_mtime_ns, p.stat().st_size)
-        for p in sorted(root.rglob("*"))
-        if p.is_file()
-    }
+    out: dict[str, tuple] = {}
+    for p in sorted(root.rglob("*")):
+        st = p.lstat()
+        digest = None
+        symlink_target = None
+        if p.is_symlink():
+            symlink_target = os.readlink(p)
+        elif stat.S_ISREG(st.st_mode):
+            digest = hashlib.sha256(p.read_bytes()).hexdigest()
+        out[str(p.relative_to(root))] = (
+            st.st_mode, st.st_mtime_ns, st.st_size, symlink_target, digest,
+        )
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -353,7 +371,9 @@ def test_explicit_snapshot_id_not_found_is_404_without_leaking(monkeypatch):
     )
 
     assert response.status_code == 404
-    assert response.json()["error"] == "snapshot_not_found"
+    body = response.json()
+    assert body["error"] == "snapshot_not_found"
+    assert body["status"] == "not_found"
     assert canary not in response.text
     assert response.headers.get("cache-control") == "no-store"
 
@@ -371,6 +391,7 @@ def test_corrupt_snapshot_returns_503_without_leaking_exception_text(monkeypatch
     assert response.status_code == 503
     body = response.json()
     assert body["error"] == "corrupt_snapshot"
+    assert body["status"] == "INVALID"
     for key, value in _HARD_FALSE_AUTHORITY.items():
         assert body[key] is value
     assert canary not in response.text
@@ -388,9 +409,61 @@ def test_unexpected_exception_returns_500_without_leaking(monkeypatch):
     response = _client().get("/api/decision-snapshot")
 
     assert response.status_code == 500
-    assert response.json()["error"] == "internal_error"
+    body = response.json()
+    assert body["error"] == "internal_error"
+    assert body["status"] == "internal_error"
     assert canary not in response.text
     assert response.headers.get("cache-control") == "no-store"
+
+
+# ---------------------------------------------------------------------------
+# Blocking finding: request/resource/internal errors must not overload the
+# closed snapshot-state vocabulary. A COMPLETE snapshot must never be reported
+# as "INVALID" just because the *request* was bad or the ID didn't exist.
+# ---------------------------------------------------------------------------
+
+def test_invalid_request_status_is_not_snapshot_state(snapshot_root):
+    persisted = _persist_real_snapshot()
+    assert persisted["state"] == "COMPLETE"
+
+    response = _client().get("/api/decision-snapshot", params={"limit": "101"})
+
+    assert response.status_code == 400
+    body = response.json()
+    assert body["error"] == "invalid_request"
+    assert body["status"] == "invalid_request"
+    assert body["status"] != "INVALID"
+
+
+def test_snapshot_invalid_request_exception_status_is_not_snapshot_state(monkeypatch):
+    def _raise(**kwargs):
+        raise snapshots.SnapshotInvalidRequest("bad section id")
+
+    monkeypatch.setattr(snapshots, "read_projection", _raise)
+
+    response = _client().get("/api/decision-snapshot", params={"section": "book_truth"})
+
+    assert response.status_code == 400
+    body = response.json()
+    assert body["error"] == "invalid_request"
+    assert body["status"] == "invalid_request"
+
+
+def test_oversize_section_response_status_is_snapshot_invalid(monkeypatch):
+    big_rows = [{"value": "x" * 200} for _ in range(2000)]
+
+    def _oversize(**kwargs):
+        return _section_page_stub(rows=big_rows)
+
+    monkeypatch.setattr(snapshots, "read_projection", _oversize)
+
+    response = _client().get(
+        "/api/decision-snapshot",
+        params={"snapshot_id": "sha256:" + "1" * 64, "section": "book_truth"},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["status"] == "INVALID"
 
 
 # ---------------------------------------------------------------------------
@@ -435,8 +508,101 @@ def test_all_response_paths_carry_no_store(monkeypatch):
     monkeypatch.setattr(snapshots, "read_projection", _boom)
     scenarios.append(_client().get("/api/decision-snapshot"))
 
+    monkeypatch.setattr(snapshots, "read_projection", _ok)
+    scenarios.append(_client().get("/api/decision-snapshot?offset=1&offset=2"))
+    scenarios.append(_client().get("/api/decision-snapshot", params={"offset": "9" * 4301}))
+
+    def _contradictory(**kwargs):
+        return _manifest_stub(authority={
+            "write_permitted": True, "execution_authority": False,
+            "numeric_target_authority": False,
+        })
+
+    monkeypatch.setattr(snapshots, "read_projection", _contradictory)
+    scenarios.append(_client().get("/api/decision-snapshot"))
+
+    def _missing_authority(**kwargs):
+        stub = _manifest_stub()
+        del stub["snapshot"]["authority"]
+        return stub
+
+    monkeypatch.setattr(snapshots, "read_projection", _missing_authority)
+    scenarios.append(_client().get("/api/decision-snapshot"))
+
     for response in scenarios:
         assert response.headers.get("cache-control") == "no-store", response.request.url
+
+
+def test_repeated_query_param_is_closed_and_no_store(monkeypatch):
+    """A repeated ``offset`` resolves to FastAPI's last-value-wins behavior — the
+    response must still be one of our closed envelopes with no-store, never a raw,
+    unheadered framework validation error."""
+    def _ok(**kwargs):
+        return _manifest_stub()
+
+    monkeypatch.setattr(snapshots, "read_projection", _ok)
+
+    response = _client().get("/api/decision-snapshot?offset=1&offset=2")
+
+    assert response.headers.get("cache-control") == "no-store"
+    assert response.status_code == 200
+    assert response.json()["schema"] == "mastermind.portfolio_decision_snapshot.status.v1"
+
+
+def test_oversized_integer_query_text_is_rejected_closed_and_no_store(monkeypatch):
+    """Python 3.11+ caps int(<str>) conversion at 4300 digits; an oversized offset must
+    still resolve to our closed invalid_request envelope, not an unheadered crash."""
+    def _fail(**kwargs):
+        pytest.fail("oversized offset text reached storage")
+
+    monkeypatch.setattr(snapshots, "read_projection", _fail)
+
+    response = _client().get("/api/decision-snapshot", params={"offset": "9" * 4301})
+
+    assert response.status_code == 400
+    body = response.json()
+    assert body["error"] == "invalid_request"
+    assert body["status"] == "invalid_request"
+    assert response.headers.get("cache-control") == "no-store"
+
+
+def test_nan_in_manifest_is_refused_not_an_unheadered_crash(monkeypatch):
+    """JSONResponse.render defaults to allow_nan=False; without a guard this would
+    raise ValueError while constructing the response, escaping the handler with no
+    Cache-Control header at all."""
+    def _nan_payload(**kwargs):
+        return _manifest_stub(summary={
+            "sources_total": float("nan"), "sources_available": 0,
+            "domains_complete": 0, "domains_partial": 0, "domains_blocked": 0,
+        })
+
+    monkeypatch.setattr(snapshots, "read_projection", _nan_payload)
+
+    response = _client().get("/api/decision-snapshot")
+
+    assert response.status_code == 500
+    body = response.json()
+    assert body["error"] == "internal_error"
+    assert body["status"] == "internal_error"
+    assert response.headers.get("cache-control") == "no-store"
+
+
+def test_nan_in_section_row_is_refused_not_an_unheadered_crash(monkeypatch):
+    def _nan_section(**kwargs):
+        return _section_page_stub(rows=[{"value": float("nan")}])
+
+    monkeypatch.setattr(snapshots, "read_projection", _nan_section)
+
+    response = _client().get(
+        "/api/decision-snapshot",
+        params={"snapshot_id": "sha256:" + "1" * 64, "section": "book_truth"},
+    )
+
+    assert response.status_code == 500
+    body = response.json()
+    assert body["error"] == "internal_error"
+    assert body["status"] == "internal_error"
+    assert response.headers.get("cache-control") == "no-store"
 
 
 # ---------------------------------------------------------------------------
@@ -460,6 +626,7 @@ def test_contradictory_authority_is_refused_not_served(monkeypatch):
     assert body["error"] == "corrupt_snapshot"
     for key, value in _HARD_FALSE_AUTHORITY.items():
         assert body[key] is value
+    assert response.headers.get("cache-control") == "no-store"
 
 
 def test_missing_authority_field_is_refused_not_served(monkeypatch):
@@ -474,6 +641,7 @@ def test_missing_authority_field_is_refused_not_served(monkeypatch):
 
     assert response.status_code == 503
     assert response.json()["error"] == "corrupt_snapshot"
+    assert response.headers.get("cache-control") == "no-store"
 
 
 # ---------------------------------------------------------------------------
@@ -507,7 +675,12 @@ def test_oversize_section_response_is_refused_not_truncated(monkeypatch):
 def test_route_only_imports_and_calls_decision_snapshot_read_projection():
     from app import web
 
-    source = inspect.getsource(web.api_decision_snapshot)
+    source = "\n".join([
+        inspect.getsource(web.api_decision_snapshot),
+        inspect.getsource(web._decision_snapshot_envelope),
+        inspect.getsource(web._decision_snapshot_error),
+        inspect.getsource(web._decision_snapshot_response),
+    ])
 
     assert "from portfolio import decision_snapshot" in source
     for forbidden in (
@@ -529,6 +702,49 @@ def test_route_only_imports_and_calls_decision_snapshot_read_projection():
 
 
 # ---------------------------------------------------------------------------
+# Closed envelope: `extra` must never be able to override the fixed keys
+# ---------------------------------------------------------------------------
+
+def test_envelope_extra_cannot_override_reserved_keys():
+    from app.web import _decision_snapshot_envelope
+
+    body = _decision_snapshot_envelope(
+        book="autonomous",
+        status="COMPLETE",
+        error=None,
+        extra={
+            "schema": "evil-schema",
+            "book": "hacked-book",
+            "status": "OWNED",
+            "error": "should-not-appear",
+            "write_permitted": True,
+            "execution_authority": True,
+            "numeric_target_authority": True,
+            "snapshot": {"legit": "payload"},
+        },
+    )
+
+    assert body["schema"] == "mastermind.portfolio_decision_snapshot.status.v1"
+    assert body["book"] == "autonomous"
+    assert body["status"] == "COMPLETE"
+    assert "error" not in body
+    for key, value in _HARD_FALSE_AUTHORITY.items():
+        assert body[key] is value
+    assert body["snapshot"] == {"legit": "payload"}
+
+
+def test_envelope_extra_error_key_does_not_leak_when_error_param_is_none():
+    from app.web import _decision_snapshot_envelope
+
+    body = _decision_snapshot_envelope(
+        book="autonomous", status="NO_SNAPSHOT", error=None,
+        extra={"error": "leaked-if-not-filtered"},
+    )
+
+    assert "error" not in body
+
+
+# ---------------------------------------------------------------------------
 # Real filesystem integration: GETs never create/modify a snapshot file
 # ---------------------------------------------------------------------------
 
@@ -547,3 +763,62 @@ def test_gets_never_create_or_modify_snapshot_files(snapshot_root):
 
     after = _tree_fingerprint(snapshot_root)
     assert after == before
+
+
+# ---------------------------------------------------------------------------
+# Fingerprint discriminator strength: same-size/mtime-restored rewrite and a
+# file-to-symlink type swap must both be caught (mutation proof for the fixture
+# itself, not the route) — confined to tmp_path and restored byte-identically.
+# ---------------------------------------------------------------------------
+
+def test_fingerprint_detects_same_size_mtime_restored_rewrite(snapshot_root):
+    persisted = _persist_real_snapshot()
+    path = snapshots._snapshot_path("autonomous", persisted["snapshot_id"])
+    before = _tree_fingerprint(snapshot_root)
+
+    original_bytes = path.read_bytes()
+    original_stat = path.stat()
+    tampered = bytes(b ^ 0xFF for b in original_bytes)
+    assert len(tampered) == len(original_bytes)
+    try:
+        path.write_bytes(tampered)
+        os.utime(path, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+
+        after = _tree_fingerprint(snapshot_root)
+        assert after != before, "same-size, mtime-restored content rewrite must be caught"
+    finally:
+        path.write_bytes(original_bytes)
+        os.utime(path, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+
+    assert _tree_fingerprint(snapshot_root) == before
+
+
+def test_fingerprint_detects_file_to_symlink_swap(snapshot_root):
+    persisted = _persist_real_snapshot()
+    path = snapshots._snapshot_path("autonomous", persisted["snapshot_id"])
+    before = _tree_fingerprint(snapshot_root)
+
+    original_bytes = path.read_bytes()
+    original_stat = path.stat()
+    parent_dir = path.parent
+    parent_original_stat = parent_dir.stat()
+    target = snapshot_root / "elsewhere.json"
+    try:
+        target.write_bytes(original_bytes)
+        os.utime(target, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+        path.unlink()
+        path.symlink_to(target)
+
+        after = _tree_fingerprint(snapshot_root)
+        assert after != before, "a file-to-symlink swap must be caught even with identical bytes"
+    finally:
+        if path.is_symlink():
+            path.unlink()
+        path.write_bytes(original_bytes)
+        os.utime(path, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+        target.unlink(missing_ok=True)
+        # Creating/removing directory entries above moves the parent directory's own
+        # mtime, which the fingerprint also tracks (directories are not filtered out).
+        os.utime(parent_dir, ns=(parent_original_stat.st_atime_ns, parent_original_stat.st_mtime_ns))
+
+    assert _tree_fingerprint(snapshot_root) == before
