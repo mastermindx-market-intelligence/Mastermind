@@ -6863,10 +6863,42 @@ function _dsDomainCoverage(sources) {
   });
   return Object.keys(byDomain).sort().map(function(dom) {
     var covs = byDomain[dom];
+    // UNKNOWN is a distinct COVERAGE_STATES member (coverage not known), not a weaker
+    // synonym for PARTIAL (coverage genuinely partial) — reporting UNKNOWN as PARTIAL would
+    // claim more knowledge than the receipts support. Precedence: BLOCKED wins outright;
+    // all-COMPLETE is COMPLETE; any other non-COMPLETE/non-PARTIAL value (UNKNOWN or an
+    // unrecognized future token) makes the domain UNKNOWN; otherwise PARTIAL.
     var agg = covs.some(function(c) { return c === 'BLOCKED'; }) ? 'BLOCKED'
-      : covs.every(function(c) { return c === 'COMPLETE'; }) ? 'COMPLETE' : 'PARTIAL';
+      : covs.every(function(c) { return c === 'COMPLETE'; }) ? 'COMPLETE'
+      : covs.some(function(c) { return c !== 'COMPLETE' && c !== 'PARTIAL'; }) ? 'UNKNOWN'
+      : 'PARTIAL';
     return { domain: dom, coverage: agg };
   });
+}
+// Sealed snapshot gaps are canonical-JSON strings (decision_snapshot_contracts.py: "gaps
+// must be a list of strings"; decision_snapshot.py's _seal_gaps serializes each gap dict to
+// one string). Recover code/owner/detail when the string parses as an object; on parse
+// failure (or any other shape) fall back to the raw escaped value — a gap must never
+// silently render as an empty row, or the displayed count stops matching the caption.
+function _dsGapRow(g) {
+  if (typeof g === 'string') {
+    var parsed = null;
+    try { parsed = JSON.parse(g); } catch (e) { parsed = null; }
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      var pcode = typeof parsed.code === 'string' ? parsed.code : '—';
+      var powner = typeof parsed.owner === 'string' ? parsed.owner : '';
+      var pdetail = typeof parsed.detail === 'string' ? parsed.detail : '';
+      return '<tr><td>' + esc(pcode) + '</td><td>' + esc(powner) + '</td><td>' + esc(pdetail) + '</td></tr>';
+    }
+    return '<tr><td colspan="3">' + esc(g) + '</td></tr>';
+  }
+  if (g && typeof g === 'object') {
+    var code = typeof g.code === 'string' ? g.code : '—';
+    var owner = typeof g.owner === 'string' ? g.owner : '';
+    var detail = typeof g.detail === 'string' ? g.detail : '';
+    return '<tr><td>' + esc(code) + '</td><td>' + esc(owner) + '</td><td>' + esc(detail) + '</td></tr>';
+  }
+  return '<tr><td colspan="3">' + esc(String(g)) + '</td></tr>';
 }
 function renderDecisionSnapshot() {
   var el = E('decision-snapshot');
@@ -6938,7 +6970,10 @@ function renderDecisionSnapshot() {
   var srcShown = sourcesArr.slice(0, MAX_ROWS);
   var srcOmitted = Math.max(0, sourcesArr.length - srcShown.length);
   var srcBody = srcShown.map(function(r) {
-    if (!r || typeof r !== 'object') return '';
+    // A non-object entry still consumes a visible row rather than silently vanishing —
+    // otherwise the "Sources (N)" caption and the 40-row/omitted-count arithmetic would
+    // both keep counting it while no row for it ever renders.
+    if (!r || typeof r !== 'object') return '<tr><td colspan="4">' + esc('MALFORMED: ' + String(r)) + '</td></tr>';
     var sid = typeof r.source_id === 'string' ? r.source_id : '—';
     var st = typeof r.status === 'string' ? r.status : '—';
     var errCode = typeof r.error_code === 'string' ? r.error_code : '';
@@ -6956,13 +6991,16 @@ function renderDecisionSnapshot() {
     + th2('domains', '领域') + th2('error_code', 'error_code') + '</tr></thead><tbody>' + srcBody + '</tbody></table></div>'
     + srcOmittedLine;
 
-  // #548 (Sector Central) is surfaced whenever a macro.sector_rotation receipt is
-  // DEPENDENCY_PARTIAL or any gap — shown or omitted — names PR #548. Never claim it is fixed.
+  // #548 (Sector Central) is surfaced whenever the real macro.sector_rotation receipt is
+  // DEPENDENCY_PARTIAL (identified by source_id — its domain is always market_structure,
+  // never "macro.sector_rotation" itself) or any gap — shown or omitted — names PR #548.
+  // Gaps are sealed strings, so the string form is checked directly rather than requiring a
+  // (rejected) object shape. Never claim it is fixed.
   var pr548 = sourcesArr.some(function(r) {
-    if (!r || typeof r !== 'object') return false;
-    var doms = Array.isArray(r.domains) ? r.domains : [];
-    return doms.indexOf('macro.sector_rotation') !== -1 && r.status === 'DEPENDENCY_PARTIAL';
+    return !!r && typeof r === 'object'
+      && r.source_id === 'macro.sector_rotation' && r.status === 'DEPENDENCY_PARTIAL';
   }) || gapsArr.some(function(g) {
+    if (typeof g === 'string') return g.indexOf('#548') !== -1;
     if (!g || typeof g !== 'object') return false;
     var owner = typeof g.owner === 'string' ? g.owner : '';
     var detail = typeof g.detail === 'string' ? g.detail : '';
@@ -6971,13 +7009,7 @@ function renderDecisionSnapshot() {
 
   var gapShown = gapsArr.slice(0, MAX_ROWS);
   var gapOmitted = Math.max(0, gapsArr.length - gapShown.length);
-  var gapBody = gapShown.map(function(g) {
-    if (!g || typeof g !== 'object') return '';
-    var code = typeof g.code === 'string' ? g.code : '—';
-    var owner = typeof g.owner === 'string' ? g.owner : '';
-    var detail = typeof g.detail === 'string' ? g.detail : '';
-    return '<tr><td>' + esc(code) + '</td><td>' + esc(owner) + '</td><td>' + esc(detail) + '</td></tr>';
-  }).join('');
+  var gapBody = gapShown.map(_dsGapRow).join('');
   var gapOmittedLine = gapOmitted > 0
     ? '<div style="font-size:11px;color:var(--muted);margin-top:4px">'
       + '<span class="l-en">' + gapOmitted + ' additional gap row(s) omitted.</span>'

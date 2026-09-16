@@ -18,6 +18,8 @@ from pathlib import Path
 
 import pytest
 
+from control_plane.wake_events import canonical_json_bytes
+
 ROOT = Path(__file__).resolve().parent.parent
 HTML = (ROOT / "app" / "static" / "index.html").read_text(encoding="utf-8")
 NODE = shutil.which("node")
@@ -304,10 +306,15 @@ def _run_renderer(snapshot_payload, *, lang: str = "en") -> dict:
     if NODE is None:
         pytest.skip("node is required for the fake-DOM renderer proof")
     source = _extract_renderer_source()
-    # Extract the real esc() implementation directly (single-statement var assignment).
-    esc_start = HTML.index("var esc = function(s) {")
+    # Extract the real GLOBAL esc() implementation — the one the renderer actually calls at
+    # runtime. There is a second, weaker `var esc = function(s) {` scoped inside renderMd()
+    # that only escapes `& < >` (no quotes); anchoring on a bare substring match would find
+    # that one first since it appears earlier in the file. The global declaration is the only
+    # occurrence that sits at column 0 (immediately after a newline, no leading indentation).
+    esc_start = HTML.index("\nvar esc = function(s) {") + 1
     esc_end = HTML.index("};", esc_start) + 2
     esc_source = HTML[esc_start:esc_end]
+    assert "&quot;" in esc_source and "&#39;" in esc_source, "harness bound the wrong esc()"
 
     harness = f"""
 {esc_source}
@@ -336,7 +343,21 @@ def _receipt(source_id, domains, status="AVAILABLE", coverage_state="COMPLETE", 
     }
 
 
+def _seal_gap(*, code, source_id=None, section_id=None, owner=None, detail=None):
+    """Build a gap exactly the way ``portfolio.decision_snapshot._seal_gaps`` does: a dict
+    with the fixed ``code/source_id/section_id/owner/detail`` fields, sealed through the
+    same canonical-JSON serializer the production code path uses
+    (``control_plane.wake_events.canonical_json_bytes``) — not a hand-rolled ``json.dumps``
+    that could silently drift from the real byte shape. Real snapshot gaps are strings, not
+    objects (``decision_snapshot_contracts.py``'s ``.gaps must be a list of strings``)."""
+    gap = {"code": code, "source_id": source_id, "section_id": section_id, "owner": owner, "detail": detail}
+    return canonical_json_bytes(gap).decode("ascii")
+
+
 def _base_snapshot(**overrides):
+    # Real internal source_id for the book_truth domain (decision_snapshot_sources.py:199),
+    # not a fabricated one — fixtures must track the checked-in contract, not the renderer's
+    # own assumptions about it.
     snap = {
         "snapshot_id": "sha256:" + "ab" * 32,
         "decision_cutoff": "2026-09-14T20:00:00Z",
@@ -346,7 +367,7 @@ def _base_snapshot(**overrides):
         "correction": {"status": "ORIGINAL"},
         "sources": [
             _receipt("macro.risk_envelope", ["risk_truth"], coverage_state="COMPLETE"),
-            _receipt("book_truth.paper_account", ["book_truth"], coverage_state="PARTIAL"),
+            _receipt("book.account", ["book_truth"], coverage_state="PARTIAL"),
         ],
         "gaps": [],
     }
@@ -398,16 +419,68 @@ def test_server_strings_are_escaped_not_injected():
     canary = "<script>alert(1)</script>\"'"
     snap = _base_snapshot(
         sources=[_receipt(canary, ["book_truth"], coverage_state="PARTIAL")],
-        gaps=[{"code": canary, "owner": canary, "detail": canary}],
+        gaps=[_seal_gap(code=canary, owner=canary, detail=canary)],
     )
     out = _run_renderer({"status": "PARTIAL", "snapshot": snap})
     assert "<script>" not in out["html"]
     assert "&lt;script&gt;" in out["html"]
 
 
+def test_harness_binds_the_quote_escaping_global_esc():
+    # Important-1: a prior harness bound the wrong (weaker, quote-unaware) local `esc()`
+    # scoped inside renderMd(), so the XSS canary above passed even though a real attribute
+    # interpolation would not have been safe. Prove the harness — and therefore every other
+    # behavioral assertion here — actually exercises the quote-escaping global `esc()`.
+    snap = _base_snapshot(sources=[_receipt('a"b\'c', ["book_truth"])])
+    out = _run_renderer({"status": "PARTIAL", "snapshot": snap})
+    assert "&quot;" in out["html"] and "&#39;" in out["html"]
+    assert 'a"b' not in out["html"]
+
+
+def test_unparseable_gap_string_renders_raw_escaped_fallback_not_blank():
+    # Critical-1 edge case: a gap string that fails JSON.parse must still render as one
+    # escaped row, never as ''.
+    bad = "not-json-at-all <b>x</b>"
+    out = _run_renderer({"status": "PARTIAL", "snapshot": _base_snapshot(gaps=[bad])})
+    html = out["html"]
+    assert "not-json-at-all" in html
+    assert "<b>x</b>" not in html
+    assert "&lt;b&gt;" in html
+    assert html.count("<tr>") >= 1
+
+
+def test_sealed_string_gaps_render_as_rows_not_blanks():
+    # Critical-1: real snapshot gaps are sealed canonical-JSON strings, not objects.
+    gaps = [
+        _seal_gap(code="MISSING", source_id="macro.regime"),
+        _seal_gap(code="UNQUALIFIED_CLOCK", source_id="macro.factor_betas"),
+    ]
+    out = _run_renderer({"status": "PARTIAL", "snapshot": _base_snapshot(gaps=gaps)})
+    html = out["html"]
+    assert "Gaps (2)" in html
+    assert "MISSING" in html
+    assert "UNQUALIFIED_CLOCK" in html
+    assert html.count("<tr>") >= 2
+
+
+def test_malformed_source_entry_renders_visible_placeholder_not_vanish():
+    # Minor-3 (folded into the Critical-1 honesty repair): a non-object source entry must
+    # still consume a visible row rather than silently disappearing from the count.
+    snap = _base_snapshot(sources=[
+        _receipt("a", ["book_truth"], coverage_state="COMPLETE"),
+        "not-a-receipt-object",
+        None,
+    ])
+    out = _run_renderer({"status": "PARTIAL", "snapshot": snap})
+    html = out["html"]
+    assert "Sources (3)" in html
+    assert html.count("<tr>") >= 3
+    assert "not-a-receipt-object" in html
+
+
 def test_forty_row_cap_and_exact_omitted_count():
     sources = [_receipt(f"src-{i}", ["book_truth"]) for i in range(45)]
-    gaps = [{"code": f"GAP-{i}", "owner": None, "detail": None} for i in range(43)]
+    gaps = [_seal_gap(code=f"GAP-{i}") for i in range(43)]
     snap = _base_snapshot(sources=sources, gaps=gaps)
     out = _run_renderer({"status": "PARTIAL", "snapshot": snap})
     html = out["html"]
@@ -415,6 +488,9 @@ def test_forty_row_cap_and_exact_omitted_count():
     assert html.count("GAP-") == 40
     assert "5 additional source row(s) omitted" in html
     assert "3 additional gap row(s) omitted" in html
+    # Discriminates a "fixed" omitted count that still hides real rows: the caption/omitted
+    # arithmetic can lie independently of whether any <tr> actually rendered.
+    assert html.count("<tr>") >= 40
 
 
 def test_domain_coverage_never_invents_absent_domains_as_complete():
@@ -437,19 +513,28 @@ def test_domain_coverage_all_complete_rule():
     assert "COMPLETE" in out["html"][idx:idx + 200]
 
 
-def test_pr548_surfaced_on_dependency_partial_sector_rotation():
+def test_pr548_surfaced_from_real_contract_receipt_shape():
+    # Critical-2 Path A: the identifying field is source_id, not domains — domains for this
+    # source is always ("market_structure",) per decision_snapshot_sources.EXTERNAL_SOURCE_SPECS.
     snap = _base_snapshot(sources=[
-        _receipt("macro.sector_central", ["macro.sector_rotation"], status="DEPENDENCY_PARTIAL",
-                  coverage_state="PARTIAL"),
+        _receipt("macro.sector_rotation", ["market_structure"],
+                 status="DEPENDENCY_PARTIAL", coverage_state="PARTIAL"),
     ])
     out = _run_renderer({"status": "PARTIAL", "snapshot": snap})
     assert "#548" in out["html"]
     assert "not repaired" in out["html"] or "尚未修复" in out["html"]
 
 
-def test_pr548_surfaced_on_named_gap_even_without_sector_rotation_domain():
-    snap = _base_snapshot(gaps=[{"code": "DEP", "owner": "Mastermind PR #548", "detail": None}])
-    out = _run_renderer({"status": "PARTIAL", "snapshot": snap})
+def test_pr548_surfaced_from_real_sealed_gap_string():
+    # Critical-2 Path B: the real #548 gap is the exact dependency_owned_elsewhere gap
+    # decision_snapshot_sources.py emits, sealed to a string — not a live object.
+    gap = _seal_gap(
+        code="DEPENDENCY_OWNED_ELSEWHERE",
+        source_id="macro.sector_rotation",
+        owner="Mastermind PR #548",
+        detail="non-lossy Sector Central reader is owned by PR #548; S0 captures receipt only",
+    )
+    out = _run_renderer({"status": "PARTIAL", "snapshot": _base_snapshot(gaps=[gap])})
     assert "#548" in out["html"]
 
 
@@ -457,6 +542,31 @@ def test_pr548_absent_when_no_dependency_signal():
     snap = _base_snapshot()
     out = _run_renderer({"status": "PARTIAL", "snapshot": snap})
     assert "#548" not in out["html"]
+
+
+def test_fixture_domains_match_the_checked_in_contract():
+    """Anti-drift: the UI fixture vocabulary must come from the real spec table, not a
+    hand-rolled guess — this is the guard that would have caught both #548 Criticals at
+    write time, by failing the moment a fixture's (source_id, domains) pair diverges from
+    ``decision_snapshot_sources.EXTERNAL_SOURCE_SPECS``."""
+    from portfolio.decision_snapshot_sources import EXTERNAL_SOURCE_SPECS
+    spec = next(s for s in EXTERNAL_SOURCE_SPECS if s.source_id == "macro.sector_rotation")
+    assert "macro.sector_rotation" not in spec.domains
+    assert spec.domains == ("market_structure",)
+
+
+def test_unknown_receipt_coverage_is_not_relabelled_partial():
+    # Important-2: UNKNOWN is a distinct COVERAGE_STATES member (coverage not known) — the
+    # domain-aggregation rule must not report more knowledge than the receipts support.
+    snap = _base_snapshot(sources=[
+        _receipt("a", ["market_structure"], coverage_state="UNKNOWN"),
+        _receipt("b", ["market_structure"], coverage_state="UNKNOWN"),
+    ])
+    out = _run_renderer({"status": "PARTIAL", "snapshot": snap})
+    idx = out["html"].index("market_structure")
+    window = out["html"][idx:idx + 200]
+    assert "UNKNOWN" in window
+    assert "PARTIAL" not in window
 
 
 def test_rendered_output_contains_no_forbidden_copy():
