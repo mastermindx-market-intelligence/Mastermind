@@ -18,7 +18,9 @@ from typing import Any, Iterable, Sequence
 _ROOT = Path(__file__).resolve().parent.parent
 _POLICY_PATH = _ROOT / "config" / "authority_map.yml"
 
-PHASE1B_ALLOWED = frozenset({"READ", "RESEARCH", "WRITE_BRANCH", "RUN_TESTS"})
+PHASE1B_ALLOWED = frozenset(
+    {"READ", "RESEARCH", "WRITE_BRANCH", "RUN_TESTS", "REQUEST_WORKER_LOGIN_CHECK"}
+)
 PHASE1B_REQUIRED_DENIES = frozenset(
     {
         "OPEN_PR",
@@ -236,6 +238,10 @@ class ExecutiveAuthorityPolicy:
             raise AuthorityPolicyError("WRITE_BRANCH must be workspace and path scoped")
         if scopes.get("RUN_TESTS") != "declared_argv_commands":
             raise AuthorityPolicyError("RUN_TESTS must be scoped to declared argv commands")
+        if scopes.get("REQUEST_WORKER_LOGIN_CHECK") != "current_attempt_assigned_worker_slot":
+            raise AuthorityPolicyError(
+                "REQUEST_WORKER_LOGIN_CHECK must be scoped to the current-attempt assigned worker slot"
+            )
         return cls(
             path=policy_path,
             sha256=hashlib.sha256(raw).hexdigest(),

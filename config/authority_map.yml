@@ -34,9 +34,12 @@
 # -----------------------
 # A0-A7 remains the portfolio effect taxonomy below.  This separate section is
 # read by the Executive OS worker path before job creation and again before a
-# claim.  The Phase 1B code accepts exactly the four allowed capabilities shown
+# claim.  The Phase 1B code accepts exactly the five allowed capabilities shown
 # here; YAML alone cannot expand the grant.  Missing, unknown, or ambiguous
-# capabilities fail closed.
+# capabilities fail closed.  REQUEST_WORKER_LOGIN_CHECK is declarative-only: it
+# lets the trusted controller ask the fixed broker to verify the current
+# Attempt's already-assigned reviewed slot, and grants no action/slot/path/host
+# evidence by itself; the controller's current-attempt join enforces the scope.
 executive_worker_policy:
   schema_version: 1
   allowed_capabilities:
@@ -44,6 +47,7 @@ executive_worker_policy:
     - RESEARCH
     - WRITE_BRANCH
     - RUN_TESTS
+    - REQUEST_WORKER_LOGIN_CHECK
   denied_capabilities:
     - OPEN_PR
     - MERGE
@@ -59,6 +63,7 @@ executive_worker_policy:
   scope_requirements:
     WRITE_BRANCH: assigned_workspace_and_declared_paths
     RUN_TESTS: declared_argv_commands
+    REQUEST_WORKER_LOGIN_CHECK: current_attempt_assigned_worker_slot
 
 # ───────────────────────────────────────────────────────────────────────────────
 # PHASE 1F-C COO RUN-ONCE POLICY
