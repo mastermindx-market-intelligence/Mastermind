@@ -476,21 +476,36 @@ def _merge_into_section(section: dict[str, Any], *, rows: list[Any], coverage_st
 # Bounded fixed-path readers
 # ---------------------------------------------------------------------------
 
-def _read_json_bytes(path: Path) -> tuple[bytes | None, int, str | None]:
-    """Non-stable bounded read for external (Macro) artifacts. Returns (raw, size, error_code)."""
+def _read_json_bytes(path: Path) -> tuple[bytes | None, int, str | None, Any | None]:
+    """No-follow, single-descriptor bounded read for external (Macro) artifacts.
+
+    Not required to be *stable* (the external producer's write discipline is not this
+    module's to enforce), but the reported size, bytes, and stat identity must all describe
+    the same open file: one descriptor, opened refusing to follow a final-component symlink
+    (closing the check-then-open race against ``_resolve_external_path``'s earlier proof),
+    fstat'd for the bounded size check, then read from that same descriptor. Returns
+    ``(raw, size, error_code, stat_result)`` — the caller derives ``filesystem_observed_at``
+    from ``stat_result``, never from a separate, later stat call.
+    """
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     try:
-        size = path.stat().st_size
+        fd = os.open(str(path), flags)
     except FileNotFoundError:
-        return None, 0, "MISSING"
+        return None, 0, "MISSING", None
     except OSError:
-        return None, 0, "INVALID"
-    if size > MAX_SOURCE_BYTES:
-        return None, size, "OVERSIZE"
+        return None, 0, "INVALID", None
     try:
-        raw = path.read_bytes()
-    except OSError:
-        return None, size, "INVALID"
-    return raw, size, None
+        stat_result = os.fstat(fd)
+        size = stat_result.st_size
+        if size > MAX_SOURCE_BYTES:
+            return None, size, "OVERSIZE", stat_result
+        try:
+            raw = os.read(fd, size)
+        except OSError:
+            return None, size, "INVALID", stat_result
+        return raw, size, None, stat_result
+    finally:
+        os.close(fd)
 
 
 def _stable_first_party_read(path: Path) -> tuple[bytes | None, Any | None, int, str | None]:
@@ -701,16 +716,21 @@ def _book_dir(book: str) -> Path:
     return _ROOT / relative
 
 
-def _project_account(payload: Any) -> tuple[dict[str, Any] | None, int]:
-    """Project the account row, returning ``(row, dropped_position_entries)``.
+def _project_account(payload: Any) -> tuple[dict[str, Any] | None, int, bool]:
+    """Project the account row, returning ``(row, dropped_position_entries, container_malformed)``.
 
     A position entry whose value is not an object cannot be projected. It is *counted* and
     surfaced by the caller as a bounded gap rather than silently discarded: book truth is
     required evidence, and a position that vanishes both understates the book and narrows
     every held-ticker-filtered external projection derived from it.
+
+    ``positions`` itself must be an explicit mapping — including ``{}`` for a genuinely
+    empty book. A missing key, ``null``, a list, a string, a number, or any other unusable
+    container is not an implicit empty book: it is an unknown one, so it is never silently
+    treated as ``{}``.
     """
     if not isinstance(payload, Mapping):
-        return None, 0
+        return None, 0, False
     row: dict[str, Any] = {}
     if "cash" in payload:
         row["cash"] = payload.get("cash")
@@ -730,17 +750,24 @@ def _project_account(payload: Any) -> tuple[dict[str, Any] | None, int]:
                 if field in pos
             }
         row["positions"] = projected_positions
-    return row, dropped
+        return row, dropped, False
+    return row, dropped, True
 
 
-def _project_latest(payload: Any) -> tuple[dict[str, Any] | None, int]:
-    """Project the latest-marks row, returning ``(row, dropped_position_entries)``.
+def _project_latest(payload: Any) -> tuple[dict[str, Any] | None, int, bool]:
+    """Project the latest-marks row, returning ``(row, dropped_position_entries, container_malformed)``.
 
     An entry that is not an object, or that carries no non-empty ticker, cannot identify a
     holding; it is counted and reported exactly like a malformed account position.
+
+    ``positions`` itself must be an explicit list — including ``[]`` for a genuinely empty
+    marks set — for the same honesty reason as the account projection, without promoting
+    this optional source to authoritative: a malformed container here degrades this
+    source's own coverage, but never substitutes for ``book.account`` as the held-ticker
+    basis.
     """
     if not isinstance(payload, Mapping):
-        return None, 0
+        return None, 0, False
     row: dict[str, Any] = {}
     if "as_of" in payload:
         row["as_of"] = payload.get("as_of")
@@ -762,7 +789,8 @@ def _project_latest(payload: Any) -> tuple[dict[str, Any] | None, int]:
                 if field in pos
             })
         row["positions"] = projected
-    return row, dropped
+        return row, dropped, False
+    return row, dropped, True
 
 
 def capture_book_state(book: str, *, decision_cutoff: str, recorded_at: str) -> dict[str, Any]:
@@ -776,6 +804,11 @@ def capture_book_state(book: str, *, decision_cutoff: str, recorded_at: str) -> 
         "book_truth": _section("book_truth", []),
         "historical_memory": _section("historical_memory", []),
     }
+    # The canonical held-ticker basis: only ``book.account``/``book.latest`` rows, keyed by
+    # source_id. Populated *only* on their own successful projection path below — never
+    # from a raw-object row (e.g. pending_orders/pending_target) that happens to carry an
+    # unrelated ``positions`` key, and never from a MISSING/MALFORMED/FUTURE_AT_CUTOFF state.
+    book_position_rows: list[tuple[str, dict[str, Any]]] = []
 
     def emit(section_id: str, source_id: str) -> None:
         sections[section_id]["source_ids"].append(source_id)
@@ -838,7 +871,15 @@ def capture_book_state(book: str, *, decision_cutoff: str, recorded_at: str) -> 
         if mtime_utc > cutoff:
             receipt["status"] = "FUTURE_AT_CUTOFF"
             receipt["coverage_state"] = "BLOCKED"
-            receipt["correction_generation"] = receipt["artifact_digest"]
+            # The clock is the only thing that moved the bytes from eligible to future (or
+            # back): a generation keyed on the bare digest is blind to that, so it must also
+            # carry the status and the exact mtime that produced it.
+            receipt["correction_generation"] = c.content_digest({
+                "generation_kind": "SOURCE_BYTES",
+                "status": receipt["status"],
+                "artifact_digest": receipt["artifact_digest"],
+                "mtime_ns": int(stat_after.st_mtime_ns),
+            })
             gap = _gap("FUTURE_AT_CUTOFF", source_id=source_id, section_id=section_id)
             gaps_out.append(gap)
             _merge_into_section(sections[section_id], rows=[], coverage_state="BLOCKED",
@@ -852,8 +893,14 @@ def capture_book_state(book: str, *, decision_cutoff: str, recorded_at: str) -> 
             receipt["error_code"] = parse_error
             receipt["coverage_state"] = "PARTIAL" if not required else "BLOCKED"
             # Stable bytes exist even though they do not parse: the generation must track
-            # them, or two different malformed bodies read as one unchanged state.
-            receipt["correction_generation"] = receipt["artifact_digest"]
+            # them and the clock, or two different malformed bodies — or the same malformed
+            # body before and after crossing the cutoff — read as one unchanged state.
+            receipt["correction_generation"] = c.content_digest({
+                "generation_kind": "SOURCE_BYTES",
+                "status": receipt["status"],
+                "artifact_digest": receipt["artifact_digest"],
+                "mtime_ns": int(stat_after.st_mtime_ns),
+            })
             gaps_out.append(_gap(parse_error, source_id=source_id, section_id=section_id))
             _merge_into_section(sections[section_id], rows=[], coverage_state=receipt["coverage_state"],
                                  omitted_rows=0,
@@ -868,11 +915,12 @@ def capture_book_state(book: str, *, decision_cutoff: str, recorded_at: str) -> 
         receipt["status"] = "AVAILABLE"
 
         dropped_positions = 0
+        positions_container_malformed = False
         if projection == "account":
-            row, dropped_positions = _project_account(payload)
+            row, dropped_positions, positions_container_malformed = _project_account(payload)
             content_present = bool(row)
         elif projection == "latest":
-            row, dropped_positions = _project_latest(payload)
+            row, dropped_positions, positions_container_malformed = _project_latest(payload)
             content_present = bool(row)
         else:
             # A raw-object projection *is* the whole artifact, so a legitimately present
@@ -881,12 +929,24 @@ def capture_book_state(book: str, *, decision_cutoff: str, recorded_at: str) -> 
             content_present = True
 
         rows = [row] if (content_present and row is not None) else []
+        if projection in ("account", "latest") and content_present and row is not None:
+            book_position_rows.append((source_id, row))
         coverage = "COMPLETE"
         source_gaps: list[dict[str, Any]] = []
         if not content_present:
             coverage = "PARTIAL"
             source_gaps.append(_gap("EMPTY_PROJECTION", source_id=source_id,
                                      section_id=section_id, detail=_EMPTY_PROJECTION_DETAIL))
+        if positions_container_malformed:
+            coverage = "PARTIAL"
+            # The whole ``positions`` value is unusable (missing, null, wrong type, ...),
+            # not merely one bad entry inside a valid mapping — a distinct, more specific
+            # code from MALFORMED_POSITION_ENTRY so a consumer can tell "we don't know the
+            # book" from "we know most of the book".
+            source_gaps.append(_gap(
+                "MALFORMED_POSITIONS_CONTAINER", source_id=source_id, section_id=section_id,
+                detail="positions is missing or not a usable container: held-ticker basis unknown",
+            ))
         if dropped_positions:
             coverage = "PARTIAL"
             source_gaps.append(_gap(
@@ -962,7 +1022,12 @@ def capture_book_state(book: str, *, decision_cutoff: str, recorded_at: str) -> 
         if mtime_utc > cutoff:
             receipt["status"] = "FUTURE_AT_CUTOFF"
             receipt["coverage_state"] = "BLOCKED"
-            receipt["correction_generation"] = receipt["artifact_digest"]
+            receipt["correction_generation"] = c.content_digest({
+                "generation_kind": "SOURCE_BYTES",
+                "status": receipt["status"],
+                "artifact_digest": receipt["artifact_digest"],
+                "mtime_ns": int(stat_after.st_mtime_ns),
+            })
             gap = _gap("FUTURE_AT_CUTOFF", source_id=source_id, section_id=section_id)
             gaps_out.append(gap)
             _merge_into_section(sections[section_id], rows=[], coverage_state="BLOCKED",
@@ -1036,6 +1101,14 @@ def capture_book_state(book: str, *, decision_cutoff: str, recorded_at: str) -> 
         if manifest_utc > cutoff:
             receipt["status"] = "FUTURE_AT_CUTOFF"
             receipt["coverage_state"] = "BLOCKED"
+            # Mirror the first-party file law: the directory/evidence clock crossing the
+            # cutoff with an unchanged eligible-name set must still be a new generation.
+            receipt["correction_generation"] = c.content_digest({
+                "generation_kind": "SOURCE_BYTES",
+                "status": receipt["status"],
+                "artifact_digest": manifest_digest,
+                "mtime_ns": int(manifest["mtime_ns"]),
+            })
             gap = _gap("FUTURE_AT_CUTOFF", source_id=_SETTLEMENT_RECEIPTS_SOURCE_ID,
                        section_id="historical_memory")
             gaps_out.append(gap)
@@ -1053,7 +1126,12 @@ def capture_book_state(book: str, *, decision_cutoff: str, recorded_at: str) -> 
                                  omitted_rows=len(names) - len(bounded), gaps=[])
     sources_out.append(receipt)
 
-    return {"sources": sources_out, "sections": sections, "gaps": gaps_out}
+    return {
+        "sources": sources_out,
+        "sections": sections,
+        "gaps": gaps_out,
+        "book_position_rows": book_position_rows,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1087,7 +1165,10 @@ def _resolve_external_path(spec: SourceSpec) -> tuple[Path | None, str | None]:
         resolved.relative_to(resolved_root)
     except (OSError, ValueError):
         return None, "CONTRACT_PATH_ESCAPE"
-    return _V / candidate, None
+    # Return the path whose containment was actually proven. Returning the unresolved
+    # ``_V / candidate`` instead would let a later open/read silently re-walk any
+    # intermediate symlink component the check above already resolved away.
+    return resolved, None
 
 
 def _project_risk_envelope(payload: Any) -> dict[str, Any]:
@@ -1305,17 +1386,14 @@ def capture_external_sources(*, held_tickers: Sequence[str], decision_cutoff: st
             sources_out.append(receipt)
             continue
 
-        raw, size, error_code = _read_json_bytes(artifact_path)
+        raw, size, error_code, fs_stat = _read_json_bytes(artifact_path)
         receipt["bytes"] = size
-        fs_stat = None
-        try:
-            fs_stat = artifact_path.stat()
+        if fs_stat is not None:
             # Integer nanosecond floor, never float st_mtime: at these epochs a float64
             # rounds up across a second boundary, sealing an evidentiary timestamp one
-            # second late. This is the same law the internal path already proves.
+            # second late. This is the same law the internal path already proves. Derived
+            # from the same fstat the read itself used, never a separate later stat call.
             receipt["filesystem_observed_at"] = _utc_from_mtime_ns(fs_stat.st_mtime_ns)
-        except OSError:
-            pass
 
         if error_code == "MISSING":
             receipt["status"] = "MISSING"
@@ -1481,10 +1559,18 @@ def _risk_missing_placeholder(spec: SourceSpec, domain: str) -> list[dict[str, A
 # Combined capture
 # ---------------------------------------------------------------------------
 
-def _held_tickers_from_book_sections(sections: Mapping[str, Any]) -> list[str]:
+def _held_tickers_from_book_position_rows(
+    book_position_rows: Sequence[tuple[str, dict[str, Any]]],
+) -> list[str]:
+    """Harvest held tickers only from ``book.account``/``book.latest`` rows.
+
+    A raw-object first-party source (e.g. pending orders/targets) is never a held-ticker
+    basis, even when its own arbitrary payload happens to carry a ``positions`` key: only
+    the two rows the caller already scoped to the canonical book state may contribute.
+    """
     tickers: list[str] = []
     seen: set[str] = set()
-    for row in sections.get("book_truth", {}).get("rows", []):
+    for _source_id, row in book_position_rows:
         if not isinstance(row, Mapping):
             continue
         positions = row.get("positions")
@@ -1505,12 +1591,25 @@ def _held_tickers_from_book_sections(sections: Mapping[str, Any]) -> list[str]:
 
 def capture_all(book: str, *, decision_cutoff: str, recorded_at: str) -> dict[str, Any]:
     book_capture = capture_book_state(book, decision_cutoff=decision_cutoff, recorded_at=recorded_at)
-    held_tickers = _held_tickers_from_book_sections(book_capture["sections"])
-    # A dropped position narrows the held-ticker set the external projections filter by, so
-    # every held-ticker-filtered domain must degrade with the book rather than present a
-    # silently narrowed view as a complete one.
-    held_tickers_complete = not any(
-        gap["code"] == "MALFORMED_POSITION_ENTRY" for gap in book_capture["gaps"]
+    book_position_rows = book_capture["book_position_rows"]
+    held_tickers = _held_tickers_from_book_position_rows(book_position_rows)
+    # The held-ticker basis is complete only when the *required* canonical source —
+    # book.account — is itself AVAILABLE, COMPLETE, and actually carries a valid projected
+    # positions mapping. Absence of a MALFORMED_POSITION_ENTRY gap is not enough: a wholly
+    # MISSING, MALFORMED, OVERSIZE, or FUTURE_AT_CUTOFF account never emits that gap code
+    # either, yet its held-ticker set is exactly as unknown as one that dropped entries.
+    account_receipt = next(
+        (r for r in book_capture["sources"] if r["source_id"] == "book.account"), None
+    )
+    account_row = next(
+        (row for source_id, row in book_position_rows if source_id == "book.account"), None
+    )
+    held_tickers_complete = bool(
+        account_receipt is not None
+        and account_receipt.get("status") == "AVAILABLE"
+        and account_receipt.get("coverage_state") == "COMPLETE"
+        and isinstance(account_row, Mapping)
+        and isinstance(account_row.get("positions"), Mapping)
     )
     external_capture = capture_external_sources(
         held_tickers=held_tickers, decision_cutoff=decision_cutoff, recorded_at=recorded_at,
