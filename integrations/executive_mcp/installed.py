@@ -67,9 +67,9 @@ def _git_blob_oid(payload: bytes) -> str:
     return digest.hexdigest()
 
 
-def _worktree_path_sets(root: Path) -> tuple[set[str], set[str]]:
-    """Return raw leaf and directory paths, excluding only the top-level Git metadata."""
-    leaves: set[str] = set()
+def _worktree_path_sets(root: Path) -> tuple[dict[str, str], set[str]]:
+    """Return raw leaf types and directories, excluding only top-level Git metadata."""
+    leaves: dict[str, str] = {}
     directories: set[str] = set()
     stack: list[tuple[Path, str]] = [(root, "")]
     while stack:
@@ -82,8 +82,12 @@ def _worktree_path_sets(root: Path) -> tuple[set[str], set[str]]:
                 if entry.is_dir(follow_symlinks=False):
                     directories.add(rel)
                     stack.append((Path(entry.path), rel))
+                elif entry.is_symlink():
+                    leaves[rel] = "symlink"
+                elif entry.is_file(follow_symlinks=False):
+                    leaves[rel] = "regular"
                 else:
-                    leaves.add(rel)
+                    leaves[rel] = "other"
     return leaves, directories
 
 
@@ -263,14 +267,24 @@ def _clean_git_snapshot(
 
     expected_leaves = set(expected)
     expected_directories = _tree_directory_paths(expected_leaves)
+    expected_types = {
+        rel: ("symlink" if mode == "120000" else "regular")
+        for rel, (mode, _oid) in expected.items()
+    }
     try:
-        actual_leaves, actual_directories = _worktree_path_sets(path)
+        actual_types, actual_directories = _worktree_path_sets(path)
     except OSError as exc:
         raise GatewayError(
             "backend_unavailable", f"installed {label} worktree observation failed"
         ) from exc
-    if actual_leaves != expected_leaves or actual_directories != expected_directories:
+    if actual_types != expected_types or actual_directories != expected_directories:
         raise GatewayError("backend_unavailable", f"installed {label} worktree path set differs")
+    if content_scope == "macro_brief" and "symlink" in expected_types.values():
+        # Agent OS uses Path.exists() across authored artifact/ownership prefixes.
+        # A symlink can make that result depend on an external target that HEAD does
+        # not bind, so a production Macro snapshot with symlinks needs a separately
+        # reviewed projection instead of silently widening this reader.
+        raise GatewayError("backend_unavailable", f"installed {label} symlinks are unsupported")
 
     try:
         content_paths = _content_paths_for_scope(set(expected), content_scope)

@@ -244,3 +244,49 @@ def test_installed_child_env_disables_ambient_terminal_sibling(tmp_path: Path):
     env = _installed_child_env(code_root=tmp_path / "code", macro_root=tmp_path / "macro")
     assert env["MACRO_TERMINAL_REPO"].endswith("/.executive-no-terminal-repo")
     assert env["GIT_NO_REPLACE_OBJECTS"] == "1"
+
+
+def test_macro_brief_scope_refuses_tracked_leaf_replaced_by_symlink(tmp_path: Path):
+    from integrations.executive_mcp.installed import (
+        _clean_git_snapshot,
+        _default_packet_runner,
+        _installed_child_env,
+    )
+    from integrations.executive_mcp.schemas import GatewayError
+
+    repo, tracked = _clean_repo(tmp_path)
+    outside = tmp_path / "outside.txt"
+    outside.write_text("original\n", encoding="utf-8")
+    tracked.unlink()
+    tracked.symlink_to(outside)
+    env = _installed_child_env(code_root=repo, macro_root=repo)
+
+    with pytest.raises(GatewayError, match="worktree path set differs"):
+        _clean_git_snapshot(
+            repo, runner=_default_packet_runner, env=env,
+            label="Macro source", content_scope="macro_brief",
+        )
+
+
+def test_macro_brief_scope_refuses_committed_symlink_dependency(tmp_path: Path):
+    from integrations.executive_mcp.installed import (
+        _clean_git_snapshot,
+        _default_packet_runner,
+        _installed_child_env,
+    )
+    from integrations.executive_mcp.schemas import GatewayError
+
+    repo, _tracked = _clean_repo(tmp_path)
+    target = repo / "target.txt"
+    target.write_text("target\n", encoding="utf-8")
+    link = repo / "linked.txt"
+    link.symlink_to("target.txt")
+    _git(repo, "add", "target.txt", "linked.txt")
+    _git(repo, "commit", "-q", "-m", "add symlink")
+    env = _installed_child_env(code_root=repo, macro_root=repo)
+
+    with pytest.raises(GatewayError, match="symlinks are unsupported"):
+        _clean_git_snapshot(
+            repo, runner=_default_packet_runner, env=env,
+            label="Macro source", content_scope="macro_brief",
+        )
