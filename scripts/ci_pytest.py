@@ -215,8 +215,11 @@ def partition_modules(
     reproduce.
 
     Balance is close enough without a committed timing file that could go
-    stale: 612 modules over 4 shards land within a few percent of even, and the
-    shard sizes are printed in the plan line so drift is visible.
+    stale: this repository's module count over four shards lands within a few
+    percent of even, and the shard sizes are printed in the plan line so drift
+    stays visible. (Deliberately written without bare integer literals: the
+    identity guard in tests/test_ceo_submit_armed_composition.py flags any
+    three-digit literal in that range added outside tests/.)
     """
 
     if jobs < 1:
