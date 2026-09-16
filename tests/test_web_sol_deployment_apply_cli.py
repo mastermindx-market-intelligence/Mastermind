@@ -374,3 +374,206 @@ def test_cli_mixed_prepared_state_is_effect_unknown_without_replay(
     assert first.destination.read_bytes() == first.content
     assert sum(row.destination.exists() for row in bundle.artifacts) == 1
     assert json.loads(state_path.read_text(encoding="utf-8"))["phase"] == "PREPARED"
+
+
+def test_cli_rejects_tampered_state_digest_without_target_effect(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    bundle, install_root = _bundle(tmp_path)
+    request = tmp_path / "request.json"
+    state = tmp_path / "state.json"
+    _write_private(request, _request_document(bundle, install_root))
+    assert cli.main(
+        ["apply", "--request", str(request), "--state", str(state)]
+    ) == 0
+    capsys.readouterr()
+    document = json.loads(state.read_text(encoding="utf-8"))
+    document["phase"] = "ROLLED_BACK"
+    _write_private(state, document)
+
+    assert cli.main(["verify", "--state", str(state)]) == 2
+
+    output = capsys.readouterr()
+    error = json.loads(output.err)
+    assert error["code"] == "STATE_INVALID"
+    assert error["target_effect"] == "NONE"
+    for artifact in bundle.artifacts:
+        assert artifact.destination.read_bytes() == artifact.content
+
+
+def test_cli_rejects_changed_request_against_existing_state(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    bundle, install_root = _bundle(tmp_path)
+    request = tmp_path / "request.json"
+    state = tmp_path / "state.json"
+    original = _request_document(bundle, install_root)
+    _write_private(request, original)
+    assert cli.main(
+        ["apply", "--request", str(request), "--state", str(state)]
+    ) == 0
+    capsys.readouterr()
+    changed = json.loads(json.dumps(original))
+    changed["operation_key"] = "web-sol-install1-different-operation-20260916-sol-001"
+    _write_private(request, changed)
+
+    assert cli.main(
+        ["apply", "--request", str(request), "--state", str(state)]
+    ) == 2
+
+    output = capsys.readouterr()
+    error = json.loads(output.err)
+    assert error["code"] == "STATE_CONFLICT"
+    assert error["target_effect"] == "NONE"
+    for artifact in bundle.artifacts:
+        assert artifact.destination.read_bytes() == artifact.content
+
+
+def test_cli_duplicate_rollback_is_terminal_and_effect_none(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    bundle, install_root = _bundle(tmp_path)
+    request = tmp_path / "request.json"
+    state = tmp_path / "state.json"
+    _write_private(request, _request_document(bundle, install_root))
+    assert cli.main(
+        ["apply", "--request", str(request), "--state", str(state)]
+    ) == 0
+    capsys.readouterr()
+    assert cli.main(["rollback", "--state", str(state)]) == 0
+    capsys.readouterr()
+
+    assert cli.main(["rollback", "--state", str(state)]) == 2
+
+    output = capsys.readouterr()
+    error = json.loads(output.err)
+    assert error["code"] == "TRANSACTION_CONSUMED"
+    assert error["target_effect"] == "NONE"
+    assert list(install_root.rglob("*")) == []
+
+
+def test_cli_reconciles_completed_rollback_when_state_remained_applied(
+    tmp_path: Path,
+    capsys,
+    monkeypatch,
+) -> None:
+    bundle, install_root = _bundle(tmp_path)
+    request = tmp_path / "request.json"
+    state = tmp_path / "state.json"
+    _write_private(request, _request_document(bundle, install_root))
+    assert cli.main(
+        ["apply", "--request", str(request), "--state", str(state)]
+    ) == 0
+    capsys.readouterr()
+    phase, _request, _prepared, applied, _digest = cli._decode_private_state(
+        cli._private_json_file(state)
+    )
+    assert phase == "APPLIED" and applied is not None
+    direct_receipt = cli.applier.rollback_deployment(applied)
+    assert direct_receipt["status"] == "ROLLBACK_VERIFIED"
+    assert list(install_root.rglob("*")) == []
+
+    def forbidden_rollback(_applied):
+        raise AssertionError("rollback reconciliation repeated filesystem effects")
+
+    monkeypatch.setattr(cli.applier, "rollback_deployment", forbidden_rollback)
+
+    assert cli.main(["rollback", "--state", str(state)]) == 0
+
+    output = capsys.readouterr()
+    assert output.err == ""
+    receipt = json.loads(output.out)
+    assert receipt["status"] == "ROLLBACK_VERIFIED"
+    assert receipt["removed_count"] == 3
+    assert json.loads(state.read_text(encoding="utf-8"))["phase"] == "ROLLED_BACK"
+
+
+def test_cli_state_parent_symlink_swap_never_writes_outside_state_directory(
+    tmp_path: Path,
+    capsys,
+    monkeypatch,
+) -> None:
+    bundle, install_root = _bundle(tmp_path)
+    request = tmp_path / "request.json"
+    _write_private(request, _request_document(bundle, install_root))
+    state_parent = tmp_path / "state-parent"
+    state_parent.mkdir(mode=0o700)
+    state = state_parent / "state.json"
+    outside = tmp_path / "state-outside"
+    outside.mkdir(mode=0o700)
+    displaced = tmp_path / "state-parent-displaced"
+    original_replace = cli.os.replace
+    injected = False
+
+    def swap_parent_then_replace(source, target, *args, **kwargs):
+        nonlocal injected
+        if not injected and Path(target).name == state.name:
+            injected = True
+            source_fd = kwargs.get("src_dir_fd")
+            if source_fd is None:
+                payload = Path(source).read_bytes()
+            else:
+                descriptor = cli.os.open(str(source), cli.os.O_RDONLY, dir_fd=source_fd)
+                try:
+                    payload = b""
+                    while True:
+                        chunk = cli.os.read(descriptor, 65536)
+                        if not chunk:
+                            break
+                        payload += chunk
+                finally:
+                    cli.os.close(descriptor)
+            state_parent.rename(displaced)
+            state_parent.symlink_to(outside, target_is_directory=True)
+            attack_temp = outside / Path(source).name
+            attack_temp.write_bytes(payload)
+            attack_temp.chmod(0o600)
+        return original_replace(source, target, *args, **kwargs)
+
+    monkeypatch.setattr(cli.os, "replace", swap_parent_then_replace)
+
+    result = cli.main(
+        ["apply", "--request", str(request), "--state", str(state)]
+    )
+
+    assert injected is True
+    assert result == 2
+    error = json.loads(capsys.readouterr().err)
+    assert error["code"] == "STATE_EFFECT_UNKNOWN"
+    assert not (outside / state.name).exists()
+    assert list(install_root.rglob("*")) == []
+
+
+def test_cli_rollback_refuses_state_through_symlinked_parent_before_target_effect(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    bundle, install_root = _bundle(tmp_path)
+    request = tmp_path / "request.json"
+    _write_private(request, _request_document(bundle, install_root))
+    state_parent = tmp_path / "state-parent-read"
+    state_parent.mkdir(mode=0o700)
+    state = state_parent / "state.json"
+    assert cli.main(
+        ["apply", "--request", str(request), "--state", str(state)]
+    ) == 0
+    capsys.readouterr()
+    outside = tmp_path / "state-outside-read"
+    outside.mkdir(mode=0o700)
+    copied = outside / state.name
+    copied.write_bytes(state.read_bytes())
+    copied.chmod(0o600)
+    displaced = tmp_path / "state-parent-read-displaced"
+    state_parent.rename(displaced)
+    state_parent.symlink_to(outside, target_is_directory=True)
+
+    result = cli.main(["rollback", "--state", str(state)])
+
+    assert result == 2
+    error = json.loads(capsys.readouterr().err)
+    assert error["code"] == "STATE_INVALID"
+    for artifact in bundle.artifacts:
+        assert artifact.destination.read_bytes() == artifact.content

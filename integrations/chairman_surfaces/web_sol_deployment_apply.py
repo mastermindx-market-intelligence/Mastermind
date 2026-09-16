@@ -437,25 +437,99 @@ class AppliedDeployment:
         }
 
 
-def _fsync_directory(path: Path) -> None:
-    descriptor = os.open(path, os.O_RDONLY)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
+def _directory_preimage_for_path(
+    path: Path,
+    prepared: PreparedDeployment,
+) -> DirectoryPreimage:
+    matches = [row for row in prepared.directory_preimages if row.path == path]
+    if len(matches) != 1:
+        raise WebSolDeploymentApplyError("PREPARED_INTEGRITY_MISMATCH")
+    return matches[0]
 
 
-def _validate_directory(path: Path, prepared: PreparedDeployment) -> None:
+def _opened_directory_matches(
+    descriptor: int,
+    path: Path,
+    prepared: PreparedDeployment,
+) -> bool:
     try:
-        info = path.lstat()
+        info = os.fstat(descriptor)
+    except OSError:
+        return False
+    row = _directory_preimage_for_path(path, prepared)
+    mode = stat.S_IMODE(info.st_mode)
+    if (
+        not stat.S_ISDIR(info.st_mode)
+        or info.st_uid != prepared.expected_uid
+        or info.st_gid != prepared.expected_gid
+        or mode & 0o022
+    ):
+        return False
+    if row.prior_state == "PRESENT":
+        return (
+            info.st_dev == row.prior_dev
+            and info.st_ino == row.prior_ino
+            and mode == row.prior_mode
+            and info.st_uid == row.prior_uid
+            and info.st_gid == row.prior_gid
+        )
+    return row.prior_state == "ABSENT" and mode == 0o700
+
+
+def _directory_binding_current(
+    descriptor: int,
+    path: Path,
+    prepared: PreparedDeployment,
+) -> bool:
+    try:
+        named = path.lstat()
+        opened = os.fstat(descriptor)
+    except OSError:
+        return False
+    return (
+        stat.S_ISDIR(named.st_mode)
+        and not stat.S_ISLNK(named.st_mode)
+        and (named.st_dev, named.st_ino) == (opened.st_dev, opened.st_ino)
+        and _opened_directory_matches(descriptor, path, prepared)
+    )
+
+
+def _open_verified_directory(
+    path: Path,
+    prepared: PreparedDeployment,
+) -> int:
+    try:
+        relative = path.relative_to(prepared.install_root)
+    except ValueError as exc:
+        raise WebSolDeploymentApplyError("TARGET_OUTSIDE_ROOT") from exc
+    if not hasattr(os, "O_DIRECTORY") or not hasattr(os, "O_NOFOLLOW"):
+        raise WebSolDeploymentApplyError("DIRECTORY_DESCRIPTOR_UNAVAILABLE")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    try:
+        descriptor = os.open(prepared.install_root, flags)
     except OSError as exc:
-        raise WebSolDeploymentApplyError("DIRECTORY_INVALID") from exc
-    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
-        raise WebSolDeploymentApplyError("DIRECTORY_INVALID")
-    if info.st_uid != prepared.expected_uid or info.st_gid != prepared.expected_gid:
-        raise WebSolDeploymentApplyError("DIRECTORY_OWNER_MISMATCH")
-    if stat.S_IMODE(info.st_mode) & 0o022:
-        raise WebSolDeploymentApplyError("DIRECTORY_MODE_MISMATCH")
+        raise WebSolDeploymentApplyError("DIRECTORY_PREIMAGE_CONFLICT") from exc
+    current = prepared.install_root
+    try:
+        if not _directory_binding_current(descriptor, current, prepared):
+            raise WebSolDeploymentApplyError("DIRECTORY_PREIMAGE_CONFLICT")
+        for part in relative.parts:
+            if not part or part in {".", ".."} or "/" in part or "\x00" in part:
+                raise WebSolDeploymentApplyError("TARGET_OUTSIDE_ROOT")
+            try:
+                next_descriptor = os.open(part, flags, dir_fd=descriptor)
+            except OSError as exc:
+                raise WebSolDeploymentApplyError("DIRECTORY_PREIMAGE_CONFLICT") from exc
+            current = current / part
+            if not _directory_binding_current(next_descriptor, current, prepared):
+                os.close(next_descriptor)
+                raise WebSolDeploymentApplyError("DIRECTORY_PREIMAGE_CONFLICT")
+            os.close(descriptor)
+            descriptor = next_descriptor
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
 
 
 def _parent_chain(target: Path, root: Path) -> tuple[Path, ...]:
@@ -533,11 +607,9 @@ def _current_matches_artifact(
         return False
 
 
-def _assert_prepared_integrity(prepared: PreparedDeployment) -> None:
+def _validate_prepared_digest(prepared: PreparedDeployment) -> None:
     if not isinstance(prepared, PreparedDeployment):
         raise WebSolDeploymentApplyError("PREPARED_INVALID")
-    if prepared._state != "PREPARED":
-        raise WebSolDeploymentApplyError("TRANSACTION_CONSUMED")
     try:
         current_digest = _prepared_digest_from_state(
             operation_key=prepared.operation_key,
@@ -554,6 +626,12 @@ def _assert_prepared_integrity(prepared: PreparedDeployment) -> None:
         raise WebSolDeploymentApplyError("PREPARED_INTEGRITY_MISMATCH")
 
 
+def _assert_prepared_integrity(prepared: PreparedDeployment) -> None:
+    _validate_prepared_digest(prepared)
+    if prepared._state != "PREPARED":
+        raise WebSolDeploymentApplyError("TRANSACTION_CONSUMED")
+
+
 def _assert_prepared(prepared: PreparedDeployment) -> None:
     _assert_prepared_integrity(prepared)
     if any(
@@ -563,6 +641,26 @@ def _assert_prepared(prepared: PreparedDeployment) -> None:
         raise WebSolDeploymentApplyError("PREIMAGE_CONFLICT")
     if any(not _current_matches_preimage(row) for row in prepared.preimages):
         raise WebSolDeploymentApplyError("PREIMAGE_CONFLICT")
+
+
+def _created_directory_matches(
+    parent_descriptor: int,
+    name: str,
+    prepared: PreparedDeployment,
+) -> bool:
+    if not name or name in {".", ".."} or "/" in name or "\x00" in name:
+        return False
+    try:
+        info = os.stat(name, dir_fd=parent_descriptor, follow_symlinks=False)
+    except OSError:
+        return False
+    return (
+        stat.S_ISDIR(info.st_mode)
+        and not stat.S_ISLNK(info.st_mode)
+        and info.st_uid == prepared.expected_uid
+        and info.st_gid == prepared.expected_gid
+        and stat.S_IMODE(info.st_mode) == 0o700
+    )
 
 
 def _create_parent_directories(
@@ -575,27 +673,113 @@ def _create_parent_directories(
     ]
     for row in sorted(absent, key=lambda item: (len(item.path.parts), str(item.path))):
         directory = row.path
-        if directory.exists() or directory.is_symlink():
-            raise WebSolDeploymentApplyError("DIRECTORY_PREIMAGE_CONFLICT")
+        parent_descriptor = _open_verified_directory(directory.parent, prepared)
         try:
-            directory.mkdir(mode=0o700)
+            try:
+                os.stat(
+                    directory.name,
+                    dir_fd=parent_descriptor,
+                    follow_symlinks=False,
+                )
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                raise WebSolDeploymentApplyError(
+                    "DIRECTORY_PREIMAGE_CONFLICT"
+                ) from exc
+            else:
+                raise WebSolDeploymentApplyError("DIRECTORY_PREIMAGE_CONFLICT")
+            try:
+                os.mkdir(directory.name, 0o700, dir_fd=parent_descriptor)
+                os.fsync(parent_descriptor)
+            except OSError as exc:
+                raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN") from exc
+            if not _created_directory_matches(
+                parent_descriptor, directory.name, prepared
+            ):
+                raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN")
+            child_descriptor = os.open(
+                directory.name,
+                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                dir_fd=parent_descriptor,
+            )
+            try:
+                if not _directory_binding_current(
+                    child_descriptor, directory, prepared
+                ):
+                    raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN")
+            finally:
+                os.close(child_descriptor)
             created.append(directory)
-            _fsync_directory(directory.parent)
-        except OSError as exc:
-            raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN") from exc
-        _validate_directory(directory, prepared)
+        finally:
+            os.close(parent_descriptor)
 
 
 
-def _remove_owned_partial_temporary(
-    temporary: Path,
+def _named_file_matches(
+    parent_descriptor: int,
+    name: str,
+    content: bytes,
+    mode: int,
+    prepared: PreparedDeployment,
+) -> bool:
+    if not name or name in {".", ".."} or "/" in name or "\x00" in name:
+        return False
+    try:
+        named = os.stat(name, dir_fd=parent_descriptor, follow_symlinks=False)
+    except OSError:
+        return False
+    if (
+        stat.S_ISLNK(named.st_mode)
+        or not stat.S_ISREG(named.st_mode)
+        or named.st_nlink != 1
+        or named.st_uid != prepared.expected_uid
+        or named.st_gid != prepared.expected_gid
+        or stat.S_IMODE(named.st_mode) != mode
+    ):
+        return False
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(name, flags, dir_fd=parent_descriptor)
+    except OSError:
+        return False
+    try:
+        opened = os.fstat(descriptor)
+        if (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino):
+            return False
+        payload = bytearray()
+        while len(payload) <= len(content):
+            chunk = os.read(descriptor, min(65536, len(content) + 1 - len(payload)))
+            if not chunk:
+                break
+            payload.extend(chunk)
+        final = os.fstat(descriptor)
+        if (final.st_dev, final.st_ino, final.st_size, final.st_mtime_ns) != (
+            opened.st_dev,
+            opened.st_ino,
+            opened.st_size,
+            opened.st_mtime_ns,
+        ):
+            return False
+        return bytes(payload) == content
+    except OSError:
+        return False
+    finally:
+        os.close(descriptor)
+
+
+def _remove_owned_partial_temporary_at(
+    parent_descriptor: int,
+    name: str,
     *,
     created_dev: int,
     created_ino: int,
     prepared: PreparedDeployment,
 ) -> None:
     try:
-        info = temporary.lstat()
+        info = os.stat(name, dir_fd=parent_descriptor, follow_symlinks=False)
         if (
             stat.S_ISLNK(info.st_mode)
             or not stat.S_ISREG(info.st_mode)
@@ -605,28 +789,35 @@ def _remove_owned_partial_temporary(
             or info.st_gid != prepared.expected_gid
         ):
             raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN")
-        temporary.unlink()
-        _fsync_directory(temporary.parent)
+        os.unlink(name, dir_fd=parent_descriptor)
+        os.fsync(parent_descriptor)
     except WebSolDeploymentApplyError:
         raise
     except OSError as exc:
         raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN") from exc
 
 
-def _write_exact_temporary(
-    temporary: Path,
+def _write_exact_temporary_at(
+    parent_descriptor: int,
+    name: str,
     content: bytes,
     mode: int,
     prepared: PreparedDeployment,
 ) -> None:
     if type(content) is not bytes or type(mode) is not int or not 0 <= mode <= 0o777:
         raise WebSolDeploymentApplyError("TEMPORARY_INPUT_INVALID")
-    if temporary.exists() or temporary.is_symlink():
+    try:
+        os.stat(name, dir_fd=parent_descriptor, follow_symlinks=False)
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        raise WebSolDeploymentApplyError("TEMPORARY_PATH_CONFLICT") from exc
+    else:
         raise WebSolDeploymentApplyError("TEMPORARY_PATH_CONFLICT")
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
-    descriptor = os.open(temporary, flags, 0o600)
+    descriptor = os.open(name, flags, 0o600, dir_fd=parent_descriptor)
     created = os.fstat(descriptor)
     failure: OSError | None = None
     try:
@@ -648,85 +839,44 @@ def _write_exact_temporary(
             if failure is None:
                 failure = close_exc
     if failure is not None:
-        _remove_owned_partial_temporary(
-            temporary,
+        _remove_owned_partial_temporary_at(
+            parent_descriptor,
+            name,
             created_dev=created.st_dev,
             created_ino=created.st_ino,
             prepared=prepared,
         )
         raise WebSolDeploymentApplyError("TEMPORARY_WRITE_FAILED") from failure
-    if not _temporary_matches(temporary, content, mode, prepared):
+    if not _named_file_matches(parent_descriptor, name, content, mode, prepared):
         raise WebSolDeploymentApplyError("TEMPORARY_READBACK_MISMATCH")
 
 
-def _temporary_matches(
-    temporary: Path,
+def _cleanup_exact_temporary_at(
+    parent_descriptor: int,
+    name: str,
     content: bytes,
     mode: int,
     prepared: PreparedDeployment,
 ) -> bool:
     try:
-        info = temporary.lstat()
-    except OSError:
+        os.stat(name, dir_fd=parent_descriptor, follow_symlinks=False)
+    except FileNotFoundError:
         return False
-    if (
-        stat.S_ISLNK(info.st_mode)
-        or not stat.S_ISREG(info.st_mode)
-        or info.st_uid != prepared.expected_uid
-        or info.st_gid != prepared.expected_gid
-        or stat.S_IMODE(info.st_mode) != mode
-    ):
-        return False
+    except OSError as exc:
+        raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN") from exc
+    if not _named_file_matches(parent_descriptor, name, content, mode, prepared):
+        raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN")
     try:
-        return temporary.read_bytes() == content
-    except OSError:
-        return False
-
-
-def _write_temporary(
-    temporary: Path,
-    artifact: deployment.DeploymentArtifact,
-    prepared: PreparedDeployment,
-) -> None:
-    _write_exact_temporary(
-        temporary,
-        artifact.content,
-        artifact.mode,
-        prepared,
-    )
+        os.unlink(name, dir_fd=parent_descriptor)
+        os.fsync(parent_descriptor)
+    except OSError as exc:
+        raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN") from exc
+    return True
 
 
 def _temporary_path(artifact: deployment.DeploymentArtifact, prepared: PreparedDeployment) -> Path:
     return artifact.destination.with_name(
         f".{artifact.destination.name}.mmx-{prepared.prepared_digest[:16]}.tmp"
-    )
-
-
-def _cleanup_exact_temporary_bytes(
-    temporary: Path,
-    content: bytes,
-    mode: int,
-    prepared: PreparedDeployment,
-) -> bool:
-    if not (temporary.exists() or temporary.is_symlink()):
-        return False
-    if not _temporary_matches(temporary, content, mode, prepared):
-        raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN")
-    temporary.unlink()
-    _fsync_directory(temporary.parent)
-    return True
-
-
-def _cleanup_exact_temporary(
-    temporary: Path,
-    artifact: deployment.DeploymentArtifact,
-    prepared: PreparedDeployment,
-) -> bool:
-    return _cleanup_exact_temporary_bytes(
-        temporary,
-        artifact.content,
-        artifact.mode,
-        prepared,
     )
 
 
@@ -752,25 +902,66 @@ def apply_deployment(prepared: PreparedDeployment) -> AppliedDeployment:
                     raise WebSolDeploymentApplyError("READBACK_MISMATCH")
                 continue
             temporary = _temporary_path(artifact, prepared)
-            _write_temporary(temporary, artifact, prepared)
+            parent_descriptor = _open_verified_directory(
+                artifact.destination.parent,
+                prepared,
+            )
             try:
-                os.replace(temporary, artifact.destination)
-                _fsync_directory(artifact.destination.parent)
-            except OSError as exc:
-                if not _current_matches_artifact(artifact, prepared):
-                    raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN") from exc
-                removed = _cleanup_exact_temporary(temporary, artifact, prepared)
-                if not removed:
-                    _fsync_directory(artifact.destination.parent)
-                reconciled.append(artifact.destination)
+                temporary_name = temporary.name
+                target_name = artifact.destination.name
+                _write_exact_temporary_at(
+                    parent_descriptor,
+                    temporary_name,
+                    artifact.content,
+                    artifact.mode,
+                    prepared,
+                )
+                try:
+                    os.replace(
+                        temporary_name,
+                        target_name,
+                        src_dir_fd=parent_descriptor,
+                        dst_dir_fd=parent_descriptor,
+                    )
+                    os.fsync(parent_descriptor)
+                except OSError as exc:
+                    if not _named_file_matches(
+                        parent_descriptor,
+                        target_name,
+                        artifact.content,
+                        artifact.mode,
+                        prepared,
+                    ):
+                        raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN") from exc
+                    removed = _cleanup_exact_temporary_at(
+                        parent_descriptor,
+                        temporary_name,
+                        artifact.content,
+                        artifact.mode,
+                        prepared,
+                    )
+                    if not removed:
+                        os.fsync(parent_descriptor)
+                    reconciled.append(artifact.destination)
+                if not _named_file_matches(
+                    parent_descriptor,
+                    target_name,
+                    artifact.content,
+                    artifact.mode,
+                    prepared,
+                ):
+                    raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN")
+            finally:
+                os.close(parent_descriptor)
             if not _current_matches_artifact(artifact, prepared):
                 raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN")
             changed.append(artifact.destination)
-    except WebSolDeploymentApplyError as exc:
-        _abort_partial_apply(prepared, created_directories)
-        raise WebSolDeploymentApplyError("APPLY_ABORTED_ROLLED_BACK") from exc
-    except OSError as exc:
-        _abort_partial_apply(prepared, created_directories)
+    except (WebSolDeploymentApplyError, OSError) as exc:
+        try:
+            _abort_partial_apply(prepared, created_directories)
+        except (WebSolDeploymentApplyError, OSError) as abort_exc:
+            prepared._state = "EFFECT_UNKNOWN"
+            raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN") from abort_exc
         raise WebSolDeploymentApplyError("APPLY_ABORTED_ROLLED_BACK") from exc
 
     applied = AppliedDeployment(
@@ -789,9 +980,8 @@ def verify_applied_deployment(applied: AppliedDeployment) -> dict[str, object]:
 
     if not isinstance(applied, AppliedDeployment) or applied._state != "APPLIED":
         raise WebSolDeploymentApplyError("APPLIED_INVALID")
-    for artifact in applied.prepared.bundle.artifacts:
-        if not _current_matches_artifact(artifact, applied.prepared):
-            raise WebSolDeploymentApplyError("READBACK_MISMATCH")
+    if not _postimage_complete(applied.prepared):
+        raise WebSolDeploymentApplyError("READBACK_MISMATCH")
     return {
         "schema": READBACK_RECEIPT_SCHEMA,
         "status": "READBACK_VERIFIED",
@@ -803,52 +993,187 @@ def verify_applied_deployment(applied: AppliedDeployment) -> dict[str, object]:
     }
 
 
+def _named_entry_absent(parent_descriptor: int, name: str) -> bool:
+    if not name or name in {".", ".."} or "/" in name or "\x00" in name:
+        return False
+    try:
+        os.stat(name, dir_fd=parent_descriptor, follow_symlinks=False)
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    return False
+
+
+def _named_preimage_matches(
+    parent_descriptor: int,
+    name: str,
+    row: ArtifactPreimage,
+    prepared: PreparedDeployment,
+) -> bool:
+    if row.prior_state == "ABSENT":
+        return _named_entry_absent(parent_descriptor, name)
+    if (
+        row.prior_state != "PRESENT"
+        or row.prior_bytes is None
+        or row.prior_mode is None
+    ):
+        return False
+    return _named_file_matches(
+        parent_descriptor,
+        name,
+        row.prior_bytes,
+        row.prior_mode,
+        prepared,
+    )
+
+
 def _restore_file(
     row: ArtifactPreimage,
     artifact: deployment.DeploymentArtifact,
     prepared: PreparedDeployment,
 ) -> None:
     target = row.path
-    if row.prior_state == "ABSENT":
-        try:
-            target.unlink()
-            _fsync_directory(target.parent)
-        except OSError as exc:
-            if target.exists() or target.is_symlink():
-                raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN") from exc
-        if target.exists() or target.is_symlink():
-            raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN")
-        return
-
-    if row.prior_bytes is None or row.prior_mode is None:
-        raise WebSolDeploymentApplyError("ROLLBACK_STATE_INVALID")
-    if not 0 <= row.prior_mode <= 0o777:
-        raise WebSolDeploymentApplyError("ROLLBACK_STATE_INVALID")
-    temporary = target.with_name(
-        f".{target.name}.mmx-{prepared.prepared_digest[:16]}.rollback.tmp"
-    )
-    _write_exact_temporary(
-        temporary,
-        row.prior_bytes,
-        row.prior_mode,
-        prepared,
-    )
+    parent_descriptor = _open_verified_directory(target.parent, prepared)
     try:
-        os.replace(temporary, target)
-        _fsync_directory(target.parent)
-    except OSError as exc:
-        if not _current_matches_preimage(row):
-            raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN") from exc
-        removed = _cleanup_exact_temporary_bytes(
-            temporary,
-            row.prior_bytes,
-            row.prior_mode,
+        target_name = target.name
+        if not _named_file_matches(
+            parent_descriptor,
+            target_name,
+            artifact.content,
+            artifact.mode,
             prepared,
-        )
-        if not removed:
-            _fsync_directory(target.parent)
+        ):
+            raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN")
+
+        if row.prior_state == "ABSENT":
+            try:
+                os.unlink(target_name, dir_fd=parent_descriptor)
+                os.fsync(parent_descriptor)
+            except OSError as exc:
+                if not _named_entry_absent(parent_descriptor, target_name):
+                    raise WebSolDeploymentApplyError(
+                        "ROLLBACK_EFFECT_UNKNOWN"
+                    ) from exc
+                try:
+                    os.fsync(parent_descriptor)
+                except OSError as fsync_exc:
+                    raise WebSolDeploymentApplyError(
+                        "ROLLBACK_EFFECT_UNKNOWN"
+                    ) from fsync_exc
+            if not _named_entry_absent(parent_descriptor, target_name):
+                raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN")
+        else:
+            if row.prior_bytes is None or row.prior_mode is None:
+                raise WebSolDeploymentApplyError("ROLLBACK_STATE_INVALID")
+            if not 0 <= row.prior_mode <= 0o777:
+                raise WebSolDeploymentApplyError("ROLLBACK_STATE_INVALID")
+            temporary_name = (
+                f".{target.name}.mmx-{prepared.prepared_digest[:16]}.rollback.tmp"
+            )
+            _write_exact_temporary_at(
+                parent_descriptor,
+                temporary_name,
+                row.prior_bytes,
+                row.prior_mode,
+                prepared,
+            )
+            try:
+                os.replace(
+                    temporary_name,
+                    target_name,
+                    src_dir_fd=parent_descriptor,
+                    dst_dir_fd=parent_descriptor,
+                )
+                os.fsync(parent_descriptor)
+            except OSError as exc:
+                if not _named_preimage_matches(
+                    parent_descriptor,
+                    target_name,
+                    row,
+                    prepared,
+                ):
+                    raise WebSolDeploymentApplyError(
+                        "ROLLBACK_EFFECT_UNKNOWN"
+                    ) from exc
+                removed = _cleanup_exact_temporary_at(
+                    parent_descriptor,
+                    temporary_name,
+                    row.prior_bytes,
+                    row.prior_mode,
+                    prepared,
+                )
+                if not removed:
+                    try:
+                        os.fsync(parent_descriptor)
+                    except OSError as fsync_exc:
+                        raise WebSolDeploymentApplyError(
+                            "ROLLBACK_EFFECT_UNKNOWN"
+                        ) from fsync_exc
+            if not _named_preimage_matches(
+                parent_descriptor,
+                target_name,
+                row,
+                prepared,
+            ):
+                raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN")
+    finally:
+        os.close(parent_descriptor)
+
     if not _current_matches_preimage(row):
         raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN")
+
+
+def _remove_created_directory(
+    directory: Path,
+    prepared: PreparedDeployment,
+) -> None:
+    parent_descriptor = _open_verified_directory(directory.parent, prepared)
+    child_descriptor = -1
+    try:
+        if not _created_directory_matches(
+            parent_descriptor, directory.name, prepared
+        ):
+            raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN")
+        try:
+            child_descriptor = os.open(
+                directory.name,
+                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                dir_fd=parent_descriptor,
+            )
+        except OSError as exc:
+            raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN") from exc
+        if not _directory_binding_current(
+            child_descriptor, directory, prepared
+        ):
+            raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN")
+        try:
+            if os.listdir(child_descriptor):
+                raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN")
+        except OSError as exc:
+            raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN") from exc
+        try:
+            os.rmdir(directory.name, dir_fd=parent_descriptor)
+            os.fsync(parent_descriptor)
+        except OSError as exc:
+            if not _named_entry_absent(parent_descriptor, directory.name):
+                raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN") from exc
+            try:
+                os.fsync(parent_descriptor)
+            except OSError as fsync_exc:
+                raise WebSolDeploymentApplyError(
+                    "ROLLBACK_EFFECT_UNKNOWN"
+                ) from fsync_exc
+        if not _named_entry_absent(parent_descriptor, directory.name):
+            raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN")
+        if not _directory_binding_current(
+            parent_descriptor, directory.parent, prepared
+        ):
+            raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN")
+    finally:
+        if child_descriptor >= 0:
+            os.close(child_descriptor)
+        os.close(parent_descriptor)
 
 
 def _abort_partial_apply(
@@ -864,20 +1189,49 @@ def _abort_partial_apply(
         for row in reversed(prepared.preimages):
             artifact = artifacts[str(row.path)]
             temporary = _temporary_path(artifact, prepared)
-            _cleanup_exact_temporary(temporary, artifact, prepared)
-            if _current_matches_preimage(row):
-                continue
-            if not _current_matches_artifact(artifact, prepared):
-                raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN")
+            parent_descriptor = _open_verified_directory(
+                artifact.destination.parent,
+                prepared,
+            )
+            try:
+                _cleanup_exact_temporary_at(
+                    parent_descriptor,
+                    temporary.name,
+                    artifact.content,
+                    artifact.mode,
+                    prepared,
+                )
+                if _named_preimage_matches(
+                    parent_descriptor,
+                    artifact.destination.name,
+                    row,
+                    prepared,
+                ):
+                    continue
+                if not _named_file_matches(
+                    parent_descriptor,
+                    artifact.destination.name,
+                    artifact.content,
+                    artifact.mode,
+                    prepared,
+                ):
+                    raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN")
+            finally:
+                os.close(parent_descriptor)
             _restore_file(row, artifact, prepared)
         for directory in sorted(
             created_directories,
             key=lambda path: (len(path.parts), str(path)),
             reverse=True,
         ):
-            directory.rmdir()
-            _fsync_directory(directory.parent)
-        if any(not _current_matches_preimage(row) for row in prepared.preimages):
+            _remove_created_directory(directory, prepared)
+        if (
+            any(not _current_matches_preimage(row) for row in prepared.preimages)
+            or any(
+                not _current_matches_directory_preimage(row)
+                for row in prepared.directory_preimages
+            )
+        ):
             raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN")
     except WebSolDeploymentApplyError:
         prepared._state = "EFFECT_UNKNOWN"
@@ -915,11 +1269,7 @@ def rollback_deployment(applied: AppliedDeployment) -> dict[str, object]:
         key=lambda path: (len(path.parts), str(path)),
         reverse=True,
     ):
-        try:
-            directory.rmdir()
-            _fsync_directory(directory.parent)
-        except OSError as exc:
-            raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN") from exc
+        _remove_created_directory(directory, applied.prepared)
     for row in applied.prepared.preimages:
         if not _current_matches_preimage(row):
             raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN")
@@ -956,32 +1306,36 @@ def _current_matches_post_directory(
     )
 
 
-def reconcile_prepared_deployment(
-    prepared: PreparedDeployment,
-) -> AppliedDeployment | None:
-    """Classify a persisted PREPARED capsule without repeating any effect.
+def _transaction_temporaries_absent(prepared: PreparedDeployment) -> bool:
+    for artifact in prepared.bundle.artifacts:
+        apply_temp = _temporary_path(artifact, prepared)
+        rollback_temp = artifact.destination.with_name(
+            f".{artifact.destination.name}.mmx-"
+            f"{prepared.prepared_digest[:16]}.rollback.tmp"
+        )
+        if (
+            apply_temp.exists()
+            or apply_temp.is_symlink()
+            or rollback_temp.exists()
+            or rollback_temp.is_symlink()
+        ):
+            return False
+    return True
 
-    ``None`` means every file and directory still matches the captured preimage,
-    so the caller may perform the original apply once.  An ``AppliedDeployment``
-    means the exact whole postimage is already present and has been reconciled.
-    Any mixed or foreign state is effect-unknown and consumes the prepared object.
-    """
 
-    _assert_prepared_integrity(prepared)
-    exact_preimage = (
+def _preimage_complete(prepared: PreparedDeployment) -> bool:
+    return (
         all(
             _current_matches_directory_preimage(row)
             for row in prepared.directory_preimages
         )
         and all(_current_matches_preimage(row) for row in prepared.preimages)
+        and _transaction_temporaries_absent(prepared)
     )
-    if exact_preimage:
-        return None
 
-    artifacts = {
-        str(item.destination): item for item in prepared.bundle.artifacts
-    }
-    exact_postimage = (
+
+def _postimage_complete(prepared: PreparedDeployment) -> bool:
+    return (
         all(
             _current_matches_post_directory(row, prepared)
             for row in prepared.directory_preimages
@@ -990,24 +1344,25 @@ def reconcile_prepared_deployment(
             _current_matches_artifact(artifact, prepared)
             for artifact in prepared.bundle.artifacts
         )
+        and _transaction_temporaries_absent(prepared)
     )
-    for artifact in prepared.bundle.artifacts:
-        temporary = _temporary_path(artifact, prepared)
-        rollback_temporary = artifact.destination.with_name(
-            f".{artifact.destination.name}.mmx-"
-            f"{prepared.prepared_digest[:16]}.rollback.tmp"
-        )
-        if (
-            temporary.exists()
-            or temporary.is_symlink()
-            or rollback_temporary.exists()
-            or rollback_temporary.is_symlink()
-        ):
-            exact_postimage = False
-    if not exact_postimage:
+
+
+def reconcile_prepared_deployment(
+    prepared: PreparedDeployment,
+) -> AppliedDeployment | None:
+    """Classify a persisted PREPARED capsule without repeating any effect."""
+
+    _assert_prepared_integrity(prepared)
+    if _preimage_complete(prepared):
+        return None
+    if not _postimage_complete(prepared):
         prepared._state = "EFFECT_UNKNOWN"
         raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN")
 
+    artifacts = {
+        str(item.destination): item for item in prepared.bundle.artifacts
+    }
     changed = tuple(
         row.path for row in prepared.plan.changes if row.action != "UNCHANGED"
     )
@@ -1030,6 +1385,49 @@ def reconcile_prepared_deployment(
     return applied
 
 
+def reconcile_applied_rollback(
+    applied: AppliedDeployment,
+) -> dict[str, object] | None:
+    """Reconcile a lost rollback receipt without repeating filesystem effects."""
+
+    if not isinstance(applied, AppliedDeployment) or applied._state != "APPLIED":
+        raise WebSolDeploymentApplyError("TRANSACTION_CONSUMED")
+    if applied.prepared._state != "APPLIED":
+        raise WebSolDeploymentApplyError("TRANSACTION_CONSUMED")
+    _validate_prepared_digest(applied.prepared)
+    if _postimage_complete(applied.prepared):
+        return None
+    if not _preimage_complete(applied.prepared):
+        applied._state = "EFFECT_UNKNOWN"
+        applied.prepared._state = "EFFECT_UNKNOWN"
+        raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN")
+
+    changed = set(applied.changed_paths)
+    preimages = {row.path: row for row in applied.prepared.preimages}
+    if any(path not in preimages for path in changed):
+        applied._state = "EFFECT_UNKNOWN"
+        applied.prepared._state = "EFFECT_UNKNOWN"
+        raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN")
+    restored = sum(
+        1 for path in changed if preimages[path].prior_state == "PRESENT"
+    )
+    removed = sum(
+        1 for path in changed if preimages[path].prior_state == "ABSENT"
+    )
+    applied._state = "ROLLED_BACK"
+    applied.prepared._state = "ROLLED_BACK"
+    return {
+        "schema": ROLLBACK_RECEIPT_SCHEMA,
+        "status": "ROLLBACK_VERIFIED",
+        "operation_key": applied.prepared.operation_key,
+        "bundle_digest": applied.prepared.bundle.bundle_digest,
+        "prepared_digest": applied.prepared.prepared_digest,
+        "restored_count": restored,
+        "removed_count": removed,
+        "production_acceptance_granted": False,
+    }
+
+
 __all__.extend(
     [
         "APPLY_RECEIPT_SCHEMA",
@@ -1037,6 +1435,7 @@ __all__.extend(
         "READBACK_RECEIPT_SCHEMA",
         "ROLLBACK_RECEIPT_SCHEMA",
         "apply_deployment",
+        "reconcile_applied_rollback",
         "reconcile_prepared_deployment",
         "rollback_deployment",
         "verify_applied_deployment",

@@ -63,6 +63,24 @@ def _check_depth(value: Any) -> None:
         pending.extend((child, depth) for child in children)
 
 
+def _decode_private_json_payload(payload: bytes) -> Any:
+    if type(payload) is not bytes or len(payload) > MAX_JSON_BYTES:
+        raise applier.WebSolDeploymentApplyError("INVALID_INPUT")
+    try:
+        value = json.loads(
+            payload.decode("utf-8"),
+            object_pairs_hook=_unique_object,
+            parse_constant=_reject_constant,
+            parse_int=_bounded_integer,
+        )
+        _check_depth(value)
+        return value
+    except applier.WebSolDeploymentApplyError:
+        raise
+    except (UnicodeError, ValueError, RecursionError):
+        raise applier.WebSolDeploymentApplyError("INVALID_INPUT") from None
+
+
 def _private_json_file(path: Path) -> Any:
     try:
         info = path.lstat()
@@ -75,19 +93,10 @@ def _private_json_file(path: Path) -> Any:
             raise applier.WebSolDeploymentApplyError("INVALID_INPUT")
         with path.open("rb") as stream:
             payload = stream.read(MAX_JSON_BYTES + 1)
-        if len(payload) > MAX_JSON_BYTES:
-            raise applier.WebSolDeploymentApplyError("INVALID_INPUT")
-        value = json.loads(
-            payload.decode("utf-8"),
-            object_pairs_hook=_unique_object,
-            parse_constant=_reject_constant,
-            parse_int=_bounded_integer,
-        )
-        _check_depth(value)
-        return value
+        return _decode_private_json_payload(payload)
     except applier.WebSolDeploymentApplyError:
         raise
-    except (OSError, UnicodeError, ValueError, RecursionError):
+    except OSError:
         raise applier.WebSolDeploymentApplyError("INVALID_INPUT") from None
 
 
@@ -445,14 +454,19 @@ def main(argv: list[str] | None = None) -> int:
             if args.state is None or args.request is not None:
                 raise applier.WebSolDeploymentApplyError("INVALID_INPUT")
             phase, request_document, prepared, applied, state_digest = (
-                _decode_private_state(_private_json_file(args.state))
+                _decode_private_state(_private_state_file(args.state))
             )
             if phase != "APPLIED" or applied is None:
                 raise applier.WebSolDeploymentApplyError("TRANSACTION_CONSUMED")
             if args.mode == "verify":
                 _emit(applier.verify_applied_deployment(applied))
                 return 0
-            rollback_receipt = applier.rollback_deployment(applied)
+            reconciled_rollback = applier.reconcile_applied_rollback(applied)
+            rollback_receipt = (
+                applier.rollback_deployment(applied)
+                if reconciled_rollback is None
+                else reconciled_rollback
+            )
             terminal_state = _private_state_document(
                 request_document=request_document,
                 prepared=prepared,
@@ -477,7 +491,7 @@ def main(argv: list[str] | None = None) -> int:
             and (args.state.exists() or args.state.is_symlink())
         ):
             phase, state_request, state_prepared, state_applied, _state_digest = (
-                _decode_private_state(_private_json_file(args.state))
+                _decode_private_state(_private_state_file(args.state))
             )
             if _canonical_bytes(state_request) != _canonical_bytes(request_document):
                 raise applier.WebSolDeploymentApplyError("STATE_CONFLICT")
@@ -598,70 +612,222 @@ def _write_all(descriptor: int, payload: bytes) -> None:
         offset += written
 
 
+def _state_parent_binding_current(parent: Path, descriptor: int) -> bool:
+    try:
+        named = parent.lstat()
+        opened = os.fstat(descriptor)
+    except OSError:
+        return False
+    return (
+        stat.S_ISDIR(named.st_mode)
+        and not stat.S_ISLNK(named.st_mode)
+        and (named.st_dev, named.st_ino) == (opened.st_dev, opened.st_ino)
+        and named.st_uid == opened.st_uid == os.geteuid()
+        and named.st_gid == opened.st_gid
+        and stat.S_IMODE(named.st_mode) == stat.S_IMODE(opened.st_mode)
+        and not (stat.S_IMODE(opened.st_mode) & 0o022)
+    )
+
+
+def _open_state_parent(path: Path) -> tuple[Path, int]:
+    parent = _state_parent(path)
+    if not hasattr(os, "O_DIRECTORY") or not hasattr(os, "O_NOFOLLOW"):
+        raise applier.WebSolDeploymentApplyError("STATE_EFFECT_UNKNOWN")
+    try:
+        descriptor = os.open(
+            parent,
+            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+        )
+    except OSError as exc:
+        raise applier.WebSolDeploymentApplyError("STATE_EFFECT_UNKNOWN") from exc
+    if not _state_parent_binding_current(parent, descriptor):
+        os.close(descriptor)
+        raise applier.WebSolDeploymentApplyError("STATE_EFFECT_UNKNOWN")
+    return parent, descriptor
+
+
+def _private_json_at(
+    parent_descriptor: int,
+    name: str,
+    *,
+    error_code: str,
+) -> tuple[Any, bytes]:
+    if not name or name in {".", ".."} or "/" in name or "\x00" in name:
+        raise applier.WebSolDeploymentApplyError(error_code)
+    try:
+        named = os.stat(name, dir_fd=parent_descriptor, follow_symlinks=False)
+        if (
+            stat.S_ISLNK(named.st_mode)
+            or not stat.S_ISREG(named.st_mode)
+            or named.st_nlink != 1
+            or named.st_uid != os.geteuid()
+            or stat.S_IMODE(named.st_mode) != 0o600
+        ):
+            raise applier.WebSolDeploymentApplyError(error_code)
+        flags = os.O_RDONLY | os.O_NOFOLLOW
+        descriptor = os.open(name, flags, dir_fd=parent_descriptor)
+        try:
+            opened = os.fstat(descriptor)
+            if (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino):
+                raise applier.WebSolDeploymentApplyError(error_code)
+            payload = bytearray()
+            while len(payload) <= MAX_JSON_BYTES:
+                chunk = os.read(
+                    descriptor,
+                    min(65536, MAX_JSON_BYTES + 1 - len(payload)),
+                )
+                if not chunk:
+                    break
+                payload.extend(chunk)
+            final = os.fstat(descriptor)
+        finally:
+            os.close(descriptor)
+        if (
+            len(payload) > MAX_JSON_BYTES
+            or (final.st_dev, final.st_ino, final.st_size, final.st_mtime_ns)
+            != (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns)
+        ):
+            raise applier.WebSolDeploymentApplyError(error_code)
+        try:
+            value = _decode_private_json_payload(bytes(payload))
+        except applier.WebSolDeploymentApplyError as exc:
+            raise applier.WebSolDeploymentApplyError(error_code) from exc
+        return value, bytes(payload)
+    except applier.WebSolDeploymentApplyError:
+        raise
+    except OSError as exc:
+        raise applier.WebSolDeploymentApplyError(error_code) from exc
+
+
+def _private_state_file(path: Path) -> Any:
+    try:
+        parent, parent_descriptor = _open_state_parent(path)
+    except applier.WebSolDeploymentApplyError as exc:
+        raise applier.WebSolDeploymentApplyError("STATE_INVALID") from exc
+    try:
+        value, _payload = _private_json_at(
+            parent_descriptor,
+            path.name,
+            error_code="STATE_INVALID",
+        )
+        if not _state_parent_binding_current(parent, parent_descriptor):
+            raise applier.WebSolDeploymentApplyError("STATE_INVALID")
+        return value
+    finally:
+        os.close(parent_descriptor)
+
+
 def _write_private_state(
     path: Path,
     document: dict[str, object],
     *,
     expected_digest: str | None,
 ) -> None:
-    parent = _state_parent(path)
-    existing = path.exists() or path.is_symlink()
-    if existing:
-        if expected_digest is None:
-            raise applier.WebSolDeploymentApplyError("STATE_CONFLICT")
-        current = _private_json_file(path)
-        if type(current) is not dict or current.get("state_digest") != expected_digest:
-            raise applier.WebSolDeploymentApplyError("STATE_CONFLICT")
-    elif expected_digest is not None:
-        raise applier.WebSolDeploymentApplyError("STATE_EFFECT_UNKNOWN")
-
-    payload = _canonical_bytes(document) + b"\n"
-    temporary = parent / f".{path.name}.mmx-state.tmp"
-    if temporary.exists() or temporary.is_symlink():
-        raise applier.WebSolDeploymentApplyError("STATE_CONFLICT")
-    flags = (
-        os.O_WRONLY
-        | os.O_CREAT
-        | os.O_EXCL
-        | getattr(os, "O_NOFOLLOW", 0)
-    )
-    descriptor = -1
+    parent, parent_descriptor = _open_state_parent(path)
+    name = path.name
+    temporary_name = f".{name}.mmx-state.tmp"
     try:
-        descriptor = os.open(temporary, flags, 0o600)
-        _write_all(descriptor, payload)
-        os.fchmod(descriptor, 0o600)
-        os.fsync(descriptor)
-        temp_info = os.fstat(descriptor)
-    except OSError as exc:
-        raise applier.WebSolDeploymentApplyError("STATE_EFFECT_UNKNOWN") from exc
-    finally:
-        if descriptor >= 0:
+        try:
+            current, _current_payload = _private_json_at(
+                parent_descriptor,
+                name,
+                error_code="STATE_CONFLICT",
+            )
+        except applier.WebSolDeploymentApplyError as exc:
             try:
-                os.close(descriptor)
-            except OSError as exc:
+                os.stat(name, dir_fd=parent_descriptor, follow_symlinks=False)
+            except FileNotFoundError:
+                existing = False
+            except OSError as stat_exc:
                 raise applier.WebSolDeploymentApplyError(
                     "STATE_EFFECT_UNKNOWN"
-                ) from exc
-    try:
-        named = temporary.lstat()
-        if (
-            stat.S_ISLNK(named.st_mode)
-            or not stat.S_ISREG(named.st_mode)
-            or named.st_dev != temp_info.st_dev
-            or named.st_ino != temp_info.st_ino
-            or named.st_uid != os.geteuid()
-            or stat.S_IMODE(named.st_mode) != 0o600
-            or named.st_size != len(payload)
-        ):
+                ) from stat_exc
+            else:
+                existing = True
+            if existing:
+                raise
+            current = None
+
+        if current is not None:
+            if expected_digest is None:
+                raise applier.WebSolDeploymentApplyError("STATE_CONFLICT")
+            if type(current) is not dict or current.get("state_digest") != expected_digest:
+                raise applier.WebSolDeploymentApplyError("STATE_CONFLICT")
+        elif expected_digest is not None:
             raise applier.WebSolDeploymentApplyError("STATE_EFFECT_UNKNOWN")
-        os.replace(temporary, path)
-        _fsync_directory(parent)
-        if path.read_bytes() != payload:
-            raise applier.WebSolDeploymentApplyError("STATE_EFFECT_UNKNOWN")
-    except applier.WebSolDeploymentApplyError:
-        raise
-    except OSError as exc:
-        raise applier.WebSolDeploymentApplyError("STATE_EFFECT_UNKNOWN") from exc
+
+        try:
+            os.stat(temporary_name, dir_fd=parent_descriptor, follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            raise applier.WebSolDeploymentApplyError("STATE_EFFECT_UNKNOWN") from exc
+        else:
+            raise applier.WebSolDeploymentApplyError("STATE_CONFLICT")
+
+        payload = _canonical_bytes(document) + b"\n"
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+        descriptor = -1
+        try:
+            descriptor = os.open(
+                temporary_name,
+                flags,
+                0o600,
+                dir_fd=parent_descriptor,
+            )
+            _write_all(descriptor, payload)
+            os.fchmod(descriptor, 0o600)
+            os.fsync(descriptor)
+            temp_info = os.fstat(descriptor)
+        except OSError as exc:
+            raise applier.WebSolDeploymentApplyError("STATE_EFFECT_UNKNOWN") from exc
+        finally:
+            if descriptor >= 0:
+                try:
+                    os.close(descriptor)
+                except OSError as exc:
+                    raise applier.WebSolDeploymentApplyError(
+                        "STATE_EFFECT_UNKNOWN"
+                    ) from exc
+
+        try:
+            named = os.stat(
+                temporary_name,
+                dir_fd=parent_descriptor,
+                follow_symlinks=False,
+            )
+            if (
+                stat.S_ISLNK(named.st_mode)
+                or not stat.S_ISREG(named.st_mode)
+                or named.st_dev != temp_info.st_dev
+                or named.st_ino != temp_info.st_ino
+                or named.st_uid != os.geteuid()
+                or stat.S_IMODE(named.st_mode) != 0o600
+                or named.st_size != len(payload)
+            ):
+                raise applier.WebSolDeploymentApplyError("STATE_EFFECT_UNKNOWN")
+            os.replace(
+                temporary_name,
+                name,
+                src_dir_fd=parent_descriptor,
+                dst_dir_fd=parent_descriptor,
+            )
+            os.fsync(parent_descriptor)
+            _value, observed_payload = _private_json_at(
+                parent_descriptor,
+                name,
+                error_code="STATE_EFFECT_UNKNOWN",
+            )
+            if observed_payload != payload:
+                raise applier.WebSolDeploymentApplyError("STATE_EFFECT_UNKNOWN")
+            if not _state_parent_binding_current(parent, parent_descriptor):
+                raise applier.WebSolDeploymentApplyError("STATE_EFFECT_UNKNOWN")
+        except applier.WebSolDeploymentApplyError:
+            raise
+        except OSError as exc:
+            raise applier.WebSolDeploymentApplyError("STATE_EFFECT_UNKNOWN") from exc
+    finally:
+        os.close(parent_descriptor)
 
 
 def _decode_preimage(

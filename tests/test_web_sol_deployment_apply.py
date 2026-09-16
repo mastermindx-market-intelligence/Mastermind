@@ -143,12 +143,12 @@ def test_partial_apply_failure_rolls_back_and_consumes_prepared(
     original_replace = applier.os.replace
     calls = 0
 
-    def fail_before_second_replace(source: object, target: object) -> None:
+    def fail_before_second_replace(source: object, target: object, *args, **kwargs) -> None:
         nonlocal calls
         calls += 1
         if calls == 2:
             raise OSError("injected-before-second-replace")
-        original_replace(source, target)
+        original_replace(source, target, *args, **kwargs)
 
     monkeypatch.setattr(applier.os, "replace", fail_before_second_replace)
 
@@ -180,31 +180,36 @@ def test_post_replace_fsync_failure_reconciles_without_replacing_twice(
         operation_key="web-sol-install1-transactional-applier-source-20260916-sol-001",
     )
     first = sorted(bundle.artifacts, key=lambda row: str(row.destination))[0]
-    original_fsync_directory = applier._fsync_directory
+    original_fsync = applier.os.fsync
     original_replace = applier.os.replace
     fsync_calls: list[Path] = []
-    replace_targets: list[Path] = []
+    replace_targets: list[str] = []
     injected = False
 
-    def record_replace(source: object, target: object) -> None:
-        replace_targets.append(Path(target))
-        original_replace(source, target)
+    def record_replace(source: object, target: object, *args, **kwargs) -> None:
+        replace_targets.append(Path(target).name)
+        original_replace(source, target, *args, **kwargs)
 
-    def fail_first_post_replace_fsync(path: Path) -> None:
+    def fail_first_post_replace_fsync(descriptor: int) -> None:
         nonlocal injected
-        fsync_calls.append(path)
-        if path == first.destination.parent and first.destination.exists() and not injected:
-            injected = True
-            raise OSError("injected-directory-fsync-failure")
-        original_fsync_directory(path)
+        info = applier.os.fstat(descriptor)
+        parent = first.destination.parent
+        if parent.exists():
+            parent_info = parent.stat()
+            if (info.st_dev, info.st_ino) == (parent_info.st_dev, parent_info.st_ino):
+                fsync_calls.append(parent)
+                if first.destination.exists() and not injected:
+                    injected = True
+                    raise OSError("injected-directory-fsync-failure")
+        original_fsync(descriptor)
 
     monkeypatch.setattr(applier.os, "replace", record_replace)
-    monkeypatch.setattr(applier, "_fsync_directory", fail_first_post_replace_fsync)
+    monkeypatch.setattr(applier.os, "fsync", fail_first_post_replace_fsync)
 
     applied = applier.apply_deployment(prepared)
 
     assert injected is True
-    assert replace_targets.count(first.destination) == 1
+    assert replace_targets.count(first.destination.name) == 1
     assert fsync_calls.count(first.destination.parent) == 2
     assert applied.public_receipt["reconciled_count"] == 1
     applier.rollback_deployment(applied)
@@ -444,12 +449,21 @@ def test_irreconcilable_post_replace_state_is_effect_unknown(
     original_replace = applier.os.replace
     injected = False
 
-    def replace_then_corrupt(source: object, target: object) -> None:
+    def replace_then_corrupt(source: object, target: object, *args, **kwargs) -> None:
         nonlocal injected
-        original_replace(source, target)
+        original_replace(source, target, *args, **kwargs)
         if not injected:
             injected = True
-            Path(target).write_bytes(b"irreconcilable-postimage")
+            descriptor = applier.os.open(
+                str(target),
+                applier.os.O_WRONLY | applier.os.O_TRUNC,
+                dir_fd=kwargs["dst_dir_fd"],
+            )
+            try:
+                applier.os.write(descriptor, b"irreconcilable-postimage")
+                applier.os.fsync(descriptor)
+            finally:
+                applier.os.close(descriptor)
             raise OSError("lost-response-with-foreign-postimage")
 
     monkeypatch.setattr(applier.os, "replace", replace_then_corrupt)
@@ -466,3 +480,269 @@ def test_irreconcilable_post_replace_state_is_effect_unknown(
         match="TRANSACTION_CONSUMED",
     ):
         applier.apply_deployment(prepared)
+
+
+def test_complete_census1_bundle_applies_reads_back_and_rolls_back(
+    tmp_path: Path,
+) -> None:
+    bundle_seed, _unused_root = _bundle(tmp_path)
+    binding_row = _binding()
+    install_root = tmp_path / "census-install"
+    install_root.mkdir(mode=0o700)
+    release = deployment.WebSolRelease(
+        package_version="0.2.0",
+        source_commit="c" * 40,
+        repository_root=tmp_path / "repo",
+        python_executable=Path(sys.executable),
+        install_root=install_root,
+    )
+    source_root = (
+        Path(__file__).resolve().parents[1]
+        / "integrations"
+        / "chairman_surfaces"
+        / "web_sol_extension"
+    )
+    names = (
+        "manifest.json",
+        "background.js",
+        "content.js",
+        "census.html",
+        "census.css",
+        "census_core.js",
+        "census.js",
+    )
+    source_files = {name: (source_root / name).read_bytes() for name in names}
+    expected = {
+        name: applier.hashlib.sha256(payload).hexdigest()
+        for name, payload in source_files.items()
+    }
+    bundle = deployment.render_census_extension_bundle(
+        binding_row,
+        release,
+        source_files=source_files,
+        expected_source_digests=expected,
+    )
+    assert len(bundle_seed.artifacts) == 3
+    assert len(bundle.artifacts) == 10
+    prepared = applier.prepare_deployment(
+        bundle,
+        deployment.plan_deployment(bundle, {}),
+        install_root=install_root,
+        expected_uid=install_root.stat().st_uid,
+        expected_gid=install_root.stat().st_gid,
+        operation_key="web-sol-install1-transactional-applier-source-20260916-sol-001",
+    )
+
+    applied = applier.apply_deployment(prepared)
+
+    assert applied.public_receipt["target_count"] == 10
+    assert applier.verify_applied_deployment(applied)["target_count"] == 10
+    assert applier.rollback_deployment(applied)["removed_count"] == 10
+    assert list(install_root.rglob("*")) == []
+
+
+def test_parent_symlink_swap_at_replace_never_writes_outside_install_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle, install_root = _bundle(tmp_path)
+    prepared = applier.prepare_deployment(
+        bundle,
+        deployment.plan_deployment(bundle, {}),
+        install_root=install_root,
+        expected_uid=install_root.stat().st_uid,
+        expected_gid=install_root.stat().st_gid,
+        operation_key="web-sol-install1-transactional-applier-source-20260916-sol-001",
+    )
+    first = sorted(bundle.artifacts, key=lambda row: str(row.destination))[0]
+    outside = tmp_path / "outside"
+    outside.mkdir(mode=0o700)
+    attack_temp = outside / applier._temporary_path(first, prepared).name
+    displaced = tmp_path / "displaced-parent"
+    original_replace = applier.os.replace
+    injected = False
+
+    def swap_parent_then_replace(source, target, *args, **kwargs):
+        nonlocal injected
+        if not injected and Path(target).name == first.destination.name:
+            injected = True
+            parent = first.destination.parent
+            parent.rename(displaced)
+            parent.symlink_to(outside, target_is_directory=True)
+            assert Path(source).name == attack_temp.name
+            attack_temp.write_bytes(first.content)
+            attack_temp.chmod(first.mode)
+        return original_replace(source, target, *args, **kwargs)
+
+    monkeypatch.setattr(applier.os, "replace", swap_parent_then_replace)
+
+    with pytest.raises(applier.WebSolDeploymentApplyError):
+        applier.apply_deployment(prepared)
+
+    assert injected is True
+    assert not (outside / first.destination.name).exists()
+    assert attack_temp.read_bytes() == first.content
+
+
+def test_parent_symlink_swap_at_rollback_never_deletes_outside_install_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle, install_root = _bundle(tmp_path)
+    prepared = applier.prepare_deployment(
+        bundle,
+        deployment.plan_deployment(bundle, {}),
+        install_root=install_root,
+        expected_uid=install_root.stat().st_uid,
+        expected_gid=install_root.stat().st_gid,
+        operation_key="web-sol-install1-transactional-applier-source-20260916-sol-001",
+    )
+    applied = applier.apply_deployment(prepared)
+    target = prepared.preimages[-1].path
+    outside = tmp_path / "outside-rollback"
+    outside.mkdir(mode=0o700)
+    sentinel = outside / target.name
+    sentinel.write_bytes(b"outside-rollback-sentinel")
+    displaced = tmp_path / "displaced-rollback-parent"
+    original_unlink = applier.os.unlink
+    injected = False
+
+    def swap_parent_then_unlink(path_value, *args, **kwargs) -> None:
+        nonlocal injected
+        if not injected and Path(path_value).name == target.name:
+            injected = True
+            target.parent.rename(displaced)
+            target.parent.symlink_to(outside, target_is_directory=True)
+        original_unlink(path_value, *args, **kwargs)
+
+    monkeypatch.setattr(applier.os, "unlink", swap_parent_then_unlink)
+
+    with pytest.raises(applier.WebSolDeploymentApplyError):
+        applier.rollback_deployment(applied)
+
+    assert injected is True
+    assert sentinel.read_bytes() == b"outside-rollback-sentinel"
+
+
+def test_install_root_symlink_swap_at_directory_create_never_creates_outside(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle, install_root = _bundle(tmp_path)
+    prepared = applier.prepare_deployment(
+        bundle,
+        deployment.plan_deployment(bundle, {}),
+        install_root=install_root,
+        expected_uid=install_root.stat().st_uid,
+        expected_gid=install_root.stat().st_gid,
+        operation_key="web-sol-install1-transactional-applier-source-20260916-sol-001",
+    )
+    first_directory = min(
+        (row.path for row in prepared.directory_preimages if row.prior_state == "ABSENT"),
+        key=lambda item: (len(item.parts), str(item)),
+    )
+    outside = tmp_path / "outside-directory-create"
+    outside.mkdir(mode=0o700)
+    displaced = tmp_path / "displaced-install-root"
+    original_mkdir = applier.os.mkdir
+    injected = False
+
+    def swap_root_then_mkdir(path_value, mode=0o777, *args, **kwargs):
+        nonlocal injected
+        if not injected and Path(path_value).name == first_directory.name:
+            injected = True
+            install_root.rename(displaced)
+            install_root.symlink_to(outside, target_is_directory=True)
+        return original_mkdir(path_value, mode, *args, **kwargs)
+
+    monkeypatch.setattr(applier.os, "mkdir", swap_root_then_mkdir)
+
+    with pytest.raises(applier.WebSolDeploymentApplyError):
+        applier.apply_deployment(prepared)
+
+    assert injected is True
+    assert not (outside / first_directory.name).exists()
+
+
+def test_parent_symlink_swap_at_directory_removal_never_removes_outside(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle, install_root = _bundle(tmp_path)
+    prepared = applier.prepare_deployment(
+        bundle,
+        deployment.plan_deployment(bundle, {}),
+        install_root=install_root,
+        expected_uid=install_root.stat().st_uid,
+        expected_gid=install_root.stat().st_gid,
+        operation_key="web-sol-install1-transactional-applier-source-20260916-sol-001",
+    )
+    applied = applier.apply_deployment(prepared)
+    target = sorted(
+        applied.created_directories,
+        key=lambda item: (len(item.parts), str(item)),
+        reverse=True,
+    )[0]
+    outside = tmp_path / "outside-directory-removal"
+    outside.mkdir(mode=0o700)
+    outside_target = outside / target.name
+    outside_target.mkdir(mode=0o700)
+    displaced = tmp_path / "displaced-directory-parent"
+    original_rmdir = applier.os.rmdir
+    injected = False
+
+    def swap_parent_then_rmdir(path_value, *args, **kwargs):
+        nonlocal injected
+        if not injected and Path(path_value).name == target.name:
+            injected = True
+            target.parent.rename(displaced)
+            target.parent.symlink_to(outside, target_is_directory=True)
+        return original_rmdir(path_value, *args, **kwargs)
+
+    monkeypatch.setattr(applier.os, "rmdir", swap_parent_then_rmdir)
+
+    with pytest.raises(applier.WebSolDeploymentApplyError):
+        applier.rollback_deployment(applied)
+
+    assert injected is True
+    assert outside_target.is_dir()
+
+
+def test_lost_response_after_first_directory_create_is_effect_unknown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle, install_root = _bundle(tmp_path)
+    prepared = applier.prepare_deployment(
+        bundle,
+        deployment.plan_deployment(bundle, {}),
+        install_root=install_root,
+        expected_uid=install_root.stat().st_uid,
+        expected_gid=install_root.stat().st_gid,
+        operation_key="web-sol-install1-transactional-applier-source-20260916-sol-001",
+    )
+    original_mkdir = applier.os.mkdir
+    calls = 0
+
+    def create_then_lose_response(path_value, mode=0o777, *args, **kwargs):
+        nonlocal calls
+        calls += 1
+        original_mkdir(path_value, mode, *args, **kwargs)
+        if calls == 1:
+            raise OSError("lost-directory-create-response")
+
+    monkeypatch.setattr(applier.os, "mkdir", create_then_lose_response)
+
+    first_directory = min(
+        (row.path for row in prepared.directory_preimages if row.prior_state == "ABSENT"),
+        key=lambda item: (len(item.parts), str(item)),
+    )
+    with pytest.raises(
+        applier.WebSolDeploymentApplyError,
+        match="APPLY_EFFECT_UNKNOWN",
+    ):
+        applier.apply_deployment(prepared)
+
+    assert calls == 1
+    assert first_directory.is_dir()
+    assert prepared._state == "EFFECT_UNKNOWN"
