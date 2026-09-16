@@ -76,6 +76,14 @@ def _graph():
     return scenario, config_a, config_b, experiment
 
 
+def _host_artifact(arm_id: str, snapshot: dict) -> dict:
+    return {
+        "artifact_ref": f"{REPO_REF_BASE}#fixtures/{arm_id}/host-capacity.json",
+        "digest": host_factor_lock.host_capacity_snapshot_digest(snapshot),
+        "kind": "OTHER",
+    }
+
+
 def _finalized_run(scenario, configuration, experiment, *, arm_id: str, snapshot: dict) -> dict:
     draft = build_run_draft(
         scenario,
@@ -84,13 +92,7 @@ def _finalized_run(scenario, configuration, experiment, *, arm_id: str, snapshot
         arm_id=arm_id,
         replicate_index=1,
     )
-    digest = host_factor_lock.host_capacity_snapshot_digest(snapshot)
-    draft["evidence"]["artifacts"] = [
-        {
-            "artifact_ref": f"{REPO_REF_BASE}#fixtures/{arm_id}/host-capacity.json",
-            "digest": digest,
-        }
-    ]
+    draft["evidence"]["artifacts"] = [_host_artifact(arm_id, snapshot)]
     return validity.finalize_run_receipt(
         scenario,
         configuration,
@@ -186,6 +188,28 @@ def test_missing_host_snapshot_evidence_refuses() -> None:
 
     assert "HOST_CAPACITY_EVIDENCE_MISSING" in _codes(excinfo)
     assert left["run_id"] != unbound["run_id"]
+
+
+def test_post_finalization_evidence_injection_refuses_stale_run_digest() -> None:
+    scenario, config_a, config_b, experiment = _graph()
+    snapshot = _snapshot()
+    right = _finalized_run(scenario, config_b, experiment, arm_id="arm_b", snapshot=snapshot)
+
+    draft = build_run_draft(scenario, config_a, experiment, arm_id="arm_a", replicate_index=2)
+    finalized_without_host = validity.finalize_run_receipt(
+        scenario,
+        config_a,
+        experiment,
+        draft,
+        **VALIDATOR_KW,
+    )
+    forged = copy.deepcopy(finalized_without_host)
+    forged["evidence"]["artifacts"] = [_host_artifact("arm_a", snapshot)]
+
+    with pytest.raises(ContractError) as excinfo:
+        host_factor_lock.verify_host_factor_evidence_lock(forged, snapshot, right, snapshot)
+
+    assert "DIGEST_MISMATCH" in _codes(excinfo)
 
 
 def test_malformed_host_snapshot_refuses_without_echo() -> None:
