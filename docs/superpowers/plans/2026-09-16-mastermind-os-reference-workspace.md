@@ -121,8 +121,8 @@ Files: README and `reference_acceptance.json`; all source paths remain the same 
 
 - [ ] Run the entire reference suite, syntax/diff checks and source scan.
 - [ ] Record HTML/spec/plan/test hashes, browser/environment, actual test results and production-effect=false.
-- [ ] Publish the six new text files sequentially on the SAME managed operation branch through the authenticated GitHub contents API; reconcile each returned commit before the next write.
-- [ ] Fast-forward only the clean owned workspace to that exact remote head, compare all six byte hashes, inspect the six-path diff, and open one Draft/HOLD PR. No reset, force or foreign workspace edit. Reconcile any uncertain write before repeating it.
+- [ ] Publish on the SAME managed operation branch. The first four contract/test records use sequential authenticated GitHub contents writes; the HTML and validation record use the reconciled owned workspace and one ordinary commit/push. Reconcile each effect before the next write.
+- [ ] Fast-forward only the clean owned workspace to the four-record remote checkpoint, transfer the remaining source with exact hash readback, compare all six byte hashes, inspect the six-path diff, and open one Draft/HOLD PR. No reset, force or foreign workspace edit. Reconcile any uncertain write before repeating it.
 - [ ] Cross-reference the exact published revision to existing #595, #600 and Macro #7120 through bounded evidence/intake comments.
 - [ ] Send one compact same-root OS integration intake to incumbent Claude8 without overriding its current child rulings or pretending delivery is consumption.
 
@@ -139,3 +139,5 @@ The current DF1 stream, #677/#653 admission work, Provider Capacity #688, AD-RET
 The intended missing-artifact RED was observed before writing the HTML. Two source-only checks now pass; JavaScript syntax is validated separately. Playwright browser execution has not reached the document: default browser payload is absent, and the installed Chromium returns `ERR_BLOCKED_BY_ADMINISTRATOR` on direct-file and temporary loopback-preview navigation. No policy changes or cross-host browser retry were performed. Browser task checkboxes remain open.
 
 The reference is safe to publish only as Draft/HOLD with those limitations and exact hashes. It is not eligible for source-release, product acceptance or deployment based on the current evidence.
+
+Publication continuity: the first four records reached `498b0bfe23109e7feddcce73f73f54e0583048da` and the clean managed workspace was fast-forwarded to that exact head. Studio went offline during the first HTML write. After reconnection, a stat and exact-workspace check proved that HTML was absent, so that effect was reconciled as NONE before repeating the write on the same host/path. The complete native HTML then read back at SHA-256 `160426f6d9105fa946520d6c51d967453ebb00746b78973d45bb27d410892353`, identical to the sandbox candidate. Browser restrictions remain unchanged and browser acceptance is still unproven.

@@ -1,0 +1,75 @@
+{
+  "record_type": "offline_reference_validation",
+  "operation_key": "mastermind-os-rollout-contract-20260916-sol-001",
+  "source_pin": "8ba7deedde164c90298d3e88785d98e02fa5e2d2",
+  "disposition": "DRAFT_HOLD_BUILT_NOT_PROVEN",
+  "production_acceptance_granted": false,
+  "runtime_or_provider_effect": false,
+  "external_worker_started": false,
+  "browser_policy_changed": false,
+  "source_checks": {
+    "passed": 2,
+    "failed": 0,
+    "latest_exit_code": 0,
+    "javascript_syntax_exit_code": 0,
+    "javascript_source_equality": true
+  },
+  "test_collection": {
+    "total": 37,
+    "source_only": 2,
+    "browser_dependent": 35
+  },
+  "red_evidence": {
+    "test": "test_reference_exists",
+    "outcome": "intended missing-HTML assertion failure before HTML creation",
+    "failed": 1,
+    "passed": 0,
+    "log_sha256": "4fa53e3ea24070b54d19e610c38bae1e23f59b8eaf889c1c88dd91e15adc3d8a"
+  },
+  "browser_campaign": {
+    "status": "BLOCKED_NOT_VERIFIED",
+    "bundled_browser": "ABSENT",
+    "installed_chromium": "144.0.7559.96",
+    "file_navigation": "ERR_BLOCKED_BY_ADMINISTRATOR",
+    "loopback_navigation": "ERR_BLOCKED_BY_ADMINISTRATOR",
+    "latest_attempt_passed": 1,
+    "latest_attempt_errors": 1,
+    "latest_attempt_stopped_after_first_error": true,
+    "screenshots_produced": 0,
+    "visual_acceptance": false,
+    "accessibility_acceptance": false,
+    "cross_host_browser_retry": false
+  },
+  "environment": {
+    "python": "3.13.5",
+    "pytest": "9.0.2",
+    "playwright": "1.57.0",
+    "node": "v22.16.0"
+  },
+  "open_source_review_risks": [
+    "Connections card layout does not draw real relation edges.",
+    "Search modal focus restoration and skip-link route/focus behavior need permitted browser verification and repair.",
+    "No current mission or authorized content API is connected."
+  ],
+  "source_publication": {
+    "initial_four_record_head": "498b0bfe23109e7feddcce73f73f54e0583048da",
+    "first_native_html_attempt": "offline response; later exact path verified absent",
+    "reconciled_effect": "NONE before same-host repeat",
+    "native_html_hash_verified": true,
+    "final_head": "resolve from the containing Git commit; not self-referential"
+  },
+  "integration_intake": {
+    "carrier": "slack:C0BSBM78V1N/1789324397.992989",
+    "message_ts": "1789555914.549109",
+    "state": "DELIVERED_CONSUMPTION_NOT_PROVEN",
+    "new_child_assignment": false
+  },
+  "artifact_sha256": {
+    "docs/superpowers/specs/2026-09-16-mastermind-os-integrated-rollout-design.md": "98d45933f606a57aa9b26bba66601cd034c711e50af47db24506bbdf88a78f29",
+    "docs/superpowers/plans/2026-09-16-mastermind-os-reference-workspace.md": "06593ff5c1b5e596c985e3716b721246eda8b61f5be5008ff7a96b0b445dc7a7",
+    "research/mastermind_os/README.md": "62a8ceadf3ac618c7e52e89d069a9ef02b550fcdc23694db7f212584d12412ad",
+    "research/mastermind_os/test_reference_workspace.py": "f3bfeaaad4d82087dca4202bbdd99654ffbf34cfa2dda2902d1c88d407e3c727",
+    "research/mastermind_os/reference_workspace.html": "160426f6d9105fa946520d6c51d967453ebb00746b78973d45bb27d410892353"
+  },
+  "next_action": "Review the exact producer mission/content contract and current CCR consumer; preserve browser and installed-product holds. No source merge or deployment from this receipt."
+}
