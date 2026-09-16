@@ -317,13 +317,15 @@ python3 -m py_compile \
   control_plane/session_targets.py \
   integrations/mastermind_company_mcp/consultation.py \
   integrations/slack_agent_dialogue/company_consultation_peer_resolver.py
-git diff --check 8ba7deedde164c90298d3e88785d98e02fa5e2d2 HEAD
+CURRENT_MASTER=$(git rev-parse origin/master)
+git diff --check "$CURRENT_MASTER"...HEAD
 ```
 
 - [x] **Step 4: Verify negative capability boundaries**
 
 ```bash
-git diff --name-only 8ba7deedde164c90298d3e88785d98e02fa5e2d2 HEAD
+CURRENT_MASTER=$(git rev-parse origin/master)
+git diff --name-only "$CURRENT_MASTER"...HEAD
 grep -R "grok-bot" config control_plane integrations common tests | sed -n '1,200p'
 ```
 
@@ -342,6 +344,6 @@ gh pr create --draft --base master --head sol/grok-consultation-v2-g1b-20260915 
   --body-file /path/to/final-pr-body.md
 ```
 
-The source branch composes accepted W6-C2 head `de190b2c7e878fd5a4cf6ecb2fc58b34b058ee74`, so the draft PR may temporarily display those five dependency paths while PR #681 remains unmerged. That is an inherited dependency, not Grok-owned scope and not merge authority. The PR must remain draft and release-blocked until #681 lands; afterward GitHub's diff must shrink to the dependency-isolated Grok delta, current-base integration proof must be refreshed, and review-reuse law must be applied. Do not retarget to the stale #681 branch, because it predates unrelated protected-master commits and would project 99 foreign paths. Do not create a replacement PR or ancestry-only source commit.
+The source branch composes accepted W6-C2 head `de190b2c7e878fd5a4cf6ecb2fc58b34b058ee74`, so the draft PR may temporarily display those five dependency paths while PR #681 remains unmerged. That is an inherited dependency, not Grok-owned scope and not merge authority. The PR must remain draft and release-blocked until #681 lands; afterward GitHub's diff must shrink to the dependency-isolated Grok delta, current-base integration proof must be refreshed, and review-reuse law must be applied. Do not retarget to the dependency branch: protected `master` remains publication truth, and dependency-branch topology may project unrelated paths. Do not create a replacement PR or ancestry-only source commit.
 
 The PR body must state `BUILT_NOT_PROVEN / PRODUCTION_INERT`, exact semantic head, inherited dependency head, dependency-isolated Grok path set, current-master integrated candidate, tests, review verdict, dependency gate, and every non-goal.
