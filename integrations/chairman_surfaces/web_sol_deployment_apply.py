@@ -7,12 +7,14 @@ credential, network, provider, Runtime, or lifecycle action.
 """
 from __future__ import annotations
 
+import ctypes
 import dataclasses
 import hashlib
 import json
 import os
 import re
 import stat
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -1016,6 +1018,57 @@ def _write_exact_temporary_at(
         raise WebSolDeploymentApplyError("TEMPORARY_READBACK_MISMATCH")
 
 
+def _cleanup_quarantine_name(
+    name: str,
+    prepared: PreparedDeployment,
+) -> str:
+    if not name or name in {".", ".."} or "/" in name or "\\x00" in name:
+        raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN")
+    digest = hashlib.sha256(
+        f"{prepared.prepared_digest}\\0{name}".encode("utf-8")
+    ).hexdigest()[:24]
+    return f".mmx-clean-{digest}.tmp"
+
+
+def _restore_quarantined_entry_at(
+    parent_descriptor: int,
+    quarantine_name: str,
+    original_name: str,
+    *,
+    effect_unknown_code: str,
+) -> None:
+    try:
+        identity = _named_entry_identity(parent_descriptor, quarantine_name)
+    except OSError as exc:
+        raise WebSolDeploymentApplyError(effect_unknown_code) from exc
+    try:
+        _atomic_rename_at(
+            parent_descriptor,
+            quarantine_name,
+            original_name,
+            exchange=False,
+        )
+    except OSError as exc:
+        if not (
+            _named_entry_identity_matches(
+                parent_descriptor,
+                original_name,
+                identity,
+            )
+            and _named_entry_absent(parent_descriptor, quarantine_name)
+        ):
+            raise WebSolDeploymentApplyError(effect_unknown_code) from exc
+    if not (
+        _named_entry_identity_matches(parent_descriptor, original_name, identity)
+        and _named_entry_absent(parent_descriptor, quarantine_name)
+    ):
+        raise WebSolDeploymentApplyError(effect_unknown_code)
+    try:
+        os.fsync(parent_descriptor)
+    except OSError as exc:
+        raise WebSolDeploymentApplyError(effect_unknown_code) from exc
+
+
 def _cleanup_exact_temporary_at(
     parent_descriptor: int,
     name: str,
@@ -1023,20 +1076,416 @@ def _cleanup_exact_temporary_at(
     mode: int,
     prepared: PreparedDeployment,
 ) -> bool:
-    try:
-        os.stat(name, dir_fd=parent_descriptor, follow_symlinks=False)
-    except FileNotFoundError:
+    """Remove one exact owned temporary without unlinking a substituted name."""
+
+    quarantine_name = _cleanup_quarantine_name(name, prepared)
+    source_absent = _named_entry_absent(parent_descriptor, name)
+    quarantine_absent = _named_entry_absent(parent_descriptor, quarantine_name)
+    if source_absent and quarantine_absent:
         return False
-    except OSError as exc:
-        raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN") from exc
-    if not _named_file_matches(parent_descriptor, name, content, mode, prepared):
+    if not source_absent and not quarantine_absent:
         raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN")
+
+    if not source_absent:
+        try:
+            _atomic_rename_at(
+                parent_descriptor,
+                name,
+                quarantine_name,
+                exchange=False,
+            )
+        except OSError as exc:
+            if not (
+                _named_entry_absent(parent_descriptor, name)
+                and _named_file_matches(
+                    parent_descriptor,
+                    quarantine_name,
+                    content,
+                    mode,
+                    prepared,
+                )
+            ):
+                raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN") from exc
+
+    if not _named_entry_absent(parent_descriptor, name):
+        raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN")
+    if not _named_file_matches(
+        parent_descriptor,
+        quarantine_name,
+        content,
+        mode,
+        prepared,
+    ):
+        _restore_quarantined_entry_at(
+            parent_descriptor,
+            quarantine_name,
+            name,
+            effect_unknown_code="APPLY_EFFECT_UNKNOWN",
+        )
+        raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN")
+
     try:
-        os.unlink(name, dir_fd=parent_descriptor)
+        os.unlink(quarantine_name, dir_fd=parent_descriptor)
         os.fsync(parent_descriptor)
     except OSError as exc:
-        raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN") from exc
+        if not (
+            _named_entry_absent(parent_descriptor, name)
+            and _named_entry_absent(parent_descriptor, quarantine_name)
+        ):
+            raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN") from exc
+    if not (
+        _named_entry_absent(parent_descriptor, name)
+        and _named_entry_absent(parent_descriptor, quarantine_name)
+    ):
+        raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN")
     return True
+
+
+def _atomic_rename_at(
+    parent_descriptor: int,
+    source_name: str,
+    target_name: str,
+    *,
+    exchange: bool,
+) -> None:
+    """Atomically exchange two names or rename without replacing a target."""
+
+    for name in (source_name, target_name):
+        if not name or name in {".", ".."} or "/" in name or "\x00" in name:
+            raise WebSolDeploymentApplyError("ATOMIC_RENAME_INVALID")
+    try:
+        libc = ctypes.CDLL(None, use_errno=True)
+        if sys.platform == "darwin":
+            rename = libc.renameatx_np
+            flags = (0x00000002 if exchange else 0x00000004) | 0x00000010
+        elif sys.platform.startswith("linux"):
+            rename = libc.renameat2
+            flags = 0x00000002 if exchange else 0x00000001
+        else:
+            raise AttributeError("atomic rename unavailable")
+    except (AttributeError, OSError) as exc:
+        raise WebSolDeploymentApplyError("ATOMIC_RENAME_UNAVAILABLE") from exc
+    rename.argtypes = [
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_uint,
+    ]
+    rename.restype = ctypes.c_int
+    ctypes.set_errno(0)
+    if rename(
+        parent_descriptor,
+        os.fsencode(source_name),
+        parent_descriptor,
+        os.fsencode(target_name),
+        flags,
+    ) != 0:
+        observed_errno = ctypes.get_errno()
+        raise OSError(observed_errno, os.strerror(observed_errno))
+
+
+def _named_entry_identity(
+    parent_descriptor: int,
+    name: str,
+) -> tuple[int, int, int, int, int, int]:
+    info = os.stat(name, dir_fd=parent_descriptor, follow_symlinks=False)
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_mode,
+        info.st_nlink,
+        info.st_uid,
+        info.st_gid,
+    )
+
+
+def _named_entry_identity_matches(
+    parent_descriptor: int,
+    name: str,
+    identity: tuple[int, int, int, int, int, int],
+) -> bool:
+    try:
+        return _named_entry_identity(parent_descriptor, name) == identity
+    except OSError:
+        return False
+
+
+def _install_absent_target_at(
+    parent_descriptor: int,
+    temporary_name: str,
+    target_name: str,
+    artifact: deployment.DeploymentArtifact,
+    prepared: PreparedDeployment,
+) -> bool:
+    """Install one artifact only while its captured target remains absent."""
+
+    reconciled = False
+    try:
+        _atomic_rename_at(
+            parent_descriptor,
+            temporary_name,
+            target_name,
+            exchange=False,
+        )
+    except OSError as exc:
+        if _named_file_matches(
+            parent_descriptor,
+            target_name,
+            artifact.content,
+            artifact.mode,
+            prepared,
+        ) and _named_entry_absent(parent_descriptor, temporary_name):
+            reconciled = True
+        elif _named_file_matches(
+            parent_descriptor,
+            temporary_name,
+            artifact.content,
+            artifact.mode,
+            prepared,
+        ) and _named_entry_absent(parent_descriptor, target_name):
+            _cleanup_exact_temporary_at(
+                parent_descriptor,
+                temporary_name,
+                artifact.content,
+                artifact.mode,
+                prepared,
+            )
+            raise
+        elif _named_file_matches(
+            parent_descriptor,
+            temporary_name,
+            artifact.content,
+            artifact.mode,
+            prepared,
+        ) and not _named_entry_absent(parent_descriptor, target_name):
+            _cleanup_exact_temporary_at(
+                parent_descriptor,
+                temporary_name,
+                artifact.content,
+                artifact.mode,
+                prepared,
+            )
+            raise WebSolDeploymentApplyError("PREIMAGE_CONFLICT") from exc
+        else:
+            raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN") from exc
+    try:
+        os.fsync(parent_descriptor)
+    except OSError as exc:
+        if not (
+            _named_file_matches(
+                parent_descriptor,
+                target_name,
+                artifact.content,
+                artifact.mode,
+                prepared,
+            )
+            and _named_entry_absent(parent_descriptor, temporary_name)
+        ):
+            raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN") from exc
+        try:
+            os.fsync(parent_descriptor)
+        except OSError as fsync_exc:
+            raise WebSolDeploymentApplyError(
+                "APPLY_EFFECT_UNKNOWN"
+            ) from fsync_exc
+        reconciled = True
+    if not (
+        _named_file_matches(
+            parent_descriptor,
+            target_name,
+            artifact.content,
+            artifact.mode,
+            prepared,
+        )
+        and _named_entry_absent(parent_descriptor, temporary_name)
+    ):
+        raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN")
+    return reconciled
+
+
+def _exchange_exact_target_at(
+    parent_descriptor: int,
+    temporary_name: str,
+    target_name: str,
+    *,
+    temporary_content: bytes,
+    temporary_mode: int,
+    expected_target_content: bytes,
+    expected_target_mode: int,
+    conflict_code: str,
+    effect_unknown_code: str,
+    prepared: PreparedDeployment,
+) -> bool:
+    """Exchange one staged file with one exact target and preserve conflicts."""
+
+    reconciled = False
+    try:
+        _atomic_rename_at(
+            parent_descriptor,
+            temporary_name,
+            target_name,
+            exchange=True,
+        )
+    except OSError as exc:
+        if _named_file_matches(
+            parent_descriptor,
+            target_name,
+            temporary_content,
+            temporary_mode,
+            prepared,
+        ) and _named_file_matches(
+            parent_descriptor,
+            temporary_name,
+            expected_target_content,
+            expected_target_mode,
+            prepared,
+        ):
+            reconciled = True
+        elif _named_file_matches(
+            parent_descriptor,
+            target_name,
+            expected_target_content,
+            expected_target_mode,
+            prepared,
+        ) and _named_file_matches(
+            parent_descriptor,
+            temporary_name,
+            temporary_content,
+            temporary_mode,
+            prepared,
+        ):
+            _cleanup_exact_temporary_at(
+                parent_descriptor,
+                temporary_name,
+                temporary_content,
+                temporary_mode,
+                prepared,
+            )
+            raise
+        elif _named_file_matches(
+            parent_descriptor,
+            temporary_name,
+            temporary_content,
+            temporary_mode,
+            prepared,
+        ):
+            _cleanup_exact_temporary_at(
+                parent_descriptor,
+                temporary_name,
+                temporary_content,
+                temporary_mode,
+                prepared,
+            )
+            raise WebSolDeploymentApplyError(conflict_code) from exc
+        else:
+            raise WebSolDeploymentApplyError(effect_unknown_code) from exc
+
+    if not _named_file_matches(
+        parent_descriptor,
+        target_name,
+        temporary_content,
+        temporary_mode,
+        prepared,
+    ):
+        raise WebSolDeploymentApplyError(effect_unknown_code)
+    if _named_file_matches(
+        parent_descriptor,
+        temporary_name,
+        expected_target_content,
+        expected_target_mode,
+        prepared,
+    ):
+        removed = _cleanup_exact_temporary_at(
+            parent_descriptor,
+            temporary_name,
+            expected_target_content,
+            expected_target_mode,
+            prepared,
+        )
+        if not removed:
+            raise WebSolDeploymentApplyError(effect_unknown_code)
+        return reconciled
+
+    try:
+        conflicting_identity = _named_entry_identity(
+            parent_descriptor,
+            temporary_name,
+        )
+    except OSError as exc:
+        raise WebSolDeploymentApplyError(effect_unknown_code) from exc
+    try:
+        _atomic_rename_at(
+            parent_descriptor,
+            temporary_name,
+            target_name,
+            exchange=True,
+        )
+    except OSError as exc:
+        if not (
+            _named_entry_identity_matches(
+                parent_descriptor,
+                target_name,
+                conflicting_identity,
+            )
+            and _named_file_matches(
+                parent_descriptor,
+                temporary_name,
+                temporary_content,
+                temporary_mode,
+                prepared,
+            )
+        ):
+            raise WebSolDeploymentApplyError(effect_unknown_code) from exc
+    if not (
+        _named_entry_identity_matches(
+            parent_descriptor,
+            target_name,
+            conflicting_identity,
+        )
+        and _named_file_matches(
+            parent_descriptor,
+            temporary_name,
+            temporary_content,
+            temporary_mode,
+            prepared,
+        )
+    ):
+        raise WebSolDeploymentApplyError(effect_unknown_code)
+    removed = _cleanup_exact_temporary_at(
+        parent_descriptor,
+        temporary_name,
+        temporary_content,
+        temporary_mode,
+        prepared,
+    )
+    if not removed:
+        raise WebSolDeploymentApplyError(effect_unknown_code)
+    raise WebSolDeploymentApplyError(conflict_code)
+
+
+def _install_present_target_at(
+    parent_descriptor: int,
+    temporary_name: str,
+    target_name: str,
+    row: ArtifactPreimage,
+    artifact: deployment.DeploymentArtifact,
+    prepared: PreparedDeployment,
+) -> bool:
+    if row.prior_bytes is None or row.prior_mode is None:
+        raise WebSolDeploymentApplyError("PREPARED_INTEGRITY_MISMATCH")
+    return _exchange_exact_target_at(
+        parent_descriptor,
+        temporary_name,
+        target_name,
+        temporary_content=artifact.content,
+        temporary_mode=artifact.mode,
+        expected_target_content=row.prior_bytes,
+        expected_target_mode=row.prior_mode,
+        conflict_code="PREIMAGE_CONFLICT",
+        effect_unknown_code="APPLY_EFFECT_UNKNOWN",
+        prepared=prepared,
+    )
 
 
 def _temporary_path(artifact: deployment.DeploymentArtifact, prepared: PreparedDeployment) -> Path:
@@ -1092,40 +1541,33 @@ def apply_deployment(prepared: PreparedDeployment) -> AppliedDeployment:
                     preserved_conflicts.add(row.path)
                     raise WebSolDeploymentApplyError("PREIMAGE_CONFLICT")
                 try:
-                    os.replace(
-                        temporary_name,
-                        target_name,
-                        src_dir_fd=parent_descriptor,
-                        dst_dir_fd=parent_descriptor,
-                    )
-                    os.fsync(parent_descriptor)
-                except OSError as exc:
-                    if not _named_file_matches(
-                        parent_descriptor,
-                        target_name,
-                        artifact.content,
-                        artifact.mode,
-                        prepared,
-                    ):
-                        raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN") from exc
-                    removed = _cleanup_exact_temporary_at(
-                        parent_descriptor,
-                        temporary_name,
-                        artifact.content,
-                        artifact.mode,
-                        prepared,
-                    )
-                    if not removed:
-                        os.fsync(parent_descriptor)
+                    if row.prior_state == "ABSENT":
+                        was_reconciled = _install_absent_target_at(
+                            parent_descriptor,
+                            temporary_name,
+                            target_name,
+                            artifact,
+                            prepared,
+                        )
+                    elif row.prior_state == "PRESENT":
+                        was_reconciled = _install_present_target_at(
+                            parent_descriptor,
+                            temporary_name,
+                            target_name,
+                            row,
+                            artifact,
+                            prepared,
+                        )
+                    else:
+                        raise WebSolDeploymentApplyError(
+                            "PREPARED_INTEGRITY_MISMATCH"
+                        )
+                except WebSolDeploymentApplyError as exc:
+                    if exc.code == "PREIMAGE_CONFLICT":
+                        preserved_conflicts.add(row.path)
+                    raise
+                if was_reconciled:
                     reconciled.append(artifact.destination)
-                if not _named_file_matches(
-                    parent_descriptor,
-                    target_name,
-                    artifact.content,
-                    artifact.mode,
-                    prepared,
-                ):
-                    raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN")
             finally:
                 os.close(parent_descriptor)
             if not _current_matches_artifact(artifact, prepared):
@@ -1209,6 +1651,121 @@ def _named_preimage_matches(
     )
 
 
+def _rollback_absent_target_at(
+    parent_descriptor: int,
+    quarantine_name: str,
+    target_name: str,
+    artifact: deployment.DeploymentArtifact,
+    prepared: PreparedDeployment,
+) -> None:
+    """Remove one exact postimage without deleting a concurrent replacement."""
+
+    try:
+        _atomic_rename_at(
+            parent_descriptor,
+            target_name,
+            quarantine_name,
+            exchange=False,
+        )
+    except OSError as exc:
+        if _named_entry_absent(
+            parent_descriptor,
+            target_name,
+        ) and _named_file_matches(
+            parent_descriptor,
+            quarantine_name,
+            artifact.content,
+            artifact.mode,
+            prepared,
+        ):
+            pass
+        else:
+            raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN") from exc
+
+    if not _named_entry_absent(parent_descriptor, target_name):
+        raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN")
+    if _named_file_matches(
+        parent_descriptor,
+        quarantine_name,
+        artifact.content,
+        artifact.mode,
+        prepared,
+    ):
+        removed = _cleanup_exact_temporary_at(
+            parent_descriptor,
+            quarantine_name,
+            artifact.content,
+            artifact.mode,
+            prepared,
+        )
+        if not removed:
+            raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN")
+        return
+
+    try:
+        conflicting_identity = _named_entry_identity(
+            parent_descriptor,
+            quarantine_name,
+        )
+    except OSError as exc:
+        raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN") from exc
+    try:
+        _atomic_rename_at(
+            parent_descriptor,
+            quarantine_name,
+            target_name,
+            exchange=False,
+        )
+    except OSError as exc:
+        if not (
+            _named_entry_identity_matches(
+                parent_descriptor,
+                target_name,
+                conflicting_identity,
+            )
+            and _named_entry_absent(parent_descriptor, quarantine_name)
+        ):
+            raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN") from exc
+    if not (
+        _named_entry_identity_matches(
+            parent_descriptor,
+            target_name,
+            conflicting_identity,
+        )
+        and _named_entry_absent(parent_descriptor, quarantine_name)
+    ):
+        raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN")
+    try:
+        os.fsync(parent_descriptor)
+    except OSError as exc:
+        raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN") from exc
+    raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN")
+
+
+def _rollback_present_target_at(
+    parent_descriptor: int,
+    temporary_name: str,
+    target_name: str,
+    row: ArtifactPreimage,
+    artifact: deployment.DeploymentArtifact,
+    prepared: PreparedDeployment,
+) -> None:
+    if row.prior_bytes is None or row.prior_mode is None:
+        raise WebSolDeploymentApplyError("ROLLBACK_STATE_INVALID")
+    _exchange_exact_target_at(
+        parent_descriptor,
+        temporary_name,
+        target_name,
+        temporary_content=row.prior_bytes,
+        temporary_mode=row.prior_mode,
+        expected_target_content=artifact.content,
+        expected_target_mode=artifact.mode,
+        conflict_code="ROLLBACK_EFFECT_UNKNOWN",
+        effect_unknown_code="ROLLBACK_EFFECT_UNKNOWN",
+        prepared=prepared,
+    )
+
+
 def _restore_file(
     row: ArtifactPreimage,
     artifact: deployment.DeploymentArtifact,
@@ -1227,31 +1784,22 @@ def _restore_file(
         ):
             raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN")
 
+        temporary_name = (
+            f".{target.name}.mmx-{prepared.prepared_digest[:16]}.rollback.tmp"
+        )
         if row.prior_state == "ABSENT":
-            try:
-                os.unlink(target_name, dir_fd=parent_descriptor)
-                os.fsync(parent_descriptor)
-            except OSError as exc:
-                if not _named_entry_absent(parent_descriptor, target_name):
-                    raise WebSolDeploymentApplyError(
-                        "ROLLBACK_EFFECT_UNKNOWN"
-                    ) from exc
-                try:
-                    os.fsync(parent_descriptor)
-                except OSError as fsync_exc:
-                    raise WebSolDeploymentApplyError(
-                        "ROLLBACK_EFFECT_UNKNOWN"
-                    ) from fsync_exc
-            if not _named_entry_absent(parent_descriptor, target_name):
-                raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN")
-        else:
+            _rollback_absent_target_at(
+                parent_descriptor,
+                temporary_name,
+                target_name,
+                artifact,
+                prepared,
+            )
+        elif row.prior_state == "PRESENT":
             if row.prior_bytes is None or row.prior_mode is None:
                 raise WebSolDeploymentApplyError("ROLLBACK_STATE_INVALID")
             if not 0 <= row.prior_mode <= _PERMISSION_BITS_MASK:
                 raise WebSolDeploymentApplyError("ROLLBACK_STATE_INVALID")
-            temporary_name = (
-                f".{target.name}.mmx-{prepared.prepared_digest[:16]}.rollback.tmp"
-            )
             _write_exact_temporary_at(
                 parent_descriptor,
                 temporary_name,
@@ -1259,45 +1807,16 @@ def _restore_file(
                 row.prior_mode,
                 prepared,
             )
-            try:
-                os.replace(
-                    temporary_name,
-                    target_name,
-                    src_dir_fd=parent_descriptor,
-                    dst_dir_fd=parent_descriptor,
-                )
-                os.fsync(parent_descriptor)
-            except OSError as exc:
-                if not _named_preimage_matches(
-                    parent_descriptor,
-                    target_name,
-                    row,
-                    prepared,
-                ):
-                    raise WebSolDeploymentApplyError(
-                        "ROLLBACK_EFFECT_UNKNOWN"
-                    ) from exc
-                removed = _cleanup_exact_temporary_at(
-                    parent_descriptor,
-                    temporary_name,
-                    row.prior_bytes,
-                    row.prior_mode,
-                    prepared,
-                )
-                if not removed:
-                    try:
-                        os.fsync(parent_descriptor)
-                    except OSError as fsync_exc:
-                        raise WebSolDeploymentApplyError(
-                            "ROLLBACK_EFFECT_UNKNOWN"
-                        ) from fsync_exc
-            if not _named_preimage_matches(
+            _rollback_present_target_at(
                 parent_descriptor,
+                temporary_name,
                 target_name,
                 row,
+                artifact,
                 prepared,
-            ):
-                raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN")
+            )
+        else:
+            raise WebSolDeploymentApplyError("ROLLBACK_STATE_INVALID")
     finally:
         os.close(parent_descriptor)
 
@@ -1440,40 +1959,51 @@ def rollback_deployment(applied: AppliedDeployment) -> dict[str, object]:
 
     if not isinstance(applied, AppliedDeployment) or applied._state != "APPLIED":
         raise WebSolDeploymentApplyError("TRANSACTION_CONSUMED")
-    verify_applied_deployment(applied)
-    artifacts = {
-        str(item.destination): item for item in applied.prepared.bundle.artifacts
-    }
-    restored = 0
-    removed = 0
-    changed_paths = set(applied.changed_paths)
-    for row in reversed(applied.prepared.preimages):
-        if row.path not in changed_paths:
-            if not _current_matches_preimage(row, applied.prepared):
+    prepared = applied.prepared
+    try:
+        verify_applied_deployment(applied)
+        artifacts = {
+            str(item.destination): item for item in prepared.bundle.artifacts
+        }
+        restored = 0
+        removed = 0
+        changed_paths = set(applied.changed_paths)
+        for row in reversed(prepared.preimages):
+            if row.path not in changed_paths:
+                if not _current_matches_preimage(row, prepared):
+                    raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN")
+                continue
+            _restore_file(row, artifacts[str(row.path)], prepared)
+            if row.prior_state == "ABSENT":
+                removed += 1
+            else:
+                restored += 1
+        for directory in sorted(
+            applied.created_directories,
+            key=lambda path: (len(path.parts), str(path)),
+            reverse=True,
+        ):
+            _remove_created_directory(directory, prepared)
+        for row in prepared.preimages:
+            if not _current_matches_preimage(row, prepared):
                 raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN")
-            continue
-        _restore_file(row, artifacts[str(row.path)], applied.prepared)
-        if row.prior_state == "ABSENT":
-            removed += 1
-        else:
-            restored += 1
-    for directory in sorted(
-        applied.created_directories,
-        key=lambda path: (len(path.parts), str(path)),
-        reverse=True,
-    ):
-        _remove_created_directory(directory, applied.prepared)
-    for row in applied.prepared.preimages:
-        if not _current_matches_preimage(row, applied.prepared):
-            raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN")
+    except (WebSolDeploymentApplyError, OSError) as exc:
+        applied._state = "EFFECT_UNKNOWN"
+        prepared._state = "EFFECT_UNKNOWN"
+        if (
+            isinstance(exc, WebSolDeploymentApplyError)
+            and exc.code == "ROLLBACK_EFFECT_UNKNOWN"
+        ):
+            raise
+        raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN") from exc
     applied._state = "ROLLED_BACK"
-    applied.prepared._state = "ROLLED_BACK"
+    prepared._state = "ROLLED_BACK"
     return {
         "schema": ROLLBACK_RECEIPT_SCHEMA,
         "status": "ROLLBACK_VERIFIED",
-        "operation_key": applied.prepared.operation_key,
-        "bundle_digest": applied.prepared.bundle.bundle_digest,
-        "prepared_digest": applied.prepared.prepared_digest,
+        "operation_key": prepared.operation_key,
+        "bundle_digest": prepared.bundle.bundle_digest,
+        "prepared_digest": prepared.prepared_digest,
         "restored_count": restored,
         "removed_count": removed,
         "production_acceptance_granted": False,
@@ -1526,9 +2056,19 @@ def _transaction_temporaries_absent(prepared: PreparedDeployment) -> bool:
                 f".{artifact.destination.name}.mmx-"
                 f"{prepared.prepared_digest[:16]}.rollback.tmp"
             )
+            apply_cleanup = _cleanup_quarantine_name(
+                apply_temp.name,
+                prepared,
+            )
+            rollback_cleanup = _cleanup_quarantine_name(
+                rollback_temp.name,
+                prepared,
+            )
             if not (
                 _named_entry_absent(descriptor, apply_temp.name)
                 and _named_entry_absent(descriptor, rollback_temp.name)
+                and _named_entry_absent(descriptor, apply_cleanup)
+                and _named_entry_absent(descriptor, rollback_cleanup)
                 and _directory_binding_current(
                     descriptor,
                     artifact.destination.parent,
@@ -1611,12 +2151,17 @@ def reconcile_applied_rollback(
 ) -> dict[str, object] | None:
     """Reconcile a lost rollback receipt without repeating filesystem effects."""
 
-    if not isinstance(applied, AppliedDeployment) or applied._state != "APPLIED":
+    if (
+        not isinstance(applied, AppliedDeployment)
+        or applied._state not in {"APPLIED", "EFFECT_UNKNOWN"}
+    ):
         raise WebSolDeploymentApplyError("TRANSACTION_CONSUMED")
-    if applied.prepared._state != "APPLIED":
+    if applied.prepared._state not in {"APPLIED", "EFFECT_UNKNOWN"}:
         raise WebSolDeploymentApplyError("TRANSACTION_CONSUMED")
     _validate_prepared_digest(applied.prepared)
     if _postimage_complete(applied.prepared):
+        applied._state = "APPLIED"
+        applied.prepared._state = "APPLIED"
         return None
     if not _preimage_complete(applied.prepared):
         applied._state = "EFFECT_UNKNOWN"

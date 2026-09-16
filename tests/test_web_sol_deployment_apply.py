@@ -140,17 +140,34 @@ def test_partial_apply_failure_rolls_back_and_consumes_prepared(
         expected_gid=install_root.stat().st_gid,
         operation_key="web-sol-install1-transactional-applier-source-20260916-sol-001",
     )
-    original_replace = applier.os.replace
-    calls = 0
+    original_atomic = applier._atomic_rename_at
+    install_target_names = {artifact.destination.name for artifact in bundle.artifacts}
+    apply_calls = 0
 
-    def fail_before_second_replace(source: object, target: object, *args, **kwargs) -> None:
-        nonlocal calls
-        calls += 1
-        if calls == 2:
-            raise OSError("injected-before-second-replace")
-        original_replace(source, target, *args, **kwargs)
+    def fail_before_second_install(
+        parent_descriptor: int,
+        source_name: str,
+        target_name: str,
+        *,
+        exchange: bool,
+    ) -> None:
+        nonlocal apply_calls
+        if (
+            target_name in install_target_names
+            and source_name.endswith(".tmp")
+            and not source_name.endswith(".rollback.tmp")
+        ):
+            apply_calls += 1
+            if apply_calls == 2:
+                raise OSError("injected-before-second-install")
+        original_atomic(
+            parent_descriptor,
+            source_name,
+            target_name,
+            exchange=exchange,
+        )
 
-    monkeypatch.setattr(applier.os, "replace", fail_before_second_replace)
+    monkeypatch.setattr(applier, "_atomic_rename_at", fail_before_second_install)
 
     with pytest.raises(
         applier.WebSolDeploymentApplyError,
@@ -158,7 +175,7 @@ def test_partial_apply_failure_rolls_back_and_consumes_prepared(
     ):
         applier.apply_deployment(prepared)
 
-    assert calls == 2
+    assert apply_calls == 2
     assert list(install_root.rglob("*")) == []
     with pytest.raises(
         applier.WebSolDeploymentApplyError,
@@ -181,14 +198,25 @@ def test_post_replace_fsync_failure_reconciles_without_replacing_twice(
     )
     first = sorted(bundle.artifacts, key=lambda row: str(row.destination))[0]
     original_fsync = applier.os.fsync
-    original_replace = applier.os.replace
+    original_atomic = applier._atomic_rename_at
     fsync_calls: list[Path] = []
     replace_targets: list[str] = []
     injected = False
 
-    def record_replace(source: object, target: object, *args, **kwargs) -> None:
-        replace_targets.append(Path(target).name)
-        original_replace(source, target, *args, **kwargs)
+    def record_install(
+        parent_descriptor: int,
+        source_name: str,
+        target_name: str,
+        *,
+        exchange: bool,
+    ) -> None:
+        replace_targets.append(target_name)
+        original_atomic(
+            parent_descriptor,
+            source_name,
+            target_name,
+            exchange=exchange,
+        )
 
     def fail_first_post_replace_fsync(descriptor: int) -> None:
         nonlocal injected
@@ -203,7 +231,7 @@ def test_post_replace_fsync_failure_reconciles_without_replacing_twice(
                     raise OSError("injected-directory-fsync-failure")
         original_fsync(descriptor)
 
-    monkeypatch.setattr(applier.os, "replace", record_replace)
+    monkeypatch.setattr(applier, "_atomic_rename_at", record_install)
     monkeypatch.setattr(applier.os, "fsync", fail_first_post_replace_fsync)
 
     applied = applier.apply_deployment(prepared)
@@ -551,6 +579,117 @@ def test_target_changed_after_final_preimage_check_is_not_overwritten(
     )
 
 
+def test_temporary_replaced_at_cleanup_boundary_is_not_unlinked(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle, install_root = _bundle(tmp_path)
+    artifact = sorted(bundle.artifacts, key=lambda row: str(row.destination))[0]
+    artifact.destination.parent.mkdir(parents=True, mode=0o700)
+    prepared = applier.prepare_deployment(
+        bundle,
+        deployment.plan_deployment(bundle, {}),
+        install_root=install_root,
+        expected_uid=install_root.stat().st_uid,
+        expected_gid=install_root.stat().st_gid,
+        operation_key="web-sol-install1-transactional-applier-source-20260916-sol-001",
+    )
+    temporary_name = applier._temporary_path(artifact, prepared).name
+    parent_descriptor = applier._open_verified_directory(
+        artifact.destination.parent,
+        prepared,
+    )
+    foreign = b"concurrent-foreign-temporary-substitution"
+    original_atomic = applier._atomic_rename_at
+    injected = False
+
+    try:
+        applier._write_exact_temporary_at(
+            parent_descriptor,
+            temporary_name,
+            artifact.content,
+            artifact.mode,
+            prepared,
+        )
+
+        def replace_then_rename(
+            descriptor: int,
+            source_name: str,
+            target_name: str,
+            *,
+            exchange: bool,
+        ) -> None:
+            nonlocal injected
+            if not injected and source_name == temporary_name and not exchange:
+                injected = True
+                applier.os.unlink(source_name, dir_fd=descriptor)
+                flags = applier.os.O_WRONLY | applier.os.O_CREAT | applier.os.O_EXCL
+                if hasattr(applier.os, "O_NOFOLLOW"):
+                    flags |= applier.os.O_NOFOLLOW
+                foreign_descriptor = applier.os.open(
+                    source_name,
+                    flags,
+                    artifact.mode,
+                    dir_fd=descriptor,
+                )
+                try:
+                    applier.os.write(foreign_descriptor, foreign)
+                    applier.os.fsync(foreign_descriptor)
+                finally:
+                    applier.os.close(foreign_descriptor)
+            original_atomic(
+                descriptor,
+                source_name,
+                target_name,
+                exchange=exchange,
+            )
+
+        monkeypatch.setattr(applier, "_atomic_rename_at", replace_then_rename)
+
+        with pytest.raises(
+            applier.WebSolDeploymentApplyError,
+            match="APPLY_EFFECT_UNKNOWN",
+        ):
+            applier._cleanup_exact_temporary_at(
+                parent_descriptor,
+                temporary_name,
+                artifact.content,
+                artifact.mode,
+                prepared,
+            )
+
+        assert injected is True
+        assert (artifact.destination.parent / temporary_name).read_bytes() == foreign
+    finally:
+        applier.os.close(parent_descriptor)
+
+
+def test_cleanup_quarantine_blocks_false_clean_reconciliation(
+    tmp_path: Path,
+) -> None:
+    bundle, install_root = _bundle(tmp_path)
+    artifact = sorted(bundle.artifacts, key=lambda row: str(row.destination))[0]
+    artifact.destination.parent.mkdir(parents=True, mode=0o700)
+    prepared = applier.prepare_deployment(
+        bundle,
+        deployment.plan_deployment(bundle, {}),
+        install_root=install_root,
+        expected_uid=install_root.stat().st_uid,
+        expected_gid=install_root.stat().st_gid,
+        operation_key="web-sol-install1-transactional-applier-source-20260916-sol-001",
+    )
+    temporary_name = applier._temporary_path(artifact, prepared).name
+    quarantine_name = applier._cleanup_quarantine_name(
+        temporary_name,
+        prepared,
+    )
+    quarantine = artifact.destination.parent / quarantine_name
+    quarantine.write_bytes(artifact.content)
+    quarantine.chmod(artifact.mode)
+
+    assert applier._transaction_temporaries_absent(prepared) is False
+
+
 def test_apply_and_rollback_are_single_consumption_boundaries(
     tmp_path: Path,
 ) -> None:
@@ -579,6 +718,28 @@ def test_apply_and_rollback_are_single_consumption_boundaries(
         applier.rollback_deployment(applied)
 
 
+def test_effect_unknown_rollback_reconciliation_rearms_exact_postimage(
+    tmp_path: Path,
+) -> None:
+    bundle, install_root = _bundle(tmp_path)
+    prepared = applier.prepare_deployment(
+        bundle,
+        deployment.plan_deployment(bundle, {}),
+        install_root=install_root,
+        expected_uid=install_root.stat().st_uid,
+        expected_gid=install_root.stat().st_gid,
+        operation_key="web-sol-install1-transactional-applier-source-20260916-sol-001",
+    )
+    applied = applier.apply_deployment(prepared)
+    applied._state = "EFFECT_UNKNOWN"
+    prepared._state = "EFFECT_UNKNOWN"
+
+    assert applier.reconcile_applied_rollback(applied) is None
+    assert applied._state == "APPLIED"
+    assert prepared._state == "APPLIED"
+    assert applier.rollback_deployment(applied)["status"] == "ROLLBACK_VERIFIED"
+
+
 def test_irreconcilable_post_replace_state_is_effect_unknown(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -592,18 +753,29 @@ def test_irreconcilable_post_replace_state_is_effect_unknown(
         operation_key="web-sol-install1-transactional-applier-source-20260916-sol-001",
     )
     first = sorted(bundle.artifacts, key=lambda row: str(row.destination))[0]
-    original_replace = applier.os.replace
+    original_atomic = applier._atomic_rename_at
     injected = False
 
-    def replace_then_corrupt(source: object, target: object, *args, **kwargs) -> None:
+    def install_then_corrupt(
+        parent_descriptor: int,
+        source_name: str,
+        target_name: str,
+        *,
+        exchange: bool,
+    ) -> None:
         nonlocal injected
-        original_replace(source, target, *args, **kwargs)
+        original_atomic(
+            parent_descriptor,
+            source_name,
+            target_name,
+            exchange=exchange,
+        )
         if not injected:
             injected = True
             descriptor = applier.os.open(
-                str(target),
+                target_name,
                 applier.os.O_WRONLY | applier.os.O_TRUNC,
-                dir_fd=kwargs["dst_dir_fd"],
+                dir_fd=parent_descriptor,
             )
             try:
                 applier.os.write(descriptor, b"irreconcilable-postimage")
@@ -612,7 +784,7 @@ def test_irreconcilable_post_replace_state_is_effect_unknown(
                 applier.os.close(descriptor)
             raise OSError("lost-response-with-foreign-postimage")
 
-    monkeypatch.setattr(applier.os, "replace", replace_then_corrupt)
+    monkeypatch.setattr(applier, "_atomic_rename_at", install_then_corrupt)
 
     with pytest.raises(
         applier.WebSolDeploymentApplyError,
@@ -705,22 +877,33 @@ def test_parent_symlink_swap_at_replace_never_writes_outside_install_root(
     outside.mkdir(mode=0o700)
     attack_temp = outside / applier._temporary_path(first, prepared).name
     displaced = tmp_path / "displaced-parent"
-    original_replace = applier.os.replace
+    original_atomic = applier._atomic_rename_at
     injected = False
 
-    def swap_parent_then_replace(source, target, *args, **kwargs):
+    def swap_parent_then_install(
+        parent_descriptor: int,
+        source_name: str,
+        target_name: str,
+        *,
+        exchange: bool,
+    ) -> None:
         nonlocal injected
-        if not injected and Path(target).name == first.destination.name:
+        if not injected and target_name == first.destination.name:
             injected = True
             parent = first.destination.parent
             parent.rename(displaced)
             parent.symlink_to(outside, target_is_directory=True)
-            assert Path(source).name == attack_temp.name
+            assert source_name == attack_temp.name
             attack_temp.write_bytes(first.content)
             attack_temp.chmod(first.mode)
-        return original_replace(source, target, *args, **kwargs)
+        original_atomic(
+            parent_descriptor,
+            source_name,
+            target_name,
+            exchange=exchange,
+        )
 
-    monkeypatch.setattr(applier.os, "replace", swap_parent_then_replace)
+    monkeypatch.setattr(applier, "_atomic_rename_at", swap_parent_then_install)
 
     with pytest.raises(applier.WebSolDeploymentApplyError):
         applier.apply_deployment(prepared)
@@ -728,6 +911,152 @@ def test_parent_symlink_swap_at_replace_never_writes_outside_install_root(
     assert injected is True
     assert not (outside / first.destination.name).exists()
     assert attack_temp.read_bytes() == first.content
+
+
+def test_present_target_changed_after_rollback_temporary_write_is_preserved(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle, install_root = _bundle(tmp_path)
+    target = sorted(bundle.artifacts, key=lambda row: str(row.destination))[1]
+    target.destination.parent.mkdir(parents=True, mode=0o700)
+    prior = b"exact-prior-before-rollback-race"
+    target.destination.write_bytes(prior)
+    target.destination.chmod(0o640)
+    prepared = applier.prepare_deployment(
+        bundle,
+        deployment.plan_deployment(bundle, {str(target.destination): prior}),
+        install_root=install_root,
+        expected_uid=install_root.stat().st_uid,
+        expected_gid=install_root.stat().st_gid,
+        operation_key="web-sol-install1-transactional-applier-source-20260916-sol-001",
+    )
+    applied = applier.apply_deployment(prepared)
+    original_write = applier._write_exact_temporary_at
+    rollback_name = (
+        f".{target.destination.name}.mmx-"
+        f"{prepared.prepared_digest[:16]}.rollback.tmp"
+    )
+    foreign = b"concurrent-owner-change-during-rollback"
+    injected = False
+
+    def write_then_change_target(*args, **kwargs) -> None:
+        nonlocal injected
+        original_write(*args, **kwargs)
+        parent_descriptor, temporary_name = args[:2]
+        if injected or temporary_name != rollback_name:
+            return
+        injected = True
+        flags = applier.os.O_WRONLY | applier.os.O_TRUNC
+        if hasattr(applier.os, "O_NOFOLLOW"):
+            flags |= applier.os.O_NOFOLLOW
+        descriptor = applier.os.open(
+            target.destination.name,
+            flags,
+            dir_fd=parent_descriptor,
+        )
+        try:
+            view = memoryview(foreign)
+            offset = 0
+            while offset < len(view):
+                written = applier.os.write(descriptor, view[offset:])
+                assert written > 0
+                offset += written
+            applier.os.fsync(descriptor)
+        finally:
+            applier.os.close(descriptor)
+
+    monkeypatch.setattr(
+        applier,
+        "_write_exact_temporary_at",
+        write_then_change_target,
+    )
+
+    with pytest.raises(
+        applier.WebSolDeploymentApplyError,
+        match="ROLLBACK_EFFECT_UNKNOWN",
+    ):
+        applier.rollback_deployment(applied)
+
+    assert injected is True
+    assert target.destination.read_bytes() == foreign
+    assert applied._state == "EFFECT_UNKNOWN"
+    assert prepared._state == "EFFECT_UNKNOWN"
+
+
+def test_absent_target_changed_after_rollback_check_is_preserved(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle, install_root = _bundle(tmp_path)
+    prepared = applier.prepare_deployment(
+        bundle,
+        deployment.plan_deployment(bundle, {}),
+        install_root=install_root,
+        expected_uid=install_root.stat().st_uid,
+        expected_gid=install_root.stat().st_gid,
+        operation_key="web-sol-install1-transactional-applier-source-20260916-sol-001",
+    )
+    applied = applier.apply_deployment(prepared)
+    target = prepared.preimages[-1].path
+    original_matches = applier._named_file_matches
+    foreign = b"concurrent-owner-change-before-rollback-delete"
+    target_match_calls = 0
+    injected = False
+
+    def match_then_change_target(
+        parent_descriptor: int,
+        name: str,
+        content: bytes,
+        mode: int,
+        current: applier.PreparedDeployment,
+    ) -> bool:
+        nonlocal target_match_calls, injected
+        matched = original_matches(
+            parent_descriptor,
+            name,
+            content,
+            mode,
+            current,
+        )
+        if name != target.name or not matched:
+            return matched
+        target_match_calls += 1
+        if target_match_calls != 2:
+            return matched
+        injected = True
+        flags = applier.os.O_WRONLY | applier.os.O_TRUNC
+        if hasattr(applier.os, "O_NOFOLLOW"):
+            flags |= applier.os.O_NOFOLLOW
+        descriptor = applier.os.open(name, flags, dir_fd=parent_descriptor)
+        try:
+            view = memoryview(foreign)
+            offset = 0
+            while offset < len(view):
+                written = applier.os.write(descriptor, view[offset:])
+                assert written > 0
+                offset += written
+            applier.os.fsync(descriptor)
+        finally:
+            applier.os.close(descriptor)
+        return matched
+
+    monkeypatch.setattr(
+        applier,
+        "_named_file_matches",
+        match_then_change_target,
+    )
+
+    with pytest.raises(
+        applier.WebSolDeploymentApplyError,
+        match="ROLLBACK_EFFECT_UNKNOWN",
+    ):
+        applier.rollback_deployment(applied)
+
+    assert injected is True
+    assert target.read_bytes() == foreign
+    assert applied._state == "EFFECT_UNKNOWN"
+    assert prepared._state == "EFFECT_UNKNOWN"
 
 
 def test_parent_symlink_swap_at_rollback_never_deletes_outside_install_root(
@@ -750,18 +1079,29 @@ def test_parent_symlink_swap_at_rollback_never_deletes_outside_install_root(
     sentinel = outside / target.name
     sentinel.write_bytes(b"outside-rollback-sentinel")
     displaced = tmp_path / "displaced-rollback-parent"
-    original_unlink = applier.os.unlink
+    original_atomic = applier._atomic_rename_at
     injected = False
 
-    def swap_parent_then_unlink(path_value, *args, **kwargs) -> None:
+    def swap_parent_then_remove(
+        parent_descriptor: int,
+        source_name: str,
+        target_name: str,
+        *,
+        exchange: bool,
+    ) -> None:
         nonlocal injected
-        if not injected and Path(path_value).name == target.name:
+        if not injected and source_name == target.name:
             injected = True
             target.parent.rename(displaced)
             target.parent.symlink_to(outside, target_is_directory=True)
-        original_unlink(path_value, *args, **kwargs)
+        original_atomic(
+            parent_descriptor,
+            source_name,
+            target_name,
+            exchange=exchange,
+        )
 
-    monkeypatch.setattr(applier.os, "unlink", swap_parent_then_unlink)
+    monkeypatch.setattr(applier, "_atomic_rename_at", swap_parent_then_remove)
 
     with pytest.raises(applier.WebSolDeploymentApplyError):
         applier.rollback_deployment(applied)
