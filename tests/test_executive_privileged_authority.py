@@ -108,6 +108,13 @@ def test_request_rejects_non_mapping():
         epa.validate_readiness_request(["job_id", "attempt_id", "fence_generation"])  # type: ignore[arg-type]
 
 
+def test_request_keys_and_schema_strings_are_pinned_literals():
+    assert epa.REQUEST_KEYS == frozenset({"job_id", "attempt_id", "fence_generation"})
+    assert epa.FAMILY_KEY_SCHEMA == "mastermind.executive_privileged_readiness_family_key/v1"
+    assert epa.BINDING_SCHEMA == "mastermind.executive_privileged_readiness_binding/v1"
+    assert epa.RESULT_SCHEMA == "mastermind.executive_privileged_readiness_result/v1"
+
+
 # ---------------------------------------------------------------------------
 # fence_generation type/range
 # ---------------------------------------------------------------------------
