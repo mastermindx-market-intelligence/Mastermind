@@ -24,6 +24,7 @@ on a hermetic host.
 from __future__ import annotations
 
 import base64
+from dataclasses import replace
 import json
 import threading
 
@@ -542,3 +543,51 @@ def test_replacement_eviction_gap_is_reachable_like_append():
         f"resync_required still True on final read; the eviction gap is unreachable: "
         f"gaps={final.gaps} cursor s={final.next_cursor!r}"
     )
+
+
+# Generation cleanup must use full TurnKey, never a reused native ID alone.
+def _setup_reused_native_turn_generations():
+    projection = VisibleTurnProjection()
+    old = TurnKey(attempt_id="attempt-old", session_epoch_id="epoch-old",
+                  process_generation_id="generation-old", generation_number=1,
+                  worker_id="worker", local_turn_id="local-old", native_turn_id="turn-1")
+    current = replace(old, attempt_id="attempt-current", session_epoch_id="epoch-current",
+                      process_generation_id="generation-current", generation_number=2,
+                      local_turn_id="local-current")
+    old_grant = projection.mint_grant(old)
+    current_grant = projection.mint_grant(current)
+    projection.publish(current, method="item/completed", native_turn_id="turn-1",
+                       params={"item": {"type": "agentMessage", "id": "answer",
+                                        "sequence": 0, "text": "current generation result"}})
+    projection.arm_prebind(7)
+    return projection, old, current, old_grant, current_grant
+
+
+def _current_generation_text(projection, current, grant):
+    return projection.read(current, reader_grant=grant, cursor=None, max_items=1).items[0].text
+
+
+@pytest.mark.parametrize("cleanup", ["revoke_old_grant", "invalidate_old_generation"])
+def test_old_generation_cleanup_preserves_current_projection(cleanup):
+    projection, old, current, old_grant, current_grant = _setup_reused_native_turn_generations()
+    assert _current_generation_text(projection, current, current_grant) == "current generation result"
+    if cleanup == "revoke_old_grant":
+        projection.revoke_grant(old_grant)
+    else:
+        projection.invalidate_generation(old)
+    assert _current_generation_text(projection, current, current_grant) == "current generation result"
+    assert projection.active_prebind_request_id() == 7
+
+
+@pytest.mark.parametrize("cleanup", ["revoke_current_grant", "invalidate_current_generation"])
+def test_current_generation_cleanup_still_removes_its_projection(cleanup):
+    projection, old, current, old_grant, current_grant = _setup_reused_native_turn_generations()
+    if cleanup == "revoke_current_grant":
+        projection.revoke_grant(current_grant)
+    else:
+        projection.invalidate_generation(current)
+    with pytest.raises(ProjectionError) as error:
+        _current_generation_text(projection, current, current_grant)
+    expected = "READER_REVOKED" if cleanup == "revoke_current_grant" else "TURN_NOT_BOUND"
+    assert error.value.code == expected
+    assert projection.active_prebind_request_id() is None
