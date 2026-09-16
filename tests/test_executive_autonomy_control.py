@@ -2724,6 +2724,78 @@ def test_ceo_submit_reconcile_control_service_can_never_reach_the_worker_boundar
     assert host._active_transaction is None
 
 
+@pytest.mark.parametrize(
+    ("case", "print_results", "expected_argv"),
+    [
+        (
+            "absent_then_still_absent",
+            (1,),
+            [
+                "/bin/launchctl",
+                "bootstrap",
+                "system",
+                os.fspath(control.CONTROL_PLIST),
+            ],
+        ),
+        (
+            "present_then_gone",
+            (0, 1),
+            ["/bin/launchctl", "kickstart", "-k", f"system/{control.CONTROL_LABEL}"],
+        ),
+    ],
+)
+def test_ceo_submit_control_boundary_refuses_when_the_launchd_call_does_not_register_control(
+    monkeypatch, case, print_results, expected_argv
+):
+    """A zero exit from ``bootstrap``/``kickstart`` is NOT proof of registration.
+
+    ``launchctl`` can answer 0 while the control label is still absent (the
+    bootstrap registered nothing) or has just gone away under a
+    ``kickstart -k``.  The boundary must therefore READ BACK the label after the
+    call and refuse with ``TransactionEffectUnknown`` when the service is not
+    registered.  In both parametrized branches the launchd verb IS attempted and
+    the read-back is the only thing that refuses, so a deletion of the read-back
+    cannot masquerade as a successful reconcile.
+
+    Production shape, no root, no launchd, no network: every argv the module
+    would run is captured through the module-level ``subprocess.run``.
+    """
+
+    host = control.ProductionCeoSubmitHost()
+    ledger: list[list[str]] = []
+    probes = {"count": 0}
+
+    def fake_run(cmd, **kw):
+        argv = list(cmd)
+        ledger.append(argv)
+        if argv[:2] != ["/bin/launchctl", "print"]:
+            # bootstrap / kickstart both succeed: a zero exit proves nothing.
+            return mock.Mock(returncode=0)
+        index = probes["count"]
+        probes["count"] += 1
+        return mock.Mock(returncode=print_results[min(index, len(print_results) - 1)])
+
+    monkeypatch.setattr(control.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        control.ProductionCeoSubmitHost,
+        "_require_control_plist_safe",
+        staticmethod(lambda: None),
+        raising=False,
+    )
+
+    with pytest.raises(control.TransactionEffectUnknown):
+        host.reconcile_control_service(SHA)
+
+    assert host._active_transaction is None
+    verbs = [argv for argv in ledger if argv[:2] != ["/bin/launchctl", "print"]]
+    assert verbs == [expected_argv], case
+    # The read-back ran strictly AFTER the launchd verb: the refusal is the
+    # read-back's, never a skipped call.
+    assert ledger.index(expected_argv) < len(ledger) - 1
+    assert ledger[-1][:2] == ["/bin/launchctl", "print"]
+    assert probes["count"] >= 2
+
+
 def test_ceo_submit_control_boundary_source_never_names_the_worker_or_the_lifecycle_script():
     source = Path(control.__file__).read_text(encoding="utf-8")
     production = source.split("class ProductionCeoSubmitHost", 1)[1]
@@ -2995,6 +3067,81 @@ def test_ceo_submit_rollback_expects_the_restored_preimage_flag_not_a_constant(
         host.rollback_ceo_submit(mismatch, _rollback_receipt(mismatch, armed=True))
 
     assert ("complete", None) not in host.ledger
+
+
+
+def _configs_claiming_the_flag(prior, armed):
+    """The probe's disk re-read: ``prior``'s digests, but a chosen arm flag.
+
+    ``rollback_ceo_submit`` compares only the digest STRINGS, so pinning them to
+    ``prior``'s leaves the flag comparison as the only thing under test.
+    """
+
+    control_value = copy.deepcopy(dict(prior.control))
+    control_value["ceo_submit_armed"] = armed
+    return (
+        control_value,
+        copy.deepcopy(dict(prior.worker)),
+        prior.control_sha256,
+        prior.worker_sha256,
+        prior.control_bytes,
+        prior.worker_bytes,
+    )
+
+
+@pytest.mark.parametrize(
+    "candidate_armed",
+    [True, False],
+    ids=["arm_rollback", "disarm_rollback"],
+)
+def test_ceo_submit_rollback_expectation_comes_from_the_rollback_candidate_not_the_preimage(
+    monkeypatch, tmp_path, candidate_armed
+):
+    """The rollback's expected arm bit comes from the ROLLBACK TARGET.
+
+    ``rollback_ceo_submit`` must read its expectation from
+    ``transaction.candidates.control`` -- the rollback TARGET -- and never from
+    ``transaction.prior_configs.control``.  In the two REAL flows those two
+    dicts always agree: an ARM rollback derives its candidate from a disarmed
+    preimage (``armed=False``) and a DISARM rollback from an armed preimage
+    (``armed=True``).  That makes the distinction invisible to the live suite,
+    so this artificial transaction deliberately makes the two flags DIFFER; it
+    is the only way to pin WHICH one the code reads.  The intended source is the
+    rollback TARGET, so a disk re-read carrying the target's flag must complete
+    and one carrying the preimage's flag must be EFFECT_UNKNOWN.
+    """
+
+    prior_armed = not candidate_armed
+    prior = _ceo_submit_evidence(armed=prior_armed)
+    candidates = control.derive_ceo_submit_candidate(prior, armed=candidate_armed)
+    assert candidates.control["ceo_submit_armed"] is candidate_armed
+    assert prior.control["ceo_submit_armed"] is prior_armed
+    transaction = _rollback_transaction(prior, candidates)
+    receipt = _rollback_receipt(transaction, armed=candidate_armed)
+
+    # (a) The disk re-read agrees with the rollback TARGET: the rollback completes.
+    target_host = _rollback_probe(
+        monkeypatch,
+        tmp_path,
+        transaction,
+        loaded=False,
+        configs=_configs_claiming_the_flag(prior, candidate_armed),
+    )
+    target_host.rollback_ceo_submit(transaction, receipt)
+    assert target_host.ledger[-1] == ("complete", None)
+
+    # (b) The disk re-read carries the PREIMAGE's flag instead: EFFECT_UNKNOWN,
+    # and the marker is never released.
+    preimage_host = _rollback_probe(
+        monkeypatch,
+        tmp_path,
+        transaction,
+        loaded=False,
+        configs=_configs_tuple(prior),
+    )
+    with pytest.raises(control.TransactionEffectUnknown):
+        preimage_host.rollback_ceo_submit(transaction, receipt)
+    assert ("complete", None) not in preimage_host.ledger
 
 
 def _control_plist_stub(mode, *, uid=0, gid=0, nlink=1, error=None):
