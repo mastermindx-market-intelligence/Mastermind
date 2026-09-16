@@ -42,8 +42,8 @@ _PHASE_KEYS = frozenset({"phase_key", "profile", "duration_ms", "effect_scope", 
 _DEMAND_KEYS = frozenset({"dimension", "capacity_pool_id", "qualified_incremental_peak", "window_binding"})
 _WINDOW_KEYS = frozenset({"unit", "window_ms", "baseline_id", "boot_id"})
 _POLICY_V1_KEYS = frozenset({"schema", "production_armed", "qualification", "policy_revision", "authority_receipt", "qualification_evidence", "canonical_runtime", "physical_pools", "allowed_callers", "profiles", "windows", "limits", "freshness", "waits", "recovery"})
-_POLICY_V2_KEYS = frozenset({"schema", "production_armed", "qualification", "policy_revision", "authority_receipt", "qualification_evidence", "allowed_callers", "host_qualifications", "freshness", "waits", "recovery"})
-_HOST_QUALIFICATION_KEYS = frozenset({"host_id", "boot_id", "capacity_pool_ref", "qualification_revision", "qualification_evidence", "canonical_runtime", "physical_pools", "profiles", "windows", "limits"})
+_POLICY_V2_KEYS = frozenset({"schema", "production_armed", "qualification", "policy_revision", "authority_receipt", "qualification_evidence", "canonical_runtime", "allowed_callers", "host_qualifications", "freshness", "waits", "recovery"})
+_HOST_QUALIFICATION_KEYS = frozenset({"host_id", "boot_id", "capacity_pool_ref", "qualification_revision", "qualification_evidence", "physical_pools", "profiles", "windows", "limits"})
 _RUNTIME_KEYS = frozenset({"runtime_id", "host_id", "boot_id", "endpoint", "database_identity", "schema_identity"})
 _WINDOW_POLICY_KEYS = frozenset({"cpu_window_ms", "io_window_ms", "normalization_evidence"})
 _LIMIT_KEYS = frozenset({"cpu_budget_us", "cpu_protected_us", "memory_budget_bytes", "memory_protected_bytes", "internal_protected_bytes", "external_protected_bytes", "io_budget_bytes", "io_protected_bytes", "max_heavy_phases"})
@@ -306,6 +306,7 @@ def _validate_policy_v2(policy: object, *, allow_synthetic: bool) -> Mapping[str
     if policy["schema"] != POLICY_SCHEMA_V2 or type(policy["production_armed"]) is not bool:
         _refuse("POLICY_INVALID", "policy schema or armed state is invalid")
     qualification = policy["qualification"]
+    runtime = _mapping(policy["canonical_runtime"], _RUNTIME_KEYS, "canonical_runtime")
     freshness = _mapping(policy["freshness"], _FRESHNESS_KEYS, "freshness")
     waits = _mapping(policy["waits"], _WAIT_KEYS, "waits")
     recovery = _mapping(policy["recovery"], _RECOVERY_KEYS, "recovery")
@@ -319,6 +320,7 @@ def _validate_policy_v2(policy: object, *, allow_synthetic: bool) -> Mapping[str
         nullable = [
             policy["policy_revision"],
             policy["authority_receipt"],
+            *runtime.values(),
             *freshness.values(),
             *waits.values(),
             *recovery.values(),
@@ -338,6 +340,8 @@ def _validate_policy_v2(policy: object, *, allow_synthetic: bool) -> Mapping[str
         _refuse("POLICY_UNQUALIFIED", "qualification evidence is required")
     for evidence in policy["qualification_evidence"]:
         _nonempty(evidence, "policy.qualification_evidence")
+    for key, value in runtime.items():
+        _nonempty(value, f"canonical_runtime.{key}")
     for group_name, group in (("freshness", freshness), ("waits", waits), ("recovery", recovery)):
         for key, value in group.items():
             _uint(value, f"{group_name}.{key}")
@@ -367,11 +371,6 @@ def _validate_policy_v2(policy: object, *, allow_synthetic: bool) -> Mapping[str
             _refuse("POLICY_UNQUALIFIED", "host qualification evidence is required")
         for item in evidence:
             _nonempty(item, "host_qualification.qualification_evidence")
-        runtime = _mapping(host["canonical_runtime"], _RUNTIME_KEYS, "canonical_runtime")
-        for key, value in runtime.items():
-            _nonempty(value, f"canonical_runtime.{key}")
-        if runtime["host_id"] != host_id or runtime["boot_id"] != boot_id:
-            _refuse("POLICY_INVALID", "canonical runtime is not bound to the host qualification generation")
         _validate_windows_limits_profiles(
             windows=host["windows"],
             limits=host["limits"],
@@ -426,7 +425,7 @@ def _select_host_qualification(
         "policy_revision": policy["policy_revision"],
         "authority_receipt": policy["authority_receipt"],
         "qualification_evidence": list(policy["qualification_evidence"]),
-        "canonical_runtime": host["canonical_runtime"],
+        "canonical_runtime": policy["canonical_runtime"],
         "physical_pools": host["physical_pools"],
         "allowed_callers": policy["allowed_callers"],
         "profiles": host["profiles"],

@@ -582,18 +582,12 @@ def _fp1b_host_qualification(*, host_id, boot_id, capacity_pool_ref, reserve=10)
         for demand in phase["demands"]:
             demand["window_binding"]["boot_id"] = boot_id
     base = _policy()
-    runtime = copy.deepcopy(base["canonical_runtime"])
-    runtime["runtime_id"] = "runtime-" + host_id[-8:]
-    runtime["host_id"] = host_id
-    runtime["boot_id"] = boot_id
-    runtime["database_identity"] = "db-" + host_id[-8:]
     return {
         "host_id": host_id,
         "boot_id": boot_id,
         "capacity_pool_ref": capacity_pool_ref,
         "qualification_revision": "host-qualification-1",
         "qualification_evidence": ["synthetic-host-evidence"],
-        "canonical_runtime": runtime,
         "physical_pools": [
             {"capacity_pool_id": p, "protected_reserve": reserve if p == "memory" else r}
             for p, r in (("memory", 10), ("git-store", 10), ("external", 10), ("cpu", 10), ("io", 10), ("heavy", 0))
@@ -612,6 +606,15 @@ def _fp1b_host_qualification(*, host_id, boot_id, capacity_pool_ref, reserve=10)
 
 def _fp1b_policy(*, host_a_reserve=10, host_b_reserve=10):
     base = _policy()
+    central_runtime = copy.deepcopy(base["canonical_runtime"])
+    central_runtime.update({
+        "runtime_id": "runtime-control",
+        "host_id": "host-" + "e" * 64,
+        "boot_id": "boot-" + "f" * 64,
+        "endpoint": "synthetic://control-runtime",
+        "database_identity": "db-control",
+        "schema_identity": "schema-control",
+    })
     return {
         "schema": "mastermind.physical_resource_policy.v2",
         "production_armed": True,
@@ -619,6 +622,7 @@ def _fp1b_policy(*, host_a_reserve=10, host_b_reserve=10):
         "policy_revision": "policy-test-1",
         "authority_receipt": "synthetic-authority",
         "qualification_evidence": ["synthetic-multihost-evidence"],
+        "canonical_runtime": central_runtime,
         "allowed_callers": copy.deepcopy(base["allowed_callers"]),
         "host_qualifications": [
             _fp1b_host_qualification(
@@ -666,6 +670,50 @@ def _fp1b_context(*, host="a", snapshot=None, policy=None):
     )
     return request, copy.deepcopy(policy or _fp1b_policy()), observations
 
+
+
+def _fp1b_global_runtime_policy():
+    return _fp1b_policy()
+
+
+def test_fp1b_v2_keeps_one_central_runtime_while_qualifying_multiple_physical_hosts():
+    policy = _fp1b_global_runtime_policy()
+    request_a, _, observations_a = _fp1b_context(host="a", policy=policy)
+    request_b, _, observations_b = _fp1b_context(host="b", policy=policy)
+    result_a = evaluate_reservation(
+        request_a,
+        policy=policy,
+        current_charges=[],
+        observations=observations_a,
+        decision_time_ms=100,
+    )
+    result_b = evaluate_reservation(
+        request_b,
+        policy=policy,
+        current_charges=[],
+        observations=observations_b,
+        decision_time_ms=100,
+    )
+    assert result_a["admitted"] is True
+    assert result_b["admitted"] is True
+    assert policy["canonical_runtime"]["host_id"] not in {request_a["host_id"], request_b["host_id"]}
+    assert all("canonical_runtime" not in host for host in policy["host_qualifications"])
+
+
+def test_fp1b_host_qualification_cannot_define_a_second_canonical_runtime():
+    request, policy, observations = _fp1b_context(host="a")
+    policy["host_qualifications"][0]["canonical_runtime"] = copy.deepcopy(
+        policy["canonical_runtime"]
+    )
+    with pytest.raises(PhysicalResourceRefusal) as exc:
+        evaluate_reservation(
+            request,
+            policy=policy,
+            current_charges=[],
+            observations=observations,
+            decision_time_ms=100,
+        )
+    assert exc.value.code == "INVALID_CONTRACT"
 
 def test_fp1b_unqualified_request_host_refuses_before_capacity_accounting():
     request, policy, observations = _fp1b_context()
