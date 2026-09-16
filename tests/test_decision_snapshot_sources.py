@@ -15,6 +15,11 @@ def _write_json(path: Path, data: dict) -> None:
     path.write_text(json.dumps(data), encoding="utf-8")
 
 
+def _write_jsonl(path: Path, rows: list) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+
+
 def _by_id(receipts) -> dict:
     return {r["source_id"]: r for r in receipts}
 
@@ -360,3 +365,194 @@ def test_unusable_declared_generation_falls_back_to_artifact_digest(repo_roots, 
     )
     receipt = _by_id(result["sources"])["macro.factor_betas"]
     assert receipt["correction_generation"] == receipt["artifact_digest"]
+
+
+# ---------------------------------------------------------------------------
+# Fix round 1 — independent review repairs: JSONL stable read + exact counts.
+# ---------------------------------------------------------------------------
+
+def test_jsonl_source_changed_during_read_returns_invalid_receipt_with_no_rows(monkeypatch, repo_roots):
+    repo, _ = repo_roots
+    path = repo / "data/portfolios/autonomous/decisions.jsonl"
+    _write_jsonl(path, [{"id": 1}, {"id": 2}])
+    real_fstat = sources.os.fstat
+    calls = {"n": 0}
+
+    def changed(fd):
+        row = real_fstat(fd)
+        calls["n"] += 1
+        if calls["n"] == 2:
+            return SimpleNamespace(
+                st_dev=row.st_dev,
+                st_ino=row.st_ino,
+                st_size=row.st_size + 1,
+                st_mtime_ns=row.st_mtime_ns + 1,
+            )
+        return row
+
+    monkeypatch.setattr(sources.os, "fstat", changed)
+    result = sources.capture_book_state(
+        "autonomous",
+        decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:01:00Z",
+    )
+    receipt = _by_id(result["sources"])["book.decisions"]
+    assert receipt["status"] == "INVALID"
+    assert receipt["error_code"] == "SOURCE_CHANGED_DURING_READ"
+    assert receipt["known_at"] is None
+    assert receipt["clock_basis"] == "UNKNOWN"
+    assert receipt["artifact_digest"] == sources._EMPTY_DIGEST
+    assert receipt["rows_returned"] == 0
+    assert result["sections"]["historical_memory"]["rows"] == []
+
+
+def test_jsonl_tail_counts_and_digest_from_single_stable_read(repo_roots):
+    repo, _ = repo_roots
+    path = repo / "data/portfolios/autonomous/decisions.jsonl"
+    lines = [json.dumps({"id": i}) for i in range(105)]
+    lines.append("{not valid json")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    raw = ("\n".join(lines) + "\n").encode("utf-8")
+    path.write_bytes(raw)
+
+    result = sources.capture_book_state(
+        "autonomous",
+        decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:01:00Z",
+    )
+    receipt = _by_id(result["sources"])["book.decisions"]
+    assert receipt["status"] == "AVAILABLE"
+    assert receipt["rows_returned"] == 100
+    assert receipt["omitted_rows"] == 6  # 5 excess valid rows beyond the tail + 1 invalid line
+    assert receipt["rows_total"] == receipt["rows_returned"] + receipt["omitted_rows"]
+    assert receipt["artifact_digest"] == sources._digest(raw)
+    assert receipt["clock_basis"] == "FILE_MTIME_FIRST_PARTY_STATE"
+    assert [row["id"] for row in result["sections"]["historical_memory"]["rows"]] == list(range(5, 105))
+
+
+def test_historical_memory_overflow_counts_all_cap_drops_exactly_once(repo_roots):
+    repo, _ = repo_roots
+    _write_jsonl(
+        repo / "data/portfolios/autonomous/decisions.jsonl",
+        [{"id": f"d{i}"} for i in range(100)],
+    )
+    _write_jsonl(
+        repo / "data/portfolios/autonomous/fills.jsonl",
+        [{"id": f"f{i}"} for i in range(100)],
+    )
+    settlement_dir = repo / "data/portfolios/autonomous/settlement_receipts"
+    settlement_dir.mkdir(parents=True, exist_ok=True)
+    for i in range(10):
+        (settlement_dir / f"receipt_{i:03d}.json").write_text("{}", encoding="utf-8")
+
+    result = sources.capture_book_state(
+        "autonomous",
+        decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:01:00Z",
+    )
+    section = result["sections"]["historical_memory"]
+    assert section["rows_returned"] == len(section["rows"]) == 100
+    assert section["rows_total"] == section["rows_returned"] + section["omitted_rows"]
+    assert section["omitted_rows"] == 110  # 200 decisions/fills + 10 settlement rows - 100 kept
+
+
+def test_prophet_selection_preserves_producer_order_and_counts_malformed_as_omitted(repo_roots):
+    _, macro = repo_roots
+    _write_json(macro / "site/prophet/index.json", {
+        "schema": "prophet.v1",
+        "generated_at": "2026-09-15T19:00:00Z",
+        "as_of": "2026-09-15",
+        "plans": [
+            {"ticker": "MSFT", "plan": "non-held-1"},
+            {"ticker": "AAPL", "plan": "held-1"},
+            "not-a-plan",
+            {"ticker": "GOOG", "plan": "non-held-2"},
+            {"ticker": "AAPL", "plan": "held-2"},
+        ],
+    })
+    result = sources.capture_external_sources(
+        held_tickers=["AAPL"],
+        decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:01:00Z",
+    )
+    receipt = _by_id(result["sources"])["macro.prophet"]
+    assert receipt["status"] == "AVAILABLE"
+    section = result["sections"]["candidate_geometry"]
+    held_selected = [row["plan"] for row in section["rows"] if row.get("ticker") == "AAPL"]
+    non_held_selected = [row["plan"] for row in section["rows"] if row.get("ticker") != "AAPL"]
+    assert held_selected == ["held-1", "held-2"]
+    assert non_held_selected == ["non-held-1", "non-held-2"]
+    assert receipt["omitted_rows"] == 1  # the malformed "not-a-plan" entry
+    assert receipt["rows_returned"] == 4
+    assert receipt["rows_total"] == 5
+
+
+def test_held_ticker_bundle_input_over_cap_counts_preslice_omissions(repo_roots):
+    _, macro = repo_roots
+    tickers = {f"T{i:03d}": {"score": i} for i in range(105)}
+    _write_json(macro / "site/altdata/by_ticker.json", {
+        "schema": "altdata.v1",
+        "generated_at": "2026-09-15T19:00:00Z",
+        "as_of": "2026-09-15",
+        "tickers": tickers,
+    })
+    held = list(tickers.keys())
+    result = sources.capture_external_sources(
+        held_tickers=held,
+        decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:01:00Z",
+    )
+    receipt = _by_id(result["sources"])["macro.altdata"]
+    assert receipt["status"] == "AVAILABLE"
+    assert receipt["rows_returned"] == 100
+    assert receipt["omitted_rows"] == 5
+    assert receipt["rows_total"] == 105
+    section = result["sections"]["positioning"]
+    assert section["rows_returned"] == len(section["rows"]) == 100
+    assert section["rows_total"] == section["rows_returned"] + section["omitted_rows"]
+
+
+def test_portfolio_context_per_domain_cap_counts_preslice_omissions(repo_roots):
+    _, macro = repo_roots
+    held = [f"T{i:03d}" for i in range(105)]
+    _write_json(macro / "site/data/portfolio_ctx.json", {
+        "schema": "portfolio_context.v1",
+        "generated_at": "2026-09-15T19:00:00Z",
+        "as_of": "2026-09-15",
+        "fundamental_state": [{"ticker": t} for t in held],
+        "positioning": [{"ticker": t} for t in held[:3]],
+        "event_state": [],
+        "priceability": [{"ticker": t} for t in held],
+    })
+    result = sources.capture_external_sources(
+        held_tickers=held,
+        decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:01:00Z",
+    )
+    receipt = _by_id(result["sources"])["macro.portfolio_context"]
+    assert receipt["status"] == "AVAILABLE"
+    assert receipt["rows_returned"] == 100 + 3 + 0 + 100
+    assert receipt["omitted_rows"] == 5 + 0 + 0 + 5
+    assert receipt["rows_total"] == receipt["rows_returned"] + receipt["omitted_rows"]
+
+    fundamental = result["sections"]["fundamental_state"]
+    assert fundamental["rows_returned"] == len(fundamental["rows"]) == 100
+    assert fundamental["omitted_rows"] == 5
+    assert fundamental["rows_total"] == fundamental["rows_returned"] + fundamental["omitted_rows"]
+
+    positioning = result["sections"]["positioning"]
+    assert positioning["rows_returned"] == len(positioning["rows"]) == 3
+    assert positioning["omitted_rows"] == 0
+
+
+def test_missing_risk_placeholder_counts_as_one_row_not_a_free_row(repo_roots):
+    result = sources.capture_external_sources(
+        held_tickers=[],
+        decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:01:00Z",
+    )
+    section = result["sections"]["risk_truth"]
+    assert section["rows_returned"] == 1
+    assert section["rows_total"] == 1
+    assert section["omitted_rows"] == 0
+    assert len(section["rows"]) == 1

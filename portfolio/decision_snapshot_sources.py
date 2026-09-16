@@ -372,14 +372,31 @@ def _worse_coverage(a: str, b: str) -> str:
     return a if _COVERAGE_RANK[a] >= _COVERAGE_RANK[b] else b
 
 
+def _append_capped(section: dict[str, Any], rows: list[Any]) -> int:
+    """Append ``rows`` to ``section["rows"]``, capping at ``MAX_SECTION_ROWS``.
+
+    Returns the number of rows dropped by the cap so the caller can fold that count into
+    ``omitted_rows`` — a cap drop must never vanish from coverage.
+    """
+    combined = section["rows"] + rows
+    kept = combined[:MAX_SECTION_ROWS]
+    section["rows"] = kept
+    return len(combined) - len(kept)
+
+
 def _merge_into_section(section: dict[str, Any], *, rows: list[Any], coverage_state: str,
-                         rows_total: int, rows_returned: int, omitted_rows: int,
-                         gaps: list[dict[str, Any]]) -> None:
-    section["rows"] = (section["rows"] + rows)[:MAX_SECTION_ROWS]
+                         omitted_rows: int, gaps: list[dict[str, Any]]) -> None:
+    """Fold one source's contribution into a section, keeping counts self-consistent.
+
+    ``rows_returned`` and ``rows_total`` are always derived from the section's own row list
+    and cumulative omissions — never independently summed — so a section can never carry
+    rows its counts deny, or drop rows its counts never report.
+    """
+    cap_dropped = _append_capped(section, rows)
     section["coverage_state"] = _worse_coverage(section["coverage_state"], coverage_state)
-    section["rows_total"] += rows_total
-    section["rows_returned"] += rows_returned
-    section["omitted_rows"] += omitted_rows
+    section["omitted_rows"] += omitted_rows + cap_dropped
+    section["rows_returned"] = len(section["rows"])
+    section["rows_total"] = section["rows_returned"] + section["omitted_rows"]
     section["gaps"].extend(gaps)
 
 
@@ -449,23 +466,13 @@ def _parse_json(raw: bytes) -> tuple[Any | None, str | None]:
         return None, "MALFORMED"
 
 
-def _read_jsonl_tail(path: Path, *, max_rows: int = MAX_JSONL_TAIL_ROWS) -> dict[str, Any]:
-    try:
-        size = path.stat().st_size
-    except FileNotFoundError:
-        return {"rows": [], "rows_total": 0, "rows_returned": 0, "omitted_rows": 0,
-                "error_code": "MISSING", "bytes": 0}
-    except OSError:
-        return {"rows": [], "rows_total": 0, "rows_returned": 0, "omitted_rows": 0,
-                "error_code": "INVALID", "bytes": 0}
-    if size > MAX_SOURCE_BYTES:
-        return {"rows": [], "rows_total": 0, "rows_returned": 0, "omitted_rows": 0,
-                "error_code": "OVERSIZE", "bytes": size}
-    try:
-        raw = path.read_bytes()
-    except OSError:
-        return {"rows": [], "rows_total": 0, "rows_returned": 0, "omitted_rows": 0,
-                "error_code": "INVALID", "bytes": size}
+def _parse_jsonl_tail(raw: bytes, *, max_rows: int = MAX_JSONL_TAIL_ROWS) -> dict[str, Any]:
+    """Parse a bounded JSONL tail from bytes already produced by a single stable read.
+
+    Never re-reads or re-stats the source: rows, the caller's digest, and the caller's
+    file-write clock must all describe the exact same bytes. Invalid lines increment
+    ``omitted_rows`` rather than vanishing from coverage.
+    """
     text = raw.decode("utf-8", errors="replace")
     valid: list[Any] = []
     omitted = 0
@@ -488,8 +495,6 @@ def _read_jsonl_tail(path: Path, *, max_rows: int = MAX_JSONL_TAIL_ROWS) -> dict
         "rows_total": len(valid) + omitted,
         "rows_returned": len(tail),
         "omitted_rows": omitted + (len(valid) - len(tail)),
-        "error_code": None,
-        "bytes": size,
     }
 
 
@@ -594,7 +599,7 @@ def capture_book_state(book: str, *, decision_cutoff: str, recorded_at: str) -> 
                 gaps_out.append(_gap("MISSING_REQUIRED_INTERNAL_SOURCE", source_id=source_id,
                                       section_id=section_id))
                 _merge_into_section(sections[section_id], rows=[], coverage_state="BLOCKED",
-                                     rows_total=0, rows_returned=0, omitted_rows=0, gaps=[])
+                                     omitted_rows=0, gaps=[])
             sources_out.append(receipt)
             continue
 
@@ -606,7 +611,7 @@ def capture_book_state(book: str, *, decision_cutoff: str, recorded_at: str) -> 
                 receipt["filesystem_observed_at"] = _utc_from_epoch_seconds(stat_after.st_mtime_ns / 1e9)
             gaps_out.append(_gap(error_code, source_id=source_id, section_id=section_id))
             _merge_into_section(sections[section_id], rows=[], coverage_state="BLOCKED",
-                                 rows_total=0, rows_returned=0, omitted_rows=0,
+                                 omitted_rows=0,
                                  gaps=[_gap(error_code, source_id=source_id, section_id=section_id)])
             sources_out.append(receipt)
             continue
@@ -625,7 +630,7 @@ def capture_book_state(book: str, *, decision_cutoff: str, recorded_at: str) -> 
             receipt["coverage_state"] = "PARTIAL" if not required else "BLOCKED"
             gaps_out.append(_gap(parse_error, source_id=source_id, section_id=section_id))
             _merge_into_section(sections[section_id], rows=[], coverage_state=receipt["coverage_state"],
-                                 rows_total=0, rows_returned=0, omitted_rows=0,
+                                 omitted_rows=0,
                                  gaps=[_gap(parse_error, source_id=source_id, section_id=section_id)])
             sources_out.append(receipt)
             continue
@@ -648,7 +653,7 @@ def capture_book_state(book: str, *, decision_cutoff: str, recorded_at: str) -> 
         receipt["rows_total"] = len(rows)
         receipt["rows_returned"] = len(rows)
         _merge_into_section(sections[section_id], rows=rows, coverage_state="COMPLETE",
-                             rows_total=len(rows), rows_returned=len(rows), omitted_rows=0, gaps=[])
+                             omitted_rows=0, gaps=[])
         sources_out.append(receipt)
 
     for source_id, rel_path, section_id in _INTERNAL_JSONL_SPECS:
@@ -667,44 +672,42 @@ def capture_book_state(book: str, *, decision_cutoff: str, recorded_at: str) -> 
         sections.setdefault(section_id, _section(section_id, []))
         emit(section_id, source_id)
 
-        try:
-            st = path.stat()
-        except FileNotFoundError:
+        raw, stat_after, size, error_code = _stable_first_party_read(path)
+        receipt["bytes"] = size
+
+        if error_code == "MISSING":
             receipt["status"] = "ABSENT_OPTIONAL"
             receipt["coverage_state"] = "COMPLETE"
             sources_out.append(receipt)
             continue
-        except OSError:
-            receipt["status"] = "INVALID"
+
+        if error_code in ("OVERSIZE", "INVALID", "SOURCE_CHANGED_DURING_READ"):
+            receipt["status"] = "INVALID" if error_code == "SOURCE_CHANGED_DURING_READ" else error_code
+            receipt["error_code"] = error_code
             receipt["coverage_state"] = "BLOCKED"
+            if stat_after is not None:
+                receipt["filesystem_observed_at"] = _utc_from_epoch_seconds(stat_after.st_mtime_ns / 1e9)
+            gaps_out.append(_gap(error_code, source_id=source_id, section_id=section_id))
+            _merge_into_section(sections[section_id], rows=[], coverage_state="BLOCKED",
+                                 omitted_rows=0,
+                                 gaps=[_gap(error_code, source_id=source_id, section_id=section_id)])
             sources_out.append(receipt)
             continue
 
-        tail = _read_jsonl_tail(path)
-        receipt["bytes"] = tail["bytes"]
-        receipt["filesystem_observed_at"] = _utc_from_epoch_seconds(st.st_mtime)
-        receipt["known_at"] = receipt["filesystem_observed_at"]
+        # Stable read succeeded — rows, digest, and mtime all come from the same bytes.
+        mtime_utc = _utc_from_epoch_seconds(stat_after.st_mtime_ns / 1e9)
+        receipt["known_at"] = mtime_utc
+        receipt["filesystem_observed_at"] = mtime_utc
         receipt["clock_basis"] = "FILE_MTIME_FIRST_PARTY_STATE"
-        if tail["error_code"]:
-            receipt["status"] = tail["error_code"]
-            receipt["error_code"] = tail["error_code"]
-            receipt["coverage_state"] = "PARTIAL"
-            gaps_out.append(_gap(tail["error_code"], source_id=source_id, section_id=section_id))
-            sources_out.append(receipt)
-            continue
+        receipt["artifact_digest"] = _digest(raw)
 
-        try:
-            raw = path.read_bytes()
-            receipt["artifact_digest"] = _digest(raw)
-        except OSError:
-            pass
+        tail = _parse_jsonl_tail(raw)
         receipt["status"] = "AVAILABLE"
         receipt["coverage_state"] = "COMPLETE"
         receipt["rows_total"] = tail["rows_total"]
         receipt["rows_returned"] = tail["rows_returned"]
         receipt["omitted_rows"] = tail["omitted_rows"]
         _merge_into_section(sections[section_id], rows=tail["rows"], coverage_state="COMPLETE",
-                             rows_total=tail["rows_total"], rows_returned=tail["rows_returned"],
                              omitted_rows=tail["omitted_rows"], gaps=[])
         sources_out.append(receipt)
 
@@ -736,7 +739,6 @@ def capture_book_state(book: str, *, decision_cutoff: str, recorded_at: str) -> 
         receipt["rows_returned"] = len(bounded)
         receipt["omitted_rows"] = len(names) - len(bounded)
         _merge_into_section(sections["historical_memory"], rows=rows, coverage_state="COMPLETE",
-                             rows_total=len(names), rows_returned=len(bounded),
                              omitted_rows=len(names) - len(bounded), gaps=[])
     else:
         receipt["status"] = "ABSENT_OPTIONAL"
@@ -800,17 +802,30 @@ def _project_factor_betas(payload: Any, held_tickers: Sequence[str]) -> dict[str
 
 
 def _project_prophet(payload: Any, held_tickers: Sequence[str]) -> tuple[list[Any], int]:
+    """Held-ticker plans, then the first 50 non-held plans, in producer order within each
+    group. A non-Mapping (malformed) plan is never silently dropped from coverage — it
+    always counts as an omitted row, exactly like an excess plan beyond either 50-cap."""
     if not isinstance(payload, Mapping):
         return [], 0
     plans = payload.get("plans")
     if not isinstance(plans, list):
         return [], 0
     held = {t.upper() for t in held_tickers}
-    held_plans = [p for p in plans if isinstance(p, Mapping) and str(p.get("ticker", "")).upper() in held]
-    non_held_plans = [p for p in plans if isinstance(p, Mapping) and str(p.get("ticker", "")).upper() not in held]
-    selected = held_plans[:50] + non_held_plans[:50]
-    selected = selected[:MAX_SECTION_ROWS]
-    omitted = len(held_plans) + len(non_held_plans) - len(selected)
+    held_plans: list[Any] = []
+    non_held_plans: list[Any] = []
+    malformed = 0
+    for plan in plans:
+        if not isinstance(plan, Mapping):
+            malformed += 1
+            continue
+        if str(plan.get("ticker", "")).upper() in held:
+            held_plans.append(plan)
+        else:
+            non_held_plans.append(plan)
+    selected_held = held_plans[:50]
+    selected_non_held = non_held_plans[:50]
+    selected = (selected_held + selected_non_held)[:MAX_SECTION_ROWS]
+    omitted = (len(plans)) - len(selected)
     return selected, max(omitted, 0)
 
 
@@ -830,37 +845,46 @@ def _project_neural_web(payload: Any, held_tickers: Sequence[str]) -> dict[str, 
     return row
 
 
-def _project_portfolio_context(payload: Any, held_tickers: Sequence[str]) -> dict[str, list[Any]]:
-    out: dict[str, list[Any]] = {"fundamental_state": [], "positioning": [], "event_state": [], "priceability": []}
+def _project_portfolio_context(
+    payload: Any, held_tickers: Sequence[str]
+) -> dict[str, tuple[list[Any], int]]:
+    """Held-ticker rows per domain, each independently capped at 100. Returns
+    ``{domain: (rows, omitted)}`` — ``omitted`` is the pre-slice held-ticker candidate
+    count beyond the 100-row cap, so a cap drop is always counted, never silently lost."""
+    domains = ("fundamental_state", "positioning", "event_state", "priceability")
+    out: dict[str, tuple[list[Any], int]] = {domain: ([], 0) for domain in domains}
     if not isinstance(payload, Mapping):
         return out
     held = {t.upper() for t in held_tickers}
-    for domain in out:
-        rows = payload.get(domain)
-        if isinstance(rows, list):
-            out[domain] = [
-                row for row in rows
+    for domain in domains:
+        rows_field = payload.get(domain)
+        if isinstance(rows_field, list):
+            filtered = [
+                row for row in rows_field
                 if isinstance(row, Mapping) and str(row.get("ticker", "")).upper() in held
-            ][:MAX_SECTION_ROWS]
+            ]
+            selected = filtered[:MAX_SECTION_ROWS]
+            out[domain] = (selected, len(filtered) - len(selected))
     return out
 
 
-def _project_held_ticker_bundle(payload: Any, held_tickers: Sequence[str], domains: Sequence[str]) -> dict[str, list[Any]]:
-    out: dict[str, list[Any]] = {domain: [] for domain in domains}
+def _project_held_ticker_bundle(payload: Any, held_tickers: Sequence[str]) -> tuple[list[Any], int]:
+    """The held-ticker rows from a ``{"tickers": {...}}`` bundle, capped at 100. The same
+    ``(rows, omitted)`` pair is mirrored into every sibling domain this source feeds —
+    callers must not multiply the counts by the number of domains."""
     if not isinstance(payload, Mapping):
-        return out
+        return [], 0
     tickers = payload.get("tickers")
     if not isinstance(tickers, Mapping):
-        return out
+        return [], 0
     held = {t.upper() for t in held_tickers}
-    rows = [
+    filtered = [
         {"ticker": ticker, **record}
         for ticker, record in tickers.items()
         if ticker.upper() in held and isinstance(record, Mapping)
-    ][:MAX_SECTION_ROWS]
-    for domain in domains:
-        out[domain] = rows
-    return out
+    ]
+    selected = filtered[:MAX_SECTION_ROWS]
+    return selected, len(filtered) - len(selected)
 
 
 def capture_external_sources(*, held_tickers: Sequence[str], decision_cutoff: str,
@@ -897,7 +921,7 @@ def capture_external_sources(*, held_tickers: Sequence[str], decision_cutoff: st
             gaps_out.append(_gap("CONTRACT_UNAVAILABLE", source_id=spec.source_id))
             for domain in spec.domains:
                 _merge_into_section(sections[domain], rows=_risk_missing_placeholder(spec, domain),
-                                     coverage_state="BLOCKED", rows_total=0, rows_returned=0,
+                                     coverage_state="BLOCKED",
                                      omitted_rows=0, gaps=[_gap("CONTRACT_UNAVAILABLE", source_id=spec.source_id)])
             sources_out.append(receipt)
             continue
@@ -918,7 +942,7 @@ def capture_external_sources(*, held_tickers: Sequence[str], decision_cutoff: st
                 placeholder = _risk_missing_placeholder(spec, domain)
                 _merge_into_section(
                     sections[domain], rows=placeholder, coverage_state="PARTIAL",
-                    rows_total=0, rows_returned=0, omitted_rows=0,
+                    omitted_rows=0,
                     gaps=[_gap("MISSING", source_id=spec.source_id)],
                 )
             sources_out.append(receipt)
@@ -931,7 +955,7 @@ def capture_external_sources(*, held_tickers: Sequence[str], decision_cutoff: st
             gaps_out.append(_gap(error_code, source_id=spec.source_id))
             for domain in spec.domains:
                 _merge_into_section(sections[domain], rows=[], coverage_state="PARTIAL",
-                                     rows_total=0, rows_returned=0, omitted_rows=0,
+                                     omitted_rows=0,
                                      gaps=[_gap(error_code, source_id=spec.source_id)])
             sources_out.append(receipt)
             continue
@@ -945,7 +969,7 @@ def capture_external_sources(*, held_tickers: Sequence[str], decision_cutoff: st
             gaps_out.append(_gap(parse_error, source_id=spec.source_id))
             for domain in spec.domains:
                 _merge_into_section(sections[domain], rows=[], coverage_state="PARTIAL",
-                                     rows_total=0, rows_returned=0, omitted_rows=0,
+                                     omitted_rows=0,
                                      gaps=[_gap(parse_error, source_id=spec.source_id)])
             sources_out.append(receipt)
             continue
@@ -975,7 +999,7 @@ def capture_external_sources(*, held_tickers: Sequence[str], decision_cutoff: st
             gaps_out.append(gap)
             for domain in spec.domains:
                 _merge_into_section(sections[domain], rows=[], coverage_state="PARTIAL",
-                                     rows_total=0, rows_returned=0, omitted_rows=0, gaps=[gap])
+                                     omitted_rows=0, gaps=[gap])
             sources_out.append(receipt)
             continue
 
@@ -989,7 +1013,7 @@ def capture_external_sources(*, held_tickers: Sequence[str], decision_cutoff: st
             gaps_out.append(gap)
             for domain in spec.domains:
                 _merge_into_section(sections[domain], rows=[], coverage_state="PARTIAL",
-                                     rows_total=0, rows_returned=0, omitted_rows=0, gaps=[gap])
+                                     omitted_rows=0, gaps=[gap])
             sources_out.append(receipt)
             continue
 
@@ -1003,7 +1027,7 @@ def capture_external_sources(*, held_tickers: Sequence[str], decision_cutoff: st
             gaps_out.append(gap)
             for domain in spec.domains:
                 _merge_into_section(sections[domain], rows=[], coverage_state="BLOCKED",
-                                     rows_total=0, rows_returned=0, omitted_rows=0, gaps=[gap])
+                                     omitted_rows=0, gaps=[gap])
             sources_out.append(receipt)
             continue
 
@@ -1014,30 +1038,29 @@ def capture_external_sources(*, held_tickers: Sequence[str], decision_cutoff: st
             row = _project_risk_envelope(payload)
             rows = [row] if row else []
             _merge_into_section(sections["risk_truth"], rows=rows, coverage_state="COMPLETE",
-                                 rows_total=len(rows), rows_returned=len(rows), omitted_rows=0, gaps=[])
+                                 omitted_rows=0, gaps=[])
             receipt["rows_total"] = receipt["rows_returned"] = len(rows)
         elif spec.projection == "regime":
             row = _project_regime(payload)
             rows = [row] if row else []
             _merge_into_section(sections["market_structure"], rows=rows, coverage_state="COMPLETE",
-                                 rows_total=len(rows), rows_returned=len(rows), omitted_rows=0, gaps=[])
+                                 omitted_rows=0, gaps=[])
             receipt["rows_total"] = receipt["rows_returned"] = len(rows)
         elif spec.projection == "covariance_spine":
             row = _project_covariance_spine(payload)
             rows = [row] if row else []
             _merge_into_section(sections["independence"], rows=rows, coverage_state="COMPLETE",
-                                 rows_total=len(rows), rows_returned=len(rows), omitted_rows=0, gaps=[])
+                                 omitted_rows=0, gaps=[])
             receipt["rows_total"] = receipt["rows_returned"] = len(rows)
         elif spec.projection == "factor_betas":
             row = _project_factor_betas(payload, held_tickers)
             rows = [row] if row else []
             _merge_into_section(sections["factor_risk"], rows=rows, coverage_state="COMPLETE",
-                                 rows_total=len(rows), rows_returned=len(rows), omitted_rows=0, gaps=[])
+                                 omitted_rows=0, gaps=[])
             receipt["rows_total"] = receipt["rows_returned"] = len(rows)
         elif spec.projection == "prophet":
             rows, omitted = _project_prophet(payload, held_tickers)
             _merge_into_section(sections["candidate_geometry"], rows=rows, coverage_state="COMPLETE",
-                                 rows_total=len(rows) + omitted, rows_returned=len(rows),
                                  omitted_rows=omitted, gaps=[])
             receipt["rows_total"] = len(rows) + omitted
             receipt["rows_returned"] = len(rows)
@@ -1046,23 +1069,28 @@ def capture_external_sources(*, held_tickers: Sequence[str], decision_cutoff: st
             row = _project_neural_web(payload, held_tickers)
             rows = [row] if row else []
             _merge_into_section(sections["relationships"], rows=rows, coverage_state="COMPLETE",
-                                 rows_total=len(rows), rows_returned=len(rows), omitted_rows=0, gaps=[])
+                                 omitted_rows=0, gaps=[])
             receipt["rows_total"] = receipt["rows_returned"] = len(rows)
         elif spec.projection == "portfolio_context":
             by_domain = _project_portfolio_context(payload, held_tickers)
-            total = 0
-            for domain, rows in by_domain.items():
+            total_returned = 0
+            total_omitted = 0
+            for domain, (rows, omitted) in by_domain.items():
                 _merge_into_section(sections[domain], rows=rows, coverage_state="COMPLETE",
-                                     rows_total=len(rows), rows_returned=len(rows), omitted_rows=0, gaps=[])
-                total += len(rows)
-            receipt["rows_total"] = receipt["rows_returned"] = total
+                                     omitted_rows=omitted, gaps=[])
+                total_returned += len(rows)
+                total_omitted += omitted
+            receipt["rows_returned"] = total_returned
+            receipt["omitted_rows"] = total_omitted
+            receipt["rows_total"] = total_returned + total_omitted
         elif spec.projection == "held_ticker_bundle":
-            by_domain = _project_held_ticker_bundle(payload, held_tickers, spec.domains)
-            shared_rows = next(iter(by_domain.values()), [])
-            for domain, rows in by_domain.items():
+            rows, omitted = _project_held_ticker_bundle(payload, held_tickers)
+            for domain in spec.domains:
                 _merge_into_section(sections[domain], rows=rows, coverage_state="COMPLETE",
-                                     rows_total=len(rows), rows_returned=len(rows), omitted_rows=0, gaps=[])
-            receipt["rows_total"] = receipt["rows_returned"] = len(shared_rows)
+                                     omitted_rows=omitted, gaps=[])
+            receipt["rows_returned"] = len(rows)
+            receipt["omitted_rows"] = omitted
+            receipt["rows_total"] = len(rows) + omitted
 
         sources_out.append(receipt)
 
@@ -1117,12 +1145,12 @@ def capture_all(book: str, *, decision_cutoff: str, recorded_at: str) -> dict[st
     for section_id, section in external_capture["sections"].items():
         if section_id in sections:
             existing = sections[section_id]
+            cap_dropped = _append_capped(existing, section["rows"])
             existing["source_ids"] = existing["source_ids"] + section["source_ids"]
-            existing["rows"] = (existing["rows"] + section["rows"])[:MAX_SECTION_ROWS]
             existing["coverage_state"] = _worse_coverage(existing["coverage_state"], section["coverage_state"])
-            existing["rows_total"] += section["rows_total"]
-            existing["rows_returned"] += section["rows_returned"]
-            existing["omitted_rows"] += section["omitted_rows"]
+            existing["omitted_rows"] += section["omitted_rows"] + cap_dropped
+            existing["rows_returned"] = len(existing["rows"])
+            existing["rows_total"] = existing["rows_returned"] + existing["omitted_rows"]
             existing["gaps"] = existing["gaps"] + section["gaps"]
         else:
             sections[section_id] = section
