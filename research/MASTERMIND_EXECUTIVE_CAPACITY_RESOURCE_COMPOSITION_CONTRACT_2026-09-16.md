@@ -334,10 +334,54 @@ and `startable_jobs` is never `floor(avail/q95)` at the root.
 
 A stage or child is eligible only if its execution mode is policy-eligible (§7), observation is FRESH (§2.3),
 applicable §2.2 generations are current, its units are well formed, and it does not expire before the operation's
-completion horizon. A required `ALL_OF` child is never filtered out: if any child is `INELIGIBLE` or
-`KNOWN_ZERO`, the parent is `KNOWN_ZERO` with that child's reason; if any child is `UNKNOWN` or `STALE`, the
-parent is correspondingly `UNKNOWN` or `STALE` with that reason. "Admissible" may never mean "omitted from the
-min."
+completion horizon.
+
+`INELIGIBLE` and `KNOWN_ZERO` are different kinds of truth and are never interchangeable. `INELIGIBLE` is an
+authority, rights, or execution-mode fact: this route is **not lawful** for this operation, and no amount of
+remaining allowance makes it lawful. `KNOWN_ZERO` is a lawful numeric-capacity fact: this route **is** lawful,
+current, and eligible, and it presently holds nothing, so a reset or a purchase would make it usable. Collapsing
+the first into the second destroys the distinction the typed result and the §7 hard gate exist to preserve, and
+downstream economics, reset and cooling logic, observability, and operator explanation all depend on that
+distinction surviving composition.
+
+A required `ALL_OF` child is never filtered out, and its class is preserved recursively. The parent's **primary
+state** is the highest state present among its required children under the frozen deterministic precedence
+
+```
+INELIGIBLE > STALE > UNKNOWN > KNOWN_ZERO > KNOWN
+```
+
+read as exactly these five clauses:
+
+1. If any required child is a known policy, rights, or execution-mode refusal — `INELIGIBLE(reason)` — the parent
+   is `INELIGIBLE` with that child's reason.
+2. Absent any such ineligibility, if any required child is `STALE(reason)`, the parent is `STALE` with that reason.
+3. Absent both of those, if any required child is `UNKNOWN(reason)`, the parent is `UNKNOWN` with that reason.
+4. Only when every other required child is current and eligible may a `KNOWN_ZERO(reason)` child make the parent
+   `KNOWN_ZERO` with that reason.
+5. Otherwise every required child is `KNOWN` and the parent is `KNOWN`; normal recursive sizing (§4.2) applies.
+
+The same rule governs equivalent recursive required-child composition at every depth. A nested required `ALL_OF`
+is itself a required child, so its own primary state — computed by these same five clauses — is what its parent
+reads. A policy refusal at any depth therefore reaches the root as `INELIGIBLE` rather than decaying into a zero.
+
+**Lower-precedence facts are retained, never discarded.** Precedence selects the parent's primary state only; it
+never selects which children are reported. Every required child whose state is not `KNOWN` contributes its
+`(child_identity, state, reason)` triple to the parent's `non_known_children` aggregate, which is carried
+alongside the primary state. Aggregation is deterministic in all three respects:
+
+- **Order** — canonical declared child order, that is, the order in which the children are declared in the
+  expression (§3.2), applied pre-order at every depth so that a nested child follows the nested parent that
+  declared it. The aggregate is never sorted by state, by precedence, by reason, or by evaluation/discovery order.
+- **Deduplication** — triples equal in all three fields collapse to a single occurrence, retaining the earliest
+  position in that canonical order. Triples differing in any field are distinct and all of them are kept; two
+  children with the same state and reason but different identities are never merged.
+- **Completeness** — no required child is omitted from the aggregate for any reason, and least of all because its
+  state ranks below the primary state.
+
+Provider-declared fallback skipping is the already-frozen `ORDERED_SPILL` contract stated in the next paragraph
+and in §3.3. It governs spill stages only, and it is not — and may never be read as — a way to filter a required
+`ALL_OF` child. "Admissible" may never mean "omitted from the min."
 
 An `ORDERED_SPILL` stage may be skipped only under the provider-declared fallback contract. An UNKNOWN, STALE, or
 otherwise undecidable earlier stage may not be treated as exhausted; the spill is UNKNOWN from that stage onward.
@@ -398,10 +442,13 @@ below `q95`), `stranded_below_cost` (a remainder below one job's cost), `ineligi
 `expiring_before_horizon`. A zero `startable_jobs` with no stranding reason is an incomplete answer: R35 §17's
 "Alibaba: 68 % remaining" failure is precisely a number that conceals which resource is the bottleneck.
 
-These reasons are diagnostics carried alongside `EvalResult`, not substitutes for it. `ineligible_by_policy` and
-`expiring_before_horizon` correspond to `INELIGIBLE(reason)` when a required child is blocked; an exhausted or
-policy-blocked required child yields `KNOWN_ZERO(reason)` only under §4.1's propagation rules. Stranded value is
-reported even when the typed result is UNKNOWN or STALE, but it never converts that result into capacity.
+These reasons are diagnostics carried alongside `EvalResult`, not substitutes for it, and they never override the
+typed state. `ineligible_by_policy` and `expiring_before_horizon` correspond to `INELIGIBLE(reason)`; under §4.1's
+frozen precedence a required child in that state makes the parent `INELIGIBLE`, never `KNOWN_ZERO`.
+`KNOWN_ZERO(reason)` is reserved for a required child that is lawful, current, and eligible but numerically
+exhausted, and it reaches the parent only when every other required child is current and eligible. Stranded value
+is reported even when the typed result is INELIGIBLE, UNKNOWN, or STALE, but it never converts that result into
+capacity.
 
 ### 4.6 Unknown fails closed
 If any leaf in `E` has UNKNOWN or STALE observation; unknown `capability_generation`, `resource_generation`,

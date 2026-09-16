@@ -532,20 +532,59 @@ right allocation of each class to an owner?** It is not a request to write the t
   bounds. Bounded by
   `rg -n "CODING_AGENT_API|SUPPORTED_TOOL_AGENT_SESSION|UNATTENDED_BACKGROUND" control_plane ops config tests`.
 
-### Class 38 — a required `ALL_OF` child is never silently filtered
-- **Proposed test**: `test_required_all_of_child_propagates_its_typed_reason_and_is_never_dropped`
+### Class 38 — a required `ALL_OF` child is never silently filtered, and its class survives composition
+- **Proposed test**: `test_required_all_of_child_propagates_its_typed_class_under_frozen_precedence_and_is_never_dropped`
 - **Owner**: the typed recursive evaluator (contract §4.1), composed with the freshness and policy gates
   (§2.3, §7).
-- **Fixture**: one `ALL_OF` with three required BUDGET children in one `native_unit` — `A` = `KNOWN(100)`,
-  `B` = `KNOWN(80)`, `C` variable. Run the same graph four times and assert the parent result each time:
-  `C = KNOWN(60)` → parent `KNOWN(60)`; `C = INELIGIBLE(unattended_mode_not_admitted)` → parent
-  `KNOWN_ZERO` carrying **that child's** reason, never `KNOWN(80)`; `C = UNKNOWN(no_observation)` → parent
-  `UNKNOWN` carrying that reason, never `KNOWN(80)` and never `KNOWN_ZERO`; `C = STALE(observed_before_reset)`
-  → parent `STALE` carrying that reason. Then assert `jobs_fit` is not computed from a filtered child set in
-  any of the four runs. **Mutants to kill**: an evaluator that builds an "admissible children" list and takes
-  `min` over it (returns 80 in three of the four runs); one that maps every non-KNOWN child to zero and so
-  collapses UNKNOWN and STALE into `KNOWN_ZERO`, discarding the typed reason; and one that treats an UNKNOWN
-  child as `KNOWN(+∞)` and lets its siblings decide the min.
+- **Fixture**: one `ALL_OF` with three required BUDGET children in one `native_unit`, declared in the canonical
+  order `A`, `B`, `C` — `A` = `KNOWN(100)`, `B` = `KNOWN(80)`, `C` variable. Run the same graph five times and
+  assert the parent result each time: `C = KNOWN(60)` → parent `KNOWN(60)`;
+  `C = INELIGIBLE(unattended_mode_not_admitted)` → parent **`INELIGIBLE`** carrying **that child's** reason —
+  never `KNOWN(80)`, and never `KNOWN_ZERO`, because "unattended mode is not admitted for this plan" is an
+  authority fact about what is lawful and not an exhausted allowance that a reset could refill;
+  `C = UNKNOWN(no_observation)` → parent `UNKNOWN` carrying that reason, never `KNOWN(80)` and never `KNOWN_ZERO`;
+  `C = STALE(observed_before_reset)` → parent `STALE` carrying that reason; `C = KNOWN_ZERO(allowance_exhausted)`
+  → parent `KNOWN_ZERO` carrying that reason, which is the lawful outcome here precisely because `A` and `B` are
+  both current and eligible. Then assert `jobs_fit` is not computed from a filtered child set in any of the five
+  runs.
+- **Mixed-state vector — precedence and aggregation determinism**: one further run over a single graph carrying
+  every state at once, which proves the parent's primary state follows the frozen precedence
+  `INELIGIBLE > STALE > UNKNOWN > KNOWN_ZERO > KNOWN` while no lower-precedence child is discarded. The seven
+  required children are declared in exactly this canonical order:
+
+  | # | Declared child | State | Reason | Position in `non_known_children` |
+  |---|---|---|---|---|
+  | 1 | `A` | `KNOWN(100)` | — | absent — `KNOWN` children are not aggregated |
+  | 2 | `B` | `KNOWN_ZERO` | `allowance_exhausted` | 1 |
+  | 3 | `C` | `UNKNOWN` | `no_observation` | 2 |
+  | 4 | `D` | `STALE` | `observed_before_reset` | 3 |
+  | 5 | `E` | `INELIGIBLE` | `unattended_mode_not_admitted` | 4 |
+  | 6 | `F` | `KNOWN_ZERO` | `allowance_exhausted` | 5 — distinct identity, never merged with `B` |
+  | 7 | `G` | `STALE` | `observed_before_reset` | 6 — distinct identity, never merged with `D` |
+
+  Assert: the parent's primary state is exactly `INELIGIBLE(unattended_mode_not_admitted)` sourced from `E`, even
+  though `E` is declared fifth and four non-`KNOWN` children precede it — precedence, not position, selects it;
+  `non_known_children` is exactly the six-element sequence `[(B, KNOWN_ZERO, allowance_exhausted),
+  (C, UNKNOWN, no_observation), (D, STALE, observed_before_reset), (E, INELIGIBLE, unattended_mode_not_admitted),
+  (F, KNOWN_ZERO, allowance_exhausted), (G, STALE, observed_before_reset)]`, in declared order — not precedence
+  order, not sorted by state or reason; and re-running the identical graph yields the byte-identical sequence.
+  Second sub-case (recursion): replace `E` with a nested required `ALL_OF` `H` whose own required children include
+  one `INELIGIBLE(unattended_mode_not_admitted)`; assert `H`'s own primary state is `INELIGIBLE`, that the root is
+  `INELIGIBLE` and not `KNOWN_ZERO`, and that `H` and its ineligible child both appear in the root aggregate in
+  pre-order — the nested parent immediately before the child it declared. Third sub-case (dedup): declare two
+  children whose `(identity, state, reason)` triples are equal in all three fields; assert exactly one occurrence
+  survives, at the earliest canonical position, and that the run is byte-identical on repeat.
+- **Mutants to kill**: an evaluator that builds an "admissible children" list and takes `min` over it (returns 80
+  in four of the five runs); **`collapse_ineligible_to_known_zero`** — an evaluator that maps a required
+  `INELIGIBLE` child to a parent `KNOWN_ZERO`, which is invisible to any assertion made only on numbers, because
+  both answers size zero jobs; only the typed assertion catches it, and it is the exact mutant that would let a
+  policy refusal be reported to operators, economics, and cooling logic as an exhausted allowance awaiting a
+  reset; one that maps every non-KNOWN child to zero and so collapses UNKNOWN and STALE into `KNOWN_ZERO`,
+  discarding the typed reason; one that treats an UNKNOWN child as `KNOWN(+∞)` and lets its siblings decide the
+  min; one that reports only the precedence-winning child and drops the remaining `non_known_children`, so the
+  operator sees the refusal but never learns that two other required children are also stale or exhausted; and
+  one that sorts the aggregate by precedence or by reason instead of preserving canonical declared order, making
+  the aggregate unstable across equivalent runs.
 - **Status at master**: **MISSING**. There is no typed evaluation result at master to propagate — the scalar
   `estimated_startable_jobs` path has no child-level reason to carry. Bounded by
   `rg -n "ALL_OF|EvalResult|KNOWN_ZERO|INELIGIBLE|admissible" control_plane ops config tests` — no hit
