@@ -63,6 +63,32 @@ def test_capacity_law_forbids_quota_burn_theater_and_limit_circumvention() -> No
         assert phrase in law
 
 
+def test_capacity_law_pins_vector_ordering_and_provider_preference_role() -> None:
+    law = _text(LAW)
+    for phrase in (
+        "Pareto/lexicographic",
+        "strictly dominated",
+        "documented lexicographic ordering",
+        "MUST NOT override a stronger stage",
+        "Static provider preference is a deterministic tie-break only",
+        "ORDERING_STAGE / DOMINANCE_REASON",
+    ):
+        assert phrase in law
+
+
+def test_changing_external_numbers_are_not_routing_authority_without_receipts() -> None:
+    memo = _text(MEMO)
+    assert memo.count("UNVERIFIED_FOR_ROUTING") >= 4
+    for phrase in (
+        "MUST NOT size capacity, choose a route, authorize a purchase",
+        "does **not** establish current Go utilization or `capacity_known`",
+        "changing MiniMax allowances, concurrency counts, subscription prices",
+        "UTC observation time",
+        "receipt/snapshot digest",
+    ):
+        assert phrase in memo
+
+
 def test_capacity_law_distinguishes_direct_workhorse_and_aggregator_breadth() -> None:
     law = _text(LAW)
     assert "Aggregator subscription:" in law

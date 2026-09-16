@@ -8,6 +8,10 @@ This is current research / routing input. It does not arm a provider, approve a 
 
 Original branch base: Mastermind `8e25bb32601ef5f40a689da6d6f24149e79e31fa`. Reconciled current protected Mastermind during the quota-semantics correction: `e1f752a58df8f874efa12e30957d911627a0c4f8`.
 
+### Evidence status for changing provider/account facts
+
+This memo intentionally separates architecture from fast-changing quantitative facts. **Any provider price, allowance, promotion, concurrency number, model menu, account-utilization percentage, or reset/headroom observation that is not bound below to an immutable source commit or a secret-safe dated Provider Control receipt is `UNVERIFIED_FOR_ROUTING`.** It may motivate a research cohort, but it MUST NOT size capacity, choose a route, authorize a purchase, or satisfy `capacity_known`. Current allocation must consume fresh evidence from the existing Provider Control/offer owners. Public URLs remain discovery pointers, not frozen receipts.
+
 ## 1. OpenCode Go — current facts and the important quota-semantics correction
 
 OpenCode's current Go documentation states:
@@ -51,9 +55,9 @@ Current source: https://opencode.ai/legal/terms-of-service
 
 ### Chairman-observed account state
 
-The reviewed Go dashboards showed low aggregate weekly/monthly utilization and usage concentrated disproportionately in GPT 5.6 Luna on at least one subscription. That still signals poor portfolio use, but **not** because untouched models contain separate balances.
+`UNVERIFIED_FOR_ROUTING`: the qualitative dashboard observation that motivated this study was not captured in this artifact with timestamped percentages, reset timestamps, account-scope identity, or an immutable snapshot digest. It therefore does **not** establish current Go utilization or `capacity_known`. Before any allocation decision, Provider Control must obtain a fresh authenticated account-shared rolling/weekly/monthly observation through the existing owner.
 
-The economic problem is instead that scarce shared Go capacity is being spent on a model family for which Mastermind also has direct OpenAI capacity, while Go's main strategic value is access to differentiated model families. Shared Go allowance spent on Luna crowds out the option to spend that same allowance on Kimi/Qwen/GLM/DeepSeek/MiniMax/Grok later.
+The architectural opportunity-cost finding does not depend on that missing snapshot: because the Go windows are shared, spending them on a model family for which Mastermind has abundant eligible direct capacity can crowd out differentiated model choices available through the same Go resource. Whether Luna or any other specific model should be avoided on a particular turn remains a current Model Router + Provider Control + Capacity decision.
 
 ## 2. OpenCode routing decision
 
@@ -74,7 +78,7 @@ Treat every currently legitimate Go subscription as a diversified model-access p
 
 Evaluate differentiated candidates against real bounded cohorts and measure both accepted-result quality and shared-quota debit. Current candidates include:
 
-- `DeepSeek V4.1 Flash` — the public page currently advertises a temporary 4× / $60 model-equivalent allowance through Sep 20; useful short-lived efficiency to test, not a separate wallet;
+- `DeepSeek V4.1 Flash` — a time-limited promotion was visible during research, but its exact multiplier/value/expiry is `UNVERIFIED_FOR_ROUTING` in this artifact; refresh it through the existing offer owner before using it economically;
 - `GLM-5.3-Flash` — low published token rates and a high model-equivalent allowance; useful fast-lane candidate;
 - `Qwen3.7 Plus` / `Qwen3.8 Flash` — candidates for routine/standard coding and research after evaluation;
 - `Kimi K2.7 Code` — coding-specific candidate;
@@ -105,24 +109,17 @@ Do not add another OpenCode-specific router, account ledger, or quota store.
 
 ## 4. MiniMax — current external facts
 
-MiniMax's current Token Plan page advertises approximately:
+MiniMax's public Token Plan and model pages market tiered M3-family subscription capacity, bounded concurrent-agent usage, common coding-client integration, long-context/agentic capabilities, multimodal understanding, and a separate pay-as-you-go API offering.
 
-- Plus: ~1.7B M3 tokens/month and 3–4 concurrent agents;
-- Max: ~5.1B M3 tokens/month and 4–5 concurrent agents;
-- Ultra: ~12.5B M3 tokens/month and 6–7 concurrent agents;
-- annual prices currently around $198 / $495 / $1,188 on the promotional subscription page, with another current page showing rounded $200 / $500 / $1,200 annual pricing;
-- access to the MiniMax family including M3 / M2.7 plus image and speech; image/video input understanding is native on M3; text/image/speech share plan quota;
-- own-tool integration through Token Plan keys and common coding clients.
+**All changing MiniMax allowances, concurrency counts, subscription prices, promotions, model availability, context-dependent PAYG rates, and cache rates are `UNVERIFIED_FOR_ROUTING` in this artifact.** The research pass observed conflicting rounded/promotional price presentations and did not store an immutable provider-page snapshot or digest, so those numbers have been deliberately removed from the decision-bearing memo rather than pretending that a live URL is a reproducible receipt. Before routing, sizing, or purchasing, the existing Provider Control/offer owner must capture a secret-safe dated observation (UTC observation time, source URL/endpoint or immutable source id, exact observed values, and receipt/snapshot digest).
 
-Current source: https://platform.minimax.io/subscribe/token-plan
+Discovery pointers:
 
-MiniMax M3 is currently positioned by MiniMax as a coding/agentic frontier model with up to 1M context, native image/video understanding, autonomous task decomposition, tool invocation, multi-step reasoning, and computer-use capability. Provider benchmark claims are marketing evidence and must not substitute for Mastermind task-cohort evaluation.
+- https://platform.minimax.io/subscribe/token-plan
+- https://www.minimax.io/models/text/m3
+- https://platform.minimax.io/subscribe/token-plan?tab=api-enterprise
 
-Current source: https://www.minimax.io/models/text/m3
-
-Current pay-as-you-go M3 rates published by MiniMax are $0.30/M input and $1.20/M output up to 512K context, with $0.60/M input and $2.40/M output for 512K–1M, plus discounted cache reads. M2.7 standard is also $0.30/M input and $1.20/M output with cache pricing.
-
-Current source: https://platform.minimax.io/subscribe/token-plan?tab=api-enterprise
+Provider benchmark/marketing claims remain research inputs only and must not substitute for Mastermind task-cohort evaluation or current quota truth.
 
 ## 5. Why MiniMax is underused inside Mastermind
 
@@ -181,7 +178,7 @@ MiniMax direct plans also expose M2.7. Treat it as a candidate economical fast/s
 
 ## 7. Direct MiniMax vs OpenCode MiniMax
 
-For sustained MiniMax-family work, the direct Token Plan is the intended workhorse candidate because it advertises very large M3 allowance and multiple concurrent agents. OpenCode remains valuable access to MiniMax for diversification/overflow/review, but Go M3 consumes the same shared Go native windows used by Go's other models.
+For sustained MiniMax-family work, the direct Token Plan is the intended concentrated-workhorse candidate **only after fresh Provider Control evidence proves current entitlement, headroom, concurrency, and usage-policy eligibility**. OpenCode remains valuable access to MiniMax for diversification/overflow/review, but Go M3 consumes the same shared Go native windows used by Go's other models.
 
 Therefore, while a large legitimate direct MiniMax pool is idle and eligible, routine M3-family demand should generally be tested against that direct pool first. Spending shared Go allowance on M3 has a portfolio opportunity cost because it reduces the same Go resource available for Qwen/Kimi/GLM/DeepSeek/Grok choices.
 

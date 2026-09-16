@@ -77,7 +77,9 @@ Already-paid subscription capacity has near-zero immediate cash cost but a real 
 - continuity cost of moving or restarting work;
 - independence value for review.
 
-Implementations may compute a bounded score, but no component may fabricate provider capacity or treat nominal API-dollar equivalence as fungible cash.
+Ranking MUST preserve a **Pareto/lexicographic** decision boundary rather than hiding unlike economic dimensions inside one universal weighted score. First remove a route only when current admitted evidence shows it is strictly dominated on the decisive economic dimensions for this mission (no better on any decisive dimension and strictly worse on at least one). When real trade-offs remain, apply a documented lexicographic ordering appropriate to the mission/risk class.
+
+A bounded scalar may be used only inside one already-frozen lexicographic stage or as a display aid; it MUST NOT override a stronger stage, silently trade away a hard reserve, or recreate universal provider precedence. **Static provider preference is a deterministic tie-break only after the admitted quality/economic dimensions are materially tied, unless a typed non-economic hard constraint explicitly elevates it.** No component may fabricate provider capacity or treat nominal API-dollar equivalence as fungible cash.
 
 ## 6. Expiring-capacity harvest rule
 
@@ -173,6 +175,8 @@ MODEL_DEBIT / COST EVIDENCE (when applicable)
 RESET_OR_EXPIRY_PRESSURE (known | unknown)
 MARGINAL_CASH_CLASS
 PORTFOLIO_SCARCITY_REASON
+ORDERING_STAGE / DOMINANCE_REASON
+STATIC_PROVIDER_PREFERENCE_ROLE (hard_constraint | tie_break | not_used)
 WHY_THIS_CAPACITY
 WHY_NOT_MORE_SCARCE_OR_METERED_ROUTE
 POLICY / RIGHTS GATE
