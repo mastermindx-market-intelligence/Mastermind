@@ -562,7 +562,7 @@ def _project_latest(payload: Any) -> dict[str, Any] | None:
 
 def capture_book_state(book: str, *, decision_cutoff: str, recorded_at: str) -> dict[str, Any]:
     observed_at = c.parse_utc_timestamp(recorded_at, field="recorded_at")
-    c.parse_utc_timestamp(decision_cutoff, field="decision_cutoff")
+    cutoff = c.parse_utc_timestamp(decision_cutoff, field="decision_cutoff")
     book_dir = _book_dir(book)
 
     sources_out: list[dict[str, Any]] = []
@@ -622,6 +622,17 @@ def capture_book_state(book: str, *, decision_cutoff: str, recorded_at: str) -> 
         receipt["filesystem_observed_at"] = mtime_utc
         receipt["clock_basis"] = "FILE_MTIME_FIRST_PARTY_STATE"
         receipt["artifact_digest"] = _digest(raw)
+
+        if mtime_utc > cutoff:
+            receipt["status"] = "FUTURE_AT_CUTOFF"
+            receipt["coverage_state"] = "BLOCKED"
+            receipt["correction_generation"] = receipt["artifact_digest"]
+            gap = _gap("FUTURE_AT_CUTOFF", source_id=source_id, section_id=section_id)
+            gaps_out.append(gap)
+            _merge_into_section(sections[section_id], rows=[], coverage_state="BLOCKED",
+                                 omitted_rows=0, gaps=[gap])
+            sources_out.append(receipt)
+            continue
 
         payload, parse_error = _parse_json(raw)
         if parse_error:
@@ -700,6 +711,17 @@ def capture_book_state(book: str, *, decision_cutoff: str, recorded_at: str) -> 
         receipt["filesystem_observed_at"] = mtime_utc
         receipt["clock_basis"] = "FILE_MTIME_FIRST_PARTY_STATE"
         receipt["artifact_digest"] = _digest(raw)
+
+        if mtime_utc > cutoff:
+            receipt["status"] = "FUTURE_AT_CUTOFF"
+            receipt["coverage_state"] = "BLOCKED"
+            receipt["correction_generation"] = receipt["artifact_digest"]
+            gap = _gap("FUTURE_AT_CUTOFF", source_id=source_id, section_id=section_id)
+            gaps_out.append(gap)
+            _merge_into_section(sections[section_id], rows=[], coverage_state="BLOCKED",
+                                 omitted_rows=0, gaps=[gap])
+            sources_out.append(receipt)
+            continue
 
         tail = _parse_jsonl_tail(raw)
         receipt["status"] = "AVAILABLE"

@@ -10,14 +10,26 @@ from portfolio import decision_snapshot_contracts as c
 from portfolio import decision_snapshot_sources as sources
 
 
+# Fixed, pre-cutoff epoch for ordinary fixture writes (2026-09-15T19:00:00Z) — every test in
+# this file that does not care about clock behavior uses "2026-09-15T20:00:00Z" as
+# decision_cutoff, so fixture mtimes must not depend on the host wall clock landing before it.
+_PRE_CUTOFF_EPOCH = 1_789_498_800
+
+
+def _set_pre_cutoff_mtime(path: Path) -> None:
+    os.utime(path, (_PRE_CUTOFF_EPOCH, _PRE_CUTOFF_EPOCH))
+
+
 def _write_json(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data), encoding="utf-8")
+    _set_pre_cutoff_mtime(path)
 
 
 def _write_jsonl(path: Path, rows: list) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+    _set_pre_cutoff_mtime(path)
 
 
 def _by_id(receipts) -> dict:
@@ -414,6 +426,7 @@ def test_jsonl_tail_counts_and_digest_from_single_stable_read(repo_roots):
     path.parent.mkdir(parents=True, exist_ok=True)
     raw = ("\n".join(lines) + "\n").encode("utf-8")
     path.write_bytes(raw)
+    _set_pre_cutoff_mtime(path)
 
     result = sources.capture_book_state(
         "autonomous",
@@ -556,3 +569,136 @@ def test_missing_risk_placeholder_counts_as_one_row_not_a_free_row(repo_roots):
     assert section["rows_total"] == 1
     assert section["omitted_rows"] == 0
     assert len(section["rows"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# W1 — first-party mtime must be compared against decision_cutoff too.
+# ---------------------------------------------------------------------------
+
+_FUTURE_EPOCH = 1_789_502_700  # 2026-09-15T20:05:00Z — strictly after the fixture cutoff
+_EQUAL_EPOCH = 1_789_502_400  # 2026-09-15T20:00:00Z — exactly the fixture cutoff
+
+
+def test_required_account_after_cutoff_is_future_and_blocks_book_truth(repo_roots):
+    repo, _ = repo_roots
+    path = repo / "data/portfolios/autonomous/account.json"
+    _write_json(path, {"cash": 1_000_000.0, "positions": {}})
+    os.utime(path, (_FUTURE_EPOCH, _FUTURE_EPOCH))
+
+    result = sources.capture_book_state(
+        "autonomous",
+        decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:06:00Z",
+    )
+    receipt = _by_id(result["sources"])["book.account"]
+    assert receipt["status"] == "FUTURE_AT_CUTOFF"
+    assert receipt["coverage_state"] == "BLOCKED"
+    assert receipt["rows_returned"] == 0
+    assert result["sections"]["book_truth"]["rows"] == []
+    assert result["sections"]["book_truth"]["coverage_state"] == "BLOCKED"
+    assert any(
+        gap["code"] == "FUTURE_AT_CUTOFF" and gap["source_id"] == "book.account"
+        for gap in result["gaps"]
+    )
+
+
+def test_optional_latest_after_cutoff_cannot_contribute_rows(repo_roots):
+    repo, _ = repo_roots
+    account_path = repo / "data/portfolios/autonomous/account.json"
+    _write_json(account_path, {"cash": 1_000_000.0, "positions": {}})
+    latest_path = repo / "data/portfolios/autonomous/latest.json"
+    _write_json(latest_path, {"as_of": "2026-09-15", "positions": []})
+    os.utime(latest_path, (_FUTURE_EPOCH, _FUTURE_EPOCH))
+
+    result = sources.capture_book_state(
+        "autonomous",
+        decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:06:00Z",
+    )
+    receipt = _by_id(result["sources"])["book.latest"]
+    assert receipt["status"] == "FUTURE_AT_CUTOFF"
+    assert receipt["coverage_state"] == "BLOCKED"
+    assert receipt["rows_returned"] == 0
+    assert not any("as_of" in row for row in result["sections"]["book_truth"]["rows"])
+
+
+def test_decisions_jsonl_after_cutoff_contributes_no_row_and_blocks_section(repo_roots):
+    repo, _ = repo_roots
+    path = repo / "data/portfolios/autonomous/decisions.jsonl"
+    _write_jsonl(path, [{"id": 1}, {"id": 2}])
+    os.utime(path, (_FUTURE_EPOCH, _FUTURE_EPOCH))
+
+    result = sources.capture_book_state(
+        "autonomous",
+        decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:06:00Z",
+    )
+    receipt = _by_id(result["sources"])["book.decisions"]
+    assert receipt["status"] == "FUTURE_AT_CUTOFF"
+    assert receipt["coverage_state"] == "BLOCKED"
+    assert receipt["rows_returned"] == 0
+    assert result["sections"]["historical_memory"]["rows"] == []
+    assert result["sections"]["historical_memory"]["coverage_state"] == "BLOCKED"
+
+
+def test_malformed_future_bytes_are_future_at_cutoff_not_malformed(repo_roots):
+    repo, _ = repo_roots
+    path = repo / "data/portfolios/autonomous/account.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{not valid json", encoding="utf-8")
+    os.utime(path, (_FUTURE_EPOCH, _FUTURE_EPOCH))
+
+    result = sources.capture_book_state(
+        "autonomous",
+        decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:06:00Z",
+    )
+    receipt = _by_id(result["sources"])["book.account"]
+    assert receipt["status"] == "FUTURE_AT_CUTOFF"
+    assert receipt["error_code"] is None
+
+
+def test_mtime_exactly_at_cutoff_remains_eligible(repo_roots):
+    repo, _ = repo_roots
+    path = repo / "data/portfolios/autonomous/account.json"
+    _write_json(path, {"cash": 1_000_000.0, "positions": {}})
+    os.utime(path, (_EQUAL_EPOCH, _EQUAL_EPOCH))
+
+    result = sources.capture_book_state(
+        "autonomous",
+        decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:06:00Z",
+    )
+    receipt = _by_id(result["sources"])["book.account"]
+    assert receipt["status"] == "AVAILABLE"
+    assert receipt["known_at"] == "2026-09-15T20:00:00Z"
+    assert result["sections"]["book_truth"]["rows"] != []
+
+
+def test_future_at_cutoff_receipt_retains_first_party_clock_digest_and_generation(repo_roots):
+    repo, _ = repo_roots
+    path = repo / "data/portfolios/autonomous/account.json"
+    _write_json(path, {"cash": 1_000_000.0, "positions": {}})
+    os.utime(path, (_FUTURE_EPOCH, _FUTURE_EPOCH))
+    raw = path.read_bytes()
+
+    result = sources.capture_book_state(
+        "autonomous",
+        decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:06:00Z",
+    )
+    receipt = _by_id(result["sources"])["book.account"]
+    c.validate_source_receipt(receipt)
+    assert receipt["clock_basis"] == "FILE_MTIME_FIRST_PARTY_STATE"
+    assert receipt["known_at"] == "2026-09-15T20:05:00Z"
+    assert receipt["known_at"] == receipt["filesystem_observed_at"]
+    assert receipt["artifact_digest"] == sources._digest(raw)
+    assert receipt["correction_generation"].startswith("sha256:")
+    assert receipt["rows_total"] == 0
+    assert receipt["rows_returned"] == 0
+    assert receipt["omitted_rows"] == 0
+    assert any(
+        gap["code"] == "FUTURE_AT_CUTOFF" and gap["source_id"] == "book.account"
+        and gap["section_id"] == "book_truth"
+        for gap in result["gaps"]
+    )
