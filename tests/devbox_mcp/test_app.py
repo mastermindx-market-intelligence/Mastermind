@@ -14,11 +14,15 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from integrations.business_mcp_auth.contracts import load_resource_policy, subject_digest
 from integrations.business_mcp_auth.jwt_verifier import JwtAuthenticator
 from integrations.devbox_mcp.app import create_authenticated_devbox_server
-from integrations.devbox_mcp.contracts import TOOL_NAMES
+from integrations.devbox_mcp.contracts import (
+    OBSERVE_SCOPE,
+    OBSERVE_TOOL_NAMES,
+    TOOL_NAMES,
+)
 
 ISSUER = "https://identity.devbox.example"
 RESOURCE = "https://devbox.example/mcp"
-SCOPE = "workbench.execute"
+EXECUTE_SCOPE = "workbench.execute"
 PROCESS_REF = "process:" + "a" * 64
 
 
@@ -121,16 +125,23 @@ class DevBoxAppTests(unittest.IsolatedAsyncioTestCase):
         self.keys = Keys(public)
         self.audit = Audit()
         self.subject = subject_digest(issuer=ISSUER, subject="pro-chairman-seat")
-        self.policy = load_resource_policy(
+        self.port = Port(self.clock)
+        self.client = None
+        self.stop = None
+        self.lifespan_task = None
+        await self._start_server(EXECUTE_SCOPE)
+
+    def _policy_for_scope(self, scope):
+        return load_resource_policy(
             {
                 "schema": "mastermind.business_mcp_auth_policy.v1",
-                "policy_id": "fixture.devbox.execute",
+                "policy_id": "fixture.devbox." + scope.rsplit(".", 1)[-1],
                 "resource": RESOURCE,
                 "resource_metadata_url": "https://devbox.example/.well-known/oauth-protected-resource/mcp",
                 "issuer": ISSUER,
                 "authorization_servers": [ISSUER],
                 "jwks_uri": ISSUER + "/jwks",
-                "required_scopes": [SCOPE],
+                "required_scopes": [scope],
                 "allowed_subject_digests": [self.subject],
                 "allowed_algorithms": ["RS256"],
                 "clock_skew_seconds": 0,
@@ -140,8 +151,11 @@ class DevBoxAppTests(unittest.IsolatedAsyncioTestCase):
                 "fetch_failure_backoff_seconds": 1,
             }
         )
+
+    async def _start_server(self, scope):
+        self.scope = scope
+        self.policy = self._policy_for_scope(scope)
         self.auth = JwtAuthenticator(policy=self.policy, jwks_cache=self.keys)
-        self.port = Port(self.clock)
         self.server = create_authenticated_devbox_server(
             authenticator=self.auth,
             policy=self.policy,
@@ -165,10 +179,22 @@ class DevBoxAppTests(unittest.IsolatedAsyncioTestCase):
             transport=httpx.ASGITransport(app=self.app), base_url="http://127.0.0.1"
         )
 
+    async def _stop_server(self):
+        if self.client is not None:
+            await self.client.aclose()
+            self.client = None
+        if self.stop is not None:
+            self.stop.set()
+        if self.lifespan_task is not None:
+            await asyncio.wait_for(self.lifespan_task, timeout=5)
+            self.lifespan_task = None
+
+    async def _restart_server(self, scope):
+        await self._stop_server()
+        await self._start_server(scope)
+
     async def asyncTearDown(self):
-        await self.client.aclose()
-        self.stop.set()
-        await asyncio.wait_for(self.lifespan_task, timeout=5)
+        await self._stop_server()
 
     def token(self, **changes):
         payload = {
@@ -177,7 +203,7 @@ class DevBoxAppTests(unittest.IsolatedAsyncioTestCase):
             "aud": RESOURCE,
             "iat": self.clock[0] - 1,
             "exp": self.clock[0] + 600,
-            "scope": SCOPE,
+            "scope": self.scope,
             "client_id": "fixture-pro-client",
         }
         payload.update(changes)
@@ -238,6 +264,43 @@ class DevBoxAppTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(by_name["start_devbox_command"]["annotations"]["readOnlyHint"])
         self.assertFalse(by_name["cancel_devbox_process"]["annotations"]["readOnlyHint"])
 
+    async def test_observe_tool_discovery_is_exact_closed_read_surface(self):
+        await self._restart_server(OBSERVE_SCOPE)
+        data = self.result(await self.rpc("tools/list", token=self.token()))
+        self.assertEqual(
+            [row["name"] for row in data["tools"]], list(OBSERVE_TOOL_NAMES)
+        )
+        self.assertTrue(all(row["annotations"]["readOnlyHint"] for row in data["tools"]))
+        self.assertEqual(self.port.calls, [])
+
+    async def test_observe_start_and_cancel_are_unavailable_before_port(self):
+        await self._restart_server(OBSERVE_SCOPE)
+        cases = (
+            (
+                "start_devbox_command",
+                {"operation_key": "observe-refusal", "command_text": "true"},
+            ),
+            ("cancel_devbox_process", {"process_ref": PROCESS_REF}),
+        )
+        for name, arguments in cases:
+            result = self.result(await self.call(name, arguments))
+            self.assertTrue(result["isError"])
+            self.assertEqual(
+                json.loads(result["content"][0]["text"])["code"],
+                "TOOL_NOT_AVAILABLE",
+            )
+        self.assertEqual(self.port.calls, [])
+
+    async def test_observe_status_and_read_dispatch_through_same_port(self):
+        await self._restart_server(OBSERVE_SCOPE)
+        self.result(await self.call("devbox_status"))
+        self.result(
+            await self.call("read_devbox_process", {"process_ref": PROCESS_REF})
+        )
+        self.assertEqual(
+            [item[1] for item in self.port.calls], list(OBSERVE_TOOL_NAMES)
+        )
+
     async def test_status_projects_baseline_and_current_source_truth(self):
         result = self.result(await self.call("devbox_status"))
         self.assertFalse(result.get("isError", False), result)
@@ -260,7 +323,7 @@ class DevBoxAppTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(args, {"operation_key": "mcp-start", "command_text": "printf ok"})
         self.assertEqual(caller.subject_digest, self.subject)
         self.assertEqual(caller.resource, RESOURCE)
-        self.assertEqual(caller.scopes, (SCOPE,))
+        self.assertEqual(caller.scopes, (EXECUTE_SCOPE,))
         self.assertNotIn("pro-chairman-seat", repr(caller))
 
     async def test_all_four_tools_dispatch_through_same_port(self):

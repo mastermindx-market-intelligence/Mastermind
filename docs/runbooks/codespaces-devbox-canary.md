@@ -3,7 +3,7 @@
 **Capability:** attended ChatGPT Web → authenticated DevBox MCP → one exact GitHub Codespace filesystem/shell/git/test workspace.
 **Source owner:** GitHub.
 **Lifecycle owner:** Executive OS when a Job/Attempt exists; this canary does not mint one.
-**Provider state:** `BUILT_NOT_PROVEN`; do not claim `PROVEN_LIVE` until the Personal Pro custom-MCP call completes through the public endpoint and its exact results are read back.
+**Provider state:** `BUILT_NOT_PROVEN`; Personal Pro observation proof is insufficient to promote the four-tool parent. Claim `PROVEN_LIVE` only after the supported-plan `EXECUTE` traversal completes through the public endpoint and its exact results are read back.
 
 ## Hard boundaries
 
@@ -99,7 +99,7 @@ policy.resource
 
 policy.required_scopes
 = lease.required_scopes
-= [workbench.execute]
+= exactly one of [workbench.observe] or [workbench.execute]
 
 policy.allowed_subject_digests
 = [lease.expected_subject_digest]
@@ -113,6 +113,13 @@ lease.repository
 lease.committed_head
 = git rev-parse HEAD
 ```
+
+Profile mapping is closed:
+
+- `OBSERVE_ONLY`: exact scope `workbench.observe`; tools are exactly `devbox_status` and `read_devbox_process`.
+- `EXECUTE`: exact scope `workbench.execute`; tools are exactly all four DevBox tools.
+
+Do not put both scopes in one policy, lease or access token. The existing Auth0 resource server may advertise both permissions, but Auth0 Management API scope updates replace the complete scope list: read the current resource-server state first, submit the complete desired list preserving `workbench.execute` while adding `workbench.observe`, then read it back. Do not create a second Auth0 tenant, application, API/resource server or OAuth client.
 
 Derive the client binding with the same public helper used by JWT verification; do not hand-reimplement the hash:
 
@@ -167,11 +174,32 @@ gh codespace ports visibility 8767:public -c <codespace-name>
 
 Public means anyone who knows the URL can reach the HTTP endpoint; Mastermind OAuth/JWT authorization remains mandatory for tool calls. Do not expose any debug/admin port.
 
-## 8. Personal Pro acceptance
+## 8. ChatGPT acceptance by exact profile
 
-Connect the existing approved Personal Pro custom-MCP surface to the exact `DEVBOX_MCP` resource using the existing accepted OAuth/app mechanism. Personal Pro write capability is a proven account fact for the Chairman seat; this canary is proving the new Codespaces backend, not re-proving generic plan entitlement.
+Use the existing Auth0 tenant, application/client, endpoint resource server, retained Codespace, port `8767`, runtime, target/process authority and public MCP URL. Do not create a parallel app or server. Each service run receives one matching exact-scope policy/lease. To move from observation to execution, stop and rebind the same service plane with the reviewed matching policy/lease and exact target generation; there is no model-visible profile switch or second CLI mode.
 
-From the real Web-Sol conversation, execute in order:
+ChatGPT uses a reviewed/frozen app tool snapshot. Before each slice, review or republish the exact expected snapshot in the eligible ChatGPT surface; do not assume source-side tool changes automatically update an already approved app.
+
+Treat the Personal Pro and full-MCP workspace snapshots as distinct provider projections over one backend. Do not reuse the two-tool observation snapshot as evidence that four execute actions are enabled. On Business, current product behavior requires recreating and republishing the ChatGPT-side app record when its tool snapshot changes; Enterprise/Edu may refresh and review actions through workspace controls. This provider-side step must preserve the same public MCP URL and existing Auth0 tenant, OAuth client and endpoint resource server, and must not mint a second target/process/auth/lifecycle plane. Record the exact reviewed tool names for each slice.
+
+### 8A. Personal Pro — `OBSERVE_ONLY`
+
+Connect Personal Pro developer mode to the exact `DEVBOX_MCP` resource using a policy/lease whose sole scope is `workbench.observe`.
+
+From the real Personal Pro Web-Sol conversation:
+
+1. confirm discovery lists exactly `devbox_status` and `read_devbox_process`;
+2. invoke `devbox_status` and read back exact target/generation/repository/HEAD plus `baseline_working_tree_dirty`, current `working_tree_dirty`, and `working_tree_changed_from_baseline`; the production baseline must be clean;
+3. only when an authorized pre-existing process reference was intentionally created through an `EXECUTE` or direct canary, invoke `read_devbox_process` and read its bounded truth;
+4. confirm `start_devbox_command` and `cancel_devbox_process` are absent; a direct RPC attempt for either must return `TOOL_NOT_AVAILABLE` and must not reach the bound port or runtime.
+
+Record this as the Personal Pro observation slice only. It does not prove write/modify entitlement and does not promote the four-tool parent capability beyond `BUILT_NOT_PROVEN`.
+
+### 8B. Business or Enterprise/Edu — `EXECUTE`
+
+Use a currently supported full-MCP ChatGPT workspace and a matching policy/lease whose sole scope is `workbench.execute`. Review the frozen app snapshot and confirm it lists exactly all four DevBox tools.
+
+From the real full-MCP Web-Sol conversation, execute in order:
 
 1. `devbox_status` — exact target/generation/repository/HEAD plus `baseline_working_tree_dirty`, current `working_tree_dirty`, and `working_tree_changed_from_baseline`; the production baseline must be clean.
 2. `start_devbox_command` with an exit-0 command; read terminal exit 0.
@@ -183,7 +211,7 @@ From the real Web-Sol conversation, execute in order:
 8. Run the credential-environment scrub canary; prove ambient `GITHUB_TOKEN`, `GH_TOKEN`, SSH-agent variables, unrelated cloud/API secret variables and usable Git credential-helper configuration are absent from the child environment. Do not report this as arbitrary credential-file isolation.
 9. Cancel one sleeping command; prove only the exact process generation terminates.
 
-Only after these calls traverse the actual Personal Pro custom-MCP connection may this slice be classified `PROVEN_LIVE`.
+Only after this `EXECUTE` sequence traverses the supported full-MCP ChatGPT connection may the four-tool parent be classified `PROVEN_LIVE`.
 
 ## 9. Recover an exact pre-effect receipt interruption
 

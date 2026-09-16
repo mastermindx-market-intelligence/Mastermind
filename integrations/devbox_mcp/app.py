@@ -31,15 +31,14 @@ from integrations.business_mcp_auth.mcp_adapter import MastermindTokenVerifier
 from .contracts import (
     DevBoxContractError,
     EFFECT_STATES,
-    TOOL_NAMES,
     TOOL_SPECS,
+    tools_for_scope,
     validate_tool_arguments,
 )
 from .port import DevBoxCaller, DevBoxPort, DevBoxPortRefused
 
 MAX_ARGUMENT_BYTES = 32768
 MAX_RESULT_BYTES = 2 * 1024 * 1024
-_SCOPE = "workbench.execute"
 _PROCESS_PATTERN = r"^process:[0-9a-f]{64}$"
 _REF_PATTERNS = {
     "target_ref": r"^target:[0-9a-f]{64}$",
@@ -235,8 +234,15 @@ def create_authenticated_devbox_server(
     """Compose one authenticated attended DevBox facade without choosing a target."""
 
     selected_policy = validate_resource_policy(policy)
-    if selected_policy.required_scopes != (_SCOPE,):
-        raise ValueError("a dedicated workbench.execute policy is required")
+    try:
+        allowed_tool_names = tools_for_scope(selected_policy.required_scopes)
+    except ValueError as exc:
+        raise ValueError("a dedicated supported DevBox policy is required") from exc
+    selected_specs = tuple(
+        spec for spec in TOOL_SPECS if spec.name in allowed_tool_names
+    )
+    if tuple(spec.name for spec in selected_specs) != allowed_tool_names:
+        raise ValueError("DevBox policy tool profile is inconsistent")
     if not callable(now) or not callable(getattr(devbox_port, "call", None)):
         raise ValueError("explicit clock and DevBox port are required")
     if (
@@ -252,7 +258,7 @@ def create_authenticated_devbox_server(
     output_schemas: dict[str, dict[str, Any]] = {}
     input_validators: dict[str, Draft202012Validator] = {}
     output_validators: dict[str, Draft202012Validator] = {}
-    for spec in TOOL_SPECS:
+    for spec in selected_specs:
         input_schema = _json_snapshot(dict(spec.input_schema), 16384)
         output_schema = _json_snapshot(_OUTPUT_SCHEMAS[spec.name], 65536)
         Draft202012Validator.check_schema(input_schema)
@@ -299,7 +305,7 @@ def create_authenticated_devbox_server(
                 outputSchema=output_schemas[spec.name],
                 annotations=_annotations(spec.annotations),
             )
-            for spec in TOOL_SPECS
+            for spec in selected_specs
         ]
 
     @server._mcp_server.call_tool(validate_input=False)
@@ -310,7 +316,9 @@ def create_authenticated_devbox_server(
         access = get_access_token()
         if access is None:
             return _error("AUTHENTICATION_REQUIRED")
-        if name not in TOOL_NAMES:
+        # Refuse at the profile boundary before validator lookup or port dispatch;
+        # unavailable tools must not depend on incidental KeyError behavior.
+        if name not in allowed_tool_names:
             return _error("TOOL_NOT_AVAILABLE")
         try:
             request = _json_snapshot(arguments if arguments is not None else {}, MAX_ARGUMENT_BYTES)

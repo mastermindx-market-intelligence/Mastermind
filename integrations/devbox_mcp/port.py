@@ -26,6 +26,7 @@ class DevBoxPortRefused(RuntimeError):
     _CODES = frozenset(
         {
             "DEVBOX_REFUSED",
+            "TOOL_NOT_AVAILABLE",
             "BINDING_CHANGED",
             "SOURCE_DIRTY",
             "OPERATION_CONFLICT",

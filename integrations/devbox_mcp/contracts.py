@@ -14,12 +14,28 @@ import re
 from typing import Any, Dict, Mapping, Tuple
 
 EFFECT_STATES = ("NOT_APPLIED", "APPLIED", "EFFECT_UNKNOWN")
+OBSERVE_SCOPE = "workbench.observe"
+EXECUTE_SCOPE = "workbench.execute"
 TOOL_NAMES = (
     "devbox_status",
     "start_devbox_command",
     "read_devbox_process",
     "cancel_devbox_process",
 )
+OBSERVE_TOOL_NAMES = (
+    "devbox_status",
+    "read_devbox_process",
+)
+
+
+def tools_for_scope(scopes: tuple[str, ...]) -> tuple[str, ...]:
+    """Return the closed deployment-owned tool profile for one exact scope."""
+    if type(scopes) is tuple and scopes == (OBSERVE_SCOPE,):
+        return OBSERVE_TOOL_NAMES
+    if type(scopes) is tuple and scopes == (EXECUTE_SCOPE,):
+        return TOOL_NAMES
+    raise ValueError("an exact supported DevBox scope is required")
+
 
 _OPERATION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,95}$")
 _PROCESS_RE = re.compile(r"^process:[0-9a-f]{64}$")
@@ -264,11 +280,15 @@ def schema_snapshot_sha256() -> str:
 __all__ = [
     "DevBoxContractError",
     "EFFECT_STATES",
+    "EXECUTE_SCOPE",
+    "OBSERVE_SCOPE",
+    "OBSERVE_TOOL_NAMES",
     "SCHEMA_SNAPSHOT_SHA256",
     "TOOL_NAMES",
     "TOOL_SPECS",
     "ToolSpec",
     "schema_snapshot",
     "schema_snapshot_sha256",
+    "tools_for_scope",
     "validate_tool_arguments",
 ]

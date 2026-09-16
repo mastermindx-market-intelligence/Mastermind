@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-12
 **Owner:** Sol
-**Chairman direction:** build the approved Codespaces-backed DevBox path end-to-end and treat Personal Pro custom-MCP read/write as a proven account capability.
+**Chairman direction:** build the approved Codespaces-backed DevBox path end-to-end while preserving current ChatGPT product truth: Personal Pro is an observation carrier, and modifying traversal requires a supported full-MCP Business or Enterprise/Edu workspace.
 **Protected pickup:** `mastermindx-market-intelligence/Mastermind@9e180aadd0b8930867d304ad62ea27a2f12375cc`
 **Skillpack:** `mastermind.sol_skillpack.v1` 1.0.1 / bootstrap major 1 from the same protected commit
 **Capability at pickup:** `NOT_BUILT` for Codespaces backend; existing attended Web-to-Mac file/write/shell baseline remains `PROVEN_LIVE / ONE_ATTENDED_CONNECTION / BOUNDED_SMOKE_ONLY` under the Personal-MCP Cockpit/Integration owner.
@@ -26,6 +26,10 @@ current attended Web-Sol authority
 ```
 
 The command may outlive a ChatGPT reasoning/tool request. Deterministic provider-local execution receipts survive the model turn. Executive Job/Attempt/Worker state, when present, stays owned by Executive OS.
+
+The same source and authority plane supports two deployment-owned profiles. `OBSERVE_ONLY` uses exact scope `workbench.observe` and exposes only `devbox_status` plus `read_devbox_process`; this is the live Personal Pro carrier. `EXECUTE` uses exact scope `workbench.execute` and exposes all four tools; this is the modifying carrier for a currently supported full-MCP ChatGPT plan. The model never selects, combines or widens the profile.
+
+ChatGPT's reviewed app snapshot is a provider projection, not a second Mastermind authority plane. Each eligible ChatGPT workspace must review the exact tool set it will invoke. OpenAI's current product contract freezes the approved tool snapshot; Business currently requires recreating and republishing the ChatGPT-side app record when that snapshot changes, while Enterprise/Edu provides action-refresh controls. Any provider-side registration must still point to the same reviewed MCP URL and reuse the existing Auth0 tenant, OAuth application/client and endpoint resource server. It does not authorize another backend, target registry, process store, credential, audit or lifecycle plane. Product source revalidated 2026-09-16: [Developer mode and MCP apps in ChatGPT](https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt).
 
 ## Existing owners reused
 
@@ -55,7 +59,7 @@ The first remote deployment runs the DevBox service *inside* the Codespace. That
 
 ## Tool surface
 
-V1 exposes four tools only:
+V1 defines four tools in source, selected through one exact singleton OAuth scope. `OBSERVE_ONLY` lists exactly `devbox_status` and `read_devbox_process`; `EXECUTE` lists all four. Empty, unknown or multiple scope tuples fail closed. The MCP edge and the bound DevBox port independently enforce the selected tuple.
 
 - `devbox_status` — read-only identity/capability/working-tree observation for the currently bound target.
 - `start_devbox_command` — attended modifying action. Input is `operation_key`, bounded `command_text`, and optional timeout/output ceilings. It never accepts cwd, environment, host, account, shell binary, repository, branch, or credentials.
@@ -106,9 +110,9 @@ A repository-root boundary does not claim strong filesystem confinement against 
 
 ## MCP/auth boundary
 
-The MCP app reuses `integrations.business_mcp_auth` for OAuth/JWT verification and audit. A dedicated policy/resource scope `workbench.execute` is required. The server owns no token store and never receives GitHub credentials. The deployment owner supplies the authenticated port and exact allowed host/origin policy. `lease.expected_client_ref` is derived only through the public canonical `client_ref_digest(issuer, client_id)` helper from the exact accepted OAuth client identity; it is never copied from an unverified token or invented independently. A token without a usable `client_id`/`azp` cannot satisfy the DevBox lease.
+The MCP app reuses `integrations.business_mcp_auth` for OAuth/JWT verification and audit. Policy and lease must contain exactly one supported scope: `workbench.observe` for `OBSERVE_ONLY`, or `workbench.execute` for `EXECUTE`. The exact singleton scope is a deployment-owned selector; a token, model request or tool argument cannot choose, combine or widen it. The server owns no token store and never receives GitHub credentials. The deployment owner supplies the authenticated port and exact allowed host/origin policy. `lease.expected_client_ref` is derived only through the public canonical `client_ref_digest(issuer, client_id)` helper from the exact accepted OAuth client identity; it is never copied from an unverified token or invented independently. A token without a usable `client_id`/`azp` cannot satisfy the DevBox lease.
 
-Personal Pro write capability is an observed account/platform fact for this Chairman seat and is no longer treated as absent. Account capability does not replace Mastermind authorization: every modifying call still needs the current authenticated subject, bound target generation and attended authority.
+OpenAI product documentation revalidated on 2026-09-16 limits Pro custom MCP connections to read/fetch permissions. Full MCP, including write/modify actions, is currently available to Business and Enterprise/Edu. Therefore Personal Pro may prove only the `OBSERVE_ONLY` slice. It cannot promote the four-tool parent capability. Every modifying call must traverse an eligible full-MCP ChatGPT workspace and still satisfy the current authenticated subject, exact `workbench.execute` policy/lease, bound target generation and attended authority.
 
 ## Codespace lifecycle
 
@@ -134,20 +138,32 @@ After the execution vertical is proven, a controller may automate `list/create/s
 
 ## First production proof
 
-One disposable Codespace must prove through the real code path:
+One retained disposable Codespace must prove two sequential slices through the same canonical source branch, resource server, target/process authority and public MCP URL. A profile change is an explicit policy/lease rebind of the same service plane, never a second server, CLI mode, target registry or auth plane.
 
-1. authenticated `devbox_status` names only opaque target/binding/source facts;
-2. an exit-0 command runs in the Codespace with separate stdout/stderr observation;
-3. an intentional exit-7 command records exit 7 rather than generic failure;
-4. a command changes a disposable file and later read/git evidence observes the exact postimage;
-5. a command can continue after the initiating tool call and be observed later by `process_ref`;
-6. duplicate same-operation start reconciles without process two;
-7. changed-payload reuse of that operation key refuses before effect;
-8. timeout/cancel terminates only the exact owned process generation;
-9. ambient GitHub credential variables are absent in child execution;
-10. Codespace stop leaves no claim of success or automatic backend failover.
+### `OBSERVE_ONLY` through Personal Pro
 
-The final product claim is `PROVEN_LIVE` only after the actual Personal Pro custom-MCP connection invokes the deployed DevBox app and the results above are read back. Source tests, a Codespace-local direct call, public port reachability, app connection, and successful OAuth are distinct gates.
+1. the reviewed app snapshot lists exactly `devbox_status` and `read_devbox_process`;
+2. authenticated `devbox_status` names only opaque target/binding/source facts;
+3. when an authorized pre-existing process reference is intentionally available, `read_devbox_process` returns its bounded observation truth;
+4. `start_devbox_command` and `cancel_devbox_process` are absent from discovery, and direct RPC attempts return `TOOL_NOT_AVAILABLE` before both MCP-port dispatch and runtime dispatch.
+
+This establishes only the Personal Pro observation slice. It does not establish modifying capability and does not promote the four-tool parent beyond `BUILT_NOT_PROVEN`.
+
+### `EXECUTE` through a supported full-MCP plan
+
+1. the reviewed app snapshot lists exactly all four DevBox tools;
+2. authenticated `devbox_status` names only opaque target/binding/source facts;
+3. an exit-0 command runs in the Codespace with separate stdout/stderr observation;
+4. an intentional exit-7 command records exit 7 rather than generic failure;
+5. a command changes a disposable file and later read/git evidence observes the exact postimage;
+6. a command can continue after the initiating tool call and be observed later by `process_ref`;
+7. duplicate same-operation start reconciles without process two;
+8. changed-payload reuse of that operation key refuses before effect;
+9. timeout/cancel terminates only the exact owned process generation;
+10. ambient GitHub credential variables are absent in child execution;
+11. Codespace stop leaves no claim of success or automatic backend failover.
+
+The four-tool parent becomes `PROVEN_LIVE` only after this exact `EXECUTE` traversal succeeds through a currently supported full-MCP ChatGPT plan and its results are read back. Source tests, a Codespace-local direct call, public port reachability, app review, OAuth success, Personal Pro observation and supported-plan modifying traversal are distinct gates.
 
 ## No-rebuild boundary
 

@@ -12,7 +12,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from .codespace_runtime import CodespaceBinding, DevBoxRuntimeError
-from .contracts import TOOL_NAMES
+from .contracts import TOOL_NAMES, tools_for_scope
 from .port import DevBoxCaller, DevBoxPortRefused
 
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
@@ -63,8 +63,10 @@ class StableDevBoxLease:
             or self.resource != self.resource.strip()
         ):
             raise ValueError("lease resource is invalid")
-        if self.required_scopes != ("workbench.execute",):
-            raise ValueError("lease requires exact workbench.execute scope")
+        try:
+            tools_for_scope(self.required_scopes)
+        except ValueError as exc:
+            raise ValueError("lease requires one exact supported DevBox scope") from exc
         for name, pattern in _REF_PATTERNS.items():
             value = getattr(self, name)
             if type(value) is not str or pattern.fullmatch(value) is None:
@@ -111,6 +113,7 @@ class BoundDevBoxPort:
                 raise TypeError("runtime does not implement the DevBox execution port")
         self._runtime = runtime
         self._lease = lease
+        self._allowed_tools = tools_for_scope(lease.required_scopes)
         self._now = now
 
     def _authorize(self, caller: object) -> None:
@@ -143,6 +146,8 @@ class BoundDevBoxPort:
         self._authorize(caller)
         if tool_name not in TOOL_NAMES:
             raise DevBoxPortRefused("DEVBOX_REFUSED")
+        if tool_name not in self._allowed_tools:
+            raise DevBoxPortRefused("TOOL_NOT_AVAILABLE")
         methods = {
             "devbox_status": self._runtime.status,
             "start_devbox_command": self._runtime.start_command,

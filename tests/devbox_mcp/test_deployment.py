@@ -6,6 +6,7 @@ import dataclasses
 import pytest
 
 from integrations.devbox_mcp.codespace_runtime import CodespaceBinding, DevBoxRuntimeError
+from integrations.devbox_mcp.contracts import OBSERVE_SCOPE, OBSERVE_TOOL_NAMES, TOOL_NAMES
 from integrations.devbox_mcp.deployment import BoundDevBoxPort, StableDevBoxLease
 from integrations.devbox_mcp.port import DevBoxCaller, DevBoxPortRefused
 
@@ -17,6 +18,7 @@ TARGET = "target:" + "1" * 64
 GENERATION = "generation:" + "2" * 64
 OWNER = "owner:" + "3" * 64
 HEAD = "4" * 40
+EXECUTE_SCOPE = "workbench.execute"
 
 
 def _binding() -> CodespaceBinding:
@@ -29,12 +31,12 @@ def _binding() -> CodespaceBinding:
     )
 
 
-def _lease(**changes) -> StableDevBoxLease:
+def _lease(scope: str = EXECUTE_SCOPE, **changes) -> StableDevBoxLease:
     value = StableDevBoxLease(
         expected_subject_digest=SUBJECT,
         expected_client_ref=CLIENT,
         resource=RESOURCE,
-        required_scopes=("workbench.execute",),
+        required_scopes=(scope,),
         target_ref=TARGET,
         generation=GENERATION,
         owner_ref=OWNER,
@@ -45,12 +47,12 @@ def _lease(**changes) -> StableDevBoxLease:
     return dataclasses.replace(value, **changes)
 
 
-def _caller(**changes) -> DevBoxCaller:
+def _caller(scope: str = EXECUTE_SCOPE, **changes) -> DevBoxCaller:
     value = DevBoxCaller(
         subject_digest=SUBJECT,
         client_ref=CLIENT,
         resource=RESOURCE,
-        scopes=("workbench.execute",),
+        scopes=(scope,),
         expires_at=NOW + 300,
     )
     return dataclasses.replace(value, **changes)
@@ -102,6 +104,30 @@ def test_exact_caller_dispatches_all_four_tools_without_target_from_model() -> N
         result = _run(port.call(_caller(), name, args))
         assert result == {"tool": name, "arguments": args}
     assert runtime.calls == cases
+
+
+def test_observe_lease_dispatches_status_and_read_but_refuses_modify_tools() -> None:
+    runtime = Runtime()
+    port = _port(runtime=runtime, lease=_lease(OBSERVE_SCOPE))
+    caller = _caller(OBSERVE_SCOPE)
+
+    for name, args in (
+        ("devbox_status", {}),
+        ("read_devbox_process", {"process_ref": "process:" + "c" * 64}),
+    ):
+        result = _run(port.call(caller, name, args))
+        assert result == {"tool": name, "arguments": args}
+
+    for name, args in (
+        ("start_devbox_command", {"operation_key": "op", "command_text": "true"}),
+        ("cancel_devbox_process", {"process_ref": "process:" + "c" * 64}),
+    ):
+        with pytest.raises(DevBoxPortRefused) as exc_info:
+            _run(port.call(caller, name, args))
+        assert exc_info.value.code == "TOOL_NOT_AVAILABLE"
+
+    assert [name for name, _args in runtime.calls] == list(OBSERVE_TOOL_NAMES)
+    assert port._allowed_tools == OBSERVE_TOOL_NAMES
 
 
 @pytest.mark.parametrize(
@@ -184,13 +210,17 @@ def test_runtime_failures_map_to_closed_port_codes(runtime_code: str, port_code:
     assert "PRIVATE_RUNTIME_DETAIL" not in str(exc_info.value)
 
 
-def test_lease_is_immutable_and_requires_exact_execute_scope() -> None:
+@pytest.mark.parametrize(
+    "required_scopes",
+    [(), ("workbench.read",), (OBSERVE_SCOPE, EXECUTE_SCOPE)],
+)
+def test_lease_requires_one_exact_supported_scope(required_scopes: tuple[str, ...]) -> None:
     with pytest.raises((TypeError, ValueError)):
         StableDevBoxLease(
             expected_subject_digest=SUBJECT,
             expected_client_ref=CLIENT,
             resource=RESOURCE,
-            required_scopes=("workbench.read",),
+            required_scopes=required_scopes,
             target_ref=TARGET,
             generation=GENERATION,
             owner_ref=OWNER,
@@ -198,3 +228,8 @@ def test_lease_is_immutable_and_requires_exact_execute_scope() -> None:
             committed_head=HEAD,
             lease_expires_at=NOW + 600,
         )
+
+
+def test_execute_lease_keeps_existing_four_tool_profile() -> None:
+    port = _port()
+    assert port._allowed_tools == TOOL_NAMES

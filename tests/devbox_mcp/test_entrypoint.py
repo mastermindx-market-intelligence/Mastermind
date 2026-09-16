@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from integrations.business_mcp_auth.contracts import subject_digest
+from integrations.devbox_mcp.contracts import OBSERVE_SCOPE, OBSERVE_TOOL_NAMES
 from ops.devbox.run_codespace_devbox import (
     DevBoxServiceConfigurationError,
     build_codespace_service,
@@ -25,6 +26,7 @@ CODESPACE = "silver-space-abc123"
 DOMAIN = "app.github.dev"
 RESOURCE = f"https://{CODESPACE}-{PORT}.{DOMAIN}/mcp"
 SUBJECT = subject_digest(issuer=ISSUER, subject="pro-chairman-seat")
+EXECUTE_SCOPE = "workbench.execute"
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -56,19 +58,25 @@ def _env() -> dict[str, str]:
     }
 
 
-def _policy(path: Path, *, subject: str = SUBJECT, resource: str = RESOURCE) -> None:
+def _policy(
+    path: Path,
+    *,
+    subject: str = SUBJECT,
+    resource: str = RESOURCE,
+    scope: str = EXECUTE_SCOPE,
+) -> None:
     path.write_text(
         json.dumps(
             {
                 "schema": "mastermind.business_mcp_auth_policy.v1",
-                "policy_id": "mastermind.devbox.execute.v1",
+                "policy_id": "mastermind.devbox." + scope.rsplit(".", 1)[-1] + ".v1",
                 "resource": resource,
                 "resource_metadata_url": resource.rsplit("/mcp", 1)[0]
                 + "/.well-known/oauth-protected-resource/mcp",
                 "issuer": ISSUER,
                 "authorization_servers": [ISSUER],
                 "jwks_uri": ISSUER + "/jwks",
-                "required_scopes": ["workbench.execute"],
+                "required_scopes": [scope],
                 "allowed_subject_digests": [subject],
                 "allowed_algorithms": ["RS256"],
                 "clock_skew_seconds": 0,
@@ -83,13 +91,15 @@ def _policy(path: Path, *, subject: str = SUBJECT, resource: str = RESOURCE) -> 
     path.chmod(0o600)
 
 
-def _lease(path: Path, repo: Path, **changes) -> None:
+def _lease(
+    path: Path, repo: Path, *, scope: str = EXECUTE_SCOPE, **changes
+) -> None:
     value = {
         "schema": "mastermind.devbox_lease.v1",
         "expected_subject_digest": SUBJECT,
         "expected_client_ref": CLIENT,
         "resource": RESOURCE,
-        "required_scopes": ["workbench.execute"],
+        "required_scopes": [scope],
         "target_ref": "target:" + "1" * 64,
         "generation": "generation:" + "2" * 64,
         "owner_ref": "owner:" + "3" * 64,
@@ -107,7 +117,7 @@ def test_load_lease_is_closed_and_exact(repo: Path, tmp_path: Path) -> None:
     _lease(path, repo)
     lease = load_devbox_lease(path)
     assert lease.repository == REPOSITORY
-    assert lease.required_scopes == ("workbench.execute",)
+    assert lease.required_scopes == (EXECUTE_SCOPE,)
     assert lease.committed_head == _git(repo, "rev-parse", "HEAD")
 
     value = json.loads(path.read_text())
@@ -144,6 +154,66 @@ def test_build_composes_exact_current_codespace_service(repo: Path, tmp_path: Pa
         assert stat.S_IMODE((state / "auth-audit").stat().st_mode) == 0o700
     finally:
         service.close()
+
+
+def test_build_composes_observe_policy_and_lease_without_second_service_profile(
+    repo: Path, tmp_path: Path
+) -> None:
+    policy = tmp_path / "observe-policy.json"
+    lease = tmp_path / "observe-lease.json"
+    state = tmp_path / "observe-state"
+    _policy(policy, scope=OBSERVE_SCOPE)
+    _lease(lease, repo, scope=OBSERVE_SCOPE)
+
+    service = build_codespace_service(
+        repo_root=repo,
+        state_root=state,
+        policy_file=policy,
+        lease_file=lease,
+        port=PORT,
+        env=_env(),
+        platform_name="linux",
+        shell_path=Path("/bin/bash"),
+    )
+    try:
+        assert service.preflight.forwarded_mcp_url == RESOURCE
+        assert service.policy.required_scopes == (OBSERVE_SCOPE,)
+        assert service.lease.required_scopes == (OBSERVE_SCOPE,)
+        assert service.port._allowed_tools == OBSERVE_TOOL_NAMES
+        assert service.server.name == "Mastermind DevBox"
+    finally:
+        service.close()
+
+
+@pytest.mark.parametrize(
+    ("policy_scope", "lease_scope"),
+    (
+        (OBSERVE_SCOPE, EXECUTE_SCOPE),
+        (EXECUTE_SCOPE, OBSERVE_SCOPE),
+    ),
+)
+def test_policy_and_lease_scope_profiles_must_match(
+    repo: Path,
+    tmp_path: Path,
+    policy_scope: str,
+    lease_scope: str,
+) -> None:
+    policy = tmp_path / "policy.json"
+    lease = tmp_path / "lease.json"
+    _policy(policy, scope=policy_scope)
+    _lease(lease, repo, scope=lease_scope)
+
+    with pytest.raises(DevBoxServiceConfigurationError):
+        build_codespace_service(
+            repo_root=repo,
+            state_root=tmp_path / "state",
+            policy_file=policy,
+            lease_file=lease,
+            port=PORT,
+            env=_env(),
+            platform_name="linux",
+            shell_path=Path("/bin/bash"),
+        )
 
 
 def test_head_resource_or_subject_mismatch_refuses_before_service(repo: Path, tmp_path: Path) -> None:

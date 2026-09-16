@@ -26,6 +26,30 @@ def test_tool_surface_is_exactly_four_bounded_attended_tools() -> None:
     assert contracts.EFFECT_STATES == ("NOT_APPLIED", "APPLIED", "EFFECT_UNKNOWN")
 
 
+def test_exact_scope_selects_closed_tool_profile() -> None:
+    assert contracts.OBSERVE_SCOPE == "workbench.observe"
+    assert contracts.EXECUTE_SCOPE == "workbench.execute"
+    assert contracts.tools_for_scope((contracts.OBSERVE_SCOPE,)) == (
+        "devbox_status",
+        "read_devbox_process",
+    )
+    assert contracts.tools_for_scope((contracts.EXECUTE_SCOPE,)) == contracts.TOOL_NAMES
+
+
+@pytest.mark.parametrize(
+    "scopes",
+    [
+        (),
+        ("workbench.read",),
+        ("workbench.observe", "workbench.execute"),
+        ("workbench.execute", "workbench.observe"),
+    ],
+)
+def test_unknown_or_multiple_scope_profile_is_refused(scopes: tuple[str, ...]) -> None:
+    with pytest.raises(ValueError, match="scope"):
+        contracts.tools_for_scope(scopes)
+
+
 def test_model_cannot_supply_target_root_host_environment_or_credentials() -> None:
     forbidden = {
         "target",
