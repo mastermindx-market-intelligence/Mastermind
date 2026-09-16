@@ -83,7 +83,7 @@ def _consultations(
     return ConsultationRuntime(
         runtime,
         repository_root=repository_root,
-        clock=clock or _ManualClock("2026-09-14T00:00:00Z"),
+        _clock=clock or _ManualClock("2026-09-14T00:00:00Z"),
     )
 
 
@@ -794,11 +794,15 @@ def test_r1_wake_projection_and_exact_answer_transaction(tmp_path: Path) -> None
     foreign = build_consultation(foreign)
     with pytest.raises(StateConflict):
         consultations.consumed_by_requester(
-            foreign, observed_at="2026-09-14T00:05:00Z"
+            foreign,
+            requester_attempt_id=frame["requester_actor_ref"]["attempt_id"],
+            observed_at="2026-09-14T00:05:00Z",
         )
 
     consumed = consultations.consumed_by_requester(
-        answer, observed_at="2026-09-14T00:06:00Z"
+        answer,
+        requester_attempt_id=frame["requester_actor_ref"]["attempt_id"],
+        observed_at="2026-09-14T00:06:00Z",
     )
     assert consumed.event.payload["answer_fingerprint"] == answer["fingerprint"]
 
@@ -847,6 +851,18 @@ def _release_recipient_writer(runtime: Runtime) -> None:
             "WHERE process_generation_id=?",
             (row["process_generation_id"],),
         )
+
+
+def _distinct_question_frame(frame: dict, suffix: str) -> dict:
+    digest = hashlib.sha256(suffix.encode("utf-8")).hexdigest()[:32]
+    changed = copy.deepcopy(frame)
+    changed["message_key"] = f"asd-consultation-{digest}"
+    changed["consultation_id"] = f"consult-{digest}"
+    changed["recipient_peer_ref"] = f"peer-{digest}"
+    changed["correlation"]["request_message_key"] = changed["message_key"]
+    changed["correlation"]["consultation_id"] = changed["consultation_id"]
+    changed["fingerprint"] = ""
+    return build_consultation(changed)
 
 
 def _answer_frame(frame: dict, suffix: str, semantic: dict) -> dict:
@@ -1180,7 +1196,9 @@ def test_canonical_wake_state_projection_and_ack_gate(tmp_path: Path) -> None:
         answer, observed_at="2026-09-14T00:04:00Z"
     )
     consumed = consultations.consumed_by_requester(
-        answer, observed_at="2026-09-14T00:05:00Z"
+        answer,
+        requester_attempt_id=frame["requester_actor_ref"]["attempt_id"],
+        observed_at="2026-09-14T00:05:00Z",
     )
     assert available.event.payload["historical"] is False
     assert consumed.event.payload["answer_fingerprint"] == answer["fingerprint"]
@@ -1341,14 +1359,20 @@ def test_answer_identity_replay_conflict_and_exact_consumption(tmp_path: Path) -
     assert refused.event.event_type == "ANSWER_REFUSED"
     with pytest.raises(StateConflict, match="exact reserved answer"):
         consultations.consumed_by_requester(
-            answer_b, observed_at="2026-09-14T00:07:00Z"
+            answer_b,
+            requester_attempt_id=frame["requester_actor_ref"]["attempt_id"],
+            observed_at="2026-09-14T00:07:00Z",
         )
 
     consumed = consultations.consumed_by_requester(
-        answer_a, observed_at="2026-09-14T00:07:00Z"
+        answer_a,
+        requester_attempt_id=frame["requester_actor_ref"]["attempt_id"],
+        observed_at="2026-09-14T00:07:00Z",
     )
     replay_consumed = consultations.consumed_by_requester(
-        answer_a, observed_at="2026-09-14T00:08:00Z"
+        answer_a,
+        requester_attempt_id=frame["requester_actor_ref"]["attempt_id"],
+        observed_at="2026-09-14T00:08:00Z",
     )
     assert replay_consumed.inserted is False
     assert replay_consumed.event.created_at == consumed.event.created_at
@@ -1403,7 +1427,9 @@ def test_deadline_and_correction_history_never_receive_current_credit(tmp_path: 
     assert result.event.payload["historical"] is True
     with pytest.raises(StateConflict, match="expired|historical"):
         consultations.consumed_by_requester(
-            late, observed_at="2026-09-16T00:01:00Z"
+            late,
+            requester_attempt_id=frame["requester_actor_ref"]["attempt_id"],
+            observed_at="2026-09-16T00:01:00Z",
         )
 
     runtime, consultations, _workers_value, frame, semantic_bundle = (
@@ -1430,7 +1456,9 @@ def test_deadline_and_correction_history_never_receive_current_credit(tmp_path: 
     assert corrected.event.payload["historical"] is True
     with pytest.raises(ConsultationConflict, match="historical"):
         consultations.consumed_by_requester(
-            correction, observed_at="2026-09-14T00:06:00Z"
+            correction,
+            requester_attempt_id=frame["requester_actor_ref"]["attempt_id"],
+            observed_at="2026-09-14T00:06:00Z",
         )
 
     second = copy.deepcopy(correction)
@@ -1476,7 +1504,7 @@ def test_trusted_clock_prevents_caller_backdating_current_credit(tmp_path: Path)
     clock = _ManualClock("2026-09-14T00:00:00Z")
     runtime = _runtime_at(tmp_path / "availability")
     consultations = ConsultationRuntime(
-        runtime, repository_root=tmp_path / "availability", clock=clock
+        runtime, repository_root=tmp_path / "availability", _clock=clock
     )
     workers = _workers(runtime)
     frame, semantic_bundle = _frame(
@@ -1500,13 +1528,15 @@ def test_trusted_clock_prevents_caller_backdating_current_credit(tmp_path: Path)
     assert available.event.payload["observed_at"] == clock.value
     with pytest.raises(StateConflict, match="expired"):
         consultations.consumed_by_requester(
-            answer, observed_at="2026-09-14T00:05:00Z"
+            answer,
+            requester_attempt_id=frame["requester_actor_ref"]["attempt_id"],
+            observed_at="2026-09-14T00:05:00Z",
         )
 
     consume_clock = _ManualClock("2026-09-14T00:00:00Z")
     consume_runtime = _runtime_at(tmp_path / "consumption")
     consume_consultations = ConsultationRuntime(
-        consume_runtime, repository_root=tmp_path / "consumption", clock=consume_clock
+        consume_runtime, repository_root=tmp_path / "consumption", _clock=consume_clock
     )
     consume_workers = _workers(consume_runtime)
     consume_frame, consume_semantic = _frame(
@@ -1531,5 +1561,137 @@ def test_trusted_clock_prevents_caller_backdating_current_credit(tmp_path: Path)
     consume_clock.value = "2026-09-16T00:00:00Z"
     with pytest.raises(StateConflict, match="expired"):
         consume_consultations.consumed_by_requester(
-            current_answer, observed_at="2026-09-14T00:05:00Z"
+            current_answer,
+            requester_attempt_id=consume_frame["requester_actor_ref"]["attempt_id"],
+            observed_at="2026-09-14T00:05:00Z",
         )
+
+def test_trusted_clock_regression_cannot_reopen_expired_credit(tmp_path: Path) -> None:
+    clock = _ManualClock("2026-09-14T00:00:00Z")
+    runtime, consultations, _workers_value, frame, semantic_bundle = (
+        _setup_canonical_intent(tmp_path, clock=clock)
+    )
+    _credited_path(runtime, consultations, frame)
+
+    clock.value = "2026-09-16T00:00:00Z"
+    historical = consultations.answer_available(
+        _answer_frame(frame, "historical-before-regression", semantic_bundle[0]),
+        observed_at="2026-09-14T00:04:00Z",
+    )
+    assert historical.event.payload["historical"] is True
+
+    clock.value = "2026-09-14T00:10:00Z"
+    with pytest.raises(StateConflict, match="clock regressed"):
+        consultations.answer_available(
+            _answer_frame(frame, "must-not-reopen", semantic_bundle[0]),
+            observed_at="2026-09-14T00:05:00Z",
+        )
+
+
+def test_malformed_trusted_clock_fails_before_durable_receipt(tmp_path: Path) -> None:
+    for index, malformed in enumerate(("::Z", "9999-99-99T99:99:99Z")):
+        root = tmp_path / f"malformed-{index}"
+        clock = _ManualClock(malformed)
+        runtime = _runtime_at(root)
+        consultations = _consultations(runtime, root, clock=clock)
+        workers = _workers(runtime)
+        frame, semantic_bundle = _frame(
+            root, requester=workers[0], recipient=workers[1]
+        )
+        with pytest.raises(StateConflict, match="UTC timestamp"):
+            consultations.intent(
+                frame,
+                requester_attempt_id=workers[0][1],
+                carrier_ref="dialogue://fixture/consultation",
+                observed_at="2026-09-14T00:00:00Z",
+                repository_root=semantic_bundle[1],
+            )
+        assert runtime.events.list_events(
+            aggregate_type="consultation", aggregate_id=frame["consultation_id"]
+        ) == []
+
+
+def test_restart_projection_survive_released_writer_and_isolate_bad_rows(
+    tmp_path: Path,
+) -> None:
+    runtime, consultations, workers, frame, semantic_bundle = (
+        _setup_canonical_intent(tmp_path)
+    )
+    second = _distinct_question_frame(frame, "second-projection-row")
+    consultations.intent(
+        second,
+        requester_attempt_id=workers[0][1],
+        carrier_ref="dialogue://fixture/consultation-second",
+        observed_at="2026-09-14T00:00:00Z",
+        repository_root=semantic_bundle[1],
+    )
+    _credited_path(runtime, consultations, frame)
+    _release_recipient_writer(runtime)
+
+    assert consultations.resolve_restart(frame) == "TARGET_ACKNOWLEDGED"
+    rows = {row["consultation_id"]: row for row in consultation_projection(runtime)}
+    assert rows[frame["consultation_id"]]["wake_state"] == "TARGET_ACKNOWLEDGED"
+    assert rows[frame["consultation_id"]]["blocker"] is None
+    assert rows[second["consultation_id"]]["wake_state"] == "NOT_SEEN"
+    with pytest.raises(StateConflict, match="current|actionable|binding|writer"):
+        consultations.answer_available(
+            _answer_frame(frame, "released-writer", semantic_bundle[0]),
+            observed_at="2026-09-14T00:04:00Z",
+        )
+
+    isolated_root = tmp_path / "isolated-bad-row"
+    isolated_runtime, isolated_consultations, isolated_workers, good, isolated_semantic = (
+        _setup_canonical_intent(isolated_root)
+    )
+    bad = _distinct_question_frame(good, "bad-projection-row")
+    isolated_consultations.intent(
+        bad,
+        requester_attempt_id=isolated_workers[0][1],
+        carrier_ref="dialogue://fixture/consultation-bad",
+        observed_at="2026-09-14T00:00:00Z",
+        repository_root=isolated_semantic[1],
+    )
+    from control_plane.wake_ledger import requested_record
+
+    extension, attempt = _wake_route(isolated_runtime, bad)
+    forged = replace(attempt, binding_generation=attempt.binding_generation + 1)
+    obligation = extension.obligation()
+    WakeLedgerRepository(isolated_runtime).append_records_atomic(
+        [
+            (requested_record(obligation), obligation),
+            (attempt_record(forged, LedgerPhase.DELIVERY_ATTEMPT), None),
+        ]
+    )
+    isolated_rows = {
+        row["consultation_id"]: row
+        for row in consultation_projection(isolated_runtime)
+    }
+    assert isolated_rows[good["consultation_id"]]["wake_state"] == "NOT_SEEN"
+    assert isolated_rows[bad["consultation_id"]]["wake_state"] == (
+        "RECONCILIATION_REQUIRED"
+    )
+    assert isolated_rows[bad["consultation_id"]]["blocker"] == (
+        "WAKE_STATE_UNAVAILABLE"
+    )
+
+
+def test_requester_consumption_requires_exact_calling_attempt(tmp_path: Path) -> None:
+    runtime, consultations, workers, frame, semantic_bundle = (
+        _setup_canonical_intent(tmp_path)
+    )
+    _credited_path(runtime, consultations, frame)
+    answer = _answer_frame(frame, "authenticated-consumption", semantic_bundle[0])
+    consultations.answer_available(answer, observed_at="2026-09-14T00:04:00Z")
+
+    with pytest.raises(StateConflict, match="requester actor"):
+        consultations.consumed_by_requester(
+            answer,
+            requester_attempt_id=workers[1][1],
+            observed_at="2026-09-14T00:05:00Z",
+        )
+    consumed = consultations.consumed_by_requester(
+        answer,
+        requester_attempt_id=workers[0][1],
+        observed_at="2026-09-14T00:05:00Z",
+    )
+    assert consumed.event.payload["requester_actor_ref"]["attempt_id"] == workers[0][1]

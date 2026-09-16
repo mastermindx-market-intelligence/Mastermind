@@ -6,7 +6,7 @@ import hashlib
 import json
 import sqlite3
 import subprocess
-from datetime import datetime, timezone
+from datetime import datetime
 
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -15,10 +15,10 @@ from typing import Any, Callable, Mapping
 from common.agent_dialogue_consultation_contract import (
     CONSULTATION_SCHEMA,
     CONSULTATION_V2_SCHEMA,
-    RECEIPT_KEYS,
     canonical_consultation_json,
     validate_consultation,
 )
+from common.agent_dialogue_contract_v2 import _UTC_RE
 from control_plane.executive_runtime import (
     Event,
     Runtime,
@@ -77,15 +77,21 @@ class _ConsultationRuntimeContext:
 
 
 def _utc(value: str) -> str:
-    if not isinstance(value, str) or not value.endswith("Z") or ":" not in value:
+    if not isinstance(value, str) or _UTC_RE.fullmatch(value) is None:
         raise StateConflict("observed_at must be a UTC timestamp")
+    try:
+        datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        raise StateConflict("observed_at must be a UTC timestamp") from None
     return value
 
 
+def _utc_instant(value: str) -> datetime:
+    return datetime.fromisoformat(_utc(value).replace("Z", "+00:00"))
+
+
 def _expired(valid_until: str, observed_at: str) -> bool:
-    deadline = datetime.fromisoformat(_utc(valid_until).replace("Z", "+00:00"))
-    observed = datetime.fromisoformat(_utc(observed_at).replace("Z", "+00:00"))
-    return observed > deadline
+    return _utc_instant(observed_at) > _utc_instant(valid_until)
 
 
 def _artifact_digest(value: Mapping[str, Any]) -> str:
@@ -132,14 +138,14 @@ class ConsultationRuntime:
         runtime: Runtime,
         *,
         repository_root: Path,
-        clock: Callable[[], str] | None = None,
+        _clock: Callable[[], str] | None = None,
     ) -> None:
         if not isinstance(runtime, Runtime):
             raise TypeError("runtime must be the existing Executive Runtime")
-        if clock is not None and not callable(clock):
-            raise TypeError("clock must be callable")
+        if _clock is not None and not callable(_clock):
+            raise TypeError("_clock must be callable")
         self.runtime = runtime
-        self._clock = clock or utc_now_iso
+        self._clock = _clock or utc_now_iso
         self._context = _ConsultationRuntimeContext(
             Path(repository_root).resolve()
         )
@@ -149,6 +155,38 @@ class ConsultationRuntime:
 
         _utc(claimed_observed_at)
         return _utc(self._clock())
+
+    def _latest_observed_at_on_connection(
+        self,
+        item: Mapping[str, Any],
+        connection: sqlite3.Connection,
+    ) -> str | None:
+        latest_token: str | None = None
+        latest_instant: datetime | None = None
+        for event in self._events_on_connection(item, connection):
+            candidate = event.payload.get("observed_at")
+            if candidate is None:
+                continue
+            candidate_token = _utc(str(candidate))
+            candidate_instant = _utc_instant(candidate_token)
+            if latest_instant is None or candidate_instant > latest_instant:
+                latest_token = candidate_token
+                latest_instant = candidate_instant
+        return latest_token
+
+    def _fenced_trusted_observed_at(
+        self,
+        claimed_observed_at: str,
+        item: Mapping[str, Any],
+        connection: sqlite3.Connection,
+    ) -> str:
+        trusted = self._trusted_observed_at(claimed_observed_at)
+        latest = self._latest_observed_at_on_connection(item, connection)
+        if latest is not None and _utc_instant(trusted) < _utc_instant(latest):
+            raise StateConflict(
+                "trusted clock regressed below durable consultation time"
+            )
+        return trusted
 
     def intent(
         self,
@@ -215,7 +253,9 @@ class ConsultationRuntime:
             raise StateConflict("ANSWER_AVAILABLE requires an ANSWER frame")
         _require_normalized(item)
         with self.runtime.store.transaction() as connection:
-            trusted_observed_at = self._trusted_observed_at(observed_at)
+            trusted_observed_at = self._fenced_trusted_observed_at(
+                observed_at, item, connection
+            )
             request = self._request_for_answer_on_connection(item, connection)
             if item["requester_actor_ref"] != request["requester_actor_ref"]:
                 raise StateConflict("answer requester actor drifted")
@@ -377,6 +417,7 @@ class ConsultationRuntime:
         self,
         frame: Mapping[str, Any],
         *,
+        requester_attempt_id: str,
         observed_at: str,
     ) -> ConsultationEventResult:
         item = validate_consultation(frame)
@@ -385,7 +426,9 @@ class ConsultationRuntime:
             self._context, consultation_id=item["consultation_id"]
         )
         with self.runtime.store.transaction() as connection:
-            trusted_observed_at = self._trusted_observed_at(observed_at)
+            trusted_observed_at = self._fenced_trusted_observed_at(
+                observed_at, item, connection
+            )
             request = self._request_for_answer_on_connection(item, connection)
             if item["requester_actor_ref"] != request["requester_actor_ref"]:
                 raise StateConflict("answer requester actor drifted")
@@ -431,7 +474,7 @@ class ConsultationRuntime:
                 )
             self._require_requester_on_connection(
                 request,
-                request["requester_actor_ref"]["attempt_id"],
+                requester_attempt_id,
                 connection,
             )
             return self._append_on_connection(
@@ -672,9 +715,12 @@ class ConsultationRuntime:
         item: Mapping[str, Any],
         connection: sqlite3.Connection,
     ) -> tuple[str, ObligationStatus]:
-        current_binding = self._require_current_recipient(
-            item, connection=connection
-        )
+        expected_binding = item["recipient_binding"]
+        expected_target = self._recipient_target()
+        if expected_binding["reasoning_surface"] != expected_target.reasoning_surface:
+            raise StateConflict(
+                "consultation INTENT binding does not match its recipient target"
+            )
         repository = WakeLedgerRepository(self.runtime)
         identity = self._consultation_source_identity_on_connection(item, connection)
         obligation = mint_obligation(
@@ -722,10 +768,12 @@ class ConsultationRuntime:
         )
         for record in attempts:
             if (
-                record.binding_id != current_binding.binding_id
-                or record.binding_generation != current_binding.binding_generation
-                or record.session_alias != current_binding.session_alias
-                or record.reasoning_surface != current_binding.reasoning_surface
+                record.binding_id != expected_binding["binding_id"]
+                or record.binding_generation
+                != expected_binding["binding_generation"]
+                or record.session_alias != expected_target.session_alias
+                or record.reasoning_surface
+                != expected_binding["reasoning_surface"]
             ):
                 raise StateConflict(
                     "Wake attempt is not bound to the current RuntimeBinding"
@@ -800,8 +848,8 @@ class ConsultationRuntime:
             session_alias="CONSULTATION-RECIPIENT",
             target_seat="coo",
             reasoning_surface="codex",
-            wake_transport="managed-codex-attention",
-            allowed_transports=("managed-codex-attention",),
+            wake_transport="codex-app-server",
+            allowed_transports=("codex-app-server",),
             workstream=None,
             target_enabled=True,
         )
@@ -886,9 +934,19 @@ def consultation_projection(runtime: Runtime) -> list[dict[str, Any]]:
         if event.event_type != "INTENT":
             continue
         payload = event.payload
-        state = consultations._canonical_wake_state(
-            consultations._intent_from_event(event)
-        ).value
+        try:
+            state = consultations._canonical_wake_state(
+                consultations._intent_from_event(event)
+            ).value
+        except StateConflict:
+            state = ObligationStatus.RECONCILIATION_REQUIRED.value
+            blocker = "WAKE_STATE_UNAVAILABLE"
+        else:
+            blocker = (
+                None
+                if state in {"TARGET_ACKNOWLEDGED", "SOURCE_RESOLVED"}
+                else state
+            )
         result.append(
             {
                 "consultation_id": event.aggregate_id,
@@ -903,9 +961,7 @@ def consultation_projection(runtime: Runtime) -> list[dict[str, Any]]:
                 "current_wake_state": state,
                 "wake_state": state,
                 "deadline": payload["valid_until"],
-                "blocker": None
-                if state in {"TARGET_ACKNOWLEDGED", "SOURCE_RESOLVED"}
-                else state,
+                "blocker": blocker,
             }
         )
     return result
