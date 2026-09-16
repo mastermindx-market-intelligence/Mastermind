@@ -74,15 +74,15 @@ The registered Business app advertised exactly these five tools and no sixth too
 
 ## Four-reader production proof
 
-Reader proof was gathered in explicit pre-canary and post-canary phases. A read of the
-new `JOB-003` is post-effect reconciliation and is not represented as evidence that the
-Job existed before admission.
+Reader proof spans pre-canary and post-canary evidence. The table names the phase
+actually used for each tool. A read of the new `JOB-003` is post-effect reconciliation
+and is not represented as evidence that the Job existed before admission.
 
 | Tool | Phase | Production result |
 |---|---|---|
 | `executive_state` | Pre-canary baseline and post-canary reconciliation | Before submit: 2 Jobs, both `QUEUED`, 0 Attempts, 0 Workers. After canaries: 3 Jobs, all `QUEUED`, 0 Attempts, 0 Workers. |
 | `executive_inbox` | Authenticated read-only reconciliation | `attention_count=0`; 3 typed degraded facts; runtime counts were 3 `QUEUED` Jobs, 0 Attempts, and 0 Workers; runtime grounding was `readonly:installed-executive-runtime`. |
-| `executive_job` | Existing-job proof, then post-effect readback | The reader was exercised on pre-existing `JOB-001` and `JOB-002`. A fresh compact read of `JOB-001` returned `QUEUED`, no current Attempt, no assigned Worker, and `attempt_count=0`. `JOB-003` was read only after its accepted submit and is recorded under post-effect reconciliation. |
+| `executive_job` | Existing-job proof, then post-effect readback | A fresh compact read of pre-existing `JOB-001` returned `QUEUED`, no current Attempt, no assigned Worker, and `attempt_count=0`. `JOB-003` was read only after its accepted submit and is recorded under post-effect reconciliation. |
 | `ceo_intent_status` | Existing-intent proof, then post-effect readback | Existing intent `auto-7e10a5d196b414c8194276797a202a47` resolved to accepted `JOB-001`, `QUEUED`, `dispatched=false`. The canary intent was resolved separately after admission. |
 
 Selected exact fields from the compact `executive_inbox` read were:
@@ -144,6 +144,10 @@ Selected exact fields from the compact `executive_inbox` read were:
   "tool": "executive_inbox"
 }
 ```
+
+The compact inbox projection returned `grounding_source=null`; the artifact preserves that
+null rather than inventing provenance. The runtime identity and tool name remained explicit,
+and the same installed-runtime counts were independently corroborated by `executive_state`.
 
 The existing-intent read returned:
 
