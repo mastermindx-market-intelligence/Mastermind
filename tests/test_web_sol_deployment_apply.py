@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 import sys
@@ -280,3 +281,188 @@ def test_directory_created_after_prepare_is_preimage_conflict(
         applier.apply_deployment(prepared)
 
     assert not any(artifact.destination.exists() for artifact in bundle.artifacts)
+
+
+def test_partial_temporary_write_is_cleaned_and_aborted_safely(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle, install_root = _bundle(tmp_path)
+    prepared = applier.prepare_deployment(
+        bundle,
+        deployment.plan_deployment(bundle, {}),
+        install_root=install_root,
+        expected_uid=install_root.stat().st_uid,
+        expected_gid=install_root.stat().st_gid,
+        operation_key="web-sol-install1-transactional-applier-source-20260916-sol-001",
+    )
+    original_write = applier.os.write
+    calls = 0
+
+    def partial_then_fail(descriptor: int, payload: object) -> int:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return original_write(descriptor, payload[: max(1, len(payload) // 2)])
+        raise OSError("injected-partial-write")
+
+    monkeypatch.setattr(applier.os, "write", partial_then_fail)
+
+    with pytest.raises(
+        applier.WebSolDeploymentApplyError,
+        match="APPLY_ABORTED_ROLLED_BACK",
+    ):
+        applier.apply_deployment(prepared)
+
+    assert calls == 2
+    assert list(install_root.rglob("*")) == []
+    with pytest.raises(
+        applier.WebSolDeploymentApplyError,
+        match="TRANSACTION_CONSUMED",
+    ):
+        applier.apply_deployment(prepared)
+
+
+def test_prepared_plan_mutation_is_refused_before_filesystem_effect(
+    tmp_path: Path,
+) -> None:
+    bundle, install_root = _bundle(tmp_path)
+    prepared = applier.prepare_deployment(
+        bundle,
+        deployment.plan_deployment(bundle, {}),
+        install_root=install_root,
+        expected_uid=install_root.stat().st_uid,
+        expected_gid=install_root.stat().st_gid,
+        operation_key="web-sol-install1-transactional-applier-source-20260916-sol-001",
+    )
+    prepared.plan = dataclasses.replace(
+        prepared.plan,
+        bundle_digest="b" * 64,
+    )
+
+    with pytest.raises(
+        applier.WebSolDeploymentApplyError,
+        match="PREPARED_INTEGRITY_MISMATCH",
+    ):
+        applier.apply_deployment(prepared)
+
+    assert list(install_root.rglob("*")) == []
+
+
+def test_target_symlink_is_refused_during_prepare(tmp_path: Path) -> None:
+    bundle, install_root = _bundle(tmp_path)
+    target = sorted(bundle.artifacts, key=lambda row: str(row.destination))[0]
+    target.destination.parent.mkdir(parents=True, mode=0o700)
+    outside = tmp_path / "outside"
+    outside.write_bytes(b"outside")
+    target.destination.symlink_to(outside)
+
+    with pytest.raises(
+        applier.WebSolDeploymentApplyError,
+        match="TARGET_SYMLINK_REFUSED",
+    ):
+        applier.prepare_deployment(
+            bundle,
+            deployment.plan_deployment(bundle, {}),
+            install_root=install_root,
+            expected_uid=install_root.stat().st_uid,
+            expected_gid=install_root.stat().st_gid,
+            operation_key="web-sol-install1-transactional-applier-source-20260916-sol-001",
+        )
+
+    assert outside.read_bytes() == b"outside"
+
+
+def test_file_changed_after_prepare_is_refused_before_replace(
+    tmp_path: Path,
+) -> None:
+    bundle, install_root = _bundle(tmp_path)
+    target = sorted(bundle.artifacts, key=lambda row: str(row.destination))[0]
+    target.destination.parent.mkdir(parents=True, mode=0o700)
+    target.destination.write_bytes(b"approved-preimage")
+    target.destination.chmod(0o600)
+    current = {str(target.destination): b"approved-preimage"}
+    prepared = applier.prepare_deployment(
+        bundle,
+        deployment.plan_deployment(bundle, current),
+        install_root=install_root,
+        expected_uid=install_root.stat().st_uid,
+        expected_gid=install_root.stat().st_gid,
+        operation_key="web-sol-install1-transactional-applier-source-20260916-sol-001",
+    )
+    target.destination.write_bytes(b"external-change")
+
+    with pytest.raises(
+        applier.WebSolDeploymentApplyError,
+        match="PREIMAGE_CONFLICT",
+    ):
+        applier.apply_deployment(prepared)
+
+    assert target.destination.read_bytes() == b"external-change"
+
+
+def test_apply_and_rollback_are_single_consumption_boundaries(
+    tmp_path: Path,
+) -> None:
+    bundle, install_root = _bundle(tmp_path)
+    prepared = applier.prepare_deployment(
+        bundle,
+        deployment.plan_deployment(bundle, {}),
+        install_root=install_root,
+        expected_uid=install_root.stat().st_uid,
+        expected_gid=install_root.stat().st_gid,
+        operation_key="web-sol-install1-transactional-applier-source-20260916-sol-001",
+    )
+    applied = applier.apply_deployment(prepared)
+
+    with pytest.raises(
+        applier.WebSolDeploymentApplyError,
+        match="TRANSACTION_CONSUMED",
+    ):
+        applier.apply_deployment(prepared)
+
+    applier.rollback_deployment(applied)
+    with pytest.raises(
+        applier.WebSolDeploymentApplyError,
+        match="TRANSACTION_CONSUMED",
+    ):
+        applier.rollback_deployment(applied)
+
+
+def test_irreconcilable_post_replace_state_is_effect_unknown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle, install_root = _bundle(tmp_path)
+    prepared = applier.prepare_deployment(
+        bundle,
+        deployment.plan_deployment(bundle, {}),
+        install_root=install_root,
+        expected_uid=install_root.stat().st_uid,
+        expected_gid=install_root.stat().st_gid,
+        operation_key="web-sol-install1-transactional-applier-source-20260916-sol-001",
+    )
+    first = sorted(bundle.artifacts, key=lambda row: str(row.destination))[0]
+    original_replace = applier.os.replace
+    injected = False
+
+    def replace_then_corrupt(source: object, target: object) -> None:
+        nonlocal injected
+        original_replace(source, target)
+        if not injected:
+            injected = True
+            Path(target).write_bytes(b"irreconcilable-postimage")
+            raise OSError("lost-response-with-foreign-postimage")
+
+    monkeypatch.setattr(applier.os, "replace", replace_then_corrupt)
+
+    with pytest.raises(
+        applier.WebSolDeploymentApplyError,
+        match="APPLY_EFFECT_UNKNOWN",
+    ):
+        applier.apply_deployment(prepared)
+
+    assert first.destination.read_bytes() == b"irreconcilable-postimage"
+    with pytest.raises(
+        applier.WebSolDeploymentApplyError,
+        match="TRANSACTION_CONSUMED",
+    ):
+        applier.apply_deployment(prepared)

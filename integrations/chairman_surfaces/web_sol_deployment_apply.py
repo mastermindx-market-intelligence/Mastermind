@@ -208,6 +208,73 @@ def _capture_directory_preimages(
     return tuple(rows)
 
 
+def _prepared_digest_from_state(
+    *,
+    operation_key: str,
+    bundle: deployment.DeploymentBundle,
+    plan: deployment.DeploymentPlan,
+    expected_uid: int,
+    expected_gid: int,
+    preimages: tuple[ArtifactPreimage, ...] | list[ArtifactPreimage],
+    directory_preimages: tuple[DirectoryPreimage, ...] | list[DirectoryPreimage],
+) -> str:
+    try:
+        plan_rows = _plan_rows(bundle, plan)
+        artifacts = {str(row.destination): row for row in bundle.artifacts}
+        target_rows: list[dict[str, object]] = []
+        for row in sorted(preimages, key=lambda item: str(item.path)):
+            artifact = artifacts[str(row.path)]
+            change = plan_rows[str(row.path)]
+            if row.kind != artifact.kind:
+                raise WebSolDeploymentApplyError("PREPARED_INTEGRITY_MISMATCH")
+            target_rows.append(
+                {
+                    "kind": row.kind,
+                    "path_digest": row.path_digest,
+                    "prior_state": row.prior_state,
+                    "prior_sha256": row.prior_sha256,
+                    "prior_mode": row.prior_mode,
+                    "prior_uid": row.prior_uid,
+                    "prior_gid": row.prior_gid,
+                    "action": change.action,
+                    "next_sha256": change.next_sha256,
+                    "next_mode": change.mode,
+                }
+            )
+        if len(target_rows) != len(bundle.artifacts):
+            raise WebSolDeploymentApplyError("PREPARED_INTEGRITY_MISMATCH")
+        directory_rows = [
+            {
+                "path_digest": row.path_digest,
+                "prior_state": row.prior_state,
+                "prior_dev": row.prior_dev,
+                "prior_ino": row.prior_ino,
+                "prior_mode": row.prior_mode,
+                "prior_uid": row.prior_uid,
+                "prior_gid": row.prior_gid,
+            }
+            for row in sorted(
+                directory_preimages,
+                key=lambda item: (len(item.path.parts), str(item.path)),
+            )
+        ]
+    except (KeyError, TypeError, AttributeError) as exc:
+        raise WebSolDeploymentApplyError("PREPARED_INTEGRITY_MISMATCH") from exc
+    return _sha256(
+        _canonical_bytes(
+            {
+                "schema": "mastermind.web_sol_deployment_prepared.v1",
+                "operation_key": operation_key,
+                "bundle_digest": bundle.bundle_digest,
+                "expected_uid": expected_uid,
+                "expected_gid": expected_gid,
+                "directories": directory_rows,
+                "targets": target_rows,
+            }
+        )
+    )
+
+
 def prepare_deployment(
     bundle: deployment.DeploymentBundle,
     plan: deployment.DeploymentPlan,
@@ -309,30 +376,14 @@ def prepare_deployment(
             }
         )
 
-    directory_digest_rows = [
-        {
-            "path_digest": row.path_digest,
-            "prior_state": row.prior_state,
-            "prior_dev": row.prior_dev,
-            "prior_ino": row.prior_ino,
-            "prior_mode": row.prior_mode,
-            "prior_uid": row.prior_uid,
-            "prior_gid": row.prior_gid,
-        }
-        for row in directory_preimages
-    ]
-    prepared_digest = _sha256(
-        _canonical_bytes(
-            {
-                "schema": "mastermind.web_sol_deployment_prepared.v1",
-                "operation_key": operation,
-                "bundle_digest": bundle.bundle_digest,
-                "expected_uid": expected_uid,
-                "expected_gid": expected_gid,
-                "directories": directory_digest_rows,
-                "targets": digest_rows,
-            }
-        )
+    prepared_digest = _prepared_digest_from_state(
+        operation_key=operation,
+        bundle=bundle,
+        plan=plan,
+        expected_uid=expected_uid,
+        expected_gid=expected_gid,
+        preimages=preimages,
+        directory_preimages=directory_preimages,
     )
     return PreparedDeployment(
         operation_key=operation,
@@ -482,11 +533,29 @@ def _current_matches_artifact(
         return False
 
 
-def _assert_prepared(prepared: PreparedDeployment) -> None:
+def _assert_prepared_integrity(prepared: PreparedDeployment) -> None:
     if not isinstance(prepared, PreparedDeployment):
         raise WebSolDeploymentApplyError("PREPARED_INVALID")
     if prepared._state != "PREPARED":
         raise WebSolDeploymentApplyError("TRANSACTION_CONSUMED")
+    try:
+        current_digest = _prepared_digest_from_state(
+            operation_key=prepared.operation_key,
+            bundle=prepared.bundle,
+            plan=prepared.plan,
+            expected_uid=prepared.expected_uid,
+            expected_gid=prepared.expected_gid,
+            preimages=prepared.preimages,
+            directory_preimages=prepared.directory_preimages,
+        )
+    except WebSolDeploymentApplyError as exc:
+        raise WebSolDeploymentApplyError("PREPARED_INTEGRITY_MISMATCH") from exc
+    if current_digest != prepared.prepared_digest:
+        raise WebSolDeploymentApplyError("PREPARED_INTEGRITY_MISMATCH")
+
+
+def _assert_prepared(prepared: PreparedDeployment) -> None:
+    _assert_prepared_integrity(prepared)
     if any(
         not _current_matches_directory_preimage(row)
         for row in prepared.directory_preimages
@@ -518,6 +587,32 @@ def _create_parent_directories(
 
 
 
+def _remove_owned_partial_temporary(
+    temporary: Path,
+    *,
+    created_dev: int,
+    created_ino: int,
+    prepared: PreparedDeployment,
+) -> None:
+    try:
+        info = temporary.lstat()
+        if (
+            stat.S_ISLNK(info.st_mode)
+            or not stat.S_ISREG(info.st_mode)
+            or info.st_dev != created_dev
+            or info.st_ino != created_ino
+            or info.st_uid != prepared.expected_uid
+            or info.st_gid != prepared.expected_gid
+        ):
+            raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN")
+        temporary.unlink()
+        _fsync_directory(temporary.parent)
+    except WebSolDeploymentApplyError:
+        raise
+    except OSError as exc:
+        raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN") from exc
+
+
 def _write_exact_temporary(
     temporary: Path,
     content: bytes,
@@ -532,6 +627,8 @@ def _write_exact_temporary(
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
     descriptor = os.open(temporary, flags, 0o600)
+    created = os.fstat(descriptor)
+    failure: OSError | None = None
     try:
         view = memoryview(content)
         offset = 0
@@ -542,8 +639,22 @@ def _write_exact_temporary(
             offset += written
         os.fchmod(descriptor, mode)
         os.fsync(descriptor)
+    except OSError as exc:
+        failure = exc
     finally:
-        os.close(descriptor)
+        try:
+            os.close(descriptor)
+        except OSError as close_exc:
+            if failure is None:
+                failure = close_exc
+    if failure is not None:
+        _remove_owned_partial_temporary(
+            temporary,
+            created_dev=created.st_dev,
+            created_ino=created.st_ino,
+            prepared=prepared,
+        )
+        raise WebSolDeploymentApplyError("TEMPORARY_WRITE_FAILED") from failure
     if not _temporary_matches(temporary, content, mode, prepared):
         raise WebSolDeploymentApplyError("TEMPORARY_READBACK_MISMATCH")
 
@@ -826,6 +937,99 @@ def rollback_deployment(applied: AppliedDeployment) -> dict[str, object]:
     }
 
 
+def _current_matches_post_directory(
+    row: DirectoryPreimage,
+    prepared: PreparedDeployment,
+) -> bool:
+    if row.prior_state == "PRESENT":
+        return _current_matches_directory_preimage(row)
+    try:
+        info = row.path.lstat()
+    except OSError:
+        return False
+    return (
+        stat.S_ISDIR(info.st_mode)
+        and not stat.S_ISLNK(info.st_mode)
+        and info.st_uid == prepared.expected_uid
+        and info.st_gid == prepared.expected_gid
+        and stat.S_IMODE(info.st_mode) == 0o700
+    )
+
+
+def reconcile_prepared_deployment(
+    prepared: PreparedDeployment,
+) -> AppliedDeployment | None:
+    """Classify a persisted PREPARED capsule without repeating any effect.
+
+    ``None`` means every file and directory still matches the captured preimage,
+    so the caller may perform the original apply once.  An ``AppliedDeployment``
+    means the exact whole postimage is already present and has been reconciled.
+    Any mixed or foreign state is effect-unknown and consumes the prepared object.
+    """
+
+    _assert_prepared_integrity(prepared)
+    exact_preimage = (
+        all(
+            _current_matches_directory_preimage(row)
+            for row in prepared.directory_preimages
+        )
+        and all(_current_matches_preimage(row) for row in prepared.preimages)
+    )
+    if exact_preimage:
+        return None
+
+    artifacts = {
+        str(item.destination): item for item in prepared.bundle.artifacts
+    }
+    exact_postimage = (
+        all(
+            _current_matches_post_directory(row, prepared)
+            for row in prepared.directory_preimages
+        )
+        and all(
+            _current_matches_artifact(artifact, prepared)
+            for artifact in prepared.bundle.artifacts
+        )
+    )
+    for artifact in prepared.bundle.artifacts:
+        temporary = _temporary_path(artifact, prepared)
+        rollback_temporary = artifact.destination.with_name(
+            f".{artifact.destination.name}.mmx-"
+            f"{prepared.prepared_digest[:16]}.rollback.tmp"
+        )
+        if (
+            temporary.exists()
+            or temporary.is_symlink()
+            or rollback_temporary.exists()
+            or rollback_temporary.is_symlink()
+        ):
+            exact_postimage = False
+    if not exact_postimage:
+        prepared._state = "EFFECT_UNKNOWN"
+        raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN")
+
+    changed = tuple(
+        row.path for row in prepared.plan.changes if row.action != "UNCHANGED"
+    )
+    if any(str(path) not in artifacts for path in changed):
+        prepared._state = "EFFECT_UNKNOWN"
+        raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN")
+    created = tuple(
+        row.path
+        for row in prepared.directory_preimages
+        if row.prior_state == "ABSENT"
+    )
+    applied = AppliedDeployment(
+        prepared=prepared,
+        changed_paths=changed,
+        created_directories=created,
+        reconciled_paths=changed,
+    )
+    prepared._state = "APPLIED"
+    verify_applied_deployment(applied)
+    return applied
+
+
 __all__.extend(
     [
         "APPLY_RECEIPT_SCHEMA",
@@ -833,6 +1037,7 @@ __all__.extend(
         "READBACK_RECEIPT_SCHEMA",
         "ROLLBACK_RECEIPT_SCHEMA",
         "apply_deployment",
+        "reconcile_prepared_deployment",
         "rollback_deployment",
         "verify_applied_deployment",
     ]
