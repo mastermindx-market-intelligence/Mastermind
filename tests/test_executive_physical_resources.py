@@ -25,6 +25,8 @@ from control_plane.executive_physical_resources import (
 ROOT = Path(__file__).resolve().parent.parent
 POLICY_PATH = ROOT / "config" / "executive_physical_resources.json"
 INT64_MAX = (1 << 63) - 1
+HP1_HOST_REF = "host-" + "a" * 64
+HP1_BOOT_REF = "boot-" + "b" * 64
 
 
 def _demand(dimension, pool, peak, *, baseline="base-1"):
@@ -37,15 +39,15 @@ def _demand(dimension, pool, peak, *, baseline="base-1"):
         "dimension": dimension,
         "capacity_pool_id": pool,
         "qualified_incremental_peak": peak,
-        "window_binding": {"unit": units[dimension], "window_ms": 1000, "baseline_id": baseline, "boot_id": "boot-test"},
+        "window_binding": {"unit": units[dimension], "window_ms": 1000, "baseline_id": baseline, "boot_id": HP1_BOOT_REF},
     }
 
 
 def _request():
     return {
         "operation_key": "ssd-create-1",
-        "host_id": "host-test",
-        "boot_id": "boot-test",
+        "host_id": HP1_HOST_REF,
+        "boot_id": HP1_BOOT_REF,
         "owner_id": "owner-test",
         "carrier_id": "carrier-test",
         "command_id": "physical:test:reserve:1",
@@ -85,7 +87,7 @@ def _policy():
         "authority_receipt": "synthetic-authority",
         "qualification_evidence": ["synthetic-evidence"],
         "canonical_runtime": {
-            "runtime_id": "runtime-test", "host_id": "host-test", "boot_id": "boot-test",
+            "runtime_id": "runtime-test", "host_id": HP1_HOST_REF, "boot_id": HP1_BOOT_REF,
             "endpoint": "synthetic://runtime", "database_identity": "db-test", "schema_identity": "schema-test",
         },
         "physical_pools": [
@@ -115,15 +117,12 @@ def _policy():
 
 def _observations():
     return {
-        "host_id": "host-test", "boot_id": "boot-test", "policy_revision": "policy-test-1",
+        "host_id": HP1_HOST_REF, "boot_id": HP1_BOOT_REF, "policy_revision": "policy-test-1",
         "sequence": 7, "required_sequence": 7, "observed_at_ms": 95,
         "pools": {p: {"available": 100, "baseline_id": "base-1", "included_materializations": []}
                   for p in ("memory", "git-store", "external", "cpu", "io", "heavy")},
+        "host_pressure_evidence": _host_pressure_evidence(),
     }
-
-
-HP1_HOST_REF = "host-" + "a" * 64
-HP1_BOOT_REF = "boot-" + "b" * 64
 
 
 def _host_pressure_snapshot(*, host_ref=HP1_HOST_REF, boot_ref=HP1_BOOT_REF, observed_at_ms=95, partial=False, extreme=False):
@@ -308,7 +307,7 @@ def test_begin_counts_own_reserved_demand_exactly_once():
     linked_charge = copy.deepcopy(own_charges[0])
     linked_charge["qualified_incremental_peak"] = 5
     linked_charge["remaining_charge"] = 5
-    observations = _observations()
+    request, policy, observations = _hp1_context()
     observations["pools"]["memory"]["available"] = 35
     observations["pools"]["external"]["available"] = 90
 
@@ -317,8 +316,8 @@ def test_begin_counts_own_reserved_demand_exactly_once():
     # independent of row order, rather than infer ownership from a global row.
     for charges in ([linked_charge, *own_charges], [*own_charges, linked_charge]):
         result = evaluate_begin(
-            _request(),
-            policy=_policy(),
+            request,
+            policy=policy,
             current_charges=charges,
             observations=observations,
             decision_time_ms=100,
@@ -329,8 +328,8 @@ def test_begin_counts_own_reserved_demand_exactly_once():
     insufficient["pools"]["memory"]["available"] = 34
     with pytest.raises(PhysicalResourceRefusal) as exc:
         evaluate_begin(
-            _request(),
-            policy=_policy(),
+            request,
+            policy=policy,
             current_charges=[linked_charge, *own_charges],
             observations=insufficient,
             decision_time_ms=100,
@@ -343,8 +342,8 @@ def test_begin_counts_own_reserved_demand_exactly_once():
     overflow_linked["remaining_charge"] = 1
     with pytest.raises(PhysicalResourceRefusal) as exc:
         evaluate_begin(
-            _request(),
-            policy=_policy(),
+            request,
+            policy=policy,
             current_charges=[overflow_linked, *overflow_charges],
             observations=observations,
             decision_time_ms=100,
