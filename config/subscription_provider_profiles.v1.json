@@ -8,10 +8,10 @@
       "protocol": "anthropic",
       "base_url": "https://api.z.ai/api/anthropic",
       "models": {
-        "routine": "GLM-5.3",
+        "routine": "GLM-5.3-Flash",
         "hard": "GLM-5.3",
         "fast": "GLM-5.3-Flash",
-        "subagent": "GLM-5.3"
+        "subagent": "GLM-5.3-Flash"
       },
       "default_model_class": "routine",
       "supported_tool_only": true,

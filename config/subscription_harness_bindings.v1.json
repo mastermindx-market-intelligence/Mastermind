@@ -1,6 +1,6 @@
 {
   "schema": "mastermind.subscription_harness_bindings/v1",
-  "verified_at": "2026-09-13T06:58:00Z",
+  "verified_at": "2026-09-15T01:19:02Z",
   "bindings": {
     "glm-coding-plan.claude-code-anthropic": {
       "profile_id": "glm-coding-plan",
@@ -65,7 +65,7 @@
       "protocol": "anthropic",
       "endpoint": {"source": "profile"},
       "model_classes": ["routine", "hard", "fast", "subagent"],
-      "implementation_state": "SPEC_ONLY",
+      "implementation_state": "BUILT_NOT_PROVEN",
       "autonomous_allowed": false,
       "activation_gates": [
         "adapter_implemented",

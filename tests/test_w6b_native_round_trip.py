@@ -30,6 +30,8 @@ from control_plane.executive_orchestration_result import (
     canonical_bytes as result_canonical_bytes,
 )
 from control_plane.executive_runtime import (
+    HOST_EXECUTION_BINDING_V3,
+    HOST_EXECUTION_BINDING_VERSION_KEY,
     AttemptStatus,
     JobStatus,
     OrchestrationDispatchOutcome,
@@ -346,6 +348,13 @@ def _native_fixture(tmp_path: Path) -> _NativeFixture:
         "operator_harness_binary_digest": _python_digest(),
         "operator_harness_version": SEALED_HARNESS_VERSION,
         "operator_harness_armed": True,
+        HOST_EXECUTION_BINDING_VERSION_KEY: HOST_EXECUTION_BINDING_V3,
+        "work_placement_union": [
+            {
+                "provider_realm": "codex",
+                "quota_class": "codex-coo-default",
+            }
+        ],
     }
     runtime.workers.register_worker(
         "worker-a",
@@ -871,3 +880,162 @@ def test_w6b_checked_in_routes_do_not_dispatch_inert_cycle(tmp_path: Path) -> No
     assert planner is not None
     assert planner.status is JobStatus.QUEUED
     assert fixture.runtime.attempts.list_attempts(planner.job_id) == []
+
+
+def test_w6b_t2v2_crash_replay_preserves_per_work_step_placement(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    fixture = _native_fixture(tmp_path)
+    runtime_path = fixture.runtime_path
+    runtime = fixture.runtime
+    root_id = fixture.root_id
+    app_server_requests: list[str] = []
+
+    async def scenario() -> None:
+        loop = asyncio.get_running_loop()
+        root = runtime.jobs.get_job(root_id)
+        assert root is not None
+        admitted_union = [
+            {"provider_realm": "codex", "quota_class": "codex-coo-default"}
+        ]
+        assert root.constraints["work_placement_union"] == admitted_union
+        created = CooCycle(runtime).run_once(root_id)
+        assert created.action == "PLANNER_CREATED"
+        planner_id = str(created.selected_job_id)
+        operator, _sealed = _bind_supervisors(runtime, fixture.socket_path)
+
+        def crash_run_claimed(self, _job, _lease):
+            raise RuntimeError("simulated v2 planner crash")
+
+        operator._run_claimed = crash_run_claimed.__get__(
+            operator, type(operator)
+        )
+
+        def crashing_dispatch(job_id: str, command_id: str):
+            return asyncio.run_coroutine_threadsafe(
+                operator.start_cycle_job(job_id, command_id=command_id),
+                loop,
+            ).result(timeout=30)
+
+        with pytest.raises(RuntimeError, match="simulated v2 planner crash"):
+            await asyncio.to_thread(
+                CooCycle(runtime, dispatcher=crashing_dispatch).run_once,
+                root_id,
+            )
+        planner = runtime.jobs.get_job(planner_id)
+        assert planner is not None and planner.attempt_count == 1
+        attempt_id = str(planner.current_attempt_id)
+        command_id = (
+            f"coo-cycle:{root_id}:dispatch:{planner_id}:attempt:1"
+        )
+
+        fixture.runtime = None
+        fixture.broker = None
+        import gc
+
+        gc.collect()
+        replay_runtime = Runtime.at(runtime_path)
+        replay_root = replay_runtime.jobs.get_job(root_id)
+        assert replay_root is not None
+        assert replay_root.constraints["work_placement_union"] == admitted_union
+        plan = {
+            "schema_version": "mastermind.execution_plan/v2",
+            "root_job_id": root_id,
+            "plan_attempt_id": attempt_id,
+            "steps": [
+                {
+                    "ordinal": 0,
+                    "step_id": "step-0",
+                    "objective": "One replayed exact placement.",
+                    "business_impact": "routine",
+                    "review_required": False,
+                    "requested_authorities": ["READ"],
+                    "allowed_write_paths": [],
+                    "validation_ids": [],
+                    "attempt_limit": 1,
+                    "cost_class": "small",
+                    "placement": {
+                        "provider_realm": "codex",
+                        "quota_class": "codex-coo-default",
+                    },
+                },
+                {
+                    "ordinal": 1,
+                    "step_id": "step-1",
+                    "objective": "One replayed inherited placement.",
+                    "business_impact": "routine",
+                    "review_required": False,
+                    "requested_authorities": ["READ"],
+                    "allowed_write_paths": [],
+                    "validation_ids": [],
+                    "attempt_limit": 1,
+                    "cost_class": "small",
+                    "placement": {
+                        "provider_realm": "codex",
+                        "quota_class": "codex-coo-default",
+                    },
+                },
+            ],
+        }
+        reply = _planner_result(root_id, attempt_id)
+        reply["job_id"] = replay_runtime.attempts.get_attempt(attempt_id).job_id
+        reply["role_result"] = plan
+        _with_fake_reply(
+            monkeypatch,
+            _canonical_result(reply),
+            requests=app_server_requests,
+        )
+        broker, _sweeper, socket_path = _build_broker(
+            fixture.workspace_root,
+            fixture.provider_home,
+        )
+        server = await asyncio.start_unix_server(
+            broker.handle_connection,
+            path=str(socket_path),
+            limit=4 * 1024 * 1024,
+        )
+        try:
+            replay_operator, _replay_sealed = _bind_supervisors(
+                replay_runtime, socket_path
+            )
+
+            def dispatch(job_id: str, dispatch_command: str):
+                return asyncio.run_coroutine_threadsafe(
+                    replay_operator.start_cycle_job(
+                        job_id, command_id=dispatch_command
+                    ),
+                    loop,
+                ).result(timeout=30)
+
+            outcome = await asyncio.to_thread(
+                CooCycle(replay_runtime, dispatcher=dispatch).run_once,
+                root_id,
+            )
+            assert outcome.action == "DISPATCHED"
+            assert outcome.receipt["attempt"]["attempt_id"] == attempt_id
+            admitted = CooCycle(replay_runtime).run_once(root_id)
+            assert admitted.action == "PLAN_ADMITTED"
+            work_ids = list(admitted.receipt["work_job_ids"])
+            work = [replay_runtime.jobs.get_job(value) for value in work_ids]
+            assert all(job is not None for job in work)
+            assert [
+                job.constraints["eligible_quota_classes"] for job in work if job
+            ] == [["codex-coo-default"], ["codex-coo-default"]]
+            replay_admission = replay_runtime.jobs.admit_cycle_plan(
+                root_id,
+                command_id=(
+                    f"coo-cycle:{root_id}:admit-plan:{attempt_id}"
+                ),
+            )
+            assert [job.job_id for job in replay_admission] == work_ids
+            assert [
+                replay_runtime.jobs.get_job(value)
+                for value in work_ids
+            ] == work
+        finally:
+            server.close()
+            await server.wait_closed()
+            socket_path.unlink(missing_ok=True)
+
+    asyncio.run(scenario())

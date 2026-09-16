@@ -275,6 +275,15 @@ MINIMAX_TOKEN_PLAN = CodexProviderRealm(
     wire_api="responses",
 )
 
+OPENCODE_GO_TOKEN_PLAN = CodexProviderRealm(
+    realm_id="opencode-go",
+    provider_alias="opencode-go",
+    display_name="OpenCode Go (Zen)",
+    base_url="https://opencode.ai/zen/go/v1",
+    env_key="OPENCODE_GO_KEY",
+    wire_api="responses",
+)
+
 ALIBABA_TOKEN_PLAN = CodexProviderRealm(
     realm_id="alibaba-token-plan-sg",
     provider_alias="alibaba",
@@ -289,13 +298,16 @@ REVIEWED_CODEX_PROVIDER_REALMS = {
 }
 
 CANDIDATE_CODEX_PROVIDER_REALMS_SPEC_ONLY = {
-    realm.realm_id: realm for realm in (MINIMAX_TOKEN_PLAN,)
+    realm.realm_id: realm for realm in (MINIMAX_TOKEN_PLAN, OPENCODE_GO_TOKEN_PLAN,)
 }
 
 # Kit-side Responses transport was observed with Codex 0.147 against MiniMax's
 # OpenAI-compatible base, but it is not officially documented. Promotion to the
 # reviewed registry requires an exact-head native execution proof. No worker
-# binding is authorized from this candidate collection.
+# binding is authorized from this candidate collection. The OpenCode Go realm
+# is SPEC-ONLY; kit-side Responses transport was proven only for some upstream
+# models (see kit GO_PROOF_LEDGER) and promotion requires the reviewed exact-head
+# native execution proof; no worker binding is authorized from it.
 
 ProviderCredentialLoader = Callable[[], str]
 
@@ -526,6 +538,7 @@ def verify_provider_realm_enrollment_receipt(receipt: Any) -> None:
 __all__ = [
     "ALIBABA_TOKEN_PLAN",
     "MINIMAX_TOKEN_PLAN",
+    "OPENCODE_GO_TOKEN_PLAN",
     "CANDIDATE_CODEX_PROVIDER_REALMS_SPEC_ONLY",
     "CODEX_WIRE_API_RESPONSES",
     "REVIEWED_CODEX_PROVIDER_REALMS",
