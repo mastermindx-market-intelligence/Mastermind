@@ -6,8 +6,25 @@ that commit; nothing here was asserted from memory).
 Authority: Sol capacity-routing architecture ruling relayed 2026-09-16T06:52:49Z, consumed as R35. This document
 discharges **step A only** ("Freeze resource-composition + execution-mode semantics").
 Proposed schema name/version (subject to the architecture review that is this document's release condition):
-`mastermind.provider_resource_composition/v1`.
+`mastermind.provider_resource_composition/v1` — **not as an independently acquired capacity truth**. The graph
+must be embedded as Provider Capacity V2's closed sub-contract or cryptographically bound to exactly one V2
+observation (§9.0).
 Owner: the existing Shared AI Provider Control / Capacity authority. **No new owner is proposed.**
+
+---
+
+## R41 disposition
+
+Sol R41 rules this proposal **REQUEST_CHANGES / STEP_A_NOT_FROZEN**. The six rulings are closed as follows:
+
+| Ruling | Disposition |
+|---|---|
+| 1 — approvals and limits | §12 records D1 APPROVED; D2 APPROVED only for proven distinct account resources; D3 APPROVED with the §2.2 axis correction. Placement remains in `research/` while HOLD and is listed UNKNOWN in §9.3. |
+| 2 — generation axes | §2.2 replaces one provider-resource generation with six axes and explicit non-effects; §2.3, §3, §4.6, §5.3, §6.3 and §8.3 propagate them. |
+| 3 — one canonical Capacity artifact | §9.0 requires embedding in Provider Capacity V2 or exact cryptographic binding to one V2 observation. |
+| 4 — existing CAP-C1 tie seam | §11.1 composes economics evidence with the existing reserved `select_placement` tie/preference seam. |
+| 5 — one commitment lifecycle | §8.3 replaces the proposed provider-quota ledger with one canonical Executive commitment primitive; step G and the map inherit that gate. |
+| 6 — Alibaba routing UNKNOWN | §3.3 and §5.4 record proven order/ceiling but UNKNOWN straddling; §10 compares hypothetical routings; §9.3 lists U1. |
 
 ---
 
@@ -84,28 +101,56 @@ This contract answers *how the buckets inside that domain deplete relative to on
 architecture explicitly does not solve nested resource algebra (R35 §21); nothing here is appended to it
 silently, and nothing here should be read as accepting Family-B B0 (still unaccepted — R19 (6)).
 
-### 2.2 Generation
-Every resource carries a `generation`. It is an identity epoch, not a clock. Changing it invalidates joins and
-calibration; historical receipts stay immutable and new claims use only the current generation (R35 §3).
+### 2.2 Generation axes
+One word cannot carry all of the epochs that Provider Control, Family-B, and model economics need to date. The
+former single "provider-resource generation" is therefore split into six axes. Each axis has one owner, and each
+axis states what it does **not** invalidate:
 
-Generation-invalidating events (R35 §3 and §15, consolidated — this is the normative list):
+| Axis | Meaning | Owner | Does not invalidate |
+|---|---|---|---|
+| `capability_generation` | What the subscription contract grants: product, tier, and seat entitlement. | Provider Control enrollment | Freshness alone; a bucket's identity unless that bucket is replaced; calibration governed by other axes. |
+| `resource_generation` | The identity epoch of the bucket or wallet itself. It moves only when that bucket is replaced by a different bucket. | Provider Control resource identity | The bucket merely because it refilled; live holds; cohort/debit calibration. |
+| `composition_generation` | The shape of the tree: which resources exist, in which operator, in which order, including seat-before-pack, nearest-expiry ordering, and presence of a member ceiling. | Provider Control deduction policy | Observed remaining in an unchanged bucket; live holds; rate/cohort calibration. |
+| `realm_generation` | The existing Family-B key/API/realm binding currentness. This contract does not re-mint it. | Family-B realm owner | Quota amount, bucket identity, observed remaining, or holds bound to the resource epoch. |
+| `rate_generation` | Model alias/version, debit multipliers, and rate card. | Model catalog / economics owner | The underlying shared wallet's balance or identity; live holds. |
+| observation freshness | Not a generation: `observed_at`, the reset boundary, and staleness. It governs usability of a number. | Provider Control observation | Joins, hold binding, or calibration; crossing a reset only makes the old number stale. |
 
-| # | Event | Source of truth |
+The required non-effects are normative:
+
+- **Ordinary reset or renewal does not automatically create a new resource epoch.** A five-hour reset, weekly
+  reset, or ordinary same-tier subscription renewal makes the observation STALE and requires a fresh observation.
+  It does not bump `resource_generation`, does not orphan live holds, and does not reset calibration.
+- **Key/API realm rotation is realm currentness, not new quota.** Bumping `realm_generation` invalidates the
+  executable binding; it does not create a new wallet, does not change observed remaining, and does not release
+  or orphan holds bound to the resource epoch.
+- **Model alias/version and rate-card changes invalidate cohort/debit evidence, not the underlying shared
+  wallet.** Bumping `rate_generation` retires q95/cost calibration to historical and reverts new placement to
+  conservative; the resource's balance, identity, and live holds are untouched.
+- **Holds bind the resource epoch plus immutable composition/debit evidence.** A hold is keyed by
+  `(resource_id, resource_generation)` and additionally records, immutably, the `composition_generation` and
+  `rate_generation` under which it was computed. Bumping composition or rate re-dates FUTURE evaluation; it never
+  rebinds or orphans a live hold.
+- **Never orphan live holds or reset calibration by bumping the wrong axis.** That is the governing rule.
+
+The old G1–G8 event list remains fully mapped; no event is lost:
+
+| Old event | Axis(s) moved | Required non-effects |
 |---|---|---|
-| G1 | Plan generation change (tier up/down, plan replacement) | Provider Control enrollment |
-| G2 | Seat assignment / reassignment | Provider Control enrollment |
-| G3 | Subscription renewal or re-purchase generation | Provider Control billing evidence |
-| G4 | API-key or realm binding change (incl. key rotation) | Family-B realm owner |
-| G5 | Provider model generation change (incl. a silent alias update) | Model catalog owner |
-| G6 | Shared-pack generation (a new pack purchased, a pack retired) | Provider Control enrollment |
-| G7 | Provider deduction-policy change (the tree's shape itself changes) | Provider Control policy evidence |
-| G8 | Rate-card generation change | Model economics catalog owner |
+| G1 plan generation change (tier up/down, plan replacement) | `capability_generation`; a plan replacement that replaces the bucket also moves `resource_generation`; an ordinary same-tier renewal moves neither. | Same-tier renewal is freshness-only and neither orphans holds nor resets calibration. |
+| G2 seat assignment/reassignment | `capability_generation`; `resource_generation` only where the seat's bucket is a different bucket; UNKNOWN for Alibaba until enrollment is proven. | Reassignment alone does not create quota or change a surviving wallet's balance. |
+| G3 subscription renewal / re-purchase | FRESHNESS ONLY for ordinary renewal at the same entitlement; `capability_generation` only if entitlement changed; a re-purchase that mints a new bucket creates a new `resource_id`. | A new shared pack is not an epoch bump on an existing resource; it is a new resource. |
+| G4 API-key or realm binding change (including rotation) | `realm_generation` ONLY. | No new wallet, no changed remaining, no hold release/orphaning. |
+| G5 provider model generation change (including silent alias update) | `rate_generation` ONLY. | Shared-wallet balance, identity, and live holds are untouched. |
+| G6 shared-pack generation (pack purchased/retired) | `composition_generation`; a new pack gets a new `resource_id`. | Existing packs' `resource_generation` is unchanged. |
+| G7 provider deduction-policy change | `composition_generation`. | This re-dates future evaluation and does not rebind or orphan live holds. |
+| G8 rate-card generation change | `rate_generation`. | It invalidates cohort/debit evidence, not the shared wallet or live holds. |
 
 ### 2.3 Generation is not freshness — reset ≠ observed refill
-Two clocks, deliberately separate, because conflating them is how a reset silently manufactures capacity
-(R35 §15):
+The generation axes and observation freshness are deliberately separate, because conflating them is how a reset
+silently manufactures capacity (R35 §15):
 
-- **Generation** governs *joins and calibration*. It changes only on G1–G8.
+- **Generation axes** govern their respective joins, executable bindings, composition evidence, and calibration
+  as stated in §2.2.
 - **Observation freshness** governs *usability of a number*. Every observation carries `observed_at` and the
   reset boundary it was taken before. **Crossing a reset boundary makes the observation STALE, not larger.**
   After a reset, a claim requiring that resource waits for a new provider observation; it does not assume the
@@ -113,8 +158,9 @@ Two clocks, deliberately separate, because conflating them is how a reset silent
 
 The one exception is a **deterministic refill contract**: an explicitly reviewed, per-resource statement that the
 post-reset value is a known function of entitlement. Absent that reviewed statement, post-reset value is UNKNOWN.
-A plan upgrade, a shared-pack purchase, a reset card or a coupon likewise create a new generation or require
-fresh observation — never a synthetic balance.
+A plan upgrade, shared-pack purchase, reset card, or coupon likewise moves the §2.2 axis it actually changes or
+requires fresh observation — it never creates a synthetic balance and never bumps `resource_generation` merely
+because value may refill.
 
 **Forecast is not observation.** A forecast of capacity available after the next reset may be published for
 expiry/stranding reasoning (Stage E, §11) but must carry a distinct field name and must never be summed into, or
@@ -131,9 +177,11 @@ an `id` that is unique inside the enclosing expression, because a CEILING must b
 E        := LEAF | ALL_OF(node, ...) | ORDERED_SPILL(node, ...) { stage_routing }
 node     := { id, role, expr: E }
 role     := BUDGET
-          | CEILING { bounds: <id>, limit, window?, next_reset_at?, generation, observation }
+          | CEILING { bounds: <id>, limit, window?, next_reset_at?, capability_generation,
+                      resource_generation, composition_generation, rate_generation, observation }
           | STAGE                          # the only lawful role inside ORDERED_SPILL
-LEAF     := { resource_id, native_unit, generation, observation }
+LEAF     := { resource_id, native_unit, capability_generation, resource_generation,
+              composition_generation, rate_generation, observation }
 observation := { observed_remaining | UNKNOWN, observed_at, next_reset_at, freshness, expires_at? }
 stage_routing := PARTITIONED | ATOMIC_FALLBACK        # provider-declared; see §3.3
 ```
@@ -144,7 +192,8 @@ Four well-formedness rules make the grammar evaluable rather than suggestive:
    enclosing `ALL_OF`. A CEILING may not bound itself, may not bound a node outside that subtree, and two
    CEILINGs may bound the same node — in which case both apply and the tighter wins.
 2. **A CEILING is a fully dated resource, not a constant.** It carries its own `limit`, optional `window` and
-   `next_reset_at`, its own `generation`, and its own `observation`. A *windowed* ceiling therefore resets and
+   `next_reset_at`, the §2.2 generations relevant to its entitlement, composition, and debit evidence, and its
+   own `observation`. A *windowed* ceiling therefore resets and
    goes stale on exactly the same rules as a BUDGET (§2.3); a non-windowed ceiling simply has no
    `next_reset_at`.
 3. **A proportional ceiling must be resolved to an absolute remainder.** A sublimit expressed as a fraction of
@@ -159,10 +208,10 @@ Four well-formedness rules make the grammar evaluable rather than suggestive:
    both spent and bounding is written once as the BUDGET and referenced by `bounds` from the CEILING.
 
 ### 3.1 LEAF
-A leaf names one resource, its provider-native unit (Credits, provider quota units, requests, …), its generation,
-and its current observation (`observed_remaining`, `observed_at`, `next_reset_at`, `freshness`). Native units are
-never compared across providers (R35 §10); comparison happens only after §6 converts headroom into job
-equivalents.
+A leaf names one resource, its provider-native unit (Credits, provider quota units, requests, …), its §2.2
+generation axes, and its current observation (`observed_remaining`, `observed_at`, `next_reset_at`, `freshness`).
+Native units are never compared across providers (R35 §10); comparison happens only after §6 converts headroom
+into job equivalents.
 
 ### 3.2 ALL_OF — two child roles, because "and/or" is load-bearing
 Sol's text defines ALL_OF as *"All children constrain and/or are debited by the operation."* That `and/or` hides
@@ -196,7 +245,11 @@ One operation's cost may straddle a stage boundary: if `s1` has 3,000 units rema
 **Stage routing is a provider-declared fact, not our inference (normative).** Ordered consumption comes in two
 provider shapes, and they do not evaluate the same way:
 
-- **`PARTITIONED`** — the provider splits *one* operation across stages, as above (Alibaba seat → shared pack).
+- **`PARTITIONED`** — the provider splits *one* operation across stages, as above. For Alibaba Team the declared
+  `stage_routing` is **UNKNOWN**: official Team docs prove seat-first → shared-pack → nearest-expiring-pack
+  deduction order and the per-member pack ceiling, but not that one request can straddle seat and pack. Until
+  provider evidence or an authorized real observation proves PARTITIONED versus ATOMIC_FALLBACK, Alibaba's
+  `stage_routing` is UNKNOWN and fails closed under §4.6.
   `avail` sums across stages (§4.1), because one job may draw from several.
 - **`ATOMIC_FALLBACK`** — the provider itself serves one *indivisible* operation wholly from the first stage
   with sufficient balance, and falls back to the next stage otherwise. This is still provider-owned deduction —
@@ -225,17 +278,18 @@ existing owner's job. Adding alternation here would quietly move the allocator i
 ## 4. Evaluation semantics
 
 Let `c` be a task cohort and `q95(c)` its conservative upper native cost for the resource's unit (R35 §11 — a
-conservative upper estimate keyed on task class, model/harness/rate generation, effort, context band and tool
+conservative upper estimate keyed on task class, model/harness `rate_generation`, effort, context band and tool
 set; never a cohort mean).
 
 ### 4.1 Available value
 `avail(E)` returns available **native value**, recursively:
 
 A stage or child is **admissible** for a given operation only if all four hold: its execution mode is
-policy-eligible (§7); its observation is FRESH (§2.3); its generation is current (§2.2); and its value does not
-expire before the operation's completion horizon. An inadmissible node contributes **zero** and is reported under
-a named `ineligible` / `expiring` component — never silently dropped, because a silent drop is indistinguishable
-from an exhausted resource and hides the bottleneck (R35 §17, §18).
+policy-eligible (§7); its observation is FRESH (§2.3); every §2.2 generation relevant to its resource identity,
+composition, executable binding, and debit evidence is current; and its value does not expire before the
+operation's completion horizon. An inadmissible node contributes **zero** and is reported under a named
+`ineligible` / `expiring` component — never silently dropped, because a silent drop is indistinguishable from an
+exhausted resource and hides the bottleneck (R35 §17, §18).
 
 ```
 avail(LEAF)                              = usable(LEAF)                    # §6.1
@@ -288,18 +342,20 @@ below `q95`), `stranded_below_cost` (a remainder below one job's cost), `ineligi
 "Alibaba: 68 % remaining" failure is precisely a number that conceals which resource is the bottleneck.
 
 ### 4.6 Unknown fails closed
-If any leaf in `E` has UNKNOWN or STALE observation, unknown generation, or an unproven independence claim
-(§5.3), then `avail(E)` is **UNKNOWN**, not zero and not the entitlement. An UNKNOWN expression cannot size
-capacity, cannot authorise a claim, and cannot satisfy `capacity_known`. It also does not make the route
-unusable for a *human-attended* act — it makes it unusable as **autonomous Fabric capacity**.
+If any leaf in `E` has UNKNOWN or STALE observation; unknown `capability_generation`, `resource_generation`,
+`composition_generation`, `realm_generation`, or `rate_generation`; unproven distinct entitlement/account
+resource status (§5.1–§5.2); unproven view independence (§5.3); or UNKNOWN provider-declared `stage_routing`
+(§3.3, §5.4), then `avail(E)` is **UNKNOWN**, not zero and not the entitlement. An UNKNOWN expression cannot size
+capacity, cannot authorise a claim, and cannot satisfy `capacity_known`. It also does not make the route unusable
+for a *human-attended* act — it makes it unusable as **autonomous Fabric capacity**.
 
 ---
 
 ## 5. Worked expressions for the current portfolio
 
 Every number below that is not receipted at master is marked ILLUSTRATIVE or UNKNOWN. **No enrollment fact is
-invented.** Actual Alibaba Team tier, actual MiniMax plan generation and actual Claude sublimit remainders are
-UNKNOWN at this pin; §9 records what master actually models.
+invented.** Actual Alibaba Team tier, actual MiniMax `capability_generation`, and actual Claude sublimit
+remainders are UNKNOWN at this pin; §9 records what master actually models.
 
 ### 5.1 GLM Coding Plan Max — three accounts, one placement policy, NOT one pool
 The seat currently operates **three** GLM Coding Plan Max accounts (`chairman-max`, `chairman-max-2`,
@@ -317,6 +373,10 @@ for acct in {chairman-max, chairman-max-2, chairman-max-3}:
   available value is `min(usable_5h, usable_weekly)`, never their sum.
 - The three accounts are **sibling routes**, not stages. `ORDERED_SPILL` is unlawful here by §3.3: a GLM request
   is served wholly by one account. Choosing among the three is placement.
+- The three accounts are three expressions **only where each is a proven distinct entitlement/account resource**.
+  Multiple sessions, hosts, dashboards, or model views of one account remain one expression — never three. Where
+  distinctness is not proven, the accounts collapse to one expression and fail closed under §4.6. At this pin,
+  that proof is a Provider Control fact we do not hold.
 - Model-specific debit (GLM-5.3 ≈ 3× GLM-5.3-Flash for identical token composition, per the published
   multipliers) is a **cost prior**, never a scheduling constant. Master already carries the stronger rule:
   `control_plane/provider_model_economics.py:21` admits `measured_native_delta` as a burn method, and
@@ -352,6 +412,10 @@ for acct in {C1, C2, C3}:
   go_concurrency)` — singular. That expression is correct *per account*; the fabric holds three of them, so the
   same "sibling routes, not a pool" rule as GLM applies. This is offered as a refinement of the example, not a
   contradiction of the operator set.
+- The three Go accounts are three expressions **only where each is a proven distinct entitlement/account
+  resource**. Multiple sessions, hosts, dashboards, or model views of one account remain one expression — never
+  three. Where distinctness is not proven, the accounts collapse to one expression and fail closed under §4.6. At
+  this pin, that proof is a Provider Control fact we do not hold.
 
 ### 5.3 MiniMax Token Plan — per-model rows are EVIDENCE VIEWS, never wallets
 ```
@@ -367,14 +431,15 @@ is not establishing a wallet. Normative rules:
 - A view with `independence: UNPROVEN` contributes **zero** additional available value. `avail` is computed from
   the underlying resources only. Views may be displayed; they may never be summed (failure class 14).
 - Independence is proven only by a **discriminating observation pair**: an operation attributed to view A must
-  leave view B's remaining unchanged across two observations of the same generation. Until that evidence exists
-  at the current generation, independence is UNPROVEN and fails closed.
+  leave view B's remaining unchanged across two observations of the same `resource_generation`, with the same
+  `composition_generation` and `rate_generation`. Until that evidence exists at those current generations,
+  independence is UNPROVEN and fails closed.
 - Master already refuses the adjacent error: `config/provider_model_economics.v1.json` records for
   `minimax.minimax-m3` that the Token Plan "is governed by 5-hour rolling, weekly, billing-cycle token allocation
   and concurrency resources", and `tests/test_provider_model_economics.py:91`
   (`test_subscription_burn_method_is_declared_without_quota_balances`) pins that the catalog declares a burn
   *method* without carrying balances.
-- The plan generation itself is **UNKNOWN** at this pin (§9).
+- The plan's `capability_generation` itself is **UNKNOWN** at this pin (§9).
 
 ### 5.4 Alibaba Team — seat → member ceiling → packs by nearest expiry
 ```
@@ -392,11 +457,17 @@ This is R35 §2's expression written with the §3.2 roles made explicit. The mem
 shared-pack subexpression — it meters the draw routed through the packs and holds no value of its own. §10 works
 it numerically.
 
-**Everything about our actual enrollment here is UNKNOWN**: the Team seat tier (Alibaba documents 25k / 100k /
-250k Credits per seat per subscription month and 625k per shared pack, but which we hold is not evidenced at
-master), how many packs exist, their expiries, and the member cap value. Master models **Personal**, not Team
-(§9). Do not rename the profile to close this gap — R35 §16: bind the actual enrolled Team seat tier, seat realm,
-subscription generation and pack generation through Provider Control.
+`stage_routing: UNKNOWN`. Official Team docs prove the deduction order — seat first, then shared packs nearest
+expiry first — and the per-member shared-pack ceiling. They do **not** prove that one request can straddle seat
+and pack. Until that routing is provider-declared or established by an authorized real observation, this
+expression fails closed under §4.6.
+
+**Everything about our actual enrollment here is UNKNOWN**: `stage_routing` (PARTITIONED versus
+ATOMIC_FALLBACK), the Team seat tier (Alibaba documents 25k / 100k / 250k Credits per seat per subscription
+month and 625k per shared pack, but which we hold is not evidenced at master), seat realm binding, subscription
+generation, how many packs exist, their identities/expiries, and the member cap value. Official docs prove order
+and the member ceiling, not straddling. Master models **Personal**, not Team (§9). Do not rename the profile to
+close this gap — R35 §16: bind the actual enrolled Team facts through Provider Control.
 
 ### 5.5 Claude / Fable subset ceiling — a ceiling, not a second wallet
 ```
@@ -442,8 +513,8 @@ evidence. Suggested parallelism is an **output** of Capacity (§4.3), not static
 
 - A concurrency reduction or a 429/cooling signal **reduces new starts** and must never move work that has
   already STARTed (failure classes 10, 11), and must never be reported as a credential failure.
-- Learned safe parallelism is keyed to the entitlement/realm/**generation** (§2.2) and the relevant provider
-  scope, so a generation change resets it conservatively rather than inheriting a stale number.
+- Learned safe parallelism is keyed to `capability_generation` + `realm_generation` (§2.2) and the relevant
+  provider scope, so either axis changing resets it conservatively rather than inheriting a stale number.
 - Master already carries the shape of the guard on the consumer side:
   `control_plane/capacity_economics_projection.py:175` refuses a preview whose `suggested_parallelism` exceeds
   `estimated_startable_jobs`.
@@ -468,7 +539,7 @@ review").
 
 ### 7.2 The gate
 At admission, a job's **requested mode** must intersect the **plan policy's admitted modes for this exact
-harness**, resolved through the existing policy owners at the current plan generation.
+harness**, resolved through the existing policy owners at the current `capability_generation`.
 
 - If the policy owner cannot prove our invocation mode is admitted → `PROVIDER_USAGE_MODE_UNKNOWN` → the
   subscription is **unavailable for that operation**, regardless of how much quota it shows (failure class 12).
@@ -506,7 +577,7 @@ R35 §14: two workers must not both observe 100 remaining units and each claim a
 enough.
 
 ### 8.1 Required claim-time sequence
-1. Revalidate generation and observation freshness (§2.2, §2.3).
+1. Revalidate every §2.2 generation axis and observation freshness (§2.2, §2.3).
 2. Resolve the exact resource expression `E` for the chosen route.
 3. Compute the conservative required native capacity per resource, by evaluating the debit partition of §3 for
    one operation of cost `q95(c)` (the same partition §10 works numerically).
@@ -550,7 +621,9 @@ offline successor is required before any production installation."* It contains
 `CREATE TABLE physical_resource_commitments (` (`:2250`) and `CREATE TABLE physical_resource_demands (` (`:2282`),
 with the command family `reserve_physical` / `begin_physical` / `observe_physical` / `settle_physical` /
 `physical_status` at `control_plane/executive_runtime.py:16594` onward, and it is exercised at
-`tests/test_executive_os_sqlite.py:1852`.
+`tests/test_executive_os_sqlite.py:1852`. These receipts are read at the procedure pin
+**a78b8fe23d8e1ed129880ac47e97ebe96afa8aea** in §8.3; they are not offered as code authorization to install the
+inactive candidate.
 
 Two conclusions, and they point the same way:
 
@@ -568,37 +641,48 @@ Two conclusions, and they point the same way:
    (`state TEXT NOT NULL CHECK(state IN ('RESERVED','EFFECT_MAY_HAVE_BEGUN','ACTIVE','RECONCILIATION_REQUIRED',
    'SETTLED','ABANDONED_NO_EFFECT'))`, `control_plane/executive_runtime.py:2259`).
 
-So A2 below is not "invent a holds table". It is "instantiate the already-reviewed commitment/demand pattern in
-the provider-quota domain", which is both narrower and far better evidenced.
+So A2 below is not "invent a holds table". The inactive candidate is the precedent **and the consolidation
+target**; it is not a pattern to instantiate a second time as a parallel provider-quota plane.
 
 ### 8.3 The narrow amendment (proposed, to be reviewed as a separate act)
-Smallest change that satisfies §8.1 without a second plane:
+Before any implementation there must be **one canonical Executive resource-commitment primitive**, or an explicit
+consolidation, so the physical and provider resource domains share **one lifecycle, one event plane, and one
+settlement plane**. Two admissible routes exist and this contract chooses neither:
+
+1. **Generalise the existing primitive.** The separately reviewed successor to
+`_PHYSICAL_RESOURCE_SCHEMA_CANDIDATE` is installed as a resource-domain-generic commitment/demand primitive. Its
+dimension CHECK at `control_plane/executive_runtime.py:2285@a78b8fe2` and its `host_id` keying are generalized to
+a typed resource-domain key; provider-quota holds become demands inside it.
+2. **Explicit consolidation.** A reviewed act declares one of the two domains canonical and migrates the other
+onto it, with one lifecycle vocabulary, one event family, and one settlement path.
+
+Either route is a separate reviewed act with its own owner. Until that primitive exists, step G
+("atomic claim/hold") cannot open, and this contract authorises no second commitment plane in the meantime.
+
+**Division of truth.** Provider Control remains quota truth: it owns observation, entitlement, cooling, deduction
+policy, and the actual provider debit. Executive never becomes a quota database. Executive persists only:
+
+1. internal holds against its own canonical commitment plane, and
+2. exact source/generation/digest evidence — the source identity the observation came from, the §2.2 axes it was
+   computed under, and the digest of its composition/debit evidence.
+
+Executive does not store provider balances, does not recompute them, and settles only against Provider Control's
+reconciliation.
+
+The narrow amendment is therefore:
 
 - **A1 — one required field on the claim receipt.** `JOB_CLAIMED`'s payload (written at
   `control_plane/executive_runtime.py:11236`) gains an immutable `capacity_hold` record: the evaluated expression
-  identity, per-`resource_id` reserved native quantity, each resource's `generation`, and the `observed_at` of
-  the observation the reservation was computed from.
-- **A2 — one holds ledger, debited inside the same transaction, on the §8.2.1 pattern.** Written by
-  `_claim_job_in_transaction` (`:11015`) in the same SQLite transaction as the existing slot mutation —
-  `control_plane/executive_runtime.py:11090` `updated = connection.execute(` / `:11093`
-  `SET status='BUSY',held_attempt_id=?,fence_counter=fence_counter+1,`. Two concurrent claims against one
-  resource then serialise on the same rows, which is what makes failure class 6 structurally impossible rather
-  than merely tested. Its identity and lifecycle are specified, not left to implementation:
-  - **Hold identity**: `hold_id`, derived deterministically from the claim (`attempt_id` plus the expression
-    identity), so a replayed claim re-derives the same `hold_id` and the write is idempotent rather than
-    additive.
-  - **Allocation rows**: one immutable row per `(hold_id, resource_id, generation)` carrying the reserved native
-    quantity and the `observed_at` it was computed against. `generation` is part of the key, so a generation
-    change (§2.2) cannot silently rebind an existing hold to a new resource epoch.
-  - **Aggregation**: the per-resource outstanding total of §6.1 is the SUM of un-settled allocation rows for that
-    `(resource_id, generation)` — never a single mutable counter, because a counter cannot express which claim
-    owns which portion and therefore cannot be released once.
-  - **Lifecycle**: the §8.2.1 state set, reused rather than re-minted —
-    `RESERVED → EFFECT_MAY_HAVE_BEGUN → ACTIVE → {SETTLED | RECONCILIATION_REQUIRED}`, with
-    `ABANDONED_NO_EFFECT` for a claim proven to have had no provider effect. `RECONCILIATION_REQUIRED` is the
-    state that satisfies §8.1 step 7: the hold stays outstanding and the capacity is not reused.
-- **A3 — one release path**, keyed on `hold_id` so it is idempotent, invoked exactly once on reconciliation,
-  with an uncertain effect moving the hold to `RECONCILIATION_REQUIRED` rather than releasing it (§8.1 step 7).
+  identity and its digest; per-`resource_id` reserved native quantity; `resource_generation`; the immutable
+  `composition_generation` and `rate_generation` under which the debit partition was computed; the source
+  identity; and `observed_at`.
+- **A2 — canonical primitive rows.** Provider-quota holds are demands on the one canonical primitive selected
+  above. A hold is keyed by `(resource_id, resource_generation)` and additionally records immutable
+  `composition_generation` and `rate_generation` evidence. Concurrent claims serialize on that primitive's rows;
+  there is no separately re-minted provider-quota lifecycle.
+- **A3 — settlement folds into the canonical primitive's settlement path.** It is not a separate release
+  mechanism. Uncertain effect keeps the canonical hold in `RECONCILIATION_REQUIRED`, outstanding and unavailable
+  for reuse, until Provider Control reconciles it (§8.1 step 7).
 
 **A1 is not a new idea — it is the already-designed direction, unimplemented.** The CF2F claim-evidence work
 already specifies a closed `JOB_CLAIMED.capacity_evidence` object:
@@ -617,6 +701,25 @@ committed in the claim's transaction.
 ---
 
 ## 9. What is left untouched, and what master actually models
+
+### 9.0 Binding to Provider Capacity V2
+The graph is **not independently acquired capacity truth**. Exactly two admissible publication forms are
+possible; the reviewer chooses one:
+
+1. **Embedded closed sub-contract.** The resource graph is a closed sub-contract inside Provider Capacity V2,
+   acquired and published by V2's own producer, in V2's own snapshot, under V2's capability generation. There is
+   no separate acquisition, producer, or snapshot.
+2. **Cryptographically bound companion.** If published separately, every graph document carries an exact
+   cryptographic binding to the V2 observation it derives from: the V2 snapshot digest, V2 producer identity
+   (an entrypoint blob pin, in the way
+   `ops/executive_os/capacity_source_contract.py:92@a78b8fe2` pins `ENTRYPOINT_GIT_BLOB` for V1), and V2
+   capability generation. A graph whose binding does not resolve to exactly one V2 snapshot is **INADMISSIBLE**,
+   not merely stale; that is what makes mixing it with another observation epoch impossible.
+
+Family-B B4 already owns V2 `realm_binding`. This contract does not mint, redefine, or duplicate realm binding;
+§2.1 composes with and consumes it. V1 remains an exact legacy compatibility projection, never a competing truth
+plane. Strict `provider_capacity.v1` is neither extended nor edited in place (§9.1), and any V1 view of a
+V2-acquired graph is an exact lossy projection for legacy consumers only.
 
 ### 9.1 Strict `provider_capacity.v1` is untouched
 R35 §2: "Do NOT append this silently to strict `provider_capacity.v1`." This contract does not modify it, extend
@@ -649,12 +752,16 @@ preparation receipts built on it (`tests/test_executive_capacity_source_contract
 | Typed execution-mode enum | MISSING | §7.4 (booleans exist; classification does not) |
 
 ### 9.3 UNKNOWN — written as UNKNOWN, per R35 §22 C ("Do not infer this from what we remember buying")
-- Alibaba: actual **Team** product enrollment, seat tier, seat realm binding, subscription generation, shared-pack
-  identity/count/expiries, member shared-pack cap. **UNKNOWN.**
-- MiniMax: plan generation; whether per-model rows are independent resources. **UNKNOWN / UNPROVEN.**
+- **U1 — Alibaba `stage_routing`**: PARTITIONED versus ATOMIC_FALLBACK. **UNKNOWN.**
+- **U2 — Alibaba Team-tier seat/pack facts**: seat tier, seat realm binding, subscription generation,
+  shared-pack identity/count/expiries, member shared-pack cap. **UNKNOWN.**
+- **U3 — MiniMax**: plan `capability_generation`; whether per-model rows are independent resources.
+  **UNKNOWN / UNPROVEN.**
 - GLM: per-account entitlement generation and reset anchors as *Provider-Control* facts (the kit's numbers are
   local telemetry, not Provider Control receipts). **UNKNOWN.**
 - Claude: Fable-family sublimit remaining per account. **UNKNOWN.**
+- **U4 — Document placement**: `research/` while HOLD (R41 ruling 1) versus the earlier census recommendation of
+  `docs/superpowers/specs/`. **UNKNOWN; Sol's call at release.**
 - Every provider: whether our exact autonomous invocation mode is policy-admitted. **PROVIDER_USAGE_MODE_UNKNOWN**
   until a current policy receipt says otherwise.
 
@@ -662,7 +769,9 @@ preparation receipts built on it (`tests/test_executive_capacity_source_contract
 
 ## 10. Worked numeric example — ORDERED_SPILL debits exactly once, and blind `min()` is wrong
 
-All quantities are **ILLUSTRATIVE**. They are chosen to exercise the operators, not to assert enrollment (§9.3).
+This whole example is **GENERIC and ILLUSTRATIVE**. It assumes `stage_routing = PARTITIONED`
+**HYPOTHETICALLY** to exercise the operator, not as an enrolled Alibaba behaviour fact (§5.4, §9.3 U1). All
+quantities are likewise illustrative and assert no enrollment.
 
 ### 10.1 State
 One Alibaba Team seat `S1`, expression as §5.4:
@@ -687,6 +796,7 @@ safe_parallelism(c)                             = min(3, 4) = 3
 ```
 
 ### 10.3 The debit walk — exactly once, across seat → pack_A → pack_B, under the ceiling
+This is the hypothetical PARTITIONED walk.
 
 | Job | Cost | seat_monthly | pack_A | pack_B | member_cap drawn (cumulative) | Partition sums to cost? |
 |---|---|---|---|---|---|---|
@@ -709,7 +819,16 @@ would strand `pack_A` at expiry while `pack_B` still had 10 months of life.
 Job 5 is failure class 4 in miniature: 588,000 Credits sit in `pack_B`, and this seat's effective capacity is
 nevertheless exhausted at 3,000 because of the member ceiling.
 
-### 10.4 The counter-example — what blind `min()` gets wrong
+### 10.4 The same state under ATOMIC_FALLBACK
+Under ATOMIC_FALLBACK, per-stage whole jobs: the seat holds `floor(3,000 / 10,000) = 0`; the pack subtree holds
+`min(ceiling 40,000, max(25,000, 600,000)) = 40,000`, so it holds `floor(40,000 / 10,000) = 4`. Total
+`startable_jobs = 4`, the same count as PARTITIONED — but the debit walk differs (no job straddles; each job is
+served wholly from one stage), and the stranding report differs: ATOMIC_FALLBACK strands 3,000
+`stranded_at_stage` at the seat and 5,000 `stranded_at_stage` at pack_A, where PARTITIONED strands 3,000
+`stranded_at_ceiling`. A matching startable count is **not evidence of routing**; that is exactly why
+`stage_routing` must be provider-DECLARED and never inferred from a number that agrees.
+
+### 10.5 The counter-example — what blind `min()` gets wrong
 Flatten the tree to its leaves and take `min` of per-leaf `floor(usable / q95)`, as R35 §10's simple conjunctive
 formula would if applied without the algebra:
 
@@ -759,13 +878,53 @@ This contract contributes to exactly three places and nowhere else:
 
 There is no new stage, no new score, and no `capacity_score` scalar.
 
+### 11.1 Composition with the existing CAP-C1 placement seam
+C1 already owns the tie/preference seam. `control_plane/executive_placement_selection.py:39-44@a78b8fe2` records
+Sol addendum (A): C1 has no tie-breaker authority; an exact top tie among eligible candidates always abstains
+(`TIE_ABSTAINED`); `select_placement` refuses any non-`None` `accepted_tie_breaker`; and `tie_breaker_used` is a
+reserved wire slot for a later typed, source-owned ruling receipt. `_CAPACITY_RANK` is narrower still:
+`control_plane/executive_placement_selection.py:159-164@a78b8fe2` ranks eligible candidates by `capacity_state`
+only (`AVAILABLE` before `DEGRADED`), and its source comment says nothing else — observation recency,
+account-label text, or title — ever breaks a tie. The reserved-slot guards are enforced at
+`control_plane/executive_placement_selection.py:790@a78b8fe2`,
+`:1186@a78b8fe2`, and `:1637@a78b8fe2`.
+
+The normative order is exactly this:
+
+1. **Model Router's first lawful suitability tier and hard gates**, including §7's execution-mode intersection,
+   review independence, and every existing C1 exclusion gate. Economics never promotes a model out of a lower
+   suitability tier.
+2. **Capacity economics preference/evidence**, as the lexicographic Stages A–G above. This produces a typed
+   preference with its evidence; it never produces a selection.
+3. **The existing reserved C1 tie/preference seam.** Capacity preference reaches `select_placement` only through
+   `accepted_tie_breaker` / `tie_breaker_used`, as a typed, source-owned ruling receipt, when and only when a
+   later wave has minted that type and named its source owner. Until then C1 abstains on an exact tie and
+   Capacity has no way to break it.
+4. **Ordinary C2 / Executive commitment**, namely §8's atomic claim, unchanged.
+
+There is **no second selector**. Capacity does not rank candidates, does not choose among them, and implements no
+placement function. The one selector is `select_placement`.
+
+Economics must not smuggle preference through back channels:
+
+- **`capacity_state`** — economics may never set or influence AVAILABLE/DEGRADED to move a candidate up
+  `_CAPACITY_RANK`; source-owned health/observation is not an economics dial.
+- **Account or file order** — the order accounts appear in a config, directory listing, ledger, or pool listing is
+  never a preference signal.
+- **Candidate ordering** — the order candidates are supplied to `select_placement` is never a preference signal;
+  the source comment already forbids recency, label text, and title.
+
+For §5.1/§5.2 sibling accounts, choosing among three GLM or three Go accounts is therefore **placement**: C1's
+decision reached by the order above. This contract supplies only economics evidence. Where evidence does not
+discriminate, the lawful outcome is C1's abstention — not a Capacity tie-break.
+
 ---
 
 ## 12. Declared departures and refinements from the verbatim ruling
 
-R35 is the frozen requirement. Three places in this document say something the ruling's verbatim text does not,
-and each is declared here rather than left for the reviewer to discover. **Sol is asked to rule on each
-separately**; none of the three is assumed accepted.
+R35 is the frozen requirement. Three refinements were declared for review. Sol R41 has now ruled on them:
+D1 APPROVED, D2 APPROVED only per proven distinct entitlement/account resource, and D3 APPROVED with the §2.2
+generation-axis correction.
 
 ### D1 — Concurrency is an output, not a term inside `startable_jobs`
 - **Ruling text (§10)**: *"`startable_jobs(c) = minimum jobs_fit across every conjunctive resource, plus the
@@ -776,12 +935,11 @@ separately**; none of the three is assumed accepted.
   same `min` conflates a simultaneity bound with a depletion count and understates throughput by the ratio of
   total work to parallel work. The ruling's own §7 supports the split — *"Suggested parallelism is an output of
   Capacity"* — so this reads as making the "plus" explicit rather than contradicting it.
-- **Risk if Sol rules the other way**: every consumer of the preview must be told which of the two numbers it is
-  reading. Master's existing consumer already carries both notions separately
+- **Live obligation**: every consumer of the preview must be told which of the two numbers it is reading:
+  `startable_jobs` is the depletion count (how many jobs fit before exhaustion), and `safe_parallelism` is a
+  separate simultaneity bound. Master's existing consumer already carries both notions separately
   (`control_plane/capacity_economics_projection.py:83` `estimated_startable_jobs` and the parallelism bound at
-  `:175`), so the split is expressible today; a merge back into one number would be the larger change.
-- **Open question for the reviewer**: does the ruling's "plus" mean a start-admission bound, a simultaneity
-  bound, or both? This document reads it as simultaneity.
+  `:175`), and any presentation that merges them back into one number is defective.
 
 ### D2 — OpenCode Go is three per-account expressions, not one shared set
 - **Ruling text (§2)**: *"OpenCode Go: `ALL_OF(go_shared_5h, go_shared_weekly, go_shared_monthly,
@@ -790,7 +948,9 @@ separately**; none of the three is assumed accepted.
 - **Why**: the fabric holds three Go accounts, and one account's depletion does not deplete another's. Writing
   them as one set would be the same "one entitlement duplicated into fictional capacity" error the ruling exists
   to prevent, in reverse.
-- **Status**: offered as a refinement of the example, not of the operator set.
+- **Sol ruling**: APPROVED ONLY per proven distinct entitlement/account resource. Multiple sessions, hosts,
+  dashboards, or model views of one account remain one expression — never three. Without proven distinctness,
+  the accounts collapse to one expression and fail closed under §4.6.
 
 ### D3 — Generation and observation freshness are two clocks
 - **Ruling text**: §3 lists generation-invalidating events; §15 separately says a reset makes an observation
@@ -800,7 +960,8 @@ separately**; none of the three is assumed accepted.
 - **Why**: the ruling implies the distinction but does not name it, and conflating them produces both of the bad
   outcomes it warns about — a reset treated as a new generation discards valid calibration, while a generation
   change treated as mere staleness keeps joining across an epoch boundary.
-- **Status**: offered as a clarification, with no change to either rule's effect.
+- **Sol ruling**: APPROVED ONLY with the epoch correction of §2.2. Ordinary reset/renewal moves FRESHNESS, never
+  the resource epoch.
 
 Two further constructs are additions rather than departures, and are flagged so the review does not mistake them
 for ruling text: the **BUDGET / CEILING child roles** (§3.2) and the **stage-routing declaration** with its
@@ -815,8 +976,11 @@ invariant. If Sol prefers a different syntax for the same invariant, nothing els
 
 This document is a PROPOSAL and is HOLD-FOR-SOL. Its release condition is a Sol architecture review of
 **(a)** the contract shape — the two child roles, the partitionability precondition, the evaluation rules of §4,
-the generation/freshness split of §2.3, and the claim amendment of §8.3 — and **(b)** the schema name and version
-(`mastermind.provider_resource_composition/v1`). The seat does not release it.
+the generation axes/freshness rules of §2.2–§2.3, and the claim amendment of §8.3 — and **(b)** the schema
+name/version and its Provider Capacity V2 embedding-or-binding decision (§9.0). It stays in `research/` while
+HOLD and is not promoted to `docs/superpowers/specs/`, protected source-law, or any spec location merely to look
+final. The earlier census recommendation of `docs/superpowers/specs/` is superseded for now; final placement is
+Sol's call at release (§9.3 U4). The seat does not release it.
 
 Companion documents in this proposal:
 - `research/MASTERMIND_EXECUTIVE_CAPACITY_COMPOSITION_ADVERSARIAL_ACCEPTANCE_MATRIX_2026-09-16.md` — the 20

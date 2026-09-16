@@ -63,13 +63,15 @@ composition fixtures must be built through the same seams rather than by constru
   views published by a live parser. No view/resource distinction exists to test. Bounded by `rg -n -i
   "wallet|model view|independent.*resource" control_plane ops tests`.
 
-### Class 3 — Alibaba seat → shared-pack overflow debits exactly once
+### Class 3 — generic/hypothetical seat → shared-pack PARTITIONED overflow debits exactly once
 - **Proposed test**: `test_ordered_spill_partitions_one_operation_cost_across_stages_exactly_once`
 - **Owner**: the composition evaluator (contract §3.3, §4.1, worked at §10).
 - **Fixture**: the §10 state — seat 3,000 / pack_A 25,000 / pack_B 600,000 / member cap 40,000, cohort cost
   10,000. Assert the four-job debit walk of §10.3 exactly, including the straddling job 3 (8,000 from pack_A,
   2,000 from pack_B), and assert the invariant `Σ per-resource debits == n_jobs × cost`. Mutants to kill:
   debit-full-cost-from-every-stage; debit-only-the-first-non-empty-stage.
+  This tests the PARTITIONED operator on a generic/hypothetical provider. The Alibaba-specific version cannot be
+  written until routing is proven; Alibaba `stage_routing` remains UNKNOWN (contract §5.4).
 - **Status at master**: **MISSING**. No spill concept exists. Bounded by `rg -n "shared_pack|seat_monthly|
   member_shared_pack|member_pack_cap|ORDERED_SPILL|spill" config control_plane ops integrations tests` — zero
   hits (positive control: the same invocation style returns 322 hits for `quota_class` in
@@ -106,8 +108,9 @@ composition fixtures must be built through the same seams rather than by constru
   because the claim binds `(worker_id, quota_class)` (`:1593`) and no **provider-capacity** hold ledger exists in
   the claim path (contract §8.2, scoped at §8.2.1). Note for the implementer, not a status change: an inactive,
   already-reviewed reservation-bundle design exists for the *physical* resource domain
-  (`control_plane/executive_runtime.py:2248`, `:2250`, `:2282`) and is the pattern contract §8.3 A2 proposes to
-  instantiate — so this class's eventual test should assert serialisation on allocation rows, not on a counter.
+  (`control_plane/executive_runtime.py:2248`, `:2250`, `:2282`) and is the consolidation target named by contract
+  §8.3 A2 — so this class's eventual test should assert serialisation on the canonical primitive's rows, not on
+  a counter or a re-minted provider-quota ledger.
 
 ### Class 7 — stale pre-reset balance cannot authorize post-reset work
 - **Proposed test**: `test_observation_taken_before_a_reset_boundary_cannot_authorize_a_post_reset_claim`
@@ -135,20 +138,23 @@ composition fixtures must be built through the same seams rather than by constru
   (`control_plane/operator_continuity_projection.py:509`, `:517`) and never as a field written by
   `_claim_job_in_transaction` (`control_plane/executive_runtime.py:11015`).
 
-### Class 9 — key/seat/plan generation change invalidates stale joins
+### Class 9 — generation-axis changes move only their required effects
 - **Proposed test**: `test_generation_change_invalidates_stale_resource_joins_for_new_claims_only`
-- **Owner**: resource generation (contract §2.2, events G1–G8).
-- **Fixture**: a resource observed at generation *n*; each of G1–G8 applied in turn; assert every one of the eight
-  invalidates new claims, that historical receipts remain readable and immutable, and that the refusal names
-  which generation event fired. Parametrised over all eight so a later-added event cannot silently skip the gate.
+- **Owner**: the six generation/freshness axes (contract §2.2).
+- **Fixture**: a fully dated resource and live hold; parametrise over `capability_generation`,
+  `resource_generation`, `composition_generation`, `realm_generation`, `rate_generation`, and observation
+  staleness. Assert each axis's required effect **and every required non-effect**: a reset does not invalidate a
+  resource epoch, hold, or calibration; key rotation does not create quota or orphan a resource-epoch hold; a
+  rate-card change retires cohort/debit calibration but does not move the wallet or orphan a hold. Historical
+  receipts remain readable and immutable, and refusals name the exact axis/freshness failure.
 - **Status at master**: **PARTIAL**, and this is the strongest existing coverage of any class. Generation/digest
   invalidation is genuinely defended for the *canary admission* object:
   `control_plane/subscription_canary_admission.py:128` (`realm_generation: int`) and `:283` (generation mismatch
   refusal); `tests/test_claude_subscription_worker.py:510` (`test_seal_refuses_changed_catalog_digest`), `:527`
   (`test_seal_refuses_unenrolled_realm`); `tests/test_executive_model_router.py:383`
-  (`test_runtime_refuses_capacity_with_a_different_capability_profile_digest`). Gap: none of these is keyed to a
-  *provider resource* generation, and none covers G3/G6/G7/G8 (billing generation, shared-pack generation,
-  deduction-policy generation, rate-card generation), which have no representation at master at all.
+  (`test_runtime_refuses_capacity_with_a_different_capability_profile_digest`). Gap: none of these is keyed to
+  the full provider `resource_generation`/`composition_generation` model, and none covers renewal-only freshness,
+  shared-pack composition, deduction policy, or `rate_generation`, which have no representation at master at all.
 
 ### Class 10 — dynamic concurrency reduction prevents new starts without moving current STARTed work
 - **Proposed test**: `test_concurrency_reduction_blocks_new_starts_and_never_moves_started_attempts`
@@ -220,11 +226,11 @@ composition fixtures must be built through the same seams rather than by constru
 - **Status at master**: **MISSING**. Bounded by `rg -n -i "token_plan|remains|wallet" control_plane ops config
   tests` — the #7103 parser that preserves those rows is a Macro-side PR, not at Mastermind master.
 
-### Class 15 — model/harness generation change invalidates stale quality/cost calibration
+### Class 15 — model/harness `rate_generation` change invalidates stale quality/cost calibration
 - **Proposed test**: `test_model_or_harness_generation_change_retires_calibration_to_historical`
-- **Owner**: model economics catalog + Outcome Learning cohort keys (contract §2.2 G5/G8).
+- **Owner**: model economics catalog + Outcome Learning cohort keys (contract §2.2 `rate_generation`).
 - **Fixture**: a cohort with calibrated `q95`; then each of: provider alias silently updated, model version
-  changed, harness changed, thinking-mode changed, rate generation changed. Assert new placement reverts to
+  changed, harness changed, thinking-mode changed, `rate_generation` changed. Assert new placement reverts to
   conservative, old evidence remains queryable as historical, and the two are never mixed in one estimate.
 - **Status at master**: **MISSING**. The adjacent defence is about *cutover determinism*, not calibration:
   `tests/test_provider_offer_economics.py:107`
@@ -263,7 +269,9 @@ composition fixtures must be built through the same seams rather than by constru
 - **Owner**: claim-hold reconciliation (contract §8.1 step 7).
 - **Fixture**: a completed attempt whose provider debit cannot be reconciled → `EFFECT_UNKNOWN`. Assert the hold
   is **not** released, the resource's `usable` stays reduced, and no alternative route is selected on economic
-  grounds. Discriminator: a successfully reconciled attempt releases exactly once and failover becomes available.
+  grounds. The refusing hold state is the canonical primitive's `RECONCILIATION_REQUIRED` state, not a re-minted
+  provider-quota state machine. Discriminator: a successfully reconciled attempt releases exactly once and
+  failover becomes available.
 - **Status at master**: **MISSING in the capacity path**. The vocabulary exists and should be reused rather than
   re-minted: `control_plane/operator_continuity_projection.py:61` and `control_plane/executive_steward.py:54`
   both define `EFFECT_UNKNOWN`, and `control_plane/executive_steward.py:1026` refuses to proceed on a blocker
@@ -276,6 +284,8 @@ composition fixtures must be built through the same seams rather than by constru
 - **Fixture**: a builder on provider family X; the only cheap/abundant reviewer route is also family X; a scarce
   independent family Y is available. Assert Y is chosen or the review is deferred — never X — and that the
   refusal reason is independence, not capacity.
+  The scarcity test must also assert that no preference was smuggled through `capacity_state` or candidate order
+  (contract §11.1).
 - **Status at master**: **PARTIAL**. `tests/test_executive_model_router.py:726`
   (`test_v2_review_exclusions_survive_structured_tiers_and_claim_projection`) establishes that review exclusions
   survive structured tiers and claim projection. Gap: it does not vary *scarcity*, which is the pressure this
@@ -312,7 +322,7 @@ Two structural observations for the reviewer:
    *tree* not at all — which is precisely R35 §21's finding restated as test coverage.
 2. **Twelve of the MISSING classes cannot be written before the contract is frozen.** Classes 1, 3, 4, 5, 14 and
    20 attack operators that do not exist; classes 6, 8 and 18 attack a claim-hold receipt that does not exist;
-   classes 7 and 15 attack a generation/freshness split that does not exist. Writing them against today's scalar
+   classes 7 and 15 attack generation-axis/freshness splits that do not exist. Writing them against today's scalar
    `estimated_startable_jobs` would produce tests that pass vacuously — the worst possible outcome, because a
    green acceptance suite would then certify a fabric that still cannot express the resource graph.
 

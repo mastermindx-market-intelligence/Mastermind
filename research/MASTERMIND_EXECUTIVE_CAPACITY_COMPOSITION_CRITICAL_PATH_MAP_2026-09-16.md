@@ -41,13 +41,14 @@ Two custody rules that govern every row above and are not negotiable by this map
 - **Owner**: Sol / Fable architecture responsibility (R35 §22 A).
 - **What exists at master**: nothing for the tree. `estimated_startable_jobs` is a scalar consumed by
   `control_plane/capacity_economics_projection.py:83`; there is no operator vocabulary, no resource identity, no
-  generation/freshness split, and no claim-side **provider-capacity** hold
+  generation-axis/freshness split, and no claim-side **provider-capacity** hold
   (`control_plane/executive_runtime.py:1593` keys the claim on `(worker_id, quota_class)`; the inactive
   `_PHYSICAL_RESOURCE_SCHEMA_CANDIDATE` at `:2248` is a different resource domain — contract §8.2.1).
 - **What this PR contributes**: the contract proposal, its acceptance matrix, and this map — docs only. No `.py`,
   no `config/`, no `schema/`, and strict `provider_capacity.v1` untouched (contract §9.1).
 - **Who may write**: this lane wrote the three documents; the seat posts. **Release**: Sol architecture review of
-  the contract shape + schema name/version. The seat does not release.
+  the contract shape + schema name/version + the Provider Capacity V2 embedding/binding decision (contract §9.0).
+  The seat does not release.
 - **Blocked by**: nothing. This is the step that unblocks the rest.
 - **Not done here**: the machine-readable schema file. A schema file is a later reviewed act; freezing semantics
   in prose first is deliberate, so the review can attack the semantics before a validator entrenches them.
@@ -56,12 +57,13 @@ Two custody rules that govern every row above and are not negotiable by this map
 
 R35 §22 B names three, each with an existing owner and an existing hold.
 
-### B/#7103 — reconcile current plan generations
+### B/#7103 — reconcile current generation axes
 - **What exists**: the subscription source and the `/token_plan/remains` parser that preserves per-model rows.
-- **What step B asks**: reconcile current GLM / Alibaba Team / MiniMax plan generations; retain historical
-  generations; **do not infer enrollment**.
+- **What step B asks**: reconcile current GLM / Alibaba Team / MiniMax `capability_generation`,
+  `resource_generation`, `composition_generation`, and `rate_generation` facts; retain historical generations;
+  **do not infer enrollment**.
 - **Custody**: RELEASE HOLD at `6ce16e745064`; the seat removed the arms (R13). Its writer keeps it.
-- **Blocked by**: the hold. Composition dependency: contract §2.2 G1–G8 defines what "a generation" is, and
+- **Blocked by**: the hold. Composition dependency: contract §2.2 defines the generation axes, and
   §5.3 defines that its per-model rows are views, not wallets — so B/#7103 should not be released before A is
   reviewed, or the parser's rows risk being read as independent resources (failure class 14).
 
@@ -86,9 +88,11 @@ R35 §22 B names three, each with an existing owner and an existing hold.
 ## 3. Step C — Ground actual enrollment
 
 - **Owner**: Provider Control, without exposing credentials.
-- **What step C asks**: for every purchased provider recover actual product; tier; entitlement generation;
-  seat/realm binding; billing/reset generation; shared-pack identity where applicable; usage-policy class.
-  R35 §22 C: "Do not infer this from what we remember buying."
+- **What step C asks**: for every purchased provider recover actual product; tier; the six
+  generation/freshness axes of contract §2.2 (`capability_generation`, `resource_generation`,
+  `composition_generation`, `realm_generation`, `rate_generation`, `observed_at`/reset boundary); seat/realm
+  binding; billing/reset generation; shared-pack identity where applicable; usage-policy class. R35 §22 C:
+  "Do not infer this from what we remember buying."
 - **What exists at master**: the *shape* of a credential ceremony and realm receipts, all hermetic —
   `ops/executive_os/subscription_provider_credential.py` owns the secret-bearing ceremony (R15, no second
   writer); `ops/executive_os/provider_realm_facts.py:40` refuses direct issuance;
@@ -96,8 +100,9 @@ R35 §22 B names three, each with an existing owner and an existing hold.
   `control_plane/model_router.py:1082` / `:1108` export and verify the capacity owner fact.
 - **What is UNKNOWN** (contract §9.3, and this is the whole point of step C): Alibaba **Team** enrollment — master
   models Personal (`config/subscription_provider_profiles.v1.json:33`
-  `"alibaba-token-plan-personal"`) — seat tier, shared-pack identity/count/expiry, member cap; MiniMax plan
-  generation; GLM per-account entitlement generation as a Provider-Control fact.
+  `"alibaba-token-plan-personal"`) — `stage_routing` (PARTITIONED versus ATOMIC_FALLBACK), seat tier,
+  shared-pack identity/count/expiry, member cap; MiniMax plan `capability_generation`; GLM per-account
+  `capability_generation` as a Provider-Control fact.
 - **Blocked by**: not by a hold — by the absence of a live evidence path. R15: the realm/capacity facts are
   fixture-only, so today's minting is interactive-canary evidence, not production enrollment. R27 additionally
   records the Executive web→MCP connector at `401 Manual reauthentication required`, so the authenticated surface
@@ -108,8 +113,8 @@ R35 §22 B names three, each with an existing owner and an existing hold.
 
 - **Owner**: Provider Control observation path.
 - **What step D asks**: GLM 5h + weekly + tool allowance / reset / concurrency; MiniMax shared-plan semantics +
-  5h + weekly + dynamic throttling; Alibaba Team seat monthly remaining + shared-pack remaining/expiry + member
-  limit + dynamic concurrency. **Unknown stays unknown.**
+  5h + weekly + dynamic throttling; Alibaba Team `stage_routing`, seat monthly remaining, shared-pack
+  remaining/expiry, member limit, and dynamic concurrency. **Unknown stays unknown.**
 - **Composition dependency**: contract §2.3 — an observation is only usable inside its freshness window and dies
   at a reset boundary; and §4.5 — one UNKNOWN leaf makes the whole expression UNKNOWN. So step D's product is not
   "numbers" but *dated, generation-stamped* numbers.
@@ -129,8 +134,8 @@ R35 §22 B names three, each with an existing owner and an existing hold.
   `measured_native_delta` admitted as a burn method (`control_plane/provider_model_economics.py:21`) and the
   declaration-without-balances rule pinned (`tests/test_provider_model_economics.py:91`).
 - **What is missing**: Alibaba **Team** model entries (the catalog's Alibaba surface is
-  `alibaba_token_plan_personal`), and cohort keys that bind model *and* harness *and* rate generation (contract
-  §2.2 G5/G8; matrix class 15).
+  `alibaba_token_plan_personal`), and cohort keys that bind model *and* harness *and* `rate_generation`
+  (contract §2.2; matrix class 15).
 - **Blocked by**: step C for the Team entries; step A for the cohort-key definition.
 
 ## 6. Step F — Shadow portfolio planner
@@ -153,11 +158,11 @@ R35 §22 B names three, each with an existing owner and an existing hold.
   resource-expression evaluation → atomic claim/hold → existing governed harness → real task → visible useful
   result → independent verification where required → actual provider debit → hold reconciliation → corrected
   fresh capacity.
-- **Blocked by**: all of A–F, plus two gates outside this program: the **execution-mode gate** (contract §7 —
+- **Blocked by**: all of A–F, plus the canonical Executive commitment primitive (contract §8.3), without which
+  "atomic claim/hold" cannot open, plus the **execution-mode gate** (contract §7 —
   every current profile is `autonomous_allowed: false` at
   `config/subscription_provider_profiles.v1.json:24`, `:52`, `:81`, and R35 §6 says do not relax that because the
-  adapters work), and the **claim amendment** (contract §8.3), without which "atomic claim/hold" has nothing to
-  hold.
+  adapters work).
 - **Standing precedent**: an interactive canary never flips a flag (R18 (2)); `claude -p` headless is UNATTENDED
   unless a policy receipt admits that exact mode (R13).
 
@@ -176,7 +181,7 @@ R35 §22 B names three, each with an existing owner and an existing hold.
 ## 9. Dependency shape, stated once
 
 ```
-A (this PR, HOLD-FOR-SOL)
+A (this PR, HOLD-FOR-SOL; release also depends on the V2 embedding/binding decision)
 ├─► B/#671  harden source law        [Sol's writer]
 ├─► B/#7103 generation reconciliation [RELEASE HOLD]
 ├─► B/#7116 measured-input repair     [WRITE WITHHELD]
