@@ -3754,3 +3754,190 @@ def test_ceo_submit_cli_pins_every_outcome_class_document_and_exit_code(
             assert host.worker_replace_calls == 0
             assert host.receipt_writes == 0
             assert host.phases == []
+
+
+# ---------------------------------------------------------------------------
+# R7 coverage: the REAL readiness poll and the candidate-path contract.
+#
+# ``ProductionCeoSubmitHost._await_control_ready`` is the single readiness seam
+# behind BOTH ``prove_control_ready`` (the ARM/DISARM readiness stage) and
+# ``_prove_rolled_back_control_live`` (the R17 B3 live rollback proof).  The
+# rollback tests above override that seam on a probe subclass, so before these
+# tests the real loop had no behavioural coverage at all: inverting its loop
+# condition left the whole file green.  These tests drive the real method over a
+# recorded subclass with a deterministic fake clock -- no sleeping, no wall
+# clock, no root, no launchd and no network.
+# ---------------------------------------------------------------------------
+
+
+class _FakeMonotonic:
+    """A deterministic ``time.monotonic``: one fixed step per read."""
+
+    def __init__(self, *, start=1000.0, step=1.0):
+        self._current = start
+        self._step = step
+        self.calls = 0
+
+    def __call__(self):
+        self.calls += 1
+        value = self._current
+        self._current += self._step
+        return value
+
+
+class _SleepRecorder:
+    """The fake ``time.sleep``: records the request and never waits."""
+
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, seconds):
+        self.calls.append(seconds)
+
+
+def _install_fake_clock(monkeypatch):
+    """Install the deterministic clock pair, returning ``(clock, sleeps)``."""
+
+    clock = _FakeMonotonic()
+    sleeps = _SleepRecorder()
+    monkeypatch.setattr(control.time, "monotonic", clock)
+    monkeypatch.setattr(control.time, "sleep", sleeps)
+    return clock, sleeps
+
+
+class _ReadinessProbeHost(control.ProductionCeoSubmitHost):
+    """The real readiness poll with every OS seam recorded and none reached.
+
+    ``_loaded`` always answers True, ``_control_ready`` answers False for the
+    first ``ready_after - 1`` polls and True on the ``ready_after``-th (never,
+    when ``ready_after`` is None), and ``_persist_phase`` records.
+    """
+
+    def __init__(self, *, ready_after=None):
+        super().__init__()
+        self.ledger = []
+        self.ready_calls = 0
+        self._ready_after = ready_after
+
+    def _loaded(self, label):
+        self.ledger.append(("loaded", label))
+        return True
+
+    def _control_ready(self, expected_sha):
+        self.ready_calls += 1
+        self.ledger.append(("ready", expected_sha))
+        if self._ready_after is None:
+            return False
+        return self.ready_calls >= self._ready_after
+
+    def _persist_phase(self, transaction, phase, *, operation=None):
+        self.ledger.append(("phase", phase))
+
+
+def _readiness_transaction():
+    """A carrier for the phase writer; the probe host never reads its fields."""
+
+    return control.TransactionContext(
+        transaction_id="autonomy-0123456789ab",
+        expected_sha=SHA,
+        prior_configs=None,
+        candidates=None,
+        admission=None,
+    )
+
+
+def test_ceo_submit_control_readiness_polls_until_ready_and_raises_only_after_the_deadline(
+    monkeypatch,
+):
+    # (a) READY ON THE THIRD POLL: the method must actually POLL, then return.
+    _clock, sleeps = _install_fake_clock(monkeypatch)
+    third_poll = _ReadinessProbeHost(ready_after=3)
+
+    assert third_poll._await_control_ready(SHA) is None
+
+    assert third_poll.ledger.count(("ready", SHA)) == 3
+    assert third_poll.ready_calls == 3
+    assert len(sleeps.calls) == 2
+    # The label probe runs inside the poll, and only on the control boundary.
+    assert third_poll.ledger.count(("loaded", control.CONTROL_LABEL)) == 3
+    assert third_poll.ledger.count(("loaded", control.WORKER_LABEL)) == 0
+
+    # (b) READY IMMEDIATELY: one poll and not one sleep.
+    _clock, sleeps = _install_fake_clock(monkeypatch)
+    immediate = _ReadinessProbeHost(ready_after=1)
+
+    assert immediate._await_control_ready(SHA) is None
+
+    assert immediate.ledger.count(("ready", SHA)) == 1
+    assert immediate.ready_calls == 1
+    assert sleeps.calls == []
+
+    # (c) NEVER READY: the deadline ends the loop, and it ends LOOPING.
+    clock, sleeps = _install_fake_clock(monkeypatch)
+    never = _ReadinessProbeHost(ready_after=None)
+
+    with pytest.raises(RuntimeError) as raised:
+        never._await_control_ready(SHA)
+
+    assert "did not reach READY" in str(raised.value)
+    assert not isinstance(raised.value, control.TransactionEffectUnknown)
+    # Bounded: the fake clock advances 1.0s per read against a 45.0s budget, so
+    # a poll that keeps re-reading the clock can never exceed 46 body passes.
+    assert 1 < never.ready_calls <= 46
+    assert clock.calls > never.ready_calls
+    assert len(sleeps.calls) >= 1
+
+    # ``prove_control_ready`` DELEGATES: the phase is persisted exactly once,
+    # AFTER the readiness poll returned, and only inside a transaction.
+    _clock, sleeps = _install_fake_clock(monkeypatch)
+    bound = _ReadinessProbeHost(ready_after=2)
+    bound._active_transaction = _readiness_transaction()
+
+    assert bound.prove_control_ready(SHA) is None
+
+    ready_positions = [
+        index for index, entry in enumerate(bound.ledger) if entry[0] == "ready"
+    ]
+    assert bound.ledger.count(("phase", "READY_PROVEN")) == 1
+    assert ready_positions
+    assert max(ready_positions) < bound.ledger.index(("phase", "READY_PROVEN"))
+    assert len(sleeps.calls) == 1
+
+    _clock, _sleeps = _install_fake_clock(monkeypatch)
+    unbound = _ReadinessProbeHost(ready_after=1)
+    unbound._active_transaction = None
+
+    assert unbound.prove_control_ready(SHA) is None
+
+    assert unbound.ledger.count(("ready", SHA)) == 1
+    assert all(entry[0] != "phase" for entry in unbound.ledger)
+
+
+def test_ceo_submit_candidate_paths_are_distinct_and_returned_control_first():
+    host = control.ProductionCeoSubmitHost()
+
+    control_candidate, worker_candidate = host._candidate_paths(
+        "autonomy-0123456789ab"
+    )
+
+    # Two DISTINCT staging paths, control FIRST: the pair is consumed in order,
+    # so a swap silently renames which boundary is named first.
+    assert control_candidate != worker_candidate
+    assert control_candidate.name == ".autonomy-control-0123456789ab.candidate.json"
+    assert worker_candidate.name == ".autonomy-worker-0123456789ab.candidate.json"
+    assert "control" in control_candidate.name
+    assert "worker" in worker_candidate.name
+    assert "worker" not in control_candidate.name
+    assert "control" not in worker_candidate.name
+
+    # Both stage DIRECTLY beside the installed configs they replace.
+    for candidate in (control_candidate, worker_candidate):
+        assert candidate.parent == control.CONFIG_ROOT
+        assert candidate.name.startswith(".")
+        assert candidate.name.endswith(".candidate.json")
+
+    # A transaction id outside the closed ``autonomy-[0-9a-f]{12}`` domain is
+    # EFFECT_UNKNOWN, never a path derived from arbitrary caller text.
+    for rejected in ("autonomy-XYZ", "nope", ""):
+        with pytest.raises(control.TransactionEffectUnknown):
+            host._candidate_paths(rejected)
