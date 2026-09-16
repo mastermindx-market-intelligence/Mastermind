@@ -441,6 +441,10 @@ right allocation of each class to an owner?** It is not a request to write the t
 - **Owner**: time-bound overlays through Provider Control facts (contract §6.4).
 - **Fixture**: a zero-quota/double-limit overlay with `effective_until` in the past, then outside its daily
   window. Assert the overlay does not apply, ordinary resource limits bind, and the advisory digest changes.
+  **Mutants to kill**: one that keeps the overlay applied after `effective_until` because the campaign digest
+  is unchanged; one that treats the daily window as advisory and relieves the limit at any hour inside the
+  campaign dates; and one that persists the doubled limit into the ordinary resource after expiry — the
+  second-wallet mutant §6.4 forbids.
 - **Status at master**: **MISSING**. Bounded by
   `rg -n "effective_until|daily.*window|offer.*overlay|promotion" control_plane ops config tests`.
 

@@ -1115,7 +1115,11 @@ reached by the order above. This contract supplies only economics evidence. Wher
 the lawful outcome is C1's abstention — not a Capacity tie-break.
 
 CF2-I is the downstream integration/adoption owner. Its chain is: hard gates → first lawful Model Router tier →
-Capacity ranks candidates inside that tier → Executive atomically claims one Worker. Economics must ultimately
+Capacity supplies typed economics **evidence** over the concrete C1 candidate set inside that tier → #657's
+exact tie/abstention seam consumes that evidence → Executive atomically claims one Worker. **Capacity never
+ranks candidates and never chooses among them**, here or anywhere else in this document; any sentence
+that reads as if it does is the second selector this contract forbids, and is to be read against the
+rule above. Economics must ultimately
 output concrete WORKER IDs through existing Worker / Runtime / Model-Router facts; WorkerRegistry/quota metadata
 (model alias, provider alias, routing policy/profile/capability digests) is the lawful router-alias-to-worker
 join. Never mint a capacity-worker-selector, second model-to-worker registry, or provider scheduler, and never
