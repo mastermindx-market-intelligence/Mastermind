@@ -38,7 +38,7 @@ class ClaudeMcpClientProjection:
     enabled_tools: tuple[str, ...]
     auto_approved_tools: tuple[str, ...]
     denied_tools: tuple[str, ...]
-    source_tool_catalog_digests: tuple[str, ...]
+    source_tool_catalog_digests: tuple[tuple[str, str], ...]  # (config_name, schema digest)
     _configuration_json: str
     production_armed: bool = field(default=False, init=False)
 
@@ -104,7 +104,7 @@ def _catalog_denials(profile, catalogs):
             raise ClaudeMcpProjectionError("observed catalog schema cannot be normalized") from exc
         if full_digest is None or grant_digest != grant.tool_schema_digest:
             raise ClaudeMcpProjectionError("observed catalog tool schema drift")
-        digests.append(full_digest)
+        digests.append((grant.config_name, full_digest))
         denied.extend(f"mcp__{grant.config_name}__{name}" for name in set(tools) - allowed)
     return tuple(sorted(denied)), tuple(sorted(digests))
 

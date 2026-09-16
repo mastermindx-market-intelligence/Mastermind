@@ -82,3 +82,15 @@ The envelope adds `tests/test_ceo_submit_armed_composition.py` as a ninth path. 
 Fourteen new classifier cases first failed. Eight real temporary-Git-repository cases verify documentation/evidence acceptance and source/config/script rejection through the actual D8 test. The full owning suite plus the existing three browser/capability suites passed 129 tests. No test is skipped, baselined, disabled or removed by this repair.
 
 Projector and native-fixture SHA-256 values still match the five completed native browser proofs. This repair does not rerun those provider-free proofs or claim new account, browser-resource, Desktop, credential or fleet activation. Publish on the same PR/branch, require fresh hosted CI and independent review of this guard change, and retain all production gates.
+
+## R3 — server-bound catalog identity (September 16)
+
+Author review after the R2 full hosted test succeeded found a metadata collision: sorting bare full-catalog digests loses the association to the MCP server. Two servers with identical granted schemas but different ungranted schemas could exchange catalogs without changing the stored digest tuple or any generated permissions. The new twin-server regression reproduced that exact failure before repair.
+
+Keep the existing `source_tool_catalog_digests` field, but its unshipped internal shape is now an immutable, server-name-sorted tuple of `(config_name, schema_digest)` pairs. The same owner-supplied catalogs and existing schema-digest function are used. No new catalog store, authority, tool grant, client config, launch flag, runtime guard or credential path is added. Consumers of this candidate metadata must use the paired shape; the metadata remains observation, not admission.
+
+Five additional cases cover a swapped-catalog witness, exact name/digest pairing on CLI/SDK/inline-child surfaces, and order invariance. The four owning/browser/capability files pass 134 tests. Restoring the old bare-digest behavior in an isolated interpreter fails four new checks while the reorder control still passes; source files are not mutated by the fault injection.
+
+The two-line production-module change affects only returned catalog metadata. Preserve earlier native browser receipts at their original hashes; do not claim they were rerun on this new revision. The native fixture file and generated client configurations are unchanged; fresh exact-head independent review and hosted CI remain required before release.
+
+Current procedure pin: `a78b8fe23d8e1ed129880ac47e97ebe96afa8aea`, Skillpack 1.0.1. Direct execution reason: PRINCIPAL_JUDGMENT / CRITICAL_PATH_SHORTCUT for a reproduced permission-attestation defect in this incumbent source lane; independent reviewer placement remains unconfirmed. No account or service activation is authorized by this amendment.

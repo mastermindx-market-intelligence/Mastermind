@@ -241,3 +241,49 @@ def test_cli_and_sdk_use_catalog_denials_without_new_permissions(api, profile):
     sdk = api.project_claude_mcp_client(profile, surface="agent-sdk", observed_tool_catalogs=catalogs)
     assert sdk.configuration()["disallowed_tools"] == list(sdk.denied_tools)
     assert sdk.configuration()["strict_mcp_config"] is True
+
+
+def twin_catalog_fixture(profile):
+    import copy
+    profile, catalogs = catalog_pair(profile)
+    first = profile.mcp_server_grants[0]
+    second = dataclasses.replace(first, config_name="catalogTwin")
+    left = copy.deepcopy(catalogs[first.config_name])
+    right = copy.deepcopy(left)
+    left["tools"][-1]["inputSchema"] = {"type": "string"}
+    right["tools"][-1]["inputSchema"] = {"type": "integer"}
+    return dataclasses.replace(profile, mcp_server_grants=(first, second)), {
+        first.config_name: left, second.config_name: right,
+    }
+
+
+def test_catalog_identity_changes_when_server_catalogs_are_swapped(api, profile):
+    profile, catalogs = twin_catalog_fixture(profile)
+    first, second = (g.config_name for g in profile.mcp_server_grants)
+    before = api.project_claude_mcp_client(profile, surface="inline-subagent", observed_tool_catalogs=catalogs)
+    swapped = {first: catalogs[second], second: catalogs[first]}
+    after = api.project_claude_mcp_client(profile, surface="inline-subagent", observed_tool_catalogs=swapped)
+    assert before.configuration() == after.configuration()
+    assert before.denied_tools == after.denied_tools
+    assert before.source_tool_catalog_digests != after.source_tool_catalog_digests
+
+
+@pytest.mark.parametrize("surface", ["cli", "agent-sdk", "inline-subagent"])
+def test_catalog_fingerprints_retain_server_names(api, profile, surface):
+    from control_plane.executive_agent_capabilities import observed_mcp_tool_schema_digest
+    profile, catalogs = twin_catalog_fixture(profile)
+    projection = api.project_claude_mcp_client(profile, surface=surface, observed_tool_catalogs=catalogs)
+    expected = tuple(sorted((name, observed_mcp_tool_schema_digest({
+        "tools": {row["name"]: row for row in catalog["tools"]},
+    })) for name, catalog in catalogs.items()))
+    assert projection.source_tool_catalog_digests == expected
+
+
+def test_catalog_identity_ignores_input_order_not_server_assignment(api, profile):
+    profile, catalogs = twin_catalog_fixture(profile)
+    before = api.project_claude_mcp_client(profile, surface="inline-subagent", observed_tool_catalogs=catalogs)
+    reordered = {name: {"tools": list(reversed(catalog["tools"]))}
+                 for name, catalog in reversed(tuple(catalogs.items()))}
+    reverse_profile = dataclasses.replace(profile, mcp_server_grants=tuple(reversed(profile.mcp_server_grants)))
+    after = api.project_claude_mcp_client(reverse_profile, surface="inline-subagent", observed_tool_catalogs=reordered)
+    assert before == after
