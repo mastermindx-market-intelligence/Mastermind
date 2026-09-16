@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 from pathlib import Path
 
 import pytest
 
+from control_plane.executive_host_pressure import canonical_host_pressure_json
 from control_plane.executive_physical_resources import (
     PhysicalResourceRefusal,
     apply_physical_observation,
@@ -118,6 +120,56 @@ def _observations():
         "pools": {p: {"available": 100, "baseline_id": "base-1", "included_materializations": []}
                   for p in ("memory", "git-store", "external", "cpu", "io", "heavy")},
     }
+
+
+HP1_HOST_REF = "host-" + "a" * 64
+HP1_BOOT_REF = "boot-" + "b" * 64
+
+
+def _host_pressure_snapshot(*, host_ref=HP1_HOST_REF, boot_ref=HP1_BOOT_REF, observed_at_ms=95, partial=False, extreme=False):
+    cpu_count = 10
+    load1_milli = INT64_MAX if extreme else 2500
+    snapshot = {
+        "schema": "mastermind.host_pressure_snapshot/v1",
+        "host_ref": host_ref,
+        "boot_ref": boot_ref,
+        "observed_at_ms": observed_at_ms,
+        "sample_window_ms": 5,
+        "logical_cpu_count": cpu_count,
+        "load1_milli": load1_milli,
+        "load_ratio_milli": load1_milli // cpu_count,
+        "fseventsd_process_count": 1,
+        "fseventsd_cpu_milli_pct": None if partial else (INT64_MAX if extreme else 500),
+        "fseventsd_rss_bytes": None if partial else (INT64_MAX if extreme else 4096),
+        "telemetry_status": "PARTIAL" if partial else "COMPLETE",
+        "unknown_fields": ["fseventsd_cpu_milli_pct", "fseventsd_rss_bytes"] if partial else [],
+    }
+    return snapshot
+
+
+def _host_pressure_evidence(snapshot=None, *, digest=None):
+    snapshot = copy.deepcopy(snapshot or _host_pressure_snapshot())
+    if digest is None:
+        digest = hashlib.sha256(canonical_host_pressure_json(snapshot)).hexdigest()
+    return {"snapshot": snapshot, "snapshot_sha256": digest}
+
+
+def _hp1_context(*, snapshot=None, digest=None):
+    request = _request()
+    request["host_id"] = HP1_HOST_REF
+    request["boot_id"] = HP1_BOOT_REF
+    for phase in request["phases"]:
+        for demand in phase["demands"]:
+            demand["window_binding"]["boot_id"] = HP1_BOOT_REF
+    policy = _policy()
+    policy["canonical_runtime"]["host_id"] = HP1_HOST_REF
+    policy["canonical_runtime"]["boot_id"] = HP1_BOOT_REF
+    policy["profiles"][0]["qualified_demands"] = copy.deepcopy(request["phases"][0]["demands"])
+    observations = _observations()
+    observations["host_id"] = HP1_HOST_REF
+    observations["boot_id"] = HP1_BOOT_REF
+    observations["host_pressure_evidence"] = _host_pressure_evidence(snapshot, digest=digest)
+    return request, policy, observations
 
 
 def _reserved_charges():
@@ -380,3 +432,75 @@ def test_wait_budget_is_bounded_and_unset_caps_refuse():
         with pytest.raises(PhysicalResourceRefusal) as exc:
             bounded_wait_ms(policy, remaining_start_ms=12)
         assert exc.value.code == "WAIT_BUDGET_UNQUALIFIED"
+
+
+def test_hp1a_valid_exact_host_pressure_snapshot_binds_begin_result_identity():
+    request, policy, observations = _hp1_context()
+    expected = observations["host_pressure_evidence"]
+    result = evaluate_begin(
+        request, policy=policy, current_charges=_reserved_charges(),
+        observations=observations, decision_time_ms=100,
+    )
+    assert result["host_pressure_snapshot_sha256"] == expected["snapshot_sha256"]
+    assert result["host_pressure_observed_at_ms"] == 95
+
+
+def test_hp1a_missing_host_pressure_evidence_refuses():
+    request, policy, observations = _hp1_context()
+    observations.pop("host_pressure_evidence")
+    with pytest.raises(PhysicalResourceRefusal) as exc:
+        evaluate_begin(request, policy=policy, current_charges=_reserved_charges(), observations=observations, decision_time_ms=100)
+    assert exc.value.code == "HOST_PRESSURE_MISSING"
+
+
+def test_hp1a_invalid_host_pressure_schema_refuses_before_hash_authority():
+    request, policy, observations = _hp1_context()
+    observations["host_pressure_evidence"] = {
+        "snapshot": {**_host_pressure_snapshot(), "schema": "other"},
+        "snapshot_sha256": "0" * 64,
+    }
+    with pytest.raises(PhysicalResourceRefusal) as exc:
+        evaluate_begin(request, policy=policy, current_charges=_reserved_charges(), observations=observations, decision_time_ms=100)
+    assert exc.value.code == "HOST_PRESSURE_SCHEMA_INVALID"
+
+
+def test_hp1a_host_pressure_digest_mismatch_refuses():
+    request, policy, observations = _hp1_context(digest="0" * 64)
+    with pytest.raises(PhysicalResourceRefusal) as exc:
+        evaluate_begin(request, policy=policy, current_charges=_reserved_charges(), observations=observations, decision_time_ms=100)
+    assert exc.value.code == "HOST_PRESSURE_HASH_MISMATCH"
+
+
+def test_hp1a_incomplete_host_pressure_telemetry_refuses():
+    request, policy, observations = _hp1_context(snapshot=_host_pressure_snapshot(partial=True))
+    with pytest.raises(PhysicalResourceRefusal) as exc:
+        evaluate_begin(request, policy=policy, current_charges=_reserved_charges(), observations=observations, decision_time_ms=100)
+    assert exc.value.code == "HOST_PRESSURE_INCOMPLETE"
+
+
+@pytest.mark.parametrize(
+    ("field", "snapshot", "code"),
+    [
+        ("host", _host_pressure_snapshot(host_ref="host-" + "c" * 64), "HOST_BINDING_MISMATCH"),
+        ("boot", _host_pressure_snapshot(boot_ref="boot-" + "d" * 64), "BOOT_GENERATION_MISMATCH"),
+        ("future", _host_pressure_snapshot(observed_at_ms=101), "HOST_PRESSURE_FUTURE_DATED"),
+        ("stale", _host_pressure_snapshot(observed_at_ms=89), "HOST_PRESSURE_STALE"),
+    ],
+)
+def test_hp1a_host_generation_and_freshness_refusals(field, snapshot, code):
+    del field
+    request, policy, observations = _hp1_context(snapshot=snapshot)
+    with pytest.raises(PhysicalResourceRefusal) as exc:
+        evaluate_begin(request, policy=policy, current_charges=_reserved_charges(), observations=observations, decision_time_ms=100)
+    assert exc.value.code == code
+
+
+def test_hp1a_extreme_descriptive_metrics_do_not_gain_hidden_gate_authority():
+    snapshot = _host_pressure_snapshot(extreme=True)
+    request, policy, observations = _hp1_context(snapshot=snapshot)
+    result = evaluate_begin(
+        request, policy=policy, current_charges=_reserved_charges(),
+        observations=observations, decision_time_ms=100,
+    )
+    assert result["fresh_begin"] is True
+    assert result["host_pressure_snapshot_sha256"] == hashlib.sha256(canonical_host_pressure_json(snapshot)).hexdigest()
