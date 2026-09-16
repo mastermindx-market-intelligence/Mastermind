@@ -159,8 +159,14 @@ universal score**.
 - **CF2-I / incumbent C1 note**: #657 (head `bc89980c7e06e81a883da8078660d3bf208e68eb`, OPEN,
   BUILT_NOT_PROVEN / REPAIR_REQUIRED) is the incumbent candidate seam; repair it on its own branch after Step A.
   CF2-I is downstream integration/adoption owner. End state: Model Router first lawful tier → concrete C1 Worker
-  candidates → Capacity resource/economics source → #657-style preference receipt → CF2-I / C1-v2 → C2 /
-  Executive atomic resource+worker commitment → existing broker/adapter. RF1 receipts:
+  candidates → Capacity resource/economics evidence → **#657's exact tie/abstention preference seam** → CF2-I
+  → C2 / Executive atomic resource+worker commitment → existing broker/adapter. **No second selector, and no
+  dead producer**: the Capacity evidence the seam reads must be an existing, exact/content-addressed producer
+  at the seam's own head; a preference receipt naming a producer that does not resolve there is INADMISSIBLE,
+  not merely stale. **Current states**: #657 OPEN, BUILT_NOT_PROVEN / REPAIR_REQUIRED at `bc89980c`; CF2-I
+  UNBUILT — the integration/adoption owner exists as a named seat, not as merged code, and its RF1 receipts
+  are read-only at `8ba7deed`; C2 / Executive atomic commitment UNBUILT — §8.3's canonical primitive is not
+  chosen yet, which is why step G cannot open. RF1 receipts:
   `docs/EXECUTIVE_WORKER_ROUTING.md:74@8ba7deed` and `:95@8ba7deed`. Never mint a worker selector, second
   model-to-worker registry, or provider scheduler, and never reorder `preferred_model_aliases` on economics
   grounds.
@@ -236,7 +242,7 @@ universal score**.
 - **Blocked by**: the acceptance suite. The race tests are matrix class 6 (currently PARTIAL — worker-slot
   exclusion only) and the correction/reset tests are classes 7 and 8 (currently MISSING). H cannot open while
   those three are not EXISTS. Worth stating plainly because it sizes the remaining work: at this pin **no** class
-  of the thirty-seven is fully EXISTS — eleven are PARTIAL, twenty-six MISSING.
+  of the thirty-eight is fully EXISTS — eleven are PARTIAL, twenty-seven MISSING.
 
 ---
 

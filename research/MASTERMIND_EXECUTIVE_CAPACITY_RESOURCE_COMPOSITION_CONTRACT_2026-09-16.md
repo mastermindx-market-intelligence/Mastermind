@@ -1091,8 +1091,9 @@ The normative order is exactly this:
    suitability tier and never compares candidates across execution modes.
 2. **Capacity economics preference/evidence**, as the lexicographic Stages A–G above. This produces a typed
    preference with its evidence; it never produces a selection.
-3. **The incumbent #657-style preference receipt.** It stays generic and binds responsibility, exact V1
-   selection-input digest, tied worker set/order, current source ref, and preference generation. Provider
+3. **#657's own tie/abstention preference seam — the incumbent, not a lookalike.** It stays generic and
+   binds responsibility, exact V1 selection-input digest, tied worker set/order, current source ref, and
+   preference generation; where the evidence does not discriminate it abstains rather than breaking the tie. Provider
    entitlement/resource/model/rate epochs do not belong in that receipt; they live in the exact, content-addressed
    Capacity SOURCE artifact referencing Provider Capacity V2, the resource graph, and economics output.
 4. **Ordinary C2 / Executive commitment**, namely §8's atomic claim, unchanged.
@@ -1123,8 +1124,18 @@ reorder `preferred_model_aliases` on economics grounds. RF1 compatibility receip
 `docs/EXECUTIVE_WORKER_ROUTING.md:95@8ba7deed` ("preferred_model_aliases ... projects *only the first tier*").
 
 End state, stated once: **Model Router first lawful tier → concrete C1 Worker candidates → Capacity
-resource/economics source → #657-style preference receipt → CF2-I / C1-v2 → C2 / Executive atomic
+resource/economics evidence → #657's exact tie/abstention preference seam → CF2-I → C2 / Executive atomic
 resource+worker commitment → existing broker/adapter.**
+
+Two properties of that chain are normative. **No second selector**: every link is an existing owner, and a new
+one may not be introduced to carry preference. **No dead producer**: the Capacity evidence the seam consumes
+must be an existing, exact/content-addressed producer resolvable at the seam's own head — a preference receipt
+naming a producer that does not resolve there is **INADMISSIBLE**, not merely stale, and the lawful outcome is
+C1's abstention. Current states, so the chain is not read as built: **#657** OPEN, BUILT_NOT_PROVEN /
+REPAIR_REQUIRED at `bc89980c`; **CF2-I** UNBUILT, a named integration/adoption owner rather than merged code,
+whose RF1 receipts are read-only at `8ba7deed`; **C2 / Executive atomic commitment** UNBUILT, because §8.3's
+one canonical primitive has not been chosen. Three of the chain's six links therefore do not exist yet, which
+is exactly why this document freezes semantics and starts nothing.
 
 **Placement authority for account pools is the #688 resource graph → the #657 candidate-preference seam → the
 CF2-I consumer / C2 commitment; Macro #7142 is a subordinate candidate-selection kernel and never a second
