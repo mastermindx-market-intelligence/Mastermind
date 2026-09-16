@@ -107,3 +107,30 @@ this asset-response lab. Expiry-aware options maps, level-change explanations,
 conditional scenarios and Prophet-first delivery remain separate bounded work
 under their existing owners. Do not hide them under this adapter or rebuild their
 underlying stores. Macro Agent OS reconciliation remains owed in its owning repo.
+
+
+## 2026-09-16 continuation — replay ambiguity repaired; release still held
+
+Protected procedure remains `7642aea155d2817219135b24246b55c1d7611c66`.
+The previous candidate was pushed as `e9310c71cb1541b85c1ff7205955fd462735a0af`.
+Hosted run `35046156905`, attempt 1, job `104636300500` completed with FAILURE
+at `2026-09-16T02:27:41Z` in the full repository test gate. CodeQL checks passed.
+The structured annotation supplies only exit code 1, not failing test identities.
+Raw-log retrieval hit a tool safety block; no alternate raw-log route or rerun
+was used. The hosted failure's cause is UNKNOWN, not declared unrelated or fixed.
+Independent review is still unassigned; no reviewer or provider was fabricated.
+
+A separate local replay defect was reproduced: two different observations with
+one state-family/first-known clock were silently selected by input order, or
+could both emit. Six discriminating cases failed before the repair. Eventization
+now refuses a conflicting same-clock pair before quality admission; equivalent canonical
+observation replay remains idempotent. Corrections still use the amendment owner,
+not an input-order tie-break. This is a pure check within the existing eventizer,
+not a new deduplication store, lifecycle, policy threshold, or research programme.
+
+The expanded related suites passed **292 tests on Python 3.12.13**, including
+96 lab tests. This is a native regression result, not full hosted CI acceptance.
+The source fixture is unchanged. No new market data, event policy, empirical
+search, forecast, customer surface, or trading authority is introduced.
+Continue on #124: independently review the new exact head, determine the old
+hosted failure and inspect new-head CI; keep DRAFT/no auto-merge/no deployment.
