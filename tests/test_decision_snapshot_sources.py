@@ -703,12 +703,16 @@ def test_future_at_cutoff_receipt_retains_first_party_clock_digest_and_generatio
     assert receipt["known_at"] == "2026-09-15T20:05:00Z"
     assert receipt["known_at"] == receipt["filesystem_observed_at"]
     assert receipt["artifact_digest"] == sources._digest(raw)
-    assert (
-        receipt["correction_generation"]
-        == receipt["artifact_digest"]
-        == sources._digest(raw)
-        != sources._EMPTY_DIGEST
-    )
+    # The generation is clock-bearing, not the bare digest: identical bytes read while
+    # eligible (see test_mtime_exactly_at_cutoff_remains_eligible) must not present the same
+    # generation as these same bytes read after crossing the cutoff.
+    assert receipt["correction_generation"] == c.content_digest({
+        "generation_kind": "SOURCE_BYTES",
+        "status": "FUTURE_AT_CUTOFF",
+        "artifact_digest": receipt["artifact_digest"],
+        "mtime_ns": _FUTURE_EPOCH * 1_000_000_000,
+    })
+    assert receipt["correction_generation"] != receipt["artifact_digest"]
     assert receipt["rows_total"] == 0
     assert receipt["rows_returned"] == 0
     assert receipt["omitted_rows"] == 0
@@ -721,6 +725,108 @@ def test_future_at_cutoff_receipt_retains_first_party_clock_digest_and_generatio
         gap["code"] == "FUTURE_AT_CUTOFF" and gap["source_id"] == "book.account"
         for gap in result["sections"]["book_truth"]["gaps"]
     )
+
+
+# ---------------------------------------------------------------------------
+# Task 8 repair 2 — first-party clock/status are generation truth (Finding A)
+# ---------------------------------------------------------------------------
+
+def test_account_generation_changes_when_identical_bytes_cross_the_cutoff(repo_roots):
+    """Failure scenario from the repair review: a producer idempotently re-emits the same
+    bytes after the cutoff. Eligible and future are two different states of the world and
+    must never present one generation, or a same-cutoff retry silently reuses the eligible
+    snapshot for evidence that is now future."""
+    repo, _ = repo_roots
+    path = repo / "data/portfolios/autonomous/account.json"
+    _write_json(path, {"cash": 1_000_000.0, "positions": {}})
+
+    def generation() -> str:
+        return _by_id(sources.capture_book_state(
+            "autonomous", decision_cutoff="2026-09-15T20:00:00Z",
+            recorded_at="2026-09-15T20:01:00Z",
+        )["sources"])["book.account"]["correction_generation"]
+
+    eligible = generation()
+    os.utime(path, (_FUTURE_EPOCH, _FUTURE_EPOCH))
+    future = generation()
+    assert eligible != future
+
+
+def test_account_generation_changes_when_identical_bytes_return_from_future_to_eligible(repo_roots):
+    """The reverse direction: a file observed future at one retry, then observed eligible at
+    the next (e.g. a corrected mtime), must equally mint a new generation."""
+    repo, _ = repo_roots
+    path = repo / "data/portfolios/autonomous/account.json"
+    _write_json(path, {"cash": 1_000_000.0, "positions": {}})
+    os.utime(path, (_FUTURE_EPOCH, _FUTURE_EPOCH))
+
+    def generation() -> str:
+        return _by_id(sources.capture_book_state(
+            "autonomous", decision_cutoff="2026-09-15T20:00:00Z",
+            recorded_at="2026-09-15T20:01:00Z",
+        )["sources"])["book.account"]["correction_generation"]
+
+    future = generation()
+    os.utime(path, (_PRE_CUTOFF_EPOCH, _PRE_CUTOFF_EPOCH))
+    eligible = generation()
+    assert future != eligible
+
+
+def test_malformed_account_generation_changes_when_identical_bytes_cross_the_cutoff(repo_roots):
+    """Same collision, on the MALFORMED branch: unparseable bytes re-observed after the
+    cutoff must not reuse the pre-cutoff malformed generation."""
+    repo, _ = repo_roots
+    path = repo / "data/portfolios/autonomous/account.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{not valid json", encoding="utf-8")
+    _set_pre_cutoff_mtime(path)
+
+    def generation() -> str:
+        return _by_id(sources.capture_book_state(
+            "autonomous", decision_cutoff="2026-09-15T20:00:00Z",
+            recorded_at="2026-09-15T20:01:00Z",
+        )["sources"])["book.account"]["correction_generation"]
+
+    malformed = generation()
+    os.utime(path, (_FUTURE_EPOCH, _FUTURE_EPOCH))
+    future = generation()
+    assert malformed != future
+
+
+def test_decisions_jsonl_generation_changes_when_identical_bytes_cross_the_cutoff(repo_roots):
+    """The JSONL first-party branch carries the same collision as the JSON branch."""
+    repo, _ = repo_roots
+    path = repo / "data/portfolios/autonomous/decisions.jsonl"
+    _write_jsonl(path, [{"id": 1}])
+
+    def generation() -> str:
+        return _by_id(sources.capture_book_state(
+            "autonomous", decision_cutoff="2026-09-15T20:00:00Z",
+            recorded_at="2026-09-15T20:01:00Z",
+        )["sources"])["book.decisions"]["correction_generation"]
+
+    eligible = generation()
+    os.utime(path, (_FUTURE_EPOCH, _FUTURE_EPOCH))
+    future = generation()
+    assert eligible != future
+
+
+def test_future_at_cutoff_generation_is_stable_across_identical_retries(repo_roots):
+    """Determinism guard: an unchanged future state must re-derive exactly the same
+    generation on every retry — no wall-clock or random identity was smuggled in."""
+    repo, _ = repo_roots
+    path = repo / "data/portfolios/autonomous/account.json"
+    _write_json(path, {"cash": 1_000_000.0, "positions": {}})
+    os.utime(path, (_FUTURE_EPOCH, _FUTURE_EPOCH))
+
+    def generation(recorded_at: str) -> str:
+        return _by_id(sources.capture_book_state(
+            "autonomous", decision_cutoff="2026-09-15T20:00:00Z", recorded_at=recorded_at,
+        )["sources"])["book.account"]["correction_generation"]
+
+    first = generation("2026-09-15T20:06:00Z")
+    second = generation("2026-09-15T20:16:00Z")
+    assert first == second
 
 
 def test_mtime_one_ns_below_next_second_stays_in_prior_second_and_eligible(repo_roots):
@@ -1130,6 +1236,141 @@ def test_malformed_latest_position_entries_are_visible(repo_roots):
 
 
 # ---------------------------------------------------------------------------
+# Task 8 repair 2 — a malformed positions *container* is never silently dropped
+# (Finding B / Widening 2 / Minors C, E)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("bad_positions", [None, [], "AAPL", 0])
+def test_malformed_account_positions_container_degrades_book_and_held_ticker_basis(
+    repo_roots, bad_positions,
+):
+    """A ``positions`` value that is null, a list, a string, or a number is not an implicit
+    empty book — it is an unknown one. Before the repair this read COMPLETE with zero gaps
+    because ``cash`` alone made ``content_present`` true; the whole held-ticker basis must
+    now degrade instead of presenting a silently narrowed view as complete."""
+    repo, macro = repo_roots
+    path = repo / "data/portfolios/autonomous/account.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"cash": 800_000.0, "positions": bad_positions}), encoding="utf-8")
+    _set_pre_cutoff_mtime(path)
+    _write_json(macro / "site/factor_betas.json", {
+        "known_at": "2026-09-15T19:00:00Z",
+        "betas": {"AAPL": {"MKT": 1.0}},
+    })
+
+    result = sources.capture_all(
+        "autonomous", decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:01:00Z",
+    )
+    account = _by_id(result["sources"])["book.account"]
+    assert account["status"] == "AVAILABLE"
+    assert account["coverage_state"] == "PARTIAL"
+    assert "MALFORMED_POSITIONS_CONTAINER" in _gap_codes(result, source_id="book.account")
+    assert result["sections"]["book_truth"]["coverage_state"] == "PARTIAL"
+    assert result["sections"]["factor_risk"]["coverage_state"] != "COMPLETE"
+    assert "PARTIAL_HELD_TICKER_BASIS" in _gap_codes(result, source_id="macro.factor_betas")
+
+
+def test_missing_account_narrows_held_ticker_basis_for_every_filtered_domain(repo_roots):
+    """Principal reproduction: previously a wholly MISSING required account produced
+    ``macro.factor_betas`` AVAILABLE/COMPLETE, ``factor_risk`` COMPLETE, and no
+    partial-basis gap — a fully complete-looking factor picture of a book that was never
+    read at all. ``book_truth`` going BLOCKED does not by itself narrow the *other*
+    held-ticker-filtered domains without this repair."""
+    repo, macro = repo_roots
+    _write_json(macro / "site/factor_betas.json", {
+        "known_at": "2026-09-15T19:00:00Z",
+        "betas": {"AAPL": {"MKT": 1.0}},
+    })
+    result = sources.capture_all(
+        "autonomous", decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:01:00Z",
+    )
+    assert _by_id(result["sources"])["book.account"]["status"] == "MISSING"
+    assert result["sections"]["factor_risk"]["coverage_state"] != "COMPLETE"
+    assert "PARTIAL_HELD_TICKER_BASIS" in _gap_codes(result, source_id="macro.factor_betas")
+
+
+def test_account_with_cash_only_and_no_positions_key_narrows_held_ticker_basis(repo_roots):
+    """Principal reproduction: previously ``account.json={"cash": 1.0}`` (no ``positions``
+    key at all) read AVAILABLE/COMPLETE with zero gaps. An implicit empty book is not the
+    same claim as a genuinely empty one declared as ``"positions": {}`` — see
+    test_genuinely_empty_positions_mapping_keeps_the_held_ticker_basis_complete for the
+    contrasting case that must stay COMPLETE."""
+    repo, macro = repo_roots
+    _write_json(repo / "data/portfolios/autonomous/account.json", {"cash": 1.0})
+    _write_json(macro / "site/factor_betas.json", {
+        "known_at": "2026-09-15T19:00:00Z",
+        "betas": {"AAPL": {"MKT": 1.0}},
+    })
+    result = sources.capture_all(
+        "autonomous", decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:01:00Z",
+    )
+    account = _by_id(result["sources"])["book.account"]
+    assert account["status"] == "AVAILABLE"
+    assert account["coverage_state"] == "PARTIAL"
+    assert "MALFORMED_POSITIONS_CONTAINER" in _gap_codes(result, source_id="book.account")
+    assert result["sections"]["factor_risk"]["coverage_state"] != "COMPLETE"
+
+
+def test_genuinely_empty_positions_mapping_keeps_the_held_ticker_basis_complete(repo_roots):
+    """The contrasting case Widening 1 protects: an explicit ``"positions": {}`` is a fully
+    known, genuinely empty book and must stay COMPLETE with zero gaps — the repair must not
+    over-tighten an honestly empty book into a degraded one."""
+    repo, macro = repo_roots
+    _write_json(repo / "data/portfolios/autonomous/account.json", {"cash": 1.0, "positions": {}})
+    _write_json(macro / "site/factor_betas.json", {
+        "known_at": "2026-09-15T19:00:00Z",
+        "betas": {},
+    })
+    result = sources.capture_all(
+        "autonomous", decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:01:00Z",
+    )
+    account = _by_id(result["sources"])["book.account"]
+    assert account["status"] == "AVAILABLE"
+    assert account["coverage_state"] == "COMPLETE"
+    assert not _gap_codes(result, source_id="book.account")
+    assert "PARTIAL_HELD_TICKER_BASIS" not in _gap_codes(result, source_id="macro.factor_betas")
+
+
+def test_empty_account_content_is_partial_with_an_empty_projection_gap(repo_roots):
+    """Minor C: the internal EMPTY_PROJECTION widening pinned for the account source
+    specifically, not only for macro.* sources."""
+    repo, _ = repo_roots
+    _write_json(repo / "data/portfolios/autonomous/account.json", {})
+    result = sources.capture_book_state(
+        "autonomous", decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:01:00Z",
+    )
+    assert "EMPTY_PROJECTION" in _gap_codes(result, source_id="book.account")
+    assert result["sections"]["book_truth"]["coverage_state"] == "PARTIAL"
+    assert _by_id(result["sources"])["book.account"]["coverage_state"] == "PARTIAL"
+
+
+def test_held_tickers_are_not_harvested_from_pending_orders_or_targets(repo_roots):
+    """Minor E: pending_orders.json/pending_target.json are raw_object projections that
+    land in book_truth alongside book.account/book.latest. A ``positions`` key in either
+    must never inject tickers the account never held into a held-ticker-filtered domain."""
+    repo, macro = repo_roots
+    _write_json(repo / "data/portfolios/autonomous/account.json", {"cash": 1.0, "positions": {}})
+    _write_json(repo / "data/portfolios/autonomous/pending_orders.json", {
+        "positions": {"TSLA": {"shares": 5.0}},
+    })
+    _write_json(macro / "site/factor_betas.json", {
+        "known_at": "2026-09-15T19:00:00Z",
+        "betas": {"TSLA": {"MKT": 1.0}},
+    })
+    result = sources.capture_all(
+        "autonomous", decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:01:00Z",
+    )
+    factor_row = result["sections"]["factor_risk"]["rows"][0]
+    assert "TSLA" not in factor_row.get("betas", {})
+
+
+# ---------------------------------------------------------------------------
 # Task 8 repair R5 — the settlement manifest is point-in-time, no-follow, bounded
 # ---------------------------------------------------------------------------
 
@@ -1218,6 +1459,25 @@ def test_settlement_directory_mtime_after_cutoff_is_future(repo_roots):
     _seed_settlement(repo, ["r001.json"], dir_epoch=_POST_CUTOFF_EPOCH)
     receipt, _ = _settlement_receipt(repo)
     assert receipt["status"] == "FUTURE_AT_CUTOFF"
+
+
+def test_settlement_manifest_generation_changes_when_the_directory_clock_crosses_the_cutoff(
+    repo_roots,
+):
+    """Same failure shape as Finding A for the settlement manifest: an unchanged eligible
+    name set whose directory/evidence clock moves past the cutoff must not reuse the
+    eligible manifest's generation."""
+    repo, _ = repo_roots
+    directory = _seed_settlement(repo, ["r001.json"])
+
+    def generation() -> str:
+        receipt, _ = _settlement_receipt(repo)
+        return receipt["correction_generation"]
+
+    eligible = generation()
+    os.utime(directory, (_POST_CUTOFF_EPOCH, _POST_CUTOFF_EPOCH))
+    future = generation()
+    assert eligible != future
 
 
 def test_settlement_source_that_is_a_symlinked_directory_fails_closed(repo_roots):
@@ -1371,6 +1631,57 @@ def test_external_filesystem_clock_floors_in_integer_nanosecond_space(repo_roots
     )
     receipt = _by_id(result["sources"])["macro.factor_betas"]
     assert receipt["filesystem_observed_at"] == "2026-09-15T19:00:00Z"
+
+
+# ---------------------------------------------------------------------------
+# Task 8 repair 2 — the external read is one descriptor, no-follow (Minor D)
+# ---------------------------------------------------------------------------
+
+def test_read_json_bytes_refuses_to_follow_a_symlink_at_the_final_component(tmp_path):
+    """``_resolve_external_path`` proves containment by fully resolving symlinks before the
+    read; if a final path component were swapped for a symlink between that check and the
+    open, a following read would silently escape the proven-contained target. The read
+    itself must independently refuse to follow one."""
+    target = tmp_path / "real.json"
+    target.write_text("{}", encoding="utf-8")
+    link = tmp_path / "link.json"
+    link.symlink_to(target)
+
+    raw, size, error_code, stat_result = sources._read_json_bytes(link)
+    assert raw is None
+    assert error_code == "INVALID"
+    assert stat_result is None
+
+
+def test_read_json_bytes_derives_size_and_stat_from_the_same_descriptor_as_the_read(tmp_path):
+    path = tmp_path / "betas.json"
+    body = json.dumps({"betas": {}}).encode("utf-8")
+    path.write_bytes(body)
+
+    raw, size, error_code, stat_result = sources._read_json_bytes(path)
+    assert error_code is None
+    assert raw == body
+    assert size == len(body) == stat_result.st_size
+
+
+def test_resolve_external_path_returns_the_fully_resolved_path(repo_roots, monkeypatch):
+    """Minor D: a returned unresolved path would let a later open/read silently re-walk an
+    intermediate symlink component the containment check had already resolved away."""
+    _, macro = repo_roots
+    real_dir = macro / "real_site"
+    real_dir.mkdir(parents=True, exist_ok=True)
+    (real_dir / "betas.json").write_text("{}", encoding="utf-8")
+    link = macro / "linked"
+    link.symlink_to(real_dir)
+
+    from control_plane import contracts as contracts_module
+    monkeypatch.setattr(contracts_module, "contract", lambda key: {"path": "linked/betas.json"})
+
+    spec = next(s for s in sources.EXTERNAL_SOURCE_SPECS if s.source_id == "macro.factor_betas")
+    resolved, error = sources._resolve_external_path(spec)
+    assert error is None
+    assert resolved == (real_dir / "betas.json").resolve()
+    assert "linked" not in resolved.parts
 
 
 @pytest.mark.parametrize("escape", ["../../etc/passwd", "/etc/passwd", "site/../../escape.json"])

@@ -731,6 +731,113 @@ def test_optional_source_going_absent_to_oversize_is_not_reusable_truth(snapshot
 
 
 # ---------------------------------------------------------------------------
+# Task 8 repair 2 — first-party clock/status are generation truth (Finding A)
+# ---------------------------------------------------------------------------
+
+_FUTURE_EPOCH = 1_789_502_700  # 2026-09-15T20:05:00Z — strictly after the fixture cutoff
+
+
+def test_account_bytes_crossing_the_cutoff_at_unchanged_content_mints_a_correction(snapshot_root):
+    """Same account bytes, only the clock moved: a same-cutoff retry after the file crosses
+    the cutoff must mint a new, CORRECTED snapshot, never reuse the eligible one."""
+    account_path = _seed_account()
+    original = snapshots.create_snapshot(
+        "autonomous", decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:01:00Z",
+    )
+    assert original["created"] is True
+
+    os.utime(account_path, (_FUTURE_EPOCH, _FUTURE_EPOCH))
+    corrected = snapshots.create_snapshot(
+        "autonomous", decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:10:00Z",
+    )
+    assert corrected["created"] is True
+    assert corrected["snapshot_id"] != original["snapshot_id"]
+    assert corrected["correction"]["status"] == "CORRECTED"
+    assert corrected["correction"]["same_cutoff_prior_snapshot_ids"] == [original["snapshot_id"]]
+    assert len(_artifacts()) == 2
+
+    # The original bytes are preserved, not replaced: corrections are additive.
+    preserved = snapshots.load_snapshot("autonomous", original["snapshot_id"])
+    assert preserved["snapshot_id"] == original["snapshot_id"]
+
+
+def test_account_bytes_returning_from_future_to_eligible_mints_a_correction(snapshot_root):
+    """The reverse direction: a file first observed future, then observed eligible at an
+    unchanged cutoff (e.g. a corrected mtime), must equally mint a new correction."""
+    account_path = _seed_account()
+    os.utime(account_path, (_FUTURE_EPOCH, _FUTURE_EPOCH))
+    original = snapshots.create_snapshot(
+        "autonomous", decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:01:00Z",
+    )
+    assert original["created"] is True
+
+    os.utime(account_path, (_PRE_CUTOFF_EPOCH, _PRE_CUTOFF_EPOCH))
+    corrected = snapshots.create_snapshot(
+        "autonomous", decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:10:00Z",
+    )
+    assert corrected["created"] is True
+    assert corrected["snapshot_id"] != original["snapshot_id"]
+    assert corrected["correction"]["status"] == "CORRECTED"
+    assert len(_artifacts()) == 2
+
+
+def test_settlement_directory_clock_crossing_the_cutoff_mints_a_correction(snapshot_root):
+    """Same shape, for the settlement manifest: an unchanged eligible name set whose
+    directory mtime crosses the cutoff must mint a new correction, not reuse the eligible
+    snapshot's generation."""
+    _seed_account()
+    settlement_dir = (
+        sources._ROOT / "data" / "portfolios" / "autonomous" / "settlement_receipts"
+    )
+    settlement_dir.mkdir(parents=True, exist_ok=True)
+    entry = settlement_dir / "r001.json"
+    entry.write_text("{}", encoding="utf-8")
+    os.utime(entry, (_PRE_CUTOFF_EPOCH, _PRE_CUTOFF_EPOCH))
+    os.utime(settlement_dir, (_PRE_CUTOFF_EPOCH, _PRE_CUTOFF_EPOCH))
+
+    original = snapshots.create_snapshot(
+        "autonomous", decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:01:00Z",
+    )
+    assert original["created"] is True
+
+    os.utime(settlement_dir, (_FUTURE_EPOCH, _FUTURE_EPOCH))
+    corrected = snapshots.create_snapshot(
+        "autonomous", decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:10:00Z",
+    )
+    assert corrected["created"] is True
+    assert corrected["snapshot_id"] != original["snapshot_id"]
+    assert corrected["correction"]["status"] == "CORRECTED"
+    assert len(_artifacts()) == 2
+
+
+def test_account_bytes_crossing_the_cutoff_at_an_unchanged_mtime_reuses_exactly(snapshot_root):
+    """Determinism guard at the create_snapshot level: an unchanged future state, retried at
+    the same cutoff with no byte or clock change, must reuse the same snapshot — no
+    wall-clock or random identity was smuggled into the generation."""
+    account_path = _seed_account()
+    os.utime(account_path, (_FUTURE_EPOCH, _FUTURE_EPOCH))
+    first = snapshots.create_snapshot(
+        "autonomous", decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:01:00Z",
+    )
+    assert first["created"] is True
+
+    second = snapshots.create_snapshot(
+        "autonomous", decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:20:00Z",
+    )
+    assert second["created"] is False
+    assert second["snapshot_id"] == first["snapshot_id"]
+    assert len(_artifacts()) == 1
+
+
+# ---------------------------------------------------------------------------
 # Task 8 repair R2 — a non-finite number degrades one source, not the vertical
 # ---------------------------------------------------------------------------
 
