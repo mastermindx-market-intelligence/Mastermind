@@ -143,6 +143,161 @@ class _HTTPRepresentation:
 class _ConditionalObservation:
     url: str
     etag: str
+    semantics: object
+
+
+# Sentinels for conditional semantic revalidation. ``_UNPROVABLE`` means this
+# adapter cannot prove semantic equivalence for the representation at all, so a
+# changed representation must fail closed. ``_ABSENT`` marks a field the payload
+# does not carry, so appearing and disappearing are both semantic movement.
+_UNPROVABLE = object()
+_ABSENT = object()
+
+
+def _semantic_field(payload: object, *names: str) -> object:
+    current = payload
+    for name in names:
+        if not isinstance(current, dict) or name not in current:
+            return _ABSENT
+        current = current[name]
+    return current
+
+
+def _pull_semantics(payload: object) -> object:
+    if not isinstance(payload, dict):
+        return _UNPROVABLE
+    return (
+        _semantic_field(payload, "state"),
+        _hold_from_pr(payload),
+        _semantic_field(payload, "head", "ref"),
+        _semantic_field(payload, "head", "sha"),
+        _semantic_field(payload, "head", "repo", "full_name"),
+        _semantic_field(payload, "base", "ref"),
+    )
+
+
+def _open_pulls_semantics(payload: object) -> object:
+    if not isinstance(payload, list):
+        return _UNPROVABLE
+    rows: list[tuple[object, ...]] = []
+    for row in payload:
+        if not isinstance(row, dict):
+            return _UNPROVABLE
+        rows.append(
+            (
+                _semantic_field(row, "number"),
+                _semantic_field(row, "state"),
+                _hold_from_pr(row),
+                _semantic_field(row, "head", "ref"),
+                _semantic_field(row, "head", "sha"),
+                _semantic_field(row, "head", "repo", "full_name"),
+                _semantic_field(row, "base", "ref"),
+                _semantic_field(row, "base", "sha"),
+                _semantic_field(row, "base", "repo", "full_name"),
+            )
+        )
+    return tuple(sorted(rows, key=repr))
+
+
+def _pull_files_semantics(payload: object) -> object:
+    if not isinstance(payload, list):
+        return _UNPROVABLE
+    rows: list[tuple[object, ...]] = []
+    for row in payload:
+        if not isinstance(row, dict):
+            return _UNPROVABLE
+        rows.append(
+            (
+                _semantic_field(row, "filename"),
+                _semantic_field(row, "status"),
+                _semantic_field(row, "previous_filename"),
+            )
+        )
+    return tuple(rows)
+
+
+def _branch_semantics(payload: object) -> object:
+    if not isinstance(payload, dict):
+        return _UNPROVABLE
+    return (_semantic_field(payload, "commit", "sha"),)
+
+
+def _commit_semantics(payload: object) -> object:
+    if not isinstance(payload, dict):
+        return _UNPROVABLE
+    return (
+        _semantic_field(payload, "sha"),
+        _semantic_field(payload, "tree", "sha"),
+    )
+
+
+def _compare_semantics(payload: object) -> object:
+    if not isinstance(payload, dict):
+        return _UNPROVABLE
+    return (
+        _semantic_field(payload, "url"),
+        _semantic_field(payload, "base_commit", "sha"),
+        _semantic_field(payload, "merge_base_commit", "sha"),
+    )
+
+
+def _tree_semantics(payload: object) -> object:
+    if not isinstance(payload, dict):
+        return _UNPROVABLE
+    rows = payload.get("tree")
+    if not isinstance(rows, list):
+        return _UNPROVABLE
+    entries: list[tuple[object, ...]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            return _UNPROVABLE
+        entries.append(
+            (
+                _semantic_field(row, "path"),
+                _semantic_field(row, "mode"),
+                _semantic_field(row, "type"),
+                _semantic_field(row, "sha"),
+            )
+        )
+    return (
+        _semantic_field(payload, "sha"),
+        _semantic_field(payload, "truncated"),
+        tuple(sorted(entries, key=repr)),
+    )
+
+
+def _semantic_projection(url: object, payload: object) -> object:
+    """Project one observed representation onto the canonical facts it owns.
+
+    Returns ``_UNPROVABLE`` for any endpoint shape or payload shape this adapter
+    cannot reduce to the evidence a receipt consumes; the caller then refuses a
+    changed representation instead of guessing equivalence.
+    """
+    if not isinstance(url, str) or not url.startswith(_API_ROOT + "/"):
+        return _UNPROVABLE
+    segments = url[len(_API_ROOT) + 1 :].partition("?")[0].split("/")
+    if len(segments) < 4 or segments[0] != "repos":
+        return _UNPROVABLE
+    tail = tuple(segments[3:])
+    if tail == ("pulls",):
+        kind, projected = "open_pulls", _open_pulls_semantics(payload)
+    elif len(tail) == 2 and tail[0] == "pulls":
+        kind, projected = "pull", _pull_semantics(payload)
+    elif len(tail) == 3 and tail[0] == "pulls" and tail[2] == "files":
+        kind, projected = "pull_files", _pull_files_semantics(payload)
+    elif len(tail) == 2 and tail[0] == "branches":
+        kind, projected = "branch", _branch_semantics(payload)
+    elif len(tail) == 3 and tail[:2] == ("git", "commits"):
+        kind, projected = "commit", _commit_semantics(payload)
+    elif len(tail) == 3 and tail[:2] == ("git", "trees"):
+        kind, projected = "tree", _tree_semantics(payload)
+    elif len(tail) == 2 and tail[0] == "compare":
+        kind, projected = "compare", _compare_semantics(payload)
+    else:
+        return _UNPROVABLE
+    if projected is _UNPROVABLE:
+        return _UNPROVABLE
+    return (kind, projected)
 
 
 class _BoundedHTTPGet:
@@ -152,6 +307,7 @@ class _BoundedHTTPGet:
         self._calls = 0
         self._bytes = 0
         self._conditional_observations: list[_ConditionalObservation] = []
+        self._semantic_revalidations: list[str] = []
         self.parallel_safe = (
             transport is _stdlib_http_get
             or getattr(transport, "_source_continuity_parallel_safe", False) is True
@@ -240,9 +396,14 @@ class _BoundedHTTPGet:
                 raise _RemoteProbeError()
             representation = payload
             self._account_payload(representation.payload)
+            semantics = _semantic_projection(url, representation.payload)
             with self._lock:
                 self._conditional_observations.append(
-                    _ConditionalObservation(url=url, etag=representation.etag)
+                    _ConditionalObservation(
+                        url=url,
+                        etag=representation.etag,
+                        semantics=semantics,
+                    )
                 )
             return representation.payload
 
@@ -273,8 +434,19 @@ class _BoundedHTTPGet:
                     raise _RemoteProbeError()
                 continue
             if payload.not_modified is False:
+                # A changed representation is accounted like any other body, then
+                # re-proved only against the canonical evidence this endpoint owns.
                 self._account_payload(payload.payload)
-                return False
+                with self._lock:
+                    self._semantic_revalidations.append(observation.url)
+                if observation.semantics is _UNPROVABLE:
+                    return False
+                if (
+                    _semantic_projection(observation.url, payload.payload)
+                    != observation.semantics
+                ):
+                    return False
+                continue
             raise _RemoteProbeError()
         return True
 

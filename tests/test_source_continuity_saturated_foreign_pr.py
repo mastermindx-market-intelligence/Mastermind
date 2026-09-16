@@ -1125,3 +1125,497 @@ def test_saturated_compare_representation_binds_exact_requested_url(bad_url) -> 
     with pytest.raises(module._RemoteProbeError):
         module._collision_census(hostile, TOKEN, REPOSITORY, TARGET_PR, OWNED)
     assert not any("/git/commits/" in url for url in hostile.calls)
+
+
+TARGET_PULL_URL = f"https://api.github.com/repos/{REPOSITORY}/pulls/{TARGET_PR}"
+OPEN_PULLS_URL = (
+    f"https://api.github.com/repos/{REPOSITORY}/pulls?state=open&per_page=100&page=1"
+)
+FOREIGN_FILES_URL = (
+    f"https://api.github.com/repos/{REPOSITORY}/pulls/{FOREIGN_PR}"
+    f"/files?per_page=100&page=1"
+)
+TARGET_BRANCH_URL = f"https://api.github.com/repos/{REPOSITORY}/branches/{TARGET_BRANCH}"
+HEAD_COMMIT_URL = f"https://api.github.com/repos/{REPOSITORY}/git/commits/{HEAD}"
+ENGINE_TREE_URL = f"https://api.github.com/repos/{REPOSITORY}/git/trees/{ENGINE_TREE}"
+COMPARE_URL = f"https://api.github.com/repos/{REPOSITORY}/compare/{BASE}...{HEAD}"
+UNSUPPORTED_URL = "https://api.github.com/repos/example/repo"
+
+
+class SemanticRevalidationTransport:
+    """Conditional transport whose second read may return a changed 200 body."""
+
+    _source_continuity_conditional = True
+
+    def __init__(
+        self,
+        module,
+        first: dict[str, object],
+        changed: dict[str, object] | None = None,
+    ) -> None:
+        self.module = module
+        self.first = first
+        self.changed = changed or {}
+        self.conditional_calls: list[tuple[str, str]] = []
+
+    @staticmethod
+    def etag(url: str) -> str:
+        import hashlib
+
+        return 'W/"' + hashlib.sha256(url.encode("utf-8")).hexdigest() + '"'
+
+    def __call__(
+        self,
+        url: str,
+        *,
+        token: str,
+        timeout: float,
+        if_none_match: str | None = None,
+    ) -> object:
+        assert token == TOKEN and timeout > 0
+        if if_none_match is None:
+            assert url in self.first, url
+            return self.module._HTTPRepresentation(
+                payload=self.first[url],
+                etag=self.etag(url),
+                not_modified=False,
+            )
+        self.conditional_calls.append((url, if_none_match))
+        if url in self.changed:
+            return self.module._HTTPRepresentation(
+                payload=self.changed[url],
+                etag='"' + "e" * 40 + '"',
+                not_modified=False,
+            )
+        return self.module._HTTPRepresentation(
+            payload=None,
+            etag=self.etag(url).removeprefix("W/"),
+            not_modified=True,
+        )
+
+
+def _observe_all(module, transport: SemanticRevalidationTransport):
+    bounded = module._BoundedHTTPGet(transport)
+    for url in transport.first:
+        bounded(url, token=TOKEN, timeout=20.0)
+    return bounded
+
+
+def _file_row(path: str, **extra: object) -> dict[str, object]:
+    row: dict[str, object] = {"filename": path, "status": "modified"}
+    row.update(extra)
+    return row
+
+
+def test_invocation_ceilings_are_unchanged_by_semantic_revalidation() -> None:
+    module = _module()
+    assert module._MAX_HTTP_CALLS == 640
+    assert module._MAX_HTTP_NORMALIZED_BYTES == 32 * 1024 * 1024
+    assert module._HTTP_READ_BUDGET_SECONDS == 180.0
+
+
+def test_foreign_changed_200_with_identical_collision_semantics_does_not_starve() -> None:
+    module = _module()
+    unchanged_urls = {
+        TARGET_PULL_URL: _target_pr_payload(),
+        OPEN_PULLS_URL: [{"number": TARGET_PR}, _foreign_pr()],
+    }
+    transport = SemanticRevalidationTransport(
+        module,
+        {
+            **unchanged_urls,
+            FOREIGN_FILES_URL: [
+                _file_row("docs/one.md", sha="a" * 40, additions=3),
+                _file_row("docs/two.md", sha="b" * 40, additions=9),
+            ],
+        },
+        changed={
+            # Same owned-path collision fact, entirely new representation.
+            FOREIGN_FILES_URL: [
+                _file_row("docs/one.md", sha="c" * 40, additions=41, blob_url="x"),
+                _file_row("docs/two.md", sha="d" * 40, additions=4, patch="@@"),
+            ],
+        },
+    )
+    bounded = _observe_all(module, transport)
+    first_bytes = bounded._bytes
+
+    assert bounded.validate_unchanged(token=TOKEN) is True
+    assert bounded._semantic_revalidations == [FOREIGN_FILES_URL]
+    assert bounded._bytes > first_bytes
+    assert bounded._calls == len(transport.first) * 2
+    assert sorted(url for url, _ in transport.conditional_calls) == sorted(
+        transport.first
+    )
+
+
+def test_changed_endpoint_only_revalidation_is_not_a_second_census() -> None:
+    module = _module()
+    first = {
+        TARGET_PULL_URL: _target_pr_payload(),
+        TARGET_BRANCH_URL: {"commit": {"sha": TARGET_HEAD}},
+        HEAD_COMMIT_URL: {"sha": HEAD, "tree": {"sha": HEAD_ROOT}},
+        COMPARE_URL: {
+            "url": COMPARE_URL,
+            "base_commit": {"sha": BASE},
+            "merge_base_commit": {"sha": MERGE_BASE},
+        },
+        OPEN_PULLS_URL: [{"number": TARGET_PR}, _foreign_pr()],
+        FOREIGN_FILES_URL: [_file_row("docs/one.md", sha="a" * 40)],
+    }
+    transport = SemanticRevalidationTransport(
+        module,
+        first,
+        changed={FOREIGN_FILES_URL: [_file_row("docs/one.md", sha="c" * 40)]},
+    )
+    bounded = _observe_all(module, transport)
+    first_bytes = bounded._bytes
+
+    assert bounded.validate_unchanged(token=TOKEN) is True
+    # Exactly one changed body was replayed; every other endpoint stayed a 304.
+    assert bounded._semantic_revalidations == [FOREIGN_FILES_URL]
+    replayed = bounded._bytes - first_bytes
+    only_changed = len(
+        module.canonical_json(transport.changed[FOREIGN_FILES_URL]).encode("utf-8")
+    )
+    assert replayed == only_changed
+    assert replayed < first_bytes
+
+
+@pytest.mark.parametrize(
+    "changed_target",
+    [
+        {**_target_pr_payload(), "state": "closed"},
+        {**_target_pr_payload(), "draft": False},
+        {
+            **_target_pr_payload(),
+            "head": {
+                "ref": "moved-branch",
+                "sha": TARGET_HEAD,
+                "repo": {"full_name": REPOSITORY},
+            },
+        },
+        {
+            **_target_pr_payload(),
+            "head": {
+                "ref": TARGET_BRANCH,
+                "sha": "8" * 40,
+                "repo": {"full_name": REPOSITORY},
+            },
+        },
+        {
+            **_target_pr_payload(),
+            "head": {
+                "ref": TARGET_BRANCH,
+                "sha": TARGET_HEAD,
+                "repo": {"full_name": "fork/macro"},
+            },
+        },
+        {**_target_pr_payload(), "base": {"ref": "release"}},
+        # Missing follow-up dependency: head repository disappears entirely.
+        {
+            **_target_pr_payload(),
+            "head": {"ref": TARGET_BRANCH, "sha": TARGET_HEAD},
+        },
+    ],
+)
+def test_changed_target_representation_altering_semantics_refuses(
+    changed_target: dict[str, object],
+) -> None:
+    module = _module()
+    transport = SemanticRevalidationTransport(
+        module,
+        {TARGET_PULL_URL: _target_pr_payload()},
+        changed={TARGET_PULL_URL: changed_target},
+    )
+    bounded = _observe_all(module, transport)
+
+    assert bounded.validate_unchanged(token=TOKEN) is False
+
+
+def test_changed_target_representation_preserving_semantics_is_accepted() -> None:
+    module = _module()
+    noisy = {
+        **_target_pr_payload(),
+        "title": "renamed title",
+        "updated_at": "2026-09-16T00:00:00Z",
+        "additions": 41,
+        "changed_files": 9,
+        "mergeable_state": "dirty",
+    }
+    transport = SemanticRevalidationTransport(
+        module,
+        {TARGET_PULL_URL: _target_pr_payload()},
+        changed={TARGET_PULL_URL: noisy},
+    )
+    bounded = _observe_all(module, transport)
+
+    assert bounded.validate_unchanged(token=TOKEN) is True
+
+
+@pytest.mark.parametrize(
+    "changed_open_pulls",
+    [
+        # Foreign PR identity movement.
+        [
+            {"number": TARGET_PR},
+            {
+                "number": FOREIGN_PR,
+                "head": {"sha": "8" * 40, "repo": {"full_name": REPOSITORY}},
+                "base": {"sha": BASE, "repo": {"full_name": REPOSITORY}},
+            },
+        ],
+        # Foreign PR open-state movement.
+        [
+            {"number": TARGET_PR},
+            {**_foreign_pr(), "state": "closed"},
+        ],
+        # Foreign PR hold movement.
+        [
+            {"number": TARGET_PR},
+            {**_foreign_pr(), "draft": True},
+        ],
+        # A newly open foreign PR joins the census.
+        [{"number": TARGET_PR}, _foreign_pr(), {"number": 7777}],
+        # A previously open foreign PR leaves the census.
+        [{"number": TARGET_PR}],
+    ],
+)
+def test_changed_foreign_representation_altering_semantics_refuses(
+    changed_open_pulls: list[dict[str, object]],
+) -> None:
+    module = _module()
+    transport = SemanticRevalidationTransport(
+        module,
+        {OPEN_PULLS_URL: [{"number": TARGET_PR}, _foreign_pr()]},
+        changed={OPEN_PULLS_URL: changed_open_pulls},
+    )
+    bounded = _observe_all(module, transport)
+
+    assert bounded.validate_unchanged(token=TOKEN) is False
+
+
+def test_changed_foreign_representation_preserving_semantics_is_accepted() -> None:
+    module = _module()
+    transport = SemanticRevalidationTransport(
+        module,
+        {OPEN_PULLS_URL: [{"number": TARGET_PR}, _foreign_pr()]},
+        changed={
+            OPEN_PULLS_URL: [
+                # Reordered page plus pure representation churn.
+                {**_foreign_pr(), "updated_at": "2026-09-16T00:00:00Z", "title": "x"},
+                {"number": TARGET_PR, "comments": 4},
+            ]
+        },
+    )
+    bounded = _observe_all(module, transport)
+
+    assert bounded.validate_unchanged(token=TOKEN) is True
+
+
+@pytest.mark.parametrize(
+    ("changed_tree", "accepted"),
+    [
+        # Only the advisory blob size moved.
+        (_tree(ENGINE_TREE, [{**_entry(), "size": 999}]), True),
+        (_tree(ENGINE_TREE, [_entry("3" * 40)]), False),
+        (_tree(ENGINE_TREE, [_entry(mode="100755")]), False),
+        (_tree(ENGINE_TREE, [_entry(mode="160000", object_type="commit")]), False),
+        (_tree(ENGINE_TREE, []), False),
+        ({"sha": ENGINE_TREE, "truncated": True, "tree": [_entry()]}, False),
+        # Missing proof dependency: the truncation flag disappears.
+        ({"sha": ENGINE_TREE, "tree": [_entry()]}, False),
+        ({"sha": "9" * 40, "truncated": False, "tree": [_entry()]}, False),
+    ],
+)
+def test_changed_owned_tree_representation_is_reproved_semantically(
+    changed_tree: dict[str, object], accepted: bool
+) -> None:
+    module = _module()
+    transport = SemanticRevalidationTransport(
+        module,
+        {ENGINE_TREE_URL: _tree(ENGINE_TREE, [_entry()])},
+        changed={ENGINE_TREE_URL: changed_tree},
+    )
+    bounded = _observe_all(module, transport)
+
+    assert bounded.validate_unchanged(token=TOKEN) is accepted
+
+
+@pytest.mark.parametrize(
+    ("url", "first_payload", "changed_payload"),
+    [
+        # Malformed changed body where a page array is owed.
+        (FOREIGN_FILES_URL, [_file_row("docs/one.md")], {"message": "Not Found"}),
+        (FOREIGN_FILES_URL, [_file_row("docs/one.md")], ["not-an-object"]),
+        # Malformed changed body where an object is owed.
+        (TARGET_PULL_URL, _target_pr_payload(), []),
+        (ENGINE_TREE_URL, _tree(ENGINE_TREE, [_entry()]), {"tree": "truncated"}),
+        # Unsupported endpoint shape can never prove equivalence.
+        (UNSUPPORTED_URL, {"ok": True}, {"ok": True, "extra": 1}),
+        (UNSUPPORTED_URL, {"ok": True}, {"ok": True}),
+    ],
+)
+def test_malformed_or_unsupported_changed_representation_fails_closed(
+    url: str, first_payload: object, changed_payload: object
+) -> None:
+    module = _module()
+    transport = SemanticRevalidationTransport(
+        module, {url: first_payload}, changed={url: changed_payload}
+    )
+    bounded = _observe_all(module, transport)
+
+    assert bounded.validate_unchanged(token=TOKEN) is False
+
+
+def test_changed_representation_that_overflows_body_budget_fails_closed(
+    monkeypatch,
+) -> None:
+    module = _module()
+    transport = SemanticRevalidationTransport(
+        module,
+        {FOREIGN_FILES_URL: [_file_row("docs/one.md", sha="a" * 40)]},
+        changed={FOREIGN_FILES_URL: [_file_row("docs/one.md", sha="b" * 40)]},
+    )
+    bounded = _observe_all(module, transport)
+    monkeypatch.setattr(module, "_MAX_HTTP_NORMALIZED_BYTES", bounded._bytes)
+
+    with pytest.raises(module._ReadBudgetExceeded):
+        bounded.validate_unchanged(token=TOKEN)
+
+
+def test_changed_representation_that_overflows_call_budget_fails_closed(
+    monkeypatch,
+) -> None:
+    module = _module()
+    first = {
+        TARGET_PULL_URL: _target_pr_payload(),
+        OPEN_PULLS_URL: [{"number": TARGET_PR}, _foreign_pr()],
+        FOREIGN_FILES_URL: [_file_row("docs/one.md")],
+    }
+    transport = SemanticRevalidationTransport(module, first)
+    bounded = _observe_all(module, transport)
+    monkeypatch.setattr(module, "_MAX_HTTP_CALLS", len(first) + 1)
+
+    with pytest.raises(module._ReadBudgetExceeded):
+        bounded.validate_unchanged(token=TOKEN)
+
+
+@pytest.mark.parametrize("error", ["_AuthProbeError", "_RemoteProbeError"])
+def test_changed_representation_transport_ambiguity_propagates(error: str) -> None:
+    module = _module()
+
+    class AmbiguousTransport(SemanticRevalidationTransport):
+        def __call__(self, url, *, token, timeout, if_none_match=None):
+            if if_none_match is not None:
+                raise getattr(module, error)()
+            return super().__call__(url, token=token, timeout=timeout)
+
+    transport = AmbiguousTransport(module, {FOREIGN_FILES_URL: [_file_row("a.md")]})
+    bounded = _observe_all(module, transport)
+
+    with pytest.raises(getattr(module, error)):
+        bounded.validate_unchanged(token=TOKEN)
+
+
+class MainSemanticConditionalHTTP:
+    _source_continuity_conditional = True
+
+    def __init__(self, module, changed: dict[str, object]) -> None:
+        import test_source_continuity as fx
+
+        self.module = module
+        self.base = fx._ProbeHTTP()
+        self.changed = changed
+        self.conditional_calls: list[tuple[str, str]] = []
+        self.first_calls: list[str] = []
+
+    @staticmethod
+    def etag(url: str) -> str:
+        import hashlib
+
+        return 'W/"' + hashlib.sha256(url.encode("utf-8")).hexdigest() + '"'
+
+    def __call__(self, url, *, token, timeout, if_none_match=None):
+        if if_none_match is None:
+            self.first_calls.append(url)
+            return self.module._HTTPRepresentation(
+                payload=self.base(url, token=token, timeout=timeout),
+                etag=self.etag(url),
+                not_modified=False,
+            )
+        self.conditional_calls.append((url, if_none_match))
+        if url in self.changed:
+            return self.module._HTTPRepresentation(
+                payload=self.changed[url],
+                etag='"' + "e" * 40 + '"',
+                not_modified=False,
+            )
+        return self.module._HTTPRepresentation(
+            payload=None,
+            etag=if_none_match.removeprefix("W/"),
+            not_modified=True,
+        )
+
+
+def test_main_issues_receipt_when_changed_200_keeps_collision_semantics(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import json
+    import test_source_continuity as fx
+
+    module = _module()
+    open_pulls = (
+        f"{fx.API_ROOT}/repos/{fx.REPOSITORY}/pulls?state=open&per_page=100&page=1"
+    )
+    http = MainSemanticConditionalHTTP(
+        module,
+        {
+            open_pulls: [
+                {
+                    "number": fx.PR_NUMBER,
+                    "updated_at": "2026-09-16T00:00:00Z",
+                    "title": "unrelated churn",
+                }
+            ]
+        },
+    )
+
+    exit_code = fx._run_cli(module, fx._cli_argv(), http=http)
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    payload = json.loads(captured.out)
+    assert payload["schema"] == "mastermind.source_continuity_receipt/v1"
+    assert payload["local_equals_remote"] is True
+    # One conditional call per first observation: no second census.
+    assert len(http.conditional_calls) == len(http.first_calls)
+
+
+@pytest.mark.parametrize("field", ["head", "base"])
+def test_main_refuses_when_changed_200_moves_target_pr_semantics(
+    field: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import json
+    import test_source_continuity as fx
+
+    module = _module()
+    target = f"{fx.API_ROOT}/repos/{fx.REPOSITORY}/pulls/{fx.PR_NUMBER}"
+    moved = {
+        "state": "open",
+        "draft": True,
+        "labels": [],
+        "head": {
+            "ref": fx.BRANCH,
+            "sha": "9" * 40 if field == "head" else fx.HEAD_SHA,
+            "repo": {"full_name": fx.REPOSITORY},
+        },
+        "base": {"ref": "release" if field == "base" else "master"},
+    }
+    http = MainSemanticConditionalHTTP(module, {target: moved})
+
+    exit_code = fx._run_cli(module, fx._cli_argv(), http=http)
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert json.loads(captured.out)["code"] == "REMOTE_PROOF_CHANGED"
