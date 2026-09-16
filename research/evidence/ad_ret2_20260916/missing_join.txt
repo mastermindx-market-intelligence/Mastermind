@@ -1,0 +1,54 @@
+{"attempt_id": "ATT-b6896ef00f744f59884c694ecf5392e6", "candidate_ready": false, "error": "OperatorOperationApplied", "event_types": ["JOB_CLAIMED", "OHF_PROFILE_SEALED", "ATTEMPT_HEARTBEAT", "OPERATOR_OPERATION_INTENT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "OHF_ATTESTATION_OBSERVED", "OHF_LAUNCH_DECISION", "OPERATOR_OPERATION_INTENT", "ATTEMPT_HEARTBEAT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "ATTEMPT_HEARTBEAT"], "fixture_only": true, "foreign": false, "job_id": "JOB-001", "kind": "BLOCKED", "observations_retained": 0}
+F{"attempt_id": "ATT-fcad7743969740368b938e70ec648d13", "candidate_ready": false, "error": "OperatorOperationApplied", "event_types": ["JOB_CLAIMED", "OHF_PROFILE_SEALED", "ATTEMPT_HEARTBEAT", "OPERATOR_OPERATION_INTENT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "OHF_ATTESTATION_OBSERVED", "OHF_LAUNCH_DECISION", "OPERATOR_OPERATION_INTENT", "ATTEMPT_HEARTBEAT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "ATTEMPT_HEARTBEAT"], "fixture_only": true, "foreign": false, "job_id": "JOB-001", "kind": "DECISION_REQUEST", "observations_retained": 0}
+F{"attempt_id": "ATT-dc862d7756ed4fc095034cb140318bfc", "candidate_ready": true, "error": null, "event_types": ["JOB_CLAIMED", "OHF_PROFILE_SEALED", "ATTEMPT_HEARTBEAT", "OPERATOR_OPERATION_INTENT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "OHF_ATTESTATION_OBSERVED", "OHF_LAUNCH_DECISION", "OPERATOR_OPERATION_INTENT", "ATTEMPT_HEARTBEAT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "ATTEMPT_HEARTBEAT", "OHF_CANDIDATE_RESULT_RECORDED"], "fixture_only": true, "foreign": false, "job_id": "JOB-001", "kind": "BLOCKED", "observations_retained": 1}
+.{"attempt_id": "ATT-8dad875ef53544ed8fa3159226d5065b", "candidate_ready": true, "error": null, "event_types": ["JOB_CLAIMED", "OHF_PROFILE_SEALED", "ATTEMPT_HEARTBEAT", "OPERATOR_OPERATION_INTENT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "OHF_ATTESTATION_OBSERVED", "OHF_LAUNCH_DECISION", "OPERATOR_OPERATION_INTENT", "ATTEMPT_HEARTBEAT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "ATTEMPT_HEARTBEAT", "OHF_CANDIDATE_RESULT_RECORDED"], "fixture_only": true, "foreign": false, "job_id": "JOB-001", "kind": "DECISION_REQUEST", "observations_retained": 1}
+.{"attempt_id": "ATT-ed00ed16c50f4645ba00a60141df0b88", "candidate_ready": true, "error": "OperatorOperationApplied", "event_types": ["JOB_CLAIMED", "OHF_PROFILE_SEALED", "ATTEMPT_HEARTBEAT", "OPERATOR_OPERATION_INTENT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "OHF_ATTESTATION_OBSERVED", "OHF_LAUNCH_DECISION", "OPERATOR_OPERATION_INTENT", "ATTEMPT_HEARTBEAT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "ATTEMPT_HEARTBEAT"], "fixture_only": true, "foreign": true, "job_id": "JOB-001", "kind": "BLOCKED", "observations_retained": 0}
+.{"attempt_id": "ATT-704201d7ee1a437daba5d65f194a6fd6", "candidate_ready": true, "error": "OperatorOperationApplied", "event_types": ["JOB_CLAIMED", "OHF_PROFILE_SEALED", "ATTEMPT_HEARTBEAT", "OPERATOR_OPERATION_INTENT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "OHF_ATTESTATION_OBSERVED", "OHF_LAUNCH_DECISION", "OPERATOR_OPERATION_INTENT", "ATTEMPT_HEARTBEAT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "ATTEMPT_HEARTBEAT"], "fixture_only": true, "foreign": true, "job_id": "JOB-001", "kind": "DECISION_REQUEST", "observations_retained": 0}
+.{"attempt_id": "ATT-f742a947a3a7449ea31e3778c1f27ea1", "candidate_ready": false, "error": "OperatorOperationApplied", "event_types": ["JOB_CLAIMED", "OHF_PROFILE_SEALED", "ATTEMPT_HEARTBEAT", "OPERATOR_OPERATION_INTENT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "OHF_ATTESTATION_OBSERVED", "OHF_LAUNCH_DECISION", "OPERATOR_OPERATION_INTENT", "ATTEMPT_HEARTBEAT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "ATTEMPT_HEARTBEAT"], "fixture_only": true, "foreign": false, "job_id": "JOB-001", "kind": "BLOCKED", "observations_retained": 0}
+.{"attempt_id": "ATT-9d16d5d9c39142b7b4be1597b4a3338a", "candidate_ready": false, "error": "OperatorOperationApplied", "event_types": ["JOB_CLAIMED", "OHF_PROFILE_SEALED", "ATTEMPT_HEARTBEAT", "OPERATOR_OPERATION_INTENT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "OHF_ATTESTATION_OBSERVED", "OHF_LAUNCH_DECISION", "OPERATOR_OPERATION_INTENT", "ATTEMPT_HEARTBEAT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "ATTEMPT_HEARTBEAT"], "fixture_only": true, "foreign": false, "job_id": "JOB-001", "kind": "BLOCKED", "observations_retained": 0}
+.{"attempt_id": "ATT-aadb65ae1a9f4e83839f2ce272a41a2a", "candidate_ready": false, "error": "OperatorOperationApplied", "event_types": ["JOB_CLAIMED", "OHF_PROFILE_SEALED", "ATTEMPT_HEARTBEAT", "OPERATOR_OPERATION_INTENT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "OHF_ATTESTATION_OBSERVED", "OHF_LAUNCH_DECISION", "OPERATOR_OPERATION_INTENT", "ATTEMPT_HEARTBEAT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "ATTEMPT_HEARTBEAT"], "fixture_only": true, "foreign": false, "job_id": "JOB-001", "kind": "BLOCKED", "observations_retained": 0}
+.{"attempt_id": "ATT-0760416fe069429f87e33843956389bc", "candidate_ready": false, "error": "OperatorOperationApplied", "event_types": ["JOB_CLAIMED", "OHF_PROFILE_SEALED", "ATTEMPT_HEARTBEAT", "OPERATOR_OPERATION_INTENT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "OHF_ATTESTATION_OBSERVED", "OHF_LAUNCH_DECISION", "OPERATOR_OPERATION_INTENT", "ATTEMPT_HEARTBEAT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "ATTEMPT_HEARTBEAT"], "fixture_only": true, "foreign": false, "job_id": "JOB-001", "kind": "DECISION_REQUEST", "observations_retained": 0}
+.
+=================================== FAILURES ===================================
+______ test_requirement_nonterminal_observation_survives_restart[BLOCKED] ______
+
+tmp_path = PosixPath('/private/tmp/pytest-of-chriswong/pytest-1301/test_requirement_nonterminal_o0')
+kind = 'BLOCKED'
+
+    @pytest.mark.parametrize("kind", ["BLOCKED", "DECISION_REQUEST"])
+    def test_requirement_nonterminal_observation_survives_restart(tmp_path, kind):
+        runtime, job, lease, adapter, _, _, error = drive_yield(tmp_path, kind)
+        assert adapter.observed and error is not None
+        reopened = Runtime.at(tmp_path)
+        retained = persisted_observations(reopened, lease.attempt.attempt_id)
+>       assert any(e.get("provider_event_id") == "synthetic-return-one" for e in retained), (
+            "MISSING_JOIN: observed nonterminal return never reached durable Executive evidence"
+        )
+E       AssertionError: MISSING_JOIN: observed nonterminal return never reached durable Executive evidence
+E       assert False
+E        +  where False = any(<generator object test_requirement_nonterminal_observation_survives_restart.<locals>.<genexpr> at 0x1074e8450>)
+
+research/evidence/ad_ret2_20260916/probe_missing_join.py:95: AssertionError
+_ test_requirement_nonterminal_observation_survives_restart[DECISION_REQUEST] __
+
+tmp_path = PosixPath('/private/tmp/pytest-of-chriswong/pytest-1301/test_requirement_nonterminal_o1')
+kind = 'DECISION_REQUEST'
+
+    @pytest.mark.parametrize("kind", ["BLOCKED", "DECISION_REQUEST"])
+    def test_requirement_nonterminal_observation_survives_restart(tmp_path, kind):
+        runtime, job, lease, adapter, _, _, error = drive_yield(tmp_path, kind)
+        assert adapter.observed and error is not None
+        reopened = Runtime.at(tmp_path)
+        retained = persisted_observations(reopened, lease.attempt.attempt_id)
+>       assert any(e.get("provider_event_id") == "synthetic-return-one" for e in retained), (
+            "MISSING_JOIN: observed nonterminal return never reached durable Executive evidence"
+        )
+E       AssertionError: MISSING_JOIN: observed nonterminal return never reached durable Executive evidence
+E       assert False
+E        +  where False = any(<generator object test_requirement_nonterminal_observation_survives_restart.<locals>.<genexpr> at 0x1075af100>)
+
+research/evidence/ad_ret2_20260916/probe_missing_join.py:95: AssertionError
+=========================== short test summary info ============================
+FAILED research/evidence/ad_ret2_20260916/probe_missing_join.py::test_requirement_nonterminal_observation_survives_restart[BLOCKED]
+FAILED research/evidence/ad_ret2_20260916/probe_missing_join.py::test_requirement_nonterminal_observation_survives_restart[DECISION_REQUEST]
+2 failed, 8 passed in 1.61s

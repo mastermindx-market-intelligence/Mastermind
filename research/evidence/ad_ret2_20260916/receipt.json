@@ -1,0 +1,83 @@
+{
+  "packet_id": "autonomy-closure-05-20260916",
+  "status": "PARTIAL",
+  "phase_a": "BUILT_NOT_PROVEN",
+  "parent": "agent-fabric-end-to-end-fable-integration-20260913-sol-001",
+  "carrier": "C0BSBM78V1N/1789324397.992989",
+  "writer_branch": "sol/autonomy-closure-05-20260916",
+  "base_sha": "8ba7deedde164c90298d3e88785d98e02fa5e2d2",
+  "source_ruling": "1789552944.586199",
+  "source_start": "1789553262.921679",
+  "prepared_at_host_utc": "2026-09-16T10:34:43.966315+00:00",
+  "actual_receiver": "Chairman-delivered ChatGPT Web; Slack ChatGPT3; no native RuntimeBinding established",
+  "incumbent_seat": "aa22a3d2-2778-41c7-b61a-6a0e1a81e6c3",
+  "production_paths": [
+    "control_plane/operator_harness_orchestrator.py",
+    "control_plane/executive_operator_harness_port.py",
+    "control_plane/executive_runtime.py"
+  ],
+  "source_hashes": {
+    "control_plane/operator_harness_orchestrator.py": "bacc998643630786d28eb809474227b6acc01286c36a9709ad628dafd6709d28",
+    "control_plane/executive_operator_harness_port.py": "ca17ec14d17e95d1a733f6b8c181fa7ae39ff1a07245a719cd3ebfb14814de17",
+    "control_plane/executive_runtime.py": "a27c467611e762c59c68b7dc67ce99ddbe246c3129b4e9f37b00cc234b7bdbc1",
+    "tests/test_ad_ret2_turn_boundary.py": "1bab876e458cda3d8a03f6e7e14b33c3e1142f6de02854cf94aca452d52adc87"
+  },
+  "tests": {
+    "original_foundation": {
+      "passed": 288,
+      "scope": "pre-implementation foundation, not additive to integrated campaign"
+    },
+    "phase_a_api_red": {
+      "failed": 19,
+      "log": "phase_a_red.txt"
+    },
+    "phase_a_adverse_red": {
+      "failed": 3,
+      "passed": 31,
+      "log": "phase_a_adverse_red.txt"
+    },
+    "phase_a_dedicated": {
+      "passed": 34,
+      "log": "phase_a_green.txt"
+    },
+    "phase_a_integrated": {
+      "passed": 398,
+      "started_host_utc": "2026-09-16T10:20:16Z",
+      "ended_host_utc": "2026-09-16T10:22:13Z",
+      "log": "phase_a_adjacent.txt"
+    },
+    "consumer_scope": {
+      "failed": 2,
+      "expected": "durable yield + Job RUNNING, but stop_calls=1 and epoch abandoned",
+      "log": "consumer_scope_red_verified.txt"
+    }
+  },
+  "production_proof": false,
+  "real_runtime_ids": [],
+  "installed_generation": null,
+  "independent_review": "NOT_PERFORMED",
+  "hosted_checks": "NOT_YET_SUBMITTED_AT_CHECKPOINT",
+  "connected_executive": {
+    "fixture_observation_utc": "2026-09-16T09:29:04Z",
+    "fixture_checkout": "7191702e3b0104525b6b26cd30ddb53d89a8a663",
+    "fixture_db_present": false,
+    "latest_read": "502 Upstream or external service errors",
+    "production_grounding": "NOT_PROVEN"
+  },
+  "scope_gate": "Read-only supervisor stops/abandons accepted yield; broker/remote bundling and real native semantic producer remain unintegrated",
+  "source_writer_state": "RETAINED; no release or successor implied",
+  "next_action_owner": "Sol/Fable incumbent integration",
+  "next_action": "Adjudicate exact same-child consumer scope and route one non-author Phase-A exact-head review",
+  "effects": [
+    "managed own worktree edits",
+    "temporary test Runtime databases and local fake-provider fixtures",
+    "same-carrier evidence transport"
+  ],
+  "no_effects": [
+    "production Job/Attempt/Worker",
+    "provider/credential",
+    "install/restart/ARM",
+    "shared host release",
+    "unassigned worktrees"
+  ]
+}

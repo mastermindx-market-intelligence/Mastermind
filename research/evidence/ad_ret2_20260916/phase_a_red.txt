@@ -1,0 +1,483 @@
+FFFFFFFFFFFFFFFFFFF                                                      [100%]
+=================================== FAILURES ===================================
+____ test_missing_candidate_yield_is_durable_without_terminalizing[BLOCKED] ____
+
+tmp_path = PosixPath('/private/tmp/pytest-of-chriswong/pytest-1307/test_missing_candidate_yield_i0')
+kind = 'BLOCKED'
+
+    @pytest.mark.parametrize("kind", ["BLOCKED", "DECISION_REQUEST"])
+    def test_missing_candidate_yield_is_durable_without_terminalizing(tmp_path, kind):
+        state = setup(tmp_path, kind)
+        runtime, job, lease, profile, adapter, *_ = state
+>       receipt = drive(state)
+                  ^^^^^^^^^^^^
+
+tests/test_ad_ret2_turn_boundary.py:80: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+state = (Runtime(store=<control_plane.executive_runtime.RuntimeStore object at 0x3486886b0>, workers=<control_plane.executive_... 0x34a5e7020>, <control_plane.executive_operator_harness_port.ExecutiveOperatorHarnessPort object at 0x34a67a300>, ...)
+allow = True
+
+    def drive(state, *, allow=True):
+>       return state[6].run_turn(state[7], operation_id=_op("ad-ret2-turn"),
+                                 allow_semantic_yield=allow)
+E       TypeError: OperatorHarnessOrchestrator.run_turn() got an unexpected keyword argument 'allow_semantic_yield'
+
+tests/test_ad_ret2_turn_boundary.py:59: TypeError
+_ test_missing_candidate_yield_is_durable_without_terminalizing[DECISION_REQUEST] _
+
+tmp_path = PosixPath('/private/tmp/pytest-of-chriswong/pytest-1307/test_missing_candidate_yield_i1')
+kind = 'DECISION_REQUEST'
+
+    @pytest.mark.parametrize("kind", ["BLOCKED", "DECISION_REQUEST"])
+    def test_missing_candidate_yield_is_durable_without_terminalizing(tmp_path, kind):
+        state = setup(tmp_path, kind)
+        runtime, job, lease, profile, adapter, *_ = state
+>       receipt = drive(state)
+                  ^^^^^^^^^^^^
+
+tests/test_ad_ret2_turn_boundary.py:80: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+state = (Runtime(store=<control_plane.executive_runtime.RuntimeStore object at 0x34d905e50>, workers=<control_plane.executive_... 0x34d906180>, <control_plane.executive_operator_harness_port.ExecutiveOperatorHarnessPort object at 0x34d906090>, ...)
+allow = True
+
+    def drive(state, *, allow=True):
+>       return state[6].run_turn(state[7], operation_id=_op("ad-ret2-turn"),
+                                 allow_semantic_yield=allow)
+E       TypeError: OperatorHarnessOrchestrator.run_turn() got an unexpected keyword argument 'allow_semantic_yield'
+
+tests/test_ad_ret2_turn_boundary.py:59: TypeError
+________________ test_exact_replay_preserves_one_durable_event _________________
+
+tmp_path = PosixPath('/private/tmp/pytest-of-chriswong/pytest-1307/test_exact_replay_preserves_on0')
+
+    def test_exact_replay_preserves_one_durable_event(tmp_path):
+        state = setup(tmp_path)
+>       receipt = drive(state)
+                  ^^^^^^^^^^^^
+
+tests/test_ad_ret2_turn_boundary.py:102: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+state = (Runtime(store=<control_plane.executive_runtime.RuntimeStore object at 0x34d9068d0>, workers=<control_plane.executive_... 0x34d907410>, <control_plane.executive_operator_harness_port.ExecutiveOperatorHarnessPort object at 0x34d907290>, ...)
+allow = True
+
+    def drive(state, *, allow=True):
+>       return state[6].run_turn(state[7], operation_id=_op("ad-ret2-turn"),
+                                 allow_semantic_yield=allow)
+E       TypeError: OperatorHarnessOrchestrator.run_turn() got an unexpected keyword argument 'allow_semantic_yield'
+
+tests/test_ad_ret2_turn_boundary.py:59: TypeError
+____________ test_changed_payload_conflicts_and_preserves_original _____________
+
+tmp_path = PosixPath('/private/tmp/pytest-of-chriswong/pytest-1307/test_changed_payload_conflicts0')
+
+    def test_changed_payload_conflicts_and_preserves_original(tmp_path):
+        state = setup(tmp_path)
+>       receipt = drive(state)
+                  ^^^^^^^^^^^^
+
+tests/test_ad_ret2_turn_boundary.py:113: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+state = (Runtime(store=<control_plane.executive_runtime.RuntimeStore object at 0x34d905130>, workers=<control_plane.executive_... 0x34d904770>, <control_plane.executive_operator_harness_port.ExecutiveOperatorHarnessPort object at 0x34d905370>, ...)
+allow = True
+
+    def drive(state, *, allow=True):
+>       return state[6].run_turn(state[7], operation_id=_op("ad-ret2-turn"),
+                                 allow_semantic_yield=allow)
+E       TypeError: OperatorHarnessOrchestrator.run_turn() got an unexpected keyword argument 'allow_semantic_yield'
+
+tests/test_ad_ret2_turn_boundary.py:59: TypeError
+_ test_foreign_or_unknown_source_identity_refuses[attempt_id-foreign-attempt] __
+
+tmp_path = PosixPath('/private/tmp/pytest-of-chriswong/pytest-1307/test_foreign_or_unknown_source0')
+field = 'attempt_id', value = 'foreign-attempt'
+
+    @pytest.mark.parametrize("field,value", [
+        ("attempt_id", "foreign-attempt"), ("session_epoch_id", "foreign-epoch"),
+        ("process_generation_id", "foreign-generation"), ("turn_id", "foreign-turn"),
+        ("turn_id", None), ("provider_event_id", None),
+    ])
+    def test_foreign_or_unknown_source_identity_refuses(tmp_path, field, value):
+        state = setup(tmp_path)
+>       receipt = drive(state)
+                  ^^^^^^^^^^^^
+
+tests/test_ad_ret2_turn_boundary.py:129: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+state = (Runtime(store=<control_plane.executive_runtime.RuntimeStore object at 0x34d9066f0>, workers=<control_plane.executive_... 0x34d907a40>, <control_plane.executive_operator_harness_port.ExecutiveOperatorHarnessPort object at 0x34d9076b0>, ...)
+allow = True
+
+    def drive(state, *, allow=True):
+>       return state[6].run_turn(state[7], operation_id=_op("ad-ret2-turn"),
+                                 allow_semantic_yield=allow)
+E       TypeError: OperatorHarnessOrchestrator.run_turn() got an unexpected keyword argument 'allow_semantic_yield'
+
+tests/test_ad_ret2_turn_boundary.py:59: TypeError
+_ test_foreign_or_unknown_source_identity_refuses[session_epoch_id-foreign-epoch] _
+
+tmp_path = PosixPath('/private/tmp/pytest-of-chriswong/pytest-1307/test_foreign_or_unknown_source1')
+field = 'session_epoch_id', value = 'foreign-epoch'
+
+    @pytest.mark.parametrize("field,value", [
+        ("attempt_id", "foreign-attempt"), ("session_epoch_id", "foreign-epoch"),
+        ("process_generation_id", "foreign-generation"), ("turn_id", "foreign-turn"),
+        ("turn_id", None), ("provider_event_id", None),
+    ])
+    def test_foreign_or_unknown_source_identity_refuses(tmp_path, field, value):
+        state = setup(tmp_path)
+>       receipt = drive(state)
+                  ^^^^^^^^^^^^
+
+tests/test_ad_ret2_turn_boundary.py:129: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+state = (Runtime(store=<control_plane.executive_runtime.RuntimeStore object at 0x34d904a70>, workers=<control_plane.executive_... 0x34d9043e0>, <control_plane.executive_operator_harness_port.ExecutiveOperatorHarnessPort object at 0x34d9062a0>, ...)
+allow = True
+
+    def drive(state, *, allow=True):
+>       return state[6].run_turn(state[7], operation_id=_op("ad-ret2-turn"),
+                                 allow_semantic_yield=allow)
+E       TypeError: OperatorHarnessOrchestrator.run_turn() got an unexpected keyword argument 'allow_semantic_yield'
+
+tests/test_ad_ret2_turn_boundary.py:59: TypeError
+_ test_foreign_or_unknown_source_identity_refuses[process_generation_id-foreign-generation] _
+
+tmp_path = PosixPath('/private/tmp/pytest-of-chriswong/pytest-1307/test_foreign_or_unknown_source2')
+field = 'process_generation_id', value = 'foreign-generation'
+
+    @pytest.mark.parametrize("field,value", [
+        ("attempt_id", "foreign-attempt"), ("session_epoch_id", "foreign-epoch"),
+        ("process_generation_id", "foreign-generation"), ("turn_id", "foreign-turn"),
+        ("turn_id", None), ("provider_event_id", None),
+    ])
+    def test_foreign_or_unknown_source_identity_refuses(tmp_path, field, value):
+        state = setup(tmp_path)
+>       receipt = drive(state)
+                  ^^^^^^^^^^^^
+
+tests/test_ad_ret2_turn_boundary.py:129: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+state = (Runtime(store=<control_plane.executive_runtime.RuntimeStore object at 0x34d906ba0>, workers=<control_plane.executive_... 0x34d91c7d0>, <control_plane.executive_operator_harness_port.ExecutiveOperatorHarnessPort object at 0x34d91ca40>, ...)
+allow = True
+
+    def drive(state, *, allow=True):
+>       return state[6].run_turn(state[7], operation_id=_op("ad-ret2-turn"),
+                                 allow_semantic_yield=allow)
+E       TypeError: OperatorHarnessOrchestrator.run_turn() got an unexpected keyword argument 'allow_semantic_yield'
+
+tests/test_ad_ret2_turn_boundary.py:59: TypeError
+____ test_foreign_or_unknown_source_identity_refuses[turn_id-foreign-turn] _____
+
+tmp_path = PosixPath('/private/tmp/pytest-of-chriswong/pytest-1307/test_foreign_or_unknown_source3')
+field = 'turn_id', value = 'foreign-turn'
+
+    @pytest.mark.parametrize("field,value", [
+        ("attempt_id", "foreign-attempt"), ("session_epoch_id", "foreign-epoch"),
+        ("process_generation_id", "foreign-generation"), ("turn_id", "foreign-turn"),
+        ("turn_id", None), ("provider_event_id", None),
+    ])
+    def test_foreign_or_unknown_source_identity_refuses(tmp_path, field, value):
+        state = setup(tmp_path)
+>       receipt = drive(state)
+                  ^^^^^^^^^^^^
+
+tests/test_ad_ret2_turn_boundary.py:129: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+state = (Runtime(store=<control_plane.executive_runtime.RuntimeStore object at 0x34d91d940>, workers=<control_plane.executive_... 0x34d91dd90>, <control_plane.executive_operator_harness_port.ExecutiveOperatorHarnessPort object at 0x34d91dbb0>, ...)
+allow = True
+
+    def drive(state, *, allow=True):
+>       return state[6].run_turn(state[7], operation_id=_op("ad-ret2-turn"),
+                                 allow_semantic_yield=allow)
+E       TypeError: OperatorHarnessOrchestrator.run_turn() got an unexpected keyword argument 'allow_semantic_yield'
+
+tests/test_ad_ret2_turn_boundary.py:59: TypeError
+________ test_foreign_or_unknown_source_identity_refuses[turn_id-None] _________
+
+tmp_path = PosixPath('/private/tmp/pytest-of-chriswong/pytest-1307/test_foreign_or_unknown_source4')
+field = 'turn_id', value = None
+
+    @pytest.mark.parametrize("field,value", [
+        ("attempt_id", "foreign-attempt"), ("session_epoch_id", "foreign-epoch"),
+        ("process_generation_id", "foreign-generation"), ("turn_id", "foreign-turn"),
+        ("turn_id", None), ("provider_event_id", None),
+    ])
+    def test_foreign_or_unknown_source_identity_refuses(tmp_path, field, value):
+        state = setup(tmp_path)
+>       receipt = drive(state)
+                  ^^^^^^^^^^^^
+
+tests/test_ad_ret2_turn_boundary.py:129: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+state = (Runtime(store=<control_plane.executive_runtime.RuntimeStore object at 0x34d91da00>, workers=<control_plane.executive_... 0x34d91f380>, <control_plane.executive_operator_harness_port.ExecutiveOperatorHarnessPort object at 0x34d91f290>, ...)
+allow = True
+
+    def drive(state, *, allow=True):
+>       return state[6].run_turn(state[7], operation_id=_op("ad-ret2-turn"),
+                                 allow_semantic_yield=allow)
+E       TypeError: OperatorHarnessOrchestrator.run_turn() got an unexpected keyword argument 'allow_semantic_yield'
+
+tests/test_ad_ret2_turn_boundary.py:59: TypeError
+___ test_foreign_or_unknown_source_identity_refuses[provider_event_id-None] ____
+
+tmp_path = PosixPath('/private/tmp/pytest-of-chriswong/pytest-1307/test_foreign_or_unknown_source5')
+field = 'provider_event_id', value = None
+
+    @pytest.mark.parametrize("field,value", [
+        ("attempt_id", "foreign-attempt"), ("session_epoch_id", "foreign-epoch"),
+        ("process_generation_id", "foreign-generation"), ("turn_id", "foreign-turn"),
+        ("turn_id", None), ("provider_event_id", None),
+    ])
+    def test_foreign_or_unknown_source_identity_refuses(tmp_path, field, value):
+        state = setup(tmp_path)
+>       receipt = drive(state)
+                  ^^^^^^^^^^^^
+
+tests/test_ad_ret2_turn_boundary.py:129: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+state = (Runtime(store=<control_plane.executive_runtime.RuntimeStore object at 0x34d91c920>, workers=<control_plane.executive_... 0x34d930650>, <control_plane.executive_operator_harness_port.ExecutiveOperatorHarnessPort object at 0x34d931d00>, ...)
+allow = True
+
+    def drive(state, *, allow=True):
+>       return state[6].run_turn(state[7], operation_id=_op("ad-ret2-turn"),
+                                 allow_semantic_yield=allow)
+E       TypeError: OperatorHarnessOrchestrator.run_turn() got an unexpected keyword argument 'allow_semantic_yield'
+
+tests/test_ad_ret2_turn_boundary.py:59: TypeError
+_______ test_payload_cannot_grant_actor_or_correction_authority[extra0] ________
+
+tmp_path = PosixPath('/private/tmp/pytest-of-chriswong/pytest-1307/test_payload_cannot_grant_acto0')
+extra = {'actor': 'sol'}
+
+    @pytest.mark.parametrize("extra", [
+        {"actor": "sol"}, {"action_target": "newest-tab"},
+        {"replaces_event_id": "unaccepted-replacement"}, {"source_event_time_ms": True},
+    ])
+    def test_payload_cannot_grant_actor_or_correction_authority(tmp_path, extra):
+        state = setup(tmp_path)
+>       receipt = drive(state)
+                  ^^^^^^^^^^^^
+
+tests/test_ad_ret2_turn_boundary.py:141: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+state = (Runtime(store=<control_plane.executive_runtime.RuntimeStore object at 0x34d930200>, workers=<control_plane.executive_... 0x34d9317c0>, <control_plane.executive_operator_harness_port.ExecutiveOperatorHarnessPort object at 0x34d9316d0>, ...)
+allow = True
+
+    def drive(state, *, allow=True):
+>       return state[6].run_turn(state[7], operation_id=_op("ad-ret2-turn"),
+                                 allow_semantic_yield=allow)
+E       TypeError: OperatorHarnessOrchestrator.run_turn() got an unexpected keyword argument 'allow_semantic_yield'
+
+tests/test_ad_ret2_turn_boundary.py:59: TypeError
+_______ test_payload_cannot_grant_actor_or_correction_authority[extra1] ________
+
+tmp_path = PosixPath('/private/tmp/pytest-of-chriswong/pytest-1307/test_payload_cannot_grant_acto1')
+extra = {'action_target': 'newest-tab'}
+
+    @pytest.mark.parametrize("extra", [
+        {"actor": "sol"}, {"action_target": "newest-tab"},
+        {"replaces_event_id": "unaccepted-replacement"}, {"source_event_time_ms": True},
+    ])
+    def test_payload_cannot_grant_actor_or_correction_authority(tmp_path, extra):
+        state = setup(tmp_path)
+>       receipt = drive(state)
+                  ^^^^^^^^^^^^
+
+tests/test_ad_ret2_turn_boundary.py:141: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+state = (Runtime(store=<control_plane.executive_runtime.RuntimeStore object at 0x34d930e60>, workers=<control_plane.executive_... 0x34d9332f0>, <control_plane.executive_operator_harness_port.ExecutiveOperatorHarnessPort object at 0x34d932e10>, ...)
+allow = True
+
+    def drive(state, *, allow=True):
+>       return state[6].run_turn(state[7], operation_id=_op("ad-ret2-turn"),
+                                 allow_semantic_yield=allow)
+E       TypeError: OperatorHarnessOrchestrator.run_turn() got an unexpected keyword argument 'allow_semantic_yield'
+
+tests/test_ad_ret2_turn_boundary.py:59: TypeError
+_______ test_payload_cannot_grant_actor_or_correction_authority[extra2] ________
+
+tmp_path = PosixPath('/private/tmp/pytest-of-chriswong/pytest-1307/test_payload_cannot_grant_acto2')
+extra = {'replaces_event_id': 'unaccepted-replacement'}
+
+    @pytest.mark.parametrize("extra", [
+        {"actor": "sol"}, {"action_target": "newest-tab"},
+        {"replaces_event_id": "unaccepted-replacement"}, {"source_event_time_ms": True},
+    ])
+    def test_payload_cannot_grant_actor_or_correction_authority(tmp_path, extra):
+        state = setup(tmp_path)
+>       receipt = drive(state)
+                  ^^^^^^^^^^^^
+
+tests/test_ad_ret2_turn_boundary.py:141: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+state = (Runtime(store=<control_plane.executive_runtime.RuntimeStore object at 0x34d933ce0>, workers=<control_plane.executive_... 0x34dc19970>, <control_plane.executive_operator_harness_port.ExecutiveOperatorHarnessPort object at 0x34dc184a0>, ...)
+allow = True
+
+    def drive(state, *, allow=True):
+>       return state[6].run_turn(state[7], operation_id=_op("ad-ret2-turn"),
+                                 allow_semantic_yield=allow)
+E       TypeError: OperatorHarnessOrchestrator.run_turn() got an unexpected keyword argument 'allow_semantic_yield'
+
+tests/test_ad_ret2_turn_boundary.py:59: TypeError
+_______ test_payload_cannot_grant_actor_or_correction_authority[extra3] ________
+
+tmp_path = PosixPath('/private/tmp/pytest-of-chriswong/pytest-1307/test_payload_cannot_grant_acto3')
+extra = {'source_event_time_ms': True}
+
+    @pytest.mark.parametrize("extra", [
+        {"actor": "sol"}, {"action_target": "newest-tab"},
+        {"replaces_event_id": "unaccepted-replacement"}, {"source_event_time_ms": True},
+    ])
+    def test_payload_cannot_grant_actor_or_correction_authority(tmp_path, extra):
+        state = setup(tmp_path)
+>       receipt = drive(state)
+                  ^^^^^^^^^^^^
+
+tests/test_ad_ret2_turn_boundary.py:141: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+state = (Runtime(store=<control_plane.executive_runtime.RuntimeStore object at 0x34dc1a9f0>, workers=<control_plane.executive_... 0x34dc190a0>, <control_plane.executive_operator_harness_port.ExecutiveOperatorHarnessPort object at 0x34dc18ef0>, ...)
+allow = True
+
+    def drive(state, *, allow=True):
+>       return state[6].run_turn(state[7], operation_id=_op("ad-ret2-turn"),
+                                 allow_semantic_yield=allow)
+E       TypeError: OperatorHarnessOrchestrator.run_turn() got an unexpected keyword argument 'allow_semantic_yield'
+
+tests/test_ad_ret2_turn_boundary.py:59: TypeError
+____________ test_inflight_batch_is_not_a_completed_native_boundary ____________
+
+tmp_path = PosixPath('/private/tmp/pytest-of-chriswong/pytest-1307/test_inflight_batch_is_not_a_c0')
+
+    def test_inflight_batch_is_not_a_completed_native_boundary(tmp_path):
+        state = setup(tmp_path, boundary=False)
+        with pytest.raises(OperatorHarnessOrchestrationError):
+>           drive(state)
+
+tests/test_ad_ret2_turn_boundary.py:151: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+state = (Runtime(store=<control_plane.executive_runtime.RuntimeStore object at 0x34dc18da0>, workers=<control_plane.executive_... 0x34dc1ad80>, <control_plane.executive_operator_harness_port.ExecutiveOperatorHarnessPort object at 0x34dc1ac30>, ...)
+allow = True
+
+    def drive(state, *, allow=True):
+>       return state[6].run_turn(state[7], operation_id=_op("ad-ret2-turn"),
+                                 allow_semantic_yield=allow)
+E       TypeError: OperatorHarnessOrchestrator.run_turn() got an unexpected keyword argument 'allow_semantic_yield'
+
+tests/test_ad_ret2_turn_boundary.py:59: TypeError
+___________________ test_progress_does_not_create_attention ____________________
+
+tmp_path = PosixPath('/private/tmp/pytest-of-chriswong/pytest-1307/test_progress_does_not_create_0')
+
+    def test_progress_does_not_create_attention(tmp_path):
+        state = setup(tmp_path, "PROGRESS")
+>       receipt = drive(state)
+                  ^^^^^^^^^^^^
+
+tests/test_ad_ret2_turn_boundary.py:157: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+state = (Runtime(store=<control_plane.executive_runtime.RuntimeStore object at 0x34dc186e0>, workers=<control_plane.executive_... 0x34dc1bda0>, <control_plane.executive_operator_harness_port.ExecutiveOperatorHarnessPort object at 0x34dc1bf80>, ...)
+allow = True
+
+    def drive(state, *, allow=True):
+>       return state[6].run_turn(state[7], operation_id=_op("ad-ret2-turn"),
+                                 allow_semantic_yield=allow)
+E       TypeError: OperatorHarnessOrchestrator.run_turn() got an unexpected keyword argument 'allow_semantic_yield'
+
+tests/test_ad_ret2_turn_boundary.py:59: TypeError
+________ test_terminal_only_caller_is_not_silently_given_yield_receipt _________
+
+tmp_path = PosixPath('/private/tmp/pytest-of-chriswong/pytest-1307/test_terminal_only_caller_is_n0')
+
+    def test_terminal_only_caller_is_not_silently_given_yield_receipt(tmp_path):
+        state = setup(tmp_path)
+        with pytest.raises(OperatorHarnessOrchestrationError):
+>           drive(state, allow=False)
+
+tests/test_ad_ret2_turn_boundary.py:165: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+state = (Runtime(store=<control_plane.executive_runtime.RuntimeStore object at 0x34dc18e00>, workers=<control_plane.executive_... 0x34dc19df0>, <control_plane.executive_operator_harness_port.ExecutiveOperatorHarnessPort object at 0x34dc1a120>, ...)
+allow = False
+
+    def drive(state, *, allow=True):
+>       return state[6].run_turn(state[7], operation_id=_op("ad-ret2-turn"),
+                                 allow_semantic_yield=allow)
+E       TypeError: OperatorHarnessOrchestrator.run_turn() got an unexpected keyword argument 'allow_semantic_yield'
+
+tests/test_ad_ret2_turn_boundary.py:59: TypeError
+____________ test_pending_yield_cannot_be_bypassed_by_new_work_turn ____________
+
+tmp_path = PosixPath('/private/tmp/pytest-of-chriswong/pytest-1307/test_pending_yield_cannot_be_b0')
+
+    def test_pending_yield_cannot_be_bypassed_by_new_work_turn(tmp_path):
+        state = setup(tmp_path)
+>       drive(state)
+
+tests/test_ad_ret2_turn_boundary.py:172: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+state = (Runtime(store=<control_plane.executive_runtime.RuntimeStore object at 0x34dc18410>, workers=<control_plane.executive_... 0x34dc1a210>, <control_plane.executive_operator_harness_port.ExecutiveOperatorHarnessPort object at 0x34dc1b800>, ...)
+allow = True
+
+    def drive(state, *, allow=True):
+>       return state[6].run_turn(state[7], operation_id=_op("ad-ret2-turn"),
+                                 allow_semantic_yield=allow)
+E       TypeError: OperatorHarnessOrchestrator.run_turn() got an unexpected keyword argument 'allow_semantic_yield'
+
+tests/test_ad_ret2_turn_boundary.py:59: TypeError
+___________________ test_wrong_lease_does_not_reaccept_yield ___________________
+
+tmp_path = PosixPath('/private/tmp/pytest-of-chriswong/pytest-1307/test_wrong_lease_does_not_reac0')
+
+    def test_wrong_lease_does_not_reaccept_yield(tmp_path):
+        state = setup(tmp_path)
+>       receipt = drive(state)
+                  ^^^^^^^^^^^^
+
+tests/test_ad_ret2_turn_boundary.py:181: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+state = (Runtime(store=<control_plane.executive_runtime.RuntimeStore object at 0x34d933d40>, workers=<control_plane.executive_... 0x34d9324b0>, <control_plane.executive_operator_harness_port.ExecutiveOperatorHarnessPort object at 0x34d932420>, ...)
+allow = True
+
+    def drive(state, *, allow=True):
+>       return state[6].run_turn(state[7], operation_id=_op("ad-ret2-turn"),
+                                 allow_semantic_yield=allow)
+E       TypeError: OperatorHarnessOrchestrator.run_turn() got an unexpected keyword argument 'allow_semantic_yield'
+
+tests/test_ad_ret2_turn_boundary.py:59: TypeError
+=========================== short test summary info ============================
+FAILED tests/test_ad_ret2_turn_boundary.py::test_missing_candidate_yield_is_durable_without_terminalizing[BLOCKED]
+FAILED tests/test_ad_ret2_turn_boundary.py::test_missing_candidate_yield_is_durable_without_terminalizing[DECISION_REQUEST]
+FAILED tests/test_ad_ret2_turn_boundary.py::test_exact_replay_preserves_one_durable_event
+FAILED tests/test_ad_ret2_turn_boundary.py::test_changed_payload_conflicts_and_preserves_original
+FAILED tests/test_ad_ret2_turn_boundary.py::test_foreign_or_unknown_source_identity_refuses[attempt_id-foreign-attempt]
+FAILED tests/test_ad_ret2_turn_boundary.py::test_foreign_or_unknown_source_identity_refuses[session_epoch_id-foreign-epoch]
+FAILED tests/test_ad_ret2_turn_boundary.py::test_foreign_or_unknown_source_identity_refuses[process_generation_id-foreign-generation]
+FAILED tests/test_ad_ret2_turn_boundary.py::test_foreign_or_unknown_source_identity_refuses[turn_id-foreign-turn]
+FAILED tests/test_ad_ret2_turn_boundary.py::test_foreign_or_unknown_source_identity_refuses[turn_id-None]
+FAILED tests/test_ad_ret2_turn_boundary.py::test_foreign_or_unknown_source_identity_refuses[provider_event_id-None]
+FAILED tests/test_ad_ret2_turn_boundary.py::test_payload_cannot_grant_actor_or_correction_authority[extra0]
+FAILED tests/test_ad_ret2_turn_boundary.py::test_payload_cannot_grant_actor_or_correction_authority[extra1]
+FAILED tests/test_ad_ret2_turn_boundary.py::test_payload_cannot_grant_actor_or_correction_authority[extra2]
+FAILED tests/test_ad_ret2_turn_boundary.py::test_payload_cannot_grant_actor_or_correction_authority[extra3]
+FAILED tests/test_ad_ret2_turn_boundary.py::test_inflight_batch_is_not_a_completed_native_boundary
+FAILED tests/test_ad_ret2_turn_boundary.py::test_progress_does_not_create_attention
+FAILED tests/test_ad_ret2_turn_boundary.py::test_terminal_only_caller_is_not_silently_given_yield_receipt
+FAILED tests/test_ad_ret2_turn_boundary.py::test_pending_yield_cannot_be_bypassed_by_new_work_turn
+FAILED tests/test_ad_ret2_turn_boundary.py::test_wrong_lease_does_not_reaccept_yield
+19 failed in 10.86s

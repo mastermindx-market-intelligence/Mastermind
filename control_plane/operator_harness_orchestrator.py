@@ -131,6 +131,11 @@ class RuntimePort(Protocol):
         detail: str,
     ) -> bool: ...
 
+    def record_operator_semantic_yield(
+        self, attempt_id: str, turn: TurnRef,
+        events: Sequence[NormalizedEvent], cursor: EventCursor,
+    ) -> str: ...
+
     def finish_operator_candidate(
         self,
         attempt_id: str,
@@ -264,6 +269,18 @@ class OperatorTurnReceipt:
     events: tuple[NormalizedEvent, ...]
     cursor: EventCursor
     candidate: CandidateResult
+
+
+@dataclass(frozen=True)
+class OperatorYieldReceipt:
+    """Durable observation only; no candidate, target, ruling or continuation."""
+
+    attempt_id: str
+    turn: TurnRef
+    start: TurnStartObservation
+    cursor: EventCursor
+    command_id: str
+    requires_response: bool = True
 
 
 class OperatorHarnessOrchestrator:
@@ -563,9 +580,17 @@ class OperatorHarnessOrchestrator:
         operation_id: OperationId,
         cursor: EventCursor | None = None,
         timeout_seconds: float = 30.0,
-    ) -> OperatorTurnReceipt:
-        """Issue one turn and persist only a candidate result, never Job completion."""
+        allow_semantic_yield: bool = False,
+    ) -> OperatorTurnReceipt | OperatorYieldReceipt:
+        """Issue one turn; explicitly capable callers may retain a material yield.
 
+        The default remains terminal-candidate-only until the actual supervisor
+        and broker consumers support this distinct receipt. Neither path grants
+        Job completion, target selection, reply authority or automatic resumption.
+        """
+
+        if type(allow_semantic_yield) is not bool:
+            raise OperatorHarnessOrchestrationError("semantic-yield opt-in must be boolean")
         self._assert_replayable(operation_id)
         bounded_timeout = float(timeout_seconds)
         if (
@@ -642,6 +667,17 @@ class OperatorHarnessOrchestrator:
             events, next_cursor = self.adapter.read_events(
                 current, timeout_seconds=bounded_timeout
             )
+            events = tuple(events)
+            if allow_semantic_yield and any(
+                event.kind in {"BLOCKED", "DECISION_REQUEST"} for event in events
+            ):
+                command_id = self.runtime.record_operator_semantic_yield(
+                    session.attempt_id, turn, events, next_cursor
+                )
+                return OperatorYieldReceipt(
+                    attempt_id=session.attempt_id, turn=turn, start=started,
+                    cursor=next_cursor, command_id=command_id,
+                )
             candidate = self.adapter.collect_candidate_result(turn)
             if candidate.complete_job_permitted:
                 raise OperatorHarnessOrchestrationError(

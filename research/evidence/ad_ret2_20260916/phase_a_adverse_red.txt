@@ -1,0 +1,79 @@
+...................F...FF.........                                       [100%]
+=================================== FAILURES ===================================
+_______________ test_candidate_cannot_overwrite_a_durable_yield ________________
+
+tmp_path = PosixPath('/private/tmp/pytest-of-chriswong/pytest-1309/test_candidate_cannot_overwrit0')
+
+    def test_candidate_cannot_overwrite_a_durable_yield(tmp_path):
+        state = setup(tmp_path)
+        receipt = drive(state)
+        candidate = FakeAdapter.collect_candidate_result(state[4], receipt.turn)
+>       with pytest.raises(StateConflict, match="semantic yield"):
+E       Failed: DID NOT RAISE StateConflict
+
+tests/test_ad_ret2_turn_boundary.py:192: Failed
+___ test_malformed_first_batch_never_gets_durable_acceptance[non-string-key] ___
+
+tmp_path = PosixPath('/private/tmp/pytest-of-chriswong/pytest-1309/test_malformed_first_batch_nev2')
+mutation = 'non-string-key'
+
+    @pytest.mark.parametrize("mutation", ["subordinate", "mixed-ruling", "non-string-key",
+        "duplicate-source-id", "unpaused", "oversized", "nonfinite"])
+    def test_malformed_first_batch_never_gets_durable_acceptance(tmp_path, mutation):
+        state = setup(tmp_path)
+        def transform(events):
+            first, end = events
+            if mutation == "subordinate":
+                return (replace(first, native_subordinate_id="untrusted-child"), end)
+            if mutation == "mixed-ruling":
+                return (replace(first, kind="RULING"), first, end)
+            if mutation == "non-string-key":
+                return (replace(end, kind="progress", payload_redacted={1: "ambiguous"}), first, end)
+            if mutation == "duplicate-source-id":
+                return (first, replace(end, provider_event_id=first.provider_event_id))
+            if mutation == "unpaused":
+                return (replace(first, payload_redacted={**first.payload_redacted,
+                    "body": {**first.payload_redacted["body"], "work_paused": False}}), end)
+            if mutation == "oversized":
+                return (first, replace(end, payload_redacted={"padding": "a" * 65537}))
+            return (first, replace(end, payload_redacted={"nonfinite": float("nan")}))
+        state[4].transform = transform
+>       with pytest.raises(OperatorHarnessOrchestrationError):
+E       Failed: DID NOT RAISE OperatorHarnessOrchestrationError
+
+tests/test_ad_ret2_turn_boundary.py:229: Failed
+_ test_malformed_first_batch_never_gets_durable_acceptance[duplicate-source-id] _
+
+tmp_path = PosixPath('/private/tmp/pytest-of-chriswong/pytest-1309/test_malformed_first_batch_nev3')
+mutation = 'duplicate-source-id'
+
+    @pytest.mark.parametrize("mutation", ["subordinate", "mixed-ruling", "non-string-key",
+        "duplicate-source-id", "unpaused", "oversized", "nonfinite"])
+    def test_malformed_first_batch_never_gets_durable_acceptance(tmp_path, mutation):
+        state = setup(tmp_path)
+        def transform(events):
+            first, end = events
+            if mutation == "subordinate":
+                return (replace(first, native_subordinate_id="untrusted-child"), end)
+            if mutation == "mixed-ruling":
+                return (replace(first, kind="RULING"), first, end)
+            if mutation == "non-string-key":
+                return (replace(end, kind="progress", payload_redacted={1: "ambiguous"}), first, end)
+            if mutation == "duplicate-source-id":
+                return (first, replace(end, provider_event_id=first.provider_event_id))
+            if mutation == "unpaused":
+                return (replace(first, payload_redacted={**first.payload_redacted,
+                    "body": {**first.payload_redacted["body"], "work_paused": False}}), end)
+            if mutation == "oversized":
+                return (first, replace(end, payload_redacted={"padding": "a" * 65537}))
+            return (first, replace(end, payload_redacted={"nonfinite": float("nan")}))
+        state[4].transform = transform
+>       with pytest.raises(OperatorHarnessOrchestrationError):
+E       Failed: DID NOT RAISE OperatorHarnessOrchestrationError
+
+tests/test_ad_ret2_turn_boundary.py:229: Failed
+=========================== short test summary info ============================
+FAILED tests/test_ad_ret2_turn_boundary.py::test_candidate_cannot_overwrite_a_durable_yield
+FAILED tests/test_ad_ret2_turn_boundary.py::test_malformed_first_batch_never_gets_durable_acceptance[non-string-key]
+FAILED tests/test_ad_ret2_turn_boundary.py::test_malformed_first_batch_never_gets_durable_acceptance[duplicate-source-id]
+3 failed, 31 passed in 13.66s

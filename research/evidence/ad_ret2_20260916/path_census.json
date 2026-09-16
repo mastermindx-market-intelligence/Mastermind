@@ -1,0 +1,59 @@
+{
+  "observed_at": "2026-09-16T10:04:43.595665+00:00",
+  "open_pr_count": 101,
+  "limit": 200,
+  "enumeration_complete": true,
+  "scope": "GitHub-reported changed-file overlap, not semantic conflict or writer custody",
+  "matches": [
+    {
+      "number": 681,
+      "title": "[W6-C2-R5] Repair consultation integrity and canonical Wake lineage",
+      "headRefName": "sol/w6c2-postmerge-integrity-repair-20260914-sol-001",
+      "headRefOid": "de190b2c7e878fd5a4cf6ecb2fc58b34b058ee74",
+      "matching_paths": [
+        "control_plane/remote_codex_operator_adapter.py"
+      ]
+    },
+    {
+      "number": 660,
+      "title": "refactor(exec): generalize remote Operator Harness proxy",
+      "headRefName": "sol/sol-operator-harness-provider-neutral-proxy-20260914",
+      "headRefOid": "a614e422c1c84b3b55be6aa855205fd2e3b1931c",
+      "matching_paths": [
+        "control_plane/remote_codex_operator_adapter.py"
+      ]
+    },
+    {
+      "number": 590,
+      "title": "[CRAFT-H3][DRAFT/HOLD] Prove Craft through Claude-compatible subscription harness",
+      "headRefName": "sol/worker-craft-claude-canary-20260913",
+      "headRefOid": "32861e4b1c2940eca4f25d709f1423d2b6700696",
+      "matching_paths": [
+        "control_plane/executive_worker_broker.py"
+      ]
+    },
+    {
+      "number": 589,
+      "title": "[CRAFT-H2][DRAFT/HOLD] Wire Craft into Codex and Alibaba worker factory",
+      "headRefName": "sol/worker-craft-runtime-integration2-20260913",
+      "headRefOid": "77d32182456e838aec32a51d301567052b8aa034",
+      "matching_paths": [
+        "control_plane/executive_worker_broker.py"
+      ]
+    },
+    {
+      "number": 124,
+      "title": "feat(liquidity): W-LIQ.3 independent quant foundation",
+      "headRefName": "codex/mas120-wliq3-20260822",
+      "headRefOid": "23f97360131d05123acc440da15780b0bb200e82",
+      "matching_paths": [
+        "control_plane/codex_operator_adapter.py",
+        "control_plane/executive_operator_harness_port.py",
+        "control_plane/executive_operator_supervisor.py",
+        "control_plane/executive_runtime.py",
+        "control_plane/executive_service.py",
+        "control_plane/executive_worker_broker.py"
+      ]
+    }
+  ]
+}

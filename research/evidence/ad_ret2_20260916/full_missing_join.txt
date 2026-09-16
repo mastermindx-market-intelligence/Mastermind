@@ -1,0 +1,73 @@
+{"attempt_id": "ATT-caf224c5c5e646f1b2b6154b801dfebd", "candidate_ready": false, "error": "OperatorOperationApplied", "event_types": ["JOB_CLAIMED", "OHF_PROFILE_SEALED", "ATTEMPT_HEARTBEAT", "OPERATOR_OPERATION_INTENT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "OHF_ATTESTATION_OBSERVED", "OHF_LAUNCH_DECISION", "OPERATOR_OPERATION_INTENT", "ATTEMPT_HEARTBEAT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "ATTEMPT_HEARTBEAT"], "fixture_only": true, "foreign": false, "job_id": "JOB-001", "kind": "BLOCKED", "observations_retained": 0}
+F{"attempt_id": "ATT-ab2ad38b791f465da7eccc1f309b607f", "candidate_ready": false, "error": "OperatorOperationApplied", "event_types": ["JOB_CLAIMED", "OHF_PROFILE_SEALED", "ATTEMPT_HEARTBEAT", "OPERATOR_OPERATION_INTENT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "OHF_ATTESTATION_OBSERVED", "OHF_LAUNCH_DECISION", "OPERATOR_OPERATION_INTENT", "ATTEMPT_HEARTBEAT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "ATTEMPT_HEARTBEAT"], "fixture_only": true, "foreign": false, "job_id": "JOB-001", "kind": "DECISION_REQUEST", "observations_retained": 0}
+F{"attempt_id": "ATT-f44dcfc9c6a14276803908f3650f1df1", "candidate_ready": true, "error": null, "event_types": ["JOB_CLAIMED", "OHF_PROFILE_SEALED", "ATTEMPT_HEARTBEAT", "OPERATOR_OPERATION_INTENT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "OHF_ATTESTATION_OBSERVED", "OHF_LAUNCH_DECISION", "OPERATOR_OPERATION_INTENT", "ATTEMPT_HEARTBEAT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "ATTEMPT_HEARTBEAT", "OHF_CANDIDATE_RESULT_RECORDED"], "fixture_only": true, "foreign": false, "job_id": "JOB-001", "kind": "BLOCKED", "observations_retained": 1}
+.{"attempt_id": "ATT-376684ab27174c1cbdf101fb635e39de", "candidate_ready": true, "error": null, "event_types": ["JOB_CLAIMED", "OHF_PROFILE_SEALED", "ATTEMPT_HEARTBEAT", "OPERATOR_OPERATION_INTENT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "OHF_ATTESTATION_OBSERVED", "OHF_LAUNCH_DECISION", "OPERATOR_OPERATION_INTENT", "ATTEMPT_HEARTBEAT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "ATTEMPT_HEARTBEAT", "OHF_CANDIDATE_RESULT_RECORDED"], "fixture_only": true, "foreign": false, "job_id": "JOB-001", "kind": "DECISION_REQUEST", "observations_retained": 1}
+.{"attempt_id": "ATT-d6f1630e9a3948108e8e0b1f1a93824f", "candidate_ready": true, "error": "OperatorOperationApplied", "event_types": ["JOB_CLAIMED", "OHF_PROFILE_SEALED", "ATTEMPT_HEARTBEAT", "OPERATOR_OPERATION_INTENT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "OHF_ATTESTATION_OBSERVED", "OHF_LAUNCH_DECISION", "OPERATOR_OPERATION_INTENT", "ATTEMPT_HEARTBEAT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "ATTEMPT_HEARTBEAT"], "fixture_only": true, "foreign": true, "job_id": "JOB-001", "kind": "BLOCKED", "observations_retained": 0}
+.{"attempt_id": "ATT-1320dec5997a4b57a79c688051200494", "candidate_ready": true, "error": "OperatorOperationApplied", "event_types": ["JOB_CLAIMED", "OHF_PROFILE_SEALED", "ATTEMPT_HEARTBEAT", "OPERATOR_OPERATION_INTENT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "OHF_ATTESTATION_OBSERVED", "OHF_LAUNCH_DECISION", "OPERATOR_OPERATION_INTENT", "ATTEMPT_HEARTBEAT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "ATTEMPT_HEARTBEAT"], "fixture_only": true, "foreign": true, "job_id": "JOB-001", "kind": "DECISION_REQUEST", "observations_retained": 0}
+.{"attempt_id": "ATT-c9e03028d8cf46248bbf9f18cee659d9", "candidate_ready": false, "error": "OperatorOperationApplied", "event_types": ["JOB_CLAIMED", "OHF_PROFILE_SEALED", "ATTEMPT_HEARTBEAT", "OPERATOR_OPERATION_INTENT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "OHF_ATTESTATION_OBSERVED", "OHF_LAUNCH_DECISION", "OPERATOR_OPERATION_INTENT", "ATTEMPT_HEARTBEAT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "ATTEMPT_HEARTBEAT"], "fixture_only": true, "foreign": false, "job_id": "JOB-001", "kind": "BLOCKED", "observations_retained": 0}
+.{"attempt_id": "ATT-0780d4c0d82a4bea9594226ff4df6d9c", "candidate_ready": false, "error": "OperatorOperationApplied", "event_types": ["JOB_CLAIMED", "OHF_PROFILE_SEALED", "ATTEMPT_HEARTBEAT", "OPERATOR_OPERATION_INTENT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "OHF_ATTESTATION_OBSERVED", "OHF_LAUNCH_DECISION", "OPERATOR_OPERATION_INTENT", "ATTEMPT_HEARTBEAT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "ATTEMPT_HEARTBEAT"], "fixture_only": true, "foreign": false, "job_id": "JOB-001", "kind": "BLOCKED", "observations_retained": 0}
+.{"attempt_id": "ATT-6dd6b1a2a00f4129a18cc1de27198a9a", "candidate_ready": false, "error": "OperatorOperationApplied", "event_types": ["JOB_CLAIMED", "OHF_PROFILE_SEALED", "ATTEMPT_HEARTBEAT", "OPERATOR_OPERATION_INTENT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "OHF_ATTESTATION_OBSERVED", "OHF_LAUNCH_DECISION", "OPERATOR_OPERATION_INTENT", "ATTEMPT_HEARTBEAT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "ATTEMPT_HEARTBEAT"], "fixture_only": true, "foreign": false, "job_id": "JOB-001", "kind": "BLOCKED", "observations_retained": 0}
+.{"attempt_id": "ATT-a1831435b6f94acabd4d3648c4a5b08a", "candidate_ready": false, "error": "OperatorOperationApplied", "event_types": ["JOB_CLAIMED", "OHF_PROFILE_SEALED", "ATTEMPT_HEARTBEAT", "OPERATOR_OPERATION_INTENT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "OHF_ATTESTATION_OBSERVED", "OHF_LAUNCH_DECISION", "OPERATOR_OPERATION_INTENT", "ATTEMPT_HEARTBEAT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "ATTEMPT_HEARTBEAT"], "fixture_only": true, "foreign": false, "job_id": "JOB-001", "kind": "DECISION_REQUEST", "observations_retained": 0}
+.{"buffered_kinds": ["turn/started", "item/completed"], "error": "CodexAdapterError:MCP_OR_TOOL_TRANSPORT_FAILURE", "interrupted": false, "native_fixture_only": true, "returned_kinds": []}
+F{"buffered_kinds": ["turn/started", "item/completed", "turn/completed"], "error": null, "interrupted": true, "native_fixture_only": true, "returned_kinds": ["turn/started", "item/completed", "turn/completed"]}
+.{"buffered_kinds": ["turn/started", "item/completed"], "error": "CodexAdapterError:MCP_OR_TOOL_TRANSPORT_FAILURE", "interrupted": false, "native_fixture_only": true, "returned_kinds": []}
+.
+=================================== FAILURES ===================================
+______ test_requirement_nonterminal_observation_survives_restart[BLOCKED] ______
+
+tmp_path = PosixPath('/private/tmp/pytest-of-chriswong/pytest-1303/test_requirement_nonterminal_o0')
+kind = 'BLOCKED'
+
+    @pytest.mark.parametrize("kind", ["BLOCKED", "DECISION_REQUEST"])
+    def test_requirement_nonterminal_observation_survives_restart(tmp_path, kind):
+        runtime, job, lease, adapter, _, _, error = drive_yield(tmp_path, kind)
+        assert adapter.observed
+        reopened = Runtime.at(tmp_path, clock=runtime.store.now_ms)
+        retained = persisted_observations(reopened, lease.attempt.attempt_id)
+>       assert any(e.get("provider_event_id") == "synthetic-return-one" for e in retained), (
+            "MISSING_JOIN: observed nonterminal return never reached durable Executive evidence"
+        )
+E       AssertionError: MISSING_JOIN: observed nonterminal return never reached durable Executive evidence
+E       assert False
+E        +  where False = any(<generator object test_requirement_nonterminal_observation_survives_restart.<locals>.<genexpr> at 0x116871b10>)
+
+research/evidence/ad_ret2_20260916/probe_missing_join.py:95: AssertionError
+_ test_requirement_nonterminal_observation_survives_restart[DECISION_REQUEST] __
+
+tmp_path = PosixPath('/private/tmp/pytest-of-chriswong/pytest-1303/test_requirement_nonterminal_o1')
+kind = 'DECISION_REQUEST'
+
+    @pytest.mark.parametrize("kind", ["BLOCKED", "DECISION_REQUEST"])
+    def test_requirement_nonterminal_observation_survives_restart(tmp_path, kind):
+        runtime, job, lease, adapter, _, _, error = drive_yield(tmp_path, kind)
+        assert adapter.observed
+        reopened = Runtime.at(tmp_path, clock=runtime.store.now_ms)
+        retained = persisted_observations(reopened, lease.attempt.attempt_id)
+>       assert any(e.get("provider_event_id") == "synthetic-return-one" for e in retained), (
+            "MISSING_JOIN: observed nonterminal return never reached durable Executive evidence"
+        )
+E       AssertionError: MISSING_JOIN: observed nonterminal return never reached durable Executive evidence
+E       assert False
+E        +  where False = any(<generator object test_requirement_nonterminal_observation_survives_restart.<locals>.<genexpr> at 0x11673f6b0>)
+
+research/evidence/ad_ret2_20260916/probe_missing_join.py:95: AssertionError
+______ test_requirement_available_native_batch_does_not_wait_for_terminal ______
+
+tmp_path = PosixPath('/private/tmp/pytest-of-chriswong/pytest-1303/test_requirement_available_nat0')
+
+    def test_requirement_available_native_batch_does_not_wait_for_terminal(tmp_path):
+        seen, returned, error = observe_native_batch(tmp_path)
+        assert any(e.provider_event_id == "synthetic-yield-item" for e in seen)
+>       assert any(e.provider_event_id == "synthetic-yield-item" for e in returned), (
+            "MISSING_PRODUCER_SEAM: available nonterminal item waits on turn/completed; " + str(error)
+        )
+E       AssertionError: MISSING_PRODUCER_SEAM: available nonterminal item waits on turn/completed; CodexAdapterError:MCP_OR_TOOL_TRANSPORT_FAILURE
+E       assert False
+E        +  where False = any(<generator object test_requirement_available_native_batch_does_not_wait_for_terminal.<locals>.<genexpr> at 0x116ec20c0>)
+
+research/evidence/ad_ret2_20260916/probe_missing_join.py:180: AssertionError
+=========================== short test summary info ============================
+FAILED research/evidence/ad_ret2_20260916/probe_missing_join.py::test_requirement_nonterminal_observation_survives_restart[BLOCKED]
+FAILED research/evidence/ad_ret2_20260916/probe_missing_join.py::test_requirement_nonterminal_observation_survives_restart[DECISION_REQUEST]
+FAILED research/evidence/ad_ret2_20260916/probe_missing_join.py::test_requirement_available_native_batch_does_not_wait_for_terminal
+3 failed, 10 passed in 14.13s

@@ -211,6 +211,18 @@ class ExecutiveOperatorHarnessPort:
             detail=detail,
         )
 
+    def record_operator_semantic_yield(
+        self, attempt_id: str, turn: TurnRef,
+        events: Sequence[NormalizedEvent], cursor: EventCursor,
+    ) -> str:
+        self._require_attempt(attempt_id)
+        if turn.attempt_id != attempt_id:
+            raise StateConflict("semantic yield is outside the port Attempt")
+        return self.runtime.operator_harness.record_semantic_yield(
+            turn=turn, events=events, cursor=cursor,
+            fence_generation=self.fence_generation, lease_token=self.lease_token,
+        )
+
     def finish_operator_candidate(
         self,
         attempt_id: str,
