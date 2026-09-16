@@ -4,14 +4,14 @@
 
 **Goal:** Deliver one independently useful permanent-system vertical: an attended non-root orchestrator may ask the trusted Executive controller to run the fixed privileged broker action `executive.worker_auth.verify_only` for the exact current SEALED_WORKER Attempt's assigned slot, with durable Event-backed replay/reconciliation and no lease-token, root-shell, arbitrary-action, slot, host, path, or retry authority.
 
-**Architecture:** Reuse the current Executive Job/Attempt/Worker/Event, policy, lease/fence, service and installer owners. Stack the reviewed PR #613 broker/client source, add one controller-only authority, factor token-free current-attempt and effective-grant validators from their existing owners, extract one shared one-send broker client, implement an Event-backed readiness controller with existing-family-first recovery and process-local singleflight, expose one closed control command plus fixed installed wrapper, and keep the whole capability default-off behind the existing `--arm-privileged-broker` bootstrap.
+**Architecture:** Reuse the current Executive Job/Attempt/Worker/Event, policy, lease/fence, service and installer owners plus the already-merged privileged broker/client/revocation source. Add one controller-only authority, factor token-free current-attempt and effective-grant validators from their existing owners, extract one shared one-send broker client, implement an Event-backed login-check controller with existing-family-first recovery and process-local singleflight, expose one closed control command plus fixed installed wrapper, and keep the whole capability default-off behind the existing `--arm-privileged-broker` bootstrap.
 
 **Tech Stack:** Python 3.12, SQLite RuntimeStore, asyncio, Unix domain sockets, macOS launchd, Bash installer wrappers, pytest, GitHub protected merge queue.
 
 **Spec:** `docs/superpowers/specs/2026-09-14-executive-job-bound-worker-readiness-design.md`
 
 **Global Constraints:**
-- Preserve PR #613's six-action catalog and broker receipt owner; never add generic exec, shell, path, socket or secret parameters.
+- Preserve protected merge `c9db5d42ed4b1479985b8989d9767ac80a84f9b8`'s six-action catalog and broker receipt owner plus revocation merge `2575d16ae8e2ae73e3e520d81bc5344621f5356c`; never add generic exec, shell, path, socket or secret parameters.
 - Preserve `SERVICE_CONTROL` and `CREDENTIAL_ADMIN` mandatory denies.
 - Never expose or request the persisted Attempt lease token.
 - Never auto-retry or fail over an attempted/unknown root effect.
@@ -20,49 +20,62 @@
 - `NOT_FOUND` after `ATTEMPTED` remains `EFFECT_UNKNOWN`.
 - Dedicated worker/model packets must not advertise the controller-only capability.
 - Source completion, merge, installation, host proof and final acceptance remain distinct.
+- No result field or value ever asserts READY; every operation result carries `observed_at_ms`, `evidence_currency: CURRENT|HISTORICAL`, and the constant `observation_scope: LOGIN_STATUS_ONLY_NO_READY_ASSERTION`. Only `TERMINAL` carries a broker receipt; replay reproduces the identical original terminal evidence without upgrading it.
+- The Event aggregate ID is the family aggregate ID (`pvrf-...`, from the logical family key only); the broker operation/request ID (`pvr-...`, from the complete first-admission binding) is a separate value. Release/boot/policy changes must never be able to create a second family for the same fence.
+- The installed `mmx-control` wrapper is closed to exactly `check-current-worker-login JOB_ID ATTEMPT_ID FENCE_GENERATION`; it rejects any `-`-prefixed argument and forwards no caller-selected option, socket/path, or other subcommand.
+- The privileged controller performs all Event reads, including the same-transaction absence recheck, through one Runtime/Event-owner API seam; it contains no raw `SELECT ... FROM events`.
 
 ## Capability state on entry
 
-- PR #613 fixed broker/status: `BUILT_NOT_PROVEN`, semantic head `2259596e943dabe566203e8dd450888661d4f00c`.
-- PR #621 administrative revocation: `BUILT_NOT_PROVEN`.
-- P2-1 Job-bound readiness authority: `NOT_BUILT`.
+- Fixed broker/status: `BUILT_NOT_PROVEN`, protected merge `c9db5d42ed4b1479985b8989d9767ac80a84f9b8`.
+- Administrative revocation: `BUILT_NOT_PROVEN`, protected merge `2575d16ae8e2ae73e3e520d81bc5344621f5356c`.
+- P2-1 Job-bound login-check authority: `NOT_BUILT`.
 - First root bootstrap and production proof: not yet performed.
 
 ---
 
-## Task 0: Reconcile and stack the exact broker dependency
+## Task 0: Re-pin protected source and baseline the merged actuator
 
-**Files:** Git ancestry only; no hand-edited source.
+**Files:** Git/source evidence only; no hand-edited source.
 
-**Step 1 — verify source identity and current base**
-
-```bash
-git fetch origin master sol/privileged-action-broker-20260913
-git rev-parse HEAD
-git rev-parse origin/master
-git rev-parse origin/sol/privileged-action-broker-20260913
-```
-
-Expected: this branch contains the reviewed spec commits; broker branch resolves to `2259596e943dabe566203e8dd450888661d4f00c`, or protected master contains a merged descendant whose broker/client blobs are byte-identical. Stop on a moved, unreviewed semantic head.
-
-**Step 2 — prove collision safety before merge**
+**Step 1 — verify current protected identity and merged owners**
 
 ```bash
-git diff --name-only HEAD..origin/master | sort > /tmp/p2-protected-paths
-git diff --name-only af9fce32861f9c1496b85a580e3569712170d92b..2259596e943dabe566203e8dd450888661d4f00c | sort > /tmp/p2-broker-paths
-comm -12 /tmp/p2-protected-paths /tmp/p2-broker-paths
-git merge-tree "$(git merge-base HEAD 2259596e943dabe566203e8dd450888661d4f00c)" HEAD 2259596e943dabe566203e8dd450888661d4f00c | grep -E 'CONFLICT|<<<<<<<|>>>>>>>' && exit 1 || true
+git fetch origin master
+PROTECTED_SHA="$(git rev-parse origin/master)"
+printf 'protected=%s\n' "$PROTECTED_SHA"
+git merge-base --is-ancestor c9db5d42ed4b1479985b8989d9767ac80a84f9b8 origin/master
+git merge-base --is-ancestor 2575d16ae8e2ae73e3e520d81bc5344621f5356c origin/master
+git merge-base --is-ancestor origin/master HEAD
 ```
 
-Expected: no unresolved overlap. If PR #613 is already merged, merge current protected master instead and verify exact broker blobs.
+Expected: the protected branch contains both reviewed merges and is an ancestor of the clean implementation carrier. If protected moved after this plan was frozen, reload the protected Skillpack, compare material source, and reconcile the carrier before source edits; never stack or copy the old PR heads.
 
-**Step 3 — merge the dependency, never copy files**
+**Step 2 — prove current collision state on all planned owner paths**
 
 ```bash
-git merge --no-ff 2259596e943dabe566203e8dd450888661d4f00c -m 'merge: stack reviewed privileged broker dependency'
+cat > /tmp/p2-owned-paths <<'EOF'
+config/authority_map.yml
+control_plane/executive_authority.py
+control_plane/executive_runtime.py
+control_plane/executive_supervisor.py
+control_plane/executive_privileged_client.py
+control_plane/executive_privileged_authority.py
+control_plane/executive_service.py
+scripts/mmx_admin.py
+scripts/executive_os_phase1c.py
+ops/executive_os/install.sh
+EOF
+
+gh pr list --repo mastermindx-market-intelligence/Mastermind \
+  --state open --limit 100 --json number,headRefOid,title
+# For every open PR returned above, inspect its file list before claiming disjointness:
+# gh pr view NUMBER --repo mastermindx-market-intelligence/Mastermind --json headRefOid,files
 ```
 
-**Step 4 — baseline the imported capability**
+At the current protected pin `8ba7deedde164c90298d3e88785d98e02fa5e2d2`, PR #655 and PR #667 have merged material Runtime/config changes; implementation must use that protected source, not pre-#655 assumptions. PR #653 at `959b37b329c44d81874dc23944746a5bd594e3b7` remains the active writer on `ops/executive_os/install.sh` and `scripts/executive_os_phase1c.py`; hold Task 6 and every overlapping edit until it merges/closes and current protected compatibility is re-established. PR #690 overlaps only `tests/test_executive_os_sqlite.py`, so P2 uses its new owning test files and rechecks before integration. PR #124 is a broad behind/failing historical branch, not a current ownership source, but its overlap must be rechecked before release. Any newly active overlap is a stop/reconcile gate, not permission for a second writer.
+
+**Step 3 — baseline the merged broker, revocation and current Executive owners**
 
 ```bash
 umask 022
@@ -71,13 +84,14 @@ python3 -m pytest -o addopts='' -q \
   tests/test_executive_privileged_broker.py \
   tests/test_mmx_admin.py \
   tests/test_executive_launchd_config.py \
-  tests/test_executive_service_control.py
+  tests/test_executive_service_control.py \
+  tests/test_executive_privileged_revocation.py
 bash -n ops/executive_os/install.sh
 bash -n ops/executive_os/service-control.sh
-git diff --check HEAD^..HEAD
+git diff --check
 ```
 
-Do not alter imported broker semantics to make later work convenient.
+Expected: baseline GREEN before the first P2 source test is written. A current-source failure is investigated or returned as a blocker; do not weaken the imported broker/revocation contracts to make P2 convenient.
 
 ---
 
@@ -91,12 +105,12 @@ Do not alter imported broker semantics to make later work convenient.
 **Step 1 — write failing policy tests**
 
 Add tests that assert:
-- exact allow-list is `{READ, RESEARCH, WRITE_BRANCH, RUN_TESTS, REQUEST_WORKER_READINESS}`;
+- exact allow-list is `{READ, RESEARCH, WRITE_BRANCH, RUN_TESTS, REQUEST_WORKER_LOGIN_CHECK}`;
 - exact scope is `current_attempt_assigned_worker_slot`;
 - adding the YAML value without the code constant fails closed;
 - deleting/changing the scope fails closed;
 - `SERVICE_CONTROL` and `CREDENTIAL_ADMIN` remain mandatory denies;
-- authorizing `REQUEST_WORKER_READINESS` accepts no worktree/path/argv/slot/action evidence and returns no slot/root grant.
+- authorizing `REQUEST_WORKER_LOGIN_CHECK` accepts no worktree/path/argv/slot/action evidence and returns no slot/root grant.
 
 ```bash
 python3 -m pytest -o addopts='' -q tests/test_executive_authority.py \
@@ -107,7 +121,7 @@ Expected RED: allow-list/scope mismatch.
 
 **Step 2 — implement the minimum policy change**
 
-- Add `REQUEST_WORKER_READINESS` to `PHASE1B_ALLOWED`.
+- Add `REQUEST_WORKER_LOGIN_CHECK` to `PHASE1B_ALLOWED`.
 - Add it to checked-in YAML allowed capabilities.
 - Add exact scope requirement in YAML and pin it in `ExecutiveAuthorityPolicy.load()`.
 - Do **not** add action/slot/path fields to `AuthorityDecision`; this capability remains declarative until the controller's current-attempt join.
@@ -163,10 +177,11 @@ Expected RED: API absent.
 
 **Step 3 — write failing effective-grant and prompt tests**
 
-Add tests that assert:
+`executive_supervisor.py` has exactly four current authority-projection sites: `_prompt`'s JSON authorities list, `WorkerLaunchSpec.authorities`, `_validate_execution_profile`'s write-capable/admission gate, and the durable launch attestation. Add tests that assert:
 - a module-level canonical validator produces the same result currently returned by `ExecutiveSupervisor._effective_grant`;
 - malformed/digest/policy/role/job/widened grants fail identically;
-- `REQUEST_WORKER_READINESS` is removed from worker/model-facing `authorities` whether sourced from the Job or effective grant;
+- `REQUEST_WORKER_LOGIN_CHECK` is removed from `_prompt`'s JSON authorities and from `WorkerLaunchSpec.authorities`, whether sourced from the Job or effective grant;
+- `_validate_execution_profile`'s admission gate and the durable launch attestation both still see the full unfiltered authority set, including `REQUEST_WORKER_LOGIN_CHECK` — negative test that filtering does not leak into either;
 - the persisted Job/Attempt grant remains unchanged for controller admission.
 
 ```bash
@@ -179,8 +194,8 @@ Expected RED: helper/filter absent.
 **Step 4 — implement the shared grant validator and packet filter**
 
 - Factor current `_effective_grant` validation into one module-level pure function in `executive_supervisor.py`; keep the existing method as a delegating compatibility seam.
-- Add a closed `CONTROLLER_ONLY_AUTHORITIES = {"REQUEST_WORKER_READINESS"}` projection rule.
-- Filter only the model packet; never rewrite durable Job or Attempt authority evidence.
+- Add a closed `CONTROLLER_ONLY_AUTHORITIES = {"REQUEST_WORKER_LOGIN_CHECK"}` projection rule.
+- Apply the filter only at the two model/worker-facing projection sites (`_prompt` JSON, `WorkerLaunchSpec.authorities`); leave `_validate_execution_profile`'s admission gate and the durable launch attestation on the full unfiltered grant; never rewrite durable Job or Attempt authority evidence.
 
 **Step 5 — verify GREEN**
 
@@ -266,16 +281,16 @@ git commit -m 'refactor(executive): share privileged broker client validation'
 **Files:**
 - Create: `control_plane/executive_privileged_authority.py`
 - Create: `tests/test_executive_privileged_authority.py`
-- Modify: `control_plane/executive_runtime.py` only if a transaction-aware Event-list seam is needed
-- Modify: `tests/test_executive_os_sqlite.py` only for that Event seam
+- Modify: `control_plane/executive_runtime.py` for the required transaction-aware Event-list seam
+- Modify: `tests/test_executive_os_sqlite.py` for that Event seam
 
 **Step 1 — write contract and binding RED tests**
 
-Pin exact schemas/keys, positive integer fence validation, fixed action, canonical JSON digest and `pvr-<48hex>` operation ID. Refuse extra fields, unsafe IDs, PID fallback boot identities, unknown slot, caller-supplied action/slot/release/host/path and any secret field.
+Pin exact schemas/keys, positive integer fence validation, fixed action, canonical JSON digests, the `pvrf-<48hex>` family aggregate ID (from the logical family key only) and the `pvr-<48hex>` operation/broker request ID (from the complete first-admission binding including release/boot/policy). Assert the two IDs differ and each is reproducible only from its own input. Refuse extra fields, unsafe IDs, PID fallback boot identities, unknown slot, caller-supplied action/slot/release/host/path and any secret field.
 
 ```bash
 python3 -m pytest -o addopts='' -q tests/test_executive_privileged_authority.py \
-  -k 'binding or request_contract or boot_identity'
+  -k 'binding or request_contract or boot_identity or family_id'
 ```
 
 Expected RED: module absent.
@@ -286,42 +301,47 @@ Add:
 - binding/result schemas and frozen dataclasses;
 - strict validators and canonical serialization;
 - real-kernel-boot UUID validator;
-- logical effect key `(job_id, attempt_id, fence, verify_only)`;
-- deterministic operation/request ID.
+- logical family key `(job_id, attempt_id, fence, verify_only)` and its `pvrf-...` family aggregate ID;
+- deterministic `pvr-...` operation/broker request ID from the complete first-admission binding.
 
 Load release, policy and boot facts outside Runtime write transactions.
 
-**Step 3 — write RED tests for existing-family-first recovery**
+**Step 3 — add the required Runtime/Event-owner seam and write RED tests for existing-family-first recovery**
+
+Add a transaction-aware `EventStore.list_events(..., connection=...)` on the existing Event owner and make `EventRegistry.list_events` delegate to it; this one seam is reused for both the outside-transaction family lookup and the inside-transaction absence recheck in Step 5. `executive_privileged_authority.py` must never issue a raw `SELECT ... FROM events`.
 
 Cover:
-- one exact family is found by Job/Attempt/fence/action after Attempt completion/requeue;
-- release/boot/policy movement does not create a second family for the same logical key;
+- the family is found by exact `aggregate_type='privileged_readiness'` + `aggregate_id=<family aggregate ID>` lookup (not a job_id/attempt_id scan) after Attempt completion/requeue;
+- release/boot/policy movement does not change the family aggregate ID and therefore cannot create a second family for the same logical key;
 - multiple/conflicting families fail closed;
 - no family enters fresh current-attempt admission;
-- controller restart reconstructs from Events plus broker status only.
-
-If required, add a transaction-aware `EventStore.list_events(..., connection=...)` on the existing Event owner and make `EventRegistry.list_events` delegate.
+- controller restart reconstructs from Events plus broker status only;
+- recovery performs at most one broker status query per invocation for `ATTEMPTED`/`EFFECT_UNKNOWN`, creates no family, performs no effect, and enumerates no other family/Job/Attempt;
+- recovery requires no current authority check (no `current_authority_snapshot` call on this path).
 
 **Step 4 — write RED tests for atomic first admission and concurrency**
 
 Use a fake broker client and real RuntimeStore:
 - wrong Job/Attempt/fence/status/lease/worker/policy/grant/mode refuses with zero Event/effect;
-- valid admission atomically appends INTENT then ATTEMPTED;
-- 20 concurrent async callers produce one ATTEMPTED and one effect call;
+- valid admission atomically appends INTENT then ATTEMPTED inside one `BEGIN IMMEDIATE` transaction;
+- 20 concurrent async callers, singleflight-keyed on the logical family key (not the complete binding), produce one ATTEMPTED and one effect call;
+- a singleflight miss (simulated second process) still cannot create a duplicate family, proven via the `BEGIN IMMEDIATE` transaction plus family aggregate-ID uniqueness alone;
 - failure before ATTEMPTED creates no operation family;
-- crash/exception after ATTEMPTED never becomes no-effect.
+- crash/exception after ATTEMPTED never becomes no-effect;
+- process crash simulated between the ATTEMPTED commit and the broker socket write leaves the family `EFFECT_UNKNOWN`, identical to a post-send transport loss, with no automatic retry;
+- `worker_id` resolves through `get_slot(worker_id)` imported via the existing `ops.executive_os` namespace-package seam from a production-style release-root composition (not a repo-relative import), and the returned slot id must equal the caller's worker.
 
 **Step 5 — implement controller admission and singleflight**
 
-- Query existing family first.
-- For new work, use process-local async singleflight by logical effect key.
-- Inside one short Runtime transaction, recheck absence, call `current_authority_snapshot`, revalidate policy/effective grant/slot/preflight facts, append INTENT+ATTEMPTED, and return execute-once only to the owner task.
+- Query existing family first via the Step 3 seam.
+- For new work, use a process-local async singleflight registry keyed on the logical family key.
+- Inside one `BEGIN IMMEDIATE` Runtime transaction, recheck absence via the same Step 3 seam, call `current_authority_snapshot`, revalidate policy/effective grant/slot/preflight facts, append INTENT+ATTEMPTED, and return execute-once only to the owner task.
 - Do not hold the Runtime transaction over sysctl, file reads, socket I/O or provider work.
 
 **Step 6 — write RED tests for terminal and unknown-effect reconciliation**
 
 Cover:
-- terminal effect response -> TERMINAL once;
+- terminal effect response -> TERMINAL once, with `observed_at_ms` set and `evidence_currency` computed from freshly re-validated boot/release/policy facts;
 - broker refusal -> BROKER_REFUSED once with closed reason;
 - transport loss -> EFFECT_UNKNOWN;
 - status terminal after loss -> RECONCILED with one total effect call;
@@ -330,11 +350,13 @@ Cover:
 - repeated marker/NOT_FOUND/status observation appends no duplicate Event;
 - malformed response -> EFFECT_UNKNOWN, no retry;
 - cancellation after ATTEMPTED -> EFFECT_UNKNOWN;
-- terminal failed receipt remains terminal failed evidence, not controller failure.
+- terminal failed receipt remains terminal failed evidence, not controller failure;
+- every result carries `observation_scope: LOGIN_STATUS_ONLY_NO_READY_ASSERTION`; a replayed terminal result (`replayed: true`) reproduces the identical terminal receipt and never asserts READY regardless of `evidence_currency`; broker refusal and EFFECT_UNKNOWN carry `receipt: null`;
+- current release/boot/policy facts diverging from the stored binding yields `evidence_currency: HISTORICAL`; exact equality yields `CURRENT`.
 
 **Step 7 — implement reconciliation and result projection**
 
-Use only the shared client's status method after ATTEMPTED. Validate event-family order and exact command IDs. Return secret-free results; never include lease token, provider home, raw credentials, environment or arbitrary paths.
+Use only the shared client's status method after ATTEMPTED. Validate event-family order and exact command IDs. Compute `observed_at_ms` and `evidence_currency` on every result path, fresh or replayed. Return secret-free results; never include lease token, provider home, raw credentials, environment or arbitrary paths.
 
 **Step 8 — verify GREEN**
 
@@ -402,15 +424,15 @@ Expected RED: fields/guards absent.
 Pin exact request:
 
 ```json
-{"command":"verify_current_worker_readiness","args":{"job_id":"JOB-...","attempt_id":"ATT-...","fence_generation":1}}
+{"command":"check_current_worker_login","args":{"job_id":"JOB-...","attempt_id":"ATT-...","fence_generation":1}}
 ```
 
-Prove exact keys/types, no extra fields, no caller action/slot/socket/path, READY-only dispatch, existing kernel peer gate, typed controller errors and exact JSON result.
+Prove exact keys/types, no extra fields, no caller action/slot/socket/path, service-`READY`-only dispatch, existing kernel peer gate, typed controller errors, and an exact JSON result that includes `family_id`, `operation_id`, `observed_at_ms`, and `evidence_currency` and never a `ready`/`READY` field.
 
 Add CLI subcommand:
 
 ```text
-verify-current-worker-readiness JOB_ID ATTEMPT_ID FENCE_GENERATION
+check-current-worker-login JOB_ID ATTEMPT_ID FENCE_GENERATION
 ```
 
 **Step 4 — implement dispatch and CLI**
@@ -425,12 +447,14 @@ Prove:
 - existing `--arm-privileged-broker` writes both broker config and `privileged_readiness_armed=true` with fixed socket;
 - no arm flag leaves readiness false and no usable wrapper;
 - installer creates root-owned exact-release `/Library/Application Support/MastermindExecutive/bin/mmx-control` with fixed control socket/config and no user-controlled path/socket/action interpolation;
+- the wrapper exposes exactly one operation (`check-current-worker-login`), accepts exactly three positional arguments `JOB_ID ATTEMPT_ID FENCE_GENERATION`, and rejects any argument beginning with `-` before dispatch;
+- the wrapper never forwards a caller-supplied global option, an alternate socket/path, or another subcommand — no argv passthrough beyond the three validated positional values;
 - cleanup/rollback removes or leaves inert the wrapper when arming fails;
 - ordinary control/worker service startup remains separately controlled.
 
 **Step 6 — implement the fixed wrapper and installer fields**
 
-Use an `exec` wrapper to installed Python + installed `scripts/executive_os_phase1c.py` with fixed config/socket arguments and forwarded command argv. Never use `eval`, `bash -c`, a mutable checkout or caller-supplied socket.
+Use an `exec` wrapper to installed Python + installed `scripts/executive_os_phase1c.py` with the fixed config/socket and the fixed `check-current-worker-login` subcommand baked in; the wrapper validates exactly its three positional arguments (rejecting any `-`-prefixed argument) and passes only those three values through — it never forwards arbitrary argv, another subcommand, or a socket/path override. Never use `eval`, `bash -c`, a mutable checkout or caller-supplied socket.
 
 **Step 7 — verify GREEN**
 
@@ -468,9 +492,10 @@ git commit -m 'feat(executive): expose armed job-bound readiness control'
 Use a real RuntimeStore, control service, Unix socket, fake fixed broker server and CLI request to prove:
 - current Job/Attempt/fence -> control service -> controller -> exact verify-only frame;
 - one effect despite concurrent callers;
-- terminal result through the real control response;
+- terminal result through the real control response, carrying `family_id`, `operation_id`, `observed_at_ms`, `evidence_currency`, and `observation_scope`, and no `ready`/`READY` field;
 - lost effect response followed by a fresh service/controller instance -> status-only terminal reconciliation;
-- stale fence and direct dedicated-worker broker access refuse.
+- stale fence and direct dedicated-worker broker access refuse;
+- `ops.executive_os.provider_worker_slots.get_slot` resolves correctly when imported from a production-style release-root composition, not only a repo-relative import.
 
 Place the test in `tests/test_executive_service.py` or a narrowly named new integration test if the owning file becomes unwieldy.
 
@@ -514,8 +539,8 @@ The runbook must separate:
 3. one attended administrator bootstrap with `--arm-privileged-broker`;
 4. services not called healthy merely because plists exist;
 5. real bounded Job creation/claim with capability;
-6. non-root `mmx-control verify-current-worker-readiness ...`;
-7. independent slot/readiness target verification;
+6. non-root `mmx-control check-current-worker-login ...`;
+7. independent verification of the exact login-status observation and absence of any READY claim;
 8. lost-response status reconciliation with one effect;
 9. stale-fence/wrong-Job/direct-worker negatives;
 10. no password prompt after bootstrap.
@@ -569,8 +594,8 @@ This task is **not** delegated to an ordinary coding worker.
 3. Reconcile Runtime: zero living Attempts or lawful explicit termination/requeue.
 4. Perform the one attended administrator bootstrap on the selected Studio using the exact protected source and pinned root Python/Codex inputs.
 5. Prove privileged plist/socket/wrappers/config ownership and service registration; do not infer readiness from installation.
-6. Create/claim one real bounded Job with `REQUEST_WORKER_READINESS` for `codex-01`.
-7. Invoke installed `mmx-control` as the non-root operator and prove exact root `verify_only` plus independent readiness target state.
+6. Create/claim one real bounded Job with `REQUEST_WORKER_LOGIN_CHECK` for `codex-01`.
+7. Invoke installed `mmx-control` as the non-root operator and prove exact root `verify_only`, the exact login-status observation, and absence of any READY claim.
 8. Reconcile a deliberately lost client response through the control command with exactly one broker effect.
 9. Prove wrong Job, stale fence, unauthorized worker socket and arbitrary action/slot/path all refuse.
 10. Prove a fresh native Codex orchestrator discovers and consumes the command without asking for sudo/password. Add Claude attended-orchestrator proof only if the provider session is available; do not claim dedicated Claude worker-slot coverage until the slot catalog supports it.
