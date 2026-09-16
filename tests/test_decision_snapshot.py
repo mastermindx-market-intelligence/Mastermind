@@ -1,3 +1,5 @@
+import json
+import os
 from pathlib import Path
 
 import pytest
@@ -474,3 +476,166 @@ def test_no_public_function_accepts_a_path_or_root_argument():
         assert not {"path", "root", "url", "filename"} & set(
             inspect.signature(fn).parameters
         )
+
+
+# ---------------------------------------------------------------------------
+# Fix round 1 — independent review repairs
+# ---------------------------------------------------------------------------
+
+# Critical 1: same-cutoff/same-generation reuse must survive an existing correction.
+
+def test_same_cutoff_same_generation_after_correction_reuses_corrected_snapshot(
+    snapshot_root,
+):
+    account_path = sources._ROOT / "data" / "portfolios" / "autonomous" / "account.json"
+    account_path.parent.mkdir(parents=True, exist_ok=True)
+    account_path.write_text(json.dumps({"cash": 1.0}), encoding="utf-8")
+
+    original = snapshots.create_snapshot(
+        "autonomous",
+        decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:01:00Z",
+    )
+
+    account_path.write_text(json.dumps({"cash": 2.0}), encoding="utf-8")
+    corrected = snapshots.create_snapshot(
+        "autonomous",
+        decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:10:00Z",
+    )
+    assert corrected["snapshot_id"] != original["snapshot_id"]
+    assert corrected["created"] is True
+    assert corrected["correction"]["same_cutoff_prior_snapshot_ids"] == [original["snapshot_id"]]
+
+    # account.json is unchanged since the correction — a later retry of the same (already
+    # corrected) generation must return the corrected snapshot, not mint a third one.
+    retry = snapshots.create_snapshot(
+        "autonomous",
+        decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:20:00Z",
+    )
+    assert retry["snapshot_id"] == corrected["snapshot_id"]
+    assert retry["created"] is False
+    assert len(list(snapshots.snapshot_dir("autonomous").glob("*.json"))) == 2
+
+
+# Important 2: create-once durability — no poisoned files, no silent short writes.
+
+def test_create_once_completes_after_forced_short_write(snapshot_root, monkeypatch):
+    payload = _sealed_snapshot(generation="sha256:" + "1" * 64)
+    encoded = canonical_json_bytes(payload)
+    real_write = os.write
+    calls = {"n": 0}
+
+    def short_write(fd, data):
+        calls["n"] += 1
+        if calls["n"] == 1 and len(data) > 1:
+            return real_write(fd, data[:1])
+        return real_write(fd, data)
+
+    monkeypatch.setattr(snapshots.os, "write", short_write)
+    result = snapshots.persist_snapshot(payload)
+    assert result["created"] is True
+    assert Path(result["path"]).read_bytes() == encoded
+    assert calls["n"] > 1
+
+
+def test_create_once_cleans_up_poisoned_file_after_write_failure(snapshot_root, monkeypatch):
+    payload = _sealed_snapshot(generation="sha256:" + "2" * 64)
+    real_write = os.write
+
+    def failing_write(fd, data):
+        raise OSError("simulated disk failure")
+
+    monkeypatch.setattr(snapshots.os, "write", failing_write)
+    with pytest.raises(OSError):
+        snapshots.persist_snapshot(payload)
+
+    path = snapshots._snapshot_path("autonomous", payload["snapshot_id"])
+    assert not path.exists()
+
+    monkeypatch.setattr(snapshots.os, "write", real_write)
+    result = snapshots.persist_snapshot(payload)
+    assert result["created"] is True
+
+
+def test_create_once_cleans_up_poisoned_file_after_fsync_failure(snapshot_root, monkeypatch):
+    payload = _sealed_snapshot(generation="sha256:" + "3" * 64)
+    real_fsync = os.fsync
+    calls = {"n": 0}
+
+    def failing_fsync(fd):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise OSError("simulated fsync failure")
+        return real_fsync(fd)
+
+    monkeypatch.setattr(snapshots.os, "fsync", failing_fsync)
+    with pytest.raises(OSError):
+        snapshots.persist_snapshot(payload)
+
+    path = snapshots._snapshot_path("autonomous", payload["snapshot_id"])
+    assert not path.exists()
+
+    monkeypatch.setattr(snapshots.os, "fsync", real_fsync)
+    result = snapshots.persist_snapshot(payload)
+    assert result["created"] is True
+
+
+# Important 3(a): section-page byte ceiling.
+
+def test_section_page_response_ceiling_is_enforced():
+    rows = [{"blob": "x" * 2000} for _ in range(100)]
+    capture = _capture()
+    capture["sections"]["book_truth"]["rows"] = rows
+    capture["sections"]["book_truth"]["rows_total"] = len(rows)
+    capture["sections"]["book_truth"]["rows_returned"] = len(rows)
+    snap = snapshots.compose_snapshot(
+        "autonomous",
+        decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:01:00Z",
+        capture=capture,
+        same_cutoff_prior_snapshot_ids=[],
+    )
+    with pytest.raises(snapshots.SnapshotInvalidRequest):
+        snapshots.section_page(snap, "book_truth", offset=0, limit=100)
+
+
+# Important 3(b): noncanonical-but-digest-valid persisted bytes must still be rejected —
+# this must depend on the canonical-byte comparison, not the digest recomputation.
+
+def test_load_rejects_noncanonical_but_digest_valid_bytes(snapshot_root):
+    payload = _sealed_snapshot(generation="sha256:" + "4" * 64)
+    snapshots.persist_snapshot(payload)
+    path = snapshots._snapshot_path("autonomous", payload["snapshot_id"])
+
+    pretty = json.dumps(payload, indent=2, sort_keys=False).encode("utf-8")
+    assert pretty != path.read_bytes()
+    # verify_snapshot would recompute the same digest from this re-serialization; only the
+    # canonical-bytes comparison catches the noncanonical on-disk representation.
+    c.verify_snapshot(json.loads(pretty))
+
+    path.unlink()
+    path.write_bytes(pretty)
+    with pytest.raises(snapshots.SnapshotCorrupt):
+        snapshots.load_snapshot("autonomous", payload["snapshot_id"])
+
+
+# Important 3(c): section-level structured gaps must be sorted and sealed exactly like root gaps.
+
+def test_section_gaps_are_sorted_and_sealed_like_root_gaps():
+    capture = _capture()
+    gap_z = {"code": "Z", "source_id": "z", "section_id": "book_truth", "owner": None, "detail": None}
+    gap_a = {"code": "A", "source_id": "a", "section_id": "book_truth", "owner": None, "detail": None}
+    capture["sections"]["book_truth"]["gaps"] = [gap_z, gap_a]
+    result = snapshots.compose_snapshot(
+        "autonomous",
+        decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:01:00Z",
+        capture=capture,
+        same_cutoff_prior_snapshot_ids=[],
+    )
+    assert result["sections"]["book_truth"]["gaps"] == [
+        canonical_json_bytes(gap_a).decode("ascii"),
+        canonical_json_bytes(gap_z).decode("ascii"),
+    ]

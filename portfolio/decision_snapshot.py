@@ -133,6 +133,32 @@ def _verify_and_load(raw: bytes) -> dict[str, Any]:
 # Create-once persistence
 # ---------------------------------------------------------------------------
 
+def _write_all(fd: int, data: bytes) -> None:
+    """Write every byte of ``data`` to ``fd``, looping past short writes.
+
+    A short or zero-length ``os.write`` is a hard error here — a partially written file
+    would otherwise silently poison its content address forever, since this store never
+    replaces an existing path.
+    """
+    view = memoryview(data)
+    total = len(view)
+    written = 0
+    while written < total:
+        n = os.write(fd, view[written:])
+        if n <= 0:
+            raise OSError("os.write returned no bytes; snapshot write stalled")
+        written += n
+
+
+def _fsync_directory(directory: Path) -> None:
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    dir_fd = os.open(str(directory), flags)
+    try:
+        os.fsync(dir_fd)
+    finally:
+        os.close(dir_fd)
+
+
 def _create_once(path: Path, encoded: bytes) -> bool:
     path.parent.mkdir(parents=True, exist_ok=True)
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
@@ -141,15 +167,23 @@ def _create_once(path: Path, encoded: bytes) -> bool:
     except FileExistsError:
         return False
     try:
-        os.write(fd, encoded)
+        _write_all(fd, encoded)
         os.fsync(fd)
-    finally:
+    except BaseException:
         os.close(fd)
-    dir_fd = os.open(str(path.parent), os.O_RDONLY)
-    try:
-        os.fsync(dir_fd)
-    finally:
-        os.close(dir_fd)
+        # O_EXCL just created this exact path, so it is never pre-existing: safe to unlink.
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
+        try:
+            _fsync_directory(path.parent)
+        except OSError:
+            pass  # best-effort durability for the cleanup; the original error still wins.
+        raise
+    else:
+        os.close(fd)
+    _fsync_directory(path.parent)
     return True
 
 
@@ -413,13 +447,13 @@ def create_snapshot(book: str, *, decision_cutoff: str, recorded_at: str) -> dic
         key=lambda entry: entry["source_id"],
     )
 
-    if prior_snapshots:
-        earliest = prior_snapshots[0]
-        if earliest["source_generation_set"] == new_generation_set:
-            return {**earliest, "created": False}
-        prior_ids = [s["snapshot_id"] for s in prior_snapshots]
-    else:
-        prior_ids = []
+    # ``prior_snapshots`` is ascending by (recorded_at, snapshot_id); the first exact
+    # generation-set match — original or a later correction — is the one to reuse. Only
+    # when none match at all does this become a new correction over every prior ID.
+    for existing in prior_snapshots:
+        if existing["source_generation_set"] == new_generation_set:
+            return {**existing, "created": False}
+    prior_ids = [s["snapshot_id"] for s in prior_snapshots]
 
     composed = compose_snapshot(
         book,
