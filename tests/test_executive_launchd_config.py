@@ -2242,3 +2242,61 @@ def test_producer_output_is_written_only_after_it_passes_the_real_validator(
         )
         == written
     )
+
+
+# R13 blocking finding (W1H3F): every fact the validator re-observes through the
+# injected ProcessInspector is an authority check, so every one of them needs its
+# OWN stale-value discriminator. Before this, only ``start_identity`` and ``boot_id``
+# had one, and deleting any of the other six comparisons left both owning suites green.
+_FRESH_OBSERVATION_FACTS = frozenset(
+    {
+        "pgid",
+        "session_id",
+        "start_identity",
+        "boot_id",
+        "effective_uid",
+        "effective_gid",
+        "real_uid",
+        "real_gid",
+    }
+)
+
+
+def test_every_process_identity_fact_has_a_stale_observation_discriminator() -> None:
+    """Structural guard: the parameterization below must cover the whole closed set.
+
+    ``pid`` is excluded because it is bound by ``expected_pid`` and has its own
+    dedicated tests. If a tenth identity fact is ever added to the wrapper's closed
+    set, this test fails until a stale-observation discriminator exists for it.
+    """
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    assert set(wrapper.PROCESS_IDENTITY_FIELDS) == _FRESH_OBSERVATION_FACTS | {"pid"}
+
+
+@pytest.mark.parametrize("fact", sorted(_FRESH_OBSERVATION_FACTS))
+def test_attestation_validator_refuses_each_stale_fresh_observation_fact(fact: str) -> None:
+    """Sol R80 item 4: the attested identity must equal the FRESHLY OBSERVED identity.
+
+    One case per fact, so each individual comparison is load-bearing: removing any
+    single fact from the validator's fresh-observation comparison turns exactly this
+    test red for that fact instead of leaving the suites green.
+    """
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    document = _good_document()
+    live = document["process_identity"][fact]
+    document["process_identity"][fact] = (
+        live + 1 if isinstance(live, int) and not isinstance(live, bool) else f"{live}-stale"
+    )
+
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            document,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=_FakeProcessInspector(),
+        )
