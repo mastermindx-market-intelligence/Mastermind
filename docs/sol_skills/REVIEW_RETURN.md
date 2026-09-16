@@ -224,6 +224,23 @@ source/dependency/authority change, touched prior finding, or strengthened capab
 `RELEASE_BLOCKED`. This preserves existing PR #404 review-reuse semantics rather than creating a
 second review or release rule.
 
+### Step 8B — Technical writer-gate evidence for same-PR release
+
+Before commissioning the maintenance-only release operation of Step 8A, read the technical writer gate
+for the exact PR branch with `scripts/source_continuity.py writer-gate` and cite its receipt digest. The
+observed state must be recorded in the release commission:
+
+* `TECHNICAL_WRITER_GATE_UNAVAILABLE` does not block a clean RCH-1 same-PR release; it records that
+  branch custody is procedural only, so the release maintainer's fresh exact-head
+  `REMOTE_COMPLETE_VERIFIED` re-proof is the sole stale-writer detection and any moved head/tree is
+  `RELEASE_BLOCKED` until reconciled. Checkpoint abandonment after writer loss (RCH-1A) is not available
+  on that branch.
+* `TECHNICAL_WRITER_GATE_ACTIVE` records that stale writers are technically fenced by GitHub and only the
+  accepted source-writer integration can mediate an expected-head update.
+
+The receipt is evidence only; neither state grants Ready, merge, fence, retry, receiver-transfer, or
+production authority, and neither weakens `EFFECT_UNKNOWN`, local-dirt, or exact-session stickiness.
+
 ## Step 9 — Close or continue the reciprocal dialogue explicitly
 
 A worker return does not become terminal merely because Sol has enough information to continue

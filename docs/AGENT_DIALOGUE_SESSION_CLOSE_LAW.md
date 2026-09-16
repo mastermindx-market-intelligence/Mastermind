@@ -220,6 +220,34 @@ the same PR/branch, cannot continue the original builder child, and gains no per
 feature semantics, retry an effect, change receiver identity, mark Ready, merge, deploy, or claim
 production merely from a Source Continuity receipt.
 
+### 3.7 Technical writer gate and procedural release
+
+`BRANCH_WRITER_RELEASED is a procedural custody edge`. It closes the builder's modifying responsibility
+under the §3.6 ordering, but it does not by itself revoke the stale writer's Git credentials or ref
+authority: after a fetch, any account with push permission can still fast-forward the operation branch
+unless GitHub-side enforcement mediates updates. Detection of such a stale write is the release
+maintainer's fresh exact-head `REMOTE_COMPLETE_VERIFIED` re-proof (a moved head/tree fails closed);
+prevention is the technical writer gate.
+
+The technical writer gate is read, never asserted. `scripts/source_continuity.py writer-gate` recomputes
+it from exact GitHub readback of the branch's active rules and the rulesets that supply them, and emits
+one evidence-only receipt (`mastermind.source_continuity_writer_gate/v1`):
+
+- `TECHNICAL_WRITER_GATE_ACTIVE` — active `update`, `deletion` and `non_fast_forward` rules cover the
+  branch, branch `creation` is not restricted, every enforcing ruleset is `active`, and the only bypass
+  actor is the one accepted source-writer integration in `always` mode.
+- `TECHNICAL_WRITER_GATE_UNAVAILABLE` — any readable configuration short of that, naming every defect
+  (`RULES_ABSENT`, `UPDATE_RULE_MISSING`, `DELETION_RULE_MISSING`, `NON_FAST_FORWARD_RULE_MISSING`,
+  `CREATION_RESTRICTED`, `ENFORCEMENT_NOT_ACTIVE`, `BYPASS_WIDENED`, `OWNER_INTEGRATION_ABSENT`).
+- a fixed refusal when the readback is invalid, incomplete, mismatched, or moved during the proof. A
+  refusal is never `ACTIVE`.
+
+Neither state changes the §3.6 ordering or any fence: `EFFECT_UNKNOWN remains exact-session sticky`,
+local dirt and unpushed commits remain nontransferable, and the receipt authorizes no release, fence
+commit, retry, merge, or receiver transfer. While the gate is `UNAVAILABLE`,
+checkpoint abandonment after writer loss is prohibited (RCH-1A); only the clean `REMOTE_COMPLETE_VERIFIED`
+release of §3.6 remains available, and its release maintainer must record the gate state it observed.
+
 ## 4. Critical anti-pattern
 
 Forbidden:
