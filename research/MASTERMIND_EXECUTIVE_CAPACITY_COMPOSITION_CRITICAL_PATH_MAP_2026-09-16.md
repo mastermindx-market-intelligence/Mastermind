@@ -180,7 +180,8 @@ universal score**.
 - **Not authorised here**: any live placement, and any scheduler/daemon.
 - **Adversarial additions**: time-bound offer expiry and surface mismatch (matrix classes 31–32) must be on the
   frozen Step-B test list; a promotion change invalidates the advisory plan digest.
-- **Rollout-order reference, FROZEN, not commissioned**: Codex → OpenCode Go coding-agent API (only after
+- **Rollout-order reference, FROZEN, not commissioned** (this is the order surfaces come online; it is NOT
+  the direct-subscription qualification order, which is in §7): Codex → OpenCode Go coding-agent API (only after
   #7143, this resource contract, and CF2-I) → GLM direct where that execution mode is admitted → direct MiniMax
   and Alibaba only in lawful modes. **Do not activate Go yet.**
 
@@ -209,6 +210,23 @@ universal score**.
   (a bounded explicit canary may use a reviewed fixed Worker under canary law and must never be mislabeled as
   general routing); (7) result → usage delta → Provider Control observation → hold settlement.
 - **Frozen direct-subscription canary #1, NOT commissioned**: GLM Coding Plan. Neither canary is activated.
+- **Frozen direct-subscription QUALIFICATION order, NOT commissioned** — distinct from §6's rollout order
+  (which sequences surfaces, Go included) and from the canary sequencing above (which sequences proofs).
+  This is the order in which DIRECT subscriptions are qualified after Step A, and it follows from execution
+  mode being a dimension of the capacity quantity rather than a tag (contract §7):
+  1. **GLM Coding Plan** first, through protected **#581**'s hermetic `interactive_canary` admission seam.
+     The binding `glm-coding-plan.claude-code-anthropic` stays **SPEC_ONLY**, and this is a bounded
+     interactive canary — **not a flag flip**.
+  2. **MiniMax M3** as a utilization target in an interactive/tool lane, on the **#665** incumbent path.
+     The host wrapper stays pinned to MiniMax-M2.7 (contract §5.3's observed inventory); a wrapper that can
+     reach a model is not an entitlement for it.
+  3. **Alibaba Team** as an **`INTERACTIVE_TOOL` capacity domain only** — contract §7.1's
+     `SUPPORTED_TOOL_INTERACTIVE` / `SUPPORTED_TOOL_AGENT_SESSION`, never `UNATTENDED_BACKGROUND` or
+     `APPLICATION_BACKEND` — because the provider terms prohibit automated backends, and because the
+     protected profile still models **Personal** against the Chairman's **Team**. That enrollment identity
+     must be fixed before any plan-specific canary (contract §9.3 U2).
+  Nothing in this order is started, and none of it is a permission to convert a technically reachable
+  wrapper into autonomous capacity.
 
 ## 8. Step H — Small live fleet
 
