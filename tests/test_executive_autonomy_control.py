@@ -2580,3 +2580,106 @@ def test_the_real_submit_ceo_intent_sink_admits_only_the_transaction_produced_st
     )
     service_source = Path(executive_service.__file__).read_text(encoding="utf-8")
     assert "ceo_submit_sink_eligible" not in service_source
+
+
+def test_ceo_submit_reconcile_control_service_can_never_reach_the_worker_boundary(
+    monkeypatch,
+):
+    """R17 B2: the CEO-submit boundary converges control ONLY, never the worker.
+
+    Production shape, no root, no launchd, no network: every argv the module
+    would run is captured through the module-level ``subprocess.run``.
+    """
+
+    def drive(*, control_loaded: bool) -> list[tuple[list[str], dict[str, object]]]:
+        ledger: list[tuple[list[str], dict[str, object]]] = []
+        probes = {"count": 0}
+
+        def fake_run(cmd, **kw):
+            argv = list(cmd)
+            ledger.append((argv, dict(kw)))
+            if argv[:2] == ["/bin/launchctl", "print"]:
+                probes["count"] += 1
+                # A host whose control service is ABSENT answers rc 1 to the
+                # first probe and rc 0 to the read-back at the end of the
+                # boundary call.
+                loaded = control_loaded or probes["count"] > 1
+                return mock.Mock(returncode=0 if loaded else 1)
+            return mock.Mock(returncode=0)
+
+        monkeypatch.setattr(control.subprocess, "run", fake_run)
+        host.reconcile_control_service(SHA)
+        return ledger
+
+    def non_probes(ledger):
+        return [
+            argv
+            for argv, _kwargs in ledger
+            if argv[:2] != ["/bin/launchctl", "print"]
+        ]
+
+    def assert_control_only(ledger):
+        joined = "\n".join(" ".join(argv) for argv, _kwargs in ledger)
+        assert "service-control.sh" not in joined
+        assert control.WORKER_LABEL not in joined
+        assert os.fspath(control.WORKER_PLIST) not in joined
+        assert "worker" not in joined.lower()
+        # Only the argv ledger is inspected: no path under CONFIG_ROOT is named.
+        assert os.fspath(control.CONFIG_ROOT) not in joined
+
+    host = control.ProductionCeoSubmitHost()
+    assert host._active_transaction is None
+    monkeypatch.setattr(
+        control.ProductionCeoSubmitHost,
+        "_require_control_plist_safe",
+        staticmethod(lambda: None),
+        raising=False,
+    )
+
+    # ABSENT: the control label is not registered, so the boundary bootstraps
+    # exactly one fixed control plist and nothing else.
+    absent = drive(control_loaded=False)
+    assert_control_only(absent)
+    assert non_probes(absent) == [
+        ["/bin/launchctl", "bootstrap", "system", os.fspath(control.CONTROL_PLIST)]
+    ]
+
+    # PRESENT: the control label is loaded, so the boundary kickstarts it. This
+    # branch used to raise TypeError before touching launchd because
+    # ``_run_fixed`` takes ``cwd`` as a required keyword-only argument.
+    present = drive(control_loaded=True)
+    assert_control_only(present)
+    assert non_probes(present) == [
+        ["/bin/launchctl", "kickstart", "-k", f"system/{control.CONTROL_LABEL}"]
+    ]
+
+    for ledger in (absent, present):
+        for argv, kwargs in ledger:
+            if argv[:2] == ["/bin/launchctl", "print"]:
+                continue
+            assert kwargs.get("cwd") == control.SYSTEM_ROOT / "releases" / SHA
+    # No phase was persisted and no manifest write was attempted in either case.
+    assert host._active_transaction is None
+
+
+def test_ceo_submit_control_boundary_source_never_names_the_worker_or_the_lifecycle_script():
+    source = Path(control.__file__).read_text(encoding="utf-8")
+    production = source.split("class ProductionCeoSubmitHost", 1)[1]
+    assert "service-control.sh" not in production
+    assert production.count("service-control.sh") == 0
+
+    for name in ("def _reconcile_control_boundary", "def reconcile_control_service"):
+        body = production.split(name, 1)[1].split("\n    def ", 1)[0]
+        assert "WORKER_LABEL" not in body
+        assert "WORKER_PLIST" not in body
+
+    boundary = production.split("def _reconcile_control_boundary", 1)[1].split(
+        "\n    def ", 1
+    )[0]
+    for token in (
+        "CONTROL_PLIST",
+        "CONTROL_LABEL",
+        "cwd=release",
+        "_require_control_plist_safe",
+    ):
+        assert token in boundary

@@ -3072,52 +3072,68 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
         )
         self._persist_phase(transaction, "RECEIPT_REPLACED")
 
-    def reconcile_control_service(self, expected_sha: str) -> None:
-        """Converge only the control boundary onto the replaced config.
+    def _reconcile_control_boundary(self, expected_sha: str) -> None:
+        """Converge ONLY the control launchd boundary. Never the worker.
 
-        The reviewed lifecycle controller exposes no control-only verb, so the
-        reload uses the one fixed control label through ``launchctl kickstart``.
-        The worker boundary is never reloaded by this ARM path; both arm bits are
-        still false afterwards, so a running worker cannot execute anything.
+        R17 B2: the reviewed lifecycle script exposes no control-only verb and its
+        ``start`` bootstraps the worker daemon first, so it is not used from the
+        CEO-submit domain at all.  The two argv forms below are fixed and name the
+        hard-coded control label and control plist; nothing is caller-selected.
         """
-
+        release = SYSTEM_ROOT / "releases" / expected_sha
         if self._loaded(CONTROL_LABEL):
             self._run_fixed(
-                ["/bin/launchctl", "kickstart", "-k", f"system/{CONTROL_LABEL}"]
+                ["/bin/launchctl", "kickstart", "-k", f"system/{CONTROL_LABEL}"],
+                cwd=release,
+                timeout=45.0,
             )
         else:
-            release = SYSTEM_ROOT / "releases" / expected_sha
+            self._require_control_plist_safe()
             self._run_fixed(
-                [
-                    "/bin/bash",
-                    os.fspath(release / "ops/executive_os/service-control.sh"),
-                    "start",
-                ],
+                ["/bin/launchctl", "bootstrap", "system", os.fspath(CONTROL_PLIST)],
                 cwd=release,
                 timeout=45.0,
             )
         if not self._loaded(CONTROL_LABEL):
             raise TransactionEffectUnknown()
+
+    @staticmethod
+    def _require_control_plist_safe() -> None:
+        """Validate the single fixed bootstrap target before a privileged bootstrap."""
+        try:
+            info = CONTROL_PLIST.lstat()
+        except OSError as exc:
+            raise TransactionEffectUnknown() from exc
+        if (
+            stat.S_ISLNK(info.st_mode)
+            or not stat.S_ISREG(info.st_mode)
+            or info.st_uid != 0
+            or info.st_gid != 0
+            or stat.S_IMODE(info.st_mode) & 0o022
+            or info.st_nlink != 1
+        ):
+            raise TransactionEffectUnknown()
+
+    def reconcile_control_service(self, expected_sha: str) -> None:
+        """Converge only the control boundary onto the replaced config."""
+        self._reconcile_control_boundary(expected_sha)
         if self._active_transaction is not None:
             # The manifest keeps whichever CEO-submit verb opened this
             # transaction; the boundary call must not relabel a DISARM as an ARM.
-            self._persist_phase(
-                self._active_transaction,
-                "CONTROL_RECONCILED",
-            )
+            self._persist_phase(self._active_transaction, "CONTROL_RECONCILED")
 
-    def prove_control_ready(self, expected_sha: str) -> None:
+    def _await_control_ready(self, expected_sha: str) -> None:
         deadline = time.monotonic() + 45.0
         while time.monotonic() < deadline:
             if self._loaded(CONTROL_LABEL) and self._control_ready(expected_sha):
-                if self._active_transaction is not None:
-                    self._persist_phase(
-                        self._active_transaction,
-                        "READY_PROVEN",
-                    )
                 return
             time.sleep(1.0)
         raise RuntimeError("Executive control service did not reach READY")
+
+    def prove_control_ready(self, expected_sha: str) -> None:
+        self._await_control_ready(expected_sha)
+        if self._active_transaction is not None:
+            self._persist_phase(self._active_transaction, "READY_PROVEN")
 
     def rollback_ceo_submit(
         self, transaction: TransactionContext, receipt: Mapping[str, Any]
