@@ -22,6 +22,9 @@ PREPARED_RECEIPT_SCHEMA = "mastermind.web_sol_deployment_prepared_receipt.v1"
 
 _OPERATION_RE = re.compile(r"\A[a-z0-9][a-z0-9-]{0,127}\Z")
 
+_PRIVATE_DIRECTORY_MODE = stat.S_IRWXU
+_PERMISSION_BITS_MASK = stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO
+
 
 class WebSolDeploymentApplyError(ValueError):
     """One payload-free transactional-applier refusal."""
@@ -473,7 +476,7 @@ def _opened_directory_matches(
             and info.st_uid == row.prior_uid
             and info.st_gid == row.prior_gid
         )
-    return row.prior_state == "ABSENT" and mode == 0o700
+    return row.prior_state == "ABSENT" and mode == _PRIVATE_DIRECTORY_MODE
 
 
 def _directory_binding_current(
@@ -659,7 +662,7 @@ def _created_directory_matches(
         and not stat.S_ISLNK(info.st_mode)
         and info.st_uid == prepared.expected_uid
         and info.st_gid == prepared.expected_gid
-        and stat.S_IMODE(info.st_mode) == 0o700
+        and stat.S_IMODE(info.st_mode) == _PRIVATE_DIRECTORY_MODE
     )
 
 
@@ -690,7 +693,7 @@ def _create_parent_directories(
             else:
                 raise WebSolDeploymentApplyError("DIRECTORY_PREIMAGE_CONFLICT")
             try:
-                os.mkdir(directory.name, 0o700, dir_fd=parent_descriptor)
+                os.mkdir(directory.name, _PRIVATE_DIRECTORY_MODE, dir_fd=parent_descriptor)
                 os.fsync(parent_descriptor)
             except OSError as exc:
                 raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN") from exc
@@ -804,7 +807,7 @@ def _write_exact_temporary_at(
     mode: int,
     prepared: PreparedDeployment,
 ) -> None:
-    if type(content) is not bytes or type(mode) is not int or not 0 <= mode <= 0o777:
+    if type(content) is not bytes or type(mode) is not int or not 0 <= mode <= _PERMISSION_BITS_MASK:
         raise WebSolDeploymentApplyError("TEMPORARY_INPUT_INVALID")
     try:
         os.stat(name, dir_fd=parent_descriptor, follow_symlinks=False)
@@ -1066,7 +1069,7 @@ def _restore_file(
         else:
             if row.prior_bytes is None or row.prior_mode is None:
                 raise WebSolDeploymentApplyError("ROLLBACK_STATE_INVALID")
-            if not 0 <= row.prior_mode <= 0o777:
+            if not 0 <= row.prior_mode <= _PERMISSION_BITS_MASK:
                 raise WebSolDeploymentApplyError("ROLLBACK_STATE_INVALID")
             temporary_name = (
                 f".{target.name}.mmx-{prepared.prepared_digest[:16]}.rollback.tmp"
@@ -1302,7 +1305,7 @@ def _current_matches_post_directory(
         and not stat.S_ISLNK(info.st_mode)
         and info.st_uid == prepared.expected_uid
         and info.st_gid == prepared.expected_gid
-        and stat.S_IMODE(info.st_mode) == 0o700
+        and stat.S_IMODE(info.st_mode) == _PRIVATE_DIRECTORY_MODE
     )
 
 

@@ -30,6 +30,8 @@ MAX_TOTAL_ARTIFACT_BYTES = 4_194_304
 _HEX40_RE = re.compile(r"\A[0-9a-f]{40}\Z")
 _HEX64_RE = re.compile(r"\A[0-9a-f]{64}\Z")
 
+_PERMISSION_BITS_MASK = stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO
+
 
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
@@ -166,7 +168,7 @@ def _decode_artifact(raw: object) -> deployment.DeploymentArtifact:
             kind=_string(row["kind"], maximum=64),
             destination=_absolute_path(row["destination"]),
             content=content,
-            mode=_integer(row["mode"], maximum=0o777),
+            mode=_integer(row["mode"], maximum=_PERMISSION_BITS_MASK),
         )
     except deployment.WebSolDeploymentError as exc:
         raise applier.WebSolDeploymentApplyError("INVALID_INPUT") from exc
@@ -246,7 +248,7 @@ def _decode_change(raw: object) -> deployment.DeploymentChange:
         action=action,
         prior_sha256=prior,
         next_sha256=_digest(row["next_sha256"]),
-        mode=_integer(row["mode"], maximum=0o777),
+        mode=_integer(row["mode"], maximum=_PERMISSION_BITS_MASK),
     )
 
 
@@ -872,7 +874,7 @@ def _decode_preimage(
         prior_sha = _digest(prior_sha)
         if hashlib.sha256(content).hexdigest() != prior_sha:
             raise applier.WebSolDeploymentApplyError("STATE_INVALID")
-        mode = _integer(mode, maximum=0o777)
+        mode = _integer(mode, maximum=_PERMISSION_BITS_MASK)
         uid = _integer(uid)
         gid = _integer(gid)
     else:
@@ -915,7 +917,7 @@ def _decode_directory_preimage(
     elif state == "PRESENT":
         dev = _integer(dev, maximum=2**63 - 1)
         ino = _integer(ino, maximum=2**63 - 1)
-        mode = _integer(mode, maximum=0o777)
+        mode = _integer(mode, maximum=_PERMISSION_BITS_MASK)
         uid = _integer(uid)
         gid = _integer(gid)
     else:
