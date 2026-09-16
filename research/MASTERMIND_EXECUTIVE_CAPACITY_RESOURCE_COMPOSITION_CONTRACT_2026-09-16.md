@@ -322,11 +322,16 @@ for acct in {chairman-max, chairman-max-2, chairman-max-3}:
   `control_plane/provider_model_economics.py:21` admits `measured_native_delta` as a burn method, and
   `config/provider_model_economics.v1.json` records for `glm.glm-5.3-flash`: *"Do not guess Flash credit
   multipliers; learn native burn from usage deltas by model/task cohort."*
-- **Live defect this models.** The kit's own aggregate reports one 5-hour figure (`5h used/cap/pct =
-  0.0/28000/0.0%`) for a fabric holding three such plans, while its per-account breakdown lists only the two
-  accounts that carry ledger rows. A single aggregate percentage over N accounts is exactly the collapse §1
-  forbids; under this contract the three accounts are three expressions and the aggregate is not a capacity fact.
-  *(Kit observation, not a master receipt; recorded as evidence of the defect, not as an enrollment fact.)*
+- **Live defect this models.** The kit's local telemetry reports **one** 5-hour figure and one weekly figure
+  against a single Max cap (`5h used/cap = …/28000`, `weekly used/cap = …/140000`) for a fabric holding **three**
+  such plans — i.e. it publishes one plan's ceiling as the fabric's ceiling, understating the portfolio threefold
+  while presenting a single percentage that cannot say which account is the bottleneck. A per-account row exists
+  beside it, but it is derived from lane-ledger rows, so an account that has not yet been used simply does not
+  appear — an account is invisible until it is spent, which is the wrong direction for a capacity instrument.
+  A single aggregate percentage over N accounts is exactly the collapse §1 forbids; under this contract the three
+  accounts are three expressions and the aggregate is not a capacity fact at all.
+  *(Kit observation, not a Provider Control receipt; by R13-B2 such numbers are `UNVERIFIED_FOR_ROUTING`.
+  Recorded as evidence of the defect, never as an enrollment fact.)*
 
 ### 5.2 OpenCode Go — per-account window triple, per-model debit weight, monthly policy gate
 ```
