@@ -342,9 +342,13 @@ administrative checkout and Macro snapshot are data/grounding roots, never code
 roots. Immediately before and after each packet read, each root must resolve one
 exact Git HEAD; the Mastermind HEAD must also equal the installed `proof_base_sha`.
 The verifier compares the entire raw filesystem leaf and directory path sets outside
-top-level `.git` with the exact paths implied by the `HEAD` tree, so ignored/untracked
-additions, empty directories, and missing paths cannot change any path-existence join. It does not depend on the mutable index, local
-attributes, clean filters, fsmonitor, hooks, or ignore rules.
+top-level `.git` with the exact paths and regular-file/symlink types implied by the
+`HEAD` tree, so ignored/untracked additions, empty directories, missing paths, and
+file-type substitutions cannot change any path-existence join. Macro snapshots with
+tracked symlinks are refused: Agent OS uses `Path.exists()` on authored paths and an
+external symlink target would not be bound by the snapshot's HEAD. The verifier does
+not depend on the mutable index, local attributes, clean filters, fsmonitor, hooks,
+or ignore rules.
 
 Only bytes the installed brief can actually consume are re-hashed on every read:
 `scripts/agentos.py`, its local `audit_stranded_work` import/package marker,
