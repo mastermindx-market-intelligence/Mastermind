@@ -157,6 +157,12 @@
       "pass_condition": "MUST refuse unattended execution without an exact current usage-policy receipt; bind usage_policy_mode and provider_policy_receipt_ref at admission. Billing debit or an interactive canary never flips unattended/autonomous permission flags."
     },
     {
+      "case_id": "E11",
+      "owner": "PF1 native Claude / provider binding owner",
+      "setup": "A GLM, Alibaba or MiniMax profile runs inside Claude Code, or is given an opus/Fable alias, while the request requires native Anthropic subscription authentication and its shared/Fable quota resources.",
+      "pass_condition": "MUST NOT treat a third-party Claude-compatible profile as native Anthropic capacity. Require the separately qualified existing PF1 claude-code binding, actual provider/model identity and native entitlement/auth evidence; a shared executable or alias cannot substitute."
+    },
+    {
       "case_id": "O01",
       "owner": "COO / task-intent interface",
       "setup": "Fresh Opus orchestrator receives a complete bounded mission.",
