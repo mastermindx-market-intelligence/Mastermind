@@ -2460,8 +2460,12 @@ def api_self_directed_history() -> JSONResponse:
             _attach_security_names(payload.get("pending"))
             return JSONResponse(payload)
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"history": [], "pending": [], "realized_total": 0.0,
-                             "n_closed": 0, "n_buys": 0, "win_rate": None, "error": str(exc)})
+        _log.warning("self_directed history failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "history": [], "pending": [], "realized_total": None,
+            "n_closed": None, "n_buys": None, "win_rate": None,
+            "error": "self_directed_history_unavailable",
+        })
 
 
 @router.get("/api/self_directed/search")
@@ -2471,7 +2475,8 @@ def api_self_directed_search(q: str = "") -> JSONResponse:
         from data_layer import polygon
         return JSONResponse({"results": polygon.search_tickers(q)})
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"results": [], "error": str(exc)})
+        _log.warning("self_directed search failed: %s", type(exc).__name__)
+        return JSONResponse({"results": [], "error": "self_directed_search_unavailable"})
 
 
 @router.get("/api/self_directed/quote")
@@ -2481,7 +2486,11 @@ def api_self_directed_quote(ticker: str = "") -> JSONResponse:
         from portfolio import self_directed
         return JSONResponse(self_directed.quote_info(ticker))
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"ticker": (ticker or "").upper(), "price": None, "error": str(exc)})
+        _log.warning("self_directed quote failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "ticker": (ticker or "").upper(), "price": None, "name": "",
+            "error": "self_directed_quote_unavailable",
+        })
 
 
 @router.post("/api/self_directed/order")
@@ -2496,7 +2505,10 @@ def api_self_directed_order(req: _OrderReq) -> JSONResponse:
             return JSONResponse(self_directed.place_order(
                 req.ticker, req.side, req.shares, notional=req.notional))
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        _log.warning("self_directed order failed: %s", type(exc).__name__)
+        return JSONResponse(
+            {"ok": False, "error": "self_directed_order_unavailable"}, status_code=500
+        )
 
 
 @router.post("/api/self_directed/thesis")
@@ -2511,7 +2523,10 @@ def api_self_directed_thesis(req: _ThesisReq) -> JSONResponse:
             saved = self_directed.set_thesis(req.ticker, req.note)
             return JSONResponse({"ok": True, "ticker": (req.ticker or "").upper(), "thesis": saved})
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        _log.warning("self_directed thesis failed: %s", type(exc).__name__)
+        return JSONResponse(
+            {"ok": False, "error": "self_directed_thesis_unavailable"}, status_code=500
+        )
 
 
 @router.post("/api/self_directed/cancel")
@@ -2525,7 +2540,10 @@ def api_self_directed_cancel(order_id: str = "") -> JSONResponse:
             from portfolio import self_directed
             return JSONResponse({"ok": self_directed.cancel_order(order_id)})
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        _log.warning("self_directed cancel failed: %s", type(exc).__name__)
+        return JSONResponse(
+            {"ok": False, "error": "self_directed_cancel_unavailable"}, status_code=500
+        )
 
 
 @router.get("/api/outcomes")
