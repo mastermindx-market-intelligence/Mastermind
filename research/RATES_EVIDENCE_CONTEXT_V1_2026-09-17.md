@@ -48,3 +48,10 @@ When either rates or primary stock evidence would be lost, omit the whole rates 
 The test contract includes missing/wrong-source schema, forged authority, separate artifact dates, input immutability, no new candidate on rates alone, source-read exceptions, UTF-8 budget, rates qualification loss, primary-evidence displacement and exact lossless reconstruction. Source-body tests are distinct from real SDK tests. The existing SDK test file contains the latter for canonical CI; local SDK/runtime access is held after the platform refusal and is not retried on another environment.
 
 Final captured-input/source-body differential, proof limits and continuation are recorded in the latest section of `RATES_AWARE_REPLAY_INPUT_BOUNDARY_2026-09-17.md`. This is still a rates-context consumer change, not the parent selection/timing suite or accepted release.
+
+
+### Effective origin semantics after the controlled fill experiment
+
+The source-origin finding in `RATES_OBSERVATION_ORIGIN_FINDING_2026-09-17.md` materially refines the original horizon/freshness wording. Effective outputs now use `observation_origin=unverified`, `horizon_basis=source_frame_intervals`, and `freshness_basis=frame_alignment_only`. Source-reported dates and numeric values are not rewritten; no raw observation is inferred merely because the aligned feature cell is populated. The acceleration description likewise refers to frame intervals, not necessarily newly observed market prints.
+
+The frame can contain carried values. An unchanged five-row value is therefore not by itself evidence of observed rate exhaustion. The existing input/provenance owner must eventually carry origin/imputation information before an event detector can make that stronger claim. Current consumer context stays read-only and uncertified for source origin, present-session freshness and historical replay. This qualification survives both lossless wire forms and is covered by the latest 95-test / 3,401-name proof recorded in the continuation document.

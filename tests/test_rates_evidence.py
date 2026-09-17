@@ -35,7 +35,7 @@ def test_real_consumer_preserves_horizons_and_prompt_projection():
     assert rates["series"]["10y"]["level"] == 4.5
     assert rates["series"]["10y"]["velocity_bp"]["5d"] == 12.0
     assert rates["series"]["10y"]["acceleration_bp"] == -8.0
-    assert rates["horizon_basis"] == "observed_intervals_not_verified_exchange_sessions"
+    assert rates["horizon_basis"] == "source_frame_intervals"
     assert rates["level_unit"] == "percent"
     assert DC.prompt_summary(out)["rates_evidence"] == rates
 
@@ -292,11 +292,21 @@ def test_matching_old_snapshot_dates_do_not_certify_current_session_freshness():
     assert out["coverage"]["context_rows"] == 5
     assert out["analysis_mode"] == "dated_context"
     assert out["current_session_freshness"] == "not_certified"
-    assert out["freshness_basis"] == "aligned_to_supplied_market_asof_not_current_session"
+    assert out["freshness_basis"] == "frame_alignment_only"
 
 
 def test_cutoff_inspection_does_not_certify_live_freshness():
     out = project(source(), "2026-09-16T22:00:00Z")
     assert out["analysis_mode"] == "cutoff_inspection"
     assert out["current_session_freshness"] == "not_certified"
+    assert out["as_observed_replay_certified"] is False
+
+
+def test_feature_frame_does_not_certify_raw_observation_origin():
+    from brain.rates_evidence import project_rates
+    out = project_rates(None)
+    assert out["observation_origin"] == "unverified"
+    assert out["horizon_basis"] == "source_frame_intervals"
+    assert out["freshness_basis"] == "frame_alignment_only"
+    assert "forward-filled" in " ".join(out["limitations"])
     assert out["as_observed_replay_certified"] is False

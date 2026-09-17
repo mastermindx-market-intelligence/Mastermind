@@ -57,7 +57,7 @@ def test_file_backed_read_uses_canonical_builder_without_publishing(rates_files)
     assert out["observation_timezone"] == "America/New_York"
     assert out["analysis_mode"] == "dated_context"
     assert out["current_session_freshness"] == "not_certified"
-    assert out["horizon_basis"] == "observed_intervals_not_verified_exchange_sessions"
+    assert out["horizon_basis"] == "source_frame_intervals"
     assert out["authority"]["allowed_effect"] == "annotate_only"
     assert not any(v for k,v in out["authority"].items() if k.startswith("can_"))
     assert out["as_observed_replay_certified"] is False
