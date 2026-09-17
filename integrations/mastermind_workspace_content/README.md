@@ -44,6 +44,9 @@ after source work and safe serialization before releasing bytes.
   qualified source callback.
 - `build_workspace_content_app`: mounts one fixed resource plus protected-resource
   metadata and process health/readiness. It starts no listener or background work.
+- `WORKSPACE_HTML`: source-free conversation UI. An approved host supplies its
+  authorized reader callback; the page embeds no source content or bearer token and
+  exposes no send/provider-control operation.
 
 ## Capability state
 

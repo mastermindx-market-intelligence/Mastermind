@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -20,6 +20,7 @@ from integrations.business_mcp_auth.contracts import ResourcePolicy, validate_re
 from integrations.business_mcp_auth.metadata import protected_resource_metadata
 from integrations.mastermind_workspace_content.business import CONTENT_SCOPE
 from integrations.mastermind_workspace_content.resource import WorkspaceContentResource
+from integrations.mastermind_workspace_content.ui import UI_PATH, WORKSPACE_HTML
 
 
 class _ContentEndpoint:
@@ -110,13 +111,32 @@ def build_workspace_content_app(
             }
         )
 
+    async def workspace_ui(_request: Request) -> Response:
+        return Response(
+            WORKSPACE_HTML,
+            media_type="text/html",
+            headers={
+                "Cache-Control": "no-store",
+                "Pragma": "no-cache",
+                "X-Content-Type-Options": "nosniff",
+                "Referrer-Policy": "no-referrer",
+                "Content-Security-Policy": (
+                    "default-src 'none'; style-src 'unsafe-inline'; "
+                    "script-src 'unsafe-inline'; connect-src 'self'; "
+                    "img-src 'none'; font-src 'none'; object-src 'none'; "
+                    "base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+                ),
+            },
+        )
+
     routes = [
         Route("/healthz", health, methods=["GET"]),
         Route("/readyz", ready, methods=["GET"]),
+        Route(UI_PATH, workspace_ui, methods=["GET"]),
         Route(metadata_path, metadata, methods=["GET"]),
         Route(content_path, endpoint=_ContentEndpoint(resource), methods=["GET"]),
     ]
-    known_paths = ("/healthz", "/readyz", metadata_path, content_path)
+    known_paths = ("/healthz", "/readyz", UI_PATH, metadata_path, content_path)
     app = Starlette(
         debug=False,
         routes=routes,
