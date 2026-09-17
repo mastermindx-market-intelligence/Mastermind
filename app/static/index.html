@@ -1887,6 +1887,10 @@ body.page-mm .mm-pf-tab .mm-pf-sub {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+body.page-mm .mm-pf-status-chip { margin-left: 5px; font-size: 8px; font-weight: 800; letter-spacing: .05em; }
+body.page-mm .mm-pf-status-chip.partial { color: var(--warn); }
+body.page-mm .mm-pf-status-chip.unavailable { color: var(--down); }
+body.page-mm .mm-pf-switch-unavailable { align-self: center; padding: 0 10px; color: var(--down); font-size: 11px; font-weight: 750; }
 
 /* Unified layout rhythm and machined panels. */
 body.page-mm .mm-section { margin-top: 18px; }
@@ -3828,6 +3832,7 @@ var _papersLoaded = false, _papersLoad = null;
 var _calibLoaded = false, _calibLoad = null;
 var _pendingSelfSelect = false;   // set when loaded at /self — auto-select that tab once portfolios load
 var _portfolios = [];             // [{id,name,tagline,kind,manager,status}] from /api/portfolios
+var _portfoliosStatus = 'loading'; // loading | available | unavailable
 var _decisions = [], _decisionsStatus = 'loading'; // selected Brain decision log + load truth
 var DECISION_PREVIEW_COUNT = 5, _decisionsExpanded = false;
 // run drilldown cache
@@ -6557,17 +6562,24 @@ function _fmtPctSigned(v) {
 function renderPortfolioSwitch() {
   var host = E('pf-switch');
   if (!host) return;
+  if (_portfoliosStatus === 'unavailable') {
+    host.innerHTML = '<span class="mm-pf-switch-unavailable"><span class="l-en">Portfolios unavailable</span><span class="l-zh">组合列表暂不可用</span></span>';
+    return;
+  }
   if (!_portfolios.length) { host.innerHTML = ''; return; }
   host.innerHTML = _pfOrdered(_portfolios).map(function(p) {
     var st = p.status || {};
     var ret = st.total_return_pct;
     var cls = ret == null ? '' : (ret > 0 ? 'up' : (ret < 0 ? 'down' : ''));
-    var ccy = _ccySymOf(p.currency);   // ¥ CNY (China) · HK$ HKD (HK) · $ USD (default)
-    // Full-dollar resolution (matches the big "Current NAV" readout) so the badge visibly
-    // tracks the live mark. The old $X.XXM format quantized to $10k steps, so intraday moves
-    // (and books sitting near $1M) looked frozen even though /api/portfolios refreshes them.
+    var ccy = _ccySymOf(p.currency);
     var navStr = st.nav != null ? ccy + Math.round(st.nav).toLocaleString('en-US') : '—';
-    var sub = navStr + ' · <span class="' + cls + '">' + _fmtPctSigned(ret) + '</span>';
+    var statusChip = '';
+    if (st.read_status === 'partial') {
+      statusChip = '<span class="mm-pf-status-chip partial"><span class="l-en">PARTIAL</span><span class="l-zh">不完整</span></span>';
+    } else if (st.read_status === 'unavailable') {
+      statusChip = '<span class="mm-pf-status-chip unavailable"><span class="l-en">UNAVAILABLE</span><span class="l-zh">不可用</span></span>';
+    }
+    var sub = navStr + ' · <span class="' + cls + '">' + _fmtPctSigned(ret) + '</span>' + statusChip;
     var archived = p.lifecycle === 'archived' || p.active === false;
     var archiveChip = archived ? '<span class="mm-archive-chip">' + (document.documentElement.getAttribute('data-lang') === 'zh' ? '已归档' : 'ARCHIVED') + '</span>' : '';
     var title = archived ? ((p.archived_reason || 'Frozen historical portfolio') + (p.superseded_by ? ' · successor: ' + p.superseded_by : '')) : (p.tagline || '');
@@ -6658,7 +6670,13 @@ async function loadPortfolios() {
   try {
     var r = await fetch('/api/portfolios');
     var d = r.ok ? await r.json() : null;
-    if (d && d.portfolios) {
+    if (!d || d.read_status === 'unavailable') {
+      _portfoliosStatus = 'unavailable';
+      renderPortfolioSwitch();
+      return;
+    }
+    if (d.portfolios) {
+      _portfoliosStatus = 'available';
       _portfolios = d.portfolios;
       // The registry owns the product default. Explicit historical/workspace URLs keep their
       // selected book, while the root dashboard follows the backend contract instead of a second
@@ -6673,7 +6691,10 @@ async function loadPortfolios() {
       }
       _schedulePortfolioPrefetch();
     }
-  } catch (e) {}
+  } catch (e) {
+    _portfoliosStatus = 'unavailable';
+    renderPortfolioSwitch();
+  }
 }
 
 // ── AUTONOMOUS BOOK: banner + daily decision log ──────────────────────────────
