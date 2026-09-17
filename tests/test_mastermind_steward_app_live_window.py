@@ -616,7 +616,15 @@ def test_steward_routes_keep_their_own_auth_with_the_composition_enabled():
     app = _steward_app(live_window=mount.config, policy=policy, key=steward_key)
 
     assert _call(app, path=METADATA_PATH, headers=_headers())[0] == 200
-    assert _call(app, path="/healthz", headers=_headers())[0] == 200
+    assert (
+        _call(
+            app,
+            path="/healthz",
+            scheme="http",
+            headers=_headers(host="127.0.0.1:8766"),
+        )[0]
+        == 200
+    )
     unauthenticated = _call(
         app,
         path=MCP_PATH,
