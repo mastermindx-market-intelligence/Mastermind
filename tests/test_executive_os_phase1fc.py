@@ -3319,26 +3319,29 @@ def test_offline_acceptance_receipt_is_deterministic_and_proves_tx9_quarantine()
     assert exhaustion["second_terminal_status"] == "LOST"
     assert exhaustion["blocked_reason"] == "plan_terminal_adverse"
     assert len(exhaustion["supervisor_dispatch_calls"]) == 2
+    # The controller-only authority changes the reviewed policy SHA; the
+    # acceptance producer binds that SHA into orchestration grants, so only
+    # derived digest goldens move while all non-digest behavior remains fixed.
     assert receipt["receipt_digest"] == (
-        "63b65e499e40e817d52bf803e70b5b3f0530591d62a0c1388a9bea3ddf84c6fc"
+        "06599ec9b4843a33e6325799620dcd6b37b425a96c5f9bb4fd49f2f09c108c36"
     )
     assert receipt["dispatch_boundary"]["acceptance_digest"] == (
         "02af618a1a926bde4b6a92fb2e697aa3b2d41538ae81350dbd954891a5dd2bcc"
     )
     assert receipt["dispatch_crash_replay"]["acceptance_digest"] == (
-        "a0a176226052ee6cc43f2948d53bbb3ac68157795cbaf09cae3932e0a35e2bdf"
+        "38e42503ea5426cbf82684f6704ae1989d46de6fe5bd10cbeec650bac45fb551"
     )
     assert receipt["happy_path"]["acceptance_digest"] == (
-        "ad407cf21645592cbfe420dda862ee7946874829559ffd194c6815fd320f4d8a"
+        "7a9c987d722816502bf1c5a9254872328aaca01db0a52937ae1822b9e5622ee7"
     )
     assert receipt["repair_path"]["acceptance_digest"] == (
-        "97d3c734230dd430733eb9f5cd8a52bd6f1263f42d09ba7ad65d80069eae63f2"
+        "cfa81f98c2b8cf30f5eda5a4a98276a1fadc7e6e9dcaa65573f312753f5b7c3f"
     )
     assert receipt["void_replacement"]["acceptance_digest"] == (
-        "be6176fa45f80467923b9c283e9b696f303a4ed2fea5b9e655c8971afcc96b62"
+        "63b4f2a845884aef0ecbde055236b85cf06ea2dcec1cf4332ebed88d3dc28051"
     )
     assert receipt["cycle"]["acceptance_digest"] == (
-        "1572cc4b36d7ccc1fd007624920986b63f23c0f6c40bb9ae051c1b49f5b649a7"
+        "88ab6c7621304c174d9f2e0ac43a98d8d71bfa4fdb45528fda802700bf640e66"
     )
     assert receipt["tx9"]["acceptance_digest"] == (
         "9a43476a06fb3ecc4351b96d5646c7b0e521fd30092c3882bc5e8d4532825585"

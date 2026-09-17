@@ -709,3 +709,31 @@ This narrow direct repair used LOWER_TOTAL_OVERHEAD and the same acquired worksp
 Next: review this exact source delta and resolve the existing dependency holds;
 then resume the Runtime/controller/installer sequence. No broker installation,
 root effect, credential operation, production acceptance or parent closure occurred.
+
+
+## Continuation — acceptance golden reconciliation
+
+The remaining hosted source failure was the deterministic offline acceptance
+receipt. A protected-versus-candidate execution compared every projected leaf.
+There were seventy-three differences and every one was a digest; no action,
+status, retry, quarantine, inertness, authority list, or other non-digest field
+changed.
+
+The exact cause is the reviewed authority-policy hash movement introduced by
+the controller-only `REQUEST_WORKER_LOGIN_CHECK` capability and its closed
+current-attempt scope. Orchestration grants intentionally bind that policy hash,
+so the receipt and five affected sub-receipts changed transitively. Dispatch
+boundary, TX-nine, and bounded-exhaustion digests remained byte-identical.
+
+Only the six derived golden values in the existing acceptance test were
+updated. The producer, Runtime, retry law, authority map, controller code, and
+expected behavior were not weakened or changed. The previously failing exact
+acceptance discriminator is green. The complete comparison receipt is retained
+under the operation evidence directory as
+`acceptance-golden-reconciliation.json`.
+
+The local full repository gate was not claimed: the first attempt lacked CI
+dependencies, the parity attempt initially lacked the workflow's separately
+materialized pinned Macro source, and the final parity run was stopped to avoid
+adding load while the Studio was saturated. Hosted required CI remains the
+release authority for the complete gate.
