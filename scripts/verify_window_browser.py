@@ -1,10 +1,11 @@
 """Actual composed browser check, controlled source events and auth fixtures."""
-import argparse, asyncio, hashlib, json, tempfile
+import argparse, asyncio, hashlib, json, sys, tempfile
 from pathlib import Path
 from cryptography.hazmat.primitives.asymmetric import rsa
 from playwright.sync_api import sync_playwright
 
 ROOT=Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(ROOT))  # run as a script: put the repository root ahead of scripts/
 from integrations.mastermind_window_reader.recorded_view import render_connection_shell
 from tests.mastermind_window_reader._browser_support import browser_launch_kwargs
 from tests.mastermind_window_reader.test_window_resource import signed_window
