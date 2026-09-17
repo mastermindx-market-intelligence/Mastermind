@@ -1373,35 +1373,61 @@ def _daily_mark_job():
         return
     try:
         from portfolio import self_directed, marks
-        _sd_state = self_directed._load_account()
+        from control_plane import locks as _locks
     except Exception as exc:  # noqa: BLE001 — Self-Directed setup failure must be queryable
         _step_failed_event("daily_mark", "self_directed", "self_directed_setup", exc, severity="FREEZE")
     else:
-        # only advance a NAV history once the hand-driven book actually HOLDS something (an empty
-        # book has nothing to mark; this also keeps the empty-books contract of the daily sweep).
-        if _sd_state.get("positions"):
-            try:
-                self_directed.set_price_resolver(lambda t: marks.mark_one(t, asof))
-            except Exception as exc:  # noqa: BLE001
-                _step_failed_event("daily_mark", "self_directed", "self_directed_setup", exc, severity="FREEZE")
-            else:
+        _sd_lock = _locks.acquire_or_log(
+            "book:self_directed", job="daily_mark", book="self_directed"
+        )
+        if _sd_lock is None:
+            _step_failed_event(
+                "daily_mark", "self_directed", "lock_held:self_directed",
+                RuntimeError("lock held — skipping mark"), severity="ADVISORY_ONLY",
+            )
+        else:
+            with _sd_lock:
                 try:
-                    try:
-                        self_directed.mark(prices=union_usd, asof=asof)
-                    except Exception as exc:  # noqa: BLE001 — truthful-mark refusal is a visible FREEZE
-                        _step_failed_event("daily_mark", "self_directed", "mark:self_directed", exc, severity="FREEZE")
-                    else:
+                    _sd_state = self_directed._load_account()
+                except Exception as exc:  # noqa: BLE001
+                    _step_failed_event(
+                        "daily_mark", "self_directed", "self_directed_setup", exc, severity="FREEZE"
+                    )
+                else:
+                    # only advance a NAV history once the hand-driven book actually HOLDS something
+                    if _sd_state.get("positions"):
                         try:
-                            # W6/T3 — publish only after a truthful mark succeeds; firm_exposure
-                            # excludes this yardstick from all binding clamp/headroom math.
-                            self_directed.publish(prices=union_usd, asof=asof)
+                            self_directed.set_price_resolver(lambda t: marks.mark_one(t, asof))
                         except Exception as exc:  # noqa: BLE001
-                            _step_failed_event("daily_mark", "self_directed", "publish:self_directed", exc, severity="FREEZE")
-                finally:
-                    try:
-                        self_directed.set_price_resolver(None)  # never leave the seam installed
-                    except Exception as exc:  # noqa: BLE001
-                        _step_failed_event("daily_mark", "self_directed", "self_directed_resolver_cleanup", exc, severity="FREEZE")
+                            _step_failed_event(
+                                "daily_mark", "self_directed", "self_directed_setup",
+                                exc, severity="FREEZE",
+                            )
+                        else:
+                            try:
+                                try:
+                                    self_directed.mark(prices=union_usd, asof=asof)
+                                except Exception as exc:  # noqa: BLE001
+                                    _step_failed_event(
+                                        "daily_mark", "self_directed", "mark:self_directed",
+                                        exc, severity="FREEZE",
+                                    )
+                                else:
+                                    try:
+                                        self_directed.publish(prices=union_usd, asof=asof)
+                                    except Exception as exc:  # noqa: BLE001
+                                        _step_failed_event(
+                                            "daily_mark", "self_directed", "publish:self_directed",
+                                            exc, severity="FREEZE",
+                                        )
+                            finally:
+                                try:
+                                    self_directed.set_price_resolver(None)
+                                except Exception as exc:  # noqa: BLE001
+                                    _step_failed_event(
+                                        "daily_mark", "self_directed",
+                                        "self_directed_resolver_cleanup", exc, severity="FREEZE",
+                                    )
     _ledger_end(handle, "ok")
 
 

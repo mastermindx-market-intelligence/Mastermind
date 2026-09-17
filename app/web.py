@@ -2399,6 +2399,26 @@ class _ThesisReq(BaseModel):
     note: str = ""
 
 
+def _self_directed_mutation_lock(operation: str):
+    """Acquire the canonical Self-Directed book lock for one mutating HTTP operation."""
+    try:
+        from control_plane import locks
+        return locks.acquire_or_log(
+            "book:self_directed",
+            job=f"self_directed_{operation}",
+            book="self_directed",
+        )
+    except Exception:  # noqa: BLE001 — lock plumbing failure must fail closed
+        return None
+
+
+def _self_directed_busy_response() -> JSONResponse:
+    return JSONResponse(
+        {"ok": False, "error": "self_directed_busy_retry"},
+        status_code=409,
+    )
+
+
 @router.get("/api/self_directed")
 def api_self_directed() -> JSONResponse:
     """The Self-Directed book: positions (live marks + weights), allocation scorecard,
@@ -2426,15 +2446,19 @@ def api_self_directed() -> JSONResponse:
 
 @router.get("/api/self_directed/history")
 def api_self_directed_history() -> JSONResponse:
-    """Trade History blotter for the Self-Directed book (every fill + the pending queue)."""
+    """Trade History blotter; may settle pending orders, so it owns the book lock."""
+    lock = _self_directed_mutation_lock("history")
+    if lock is None:
+        return _self_directed_busy_response()
     try:
-        from portfolio import self_directed
-        held = list((self_directed._load_account().get("positions") or {}).keys())
-        prices = _live_prices(held)
-        payload = self_directed.history(prices=prices)
-        _attach_security_names(payload.get("history"))
-        _attach_security_names(payload.get("pending"))
-        return JSONResponse(payload)
+        with lock:
+            from portfolio import self_directed
+            held = list((self_directed._load_account().get("positions") or {}).keys())
+            prices = _live_prices(held)
+            payload = self_directed.history(prices=prices)
+            _attach_security_names(payload.get("history"))
+            _attach_security_names(payload.get("pending"))
+            return JSONResponse(payload)
     except Exception as exc:  # noqa: BLE001
         return JSONResponse({"history": [], "pending": [], "realized_total": 0.0,
                              "n_closed": 0, "n_buys": 0, "win_rate": None, "error": str(exc)})
@@ -2462,32 +2486,44 @@ def api_self_directed_quote(ticker: str = "") -> JSONResponse:
 
 @router.post("/api/self_directed/order")
 def api_self_directed_order(req: _OrderReq) -> JSONResponse:
-    """Place a buy/sell. Fills now at market if open; otherwise queues to the next open."""
+    """Place a buy/sell under the same book lock as settlement and scheduled marking."""
+    lock = _self_directed_mutation_lock("order")
+    if lock is None:
+        return _self_directed_busy_response()
     try:
-        from portfolio import self_directed
-        return JSONResponse(self_directed.place_order(
-            req.ticker, req.side, req.shares, notional=req.notional))
+        with lock:
+            from portfolio import self_directed
+            return JSONResponse(self_directed.place_order(
+                req.ticker, req.side, req.shares, notional=req.notional))
     except Exception as exc:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
 
 
 @router.post("/api/self_directed/thesis")
 def api_self_directed_thesis(req: _ThesisReq) -> JSONResponse:
-    """Save (or clear) the user's conviction thesis note for a position."""
+    """Save (or clear) the user's conviction thesis note under the book mutation lock."""
+    lock = _self_directed_mutation_lock("thesis")
+    if lock is None:
+        return _self_directed_busy_response()
     try:
-        from portfolio import self_directed
-        saved = self_directed.set_thesis(req.ticker, req.note)
-        return JSONResponse({"ok": True, "ticker": (req.ticker or "").upper(), "thesis": saved})
+        with lock:
+            from portfolio import self_directed
+            saved = self_directed.set_thesis(req.ticker, req.note)
+            return JSONResponse({"ok": True, "ticker": (req.ticker or "").upper(), "thesis": saved})
     except Exception as exc:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
 
 
 @router.post("/api/self_directed/cancel")
 def api_self_directed_cancel(order_id: str = "") -> JSONResponse:
-    """Cancel a still-pending (unfilled) order."""
+    """Cancel a still-pending order under the book mutation lock."""
+    lock = _self_directed_mutation_lock("cancel")
+    if lock is None:
+        return _self_directed_busy_response()
     try:
-        from portfolio import self_directed
-        return JSONResponse({"ok": self_directed.cancel_order(order_id)})
+        with lock:
+            from portfolio import self_directed
+            return JSONResponse({"ok": self_directed.cancel_order(order_id)})
     except Exception as exc:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
 
