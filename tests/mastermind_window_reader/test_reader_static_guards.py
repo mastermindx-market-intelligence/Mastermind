@@ -21,6 +21,15 @@ def test_pr_repository_and_number_are_guarded():
     assert r'/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/' in source
     for match in re.finditer('github.com/', source):
         assert 'validRepository' in source[max(0, match.start() - 400):match.start()]
+    guarded_start = source.index('if(validRepository&&validPr)')
+    guarded_end = source.index('}else{', guarded_start)
+    guarded_block = source[guarded_start:guarded_end]
+    for sanitizer in (
+        'encodeURIComponent(owner)',
+        'encodeURIComponent(name)',
+        'String(Number(data.lane.pr))',
+    ):
+        assert sanitizer in guarded_block
 
 
 def test_reader_javascript_parses():
