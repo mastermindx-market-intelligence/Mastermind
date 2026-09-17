@@ -227,8 +227,15 @@ async def get_overnight_tape(args):
     try:
         from data_layer import overnight
         return _json(overnight.tape())
-    except Exception as e:  # noqa: BLE001
-        return _json({"error": repr(e)[:200], "note": "overnight tape unavailable"})
+    except Exception:  # noqa: BLE001
+        return _json({
+            "overnight_status": "unavailable",
+            "risk": None,
+            "groups": None,
+            "live": False,
+            "error": "overnight_tape_unavailable",
+            "note": "overnight tape unavailable",
+        })
 
 
 @tool("get_themes", "Narrative baskets with recent relative performance (the theme universe).",
