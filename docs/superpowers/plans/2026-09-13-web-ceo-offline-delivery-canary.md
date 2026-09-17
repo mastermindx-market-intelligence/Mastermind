@@ -23,9 +23,14 @@ projection, exact Wake phase, trusted acknowledgement mode, semantic parent/Sol 
 acceptance. Wake `TARGET_ACKNOWLEDGED` or `SOURCE_RESOLVED` is never relabeled as semantic or product
 acceptance. Terminal-return state is reconstructed through the existing immutable phase owner: exact
 known-zero phases remain visible, while `ATTEMPTED`, `EFFECT_UNKNOWN`, malformed history, multiple
-matching obligations and unresolved Wake delivery effects fail closed. Event reads bind to the exact
-root Job aggregate and exact root/aggregation-Attempt Wake scope rather than scanning broad event
-families. The reader remains read-only and creates no telemetry, lifecycle, queue or acceptance store.
+matching obligations and unresolved Wake delivery effects fail closed. The reader delegates Wake
+selection, the two-obligation ambiguity bound, the 64-event budget and causal reconstruction to the
+existing canonical terminal/Wake owner in one Runtime snapshot. It then requires that selected
+request's `PhysicalDialogueSourceIdentity` to bind the exact terminal message, projection receipt
+fingerprint/thread, operation, root/Job/Attempt/Worker, terminal evidence digest and CEO target.
+An APPLIED terminal return without trusted dialogue provenance is a typed correlation hold, never
+`NOT_REQUESTED`. Root creation reads remain bound to the exact root Job aggregate. The reader remains
+read-only and creates no telemetry, lifecycle, queue or acceptance store.
 
 ## Global Constraints
 
