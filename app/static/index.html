@@ -4747,9 +4747,18 @@ function renderPositions() {
   var b = _book || {};
   var positions = b.positions || [];
   var el = E('positions');
+  var accountUnavailable = b.account_reconciliation_status === 'unavailable';
+  var accountWarning = accountUnavailable
+    ? '<div class="mm-cal-building" style="margin-bottom:10px"><span class="ic">!</span><span class="tx">' +
+      '<span class="l-en"><strong>Account reconciliation unavailable</strong> — showing published strategy positions only; live/account-only holdings may be missing.</span>' +
+      '<span class="l-zh"><strong>账户对账暂不可用</strong> — 当前仅显示已发布的策略持仓；实时/仅账户持仓可能缺失。</span></span></div>'
+    : '';
 
   if (!positions.length) {
-    el.innerHTML = '<h2><span class="l-en">Positions</span><span class="l-zh">持仓</span></h2><div class="mm-empty"><span class="mm-empty-icon">○</span>' + t('pos.empty') + '</div>';
+    var emptyCopy = accountUnavailable
+      ? '<span class="l-en">Published strategy snapshot has no position rows; actual account holdings could not be reconciled.</span><span class="l-zh">已发布策略快照没有持仓行；实际账户持仓目前无法对账。</span>'
+      : t('pos.empty');
+    el.innerHTML = '<h2><span class="l-en">Positions</span><span class="l-zh">持仓</span></h2>' + accountWarning + '<div class="mm-empty"><span class="mm-empty-icon">○</span>' + emptyCopy + '</div>';
     return;
   }
 
@@ -4909,7 +4918,7 @@ function renderPositions() {
     : '';
 
   el.innerHTML = '<h2><span class="l-en">Positions</span><span class="l-zh">持仓</span> <span style="font-weight:400;font-size:11px;color:var(--muted);margin-left:6px">' + t('pos.subtitle') + '</span></h2>' +
-    banner +
+    banner + accountWarning +
     '<div class="mm-table-wrap"><table>' +
     '<thead><tr>' +
     '<th>' + t('pos.ticker') + '</th>'
@@ -7924,7 +7933,7 @@ function _mergeLiveMarks(data) {
         var mark = byTicker[row.ticker];
         if (mark) {
           seen[row.ticker] = true;
-          reconciled.push(Object.assign(row, mark));
+          reconciled.push(Object.assign({}, row, mark));
         } else if (row.pending) {
           reconciled.push(row);
         }
@@ -7943,6 +7952,15 @@ function _mergeLiveMarks(data) {
       var holdingsComplete = !data.error &&
         Number(pricing.total_positions || 0) === (data.positions || []).length;
       if (holdingsComplete) _book.positions = reconciled;
+      if (holdingsComplete && _book.account_reconciliation_status === 'unavailable') {
+        _book.account_reconciliation_status = 'available';
+        if (Array.isArray(_book.failed_sources)) {
+          _book.failed_sources = _book.failed_sources.filter(function(source) { return source !== 'account_reconciliation'; });
+        }
+        if ((!_book.failed_sources || !_book.failed_sources.length) && _book.snapshot_status === 'partial') {
+          _book.snapshot_status = 'available';
+        }
+      }
     }
     if (!_perf) _perf = { series: [] };
     Object.assign(_perf, data.performance || {});
