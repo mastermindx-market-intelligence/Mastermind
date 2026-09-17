@@ -597,8 +597,8 @@ def _closed_ambiguous_error_data(data: Any) -> dict[str, list[dict[str, str]]]:
         ):
             return empty
         peers = [_validated_dispatch_peer(peer) for peer in data["peers"]]
-        fingerprints = [canonical_company_consultation_json(peer) for peer in peers]
-        if len(fingerprints) != len(set(fingerprints)):
+        peer_refs = [peer["peer_ref"] for peer in peers]
+        if len(peer_refs) != len(set(peer_refs)):
             return empty
         return {"peers": peers}
     except Exception:

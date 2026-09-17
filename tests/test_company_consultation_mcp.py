@@ -1824,3 +1824,45 @@ def test_nonserializable_peer_refusal_data_returns_typed_bounded_error() -> None
         COMPANY_CONSULTATION_MAX_RESPONSE_BYTES
     )
     assert sink.calls == []
+
+def test_duplicate_peer_identity_in_refusal_collapses_to_empty_closed_facts() -> None:
+    peer_ref = _peer().peer_ref
+
+    class DuplicateIdentityResolver:
+        peers = []
+
+        def resolve(self, alias: str, *, program_ref: str):
+            raise ConsultationPeerRefused(
+                "AMBIGUOUS",
+                {
+                    "peers": [
+                        {"peer_ref": peer_ref, "display_name": "Peer A"},
+                        {"peer_ref": peer_ref, "display_name": "Peer B"},
+                    ]
+                },
+            )
+
+    sink = _Dispatcher()
+    gateway = CompanyConsultationGateway(
+        peer_resolver=DuplicateIdentityResolver(),  # type: ignore[arg-type]
+        dispatcher=sink,
+        observed_tool_schema_digest=COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST,
+        utc_now=lambda: "2026-09-14T00:00:00Z",
+    )
+
+    response = _run(
+        gateway.call(
+            "company.consult",
+            {
+                "to": peer_ref,
+                "question": "Reject conflicting facts for one peer identity.",
+                "evidence_refs": [],
+                "artifact_revisions": [],
+            },
+        )
+    )
+
+    assert response["ok"] is False
+    assert response["error"]["code"] == "AMBIGUOUS"
+    assert response["data"] == {"peers": []}
+    assert sink.calls == []
