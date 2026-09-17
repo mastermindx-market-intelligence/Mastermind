@@ -246,11 +246,12 @@ owner or successor. Exact parent consumption must be proven, not inferred from d
 No supported continuation means an honest held result, not a fabricated wake.
 
 At a verified semantic phase boundary, checkpoint accepted deltas and rotate before another
-high-context phase when carrying the next phase in the same conversation would materially increase
-fragility. This is proactive continuity, not premature stopping: optimize durable capability progress
-and decision quality, not turn length, token volume, tool-call count, or wall-clock duration. Completed
-work becomes do-not-redo; the successor loads the durable frontier and only the minimum fresh canonical
-state required by the exact next action.
+high-context phase **only when the exact surface is `ROTATION_REQUIRED`, all modifying effects are
+reconciled, a compact durable continuation exists, and one lawful successor can recover the same
+responsibility**. This is proactive continuity, not premature stopping: optimize durable capability
+progress and decision quality, not turn length, token volume, tool-call count, or wall-clock duration.
+Completed work becomes do-not-redo; the successor loads the durable frontier and only the minimum
+fresh canonical state required by the exact next action.
 
 Measure accepted capability progress per Pro turn, worker spend per accepted outcome, avoidable
 repair, review backlog, and completion/continuation reliability through existing evaluation and evidence owners; no new telemetry store.

@@ -381,10 +381,19 @@ def test_rotation_threshold_taint_hygiene_and_compact_kernel_are_aligned() -> No
         "raw tool history is not a continuation manifest",
         "already-durable continuation",
         "Thinking failed != context exhausted",
+        "exact surface cannot safely continue",
+        "Chairman explicitly retires the conversation",
     )
     for phrase in required:
         assert phrase in law, f"context-rotation law omits session-hygiene rule: {phrase}"
         assert phrase in skill, f"session-reliability skill omits session-hygiene rule: {phrase}"
+
+    for phrase in (
+        "allow at most one clean retry when no effect is uncertain",
+        "original carrier and connector generation",
+        "never authorizes replay or carrier failover",
+    ):
+        assert phrase in skill, f"session-reliability skill omits retry/taint fence: {phrase}"
 
     for phrase in (
         "SESSION RELIABILITY",
@@ -392,6 +401,8 @@ def test_rotation_threshold_taint_hygiene_and_compact_kernel_are_aligned() -> No
         "Bound tool output at source",
         "checkpoint before context pressure",
         "reconcile timed-out or tainted tool operations by exact identity",
+        "two consecutive terminal generation failures with no successful intervening turn",
+        "one resume failure following unresolved tool timeout, connector taint, or EFFECT_UNKNOWN",
         "stop executing in that conversation",
         "Never keep issuing Continue into a surface classified ROTATION_REQUIRED",
         "never paste raw tool history into its successor",

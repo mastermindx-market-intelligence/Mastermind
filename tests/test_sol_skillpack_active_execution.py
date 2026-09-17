@@ -277,3 +277,16 @@ def test_context_rotation_is_lawful_continuation_not_completion() -> None:
         "not turn length, token volume, tool-call count, or wall-clock duration",
     ):
         assert phrase in text, f"ACTIVE_EXECUTION omits context-rotation boundary: {phrase}"
+
+
+def test_proactive_phase_rotation_reuses_the_closed_context_rotation_gate() -> None:
+    text = " ".join(
+        _section("Step 7A — Preserve operational continuity before interruption").split()
+    )
+    for phrase in (
+        "only when the exact surface is `ROTATION_REQUIRED`",
+        "all modifying effects are reconciled",
+        "a compact durable continuation exists",
+        "one lawful successor can recover the same responsibility",
+    ):
+        assert phrase in text, f"proactive rotation path omits closed gate: {phrase}"

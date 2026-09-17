@@ -119,9 +119,10 @@ until canonical reconciliation proves accepted, conflicted, not found, or still 
 ## Connector taint
 
 A tainted connector generation is unusable for additional work. Refuse further calls in that
-generation, return one compact typed error, preserve the original PID/action/effect identity, and
-reconcile through a fresh connector session. Connector taint never authorizes replay or carrier
-failover and never includes prior raw payloads in the error.
+generation, return one compact typed error, and preserve the original PID/action/effect plus the
+**original carrier and connector generation**. Reconcile from a fresh connector generation while
+remaining bound to that original carrier; a fresh generation is not carrier failover. Connector taint
+never authorizes replay or carrier failover and never includes prior raw payloads in the error.
 
 ## Conversation-context discipline
 

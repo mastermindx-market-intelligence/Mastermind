@@ -157,8 +157,10 @@ The product need not always know why a conversation stopped. It must know whethe
 exact conversation with **no successful intervening turn**. The surface also requires rotation after
 **one resume failure** immediately following an unresolved tool timeout, connector taint, or
 `EFFECT_UNKNOWN`; this establishes `ROTATION_REQUIRED`
-because the exact surface cannot safely reconcile its prior boundary. These thresholds classify the
-surface; they do not prove a private provider context limit.
+because the exact surface cannot safely reconcile its prior boundary. `ROTATION_REQUIRED` also
+applies when the **exact surface cannot safely continue** or the **Chairman explicitly retires the
+conversation**. These thresholds classify the surface; they do not prove a private provider context
+limit.
 
 A single failure preserves the existing truth rule: **Thinking failed != context exhausted**. It may
 establish `ROTATION_SUSPECTED`, provider transient, surface unusable, or unknown, but it cannot by
