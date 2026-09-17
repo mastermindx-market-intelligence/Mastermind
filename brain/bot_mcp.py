@@ -351,20 +351,91 @@ async def get_overnight_tape(args):
 @tool("get_themes", "Narrative baskets with recent relative performance (the theme universe).",
       {"type": "object", "properties": {"region": {"type": "string"}}})
 async def get_themes(args):
-    d = _read_json(_V / "site" / "basketdata" / "baskets.json") or {}
-    out = [{"id": b["id"], "name": b.get("name"), "category": b.get("category"),
-            "perf_20d_rel": ((b.get("perf") or {}).get("20d") or {}).get("rel"),
-            "n_members": b.get("n_members")} for b in (d.get("baskets") or [])]
-    return _json({"as_of": d.get("as_of"), "themes": out})
+    data, read_failed = _read_first_nonempty_mapping_checked((
+        _V / "site" / "basketdata" / "baskets.json",
+    ))
+    if data is None:
+        return _json({
+            "as_of": None,
+            "themes": None,
+            "read_status": "unavailable",
+            "error": "themes_unavailable",
+            "failed_sources": ["themes"],
+        })
+    baskets = data.get("baskets")
+    if not isinstance(baskets, list):
+        return _json({
+            "as_of": data.get("as_of"),
+            "themes": None,
+            "read_status": "unavailable",
+            "error": "themes_unavailable",
+            "failed_sources": ["themes"],
+        })
+    out = []
+    row_failed = read_failed
+    for basket in baskets:
+        if not isinstance(basket, dict) or not basket.get("id"):
+            row_failed = True
+            continue
+        perf = basket.get("perf") or {}
+        if not isinstance(perf, dict):
+            perf = {}
+            row_failed = True
+        perf_20d = perf.get("20d") or {}
+        if not isinstance(perf_20d, dict):
+            perf_20d = {}
+            row_failed = True
+        out.append({
+            "id": basket.get("id"),
+            "name": basket.get("name"),
+            "category": basket.get("category"),
+            "perf_20d_rel": perf_20d.get("rel"),
+            "n_members": basket.get("n_members"),
+        })
+    payload = {"as_of": data.get("as_of"), "themes": out}
+    if row_failed:
+        payload["read_status"] = "partial"
+        payload["failed_sources"] = ["themes"]
+        payload["note"] = "Theme-universe evidence is incomplete; malformed rows are unknown."
+    return _json(payload)
 
 
 @tool("get_standouts", "The ranked single-name buy board (top picks with suggested size).", {})
 async def get_standouts(args):
-    d = _read_json(_V / "site" / "factordata" / "us_standouts.json")
-    if not d:
+    data, read_failed = _read_first_nonempty_mapping_checked((
+        _V / "site" / "factordata" / "us_standouts.json",
+    ))
+    if data is None:
+        if read_failed:
+            return _json({
+                "gate_go": None,
+                "rank_by": None,
+                "buy": None,
+                "read_status": "unavailable",
+                "error": "standouts_unavailable",
+                "failed_sources": ["standouts"],
+            })
         return _ok("us_standouts.json not built locally (ships in the Pages artifact).")
-    buys = (d.get("buy") or d.get("standouts") or [])[:20]
-    return _json({"gate_go": d.get("gate_go"), "rank_by": d.get("rank_by"), "buy": buys})
+
+    buys_raw = data.get("buy")
+    if not buys_raw:
+        buys_raw = data.get("standouts")
+    buys_failed = buys_raw is not None and not isinstance(buys_raw, list)
+    buys = None if buys_failed else list(buys_raw or [])[:20]
+    row_failed = False
+    if buys is not None:
+        row_failed = any(not isinstance(row, dict) for row in buys)
+        buys = [row for row in buys if isinstance(row, dict)]
+    payload = {
+        "gate_go": data.get("gate_go"),
+        "rank_by": data.get("rank_by"),
+        "buy": buys,
+    }
+    if read_failed or buys_failed or row_failed:
+        payload["read_status"] = "partial"
+        payload["failed_sources"] = ["standouts"]
+        payload["note"] = "Standout-board evidence is incomplete; missing rows are unknown."
+    return _json(payload)
 
 
 @tool("get_portfolio", "The bot's current paper book + track record.", {})
@@ -835,9 +906,25 @@ async def get_intel_hub(args):
 async def get_intake_candidates(args):
     from brain import intake
     limit = int(args.get("limit") or 30)
-    out = intake.build(limit=limit)
+    try:
+        out = intake.build(limit=limit)
+        if not isinstance(out, dict):
+            raise TypeError("intake queue is not a mapping")
+    except Exception:  # noqa: BLE001
+        return _json({
+            "read_status": "unavailable",
+            "error": "intake_candidates_unavailable",
+            "failed_sources": ["intake"],
+            "candidates": None,
+        })
     if args.get("tiers"):
-        out["salience"] = intake.salience_tiers(limit)
+        try:
+            out["salience"] = intake.salience_tiers(limit)
+        except Exception:  # noqa: BLE001
+            out["salience"] = None
+            out["read_status"] = "partial"
+            out["failed_sources"] = ["intake_salience"]
+            out["note"] = "Candidate queue is available; salience tiers did not complete."
     return _json(out)
 
 
