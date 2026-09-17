@@ -76,6 +76,8 @@ def _fixture_claude_binary(tmp_path: Path) -> Path:
         '  stream-cap) printf \'abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz\\n\'; sleep 1 ;;\n'
         '  delayed-success) sleep 0.2; printf \'{"is_error":false,"model":"claude-opus-4-6","structured_output":{"outcome":"ok","artifacts":[]}}\\n\' ;;\n'
         '  git-change) printf \'changed\\n\' > unexpected.txt; printf \'{"is_error":false,"model":"claude-opus-4-6","structured_output":{"outcome":"ok","artifacts":[]}}\\n\' ;;\n'
+        '  nonzero-secret) printf \'{"is_error":false,"model":"claude-opus-4-6","structured_output":{"outcome":"ok","artifacts":[]}}\\n\'; printf \'CREDENTIAL-SENTINEL\\n\' >&2; exit 9 ;;\n'
+        '  nonzero) printf \'ordinary fixture failure\\n\' >&2; exit 9 ;;\n'
         '  sleep) sleep 2 ;;\n'
         '  *) printf \'{"is_error":true,"subtype":"error"}\\n\' ;;\n'
         'esac\n'
@@ -872,3 +874,143 @@ def test_post_parse_git_rejection_leaves_bound_result_empty(tmp_path: Path) -> N
     receipt = asyncio.run(execute())
     assert receipt.result.status is WorkerRunStatus.INVALID_RESULT
     assert Path(receipt.process_ref.result_path).read_bytes() == b""
+
+
+def test_nonzero_secret_stderr_precedes_ordinary_exit_failure(tmp_path: Path) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    (tmp_path / "mode").write_text("nonzero-secret", encoding="utf-8")
+    adapter = _adapter(tmp_path, binary)
+
+    async def execute() -> CollectionReceipt:
+        return await adapter.collect_result(await adapter.start(_workspace_and_spec(tmp_path)))
+
+    receipt = asyncio.run(execute())
+    assert receipt.result.status is WorkerRunStatus.INVALID_RESULT
+    assert Path(receipt.process_ref.stderr_path).read_bytes() == b""
+    assert "CREDENTIAL-SENTINEL" not in str(receipt.result.error)
+
+    (tmp_path / "mode").write_text("nonzero", encoding="utf-8")
+    ordinary = _adapter(tmp_path, binary)
+
+    async def ordinary_exit() -> CollectionReceipt:
+        return await ordinary.collect_result(
+            await ordinary.start(_workspace_and_spec(tmp_path, run_id="run-nonzero"))
+        )
+
+    assert asyncio.run(ordinary_exit()).result.status is WorkerRunStatus.FAILED
+
+
+def test_concurrent_collectors_share_a_single_terminal_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    (tmp_path / "mode").write_text("delayed-success", encoding="utf-8")
+    adapter = _adapter(tmp_path, binary)
+    writes = 0
+    original_write = claude_worker._write_bound_evidence
+
+    def counted_write(*args: object, **kwargs: object) -> str:
+        nonlocal writes
+        writes += 1
+        return original_write(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(claude_worker, "_write_bound_evidence", counted_write)
+
+    async def execute() -> tuple[CollectionReceipt, CollectionReceipt]:
+        ref = await adapter.start(_workspace_and_spec(tmp_path, timeout_seconds=1))
+        first, second = await asyncio.gather(
+            adapter.collect_result(ref), adapter.collect_result(ref)
+        )
+        return first, second
+
+    first, second = asyncio.run(execute())
+    assert first is second
+    assert first.result.status is WorkerRunStatus.SUCCEEDED
+    assert writes == 3
+
+
+def test_cancelled_collector_does_not_cancel_shared_terminal_collection(
+    tmp_path: Path,
+) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    (tmp_path / "mode").write_text("delayed-success", encoding="utf-8")
+    adapter = _adapter(tmp_path, binary)
+
+    async def execute() -> CollectionReceipt:
+        ref = await adapter.start(_workspace_and_spec(tmp_path, timeout_seconds=1))
+        abandoned = asyncio.create_task(adapter.collect_result(ref))
+        await asyncio.sleep(0.03)
+        abandoned.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await abandoned
+        return await asyncio.wait_for(adapter.collect_result(ref), timeout=1)
+
+    assert asyncio.run(execute()).result.status is WorkerRunStatus.SUCCEEDED
+
+
+def test_cancel_racing_collection_has_one_cancelled_receipt(tmp_path: Path) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    (tmp_path / "mode").write_text("sleep", encoding="utf-8")
+    adapter = _adapter(tmp_path, binary)
+
+    async def execute() -> CollectionReceipt:
+        ref = await adapter.start(_workspace_and_spec(tmp_path, timeout_seconds=1))
+        collecting = asyncio.create_task(adapter.collect_result(ref))
+        await asyncio.sleep(0.03)
+        cancellation = await adapter.cancel(ref, "operator requested")
+        receipt = await asyncio.wait_for(collecting, timeout=1)
+        assert cancellation.signal_sent is True
+        return receipt
+
+    assert asyncio.run(execute()).result.status is WorkerRunStatus.CANCELLED
+
+
+def test_foreign_or_permission_denied_residual_group_never_receives_signal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    (tmp_path / "mode").write_text("success", encoding="utf-8")
+    adapter = _adapter(tmp_path, binary)
+
+    async def execute() -> None:
+        ref = await adapter.start(_workspace_and_spec(tmp_path))
+        await adapter.collect_result(ref)
+        state = adapter._runs[ref.run_id]
+
+        class ForeignInspector:
+            def boot_session_id(self) -> str:
+                return ref.boot_session_id
+
+            def inspect(self, _pid: int) -> object:
+                class Foreign:
+                    start_identity = "foreign-start"
+                    pgid = ref.pgid
+                    session_id = ref.session_id
+                    effective_uid = ref.effective_uid
+                    effective_gid = ref.effective_gid
+                    real_uid = ref.real_uid
+                    real_gid = ref.real_gid
+                return Foreign()
+
+        adapter.inspector = ForeignInspector()
+        signals: list[tuple[int, int]] = []
+        monkeypatch.setattr(claude_worker, "_process_group_exists", lambda _pgid: True)
+        monkeypatch.setattr(
+            claude_worker.os, "killpg", lambda pgid, sig: signals.append((pgid, sig))
+        )
+        with pytest.raises(claude_worker.ClaudeProcessIdentityError):
+            await adapter._kill_residual_process_group(state)
+        assert signals == []
+
+        adapter.inspector = ForeignInspector()
+        monkeypatch.setattr(
+            claude_worker,
+            "_process_group_exists",
+            lambda _pgid: (_ for _ in ()).throw(
+                claude_worker.ProcessIdentityError("permission denied")
+            ),
+        )
+        with pytest.raises(claude_worker.ClaudeProcessIdentityError):
+            await adapter._kill_residual_process_group(state)
+
+    asyncio.run(execute())
