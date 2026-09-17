@@ -437,7 +437,7 @@ def _parse_jsonl(raw: str) -> dict[str, Any]:
                         err = item.get("error")
                         msg = err.get("message") if isinstance(err, dict) else err
                         failed_write_tools.append(
-                            {"tool": str(name), "error": str(msg)[:500] if msg else None}
+                            {"tool": str(name), "error": str(msg)[:1000] if msg else None}
                         )
         elif et == "turn.completed":
             usage = event.get("usage") or usage
