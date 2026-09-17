@@ -1866,3 +1866,36 @@ def test_duplicate_peer_identity_in_refusal_collapses_to_empty_closed_facts() ->
     assert response["error"]["code"] == "AMBIGUOUS"
     assert response["data"] == {"peers": []}
     assert sink.calls == []
+
+
+@pytest.mark.parametrize("path", [
+    "docs/../README.md", "docs/./contract.md", "docs//contract.md",
+    "docs/", "docs/..", "docs/.", "docs/nested/../../README.md",
+])
+def test_company_consult_rejects_noncanonical_artifact_paths_before_dispatch(path: str) -> None:
+    artifact = _artifact()
+    artifact["path"] = path
+    gateway, sink = _gateway()
+    response = _run(gateway.call("company.consult", {
+        "to": _peer().peer_ref,
+        "question": "Reject ambiguous immutable artifact paths.",
+        "evidence_refs": [],
+        "artifact_revisions": [artifact],
+    }))
+    assert response["ok"] is False
+    assert response["error"]["code"] == "INVALID_REQUEST"
+    assert sink.calls == []
+
+
+@pytest.mark.parametrize("path", [
+    "docs/../README.md", "docs/./contract.md", "docs//contract.md",
+    "docs/", "docs/..", "docs/.", "docs/nested/../../README.md",
+])
+def test_company_dispatch_rejects_noncanonical_artifact_paths(path: str) -> None:
+    request = _valid_company_consult_dispatch_request()
+    artifact = _artifact()
+    artifact["path"] = path
+    request["semantic"]["artifact_revisions"] = [artifact]
+    with pytest.raises(CompanyConsultationToolError) as exc_info:
+        consultation_contract.validate_company_consult_dispatch_request(request)
+    assert exc_info.value.code == "INVALID_REQUEST"

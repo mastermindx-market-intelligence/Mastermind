@@ -335,6 +335,8 @@ def _validated_artifact_revisions(value: Any) -> list[dict[str, str]]:
             or _SECRET_RE.search(normalized["repository"]) is not None
             or not isinstance(normalized["path"], str)
             or _ARTIFACT_PATH_RE.fullmatch(normalized["path"]) is None
+            # Immutable artifact identities must not be normalized after admission.
+            or any(part in {"", ".", ".."} for part in normalized["path"].split("/"))
             or _SECRET_RE.search(normalized["path"]) is not None
             or not isinstance(normalized["commit"], str)
             or re.fullmatch(r"[0-9a-f]{40}", normalized["commit"]) is None
