@@ -149,6 +149,7 @@ class GrokBotRoutineWakeDispatcher:
             )
 
         opaque_ids = tuple(wake.obligation_ids) + tuple(wake.attempt_command_ids)
+        submission_cancelled = False
         submission_unknown = False
         observation = None
         try:
@@ -166,9 +167,11 @@ class GrokBotRoutineWakeDispatcher:
                 nudge_id=wake.nudge_id,
             )
         except asyncio.CancelledError:
-            submission_unknown = True
+            submission_cancelled = True
         except Exception:
             submission_unknown = True
+        if submission_cancelled:
+            raise asyncio.CancelledError()
         if submission_unknown:
             raise WakeEffectUnknownError(
                 "Grok routine submission effect is unknown after the client call began"
@@ -197,6 +200,7 @@ class GrokBotRoutineWakeDispatcher:
             raise WakeEffectUnknownError(
                 "Grok routine reconciliation has no observation source"
             )
+        observation_cancelled = False
         observation_unavailable = False
         observation = None
         try:
@@ -205,9 +209,11 @@ class GrokBotRoutineWakeDispatcher:
                 nudge_id=wake.nudge_id,
             )
         except asyncio.CancelledError:
-            observation_unavailable = True
+            observation_cancelled = True
         except Exception:
             observation_unavailable = True
+        if observation_cancelled:
+            raise asyncio.CancelledError()
         if observation_unavailable or observation is None:
             raise WakeEffectUnknownError(
                 "Grok routine submission effect remains unknown"

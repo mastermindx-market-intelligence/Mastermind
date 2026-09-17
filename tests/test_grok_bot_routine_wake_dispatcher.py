@@ -41,7 +41,7 @@ def _wake(**overrides) -> WakeNudge:
 @dataclasses.dataclass
 class _FakeClient:
     observation: object
-    fail: Exception | None = None
+    fail: BaseException | None = None
     calls: list[tuple[str, str, str, int, tuple[str, ...]]] = dataclasses.field(
         default_factory=list
     )
@@ -72,7 +72,7 @@ class _FakeClient:
 @dataclasses.dataclass
 class _FakeObservationSource:
     observation: object | None
-    fail: Exception | None = None
+    fail: BaseException | None = None
     calls: list[tuple[str, str]] = dataclasses.field(default_factory=list)
 
     async def observe_wake(self, *, native_handle, nudge_id):
@@ -80,6 +80,46 @@ class _FakeObservationSource:
         if self.fail is not None:
             raise self.fail
         return self.observation
+
+
+@dataclasses.dataclass
+class _BlockingClient:
+    started: asyncio.Event
+    calls: list[tuple[str, str, str, int, tuple[str, ...]]] = dataclasses.field(
+        default_factory=list
+    )
+
+    async def deliver_wake(
+        self,
+        *,
+        native_handle,
+        nudge_id,
+        binding_id,
+        binding_generation,
+        opaque_ids,
+    ):
+        self.calls.append(
+            (
+                native_handle,
+                nudge_id,
+                binding_id,
+                binding_generation,
+                tuple(opaque_ids),
+            )
+        )
+        self.started.set()
+        await asyncio.Future()
+
+
+@dataclasses.dataclass
+class _BlockingObservationSource:
+    started: asyncio.Event
+    calls: list[tuple[str, str]] = dataclasses.field(default_factory=list)
+
+    async def observe_wake(self, *, native_handle, nudge_id):
+        self.calls.append((native_handle, nudge_id))
+        self.started.set()
+        await asyncio.Future()
 
 
 def _observation(
@@ -200,13 +240,40 @@ def test_post_call_exception_is_effect_unknown_and_never_failed_or_retried():
     assert len(client.calls) == 1
 
 
-def test_post_call_cancellation_is_effect_unknown_and_never_retried():
-    client = _FakeClient(_observation(), fail=asyncio.CancelledError())
+def test_post_call_injected_cancellation_propagates_sanitized_and_never_retries():
+    secret = "secret-cancellation-detail.not-for-logs"
+    client = _FakeClient(_observation(), fail=asyncio.CancelledError(secret))
     dispatcher = GrokBotRoutineWakeDispatcher(client)
 
-    with pytest.raises(WakeEffectUnknownError, match="effect is unknown"):
+    with pytest.raises(asyncio.CancelledError) as captured:
         _nudge(dispatcher, _wake())
+
+    assert secret not in repr(captured.value)
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
     assert len(client.calls) == 1
+
+
+def test_real_post_call_task_cancellation_propagates_and_ends_cancelled():
+    secret = "secret-task-cancellation-detail.not-for-logs"
+
+    async def exercise() -> None:
+        client = _BlockingClient(asyncio.Event())
+        dispatcher = GrokBotRoutineWakeDispatcher(client)
+        task = asyncio.create_task(dispatcher.nudge(_wake()))
+        await client.started.wait()
+
+        task.cancel(secret)
+        with pytest.raises(asyncio.CancelledError) as captured:
+            await task
+
+        assert task.cancelled() is True
+        assert secret not in repr(captured.value)
+        assert captured.value.__cause__ is None
+        assert captured.value.__context__ is None
+        assert len(client.calls) == 1
+
+    asyncio.run(exercise())
 
 
 @pytest.mark.parametrize(
@@ -289,15 +356,44 @@ def test_reconcile_source_error_remains_effect_unknown_without_submission():
     assert len(source.calls) == 1
 
 
-def test_reconcile_cancellation_remains_effect_unknown_without_submission():
+def test_reconcile_injected_cancellation_propagates_sanitized_without_submission():
+    secret = "secret-reconcile-cancellation-detail.not-for-logs"
     client = _FakeClient(_observation())
-    source = _FakeObservationSource(None, fail=asyncio.CancelledError())
+    source = _FakeObservationSource(None, fail=asyncio.CancelledError(secret))
     dispatcher = GrokBotRoutineWakeDispatcher(client, observation_source=source)
 
-    with pytest.raises(WakeEffectUnknownError, match="remains unknown"):
+    with pytest.raises(asyncio.CancelledError) as captured:
         _reconcile(dispatcher, _wake())
+
+    assert secret not in repr(captured.value)
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
     assert client.calls == []
     assert len(source.calls) == 1
+
+
+def test_real_reconcile_task_cancellation_propagates_and_ends_cancelled():
+    secret = "secret-reconcile-task-cancellation-detail.not-for-logs"
+
+    async def exercise() -> None:
+        client = _FakeClient(_observation())
+        source = _BlockingObservationSource(asyncio.Event())
+        dispatcher = GrokBotRoutineWakeDispatcher(client, observation_source=source)
+        task = asyncio.create_task(dispatcher.reconcile(_wake()))
+        await source.started.wait()
+
+        task.cancel(secret)
+        with pytest.raises(asyncio.CancelledError) as captured:
+            await task
+
+        assert task.cancelled() is True
+        assert secret not in repr(captured.value)
+        assert captured.value.__cause__ is None
+        assert captured.value.__context__ is None
+        assert client.calls == []
+        assert len(source.calls) == 1
+
+    asyncio.run(exercise())
 
 
 def test_observation_validation_is_closed_and_secret_free():
@@ -355,40 +451,10 @@ def test_post_call_exception_does_not_expose_injected_client_details():
     assert len(client.calls) == 1
 
 
-def test_post_call_cancellation_does_not_expose_cancellation_details():
-    secret = "secret-token-value.not-for-logs"
-    client = _FakeClient(_observation(), fail=asyncio.CancelledError(secret))
-    dispatcher = GrokBotRoutineWakeDispatcher(client)
-
-    with pytest.raises(WakeEffectUnknownError, match="effect is unknown") as captured:
-        _nudge(dispatcher, _wake())
-
-    assert secret not in repr(captured.value)
-    assert captured.value.__cause__ is None
-    assert captured.value.__context__ is None
-    assert len(client.calls) == 1
-
-
 def test_reconcile_error_does_not_expose_observation_source_details():
     secret = "secret-provider-history.not-for-logs"
     client = _FakeClient(_observation())
     source = _FakeObservationSource(None, fail=RuntimeError(secret))
-    dispatcher = GrokBotRoutineWakeDispatcher(client, observation_source=source)
-
-    with pytest.raises(WakeEffectUnknownError, match="remains unknown") as captured:
-        _reconcile(dispatcher, _wake())
-
-    assert secret not in repr(captured.value)
-    assert captured.value.__cause__ is None
-    assert captured.value.__context__ is None
-    assert client.calls == []
-    assert len(source.calls) == 1
-
-
-def test_reconcile_cancellation_does_not_expose_cancellation_details():
-    secret = "secret-provider-history.not-for-logs"
-    client = _FakeClient(_observation())
-    source = _FakeObservationSource(None, fail=asyncio.CancelledError(secret))
     dispatcher = GrokBotRoutineWakeDispatcher(client, observation_source=source)
 
     with pytest.raises(WakeEffectUnknownError, match="remains unknown") as captured:

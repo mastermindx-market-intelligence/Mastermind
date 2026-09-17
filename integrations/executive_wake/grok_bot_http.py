@@ -270,14 +270,17 @@ class GrokRoutineHttpClient:
                 "Grok routine payload is invalid before submission"
             )
 
+        credential_cancelled = False
         credential_unavailable = False
         credential = None
         try:
             credential = self.credential_source.resolve(native_handle)
         except asyncio.CancelledError:
-            credential_unavailable = True
+            credential_cancelled = True
         except Exception:
             credential_unavailable = True
+        if credential_cancelled:
+            raise asyncio.CancelledError()
         if credential_unavailable:
             raise WakePreSubmitError(
                 "Grok routine credential unavailable before submission"
@@ -295,6 +298,7 @@ class GrokRoutineHttpClient:
                 "Grok routine credential generation mismatch before submission"
             )
 
+        submission_cancelled = False
         submission_unknown = False
         result = None
         try:
@@ -308,8 +312,12 @@ class GrokRoutineHttpClient:
                 timeout_seconds=POST_TIMEOUT_SECONDS,
                 max_response_bytes=MAX_RESPONSE_BYTES,
             )
+        except asyncio.CancelledError:
+            submission_cancelled = True
         except Exception:
             submission_unknown = True
+        if submission_cancelled:
+            raise asyncio.CancelledError()
         if submission_unknown:
             raise RuntimeError(
                 "Grok routine submission result is unavailable after POST began"

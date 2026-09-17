@@ -66,7 +66,7 @@ def _credential(**overrides) -> GrokRoutineCredential:
 @dataclasses.dataclass
 class _CredentialSource:
     credential: object = dataclasses.field(default_factory=_credential)
-    fail: Exception | None = None
+    fail: BaseException | None = None
     calls: list[str] = dataclasses.field(default_factory=list)
 
     def resolve(self, native_handle: str):
@@ -85,7 +85,7 @@ class _Poster:
             request_id="request-opaque-1",
         )
     )
-    fail: Exception | None = None
+    fail: BaseException | None = None
     calls: list[dict[str, object]] = dataclasses.field(default_factory=list)
 
     async def post_json(
@@ -238,10 +238,11 @@ def test_bounded_http_result_repr_redacts_response_body():
     assert "secret-response-body" not in repr(result)
 
 
-def test_bounded_http_result_accepts_upper_status_boundary():
-    result = BoundedHttpResult(599, b"", None)
+@pytest.mark.parametrize("status_code", [100, 599])
+def test_bounded_http_result_accepts_status_boundaries(status_code):
+    result = BoundedHttpResult(status_code, b"", None)
 
-    assert result.status_code == 599
+    assert result.status_code == status_code
 
 
 def test_payload_is_exact_canonical_json_and_contains_only_opaque_correlation():
@@ -416,17 +417,34 @@ def test_credential_resolution_failure_is_typed_no_start_and_redacted():
     assert poster.calls == []
 
 
-def test_credential_resolution_cancellation_is_definite_no_start_without_post():
-    source = _CredentialSource(fail=asyncio.CancelledError())
+def test_credential_resolution_cancellation_propagates_sanitized_without_post():
+    secret = "secret-credential-cancellation-detail.not-for-logs"
+    source = _CredentialSource(fail=asyncio.CancelledError(secret))
     client, _, poster = _client(source=source)
-    dispatcher = GrokBotRoutineWakeDispatcher(client)
 
-    receipt = asyncio.run(dispatcher.nudge(_wake()))
+    with pytest.raises(asyncio.CancelledError) as captured:
+        _deliver(client)
 
-    assert receipt.outcome is TransportOutcome.TARGET_UNAVAILABLE
-    assert receipt.reason_code == "target_unavailable"
+    assert secret not in repr(captured.value)
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
     assert source.calls == [NATIVE_HANDLE]
     assert poster.calls == []
+
+
+def test_post_cancellation_propagates_sanitized_after_one_attempt():
+    secret = "secret-post-cancellation-detail.not-for-logs"
+    poster = _Poster(fail=asyncio.CancelledError(secret))
+    client, source, _ = _client(poster=poster)
+
+    with pytest.raises(asyncio.CancelledError) as captured:
+        _deliver(client)
+
+    assert secret not in repr(captured.value)
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
+    assert source.calls == [NATIVE_HANDLE]
+    assert len(poster.calls) == 1
 
 
 def test_invalid_payload_is_typed_no_start_and_never_calls_secret_source_or_poster():
