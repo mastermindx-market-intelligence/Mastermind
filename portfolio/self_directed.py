@@ -46,6 +46,14 @@ _NAV_PATH = _DATA / "nav_history.jsonl"      # W-L / L1: this book now advances 
 _STARTING_NAV = 1_000_000.0
 
 
+class SelfDirectedStateCorrupt(RuntimeError):
+    """Existing durable Self-Directed state is malformed and must not be reset implicitly."""
+
+    def __init__(self, artifact: str) -> None:
+        self.artifact = str(artifact)
+        super().__init__(f"self-directed durable state corrupt: {self.artifact}")
+
+
 # ---------------------------------------------------------------------------
 # persistence helpers
 # ---------------------------------------------------------------------------
@@ -114,17 +122,22 @@ def _fresh_account() -> dict[str, Any]:
 
 
 def _load_account() -> dict[str, Any]:
-    """Load account state; a fresh $1M book on any corruption."""
+    """Load account state; only a genuinely missing file is a fresh $1M book."""
+    if not _ACCOUNT_PATH.exists():
+        return _fresh_account()
     try:
-        if _ACCOUNT_PATH.exists():
-            raw = json.loads(_ACCOUNT_PATH.read_text())
-            if isinstance(raw.get("cash"), (int, float)) and isinstance(raw.get("positions"), dict):
-                raw.setdefault("starting_nav", _STARTING_NAV)
-                raw.setdefault("inception_date", _fresh_account()["inception_date"])
-                return raw
-    except Exception:
-        pass
-    return _fresh_account()
+        raw = json.loads(_ACCOUNT_PATH.read_text())
+    except Exception as exc:
+        raise SelfDirectedStateCorrupt("account") from exc
+    if not isinstance(raw, dict):
+        raise SelfDirectedStateCorrupt("account")
+    if not isinstance(raw.get("cash"), (int, float)) or not isinstance(
+        raw.get("positions"), dict
+    ):
+        raise SelfDirectedStateCorrupt("account")
+    raw.setdefault("starting_nav", _STARTING_NAV)
+    raw.setdefault("inception_date", _fresh_account()["inception_date"])
+    return raw
 
 
 def _save_account(state: dict[str, Any]) -> None:
@@ -148,22 +161,26 @@ def _load_fills() -> list[dict]:
             continue
         try:
             r = json.loads(line)
-            r["_seq"] = i
-            rows.append(r)
-        except Exception:
-            pass
+        except Exception as exc:
+            raise SelfDirectedStateCorrupt("fills") from exc
+        if not isinstance(r, dict):
+            raise SelfDirectedStateCorrupt("fills")
+        r["_seq"] = i
+        rows.append(r)
     rows.sort(key=lambda r: (r.get("date") or "", r.get("_seq", 0)))
     return rows
 
 
 def _load_pending() -> list[dict]:
+    if not _PENDING_PATH.exists():
+        return []
     try:
-        if _PENDING_PATH.exists():
-            data = json.loads(_PENDING_PATH.read_text())
-            return data if isinstance(data, list) else []
-    except Exception:
-        pass
-    return []
+        data = json.loads(_PENDING_PATH.read_text())
+    except Exception as exc:
+        raise SelfDirectedStateCorrupt("pending") from exc
+    if not isinstance(data, list):
+        raise SelfDirectedStateCorrupt("pending")
+    return data
 
 
 def _save_pending(orders: list[dict]) -> None:
@@ -172,13 +189,15 @@ def _save_pending(orders: list[dict]) -> None:
 
 
 def _load_theses() -> dict[str, dict]:
+    if not _THESES_PATH.exists():
+        return {}
     try:
-        if _THESES_PATH.exists():
-            data = json.loads(_THESES_PATH.read_text())
-            return data if isinstance(data, dict) else {}
-    except Exception:
-        pass
-    return {}
+        data = json.loads(_THESES_PATH.read_text())
+    except Exception as exc:
+        raise SelfDirectedStateCorrupt("theses") from exc
+    if not isinstance(data, dict):
+        raise SelfDirectedStateCorrupt("theses")
+    return data
 
 
 def _save_theses(theses: dict[str, dict]) -> None:
@@ -186,6 +205,25 @@ def _save_theses(theses: dict[str, dict]) -> None:
     _atomic_write_text(
         _THESES_PATH, json.dumps(theses, indent=2, default=str, ensure_ascii=False)
     )
+
+
+def _load_nav_rows() -> list[dict]:
+    """Load the replace-on-mark NAV ledger without silently dropping malformed history."""
+    if not _NAV_PATH.exists():
+        return []
+    rows: list[dict] = []
+    for line in _NAV_PATH.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except Exception as exc:
+            raise SelfDirectedStateCorrupt("nav_history") from exc
+        if not isinstance(row, dict):
+            raise SelfDirectedStateCorrupt("nav_history")
+        rows.append(row)
+    return rows
 
 
 # ---------------------------------------------------------------------------
@@ -413,6 +451,9 @@ def settle_pending(*, now: datetime | None = None, market_open: bool | None = No
     if not market_open:
         return []
 
+    # The fill log is durable trade history. Refuse before touching account/pending state if an
+    # existing line is malformed; appending to a corrupt ledger would hide the first bad boundary.
+    _load_fills()
     state = _load_account()
     asof = _today()
     settled: list[dict] = []
@@ -483,6 +524,7 @@ def place_order(ticker: str, side: str, shares: float | None = None, *,
     # market open → settle any stragglers, then fill this one immediately
     if market_open:
         settle_pending(now=now, market_open=True)
+        _load_fills()
         state = _load_account()
         px = float(price) if (price and float(price) > 0) else _current_price(ticker)
         if not px or px <= 0:
@@ -655,6 +697,7 @@ def mark(*, prices: dict[str, float] | None = None, asof: str | None = None,
     """
     asof = str(asof or _today())[:10]
     state = _load_account()
+    existing_nav_rows = _load_nav_rows()
     prices = {(k or "").upper(): v for k, v in (prices or {}).items() if _positive_price(v) is not None}
     positions = state.get("positions", {})
 
@@ -711,18 +754,7 @@ def mark(*, prices: dict[str, float] | None = None, asof: str | None = None,
            "invested": round(invested, 2),
            "spy_nav": round(spy_nav, 2) if spy_nav is not None else None}
     _ensure_dir()
-    rows: list[dict] = []
-    if _NAV_PATH.exists():
-        for line in _NAV_PATH.read_text().splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                r = json.loads(line)
-            except Exception:
-                continue
-            if r.get("date") != asof:            # idempotent per date
-                rows.append(r)
+    rows = [r for r in existing_nav_rows if r.get("date") != asof]  # idempotent per date
     rows.append(row)
     _atomic_write_text(
         _NAV_PATH, "\n".join(json.dumps(r, default=str) for r in rows) + "\n"
@@ -876,6 +908,7 @@ def history(*, prices: dict[str, float] | None = None, now: datetime | None = No
             market_open: bool | None = None) -> dict:
     """Trade-history blotter: every executed fill (FIFO realized P&L on sells, live
     unrealized on open buy remainders) + the pending queue + a realized summary."""
+    _load_fills()
     settle_pending(now=now, market_open=market_open, prices=prices)
     fills = _load_fills()
     live = {(k or "").upper(): v for k, v in (prices or {}).items()}
