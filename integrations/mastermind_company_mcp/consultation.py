@@ -672,9 +672,14 @@ class CompanyConsultationGateway:
                 return _error(tool_name, "EFFECT_UNKNOWN")
             return _error(tool_name, exc.code, data=exc.data)
         except asyncio.CancelledError:
-            return _error(tool_name, "EFFECT_UNKNOWN")
+            if dispatch_invoked:
+                return _error(tool_name, "EFFECT_UNKNOWN")
+            raise
         except Exception:
-            return _error(tool_name, "EFFECT_UNKNOWN")
+            return _error(
+                tool_name,
+                "EFFECT_UNKNOWN" if dispatch_invoked else "INTERNAL_ERROR",
+            )
 
     @staticmethod
     def _service_data(response: Any) -> Any:

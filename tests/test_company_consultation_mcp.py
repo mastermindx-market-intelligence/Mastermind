@@ -1254,6 +1254,8 @@ def _valid_company_consult_dispatch_request() -> dict:
         lambda request: request.__setitem__("unexpected", True),
         lambda request: request["budget"].__setitem__("max_answers", True),
         lambda request: request["budget"].__setitem__("max_forward_hops", False),
+        lambda request: request["budget"].__setitem__("max_evidence_reads", 5),
+        lambda request: request.pop("issued_at"),
     ],
     ids=[
         "v2-response-schema",
@@ -1262,6 +1264,8 @@ def _valid_company_consult_dispatch_request() -> dict:
         "extra-outer-field",
         "bool-answer-budget",
         "bool-forward-budget",
+        "wrong-evidence-budget",
+        "missing-issued-at",
     ],
 )
 def test_company_consult_dispatch_refuses_closed_contract_mutations(mutate) -> None:
@@ -1321,6 +1325,61 @@ def test_company_consult_clock_failure_is_definite_pre_dispatch_internal_error()
 
     assert response["ok"] is False
     assert response["error"]["code"] == "INTERNAL_ERROR"
+    assert sink.calls == []
+
+
+def test_company_consult_pre_dispatch_cancellation_propagates_without_dispatch() -> None:
+    secret = "secret-pre-dispatch-cancellation-detail.not-for-logs"
+
+    def cancelled_clock() -> str:
+        raise asyncio.CancelledError(secret)
+
+    sink = _Dispatcher()
+    gateway = CompanyConsultationGateway(
+        peer_resolver=_resolver(),
+        dispatcher=sink,
+        observed_tool_schema_digest=COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST,
+        utc_now=cancelled_clock,
+    )
+
+    with pytest.raises(asyncio.CancelledError) as exc_info:
+        _run(
+            gateway.call(
+                "company.consult",
+                {
+                    "to": _peer().peer_ref,
+                    "question": "Preserve definite pre-dispatch cancellation.",
+                    "evidence_refs": [],
+                    "artifact_revisions": [],
+                },
+            )
+        )
+
+    assert secret in str(exc_info.value)
+    assert sink.calls == []
+
+
+def test_company_peers_pre_effect_failure_is_internal_error() -> None:
+    secret = "secret-pre-effect-peer-projection-detail.not-for-logs"
+
+    class BrokenPeersResolver:
+        @property
+        def peers(self):
+            raise RuntimeError(secret)
+
+    sink = _Dispatcher()
+    gateway = CompanyConsultationGateway(
+        peer_resolver=BrokenPeersResolver(),
+        dispatcher=sink,
+        observed_tool_schema_digest=COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST,
+        utc_now=lambda: "2026-09-14T00:00:00Z",
+    )
+
+    response = _run(gateway.call("company.peers", {}))
+
+    assert response["ok"] is False
+    assert response["error"]["code"] == "INTERNAL_ERROR"
+    assert secret not in repr(response)
     assert sink.calls == []
 
 
