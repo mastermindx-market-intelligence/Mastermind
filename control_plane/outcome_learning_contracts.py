@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from datetime import datetime, timezone
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -64,6 +65,9 @@ FORBIDDEN_SELF_REFERENTIAL_KEYS = frozenset({"containing_commit_sha", "current_p
 _SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
 _SHA256_HEX_RE = re.compile(r"^[0-9a-f]{64}$")
 _SHA256_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+_UTC_RFC3339_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3}(?:\d{3})?)?Z$"
+)
 
 _PUBLIC_SAFE_PATTERNS = (
     re.compile(r"\b17\d{8}\.\d{6}\b"),
@@ -193,6 +197,41 @@ def _text(value: Any, name: str, max_len: int = 500) -> str:
     if len(value) > max_len or any(ord(char) < 32 for char in value):
         raise OutcomeLearningContractError(f"{name} is out of bounds")
     return value
+
+
+def _utc_timestamp(value: Any, name: str) -> datetime:
+    """Parse the one timestamp grammar OL-V1 accepts.
+
+    UTC is spelled with ``Z`` only. Fractional seconds are either milliseconds or
+    microseconds; offsets, naive datetimes, and caller-specific variants are refused so
+    chronology comparisons are stable across hosts and serializers.
+    """
+    text = _text(value, name, 40)
+    if _UTC_RFC3339_RE.fullmatch(text) is None:
+        raise OutcomeLearningContractError(
+            f"{name} must be canonical UTC RFC3339 (YYYY-MM-DDTHH:MM:SS[.ffffff]Z)"
+        )
+    try:
+        parsed = datetime.fromisoformat(text[:-1] + "+00:00")
+    except ValueError as exc:
+        raise OutcomeLearningContractError(
+            f"{name} must be canonical UTC RFC3339"
+        ) from exc
+    if parsed.tzinfo != timezone.utc:
+        raise OutcomeLearningContractError(f"{name} must be UTC")
+    return parsed
+
+
+def _utc_text(value: Any, name: str) -> str:
+    _utc_timestamp(value, name)
+    return str(value)
+
+
+def _require_strict_chronology(
+    earlier: Any, later: Any, *, earlier_name: str, later_name: str, message: str
+) -> None:
+    if _utc_timestamp(earlier, earlier_name) >= _utc_timestamp(later, later_name):
+        raise OutcomeLearningContractError(message)
 
 
 #: Sol REQUEST_REPAIR (BLOCKER B, 2026-09-02): no dots, no colons, no path
@@ -589,7 +628,7 @@ def build_expectation(
         "decision_ref": dict(decision_ref),
         "operation_key": _operation_key(operation_key),
         "decision_kind": _text(decision_kind, "decision_kind", 128),
-        "recorded_at": _text(recorded_at, "recorded_at", 40),
+        "recorded_at": _utc_text(recorded_at, "recorded_at"),
         "context": dict(context),
         "alternatives": [dict(item) for item in alternatives],
         "chosen_action": _text(chosen_action, "chosen_action", 128),
@@ -615,7 +654,7 @@ def validate_expectation(doc: Mapping[str, Any]) -> Mapping[str, Any]:
     _validate_decision_ref(item["decision_ref"])
     _operation_key(item["operation_key"])
     _text(item["decision_kind"], "decision_kind", 128)
-    _text(item["recorded_at"], "recorded_at", 40)
+    _utc_timestamp(item["recorded_at"], "recorded_at")
     _validate_context(item["context"])
     chosen_action = _text(item["chosen_action"], "chosen_action", 128)
     _validate_alternatives(item["alternatives"], chosen_action)
@@ -690,7 +729,7 @@ def build_canary_request(
         "effect_owner_revalidation_required": True,
         "supervised": True,
         "execution_authority_granted": False,
-        "recorded_at": _text(recorded_at, "recorded_at", 40),
+        "recorded_at": _utc_text(recorded_at, "recorded_at"),
         "privacy_class": PRIVACY_CLASS,
     }
     validate_canary_request(doc)
@@ -725,7 +764,7 @@ def validate_canary_request(doc: Mapping[str, Any]) -> Mapping[str, Any]:
     _true(item["effect_owner_revalidation_required"], "effect_owner_revalidation_required")
     _true(item["supervised"], "supervised")
     _false(item["execution_authority_granted"], "execution_authority_granted")
-    _text(item["recorded_at"], "recorded_at", 40)
+    _utc_timestamp(item["recorded_at"], "recorded_at")
     _require_public_safe(item, "canary_request")
     _reject_forbidden_self_referential_keys(item, "canary_request")
     return item
@@ -760,7 +799,7 @@ SEAL_PROVENANCE_COMMITTED_BLOBS_VERIFIED = "COMMITTED_BLOBS_VERIFIED"
 
 def validate_preflight(doc: Mapping[str, Any]) -> Mapping[str, Any]:
     item = _closed_mapping(doc, required=_PREFLIGHT_REQUIRED, where="preflight")
-    _text(item["observed_at"], "preflight.observed_at", 40)
+    _utc_timestamp(item["observed_at"], "preflight.observed_at")
     _text(item["repository"], "preflight.repository", 200)
     _int(item["pr_number"], "preflight.pr_number", minimum=1)
     _text(item["pr_url"], "preflight.pr_url", 500)
@@ -840,7 +879,7 @@ _RESTORATION_REQUIRED = {
 
 def _validate_readback(value: Any, where: str) -> Mapping[str, Any]:
     item = _closed_mapping(value, required=_READBACK_REQUIRED, where=where)
-    _text(item["observed_at"], f"{where}.observed_at", 40)
+    _utc_timestamp(item["observed_at"], f"{where}.observed_at")
     _sha256_hex(item["title_sha256"], f"{where}.title_sha256")
     _int(item["title_length"], f"{where}.title_length", minimum=0)
     _sha40(item["head_sha"], f"{where}.head_sha")
@@ -876,7 +915,7 @@ def _validate_effect_calls(value: Any) -> list[Mapping[str, Any]]:
             raise OutcomeLearningContractError(
                 f"effect_calls[{index}].kind must be {expected_kind}"
             )
-        _text(item["requested_at"], f"effect_calls[{index}].requested_at", 40)
+        _utc_timestamp(item["requested_at"], f"effect_calls[{index}].requested_at")
         if item["method"] != "PATCH":
             raise OutcomeLearningContractError(f"effect_calls[{index}].method must be PATCH")
         _text(item["endpoint"], f"effect_calls[{index}].endpoint", 300)
@@ -949,7 +988,7 @@ def build_outcome(
             dict(pre_effect_observation) if pre_effect_observation is not None else None
         ),
         "effect_edge": dict(effect_edge),
-        "recorded_at": _text(recorded_at, "recorded_at", 40),
+        "recorded_at": _utc_text(recorded_at, "recorded_at"),
         "privacy_class": PRIVACY_CLASS,
     }
     validate_outcome(doc, expectation=None, request=request)
@@ -985,8 +1024,27 @@ def validate_outcome(
     effect_calls = _validate_effect_calls(item["effect_calls"])
     effect_state = _enum(item["effect_state"], EFFECT_STATES, "effect_state")
     restoration = _validate_restoration(item["restoration"])
-    _text(item["recorded_at"], "recorded_at", 40)
+    outcome_recorded_at = _utc_timestamp(item["recorded_at"], "outcome.recorded_at")
     _require_public_safe(item, "outcome")
+
+    # The effect-edge receipt is validated before the state-specific observation shape:
+    # selector-stage invalidation is the one lawful zero-PATCH state with no PR body
+    # observation, and its truth shape is keyed by selector_repeated_single_pr=False.
+    effect_edge = _closed_mapping(
+        item["effect_edge"], required=_EFFECT_EDGE_REQUIRED, where="effect_edge"
+    )
+    for field in _EFFECT_EDGE_REQUIRED:
+        _bool(effect_edge[field], f"effect_edge.{field}")
+    derived_bindings_verified = all(
+        effect_edge[field]
+        for field in _EFFECT_EDGE_REQUIRED
+        if field != "bindings_verified"
+    )
+    if effect_edge["bindings_verified"] is not derived_bindings_verified:
+        raise OutcomeLearningContractError(
+            "effect_edge.bindings_verified must equal the conjunction of the four "
+            "named effect-edge checks"
+        )
 
     if effect_state in {"NOT_ATTEMPTED", "INVALIDATED_BEFORE_EFFECT"} and effect_calls:
         raise OutcomeLearningContractError(
@@ -1052,65 +1110,133 @@ def validate_outcome(
             "the APPLIED_AND_RESTORED contract"
         )
 
-    # BLOCKER E (Sol REQUEST_REPAIR, 2026-09-02): INVALIDATED_BEFORE_EFFECT must carry
-    # the exact pre-effect observation, and restoration must be DERIVED from it — a
-    # fabricated byte_identical=True that contradicts the observation is rejected.
+    # Exact state-specific zero-PATCH truth shapes. A selector-stage refusal has no
+    # PR-body observation at all and therefore must report UNOBSERVED/unknown. A later
+    # freshness refusal has an observation and restoration must be derived from it.
     pre_effect_observation = item["pre_effect_observation"]
+    observation_time: datetime | None = None
     if effect_state == "INVALIDATED_BEFORE_EFFECT":
-        observation = _closed_mapping(
-            pre_effect_observation,
-            required=_PRE_EFFECT_OBSERVATION_REQUIRED,
-            where="pre_effect_observation",
-        )
-        _sha40(observation["observed_head_sha"], "pre_effect_observation.observed_head_sha")
-        _sha256_hex(
-            observation["observed_title_sha256"],
-            "pre_effect_observation.observed_title_sha256",
-        )
-        _int(
-            observation["observed_title_length"],
-            "pre_effect_observation.observed_title_length",
-            minimum=0,
-        )
-        _text(observation["observed_at"], "pre_effect_observation.observed_at", 40)
-        expected_byte_identical = (
-            observation["observed_title_sha256"] == preflight["original_title_sha256"]
-        )
-        expected_head_unchanged = (
-            observation["observed_head_sha"] == preflight["sealed_commit_sha"]
-        )
-        if restoration["byte_identical"] is not expected_byte_identical:
-            raise OutcomeLearningContractError(
-                "INVALIDATED_BEFORE_EFFECT requires restoration.byte_identical to equal "
-                "(pre_effect_observation.observed_title_sha256 == "
-                "preflight.original_title_sha256) — a fabricated claim that contradicts "
-                "the observation is refused"
+        selector_completed = effect_edge["selector_repeated_single_pr"]
+        if pre_effect_observation is None:
+            if selector_completed:
+                raise OutcomeLearningContractError(
+                    "selector-stage invalidation is the only INVALIDATED_BEFORE_EFFECT "
+                    "state permitted without pre_effect_observation"
+                )
+            expected_zero_patch_restoration = {
+                "byte_identical": None,
+                "prestate_title_sha256": preflight["original_title_sha256"],
+                "poststate_title_sha256": "UNOBSERVED",
+                "head_unchanged": False,
+            }
+            if dict(restoration) != expected_zero_patch_restoration:
+                raise OutcomeLearningContractError(
+                    "selector-stage invalidation requires the closed UNOBSERVED "
+                    "zero-PATCH restoration shape"
+                )
+        else:
+            if not selector_completed:
+                raise OutcomeLearningContractError(
+                    "pre_effect_observation requires the owner selector to have completed"
+                )
+            observation = _closed_mapping(
+                pre_effect_observation,
+                required=_PRE_EFFECT_OBSERVATION_REQUIRED,
+                where="pre_effect_observation",
             )
-        if restoration["head_unchanged"] is not expected_head_unchanged:
-            raise OutcomeLearningContractError(
-                "INVALIDATED_BEFORE_EFFECT requires restoration.head_unchanged to equal "
-                "(pre_effect_observation.observed_head_sha == preflight.sealed_commit_sha) "
-                "— a fabricated claim that contradicts the observation is refused"
+            _sha40(
+                observation["observed_head_sha"],
+                "pre_effect_observation.observed_head_sha",
             )
-        if restoration["poststate_title_sha256"] != observation["observed_title_sha256"]:
-            raise OutcomeLearningContractError(
-                "INVALIDATED_BEFORE_EFFECT requires restoration.poststate_title_sha256 "
-                "to equal pre_effect_observation.observed_title_sha256"
+            _sha256_hex(
+                observation["observed_title_sha256"],
+                "pre_effect_observation.observed_title_sha256",
             )
+            _int(
+                observation["observed_title_length"],
+                "pre_effect_observation.observed_title_length",
+                minimum=0,
+            )
+            observation_time = _utc_timestamp(
+                observation["observed_at"], "pre_effect_observation.observed_at"
+            )
+            expected_byte_identical = (
+                observation["observed_title_sha256"]
+                == preflight["original_title_sha256"]
+            )
+            expected_head_unchanged = (
+                observation["observed_head_sha"] == preflight["sealed_commit_sha"]
+            )
+            if restoration["byte_identical"] is not expected_byte_identical:
+                raise OutcomeLearningContractError(
+                    "INVALIDATED_BEFORE_EFFECT requires restoration.byte_identical to equal "
+                    "(pre_effect_observation.observed_title_sha256 == "
+                    "preflight.original_title_sha256) — a fabricated claim that contradicts "
+                    "the observation is refused"
+                )
+            if restoration["head_unchanged"] is not expected_head_unchanged:
+                raise OutcomeLearningContractError(
+                    "INVALIDATED_BEFORE_EFFECT requires restoration.head_unchanged to equal "
+                    "(pre_effect_observation.observed_head_sha == "
+                    "preflight.sealed_commit_sha) — a fabricated claim that contradicts "
+                    "the observation is refused"
+                )
+            if (
+                restoration["poststate_title_sha256"]
+                != observation["observed_title_sha256"]
+            ):
+                raise OutcomeLearningContractError(
+                    "INVALIDATED_BEFORE_EFFECT requires "
+                    "restoration.poststate_title_sha256 to equal "
+                    "pre_effect_observation.observed_title_sha256"
+                )
     elif pre_effect_observation is not None:
         raise OutcomeLearningContractError(
             "pre_effect_observation must be None for every effect_state except "
             "INVALIDATED_BEFORE_EFFECT"
         )
 
-    # BLOCKER F: the effect-edge receipt is structurally validated here (booleans);
-    # the evaluator (not this validator) is what refuses to CREDIT process-quality
-    # from anything less than all-True.
-    effect_edge = _closed_mapping(
-        item["effect_edge"], required=_EFFECT_EDGE_REQUIRED, where="effect_edge"
-    )
-    for field in _EFFECT_EDGE_REQUIRED:
-        _bool(effect_edge[field], f"effect_edge.{field}")
+    # Prospective chronology is a contract, not a proof-text claim. Every effect event
+    # must occur strictly after the previous observed event, and the outcome closes the
+    # sequence strictly after its latest evidence.
+    request_time = _utc_timestamp(request["recorded_at"], "canary_request.recorded_at")
+    preflight_time = _utc_timestamp(preflight["observed_at"], "preflight.observed_at")
+    if expectation is not None:
+        expectation_time = _utc_timestamp(
+            expectation["recorded_at"], "expectation.recorded_at"
+        )
+        if expectation_time >= request_time:
+            raise OutcomeLearningContractError(
+                "expectation must be recorded strictly before the canary request"
+            )
+    if request_time >= preflight_time:
+        raise OutcomeLearningContractError(
+            "canary request must be recorded strictly before preflight"
+        )
+    chronology_cursor = preflight_time
+    for index, call in enumerate(effect_calls):
+        requested_time = _utc_timestamp(
+            call["requested_at"], f"effect_calls[{index}].requested_at"
+        )
+        readback_time = _utc_timestamp(
+            call["readback"]["observed_at"],
+            f"effect_calls[{index}].readback.observed_at",
+        )
+        if chronology_cursor >= requested_time or requested_time >= readback_time:
+            raise OutcomeLearningContractError(
+                f"effect_calls[{index}] violates strict request/readback chronology"
+            )
+        chronology_cursor = readback_time
+    if observation_time is not None:
+        if preflight_time >= observation_time:
+            raise OutcomeLearningContractError(
+                "pre_effect_observation must occur strictly after preflight"
+            )
+        chronology_cursor = max(chronology_cursor, observation_time)
+    if chronology_cursor >= outcome_recorded_at:
+        raise OutcomeLearningContractError(
+            "outcome must be recorded strictly after its latest observed evidence"
+        )
 
     return item
 
@@ -1363,7 +1489,11 @@ def validate_evaluation(
         raise OutcomeLearningContractError("causal_grade must be DESCRIPTIVE_ONLY")
     if item["promotion"] != "NONE":
         raise OutcomeLearningContractError("evaluation promotion must be NONE")
-    _text(item["recorded_at"], "recorded_at", 40)
+    evaluation_time = _utc_timestamp(item["recorded_at"], "evaluation.recorded_at")
+    if _utc_timestamp(outcome["recorded_at"], "outcome.recorded_at") >= evaluation_time:
+        raise OutcomeLearningContractError(
+            "evaluation must be recorded strictly after outcome"
+        )
     _require_public_safe(item, "evaluation")
     return item
 
@@ -1443,7 +1573,13 @@ def validate_self_model(
     )
     for field in _MEMORY_LAW_REQUIRED:
         _true(memory_law[field], f"memory_law.{field}")
-    _text(item["recorded_at"], "recorded_at", 40)
+    self_model_time = _utc_timestamp(item["recorded_at"], "self_model.recorded_at")
+    if evaluation is not None and _utc_timestamp(
+        evaluation["recorded_at"], "evaluation.recorded_at"
+    ) >= self_model_time:
+        raise OutcomeLearningContractError(
+            "self_model must be recorded strictly after evaluation"
+        )
     _require_public_safe(item, "self_model")
     return item
 
@@ -1525,10 +1661,694 @@ def validate_agentos_projection(
         raise OutcomeLearningContractError(
             "candidates must include at least one DSC_CANDIDATE and one WS_UPDATE_CANDIDATE"
         )
-    _text(item["recorded_at"], "recorded_at", 40)
+    projection_time = _utc_timestamp(
+        item["recorded_at"], "agentos_projection.recorded_at"
+    )
+    if evaluation is not None and _utc_timestamp(
+        evaluation["recorded_at"], "evaluation.recorded_at"
+    ) >= projection_time:
+        raise OutcomeLearningContractError(
+            "agentos_projection must be recorded strictly after evaluation"
+        )
     _require_public_safe(item, "agentos_projection")
     return item
 
+
+# --------------------------------------------------------------------------- append-only revisions
+
+ARTIFACT_REVISION_SCHEMA = "mastermind.olv1_artifact_revision.v1"
+OWNER_EVIDENCE_SCHEMA = "mastermind.olv1_owner_evidence.v1"
+GITHUB_CHECK_EVIDENCE_SCHEMA = "mastermind.olv1_github_check_evidence.v1"
+REMOTE_PUBLICATION_SCHEMA = "mastermind.olv1_remote_publication_receipt.v1"
+
+REVISION_ARTIFACT_KINDS = frozenset(
+    {"EXPECTATION", "OUTCOME", "EVALUATION", "SELF_MODEL", "AGENTOS_PROJECTION"}
+)
+PUBLICATION_STAGES = frozenset({"EVIDENCE_COMMIT", "MATURATION_COMMIT"})
+CHECK_CONCLUSIONS = frozenset(
+    {
+        "success",
+        "failure",
+        "neutral",
+        "cancelled",
+        "skipped",
+        "timed_out",
+        "action_required",
+        "startup_failure",
+        "stale",
+    }
+)
+_ARTIFACT_SCHEMA_BY_KIND = {
+    "EXPECTATION": EXPECTATION_SCHEMA,
+    "OUTCOME": OUTCOME_SCHEMA,
+    "EVALUATION": EVALUATION_SCHEMA,
+    "SELF_MODEL": SELF_MODEL_SCHEMA,
+    "AGENTOS_PROJECTION": AGENTOS_PROJECTION_SCHEMA,
+}
+_EPISODE_IDENTITY_REQUIRED = {
+    "operation_key",
+    "carrier_ref",
+    "expectation_sealed_hash",
+    "request_digest",
+}
+_ARTIFACT_REVISION_REQUIRED = {
+    "schema",
+    "revision",
+    "revision_id",
+    "artifact_kind",
+    "episode_identity",
+    "episode_digest",
+    "supersedes",
+    "prior_payload_digest",
+    "correction_reason",
+    "owner_evidence",
+    "corrected_at",
+    "payload_digest",
+    "payload",
+    "authority",
+    "promotion",
+    "privacy_class",
+}
+_OWNER_EVIDENCE_REQUIRED = {
+    "schema",
+    "owner_kind",
+    "source_ref",
+    "subject_digest",
+    "observed_at",
+    "evidence_digest",
+    "privacy_class",
+}
+_GITHUB_CHECK_EVIDENCE_REQUIRED = {
+    "schema",
+    "source_ref",
+    "repository",
+    "commit_sha",
+    "check_run_id",
+    "check_name",
+    "status",
+    "conclusion",
+    "observed_at",
+    "evidence_digest",
+    "privacy_class",
+}
+_PUBLICATION_REQUIRED = {
+    "schema",
+    "stage",
+    "repository",
+    "branch",
+    "pr_number",
+    "episode_identity",
+    "episode_digest",
+    "target_commit_sha",
+    "frozen_evidence_commit_sha",
+    "remote_branch_head_sha",
+    "remote_pr_head_sha",
+    "artifact_digests",
+    "checks",
+    "observed_at",
+    "authority",
+    "promotion",
+    "privacy_class",
+}
+_ARTIFACT_DIGEST_REQUIRED = {"path", "blob_sha", "content_digest"}
+
+
+def _validate_episode_identity(value: Any) -> Mapping[str, Any]:
+    identity = _closed_mapping(
+        value, required=_EPISODE_IDENTITY_REQUIRED, where="episode_identity"
+    )
+    _operation_key(identity["operation_key"], "episode_identity.operation_key")
+    _text(identity["carrier_ref"], "episode_identity.carrier_ref", 300)
+    _sha256_digest(
+        identity["expectation_sealed_hash"],
+        "episode_identity.expectation_sealed_hash",
+    )
+    _sha256_digest(identity["request_digest"], "episode_identity.request_digest")
+    return identity
+
+
+def _owner_evidence_digest_payload(item: Mapping[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in item.items() if key != "evidence_digest"}
+
+
+def build_owner_evidence(
+    *,
+    owner_kind: str,
+    source_ref: str,
+    subject_digest: str,
+    observed_at: str,
+) -> dict[str, Any]:
+    item = {
+        "schema": OWNER_EVIDENCE_SCHEMA,
+        "owner_kind": owner_kind,
+        "source_ref": source_ref,
+        "subject_digest": subject_digest,
+        "observed_at": observed_at,
+        "privacy_class": PRIVACY_CLASS,
+    }
+    item["evidence_digest"] = canonical_digest(item)
+    validate_owner_evidence(item)
+    return item
+
+
+def validate_owner_evidence(doc: Mapping[str, Any]) -> Mapping[str, Any]:
+    item = _closed_mapping(
+        doc, required=_OWNER_EVIDENCE_REQUIRED, where="owner_evidence"
+    )
+    if item["schema"] != OWNER_EVIDENCE_SCHEMA:
+        raise OutcomeLearningContractError("unsupported owner_evidence schema")
+    _text(item["owner_kind"], "owner_evidence.owner_kind", 80)
+    _text(item["source_ref"], "owner_evidence.source_ref", 300)
+    _sha256_digest(item["subject_digest"], "owner_evidence.subject_digest")
+    _utc_timestamp(item["observed_at"], "owner_evidence.observed_at")
+    if item["evidence_digest"] != canonical_digest(
+        _owner_evidence_digest_payload(item)
+    ):
+        raise OutcomeLearningContractError(
+            "owner_evidence.evidence_digest does not match its own content"
+        )
+    _require_public_safe(item, "owner_evidence")
+    return item
+
+
+def build_github_check_evidence(
+    *,
+    repository: str,
+    commit_sha: str,
+    check_run_id: int,
+    check_name: str,
+    status: str,
+    conclusion: str,
+    observed_at: str,
+) -> dict[str, Any]:
+    item = {
+        "schema": GITHUB_CHECK_EVIDENCE_SCHEMA,
+        "source_ref": f"GITHUB_CHECK_RUN:{repository}:{check_run_id}",
+        "repository": repository,
+        "commit_sha": commit_sha,
+        "check_run_id": check_run_id,
+        "check_name": check_name,
+        "status": status,
+        "conclusion": conclusion,
+        "observed_at": observed_at,
+        "privacy_class": PRIVACY_CLASS,
+    }
+    item["evidence_digest"] = canonical_digest(item)
+    validate_github_check_evidence(item)
+    return item
+
+
+def validate_github_check_evidence(doc: Mapping[str, Any]) -> Mapping[str, Any]:
+    item = _closed_mapping(
+        doc,
+        required=_GITHUB_CHECK_EVIDENCE_REQUIRED,
+        where="github_check_evidence",
+    )
+    if item["schema"] != GITHUB_CHECK_EVIDENCE_SCHEMA:
+        raise OutcomeLearningContractError("unsupported github_check_evidence schema")
+    repository = _text(item["repository"], "github_check_evidence.repository", 200)
+    commit_sha = _sha40(item["commit_sha"], "github_check_evidence.commit_sha")
+    check_run_id = _int(
+        item["check_run_id"], "github_check_evidence.check_run_id", minimum=1
+    )
+    _text(item["check_name"], "github_check_evidence.check_name", 200)
+    if item["status"] != "completed":
+        raise OutcomeLearningContractError(
+            "github_check_evidence.status must be completed"
+        )
+    _enum(
+        item["conclusion"], CHECK_CONCLUSIONS, "github_check_evidence.conclusion"
+    )
+    _utc_timestamp(item["observed_at"], "github_check_evidence.observed_at")
+    expected_source_ref = f"GITHUB_CHECK_RUN:{repository}:{check_run_id}"
+    if item["source_ref"] != expected_source_ref:
+        raise OutcomeLearningContractError(
+            "github_check_evidence.source_ref does not match repository/check_run_id"
+        )
+    if item["evidence_digest"] != canonical_digest(
+        _owner_evidence_digest_payload(item)
+    ):
+        raise OutcomeLearningContractError(
+            "github_check_evidence.evidence_digest does not match its own content"
+        )
+    _require_public_safe(item, "github_check_evidence")
+    return item
+
+
+def _validate_any_owner_evidence(doc: Mapping[str, Any]) -> Mapping[str, Any]:
+    schema = doc.get("schema") if isinstance(doc, Mapping) else None
+    if schema == OWNER_EVIDENCE_SCHEMA:
+        return validate_owner_evidence(doc)
+    if schema == GITHUB_CHECK_EVIDENCE_SCHEMA:
+        return validate_github_check_evidence(doc)
+    raise OutcomeLearningContractError(
+        f"unsupported revision owner evidence schema: {schema!r}"
+    )
+
+
+def _validate_revision_payload(
+    artifact_kind: str,
+    payload: Any,
+    episode_identity: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    if not isinstance(payload, Mapping):
+        raise OutcomeLearningContractError("revision.payload must be a mapping")
+    expected_schema = _ARTIFACT_SCHEMA_BY_KIND[artifact_kind]
+    if payload.get("schema") != expected_schema:
+        raise OutcomeLearningContractError(
+            f"revision payload schema does not match artifact_kind {artifact_kind}"
+        )
+    if payload.get("operation_key") != episode_identity["operation_key"]:
+        raise OutcomeLearningContractError(
+            "revision payload operation_key does not match episode identity"
+        )
+    if artifact_kind == "EXPECTATION":
+        if payload.get("sealed_hash") != episode_identity["expectation_sealed_hash"]:
+            raise OutcomeLearningContractError(
+                "expectation revision does not match episode expectation_sealed_hash"
+            )
+        validate_expectation(payload)
+    elif "expectation_sealed_hash" in payload and (
+        payload["expectation_sealed_hash"]
+        != episode_identity["expectation_sealed_hash"]
+    ):
+        raise OutcomeLearningContractError(
+            "revision payload expectation_sealed_hash does not match episode identity"
+        )
+    _utc_timestamp(payload.get("recorded_at"), "revision.payload.recorded_at")
+    scan_public_safe_text(payload)
+    return payload
+
+
+def _revision_id_payload(item: Mapping[str, Any]) -> dict[str, Any]:
+    """Return every immutable revision field except the id and full payload bytes.
+
+    ``payload_digest`` content-addresses the payload itself. The predecessor edge and
+    owner evidence are part of the revision identity so neither can be swapped while
+    preserving a durable ``revision_id``.
+    """
+    return {
+        "schema": item["schema"],
+        "revision": item["revision"],
+        "artifact_kind": item["artifact_kind"],
+        "episode_digest": item["episode_digest"],
+        "supersedes": item["supersedes"],
+        "prior_payload_digest": item["prior_payload_digest"],
+        "correction_reason": item["correction_reason"],
+        "owner_evidence": item["owner_evidence"],
+        "corrected_at": item["corrected_at"],
+        "payload_digest": item["payload_digest"],
+        "authority": item["authority"],
+        "promotion": item["promotion"],
+        "privacy_class": item["privacy_class"],
+    }
+
+
+def _validate_artifact_revision_base(doc: Mapping[str, Any]) -> Mapping[str, Any]:
+    item = _closed_mapping(
+        doc, required=_ARTIFACT_REVISION_REQUIRED, where="artifact_revision"
+    )
+    if item["schema"] != ARTIFACT_REVISION_SCHEMA:
+        raise OutcomeLearningContractError("unsupported artifact_revision schema")
+    revision = _int(item["revision"], "artifact_revision.revision", minimum=1)
+    artifact_kind = _enum(
+        item["artifact_kind"], REVISION_ARTIFACT_KINDS, "artifact_revision.artifact_kind"
+    )
+    identity = _validate_episode_identity(item["episode_identity"])
+    if item["episode_digest"] != canonical_digest(identity):
+        raise OutcomeLearningContractError(
+            "artifact_revision.episode_digest does not match episode identity"
+        )
+    payload = _validate_revision_payload(artifact_kind, item["payload"], identity)
+    if item["payload_digest"] != canonical_digest(payload):
+        raise OutcomeLearningContractError(
+            "artifact_revision.payload_digest does not match payload — payload was mutated"
+        )
+    _text(item["correction_reason"], "artifact_revision.correction_reason", 300)
+    corrected_time = _utc_timestamp(
+        item["corrected_at"], "artifact_revision.corrected_at"
+    )
+    if _utc_timestamp(
+        payload["recorded_at"], "artifact_revision.payload.recorded_at"
+    ) >= corrected_time:
+        raise OutcomeLearningContractError(
+            "artifact_revision chronology requires payload.recorded_at < corrected_at"
+        )
+    evidence = item["owner_evidence"]
+    if not isinstance(evidence, list) or len(evidence) > 32:
+        raise OutcomeLearningContractError(
+            "artifact_revision.owner_evidence must be a bounded list"
+        )
+    for index, receipt in enumerate(evidence):
+        validated = _validate_any_owner_evidence(receipt)
+        if _utc_timestamp(
+            validated["observed_at"], f"owner_evidence[{index}].observed_at"
+        ) > corrected_time:
+            raise OutcomeLearningContractError(
+                "owner evidence cannot postdate artifact_revision.corrected_at"
+            )
+    if revision == 1:
+        if item["supersedes"] is not None or item["prior_payload_digest"] is not None:
+            raise OutcomeLearningContractError(
+                "first artifact revision requires explicit null predecessor fields"
+            )
+        if item["correction_reason"] != "INITIAL_REVISION":
+            raise OutcomeLearningContractError(
+                "first artifact revision correction_reason must be INITIAL_REVISION"
+            )
+    else:
+        _sha256_digest(item["supersedes"], "artifact_revision.supersedes")
+        _sha256_digest(
+            item["prior_payload_digest"],
+            "artifact_revision.prior_payload_digest",
+        )
+        if not evidence:
+            raise OutcomeLearningContractError(
+                "a correction/maturation revision requires owner_evidence"
+            )
+    if item["supersedes"] == item["revision_id"]:
+        raise OutcomeLearningContractError(
+            "artifact_revision self-supersession is forbidden"
+        )
+    expected_revision_id = canonical_digest(_revision_id_payload(item))
+    if item["revision_id"] != expected_revision_id:
+        raise OutcomeLearningContractError(
+            "artifact_revision.revision_id does not match immutable revision content"
+        )
+    if item["authority"] != "NONE" or item["promotion"] != "NONE":
+        raise OutcomeLearningContractError(
+            "artifact_revision authority and promotion must both be NONE"
+        )
+    _require_public_safe(item, "artifact_revision")
+    return item
+
+
+def build_initial_artifact_revision(
+    *,
+    artifact_kind: str,
+    episode_identity: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    owner_evidence: Sequence[Mapping[str, Any]],
+    corrected_at: str,
+) -> dict[str, Any]:
+    identity = dict(_validate_episode_identity(episode_identity))
+    item = {
+        "schema": ARTIFACT_REVISION_SCHEMA,
+        "revision": 1,
+        "revision_id": "",
+        "artifact_kind": artifact_kind,
+        "episode_identity": identity,
+        "episode_digest": canonical_digest(identity),
+        "supersedes": None,
+        "prior_payload_digest": None,
+        "correction_reason": "INITIAL_REVISION",
+        "owner_evidence": [dict(entry) for entry in owner_evidence],
+        "corrected_at": corrected_at,
+        "payload_digest": canonical_digest(payload),
+        "payload": dict(payload),
+        "authority": "NONE",
+        "promotion": "NONE",
+        "privacy_class": PRIVACY_CLASS,
+    }
+    item["revision_id"] = canonical_digest(_revision_id_payload(item))
+    validate_artifact_revision(item)
+    return item
+
+
+def build_correction_revision(
+    previous: Mapping[str, Any],
+    *,
+    payload: Mapping[str, Any],
+    correction_reason: str,
+    owner_evidence: Sequence[Mapping[str, Any]],
+    corrected_at: str,
+) -> dict[str, Any]:
+    prior = _validate_artifact_revision_base(previous)
+    item = {
+        "schema": ARTIFACT_REVISION_SCHEMA,
+        "revision": prior["revision"] + 1,
+        "revision_id": "",
+        "artifact_kind": prior["artifact_kind"],
+        "episode_identity": dict(prior["episode_identity"]),
+        "episode_digest": prior["episode_digest"],
+        "supersedes": prior["revision_id"],
+        "prior_payload_digest": prior["payload_digest"],
+        "correction_reason": correction_reason,
+        "owner_evidence": [dict(entry) for entry in owner_evidence],
+        "corrected_at": corrected_at,
+        "payload_digest": canonical_digest(payload),
+        "payload": dict(payload),
+        "authority": "NONE",
+        "promotion": "NONE",
+        "privacy_class": PRIVACY_CLASS,
+    }
+    item["revision_id"] = canonical_digest(_revision_id_payload(item))
+    validate_artifact_revision(item, previous=prior)
+    return item
+
+
+def validate_artifact_revision(
+    doc: Mapping[str, Any], previous: Mapping[str, Any] | None = None
+) -> Mapping[str, Any]:
+    item = _validate_artifact_revision_base(doc)
+    if item["revision"] == 1:
+        if previous is not None:
+            raise OutcomeLearningContractError(
+                "first artifact revision cannot have a predecessor"
+            )
+        return item
+    if previous is None:
+        raise OutcomeLearningContractError(
+            "non-initial artifact revision requires its exact predecessor"
+        )
+    prior = _validate_artifact_revision_base(previous)
+    if item["supersedes"] == item["revision_id"]:
+        raise OutcomeLearningContractError(
+            "artifact_revision self-supersession is forbidden"
+        )
+    if item["revision"] != prior["revision"] + 1:
+        raise OutcomeLearningContractError(
+            "artifact revision number is not contiguous with predecessor"
+        )
+    if item["supersedes"] != prior["revision_id"]:
+        raise OutcomeLearningContractError(
+            "artifact_revision.supersedes does not match exact predecessor revision_id"
+        )
+    if item["prior_payload_digest"] != prior["payload_digest"]:
+        raise OutcomeLearningContractError(
+            "artifact_revision.prior_payload_digest does not match predecessor"
+        )
+    if item["artifact_kind"] != prior["artifact_kind"]:
+        raise OutcomeLearningContractError(
+            "artifact revision kind changed across correction"
+        )
+    if item["episode_identity"] != prior["episode_identity"]:
+        raise OutcomeLearningContractError(
+            "artifact revision episode identity changed across correction"
+        )
+    if item["payload_digest"] == prior["payload_digest"]:
+        raise OutcomeLearningContractError(
+            "artifact correction must change payload; no-op successor is forbidden"
+        )
+    if _utc_timestamp(
+        prior["corrected_at"], "previous.corrected_at"
+    ) >= _utc_timestamp(item["payload"]["recorded_at"], "payload.recorded_at"):
+        raise OutcomeLearningContractError(
+            "correction chronology requires previous.corrected_at < payload.recorded_at"
+        )
+    if _utc_timestamp(
+        prior["corrected_at"], "previous.corrected_at"
+    ) >= _utc_timestamp(item["corrected_at"], "corrected_at"):
+        raise OutcomeLearningContractError(
+            "correction chronology requires predecessor corrected_at < corrected_at"
+        )
+    return item
+
+
+def validate_revision_chain(
+    revisions: Sequence[Mapping[str, Any]],
+) -> list[Mapping[str, Any]]:
+    if not isinstance(revisions, (list, tuple)) or not revisions:
+        raise OutcomeLearningContractError("revision chain must be a non-empty sequence")
+    items = [_validate_artifact_revision_base(item) for item in revisions]
+    revision_ids = [item["revision_id"] for item in items]
+    if len(set(revision_ids)) != len(revision_ids):
+        raise OutcomeLearningContractError("revision chain contains duplicate revision_id")
+    successors = [item["supersedes"] for item in items if item["supersedes"] is not None]
+    if len(set(successors)) != len(successors):
+        raise OutcomeLearningContractError(
+            "revision chain contains duplicate successor for one predecessor"
+        )
+    if items[0]["revision"] != 1:
+        raise OutcomeLearningContractError("revision chain must begin at revision 1")
+    validate_artifact_revision(items[0])
+    for previous, current in zip(items, items[1:]):
+        validate_artifact_revision(current, previous=previous)
+    return items
+
+
+# --------------------------------------------------------------------------- remote publication receipts
+
+
+def _validate_artifact_digests(value: Any) -> list[Mapping[str, Any]]:
+    if not isinstance(value, list) or not value:
+        raise OutcomeLearningContractError(
+            "publication artifact_digests must be a non-empty list"
+        )
+    paths: list[str] = []
+    for index, raw in enumerate(value):
+        item = _closed_mapping(
+            raw,
+            required=_ARTIFACT_DIGEST_REQUIRED,
+            where=f"artifact_digests[{index}]",
+        )
+        path = _text(item["path"], f"artifact_digests[{index}].path", 300)
+        if (
+            path.startswith("/")
+            or ".." in path.split("/")
+            or not path.startswith("research/outcome_learning/")
+        ):
+            raise OutcomeLearningContractError(
+                "publication artifact path must stay under research/outcome_learning/"
+            )
+        paths.append(path)
+        _sha40(item["blob_sha"], f"artifact_digests[{index}].blob_sha")
+        _sha256_digest(
+            item["content_digest"], f"artifact_digests[{index}].content_digest"
+        )
+    if paths != sorted(paths) or len(paths) != len(set(paths)):
+        raise OutcomeLearningContractError(
+            "publication artifact_digests must be path-sorted and unique"
+        )
+    return value
+
+
+def build_remote_publication_receipt(
+    *,
+    stage: str,
+    repository: str,
+    branch: str,
+    pr_number: int,
+    episode_identity: Mapping[str, Any],
+    target_commit_sha: str,
+    frozen_evidence_commit_sha: str,
+    remote_branch_head_sha: str,
+    remote_pr_head_sha: str,
+    artifact_digests: Sequence[Mapping[str, Any]],
+    checks: Sequence[Mapping[str, Any]],
+    observed_at: str,
+) -> dict[str, Any]:
+    identity = dict(_validate_episode_identity(episode_identity))
+    item = {
+        "schema": REMOTE_PUBLICATION_SCHEMA,
+        "stage": stage,
+        "repository": repository,
+        "branch": branch,
+        "pr_number": pr_number,
+        "episode_identity": identity,
+        "episode_digest": canonical_digest(identity),
+        "target_commit_sha": target_commit_sha,
+        "frozen_evidence_commit_sha": frozen_evidence_commit_sha,
+        "remote_branch_head_sha": remote_branch_head_sha,
+        "remote_pr_head_sha": remote_pr_head_sha,
+        "artifact_digests": sorted(
+            [dict(entry) for entry in artifact_digests], key=lambda entry: entry["path"]
+        ),
+        "checks": [dict(entry) for entry in checks],
+        "observed_at": observed_at,
+        "authority": "NONE",
+        "promotion": "NONE",
+        "privacy_class": PRIVACY_CLASS,
+    }
+    validate_remote_publication_receipt(item)
+    return item
+
+
+def validate_remote_publication_receipt(
+    doc: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    item = _closed_mapping(
+        doc, required=_PUBLICATION_REQUIRED, where="remote_publication_receipt"
+    )
+    if item["schema"] != REMOTE_PUBLICATION_SCHEMA:
+        raise OutcomeLearningContractError(
+            "unsupported remote_publication_receipt schema"
+        )
+    stage = _enum(item["stage"], PUBLICATION_STAGES, "publication.stage")
+    repository = _text(item["repository"], "publication.repository", 200)
+    branch = _text(item["branch"], "publication.branch", 240)
+    _int(item["pr_number"], "publication.pr_number", minimum=1)
+    identity = _validate_episode_identity(item["episode_identity"])
+    if item["episode_digest"] != canonical_digest(identity):
+        raise OutcomeLearningContractError(
+            "publication episode_digest does not match episode identity"
+        )
+    expected_carrier = f"github:{repository.split('/')[-1]}:branch:{branch}"
+    if identity["carrier_ref"] != expected_carrier:
+        raise OutcomeLearningContractError(
+            "publication repository/branch do not match episode carrier_ref"
+        )
+    target = _sha40(item["target_commit_sha"], "publication.target_commit_sha")
+    frozen = _sha40(
+        item["frozen_evidence_commit_sha"],
+        "publication.frozen_evidence_commit_sha",
+    )
+    if _sha40(
+        item["remote_branch_head_sha"], "publication.remote_branch_head_sha"
+    ) != target:
+        raise OutcomeLearningContractError(
+            "publication remote branch head does not equal target commit"
+        )
+    if _sha40(item["remote_pr_head_sha"], "publication.remote_pr_head_sha") != target:
+        raise OutcomeLearningContractError(
+            "publication remote PR head does not equal target commit"
+        )
+    _validate_artifact_digests(item["artifact_digests"])
+    checks = item["checks"]
+    if not isinstance(checks, list):
+        raise OutcomeLearningContractError("publication.checks must be a list")
+    validated_checks = [validate_github_check_evidence(check) for check in checks]
+    observed_time = _utc_timestamp(item["observed_at"], "publication.observed_at")
+    for index, check in enumerate(validated_checks):
+        if check["repository"] != repository or check["commit_sha"] != target:
+            raise OutcomeLearningContractError(
+                f"publication.checks[{index}] is not bound to repository/target commit"
+            )
+        if _utc_timestamp(
+            check["observed_at"], f"publication.checks[{index}].observed_at"
+        ) > observed_time:
+            raise OutcomeLearningContractError(
+                "publication check evidence cannot postdate publication observation"
+            )
+    if stage == "EVIDENCE_COMMIT":
+        if target != frozen:
+            raise OutcomeLearningContractError(
+                "EVIDENCE_COMMIT target must equal frozen evidence commit"
+            )
+        if checks:
+            raise OutcomeLearningContractError(
+                "EVIDENCE_COMMIT readback receipt must precede CI maturation and carry no checks"
+            )
+    else:
+        if target == frozen:
+            raise OutcomeLearningContractError(
+                "MATURATION_COMMIT target must differ from frozen evidence commit; "
+                "recursive evidence is forbidden"
+            )
+        if not validated_checks:
+            raise OutcomeLearningContractError(
+                "MATURATION_COMMIT requires terminal hosted check evidence"
+            )
+        if any(check["conclusion"] != "success" for check in validated_checks):
+            raise OutcomeLearningContractError(
+                "MATURATION_COMMIT requires every terminal hosted check to succeed"
+            )
+    if item["authority"] != "NONE" or item["promotion"] != "NONE":
+        raise OutcomeLearningContractError(
+            "publication receipt authority and promotion must both be NONE"
+        )
+    _require_public_safe(item, "remote_publication_receipt")
+    return item
 
 __all__ = [
     "AGENTOS_PROJECTION_SCHEMA",
@@ -1560,4 +2380,18 @@ __all__ = [
     "validate_preflight",
     "validate_self_model",
     "verify_sealed",
+    "ARTIFACT_REVISION_SCHEMA",
+    "GITHUB_CHECK_EVIDENCE_SCHEMA",
+    "OWNER_EVIDENCE_SCHEMA",
+    "REMOTE_PUBLICATION_SCHEMA",
+    "build_correction_revision",
+    "build_github_check_evidence",
+    "build_initial_artifact_revision",
+    "build_owner_evidence",
+    "build_remote_publication_receipt",
+    "validate_artifact_revision",
+    "validate_github_check_evidence",
+    "validate_owner_evidence",
+    "validate_remote_publication_receipt",
+    "validate_revision_chain",
 ]

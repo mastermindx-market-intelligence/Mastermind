@@ -1,32 +1,37 @@
 #!/usr/bin/env python3
 """Outcome Learning V1 (OL-V1) — one sealed prospective episode, end to end.
 
-Subcommands mirror the episode's sequence exactly:
+Subcommands mirror the bounded learning sequence:
 
-    compose      -> compose + evaluate one Chairman-cognition source bundle (read-only)
-    seal         -> seal the decision-expectation receipt + canary request
-    preflight    -> external, non-self-referential preflight receipt for the effect owner
-    canary       -> apply the two-call GitHub PR-title canary, or stop EFFECT_UNKNOWN
-    outcome      -> assemble + validate the OLV1_OUTCOME artifact from the journal
-    evaluate     -> deterministic DESCRIPTIVE_ONLY evaluation
-    self-model   -> n=1 non-promoting self-model
-    project      -> candidate-only Agent OS projection
-    proof        -> render the production-proof markdown from the six JSON artifacts
+    compose              -> acquire current owners + trusted directive; preserve A1 frontier
+    seal                 -> bind an exact accepted packet selection, expectation, and request
+    preflight             -> prove committed prerequisite blobs and one exact carrier
+    canary                -> run the two-call reversible effect or stop without retry
+    outcome               -> derive the observed result from the canonical host journal
+    evaluate              -> deterministic DESCRIPTIVE_ONLY evaluation + optional revision 1
+    self-model            -> n=1 non-promoting self-model
+    project               -> candidate-only Agent OS projection
+    capture-publication   -> read exact remote branch/PR/commit/check evidence; never write
+    mature-evaluation     -> append one delayed CI correction from exact owner evidence
+    proof                 -> local candidate by default; production only with both remote receipts
 
 Every GitHub call goes through an injectable :class:`GhTransport`; every git/subprocess
-call goes through an injectable :class:`Runner`. The defaults (`GhCliTransport`,
-`SubprocessRunner`) shell out to ``gh``/``git``/``python3`` — this module is the only
-place in the OL-V1 vertical allowed to perform I/O. ``control_plane.outcome_learning_*``
-stay pure; this script is the impure shell around them.
+call goes through an injectable :class:`Runner`. The defaults shell out to ``gh``/``git``/
+``python3``. This module is the only OL-V1 I/O shell; the contract and evaluator modules
+remain pure. Publication and maturation commands have no GitHub write path. A production
+proof is an external attestation about an immutable subject commit and is refused inside
+the repository, preventing a self-referential proof commit.
 """
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import hashlib
 import json
 import os
 import re
 import sys
+from datetime import datetime, timedelta, timezone
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,22 +45,30 @@ from control_plane.outcome_learning_contracts import (  # noqa: E402
     CANARY_TOKEN,
     OutcomeLearningContractError,
     build_canary_request,
+    build_correction_revision,
     build_expectation,
+    build_github_check_evidence,
+    build_initial_artifact_revision,
     build_outcome,
+    build_remote_publication_receipt,
     canonical_digest,
     scan_public_safe_text,
     validate_agentos_projection,
+    validate_artifact_revision,
     validate_canary_request,
     validate_evaluation,
     validate_expectation,
     validate_outcome,
     validate_preflight,
+    validate_remote_publication_receipt,
+    validate_revision_chain,
     validate_self_model,
 )
 from control_plane.outcome_learning_evaluator import (  # noqa: E402
     build_agentos_projection,
     build_self_model,
     evaluate_episode,
+    mature_ci_evaluation,
 )
 from control_plane.chairman_cognition import ChairmanCognitionError  # noqa: E402
 from control_plane.chairman_cognition_sources import (  # noqa: E402
@@ -69,14 +82,77 @@ _ENVELOPE_SCHEMA = "mastermind.chairman_delegation_envelope.v1"
 _SOURCE_BUNDLE_SCHEMA = "mastermind.chairman_cognition_source_bundle.v1"
 _STRATEGIC_SOURCE_REF = "STRATEGIC_STATE:config/strategic_state.yml"
 _AGENT_OS_SOURCE_REF = "AGENT_OS:ceo_brief"
-_CHAIRMAN_REF = "CHAIRMAN_DIRECTIVE:completion-drive-2026-09-02"
 _OPT_CANARY = "OPT-OLV1-PR-TITLE-CANARY"
 _OPT_HOLD = "OPT-OLV1-PORTFOLIO-HOLD"
 _SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_WORKSTREAM_REF = "WS:AGENT-EVAL-FABRIC"
+_CARRIER_REF = (
+    "github:Mastermind:branch:"
+    "sol/outcome-learning-v1-complete-vertical-20260902"
+)
+_DIRECTIVE_SCHEMA = "mastermind.olv1_directive.v1"
+_SELECTION_SCHEMA = "mastermind.olv1_selection.v1"
+_DIRECTIVE_AUTHORITY_CEILING = "COMPOSE_ONLY_NO_EFFECT_NO_PROMOTION"
+_SELECTION_AUTHORITY_CEILING = "SEAL_ONLY_NO_EFFECT_NO_PROMOTION"
+_EXECUTIVE_CONFIG_PATH = Path(
+    "/Library/Application Support/MastermindExecutive/config/control.json"
+)
+_CANONICAL_JOURNAL_ROOT = Path(
+    "/Library/Application Support/MastermindExecutive/state/"
+    "outcome-learning-v1/journals"
+)
 
 
 class OutcomeLearningCliError(RuntimeError):
     """A CLI-level failure: bad input, refused write location, transport failure."""
+
+
+class Clock(Protocol):
+    def now(self) -> datetime: ...
+
+
+class SystemUtcClock:
+    def now(self) -> datetime:
+        return datetime.now(timezone.utc)
+
+
+_SYSTEM_CLOCK: Clock = SystemUtcClock()
+
+
+def _parse_iso_utc(value: str) -> datetime:
+    if not isinstance(value, str) or not value.endswith("Z"):
+        raise OutcomeLearningCliError(f"timestamp is not canonical UTC RFC3339: {value!r}")
+    try:
+        parsed = datetime.fromisoformat(value[:-1] + "+00:00")
+    except ValueError as exc:
+        raise OutcomeLearningCliError(
+            f"timestamp is not canonical UTC RFC3339: {value!r}"
+        ) from exc
+    if parsed.tzinfo != timezone.utc:
+        raise OutcomeLearningCliError(f"timestamp is not UTC: {value!r}")
+    return parsed
+
+
+def _format_utc(value: datetime) -> str:
+    if value.tzinfo is None:
+        raise OutcomeLearningCliError("clock returned a naive datetime")
+    value = value.astimezone(timezone.utc)
+    if value.microsecond:
+        return value.isoformat(timespec="microseconds").replace("+00:00", "Z")
+    return value.isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _event_time(clock: Clock | None = None, *, after: str | None = None) -> str:
+    value = (clock or _SYSTEM_CLOCK).now()
+    if value.tzinfo is None:
+        raise OutcomeLearningCliError("clock returned a naive datetime")
+    value = value.astimezone(timezone.utc)
+    if after is not None:
+        floor = _parse_iso_utc(after)
+        if value <= floor:
+            value = floor + timedelta(microseconds=1)
+    return _format_utc(value)
 
 
 # --------------------------------------------------------------------------- transports
@@ -269,6 +345,264 @@ def _resolve_committed_blob(
     return blob_id, cat_file.stdout
 
 
+def _carrier_ref(repository: str, branch: str) -> str:
+    return f"github:{repository.split('/')[-1]}:branch:{branch}"
+
+
+def _episode_identity(
+    expectation: Mapping[str, Any], request: Mapping[str, Any]
+) -> dict[str, Any]:
+    validate_expectation(expectation)
+    validate_canary_request(request)
+    if request["operation_key"] != expectation["operation_key"]:
+        raise OutcomeLearningCliError(
+            "request operation_key does not match expectation"
+        )
+    if request["expectation_sealed_hash"] != expectation["sealed_hash"]:
+        raise OutcomeLearningCliError(
+            "request expectation_sealed_hash does not match expectation"
+        )
+    return {
+        "operation_key": expectation["operation_key"],
+        "carrier_ref": _carrier_ref(request["repository"], request["branch"]),
+        "expectation_sealed_hash": expectation["sealed_hash"],
+        "request_digest": canonical_digest(request),
+    }
+
+
+def _artifact_digest_at_commit(
+    runner: Runner,
+    mastermind_root: str | None,
+    commit_sha: str,
+    repo_path: str,
+) -> dict[str, Any]:
+    normalized = _normalize_repo_path(repo_path, where="publication artifact")
+    if not normalized.startswith("research/outcome_learning/"):
+        raise OutcomeLearningCliError(
+            "publication artifacts must stay under research/outcome_learning/"
+        )
+    blob_sha, text = _resolve_committed_blob(
+        runner,
+        mastermind_root,
+        commit_sha,
+        normalized,
+        where="publication artifact",
+    )
+    if _SHA40_RE.fullmatch(blob_sha) is None:
+        raise OutcomeLearningCliError(
+            f"publication artifact {normalized!r} resolved to invalid blob sha {blob_sha!r}"
+        )
+    return {
+        "path": normalized,
+        "blob_sha": blob_sha,
+        "content_digest": f"sha256:{_sha256_hex_text(text)}",
+    }
+
+
+def _extract_remote_sha(doc: Any, *, where: str) -> str:
+    try:
+        if where == "branch":
+            value = doc["object"]["sha"]
+        else:
+            value = doc["head"]["sha"]
+    except (KeyError, TypeError) as exc:
+        raise OutcomeLearningCliError(
+            f"GitHub {where} readback did not contain a head sha"
+        ) from exc
+    if not isinstance(value, str) or _SHA40_RE.fullmatch(value) is None:
+        raise OutcomeLearningCliError(f"GitHub {where} readback sha is invalid")
+    return value
+
+
+def _normalized_check_evidence(
+    raw: Mapping[str, Any],
+    *,
+    repository: str,
+    expected_commit_sha: str,
+    observed_at: str,
+) -> dict[str, Any]:
+    if raw.get("head_sha") != expected_commit_sha:
+        raise OutcomeLearningCliError(
+            "GitHub check run is not bound to the exact evidence commit"
+        )
+    check_run_id = raw.get("id")
+    check_name = raw.get("name")
+    status = raw.get("status")
+    conclusion = raw.get("conclusion")
+    if type(check_run_id) is not int or check_run_id <= 0:
+        raise OutcomeLearningCliError("GitHub check run id is invalid")
+    if not isinstance(check_name, str) or not check_name:
+        raise OutcomeLearningCliError("GitHub check run name is invalid")
+    if status != "completed" or not isinstance(conclusion, str):
+        raise OutcomeLearningCliError(
+            "GitHub check run is not terminal and therefore cannot mature evidence"
+        )
+    return build_github_check_evidence(
+        repository=repository,
+        commit_sha=expected_commit_sha,
+        check_run_id=check_run_id,
+        check_name=check_name,
+        status=status,
+        conclusion=conclusion,
+        observed_at=observed_at,
+    )
+
+
+def _check_runs_page(
+    transport: GhTransport, repository: str, commit_sha: str
+) -> list[Mapping[str, Any]]:
+    _, doc = transport.get(
+        f"repos/{repository}/commits/{commit_sha}/check-runs?filter=latest&per_page=100"
+    )
+    if not isinstance(doc, Mapping):
+        raise OutcomeLearningCliError("GitHub check-runs response was not a mapping")
+    total_count = doc.get("total_count")
+    raw_checks = doc.get("check_runs")
+    if type(total_count) is not int or total_count < 0 or not isinstance(raw_checks, list):
+        raise OutcomeLearningCliError(
+            "GitHub check-runs response lacks total_count/check_runs"
+        )
+    if total_count != len(raw_checks):
+        raise OutcomeLearningCliError(
+            "incomplete check-run page: GitHub reported "
+            f"total_count={total_count} but returned {len(raw_checks)}; refusing partial evidence"
+        )
+    return raw_checks
+
+
+def _require_commit_ancestor(
+    runner: Runner,
+    mastermind_root: str | None,
+    ancestor_sha: str,
+    descendant_sha: str,
+) -> None:
+    result = runner.run(
+        ["git", "merge-base", "--is-ancestor", ancestor_sha, descendant_sha],
+        cwd=mastermind_root,
+    )
+    if result.returncode != 0:
+        raise OutcomeLearningCliError(
+            f"final commit {descendant_sha} must descend from the frozen evidence commit "
+            f"{ancestor_sha}"
+        )
+
+
+def _json_artifact_content_digest(doc: Mapping[str, Any]) -> str:
+    text = json.dumps(doc, indent=2, sort_keys=True) + "\n"
+    return f"sha256:{_sha256_hex_text(text)}"
+
+
+def _require_exact_artifact_contents(
+    receipt: Mapping[str, Any],
+    expected_docs: Sequence[Mapping[str, Any]],
+    *,
+    where: str,
+) -> None:
+    available = Counter(
+        artifact["content_digest"] for artifact in receipt["artifact_digests"]
+    )
+    required = Counter(_json_artifact_content_digest(doc) for doc in expected_docs)
+    missing = required - available
+    if missing:
+        raise OutcomeLearningCliError(
+            f"{where} receipt does not contain every exact committed artifact byte digest: "
+            f"missing={dict(missing)}"
+        )
+
+
+def _verify_receipt_artifacts_at_commit(
+    receipt: Mapping[str, Any],
+    *,
+    runner: Runner,
+    mastermind_root: str | None,
+) -> None:
+    target = receipt["target_commit_sha"]
+    for expected in receipt["artifact_digests"]:
+        observed = _artifact_digest_at_commit(
+            runner,
+            mastermind_root,
+            target,
+            expected["path"],
+        )
+        if observed != expected:
+            raise OutcomeLearningCliError(
+                "remote publication receipt artifact does not match the exact committed "
+                f"blob/content at {target}:{expected['path']}"
+            )
+
+
+def _check_identity(check: Mapping[str, Any]) -> tuple[Any, ...]:
+    return (
+        check["repository"],
+        check["commit_sha"],
+        check["check_run_id"],
+        check["check_name"],
+        check["status"],
+        check["conclusion"],
+    )
+
+
+def _verify_live_final_receipt(
+    receipt: Mapping[str, Any], *, transport: GhTransport
+) -> None:
+    repository = receipt["repository"]
+    target = receipt["target_commit_sha"]
+    _, branch_doc = transport.get(
+        f"repos/{repository}/git/ref/heads/{receipt['branch']}"
+    )
+    branch_sha = _extract_remote_sha(branch_doc, where="branch")
+    if branch_sha != target:
+        raise OutcomeLearningCliError(
+            f"remote branch head {branch_sha} does not equal final proof target {target}"
+        )
+    _, pr_doc = transport.get(f"repos/{repository}/pulls/{receipt['pr_number']}")
+    pr_sha = _extract_remote_sha(pr_doc, where="PR")
+    if pr_sha != target:
+        raise OutcomeLearningCliError(
+            f"remote PR head {pr_sha} does not equal final proof target {target}"
+        )
+    observed_at = receipt["observed_at"]
+    live_checks = [
+        _normalized_check_evidence(
+            raw,
+            repository=repository,
+            expected_commit_sha=target,
+            observed_at=observed_at,
+        )
+        for raw in _check_runs_page(transport, repository, target)
+    ]
+    if Counter(_check_identity(check) for check in live_checks) != Counter(
+        _check_identity(check) for check in receipt["checks"]
+    ):
+        raise OutcomeLearningCliError(
+            "live final check-run set does not equal the final publication receipt"
+        )
+
+
+def _verify_live_owner_check(
+    owner_check: Mapping[str, Any], *, transport: GhTransport
+) -> None:
+    repository = owner_check["repository"]
+    commit_sha = owner_check["commit_sha"]
+    _, raw = transport.get(
+        f"repos/{repository}/check-runs/{owner_check['check_run_id']}"
+    )
+    if not isinstance(raw, Mapping):
+        raise OutcomeLearningCliError(
+            "GitHub check-run-id response was not a mapping"
+        )
+    observed = _normalized_check_evidence(
+        raw,
+        repository=repository,
+        expected_commit_sha=commit_sha,
+        observed_at=owner_check["observed_at"],
+    )
+    if _check_identity(observed) != _check_identity(owner_check):
+        raise OutcomeLearningCliError(
+            "live frozen-commit owner check does not equal the evaluation revision receipt"
+        )
+
+
 # --------------------------------------------------------------------------- compose
 
 
@@ -317,7 +651,11 @@ def _append_binding(revision: str, label: str, digest: str) -> str:
     """Replace-semantics: at most one token for ``label`` (used for envelope-sha256,
     which is a single value)."""
     prefix = f"{label}:"
-    fields = [field for field in revision.split(";") if not field.startswith(prefix)]
+    fields = [
+        field
+        for field in revision.split(";")
+        if field and not field.startswith(prefix)
+    ]
     fields.append(f"{label}:{digest}")
     return ";".join(fields)
 
@@ -328,17 +666,19 @@ def _add_binding_if_absent(revision: str, label: str, digest: str) -> str:
     same chairman receipt) — mirrors ``_bind_bundle`` in
     ``tests/test_chairman_cognition_sources.py``."""
     token = f"{label}:{digest}"
-    fields = revision.split(";")
+    fields = [field for field in revision.split(";") if field]
     if token not in fields:
         fields.append(token)
     return ";".join(fields)
 
 
-def _olv1_envelope(parent_head: str) -> dict[str, Any]:
+def _olv1_envelope(
+    parent_head: str, *, chairman_source_ref: str, expires_at: str
+) -> dict[str, Any]:
     return {
         "schema": _ENVELOPE_SCHEMA,
-        "envelope_id": "ENV-OLV1-20260902",
-        "authority_source_refs": [_CHAIRMAN_REF],
+        "envelope_id": f"ENV-OLV1-{parent_head[:12]}",
+        "authority_source_refs": [chairman_source_ref],
         "mode": "SUPERVISED_LIVE_CANARY",
         "allowed_actions": ["REVERSIBLE_RUNTIME_CANARY"],
         "allowed_reversibility": ["REVERSIBLE"],
@@ -346,49 +686,19 @@ def _olv1_envelope(parent_head: str) -> dict[str, Any]:
         "allowed_path_prefixes": {
             "mastermindx-market-intelligence/Mastermind": ["research/outcome_learning"]
         },
-        # Deviation from the frozen spec's literal "WS:OUTCOME-LEARNING" for the same
-        # boundary-character reason documented below on allowed_carrier_prefixes: the
-        # actual scope_ref "WS:OUTCOME-LEARNING-POLICY-CALIBRATION" is not preceded by a
-        # boundary char after that truncated prefix, so it fails
-        # control_plane.chairman_cognition._ref_matches_prefix. Using the exact scope_ref
-        # is narrower, not broader, than the pinned literal. See this build's DEVIATIONS.
         "allowed_scope_prefixes": ["WS:OUTCOME-LEARNING-POLICY-CALIBRATION"],
-        # Deviation from the frozen spec's literal
-        # "github:Mastermind:branch:sol/outcome-learning" (no trailing boundary
-        # character): control_plane.chairman_cognition._ref_matches_prefix requires
-        # either an exact match or a boundary char (":", "/", "#") immediately after
-        # the prefix. The truncated literal does not prefix-match the pinned carrier_ref
-        # below (the next character is "-", not a boundary char), which drove the real
-        # OPT-OLV1-PR-TITLE-CANARY option to CHAIRMAN_REQUIRED/SCOPE_OUTSIDE_ENVELOPE
-        # instead of ELIGIBLE_WITHIN_DELEGATION — confirmed against a live compose run.
-        # Using the exact carrier_ref as the sole allowed prefix scopes to precisely the
-        # one branch this episode runs on (a strictly narrower, not broader, grant) and
-        # is content-bound the same way. See this build's DEVIATIONS.
-        "allowed_carrier_prefixes": [
-            "github:Mastermind:branch:sol/outcome-learning-v1-complete-vertical-20260902"
-        ],
+        "allowed_carrier_prefixes": [_CARRIER_REF],
         "max_budget_units": 5,
         "max_active_children": 1,
         "require_exact_carrier": True,
-        "expires_at": "2026-09-09T00:00:00Z",
+        "expires_at": expires_at,
     }
 
 
-_HOLD_CLASSIFICATION_SOURCE_REF = "OLV1:portfolio-hold-classification"
-# Owner for the dedicated HOLD-option classification receipt. "STEWARD" was rejected on
-# principal review — it collides with the real Executive Steward control-plane concept.
-# The requested literal "OLV1_COMPOSER" is not a member of
-# control_plane.chairman_cognition.ALLOWED_SOURCE_OWNERS / CLASSIFICATION_SOURCE_OWNERS
-# (verified directly against that unmodifiable frozenset) and would make
-# evaluate_document raise "unknown source owner" unconditionally. "OPERATION_ASSURANCE"
-# is the closest already-allowed, non-colliding owner — this vertical IS an
-# auditor-gated Operation Assurance episode. See this build's DEVIATIONS.
-_HOLD_CLASSIFICATION_SOURCE_OWNER = "OPERATION_ASSURANCE"
-
-
-def _olv1_options(operation_key: str, parent_head: str) -> list[dict[str, Any]]:
-    source_refs = [_CHAIRMAN_REF, _STRATEGIC_SOURCE_REF, _AGENT_OS_SOURCE_REF]
-    carrier_ref = "github:Mastermind:branch:sol/outcome-learning-v1-complete-vertical-20260902"
+def _olv1_options(
+    operation_key: str, parent_head: str, *, chairman_source_ref: str
+) -> list[dict[str, Any]]:
+    source_refs = [chairman_source_ref, _STRATEGIC_SOURCE_REF, _AGENT_OS_SOURCE_REF]
     canary = {
         "option_id": _OPT_CANARY,
         "title": "Run the OL-V1 supervised GitHub PR-title canary",
@@ -399,7 +709,7 @@ def _olv1_options(operation_key: str, parent_head: str) -> list[dict[str, Any]]:
         "effect_state": "NONE",
         "operation_key": operation_key,
         "carrier_state": "EXACT_EXISTING",
-        "carrier_ref": carrier_ref,
+        "carrier_ref": _CARRIER_REF,
         "expected_head_sha": parent_head,
         "repositories": ["mastermindx-market-intelligence/Mastermind"],
         "paths": ["research/outcome_learning/"],
@@ -417,7 +727,7 @@ def _olv1_options(operation_key: str, parent_head: str) -> list[dict[str, Any]]:
             "Any second apply call, a non-identical restoration, or head movement "
             "during the effect falsifies this option's premise."
         ),
-        "classification_source_ref": _CHAIRMAN_REF,
+        "classification_source_ref": chairman_source_ref,
         "change_classes": ["RUNTIME_CANARY"],
         "affected_departments": ["executive"],
         "benefits": {
@@ -439,18 +749,13 @@ def _olv1_options(operation_key: str, parent_head: str) -> list[dict[str, Any]]:
         "option_id": _OPT_HOLD,
         "title": "Hold the OL-V1 portfolio with no effect",
         "action": "PORTFOLIO_HOLD",
-        # PORTFOLIO_HOLD is a READ_ONLY_ACTION; control_plane.chairman_cognition
-        # hard-requires Reversibility.READ_ONLY for every READ_ONLY_ACTION
-        # (_parse_options) — see this build's DEVIATIONS for the frozen-spec text
-        # this corrects (it names "reversibility REVERSIBLE" for this option, which
-        # evaluate_document unconditionally refuses).
         "reversibility": "READ_ONLY",
-        "source_refs": [*source_refs, _HOLD_CLASSIFICATION_SOURCE_REF],
+        "source_refs": source_refs,
         "scope_refs": ["WS:OUTCOME-LEARNING-POLICY-CALIBRATION"],
         "effect_state": "NONE",
         "operation_key": operation_key,
         "carrier_state": "EXACT_EXISTING",
-        "carrier_ref": carrier_ref,
+        "carrier_ref": _CARRIER_REF,
         "expected_head_sha": parent_head,
         "repositories": ["mastermindx-market-intelligence/Mastermind"],
         "paths": [],
@@ -460,14 +765,7 @@ def _olv1_options(operation_key: str, parent_head: str) -> list[dict[str, Any]]:
         "stop_condition": "No effect; the vertical returns a typed blocker instead.",
         "rollback_plan": "No effect; the vertical returns a typed blocker instead.",
         "falsifier": "No effect; the vertical returns a typed blocker instead.",
-        # Deviation from the frozen spec's literal "classification_source_ref = chairman
-        # ref" for BOTH options: binding two distinct classification-sha256 tokens plus
-        # one envelope-sha256 token onto the single chairman receipt's `revision` field
-        # overflows chairman_cognition_sources.py's unmodifiable 256-char bound on that
-        # field (257+ chars, always). The canary option (the one actually executed) keeps
-        # the literal pin; this read-only, never-executed fallback classifies against its
-        # own dedicated receipt instead. See this build's DEVIATIONS.
-        "classification_source_ref": _HOLD_CLASSIFICATION_SOURCE_REF,
+        "classification_source_ref": chairman_source_ref,
         "change_classes": ["RESEARCH"],
         "affected_departments": ["executive"],
         "benefits": {
@@ -477,18 +775,6 @@ def _olv1_options(operation_key: str, parent_head: str) -> list[dict[str, Any]]:
             "chairman_load_reduction": 0,
             "user_or_machine_value": 0,
         },
-        # Honest costs (principal review correction, 2026-09-02): a HOLD has genuinely
-        # zero execution/coordination/irreversibility/scarce-cognition cost — it does
-        # nothing. Its one real cost is that holding defers all evidence indefinitely
-        # (time_to_evidence=90). Equalizing costs to the canary's to force Pareto
-        # dominance (the prior draft's approach) was input-shaping, not honest
-        # classification, and was reverted. Under strict Pareto dominance
-        # (control_plane.chairman_cognition._dominates) this honest, near-zero-cost HOLD
-        # is never dominated by the higher-benefit/higher-cost canary — both stay on the
-        # actionable frontier (selection_state=MULTIPLE_INCOMPARABLE_ACTIONABLE_OPTIONS).
-        # That is the A1 law working as designed, not a defect: compose's gate is
-        # disposition-keyed on the canary option alone, not on selection_state or
-        # recommended_option_id — see cmd_compose.
         "costs": {
             "time_to_evidence": 90,
             "execution_cost": 0,
@@ -498,6 +784,232 @@ def _olv1_options(operation_key: str, parent_head: str) -> list[dict[str, Any]]:
         },
     }
     return [canary, hold]
+
+
+def _canonical_objective(value: Any, *, where: str) -> dict[str, Any]:
+    if not isinstance(value, str):
+        raise OutcomeLearningCliError(f"{where}.objective must be canonical JSON text")
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise OutcomeLearningCliError(f"{where}.objective is not valid JSON") from exc
+    if not isinstance(parsed, dict):
+        raise OutcomeLearningCliError(f"{where}.objective must decode to a mapping")
+    canonical = json.dumps(
+        parsed, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    )
+    if canonical != value:
+        raise OutcomeLearningCliError(f"{where}.objective is not canonical JSON")
+    return parsed
+
+
+def _closed_objective(
+    value: Mapping[str, Any], *, required: set[str], where: str
+) -> dict[str, Any]:
+    keys = set(value)
+    missing = required - keys
+    extra = keys - required
+    if missing or extra:
+        raise OutcomeLearningCliError(
+            f"{where} objective has missing={sorted(missing)} extra={sorted(extra)}"
+        )
+    return dict(value)
+
+
+def _intent_status(
+    runner: Runner, mastermind_root: str, target: str
+) -> dict[str, Any]:
+    result = runner.run(
+        [
+            "python3",
+            "scripts/ceo_intent.py",
+            "--json",
+            "--config",
+            str(_EXECUTIVE_CONFIG_PATH),
+            "status",
+            target,
+        ],
+        cwd=mastermind_root,
+    )
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip() or "unavailable"
+        raise OutcomeLearningCliError(
+            f"canonical ceo_intent status for {target!r} failed: {detail}"
+        )
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise OutcomeLearningCliError(
+            f"canonical ceo_intent status for {target!r} was not JSON"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise OutcomeLearningCliError(
+            f"canonical ceo_intent status for {target!r} was not a mapping"
+        )
+    return payload
+
+
+def _acquire_trusted_intent(
+    runner: Runner,
+    mastermind_root: str,
+    intent_id: str,
+    *,
+    mastermind_sha: str,
+    macro_sha: str,
+    expected_schema: str,
+) -> dict[str, Any]:
+    receipt = _intent_status(runner, mastermind_root, intent_id)
+    if receipt.get("schema") not in {
+        "mastermind.ceo_intent_receipt.v1",
+        "mastermind.ceo_intent_receipt.v2",
+    }:
+        raise OutcomeLearningCliError("canonical intent receipt schema is unsupported")
+    fingerprint = receipt.get("fingerprint")
+    job_id = receipt.get("job_id")
+    if (
+        receipt.get("intent_id") != intent_id
+        or not isinstance(fingerprint, str)
+        or _SHA256_RE.fullmatch(fingerprint) is None
+        or not isinstance(job_id, str)
+        or not job_id
+        or receipt.get("accepted") is not True
+        or receipt.get("dispatched") is not False
+        or receipt.get("status") != "QUEUED"
+    ):
+        raise OutcomeLearningCliError(
+            "canonical intent receipt is not one accepted, undispatched QUEUED intent"
+        )
+    authority = receipt.get("authority")
+    if not isinstance(authority, dict) or authority.get("requested") != ["READ"]:
+        raise OutcomeLearningCliError(
+            "canonical intent receipt exceeds the READ-only OL-V1 authority ceiling"
+        )
+    grounding = receipt.get("grounding")
+    if not isinstance(grounding, dict) or (
+        grounding.get("mastermind_sha") != mastermind_sha
+        or grounding.get("macro_sha") != macro_sha
+    ):
+        raise OutcomeLearningCliError(
+            "canonical intent grounding does not match the exact Mastermind/Macro source"
+        )
+    created_at_ms = receipt.get("created_at_ms")
+    if not isinstance(created_at_ms, int) or created_at_ms <= 0:
+        raise OutcomeLearningCliError("canonical intent receipt has no valid created_at_ms")
+
+    job = _intent_status(runner, mastermind_root, job_id)
+    if (
+        job.get("job_id") != job_id
+        or job.get("status") != "QUEUED"
+        or job.get("attempt_count") != 0
+        or job.get("current_attempt_id") is not None
+        or job.get("checkpoint") is not None
+        or job.get("result") is not None
+        or job.get("requested_authorities") != ["READ"]
+        or job.get("authority_level") != "A0"
+        or job.get("branch") is not None
+        or job.get("worktree") is not None
+        or job.get("allowed_write_paths") != []
+        or job.get("validation_commands") != []
+    ):
+        raise OutcomeLearningCliError(
+            "canonical intent Job is not an untouched READ-only admission"
+        )
+    objective = _canonical_objective(job.get("objective"), where=expected_schema)
+    if objective.get("schema") != expected_schema:
+        raise OutcomeLearningCliError(
+            f"canonical intent objective schema is not {expected_schema}"
+        )
+    observed_at = _format_utc(
+        datetime.fromtimestamp(created_at_ms / 1000, tz=timezone.utc)
+    )
+    source_ref = f"CEO_INTENT:{intent_id}:sha256:{fingerprint}"
+    if len(source_ref) > 256:
+        raise OutcomeLearningCliError("canonical intent source_ref exceeds 256 characters")
+    return {
+        "receipt": receipt,
+        "job": job,
+        "objective": objective,
+        "observed_at": observed_at,
+        "source_ref": source_ref,
+        "receipt_digest": canonical_digest(receipt),
+    }
+
+
+def _validate_directive(
+    acquired: Mapping[str, Any], *, operation_key: str, as_of: str
+) -> dict[str, Any]:
+    objective = _closed_objective(
+        acquired["objective"],
+        required={
+            "schema",
+            "workstream",
+            "operation_key",
+            "carrier_ref",
+            "expires_at",
+            "authority_ceiling",
+        },
+        where="directive",
+    )
+    expected = {
+        "schema": _DIRECTIVE_SCHEMA,
+        "workstream": _WORKSTREAM_REF,
+        "operation_key": operation_key,
+        "carrier_ref": _CARRIER_REF,
+        "authority_ceiling": _DIRECTIVE_AUTHORITY_CEILING,
+    }
+    for field, value in expected.items():
+        if objective.get(field) != value:
+            raise OutcomeLearningCliError(
+                f"directive objective {field}={objective.get(field)!r} does not equal {value!r}"
+            )
+    if _parse_iso_utc(acquired["observed_at"]) > _parse_iso_utc(as_of):
+        raise OutcomeLearningCliError("directive receipt postdates composition as_of")
+    if _parse_iso_utc(objective["expires_at"]) <= _parse_iso_utc(as_of):
+        raise OutcomeLearningCliError("directive objective is expired at composition as_of")
+    return objective
+
+
+def _validate_selection(
+    acquired: Mapping[str, Any],
+    *,
+    operation_key: str,
+    packet_digest: str,
+    chosen_option_id: str,
+    carrier_ref: str,
+    packet_as_of: str,
+) -> dict[str, Any]:
+    objective = _closed_objective(
+        acquired["objective"],
+        required={
+            "schema",
+            "workstream",
+            "operation_key",
+            "packet_digest",
+            "chosen_option_id",
+            "carrier_ref",
+            "authority_ceiling",
+        },
+        where="selection",
+    )
+    expected = {
+        "schema": _SELECTION_SCHEMA,
+        "workstream": _WORKSTREAM_REF,
+        "operation_key": operation_key,
+        "packet_digest": packet_digest,
+        "chosen_option_id": chosen_option_id,
+        "carrier_ref": carrier_ref,
+        "authority_ceiling": _SELECTION_AUTHORITY_CEILING,
+    }
+    for field, value in expected.items():
+        if objective.get(field) != value:
+            raise OutcomeLearningCliError(
+                f"selection objective {field}={objective.get(field)!r} does not equal {value!r}"
+            )
+    if _parse_iso_utc(acquired["observed_at"]) <= _parse_iso_utc(packet_as_of):
+        raise OutcomeLearningCliError(
+            "selection intent must be accepted strictly after the packet source cutoff"
+        )
+    return objective
 
 
 # Sol REQUEST_REPAIR (BLOCKER A, 2026-09-02): canonical identity is resolved against
@@ -691,21 +1203,6 @@ def _redact_boot_packet(boot: Mapping[str, Any]) -> dict[str, Any]:
     return redacted
 
 
-def _utc_now_iso() -> str:
-    from datetime import datetime, timezone
-
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def _parse_iso_utc(value: str):
-    from datetime import datetime, timezone
-
-    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed
-
-
 def _acquire_agentos_records_digest(
     runner: Runner, macro_root: str, as_of: str, override: str | None
 ) -> str:
@@ -749,17 +1246,18 @@ def _acquire_agentos_records_digest(
     return digest
 
 
-def cmd_compose(args: argparse.Namespace, *, runner: Runner | None = None) -> int:
-    """Sol REQUEST_REPAIR (BLOCKER A, 2026-09-02): every identity claim this function
-    embeds is now acquired from a source it cannot itself author. Mastermind's
-    revision and its strategic-state blob come from the canonical GitHub remote (via
-    ``git ls-remote`` + the Contents API), never local ``git rev-parse``/working-tree
-    bytes. Macro's identity is proven by requiring the LOCAL macro checkout used for
-    the boot-packet/brief run to exactly equal, and be clean at, the canonical
-    ``main`` ls-remote sha — a dirty or divergent local checkout can no longer
-    self-attest CURRENT. Any acquisition failure (unreachable remote, missing blob,
-    checkout mismatch, dirty tree) is a typed, named refusal before any bundle is
-    even constructed — see the ``BLOCKER SOURCE_IDENTITY_UNVERIFIED`` handling below.
+def cmd_compose(
+    args: argparse.Namespace,
+    *,
+    runner: Runner | None = None,
+    clock: Clock | None = None,
+) -> int:
+    """Compose only from independently current repository, Agent OS, and Chairman sources.
+
+    The Chairman source is an accepted, untouched, READ-only ``ceo_intent`` receipt.
+    This command never creates that intent, never substitutes a fixture, and never
+    infers authority from the local conversation. A multi-option actionable frontier is
+    written as evidence and returns ``DECISION_REQUIRED``; it is not silently resolved.
     """
     runner = runner or SubprocessRunner()
 
@@ -767,10 +1265,12 @@ def cmd_compose(args: argparse.Namespace, *, runner: Runner | None = None) -> in
         mastermind_sha = _ls_remote_sha(
             runner, _CANONICAL_MASTERMIND_URL, "refs/heads/master"
         )
-        strategic_blob_sha, canonical_strategic_state = _acquire_canonical_strategic_state(
-            runner, mastermind_sha
+        strategic_blob_sha, canonical_strategic_state = (
+            _acquire_canonical_strategic_state(runner, mastermind_sha)
         )
-        macro_canonical_sha = _ls_remote_sha(runner, _CANONICAL_MACRO_URL, "refs/heads/main")
+        macro_canonical_sha = _ls_remote_sha(
+            runner, _CANONICAL_MACRO_URL, "refs/heads/main"
+        )
         macro_local_sha, macro_clean, macro_dirty_lines = (
             _macro_checkout_matches_canonical_and_is_clean(
                 runner, args.macro_root, macro_canonical_sha
@@ -787,17 +1287,13 @@ def cmd_compose(args: argparse.Namespace, *, runner: Runner | None = None) -> in
                 "local macro checkout is not clean (git status --porcelain, "
                 f"excluding known sparse omissions): {macro_dirty_lines[:5]}"
             )
-    except OutcomeLearningCliError as exc:
+        boot = _redact_boot_packet(
+            _acquire_boot_packet(runner, args.mastermind_root, args.macro_root)
+        )
+    except (OutcomeLearningCliError, KeyError, json.JSONDecodeError) as exc:
         print(f"BLOCKER SOURCE_IDENTITY_UNVERIFIED {exc}")
         return 5
 
-    boot = _redact_boot_packet(
-        _acquire_boot_packet(runner, args.mastermind_root, args.macro_root)
-    )
-    # Cross-check: the boot packet's own (independently git-derived) macro sha must
-    # agree with the identity we just proved — a boot packet pointed at a different
-    # macro checkout than --macro-root would otherwise silently smuggle in an
-    # unverified Macro state.
     boot_macro_sha = ((boot.get("macro") or {}).get("sha"))
     if boot_macro_sha != macro_local_sha:
         print(
@@ -806,105 +1302,102 @@ def cmd_compose(args: argparse.Namespace, *, runner: Runner | None = None) -> in
             f"macro checkout {macro_local_sha!r}"
         )
         return 5
-    # The canonical, GitHub-content-API-fetched strategic state REPLACES whatever the
-    # boot packet's own local-working-tree read produced — the whole point of this
-    # repair is that only the canonical read may promote to CURRENT.
     boot = {**boot, "strategic_state": canonical_strategic_state}
 
-    # as_of (principal correction, addendum A, 2026-09-02): a caller-fixed --as-of
-    # captured BEFORE acquisition can end up earlier than the receipts' own
-    # observed_at once a slow acquisition (the Agent OS brief can take minutes) has
-    # finished — A1 then rightly refuses ("source receipt cannot postdate
-    # document.as_of"). Default: compute as_of AFTER acquisition, as the later of
-    # "now" and the boot packet's own generated_at, so it can never be postdated by
-    # anything this command is about to embed. An explicitly supplied --as-of is
-    # honored, but refused up front if the boot packet's generated_at already
-    # postdates it — the same defect, caught before composing instead of inside A1.
-    agentos_records_digest = _acquire_agentos_records_digest(
-        runner, args.macro_root, args.as_of or _utc_now_iso(), args.agentos_records_digest
-    )
-    if args.as_of is not None:
-        as_of = args.as_of
-        as_of_mode = "explicit"
-        if _parse_iso_utc(boot["generated_at"]) > _parse_iso_utc(as_of):
-            raise OutcomeLearningCliError(
-                f"--as-of {as_of} predates boot_packet.generated_at "
-                f"{boot['generated_at']} — refusing (A1 would reject this receipt as "
-                "postdating document.as_of); omit --as-of to compute it automatically"
-            )
-    else:
-        acquisition_completed_at = _utc_now_iso()
-        as_of = max(
-            (boot["generated_at"], acquisition_completed_at), key=_parse_iso_utc
+    try:
+        directive = _acquire_trusted_intent(
+            runner,
+            args.mastermind_root,
+            args.directive_intent_id,
+            mastermind_sha=mastermind_sha,
+            macro_sha=macro_local_sha,
+            expected_schema=_DIRECTIVE_SCHEMA,
         )
-        as_of_mode = "auto(max_observed_at)"
+    except OutcomeLearningCliError as exc:
+        print(f"BLOCKER DIRECTIVE_SOURCE_UNVERIFIED {exc}")
+        return 5
+
+    agentos_override = getattr(args, "agentos_records_digest", None)
+    try:
+        agentos_reference_at = _event_time(clock)
+        agentos_records_digest = _acquire_agentos_records_digest(
+            runner,
+            args.macro_root,
+            agentos_reference_at,
+            agentos_override,
+        )
+        as_of = _event_time(clock, after=agentos_reference_at)
+        boot_generated_at = boot["generated_at"]
+        for source_name, observed_at in (
+            ("boot_packet.generated_at", boot_generated_at),
+            ("directive.created_at", directive["observed_at"]),
+        ):
+            if _parse_iso_utc(observed_at) > _parse_iso_utc(as_of):
+                raise OutcomeLearningCliError(
+                    f"{source_name} {observed_at} postdates host acquisition completion "
+                    f"{as_of}"
+                )
+        directive_objective = _validate_directive(
+            directive, operation_key=args.operation_key, as_of=as_of
+        )
+    except OutcomeLearningCliError as exc:
+        print(f"BLOCKER DIRECTIVE_SOURCE_UNVERIFIED {exc}")
+        return 5
 
     strategic_state = boot.get("strategic_state") or {}
     brief = boot.get("brief") or {}
     strategic_payload_digest = canonical_digest(strategic_state)
     agentos_payload_digest = canonical_digest(brief) if brief else "UNRESOLVED"
-
-    # Sol REQUEST_REPAIR: the two attestations are no longer the SAME copied boolean.
-    # Mastermind's state is CURRENT because we are already past every acquisition
-    # check above (ls-remote + Contents API both succeeded and validated). Agent OS's
-    # state is CURRENT only when the macro identity was independently proven AND no
-    # unverifiable operator override was supplied for its records digest — an
-    # override can never itself participate in a CURRENT claim (BLOCKER A, item 3).
-    mastermind_state = "CURRENT"
-    agentos_state = "UNKNOWN" if args.agentos_records_digest is not None else "CURRENT"
-
     mastermind_revision_attestation = {
         "revision": mastermind_sha,
-        "state": mastermind_state,
+        "state": "CURRENT",
         "load_bearing": True,
         "observed_at": as_of,
-        # The real committed BLOB sha for config/strategic_state.yml — never the
-        # commit sha (BLOCKER A's named defect).
         "source_blob_sha": strategic_blob_sha,
         "payload_digest": strategic_payload_digest,
     }
     agentos_revision_attestation = {
         "revision": macro_local_sha,
-        "state": agentos_state,
+        "state": "UNKNOWN" if agentos_override is not None else "CURRENT",
         "load_bearing": True,
         "observed_at": as_of,
         "source_records_digest": agentos_records_digest,
         "payload_digest": agentos_payload_digest,
     }
 
-    envelope = _olv1_envelope(mastermind_sha)
-    options = _olv1_options(args.operation_key, mastermind_sha)
-    envelope_digest = _digest_hex(_envelope_payload(envelope))
-
-    chairman_revision = _append_binding(
-        args.chairman_revision, "envelope-sha256", envelope_digest
+    chairman_source_ref = directive["source_ref"]
+    envelope = _olv1_envelope(
+        mastermind_sha,
+        chairman_source_ref=chairman_source_ref,
+        expires_at=directive_objective["expires_at"],
     )
-    additional_source_receipts: list[dict[str, Any]] = []
+    options = _olv1_options(
+        args.operation_key,
+        mastermind_sha,
+        chairman_source_ref=chairman_source_ref,
+    )
+    chairman_revision = _append_binding(
+        "", "envelope-sha256", _digest_hex(_envelope_payload(envelope))
+    )
     for option in options:
-        classification_digest = _digest_hex(_classification_payload(option))
-        if option["classification_source_ref"] == _CHAIRMAN_REF:
-            chairman_revision = _add_binding_if_absent(
-                chairman_revision, "classification-sha256", classification_digest
-            )
-        else:
-            additional_source_receipts.append(
-                {
-                    "source_ref": option["classification_source_ref"],
-                    "owner": _HOLD_CLASSIFICATION_SOURCE_OWNER,
-                    "revision": f"classification-sha256:{classification_digest}",
-                    "state": "CURRENT",
-                    "load_bearing": True,
-                    "observed_at": as_of,
-                }
-            )
+        chairman_revision = _add_binding_if_absent(
+            chairman_revision,
+            "classification-sha256",
+            _digest_hex(_classification_payload(option)),
+        )
+    if len(chairman_revision) > 256:
+        print(
+            "BLOCKER COMPOSITION_INVALID trusted directive revision bindings exceed "
+            "the canonical 256-character source receipt ceiling"
+        )
+        return 5
     chairman_directive = {
-        "source_ref": _CHAIRMAN_REF,
+        "source_ref": chairman_source_ref,
         "revision": chairman_revision,
         "state": "CURRENT",
         "load_bearing": True,
-        "observed_at": as_of,
+        "observed_at": directive["observed_at"],
     }
-
     bundle = {
         "schema": _SOURCE_BUNDLE_SCHEMA,
         "as_of": as_of,
@@ -912,19 +1405,11 @@ def cmd_compose(args: argparse.Namespace, *, runner: Runner | None = None) -> in
         "mastermind_revision_attestation": mastermind_revision_attestation,
         "agentos_revision_attestation": agentos_revision_attestation,
         "boot_packet": boot,
-        "additional_source_receipts": additional_source_receipts,
+        "additional_source_receipts": [],
         "delegation_envelope": envelope,
         "options": options,
     }
 
-    # Error-channel honesty (principal correction, addendum B, 2026-09-02): an
-    # exception here is a COMPOSITION defect (a malformed bundle, an unbindable
-    # envelope, a stale as_of that slipped past the check above) — never an owner
-    # SOURCE state, and it must never be rendered through the
-    # "BLOCKER OWNER_SOURCE_NOT_CURRENT <ref>=<state>" template, which presumes a
-    # successfully-composed packet with a real ref/state pair. Exit 4 /
-    # OWNER_SOURCE_NOT_CURRENT is reserved strictly for that successful-packet case,
-    # below.
     try:
         composition = evaluate_bundle(bundle)
     except (ChairmanCognitionSourceError, ChairmanCognitionError) as exc:
@@ -936,7 +1421,7 @@ def cmd_compose(args: argparse.Namespace, *, runner: Runner | None = None) -> in
     _write_artifact(episode_dir / "bundle.json", bundle)
     _write_artifact(episode_dir / "composition.json", composition)
 
-    print(f"as_of_mode={as_of_mode} as_of={as_of}")
+    print(f"as_of_mode=host_clock_after_acquisition as_of={as_of}")
     for summary in composition["source_summary"]:
         print(f"SOURCE {summary['source_ref']}={summary['state']}")
     for adjudication in composition["packet"]["adjudications"]:
@@ -944,38 +1429,32 @@ def cmd_compose(args: argparse.Namespace, *, runner: Runner | None = None) -> in
             f"ADJUDICATION {adjudication['option_id']}="
             f"{adjudication['disposition']}/{adjudication['reason']}"
         )
-    print(f"selection_state={composition['packet']['selection_state']}")
-    print(f"recommended_option_id={composition['packet']['recommended_option_id']}")
+    packet = composition["packet"]
+    print(f"selection_state={packet['selection_state']}")
+    print(f"recommended_option_id={packet['recommended_option_id']}")
     print(f"execution_authority_granted={composition['execution_authority_granted']}")
     print(f"source_bundle_digest=sha256:{composition['source_bundle_digest']}")
     print(f"composed_input_digest=sha256:{composition['composed_input_digest']}")
-    print(f"packet_digest=sha256:{composition['packet']['packet_digest']}")
+    print(f"packet_digest=sha256:{packet['packet_digest']}")
     print(f"composition_digest=sha256:{composition['composition_digest']}")
 
-    # Disposition-keyed gate (principal correction, 2026-09-02): compose does NOT require
-    # selection_state == UNIQUE_ACTIONABLE_FRONTIER or recommended_option_id == the
-    # canary. control_plane.chairman_cognition's A1 law lets an honest, near-zero-cost
-    # READ_ONLY HOLD join the actionable frontier alongside a higher-benefit/higher-cost
-    # canary under strict Pareto dominance — MULTIPLE_INCOMPARABLE_ACTIONABLE_OPTIONS is
-    # an expected, lawful outcome, not a fault. What actually gates this episode is
-    # whether the CANARY option itself is ELIGIBLE_WITHIN_DELEGATION — the principal (or
-    # a human reading this output) makes the final selection among an incomparable
-    # frontier; compose never manufactures uniqueness by input-shaping the HOLD option.
     canary_adjudication = next(
-        item
-        for item in composition["packet"]["adjudications"]
-        if item["option_id"] == _OPT_CANARY
+        item for item in packet["adjudications"] if item["option_id"] == _OPT_CANARY
     )
     disposition = canary_adjudication["disposition"]
     reason = canary_adjudication["reason"]
-
     if disposition == "ELIGIBLE_WITHIN_DELEGATION":
+        if (
+            packet["selection_state"] == "UNIQUE_ACTIONABLE_FRONTIER"
+            and packet["recommended_option_id"] == _OPT_CANARY
+        ):
+            print("COMPOSE_OK unique canary recommendation is sealable without selection intent")
+            return 0
         print(
-            "COMPOSE_OK canary_disposition=ELIGIBLE_WITHIN_DELEGATION "
-            f"selection_state={composition['packet']['selection_state']} "
-            f"recommended_option_id={composition['packet']['recommended_option_id']}"
+            "BLOCKER DECISION_REQUIRED exact packet selection must be admitted through "
+            "the canonical ceo_intent plane before seal"
         )
-        return 0
+        return 7
     if disposition == "REFUSED" and reason == "SOURCE_NOT_CURRENT":
         blocker_ref = next(
             (
@@ -992,7 +1471,7 @@ def cmd_compose(args: argparse.Namespace, *, runner: Runner | None = None) -> in
                 if summary["source_ref"] == blocker_ref
             )
             print(f"BLOCKER OWNER_SOURCE_NOT_CURRENT {blocker_ref}={state}")
-        else:  # pragma: no cover - defensive: reason implies a non-CURRENT source exists
+        else:
             print("BLOCKER OWNER_SOURCE_NOT_CURRENT unknown=SOURCE_NOT_CURRENT")
         return 4
     print(f"BLOCKER CANARY_NOT_ELIGIBLE {disposition}/{reason}")
@@ -1017,7 +1496,13 @@ def _alternative_from_adjudication(
     }
 
 
-def cmd_seal(args: argparse.Namespace) -> int:
+def cmd_seal(
+    args: argparse.Namespace,
+    *,
+    runner: Runner | None = None,
+    clock: Clock | None = None,
+) -> int:
+    runner = runner or SubprocessRunner()
     composition = _read_json(args.composition)
     bundle = _read_json(Path(args.episode_dir) / "bundle.json")
 
@@ -1048,13 +1533,7 @@ def cmd_seal(args: argparse.Namespace) -> int:
     packet = composition["packet"]
     options = bundle["options"]
     chosen_action = _OPT_CANARY
-
-    # Truthful assignment.method from the packet's own adjudication (principal
-    # correction, 2026-09-02) — never a hardcoded "DETERMINISTIC" label. A1's frontier
-    # may legitimately be MULTIPLE_INCOMPARABLE_ACTIONABLE_OPTIONS (an honest
-    # near-zero-cost HOLD is never Pareto-dominated); that is not grounds to refuse
-    # sealing the canary, only grounds to say plainly that a human selected it from an
-    # incomparable frontier rather than A1 having uniquely recommended it.
+    chosen_option = next(item for item in options if item["option_id"] == chosen_action)
     canary_adjudication = next(
         item for item in packet["adjudications"] if item["option_id"] == chosen_action
     )
@@ -1065,17 +1544,50 @@ def cmd_seal(args: argparse.Namespace) -> int:
             f"refusing to seal chosen_action {chosen_action}: adjudication "
             f"disposition={disposition} reason={reason}"
         )
-    if packet["recommended_option_id"] == chosen_action:
+
+    selection: dict[str, Any] | None = None
+    if (
+        packet["selection_state"] == "UNIQUE_ACTIONABLE_FRONTIER"
+        and packet["recommended_option_id"] == chosen_action
+    ):
+        if getattr(args, "selection_intent_id", None) is not None:
+            raise OutcomeLearningCliError(
+                "a selection intent is not accepted when A1 already produced one unique "
+                "canary recommendation"
+            )
         assignment_method = "deterministic_a1_unique_actionable_frontier"
     elif (
         packet["selection_state"] == "MULTIPLE_INCOMPARABLE_ACTIONABLE_OPTIONS"
         and disposition == "ELIGIBLE_WITHIN_DELEGATION"
     ):
-        assignment_method = "principal_selection_from_a1_incomparable_frontier"
-    else:  # pragma: no cover - defensive: not reachable for this vertical's fixed options
+        selection_intent_id = getattr(args, "selection_intent_id", None)
+        if not selection_intent_id:
+            raise OutcomeLearningCliError(
+                "refusing to seal an incomparable frontier without --selection-intent-id"
+            )
+        selection = _acquire_trusted_intent(
+            runner,
+            getattr(args, "mastermind_root", str(_ROOT)),
+            selection_intent_id,
+            mastermind_sha=bundle["mastermind_revision_attestation"]["revision"],
+            macro_sha=bundle["agentos_revision_attestation"]["revision"],
+            expected_schema=_SELECTION_SCHEMA,
+        )
+        _validate_selection(
+            selection,
+            operation_key=chosen_option["operation_key"],
+            packet_digest=f"sha256:{packet['packet_digest']}",
+            chosen_option_id=chosen_action,
+            carrier_ref=chosen_option["carrier_ref"],
+            packet_as_of=bundle["as_of"],
+        )
+        assignment_method = (
+            "trusted_ceo_intent_selection_from_a1_incomparable_frontier"
+        )
+    else:
         raise OutcomeLearningCliError(
             f"refusing to seal chosen_action {chosen_action}: disposition={disposition} "
-            f"does not map to a known assignment.method (selection_state="
+            f"does not map to a lawful selection path (selection_state="
             f"{packet['selection_state']}, recommended_option_id="
             f"{packet['recommended_option_id']})"
         )
@@ -1085,7 +1597,6 @@ def cmd_seal(args: argparse.Namespace) -> int:
     # otherwise attach this packet's digest to an unrelated operation/parent/carrier.
     # --operation-key/--parent-head become optional cross-checks: if supplied, they
     # must exactly equal what the option already says, or sealing refuses outright.
-    chosen_option = next(item for item in options if item["option_id"] == chosen_action)
     operation_key = chosen_option["operation_key"]
     expected_parent_head = chosen_option["expected_head_sha"]
     option_repositories = chosen_option["repositories"]
@@ -1121,6 +1632,31 @@ def cmd_seal(args: argparse.Namespace) -> int:
         f"sha256:{packet['packet_digest']}",
         f"sha256:{composition['composition_digest']}",
     ]
+    context_source_refs = [
+        bundle["chairman_directive"]["source_ref"],
+        _STRATEGIC_SOURCE_REF,
+        _AGENT_OS_SOURCE_REF,
+        "GITHUB:Mastermind:protected-master",
+    ]
+    source_cutoff = bundle["as_of"]
+    selection_binding: dict[str, Any] | None = None
+    if selection is not None:
+        context_source_refs.append(selection["source_ref"])
+        source_packet_digests.append(selection["receipt_digest"])
+        source_cutoff = selection["observed_at"]
+        selection_binding = {
+            "source_ref": selection["source_ref"],
+            "receipt_digest": selection["receipt_digest"],
+        }
+    expectation_recorded_at = _event_time(clock, after=source_cutoff)
+    request_recorded_at = _event_time(clock, after=expectation_recorded_at)
+    final_decision_binding = {
+        "operation_key": operation_key,
+        "packet_digest": f"sha256:{packet['packet_digest']}",
+        "chosen_option_id": chosen_action,
+        "carrier_ref": chosen_option["carrier_ref"],
+        "selection": selection_binding,
+    }
 
     expectation = build_expectation(
         decision_ref={
@@ -1130,20 +1666,15 @@ def cmd_seal(args: argparse.Namespace) -> int:
         },
         operation_key=operation_key,
         decision_kind="organizational_learning_episode",
-        recorded_at=args.recorded_at,
+        recorded_at=expectation_recorded_at,
         context={
-            "source_refs": [
-                bundle["chairman_directive"]["source_ref"],
-                _STRATEGIC_SOURCE_REF,
-                _AGENT_OS_SOURCE_REF,
-                "GITHUB:Mastermind:protected-master",
-            ],
+            "source_refs": context_source_refs,
             "task_kind": "organizational_learning_episode",
             "risk": "routine",
             "ambiguity": "low",
             "program": "organizational-learning",
             "repository": request_repository,
-            "source_cutoff": bundle["as_of"],
+            "source_cutoff": source_cutoff,
             "applicability_cohort": (
                 "supervised reversible GitHub metadata canary, repository-owner PR, "
                 "single episode"
@@ -1195,7 +1726,7 @@ def cmd_seal(args: argparse.Namespace) -> int:
                 "kind": "probability",
             },
             {
-                "metric_id": "ci_green_at_final_head",
+                "metric_id": "ci_green_at_frozen_evidence_commit",
                 "horizon": "delayed",
                 "estimate": 0.80,
                 "lower": 0.55,
@@ -1298,12 +1829,7 @@ def cmd_seal(args: argparse.Namespace) -> int:
         memory_exposure={
             "pre_memory_option_set_digest": option_set_digest,
             "final_option_set_digest": option_set_digest,
-            "final_decision_digest": canonical_digest(
-                {
-                    "operation_key": operation_key,
-                    "recommended_option_id": packet["recommended_option_id"],
-                }
-            ),
+            "final_decision_digest": canonical_digest(final_decision_binding),
             "consulted": [
                 {
                     "record_ref": "DEC:OUTCOME-LEARNING-POLICY-CALIBRATION-ARCHITECTURE",
@@ -1340,7 +1866,7 @@ def cmd_seal(args: argparse.Namespace) -> int:
         repository=request_repository,
         branch=request_branch,
         expected_parent_head=expected_parent_head,
-        recorded_at=args.recorded_at,
+        recorded_at=request_recorded_at,
     )
 
     _write_artifact(args.out_expectation, expectation)
@@ -1393,7 +1919,13 @@ def _committed_blob_content_sha256(
     return blob_id, committed_content_sha256
 
 
-def cmd_preflight(args: argparse.Namespace, *, runner: Runner | None = None, transport: GhTransport | None = None) -> int:
+def cmd_preflight(
+    args: argparse.Namespace,
+    *,
+    runner: Runner | None = None,
+    transport: GhTransport | None = None,
+    clock: Clock | None = None,
+) -> int:
     """Sol REQUEST_REPAIR, 2026-09-02: preflight proves ``head_equals_sealed_commit``
     together with an independently-verified claim that the expectation/request
     artifacts are the EXACT bytes committed at ``sealed_commit`` — never a local
@@ -1471,8 +2003,9 @@ def cmd_preflight(args: argparse.Namespace, *, runner: Runner | None = None, tra
     original_title_sha256 = _sha256_hex_text(original_title)
     head_sha = pr["head"]["sha"]
 
+    observed_at = _event_time(clock, after=request_obj["recorded_at"])
     preflight = {
-        "observed_at": args.observed_at,
+        "observed_at": observed_at,
         "repository": args.repo,
         "pr_number": pr["number"],
         "pr_url": pr["html_url"],
@@ -1505,18 +2038,20 @@ def _make_call(
     payload_sha: str,
     status: int | str,
     doc: Mapping[str, Any],
-    recorded_at: str,
+    *,
+    requested_at: str,
+    observed_at: str,
 ) -> dict[str, Any]:
     return {
         "seq": seq,
         "kind": kind,
-        "requested_at": recorded_at,
+        "requested_at": requested_at,
         "method": "PATCH",
         "endpoint": endpoint,
         "payload_title_sha256": payload_sha,
         "response_status": status,
         "readback": {
-            "observed_at": recorded_at,
+            "observed_at": observed_at,
             "title_sha256": _sha256_hex_text(doc["title"]),
             "title_length": len(doc["title"]),
             "head_sha": doc["head"]["sha"],
@@ -1525,20 +2060,28 @@ def _make_call(
 
 
 def _reconcile(
-    transport: GhTransport, endpoint: str
+    transport: GhTransport,
+    endpoint: str,
+    *,
+    clock: Clock | None,
+    after: str,
 ) -> dict[str, Any]:
-    """EXACTLY one read-only reconciliation GET — never a retry of any PATCH. Returns
-    the actually-observed post-effect state, or nulls when even the reconciliation
-    itself failed (BLOCKER 1: the caller must then report "UNOBSERVED", never guess)."""
+    """Perform exactly one read-only reconciliation GET, never an effect retry."""
     try:
         _, doc = transport.get(endpoint)
         return {
             "attempted": True,
             "observed_title_sha256": _sha256_hex_text(doc["title"]),
             "observed_head_sha": doc["head"]["sha"],
+            "observed_at": _event_time(clock, after=after),
         }
     except Exception:  # noqa: BLE001 - preserve EFFECT_UNKNOWN without a retry
-        return {"attempted": True, "observed_title_sha256": None, "observed_head_sha": None}
+        return {
+            "attempted": True,
+            "observed_title_sha256": None,
+            "observed_head_sha": None,
+            "observed_at": _event_time(clock, after=after),
+        }
 
 
 #: BLOCKER D journal state machine (CLI-internal artifact — not an OL-V1 contract
@@ -1551,21 +2094,58 @@ _JOURNAL_TERMINAL_STATES = frozenset(
 )
 
 
+def _canonical_journal_identity(
+    request: Mapping[str, Any], preflight: Mapping[str, Any]
+) -> dict[str, Any]:
+    return {
+        "repository": request["repository"],
+        "branch": request["branch"],
+        "operation_key": request["operation_key"],
+        "expectation_sealed_hash": request["expectation_sealed_hash"],
+        "sealed_commit_sha": preflight["sealed_commit_sha"],
+        "expected_parent_head": request["expected_parent_head"],
+        "preflight_pr_number": preflight["pr_number"],
+        "canary_token": request["canary_token"],
+        "request_digest": canonical_digest(request).removeprefix("sha256:"),
+    }
+
+
+def _canonical_journal_path(
+    request: Mapping[str, Any],
+    preflight: Mapping[str, Any],
+    *,
+    journal_root: Path | None = None,
+) -> Path:
+    """Derive the single host-owned journal identity; callers cannot select its path."""
+    root = Path(journal_root) if journal_root is not None else _CANONICAL_JOURNAL_ROOT
+    identity = _canonical_journal_identity(request, preflight)
+    repository_key = _sha256_hex_text(str(identity["repository"]))[:24]
+    branch_key = _sha256_hex_text(str(identity["branch"]))[:24]
+    expectation_key = str(identity["expectation_sealed_hash"]).removeprefix("sha256:")
+    return (
+        root
+        / repository_key
+        / branch_key
+        / str(identity["operation_key"])
+        / expectation_key
+        / str(identity["sealed_commit_sha"])
+        / "journal.json"
+    )
+
+
 def _reserve_journal(journal_path: Path, record: dict[str, Any]) -> None:
     """Atomically reserve the single-shot journal (BLOCKER D). ``open(..., 'x')``
     (exclusive create) is the ENTIRE single-shot guard: whichever of two racing
     invocations wins this call proceeds, and the other sees ``FileExistsError``
     unconditionally — regardless of what state a pre-existing reservation is in."""
-    journal_path.parent.mkdir(parents=True, exist_ok=True)
+    journal_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     try:
-        fd = os.open(str(journal_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        fd = os.open(str(journal_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     except FileExistsError as exc:
         raise OutcomeLearningCliError(
-            f"{journal_path} already exists — OL-V1 canary is single-shot per "
-            "operation_key + expectation_sealed_hash within one --episode-dir "
-            "(BLOCKER D: ANY pre-existing reservation, whatever its state, refuses; "
-            "a different --episode-dir can only be stopped operationally by the "
-            "supervised single-operator law — see the runbook)"
+            f"{journal_path} already exists — OL-V1 canary is single-shot for the "
+            "host-owned repository + branch + operation + expectation + sealed-commit "
+            "identity; every pre-existing reservation refuses, whatever its state"
         ) from exc
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
         handle.write(json.dumps(record, indent=2, sort_keys=True) + "\n")
@@ -1581,46 +2161,29 @@ def _advance_journal(journal_path: Path, record: dict[str, Any]) -> None:
 
 
 def cmd_canary(
-    args: argparse.Namespace, *, runner: Runner | None = None, transport: GhTransport | None = None
+    args: argparse.Namespace,
+    *,
+    runner: Runner | None = None,
+    transport: GhTransport | None = None,
+    clock: Clock | None = None,
+    journal_root: Path | None = None,
 ) -> int:
-    """Apply-then-restore, no retry, ever.
-
-    Sol REQUEST_REPAIR (BLOCKERS C + D, 2026-09-02): the canary request is REACQUIRED
-    from its committed git blob (never trusted from the local ``--request`` file
-    beyond locating that blob) and independently re-validated before anything else
-    happens; the owner's exact branch selector is re-run to reprove there is still
-    exactly one open PR whose number matches preflight, before the pre-effect
-    freshness read. The derived journal is reserved via an atomic exclusive-create
-    BEFORE any transport call at all — read or write — and advanced through an
-    explicit state machine (PREPARED -> APPLY_SENT -> APPLIED_READBACK ->
-    RESTORE_SENT -> a terminal state) so a crash after APPLY leaves a non-terminal
-    reservation on disk that the next invocation refuses outright rather than
-    replays. Any exception mid-sequence gets EXACTLY one read-only reconciliation GET
-    (best effort) and the episode reports EFFECT_UNKNOWN; a completed apply call is
-    always journaled honestly (BLOCKER 1's poststate law).
-    """
-    transport = transport or GhCliTransport()
+    """Apply-then-restore, no retry, with one canonical host-owned journal."""
     runner = runner or SubprocessRunner()
-    episode_dir = _refuse_inside_repo(args.episode_dir, where="canary --episode-dir")
+    transport = transport or GhCliTransport(runner)
 
     preflight = _read_json(args.preflight)
-    # Sol REQUEST_REPAIR: validate_preflight (including its seal_provenance ==
-    # "COMMITTED_BLOBS_VERIFIED" check) runs BEFORE any transport call — a tampered
-    # or absent seal_provenance raises here, so the episode never issues a single GET
-    # or PATCH against a preflight this CLI cannot prove is committed-seal-verified.
     validate_preflight(preflight)
 
-    # BLOCKER C: reacquire the canary request from its committed blob — a git-only
-    # read, zero transport — and independently re-validate it. The local --request
-    # file is never trusted beyond having pointed us at this preflight/blob in the
-    # first place; every field used from here on is the REACQUIRED document.
+    # Reacquire the request from the exact committed blob before any transport call.
     cat_file = runner.run(
-        ["git", "cat-file", "-p", preflight["request_blob_sha"]], cwd=args.mastermind_root
+        ["git", "cat-file", "-p", preflight["request_blob_sha"]],
+        cwd=args.mastermind_root,
     )
     if cat_file.returncode != 0:
         raise OutcomeLearningCliError(
-            f"could not reacquire the committed request blob {preflight['request_blob_sha']}: "
-            f"{cat_file.stderr.strip()}"
+            f"could not reacquire the committed request blob "
+            f"{preflight['request_blob_sha']}: {cat_file.stderr.strip()}"
         )
     try:
         request = json.loads(cat_file.stdout)
@@ -1641,53 +2204,46 @@ def cmd_canary(
             f"reacquired request.repository {request['repository']!r} does not match "
             f"preflight.repository {preflight['repository']!r}"
         )
-
     if preflight["head_equals_sealed_commit"] is not True:
         raise OutcomeLearningCliError(
             "refusing to canary: preflight.head_equals_sealed_commit is not True"
         )
 
-    journal_name = (
-        f"canary_journal.{request['operation_key']}."
-        f"{request['expectation_sealed_hash'][7:19]}.json"
+    journal_path = _canonical_journal_path(
+        request, preflight, journal_root=journal_root
     )
-    journal_path = episode_dir / journal_name
-    bound_identity = {
-        "repository": request["repository"],
-        "branch": request["branch"],
-        "operation_key": request["operation_key"],
-        "expectation_sealed_hash": request["expectation_sealed_hash"],
-        "sealed_commit_sha": preflight["sealed_commit_sha"],
-        "expected_parent_head": request["expected_parent_head"],
-        "preflight_pr_number": preflight["pr_number"],
-        "canary_token": request["canary_token"],
-        "request_digest": reacquired_digest,
-    }
-
-    # BLOCKER D: the atomic reservation — before ANY transport call, read or write.
+    bound_identity = _canonical_journal_identity(request, preflight)
+    if bound_identity["request_digest"] != reacquired_digest:
+        raise OutcomeLearningCliError(
+            "canonical journal request identity does not match the committed request blob"
+        )
+    prepared_at = _event_time(clock, after=preflight["observed_at"])
     _reserve_journal(
         journal_path,
-        {"state": "PREPARED", "bound_identity": bound_identity, "recorded_at": args.recorded_at},
+        {
+            "state": "PREPARED",
+            "bound_identity": bound_identity,
+            "recorded_at": prepared_at,
+        },
     )
 
     endpoint = f"repos/{request['repository']}/pulls/{preflight['pr_number']}"
     original_sha = preflight["original_title_sha256"]
     sealed_head = preflight["sealed_commit_sha"]
 
-    # BLOCKER C: re-run the EXACT owner branch selector (never merely re-GET the
-    # already-known PR number) — reproving there is still exactly one open PR for
-    # this branch AND that its number agrees with preflight, before trusting
-    # anything else the owner reports.
+    # Re-run the exact owner selector after reserving the one lawful carrier.
     _, prs = transport.get(
         f"repos/{request['repository']}/pulls?head="
         f"{request['repository'].split('/')[0]}:{request['branch']}&state=open"
     )
+    selector_at = _event_time(clock, after=prepared_at)
     selector_ok = (
         isinstance(prs, list)
         and len(prs) == 1
         and prs[0].get("number") == preflight["pr_number"]
     )
     if not selector_ok:
+        terminal_at = _event_time(clock, after=selector_at)
         _advance_journal(
             journal_path,
             {
@@ -1696,7 +2252,7 @@ def cmd_canary(
                 "effect_calls": [],
                 "reconciliation": None,
                 "pre_effect_observation": None,
-                "recorded_at": args.recorded_at,
+                "recorded_at": terminal_at,
             },
         )
         print(
@@ -1705,10 +2261,9 @@ def cmd_canary(
         )
         return 6
 
-    # Pre-effect freshness gate (MAJOR 5 + BLOCKER E): read the live PR once, before
-    # issuing any PATCH, and refuse outright — zero PATCHes — if it has drifted from
-    # preflight. The exact observation is journaled honestly either way (BLOCKER E).
+    # Observe the exact PR once more immediately before the first possible PATCH.
     _, current = transport.get(endpoint)
+    freshness_at = _event_time(clock, after=selector_at)
     live_head = current["head"]["sha"]
     live_title = current["title"]
     live_title_sha = _sha256_hex_text(live_title)
@@ -1716,9 +2271,10 @@ def cmd_canary(
         "observed_head_sha": live_head,
         "observed_title_sha256": live_title_sha,
         "observed_title_length": len(live_title),
-        "observed_at": args.recorded_at,
+        "observed_at": freshness_at,
     }
     if live_head != sealed_head or live_title_sha != original_sha:
+        terminal_at = _event_time(clock, after=freshness_at)
         _advance_journal(
             journal_path,
             {
@@ -1727,30 +2283,46 @@ def cmd_canary(
                 "effect_calls": [],
                 "reconciliation": None,
                 "pre_effect_observation": pre_effect_observation,
-                "recorded_at": args.recorded_at,
+                "recorded_at": terminal_at,
             },
         )
-        print(f"effect_state=INVALIDATED_BEFORE_EFFECT (drift: {pre_effect_observation})")
+        print(
+            "effect_state=INVALIDATED_BEFORE_EFFECT "
+            f"(drift: {pre_effect_observation})"
+        )
         return 6
 
     original_title = live_title
     applied_title = original_title + " " + request["canary_token"]
     applied_sha = _sha256_hex_text(applied_title)
-
+    apply_requested_at = _event_time(clock, after=freshness_at)
     _advance_journal(
         journal_path,
         {
             "state": "APPLY_SENT",
             "bound_identity": bound_identity,
             "pre_effect_observation": pre_effect_observation,
-            "recorded_at": args.recorded_at,
+            "recorded_at": apply_requested_at,
         },
     )
     try:
         status1, applied_doc = transport.patch(endpoint, {"title": applied_title})
-        call1 = _make_call(1, "TITLE_APPLY", endpoint, applied_sha, status1, applied_doc, args.recorded_at)
+        apply_observed_at = _event_time(clock, after=apply_requested_at)
+        call1 = _make_call(
+            1,
+            "TITLE_APPLY",
+            endpoint,
+            applied_sha,
+            status1,
+            applied_doc,
+            requested_at=apply_requested_at,
+            observed_at=apply_observed_at,
+        )
     except Exception:  # noqa: BLE001 - the apply may have crossed the effect boundary
-        reconciliation = _reconcile(transport, endpoint)
+        reconciliation = _reconcile(
+            transport, endpoint, clock=clock, after=apply_requested_at
+        )
+        terminal_at = _event_time(clock, after=reconciliation["observed_at"])
         _advance_journal(
             journal_path,
             {
@@ -1759,7 +2331,7 @@ def cmd_canary(
                 "effect_calls": [],
                 "reconciliation": reconciliation,
                 "pre_effect_observation": pre_effect_observation,
-                "recorded_at": args.recorded_at,
+                "recorded_at": terminal_at,
             },
         )
         print("effect_state=EFFECT_UNKNOWN (apply raised)")
@@ -1772,9 +2344,10 @@ def cmd_canary(
             "bound_identity": bound_identity,
             "effect_calls": [call1],
             "pre_effect_observation": pre_effect_observation,
-            "recorded_at": args.recorded_at,
+            "recorded_at": apply_observed_at,
         },
     )
+    restore_requested_at = _event_time(clock, after=apply_observed_at)
     _advance_journal(
         journal_path,
         {
@@ -1782,16 +2355,22 @@ def cmd_canary(
             "bound_identity": bound_identity,
             "effect_calls": [call1],
             "pre_effect_observation": pre_effect_observation,
-            "recorded_at": args.recorded_at,
+            "recorded_at": restore_requested_at,
         },
     )
     try:
-        # MAJOR 6: the restore payload's digest is computed from the title text
-        # ACTUALLY SENT in this PATCH, never fetched indirectly from preflight.
         restore_payload_sha = _sha256_hex_text(original_title)
         status2, restored_doc = transport.patch(endpoint, {"title": original_title})
+        restore_observed_at = _event_time(clock, after=restore_requested_at)
         call2 = _make_call(
-            2, "TITLE_RESTORE", endpoint, restore_payload_sha, status2, restored_doc, args.recorded_at
+            2,
+            "TITLE_RESTORE",
+            endpoint,
+            restore_payload_sha,
+            status2,
+            restored_doc,
+            requested_at=restore_requested_at,
+            observed_at=restore_observed_at,
         )
         clean = (
             call1["readback"]["title_sha256"] == applied_sha
@@ -1802,15 +2381,16 @@ def cmd_canary(
         effect_calls = [call1, call2]
         state = "RESTORED" if clean else "EFFECT_UNKNOWN"
         reconciliation = None
-    except Exception:  # noqa: BLE001 - the restore may have crossed the effect boundary
-        # BLOCKER 1: the apply DID complete — call1 is real evidence and is journaled,
-        # never discarded. The reconciliation GET's observed title (or UNOBSERVED, if
-        # even that fails) becomes cmd_outcome's poststate — never a guessed "nothing
-        # changed" over a PR that may still carry the mutated, unrestored title.
-        reconciliation = _reconcile(transport, endpoint)
+        evidence_at = restore_observed_at
+    except Exception:  # noqa: BLE001 - restore may have crossed the effect boundary
+        reconciliation = _reconcile(
+            transport, endpoint, clock=clock, after=restore_requested_at
+        )
         effect_calls = [call1]
         state = "EFFECT_UNKNOWN"
+        evidence_at = reconciliation["observed_at"]
 
+    terminal_at = _event_time(clock, after=evidence_at)
     _advance_journal(
         journal_path,
         {
@@ -1819,7 +2399,7 @@ def cmd_canary(
             "effect_calls": effect_calls,
             "reconciliation": reconciliation,
             "pre_effect_observation": pre_effect_observation,
-            "recorded_at": args.recorded_at,
+            "recorded_at": terminal_at,
         },
     )
     if state == "EFFECT_UNKNOWN":
@@ -1827,7 +2407,6 @@ def cmd_canary(
         return 3
     print("effect_state=APPLIED_AND_RESTORED")
     return 0
-
 
 # --------------------------------------------------------------------------- outcome
 
@@ -1869,28 +2448,58 @@ def _derive_effect_edge(journal: Mapping[str, Any]) -> dict[str, bool]:
     }
 
 
-def cmd_outcome(args: argparse.Namespace) -> int:
-    """Restoration is derived in strict priority order, honest evidence first
-    (BLOCKER 1): a reconciliation GET that actually observed the live title is ground
-    truth over anything else, including the calls' own readbacks — the reconciliation
-    runs precisely because the calls could not be trusted. Only when there is truly no
-    observation at all does poststate become the literal "UNOBSERVED".
-
-    Sol REQUEST_REPAIR (BLOCKER D): a journal whose ``state`` is not one of the three
-    terminal states (a crash mid-sequence) is refused outright — never replayed,
-    never silently interpreted as any particular outcome.
-    """
-    journal = _read_json(args.journal)
+def cmd_outcome(
+    args: argparse.Namespace,
+    *,
+    clock: Clock | None = None,
+    journal_root: Path | None = None,
+) -> int:
+    """Assemble an outcome only from the canonical terminal journal identity."""
     preflight = _read_json(args.preflight)
     expectation = _read_json(args.expectation)
     request = _read_json(args.request)
+    validate_preflight(preflight)
+    validate_expectation(expectation)
+    validate_canary_request(request)
 
-    journal_state = journal["state"]
+    if request["operation_key"] != expectation["operation_key"]:
+        raise OutcomeLearningCliError(
+            "request.operation_key does not match expectation.operation_key"
+        )
+    if request["expectation_sealed_hash"] != expectation["sealed_hash"]:
+        raise OutcomeLearningCliError(
+            "request.expectation_sealed_hash does not match expectation.sealed_hash"
+        )
+    request_digest = canonical_digest(request).removeprefix("sha256:")
+    expectation_digest = canonical_digest(expectation).removeprefix("sha256:")
+    if preflight["request_content_sha256"] != request_digest:
+        raise OutcomeLearningCliError(
+            "preflight.request_content_sha256 does not match the supplied request"
+        )
+    if preflight["expectation_content_sha256"] != expectation_digest:
+        raise OutcomeLearningCliError(
+            "preflight.expectation_content_sha256 does not match the supplied expectation"
+        )
+
+    journal_path = _canonical_journal_path(
+        request, preflight, journal_root=journal_root
+    )
+    journal = _read_json(journal_path)
+    expected_identity = _canonical_journal_identity(request, preflight)
+    if expected_identity["request_digest"] != request_digest:
+        raise OutcomeLearningCliError(
+            "canonical journal request identity does not match the supplied request"
+        )
+    if journal.get("bound_identity") != expected_identity:
+        raise OutcomeLearningCliError(
+            "canonical journal bound_identity does not match the supplied episode"
+        )
+
+    journal_state = journal.get("state")
     if journal_state not in _JOURNAL_TERMINAL_STATES:
         raise OutcomeLearningCliError(
             f"journal is in non-terminal state {journal_state!r} — refusing "
-            "(BLOCKER D: a crash mid-sequence is never replayed and never "
-            "interpreted as any particular outcome)"
+            "(a crash mid-sequence is never replayed or interpreted as an outcome)"
         )
     effect_state = _JOURNAL_STATE_TO_EFFECT_STATE[journal_state]
     effect_calls = journal.get("effect_calls", [])
@@ -1900,10 +2509,6 @@ def cmd_outcome(args: argparse.Namespace) -> int:
     sealed_head = preflight["sealed_commit_sha"]
 
     if effect_state == "INVALIDATED_BEFORE_EFFECT":
-        # BLOCKER E: derive restoration HONESTLY from the exact pre-effect
-        # observation that caused the refusal — never assume "zero PATCHes" means
-        # "unchanged state". A selector-stage refusal (no freshness read reached)
-        # has no observation at all, so poststate is the literal UNOBSERVED.
         if pre_effect_observation is None:
             restoration = {
                 "byte_identical": None,
@@ -1920,16 +2525,17 @@ def cmd_outcome(args: argparse.Namespace) -> int:
                 "poststate_title_sha256": observed_title,
                 "head_unchanged": observed_head == sealed_head,
             }
-    elif effect_state in {"APPLIED_AND_RESTORED", "NOT_ATTEMPTED"}:
+    elif effect_state == "APPLIED_AND_RESTORED":
         restoration = {
             "byte_identical": True,
             "prestate_title_sha256": original_sha,
             "poststate_title_sha256": original_sha,
             "head_unchanged": True,
         }
-    elif reconciliation is not None and reconciliation.get("observed_title_sha256") is not None:
-        # EFFECT_UNKNOWN with a reconciliation GET that actually observed the live
-        # title — the ground truth for "what state is the PR in right now".
+    elif (
+        reconciliation is not None
+        and reconciliation.get("observed_title_sha256") is not None
+    ):
         observed_title = reconciliation["observed_title_sha256"]
         observed_head = reconciliation.get("observed_head_sha")
         restoration = {
@@ -1939,8 +2545,6 @@ def cmd_outcome(args: argparse.Namespace) -> int:
             "head_unchanged": observed_head == sealed_head,
         }
     elif reconciliation is not None:
-        # Reconciliation was attempted but itself failed — genuinely no observed
-        # post-effect state, so poststate is the literal UNOBSERVED, never a guess.
         restoration = {
             "byte_identical": None,
             "prestate_title_sha256": original_sha,
@@ -1948,9 +2552,6 @@ def cmd_outcome(args: argparse.Namespace) -> int:
             "head_unchanged": False,
         }
     elif effect_calls:
-        # No reconciliation was attempted (both calls completed without raising, but
-        # their readbacks did not match expectations) — the calls' own evidence is
-        # definitive; report what the last observed readback actually showed.
         last = effect_calls[-1]
         restoration = {
             "byte_identical": last["readback"]["title_sha256"] == original_sha,
@@ -1959,7 +2560,6 @@ def cmd_outcome(args: argparse.Namespace) -> int:
             "head_unchanged": last["readback"]["head_sha"] == sealed_head,
         }
     else:
-        # No calls and no reconciliation at all: genuinely no basis to claim anything.
         restoration = {
             "byte_identical": None,
             "prestate_title_sha256": original_sha,
@@ -1967,10 +2567,6 @@ def cmd_outcome(args: argparse.Namespace) -> int:
             "head_unchanged": False,
         }
 
-    # The journal keeps pre_effect_observation for every state once the freshness
-    # GET has run (audit trail for cmd_canary's own control flow), but the outcome
-    # contract permits it ONLY on the INVALIDATED_BEFORE_EFFECT terminal state — carry
-    # it into the outcome exactly there, never on APPLIED_AND_RESTORED/EFFECT_UNKNOWN.
     outcome_pre_effect_observation = (
         pre_effect_observation if effect_state == "INVALIDATED_BEFORE_EFFECT" else None
     )
@@ -1984,8 +2580,9 @@ def cmd_outcome(args: argparse.Namespace) -> int:
         restoration=restoration,
         pre_effect_observation=outcome_pre_effect_observation,
         effect_edge=_derive_effect_edge(journal),
-        recorded_at=args.recorded_at,
+        recorded_at=_event_time(clock, after=journal["recorded_at"]),
     )
+    validate_outcome(outcome, expectation, request)
     _write_artifact(args.out, outcome)
     print(f"effect_state={outcome['effect_state']}")
     return 0
@@ -1994,39 +2591,256 @@ def cmd_outcome(args: argparse.Namespace) -> int:
 # --------------------------------------------------------------------------- evaluate / self-model / project
 
 
-def cmd_evaluate(args: argparse.Namespace) -> int:
+def cmd_evaluate(
+    args: argparse.Namespace, *, clock: Clock | None = None
+) -> int:
     expectation = _read_json(args.expectation)
     outcome = _read_json(args.outcome)
     request = _read_json(args.request)
-    evaluation = evaluate_episode(expectation, outcome, request, recorded_at=args.recorded_at)
+    evaluation = evaluate_episode(
+        expectation,
+        outcome,
+        request,
+        recorded_at=_event_time(clock, after=outcome["recorded_at"]),
+    )
+    revision: dict[str, Any] | None = None
+    out_revision = getattr(args, "out_revision", None)
+    if out_revision is not None:
+        revision = build_initial_artifact_revision(
+            artifact_kind="EVALUATION",
+            episode_identity=_episode_identity(expectation, request),
+            payload=evaluation,
+            owner_evidence=[],
+            corrected_at=_event_time(clock, after=evaluation["recorded_at"]),
+        )
     _write_artifact(args.out, evaluation)
-    print(f"causal_grade={evaluation['causal_grade']} promotion={evaluation['promotion']}")
+    if revision is not None:
+        _write_artifact(out_revision, revision)
+    print(
+        f"causal_grade={evaluation['causal_grade']} "
+        f"promotion={evaluation['promotion']}"
+    )
     return 0
 
 
-def cmd_self_model(args: argparse.Namespace) -> int:
+def cmd_self_model(
+    args: argparse.Namespace, *, clock: Clock | None = None
+) -> int:
     evaluation = _read_json(args.evaluation)
     expectation = _read_json(args.expectation)
-    self_model = build_self_model(evaluation, expectation, recorded_at=args.recorded_at)
+    self_model = build_self_model(
+        evaluation,
+        expectation,
+        recorded_at=_event_time(clock, after=evaluation["recorded_at"]),
+    )
     _write_artifact(args.out, self_model)
-    print(f"sample_size={self_model['sample_size']} promotion={self_model['promotion']}")
+    print(
+        f"sample_size={self_model['sample_size']} "
+        f"promotion={self_model['promotion']}"
+    )
     return 0
 
 
-def cmd_project(args: argparse.Namespace) -> int:
+def cmd_project(
+    args: argparse.Namespace, *, clock: Clock | None = None
+) -> int:
     evaluation = _read_json(args.evaluation)
     expectation = _read_json(args.expectation)
     outcome = _read_json(args.outcome)
-    # key_hint is derived from recorded_at's own date, never hardcoded — the CLI
-    # supplies it (evaluator.build_agentos_projection never invents its own "today").
-    key_hint = f"OLV1-EPISODE-CONSEQUENCE-{args.recorded_at[:10]}"
+    recorded_at = _event_time(clock, after=evaluation["recorded_at"])
+    key_hint = f"OLV1-EPISODE-CONSEQUENCE-{recorded_at[:10]}"
     projection = build_agentos_projection(
-        evaluation, expectation, outcome, recorded_at=args.recorded_at, key_hint=key_hint
+        evaluation,
+        expectation,
+        outcome,
+        recorded_at=recorded_at,
+        key_hint=key_hint,
     )
     _write_artifact(args.out, projection)
     print(f"candidates={len(projection['candidates'])}")
     return 0
 
+
+# --------------------------------------------------------------------------- remote publication / maturation
+
+
+def cmd_capture_publication(
+    args: argparse.Namespace,
+    *,
+    runner: Runner | None = None,
+    transport: GhTransport | None = None,
+    clock: Clock | None = None,
+) -> int:
+    """Capture immutable git/GitHub readback; this command has no write transport."""
+    runner = runner or SubprocessRunner()
+    transport = transport or GhCliTransport(runner)
+    expectation = _read_json(args.expectation)
+    request = _read_json(args.request)
+    identity = _episode_identity(expectation, request)
+    if args.repo != request["repository"] or args.branch != request["branch"]:
+        raise OutcomeLearningCliError(
+            "publication repo/branch must exactly match the sealed canary request"
+        )
+    if _SHA40_RE.fullmatch(args.target_commit) is None:
+        raise OutcomeLearningCliError("target commit must be 40 lowercase hex")
+    if _SHA40_RE.fullmatch(args.frozen_evidence_commit) is None:
+        raise OutcomeLearningCliError(
+            "frozen evidence commit must be 40 lowercase hex"
+        )
+
+    _, branch_doc = transport.get(
+        f"repos/{args.repo}/git/ref/heads/{args.branch}"
+    )
+    branch_sha = _extract_remote_sha(branch_doc, where="branch")
+    if branch_sha != args.target_commit:
+        raise OutcomeLearningCliError(
+            f"remote branch head {branch_sha} does not equal target commit "
+            f"{args.target_commit}"
+        )
+    _, pr_doc = transport.get(f"repos/{args.repo}/pulls/{args.pr_number}")
+    pr_sha = _extract_remote_sha(pr_doc, where="PR")
+    if pr_sha != args.target_commit:
+        raise OutcomeLearningCliError(
+            f"remote PR head {pr_sha} does not equal target commit {args.target_commit}"
+        )
+
+    if args.stage == "MATURATION_COMMIT":
+        _require_commit_ancestor(
+            runner,
+            args.mastermind_root,
+            args.frozen_evidence_commit,
+            args.target_commit,
+        )
+    artifact_digests = [
+        _artifact_digest_at_commit(
+            runner,
+            args.mastermind_root,
+            args.target_commit,
+            path,
+        )
+        for path in args.artifact
+    ]
+    checks: list[dict[str, Any]] = []
+    observed_at = _event_time(clock)
+    if args.stage == "MATURATION_COMMIT":
+        raw_checks = _check_runs_page(transport, args.repo, args.target_commit)
+        if not raw_checks:
+            raise OutcomeLearningCliError(
+                "MATURATION_COMMIT has no terminal hosted check runs"
+            )
+        checks = [
+            _normalized_check_evidence(
+                raw,
+                repository=args.repo,
+                expected_commit_sha=args.target_commit,
+                observed_at=observed_at,
+            )
+            for raw in raw_checks
+        ]
+        observed_at = _event_time(clock, after=observed_at)
+
+    receipt = build_remote_publication_receipt(
+        stage=args.stage,
+        repository=args.repo,
+        branch=args.branch,
+        pr_number=args.pr_number,
+        episode_identity=identity,
+        target_commit_sha=args.target_commit,
+        frozen_evidence_commit_sha=args.frozen_evidence_commit,
+        remote_branch_head_sha=branch_sha,
+        remote_pr_head_sha=pr_sha,
+        artifact_digests=artifact_digests,
+        checks=checks,
+        observed_at=observed_at,
+    )
+    out = _refuse_inside_repo(args.out, where="remote publication receipt")
+    _write_artifact(out, receipt)
+    print(
+        f"publication_stage={receipt['stage']} "
+        f"target_commit={receipt['target_commit_sha']}"
+    )
+    return 0
+
+
+def cmd_mature_evaluation(
+    args: argparse.Namespace,
+    *,
+    transport: GhTransport | None = None,
+    clock: Clock | None = None,
+) -> int:
+    """Append one deterministic delayed-CI correction from exact GitHub evidence."""
+    transport = transport or GhCliTransport()
+    expectation = _read_json(args.expectation)
+    request = _read_json(args.request)
+    outcome = _read_json(args.outcome)
+    initial_evaluation = _read_json(args.initial_evaluation)
+    initial_revision = _read_json(args.initial_revision)
+    evidence_receipt = _read_json(args.evidence_receipt)
+
+    identity = _episode_identity(expectation, request)
+    validate_outcome(outcome, expectation, request)
+    validate_evaluation(initial_evaluation, expectation, outcome)
+    validate_artifact_revision(initial_revision)
+    validate_remote_publication_receipt(evidence_receipt)
+    if initial_revision["artifact_kind"] != "EVALUATION":
+        raise OutcomeLearningCliError("initial revision is not an EVALUATION revision")
+    if initial_revision["payload"] != initial_evaluation:
+        raise OutcomeLearningCliError(
+            "initial revision payload does not equal the immutable initial evaluation"
+        )
+    if initial_revision["episode_identity"] != identity:
+        raise OutcomeLearningCliError(
+            "initial revision episode identity does not match expectation/request"
+        )
+    if evidence_receipt["stage"] != "EVIDENCE_COMMIT":
+        raise OutcomeLearningCliError(
+            "CI maturation requires an EVIDENCE_COMMIT publication receipt"
+        )
+    if evidence_receipt["episode_identity"] != identity:
+        raise OutcomeLearningCliError(
+            "evidence receipt episode identity does not match expectation/request"
+        )
+    frozen_sha = evidence_receipt["frozen_evidence_commit_sha"]
+    repository = evidence_receipt["repository"]
+    raw_checks = _check_runs_page(transport, repository, frozen_sha)
+    matches = [raw for raw in raw_checks if raw.get("name") == args.check_name]
+    if len(matches) != 1:
+        raise OutcomeLearningCliError(
+            f"expected exactly one GitHub check named {args.check_name!r}, got {len(matches)}"
+        )
+    check_observed_at = _event_time(clock, after=evidence_receipt["observed_at"])
+    owner_check = _normalized_check_evidence(
+        matches[0],
+        repository=repository,
+        expected_commit_sha=frozen_sha,
+        observed_at=check_observed_at,
+    )
+    evaluation_recorded_at = _event_time(clock, after=check_observed_at)
+    matured = mature_ci_evaluation(
+        expectation,
+        outcome,
+        request,
+        initial_evaluation,
+        evidence_commit_sha=frozen_sha,
+        owner_check=owner_check,
+        expected_check_name=args.check_name,
+        recorded_at=evaluation_recorded_at,
+    )
+    correction = build_correction_revision(
+        initial_revision,
+        payload=matured,
+        correction_reason="DELAYED_OWNER_EVIDENCE_MATURATION",
+        owner_evidence=[owner_check],
+        corrected_at=_event_time(clock, after=evaluation_recorded_at),
+    )
+    validate_revision_chain([initial_revision, correction])
+    _write_artifact(args.out_evaluation, matured)
+    _write_artifact(args.out_revision, correction)
+    print(
+        f"matured_metric=ci_green_at_frozen_evidence_commit "
+        f"evidence_commit={frozen_sha} revision={correction['revision']}"
+    )
+    return 0
 
 # --------------------------------------------------------------------------- proof
 
@@ -2094,7 +2908,122 @@ def _verify_proof_chain(
     validate_agentos_projection(projection, evaluation)
 
 
-def cmd_proof(args: argparse.Namespace) -> int:
+def _verify_remote_proof(
+    *,
+    expectation: Mapping[str, Any],
+    request: Mapping[str, Any],
+    evaluation: Mapping[str, Any],
+    self_model: Mapping[str, Any],
+    projection: Mapping[str, Any],
+    revisions: Sequence[Mapping[str, Any]],
+    evidence_receipt: Mapping[str, Any],
+    final_receipt: Mapping[str, Any],
+    runner: Runner,
+    transport: GhTransport,
+    mastermind_root: str | None,
+) -> None:
+    chain = validate_revision_chain(revisions)
+    identity = _episode_identity(expectation, request)
+    if len(chain) < 2:
+        raise OutcomeLearningCliError(
+            "production proof requires an initial revision and a later correction"
+        )
+    if any(item["artifact_kind"] != "EVALUATION" for item in chain):
+        raise OutcomeLearningCliError(
+            "production proof revision chain must contain only EVALUATION revisions"
+        )
+    if any(item["episode_identity"] != identity for item in chain):
+        raise OutcomeLearningCliError(
+            "production proof revision chain does not match the sealed episode"
+        )
+    if chain[-1]["payload"] != evaluation:
+        raise OutcomeLearningCliError(
+            "proof evaluation is not the authoritative payload of the latest revision"
+        )
+    validate_remote_publication_receipt(evidence_receipt)
+    validate_remote_publication_receipt(final_receipt)
+    if evidence_receipt["stage"] != "EVIDENCE_COMMIT":
+        raise OutcomeLearningCliError(
+            "production proof requires one EVIDENCE_COMMIT receipt"
+        )
+    if final_receipt["stage"] != "MATURATION_COMMIT":
+        raise OutcomeLearningCliError(
+            "production proof requires one MATURATION_COMMIT receipt"
+        )
+    if (
+        evidence_receipt["episode_identity"] != identity
+        or final_receipt["episode_identity"] != identity
+    ):
+        raise OutcomeLearningCliError(
+            "remote publication receipts do not match the sealed episode"
+        )
+    frozen_sha = evidence_receipt["target_commit_sha"]
+    if evidence_receipt["frozen_evidence_commit_sha"] != frozen_sha:
+        raise OutcomeLearningCliError(
+            "evidence receipt does not freeze its own target commit"
+        )
+    if final_receipt["frozen_evidence_commit_sha"] != frozen_sha:
+        raise OutcomeLearningCliError(
+            "final receipt does not preserve the frozen evidence commit"
+        )
+    if final_receipt["target_commit_sha"] == frozen_sha:
+        raise OutcomeLearningCliError(
+            "final proof subject cannot recursively equal the frozen evidence commit"
+        )
+    owner_checks = [
+        evidence
+        for evidence in chain[-1]["owner_evidence"]
+        if evidence.get("schema") == "mastermind.olv1_github_check_evidence.v1"
+    ]
+    if len(owner_checks) != 1 or owner_checks[0]["commit_sha"] != frozen_sha:
+        raise OutcomeLearningCliError(
+            "latest evaluation revision lacks one exact frozen-commit check receipt"
+        )
+    if _parse_iso_utc(chain[-1]["corrected_at"]) >= _parse_iso_utc(
+        final_receipt["observed_at"]
+    ):
+        raise OutcomeLearningCliError(
+            "final remote receipt must postdate the evaluation correction"
+        )
+    if _parse_iso_utc(projection["recorded_at"]) >= _parse_iso_utc(
+        final_receipt["observed_at"]
+    ):
+        raise OutcomeLearningCliError(
+            "final remote receipt must postdate the candidate projection"
+        )
+
+    final_sha = final_receipt["target_commit_sha"]
+    _require_commit_ancestor(runner, mastermind_root, frozen_sha, final_sha)
+    _verify_receipt_artifacts_at_commit(
+        evidence_receipt,
+        runner=runner,
+        mastermind_root=mastermind_root,
+    )
+    _verify_receipt_artifacts_at_commit(
+        final_receipt,
+        runner=runner,
+        mastermind_root=mastermind_root,
+    )
+    _require_exact_artifact_contents(
+        evidence_receipt,
+        [chain[0]["payload"], chain[0]],
+        where="evidence publication",
+    )
+    _require_exact_artifact_contents(
+        final_receipt,
+        [evaluation, chain[-1], self_model, projection],
+        where="final publication",
+    )
+    _verify_live_owner_check(owner_checks[0], transport=transport)
+    _verify_live_final_receipt(final_receipt, transport=transport)
+
+
+def cmd_proof(
+    args: argparse.Namespace,
+    *,
+    runner: Runner | None = None,
+    transport: GhTransport | None = None,
+) -> int:
     expectation = _read_json(args.expectation)
     request = _read_json(args.request)
     outcome = _read_json(args.outcome)
@@ -2104,8 +3033,49 @@ def cmd_proof(args: argparse.Namespace) -> int:
 
     _verify_proof_chain(expectation, request, outcome, evaluation, self_model, projection)
 
+    revision_paths = list(getattr(args, "revision", None) or [])
+    revisions = [_read_json(path) for path in revision_paths]
+    evidence_path = getattr(args, "evidence_receipt", None)
+    final_path = getattr(args, "final_publication_receipt", None)
+    if bool(evidence_path) != bool(final_path):
+        raise OutcomeLearningCliError(
+            "remote proof requires both evidence and final publication receipts"
+        )
+    production = evidence_path is not None
+    evidence_receipt: Mapping[str, Any] | None = None
+    final_receipt: Mapping[str, Any] | None = None
+    if revisions:
+        chain = validate_revision_chain(revisions)
+        if chain[-1]["payload"] != evaluation:
+            raise OutcomeLearningCliError(
+                "proof evaluation does not equal the latest supplied revision payload"
+            )
+    if production:
+        runner = runner or SubprocessRunner()
+        transport = transport or GhCliTransport(runner)
+        evidence_receipt = _read_json(evidence_path)
+        final_receipt = _read_json(final_path)
+        _verify_remote_proof(
+            expectation=expectation,
+            request=request,
+            evaluation=evaluation,
+            self_model=self_model,
+            projection=projection,
+            revisions=revisions,
+            evidence_receipt=evidence_receipt,
+            final_receipt=final_receipt,
+            runner=runner,
+            transport=transport,
+            mastermind_root=getattr(args, "mastermind_root", str(_ROOT)),
+        )
+        out_path = _refuse_inside_repo(args.out, where="production proof")
+        title = "# OL-V1 Production Proof"
+    else:
+        out_path = Path(args.out)
+        title = "# OL-V1 Local Candidate Proof"
+
     lines = [
-        "# OL-V1 Production Proof",
+        title,
         "",
         f"operation_key: `{expectation['operation_key']}`",
         "",
@@ -2120,44 +3090,86 @@ def cmd_proof(args: argparse.Namespace) -> int:
         f"| 5. evaluate | evaluation | `{canonical_digest(evaluation)}` |",
         f"| 6. self-model | self-model | `{canonical_digest(self_model)}` |",
         f"| 7. project | agentos projection | `{canonical_digest(projection)}` |",
-        "",
-        "## Preflight (embedded verbatim)",
-        "",
-        "```json",
-        json.dumps(outcome["preflight"], indent=2, sort_keys=True),
-        "```",
-        "",
-        "## Authority",
-        "",
-        f"- expectation_sealed_hash: `{expectation['sealed_hash']}`",
-        f"- request_digest (A2): `{canonical_digest(request)}`",
-        f"- decision_ref.id (A1 packet digest): `{expectation['decision_ref']['id']}`",
-        f"- execution_authority_granted: `{request['execution_authority_granted']}`",
-        "",
-        "## What this proves",
-        "",
-        "- One sealed, prospective decision-expectation receipt existed before any effect.",
-        *_proof_effect_state_bullets(outcome),
-        "- The evaluation is DESCRIPTIVE_ONLY with promotion=NONE; the self-model is n=1, "
-        "sample_state=INSUFFICIENT_SAMPLE, promotion=NONE, authority=NONE, "
-        "universal_score=None.",
-        "- The Agent OS projection carries candidate-only entries: automatic_writes=False, "
-        "grants_authority=False, every candidate status=CANDIDATE_ONLY.",
-        "",
-        "## What this does NOT prove",
-        "",
-        "- Not broad memory efficacy — this is one episode, n=1.",
-        "- Not executive competence — this exercises one narrow, supervised, reversible "
-        "effect class.",
-        "- Not route superiority — no alternative route was executed for comparison.",
-        "- Not policy — nothing here changes any standing rule; the self-model and "
-        "projection are non-promoting by construction.",
-        "",
     ]
-    _write_text_artifact(args.out, "\n".join(lines))
-    print(f"wrote {args.out}")
+    for index, revision in enumerate(revisions, start=1):
+        lines.append(
+            f"| R{index}. revision | evaluation revision {revision['revision']} | "
+            f"`{revision['revision_id']}` |"
+        )
+    if production and evidence_receipt is not None and final_receipt is not None:
+        lines.extend(
+            [
+                f"| remote 1 | frozen evidence commit | "
+                f"`{evidence_receipt['target_commit_sha']}` |",
+                f"| remote 2 | final subject commit | "
+                f"`{final_receipt['target_commit_sha']}` |",
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            "## Preflight (embedded verbatim)",
+            "",
+            "```json",
+            json.dumps(outcome["preflight"], indent=2, sort_keys=True),
+            "```",
+            "",
+            "## Authority",
+            "",
+            f"- expectation_sealed_hash: `{expectation['sealed_hash']}`",
+            f"- request_digest (A2): `{canonical_digest(request)}`",
+            f"- decision_ref.id (A1 packet digest): `{expectation['decision_ref']['id']}`",
+            f"- execution_authority_granted: `{request['execution_authority_granted']}`",
+            "",
+            "## What this proves",
+            "",
+            "- One sealed, prospective decision-expectation receipt existed before any effect.",
+            *_proof_effect_state_bullets(outcome),
+            "- The evaluation is DESCRIPTIVE_ONLY with promotion=NONE; the self-model is n=1, "
+            "sample_state=INSUFFICIENT_SAMPLE, promotion=NONE, authority=NONE, "
+            "universal_score=None.",
+            "- The Agent OS projection carries candidate-only entries: automatic_writes=False, "
+            "grants_authority=False, every candidate status=CANDIDATE_ONLY.",
+        ]
+    )
+    if production and evidence_receipt is not None and final_receipt is not None:
+        lines.extend(
+            [
+                "- The delayed CI observation matured against the immutable frozen evidence commit "
+                f"`{evidence_receipt['target_commit_sha']}`.",
+                "- The final subject commit "
+                f"`{final_receipt['target_commit_sha']}` was read back from both the remote branch "
+                "and PR, and every captured terminal hosted check concluded success.",
+                "- This production proof is an external attestation about that subject commit; "
+                "it is intentionally not committed back onto the subject branch, avoiding a "
+                "self-referential commit claim.",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "- This is a local candidate proof only. It is not a production proof because "
+                "the immutable remote evidence receipt, delayed owner observation, final remote "
+                "readback, and terminal hosted checks have not all been supplied.",
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            "## What this does NOT prove",
+            "",
+            "- Not broad memory efficacy — this is one episode, n=1.",
+            "- Not executive competence — this exercises one narrow, supervised, reversible "
+            "effect class.",
+            "- Not route superiority — no alternative route was executed for comparison.",
+            "- Not policy — nothing here changes any standing rule; the self-model and "
+            "projection are non-promoting by construction.",
+            "",
+        ]
+    )
+    _write_text_artifact(out_path, "\n".join(lines))
+    print(f"wrote {out_path}")
     return 0
-
 
 # --------------------------------------------------------------------------- argparse
 
@@ -2171,15 +3183,12 @@ def _parser() -> argparse.ArgumentParser:
     p_compose.add_argument("--macro-root", required=True)
     p_compose.add_argument("--episode-dir", required=True)
     p_compose.add_argument(
-        "--as-of",
-        default=None,
+        "--directive-intent-id",
+        required=True,
         help=(
-            "optional; when omitted, computed AFTER acquisition as the later of "
-            "'now' and boot_packet.generated_at, so it can never postdate a receipt"
+            "accepted, undispatched READ-only ceo_intent that binds the exact "
+            "OL-V1 workstream, operation, carrier, expiry, and authority ceiling"
         ),
-    )
-    p_compose.add_argument(
-        "--chairman-revision", default="conversation:chairman-completion-drive-20260902"
     )
     p_compose.add_argument("--operation-key", required=True)
     p_compose.add_argument("--agentos-records-digest", default=None)
@@ -2188,12 +3197,21 @@ def _parser() -> argparse.ArgumentParser:
     p_seal = sub.add_parser("seal", help="seal the expectation receipt + canary request")
     p_seal.add_argument("--composition", required=True)
     p_seal.add_argument("--episode-dir", required=True)
+    p_seal.add_argument("--mastermind-root", default=str(_ROOT))
+    p_seal.add_argument(
+        "--selection-intent-id",
+        default=None,
+        help=(
+            "required only when A1 returns multiple incomparable actionable options; "
+            "must bind the exact packet, chosen option, carrier, operation, and "
+            "no-effect authority ceiling"
+        ),
+    )
     p_seal.add_argument(
         "--parent-head",
         default=None,
         help="optional cross-check only (BLOCKER B): must exactly equal the adjudicated option's expected_head_sha, which is what is actually used",
     )
-    p_seal.add_argument("--recorded-at", required=True)
     p_seal.add_argument(
         "--operation-key",
         default=None,
@@ -2224,7 +3242,6 @@ def _parser() -> argparse.ArgumentParser:
         default=None,
         help="explicit cwd for the git blob-provenance calls (default: this process's cwd)",
     )
-    p_preflight.add_argument("--observed-at", required=True)
     p_preflight.add_argument("--out", required=True)
     p_preflight.set_defaults(func=cmd_preflight)
 
@@ -2244,23 +3261,12 @@ def _parser() -> argparse.ArgumentParser:
         default=None,
         help="explicit cwd for the committed-blob reacquisition git call (BLOCKER C)",
     )
-    p_canary.add_argument("--recorded-at", required=True)
-    p_canary.add_argument(
-        "--episode-dir",
-        required=True,
-        help=(
-            "outside the repo; the journal filename is DERIVED from operation_key + "
-            "expectation_sealed_hash (BLOCKER 2) — there is no --out-journal override"
-        ),
-    )
     p_canary.set_defaults(func=cmd_canary)
 
     p_outcome = sub.add_parser("outcome", help="assemble + validate the outcome artifact")
-    p_outcome.add_argument("--journal", required=True)
     p_outcome.add_argument("--preflight", required=True)
     p_outcome.add_argument("--expectation", required=True)
     p_outcome.add_argument("--request", required=True)
-    p_outcome.add_argument("--recorded-at", required=True)
     p_outcome.add_argument("--out", required=True)
     p_outcome.set_defaults(func=cmd_outcome)
 
@@ -2268,14 +3274,17 @@ def _parser() -> argparse.ArgumentParser:
     p_evaluate.add_argument("--expectation", required=True)
     p_evaluate.add_argument("--outcome", required=True)
     p_evaluate.add_argument("--request", required=True)
-    p_evaluate.add_argument("--recorded-at", required=True)
     p_evaluate.add_argument("--out", required=True)
+    p_evaluate.add_argument(
+        "--out-revision",
+        default=None,
+        help="optional explicit revision-1 envelope with null predecessor",
+    )
     p_evaluate.set_defaults(func=cmd_evaluate)
 
     p_self_model = sub.add_parser("self-model", help="n=1 non-promoting self-model")
     p_self_model.add_argument("--evaluation", required=True)
     p_self_model.add_argument("--expectation", required=True)
-    p_self_model.add_argument("--recorded-at", required=True)
     p_self_model.add_argument("--out", required=True)
     p_self_model.set_defaults(func=cmd_self_model)
 
@@ -2283,17 +3292,61 @@ def _parser() -> argparse.ArgumentParser:
     p_project.add_argument("--evaluation", required=True)
     p_project.add_argument("--expectation", required=True)
     p_project.add_argument("--outcome", required=True)
-    p_project.add_argument("--recorded-at", required=True)
     p_project.add_argument("--out", required=True)
     p_project.set_defaults(func=cmd_project)
 
-    p_proof = sub.add_parser("proof", help="render the production-proof markdown")
+    p_publication = sub.add_parser(
+        "capture-publication",
+        help="capture exact remote branch/PR/blob/check readback without any write",
+    )
+    p_publication.add_argument(
+        "--stage", choices=["EVIDENCE_COMMIT", "MATURATION_COMMIT"], required=True
+    )
+    p_publication.add_argument("--expectation", required=True)
+    p_publication.add_argument("--request", required=True)
+    p_publication.add_argument("--repo", required=True)
+    p_publication.add_argument("--branch", required=True)
+    p_publication.add_argument("--pr-number", type=int, required=True)
+    p_publication.add_argument("--target-commit", required=True)
+    p_publication.add_argument("--frozen-evidence-commit", required=True)
+    p_publication.add_argument("--artifact", action="append", required=True)
+    p_publication.add_argument("--mastermind-root", default=str(_ROOT))
+    p_publication.add_argument("--out", required=True)
+    p_publication.set_defaults(func=cmd_capture_publication)
+
+    p_mature = sub.add_parser(
+        "mature-evaluation",
+        help="append one delayed CI evaluation correction from exact check-run evidence",
+    )
+    p_mature.add_argument("--expectation", required=True)
+    p_mature.add_argument("--request", required=True)
+    p_mature.add_argument("--outcome", required=True)
+    p_mature.add_argument("--initial-evaluation", required=True)
+    p_mature.add_argument("--initial-revision", required=True)
+    p_mature.add_argument("--evidence-receipt", required=True)
+    p_mature.add_argument("--check-name", required=True)
+    p_mature.add_argument("--out-evaluation", required=True)
+    p_mature.add_argument("--out-revision", required=True)
+    p_mature.set_defaults(func=cmd_mature_evaluation)
+
+    p_proof = sub.add_parser(
+        "proof", help="render a local candidate or remote-gated production proof"
+    )
     p_proof.add_argument("--expectation", required=True)
     p_proof.add_argument("--request", required=True)
     p_proof.add_argument("--outcome", required=True)
     p_proof.add_argument("--evaluation", required=True)
     p_proof.add_argument("--self-model", dest="self_model", required=True)
     p_proof.add_argument("--project", dest="projection", required=True)
+    p_proof.add_argument(
+        "--revision",
+        action="append",
+        default=[],
+        help="ordered append-only evaluation revision (repeat from revision 1 onward)",
+    )
+    p_proof.add_argument("--evidence-receipt", default=None)
+    p_proof.add_argument("--final-publication-receipt", default=None)
+    p_proof.add_argument("--mastermind-root", default=str(_ROOT))
     p_proof.add_argument("--out", required=True)
     p_proof.set_defaults(func=cmd_proof)
 

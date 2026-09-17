@@ -37,7 +37,19 @@ from control_plane.outcome_learning_evaluator import (
     evaluate_episode,
 )
 
-RECORDED_AT = "2026-09-02T12:00:00Z"
+EXPECTATION_AT = "2026-09-02T12:00:00Z"
+REQUEST_AT = "2026-09-02T12:00:01Z"
+PREFLIGHT_AT = "2026-09-02T12:00:02Z"
+CALL1_REQUESTED_AT = "2026-09-02T12:00:03Z"
+CALL1_OBSERVED_AT = "2026-09-02T12:00:04Z"
+CALL2_REQUESTED_AT = "2026-09-02T12:00:05Z"
+CALL2_OBSERVED_AT = "2026-09-02T12:00:06Z"
+OUTCOME_AT = "2026-09-02T12:00:07Z"
+EVALUATION_AT = "2026-09-02T12:00:08Z"
+SELF_MODEL_AT = "2026-09-02T12:00:09Z"
+PROJECTION_AT = "2026-09-02T12:00:10Z"
+# Compatibility alias for tests that construct only an evaluation.
+RECORDED_AT = EVALUATION_AT
 SHA40_A = "a" * 40
 SHA40_B = "b" * 40
 #: Sol REQUEST_REPAIR (BLOCKER F): every Blocker B/C revalidation actually performed.
@@ -67,7 +79,7 @@ def make_expectation(**overrides):
         },
         operation_key="mastermind-outcome-learning-v1-complete-vertical-20260902-sol-001",
         decision_kind="organizational_learning_episode",
-        recorded_at=RECORDED_AT,
+        recorded_at=EXPECTATION_AT,
         context={
             "source_refs": ["CHAIRMAN_DIRECTIVE:completion-drive-2026-09-02"],
             "task_kind": "organizational_learning_episode",
@@ -75,7 +87,7 @@ def make_expectation(**overrides):
             "ambiguity": "low",
             "program": "organizational-learning",
             "repository": "mastermindx-market-intelligence/Mastermind",
-            "source_cutoff": RECORDED_AT,
+            "source_cutoff": EXPECTATION_AT,
             "applicability_cohort": (
                 "supervised reversible GitHub metadata canary, repository-owner PR, "
                 "single episode"
@@ -98,7 +110,7 @@ def make_expectation(**overrides):
             {"metric_id": "head_unchanged_through_effect", "horizon": "terminal", "estimate": 0.97, "lower": 0.85, "upper": 0.995, "kind": "probability"},
             {"metric_id": "byte_identical_restoration", "horizon": "terminal", "estimate": 0.95, "lower": 0.80, "upper": 0.99, "kind": "probability"},
             {"metric_id": "effect_calls_exactly_two", "horizon": "terminal", "estimate": 0.90, "lower": 0.75, "upper": 0.98, "kind": "probability"},
-            {"metric_id": "ci_green_at_final_head", "horizon": "delayed", "estimate": 0.80, "lower": 0.55, "upper": 0.95, "kind": "probability"},
+            {"metric_id": "ci_green_at_frozen_evidence_commit", "horizon": "delayed", "estimate": 0.80, "lower": 0.55, "upper": 0.95, "kind": "probability"},
         ],
         guardrails=[
             {"guardrail_id": "G1", "statement": "Two-call max."},
@@ -137,7 +149,7 @@ def make_request(expectation, **overrides):
         repository="mastermindx-market-intelligence/Mastermind",
         branch="sol/outcome-learning-v1-complete-vertical-20260902",
         expected_parent_head=SHA40_A,
-        recorded_at=RECORDED_AT,
+        recorded_at=REQUEST_AT,
     )
     kwargs.update(overrides)
     return build_canary_request(**kwargs)
@@ -148,7 +160,7 @@ def make_clean_outcome(expectation, request, *, head_sha=SHA40_B, original_title
     applied_title = original_title + " " + CANARY_TOKEN
     applied_sha = _sha256_hex(applied_title)
     preflight = {
-        "observed_at": RECORDED_AT,
+        "observed_at": PREFLIGHT_AT,
         "repository": "mastermindx-market-intelligence/Mastermind",
         "pr_number": 1,
         "pr_url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/1",
@@ -169,13 +181,13 @@ def make_clean_outcome(expectation, request, *, head_sha=SHA40_B, original_title
         {
             "seq": 1,
             "kind": "TITLE_APPLY",
-            "requested_at": RECORDED_AT,
+            "requested_at": CALL1_REQUESTED_AT,
             "method": "PATCH",
             "endpoint": "repos/mastermindx-market-intelligence/Mastermind/pulls/1",
             "payload_title_sha256": applied_sha,
             "response_status": 200,
             "readback": {
-                "observed_at": RECORDED_AT,
+                "observed_at": CALL1_OBSERVED_AT,
                 "title_sha256": applied_sha,
                 "title_length": len(applied_title),
                 "head_sha": head_sha,
@@ -184,13 +196,13 @@ def make_clean_outcome(expectation, request, *, head_sha=SHA40_B, original_title
         {
             "seq": 2,
             "kind": "TITLE_RESTORE",
-            "requested_at": RECORDED_AT,
+            "requested_at": CALL2_REQUESTED_AT,
             "method": "PATCH",
             "endpoint": "repos/mastermindx-market-intelligence/Mastermind/pulls/1",
             "payload_title_sha256": original_sha,
             "response_status": 200,
             "readback": {
-                "observed_at": RECORDED_AT,
+                "observed_at": CALL2_OBSERVED_AT,
                 "title_sha256": original_sha,
                 "title_length": len(original_title),
                 "head_sha": head_sha,
@@ -213,7 +225,7 @@ def make_clean_outcome(expectation, request, *, head_sha=SHA40_B, original_title
         effect_edge=FULLY_VERIFIED_EFFECT_EDGE,
         effect_state="APPLIED_AND_RESTORED",
         restoration=restoration,
-        recorded_at=RECORDED_AT,
+        recorded_at=OUTCOME_AT,
     )
 
 
@@ -265,7 +277,7 @@ def test_evaluate_episode_is_descriptive_only_and_deterministic():
     assert by_id["OLV1-A3"] == "HELD"
     assert by_id["OLV1-A6"] == "NOT_TESTED"
 
-    delayed = next(f for f in evaluation["forecast"] if f["metric_id"] == "ci_green_at_final_head")
+    delayed = next(f for f in evaluation["forecast"] if f["metric_id"] == "ci_green_at_frozen_evidence_commit")
     assert delayed["realized"] is None
     assert delayed["within_interval"] is None
 
@@ -273,7 +285,7 @@ def test_evaluate_episode_is_descriptive_only_and_deterministic():
 def test_build_self_model_is_n1_and_non_promoting():
     expectation, request, outcome = make_episode()
     evaluation = evaluate_episode(expectation, outcome, request, recorded_at=RECORDED_AT)
-    self_model = build_self_model(evaluation, expectation, recorded_at=RECORDED_AT)
+    self_model = build_self_model(evaluation, expectation, recorded_at=SELF_MODEL_AT)
     assert self_model["sample_size"] == 1
     assert self_model["sample_state"] == "INSUFFICIENT_SAMPLE"
     assert self_model["promotion"] == "NONE"
@@ -286,7 +298,7 @@ def test_build_agentos_projection_is_candidate_only():
     expectation, request, outcome = make_episode()
     evaluation = evaluate_episode(expectation, outcome, request, recorded_at=RECORDED_AT)
     projection = build_agentos_projection(
-        evaluation, expectation, outcome, recorded_at=RECORDED_AT, key_hint="OLV1-EPISODE-2026-09-02"
+        evaluation, expectation, outcome, recorded_at=PROJECTION_AT, key_hint="OLV1-EPISODE-2026-09-02"
     )
     assert projection["automatic_writes"] is False
     assert projection["grants_authority"] is False
@@ -422,7 +434,7 @@ def test_kill_10_restore_readback_mismatch_with_applied_and_restored_rejected():
 def test_kill_12_self_model_promotion_score_and_sample_size_rejected():
     expectation, request, outcome = make_episode()
     evaluation = evaluate_episode(expectation, outcome, request, recorded_at=RECORDED_AT)
-    self_model = build_self_model(evaluation, expectation, recorded_at=RECORDED_AT)
+    self_model = build_self_model(evaluation, expectation, recorded_at=SELF_MODEL_AT)
 
     bad_promotion = dict(self_model)
     bad_promotion["promotion"] = "GRANTED"
@@ -601,3 +613,363 @@ def test_coverage_forecast_must_bind_verbatim_to_expectation_metric():
         OutcomeLearningContractError, match="does not match the sealed expectation"
     ):
         validate_evaluation(bad, expectation, outcome)
+
+
+# --------------------------------------------------------------------------- 2026-09-17 exact-head repair wave
+
+
+def test_selector_stage_invalidation_has_a_closed_zero_patch_truth_shape():
+    expectation, request, outcome = make_episode()
+    selector_refusal = dict(outcome)
+    selector_refusal["effect_state"] = "INVALIDATED_BEFORE_EFFECT"
+    selector_refusal["effect_calls"] = []
+    selector_refusal["pre_effect_observation"] = None
+    selector_refusal["restoration"] = {
+        "byte_identical": None,
+        "prestate_title_sha256": outcome["preflight"]["original_title_sha256"],
+        "poststate_title_sha256": "UNOBSERVED",
+        "head_unchanged": False,
+    }
+    selector_refusal["effect_edge"] = {
+        **outcome["effect_edge"],
+        "selector_repeated_single_pr": False,
+        "bindings_verified": False,
+    }
+
+    assert validate_outcome(selector_refusal, expectation, request) == selector_refusal
+
+    impossible = dict(selector_refusal)
+    impossible["effect_edge"] = {
+        **selector_refusal["effect_edge"],
+        "selector_repeated_single_pr": True,
+        "bindings_verified": True,
+    }
+    with pytest.raises(
+        OutcomeLearningContractError,
+        match="selector-stage invalidation|pre_effect_observation",
+    ):
+        validate_outcome(impossible, expectation, request)
+
+
+def test_timestamps_are_canonical_utc_and_episode_chronology_is_strict():
+    expectation, request, outcome = make_episode()
+
+    bad_request = dict(request)
+    bad_request["recorded_at"] = request["recorded_at"].replace("Z", "+00:00")
+    with pytest.raises(OutcomeLearningContractError, match="canonical UTC RFC3339"):
+        validate_canary_request(bad_request)
+
+    non_prospective_request = dict(request)
+    non_prospective_request["recorded_at"] = expectation["recorded_at"]
+    non_prospective_outcome = dict(outcome)
+    non_prospective_outcome["request_digest"] = canonical_digest(non_prospective_request)
+    with pytest.raises(OutcomeLearningContractError, match="expectation.*before.*request"):
+        validate_outcome(non_prospective_outcome, expectation, non_prospective_request)
+
+    with pytest.raises(OutcomeLearningContractError, match="evaluation.*after.*outcome"):
+        evaluate_episode(
+            expectation,
+            outcome,
+            request,
+            recorded_at=outcome["recorded_at"],
+        )
+
+
+# --------------------------------------------------------------------------- 2026-09-17 append-only maturation repair
+
+
+def _revision_identity(expectation, request):
+    return {
+        "operation_key": expectation["operation_key"],
+        "carrier_ref": (
+            "github:Mastermind:branch:"
+            "sol/outcome-learning-v1-complete-vertical-20260902"
+        ),
+        "expectation_sealed_hash": expectation["sealed_hash"],
+        "request_digest": canonical_digest(request),
+    }
+
+
+def _success_check(commit_sha=SHA40_B, *, check_name="hosted-ci"):
+    from control_plane.outcome_learning_contracts import build_github_check_evidence
+
+    return build_github_check_evidence(
+        repository="mastermindx-market-intelligence/Mastermind",
+        commit_sha=commit_sha,
+        check_run_id=4242,
+        check_name=check_name,
+        status="completed",
+        conclusion="success",
+        observed_at="2026-09-02T12:00:20Z",
+    )
+
+
+def _initial_evaluation_revision():
+    from control_plane.outcome_learning_contracts import build_initial_artifact_revision
+
+    expectation, request, outcome = make_episode()
+    evaluation = evaluate_episode(
+        expectation, outcome, request, recorded_at=EVALUATION_AT
+    )
+    revision = build_initial_artifact_revision(
+        artifact_kind="EVALUATION",
+        episode_identity=_revision_identity(expectation, request),
+        payload=evaluation,
+        owner_evidence=[],
+        corrected_at="2026-09-02T12:00:09Z",
+    )
+    return expectation, request, outcome, evaluation, revision
+
+
+def test_revision_chain_accepts_one_exact_ci_maturation_without_mutating_initial():
+    from control_plane.outcome_learning_contracts import (
+        build_correction_revision,
+        validate_revision_chain,
+    )
+    from control_plane.outcome_learning_evaluator import mature_ci_evaluation
+
+    expectation, request, outcome, initial, first = _initial_evaluation_revision()
+    initial_before = copy.deepcopy(initial)
+    check = _success_check()
+    matured = mature_ci_evaluation(
+        expectation,
+        outcome,
+        request,
+        initial,
+        evidence_commit_sha=SHA40_B,
+        owner_check=check,
+        expected_check_name="hosted-ci",
+        recorded_at="2026-09-02T12:00:21Z",
+    )
+    second = build_correction_revision(
+        first,
+        payload=matured,
+        correction_reason="DELAYED_OWNER_EVIDENCE_MATURATION",
+        owner_evidence=[check],
+        corrected_at="2026-09-02T12:00:22Z",
+    )
+
+    assert initial == initial_before
+    assert first["supersedes"] is None
+    assert first["prior_payload_digest"] is None
+    assert second["supersedes"] == first["revision_id"]
+    assert second["prior_payload_digest"] == first["payload_digest"]
+    assert second["authority"] == "NONE"
+    assert second["promotion"] == "NONE"
+    validate_revision_chain([first, second])
+
+    metric = next(
+        item
+        for item in matured["forecast"]
+        if item["metric_id"] == "ci_green_at_frozen_evidence_commit"
+    )
+    assert metric["realized"] == 1.0
+    assert metric["within_interval"] is None
+    assert metric["brier_score"] == pytest.approx((metric["estimate"] - 1.0) ** 2)
+
+
+def test_revision_chain_rejects_wrong_predecessor_self_supersession_and_duplicate_successor():
+    from control_plane.outcome_learning_contracts import (
+        build_correction_revision,
+        validate_artifact_revision,
+        validate_revision_chain,
+    )
+    from control_plane.outcome_learning_evaluator import mature_ci_evaluation
+
+    expectation, request, outcome, initial, first = _initial_evaluation_revision()
+    check = _success_check()
+    matured = mature_ci_evaluation(
+        expectation,
+        outcome,
+        request,
+        initial,
+        evidence_commit_sha=SHA40_B,
+        owner_check=check,
+        expected_check_name="hosted-ci",
+        recorded_at="2026-09-02T12:00:21Z",
+    )
+    second = build_correction_revision(
+        first,
+        payload=matured,
+        correction_reason="DELAYED_OWNER_EVIDENCE_MATURATION",
+        owner_evidence=[check],
+        corrected_at="2026-09-02T12:00:22Z",
+    )
+
+    wrong = copy.deepcopy(second)
+    wrong["supersedes"] = "sha256:" + "0" * 64
+    with pytest.raises(OutcomeLearningContractError, match="predecessor|supersedes|revision_id"):
+        validate_revision_chain([first, wrong])
+
+    self_ref = copy.deepcopy(second)
+    self_ref["supersedes"] = self_ref["revision_id"]
+    with pytest.raises(OutcomeLearningContractError, match="self-supersession"):
+        validate_artifact_revision(self_ref, previous=first)
+
+    alternate_payload = copy.deepcopy(matured)
+    alternate_payload["recorded_at"] = "2026-09-02T12:00:23Z"
+    alternate = build_correction_revision(
+        first,
+        payload=alternate_payload,
+        correction_reason="ALTERNATE_CORRECTION",
+        owner_evidence=[check],
+        corrected_at="2026-09-02T12:00:24Z",
+    )
+    with pytest.raises(OutcomeLearningContractError, match="duplicate successor"):
+        validate_revision_chain([first, second, alternate])
+
+
+def test_revision_contract_rejects_payload_mutation_wrong_episode_and_backdating():
+    from control_plane.outcome_learning_contracts import (
+        build_correction_revision,
+        validate_artifact_revision,
+    )
+    from control_plane.outcome_learning_evaluator import mature_ci_evaluation
+
+    expectation, request, outcome, initial, first = _initial_evaluation_revision()
+    check = _success_check()
+    matured = mature_ci_evaluation(
+        expectation,
+        outcome,
+        request,
+        initial,
+        evidence_commit_sha=SHA40_B,
+        owner_check=check,
+        expected_check_name="hosted-ci",
+        recorded_at="2026-09-02T12:00:21Z",
+    )
+
+    with pytest.raises(OutcomeLearningContractError, match="chronology|corrected_at"):
+        build_correction_revision(
+            first,
+            payload=matured,
+            correction_reason="BACKDATED",
+            owner_evidence=[check],
+            corrected_at="2026-09-02T12:00:08Z",
+        )
+
+    second = build_correction_revision(
+        first,
+        payload=matured,
+        correction_reason="DELAYED_OWNER_EVIDENCE_MATURATION",
+        owner_evidence=[check],
+        corrected_at="2026-09-02T12:00:22Z",
+    )
+    mutated = copy.deepcopy(second)
+    mutated["payload"]["promotion"] = "AUTO_PROMOTE"
+    with pytest.raises(OutcomeLearningContractError, match="payload_digest|mutated"):
+        validate_artifact_revision(mutated, previous=first)
+
+    from control_plane.outcome_learning_contracts import build_github_check_evidence
+
+    owner_mutated = copy.deepcopy(second)
+    owner_mutated["owner_evidence"][0] = build_github_check_evidence(
+        repository="mastermindx-market-intelligence/Mastermind",
+        commit_sha=SHA40_B,
+        check_run_id=4343,
+        check_name="hosted-ci",
+        status="completed",
+        conclusion="success",
+        observed_at="2026-09-02T12:00:20Z",
+    )
+    with pytest.raises(OutcomeLearningContractError, match="revision_id"):
+        validate_artifact_revision(owner_mutated, previous=first)
+
+    wrong_episode = copy.deepcopy(second)
+    wrong_episode["episode_identity"]["carrier_ref"] = "github:Other:branch:other"
+    with pytest.raises(OutcomeLearningContractError, match="episode_digest|episode identity"):
+        validate_artifact_revision(wrong_episode, previous=first)
+
+
+def test_ci_maturation_requires_exact_frozen_sha_and_exact_check_name():
+    from control_plane.outcome_learning_evaluator import mature_ci_evaluation
+
+    expectation, request, outcome, initial, first = _initial_evaluation_revision()
+    wrong_sha = _success_check(commit_sha="c" * 40)
+    with pytest.raises(OutcomeLearningContractError, match="evidence commit"):
+        mature_ci_evaluation(
+            expectation,
+            outcome,
+            request,
+            initial,
+            evidence_commit_sha=SHA40_B,
+            owner_check=wrong_sha,
+            expected_check_name="hosted-ci",
+            recorded_at="2026-09-02T12:00:21Z",
+        )
+
+    wrong_name = _success_check(check_name="different-check")
+    with pytest.raises(OutcomeLearningContractError, match="check name"):
+        mature_ci_evaluation(
+            expectation,
+            outcome,
+            request,
+            initial,
+            evidence_commit_sha=SHA40_B,
+            owner_check=wrong_name,
+            expected_check_name="hosted-ci",
+            recorded_at="2026-09-02T12:00:21Z",
+        )
+
+
+def test_publication_receipts_freeze_evidence_sha_and_forbid_recursive_final_subject():
+    from control_plane.outcome_learning_contracts import (
+        build_remote_publication_receipt,
+        validate_remote_publication_receipt,
+    )
+
+    expectation, request, outcome = make_episode()
+    identity = _revision_identity(expectation, request)
+    artifact = {
+        "path": "research/outcome_learning/OLV1_EVALUATION.json",
+        "blob_sha": "d" * 40,
+        "content_digest": canonical_digest({"evaluation": "bytes"}),
+    }
+    evidence = build_remote_publication_receipt(
+        stage="EVIDENCE_COMMIT",
+        repository=request["repository"],
+        branch=request["branch"],
+        pr_number=398,
+        episode_identity=identity,
+        target_commit_sha=SHA40_B,
+        frozen_evidence_commit_sha=SHA40_B,
+        remote_branch_head_sha=SHA40_B,
+        remote_pr_head_sha=SHA40_B,
+        artifact_digests=[artifact],
+        checks=[],
+        observed_at="2026-09-02T12:00:15Z",
+    )
+    validate_remote_publication_receipt(evidence)
+
+    final_check = _success_check(commit_sha="c" * 40, check_name="terminal-ci")
+    final = build_remote_publication_receipt(
+        stage="MATURATION_COMMIT",
+        repository=request["repository"],
+        branch=request["branch"],
+        pr_number=398,
+        episode_identity=identity,
+        target_commit_sha="c" * 40,
+        frozen_evidence_commit_sha=SHA40_B,
+        remote_branch_head_sha="c" * 40,
+        remote_pr_head_sha="c" * 40,
+        artifact_digests=[artifact],
+        checks=[final_check],
+        observed_at="2026-09-02T12:00:30Z",
+    )
+    validate_remote_publication_receipt(final)
+
+    with pytest.raises(OutcomeLearningContractError, match="must differ|recursive"):
+        build_remote_publication_receipt(
+            stage="MATURATION_COMMIT",
+            repository=request["repository"],
+            branch=request["branch"],
+            pr_number=398,
+            episode_identity=identity,
+            target_commit_sha=SHA40_B,
+            frozen_evidence_commit_sha=SHA40_B,
+            remote_branch_head_sha=SHA40_B,
+            remote_pr_head_sha=SHA40_B,
+            artifact_digests=[artifact],
+            checks=[_success_check(commit_sha=SHA40_B, check_name="terminal-ci")],
+            observed_at="2026-09-02T12:00:30Z",
+        )

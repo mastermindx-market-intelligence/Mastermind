@@ -39,6 +39,102 @@ SHA40_A = "a" * 40
 SHA40_B = "b" * 40
 
 
+DIRECTIVE_INTENT_ID = "CEO-OLV1-DIRECTIVE-1"
+SELECTION_INTENT_ID = "CEO-OLV1-SELECTION-1"
+
+
+class StepClock:
+    def __init__(self, start="2026-09-17T12:00:00+00:00"):
+        from datetime import datetime, timedelta
+
+        self._value = datetime.fromisoformat(start)
+        self._step = timedelta(seconds=1)
+
+    def now(self):
+        value = self._value
+        self._value += self._step
+        return value
+
+
+def _accepted_intent_documents(
+    *,
+    intent_id: str,
+    job_id: str,
+    objective: dict,
+    mastermind_sha: str,
+    macro_sha: str,
+    created_at_ms: int,
+) -> dict[str, dict]:
+    canonical_objective = json.dumps(
+        objective, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    )
+    receipt = {
+        "schema": "mastermind.ceo_intent_receipt.v1",
+        "intent_id": intent_id,
+        "fingerprint": "f" * 64,
+        "job_id": job_id,
+        "status": "QUEUED",
+        "accepted": True,
+        "duplicate": False,
+        "dispatched": False,
+        "authority": {
+            "requested": ["READ"],
+            "policy_sha256": "a" * 64,
+            "authority_level": "A0",
+        },
+        "grounding": {
+            "mastermind_sha": mastermind_sha,
+            "macro_sha": macro_sha,
+        },
+        "created_at_ms": created_at_ms,
+    }
+    job = {
+        "job_id": job_id,
+        "objective": canonical_objective,
+        "status": "QUEUED",
+        "attempt_count": 0,
+        "current_attempt_id": None,
+        "requested_authorities": ["READ"],
+        "authority_policy_hash": "a" * 64,
+        "authority_level": "A0",
+        "branch": None,
+        "worktree": None,
+        "allowed_write_paths": [],
+        "validation_commands": [],
+        "checkpoint": None,
+        "result": None,
+    }
+    return {intent_id: receipt, job_id: job}
+
+
+def _directive_objective_fixture(operation_key: str = "olv1-cli-test-op") -> dict:
+    return {
+        "schema": "mastermind.olv1_directive.v1",
+        "workstream": "WS:AGENT-EVAL-FABRIC",
+        "operation_key": operation_key,
+        "carrier_ref": (
+            "github:Mastermind:branch:"
+            "sol/outcome-learning-v1-complete-vertical-20260902"
+        ),
+        "expires_at": "2026-10-01T00:00:00Z",
+        "authority_ceiling": "COMPOSE_ONLY_NO_EFFECT_NO_PROMOTION",
+    }
+
+
+def _install_intent_documents(runner, documents: dict[str, dict]) -> None:
+    target = getattr(runner, "documents", None)
+    if target is None:
+        target = runner.intent_documents
+    target.update(documents)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_host_journal_root(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        cli, "_CANONICAL_JOURNAL_ROOT", tmp_path / "host-state" / "journals"
+    )
+
+
 def _capture_stdout(fn):
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
@@ -172,6 +268,8 @@ class FakeRunner:
         boot_generated_at="2026-09-02T12:00:00Z",
         committed_blobs: dict[str, str] | None = None,
         sealed_commit_parent: str | None = None,
+        intent_documents: dict[str, dict] | None = None,
+        ancestor_pairs: set[tuple[str, str]] | None = None,
     ):
         self.mastermind_canonical_sha = mastermind_canonical_sha
         self.macro_canonical_sha = macro_canonical_sha
@@ -187,6 +285,18 @@ class FakeRunner:
         self.boot_generated_at = boot_generated_at
         self.committed_blobs = dict(committed_blobs or {})
         self.sealed_commit_parent = sealed_commit_parent
+        self.ancestor_pairs = set(ancestor_pairs or set())
+        default_intents = _accepted_intent_documents(
+            intent_id=DIRECTIVE_INTENT_ID,
+            job_id="JOB-DIRECTIVE-1",
+            objective=_directive_objective_fixture(),
+            mastermind_sha=self.mastermind_canonical_sha,
+            macro_sha=self.macro_canonical_sha,
+            created_at_ms= 1789560000000,
+        )
+        self.intent_documents = dict(
+            default_intents if intent_documents is None else intent_documents
+        )
         self.calls: list[tuple] = []
 
     def _blob_id_for(self, path: str) -> str:
@@ -222,6 +332,13 @@ class FakeRunner:
             output = "M data/scratch.parquet\n M control_plane/mutated.py\n" if self.macro_dirty else ""
             return cli.RunResult(0, output, "")
 
+        if len(args) >= 2 and args[0] == "python3" and args[1] == "scripts/ceo_intent.py":
+            target = args[-1]
+            value = self.intent_documents.get(target)
+            if value is None:
+                return cli.RunResult(1, "", f"intent/job {target} unavailable")
+            return cli.RunResult(0, json.dumps(value), "")
+
         if len(args) >= 2 and "ceo_boot_packet.py" in args[1]:
             boot = _boot_packet(
                 mastermind_sha=self.boot_mastermind_sha,
@@ -243,6 +360,14 @@ class FakeRunner:
             if repo_path in self.committed_blobs:
                 return cli.RunResult(0, self._blob_id_for(repo_path) + "\n", "")
             return cli.RunResult(1, "", f"fatal: path '{repo_path}' does not exist in the given commit")
+
+        if args[:3] == ["git", "merge-base", "--is-ancestor"]:
+            ancestor, descendant = args[3], args[4]
+            return cli.RunResult(
+                0 if (ancestor, descendant) in self.ancestor_pairs else 1,
+                "",
+                "",
+            )
 
         if args[:2] == ["git", "cat-file"]:
             blob_id = args[-1]
@@ -314,11 +439,10 @@ class FakeTransport:
 
 
 def _journal_path(episode_dir: Path, request: dict) -> Path:
-    name = (
-        f"canary_journal.{request['operation_key']}."
-        f"{request['expectation_sealed_hash'][7:19]}.json"
-    )
-    return episode_dir / name
+    preflight = json.loads((episode_dir / "preflight.json").read_text())
+    path = cli._canonical_journal_path(request, preflight)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 EXPECTATION_REPO_PATH = "research/outcome_learning/OLV1_EXPECTATION_TEST.json"
@@ -326,62 +450,107 @@ REQUEST_REPO_PATH = "research/outcome_learning/OLV1_CANARY_REQUEST_TEST.json"
 
 
 def _compose_and_seal(
-    tmp_path: Path, runner: FakeRunner | None = None, *, as_of: str | None = "2026-09-02T12:00:00Z"
+    tmp_path: Path, runner: FakeRunner | None = None
 ) -> tuple[Path, dict, dict]:
-    """Run compose (fully-CURRENT canonical-identity fixture) then seal.
-
-    compose's gate is disposition-keyed on the canary option alone (principal
-    correction, 2026-09-02): an honest, near-zero-cost READ_ONLY HOLD is never
-    Pareto-dominated, so this fixture's ``selection_state`` is lawfully
-    ``MULTIPLE_INCOMPARABLE_ACTIONABLE_OPTIONS`` with ``recommended_option_id=None``
-    — that is not a failure, and compose still exits 0 with ``COMPOSE_OK`` because
-    the canary option itself is ``ELIGIBLE_WITHIN_DELEGATION``. seal derives
-    operation_key/expected_parent_head/repository/branch from that adjudicated
-    option (BLOCKER B) and picks the truthful
-    ``principal_selection_from_a1_incomparable_frontier`` assignment method."""
+    """Compose from a trusted directive, then seal an exact packet-bound choice."""
     runner = runner or FakeRunner()
     episode_dir = tmp_path / "episode"
     outside_dir = tmp_path / "outside"
     outside_dir.mkdir()
 
-    compose_argv = [
-        "compose",
-        "--mastermind-root", "/x",
-        "--macro-root", "/y",
-        "--episode-dir", str(episode_dir),
-        "--operation-key", "olv1-cli-test-op",
-    ]
-    if as_of is not None:
-        compose_argv += ["--as-of", as_of]
-    compose_args = cli._parser().parse_args(compose_argv)
-    rc, out = _capture_stdout(lambda: cli.cmd_compose(compose_args, runner=runner))
-    assert rc == 0, f"compose must succeed against a fully CURRENT fixture, got: {out}"
-    assert "COMPOSE_OK canary_disposition=ELIGIBLE_WITHIN_DELEGATION" in out
+    compose_args = cli._parser().parse_args(
+        [
+            "compose",
+            "--mastermind-root", "/x",
+            "--macro-root", "/y",
+            "--episode-dir", str(episode_dir),
+            "--directive-intent-id", DIRECTIVE_INTENT_ID,
+            "--operation-key", "olv1-cli-test-op",
+        ]
+    )
+    rc, out = _capture_stdout(
+        lambda: cli.cmd_compose(
+            compose_args,
+            runner=runner,
+            clock=StepClock("2026-09-17T12:00:00+00:00"),
+        )
+    )
+    assert rc == 7, f"compose must preserve the incomparable frontier, got: {out}"
+    assert "DECISION_REQUIRED" in out
     composition = json.loads((episode_dir / "composition.json").read_text())
-    assert composition["packet"]["selection_state"] == "MULTIPLE_INCOMPARABLE_ACTIONABLE_OPTIONS"
-    assert composition["packet"]["recommended_option_id"] is None
+    bundle = json.loads((episode_dir / "bundle.json").read_text())
+    packet = composition["packet"]
+    assert packet["selection_state"] == "MULTIPLE_INCOMPARABLE_ACTIONABLE_OPTIONS"
+    assert packet["recommended_option_id"] is None
 
-    rc = cli.main(
+    selection_objective = {
+        "schema": "mastermind.olv1_selection.v1",
+        "workstream": "WS:AGENT-EVAL-FABRIC",
+        "operation_key": "olv1-cli-test-op",
+        "packet_digest": f"sha256:{packet['packet_digest']}",
+        "chosen_option_id": cli._OPT_CANARY,
+        "carrier_ref": bundle["options"][0]["carrier_ref"],
+        "authority_ceiling": "SEAL_ONLY_NO_EFFECT_NO_PROMOTION",
+    }
+    _install_intent_documents(
+        runner,
+        _accepted_intent_documents(
+            intent_id=SELECTION_INTENT_ID,
+            job_id="JOB-SELECTION-1",
+            objective=selection_objective,
+            mastermind_sha=runner.mastermind_canonical_sha,
+            macro_sha=runner.macro_canonical_sha,
+            created_at_ms=1789646700000,
+        ),
+    )
+    seal_args = cli._parser().parse_args(
         [
             "seal",
             "--composition", str(episode_dir / "composition.json"),
             "--episode-dir", str(episode_dir),
-            "--recorded-at", "2026-09-02T12:01:00Z",
+            "--mastermind-root", "/x",
+            "--selection-intent-id", SELECTION_INTENT_ID,
             "--out-expectation", str(outside_dir / "expectation.json"),
             "--out-request", str(outside_dir / "request.json"),
         ]
+    )
+    rc = cli.cmd_seal(
+        seal_args,
+        runner=runner,
+        clock=StepClock("2026-09-17T12:10:00+00:00"),
     )
     assert rc == 0
     expectation = json.loads((outside_dir / "expectation.json").read_text())
     request = json.loads((outside_dir / "request.json").read_text())
     return outside_dir, expectation, request
 
+def _install_selection_for_episode(runner, episode_dir: Path) -> None:
+    composition = json.loads((episode_dir / "composition.json").read_text())
+    bundle = json.loads((episode_dir / "bundle.json").read_text())
+    packet = composition["packet"]
+    objective = {
+        "schema": "mastermind.olv1_selection.v1",
+        "workstream": "WS:AGENT-EVAL-FABRIC",
+        "operation_key": "olv1-cli-test-op",
+        "packet_digest": f"sha256:{packet['packet_digest']}",
+        "chosen_option_id": cli._OPT_CANARY,
+        "carrier_ref": bundle["options"][0]["carrier_ref"],
+        "authority_ceiling": "SEAL_ONLY_NO_EFFECT_NO_PROMOTION",
+    }
+    _install_intent_documents(
+        runner,
+        _accepted_intent_documents(
+            intent_id=SELECTION_INTENT_ID,
+            job_id="JOB-SELECTION-1",
+            objective=objective,
+            mastermind_sha=runner.mastermind_canonical_sha,
+            macro_sha=runner.macro_canonical_sha,
+            created_at_ms=1789646700000,
+        ),
+    )
+
 
 def _preflight_runner_for(outside_dir: Path, *, sealed_commit_parent: str) -> FakeRunner:
-    """A FakeRunner whose committed_blobs echo the actual on-disk expectation/request
-    file contents — the honest happy-path fixture: the sealed commit really does
-    contain the exact bytes preflight is being asked to prove, and its parent really
-    is what the sealed request claims."""
     return FakeRunner(
         committed_blobs={
             EXPECTATION_REPO_PATH: (outside_dir / "expectation.json").read_text(encoding="utf-8"),
@@ -401,24 +570,25 @@ def _run_preflight(
     runner = runner or _preflight_runner_for(
         outside_dir, sealed_commit_parent=request["expected_parent_head"]
     )
+    args = cli._parser().parse_args(
+        [
+            "preflight",
+            "--repo", request["repository"],
+            "--branch", request["branch"],
+            "--sealed-commit", transport.head_sha,
+            "--expectation", str(outside_dir / "expectation.json"),
+            "--request", str(outside_dir / "request.json"),
+            "--expectation-repo-path", EXPECTATION_REPO_PATH,
+            "--request-repo-path", REQUEST_REPO_PATH,
+            "--mastermind-root", "/x",
+            "--out", str(outside_dir / "preflight.json"),
+        ]
+    )
     rc = cli.cmd_preflight(
-        cli._parser().parse_args(
-            [
-                "preflight",
-                "--repo", request["repository"],
-                "--branch", request["branch"],
-                "--sealed-commit", transport.head_sha,
-                "--expectation", str(outside_dir / "expectation.json"),
-                "--request", str(outside_dir / "request.json"),
-                "--expectation-repo-path", EXPECTATION_REPO_PATH,
-                "--request-repo-path", REQUEST_REPO_PATH,
-                "--mastermind-root", "/x",
-                "--observed-at", "2026-09-02T12:02:00Z",
-                "--out", str(outside_dir / "preflight.json"),
-            ]
-        ),
+        args,
         runner=runner,
         transport=transport,
+        clock=StepClock("2026-09-17T12:20:00+00:00"),
     )
     assert rc == 0
     return json.loads((outside_dir / "preflight.json").read_text())
@@ -430,7 +600,6 @@ def _run_canary(
     transport: FakeTransport,
     *,
     runner: FakeRunner | None = None,
-    recorded_at: str = "2026-09-02T12:03:00Z",
 ):
     runner = runner or FakeRunner()
     args = cli._parser().parse_args(
@@ -439,23 +608,22 @@ def _run_canary(
             "--preflight", str(outside_dir / "preflight.json"),
             "--request", str(outside_dir / "request.json"),
             "--mastermind-root", "/x",
-            "--recorded-at", recorded_at,
-            "--episode-dir", str(outside_dir),
         ]
     )
-    return cli.cmd_canary(args, runner=runner, transport=transport)
+    return cli.cmd_canary(
+        args,
+        runner=runner,
+        transport=transport,
+        clock=StepClock("2026-09-17T12:30:00+00:00"),
+    )
 
 
 def _canary_runner_for(outside_dir: Path) -> FakeRunner:
-    """A FakeRunner that can serve BLOCKER C's committed-blob request reacquisition
-    (keyed by blob id, not repo-path — canary reacquires via
-    preflight.request_blob_sha directly)."""
     return FakeRunner(
         committed_blobs={
             REQUEST_REPO_PATH: (outside_dir / "request.json").read_text(encoding="utf-8"),
         }
     )
-
 
 # --------------------------------------------------------------------------- happy path
 
@@ -465,7 +633,7 @@ def test_end_to_end_seal_through_proof_cross_digests_verify(tmp_path):
     outside_dir, expectation, request = _compose_and_seal(tmp_path, runner)
     assert (
         expectation["assignment"]["method"]
-        == "principal_selection_from_a1_incomparable_frontier"
+        == "trusted_ceo_intent_selection_from_a1_incomparable_frontier"
     )
     transport = FakeTransport()
     preflight = _run_preflight(outside_dir, transport, request)
@@ -485,11 +653,9 @@ def test_end_to_end_seal_through_proof_cross_digests_verify(tmp_path):
     rc = cli.main(
         [
             "outcome",
-            "--journal", str(journal_path),
             "--preflight", str(outside_dir / "preflight.json"),
             "--expectation", str(outside_dir / "expectation.json"),
             "--request", str(outside_dir / "request.json"),
-            "--recorded-at", "2026-09-02T12:04:00Z",
             "--out", str(outside_dir / "outcome.json"),
         ]
     )
@@ -507,8 +673,8 @@ def test_end_to_end_seal_through_proof_cross_digests_verify(tmp_path):
             "--expectation", str(outside_dir / "expectation.json"),
             "--outcome", str(outside_dir / "outcome.json"),
             "--request", str(outside_dir / "request.json"),
-            "--recorded-at", "2026-09-02T12:05:00Z",
             "--out", str(outside_dir / "evaluation.json"),
+            "--out-revision", str(outside_dir / "evaluation_revision_1.json"),
         ]
     )
     assert rc == 0
@@ -516,6 +682,13 @@ def test_end_to_end_seal_through_proof_cross_digests_verify(tmp_path):
     assert evaluation["outcome_digest"] == canonical_digest(outcome)
     assert evaluation["causal_grade"] == "DESCRIPTIVE_ONLY"
     assert all(evaluation["process_quality"].values())
+    initial_revision = json.loads(
+        (outside_dir / "evaluation_revision_1.json").read_text()
+    )
+    assert initial_revision["revision"] == 1
+    assert initial_revision["supersedes"] is None
+    assert initial_revision["prior_payload_digest"] is None
+    assert initial_revision["payload"] == evaluation
 
     # BLOCKER 4: a perfect episode's probability-kind forecasts score small brier and
     # carry no interval-hit/miss nonsense.
@@ -535,7 +708,6 @@ def test_end_to_end_seal_through_proof_cross_digests_verify(tmp_path):
             "self-model",
             "--evaluation", str(outside_dir / "evaluation.json"),
             "--expectation", str(outside_dir / "expectation.json"),
-            "--recorded-at", "2026-09-02T12:06:00Z",
             "--out", str(outside_dir / "self_model.json"),
         ]
     )
@@ -550,7 +722,6 @@ def test_end_to_end_seal_through_proof_cross_digests_verify(tmp_path):
             "--evaluation", str(outside_dir / "evaluation.json"),
             "--expectation", str(outside_dir / "expectation.json"),
             "--outcome", str(outside_dir / "outcome.json"),
-            "--recorded-at", "2026-09-02T12:07:00Z",
             "--out", str(outside_dir / "projection.json"),
         ]
     )
@@ -559,7 +730,7 @@ def test_end_to_end_seal_through_proof_cross_digests_verify(tmp_path):
     assert projection["evaluation_digest"] == canonical_digest(evaluation)
     assert projection["automatic_writes"] is False
     dsc = next(c for c in projection["candidates"] if c["kind"] == "DSC_CANDIDATE")
-    assert dsc["key_hint"] == "OLV1-EPISODE-CONSEQUENCE-2026-09-02"
+    assert dsc["key_hint"] == "OLV1-EPISODE-CONSEQUENCE-2026-09-17"
 
     rc = cli.main(
         [
@@ -576,6 +747,8 @@ def test_end_to_end_seal_through_proof_cross_digests_verify(tmp_path):
     assert rc == 0
     proof_text = (outside_dir / "proof.md").read_text()
     assert expectation["operation_key"] in proof_text
+    assert proof_text.startswith("# OL-V1 Local Candidate Proof")
+    assert "not a production proof" in proof_text.lower()
     assert "DESCRIPTIVE_ONLY" in proof_text
     assert "What this does NOT prove" in proof_text
     assert "applied, and restored" in proof_text
@@ -606,7 +779,7 @@ def test_repair_a_protected_source_unreachable_refuses_typed(tmp_path):
             "--mastermind-root", "/x",
             "--macro-root", "/y",
             "--episode-dir", str(tmp_path / "episode"),
-            "--as-of", "2026-09-02T12:00:00Z",
+            "--directive-intent-id", DIRECTIVE_INTENT_ID,
             "--operation-key", "olv1-cli-test-op",
         ]
     )
@@ -625,7 +798,7 @@ def test_repair_a_local_macro_checkout_mismatched_refuses(tmp_path):
             "--mastermind-root", "/x",
             "--macro-root", "/y",
             "--episode-dir", str(tmp_path / "episode"),
-            "--as-of", "2026-09-02T12:00:00Z",
+            "--directive-intent-id", DIRECTIVE_INTENT_ID,
             "--operation-key", "olv1-cli-test-op",
         ]
     )
@@ -643,7 +816,7 @@ def test_repair_a_dirty_macro_checkout_refuses(tmp_path):
             "--mastermind-root", "/x",
             "--macro-root", "/y",
             "--episode-dir", str(tmp_path / "episode"),
-            "--as-of", "2026-09-02T12:00:00Z",
+            "--directive-intent-id", DIRECTIVE_INTENT_ID,
             "--operation-key", "olv1-cli-test-op",
         ]
     )
@@ -662,7 +835,7 @@ def test_repair_a_override_caps_agentos_state_at_unknown(tmp_path):
             "--mastermind-root", "/x",
             "--macro-root", "/y",
             "--episode-dir", str(tmp_path / "episode"),
-            "--as-of", "2026-09-02T12:00:00Z",
+            "--directive-intent-id", DIRECTIVE_INTENT_ID,
             "--operation-key", "olv1-cli-test-op",
             "--agentos-records-digest", "sha256:" + "f" * 64,
         ]
@@ -689,7 +862,7 @@ def test_repair_advisory_warnings_alone_do_not_force_agentos_unknown(tmp_path):
             "--mastermind-root", "/x",
             "--macro-root", "/y",
             "--episode-dir", str(tmp_path / "episode"),
-            "--as-of", "2026-09-02T12:00:00Z",
+            "--directive-intent-id", DIRECTIVE_INTENT_ID,
             "--operation-key", "olv1-cli-test-op",
         ]
     )
@@ -711,7 +884,7 @@ def test_repair_real_degradation_channel_inputs_degraded_forces_unknown(tmp_path
             "--mastermind-root", "/x",
             "--macro-root", "/y",
             "--episode-dir", str(tmp_path / "episode"),
-            "--as-of", "2026-09-02T12:00:00Z",
+            "--directive-intent-id", DIRECTIVE_INTENT_ID,
             "--operation-key", "olv1-cli-test-op",
         ]
     )
@@ -728,7 +901,7 @@ def test_repair_real_degradation_channel_readiness_degraded_forces_unknown(tmp_p
             "--mastermind-root", "/x",
             "--macro-root", "/y",
             "--episode-dir", str(tmp_path / "episode"),
-            "--as-of", "2026-09-02T12:00:00Z",
+            "--directive-intent-id", DIRECTIVE_INTENT_ID,
             "--operation-key", "olv1-cli-test-op",
         ]
     )
@@ -753,7 +926,7 @@ def test_compose_composition_invalid_path_exits_5_not_4(tmp_path):
             "--mastermind-root", "/x",
             "--macro-root", "/y",
             "--episode-dir", str(tmp_path / "episode"),
-            "--as-of", "2026-09-02T12:00:00Z",
+            "--directive-intent-id", DIRECTIVE_INTENT_ID,
             "--operation-key", "olv1-cli-test-op",
         ]
     )
@@ -774,33 +947,33 @@ def test_compose_as_of_auto_computed_when_omitted(tmp_path):
             "--mastermind-root", "/x",
             "--macro-root", "/y",
             "--episode-dir", str(tmp_path / "episode"),
+            "--directive-intent-id", DIRECTIVE_INTENT_ID,
             "--operation-key", "olv1-cli-test-op",
         ]
     )
-    rc, out = _capture_stdout(lambda: cli.cmd_compose(args, runner=runner))
-    assert rc == 0
-    assert "as_of_mode=auto(max_observed_at)" in out
-
-
+    rc, out = _capture_stdout(
+        lambda: cli.cmd_compose(
+            args,
+            runner=runner,
+            clock=StepClock("2026-09-17T12:00:00+00:00"),
+        )
+    )
+    assert rc == 7
+    assert "as_of_mode=host_clock_after_acquisition" in out
+    assert "DECISION_REQUIRED" in out
 def test_compose_stale_explicit_as_of_refused_up_front(tmp_path):
-    runner = FakeRunner(boot_generated_at="2026-09-02T12:30:00Z")
-    args = cli._parser().parse_args(
-        [
-            "compose",
-            "--mastermind-root", "/x",
-            "--macro-root", "/y",
-            "--episode-dir", str(tmp_path / "episode"),
-            "--as-of", "2026-09-02T12:00:00Z",  # predates boot_generated_at above
-            "--operation-key", "olv1-cli-test-op",
-        ]
-    )
-    with pytest.raises(cli.OutcomeLearningCliError, match="predates boot_packet.generated_at"):
-        cli.cmd_compose(args, runner=runner)
-
-
-# --------------------------------------------------------------------------- BLOCKER B: A1-seal ancestry
-
-
+    with pytest.raises(SystemExit):
+        cli._parser().parse_args(
+            [
+                "compose",
+                "--mastermind-root", "/x",
+                "--macro-root", "/y",
+                "--episode-dir", str(tmp_path / "episode"),
+                "--directive-intent-id", DIRECTIVE_INTENT_ID,
+                "--operation-key", "olv1-cli-test-op",
+                "--as-of", "2020-01-01T00:00:00Z",
+            ]
+        )
 def test_repair_b_operation_key_mismatch_refuses(tmp_path):
     runner = FakeRunner()
     episode_dir = tmp_path / "episode"
@@ -810,30 +983,40 @@ def test_repair_b_operation_key_mismatch_refuses(tmp_path):
             "--mastermind-root", "/x",
             "--macro-root", "/y",
             "--episode-dir", str(episode_dir),
-            "--as-of", "2026-09-02T12:00:00Z",
+            "--directive-intent-id", DIRECTIVE_INTENT_ID,
             "--operation-key", "olv1-cli-test-op",
         ]
     )
-    assert cli.cmd_compose(args, runner=runner) == 0
+    assert (
+        cli.cmd_compose(
+            args,
+            runner=runner,
+            clock=StepClock("2026-09-17T12:00:00+00:00"),
+        )
+        == 7
+    )
+    _install_selection_for_episode(runner, episode_dir)
 
     outside_dir = tmp_path / "outside"
     outside_dir.mkdir()
+    seal_args = cli._parser().parse_args(
+        [
+            "seal",
+            "--composition", str(episode_dir / "composition.json"),
+            "--episode-dir", str(episode_dir),
+            "--mastermind-root", "/x",
+            "--selection-intent-id", SELECTION_INTENT_ID,
+            "--operation-key", "a-completely-different-op",
+            "--out-expectation", str(outside_dir / "expectation.json"),
+            "--out-request", str(outside_dir / "request.json"),
+        ]
+    )
     with pytest.raises(cli.OutcomeLearningCliError, match="does not match the adjudicated"):
         cli.cmd_seal(
-            cli._parser().parse_args(
-                [
-                    "seal",
-                    "--composition", str(episode_dir / "composition.json"),
-                    "--episode-dir", str(episode_dir),
-                    "--recorded-at", "2026-09-02T12:01:00Z",
-                    "--operation-key", "a-completely-different-op",
-                    "--out-expectation", str(outside_dir / "expectation.json"),
-                    "--out-request", str(outside_dir / "request.json"),
-                ]
-            )
+            seal_args,
+            runner=runner,
+            clock=StepClock("2026-09-17T12:10:00+00:00"),
         )
-
-
 def test_repair_b_parent_head_mismatch_refuses(tmp_path):
     runner = FakeRunner()
     episode_dir = tmp_path / "episode"
@@ -843,30 +1026,40 @@ def test_repair_b_parent_head_mismatch_refuses(tmp_path):
             "--mastermind-root", "/x",
             "--macro-root", "/y",
             "--episode-dir", str(episode_dir),
-            "--as-of", "2026-09-02T12:00:00Z",
+            "--directive-intent-id", DIRECTIVE_INTENT_ID,
             "--operation-key", "olv1-cli-test-op",
         ]
     )
-    assert cli.cmd_compose(args, runner=runner) == 0
+    assert (
+        cli.cmd_compose(
+            args,
+            runner=runner,
+            clock=StepClock("2026-09-17T12:00:00+00:00"),
+        )
+        == 7
+    )
+    _install_selection_for_episode(runner, episode_dir)
 
     outside_dir = tmp_path / "outside"
     outside_dir.mkdir()
+    seal_args = cli._parser().parse_args(
+        [
+            "seal",
+            "--composition", str(episode_dir / "composition.json"),
+            "--episode-dir", str(episode_dir),
+            "--mastermind-root", "/x",
+            "--selection-intent-id", SELECTION_INTENT_ID,
+            "--parent-head", "c" * 40,
+            "--out-expectation", str(outside_dir / "expectation.json"),
+            "--out-request", str(outside_dir / "request.json"),
+        ]
+    )
     with pytest.raises(cli.OutcomeLearningCliError, match="does not match the adjudicated"):
         cli.cmd_seal(
-            cli._parser().parse_args(
-                [
-                    "seal",
-                    "--composition", str(episode_dir / "composition.json"),
-                    "--episode-dir", str(episode_dir),
-                    "--parent-head", "c" * 40,
-                    "--recorded-at", "2026-09-02T12:01:00Z",
-                    "--out-expectation", str(outside_dir / "expectation.json"),
-                    "--out-request", str(outside_dir / "request.json"),
-                ]
-            )
+            seal_args,
+            runner=runner,
+            clock=StepClock("2026-09-17T12:10:00+00:00"),
         )
-
-
 def test_repair_b_operation_key_grammar_rejects_dots_and_colons():
     from control_plane.outcome_learning_contracts import (
         OutcomeLearningContractError,
@@ -917,7 +1110,6 @@ def test_repair_b_preflight_cross_checks_repo_and_branch_before_transport(tmp_pa
             "--expectation-repo-path", EXPECTATION_REPO_PATH,
             "--request-repo-path", REQUEST_REPO_PATH,
             "--mastermind-root", "/x",
-            "--observed-at", "2026-09-02T12:02:00Z",
             "--out", str(outside_dir / "preflight.json"),
         ]
     )
@@ -984,7 +1176,7 @@ def test_repair_d_crash_after_apply_refuses_next_invocation(tmp_path):
         json.dumps(
             {
                 "state": "APPLIED_READBACK",  # non-terminal — simulates a crash here
-                "bound_identity": {"operation_key": request["operation_key"]},
+                "bound_identity": cli._canonical_journal_identity(request, preflight),
                 "effect_calls": [],
                 "recorded_at": "2026-09-02T12:03:00Z",
             }
@@ -1002,11 +1194,9 @@ def test_repair_d_crash_after_apply_refuses_next_invocation(tmp_path):
             cli._parser().parse_args(
                 [
                     "outcome",
-                    "--journal", str(journal_path),
                     "--preflight", str(outside_dir / "preflight.json"),
                     "--expectation", str(outside_dir / "expectation.json"),
                     "--request", str(outside_dir / "request.json"),
-                    "--recorded-at", "2026-09-02T12:04:00Z",
                     "--out", str(outside_dir / "outcome.json"),
                 ]
             )
@@ -1026,7 +1216,7 @@ def test_repair_d_same_dir_concurrency_race_second_invocation_refused(tmp_path):
         json.dumps(
             {
                 "state": "PREPARED",
-                "bound_identity": {"operation_key": request["operation_key"]},
+                "bound_identity": cli._canonical_journal_identity(request, preflight),
                 "recorded_at": "2026-09-02T12:03:00Z",
             }
         )
@@ -1073,11 +1263,9 @@ def test_repair_e_drift_outcome_reports_observed_state_honestly(tmp_path):
     rc = cli.main(
         [
             "outcome",
-            "--journal", str(_journal_path(outside_dir, request)),
             "--preflight", str(outside_dir / "preflight.json"),
             "--expectation", str(outside_dir / "expectation.json"),
             "--request", str(outside_dir / "request.json"),
-            "--recorded-at", "2026-09-02T12:04:00Z",
             "--out", str(outside_dir / "outcome.json"),
         ]
     )
@@ -1144,11 +1332,9 @@ def test_repair_f_proof_refuses_a_tampered_evaluation(tmp_path):
     cli.main(
         [
             "outcome",
-            "--journal", str(_journal_path(outside_dir, request)),
             "--preflight", str(outside_dir / "preflight.json"),
             "--expectation", str(outside_dir / "expectation.json"),
             "--request", str(outside_dir / "request.json"),
-            "--recorded-at", "2026-09-02T12:04:00Z",
             "--out", str(outside_dir / "outcome.json"),
         ]
     )
@@ -1158,7 +1344,6 @@ def test_repair_f_proof_refuses_a_tampered_evaluation(tmp_path):
             "--expectation", str(outside_dir / "expectation.json"),
             "--outcome", str(outside_dir / "outcome.json"),
             "--request", str(outside_dir / "request.json"),
-            "--recorded-at", "2026-09-02T12:05:00Z",
             "--out", str(outside_dir / "evaluation.json"),
         ]
     )
@@ -1167,7 +1352,6 @@ def test_repair_f_proof_refuses_a_tampered_evaluation(tmp_path):
             "self-model",
             "--evaluation", str(outside_dir / "evaluation.json"),
             "--expectation", str(outside_dir / "expectation.json"),
-            "--recorded-at", "2026-09-02T12:06:00Z",
             "--out", str(outside_dir / "self_model.json"),
         ]
     )
@@ -1177,7 +1361,6 @@ def test_repair_f_proof_refuses_a_tampered_evaluation(tmp_path):
             "--evaluation", str(outside_dir / "evaluation.json"),
             "--expectation", str(outside_dir / "expectation.json"),
             "--outcome", str(outside_dir / "outcome.json"),
-            "--recorded-at", "2026-09-02T12:07:00Z",
             "--out", str(outside_dir / "projection.json"),
         ]
     )
@@ -1209,7 +1392,11 @@ def test_repair_f_process_quality_false_when_effect_edge_incomplete():
 
     expectation, request, outcome = contracts_tests.make_episode()
     incomplete = dict(outcome)
-    incomplete["effect_edge"] = {**outcome["effect_edge"], "selector_repeated_single_pr": False}
+    incomplete["effect_edge"] = {
+        **outcome["effect_edge"],
+        "selector_repeated_single_pr": False,
+        "bindings_verified": False,
+    }
     evaluation = evaluate_episode(expectation, incomplete, request, recorded_at=contracts_tests.RECORDED_AT)
     assert evaluation["process_quality"]["sealed_before_effect"] is False
     assert evaluation["process_quality"]["effect_owner_revalidated"] is False
@@ -1292,11 +1479,9 @@ def test_apply_succeeds_restore_raises_journals_call1_and_observed_poststate(tmp
     rc = cli.main(
         [
             "outcome",
-            "--journal", str(_journal_path(outside_dir, request)),
             "--preflight", str(outside_dir / "preflight.json"),
             "--expectation", str(outside_dir / "expectation.json"),
             "--request", str(outside_dir / "request.json"),
-            "--recorded-at", "2026-09-02T12:04:00Z",
             "--out", str(outside_dir / "outcome.json"),
         ]
     )
@@ -1325,7 +1510,6 @@ def test_preflight_out_refuses_a_path_inside_the_repository_worktree(tmp_path):
             "--request", str(outside_dir / "request.json"),
             "--expectation-repo-path", EXPECTATION_REPO_PATH,
             "--request-repo-path", REQUEST_REPO_PATH,
-            "--observed-at", "2026-09-02T12:02:00Z",
             "--out", str(inside_repo_path),
         ]
     )
@@ -1336,26 +1520,17 @@ def test_preflight_out_refuses_a_path_inside_the_repository_worktree(tmp_path):
 def test_canary_episode_dir_refuses_a_path_inside_the_repository_worktree(tmp_path):
     outside_dir = tmp_path / "outside"
     outside_dir.mkdir()
-    (outside_dir / "request.json").write_text(json.dumps({"placeholder": True}))
     inside_repo_dir = cli._ROOT / "research" / "outcome_learning"
-
-    args = cli._parser().parse_args(
-        [
-            "canary",
-            "--preflight", str(outside_dir / "preflight.json"),
-            "--request", str(outside_dir / "request.json"),
-            "--mastermind-root", "/x",
-            "--recorded-at", "2026-09-02T12:03:00Z",
-            "--episode-dir", str(inside_repo_dir),
-        ]
-    )
-    with pytest.raises(cli.OutcomeLearningCliError, match="outside the repository worktree"):
-        cli.cmd_canary(args, transport=FakeTransport())
-
-
-# --------------------------------------------------------------------------- committed-seal (prior REQUEST_REPAIR)
-
-
+    with pytest.raises(SystemExit):
+        cli._parser().parse_args(
+            [
+                "canary",
+                "--preflight", str(outside_dir / "preflight.json"),
+                "--request", str(outside_dir / "request.json"),
+                "--mastermind-root", "/x",
+                "--episode-dir", str(inside_repo_dir),
+            ]
+        )
 def test_repair_local_only_artifact_not_in_sealed_commit_refuses(tmp_path):
     runner = FakeRunner()
     outside_dir, expectation, request = _compose_and_seal(tmp_path, runner)
@@ -1408,7 +1583,6 @@ def test_repair_path_escape_refused_before_any_git_call(tmp_path):
             "--expectation-repo-path", "../../../etc/passwd",
             "--request-repo-path", REQUEST_REPO_PATH,
             "--mastermind-root", "/x",
-            "--observed-at", "2026-09-02T12:02:00Z",
             "--out", str(outside_dir / "preflight.json"),
         ]
     )
@@ -1436,6 +1610,903 @@ def test_repair_canary_refuses_zero_patches_on_missing_seal_provenance(tmp_path)
 
 
 def test_hold_classification_owner_is_a_real_allowed_owner():
-    assert cli._HOLD_CLASSIFICATION_SOURCE_OWNER in ALLOWED_SOURCE_OWNERS
-    assert cli._HOLD_CLASSIFICATION_SOURCE_OWNER in CLASSIFICATION_SOURCE_OWNERS
-    assert cli._HOLD_CLASSIFICATION_SOURCE_OWNER != "STEWARD"
+    source_ref = "CEO_INTENT:CEO-OLV1-DIRECTIVE-1:sha256:" + "f" * 64
+    options = cli._olv1_options(
+        "olv1-cli-test-op", SHA40_A, chairman_source_ref=source_ref
+    )
+    assert all(option["classification_source_ref"] == source_ref for option in options)
+    assert all(source_ref in option["source_refs"] for option in options)
+    assert not hasattr(cli, "_HOLD_CLASSIFICATION_SOURCE_OWNER")
+def _intent_documents(*, intent_id, job_id, objective, mastermind_sha=SHA40_A, macro_sha=SHA40_B, created_at_ms=1789646340000):
+    canonical_objective = json.dumps(
+        objective, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    )
+    receipt = {
+        "schema": "mastermind.ceo_intent_receipt.v1",
+        "intent_id": intent_id,
+        "fingerprint": "f" * 64,
+        "job_id": job_id,
+        "status": "QUEUED",
+        "accepted": True,
+        "duplicate": False,
+        "dispatched": False,
+        "authority": {
+            "requested": ["READ"],
+            "policy_sha256": "a" * 64,
+            "authority_level": "A0",
+        },
+        "grounding": {
+            "mastermind_sha": mastermind_sha,
+            "macro_sha": macro_sha,
+        },
+        "created_at_ms": created_at_ms,
+    }
+    job = {
+        "job_id": job_id,
+        "objective": canonical_objective,
+        "status": "QUEUED",
+        "attempt_count": 0,
+        "current_attempt_id": None,
+        "requested_authorities": ["READ"],
+        "authority_policy_hash": "a" * 64,
+        "authority_level": "A0",
+        "branch": None,
+        "worktree": None,
+        "allowed_write_paths": [],
+        "validation_commands": [],
+        "checkpoint": None,
+        "result": None,
+    }
+    return {intent_id: receipt, job_id: job}
+
+
+class IntentRunner(FakeRunner):
+    def __init__(self, *, documents=None, **kwargs):
+        super().__init__(**kwargs)
+        self.documents = dict(documents or {})
+
+    def run(self, args, *, cwd=None, input=None):
+        if len(args) >= 2 and args[0] == "python3" and args[1] == "scripts/ceo_intent.py":
+            target = args[-1]
+            value = self.documents.get(target)
+            if value is None:
+                return cli.RunResult(1, "", f"intent/job {target} unavailable")
+            return cli.RunResult(0, json.dumps(value), "")
+        return super().run(args, cwd=cwd, input=input)
+
+
+def _directive_objective(operation_key="olv1-cli-test-op"):
+    return {
+        "schema": "mastermind.olv1_directive.v1",
+        "workstream": "WS:AGENT-EVAL-FABRIC",
+        "operation_key": operation_key,
+        "carrier_ref": (
+            "github:Mastermind:branch:"
+            "sol/outcome-learning-v1-complete-vertical-20260902"
+        ),
+        "expires_at": "2026-10-01T00:00:00Z",
+        "authority_ceiling": "COMPOSE_ONLY_NO_EFFECT_NO_PROMOTION",
+    }
+
+
+def _compose_with_directive(tmp_path, runner, *, clock=None):
+    args = cli._parser().parse_args(
+        [
+            "compose",
+            "--mastermind-root", "/x",
+            "--macro-root", "/y",
+            "--episode-dir", str(tmp_path / "episode"),
+            "--directive-intent-id", DIRECTIVE_INTENT_ID,
+            "--operation-key", "olv1-cli-test-op",
+            "--directive-intent-id", "CEO-OLV1-DIRECTIVE-1",
+        ]
+    )
+    return _capture_stdout(
+        lambda: cli.cmd_compose(args, runner=runner, clock=clock or StepClock())
+    )
+
+
+def test_compose_refuses_when_canonical_directive_cannot_be_acquired(tmp_path):
+    rc, out = _compose_with_directive(tmp_path, IntentRunner())
+    assert rc == 5
+    assert "DIRECTIVE_SOURCE_UNVERIFIED" in out
+    assert not (tmp_path / "episode" / "composition.json").exists()
+
+
+def test_compose_uses_accepted_intent_and_stops_for_exact_packet_selection(tmp_path):
+    documents = _intent_documents(
+        intent_id="CEO-OLV1-DIRECTIVE-1",
+        job_id="JOB-DIRECTIVE-1",
+        objective=_directive_objective(),
+    )
+    rc, out = _compose_with_directive(
+        tmp_path,
+        IntentRunner(documents=documents),
+    )
+    assert rc == 7
+    assert "DECISION_REQUIRED" in out
+    bundle = json.loads((tmp_path / "episode" / "bundle.json").read_text())
+    composition = json.loads((tmp_path / "episode" / "composition.json").read_text())
+    source_ref = bundle["chairman_directive"]["source_ref"]
+    assert source_ref.startswith("CEO_INTENT:CEO-OLV1-DIRECTIVE-1:")
+    assert bundle["delegation_envelope"]["expires_at"] == "2026-10-01T00:00:00Z"
+    assert composition["packet"]["selection_state"] == "MULTIPLE_INCOMPARABLE_ACTIONABLE_OPTIONS"
+
+
+def test_seal_requires_and_verifies_a_selection_intent_bound_to_the_exact_packet(tmp_path):
+    directive_documents = _intent_documents(
+        intent_id="CEO-OLV1-DIRECTIVE-1",
+        job_id="JOB-DIRECTIVE-1",
+        objective=_directive_objective(),
+    )
+    runner = IntentRunner(documents=directive_documents)
+    rc, _ = _compose_with_directive(tmp_path, runner)
+    assert rc == 7
+
+    episode_dir = tmp_path / "episode"
+    outside_dir = tmp_path / "outside"
+    outside_dir.mkdir()
+    composition = json.loads((episode_dir / "composition.json").read_text())
+    bundle = json.loads((episode_dir / "bundle.json").read_text())
+    packet_digest = "sha256:" + composition["packet"]["packet_digest"]
+    selection_objective = {
+        "schema": "mastermind.olv1_selection.v1",
+        "workstream": "WS:AGENT-EVAL-FABRIC",
+        "operation_key": "olv1-cli-test-op",
+        "packet_digest": packet_digest,
+        "chosen_option_id": cli._OPT_CANARY,
+        "carrier_ref": bundle["options"][0]["carrier_ref"],
+        "authority_ceiling": "SEAL_ONLY_NO_EFFECT_NO_PROMOTION",
+    }
+    selection_docs = _intent_documents(
+        intent_id="CEO-OLV1-SELECTION-1",
+        job_id="JOB-SELECTION-1",
+        objective=selection_objective,
+        created_at_ms=1789646700000,
+    )
+    runner.documents.update(selection_docs)
+
+    args = cli._parser().parse_args(
+        [
+            "seal",
+            "--composition", str(episode_dir / "composition.json"),
+            "--episode-dir", str(episode_dir),
+            "--selection-intent-id", "CEO-OLV1-SELECTION-1",
+            "--out-expectation", str(outside_dir / "expectation.json"),
+            "--out-request", str(outside_dir / "request.json"),
+        ]
+    )
+    assert cli.cmd_seal(args, runner=runner, clock=StepClock("2026-09-17T12:10:00+00:00")) == 0
+    expectation = json.loads((outside_dir / "expectation.json").read_text())
+    assert expectation["assignment"]["method"] == (
+        "trusted_ceo_intent_selection_from_a1_incomparable_frontier"
+    )
+    assert any(
+        ref.startswith("CEO_INTENT:CEO-OLV1-SELECTION-1:")
+        for ref in expectation["context"]["source_refs"]
+    )
+
+    forged = dict(selection_objective)
+    forged["packet_digest"] = "sha256:" + "0" * 64
+    runner.documents.update(
+        _intent_documents(
+            intent_id="CEO-OLV1-SELECTION-FORGED",
+            job_id="JOB-SELECTION-FORGED",
+            objective=forged,
+            created_at_ms=1789646760000,
+        )
+    )
+    forged_args = cli._parser().parse_args(
+        [
+            "seal",
+            "--composition", str(episode_dir / "composition.json"),
+            "--episode-dir", str(episode_dir),
+            "--selection-intent-id", "CEO-OLV1-SELECTION-FORGED",
+            "--out-expectation", str(outside_dir / "forged-expectation.json"),
+            "--out-request", str(outside_dir / "forged-request.json"),
+        ]
+    )
+    with pytest.raises(cli.OutcomeLearningCliError, match="packet_digest"):
+        cli.cmd_seal(
+            forged_args,
+            runner=runner,
+            clock=StepClock("2026-09-17T12:20:00+00:00"),
+        )
+
+
+def test_public_cli_has_no_timestamp_or_journal_root_override():
+    with pytest.raises(SystemExit):
+        cli._parser().parse_args(
+            [
+                "canary",
+                "--preflight", "/tmp/p.json",
+                "--request", "/tmp/r.json",
+                "--mastermind-root", "/x",
+                "--recorded-at", "2020-01-01T00:00:00Z",
+                "--episode-dir", "/tmp/attacker-chosen",
+            ]
+        )
+
+
+def test_canonical_journal_path_is_host_rooted_and_identity_bound(tmp_path):
+    request = {
+        "repository": "mastermindx-market-intelligence/Mastermind",
+        "branch": "sol/outcome-learning-v1-complete-vertical-20260902",
+        "operation_key": "olv1-cli-test-op",
+        "expectation_sealed_hash": "sha256:" + "1" * 64,
+        "expected_parent_head": SHA40_A,
+        "canary_token": "OLV1-CANARY",
+    }
+    preflight = {"sealed_commit_sha": SHA40_B, "pr_number": 42}
+    root = tmp_path / "canonical-host-root"
+    path = cli._canonical_journal_path(request, preflight, journal_root=root)
+    assert path.is_relative_to(root)
+    assert "olv1-cli-test-op" in path.parts
+    assert SHA40_B in path.parts
+    assert "/tmp/attacker-chosen" not in str(path)
+
+
+# --------------------------------------------------------------------------- 2026-09-17 remote maturation shell
+
+
+class PublicationTransport:
+    def __init__(
+        self,
+        *,
+        branch_sha,
+        pr_sha=None,
+        check_runs=None,
+        check_runs_by_sha=None,
+        total_count_by_sha=None,
+    ):
+        self.branch_sha = branch_sha
+        self.pr_sha = pr_sha or branch_sha
+        self.check_runs = list(check_runs or [])
+        self.check_runs_by_sha = {
+            key: list(value) for key, value in (check_runs_by_sha or {}).items()
+        }
+        self.total_count_by_sha = dict(total_count_by_sha or {})
+        self.get_endpoints = []
+        self.patches = 0
+
+    def get(self, endpoint):
+        self.get_endpoints.append(endpoint)
+        if "/git/ref/heads/" in endpoint:
+            return 200, {"object": {"sha": self.branch_sha}}
+        if "/commits/" in endpoint and "/check-runs" in endpoint:
+            commit_sha = endpoint.split("/commits/", 1)[1].split("/", 1)[0]
+            runs = self.check_runs_by_sha.get(commit_sha, self.check_runs)
+            total_count = self.total_count_by_sha.get(commit_sha, len(runs))
+            return 200, {"total_count": total_count, "check_runs": runs}
+        if "/check-runs/" in endpoint:
+            check_id = int(endpoint.rsplit("/", 1)[1])
+            for runs in [*self.check_runs_by_sha.values(), self.check_runs]:
+                for run in runs:
+                    if run.get("id") == check_id:
+                        return 200, run
+            raise AssertionError(f"unknown check run id {check_id}")
+        if "/pulls/" in endpoint:
+            return 200, {"head": {"sha": self.pr_sha}}
+        raise AssertionError(f"unexpected publication GET {endpoint}")
+
+    def patch(self, endpoint, payload):
+        self.patches += 1
+        raise AssertionError("publication/maturation must never PATCH GitHub")
+
+
+def _write_revision_fixture(tmp_path):
+    import tests.test_outcome_learning_v1 as contracts_tests
+    from control_plane.outcome_learning_contracts import build_initial_artifact_revision
+    from control_plane.outcome_learning_evaluator import evaluate_episode
+
+    expectation, request, outcome = contracts_tests.make_episode()
+    evaluation = evaluate_episode(
+        expectation,
+        outcome,
+        request,
+        recorded_at=contracts_tests.EVALUATION_AT,
+    )
+    identity = {
+        "operation_key": expectation["operation_key"],
+        "carrier_ref": (
+            "github:Mastermind:branch:"
+            "sol/outcome-learning-v1-complete-vertical-20260902"
+        ),
+        "expectation_sealed_hash": expectation["sealed_hash"],
+        "request_digest": canonical_digest(request),
+    }
+    revision = build_initial_artifact_revision(
+        artifact_kind="EVALUATION",
+        episode_identity=identity,
+        payload=evaluation,
+        owner_evidence=[],
+        corrected_at="2026-09-02T12:00:09Z",
+    )
+    docs = {
+        "expectation": expectation,
+        "request": request,
+        "outcome": outcome,
+        "evaluation": evaluation,
+        "revision_1": revision,
+    }
+    for name, doc in docs.items():
+        (tmp_path / f"{name}.json").write_text(
+            json.dumps(doc, indent=2, sort_keys=True) + "\n"
+        )
+    return docs
+
+
+def _json_artifact(path: str, doc: dict, *, blob_sha="d" * 40) -> dict:
+    text = json.dumps(doc, indent=2, sort_keys=True) + "\n"
+    return {
+        "path": path,
+        "blob_sha": blob_sha,
+        "content_digest": "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest(),
+    }
+
+
+def _raw_check(*, check_id: int, name: str, head_sha: str, conclusion="success") -> dict:
+    return {
+        "id": check_id,
+        "name": name,
+        "head_sha": head_sha,
+        "status": "completed",
+        "conclusion": conclusion,
+    }
+
+
+def test_capture_publication_reads_exact_remote_heads_and_committed_artifacts(tmp_path):
+    docs = _write_revision_fixture(tmp_path)
+    target = "b" * 40
+    repo_paths = {
+        "research/outcome_learning/OLV1_EVALUATION.json": json.dumps(
+            docs["evaluation"], sort_keys=True
+        ),
+        "research/outcome_learning/OLV1_EVALUATION_REVISION_1.json": json.dumps(
+            docs["revision_1"], sort_keys=True
+        ),
+    }
+    runner = FakeRunner(committed_blobs=repo_paths)
+    transport = PublicationTransport(branch_sha=target)
+    args = cli._parser().parse_args(
+        [
+            "capture-publication",
+            "--stage", "EVIDENCE_COMMIT",
+            "--expectation", str(tmp_path / "expectation.json"),
+            "--request", str(tmp_path / "request.json"),
+            "--repo", docs["request"]["repository"],
+            "--branch", docs["request"]["branch"],
+            "--pr-number", "398",
+            "--target-commit", target,
+            "--frozen-evidence-commit", target,
+            "--artifact", "research/outcome_learning/OLV1_EVALUATION.json",
+            "--artifact", "research/outcome_learning/OLV1_EVALUATION_REVISION_1.json",
+            "--mastermind-root", "/x",
+            "--out", str(tmp_path / "evidence_receipt.json"),
+        ]
+    )
+    assert (
+        cli.cmd_capture_publication(
+            args,
+            runner=runner,
+            transport=transport,
+            clock=StepClock("2026-09-02T12:00:15+00:00"),
+        )
+        == 0
+    )
+    receipt = json.loads((tmp_path / "evidence_receipt.json").read_text())
+    assert receipt["stage"] == "EVIDENCE_COMMIT"
+    assert receipt["target_commit_sha"] == target
+    assert receipt["remote_branch_head_sha"] == target
+    assert receipt["remote_pr_head_sha"] == target
+    assert len(receipt["artifact_digests"]) == 2
+    assert receipt["checks"] == []
+    assert transport.patches == 0
+
+
+def test_capture_publication_refuses_remote_branch_or_pr_drift(tmp_path):
+    docs = _write_revision_fixture(tmp_path)
+    target = "b" * 40
+    path = "research/outcome_learning/OLV1_EVALUATION.json"
+    runner = FakeRunner(committed_blobs={path: json.dumps(docs["evaluation"])})
+    transport = PublicationTransport(branch_sha="c" * 40, pr_sha=target)
+    args = cli._parser().parse_args(
+        [
+            "capture-publication",
+            "--stage", "EVIDENCE_COMMIT",
+            "--expectation", str(tmp_path / "expectation.json"),
+            "--request", str(tmp_path / "request.json"),
+            "--repo", docs["request"]["repository"],
+            "--branch", docs["request"]["branch"],
+            "--pr-number", "398",
+            "--target-commit", target,
+            "--frozen-evidence-commit", target,
+            "--artifact", path,
+            "--mastermind-root", "/x",
+            "--out", str(tmp_path / "receipt.json"),
+        ]
+    )
+    with pytest.raises(cli.OutcomeLearningCliError, match="branch head"):
+        cli.cmd_capture_publication(
+            args,
+            runner=runner,
+            transport=transport,
+            clock=StepClock("2026-09-02T12:00:15+00:00"),
+        )
+    assert not (tmp_path / "receipt.json").exists()
+
+
+def test_mature_evaluation_queries_exact_check_and_appends_without_mutation(tmp_path):
+    from control_plane.outcome_learning_contracts import (
+        build_remote_publication_receipt,
+        validate_revision_chain,
+    )
+
+    docs = _write_revision_fixture(tmp_path)
+    target = "b" * 40
+    artifact = {
+        "path": "research/outcome_learning/OLV1_EVALUATION.json",
+        "blob_sha": "d" * 40,
+        "content_digest": canonical_digest({"evaluation": "bytes"}),
+    }
+    receipt = build_remote_publication_receipt(
+        stage="EVIDENCE_COMMIT",
+        repository=docs["request"]["repository"],
+        branch=docs["request"]["branch"],
+        pr_number=398,
+        episode_identity=docs["revision_1"]["episode_identity"],
+        target_commit_sha=target,
+        frozen_evidence_commit_sha=target,
+        remote_branch_head_sha=target,
+        remote_pr_head_sha=target,
+        artifact_digests=[artifact],
+        checks=[],
+        observed_at="2026-09-02T12:00:15Z",
+    )
+    (tmp_path / "evidence_receipt.json").write_text(json.dumps(receipt))
+    initial_bytes = (tmp_path / "evaluation.json").read_bytes()
+    transport = PublicationTransport(
+        branch_sha=target,
+        check_runs=[
+            {
+                "id": 4242,
+                "name": "hosted-ci",
+                "head_sha": target,
+                "status": "completed",
+                "conclusion": "success",
+            }
+        ],
+    )
+    args = cli._parser().parse_args(
+        [
+            "mature-evaluation",
+            "--expectation", str(tmp_path / "expectation.json"),
+            "--request", str(tmp_path / "request.json"),
+            "--outcome", str(tmp_path / "outcome.json"),
+            "--initial-evaluation", str(tmp_path / "evaluation.json"),
+            "--initial-revision", str(tmp_path / "revision_1.json"),
+            "--evidence-receipt", str(tmp_path / "evidence_receipt.json"),
+            "--check-name", "hosted-ci",
+            "--out-evaluation", str(tmp_path / "evaluation_matured.json"),
+            "--out-revision", str(tmp_path / "revision_2.json"),
+        ]
+    )
+    assert (
+        cli.cmd_mature_evaluation(
+            args,
+            transport=transport,
+            clock=StepClock("2026-09-02T12:00:20+00:00"),
+        )
+        == 0
+    )
+    assert (tmp_path / "evaluation.json").read_bytes() == initial_bytes
+    matured = json.loads((tmp_path / "evaluation_matured.json").read_text())
+    second = json.loads((tmp_path / "revision_2.json").read_text())
+    validate_revision_chain([docs["revision_1"], second])
+    metric = next(
+        item
+        for item in matured["forecast"]
+        if item["metric_id"] == "ci_green_at_frozen_evidence_commit"
+    )
+    assert metric["realized"] == 1.0
+    assert second["payload"] == matured
+    assert second["owner_evidence"][0]["check_run_id"] == 4242
+    assert transport.patches == 0
+
+
+def test_mature_evaluation_refuses_wrong_check_sha_or_ambiguous_name(tmp_path):
+    from control_plane.outcome_learning_contracts import build_remote_publication_receipt
+
+    docs = _write_revision_fixture(tmp_path)
+    target = "b" * 40
+    artifact = {
+        "path": "research/outcome_learning/OLV1_EVALUATION.json",
+        "blob_sha": "d" * 40,
+        "content_digest": canonical_digest({"evaluation": "bytes"}),
+    }
+    receipt = build_remote_publication_receipt(
+        stage="EVIDENCE_COMMIT",
+        repository=docs["request"]["repository"],
+        branch=docs["request"]["branch"],
+        pr_number=398,
+        episode_identity=docs["revision_1"]["episode_identity"],
+        target_commit_sha=target,
+        frozen_evidence_commit_sha=target,
+        remote_branch_head_sha=target,
+        remote_pr_head_sha=target,
+        artifact_digests=[artifact],
+        checks=[],
+        observed_at="2026-09-02T12:00:15Z",
+    )
+    (tmp_path / "evidence_receipt.json").write_text(json.dumps(receipt))
+    transport = PublicationTransport(
+        branch_sha=target,
+        check_runs=[
+            {
+                "id": 1,
+                "name": "hosted-ci",
+                "head_sha": "c" * 40,
+                "status": "completed",
+                "conclusion": "success",
+            }
+        ],
+    )
+    args = cli._parser().parse_args(
+        [
+            "mature-evaluation",
+            "--expectation", str(tmp_path / "expectation.json"),
+            "--request", str(tmp_path / "request.json"),
+            "--outcome", str(tmp_path / "outcome.json"),
+            "--initial-evaluation", str(tmp_path / "evaluation.json"),
+            "--initial-revision", str(tmp_path / "revision_1.json"),
+            "--evidence-receipt", str(tmp_path / "evidence_receipt.json"),
+            "--check-name", "hosted-ci",
+            "--out-evaluation", str(tmp_path / "bad_eval.json"),
+            "--out-revision", str(tmp_path / "bad_revision.json"),
+        ]
+    )
+    with pytest.raises(cli.OutcomeLearningCliError, match="exact evidence commit"):
+        cli.cmd_mature_evaluation(
+            args,
+            transport=transport,
+            clock=StepClock("2026-09-02T12:00:20+00:00"),
+        )
+
+
+def _production_proof_fixture(tmp_path):
+    import tests.test_outcome_learning_v1 as contracts_tests
+    from control_plane.outcome_learning_contracts import (
+        build_correction_revision,
+        build_github_check_evidence,
+        build_remote_publication_receipt,
+    )
+    from control_plane.outcome_learning_evaluator import (
+        build_agentos_projection,
+        build_self_model,
+        mature_ci_evaluation,
+    )
+
+    docs = _write_revision_fixture(tmp_path)
+    frozen_sha = "b" * 40
+    final_sha = "c" * 40
+    owner_check = contracts_tests._success_check(
+        commit_sha=frozen_sha, check_name="hosted-ci"
+    )
+    matured = mature_ci_evaluation(
+        docs["expectation"],
+        docs["outcome"],
+        docs["request"],
+        docs["evaluation"],
+        evidence_commit_sha=frozen_sha,
+        owner_check=owner_check,
+        expected_check_name="hosted-ci",
+        recorded_at="2026-09-02T12:00:21Z",
+    )
+    revision_2 = build_correction_revision(
+        docs["revision_1"],
+        payload=matured,
+        correction_reason="DELAYED_OWNER_EVIDENCE_MATURATION",
+        owner_evidence=[owner_check],
+        corrected_at="2026-09-02T12:00:22Z",
+    )
+    self_model = build_self_model(
+        matured,
+        docs["expectation"],
+        recorded_at="2026-09-02T12:00:23Z",
+    )
+    projection = build_agentos_projection(
+        matured,
+        docs["expectation"],
+        docs["outcome"],
+        recorded_at="2026-09-02T12:00:24Z",
+        key_hint="OLV1-MATURED-CANDIDATE",
+    )
+
+    evidence_docs = {
+        "research/outcome_learning/OLV1_EVALUATION_V1.json": docs["evaluation"],
+        "research/outcome_learning/OLV1_EVALUATION_REVISION_1.json": docs["revision_1"],
+    }
+    final_docs = {
+        "research/outcome_learning/OLV1_EVALUATION_V2.json": matured,
+        "research/outcome_learning/OLV1_EVALUATION_REVISION_2.json": revision_2,
+        "research/outcome_learning/OLV1_SELF_MODEL_V2.json": self_model,
+        "research/outcome_learning/OLV1_AGENTOS_PROJECTION_V2.json": projection,
+    }
+    repo_docs = {**evidence_docs, **final_docs}
+    repo_paths = {
+        path: json.dumps(doc, indent=2, sort_keys=True) + "\n"
+        for path, doc in repo_docs.items()
+    }
+    evidence_artifacts = [
+        _json_artifact(path, doc, blob_sha=_sha1(path))
+        for path, doc in sorted(evidence_docs.items())
+    ]
+    final_artifacts = [
+        _json_artifact(path, doc, blob_sha=_sha1(path))
+        for path, doc in sorted(final_docs.items())
+    ]
+    evidence_receipt = build_remote_publication_receipt(
+        stage="EVIDENCE_COMMIT",
+        repository=docs["request"]["repository"],
+        branch=docs["request"]["branch"],
+        pr_number=398,
+        episode_identity=docs["revision_1"]["episode_identity"],
+        target_commit_sha=frozen_sha,
+        frozen_evidence_commit_sha=frozen_sha,
+        remote_branch_head_sha=frozen_sha,
+        remote_pr_head_sha=frozen_sha,
+        artifact_digests=evidence_artifacts,
+        checks=[],
+        observed_at="2026-09-02T12:00:15Z",
+    )
+    final_check = build_github_check_evidence(
+        repository=docs["request"]["repository"],
+        commit_sha=final_sha,
+        check_run_id=5252,
+        check_name="terminal-ci",
+        status="completed",
+        conclusion="success",
+        observed_at="2026-09-02T12:00:30Z",
+    )
+    final_receipt = build_remote_publication_receipt(
+        stage="MATURATION_COMMIT",
+        repository=docs["request"]["repository"],
+        branch=docs["request"]["branch"],
+        pr_number=398,
+        episode_identity=docs["revision_1"]["episode_identity"],
+        target_commit_sha=final_sha,
+        frozen_evidence_commit_sha=frozen_sha,
+        remote_branch_head_sha=final_sha,
+        remote_pr_head_sha=final_sha,
+        artifact_digests=final_artifacts,
+        checks=[final_check],
+        observed_at="2026-09-02T12:00:31Z",
+    )
+    files = {
+        "evaluation_matured": matured,
+        "revision_2": revision_2,
+        "self_model_matured": self_model,
+        "projection_matured": projection,
+        "evidence_receipt": evidence_receipt,
+        "final_receipt": final_receipt,
+    }
+    for name, doc in files.items():
+        (tmp_path / f"{name}.json").write_text(
+            json.dumps(doc, indent=2, sort_keys=True) + "\n"
+        )
+
+    args = cli._parser().parse_args(
+        [
+            "proof",
+            "--expectation", str(tmp_path / "expectation.json"),
+            "--request", str(tmp_path / "request.json"),
+            "--outcome", str(tmp_path / "outcome.json"),
+            "--evaluation", str(tmp_path / "evaluation_matured.json"),
+            "--self-model", str(tmp_path / "self_model_matured.json"),
+            "--project", str(tmp_path / "projection_matured.json"),
+            "--revision", str(tmp_path / "revision_1.json"),
+            "--revision", str(tmp_path / "revision_2.json"),
+            "--evidence-receipt", str(tmp_path / "evidence_receipt.json"),
+            "--final-publication-receipt", str(tmp_path / "final_receipt.json"),
+            "--mastermind-root", "/x",
+            "--out", str(tmp_path / "production_proof.md"),
+        ]
+    )
+    runner = FakeRunner(
+        committed_blobs=repo_paths,
+        ancestor_pairs={(frozen_sha, final_sha)},
+    )
+    transport = PublicationTransport(
+        branch_sha=final_sha,
+        check_runs_by_sha={
+            frozen_sha: [
+                _raw_check(
+                    check_id=owner_check["check_run_id"],
+                    name=owner_check["check_name"],
+                    head_sha=frozen_sha,
+                    conclusion=owner_check["conclusion"],
+                )
+            ],
+            final_sha: [
+                _raw_check(
+                    check_id=final_check["check_run_id"],
+                    name=final_check["check_name"],
+                    head_sha=final_sha,
+                    conclusion=final_check["conclusion"],
+                )
+            ],
+        },
+    )
+    return args, runner, transport, files
+
+
+def test_production_proof_requires_revision_chain_and_two_remote_receipts(tmp_path):
+    args, runner, transport, _files = _production_proof_fixture(tmp_path)
+    assert cli.cmd_proof(args, runner=runner, transport=transport) == 0
+    proof = (tmp_path / "production_proof.md").read_text()
+    assert proof.startswith("# OL-V1 Production Proof")
+    assert "subject commit" in proof.lower()
+    assert "cccccccccccccccccccccccccccccccccccccccc" in proof
+    assert "frozen evidence commit" in proof.lower()
+    assert "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" in proof
+    assert transport.patches == 0
+
+
+def test_production_proof_refuses_receipt_without_exact_artifact_bytes(tmp_path):
+    args, runner, transport, files = _production_proof_fixture(tmp_path)
+    receipt = dict(files["final_receipt"])
+    receipt["artifact_digests"] = [
+        {
+            "path": "research/outcome_learning/UNRELATED.json",
+            "blob_sha": "d" * 40,
+            "content_digest": canonical_digest({"unrelated": True}),
+        }
+    ]
+    (tmp_path / "final_receipt.json").write_text(json.dumps(receipt))
+    with pytest.raises(cli.OutcomeLearningCliError, match="exact artifact path|exact committed artifact"):
+        cli.cmd_proof(args, runner=runner, transport=transport)
+    assert not (tmp_path / "production_proof.md").exists()
+
+
+def test_production_proof_refuses_live_remote_or_owner_check_drift(tmp_path):
+    args, runner, drifted, _files = _production_proof_fixture(tmp_path)
+    drifted.branch_sha = "e" * 40
+    with pytest.raises(cli.OutcomeLearningCliError, match="remote branch head"):
+        cli.cmd_proof(args, runner=runner, transport=drifted)
+
+
+def test_capture_maturation_refuses_incomplete_check_page(tmp_path):
+    docs = _write_revision_fixture(tmp_path)
+    frozen_sha = "b" * 40
+    final_sha = "c" * 40
+    path = "research/outcome_learning/OLV1_EVALUATION_V2.json"
+    runner = FakeRunner(
+        committed_blobs={path: json.dumps(docs["evaluation"], indent=2, sort_keys=True) + "\n"},
+        ancestor_pairs={(frozen_sha, final_sha)},
+    )
+    transport = PublicationTransport(
+        branch_sha=final_sha,
+        check_runs_by_sha={
+            final_sha: [
+                _raw_check(check_id=1, name="hosted-ci", head_sha=final_sha)
+            ]
+        },
+        total_count_by_sha={final_sha: 2},
+    )
+    args = cli._parser().parse_args(
+        [
+            "capture-publication",
+            "--stage", "MATURATION_COMMIT",
+            "--expectation", str(tmp_path / "expectation.json"),
+            "--request", str(tmp_path / "request.json"),
+            "--repo", docs["request"]["repository"],
+            "--branch", docs["request"]["branch"],
+            "--pr-number", "398",
+            "--target-commit", final_sha,
+            "--frozen-evidence-commit", frozen_sha,
+            "--artifact", path,
+            "--mastermind-root", "/x",
+            "--out", str(tmp_path / "receipt.json"),
+        ]
+    )
+    with pytest.raises(cli.OutcomeLearningCliError, match="incomplete check-run page"):
+        cli.cmd_capture_publication(
+            args,
+            runner=runner,
+            transport=transport,
+            clock=StepClock("2026-09-02T12:00:30+00:00"),
+        )
+
+
+def test_capture_maturation_refuses_non_descendant_final_commit(tmp_path):
+    docs = _write_revision_fixture(tmp_path)
+    frozen_sha = "b" * 40
+    final_sha = "c" * 40
+    path = "research/outcome_learning/OLV1_EVALUATION_V2.json"
+    runner = FakeRunner(
+        committed_blobs={path: json.dumps(docs["evaluation"], indent=2, sort_keys=True) + "\n"}
+    )
+    transport = PublicationTransport(
+        branch_sha=final_sha,
+        check_runs_by_sha={
+            final_sha: [
+                _raw_check(check_id=1, name="hosted-ci", head_sha=final_sha)
+            ]
+        },
+    )
+    args = cli._parser().parse_args(
+        [
+            "capture-publication",
+            "--stage", "MATURATION_COMMIT",
+            "--expectation", str(tmp_path / "expectation.json"),
+            "--request", str(tmp_path / "request.json"),
+            "--repo", docs["request"]["repository"],
+            "--branch", docs["request"]["branch"],
+            "--pr-number", "398",
+            "--target-commit", final_sha,
+            "--frozen-evidence-commit", frozen_sha,
+            "--artifact", path,
+            "--mastermind-root", "/x",
+            "--out", str(tmp_path / "receipt.json"),
+        ]
+    )
+    with pytest.raises(cli.OutcomeLearningCliError, match="descend from the frozen evidence commit"):
+        cli.cmd_capture_publication(
+            args,
+            runner=runner,
+            transport=transport,
+            clock=StepClock("2026-09-02T12:00:30+00:00"),
+        )
+
+
+def test_mature_evaluation_refuses_incomplete_check_page(tmp_path):
+    from control_plane.outcome_learning_contracts import build_remote_publication_receipt
+
+    docs = _write_revision_fixture(tmp_path)
+    target = "b" * 40
+    artifact = _json_artifact(
+        "research/outcome_learning/OLV1_EVALUATION_V1.json",
+        docs["evaluation"],
+    )
+    receipt = build_remote_publication_receipt(
+        stage="EVIDENCE_COMMIT",
+        repository=docs["request"]["repository"],
+        branch=docs["request"]["branch"],
+        pr_number=398,
+        episode_identity=docs["revision_1"]["episode_identity"],
+        target_commit_sha=target,
+        frozen_evidence_commit_sha=target,
+        remote_branch_head_sha=target,
+        remote_pr_head_sha=target,
+        artifact_digests=[artifact],
+        checks=[],
+        observed_at="2026-09-02T12:00:15Z",
+    )
+    (tmp_path / "evidence_receipt.json").write_text(json.dumps(receipt))
+    transport = PublicationTransport(
+        branch_sha=target,
+        check_runs_by_sha={
+            target: [_raw_check(check_id=1, name="hosted-ci", head_sha=target)]
+        },
+        total_count_by_sha={target: 2},
+    )
+    args = cli._parser().parse_args(
+        [
+            "mature-evaluation",
+            "--expectation", str(tmp_path / "expectation.json"),
+            "--request", str(tmp_path / "request.json"),
+            "--outcome", str(tmp_path / "outcome.json"),
+            "--initial-evaluation", str(tmp_path / "evaluation.json"),
+            "--initial-revision", str(tmp_path / "revision_1.json"),
+            "--evidence-receipt", str(tmp_path / "evidence_receipt.json"),
+            "--check-name", "hosted-ci",
+            "--out-evaluation", str(tmp_path / "bad_eval.json"),
+            "--out-revision", str(tmp_path / "bad_revision.json"),
+        ]
+    )
+    with pytest.raises(cli.OutcomeLearningCliError, match="incomplete check-run page"):
+        cli.cmd_mature_evaluation(
+            args,
+            transport=transport,
+            clock=StepClock("2026-09-02T12:00:20+00:00"),
+        )

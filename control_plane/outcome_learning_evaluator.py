@@ -19,6 +19,7 @@ DEVIATIONS for the full rationale):
 """
 from __future__ import annotations
 
+import copy
 from collections.abc import Mapping
 from typing import Any
 
@@ -33,6 +34,7 @@ from control_plane.outcome_learning_contracts import (
     validate_canary_request,
     validate_evaluation,
     validate_expectation,
+    validate_github_check_evidence,
     validate_outcome,
     validate_self_model,
 )
@@ -81,6 +83,86 @@ def evaluate_episode(
     }
     validate_evaluation(evaluation, expectation, outcome)
     return evaluation
+
+
+def mature_ci_evaluation(
+    expectation: Mapping[str, Any],
+    outcome: Mapping[str, Any],
+    request: Mapping[str, Any],
+    initial_evaluation: Mapping[str, Any],
+    *,
+    evidence_commit_sha: str,
+    owner_check: Mapping[str, Any],
+    expected_check_name: str,
+    recorded_at: str,
+) -> dict[str, Any]:
+    """Mature the one delayed CI forecast from exact GitHub owner evidence.
+
+    The immutable target is the previously published evidence commit, never the commit
+    that will contain this correction. The initial evaluation is copied; only the named
+    delayed forecast entry and ``recorded_at`` may change. No result grants promotion or
+    authority.
+    """
+    validate_expectation(expectation)
+    validate_canary_request(request)
+    validate_outcome(outcome, expectation, request)
+    validate_evaluation(initial_evaluation, expectation, outcome)
+    check = validate_github_check_evidence(owner_check)
+    if check["commit_sha"] != evidence_commit_sha:
+        raise OutcomeLearningContractError(
+            "GitHub check evidence is not bound to the frozen evidence commit"
+        )
+    if check["check_name"] != expected_check_name:
+        raise OutcomeLearningContractError(
+            "GitHub check name does not match the exact maturation target"
+        )
+
+    metric_id = "ci_green_at_frozen_evidence_commit"
+    expectation_metric = next(
+        (entry for entry in expectation["expectations"] if entry["metric_id"] == metric_id),
+        None,
+    )
+    if expectation_metric is None or expectation_metric["horizon"] != "delayed":
+        raise OutcomeLearningContractError(
+            "sealed expectation lacks delayed ci_green_at_frozen_evidence_commit"
+        )
+    initial_entry = next(
+        (entry for entry in initial_evaluation["forecast"] if entry["metric_id"] == metric_id),
+        None,
+    )
+    if initial_entry is None or any(
+        initial_entry[field] is not None
+        for field in ("realized", "within_interval", "brier_score")
+    ):
+        raise OutcomeLearningContractError(
+            "CI maturation requires one initially unresolved delayed forecast"
+        )
+
+    from datetime import datetime
+
+    def _time(value: str) -> datetime:
+        return datetime.fromisoformat(value[:-1] + "+00:00")
+
+    if _time(initial_evaluation["recorded_at"]) >= _time(recorded_at):
+        raise OutcomeLearningContractError(
+            "matured evaluation must be recorded after the initial evaluation"
+        )
+    if _time(check["observed_at"]) >= _time(recorded_at):
+        raise OutcomeLearningContractError(
+            "matured evaluation must be recorded after GitHub check observation"
+        )
+
+    matured = copy.deepcopy(dict(initial_evaluation))
+    realized = 1.0 if check["conclusion"] == "success" else 0.0
+    for entry in matured["forecast"]:
+        if entry["metric_id"] == metric_id:
+            entry["realized"] = realized
+            entry["within_interval"] = None
+            entry["brier_score"] = (entry["estimate"] - realized) ** 2
+            break
+    matured["recorded_at"] = recorded_at
+    validate_evaluation(matured, expectation, outcome)
+    return matured
 
 
 def _process_quality(
