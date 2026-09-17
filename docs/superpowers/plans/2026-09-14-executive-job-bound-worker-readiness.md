@@ -737,3 +737,123 @@ dependencies, the parity attempt initially lacked the workflow's separately
 materialized pinned Macro source, and the final parity run was stopped to avoid
 adding load while the Studio was saturated. Hosted required CI remains the
 release authority for the complete gate.
+
+## 2026-09-17 continuation — master integration, custody adjudication, Task 4B
+
+Protected master re-pinned at `eee809949ee79c0ea1ef922ce74c110b1bb1dddf`; Skillpack
+`mastermind.sol_skillpack.v1` `1.0.1` / `minimum_bootstrap_major: 1` loaded from that
+same commit. The existing PR #703, branch and operation key remain canonical; nothing
+was reset, force-pushed or replaced.
+
+### The integration event was real, not cosmetic
+
+Master had moved nine commits past this branch's merge base `8ba7deed`. The PR-owned
+path set is disjoint from that movement and the merge is clean (tree
+`85953a5feb60041293ecf983e46c4d849dee6ff0`), but the movement was still material:
+master `3d473cfa` (#707, RCH-P0) repairs the exact `REMOTE_PROOF_CHANGED` collapse
+that made the canonical `scripts/source_continuity.py` custody receipt **unobtainable**
+on this branch's base. Two pre-merge invocations refused with `REMOTE_PROOF_CHANGED`;
+after integrating master the adapter reached the local-facts stage instead. The
+custody instrument this operation depends on was broken on the old base, so the merge
+is a dependency repair rather than a currency refresh.
+
+The already-reconciled acceptance goldens survive that integration unchanged:
+`test_offline_acceptance_receipt_is_deterministic_and_proves_tx9_quarantine` and the
+full `tests/test_executive_os_phase1fc.py` file pass (62 passed) on the integrated
+candidate. The six derived golden digests were **not** revisited; no new discriminator
+suggested they are wrong.
+
+### Two adapter usability defects observed (not owned by this PR)
+
+1. `scripts/source_continuity.py` counts untracked paths with `git ls-files --others`
+   and no `--exclude-standard`, while the adapter's own import of
+   `control_plane.source_continuity` writes `control_plane/__pycache__/*.pyc` before
+   the local probe runs. A clean checkout therefore self-inflicts `OUT_OF_SCOPE_DIRT`.
+   Invoking as `python3 -B` (or with `PYTHONDONTWRITEBYTECODE=1`) clears it.
+2. Its `--external-effect-evidence-fingerprint` must be 64 hex characters; a
+   descriptive string returns the undifferentiated `INVALID_REQUEST`.
+
+Both belong to the #707 owner. No change was made to that adapter here.
+
+### Source custody: `control_plane/executive_runtime.py` remains held — adjudicated, not assumed
+
+PR #699 declares that path among its three production paths and is
+`REJECTED_FOR_ACCEPTANCE / SUPPORTING_SYNTHETIC_EVIDENCE_ONLY /
+RUNTIME_BINDING_RECONCILIATION_REQUIRED` at head `bdd124c4`, unchanged. Its release
+edge is either the incumbent identifying its current binding/generation, or a lawful
+terminal STOP establishing `BRANCH_WRITER_RELEASED`. Neither exists; #703 has already
+posted two custody requests (`2026-09-17T00:54Z`, `2026-09-17T03:38Z`) with no return.
+
+Two new facts were established, and they point in opposite directions:
+
+- **The overlap is path-level only.** #699's three hunks in that file sit at lines
+  14091-14750, entirely inside `class OperatorHarnessRegistry` (opens 13072). The P2
+  seams sit in `class AttemptRegistry` (10991-13071) — `_leased_row` at 11627 and its
+  call sites — and in `class EventRegistry` (opens 16535). Zero line, function or
+  class overlap.
+- **Mechanical fenced succession is structurally closed.** At this integrated
+  candidate `control_plane/runtime_binding_projection.py` is still blob
+  `af9eae257d0bc0a558656b23bc078c59bf67c3fe`, byte-identical to the 2026-09-16
+  packet05 diagnostic, and still carries
+  `_PROVIDER_TO_REASONING_SURFACE = {"openai-codex": "codex"}`. The projector cannot
+  derive a RuntimeBinding for a Web/Claude writer at all, so §6 outcome 2 has no
+  mechanism behind it. Master did not touch that file.
+
+Disjoint regions do **not** confer custody, and the incumbent seat
+`aa22a3d2-2778-41c7-b61a-6a0e1a81e6c3` shares this account — which the #699 hold
+explicitly anticipates ("same account/child/branch is not adequate modifying-writer
+identity"; do not use "a sister same-account Web surface as implicit successor").
+This session is a different session on that account and therefore is **not** the
+incumbent. The lane stays frozen. No duplicate validator, shadow lookup, second
+Runtime plane or cloned state was created.
+
+Both Task 4 Runtime seams were re-verified as genuinely absent, so the block is
+complete rather than partially avoidable: `RuntimeStore.list_events` does not exist,
+`EventRegistry.list_events` (16544) opens its own `self.store.read()` connection and
+takes no `connection=` parameter, and `current_authority_snapshot` appears nowhere in
+the file.
+
+### Task 4B — the pure result-projection half, built inside an already-owned file
+
+Task 4's Step 6/7 contract is pure and needs no Runtime transaction, so it was
+implemented in `control_plane/executive_privileged_authority.py`:
+`ReadinessResultState` (closed, three members, no ready-to-work member),
+`ReadinessEvidenceCurrency`, `ReadinessEventPhase` (the six durable phases),
+`READINESS_AGGREGATE_TYPE`, `result_state_for_broker_error`, `ReadinessResult` with
+construction-time state/receipt/reason coherence, and `evidence_currency_for`.
+
+The broker reason domain is **reused, not forked**: the merged PR #613 broker emits
+exactly four `_wire_error` codes, and a test derives that set from the broker's own
+source text so the constant self-falsifies if that owner adds a code. `EFFECT_UNKNOWN`
+maps to the unresolved-effect state and can never collapse into `REFUSED`; an
+unrecognised code fails closed instead of defaulting.
+
+Proof: focused 166 passed; adjacent eight-file campaign 434 passed; `py_compile` and
+`git diff --check` pass. Five mutations were each killed — `EFFECT_UNKNOWN` collapsing
+into `REFUSED`, a terminal result accepting a null receipt, an unprovable fact
+reporting `CURRENT`, a refusal carrying a receipt, and the reason domain drifting from
+the broker source. No existing test was weakened.
+
+### Effect state
+
+No privileged, root, service, sudoers, credential or provider effect occurred. The
+Studio was re-probed read-only: no `com.mastermind.executive.privileged` plist in
+`/Library/LaunchDaemons`, no `privileged-broker.json`, no `privileged.sock` in
+`/var/run/mastermind-executive/` (only the pre-existing `ceo-ingress.sock` and
+`control.sock`), no installed `mmx-admin` in the release `bin/`, no mastermind
+sudoers entry, and the launchd service is not loaded. Nothing was installed or armed.
+
+### Host authentication blocker
+
+At `2026-09-16T22:44:37` local, mid-session, `~/.config/gh/hosts.yml` was rewritten to
+`{}` and this host lost GitHub authentication. No logout was issued from this session.
+The osxkeychain credential returns nothing, `ssh -T git@github.com` is denied by
+public key, and no `GH_TOKEN`/`GITHUB_TOKEN` is present. Authenticated GitHub reads,
+the push of the Task 4B commit, hosted CI observation, and the canonical
+source-continuity receipt (which returns `AUTH_UNAVAILABLE` without a token) are all
+unavailable until an operator restores that credential. Restoring it is an operator
+act and was not attempted here.
+
+Next: restore host GitHub authentication, push and re-prove the Task 4B head, then
+consume the #699 custody return before the `AttemptRegistry`/`EventRegistry` seams and
+Task 4 Step 3/5 admission. Task 5 stays held behind #653 installer custody.
