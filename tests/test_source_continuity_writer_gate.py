@@ -586,19 +586,33 @@ def _protection_endpoint(branch: str = BRANCH) -> str:
 
 
 class _MissingResource(Exception):
-    """A fake 404 on an endpoint whose absence is itself a lawful observation."""
+    """A foreign 404 signal: marked absent, but not the adapter's own class.
+
+    Used for the optional classic-protection readback so the tests also prove
+    the marker-attribute protocol admits a transport that raises its own type.
+    A required endpoint uses `_cli_missing_error()` instead, because there the
+    contract under test is the real transport's.
+    """
 
     source_continuity_resource_missing = True
 
 
-def _cli_probe_error() -> type[BaseException]:
-    """`_RemoteProbeError` of the exact CLI module object under test.
+def _cli_attr(name: str):
+    """An attribute of the exact CLI module object under test.
 
     `_cli_module()` re-executes the module per test, so the fake transport must
-    resolve the class when it is called, never from an earlier execution.
+    resolve these when it is called, never from an earlier execution.
     """
 
-    return sys.modules[CLI_MODULE_NAME]._RemoteProbeError
+    return getattr(sys.modules[CLI_MODULE_NAME], name)
+
+
+def _cli_probe_error() -> type[BaseException]:
+    return _cli_attr("_RemoteProbeError")
+
+
+def _cli_missing_error() -> type[BaseException]:
+    return _cli_attr("_RemoteResourceMissing")
 
 
 class _GateHTTP:
@@ -616,6 +630,7 @@ class _GateHTTP:
         protection_unreadable: bool = False,
         protection_on_second_read=None,
         protection_absent_on_second_read: bool = False,
+        missing_endpoints=(),
     ) -> None:
         self.calls: list[tuple[str, str, float]] = []
         self.rules = [] if rules is None else rules
@@ -627,6 +642,7 @@ class _GateHTTP:
         self.protection_unreadable = protection_unreadable
         self.protection_on_second_read = protection_on_second_read
         self.protection_absent_on_second_read = protection_absent_on_second_read
+        self.missing_endpoints = frozenset(missing_endpoints)
         self.rules_reads = 0
         self.protection_reads = 0
 
@@ -650,6 +666,8 @@ class _GateHTTP:
         assert token == TOKEN
         assert TOKEN not in url
         endpoint = url.removeprefix(API_ROOT + "/")
+        if endpoint in self.missing_endpoints:
+            raise _cli_missing_error()()
         if endpoint == _branch_endpoint():
             return self.branch
         if endpoint == _protection_endpoint():
@@ -1580,3 +1598,35 @@ def test_get_optional_never_swallows_a_real_probe_failure() -> None:
     with pytest.raises(module._RemoteProbeError):
         bounded.get_optional(_ABSENT_URL, token=TOKEN, timeout=20.0)
     assert bounded._missing_observations == []
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        _branch_endpoint(),
+        _rules_endpoint(),
+        f"repos/{REPOSITORY}/rulesets/{REPO_RULESET}",
+    ],
+)
+def test_cli_absence_of_a_required_endpoint_is_never_read_as_absence(endpoint, capsys) -> None:
+    """Only the classic-protection readback may be absent; 404 elsewhere fails closed.
+
+    Raised as the transport's own `_RemoteResourceMissing`, which subclasses
+    `_RemoteProbeError` precisely so marking a 404 cannot widen any other probe
+    into a lawful absence. Confirmed against live GitHub on a nonexistent
+    branch: `REMOTE_PROBE_FAILED`, exit 2.
+    """
+
+    module = _cli_module()
+    exit_code = _run(module, _argv(), http=_active_http(missing_endpoints=(endpoint,)))
+    payload = json.loads(capsys.readouterr().out.strip())
+
+    assert exit_code == 2
+    assert payload["code"] == "REMOTE_PROBE_FAILED"
+
+
+def test_resource_missing_is_a_probe_error_subclass() -> None:
+    module = _cli_module()
+    assert issubclass(module._RemoteResourceMissing, module._RemoteProbeError)
+    assert module._is_resource_missing(module._RemoteResourceMissing()) is True
+    assert module._is_resource_missing(module._RemoteProbeError()) is False
