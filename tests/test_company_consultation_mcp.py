@@ -20,7 +20,6 @@ from control_plane.runtime_binding_projection import project_runtime_binding
 from control_plane.operator_harness_contract import runtime_binding_id_for
 from integrations.mastermind_company_mcp.consultation import (
     COMPANY_CONSULTATION_CAPABILITY,
-    COMPANY_CONSULTATION_ERROR_CODES,
     COMPANY_CONSULTATION_MAX_RESPONSE_BYTES,
     COMPANY_CONSULTATION_RESULT_SCHEMA,
     COMPANY_CONSULTATION_SERVER_IDENTITY,
@@ -419,7 +418,8 @@ def test_oversized_ambiguous_error_encodes_within_response_cap() -> None:
     encoded = canonical_company_consultation_json(response)
     assert len(encoded) <= COMPANY_CONSULTATION_MAX_RESPONSE_BYTES
     assert response["ok"] is False
-    assert response["error"]["code"] in COMPANY_CONSULTATION_ERROR_CODES
+    assert response["error"]["code"] == "AMBIGUOUS"
+    assert response["data"] == {"peers": []}
     assert sink.calls == []
 
 
@@ -1755,3 +1755,72 @@ def test_company_consultation_tool_digest_matches_execution_grant_owner() -> Non
     assert EXECUTIVE_COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST == (
         COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST
     )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("repository", "github_pat_" + ("A" * 24) + "/repo"),
+        ("path", "github_pat_" + ("A" * 24)),
+    ],
+)
+def test_company_consult_rejects_secret_shaped_artifact_value_before_dispatch(
+    field: str, value: str
+) -> None:
+    artifact = _artifact()
+    artifact[field] = value
+    gateway, sink = _gateway()
+
+    response = _run(
+        gateway.call(
+            "company.consult",
+            {
+                "to": _peer().peer_ref,
+                "question": "Reject nested secret material.",
+                "evidence_refs": [],
+                "artifact_revisions": [artifact],
+            },
+        )
+    )
+
+    assert response["ok"] is False
+    assert response["error"]["code"] == "INVALID_REQUEST"
+    assert sink.calls == []
+
+
+def test_nonserializable_peer_refusal_data_returns_typed_bounded_error() -> None:
+    class BrokenDataResolver:
+        peers = []
+
+        def resolve(self, alias: str, *, program_ref: str):
+            raise ConsultationPeerRefused(
+                "AMBIGUOUS", {"peers": [object()]}
+            )
+
+    sink = _Dispatcher()
+    gateway = CompanyConsultationGateway(
+        peer_resolver=BrokenDataResolver(),  # type: ignore[arg-type]
+        dispatcher=sink,
+        observed_tool_schema_digest=COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST,
+        utc_now=lambda: "2026-09-14T00:00:00Z",
+    )
+
+    response = _run(
+        gateway.call(
+            "company.consult",
+            {
+                "to": _peer().peer_ref,
+                "question": "Keep the typed refusal safe.",
+                "evidence_refs": [],
+                "artifact_revisions": [],
+            },
+        )
+    )
+
+    assert response["ok"] is False
+    assert response["error"]["code"] == "AMBIGUOUS"
+    assert response["data"] == {"peers": []}
+    assert len(canonical_company_consultation_json(response)) <= (
+        COMPANY_CONSULTATION_MAX_RESPONSE_BYTES
+    )
+    assert sink.calls == []
