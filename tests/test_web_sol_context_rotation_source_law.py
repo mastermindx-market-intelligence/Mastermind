@@ -354,7 +354,7 @@ def test_session_reliability_budgets_capsule_and_no_duplicate_plane_are_explicit
         "six material tool calls",
         "15 seconds",
         "30 seconds",
-        "12 KiB / 1,500 words",
+        "12 KiB / 1500 words",
         "UNRESOLVED EFFECTS / PIDS / REQUEST REFS",
         "WHAT MUST NOT BE REDONE",
         "no transcript database",

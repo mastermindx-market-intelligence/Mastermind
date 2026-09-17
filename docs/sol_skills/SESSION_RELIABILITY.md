@@ -136,7 +136,7 @@ full prior tool transcript after interruption, compaction, or rotation.
 
 ## Compact continuation capsule
 
-Maximum target: **12 KiB / 1,500 words**.
+Maximum target: **12 KiB / 1500 words**.
 
 ```text
 MISSION

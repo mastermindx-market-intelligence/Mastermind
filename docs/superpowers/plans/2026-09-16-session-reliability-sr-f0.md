@@ -33,7 +33,7 @@
 
 - [ ] Add `SESSION_RELIABILITY_PATH = "docs/sol_skills/SESSION_RELIABILITY.md"` to the existing rotation test owner.
 - [ ] Add a test requiring compatible front matter, INDEX registration, and mandatory selection triggers: more than three tool calls, host process, multi-source archaeology, resumed failure, or more than one material phase.
-- [ ] Add a test requiring the 8 KiB/16 KiB/100-match/32 KiB/six-call/15s/30s budgets and the 12 KiB/1,500-word capsule.
+- [ ] Add a test requiring the 8 KiB/16 KiB/100-match/32 KiB/six-call/15s/30s budgets and the 12 KiB/1500-word capsule.
 - [ ] Add a test requiring the two-failure threshold, resume-after-timeout/taint/effect threshold, single-failure truth rule, tainted-generation refusal, no raw-history manifest, and durable continuation before retirement.
 - [ ] Add a test requiring the compact kernel to load the protected skill and forbid raw tool-history replay.
 - [ ] Extend the active-execution test to require `CONTEXT_ROTATION` as a non-completion boundary with reconciled effects, durable capsule, active parent mission, and no ordinary finalization while `MORE_WORK_EXISTS`.

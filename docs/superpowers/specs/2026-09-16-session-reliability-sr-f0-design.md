@@ -111,7 +111,7 @@ These are Mastermind engineering budgets, not claims about undocumented provider
 
 ### Continuation capsule
 
-Maximum target: 12 KiB / 1,500 words. It contains mission, canonical owners/identities, protected SHA/Skillpack, capability ledger, last confirmed effect, unresolved effects/PIDs/request refs, workspace/branch/PR, do-not-redo, exact next action, and acceptance/stop condition. It contains no hidden reasoning, secrets, raw logs, or raw tool history.
+Maximum target: 12 KiB / 1500 words. It contains mission, canonical owners/identities, protected SHA/Skillpack, capability ledger, last confirmed effect, unresolved effects/PIDs/request refs, workspace/branch/PR, do-not-redo, exact next action, and acceptance/stop condition. It contains no hidden reasoning, secrets, raw logs, or raw tool history.
 
 ### Tool timeout and taint
 
