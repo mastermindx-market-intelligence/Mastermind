@@ -1213,7 +1213,9 @@ def _create_private_file(path: Path) -> int:
         raise LaunchValidationError(f"run output already exists: {path}") from exc
 
 
-def _validate_codex_home(path: Path) -> Path:
+def _validate_codex_home_directory(path: Path) -> Path:
+    """Validate only the private provider-home directory boundary, not auth."""
+
     try:
         info = path.lstat()
         resolved = path.resolve(strict=True)
@@ -1223,6 +1225,11 @@ def _validate_codex_home(path: Path) -> Path:
         raise LaunchValidationError("CODEX_HOME must be a real directory")
     if stat.S_IMODE(info.st_mode) & 0o077:
         raise LaunchValidationError("CODEX_HOME must be mode 0700 or narrower")
+    return resolved
+
+
+def _validate_codex_home(path: Path) -> Path:
+    resolved = _validate_codex_home_directory(path)
     auth = resolved / "auth.json"
     try:
         auth_info = auth.lstat()
@@ -1857,17 +1864,7 @@ class CodexWorkerAdapter:
 
         if self.provider_realm is None or self.provider_realm.requires_codex_auth_file:
             return _validate_codex_home(self.codex_home)
-        path = self.codex_home
-        try:
-            info = path.lstat()
-            resolved = path.resolve(strict=True)
-        except OSError as exc:
-            raise LaunchValidationError("CODEX_HOME is unavailable") from exc
-        if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
-            raise LaunchValidationError("CODEX_HOME must be a real directory")
-        if stat.S_IMODE(info.st_mode) & 0o077:
-            raise LaunchValidationError("CODEX_HOME must be mode 0700 or narrower")
-        return resolved
+        return _validate_codex_home_directory(self.codex_home)
 
     def _bind_legacy_codex_home(self, _codex_home: str | os.PathLike[str]) -> None:
         """Reject every attempt to inject a second provider-home authority."""
@@ -2545,7 +2542,7 @@ class CodexWorkerAdapter:
         if not 0.1 <= timeout <= 3600:
             raise LaunchValidationError("validation timeout is out of bounds")
 
-        codex_home = self._validated_codex_home()
+        codex_home = _validate_codex_home_directory(self.codex_home)
         _authority_set(spec)
         workspace_lexical = Path(spec.workspace_path)
         if not workspace_lexical.is_absolute():

@@ -194,10 +194,10 @@ def _workspace_and_spec(
     return WorkerLaunchSpec(**values)  # type: ignore[arg-type]
 
 
-def test_descriptor_is_implemented_and_resolves_the_exact_native_class() -> None:
+def test_descriptor_remains_unarmed_until_real_turn_proof() -> None:
     descriptor = adapter_descriptor("claude-code")
 
-    assert descriptor.implemented is True
+    assert descriptor.implemented is False
     assert descriptor.implementation == "control_plane.claude_worker.ClaudeCodeWorkerAdapter"
     assert adapter_implementation("claude-code") is ClaudeCodeWorkerAdapter
     for alias in ("claude", "claude-cli", "claude-code-v1", "claude-compatible"):
@@ -719,7 +719,9 @@ def test_status_and_direct_validation_fail_closed_before_common_sandbox(
     tmp_path: Path,
 ) -> None:
     binary = _fixture_claude_binary(tmp_path)
-    (tmp_path / "mode").write_text("success", encoding="utf-8")
+    # Keep the fixture alive long enough to exercise the RUNNING status edge;
+    # an instant synthetic exit can disappear before macOS identity sampling.
+    (tmp_path / "mode").write_text("delayed-success", encoding="utf-8")
     adapter = _adapter(tmp_path, binary)
     spec = _workspace_and_spec(tmp_path)
 

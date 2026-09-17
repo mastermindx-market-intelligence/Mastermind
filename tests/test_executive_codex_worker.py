@@ -1161,6 +1161,30 @@ def test_supervisor_validation_is_direct_hash_only_and_auth_free(tmp_path: Path)
     assert receipt.error is None
 
 
+
+def test_supervisor_validation_is_auth_free_when_codex_auth_file_is_absent(tmp_path: Path):
+    async def exercise():
+        adapter, spec, _workspace_path, _run_dir = _fixture(tmp_path)
+        (adapter.codex_home / "auth.json").unlink()
+        return await adapter.run_validation_argv(
+            spec,
+            ("/usr/bin/true",),
+            timeout_seconds=5,
+        )
+
+    receipt = asyncio.run(exercise())
+    assert receipt.exit_code == 0
+    assert receipt.timed_out is False
+    assert receipt.error is None
+
+
+def test_provider_start_still_requires_codex_auth_file(tmp_path: Path):
+    adapter, spec, _workspace_path, _run_dir = _fixture(tmp_path)
+    (adapter.codex_home / "auth.json").unlink()
+
+    with pytest.raises(cw.LaunchValidationError, match="auth.json is required"):
+        asyncio.run(adapter.start(spec))
+
 def test_supervisor_validation_timeout_reaps_its_process_group(tmp_path: Path):
     async def exercise():
         adapter, spec, _workspace_path, _run_dir = _fixture(tmp_path)

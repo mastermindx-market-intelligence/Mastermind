@@ -24,9 +24,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from control_plane.codex_worker import (
-    LAUNCH_ATTESTATION_SCHEMA_VERSION,
     CodexWorkerAdapter,
-    LaunchAttestation,
     LaunchValidationError,
     ProcessIdentityError,
     ProcessInspector as LocalProcessInspector,
@@ -50,8 +48,10 @@ from control_plane.codex_worker import (
     validate_secret_canary_verdict,
 )
 from control_plane.worker_execution_contract import (
+    LAUNCH_ATTESTATION_SCHEMA_VERSION,
     ArtifactReceipt,
     BinaryAttestation,
+    LaunchAttestation,
     CancelReceipt,
     CollectionReceipt,
     ProcessInspector,

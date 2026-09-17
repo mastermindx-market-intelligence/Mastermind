@@ -264,10 +264,6 @@ def _reviewed_codex_kwargs(root: Path) -> dict:
     )
     codex_home = root / "codex-home"
     codex_home.mkdir(mode=0o700, exist_ok=True)
-    auth = codex_home / "auth.json"
-    if not auth.exists():
-        auth.write_text("{}\n", encoding="utf-8")
-        auth.chmod(0o600)
     return {
         "binary_path": binary,
         "codex_home": codex_home,
@@ -2872,6 +2868,39 @@ def _real_claude_broker_fixture(
     broker.startup_sweep = sweeper.sweep("broker_startup")
     broker.last_sweep = broker.startup_sweep
     return broker, claude, validator, sweeper, peer, spec, claude_root / "mode"
+
+
+def test_unarmed_claude_descriptor_refuses_broker_execution(tmp_path: Path) -> None:
+    codex_root = tmp_path / "codex"
+    codex_root.mkdir()
+    codex_broker, _adapter, sweeper, peer, spec = _fixture(codex_root)
+    claude = _reviewed_claude_adapter(tmp_path / "claude")
+    validator = _reviewed_codex_adapter(tmp_path / "validator")
+    broker = ExecutiveWorkerBroker(
+        claude,
+        codex_broker.policy,
+        sweeper,
+        adapter_id="claude-code",
+        validation_adapter=validator,
+        validation_adapter_id="codex-cli",
+    )
+
+    with pytest.raises(
+        broker_module.WorkerAdapterNotImplementedError, match="not implemented"
+    ):
+        asyncio.run(
+            broker.execute(
+                _request(
+                    "start",
+                    {"launch_spec": spec, "validation_commands": []},
+                    suffix="claude-unarmed",
+                ),
+                peer=peer,
+            )
+        )
+
+    assert broker._active_run_id is None
+    assert broker._runs == {}
 
 
 def test_claude_broker_binds_exact_execution_and_common_validation_owners(
