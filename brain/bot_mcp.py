@@ -726,9 +726,24 @@ async def get_intelligence(args):
 async def get_quote(args):
     from data_layer import polygon
     tks = [str(t) for t in (args.get("tickers") or []) if t]
-    px = polygon.quotes(tks)
+    try:
+        px = polygon.quotes(tks)
+    except Exception:  # noqa: BLE001
+        return _json({
+            "read_status": "unavailable",
+            "error": "live_quotes_unavailable",
+            "failed_sources": ["quotes"],
+            "quotes": None,
+        })
+    if not isinstance(px, dict):
+        return _json({
+            "read_status": "unavailable",
+            "error": "live_quotes_unavailable",
+            "failed_sources": ["quotes"],
+            "quotes": None,
+        })
     if not any(v is not None for v in px.values()):
-        return _ok("no live quotes available — Polygon layer offline or unkeyed (set POLYGON_API_KEY).")
+        return _ok("no live quotes returned for the requested tickers.")
     return _json({"quotes": px,
                   "note": "Live 15-min delayed prices (Polygon). For marks/entry checks — not a signal."})
 
@@ -1125,8 +1140,15 @@ async def read_signal(args):
         _audit_denied_book_read(p)
         return _ok("DENIED: portfolio book state (positions/ledger/research) is not readable "
                    "via read_signal — read your OWN book through your desk tool.")
-    d = _read_json(p)
-    return _json(d) if d is not None else _ok(f"not found: {p}")
+    try:
+        data = _read_json(p)
+    except Exception:  # noqa: BLE001
+        return _json({
+            "read_status": "unavailable",
+            "error": "signal_read_unavailable",
+            "failed_sources": ["signal"],
+        })
+    return _json(data) if data is not None else _ok("not found: requested signal path")
 
 
 def _audit_denied_book_read(p: Path) -> None:
