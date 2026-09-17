@@ -2016,10 +2016,16 @@ def api_outcome_ledger() -> JSONResponse:
         weights = outcome_ledger.lens_weights()
         records = outcome_ledger.load()
     except Exception as exc:
-        return JSONResponse({"summary": {"n": 0, "status": "building", "brier": None,
-                                         "hit_rate": None, "calibration_error": None},
-                             "reliability_curve": [], "lens_edge": [], "lens_weights": {},
-                             "records": [], "error": str(exc)})
+        _log.warning("outcome ledger read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "ledger_status": "unavailable",
+            "error": "outcome_ledger_unavailable",
+            "summary": None,
+            "reliability_curve": None,
+            "lens_edge": None,
+            "lens_weights": None,
+            "records": None,
+        })
     records = sorted(records, key=lambda r: r.get("asof_resolved") or "", reverse=True)[:200]
     rec_out = [{
         "thesis_id": r.get("thesis_id"), "subject": r.get("subject"), "sleeve": r.get("sleeve"),
@@ -2028,7 +2034,8 @@ def api_outcome_ledger() -> JSONResponse:
         "outcome": r.get("outcome"), "quad_at_entry": r.get("quad_at_entry"),
         "confluence_at_entry": r.get("confluence_at_entry"), "lens_dirs": r.get("lens_dirs") or {},
     } for r in records]
-    return JSONResponse({"summary": summary, "reliability_curve": curve, "lens_edge": edge,
+    return JSONResponse({"ledger_status": "available", "summary": summary,
+                         "reliability_curve": curve, "lens_edge": edge,
                          "lens_weights": weights, "records": rec_out})
 
 
