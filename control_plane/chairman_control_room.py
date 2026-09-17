@@ -2078,6 +2078,7 @@ def _read_placement_selection(
 def build_control_room(
     *,
     repo_root: Path | None = None,
+    runtime_root: Path | str | None = None,
     macro_root_flag: str | None = None,
     environ: Mapping[str, str] = os.environ,
     now: str | None = None,
@@ -2106,6 +2107,9 @@ def build_control_room(
     gather remains the same on either path.
     """
     root = Path(repo_root) if repo_root is not None else _REPO_ROOT
+    runtime_projection_root = (
+        Path(runtime_root).resolve() if runtime_root is not None else root
+    )
     generated_at = now or _utc_now_z()
 
     packet: dict[str, Any] | None = None
@@ -2126,6 +2130,7 @@ def build_control_room(
     try:
         inbox = executive_inbox.build_inbox(
             repo_root=root,
+            runtime_root=runtime_projection_root,
             boot_packet=packet,
             environ=environ,
             now=now,
@@ -2157,7 +2162,7 @@ def build_control_room(
         active_builds = active_builds_snapshot
         active_builds_failure = None
     agent_os_state, agent_os_state_failure = _read_agent_os_state(macro_root)
-    runtime_jobs, runtime_jobs_failure = _read_runtime_jobs(root)
+    runtime_jobs, runtime_jobs_failure = _read_runtime_jobs(runtime_projection_root)
 
     bindings, binding_problems = surface_bindings.load_bindings(bindings_path)
 
@@ -2196,7 +2201,7 @@ def build_control_room(
                     precursor_cards, (str, bytes)
                 ):
                     dispatch_evidence = _gather_dispatch_evidence(
-                        root, precursor_cards, generated_at
+                        runtime_projection_root, precursor_cards, generated_at
                     )
         except Exception:  # noqa: BLE001 — gather layer never raises
             dispatch_evidence = None
