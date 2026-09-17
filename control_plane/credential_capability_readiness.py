@@ -23,7 +23,11 @@ from control_plane.sol_capability_status import (
 _ID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
 _SOURCE = re.compile(r"^(?:receipt|runtime|owner|evidence):[A-Za-z0-9][A-Za-z0-9:._/@-]{0,239}$")
 _FORBIDDEN_SOURCE = re.compile(
-    r"(?:github_pat_|\bgh[pousr]_|\bxox[baprs]-|\bsk-|bearer|authorization|password|-----begin)",
+    r"(?:github_pat_|\bgh[pousr]_|\bxox[baprs]-|\bsk-|"
+    r"\b(?:sk|rk)_(?:live|test|prod)_|\bwhsec_|"
+    r"\bops_[a-z0-9]{16,}|\b(?:akia|asia)[a-z0-9]{16}|"
+    r"\bglpat-|\bnpm_[a-z0-9]{16,}|\bya29\.|"
+    r"bearer|authorization|password|-----begin)",
     re.IGNORECASE,
 )
 _RESERVED_DEPENDENCIES = frozenset(

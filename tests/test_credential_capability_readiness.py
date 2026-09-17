@@ -327,3 +327,58 @@ def test_headless_auth_readiness_cannot_promote_interactive_provider_capability(
 
     with pytest.raises(CredentialReadinessError, match="capability_name"):
         augment_credential_readiness(interactive, headless_auth)
+
+
+def _secret_shape(*parts: str) -> str:
+    # Keep regression fixtures semantically realistic without committing literal
+    # credential-shaped strings that GitHub push protection must reject.
+    return "".join(parts)
+
+
+@pytest.mark.parametrize(
+    "secret_shaped",
+    [
+        _secret_shape("sk_", "live_", "abcdefghijklmnopqrstuvwxyz"),
+        _secret_shape("rk_", "live_", "abcdefghijklmnopqrstuvwxyz"),
+        _secret_shape("wh", "sec_", "abcdefghijklmnopqrstuvwxyz"),
+        _secret_shape("op", "s_", "abcdefghijklmnopqrstuvwxyz"),
+        _secret_shape("ak", "ia", "iosfodnn7example"),
+        _secret_shape("as", "ia", "iosfodnn7example"),
+        _secret_shape("gl", "pat-", "abcdefghijklmnopqrstuvwxyz"),
+        _secret_shape("np", "m_", "abcdefghijklmnopqrstuvwxyz"),
+        _secret_shape("ya", "29.", "abcdefghijklmnopqrstuvwxyz"),
+    ],
+)
+def test_common_secret_prefixes_are_refused_in_opaque_identifiers(secret_shaped):
+    observation = dataclasses.replace(
+        _observation(), expected_credential_generation=secret_shaped
+    )
+    with pytest.raises(CredentialReadinessError, match="secret-shaped"):
+        augment_credential_readiness(_base(), observation)
+
+
+def test_common_secret_prefix_is_refused_in_source_reference():
+    with pytest.raises(CredentialReadinessError, match="secret-shaped"):
+        augment_credential_readiness(
+            _base(), _observation(source_ref="receipt:" + _secret_shape("op", "s_", "abcdefghijklmnopqrstuvwxyz"))
+        )
+
+
+@pytest.mark.parametrize(
+    "ordinary_identifier",
+    [
+        "ops-team",
+        "sketch-runtime",
+        "asia-region",
+        "npm-mirror",
+        "credential-g7",
+        "studio-01",
+    ],
+)
+def test_secret_prefix_hardening_preserves_ordinary_identifiers(ordinary_identifier):
+    observation = dataclasses.replace(
+        _observation(), expected_host_binding=ordinary_identifier,
+        observed_host_binding=ordinary_identifier,
+    )
+    augmented = augment_credential_readiness(_base(), observation)
+    assert isinstance(augmented, CapabilityFact)
