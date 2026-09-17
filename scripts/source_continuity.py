@@ -13,6 +13,7 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from http import HTTPStatus
 import json
 import math
 import os
@@ -645,7 +646,7 @@ def _stdlib_http_get(
             return _HTTPRepresentation(payload=None, etag=etag, not_modified=True)
         if exc.code in {401, 403}:
             raise _AuthProbeError() from None
-        if exc.code == 404:
+        if exc.code == HTTPStatus.NOT_FOUND:
             raise _RemoteResourceMissing() from None
         raise _RemoteProbeError() from None
     except (URLError, TimeoutError, OSError):
