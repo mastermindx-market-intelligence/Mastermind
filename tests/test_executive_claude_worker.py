@@ -7,8 +7,11 @@ import inspect
 import json
 import os
 from pathlib import Path
+import platform
+import signal
 import subprocess
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -773,6 +776,39 @@ def test_launch_relative_timeout_and_descendant_pipe_are_bounded(tmp_path: Path)
     assert asyncio.run(collect_descendant()).result.status is WorkerRunStatus.INVALID_RESULT
 
 
+def test_timeout_path_reconciles_residual_process_group_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    (tmp_path / "mode").write_text("sleep", encoding="utf-8")
+    adapter = _adapter(tmp_path, binary)
+    original_cleanup = ClaudeCodeWorkerAdapter._kill_residual_process_group
+    cleanup_calls = 0
+
+    async def counted_cleanup(
+        current: ClaudeCodeWorkerAdapter, state: object
+    ) -> bool:
+        nonlocal cleanup_calls
+        cleanup_calls += 1
+        return await original_cleanup(current, state)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(
+        ClaudeCodeWorkerAdapter, "_kill_residual_process_group", counted_cleanup
+    )
+
+    async def execute() -> CollectionReceipt:
+        ref = await adapter.start(
+            _workspace_and_spec(
+                tmp_path, timeout_seconds=0.05, cancel_grace_seconds=0.1
+            )
+        )
+        return await asyncio.wait_for(adapter.collect_result(ref), timeout=5)
+
+    receipt = asyncio.run(execute())
+    assert receipt.result.status is WorkerRunStatus.TIMED_OUT
+    assert cleanup_calls == 1
+
+
 def test_stream_violation_and_pure_refusal_never_succeed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -950,6 +986,85 @@ def test_cancelled_collector_does_not_cancel_shared_terminal_collection(
     assert asyncio.run(execute()).result.status is WorkerRunStatus.SUCCEEDED
 
 
+def test_terminal_shared_collection_wins_same_turn_waiter_cancellation() -> None:
+    async def execute() -> tuple[object, object]:
+        terminal: asyncio.Future[object] = asyncio.get_running_loop().create_future()
+        sentinel = object()
+        waiter = asyncio.create_task(
+            ClaudeCodeWorkerAdapter._await_shared_collection(terminal)  # type: ignore[arg-type]
+        )
+        await asyncio.sleep(0)
+        terminal.set_result(sentinel)
+        waiter.cancel()
+        return await waiter, sentinel
+
+    observed, expected = asyncio.run(execute())
+    assert observed is expected
+
+
+def test_cancel_accepts_os_absence_while_wait_task_settles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    adapter = _adapter(tmp_path)
+
+    async def execute() -> tuple[bool, bool, bool]:
+        process_wait_task: asyncio.Future[int] = (
+            asyncio.get_running_loop().create_future()
+        )
+        state = SimpleNamespace(
+            ref=object(),
+            process_wait_task=process_wait_task,
+            termination_lock=asyncio.Lock(),
+            spec=SimpleNamespace(cancel_grace_seconds=0.001),
+            cancel_reason=None,
+            status=WorkerRunStatus.RUNNING,
+            residual_reconciliation_task=None,
+        )
+        leader_observations = 0
+
+        def leader_then_absent(
+            _adapter: ClaudeCodeWorkerAdapter, _ref: object
+        ) -> object | None:
+            nonlocal leader_observations
+            leader_observations += 1
+            return object() if leader_observations == 1 else None
+
+        monkeypatch.setattr(
+            ClaudeCodeWorkerAdapter, "_exact_leader_identity", leader_then_absent
+        )
+        monkeypatch.setattr(
+            ClaudeCodeWorkerAdapter,
+            "_signal_owned_group",
+            lambda _adapter, _ref, _signum: True,
+        )
+        monkeypatch.setattr(
+            ClaudeCodeWorkerAdapter,
+            "_owned_residual_members",
+            lambda _adapter, _ref: (),
+        )
+
+        async def no_residual(
+            _adapter: ClaudeCodeWorkerAdapter, _state: object
+        ) -> bool:
+            return False
+
+        monkeypatch.setattr(
+            ClaudeCodeWorkerAdapter,
+            "_reconcile_residual_process_group",
+            no_residual,
+        )
+        asyncio.get_running_loop().call_later(
+            0.01, process_wait_task.set_result, 0
+        )
+
+        result = await adapter._terminate(state, "operator requested")  # type: ignore[arg-type]
+        assert state.cancel_reason == "operator requested"
+        assert state.status is WorkerRunStatus.CANCELLING
+        return result
+
+    assert asyncio.run(execute()) == (True, False, False)
+
+
 def test_cancel_racing_collection_has_one_cancelled_receipt(tmp_path: Path) -> None:
     binary = _fixture_claude_binary(tmp_path)
     (tmp_path / "mode").write_text("sleep", encoding="utf-8")
@@ -1014,6 +1129,68 @@ def test_foreign_or_permission_denied_residual_group_never_receives_signal(
         )
         with pytest.raises(claude_worker.ClaudeProcessIdentityError):
             await adapter._kill_residual_process_group(state)
+
+    asyncio.run(execute())
+
+
+def test_residual_cleanup_uses_only_two_adjacent_ownership_censuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    (tmp_path / "mode").write_text("success", encoding="utf-8")
+    adapter = _adapter(tmp_path, binary)
+
+    async def execute() -> None:
+        ref = await adapter.start(_workspace_and_spec(tmp_path))
+        await adapter.collect_result(ref)
+        state = adapter._runs[ref.run_id]
+
+        class ResidualInspector:
+            def boot_session_id(self) -> str:
+                return ref.boot_session_id
+
+            def inspect(self, _pid: int) -> object:
+                class Residual:
+                    start_identity = "residual-start"
+                    pgid = ref.pgid
+                    session_id = ref.session_id
+                    effective_uid = ref.effective_uid
+                    effective_gid = ref.effective_gid
+                    real_uid = ref.real_uid
+                    real_gid = ref.real_gid
+
+                return Residual()
+
+        adapter.inspector = ResidualInspector()
+        monkeypatch.setattr(
+            ClaudeCodeWorkerAdapter,
+            "_exact_leader_identity",
+            lambda _adapter, _ref: None,
+        )
+        census_calls = 0
+
+        def residual_census(_pgid: int) -> tuple[claude_worker._ProcessGroupMember, ...]:
+            nonlocal census_calls
+            census_calls += 1
+            return (claude_worker._ProcessGroupMember(4242, "S"),)
+
+        signals: list[tuple[int, signal.Signals]] = []
+        monkeypatch.setattr(claude_worker, "_process_group_member_pids", residual_census)
+        monkeypatch.setattr(claude_worker, "_process_group_exists", lambda _pgid: True)
+        monkeypatch.setattr(
+            claude_worker,
+            "_wait_for_process_group_exit",
+            lambda _pgid, timeout: asyncio.sleep(0, result=True),
+        )
+        monkeypatch.setattr(
+            claude_worker.os,
+            "killpg",
+            lambda pgid, signum: signals.append((pgid, signum)),
+        )
+
+        assert await adapter._kill_residual_process_group(state)
+        assert census_calls == 2
+        assert signals == [(ref.pgid, signal.SIGKILL)]
 
     asyncio.run(execute())
 
@@ -1102,23 +1279,27 @@ def test_unprovable_launch_cleanup_is_bounded_and_closes_evidence(
     (tmp_path / "mode").write_text("sleep-short", encoding="utf-8")
     adapter = _adapter(tmp_path, binary)
 
+    refusal_started: list[float] = []
+
     class AmbiguousInspector:
         def boot_session_id(self) -> str:
             return "unknown"
 
         def inspect(self, _pid: int) -> object:
+            if not refusal_started:
+                refusal_started.append(time.monotonic())
             raise claude_worker.ProcessIdentityError("unavailable")
 
     adapter.inspector = AmbiguousInspector()
 
     async def execute() -> None:
-        started = time.monotonic()
         with pytest.raises(claude_worker.ClaudeProcessIdentityError):
             await asyncio.wait_for(
                 adapter.start(_workspace_and_spec(tmp_path, timeout_seconds=1)),
-                timeout=1.5,
+                timeout=5,
             )
-        assert time.monotonic() - started < 1.2
+        assert refusal_started
+        assert time.monotonic() - refusal_started[0] < 1.0
         await asyncio.sleep(0.25)
 
     asyncio.run(execute())
@@ -1213,3 +1394,140 @@ def test_zombie_only_or_unreadable_residual_census_never_signals(
         assert signals == []
 
     asyncio.run(execute())
+
+
+def test_process_group_census_scopes_ps_to_exact_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")
+    real_popen = subprocess.Popen
+    observed_argv: list[tuple[str, ...]] = []
+
+    def exact_group_popen(
+        argv: object, **kwargs: object
+    ) -> subprocess.Popen[bytes]:
+        observed_argv.append(tuple(argv))  # type: ignore[arg-type]
+        return real_popen(
+            ("/usr/bin/printf", "42 99 S\n"),
+            **kwargs,
+        )
+
+    monkeypatch.setattr(claude_worker.subprocess, "Popen", exact_group_popen)
+
+    assert claude_worker._process_group_member_pids(99) == (
+        claude_worker._ProcessGroupMember(42, "S"),
+    )
+    assert observed_argv == [
+        ("/bin/ps", "-g", "99", "-o", "pid=,pgid=,state=")
+    ]
+
+
+def test_process_group_census_accepts_empty_exact_group_exit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")
+    real_popen = subprocess.Popen
+
+    def empty_group_popen(
+        _argv: object, **kwargs: object
+    ) -> subprocess.Popen[bytes]:
+        return real_popen(("/usr/bin/false",), **kwargs)
+
+    monkeypatch.setattr(claude_worker.subprocess, "Popen", empty_group_popen)
+    monkeypatch.setattr(
+        claude_worker, "_process_group_exists", lambda _pgid: False
+    )
+
+    assert claude_worker._process_group_member_pids(99) == ()
+
+
+def test_process_group_census_refuses_empty_error_for_existing_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")
+    real_popen = subprocess.Popen
+
+    def failed_group_query(
+        _argv: object, **kwargs: object
+    ) -> subprocess.Popen[bytes]:
+        return real_popen(("/usr/bin/false",), **kwargs)
+
+    monkeypatch.setattr(claude_worker.subprocess, "Popen", failed_group_query)
+    monkeypatch.setattr(
+        claude_worker, "_process_group_exists", lambda _pgid: True
+    )
+
+    with pytest.raises(claude_worker.ClaudeProcessIdentityError):
+        claude_worker._process_group_member_pids(99)
+
+
+def test_process_group_census_accepts_darwin_state_flags(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_popen = subprocess.Popen
+
+    def flagged_state_popen(
+        _argv: object, **kwargs: object
+    ) -> subprocess.Popen[bytes]:
+        return real_popen(
+            ("/usr/bin/printf", "42 99 SN\\n43 99 Z+\\n"),
+            **kwargs,
+        )
+
+    monkeypatch.setattr(claude_worker.subprocess, "Popen", flagged_state_popen)
+
+    assert claude_worker._process_group_member_pids(99) == (
+        claude_worker._ProcessGroupMember(42, "S"),
+        claude_worker._ProcessGroupMember(43, "Z"),
+    )
+
+
+def test_exited_launch_pid_reuse_never_signals_foreign_group(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    adapter = _adapter(tmp_path, binary)
+
+    class ReusedInspector:
+        def boot_session_id(self) -> str:
+            return "boot-reused"
+
+        def inspect(self, _pid: int) -> object:
+            class ForeignSession:
+                start_identity = "foreign-reused-start"
+                pgid = 4242
+                session_id = 4242
+                effective_uid = os.geteuid()
+                effective_gid = os.getegid()
+                real_uid = os.getuid()
+                real_gid = os.getgid()
+
+            return ForeignSession()
+
+    class ReapedProcess:
+        pid = 4242
+
+        def __init__(self) -> None:
+            self.returncode_reads = 0
+
+        @property
+        def returncode(self) -> int | None:
+            self.returncode_reads += 1
+            return None if self.returncode_reads == 1 else 0
+
+    adapter.inspector = ReusedInspector()
+    process = ReapedProcess()
+    signals: list[tuple[int, signal.Signals]] = []
+    monkeypatch.setattr(
+        claude_worker.os,
+        "killpg",
+        lambda pgid, signum: signals.append((pgid, signum)),
+    )
+
+    outcome = asyncio.run(
+        adapter._safe_launch_failure_cleanup(process)  # type: ignore[arg-type]
+    )
+
+    assert outcome is claude_worker._LaunchCleanupOutcome.ABSENT
+    assert signals == []
+    assert process.returncode_reads >= 2

@@ -11,6 +11,7 @@ import enum
 import hashlib
 import json
 import os
+import platform
 import re
 import selectors
 import signal
@@ -88,6 +89,8 @@ _MAX_VALIDATION_STDOUT_BYTES = 4 * 1024 * 1024
 _MAX_VALIDATION_STDERR_BYTES = 1 * 1024 * 1024
 _MAX_PROCESS_CENSUS_BYTES = 64 * 1024
 _MAX_PROCESS_CENSUS_MEMBERS = 256
+_DARWIN_PROCESS_RUN_STATES = frozenset("IRSTUZ")
+_DARWIN_PROCESS_STATE_FLAGS = frozenset("+<>AELNSsVWX")
 _LAUNCH_QUARANTINE_CLEANUP_SECONDS = 0.2
 _DENIED_PROVIDER_ENV_KEYS = frozenset(
     {
@@ -210,6 +213,7 @@ class _RunState:
     finished_at: str | None = None
     receipt: CollectionReceipt | None = None
     collection_task: asyncio.Task[CollectionReceipt] | None = None
+    residual_reconciliation_task: asyncio.Task[bool] | None = None
     evidence_closed: bool = False
 
 
@@ -797,9 +801,15 @@ def _run_bounded_auth_status(argv: Sequence[str], *, timeout: float, env: Mappin
 def _process_group_member_pids(pgid: int) -> tuple[_ProcessGroupMember, ...]:
     """Observe group membership through the OS, never infer it from a PGID alone."""
 
+    exact_group_query = platform.system() == "Darwin"
+    argv = (
+        ("/bin/ps", "-g", str(pgid), "-o", "pid=,pgid=,state=")
+        if exact_group_query
+        else ("/bin/ps", "-axo", "pid=,pgid=,state=")
+    )
     try:
         process = subprocess.Popen(
-            ("/bin/ps", "-axo", "pid=,pgid=,state="),
+            argv,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
@@ -826,18 +836,34 @@ def _process_group_member_pids(pgid: int) -> tuple[_ProcessGroupMember, ...]:
             captured.extend(chunk)
             if len(captured) > _MAX_PROCESS_CENSUS_BYTES:
                 raise ValueError
-        if process.wait(timeout=max(0.01, deadline - time.monotonic())) != 0:
+        return_code = process.wait(
+            timeout=max(0.01, deadline - time.monotonic())
+        )
+        if return_code == 1 and exact_group_query and not captured:
+            try:
+                if not _process_group_exists(pgid):
+                    return ()
+            except ProcessIdentityError:
+                raise ValueError from None
+        if return_code != 0:
             raise ValueError
         members: list[_ProcessGroupMember] = []
         for line in captured.decode("ascii", "strict").splitlines():
             fields = line.split()
             if len(fields) != 3:
                 raise ValueError
-            pid, observed_group, state = int(fields[0]), int(fields[1]), fields[2]
+            pid, observed_group, state_token = int(fields[0]), int(fields[1]), fields[2]
             if pid > 0 and observed_group == pgid:
-                if state not in {"R", "S", "T", "U", "I", "Z"}:
+                if (
+                    not state_token
+                    or state_token[0] not in _DARWIN_PROCESS_RUN_STATES
+                    or any(
+                        flag not in _DARWIN_PROCESS_STATE_FLAGS
+                        for flag in state_token[1:]
+                    )
+                ):
                     raise ValueError
-                members.append(_ProcessGroupMember(pid, state))
+                members.append(_ProcessGroupMember(pid, state_token[0]))
                 if len(members) > _MAX_PROCESS_CENSUS_MEMBERS:
                     raise ValueError
     except (UnicodeDecodeError, ValueError, TimeoutError, OSError, subprocess.SubprocessError):
@@ -1172,6 +1198,8 @@ class ClaudeCodeWorkerAdapter:
     ) -> _LaunchCleanupOutcome:
         """Signal an unaccepted launch only after a two-sample ownership proof."""
 
+        if process.returncode is not None:
+            return _LaunchCleanupOutcome.ABSENT
         try:
             first_boot = self.inspector.boot_session_id()
             first = self.inspector.inspect(process.pid)
@@ -1197,6 +1225,8 @@ class ClaudeCodeWorkerAdapter:
                 or expected[2] != process.pid
             ):
                 return _LaunchCleanupOutcome.AMBIGUOUS
+            if process.returncode is not None:
+                return _LaunchCleanupOutcome.ABSENT
             os.killpg(process.pid, signal.SIGKILL)
             return _LaunchCleanupOutcome.OWNED_CLEANED
         except ProcessLookupError:
@@ -1401,7 +1431,12 @@ class ClaudeCodeWorkerAdapter:
                 waiter.set_result(completed.result())
 
         task.add_done_callback(deliver)
-        return await waiter
+        try:
+            return await waiter
+        except asyncio.CancelledError:
+            if task.done() and not task.cancelled():
+                return task.result()
+            raise
 
     @staticmethod
     def _retrieve_terminal_exception(task: asyncio.Task[CollectionReceipt]) -> None:
@@ -1521,10 +1556,11 @@ class ClaudeCodeWorkerAdapter:
                 leader = self._exact_leader_identity(ref)
                 if leader is None:
                     # The leader exited in the race between wait sampling and
-                    # inspection.  Only an independently proven residual
-                    # session may be signalled by the cleanup path below.
+                    # inspection.  Reconcile descendants before awaiting the
+                    # asyncio transport, because inherited pipes can keep that
+                    # wait pending after the OS leader is already gone.
+                    residual = await self._reconcile_residual_process_group(state)
                     await state.process_wait_task
-                    residual = await self._kill_residual_process_group(state)
                     return residual, residual, not residual
                 if reason is not None:
                     state.cancel_reason = reason
@@ -1540,28 +1576,42 @@ class ClaudeCodeWorkerAdapter:
                     )
                 except asyncio.TimeoutError:
                     leader = self._exact_leader_identity(ref)
-                    if leader is None and not self._owned_residual_members(ref):
-                        raise ClaudeProcessIdentityError(
-                            "process identity disappeared without an owned group"
-                        )
-                    try:
-                        escalated = self._signal_owned_group(ref, signal.SIGKILL)
-                        sent = sent or escalated
-                    except ProcessLookupError:
-                        pass
-                    await state.process_wait_task
+                    residual_members = (
+                        () if leader is not None else self._owned_residual_members(ref)
+                    )
+                    # The OS may report the leader and group absent one event-loop
+                    # turn before asyncio publishes the wait-task completion.
+                    # Absence authorizes no further signal; the shared residual
+                    # reconciliation below still proves the terminal group state.
+                    if leader is not None or residual_members:
+                        try:
+                            escalated = self._signal_owned_group(ref, signal.SIGKILL)
+                            sent = sent or escalated
+                        except ProcessLookupError:
+                            pass
+                        await state.process_wait_task
+            residual = await self._reconcile_residual_process_group(state)
             await state.process_wait_task
-            residual = await self._kill_residual_process_group(state)
             return sent or residual, escalated or residual, leader_already_exited and not residual
+
+    async def _reconcile_residual_process_group(self, state: _RunState) -> bool:
+        """Run one identity-bound residual reconciliation and share its outcome."""
+
+        if state.residual_reconciliation_task is None:
+            state.residual_reconciliation_task = asyncio.create_task(
+                self._kill_residual_process_group(state)
+            )
+            state.residual_reconciliation_task.add_done_callback(
+                self._retrieve_task_exception
+            )
+        return await asyncio.shield(state.residual_reconciliation_task)
 
     async def _kill_residual_process_group(self, state: _RunState) -> bool:
         ref = state.ref
         if ref is None:
             raise ClaudeProcessIdentityError("Claude process identity is unavailable")
         try:
-            leader = self._exact_leader_identity(ref)
-            members = self._owned_residual_members(ref)
-            if leader is None and not members:
+            if not self._signal_owned_group(ref, signal.SIGKILL):
                 census = _process_group_member_pids(ref.pgid)
                 if census and all(member.state == "Z" for member in census):
                     return False
@@ -1575,18 +1625,6 @@ class ClaudeCodeWorkerAdapter:
                     raise ClaudeProcessIdentityError(
                         "Claude process group exists without owned members"
                     )
-                return False
-            if not members:
-                members = (ref.pid,)
-            try:
-                group_exists = _process_group_exists(ref.pgid)
-            except ProcessIdentityError:
-                raise ClaudeProcessIdentityError(
-                    "Claude process group identity is ambiguous"
-                ) from None
-            if not group_exists:
-                return False
-            if not self._signal_owned_group(ref, signal.SIGKILL):
                 return False
         except ProcessLookupError:
             return False
@@ -1606,12 +1644,24 @@ class ClaudeCodeWorkerAdapter:
             raise ClaudeProcessIdentityError("Claude process group identity is ambiguous") from None
         return True
 
+    @staticmethod
+    async def _wait_for_process_returncode(
+        process: asyncio.subprocess.Process,
+    ) -> None:
+        """Observe OS leader exit without waiting for inherited pipe EOF."""
+
+        while process.returncode is None:
+            await asyncio.sleep(0.01)
+
     async def _monitor(self, state: _RunState) -> None:
         violation_task = asyncio.create_task(state.violation.wait())
+        leader_exit_task = asyncio.create_task(
+            self._wait_for_process_returncode(state.process)
+        )
         failed = False
         try:
             done, _pending = await asyncio.wait(
-                {state.process_wait_task, violation_task},
+                {leader_exit_task, violation_task},
                 timeout=max(0.0, state.deadline - asyncio.get_running_loop().time()),
                 return_when=asyncio.FIRST_COMPLETED,
             )
@@ -1619,11 +1669,10 @@ class ClaudeCodeWorkerAdapter:
                 state.timed_out = True
                 await self._terminate(state, None)
             elif violation_task in done and state.violation.is_set():
-                if not state.process_wait_task.done():
-                    await self._terminate(state, None)
-            await state.process_wait_task
+                await self._terminate(state, None)
             async with state.termination_lock:
-                residual = await self._kill_residual_process_group(state)
+                residual = await self._reconcile_residual_process_group(state)
+            await state.process_wait_task
             if residual:
                 state.stream_errors.append("provider left a residual process group")
                 state.violation.set()
@@ -1632,7 +1681,10 @@ class ClaudeCodeWorkerAdapter:
             raise
         finally:
             violation_task.cancel()
-            await asyncio.gather(violation_task, return_exceptions=True)
+            leader_exit_task.cancel()
+            await asyncio.gather(
+                violation_task, leader_exit_task, return_exceptions=True
+            )
             tasks = tuple(task for task in (state.stdout_task, state.stderr_task) if task is not None)
             if failed:
                 for task in tasks:
