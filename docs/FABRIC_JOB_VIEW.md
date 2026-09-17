@@ -20,6 +20,32 @@ no Chairman-authenticated admitted job can exist yet. The value of this view is
 therefore mostly in *how it renders nothing*: an absent runtime must read as a
 typed refusal, never as "no work".
 
+
+## Executive MCP access (`executive_fabric`)
+
+The reviewed Executive MCP `1.1.0` source generation exposes this projector as
+one read-only tool named `executive_fabric`:
+
+```json
+{"view":"roots","limit":50}
+{"view":"root","root_job_id":"JOB-1"}
+```
+
+`view=roots` calls the existing bounded `list_roots` projection; `view=root`
+calls the existing `read_fabric_view` projection. The gateway does not recreate
+job joins, review/result logic, or Runtime access. It replaces configured host
+runtime coordinates with the stable non-secret label already used by the other
+Executive MCP reads before the document crosses the MCP boundary. Projector
+failures return one typed, path-safe `backend_unavailable` envelope.
+
+This is **visibility only**. It does not submit or dispatch a Job, spawn a
+worker, cancel or terminate an Attempt, wake a session, retry, reassign, merge,
+deploy, read credentials, or call a provider. The source remains
+`BUILT_NOT_PROVEN` until the separately authorized installed-app generation and
+a real authenticated runtime prove both root enumeration and one-root detail.
+The current production five-tool app is historical proof of its own generation;
+this reviewed source extension does not silently mutate that installed app.
+
 ## Usage
 
 ```

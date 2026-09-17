@@ -219,3 +219,31 @@ def test_executive_fabric_projector_failure_is_typed_and_path_safe(
     serialized = json.dumps(envelope, sort_keys=True)
     assert str(runtime_root) not in serialized
     assert "traceback" not in serialized.lower()
+
+
+def test_server_surface_is_six_tool_and_table_driven() -> None:
+    server_path = (
+        Path(__file__).resolve().parents[1]
+        / "integrations"
+        / "executive_mcp"
+        / "server.py"
+    )
+    source = server_path.read_text(encoding="utf-8")
+
+    assert "The static six-tool advertisement" in source
+    assert "Wire the six tools" in source
+    assert "for spec in TOOL_SPECS" in source
+    assert 'if name == "executive_fabric"' not in source
+
+
+def test_sdk_advertises_executive_fabric_as_read_only() -> None:
+    pytest.importorskip("mcp")
+    from integrations.executive_mcp.server import build_tools
+
+    tools = {tool.name: tool for tool in build_tools()}
+    tool = tools["executive_fabric"]
+
+    assert tool.annotations is not None
+    assert tool.annotations.readOnlyHint is True
+    assert tool.annotations.destructiveHint is False
+    assert tool.inputSchema == tool_spec("executive_fabric").input_schema

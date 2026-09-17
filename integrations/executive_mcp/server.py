@@ -373,7 +373,7 @@ def _executive_outcome(payload: Any, request_ref: str, status_code: int) -> bool
 
 
 def build_executive_mcp_app(settings: Any, *, audit_sink: Any) -> Any:
-    """Expose the frozen five tools through the existing authenticated App.
+    """Expose the frozen six tools through the existing authenticated App.
 
     This is a stateless transport composition, not a new admission service.
     Submit and status use only the App's dedicated CeoIngress client. Every
@@ -390,7 +390,7 @@ def build_executive_mcp_app(settings: Any, *, audit_sink: Any) -> Any:
     from integrations.mastermind_executive_app.gateway import make_jwt_authenticators
 
     if settings.read_only:
-        raise ValueError("five-tool MCP refuses read-only app settings")
+        raise ValueError("Executive MCP refuses read-only app settings")
     _, metadata_path = _metadata_policy_and_path(settings.policies)
     if metadata_path == "/mcp":
         raise ValueError("metadata route collides with MCP transport")
@@ -528,7 +528,7 @@ def build_executive_mcp_app(settings: Any, *, audit_sink: Any) -> Any:
         fenced_app=_ExecutivePathFence(outer_app, metadata_path))
 
 def build_tools() -> list[mcp_types.Tool]:
-    """The static five-tool advertisement, built from the reviewed table.
+    """The static six-tool advertisement, built from the reviewed table.
 
     Read-only annotations are declared here because the SDK's scan surface is
     where a client looks for them.  They are UX metadata: server-side
@@ -547,7 +547,7 @@ def build_tools() -> list[mcp_types.Tool]:
 
 
 def build_mcp_server(gateway: ExecutiveMcpGateway) -> Server:
-    """Wire the five tools onto one low-level MCP server.
+    """Wire the six tools onto one low-level MCP server.
 
     The low-level server is used rather than a higher-level convenience wrapper
     precisely because the surface must stay auditable: exactly two request

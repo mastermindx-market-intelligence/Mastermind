@@ -530,7 +530,7 @@ def derive_authorities(execution_profile: str) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# the five-tool registry
+# the six-tool registry
 # ---------------------------------------------------------------------------
 
 
