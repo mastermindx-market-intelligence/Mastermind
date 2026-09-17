@@ -22,7 +22,7 @@ def wire(capture=None):
 @pytest.fixture(scope='module')
 def browser():
     with sync_playwright() as p:
-        b=p.chromium.launch(headless=True,args=['--no-sandbox'],**browser_launch_kwargs())
+        b=p.chromium.launch(**browser_launch_kwargs())
         yield b;b.close()
 
 @pytest.fixture

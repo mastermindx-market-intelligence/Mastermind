@@ -50,8 +50,9 @@ and never imports or calls the broker, sockets, network, or I/O.
   application/content owner (to be returned with its admitted carrier).
 - **G4 — installed content service / broker read:** NOT DONE. The broker
   observation endpoint is reachable only through its configured Unix-domain
-  socket and control-UID boundary. Grantor: S1/S3 owner (#623/#675/#678 lane)
-  plus the host operator.
+  socket and control-UID boundary. Grantor: UNKNOWN — no current admitted
+  broker/install owner or carrier is named; #623/#675/#678 are closed
+  historical source tasks, not a current grantor.
 - **G5 — application mount:** NOT DONE. The reader requires a same-origin
   `https` resource at an allowed origin; no production route is mounted.
   Grantor: the current qualified application owner of the Steward app (#463
@@ -60,8 +61,9 @@ and never imports or calls the broker, sockets, network, or I/O.
 - **G6 — provider canary / live proof:** NOT DONE. Terminal acceptance requires
   an observed live upstream response; autonomous production deployment remains
   prohibited. Grantor: Sol, after G1–G5.
-- **G7 — publication:** NOT DONE. Authority boundaries prohibit opening,
-  merging, and pushing a branch. Grantor: the seat, per the custody packet's
-  §3 RELEASE.
+- **G7 — publication:** PARTIAL. Source branch/PR publication is DONE (branch
+  claude/window-reader-import-20260917, Mastermind #716, DRAFT). Protected
+  release, Ready, merge, install and production publication are NOT DONE.
+  Grantor: Sol, per the custody packet's §3 RELEASE.
 
 The reader remains **BUILT_NOT_PROVEN**.

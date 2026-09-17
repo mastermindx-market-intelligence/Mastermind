@@ -45,6 +45,12 @@ def test_browser_modules_use_capability_driven_qualification():
         assert 'browser_available()' in source
         assert 'pytest.mark.skipif(' in source
         assert "importorskip('playwright.sync_api'" in source
+        launches = re.findall(r'chromium\.launch\([^\n]*', source)
+        assert launches
+        assert all(
+            launch == 'chromium.launch(**browser_launch_kwargs())'
+            for launch in launches
+        )
 
 
 def test_browser_available_reports_missing_dependency_without_raising(monkeypatch):

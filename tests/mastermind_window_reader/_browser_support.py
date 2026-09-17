@@ -8,13 +8,18 @@ BROWSER_REASON_PREFIX = "BROWSER_UNAVAILABLE: "
 
 
 def browser_launch_kwargs() -> dict:
+    selection = {}
     executable_path = os.environ.get("MASTERMIND_BROWSER_EXECUTABLE")
     if executable_path:
-        return {"executable_path": executable_path}
+        selection = {"executable_path": executable_path}
     channel = os.environ.get("MASTERMIND_BROWSER_CHANNEL")
     if channel:
-        return {"channel": channel}
-    return {}
+        selection = {"channel": channel}
+    return {
+        "headless": True,
+        "args": ["--no-sandbox"],
+        **selection,
+    }
 
 
 def reset_browser_available_cache() -> None:
@@ -36,10 +41,7 @@ def browser_available() -> tuple[bool, str]:
 
     try:
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(
-                headless=True,
-                **browser_launch_kwargs(),
-            )
+            browser = playwright.chromium.launch(**browser_launch_kwargs())
             browser.close()
     except Exception as error:
         first_line = str(error).splitlines()[0]
