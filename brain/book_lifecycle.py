@@ -134,9 +134,29 @@ def _hac(series: list[float], lags: int) -> dict:
         from engine.validation import newey_west_tstat
         return newey_west_tstat(list(s), lags=lags)
     except Exception:  # noqa: BLE001
+        # Keep the fallback statistically equivalent to engine.validation.newey_west_tstat.
+        # The vendor is intentionally optional at runtime; returning t=0 here used to turn a
+        # missing vendor checkout into a silent global disable of lifecycle loss escalation.
+        import math
+
         n = len(s)
+        if n < 8:
+            return {"mean": None, "se": None, "t": None, "p": None, "n": n,
+                    "lags": None, "lags_requested": int(lags)}
         mean = sum(s) / n
-        return {"n": n, "mean": round(mean, 8), "t": 0.0, "se": None}
+        demeaned = [x - mean for x in s]
+        var = sum(x * x for x in demeaned) / n
+        effective_lags = min(int(lags), n - 1)
+        for lag in range(1, effective_lags + 1):
+            autocov = sum(demeaned[i] * demeaned[i - lag]
+                          for i in range(lag, n)) / n
+            var += 2.0 * (1.0 - lag / (effective_lags + 1)) * autocov
+        se = math.sqrt(max(var, 1e-18) / n)
+        t = mean / se if se else float("nan")
+        p_value = 2.0 * (1.0 - 0.5 * (1.0 + math.erf(abs(t) / math.sqrt(2.0))))
+        return {"mean": round(mean, 5), "se": round(se, 5), "t": round(t, 3),
+                "p": round(p_value, 4), "n": n, "lags": effective_lags,
+                "lags_requested": int(lags)}
 
 
 def _loss_significance(active_series: list[float]) -> dict:
