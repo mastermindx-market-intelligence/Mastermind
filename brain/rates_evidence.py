@@ -9,6 +9,7 @@ from datetime import date, datetime, timezone
 import math
 import re
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 _TENORS = ("2y", "5y", "10y", "20y", "30y")
 _HORIZONS = ("5d", "22d", "63d")
@@ -44,6 +45,16 @@ def _clock(value: Any) -> tuple[str, datetime | None]:
         return "invalid", None
 
 
+def _market_date(instant: datetime | None) -> date | None:
+    """US observation labels use New York dates, never host-local or UTC dates."""
+    if instant is None:
+        return None
+    try:
+        return instant.astimezone(ZoneInfo("America/New_York")).date()
+    except (ZoneInfoNotFoundError, ValueError, OverflowError):
+        return None
+
+
 def _number(value: Any) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
@@ -74,6 +85,8 @@ def project_rates(
     build_kind, built = _clock(raw.get("built"))
     cutoff_kind, cutoff = _clock(analysis_cutoff)
     strict = analysis_cutoff is not None
+    cutoff_day = _market_date(cutoff)
+    build_day = _day(raw.get("built")) if build_kind == "date_only" else _market_date(built)
     valid_source = (raw.get("schema") == "rates_command.v1"
                     and momentum.get("schema") == "yield_momentum.v1")
     issues: list[str] = []
@@ -103,6 +116,8 @@ def project_rates(
         usable = not blocked
         observed = _day(source.get("as_of"))
         availability_kind, available = _clock(source.get("available_at"))
+        available_day = (_day(source.get("available_at")) if availability_kind == "date_only"
+                         else _market_date(available))
         status = source.get("status")
         status = status if status in ("available", "insufficient_history", "stale", "missing") else "unknown"
         if status not in ("available", "insufficient_history"):
@@ -125,6 +140,18 @@ def project_rates(
         elif cutoff and available > cutoff:
             row_issues.append("availability_after_cutoff")
             usable = False
+        if observed is not None:
+            for instant, local_day, reason in (
+                (available, available_day, "observation_after_available_date"),
+                (built, build_day, "observation_after_producer_build_date"),
+                (cutoff, cutoff_day, "observation_after_cutoff_market_date"),
+            ):
+                if instant is not None and local_day is None:
+                    row_issues.append("market_timezone_conversion_unavailable")
+                    usable = False
+                elif local_day is not None and observed > local_day:
+                    row_issues.append(reason)
+                    usable = False
         if available and built and available > built:
             row_issues.append("availability_after_producer_build")
             usable = False
@@ -157,6 +184,8 @@ def project_rates(
         "schema": "decision_context.rates_evidence.v1",
         "source_contract": "rates_command.v1 / yield_momentum.v1",
         "source_ref": _SOURCE,
+        "market": "US",
+        "observation_timezone": "America/New_York",
         "status": "available_context" if count == len(_TENORS) else "partial_context" if count else "unavailable",
         "market_asof": market_day.isoformat() if market_day else None,
         "artifact_asof": artifact_day.isoformat() if artifact_day else None,

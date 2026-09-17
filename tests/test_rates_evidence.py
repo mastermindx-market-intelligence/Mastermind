@@ -185,3 +185,95 @@ def test_invalid_changes_remain_null_without_polluting_other_maturities():
     assert out["series"]["10y"]["acceleration_bp"] is None
     assert out["series"]["5y"]["velocity_bp"]["5d"] == 12.0
     json.dumps(out, allow_nan=False)
+
+
+@pytest.mark.parametrize("field", ["available_at", "built"])
+def test_date_only_clock_cannot_precede_observation(field):
+    a = source()
+    if field == "built":
+        a["built"] = "2026-09-15"
+        for row in a["yield_momentum"]["series"].values():
+            row["available_at"] = None
+    else:
+        a["yield_momentum"]["series"]["10y"]["available_at"] = "2026-09-15"
+    row = project(a)["series"]["10y"]
+    assert row["usable_for_context"] is False
+    assert row["level"] is None
+
+
+def test_market_conventions_are_explicit():
+    out = project(source())
+    assert out["observation_timezone"] == "America/New_York"
+    assert out["market"] == "US"
+
+
+@pytest.mark.parametrize("day,before,after", [
+    ("2026-01-15", "2026-01-15T04:59:59Z", "2026-01-15T05:00:00Z"),
+    ("2026-07-15", "2026-07-15T03:59:59Z", "2026-07-15T04:00:00Z"),
+    ("2026-03-09", "2026-03-09T03:59:59Z", "2026-03-09T04:00:00Z"),
+    ("2026-11-02", "2026-11-02T04:59:59Z", "2026-11-02T05:00:00Z"),
+])
+def test_new_york_day_boundary_in_winter_summer_and_dst(day, before, after):
+    from brain.rates_evidence import _clock, _market_date
+    from datetime import date, timedelta
+    assert _market_date(_clock(before)[1]) == date.fromisoformat(day) - timedelta(days=1)
+    assert _market_date(_clock(after)[1]) == date.fromisoformat(day)
+
+
+@pytest.mark.parametrize("stamp", ["2026-11-01T01:30:00-04:00", "2026-11-01T01:30:00-05:00"])
+def test_fall_back_ambiguous_local_hour_is_resolved_by_offset(stamp):
+    from brain.rates_evidence import _clock, _market_date
+    from datetime import date
+    assert _market_date(_clock(stamp)[1]) == date(2026, 11, 1)
+
+
+def test_timezone_database_unavailable_never_becomes_utc_fallback(monkeypatch):
+    from brain import rates_evidence as RE
+    from zoneinfo import ZoneInfoNotFoundError
+    def unavailable(_key):
+        raise ZoneInfoNotFoundError("controlled missing timezone database")
+    monkeypatch.setattr(RE, "ZoneInfo", unavailable)
+    out = project(source(), "2026-09-16T22:00:00Z")
+    assert out["coverage"]["context_rows"] == 0
+    assert all("market_timezone_conversion_unavailable" in row["issues"] for row in out["series"].values())
+
+
+@pytest.mark.parametrize("stamp", ["0001-01-01T00:00:00Z", "9999-12-31T23:59:59-23:59", "2026-09-16T20:00:00+99:00"])
+def test_extreme_or_bad_timezone_clocks_are_json_safe(stamp):
+    a = source(); a["built"] = stamp
+    out = project(a, stamp)
+    assert out["coverage"]["context_rows"] == 0
+    json.dumps(out, allow_nan=False)
+
+
+def test_cutoff_equality_is_inclusive_to_microsecond():
+    a = source(); a["built"] = "2026-09-16T21:00:00.123456Z"
+    for row in a["yield_momentum"]["series"].values():
+        row["available_at"] = a["built"]
+    assert project(a, a["built"])["coverage"]["context_rows"] == 5
+    assert project(a, "2026-09-16T21:00:00.123455Z")["coverage"]["context_rows"] == 0
+
+
+def test_later_availability_date_is_not_rejected_as_inconsistent():
+    a = source(); a["built"] = "2026-09-17T12:00:00Z"
+    for row in a["yield_momentum"]["series"].values():
+        row["available_at"] = "2026-09-17T11:00:00Z"
+    assert project(a, a["built"])["coverage"]["context_rows"] == 5
+    assert project(a, a["built"])["as_observed_replay_certified"] is False
+
+
+@pytest.mark.parametrize("bad", [None, [], True, 0, "payload", {"yield_momentum": []}])
+def test_top_level_non_mapping_sources_degrade(bad):
+    out = project(bad)
+    assert out["coverage"]["context_rows"] == 0
+    json.dumps(out, allow_nan=False)
+
+
+def test_current_context_legacy_untimed_rows_stay_dated_not_certified():
+    a = source()
+    for row in a["yield_momentum"]["series"].values():
+        row["available_at"] = None
+    out = project(a)
+    assert out["coverage"] == {"requested_rows": 5, "context_rows": 5, "timed_context_rows": 0}
+    assert out["as_observed_replay_certified"] is False
+    assert project(a, "2026-09-17T22:00:00Z")["coverage"]["context_rows"] == 0

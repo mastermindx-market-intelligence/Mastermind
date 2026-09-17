@@ -73,3 +73,22 @@ Release is held for the exact temporal repair, full relevant tests, independent 
 Continue on the existing operation/workspace after actual tool-state reconciliation. First resolve the two retained temporal tests on that carrier; then rerun the complete candidate suite and actual source proof. Independently consume the three research returns and reconcile their proposals against existing RIC/#7088, TOI/Radar, Options and Evaluation owners. Do not repeat the completed six contract probes, this source fingerprint, the D0 census, or the 146-PR collision check absent a material invalidator.
 
 GitHub owns this implementation/evidence. Macro Agent OS continuity publication remains owed through its accepted source-custody route; no duplicate Agent OS store is created in Mastermind. Link this child back to existing Macro #7088 without claiming ownership transfer, architecture acceptance, or release of its held work.
+
+
+## Continuation checkpoint: temporal repair and actual consumer reach
+
+Fresh protected procedure was loaded from `7a191cc11039199843d4734c7df8d5523280e09c`; the required Skillpack files were fetched at that exact commit and their bytes matched the previously read compatible bodies. The operation, branch, and source-custody workspace remain unchanged.
+
+The original Studio/Remote Desktop Commander path accepted the guarded temporal repair after same-workspace reconciliation proved the prior repair had not applied. The earlier source-repair freeze above is historical, not a permanent claim that source editing is unavailable. No alternate source carrier, replacement branch, or duplicate worker was used.
+
+The two original failures are repaired. Added discriminators also exposed impossible date-only availability/build chronology; those are now withheld. US observation dates use America/New_York with daylight-saving handling, not UTC or the host-local timezone. Missing timezone data and out-of-range conversion withhold affected values, never substitute a guessed offset. US market/timezone metadata is explicit. No missing timestamp is manufactured.
+
+The expanded rates, decision-context, Neural Web decision-policy, and portfolio-intelligence set completed successfully: 149 tests on the existing Python 3.14 interpreter. These are code-level results, not efficacy, live deployment, or a complete production generation.
+
+The actual repository gate discovered 633 modules with zero exclusions, then stopped during collection with 37 errors. Named missing dependencies include claude_agent_sdk, PyJWT, MCP, reportlab, and the CI-pinned Macro engine/lib import surface. This is not a passing full gate. The attempt to provision an isolated Python 3.12 environment and materialize the CI dependency was safety-blocked; same-device readback confirmed both requested destinations remain absent. That exact provisioning action is not repeated or delegated. The existing hosted repository workflow remains the authoritative independent CI environment; its current-head result is still owed.
+
+A source-level consumer trace found that get_regime intentionally returns a compact decision-context subset and does not include the new maturity evidence. PM prompt rendering also does not render the new field. Preservation by prompt_summary alone is therefore not proof that every actual reasoning seat receives it. The next bounded read-only consumer extension must preserve the existing tool server and transport boundary, not introduce a new scorer or data service.
+
+The newly scoped tool-server path check examined all 164 open PRs and complete file pages. It found existing owners #495 (strict JSON response boundary) and #772 (unavailable overnight evidence). No shared tool-server edit has been made at this checkpoint. Their source/hold state must remain intact and compatibility must be established before adding a separate rates read.
+
+Release remains held for complete relevant verification, independent exact-head review, concluded hosted CI, and separately authorized production proof. The broader leader-pullback suite, its research assignments, and the requirement for a genuine Prophet/Terminal consumer remain unfinished. Local test-environment provisioning failure is lane-local, not a mission-completion state.
