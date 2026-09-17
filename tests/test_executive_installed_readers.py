@@ -769,6 +769,10 @@ def test_capacity_boot_runtime_attestor_binds_exact_closure_and_probe(
     assert len(calls) == 1
     argv, kwargs = calls[0]
     assert argv[:4] == [str(contract.python_binary), "-I", "-S", "-B"]
+    probe_code = argv[5]
+    assert "sys.prefix" not in probe_code
+    assert "sys.base_prefix" not in probe_code
+    assert "site.ENABLE_USER_SITE is not True" in probe_code
     assert kwargs["env"] == {
         "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
         "LANG": "C.UTF-8",
@@ -779,6 +783,69 @@ def test_capacity_boot_runtime_attestor_binds_exact_closure_and_probe(
     assert str(contract.site_packages) in argv
     assert contract.python_version in argv
     assert contract.pyyaml_version in argv
+
+
+def test_capacity_boot_runtime_attestor_allows_root_owned_sealed_ancestor_with_different_gid(
+    tmp_path: Path, monkeypatch,
+):
+    import stat
+    from types import SimpleNamespace
+
+    packet, contract = _capacity_runtime_contract_fixture(tmp_path, monkeypatch)
+    outer = tmp_path / "system-ancestor"
+    outer.mkdir()
+    contract.trusted_ancestors = (outer, contract.runtime_root)
+    original_lstat = Path.lstat
+
+    def lstat(path):
+        if path == outer:
+            return SimpleNamespace(
+                st_mode=stat.S_IFDIR | 0o755, st_uid=contract.owner_uid,
+                st_gid=contract.owner_gid + 1, st_nlink=2,
+            )
+        return original_lstat(path)
+
+    monkeypatch.setattr(Path, "lstat", lstat)
+    result = packet.attest_capacity_boot_runtime(
+        contract.python_binary,
+        runner=lambda *_args, **_kwargs: {
+            "code": 0, "stdout": "CAPACITY_RUNTIME_OK\n", "stderr": "",
+            "timed_out": False, "limit_exceeded": False, "invalid_utf8": False,
+        },
+    )
+    assert result == contract.site_packages
+
+
+@pytest.mark.parametrize("owner_delta,mode", [(1, 0o755), (0, 0o775)])
+def test_capacity_boot_runtime_attestor_refuses_untrusted_traversal_ancestor(
+    tmp_path: Path, monkeypatch, owner_delta: int, mode: int,
+):
+    import stat
+    from types import SimpleNamespace
+
+    packet, contract = _capacity_runtime_contract_fixture(tmp_path, monkeypatch)
+    outer = tmp_path / "system-ancestor"
+    outer.mkdir()
+    contract.trusted_ancestors = (outer, contract.runtime_root)
+    original_lstat = Path.lstat
+
+    def lstat(path):
+        if path == outer:
+            return SimpleNamespace(
+                st_mode=stat.S_IFDIR | mode,
+                st_uid=contract.owner_uid + owner_delta,
+                st_gid=contract.owner_gid + 1, st_nlink=2,
+            )
+        return original_lstat(path)
+
+    monkeypatch.setattr(Path, "lstat", lstat)
+    with pytest.raises(RuntimeError, match="capacity runtime ancestor metadata differs"):
+        packet.attest_capacity_boot_runtime(
+            contract.python_binary,
+            runner=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("probe must not run after ancestor trust failure")
+            ),
+        )
 
 
 def test_capacity_boot_runtime_attestor_refuses_tree_digest_drift(

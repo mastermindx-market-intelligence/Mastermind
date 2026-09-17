@@ -328,7 +328,9 @@ def _require_capacity_runtime_metadata(contract: Any) -> None:
         if (
             not stat.S_ISDIR(observed.st_mode)
             or observed.st_uid != contract.owner_uid
-            or observed.st_gid != contract.owner_gid
+            # Generic macOS traversal ancestors such as /Library/Application Support
+            # may be root:admin while remaining sealed. Group identity is not part
+            # of the trust boundary here; root ownership plus no group/other write is.
             or stat.S_IMODE(observed.st_mode) & 0o022
         ):
             raise RuntimeError("capacity runtime ancestor metadata differs")
@@ -412,10 +414,11 @@ def attest_capacity_boot_runtime(
         "site_packages=pathlib.Path(sys.argv[2]).resolve(strict=True);"
         "expected_python=pathlib.Path(sys.argv[3]).resolve(strict=True);"
         "assert pathlib.Path(sys.executable).resolve(strict=True)==expected_python;"
-        "assert pathlib.Path(sys.prefix).resolve(strict=True)==root;"
-        "assert pathlib.Path(sys.base_prefix).resolve(strict=True)==root;"
+        # CF1 is a sealed runtime tree, not a venv; sys.prefix/base_prefix correctly
+        # remain the reviewed framework. Exact runtime identity is bound above by
+        # executable path/digest, RECORD digest and the complete runtime-tree digest.
         "assert sys.version.split()[0]==sys.argv[4];"
-        "assert site.ENABLE_USER_SITE is False;"
+        "assert site.ENABLE_USER_SITE is not True;"
         "sys.path.insert(0,str(site_packages));"
         "import _yaml,yaml;"
         "assert yaml.__version__==sys.argv[5];"
