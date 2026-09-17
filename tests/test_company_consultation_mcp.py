@@ -51,7 +51,11 @@ from integrations.slack_agent_dialogue.company_dialogue_runtime_binding import (
     CurrentWorkerDialogueSnapshot,
     WorkerDialogueCaller,
 )
-from common.agent_dialogue_consultation_contract import validate_consultation
+from common.agent_dialogue_consultation_contract import (
+    CONSULTATION_SCHEMA,
+    GROK_CONSULTATION_SCHEMA,
+    validate_consultation,
+)
 from integrations.slack_agent_dialogue.contract import DialogueContractError
 from tests.test_agent_dialogue_consultation_contract import raw_consultation
 from tests.test_runtime_binding_projection import _admitted_runtime, _target
@@ -82,6 +86,24 @@ def _peer(peer_ref: str = "peer-7bdf4a6f9a664bbcf1a93d67a41ba51d") -> Consultati
             "binding_id": "bind-7bdf4a6f9a664bbcf1a93d67a41ba51d",
             "binding_generation": 1,
             "reasoning_surface": "codex",
+        },
+    )
+
+
+def _grok_peer() -> ConsultationPeer:
+    return dataclasses.replace(
+        _peer("peer-9bdf4a6f9a664bbcf1a93d67a41ba51d"),
+        display_name="Grok Bot",
+        actor_ref={
+            "kind": "worker_attempt",
+            "job_id": "JOB-209",
+            "attempt_id": "ATT-209",
+            "worker_id": "grok-bot",
+        },
+        binding={
+            "binding_id": runtime_binding_id_for("ATT-209", "EPOCH-0209"),
+            "binding_generation": 1,
+            "reasoning_surface": "grok-bot",
         },
     )
 
@@ -752,3 +774,139 @@ def test_consultation_registry_profile_is_minimal_and_unarmed() -> None:
         "admin",
     )
     assert len(profile.policy_digest) == 64
+
+
+def test_grok_peer_derives_v3_without_widening_public_projection() -> None:
+    peer = _grok_peer()
+    resolved = CompanyConsultationPeerResolver([peer]).resolve(
+        peer.peer_ref, program_ref=peer.program_ref
+    )
+
+    assert resolved.consultation_schema == GROK_CONSULTATION_SCHEMA
+    assert resolved.public_projection() == {
+        "peer_ref": peer.peer_ref,
+        "display_name": "Grok Bot",
+    }
+
+
+def test_company_consult_derives_schema_from_trusted_peer_binding() -> None:
+    codex_gateway, codex_sink = _gateway()
+    codex_response = _run(
+        codex_gateway.call(
+            "company.consult",
+            {
+                "to": _peer().peer_ref,
+                "question": "Which schema is trusted?",
+                "evidence_refs": [],
+                "artifact_revisions": [_artifact()],
+            },
+        )
+    )
+    assert codex_response["ok"] is True
+    assert codex_sink.calls[0][1]["consultation_schema"] == CONSULTATION_SCHEMA
+
+    grok = _grok_peer()
+    grok_gateway, grok_sink = _gateway([grok])
+    grok_response = _run(
+        grok_gateway.call(
+            "company.consult",
+            {
+                "to": grok.peer_ref,
+                "question": "Which schema is trusted?",
+                "evidence_refs": [],
+                "artifact_revisions": [_artifact()],
+            },
+        )
+    )
+    assert grok_response["ok"] is True
+    assert grok_sink.calls[0][1]["consultation_schema"] == GROK_CONSULTATION_SCHEMA
+    assert grok_sink.calls[0][1]["peer"] == grok.public_projection()
+
+
+def test_company_peers_does_not_expose_consultation_schema() -> None:
+    peer = _grok_peer()
+    gateway, sink = _gateway([peer])
+
+    response = _run(gateway.call("company.peers", {}))
+
+    assert response["ok"] is True
+    assert response["data"]["peers"] == [peer.public_projection()]
+    assert "consultation_schema" not in response["data"]["peers"][0]
+    assert sink.calls == []
+
+
+def test_company_consult_refuses_caller_schema_override_before_dispatch() -> None:
+    peer = _grok_peer()
+    gateway, sink = _gateway([peer])
+
+    response = _run(
+        gateway.call(
+            "company.consult",
+            {
+                "to": peer.peer_ref,
+                "question": "Use this caller schema.",
+                "evidence_refs": [],
+                "artifact_revisions": [_artifact()],
+                "consultation_schema": GROK_CONSULTATION_SCHEMA,
+            },
+        )
+    )
+
+    assert response["ok"] is False
+    assert response["error"]["code"] == "INVALID_REQUEST"
+    assert sink.calls == []
+
+
+def test_peer_resolver_refuses_unmapped_reasoning_surface() -> None:
+    peer = dataclasses.replace(
+        _grok_peer(),
+        binding={**_grok_peer().binding, "reasoning_surface": "gemini"},
+    )
+
+    with pytest.raises(ConsultationPeerRefused) as exc_info:
+        CompanyConsultationPeerResolver([peer]).resolve(
+            peer.peer_ref, program_ref=peer.program_ref
+        )
+
+    assert exc_info.value.code == "BINDING_UNAVAILABLE"
+
+
+def test_company_dialogue_grok_binding_derives_v3_without_public_widening() -> None:
+    grok_binding = dataclasses.replace(
+        _runtime_binding(),
+        reasoning_surface="grok-bot",
+    )
+    current = dataclasses.replace(_current_snapshot(), runtime_binding=grok_binding)
+    caller = dataclasses.replace(_caller(), runtime_binding=grok_binding)
+
+    resolution = peer_from_company_dialogue(
+        peer_ref="peer-9bdf4a6f9a664bbcf1a93d67a41ba51d",
+        display_name="Grok Bot",
+        program_ref="JOB-100/agent-fabric-end-to-end-fable-integration",
+        delegation_identity=_delegation_identity(),
+        dialogue_parent=_dialogue_parent(),
+        thread_ts="1787896128.625239",
+        current=current,
+        actor=caller,
+    )
+
+    assert resolution.peer is not None
+    assert resolution.peer.binding["reasoning_surface"] == "grok-bot"
+    assert resolution.peer.consultation_schema == GROK_CONSULTATION_SCHEMA
+    assert resolution.peer.public_projection() == {
+        "peer_ref": "peer-9bdf4a6f9a664bbcf1a93d67a41ba51d",
+        "display_name": "Grok Bot",
+    }
+
+
+def test_grok_peer_binding_composes_into_v3_contract() -> None:
+    peer = _grok_peer()
+    frame = raw_consultation(schema=GROK_CONSULTATION_SCHEMA)
+    frame["recipient_actor_ref"] = dict(peer.actor_ref)
+    frame["recipient_peer_ref"] = peer.peer_ref
+    frame["recipient_binding"] = dict(peer.binding)
+
+    validated = validate_consultation(frame)
+
+    assert validated["schema"] == GROK_CONSULTATION_SCHEMA
+    assert validated["recipient_binding"] == peer.binding

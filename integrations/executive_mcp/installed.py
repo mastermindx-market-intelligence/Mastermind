@@ -21,20 +21,46 @@ from integrations.executive_mcp.schemas import (
 class InstalledExecutiveReaders(ExecutiveMcpGateway):
     """Reuse all four projections with one explicit, host-owned Runtime root."""
 
-    def __init__(self, *, repo_root: Path, macro_root: Path, runtime_root: Path) -> None:
+    def __init__(
+        self, *, repo_root: Path, macro_root: Path, runtime_root: Path,
+        boot_python: Path | None = None,
+    ) -> None:
         if not all(Path(p).is_absolute() for p in (repo_root, macro_root, runtime_root)):
             raise ValueError("installed read roots must be absolute")
+        if boot_python is not None and not Path(boot_python).is_absolute():
+            raise ValueError("installed boot interpreter must be absolute")
         self._installed_runtime_root = Path(runtime_root).resolve()
         self._source_root = Path(repo_root).resolve()
         self._macro_root = Path(macro_root).resolve()
+        self._boot_python = Path(boot_python).resolve() if boot_python is not None else None
         super().__init__(
             GatewayConfig(
                 mode=ServerMode.READONLY, repo_root=self._source_root,
                 macro_root_flag=str(self._macro_root),
                 max_response_bytes=executive_ceo_ingress.MAX_RESPONSE_BYTES // 2,
             ),
+            packet_builder=self._installed_packet,
             inbox_builder=self._canonical_inbox,
             runtime_factory=lambda _root: _open_readonly_runtime(self._installed_runtime_root),
+        )
+
+    def _installed_packet(self, **kwargs: Any) -> dict[str, Any]:
+        """Build the packet through the canonical sealed boot-packet reader."""
+        requested_repo = Path(kwargs.get("repo_root", self._source_root)).resolve()
+        requested_macro = Path(kwargs.get("macro_root_flag", self._macro_root)).resolve()
+        if requested_repo != self._source_root or requested_macro != self._macro_root:
+            packet = ceo_boot_packet.build_packet(**kwargs)
+            packet["degraded"] = [
+                "installed boot helper unavailable: source_binding_mismatch",
+                *(str(item) for item in (packet.get("degraded") or [])),
+            ]
+            return packet
+        return ceo_boot_packet.build_packet_in_interpreter(
+            boot_python=self._boot_python,
+            repo_root=self._source_root,
+            macro_root=self._macro_root,
+            timeout=float(kwargs.get("timeout", ceo_boot_packet.DEFAULT_TIMEOUT)),
+            now=kwargs.get("now"),
         )
 
     def _canonical_inbox(self, **kwargs: Any) -> dict[str, Any]:
