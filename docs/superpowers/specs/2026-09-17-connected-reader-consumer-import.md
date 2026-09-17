@@ -34,9 +34,30 @@ and never imports or calls the broker, sockets, network, or I/O.
 
 ## Not Done
 
-- G1 safe-content classifier (owner: Steward #599 lineage per Sol R83 item 2).
-- G2 registration, mount, client registration, auth-scope change, provider or
-  browser canary, Slack/GitHub publication, Ready/merge/install.
-- Real registered-client or live-provider source-to-browser proof.
+- **G1 — safe-content classifier:** NOT DONE. Production reads require an
+  owner-supplied `ContentDecision`; no default classifier is provided. Grantor:
+  Sol. (owner ruled by Sol R83 item 2, root ts 1789607891.352309; no
+  edit/start/merge authority on #599 is implied).
+- **G2 — registered auth client:** NOT DONE. Production authentication requires
+  the incumbent `JwtAuthenticator`; live dynamic client registration is not
+  established. Grantor: Chairman/Sol via an authorized Auth0 tenant-admin
+  surface.
+- **G3 — production scope enrollment:** NOT DONE. Production requires the
+  workspace content-read scope, which is mutually exclusive with the current
+  Steward read scope. Grantor: Sol, through a new enrolled scope or an owner
+  change to the Steward app by its #599 writer.
+- **G4 — installed content service / broker read:** NOT DONE. The broker
+  observation endpoint is reachable only through its configured Unix-domain
+  socket and control-UID boundary. Grantor: S1/S3 owner (#623/#675/#678 lane)
+  plus the host operator.
+- **G5 — application mount:** NOT DONE. The reader requires a same-origin
+  `https` resource at an allowed origin; no production route is mounted.
+  Grantor: S7 owner (#599 writer).
+- **G6 — provider canary / live proof:** NOT DONE. Terminal acceptance requires
+  an observed live upstream response; autonomous production deployment remains
+  prohibited. Grantor: Sol, after G1–G5.
+- **G7 — publication:** NOT DONE. Authority boundaries prohibit opening,
+  merging, and pushing a branch. Grantor: the seat, per the custody packet's
+  §3 RELEASE.
 
 The reader remains **BUILT_NOT_PROVEN**.
