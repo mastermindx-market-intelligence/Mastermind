@@ -5,6 +5,8 @@
  * native compatibility requires the separately qualified mounted-DSH fixture.
  */
 import {createHash} from 'node:crypto';
+import type {ToolDefinition} from '@deepseek-ai/dsh-tools';
+import type {ModelSelection} from '@deepseek-ai/dsh-agent';
 export const UPSTREAM_COMMIT = '0d1f50007f9bca3f52b06e1c3074fa14d5fb0720';
 export const EXTENSION_POLICY = 'N0_CLOSED_FIXTURE_NO_EXTERNAL_CAPABILITIES';
 export const MAX_BYTES = 65536;
@@ -16,13 +18,13 @@ function refuse(code: string): never {throw new ObservationError(code);}
 type Json = null|boolean|number|string|Json[]|{[key:string]:Json};
 export type Binding = Readonly<{attempt_id:string;worker_id:string;process_generation_id:string;native_session_id:string}>;
 export type Agent = {session:{id:string}};
-export type Definition = {name:string;description:string;parameters:unknown;execute:Function;output:{schema:unknown;render:Function};finalizeContent?:Function};
+export type Definition = ToolDefinition;
 export type Handle = {agent:Agent;dispose():Promise<void>};
-export type Selection = {provider:string;model:string;reasoningEffort?:string};
+export type Selection = ModelSelection;
 export type NativeContext = {
   agents:{get(id:string):Agent|undefined};
   tools:{schemas(agent:Agent):unknown;get(name:string,agent:Agent):Definition|undefined};
-  loader:{entries():Iterable<{id:string;options:{name:string;group?:boolean};disabled:boolean;fiber?:{state:number}}>};
+  loader:{entries():Iterable<{id:string;options:{name:string;group?:boolean|null|undefined};disabled:boolean;fiber?:{state:number}|undefined}>};
   llm:{resolveCallConfig(selection:Selection,signal?:AbortSignal):Promise<Selection & {maxTokens?:number}>};
 };
 export type ModuleIdentity = Readonly<{entry_id:string;module:string;module_digest:string}>;
@@ -104,9 +106,11 @@ export function createObserver(ctx:NativeContext,handle:Handle,selection:{curren
     if(!Array.isArray(rows)) refuse('OBSERVATION_UNAVAILABLE');
     if(rows.some(r=>r?.name==='run_code')) refuse('PRESENTATION_NOT_NATIVE');
     if(rows.length>64) refuse('OBSERVATION_LIMIT');
-    if(rows.length!==definitions.length || rows.some((r,i)=>r?.name!==definitions[i].name)) refuse('TOOL_CENSUS_MISMATCH');
+    if(rows.length!==definitions.length || rows.some((r,i)=>r?.name!==definitions[i]?.name)) refuse('TOOL_CENSUS_MISMATCH');
     return rows.map((r,i)=>{
-      const sealed=definitions[i],actual=ctx.tools.get(sealed.name,handle.agent);
+      const sealed=definitions[i];
+      if(!sealed) refuse('TOOL_CENSUS_MISMATCH');
+      const actual=ctx.tools.get(sealed.name,handle.agent);
       if(actual!==sealed.definition || actual.execute!==sealed.execute || actual.output.render!==sealed.render || actual.finalizeContent!==sealed.finalize || canonical(actual.output.schema)!==sealed.outputSchema) refuse('TOOL_IMPLEMENTATION_DRIFT');
       if(canonical(r)!==sealed.schema || canonical(schema(actual))!==sealed.schema) refuse('TOOL_SCHEMA_DRIFT');
       return {...JSON.parse(sealed.schema),implementation_digest:sealed.implementation_digest};
@@ -118,7 +122,7 @@ export function createObserver(ctx:NativeContext,handle:Handle,selection:{curren
       if(rows.length>=128) refuse('OBSERVATION_LIMIT');
       // N0 admits a flat explicit fixture recipe; no inherited conditional groups.
       if(entry.options.group || entry.disabled!==false || entry.fiber?.state!==2) refuse('COMPOSITION_UNSETTLED');
-      const expected=modules[rows.length];
+      const expected:ModuleIdentity|undefined=modules[rows.length];
       if(!expected || entry.id!==expected.entry_id || entry.options.name!==expected.module) refuse('COMPOSITION_MISMATCH');
       rows.push({...expected});
     }

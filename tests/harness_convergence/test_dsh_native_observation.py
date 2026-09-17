@@ -4,6 +4,7 @@ import dataclasses
 import hashlib
 import importlib
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -166,3 +167,81 @@ def test_native_token_setting_drift_cannot_hide_behind_matching_host_config():
     result=m.compareNativeObservation(canonical(d),binding=b,requested=r,host_observation=h)
     assert result.launch.decision is LaunchDecision.REFUSE_CONFIG_DRIFT
     assert not result.comparator_allows
+
+
+@pytest.mark.parametrize("case", ["positive", "ambient-tool", "implementation-drift",
+    "cancel", "late-cancel", "setup-failure", "cleanup-failure",
+    "setup-subprocess", "setup-network", "setup-write"])
+def test_real_pinned_native_fixture_and_existing_consumer(case):
+    """Opt-in native proof. Missing prepared supply is explicit missing evidence.
+
+    This test never downloads/builds/installs or grants a production route. The
+    qualified attended owner supplies the fixed bundle and OS policy. The actual
+    native process, not a prerecorded result or double, produces these bytes.
+    """
+    supplied = os.environ.get("MMX_DSH_NATIVE_SUPPLY")
+    if not supplied:
+        pytest.skip("Qualified native supply absent: mounted DSH proof NOT executed")
+    supply = Path(supplied).resolve(strict=True)
+    node = supply / "node/bin/node"
+    assert hashlib.sha256(node.read_bytes()).hexdigest() == (
+        "ebd2d552c7bebde593dd0390530963ad28de56bccde6ce387cdbe55fb0b6fb8e")
+    build = json.loads((supply / "build-inputs-receipt.json").read_text())
+    bundle = supply / "build/mounted_fixture.mjs"
+    assert hashlib.sha256(bundle.read_bytes()).hexdigest() == build["bundle_sha256"]
+    owned = {"Mastermind/experiments/harness_convergence/dsh_native/" + name
+        for name in ("observe.ts", "fixture_host.ts", "mounted_fixture.ts")}
+    assert owned <= {row["path"] for row in build["inputs"]}
+    for row in build["inputs"]:
+        if row["path"] in owned:
+            assert hashlib.sha256((ROOT / row["path"][len("Mastermind/"):]).read_bytes()).hexdigest() == row["sha256"]
+    boundary = json.loads((supply / "os-boundary-receipt.json").read_text())
+    policy = supply / "native-fixture.sb"
+    assert hashlib.sha256(policy.read_bytes()).hexdigest() == boundary["policy_sha256"]
+    assert boundary["exit_code"] == 0
+    assert all(row["denied"] for row in boundary["result"]["cases"][:4])
+    recipe = json.loads((supply / "native-recipe.json").read_text())
+    assert recipe["recipe_digest"] == hash_value(build)
+    env = {"PATH": "/usr/bin:/bin", "HOME": str(supply / "runtime/home"),
+        "TMPDIR": str(supply / "runtime/tmp"), "LANG": "C", "TZ": "UTC"}
+    completed = subprocess.run(["/usr/bin/sandbox-exec", "-f", str(policy),
+        str(node), "--max-old-space-size=384", str(bundle), case,
+        str(supply / "native-recipe.json")], cwd=supply / "runtime", env=env,
+        capture_output=True, timeout=20)
+    assert completed.returncode == 0, completed.stderr.decode(errors="replace")[-4000:]
+    assert completed.stderr == b""
+    result = json.loads(completed.stdout)
+    assert result["scope"] == "REAL_PINNED_DSH_CORE_FIXTURE_NOT_PRODUCTION"
+    assert result["native_generation_calls"] == 0
+    assert result["native_agent_absent"] and result["native_session_absent"]
+    assert result["native_services_absent"]
+    if case != "positive":
+        assert result["observation"] is None
+        assert result["decision"] != "OBSERVATION_PRODUCED"
+        return
+
+    expected = document()
+    expected["binding"] = dict(attempt_id="n0-native-fixture-attempt",
+        worker_id="n0-native-fixture-worker", process_generation_id="n0-native-fixture-generation",
+        native_session_id="n0-native-fixture-session")
+    expected["recipe_digest"] = recipe["recipe_digest"]
+    expected["composition"] = recipe["modules"]
+    for row in expected["tools"]:
+        row["implementation_digest"] = recipe["implementation_digest"]
+    raw = result["observation"].encode()
+    assert raw == canonical(expected)  # fixed spec, not expectation copied from output
+    m = load()
+    tool_ids = tuple((r["name"], hash_value({k:r[k] for k in
+        ("name", "description", "parameters")}), r["implementation_digest"]) for r in expected["tools"])
+    binding = m.NativeBinding(**expected["binding"], recipe_digest=recipe["recipe_digest"],
+        tools=tool_ids, modules=tuple((r["entry_id"], r["module"], r["module_digest"])
+            for r in recipe["modules"]))
+    requested = _requested(worker_id=binding.worker_id, provider="fixture",
+        requested_model="fixture-model", expected_config_digest=native_config_digest(expected),
+        capabilities=CapabilityManifest(required=tuple(CapabilityIdentity(name=n, kind="tool",
+            harness_binary_digest="digest-v1", tool_schema_digest=s) for n,s,_ in tool_ids)))
+    host = _observed(auth=AuthRealmFact(worker_id=binding.worker_id, provider="fixture"),
+        capabilities=(), effective_skills=())  # explicitly synthetic host attestation
+    verdict = m.compareNativeObservation(raw, binding=binding, requested=requested, host_observation=host)
+    assert verdict.launch.decision is LaunchDecision.ALLOW
+    assert not verdict.first_work_started

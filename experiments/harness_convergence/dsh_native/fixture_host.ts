@@ -3,8 +3,16 @@
  * The qualified native owner supplies its already-composed DSH Context/factory.
  * Unit contract doubles exercise this original code, not DSH itself.
  */
+import type {Context} from '@deepseek-ai/cordis';
+import type {CreateAgentOptions, ModelSelectionRef} from '@deepseek-ai/dsh-agent';
 import {createObserver,ObservationError,EXTENSION_POLICY,canonical} from './observe.ts';
 import type {NativeContext,Handle,OwnerSeal,Selection,Definition,Binding,ModuleIdentity} from './observe.ts';
+export type NativeCreateOptions = Omit<CreateAgentOptions, 'sessionId'|'setup'> & {
+  sessionId:string; setup:(ctx:Context)=>Promise<void>;
+};
+export type NativeFactoryContext = NativeContext & {
+  agents:NativeContext['agents'] & {create(options:NativeCreateOptions):Promise<Handle>};
+};
 export type OwnedFixture = {ctx:NativeContext;handle:Handle;selection:{current:Selection|undefined};owner:OwnerSeal};
 
 export async function withOwnedFixture(factory:(signal?:AbortSignal)=>Promise<OwnedFixture>,signal?:AbortSignal) {
@@ -40,10 +48,10 @@ export async function withOwnedFixture(factory:(signal?:AbortSignal)=>Promise<Ow
  * Module closure, fixture LLM adapter and process fencing belong to that caller.
  */
 export function nativeFixtureFactory(
-  ctx:NativeContext & {agents:NativeContext['agents'] & {create(options:unknown):Promise<Handle>}},
+  ctx:NativeFactoryContext,
   binding:Binding,
   recipe:Readonly<{recipe_digest:string;modules:readonly ModuleIdentity[];implementation_digest:string}>,
-  installModelSelection:(ctx:unknown,selection:unknown)=>void,
+  installModelSelection:(ctx:Context,selection:ModelSelectionRef)=>void,
 ) {
   const fixedBinding=JSON.parse(canonical(binding)) as Binding;
   const fixedRecipe=JSON.parse(canonical(recipe)) as typeof recipe;
@@ -54,9 +62,9 @@ export function nativeFixtureFactory(
       output:{schema:{type:'string'},render:(_args:unknown,value:unknown)=>[{type:'text',text:String(value)}]},
       execute:async()=> 'fixture-only',
     }));
-    const handle=await ctx.agents.create({sessionId:fixedBinding.native_session_id,signal,
+    const handle=await ctx.agents.create({sessionId:fixedBinding.native_session_id,...(signal ? {signal} : {}),
       agentOptions:{provider:'fixture',model:'fixture-model'},
-      setup:async (agentCtx:{tools:{presentAs(mode:string):unknown;register(d:Definition):unknown}})=>{
+      setup:async (agentCtx:Context)=>{
         installModelSelection(agentCtx,selection);
         agentCtx.tools.presentAs('native');
         for(const definition of definitions) agentCtx.tools.register(definition);
