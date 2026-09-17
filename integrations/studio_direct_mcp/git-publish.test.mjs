@@ -220,6 +220,71 @@ test('typed commit includes staged and unstaged changes, syncs the real index, a
   }
 });
 
+test('typed commit stays closed-world and does not require remote observation', async () => {
+  const f = await fixture();
+  try {
+    await writeFile(path.join(f.workspace, 'proof.txt'), 'v2\n');
+    let remoteObservationAttempted = false;
+    const wrappedExec = async (file, args, options) => {
+      if (file === GIT && args[0] === 'ls-remote') {
+        remoteObservationAttempted = true;
+        throw new Error('simulated remote observation outage');
+      }
+      return execFile(file, args, options);
+    };
+    const publisher = createGitPublisher(f.config, { execFile: wrappedExec });
+    const result = await publisher.commit({
+      operation_id: f.operationId,
+      expected_head_sha: f.head,
+      message: 'test: local-only typed commit',
+    });
+    assert.equal(remoteObservationAttempted, false);
+    assert.equal(result.status, 'OK');
+    assert.equal(result.effect_state, 'APPLIED');
+    assert.equal(result.code, 'APPLIED');
+    assert.equal('remote_head_sha' in result, false);
+    assert.equal('publication_state' in result, false);
+    const { stdout } = await git(f.workspace, 'rev-parse', 'HEAD');
+    assert.equal(stdout.trim(), result.commit_head_sha);
+
+    await assert.rejects(
+      () => publisher.status({ operation_id: f.operationId }),
+      /simulated remote observation outage/,
+    );
+    assert.equal(remoteObservationAttempted, true);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('scratch cleanup failure after ref admission cannot downgrade an applied commit', async () => {
+  const f = await fixture();
+  let leakedScratch = null;
+  try {
+    await writeFile(path.join(f.workspace, 'proof.txt'), 'v2\n');
+    const publisher = createGitPublisher(f.config, {
+      rm: async (target) => {
+        leakedScratch = target;
+        throw new Error('simulated scratch cleanup failure');
+      },
+    });
+    const result = await publisher.commit({
+      operation_id: f.operationId,
+      expected_head_sha: f.head,
+      message: 'test: cleanup failure preserves effect truth',
+    });
+    assert.ok(leakedScratch);
+    assert.equal(result.status, 'OK');
+    assert.equal(result.effect_state, 'APPLIED');
+    assert.equal(result.code, 'APPLIED');
+    const { stdout } = await git(f.workspace, 'rev-parse', 'HEAD');
+    assert.equal(stdout.trim(), result.commit_head_sha);
+  } finally {
+    if (leakedScratch) await rm(leakedScratch, { recursive: true, force: true });
+    await f.cleanup();
+  }
+});
+
 test('typed commit rejects stale fences, extra selectors, and multiline messages', async () => {
   const f = await fixture();
   try {
