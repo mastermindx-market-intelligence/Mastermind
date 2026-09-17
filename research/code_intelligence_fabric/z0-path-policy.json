@@ -1,0 +1,43 @@
+{
+  "schema_version": "mastermind.codeintel_z0_path_policy.v1",
+  "benchmark_cases": [
+    {
+      "id": "E1",
+      "repository_ref": "mastermind/master",
+      "critical_paths": ["control_plane/**", "docs/sol_skills/**"],
+      "query_families": ["exact authority owner", "carrier receipt provenance"]
+    },
+    {
+      "id": "X3",
+      "repository_ref": "macro/main",
+      "critical_paths": ["scripts/**", "agentos/**", ".github/workflows/**"],
+      "query_families": ["cross-repository execution evidence", "workflow owner"]
+    },
+    {
+      "id": "R3",
+      "repository_ref": "mastermind-terminal/master",
+      "critical_paths": ["src/**", "app/**", "tests/**"],
+      "query_families": ["terminal source owner", "regression surface"]
+    },
+    {
+      "id": "A1",
+      "repository_ref": "macro/main",
+      "critical_paths": ["engine/**", "lib/**", "config/**"],
+      "query_families": ["application source owner", "configuration provenance"]
+    }
+  ],
+  "policies": [
+    {
+      "id": "P0",
+      "description": "Broad repository minus binaries and caches only"
+    },
+    {
+      "id": "P1",
+      "description": "Initial reviewed source-bearing include policy"
+    },
+    {
+      "id": "P2",
+      "description": "P1 plus individually justified narrow data or config additions"
+    }
+  ]
+}
