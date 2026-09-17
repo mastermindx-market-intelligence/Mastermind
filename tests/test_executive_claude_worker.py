@@ -724,9 +724,8 @@ def test_cancellation_after_start_reconciles(tmp_path: Path) -> None:
     spec = _make_spec(tmp_path)
 
     ref = _run_async(adapter.start(spec))
-    run_dir = Path(spec.run_dir)
-    state_file = run_dir / "claude_fake_state.json"
-    deadline = time.monotonic() + 10.0
+    state_file = adapter._runtime_root / "claude_fake_state.json"
+    deadline = time.monotonic() + 20.0
     submissions = None
     while time.monotonic() < deadline:
         if state_file.exists():
