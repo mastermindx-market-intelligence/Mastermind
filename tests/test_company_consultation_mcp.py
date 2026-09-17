@@ -1366,6 +1366,39 @@ def test_company_consult_real_post_dispatch_cancellation_is_effect_unknown() -> 
     asyncio.run(exercise())
 
 
+def test_company_consult_typed_dispatcher_refusal_after_invocation_is_effect_unknown() -> None:
+    secret = "secret-post-dispatch-peer-refusal-detail.not-for-logs"
+
+    class RefusingDispatcher:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict]] = []
+
+        async def __call__(self, operation: str, request: dict) -> dict:
+            self.calls.append((operation, copy.deepcopy(request)))
+            raise ConsultationPeerRefused("AMBIGUOUS", {"detail": secret})
+
+    sink = RefusingDispatcher()
+    gateway, _ = _gateway(dispatcher=sink)
+
+    response = _run(
+        gateway.call(
+            "company.consult",
+            {
+                "to": _peer().peer_ref,
+                "question": "Do not convert post-dispatch refusal into no-effect truth.",
+                "evidence_refs": [],
+                "artifact_revisions": [],
+            },
+        )
+    )
+
+    assert response["ok"] is False
+    assert response["error"]["code"] == "EFFECT_UNKNOWN"
+    assert "data" not in response["error"]
+    assert secret not in repr(response)
+    assert len(sink.calls) == 1
+
+
 def test_company_consult_dispatch_failure_after_invocation_remains_effect_unknown() -> None:
     class FailingDispatcher:
         def __init__(self) -> None:

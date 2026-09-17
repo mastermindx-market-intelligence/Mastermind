@@ -628,6 +628,7 @@ class CompanyConsultationGateway:
             normalized = validate_company_consultation_tool_arguments(tool_name, arguments)
         except CompanyConsultationToolError as exc:
             return _error(tool_name, exc.code)
+        dispatch_invoked = False
         try:
             if tool_name == "company.peers":
                 peers = [
@@ -655,6 +656,7 @@ class CompanyConsultationGateway:
                     raise
                 except Exception:
                     return _error(tool_name, "INTERNAL_ERROR")
+                dispatch_invoked = True
                 response = await self.dispatcher(tool_name, request)
                 return _result_after_dispatch(tool_name, self._service_data(response))
             request = {
@@ -662,9 +664,12 @@ class CompanyConsultationGateway:
                 "operation": "reply" if tool_name == "company.reply" else "read",
                 "semantic": normalized,
             }
+            dispatch_invoked = True
             response = await self.dispatcher(tool_name, request)
             return _result_after_dispatch(tool_name, self._service_data(response))
         except ConsultationPeerRefused as exc:
+            if dispatch_invoked:
+                return _error(tool_name, "EFFECT_UNKNOWN")
             return _error(tool_name, exc.code, data=exc.data)
         except asyncio.CancelledError:
             return _error(tool_name, "EFFECT_UNKNOWN")
