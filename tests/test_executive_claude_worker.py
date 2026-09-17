@@ -716,6 +716,62 @@ def test_complete_launch_attestation_is_redacted_and_principal_bound(
 
 
 
+
+def test_process_ref_construction_failure_reaps_unpublished_process(
+    tmp_path: Path,
+) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    (tmp_path / "mode").write_text("sleep", encoding="utf-8")
+    adapter = _adapter(tmp_path, binary)
+    real_inspector = adapter.inspector
+    observed_pids: list[int] = []
+
+    class MalformedPrincipalInspector:
+        def boot_session_id(self) -> str:
+            return real_inspector.boot_session_id()
+
+        def inspect(self, pid: int) -> object:
+            observed_pids.append(pid)
+            observed = real_inspector.inspect(pid)
+            return SimpleNamespace(
+                start_identity=observed.start_identity,
+                pgid=observed.pgid,
+                session_id=observed.session_id,
+                effective_uid=None,
+                effective_gid=observed.effective_gid,
+                real_uid=observed.real_uid,
+                real_gid=observed.real_gid,
+            )
+
+    adapter.inspector = MalformedPrincipalInspector()
+
+    async def execute() -> tuple[BaseException | None, bool]:
+        error: BaseException | None = None
+        leaked = False
+        try:
+            await adapter.start(_workspace_and_spec(tmp_path, timeout_seconds=5))
+        except BaseException as exc:
+            error = exc
+        pid = observed_pids[0] if observed_pids else None
+        if pid is not None:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                leaked = False
+            else:
+                leaked = True
+                try:
+                    os.killpg(pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                await asyncio.sleep(0.05)
+        return error, leaked
+
+    error, leaked = asyncio.run(execute())
+    assert leaked is False
+    assert isinstance(error, claude_worker.ClaudeProcessIdentityError)
+    assert adapter._runs == {}
+
 def test_launch_attestation_failure_reaps_unpublished_process(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

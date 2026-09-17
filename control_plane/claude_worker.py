@@ -1407,16 +1407,26 @@ class ClaudeCodeWorkerAdapter:
             except ClaudeProcessIdentityError:
                 raise
             raise ClaudeProcessIdentityError("Claude process identity is unavailable") from exc
-        ref = WorkerProcessRef(
-            run_id=spec.run_id, pid=process.pid, pgid=process.pid,
-            process_start_identity=str(getattr(identity, "start_identity")), boot_session_id=boot,
-            launch_nonce=uuid.uuid4().hex, provider_session_id=None,
-            stdout_path=str(stdout_path), stderr_path=str(stderr_path), result_path=str(result_path),
-            started_at=_utc_now(), binary=self.binary, base_sha=baseline.head,
-            session_id=int(getattr(identity, "session_id")),
-            effective_uid=int(getattr(identity, "effective_uid")), effective_gid=int(getattr(identity, "effective_gid")),
-            real_uid=int(getattr(identity, "real_uid")), real_gid=int(getattr(identity, "real_gid")),
-        )
+        try:
+            ref = WorkerProcessRef(
+                run_id=spec.run_id, pid=process.pid, pgid=process.pid,
+                process_start_identity=str(getattr(identity, "start_identity")), boot_session_id=boot,
+                launch_nonce=uuid.uuid4().hex, provider_session_id=None,
+                stdout_path=str(stdout_path), stderr_path=str(stderr_path), result_path=str(result_path),
+                started_at=_utc_now(), binary=self.binary, base_sha=baseline.head,
+                session_id=int(getattr(identity, "session_id")),
+                effective_uid=int(getattr(identity, "effective_uid")), effective_gid=int(getattr(identity, "effective_gid")),
+                real_uid=int(getattr(identity, "real_uid")), real_gid=int(getattr(identity, "real_gid")),
+            )
+        except Exception as exc:
+            outcome = await self._safe_launch_failure_cleanup(process)
+            try:
+                await self._quarantine_launch_failure(state, outcome)
+            except ClaudeProcessIdentityError:
+                raise
+            raise ClaudeProcessIdentityError(
+                "Claude process reference is unavailable"
+            ) from exc
         try:
             try:
                 observed_user = pwd.getpwuid(ref.effective_uid).pw_name
