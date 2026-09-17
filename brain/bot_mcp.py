@@ -339,20 +339,67 @@ async def get_standouts(args):
 
 @tool("get_portfolio", "The bot's current paper book + track record.", {})
 async def get_portfolio(args):
-    # This is the private Portfolio Advisor's own-book reader.  ``flagship`` remains the
+    # This is the private Portfolio Advisor's own-book reader. ``flagship`` remains the
     # storage compatibility default, but it is archived and must never silently supply the
     # active US advisor context.
     from portfolio import registry
 
     portfolio_id = registry.DASHBOARD_DEFAULT_ID
-    meta = registry.get(portfolio_id)
-    latest = _read_json(registry.data_dir(portfolio_id) / "latest.json")
+    try:
+        book_dir = registry.data_dir(portfolio_id)
+    except Exception:  # noqa: BLE001
+        return _json({
+            "portfolio_id": portfolio_id,
+            "read_status": "unavailable",
+            "error": "portfolio_registry_unavailable",
+            "failed_sources": ["portfolio_registry"],
+        })
+
+    latest, book_failed = _read_first_mapping_checked((book_dir / "latest.json",))
+    if latest is None:
+        if book_failed:
+            return _json({
+                "portfolio_id": portfolio_id,
+                "read_status": "unavailable",
+                "error": "portfolio_book_unavailable",
+                "failed_sources": ["portfolio_book"],
+            })
+        return _json({"status": "no book yet", "portfolio_id": portfolio_id})
     if not latest:
         return _json({"status": "no book yet", "portfolio_id": portfolio_id})
+
+    try:
+        meta = registry.get(portfolio_id)
+        if not isinstance(meta, dict):
+            raise TypeError("portfolio registry metadata is not a mapping")
+    except Exception:  # noqa: BLE001
+        return _json({
+            **latest,
+            "portfolio_id": portfolio_id,
+            "active": None,
+            "lifecycle": None,
+            "read_status": "partial",
+            "failed_sources": ["portfolio_registry"],
+            "note": "Book state is available; portfolio registry metadata did not complete.",
+        })
+
+    try:
+        active = registry.is_active(portfolio_id)
+    except Exception:  # noqa: BLE001
+        return _json({
+            **latest,
+            "portfolio_id": portfolio_id,
+            "active": None,
+            "lifecycle": meta.get("status", "active"),
+            "read_status": "partial",
+            "failed_sources": ["portfolio_registry"],
+            "note": "Book state is available; portfolio active-status read did not complete.",
+        })
+
     return _json({
         **latest,
         "portfolio_id": portfolio_id,
-        "active": registry.is_active(portfolio_id),
+        "active": active,
         "lifecycle": meta.get("status", "active"),
     })
 
