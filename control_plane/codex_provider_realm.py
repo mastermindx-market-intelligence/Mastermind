@@ -302,17 +302,20 @@ CANDIDATE_CODEX_PROVIDER_REALMS_SPEC_ONLY = {
 }
 
 # MiniMax Token Plan was promoted out of quarantine by the exact-head native
-# execution proof its own comment required: the codex-cli 0.154.0 canary receipt
-# at ~/.claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/
-# handoff_kits/meta-ceo-b-2026-09-08/ext/state/
-# minimax_codex_canary_receipt_20260915.json (rc 0, output PONG, served model
-# MiniMax-M3, wire_api "responses", key fingerprint fadd3d5f310d). That receipt
-# proves transport reachability only -- it is a kit-harness execution proof, not
-# a governed-path canary -- so this realm is reviewed for transport and no worker
-# binding is armed by the promotion. The binding it enables
-# (minimax-token-plan.codex-responses) is BUILT_NOT_PROVEN with
-# autonomous_allowed false, and a live lane still requires the per-binding
-# enrollment and canary gates.
+# transport proof recorded in the secret-free, reviewable repository artifact:
+# review_evidence/provider_realms/minimax_codex_responses_20260915.json
+# (source receipt SHA-256
+# 84771422af5ef24e12f6ec0e82a2b107763fceaca77f1c7c7915493802bee3dd).
+# It records codex-cli 0.154.0, rc 0, MiniMax-M3 and wire_api "responses"
+# without credential fingerprints, credential type tags or host-local paths.
+# The observed helper used the existing `minimax` pool; the candidate
+# `minimax-codex` binding was not executed. The artifact therefore proves only
+# transport reachability -- not a governed-path canary, capacity observation,
+# usage-policy decision or autonomous-routing grant -- so
+# this realm is reviewed for transport and no worker binding is armed by the
+# promotion. The binding it enables (minimax-token-plan.codex-responses) stays
+# BUILT_NOT_PROVEN with autonomous_allowed false, and a live lane still requires
+# every per-binding enrollment, capacity, canary and usage-policy gate.
 #
 # The OpenCode Go realm remains SPEC-ONLY and quarantined: kit-side Responses
 # transport was proven only for some upstream models (see kit GO_PROOF_LEDGER)
