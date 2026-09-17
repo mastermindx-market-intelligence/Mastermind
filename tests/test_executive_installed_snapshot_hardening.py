@@ -28,6 +28,135 @@ def _clean_repo(tmp_path: Path) -> tuple[Path, Path]:
     return repo, tracked
 
 
+@pytest.mark.parametrize("metadata_kind", ["gitfile", "symlink"])
+def test_clean_snapshot_refuses_non_directory_git_metadata_before_git(
+    tmp_path: Path, metadata_kind: str,
+):
+    from integrations.executive_mcp.installed import (
+        _clean_git_snapshot,
+        _installed_child_env,
+    )
+    from integrations.executive_mcp.schemas import GatewayError
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    external_git = tmp_path / "external.git"
+    external_git.mkdir()
+    git_metadata = repo / ".git"
+    if metadata_kind == "gitfile":
+        git_metadata.write_text(f"gitdir: {external_git}\n", encoding="utf-8")
+    else:
+        git_metadata.symlink_to(external_git, target_is_directory=True)
+
+    calls = 0
+
+    def runner(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise AssertionError("unsafe Git metadata must refuse before Git execution")
+
+    env = _installed_child_env(code_root=repo, macro_root=repo)
+    with pytest.raises(GatewayError, match="repository topology is unsafe"):
+        _clean_git_snapshot(
+            repo, runner=runner, env=env, label="Mastermind source",
+        )
+    assert calls == 0
+
+
+@pytest.mark.parametrize(
+    ("marker_path", "content"),
+    [
+        ("commondir", "../shared.git\n"),
+        ("shallow", "0" * 40 + "\n"),
+        ("objects/info/alternates", "/tmp/foreign-objects\n"),
+        ("objects/pack/pack-test.promisor", ""),
+    ],
+)
+def test_clean_snapshot_refuses_unsafe_git_topology_markers_before_git(
+    tmp_path: Path, marker_path: str, content: str,
+):
+    from integrations.executive_mcp.installed import (
+        _clean_git_snapshot,
+        _installed_child_env,
+    )
+    from integrations.executive_mcp.schemas import GatewayError
+
+    repo, _tracked = _clean_repo(tmp_path)
+    marker = repo / ".git" / marker_path
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(content, encoding="utf-8")
+    calls = 0
+
+    def runner(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise AssertionError("unsafe topology must refuse before Git execution")
+
+    env = _installed_child_env(code_root=repo, macro_root=repo)
+    with pytest.raises(GatewayError, match="repository topology is unsafe"):
+        _clean_git_snapshot(
+            repo, runner=runner, env=env, label="Mastermind source",
+        )
+    assert calls == 0
+
+
+@pytest.mark.parametrize(
+    ("config_key", "config_value"),
+    [
+        ("extensions.partialClone", "origin"),
+        ("remote.origin.promisor", "true"),
+        ("remote.origin.partialCloneFilter", "blob:none"),
+        ("remote.origin.uploadpack", "/tmp/forbidden-upload-pack"),
+    ],
+)
+def test_clean_snapshot_refuses_partial_clone_and_helper_config_before_git(
+    tmp_path: Path, config_key: str, config_value: str,
+):
+    from integrations.executive_mcp.installed import (
+        _clean_git_snapshot,
+        _installed_child_env,
+    )
+    from integrations.executive_mcp.schemas import GatewayError
+
+    repo, _tracked = _clean_repo(tmp_path)
+    _git(repo, "config", config_key, config_value)
+    calls = 0
+
+    def runner(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise AssertionError("unsafe repository config must refuse before Git execution")
+
+    env = _installed_child_env(code_root=repo, macro_root=repo)
+    with pytest.raises(GatewayError, match="repository topology is unsafe"):
+        _clean_git_snapshot(
+            repo, runner=runner, env=env, label="Mastermind source",
+        )
+    assert calls == 0
+
+
+def test_clean_snapshot_refuses_missing_reachable_blob(tmp_path: Path):
+    from integrations.executive_mcp.installed import (
+        _clean_git_snapshot,
+        _default_packet_runner,
+        _installed_child_env,
+    )
+    from integrations.executive_mcp.schemas import GatewayError
+
+    repo, tracked = _clean_repo(tmp_path)
+    blob_oid = _git(repo, "rev-parse", "HEAD:tracked.txt").stdout.strip()
+    object_path = repo / ".git" / "objects" / blob_oid[:2] / blob_oid[2:]
+    assert object_path.is_file()
+    object_path.unlink()
+    assert tracked.read_text(encoding="utf-8") == "original\n"
+
+    env = _installed_child_env(code_root=repo, macro_root=repo)
+    with pytest.raises(GatewayError, match="repository objects are incomplete"):
+        _clean_git_snapshot(
+            repo, runner=_default_packet_runner, env=env, label="Mastermind source",
+        )
+
+
 @pytest.mark.parametrize(
     "index_flag",
     ["--assume-unchanged", "--skip-worktree"],

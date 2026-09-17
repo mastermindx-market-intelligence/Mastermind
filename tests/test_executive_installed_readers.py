@@ -94,7 +94,7 @@ def test_installed_readers_wires_dependency_complete_packet_collector(tmp_path: 
 
     readers = InstalledExecutiveReaders(
         repo_root=repo, macro_root=macro, runtime_root=runtime,
-        packet_python=python, packet_runner=runner, code_root=repo,
+        boot_python=python, packet_runner=runner, code_root=repo,
         expected_source_sha="a" * 40,
     )
     assert isinstance(readers._packet_builder, InstalledBootPacketCollector)
@@ -146,6 +146,138 @@ def test_installed_boot_packet_collector_has_bounded_default_subprocess_runner(t
     assert packet["mastermind"]["sha"] == source_sha
     assert packet["macro"]["root"] == str(macro)
     assert packet["degraded"] == []
+
+
+def test_installed_boot_packet_collector_reads_real_macro_from_materialization(tmp_path: Path):
+    import subprocess
+    from integrations.executive_mcp.installed import (
+        InstalledBootPacketCollector,
+        _default_packet_runner,
+    )
+
+    repo = tmp_path / "mastermind"
+    macro = tmp_path / "macro"
+    code = tmp_path / "immutable-release"
+    repo.mkdir(); macro.mkdir(); (code / "scripts").mkdir(parents=True)
+    (repo / "README.md").write_text("source\n", encoding="utf-8")
+    (macro / "agentos").mkdir()
+    (macro / "agentos" / "record.md").write_text("record\n", encoding="utf-8")
+    for root in (repo, macro):
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.email", "test@example.invalid"], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.name", "Test"], check=True)
+        subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "-q", "-m", "fixture"], check=True)
+    source_sha = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"], check=True,
+        capture_output=True, text=True,
+    ).stdout.strip()
+    macro_sha = subprocess.run(
+        ["git", "-C", str(macro), "rev-parse", "HEAD"], check=True,
+        capture_output=True, text=True,
+    ).stdout.strip()
+    python = tmp_path / "network-python"
+    python.write_text("fixture", encoding="utf-8")
+    observed: dict[str, Path] = {}
+
+    def runner(argv, **kwargs):
+        if str(argv[0]) == "git":
+            return _default_packet_runner(argv, **kwargs)
+        child_macro = Path(argv[argv.index("--macro-root") + 1])
+        observed["macro_root"] = child_macro
+        packet = {
+            "schema": "mastermind.ceo_boot_packet.v1",
+            "mastermind": {"root": str(repo), "sha": source_sha, "branch": "HEAD"},
+            "macro": {
+                "root": str(child_macro), "sha": macro_sha, "resolved_via": "flag",
+                "candidates_tried": [{"via": "flag", "path": str(child_macro), "usable": True, "reason": None}],
+            },
+        }
+        return {
+            "code": 0, "stdout": json.dumps(packet), "stderr": "",
+            "timed_out": False, "limit_exceeded": False, "invalid_utf8": False,
+        }
+
+    collector = InstalledBootPacketCollector(
+        source_root=repo, macro_root=macro, code_root=code,
+        python_executable=python, runner=runner, expected_source_sha=source_sha,
+    )
+    packet = collector(repo_root=repo, macro_root_flag=str(macro), now=None, timeout=5.0)
+
+    child_macro = observed["macro_root"]
+    assert child_macro != macro
+    assert packet["macro"]["root"] == str(macro)
+    assert packet["macro"]["candidates_tried"][0]["path"] == str(macro)
+    assert child_macro.exists() is False
+
+
+def test_installed_boot_packet_collector_refuses_live_macro_mutate_and_restore(
+    tmp_path: Path,
+):
+    import subprocess
+    import time
+    from integrations.executive_mcp.installed import (
+        InstalledBootPacketCollector,
+        _default_packet_runner,
+    )
+    from integrations.executive_mcp.schemas import GatewayError
+
+    repo = tmp_path / "mastermind"
+    macro = tmp_path / "macro"
+    code = tmp_path / "immutable-release"
+    repo.mkdir(); macro.mkdir(); (code / "scripts").mkdir(parents=True)
+    (repo / "README.md").write_text("source\n", encoding="utf-8")
+    record = macro / "agentos" / "record.md"
+    record.parent.mkdir()
+    record.write_text("original\n", encoding="utf-8")
+    for root in (repo, macro):
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.email", "test@example.invalid"], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.name", "Test"], check=True)
+        subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "-q", "-m", "fixture"], check=True)
+    source_sha = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"], check=True,
+        capture_output=True, text=True,
+    ).stdout.strip()
+    macro_sha = subprocess.run(
+        ["git", "-C", str(macro), "rev-parse", "HEAD"], check=True,
+        capture_output=True, text=True,
+    ).stdout.strip()
+    python = tmp_path / "network-python"
+    python.write_text("fixture", encoding="utf-8")
+
+    def runner(argv, **kwargs):
+        if str(argv[0]) == "git":
+            return _default_packet_runner(argv, **kwargs)
+        child_macro = Path(argv[argv.index("--macro-root") + 1])
+        assert child_macro != macro
+        before_ctime = record.stat().st_ctime_ns
+        original = record.read_bytes()
+        time.sleep(0.01)
+        record.write_bytes(b"transient mutation\n")
+        record.write_bytes(original)
+        assert record.read_bytes() == original
+        assert record.stat().st_ctime_ns != before_ctime
+        packet = {
+            "schema": "mastermind.ceo_boot_packet.v1",
+            "mastermind": {"root": str(repo), "sha": source_sha, "branch": "HEAD"},
+            "macro": {
+                "root": str(child_macro), "sha": macro_sha, "resolved_via": "flag",
+                "candidates_tried": [],
+            },
+        }
+        return {
+            "code": 0, "stdout": json.dumps(packet), "stderr": "",
+            "timed_out": False, "limit_exceeded": False, "invalid_utf8": False,
+        }
+
+    collector = InstalledBootPacketCollector(
+        source_root=repo, macro_root=macro, code_root=code,
+        python_executable=python, runner=runner, expected_source_sha=source_sha,
+    )
+    with pytest.raises(GatewayError, match="changed during boot-packet read"):
+        collector(repo_root=repo, macro_root_flag=str(macro), now=None, timeout=5.0)
 
 
 def test_installed_boot_packet_collector_refuses_foreign_packet_roots(tmp_path: Path):
@@ -289,12 +421,14 @@ def test_installed_collector_scopes_git_trust_and_mastermind_sibling(tmp_path: P
     assert set(env) == {
         "PATH", "LANG", "LC_ALL", "PYTHONDONTWRITEBYTECODE",
         "GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM", "GIT_NO_REPLACE_OBJECTS",
+        "GIT_NO_LAZY_FETCH",
         "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0",
         "MACRO_MASTERMIND_REPO", "MACRO_TERMINAL_REPO",
     }
     assert env["GIT_CONFIG_GLOBAL"] == "/dev/null"
     assert env["GIT_CONFIG_NOSYSTEM"] == "1"
     assert env["GIT_NO_REPLACE_OBJECTS"] == "1"
+    assert env["GIT_NO_LAZY_FETCH"] == "1"
     assert env["GIT_CONFIG_COUNT"] == "1"
     assert env["GIT_CONFIG_KEY_0"] == "safe.directory"
     assert env["GIT_CONFIG_VALUE_0"] == str(macro)
@@ -341,7 +475,7 @@ def test_installed_grounding_observer_uses_scoped_git_trust(tmp_path: Path):
 
     readers = InstalledExecutiveReaders(
         repo_root=repo, macro_root=macro, runtime_root=runtime,
-        packet_python=python, packet_runner=runner, code_root=repo,
+        boot_python=python, packet_runner=runner, code_root=repo,
         expected_source_sha="a" * 40,
     )
     observed = readers.observe()
@@ -403,6 +537,7 @@ def test_installed_collector_executes_immutable_code_root_and_binds_clean_snapsh
     assert len(helper_calls) == 1
     argv, cwd, env = helper_calls[0]
     assert cwd == code
+    assert argv[1:3] == ["-I", "-B"]
     assert argv[3] == str(code / "scripts" / "ceo_boot_packet.py")
     assert argv[argv.index("--repo-root") + 1] == str(repo)
     assert env["MACRO_MASTERMIND_REPO"] == str(code)
@@ -574,6 +709,91 @@ def test_process_group_cleanup_refuses_uncertain_live_group(monkeypatch):
 
     with pytest.raises(RuntimeError, match="cleanup is uncertain"):
         packet._terminate_owned_process_group(FakeProcess())
+
+
+def _capacity_runtime_contract_fixture(tmp_path: Path, monkeypatch):
+    import hashlib
+    import os
+    from types import SimpleNamespace
+    from control_plane import ceo_boot_packet as packet
+
+    runtime = tmp_path / "capacity-runtimes" / "fixture"
+    python = runtime / "bin" / "python3.12"
+    site_packages = runtime / "lib" / "python3.12" / "site-packages"
+    record = site_packages / "pyyaml-6.0.3.dist-info" / "RECORD"
+    record.parent.mkdir(parents=True)
+    python.parent.mkdir(parents=True, exist_ok=True)
+    python.write_bytes(b"fixture-python")
+    python.chmod(0o555)
+    record.write_text("fixture,sha256=fixture,1\n", encoding="utf-8")
+    record.chmod(0o444)
+    for directory in (runtime, runtime / "bin", runtime / "lib", runtime / "lib" / "python3.12", site_packages, record.parent):
+        directory.chmod(0o555)
+
+    contract = SimpleNamespace(
+        runtime_root=runtime,
+        python_binary=python,
+        site_packages=site_packages,
+        python_version="3.12.10",
+        python_binary_sha256=hashlib.sha256(python.read_bytes()).hexdigest(),
+        pyyaml_version="6.0.3",
+        pyyaml_record_sha256="a" * 64,
+        runtime_tree_sha256="b" * 64,
+        owner_uid=os.getuid(),
+        owner_gid=os.getgid(),
+        verify_pyyaml_record=lambda root: "a" * 64,
+        runtime_tree_digest=lambda root: "b" * 64,
+    )
+    monkeypatch.setattr(packet, "_capacity_runtime_contract", lambda: contract, raising=False)
+    return packet, contract
+
+
+def test_capacity_boot_runtime_attestor_binds_exact_closure_and_probe(
+    tmp_path: Path, monkeypatch,
+):
+    packet, contract = _capacity_runtime_contract_fixture(tmp_path, monkeypatch)
+    calls = []
+
+    def runner(argv, **kwargs):
+        calls.append((list(argv), kwargs))
+        return {
+            "code": 0, "stdout": "CAPACITY_RUNTIME_OK\n", "stderr": "",
+            "timed_out": False, "limit_exceeded": False, "invalid_utf8": False,
+        }
+
+    site_packages = packet.attest_capacity_boot_runtime(
+        contract.python_binary, runner=runner,
+    )
+
+    assert site_packages == contract.site_packages
+    assert len(calls) == 1
+    argv, kwargs = calls[0]
+    assert argv[:4] == [str(contract.python_binary), "-I", "-S", "-B"]
+    assert kwargs["env"] == {
+        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONNOUSERSITE": "1",
+    }
+    assert str(contract.site_packages) in argv
+    assert contract.python_version in argv
+    assert contract.pyyaml_version in argv
+
+
+def test_capacity_boot_runtime_attestor_refuses_tree_digest_drift(
+    tmp_path: Path, monkeypatch,
+):
+    packet, contract = _capacity_runtime_contract_fixture(tmp_path, monkeypatch)
+    contract.runtime_tree_digest = lambda root: "c" * 64
+
+    with pytest.raises(RuntimeError, match="runtime tree digest differs"):
+        packet.attest_capacity_boot_runtime(
+            contract.python_binary,
+            runner=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("probe must not run after closure drift")
+            ),
+        )
 
 
 def test_installed_reader_reserves_gateway_timeout_margin(tmp_path: Path):

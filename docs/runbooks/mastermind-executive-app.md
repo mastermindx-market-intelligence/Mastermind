@@ -285,26 +285,47 @@ successful ChatGPT call.
 ### Installed production binding
 
 The installed composition gives the network MCP process its own non-login
-service identity. `ceo_ingress_app_peer_uid`, `ceo_ingress_app_armed`,
-`ceo_ingress_app_macro_root`, and `ceo_ingress_app_read_python` must be supplied
-together in the existing protected control configuration. The read Python must
-be the content-addressed Executive network runtime path under
-`/Library/Application Support/MastermindExecutive/network-runtimes/<64 hex>/bin/python`.
-Its peer must differ from control, Operator, worker, and C1 identities. C1 retains
-its existing peer, grounding provider and arming setting.
+service identity. `ceo_ingress_app_peer_uid`, `ceo_ingress_app_armed`, and
+`ceo_ingress_app_macro_root` must be supplied together in the existing protected
+control configuration. Its peer must differ from control, Operator, worker,
+and C1 identities. C1 retains its existing peer, grounding provider and arming
+setting.
 
-For an already-installed three-field App binding, reinstall with the existing
-root-owned control config as `--control-config` and pass exactly one
-`--ceo-ingress-app-read-python <content-addressed-runtime>/bin/python`. The
-installer may only fill the missing fourth field. It refuses to originate an App
-binding, retarget an existing full binding, or accept a noncanonical/non-executable
-read Python path. Provision and verify that immutable runtime before the control
-reinstall; never add site-packages to the sealed control interpreter.
+The full-schema `control.json.template` includes an unarmed App binding, an
+explicit Macro snapshot placeholder, and an optional `ceo_ingress_app_boot_python`
+coordinate. The three App identity/arm/Macro fields remain the binding atom; the
+boot interpreter is additive so an older install can still start and degrade
+honestly instead of failing closed during rollout. Production should bind it to a
+root-owned, executable, non-group/other-writable Python runtime that already carries
+the read-only YAML dependency. The control process itself remains `-I -S -B` and
+never imports that third-party package tree.
 
-The full-schema `control.json.template` includes an unarmed App binding and an
-explicit Macro snapshot placeholder. Supply the actual sealed snapshot when
-provisioning the App, or omit all four App fields when installing control
-without it. The base installer does not add these optional fields by default.
+When configured, the control loader first attests `ceo_ingress_app_boot_python`
+against the existing CF2 capacity-runtime owner: exact runtime root and interpreter,
+root-owned/non-writable metadata, reviewed Python digest, PyYAML RECORD digest, full
+runtime-tree digest, and a bounded `-I -S -B` import probe that explicitly inserts
+the reviewed site-packages directory. This attestation does not replace the boot
+child's dependency-loading mode: the actual immutable boot-packet helper runs with
+`-I -B`, which is required for PyYAML 6.0.3 to remain importable from the sealed
+capacity runtime. If no boot interpreter is configured, #697's backward-compatible
+stdlib-only degraded path remains available and never changes admission state.
+
+With a boot interpreter bound, `InstalledExecutiveReaders` executes
+`scripts/ceo_boot_packet.py` only from the root-owned immutable installed release;
+the control-owned administrative Mastermind checkout contributes grounding identity
+only. Git observation is fail-closed before object traversal for gitfiles/external
+gitdirs, `commondir`, shallow state, alternates, promisor/partial-clone/helper
+configuration and `.promisor` packs, with `GIT_NO_LAZY_FETCH=1`. The Macro snapshot
+is copied to a same-filesystem temporary materialization for the child read, while
+pre/post path metadata seals on the canonical roots reject transient mutate-and-
+restore races. The packet must retain the exact source/Macro SHAs, path/type closure,
+load-bearing raw blob identities, schema and roots before it is projected back to the
+canonical Macro path.
+
+Supply the actual sealed Macro snapshot when provisioning the App, or omit the App
+binding when installing control without it. The existing installer preserves the
+optional boot coordinate from a reviewed control-config source; it does not create a
+second runtime/configuration authority.
 
 The App peer can use existing v2 submit/status frames and two closed internal
 read frames on the same CeoIngress socket. The four public tools and schemas
@@ -330,51 +351,7 @@ release directory, dedicated process uid, loopback port, real A1 policies and
 separate directories for the existing read/submit durable authentication audit
 sinks. It refuses user-writable installation configuration. Run it under a
 separately provisioned network Python environment with `-I -B`; the sealed
-Executive control Python remains SDK-free. The reviewed dependency closure for
-that edge is `requirements/executive-mcp-macos-arm64-py312.lock`. It includes
-PyYAML 6.0.3 because installed `executive_state`/`executive_inbox` invoke the
-canonical boot-packet CLI in that dependency-complete runtime. The control
-process itself stays `-I -S -B`: it does not import PyYAML or the MCP SDK.
-
-The installed reader executes `scripts/ceo_boot_packet.py` only from the
-root-owned immutable installed release. The separately configured Mastermind
-administrative checkout and Macro snapshot are data/grounding roots, never code
-roots. Immediately before and after each packet read, each root must resolve one
-exact Git HEAD; the Mastermind HEAD must also equal the installed `proof_base_sha`.
-The verifier compares the entire raw filesystem leaf and directory path sets outside
-top-level `.git` with the exact paths and regular-file/symlink types implied by the
-`HEAD` tree, so ignored/untracked additions, empty directories, missing paths, and
-file-type substitutions cannot change any path-existence join. Macro snapshots with
-tracked symlinks are refused: Agent OS uses `Path.exists()` on authored paths and an
-external symlink target would not be bound by the snapshot's HEAD. The verifier does
-not depend on the mutable index, local attributes, clean filters, fsmonitor, hooks,
-or ignore rules.
-
-Only bytes the installed brief can actually consume are re-hashed on every read:
-`scripts/agentos.py`, its local `audit_stranded_work` import/package marker,
-`config/mastermind_programs.yml`, `data/governance/active_builds.json`, the optional
-CEO check-in marker when tracked, and the direct `*.md` records under the four
-Agent OS record directories. Their raw Git-blob identities must equal the exact
-`HEAD` tree. Other tracked Macro bytes can affect the brief only through existence,
-which the whole-tree leaf-set equality already binds. The owner-writable Mastermind
-administrative checkout contributes identity only; product/strategy bytes used by
-the packet come from the immutable installed release. Packet-reported Mastermind
-and Macro SHAs must equal the pre-read observations and remain stable through the
-post-read check. Any path-set difference, load-bearing byte difference, identity
-movement, wrong schema/root, timeout, invalid UTF-8, nonzero exit, output overflow,
-or cleanup uncertainty refuses the read rather than falling back.
-
-The helper receives a minimal secret-free environment: fixed system `PATH`, no
-global/system Git config, replacement objects disabled, one command-scoped
-`safe.directory` for the exact root-owned Macro snapshot,
-`MACRO_MASTERMIND_REPO` pinned to the immutable installed Mastermind release, and
-`MACRO_TERMINAL_REPO` pinned to an absent path so ambient sibling discovery cannot
-change the brief. This keeps the Macro snapshot root-owned without wildcard Git
-trust while preventing the owner-writable administrative checkout from supplying
-product state. The installed packet gets a 28-second total budget beneath the MCP
-read executor's 30-second ceiling; the inner Agent OS brief receives a further
-two-second-shorter budget so JSON serialization, pipe drain and process-group
-settlement remain inside the total read deadline.
+Executive control Python remains SDK-free.
 
 Deployment evidence belongs in the private operation receipt. Source tests do
 not establish an installed generation, accepted identity provider, live tunnel,

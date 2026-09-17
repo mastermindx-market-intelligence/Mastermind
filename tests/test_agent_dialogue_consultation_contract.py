@@ -6,13 +6,19 @@ import pytest
 
 from common.agent_dialogue_consultation_contract import (
     _BINDING_ID_RE,
+    _PRODUCER_SCHEMA_BY_REASONING_SURFACE,
     CONSULTATION_PURPOSES,
+    CONSULTATION_SCHEMA,
+    CONSULTATION_SCHEMA_REASONING_SURFACES,
+    CONSULTATION_V2_SCHEMA,
+    GROK_CONSULTATION_SCHEMA,
     RECEIPT_KEYS,
     RESPONSE_BUDGET_MAXIMA,
     DuplicateClassification,
     build_consultation,
     canonical_consultation_json,
     classify_duplicate,
+    consultation_schema_for_reasoning_surface,
     consultation_semantic_fingerprint,
     validate_consultation,
 )
@@ -78,6 +84,8 @@ def raw_consultation(**overrides) -> dict:
         "fingerprint": "",
     }
     value.update(overrides)
+    if value["purpose"] == "QUESTION":
+        value.pop("question_message_key", None)
     return value
 
 
@@ -142,14 +150,34 @@ def test_consultation_rejects_unknown_privileged_or_secret_shapes(
     assert field
 
 
+@pytest.mark.parametrize(
+    "schema",
+    [
+        "mastermind.agent_dialogue_consultation.v99",
+        "",
+        None,
+        1,
+        ["mastermind.agent_dialogue_consultation.v1"],
+    ],
+    ids=["unreserved", "empty", "none", "int", "list"],
+)
+def test_validate_consultation_refuses_unreserved_or_non_string_schema(schema) -> None:
+    with pytest.raises(DialogueContractError) as exc_info:
+        validate_consultation(raw_consultation(schema=schema))
+
+    assert exc_info.value.code == "MESSAGE_INVALID"
+
+
 def test_consultation_enforces_purpose_and_frozen_budget_bounds() -> None:
     answer = {"text": "The closed field list and refusal list.", "evidence_refs": []}
     correction = raw_consultation(
+        message_key="asd-consultation-correction-0001",
         purpose="CORRECTION",
         question=None,
         answer=answer,
-        supersedes_message_key="asd-consultation-0000000000000000",
+        supersedes_message_key="asd-consultation-answer-0001",
     )
+    correction["schema"] = "mastermind.agent_dialogue_consultation.v2"
     assert validate_consultation(correction)["purpose"] == "CORRECTION"
 
     with pytest.raises(DialogueContractError):
@@ -216,6 +244,7 @@ def test_question_and_answer_have_explicit_request_reference_invariants() -> Non
 
     answer = copy.deepcopy(request)
     answer["message_key"] = "asd-consultation-answer-0001"
+    answer["schema"] = "mastermind.agent_dialogue_consultation.v2"
     answer["purpose"] = "ANSWER"
     answer["question"] = None
     answer["answer"] = {"text": "closed answer", "evidence_refs": []}
@@ -234,3 +263,221 @@ def test_question_and_answer_have_explicit_request_reference_invariants() -> Non
     reused_request_key["question_message_key"] = request["message_key"]
     with pytest.raises(DialogueContractError):
         validate_consultation(reused_request_key)
+
+
+def test_protected_v1_frame_and_fingerprint_remain_admitted_unchanged() -> None:
+    protected = raw_consultation()
+    built = build_consultation(protected)
+
+    assert "question_message_key" not in built
+    assert validate_consultation(built) is not built
+    assert built["fingerprint"] == (
+        "f63e2e0e2e64939b47e03fc4008115064bca4a51ef6cb02b8ab7025c2cdd19b1"
+    )
+    assert built["fingerprint"] == consultation_semantic_fingerprint(built)
+
+    replay = copy.deepcopy(built)
+    assert classify_duplicate(built, replay) is DuplicateClassification.IDEMPOTENT
+
+    historical_answer = copy.deepcopy(protected)
+    historical_answer.update(
+        {
+            "message_key": "asd-consultation-original-answer",
+            "purpose": "ANSWER",
+            "question": None,
+            "answer": {"text": "closed answer", "evidence_refs": []},
+            "fingerprint": "",
+        }
+    )
+    historical_answer["correlation"]["request_message_key"] = historical_answer[
+        "message_key"
+    ]
+    built_answer = build_consultation(historical_answer)
+    assert "question_message_key" not in built_answer
+    assert built_answer["fingerprint"] == (
+        "b410fc5189d244c7b94ef74affff676a0c74703a76e9d87cf4efe4cc0b451afc"
+    )
+
+    foreign_request_link = copy.deepcopy(historical_answer)
+    foreign_request_link["correlation"]["request_message_key"] = protected[
+        "message_key"
+    ]
+    with pytest.raises(DialogueContractError):
+        validate_consultation(foreign_request_link)
+
+    legacy_correction = copy.deepcopy(protected)
+    legacy_correction.update(
+        {
+            "purpose": "CORRECTION",
+            "question": None,
+            "answer": {"text": "legacy correction", "evidence_refs": []},
+            "supersedes_message_key": protected["message_key"],
+            "fingerprint": "",
+        }
+    )
+    built_legacy_correction = build_consultation(legacy_correction)
+    assert built_legacy_correction["schema"] == CONSULTATION_SCHEMA
+    assert built_legacy_correction["supersedes_message_key"] == protected[
+        "message_key"
+    ]
+    assert built_legacy_correction["fingerprint"] == (
+        "e659d12d195ad987aebdff5eaf62dc6e68abf3d851490ddde46ae0e5695221a8"
+    )
+
+def test_v2_correction_message_identity_is_closed() -> None:
+    request = build_consultation(raw_consultation())
+    answer = copy.deepcopy(request)
+    answer.update(
+        {
+            "schema": CONSULTATION_V2_SCHEMA,
+            "message_key": "asd-consultation-answer-0001",
+            "purpose": "ANSWER",
+            "question": None,
+            "answer": {"text": "closed answer", "evidence_refs": []},
+            "question_message_key": request["message_key"],
+            "fingerprint": "",
+        }
+    )
+    answer["correlation"]["request_message_key"] = request["message_key"]
+    answer = build_consultation(answer)
+
+    correction = copy.deepcopy(answer)
+    correction.update(
+        {
+            "message_key": "asd-consultation-correction-0001",
+            "purpose": "CORRECTION",
+            "supersedes_message_key": answer["message_key"],
+            "answer": {"text": "corrected answer", "evidence_refs": []},
+            "fingerprint": "",
+        }
+    )
+    assert validate_consultation(correction)["purpose"] == "CORRECTION"
+
+    reused_request_key = copy.deepcopy(correction)
+    reused_request_key["message_key"] = request["message_key"]
+    with pytest.raises(DialogueContractError):
+        validate_consultation(reused_request_key)
+
+    self_superseding = copy.deepcopy(correction)
+    self_superseding["supersedes_message_key"] = correction["message_key"]
+    with pytest.raises(DialogueContractError):
+        validate_consultation(self_superseding)
+
+    supersedes_request = copy.deepcopy(correction)
+    supersedes_request["supersedes_message_key"] = request["message_key"]
+    with pytest.raises(DialogueContractError):
+        validate_consultation(supersedes_request)
+
+
+def _grok_question() -> dict:
+    frame = raw_consultation(schema=GROK_CONSULTATION_SCHEMA)
+    frame["recipient_binding"]["reasoning_surface"] = "grok-bot"
+    return frame
+
+
+def test_v3_accepts_only_closed_grok_question_shape() -> None:
+    built = build_consultation(_grok_question())
+
+    assert built["schema"] == GROK_CONSULTATION_SCHEMA
+    assert built["purpose"] == "QUESTION"
+    assert built["question"]
+    assert built["answer"] is None
+    assert "question_message_key" not in built
+    assert built["correlation"]["request_message_key"] == built["message_key"]
+    assert built["recipient_binding"]["reasoning_surface"] == "grok-bot"
+    assert CONSULTATION_SCHEMA_REASONING_SURFACES[GROK_CONSULTATION_SCHEMA] == frozenset(
+        {"grok-bot"}
+    )
+
+
+@pytest.mark.parametrize("surface", ["codex", "claude", "gemini", "grok", ""])
+def test_v3_refuses_every_non_grok_reasoning_surface(surface: str) -> None:
+    frame = _grok_question()
+    frame["recipient_binding"]["reasoning_surface"] = surface
+
+    with pytest.raises(DialogueContractError) as exc_info:
+        validate_consultation(frame)
+
+    assert exc_info.value.code == "MESSAGE_INVALID"
+
+
+@pytest.mark.parametrize("purpose", ["ANSWER", "CORRECTION", "NOTICE"])
+def test_v3_refuses_non_question_purposes(purpose: str) -> None:
+    frame = _grok_question()
+    frame["purpose"] = purpose
+    if purpose in {"ANSWER", "CORRECTION"}:
+        frame["question"] = None
+        frame["answer"] = {"text": "{}", "evidence_refs": []}
+    if purpose == "CORRECTION":
+        frame["supersedes_message_key"] = "asd-consultation-answer-0001"
+
+    with pytest.raises(DialogueContractError) as exc_info:
+        validate_consultation(frame)
+
+    assert exc_info.value.code == "MESSAGE_INVALID"
+
+
+def test_v3_refuses_v2_request_reference_shape() -> None:
+    frame = _grok_question()
+    frame["question_message_key"] = frame["message_key"]
+
+    with pytest.raises(DialogueContractError) as exc_info:
+        validate_consultation(frame)
+
+    assert exc_info.value.code == "MESSAGE_INVALID"
+
+
+def test_v1_and_v2_do_not_gain_grok_surface_authority() -> None:
+    v1 = raw_consultation()
+    v1["recipient_binding"]["reasoning_surface"] = "grok-bot"
+    with pytest.raises(DialogueContractError):
+        validate_consultation(v1)
+
+    request = build_consultation(raw_consultation())
+    v2 = copy.deepcopy(request)
+    v2.update(
+        {
+            "schema": CONSULTATION_V2_SCHEMA,
+            "message_key": "asd-consultation-answer-v2-surface",
+            "purpose": "ANSWER",
+            "question": None,
+            "answer": {"text": "{}", "evidence_refs": []},
+            "question_message_key": request["message_key"],
+            "fingerprint": "",
+        }
+    )
+    v2["recipient_binding"]["reasoning_surface"] = "grok-bot"
+    with pytest.raises(DialogueContractError):
+        validate_consultation(v2)
+
+
+def test_surface_selector_reserves_v3_for_grok_without_widening_v2() -> None:
+    assert dict(CONSULTATION_SCHEMA_REASONING_SURFACES) == {
+        CONSULTATION_SCHEMA: frozenset({"codex", "claude"}),
+        CONSULTATION_V2_SCHEMA: frozenset({"codex", "claude"}),
+        GROK_CONSULTATION_SCHEMA: frozenset({"grok-bot"}),
+    }
+    assert set(_PRODUCER_SCHEMA_BY_REASONING_SURFACE) == {
+        "codex",
+        "claude",
+        "grok-bot",
+    }
+    assert consultation_schema_for_reasoning_surface("codex") == CONSULTATION_SCHEMA
+    assert consultation_schema_for_reasoning_surface("claude") == CONSULTATION_SCHEMA
+    assert consultation_schema_for_reasoning_surface("grok-bot") == GROK_CONSULTATION_SCHEMA
+
+    for unsupported in ("gemini", "grok", "", None, 1):
+        with pytest.raises(DialogueContractError) as exc_info:
+            consultation_schema_for_reasoning_surface(unsupported)
+        assert exc_info.value.code == "MESSAGE_INVALID"
+
+
+def test_v3_schema_identity_is_not_a_v1_fingerprint_alias() -> None:
+    v1 = build_consultation(raw_consultation())
+    v3 = build_consultation(_grok_question())
+
+    assert v3["fingerprint"] == (
+        "6ba1d8cf6e5e254dd54862a4199d3285dfdd5afd0fe61012a0128a2daa754695"
+    )
+    assert v3["fingerprint"] != v1["fingerprint"]
+    assert classify_duplicate(v1, v3) is DuplicateClassification.CONFLICT
