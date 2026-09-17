@@ -240,12 +240,12 @@ def test_post_call_exception_is_effect_unknown_and_never_failed_or_retried():
     assert len(client.calls) == 1
 
 
-def test_post_call_injected_cancellation_propagates_sanitized_and_never_retries():
+def test_post_call_injected_cancellation_is_effect_unknown_and_never_retries():
     secret = "secret-cancellation-detail.not-for-logs"
     client = _FakeClient(_observation(), fail=asyncio.CancelledError(secret))
     dispatcher = GrokBotRoutineWakeDispatcher(client)
 
-    with pytest.raises(asyncio.CancelledError) as captured:
+    with pytest.raises(WakeEffectUnknownError, match="effect is unknown") as captured:
         _nudge(dispatcher, _wake())
 
     assert secret not in repr(captured.value)
@@ -254,7 +254,7 @@ def test_post_call_injected_cancellation_propagates_sanitized_and_never_retries(
     assert len(client.calls) == 1
 
 
-def test_real_post_call_task_cancellation_propagates_and_ends_cancelled():
+def test_real_post_call_task_cancellation_is_effect_unknown_and_never_retried():
     secret = "secret-task-cancellation-detail.not-for-logs"
 
     async def exercise() -> None:
@@ -264,10 +264,10 @@ def test_real_post_call_task_cancellation_propagates_and_ends_cancelled():
         await client.started.wait()
 
         task.cancel(secret)
-        with pytest.raises(asyncio.CancelledError) as captured:
+        with pytest.raises(WakeEffectUnknownError, match="effect is unknown") as captured:
             await task
 
-        assert task.cancelled() is True
+        assert task.cancelled() is False
         assert secret not in repr(captured.value)
         assert captured.value.__cause__ is None
         assert captured.value.__context__ is None
@@ -356,13 +356,13 @@ def test_reconcile_source_error_remains_effect_unknown_without_submission():
     assert len(source.calls) == 1
 
 
-def test_reconcile_injected_cancellation_propagates_sanitized_without_submission():
+def test_reconcile_injected_cancellation_remains_effect_unknown_without_submission():
     secret = "secret-reconcile-cancellation-detail.not-for-logs"
     client = _FakeClient(_observation())
     source = _FakeObservationSource(None, fail=asyncio.CancelledError(secret))
     dispatcher = GrokBotRoutineWakeDispatcher(client, observation_source=source)
 
-    with pytest.raises(asyncio.CancelledError) as captured:
+    with pytest.raises(WakeEffectUnknownError, match="remains unknown") as captured:
         _reconcile(dispatcher, _wake())
 
     assert secret not in repr(captured.value)
@@ -372,7 +372,7 @@ def test_reconcile_injected_cancellation_propagates_sanitized_without_submission
     assert len(source.calls) == 1
 
 
-def test_real_reconcile_task_cancellation_propagates_and_ends_cancelled():
+def test_real_reconcile_task_cancellation_remains_effect_unknown():
     secret = "secret-reconcile-task-cancellation-detail.not-for-logs"
 
     async def exercise() -> None:
@@ -383,10 +383,10 @@ def test_real_reconcile_task_cancellation_propagates_and_ends_cancelled():
         await source.started.wait()
 
         task.cancel(secret)
-        with pytest.raises(asyncio.CancelledError) as captured:
+        with pytest.raises(WakeEffectUnknownError, match="remains unknown") as captured:
             await task
 
-        assert task.cancelled() is True
+        assert task.cancelled() is False
         assert secret not in repr(captured.value)
         assert captured.value.__cause__ is None
         assert captured.value.__context__ is None

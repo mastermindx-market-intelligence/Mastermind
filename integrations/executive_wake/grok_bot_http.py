@@ -279,9 +279,7 @@ class GrokRoutineHttpClient:
             credential_cancelled = True
         except Exception:
             credential_unavailable = True
-        if credential_cancelled:
-            raise asyncio.CancelledError()
-        if credential_unavailable:
+        if credential_cancelled or credential_unavailable:
             raise WakePreSubmitError(
                 "Grok routine credential unavailable before submission"
             )

@@ -417,12 +417,12 @@ def test_credential_resolution_failure_is_typed_no_start_and_redacted():
     assert poster.calls == []
 
 
-def test_credential_resolution_cancellation_propagates_sanitized_without_post():
+def test_credential_resolution_cancellation_is_typed_no_start_and_redacted():
     secret = "secret-credential-cancellation-detail.not-for-logs"
     source = _CredentialSource(fail=asyncio.CancelledError(secret))
     client, _, poster = _client(source=source)
 
-    with pytest.raises(asyncio.CancelledError) as captured:
+    with pytest.raises(WakePreSubmitError, match="credential unavailable") as captured:
         _deliver(client)
 
     assert secret not in repr(captured.value)
