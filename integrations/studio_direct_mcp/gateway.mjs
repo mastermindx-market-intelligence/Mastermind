@@ -68,6 +68,7 @@
  *    a test worker that wants `port: 0` for an ephemeral loopback port.
  */
 
+import { TextOutputPager, OUTPUT_PAGE_TOOL, projectOutputSafely } from './output-budget.mjs';
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
@@ -656,6 +657,8 @@ class BackendOwner {
   constructor({ principalKey, principalTag, cfg, stats }) {
     Object.assign(this, { principalKey, principalTag, cfg, stats });
     this.generation = randomUUID();
+    this.outputPager = new TextOutputPager();
+    this.outputToolSchemas = new Map();
     this.state = 'idle';
     this.client = null;
     this.transport = null;
@@ -716,6 +719,8 @@ class BackendOwner {
   close() {
     if (this.closePromise) return this.closePromise;
     this.closing = true;
+    this.outputPager.clear();
+    this.outputToolSchemas.clear();
     this.state = 'broken';
     this.limiter.drain('Backend closed');
     this.closePromise = (async () => {
@@ -748,6 +753,8 @@ class GatewaySession {
     // In shared-account mode, this session's assigned BackendOwner.
     // Undefined when backendMode is 'per-session' (session uses its own backend).
     this.owner = owner;
+    this.outputPager = owner?.outputPager ?? new TextOutputPager();
+    this.outputToolSchemas = owner?.outputToolSchemas ?? new Map();
     this.backendOpsInFlight = 0;
 
     this.createdAt = Date.now();
@@ -773,7 +780,7 @@ class GatewaySession {
     // Starts reclaim-safe. Any effectful or interactive admission flips this
     // permanently; catalog/read-only work does not.
     this.reclaimUnsafe = false;
-    this.readonlyToolNames = new Set([STUDIO_PING_TOOL.name]);
+    this.readonlyToolNames = new Set([STUDIO_PING_TOOL.name, OUTPUT_PAGE_TOOL.name]);
 
     this.transport = null;
     this.server = null;
@@ -783,6 +790,7 @@ class GatewaySession {
 
   rememberToolAnnotations(tool) {
     if (!tool || typeof tool.name !== 'string') return;
+    this.outputToolSchemas.set(tool.name, Boolean(tool.outputSchema));
     if (tool.annotations?.readOnlyHint === true) {
       this.readonlyToolNames.add(tool.name);
     } else {
@@ -878,7 +886,8 @@ class GatewaySession {
         capabilities: { tools: { listChanged: false }, resources: {}, prompts: {} },
         instructions:
           'HTTP gateway in front of the local Desktop Commander stdio server. ' +
-          'studio_ping and any configured studio_git_* tools are answered by the gateway; ' +
+          'studio_ping, studio_output_page, and configured studio_git_* tools are gateway-owned. ' +
+          'studio_output_page reads retained output without repeating the original action; ' +
           'all remaining tools are proxied to the backend.',
       },
     );
@@ -891,7 +900,7 @@ class GatewaySession {
           signal: extra?.signal,
         });
         const tools = sanitizeToolList(result.tools);
-        const localTools = [{ ...STUDIO_PING_TOOL }];
+        const localTools = [{ ...STUDIO_PING_TOOL }, { ...OUTPUT_PAGE_TOOL }];
         if (session.gitPublisher) {
           localTools.push(...STUDIO_GIT_PUBLISH_TOOLS.map((tool) => ({ ...tool })));
         }
@@ -949,6 +958,12 @@ class GatewaySession {
   async callTool(request, extra) {
     const name = request?.params?.name;
     const started = Date.now();
+
+    if (name === OUTPUT_PAGE_TOOL.name) {
+      this.touch();
+      this.bumpTool(name);
+      return this.outputPager.read(request?.params?.arguments ?? {});
+    }
 
     if (name === STUDIO_PING_TOOL.name) {
       // Answered locally: no backend, no limiter slot, cannot taint anything.
@@ -1024,9 +1039,12 @@ class GatewaySession {
         log('info', 'tool_call', {
           sid: this.tag, tool: name, durationMs: Date.now() - started, classification,
         });
-        // Forwarded exactly as the backend produced it: content,
-        // structuredContent, isError and _meta are all untouched.
-        return result;
+        // Retain only catalogued, untyped text results under the existing owner.
+        // Paging never dispatches the backend or changes the original effect.
+        return projectOutputSafely(this.outputPager, result, {
+          toolName: name,
+          hasOutputSchema: this.outputToolSchemas.get(name) !== false,
+        });
       } catch (err) {
         return this.handleToolFailure(err, name, started);
       }
@@ -1233,7 +1251,9 @@ class GatewaySession {
       return;
     }
 
-    // Per-session mode: original logic
+    // Per-session mode: output retention shares this backend lifetime.
+    this.outputPager.clear();
+    this.outputToolSchemas.clear();
     this.closingBackend = true;
     const transport = this.backendTransport;
     const client = this.backendClient;

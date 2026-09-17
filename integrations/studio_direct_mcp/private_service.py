@@ -56,6 +56,7 @@ RESERVED_ACCOUNT_LABELS = frozenset(
 # Files staged from source directory. gateway.mjs is the engine library.
 STAGE_FILES = (
     "gateway.mjs",
+    "output-budget.mjs",
     "git-publish.mjs",
     "private-tunnel-auth.mjs",
     "private-tunnel-gateway.mjs",
@@ -67,9 +68,10 @@ STAGE_FILES = (
 # Accept only that exact historical set (or the current set) so the canonical
 # installer can stop and upgrade those known installs without accepting an
 # arbitrary manifest shape.
-LEGACY_STAGE_FILES_V1 = tuple(name for name in STAGE_FILES if name != "git-publish.mjs")
+LEGACY_STAGE_FILES_V2 = tuple(name for name in STAGE_FILES if name != "output-budget.mjs")
+LEGACY_STAGE_FILES_V1 = tuple(name for name in LEGACY_STAGE_FILES_V2 if name != "git-publish.mjs")
 KNOWN_MANIFEST_FILESETS = frozenset(
-    (frozenset(STAGE_FILES), frozenset(LEGACY_STAGE_FILES_V1))
+    (frozenset(STAGE_FILES), frozenset(LEGACY_STAGE_FILES_V2), frozenset(LEGACY_STAGE_FILES_V1))
 )
 
 MANIFEST_KEYS = (
