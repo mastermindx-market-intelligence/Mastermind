@@ -3,6 +3,8 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+from collections.abc import Sequence
+from dataclasses import replace
 
 import pytest
 
@@ -281,3 +283,76 @@ def test_v2_wire_rejects_removed_preference_from_resolved_tie():
     wire["preference"] = None
     with pytest.raises(epp.PlacementPreferenceError):
         epp.validate_placement_selection_v2(wire)
+
+
+class MovingCandidates(Sequence):
+    """Deterministically change candidate facts after the first traversal."""
+
+    def __init__(self, before, after):
+        self.before = before
+        self.after = after
+        self.iterations = 0
+
+    def __len__(self):
+        return len(self.before)
+
+    def __getitem__(self, index):
+        return self.before[index]
+
+    def __iter__(self):
+        self.iterations += 1
+        return iter(self.before if self.iterations == 1 else self.after)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("account_label", "unreviewed-account"),
+        ("quota_class", "unreviewed-quota"),
+        ("provider", "openai-codex"),
+        ("observed_at_ms", 9999),
+    ],
+)
+def test_v2_keeps_the_v1_frozen_candidate_snapshot(field, value):
+    before = _fables()
+    after = list(before)
+    after[2] = replace(before[2], **{field: value})
+    moving = MovingCandidates(before, tuple(after))
+
+    result = epp.select_placement_v2(
+        responsibility=_responsibility(),
+        demand=_demand(),
+        candidates=moving,
+        preference=_preference(),
+    )
+
+    wire = result.to_dict()
+    assert epp.validate_placement_selection_v2(wire) == wire
+    assert wire["selected"][field] == getattr(before[2], field)
+
+
+def test_unchanged_tuple_snapshot_remains_valid():
+    result = epp.select_placement_v2(
+        responsibility=_responsibility(),
+        demand=_demand(),
+        candidates=_fables(),
+        preference=_preference(),
+    )
+    assert epp.validate_placement_selection_v2(result.to_dict()) == result.to_dict()
+
+
+@pytest.mark.parametrize(
+    "candidate_factory",
+    [
+        lambda: "fable-a",
+        lambda: b"fable-a",
+        lambda: iter(_fables()),
+    ],
+)
+def test_v2_preserves_v1_candidate_sequence_refusal(candidate_factory):
+    with pytest.raises(TypeError, match="candidates must be a sequence"):
+        epp.select_placement_v2(
+            responsibility=_responsibility(),
+            demand=_demand(),
+            candidates=candidate_factory(),
+        )

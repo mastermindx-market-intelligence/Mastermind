@@ -356,7 +356,14 @@ def select_placement_v2(
     preference: CapacityPlacementPreference | None = None,
 ) -> PlacementSelectionDecisionV2:
     """Run v1 unchanged, then resolve only an exact top tie with Capacity evidence."""
-    base = select_placement(responsibility=responsibility, demand=demand, candidates=candidates)
+    if isinstance(candidates, (str, bytes)) or not isinstance(candidates, Sequence):
+        raise TypeError("candidates must be a sequence of PlacementCandidateFact")
+    candidate_tuple = tuple(candidates)
+    base = select_placement(
+        responsibility=responsibility,
+        demand=demand,
+        candidates=candidate_tuple,
+    )
     if base.state is not SelectionState.TIE_ABSTAINED:
         if preference is not None:
             raise PlacementPreferenceError("preference is invalid when v1 did not tie")
@@ -383,7 +390,7 @@ def select_placement_v2(
         raise PlacementPreferenceError("preference no longer covers the exact tied workers")
 
     winner_id = preference.preference_order[0]
-    matches = [candidate for candidate in candidates if candidate.worker_id == winner_id]
+    matches = [candidate for candidate in candidate_tuple if candidate.worker_id == winner_id]
     if len(matches) != 1:
         raise PlacementPreferenceError("preferred worker is not uniquely present")
     winner = matches[0]
