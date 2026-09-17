@@ -1921,8 +1921,13 @@ def api_research() -> JSONResponse:
             note["body_md_zh"] = _cached_zh(note.get("body_md") or "")
             out.append(note)
         return JSONResponse(out)
-    except Exception:
-        return JSONResponse([])
+    except Exception as exc:
+        _log.warning("research feed read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "research_status": "unavailable",
+            "error": "research_feed_unavailable",
+            "notes": None,
+        }, status_code=500)
 
 
 @router.get("/api/research_papers")
@@ -1938,7 +1943,12 @@ def api_research_papers() -> JSONResponse:
         from brain import research_paper
         papers = research_paper.load_papers()
     except Exception as exc:
-        return JSONResponse({"papers": [], "error": str(exc)})
+        _log.warning("research papers read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "paper_status": "unavailable",
+            "error": "research_papers_unavailable",
+            "papers": None,
+        })
 
     # join with the latest book: ticker -> (research_block, action, trade_time, weight)
     gate: dict[str, dict] = {}
