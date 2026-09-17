@@ -7453,6 +7453,13 @@ function renderLiveMarksStatus() {
       : ('Archived history · frozen ' + frozenAt + ' · no live pricing')) + '</span>';
     return;
   }
+  if (d.error === 'live_marks_unavailable') {
+    host.className = 'mm-live-status';
+    host.innerHTML = '<span class="dot"></span><span>' +
+      (isZh ? '实时行情暂不可用 · 保留上次组合快照' :
+        'Live marks unavailable · keeping the last portfolio snapshot') + '</span>';
+    return;
+  }
   var hasSnapshot = rows.some(function(p) { return p.quote_source === 'terminal_snapshot'; });
   var persistedRows = rows.filter(function(p) {
     return ['portfolio_eod', 'portfolio_snapshot', 'persisted_portfolio_mark'].indexOf(p.quote_source) >= 0;
@@ -7511,6 +7518,12 @@ function renderLiveMarksStatus() {
 function _mergeLiveMarks(data) {
   if (!data || data.portfolio !== _portfolio) return;
   _liveMarks = data;
+  // A live-preview failure says nothing about the underlying book. Preserve the last truthful
+  // snapshot/performance/positions and update only the visible transport status.
+  if (data.error) {
+    renderLiveMarksStatus();
+    return;
+  }
   if (_portfolio === 'self_directed') {
     if (data.book) _self = data.book;
     renderSelf();
