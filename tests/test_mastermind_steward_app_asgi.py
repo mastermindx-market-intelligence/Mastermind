@@ -409,9 +409,9 @@ def rsa_key() -> rsa.RSAPrivateKey:
 
 def test_authenticated_app_exposes_metadata_and_readiness_tracks_lifespan():
     app, policy, verifier_calls, port = _build()
-    client = TestClient(app, base_url=BASE_URL)
+    loopback = TestClient(app, base_url="http://127.0.0.1:8766")
 
-    not_started = client.get("/readyz")
+    not_started = loopback.get("/readyz")
     assert not_started.status_code == 503
     assert not_started.json() == {
         "status": "not_ready",
@@ -419,22 +419,88 @@ def test_authenticated_app_exposes_metadata_and_readiness_tracks_lifespan():
         "mode": "authenticated-readonly",
     }
 
-    with client:
-        health = client.get("/healthz")
+    with loopback:
+        health = loopback.get("/healthz")
         assert health.status_code == 200
         assert health.json()["mode"] == "authenticated-readonly"
 
-        ready = client.get("/readyz")
+        ready = loopback.get("/readyz")
         assert ready.status_code == 200
         assert ready.json()["status"] == "ready"
 
-        metadata = client.get(METADATA_PATH)
+        public = TestClient(app, base_url=BASE_URL)
+        metadata = public.get(METADATA_PATH)
         assert metadata.status_code == 200
         assert metadata.json()["resource"] == policy.resource
         assert metadata.json()["scopes_supported"] == [REQUIRED_SCOPE]
 
-    stopped = client.get("/readyz")
+    stopped = loopback.get("/readyz")
     assert stopped.status_code == 503
+    assert verifier_calls == []
+    assert port.calls == []
+
+
+def test_public_steward_routes_require_https_and_exact_resource_host_before_auth():
+    app, policy, verifier_calls, port = _build()
+    manager = app.state.mcp_session_manager
+
+    assert manager.security_settings.allowed_hosts == ["mcp.example.test"]
+
+    with TestClient(app, base_url="http://mcp.example.test") as plaintext:
+        metadata_plain = plaintext.get(METADATA_PATH)
+        mcp_plain = plaintext.post(
+            MCP_PATH,
+            headers={
+                **MCP_HEADERS,
+                "authorization": "Bearer must-not-reach-verifier",
+            },
+            json=MCP_BODY,
+        )
+
+    assert metadata_plain.status_code == 403
+    assert metadata_plain.json() == {"error": "transport_refused"}
+    assert mcp_plain.status_code == 403
+    assert mcp_plain.json() == {"error": "transport_refused"}
+    assert verifier_calls == []
+    assert port.calls == []
+
+    with TestClient(app, base_url="https://127.0.0.1:8766") as loopback:
+        metadata_loopback = loopback.get(METADATA_PATH)
+        mcp_loopback = loopback.post(
+            MCP_PATH,
+            headers={
+                **MCP_HEADERS,
+                "authorization": "Bearer must-not-reach-verifier",
+            },
+            json=MCP_BODY,
+        )
+
+    assert metadata_loopback.status_code == 421
+    assert metadata_loopback.json() == {"error": "misdirected_request"}
+    assert mcp_loopback.status_code == 421
+    assert mcp_loopback.json() == {"error": "misdirected_request"}
+    assert verifier_calls == []
+    assert port.calls == []
+
+
+def test_health_and_readiness_remain_loopback_http_only():
+    app, _, verifier_calls, port = _build()
+
+    with TestClient(app, base_url="http://127.0.0.1:8766") as loopback:
+        health = loopback.get("/healthz")
+        ready = loopback.get("/readyz")
+
+    assert health.status_code == 200
+    assert ready.status_code == 200
+
+    with TestClient(app, base_url=BASE_URL) as public:
+        public_health = public.get("/healthz")
+        public_ready = public.get("/readyz")
+
+    assert public_health.status_code == 421
+    assert public_health.json() == {"error": "misdirected_request"}
+    assert public_ready.status_code == 421
+    assert public_ready.json() == {"error": "misdirected_request"}
     assert verifier_calls == []
     assert port.calls == []
 
