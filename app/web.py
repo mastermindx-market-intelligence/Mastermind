@@ -2606,7 +2606,14 @@ def api_shadow_books() -> JSONResponse:
                          for p in shadow_books.POLICIES],
         })
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"leaderboard": [], "books": {}, "policies": [], "error": str(exc)})
+        _log.warning("shadow books read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "error": "shadow_books_unavailable",
+            "leaderboard": None,
+            "books": None,
+            "policies": None,
+        })
 
 
 @router.get("/api/predictions")
@@ -2622,7 +2629,13 @@ def api_predictions() -> JSONResponse:
         from portfolio import predictions
         return JSONResponse(predictions.summary(_date.today().isoformat()))
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"coverage": {}, "scorecard": {}, "error": str(exc)})
+        _log.warning("predictions read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "error": "predictions_unavailable",
+            "coverage": None,
+            "scorecard": None,
+        })
 
 
 @router.get("/api/rejections")
@@ -2664,7 +2677,13 @@ def api_student() -> JSONResponse:
         out["top_predicted"] = student.predict(top=12)
         return JSONResponse(out)
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"status": "building", "top_predicted": [], "error": str(exc)})
+        _log.warning("student model read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "status": "unavailable",
+            "top_predicted": None,
+            "error": "student_unavailable",
+        })
 
 
 @router.get("/api/distill")
@@ -2678,7 +2697,13 @@ def api_distill() -> JSONResponse:
         out["top_predicted"] = distill.predict(top=12)
         return JSONResponse(out)
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"status": "building", "top_predicted": [], "error": str(exc)})
+        _log.warning("distill model read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "status": "unavailable",
+            "top_predicted": None,
+            "error": "distill_unavailable",
+        })
 
 
 @router.get("/api/interim_marks")
@@ -2705,7 +2730,12 @@ def api_engine_backtest() -> JSONResponse:
         from loop import engine_backtest
         return JSONResponse(engine_backtest.load())
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"status": "unavailable", "error": str(exc)})
+        _log.warning("engine backtest read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "status": "unavailable",
+            "error": "engine_backtest_unavailable",
+        })
 
 
 @router.get("/api/factor_zoo")
@@ -2719,7 +2749,12 @@ def api_factor_zoo() -> JSONResponse:
         from loop import factor_zoo
         return JSONResponse(factor_zoo.load())
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"status": "unavailable", "error": str(exc)})
+        _log.warning("factor zoo read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "status": "unavailable",
+            "error": "factor_zoo_unavailable",
+        })
 
 
 @router.get("/api/fundamentals")
@@ -2732,7 +2767,12 @@ def api_fundamentals() -> JSONResponse:
         from loop import fundamentals
         return JSONResponse(fundamentals.load())
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"status": "unavailable", "error": str(exc)})
+        _log.warning("fundamentals read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "status": "unavailable",
+            "error": "fundamentals_unavailable",
+        })
 
 
 # ─────────────────────────────────────────────────────────────────────────────────────────────

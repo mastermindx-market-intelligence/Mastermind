@@ -3669,6 +3669,17 @@ var _factorZoo = null;            // advanced factor-alpha lab verdict (/api/fac
 var _fundamentals = null;         // PIT fundamental (value/quality) factor verdict (/api/fundamentals)
 var _student = null;              // CatBoost return-predicting student (/api/student)
 var _distill = null;              // CatBoost Opus-mimic distillation model (/api/distill)
+function _learningUnavailable(surface) {
+  return {
+    read_status: 'unavailable', status: 'unavailable',
+    error: 'learning_transport_unavailable', surface: surface
+  };
+}
+function _learningFetch(url, surface) {
+  return fetch(url)
+    .then(function(r) { return r.ok ? r.json() : _learningUnavailable(surface); })
+    .catch(function() { return _learningUnavailable(surface); });
+}
 // paged-feed state (Brain Log + Research Feed) — preserved across re-renders, clamped on reload
 var _brainPage = 0, _researchPage = 0;
 // brain rows are compact, research cards are tall — bias counts so the two columns end ~level
@@ -7006,6 +7017,12 @@ function renderShadowBooks() {
   var isZh = document.documentElement.getAttribute('data-lang') === 'zh';
   var head = collH2('shadow-books', 'Shadow Books — Policy A/B', '影子组合 — 策略 A/B',
     isZh ? '前瞻式平行组合 · 无泄漏' : 'parallel forward books · leakage-free');
+  if (d.read_status === 'unavailable') {
+    el.innerHTML = head + '<div class="mm-empty"><span class="mm-empty-icon">!</span>'
+      + '<span class="l-en">Shadow-book evidence unavailable — this read did not complete.</span>'
+      + '<span class="l-zh">影子组合证据暂不可用 — 本次读取未完成。</span></div>';
+    return;
+  }
   if (!lb.length) {
     el.innerHTML = head + '<div class="mm-empty"><span class="mm-empty-icon">○</span>'
       + '<span class="l-en">No shadow books yet — they accrue from the next build.</span>'
@@ -7077,6 +7094,12 @@ function renderXsec() {
   var isZh = document.documentElement.getAttribute('data-lang') === 'zh';
   var head = collH2('xsec', 'Cross-Sectional Edge', '横截面边际',
     isZh ? '全域预测日志 · 日聚类置信区间' : 'universe-wide prediction log · date-clustered CIs');
+  if (d.read_status === 'unavailable') {
+    el.innerHTML = head + '<div class="mm-empty"><span class="mm-empty-icon">!</span>'
+      + '<span class="l-en">Prediction evidence unavailable — this read did not complete.</span>'
+      + '<span class="l-zh">预测证据暂不可用 — 本次读取未完成。</span></div>';
+    return;
+  }
   if (!cov.n_total) {
     el.innerHTML = head + '<div class="mm-empty"><span class="mm-empty-icon">○</span>'
       + '<span class="l-en">No predictions logged yet — they accrue from the next build.</span>'
@@ -7136,6 +7159,12 @@ function renderEngineBacktest() {
   var isZh = document.documentElement.getAttribute('data-lang') === 'zh';
   var head = collH2('engine-bt', 'Engine Backtest Verdict', '引擎回测裁定',
     isZh ? '历史 · 无泄漏 · 高样本量' : 'historical · leakage-free · high-n');
+  if (d.read_status === 'unavailable') {
+    el.innerHTML = head + '<div class="mm-empty"><span class="mm-empty-icon">!</span>'
+      + '<span class="l-en">Engine-backtest evidence unavailable — this read did not complete.</span>'
+      + '<span class="l-zh">引擎回测证据暂不可用 — 本次读取未完成。</span></div>';
+    return;
+  }
   if (d.status !== 'ok' || !d.verdict) {
     el.innerHTML = head + '<div class="mm-empty"><span class="mm-empty-icon">○</span>'
       + '<span class="l-en">No engine backtest recorded yet — run scripts/run_engine_backtest.py.</span>'
@@ -7201,6 +7230,12 @@ function renderFactorZoo() {
   var isZh = document.documentElement.getAttribute('data-lang') === 'zh';
   var head = collH2('factor-zoo', 'Factor Alpha Lab', '因子阿尔法实验室',
     isZh ? '因子库 + 复合 + IC 期限结构 · 多重检验诚实' : 'factor zoo + composite + IC term-structure · multiple-testing-honest');
+  if (d.read_status === 'unavailable') {
+    el.innerHTML = head + '<div class="mm-empty"><span class="mm-empty-icon">!</span>'
+      + '<span class="l-en">Factor-zoo evidence unavailable — this read did not complete.</span>'
+      + '<span class="l-zh">因子库证据暂不可用 — 本次读取未完成。</span></div>';
+    return;
+  }
   if (d.status !== 'ok' || !d.verdict) {
     el.innerHTML = head + '<div class="mm-empty"><span class="mm-empty-icon">○</span>'
       + '<span class="l-en">No factor-zoo run recorded yet — run scripts/run_factor_zoo.py.</span>'
@@ -7308,6 +7343,12 @@ function renderFundamentals() {
   var isZh = document.documentElement.getAttribute('data-lang') === 'zh';
   var head = collH2('fundamentals', 'Fundamental Factors — PIT', '基本面因子 — 时点',
     isZh ? 'EDGAR 价值/质量 · 时点无泄漏 · 含做多做空' : 'EDGAR value/quality · point-in-time · long-only + long-short');
+  if (d.read_status === 'unavailable') {
+    el.innerHTML = head + '<div class="mm-empty"><span class="mm-empty-icon">!</span>'
+      + '<span class="l-en">Fundamental-factor evidence unavailable — this read did not complete.</span>'
+      + '<span class="l-zh">基本面因子证据暂不可用 — 本次读取未完成。</span></div>';
+    return;
+  }
   if (d.status !== 'ok' || !d.verdict) {
     el.innerHTML = head + '<div class="mm-empty"><span class="mm-empty-icon">○</span>'
       + '<span class="l-en">No fundamentals run recorded yet — run scripts/run_fundamentals.py.</span>'
@@ -7472,6 +7513,7 @@ function renderSizingScorecard() {
 // state (status chip + what unblocks it) and shows the top predicted edges once a model trains.
 function _lmCard(title, sub, d, isZh, kind) {
   d = d || {};
+  var readUnavailable = d.read_status === 'unavailable';
   var status = d.status || 'building';
   var lbl = status === 'scoring' || status === 'ok' ? (isZh ? '已训练' : 'trained')
           : status === 'unavailable' ? (isZh ? '不可用' : 'unavailable') : (isZh ? '累积中' : 'building');
@@ -7494,10 +7536,13 @@ function _lmCard(title, sub, d, isZh, kind) {
     var evs = ev == null ? '' : ' <span style="opacity:.7">' + (Number(ev) >= 0 ? '+' : '') + Number(ev).toFixed(3) + '</span>';
     return '<span class="mm-ticker-chip">' + esc(tk) + evs + '</span>';
   }).join('');
-  var predBlock = preds
-    ? ('<div class="mm-comp-holdings-h" style="margin-top:10px">' + (isZh ? '当前最高预测' : 'Top predicted now') + '</div>' +
-       '<div style="display:flex;flex-wrap:wrap;gap:4px">' + preds + '</div>')
-    : ('<div style="font-size:11px;color:var(--muted);margin-top:10px;font-style:italic">' + esc(sub) + '</div>');
+  var predBlock = readUnavailable
+    ? ('<div style="font-size:11px;color:var(--muted);margin-top:10px;font-style:italic">' +
+       (isZh ? '模型状态暂不可用 — 本次读取未完成。' : 'Model state unavailable — this read did not complete.') + '</div>')
+    : (preds
+      ? ('<div class="mm-comp-holdings-h" style="margin-top:10px">' + (isZh ? '当前最高预测' : 'Top predicted now') + '</div>' +
+         '<div style="display:flex;flex-wrap:wrap;gap:4px">' + preds + '</div>')
+      : ('<div style="font-size:11px;color:var(--muted);margin-top:10px;font-style:italic">' + esc(sub) + '</div>'));
   return '<div class="mm-comp-card m-claude">' +
     '<div class="mm-comp-name">' + esc(title) + ' <span class="mm-chip ' + chipCls + '" style="margin-left:4px">' + lbl + '</span></div>' +
     '<div class="mm-comp-metrics">' + metrics + '</div>' + predBlock + '</div>';
@@ -7933,13 +7978,13 @@ function _hydrateShared() {
     return Promise.allSettled([
       fetch('/api/activity').then(function(r)  { return r.ok ? r.json() : [];   }).catch(function() { return []; }),
       fetch('/api/research').then(function(r)  { return r.ok ? r.json() : [];   }).catch(function() { return []; }),
-      fetch('/api/shadow_books').then(function(r){ return r.ok ? r.json() : null; }).catch(function() { return null; }),
-      fetch('/api/predictions').then(function(r){ return r.ok ? r.json() : null; }).catch(function() { return null; }),
-      fetch('/api/engine_backtest').then(function(r){ return r.ok ? r.json() : null; }).catch(function() { return null; }),
-      fetch('/api/factor_zoo').then(function(r){ return r.ok ? r.json() : null; }).catch(function() { return null; }),
-      fetch('/api/fundamentals').then(function(r){ return r.ok ? r.json() : null; }).catch(function() { return null; }),
-      fetch('/api/student').then(function(r){ return r.ok ? r.json() : null; }).catch(function() { return null; }),
-      fetch('/api/distill').then(function(r){ return r.ok ? r.json() : null; }).catch(function() { return null; }),
+      _learningFetch('/api/shadow_books', 'shadow_books'),
+      _learningFetch('/api/predictions', 'predictions'),
+      _learningFetch('/api/engine_backtest', 'engine_backtest'),
+      _learningFetch('/api/factor_zoo', 'factor_zoo'),
+      _learningFetch('/api/fundamentals', 'fundamentals'),
+      _learningFetch('/api/student', 'student'),
+      _learningFetch('/api/distill', 'distill'),
     ]);
   }).then(function(s) {
     var actRes = s[0], researchRes = s[1], shadowRes = s[2], predRes = s[3],
