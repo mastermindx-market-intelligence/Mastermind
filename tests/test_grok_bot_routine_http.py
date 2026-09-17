@@ -238,6 +238,12 @@ def test_bounded_http_result_repr_redacts_response_body():
     assert "secret-response-body" not in repr(result)
 
 
+def test_bounded_http_result_accepts_upper_status_boundary():
+    result = BoundedHttpResult(599, b"", None)
+
+    assert result.status_code == 599
+
+
 def test_payload_is_exact_canonical_json_and_contains_only_opaque_correlation():
     body = grok_wake_payload(
         native_handle=NATIVE_HANDLE,

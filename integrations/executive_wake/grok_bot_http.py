@@ -24,6 +24,8 @@ MAX_REQUEST_BYTES = 16 * 1024
 MAX_RESPONSE_BYTES = 16 * 1024
 POST_TIMEOUT_SECONDS = 15.0
 
+# HTTP response status classes span 1xx through 5xx.
+_HTTP_STATUS_MAX_EXCLUSIVE = 6 * 100
 _MAX_URL_CHARS = 2048
 _MAX_TOKEN_CHARS = 8192
 _MAX_OPAQUE_CHARS = 256
@@ -198,7 +200,10 @@ class BoundedHttpResult:
     request_id: str | None = None
 
     def __post_init__(self) -> None:
-        if type(self.status_code) is not int or not 100 <= self.status_code <= 599:
+        if (
+            type(self.status_code) is not int
+            or not 100 <= self.status_code < _HTTP_STATUS_MAX_EXCLUSIVE
+        ):
             raise ValueError("Grok routine HTTP status is invalid")
         if not isinstance(self.body, bytes):
             raise ValueError("Grok routine HTTP body must be bytes")
