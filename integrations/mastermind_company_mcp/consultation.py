@@ -418,6 +418,7 @@ class CompanyConsultationGateway:
                 peer = self.peer_resolver.resolve(normalized["to"], program_ref=self.program_ref)
                 request = {
                     "schema": COMPANY_CONSULTATION_SCHEMA,
+                    "consultation_schema": peer.consultation_schema,
                     "operation": "consult",
                     "peer": peer.public_projection(),
                     "semantic": normalized,
