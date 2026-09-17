@@ -3264,8 +3264,10 @@ def api_desk_strategist(asof: str = "") -> JSONResponse:
             "rationale": (verdict.get("rationale") or "")[:1600],
             "calibration_multiplier": verdict.get("calibration_multiplier"),
         })
-    except Exception as exc:  # noqa: BLE001 — never raise; degrade to building
-        return JSONResponse({"status": "building", "asof": None, "error": str(exc)})
+    except Exception as exc:  # noqa: BLE001 — never raise; preserve unavailable truth
+        _log.warning("desk strategist read failed: %s", type(exc).__name__)
+        return JSONResponse({"status": "unavailable", "asof": None,
+                             "error": "desk_strategist_unavailable"})
 
 
 @router.get("/api/desk/decisions")
@@ -3335,7 +3337,9 @@ def api_desk_decisions(asof: str = "") -> JSONResponse:
         return JSONResponse({"status": "scoring" if rows else "building",
                              "asof": asof, "decisions": rows})
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"status": "building", "asof": None, "decisions": [], "error": str(exc)})
+        _log.warning("desk decisions read failed: %s", type(exc).__name__)
+        return JSONResponse({"status": "unavailable", "asof": None, "decisions": None,
+                             "error": "desk_decisions_unavailable"})
 
 
 @router.get("/api/desk/watchlist")
@@ -3379,7 +3383,9 @@ def api_desk_watchlist(book: str = "flagship") -> JSONResponse:
                              "last_review": str(s.get("last_review") or "")[:10] or None})
         return JSONResponse({"book": book, "watchlist": rows[:120]})
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"book": book, "watchlist": [], "error": str(exc)})
+        _log.warning("desk watchlist read failed for %s: %s", book, type(exc).__name__)
+        return JSONResponse({"status": "unavailable", "book": book, "watchlist": None,
+                             "error": "desk_watchlist_unavailable"})
 
 
 @router.get("/api/desk/scorecard")
@@ -3512,8 +3518,10 @@ def api_desk_macro_risk(asof: str = "") -> JSONResponse:
             if (_data().parent / "vendor" / "macro" / "data" / "regime" / "latest.json").exists() else {}
         st = macro_risk.risk_state(reg.get("date") or "", reg or None)
         return JSONResponse({"status": "scoring" if st.get("state") else "building", **_shape(st)})
-    except Exception as exc:  # noqa: BLE001 — never raise; degrade to building
-        return JSONResponse({"status": "building", "state": None, "error": str(exc)})
+    except Exception as exc:  # noqa: BLE001 — never raise; preserve unavailable truth
+        _log.warning("desk macro-risk read failed: %s", type(exc).__name__)
+        return JSONResponse({"status": "unavailable", "state": None,
+                             "error": "desk_macro_risk_unavailable"})
 
 
 @router.get("/api/desk/firm-exposure")
@@ -3521,14 +3529,17 @@ def api_desk_firm_exposure() -> JSONResponse:
     """READ-ONLY firm-level cross-book exposure monitor — where the independent books (flagship,
     heavyweight, US/CN/HK/ETF Brains) have piled into the SAME names / sectors. Surfaces the flagged
     concentrations + the top firm-wide exposures + a sector rollup. A MONITOR only: it never changes
-    any allocation or trades. Degrades to an honest empty payload; never 500s."""
+    any allocation or trades. A real empty firm summary stays empty; read failure is explicitly unavailable. Never 500s."""
     try:
         from portfolio import firm_exposure
         return JSONResponse(firm_exposure.summary())
-    except Exception as exc:  # noqa: BLE001 — never raise; degrade to an honest stub
-        return JSONResponse({"as_of": None, "books": [], "n_books": 0, "top_exposures": [],
-                             "flags": [], "by_sector": {}, "by_chain": {}, "thresholds": {},
-                             "currency_clean": False, "note": f"Firm exposure unavailable: {exc}"})
+    except Exception as exc:  # noqa: BLE001 — never raise; preserve unavailable truth
+        _log.warning("desk firm exposure read failed: %s", type(exc).__name__)
+        return JSONResponse({"status": "unavailable", "as_of": None, "books": None,
+                             "n_books": None, "top_exposures": None, "flags": None,
+                             "by_sector": None, "by_chain": None, "thresholds": None,
+                             "currency_clean": False,
+                             "error": "desk_firm_exposure_unavailable"})
 
 
 @router.get("/api/firm_allocator")

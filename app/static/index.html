@@ -5404,8 +5404,17 @@ function renderCalibrationPage() {
 // ── DESK page ───────────────────────────────────────────────────────────────
 // Lazy-loaded observability over the multi-seat Flagship desk. Fetches the four /api/desk/*
 // endpoints in parallel, then renders four sections. Every fetch degrades to null on any error
-// (the renderers then show a graceful "building" / empty state); nothing here can break the page.
+// Transport failures become an explicit unavailable sentinel; legitimate cold-start artifacts may still render building/empty.
 var _deskData = { strategist: null, macroRisk: null, decisions: null, watchlist: null, scorecard: null, firm: null, scheduler: null };
+
+function _deskUnavailable() {
+  return { status: 'unavailable', error: 'desk_transport_unavailable' };
+}
+function _deskUnavailableHtml() {
+  return '<div class="mm-empty"><span class="mm-empty-icon">!</span>' +
+    '<span class="l-en">Desk data unavailable — this read did not complete.</span>' +
+    '<span class="l-zh">工作台数据暂不可用 — 本次读取未完成。</span></div>';
+}
 
 function _deskBuilding(msgKey) {
   return '<div class="mm-desk-building"><span class="ic">⊙</span><span class="tx">' + t(msgKey) + '</span></div>';
@@ -5417,7 +5426,11 @@ function _deskEmpty(msgKey) {
 window.loadDesk = function() {
   // re-render any cached data immediately (so a re-open / lang toggle is instant), then refresh
   renderDeskPage();
-  var g = function(url) { return fetch(url).then(function(r){ return r.ok ? r.json() : null; }).catch(function(){ return null; }); };
+  var g = function(url) {
+    return fetch(url)
+      .then(function(r){ return r.ok ? r.json() : _deskUnavailable(); })
+      .catch(function(){ return _deskUnavailable(); });
+  };
   Promise.all([
     g('/api/desk/strategist'),
     g('/api/desk/decisions'),
@@ -5495,6 +5508,7 @@ function renderDeskStrategist() {
   var d = _deskData.strategist;
   var asofEl = E('desk-asof');
   if (asofEl) asofEl.innerHTML = (d && d.asof) ? (t('desk.asof') + ' ' + esc(d.asof)) : '';
+  if (d && d.status === 'unavailable') { host.innerHTML = _deskUnavailableHtml(); return; }
   // The backend returns status 'building' only when there is NO verdict; once a verdict exists it
   // is 'scoring' and carries backdrop/crowding/rationale even on a risk-off day that confirmed zero
   // themes. Don't gate on themes alone, or that whole verdict is wrongly hidden as "building".
@@ -5542,6 +5556,7 @@ function renderDeskStrategist() {
 function renderDeskMacroRisk() {
   var host = E('desk-macro-risk'); if (!host) return;
   var d = _deskData.macroRisk;
+  if (d && d.status === 'unavailable') { host.innerHTML = _deskUnavailableHtml(); return; }
   if (!d || d.status === 'building' || !d.state) {
     host.innerHTML = _deskBuilding('desk.macro_building'); return;
   }
@@ -5610,6 +5625,7 @@ function _deskActChip(action, cls) {
 function renderDeskDecisions() {
   var host = E('desk-decisions'); if (!host) return;
   var d = _deskData.decisions;
+  if (d && d.status === 'unavailable') { host.innerHTML = _deskUnavailableHtml(); return; }
   if (!d || d.status === 'building' || !(d.decisions || []).length) {
     host.innerHTML = _deskBuilding('desk.dec_building'); return;
   }
@@ -5658,6 +5674,7 @@ function renderDeskDecisions() {
 function renderDeskWatchlist() {
   var host = E('desk-watchlist'); if (!host) return;
   var d = _deskData.watchlist;
+  if (d && d.status === 'unavailable') { host.innerHTML = _deskUnavailableHtml(); return; }
   var rows = (d && d.watchlist) || [];
   if (!rows.length) { host.innerHTML = _deskEmpty('desk.wl_empty'); return; }
   var html = '<div class="mm-rp-wrap"><table class="mm-rp-table"><thead><tr>' +
@@ -5678,7 +5695,13 @@ function renderDeskWatchlist() {
 
 function renderDeskScorecard() {
   var host = E('desk-scorecard'); if (!host) return;
+  var cioHost = E('desk-cio');
   var d = _deskData.scorecard;
+  if (d && d.status === 'unavailable') {
+    host.innerHTML = _deskUnavailableHtml();
+    if (cioHost) cioHost.innerHTML = _deskUnavailableHtml();
+    return;
+  }
   var seats = (d && d.seats) || [];
   var rendered = seats.filter(function(s) {
     // surface a seat once it has any calibration OR attribution signal (skip pure-empty rows)
@@ -5716,7 +5739,7 @@ function renderDeskScorecard() {
   host.innerHTML = cardHtml;
 
   // CIO note (separate panel)
-  var cioHost = E('desk-cio'); if (!cioHost) return;
+  if (!cioHost) return;
   var cio = d && d.cio;
   if (cio && cio.note_md) {
     var wk = cio.week ? ('<div class="mm-rp-intro" style="margin:0 0 8px">' + t('desk.cio_week') + ' ' + esc(cio.week) + '</div>') : '';
@@ -5744,6 +5767,7 @@ function _firmBooksStr(ids) {
 function renderDeskFirm() {
   var host = E('desk-firm'); if (!host) return;
   var d = _deskData.firm;
+  if (d && d.status === 'unavailable') { host.innerHTML = _deskUnavailableHtml(); return; }
   if (!d || !(d.books || []).length) { host.innerHTML = _deskBuilding('desk.firm_building'); return; }
   var html = '';
 
