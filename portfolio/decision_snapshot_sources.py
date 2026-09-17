@@ -18,9 +18,15 @@ Two distinct clock laws (Task 2 controller ruling):
     ``clock_basis=UNQUALIFIED_EXTERNAL_CLOCK``, ``status=UNQUALIFIED_CLOCK``.
 
 The internal first-party settlement-receipt *directory* is read the same way: a no-follow,
-stable, bounded manifest whose clock is the newest of the directory's own mtime and every
-eligible entry's mtime. ``status=AVAILABLE`` is a point-in-time claim everywhere — the
-closed contract refuses it without a qualified non-null ``known_at``.
+stable, bounded manifest of per-entry names and mtimes. Each entry is independently
+partitioned against ``decision_cutoff`` at the same second-precision law the file sources
+use: an entry at or before the cutoff is eligible and may enter rows, counts, and the
+artifact digest; an entry after the cutoff is excluded and degrades coverage instead of
+either vanishing or blocking every eligible sibling. ``known_at``/``filesystem_observed_at``
+describe only the newest *eligible* entry — never the directory's own mtime and never an
+excluded future entry's mtime, so post-cutoff evidence can never surface through the clock
+fields either. ``status=AVAILABLE`` is a point-in-time claim everywhere — the closed
+contract refuses it without a qualified non-null ``known_at``.
 """
 from __future__ import annotations
 
@@ -589,7 +595,12 @@ _MANIFEST_NAME_OVERHEAD_BYTES = 3  # JSON quoting plus one separator per encoded
 def _stable_directory_manifest(directory: Path) -> dict[str, Any]:
     """Fixed-path, no-follow, stable first-party directory-manifest read.
 
-    Returns ``{"names": sorted_names, "mtime_ns": int | None, "error_code": str | None}``.
+    Returns ``{"entries": sorted_name_mtime_pairs, "dir_mtime_ns": int | None,
+    "error_code": str | None}`` — ``entries`` is a list of ``(name, st_mtime_ns)`` tuples
+    sorted by name, one per eligible ``.json`` entry, with no cutoff partitioning applied
+    here (the caller partitions, since the caller alone knows ``decision_cutoff``).
+    ``dir_mtime_ns`` is the directory's own stable mtime, reported only for the caller's
+    genuinely-empty-directory fallback clock — it is never mixed into an entry's mtime.
 
     ``is_dir()``/``glob()`` follow symlinks, expose no clock, and cannot detect a directory
     mutating underneath the enumeration — so the manifest they produce is neither
@@ -605,13 +616,12 @@ def _stable_directory_manifest(directory: Path) -> dict[str, Any]:
       capture;
     * re-fstats the directory afterwards and rejects any identity or mtime change during
       enumeration;
-    * reports a qualified first-party metadata clock: the newest of the directory's own
-      mtime and every eligible entry's mtime, which is the instant at which the manifest
-      became true. A receipt written after the decision cutoff therefore moves that clock
-      forward and is excluded, instead of being exposed as historical memory.
+    * captures each eligible entry's own mtime untouched by the directory's mtime — the
+      directory's own mtime moves on any add/remove/rename and is never a stand-in for a
+      specific receipt's clock.
     """
     def _failed(code: str) -> dict[str, Any]:
-        return {"names": [], "mtime_ns": None, "error_code": code}
+        return {"entries": [], "dir_mtime_ns": None, "error_code": code}
 
     try:
         dir_lstat = os.lstat(str(directory))
@@ -633,11 +643,10 @@ def _stable_directory_manifest(directory: Path) -> dict[str, Any]:
         return _failed("INVALID")
     try:
         pre = os.fstat(dir_fd)
-        names: list[str] = []
-        newest_ns = pre.st_mtime_ns
+        entries: list[tuple[str, int]] = []
         encoded_bytes = 0
-        with os.scandir(dir_fd) as entries:
-            for entry in entries:
+        with os.scandir(dir_fd) as scanned:
+            for entry in scanned:
                 if not entry.name.endswith(".json"):
                     continue
                 try:
@@ -649,9 +658,7 @@ def _stable_directory_manifest(directory: Path) -> dict[str, Any]:
                 encoded_bytes += len(entry.name.encode("utf-8")) + _MANIFEST_NAME_OVERHEAD_BYTES
                 if encoded_bytes > MAX_MANIFEST_METADATA_BYTES:
                     return _failed("SETTLEMENT_MANIFEST_TOO_LARGE")
-                names.append(entry.name)
-                if info.st_mtime_ns > newest_ns:
-                    newest_ns = info.st_mtime_ns
+                entries.append((entry.name, info.st_mtime_ns))
         post = os.fstat(dir_fd)
         if (
             pre.st_dev != post.st_dev
@@ -661,7 +668,32 @@ def _stable_directory_manifest(directory: Path) -> dict[str, Any]:
             return _failed("SOURCE_CHANGED_DURING_READ")
     finally:
         os.close(dir_fd)
-    return {"names": sorted(names), "mtime_ns": newest_ns, "error_code": None}
+    return {
+        "entries": sorted(entries, key=lambda item: item[0]),
+        "dir_mtime_ns": pre.st_mtime_ns,
+        "error_code": None,
+    }
+
+
+def _settlement_generation(
+    *, status: str, eligible_names: Sequence[str], future_names: Sequence[str]
+) -> str:
+    """Correction generation for the settlement-receipts manifest.
+
+    Folds ``status`` together with the eligible and future-excluded name sets so a
+    same-cutoff retry reuses the prior snapshot only when none of the three have changed:
+    a receipt crossing from future to eligible (impossible without a mtime edit) or back, a
+    receipt appearing or disappearing on either side of the partition, or the status itself
+    changing, always mints a new generation. An unrelated directory-mtime touch that moves
+    no entry across the partition changes none of these inputs and therefore reuses the
+    prior generation — the directory's own mtime is never an input here.
+    """
+    return c.content_digest({
+        "generation_kind": "SETTLEMENT_MANIFEST",
+        "status": status,
+        "eligible": sorted(eligible_names),
+        "future_excluded": sorted(future_names),
+    })
 
 
 def _parse_jsonl_tail(raw: bytes, *, max_rows: int = MAX_JSONL_TAIL_ROWS) -> dict[str, Any]:
@@ -1065,7 +1097,6 @@ def capture_book_state(book: str, *, decision_cutoff: str, recorded_at: str) -> 
     emit("historical_memory", _SETTLEMENT_RECEIPTS_SOURCE_ID)
     manifest = _stable_directory_manifest(settlement_dir)
     manifest_error = manifest["error_code"]
-    names = manifest["names"]
     if manifest_error == "MISSING":
         receipt["status"] = "ABSENT_OPTIONAL"
         receipt["coverage_state"] = "COMPLETE"
@@ -1089,41 +1120,90 @@ def capture_book_state(book: str, *, decision_cutoff: str, recorded_at: str) -> 
         _merge_into_section(sections["historical_memory"], rows=[], coverage_state="BLOCKED",
                              omitted_rows=0, gaps=[gap])
     else:
+        # Partition every entry independently against the cutoff — never gate the whole
+        # directory on one aggregate clock. Only the eligible side may ever enter rows,
+        # counts, or the artifact digest.
+        eligible: list[tuple[str, int]] = []
+        future: list[tuple[str, int]] = []
+        for name, mtime_ns in manifest["entries"]:
+            if _utc_from_mtime_ns(mtime_ns) > cutoff:
+                future.append((name, mtime_ns))
+            else:
+                eligible.append((name, mtime_ns))
+        eligible_names = [name for name, _ in eligible]
+        future_names = [name for name, _ in future]
         # Digest the entire eligible manifest, not just the displayed tail: a change to an
-        # omitted name is still a change in the evidence this receipt attests to.
-        manifest_digest = c.content_digest({"manifest": names})
-        receipt["artifact_digest"] = manifest_digest
-        receipt["correction_generation"] = manifest_digest
-        manifest_utc = _utc_from_mtime_ns(manifest["mtime_ns"])
-        receipt["known_at"] = manifest_utc
-        receipt["filesystem_observed_at"] = manifest_utc
+        # omitted eligible name is still a change in the evidence this receipt attests to.
+        # A future-excluded name never reaches this digest at all.
+        eligible_digest = c.content_digest({"manifest": eligible_names})
+        receipt["artifact_digest"] = eligible_digest
         receipt["clock_basis"] = "FILE_MTIME_FIRST_PARTY_STATE"
-        if manifest_utc > cutoff:
+
+        if not manifest["entries"]:
+            # A genuinely empty directory has no receipt to found a clock on; its own
+            # stable mtime is the only evidence of "empty since when" and is not itself a
+            # future value here since the directory was already proven stable above.
+            receipt["status"] = "AVAILABLE"
+            receipt["coverage_state"] = "COMPLETE"
+            empty_clock = _utc_from_mtime_ns(manifest["dir_mtime_ns"])
+            receipt["known_at"] = empty_clock
+            receipt["filesystem_observed_at"] = empty_clock
+            receipt["correction_generation"] = _settlement_generation(
+                status="AVAILABLE", eligible_names=(), future_names=(),
+            )
+            _merge_into_section(sections["historical_memory"], rows=[], coverage_state="COMPLETE",
+                                 omitted_rows=0, gaps=[])
+        elif not eligible:
+            # Every receipt in a non-empty directory lies beyond the cutoff: there is no
+            # eligible evidence to found a qualified known_at on (never the directory's own
+            # mtime, never an excluded future entry's), so this can never be AVAILABLE — and
+            # it is not the same claim as an empty directory, so it is not COMPLETE either.
             receipt["status"] = "FUTURE_AT_CUTOFF"
             receipt["coverage_state"] = "BLOCKED"
-            # Mirror the first-party file law: the directory/evidence clock crossing the
-            # cutoff with an unchanged eligible-name set must still be a new generation.
-            receipt["correction_generation"] = c.content_digest({
-                "generation_kind": "SOURCE_BYTES",
-                "status": receipt["status"],
-                "artifact_digest": manifest_digest,
-                "mtime_ns": int(manifest["mtime_ns"]),
-            })
+            receipt["correction_generation"] = _settlement_generation(
+                status="FUTURE_AT_CUTOFF", eligible_names=(), future_names=future_names,
+            )
             gap = _gap("FUTURE_AT_CUTOFF", source_id=_SETTLEMENT_RECEIPTS_SOURCE_ID,
                        section_id="historical_memory")
             gaps_out.append(gap)
             _merge_into_section(sections["historical_memory"], rows=[], coverage_state="BLOCKED",
                                  omitted_rows=0, gaps=[gap])
         else:
-            bounded = names[-MAX_SECTION_ROWS:]
-            rows = [{"file": name} for name in bounded]
+            newest_eligible_ns = max(ns for _, ns in eligible)
+            known_at = _utc_from_mtime_ns(newest_eligible_ns)
+            receipt["known_at"] = known_at
+            receipt["filesystem_observed_at"] = known_at
             receipt["status"] = "AVAILABLE"
-            receipt["coverage_state"] = "COMPLETE"
-            receipt["rows_total"] = len(names)
+            bounded = eligible_names[-MAX_SECTION_ROWS:]
+            rows = [{"file": name} for name in bounded]
+            cap_omitted = len(eligible_names) - len(bounded)
+            source_gaps: list[dict[str, Any]] = []
+            if future_names:
+                # Excluded future evidence must degrade coverage and surface a bounded gap
+                # rather than disappear silently — but the gap carries only a count, never
+                # the excluded filenames themselves.
+                coverage = "PARTIAL"
+                source_gaps.append(_gap(
+                    "FUTURE_AT_CUTOFF", source_id=_SETTLEMENT_RECEIPTS_SOURCE_ID,
+                    section_id="historical_memory",
+                    detail=(
+                        f"{len(future_names)} settlement receipt "
+                        f"{'file' if len(future_names) == 1 else 'files'} excluded: mtime "
+                        "beyond decision_cutoff"
+                    ),
+                ))
+            else:
+                coverage = "COMPLETE"
+            receipt["coverage_state"] = coverage
+            receipt["rows_total"] = len(eligible_names)
             receipt["rows_returned"] = len(bounded)
-            receipt["omitted_rows"] = len(names) - len(bounded)
-            _merge_into_section(sections["historical_memory"], rows=rows, coverage_state="COMPLETE",
-                                 omitted_rows=len(names) - len(bounded), gaps=[])
+            receipt["omitted_rows"] = cap_omitted
+            receipt["correction_generation"] = _settlement_generation(
+                status="AVAILABLE", eligible_names=eligible_names, future_names=future_names,
+            )
+            gaps_out.extend(source_gaps)
+            _merge_into_section(sections["historical_memory"], rows=rows, coverage_state=coverage,
+                                 omitted_rows=cap_omitted, gaps=source_gaps)
     sources_out.append(receipt)
 
     return {

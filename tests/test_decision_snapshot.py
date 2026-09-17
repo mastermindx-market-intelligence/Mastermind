@@ -785,10 +785,11 @@ def test_account_bytes_returning_from_future_to_eligible_mints_a_correction(snap
     assert len(_artifacts()) == 2
 
 
-def test_settlement_directory_clock_crossing_the_cutoff_mints_a_correction(snapshot_root):
-    """Same shape, for the settlement manifest: an unchanged eligible name set whose
-    directory mtime crosses the cutoff must mint a new correction, not reuse the eligible
-    snapshot's generation."""
+def test_settlement_directory_clock_alone_reuses_the_same_generation(snapshot_root):
+    """Task 8 repair 3, finding A: the settlement manifest's known_at/generation are now
+    bound to each entry's own mtime, never the directory's — so a directory mtime touch
+    with no entry change (e.g. an unrelated sibling write) must reuse the same snapshot,
+    not spuriously mint a correction."""
     _seed_account()
     settlement_dir = (
         sources._ROOT / "data" / "portfolios" / "autonomous" / "settlement_receipts"
@@ -806,6 +807,39 @@ def test_settlement_directory_clock_crossing_the_cutoff_mints_a_correction(snaps
     assert original["created"] is True
 
     os.utime(settlement_dir, (_FUTURE_EPOCH, _FUTURE_EPOCH))
+    retry = snapshots.create_snapshot(
+        "autonomous", decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:10:00Z",
+    )
+    assert retry["created"] is False
+    assert retry["snapshot_id"] == original["snapshot_id"]
+    assert len(_artifacts()) == 1
+
+
+def test_settlement_new_future_receipt_mints_a_correction(snapshot_root):
+    """The settlement manifest's actual evidence clock is each entry's own mtime: a new
+    post-cutoff receipt landing alongside an unchanged eligible one must mint a new
+    correction, since the source's coverage genuinely degraded."""
+    _seed_account()
+    settlement_dir = (
+        sources._ROOT / "data" / "portfolios" / "autonomous" / "settlement_receipts"
+    )
+    settlement_dir.mkdir(parents=True, exist_ok=True)
+    entry = settlement_dir / "r001.json"
+    entry.write_text("{}", encoding="utf-8")
+    os.utime(entry, (_PRE_CUTOFF_EPOCH, _PRE_CUTOFF_EPOCH))
+    os.utime(settlement_dir, (_PRE_CUTOFF_EPOCH, _PRE_CUTOFF_EPOCH))
+
+    original = snapshots.create_snapshot(
+        "autonomous", decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:01:00Z",
+    )
+    assert original["created"] is True
+
+    future_entry = settlement_dir / "r002.json"
+    future_entry.write_text("{}", encoding="utf-8")
+    os.utime(future_entry, (_FUTURE_EPOCH, _FUTURE_EPOCH))
+    os.utime(settlement_dir, (_PRE_CUTOFF_EPOCH, _PRE_CUTOFF_EPOCH))
     corrected = snapshots.create_snapshot(
         "autonomous", decision_cutoff="2026-09-15T20:00:00Z",
         recorded_at="2026-09-15T20:10:00Z",
