@@ -144,3 +144,31 @@ def test_registry_keeps_mapping_private_and_has_no_persistence_api(monkeypatch):
     assert not hasattr(registry, "discover")
     assert not hasattr(registry, "refresh")
     assert not hasattr(registry, "retry")
+
+
+def test_registry_accepts_inert_grok_dispatcher_without_arming_transport():
+    fake = _FakeDispatcher(transport_id="grok-computer")
+
+    registry = WakeDispatcherRegistry({"grok-computer": fake})
+    dispatcher = registry.resolve("grok-computer")
+
+    assert isinstance(dispatcher, UnsupportedWakeDispatcher)
+    assert dispatcher is not fake
+    assert dispatcher.descriptor.transport_implemented is False
+    assert fake.calls == 0
+
+
+def test_registry_uses_injected_grok_only_after_descriptor_is_implemented(monkeypatch):
+    fake = _FakeDispatcher(transport_id="grok-computer")
+    registry = WakeDispatcherRegistry({"grok-computer": fake})
+
+    _mark_implemented(monkeypatch, "grok-computer")
+
+    assert registry.resolve("grok-computer") is fake
+
+
+def test_registry_refuses_inert_grok_identity_mismatch():
+    fake = _FakeDispatcher(transport_id="codex-app-server")
+
+    with pytest.raises(WakeDispatchError, match="dispatcher transport identity"):
+        WakeDispatcherRegistry({"grok-computer": fake})

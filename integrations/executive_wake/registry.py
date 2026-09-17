@@ -25,9 +25,10 @@ class WakeDispatcherRegistry:
     """Resolve one explicitly composed dispatcher by canonical transport id.
 
     An unimplemented transport resolves through the existing fail-closed
-    ``UnsupportedWakeDispatcher``.  Once the canonical descriptor says a
-    transport is implemented, process composition must explicitly provide its
-    dispatcher; absence is an error rather than a fake unsupported success.
+    ``UnsupportedWakeDispatcher``. Trusted composition may pre-supply the exact
+    ``grok-computer`` dispatcher while its canonical descriptor remains false;
+    source presence still cannot make it reachable. Once a descriptor says a
+    transport is implemented, absence of an injected dispatcher is an error.
     """
 
     def __init__(
@@ -36,28 +37,41 @@ class WakeDispatcherRegistry:
     ) -> None:
         supplied = {} if dispatchers is None else dispatchers
         if not isinstance(supplied, Mapping):
-            raise WakeDispatchError("wake dispatcher registry requires an explicit mapping")
+            raise WakeDispatchError(
+                "wake dispatcher registry requires an explicit mapping"
+            )
         resolved: dict[str, WakeDispatcher] = {}
         for raw_transport_id, dispatcher in supplied.items():
             transport_id = str(raw_transport_id or "").strip()
             descriptor = self._descriptor(transport_id)
             if descriptor.transport_id != transport_id:
                 raise WakeDispatchError("registered wake transport id is not canonical")
-            if not descriptor.transport_implemented:
+            if (
+                not descriptor.transport_implemented
+                and transport_id != "grok-computer"
+            ):
                 raise WakeDispatchError(
                     f"wake transport {transport_id!r} is not marked implemented"
                 )
-            if dispatcher is None:
-                raise WakeDispatchError(
-                    f"wake transport {transport_id!r} has no dispatcher instance"
-                )
-            dispatcher_id = str(getattr(dispatcher, "transport_id", "") or "").strip()
-            if dispatcher_id != descriptor.transport_id:
-                raise WakeDispatchError(
-                    "dispatcher transport identity does not match the canonical descriptor"
-                )
+            self._require_dispatcher_identity(descriptor.transport_id, dispatcher)
             resolved[transport_id] = dispatcher
         self._dispatchers = resolved
+
+    @staticmethod
+    def _require_dispatcher_identity(
+        transport_id: str, dispatcher: WakeDispatcher | None
+    ) -> None:
+        if dispatcher is None:
+            raise WakeDispatchError(
+                f"wake transport {transport_id!r} has no dispatcher instance"
+            )
+        dispatcher_id = str(
+            getattr(dispatcher, "transport_id", "") or ""
+        ).strip()
+        if dispatcher_id != transport_id:
+            raise WakeDispatchError(
+                "dispatcher transport identity does not match the canonical descriptor"
+            )
 
     @staticmethod
     def _descriptor(transport_id: str):

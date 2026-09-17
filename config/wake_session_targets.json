@@ -82,6 +82,14 @@
       "workstream": "executive",
       "target_enabled": false
     },
+    "EXECUTIVE-COO-GROK-A": {
+      "session_alias": "EXECUTIVE-COO-GROK-A",
+      "target_seat": "coo",
+      "reasoning_surface": "grok-bot",
+      "wake_transport": "grok-computer",
+      "allowed_transports": ["grok-computer"],
+      "target_enabled": false
+    },
     "EXECUTIVE-CHAIRMAN-A": {
       "session_alias": "EXECUTIVE-CHAIRMAN-A",
       "target_seat": "chairman",

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import dataclasses
 import hashlib
 import json
 import sqlite3
@@ -1247,25 +1248,55 @@ def test_negative_binding_generation_fails_closed():
         RuntimeBinding(session_alias="PROPHET-COO-A", binding_id=_BIND, binding_generation=-1)
 
 
-def test_grok_bot_vocabulary_adds_no_target_or_transport_implementation() -> None:
+def test_grok_bot_target_is_explicit_disabled_and_not_a_default_route() -> None:
     assert "grok-bot" in REASONING_SURFACES
-    binding = RuntimeBinding(
-        session_alias="GROK-BOT-A",
-        binding_id="bind-grokbot00000001",
-        binding_generation=1,
-        reasoning_surface="grok-bot",
-    )
-    assert binding.reasoning_surface == "grok-bot"
-
     registry = load_session_targets()
+    target = registry.get("EXECUTIVE-COO-GROK-A")
+
+    assert target.target_seat == "coo"
+    assert target.reasoning_surface == "grok-bot"
+    assert target.wake_transport == "grok-computer"
+    assert target.allowed_transports == ("grok-computer",)
+    assert target.workstream is None
+    assert target.target_enabled is False
+    assert registry.production_armed is False
+    assert target.session_alias not in registry.default_alias_by_seat.values()
     assert all(
-        target.reasoning_surface != "grok-bot"
-        for target in registry.targets.values()
+        target.session_alias not in seat_map.values()
+        for seat_map in registry.workstream_alias_by_seat.values()
     )
-    assert "grok-bot" not in DEFAULT_TARGETS_PATH.read_text(encoding="utf-8")
     assert transport_implemented("grok-computer") is False
     assert {
         transport_id
         for transport_id, descriptor in WAKE_TRANSPORT_DESCRIPTORS.items()
         if descriptor.transport_implemented
     } == {"codex-app-server"}
+
+
+def test_disabled_grok_target_requires_exact_binding_and_cannot_deliver() -> None:
+    registry = load_session_targets().with_root_job_bindings(
+        {_JOB: {"coo": "EXECUTIVE-COO-GROK-A"}}
+    )
+    obligation = _obligation_from_inbox()
+    binding = RuntimeBinding(
+        session_alias="EXECUTIVE-COO-GROK-A",
+        binding_id="bind-grokbot00000001",
+        binding_generation=1,
+        reasoning_surface="grok-bot",
+    )
+
+    route = route_obligation(obligation, registry, binding=binding)
+
+    assert route.session_alias == "EXECUTIVE-COO-GROK-A"
+    assert route.reasoning_surface == "grok-bot"
+    assert route.wake_transport == "grok-computer"
+    assert route.binding_ready is True
+    assert route.target_enabled is False
+    assert route.transport_implemented is False
+    assert route.production_armed is False
+    assert route.delivery_allowed is False
+
+    for wrong_surface in ("codex", "claude", "chatgpt-sol"):
+        wrong = dataclasses.replace(binding, reasoning_surface=wrong_surface)
+        with pytest.raises(SessionTargetError, match="reasoning_surface"):
+            route_obligation(obligation, registry, binding=wrong)
