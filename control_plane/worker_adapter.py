@@ -62,7 +62,8 @@ ADAPTER_DESCRIPTORS: dict[str, AdapterDescriptor] = {
     ),
     "claude-code": AdapterDescriptor(
         adapter_id="claude-code",
-        implemented=False,
+        implemented=True,
+        implementation="control_plane.claude_worker.ClaudeCodeWorkerAdapter",
     ),
     # Clean, deliberately unarmed seams for later provider work.  A routing
     # policy cannot bind a live worker through an unimplemented descriptor.
