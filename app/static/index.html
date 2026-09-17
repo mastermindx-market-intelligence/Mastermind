@@ -6777,8 +6777,18 @@ window.addEventListener('resize', function() {
 // ── STRATEGY POSTURE: per-book strategy-label chip + hover playbook ────────────
 // The glance-able layer on top of the Brain's free-form rationale. Pure presentation —
 // the label / favored / avoided / driver are computed server-side by /api/posture.
+function _postureUnavailable() {
+  return { available: false, read_status: 'unavailable', posture_label: '—', posture_label_zh: '—', posture_tone: 'muted' };
+}
+
 function _postureChipHTML(p) {
   var isZh = document.documentElement.getAttribute('data-lang') === 'zh';
+  if (p && p.read_status === 'unavailable') {
+    return '<div class="mm-posture tone-muted">' +
+      '<span class="mm-posture-eyebrow"><span class="l-en">Strategy posture</span><span class="l-zh">策略姿态</span></span>' +
+      '<div class="mm-posture-head"><span class="mm-posture-label">' + (isZh ? '姿态暂不可用' : 'Posture unavailable') + '</span></div>' +
+      '<span class="mm-posture-sub">' + (isZh ? '最近一次读取未完成。' : 'The latest read did not complete.') + '</span></div>';
+  }
   if (!p || !p.available || !p.posture_label || p.posture_label === '—') {
     return '<div class="mm-posture tone-muted">' +
       '<span class="mm-posture-eyebrow"><span class="l-en">Strategy posture</span><span class="l-zh">策略姿态</span></span>' +
@@ -6809,9 +6819,9 @@ function _postureChipHTML(p) {
 function loadDeskPosture() {
   var host = E('desk-posture'); if (!host) return;
   fetch('/api/posture?book=flagship')
-    .then(function(r){ return r.ok ? r.json() : null; })
-    .then(function(d){ host.innerHTML = d ? ('<div class="mm-posture-wrap">' + _postureChipHTML(d) + '</div>') : ''; })
-    .catch(function(){ host.innerHTML = ''; });
+    .then(function(r){ return r.ok ? r.json() : _postureUnavailable(); })
+    .then(function(d){ host.innerHTML = '<div class="mm-posture-wrap">' + _postureChipHTML(d || _postureUnavailable()) + '</div>'; })
+    .catch(function(){ host.innerHTML = '<div class="mm-posture-wrap">' + _postureChipHTML(_postureUnavailable()) + '</div>'; });
 }
 
 function renderDecisions() {

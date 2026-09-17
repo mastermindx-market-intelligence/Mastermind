@@ -1777,11 +1777,24 @@ def api_posture(book: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
     try:
         from brain import posture as _posture
         return JSONResponse(_posture.posture(book))
-    except Exception as exc:  # noqa: BLE001 — never raise; degrade to an honest stub
-        return JSONResponse({"book": book, "available": False, "posture_label": "—",
-                             "posture_label_zh": "—", "posture_tone": "muted", "sub_strategy": None,
-                             "favored": [], "avoided": [], "driver": None, "detail": None,
-                             "cash_pct": None, "invested_pct": None, "error": str(exc)})
+    except Exception as exc:  # noqa: BLE001 — never raise; preserve unavailable truth
+        _log.warning("posture read failed for %s: %s", book, type(exc).__name__)
+        return JSONResponse({
+            "book": book,
+            "available": False,
+            "read_status": "unavailable",
+            "posture_label": "—",
+            "posture_label_zh": "—",
+            "posture_tone": "muted",
+            "sub_strategy": None,
+            "favored": [],
+            "avoided": [],
+            "driver": None,
+            "detail": None,
+            "cash_pct": None,
+            "invested_pct": None,
+            "error": "posture_unavailable",
+        })
 
 
 def _enrich_rotation_pairs(view: dict) -> None:
@@ -1832,9 +1845,12 @@ def api_market_view() -> JSONResponse:
             raise ValueError("artifact is not a JSON object")
         _enrich_rotation_pairs(view)
         return JSONResponse(view, headers=_NOCACHE)
-    except Exception as exc:  # noqa: BLE001 — never raise; degrade to an honest stub
+    except Exception as exc:  # noqa: BLE001 — never raise; preserve unavailable truth
+        _log.warning("market view read failed: %s", type(exc).__name__)
         return JSONResponse(
-            {"available": False, "error": str(exc)}, status_code=500, headers=_NOCACHE)
+            {"available": False, "read_status": "unavailable",
+             "error": "market_view_unavailable", "note": "market view unavailable"},
+            status_code=500, headers=_NOCACHE)
 
 
 @router.get("/api/agenda")
@@ -1858,9 +1874,12 @@ def api_agenda() -> JSONResponse:
                  "(brain.improvement_agenda.write runs in the weekly CIO job)"},
                 status_code=404, headers=_NOCACHE)
         return JSONResponse(agenda, headers=_NOCACHE)
-    except Exception as exc:  # noqa: BLE001 — never raise; degrade to an honest stub
+    except Exception as exc:  # noqa: BLE001 — never raise; preserve unavailable truth
+        _log.warning("agenda read failed: %s", type(exc).__name__)
         return JSONResponse(
-            {"available": False, "error": str(exc)}, status_code=500, headers=_NOCACHE)
+            {"available": False, "read_status": "unavailable",
+             "error": "agenda_unavailable", "note": "agenda unavailable"},
+            status_code=500, headers=_NOCACHE)
 
 
 @router.get("/api/etf/outcomes")
