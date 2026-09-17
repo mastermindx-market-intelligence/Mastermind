@@ -402,16 +402,16 @@ body.page-ag .msg {
     .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
     .then(function (res) {
       if (!res.ok || (res.body && res.body.available === false)) {
-        var note = (res.body && (res.body.note || res.body.error)) || "agenda unavailable";
+        var note = (res.body && res.body.note) || "agenda unavailable";
         root.innerHTML = '<div class="msg">' + esc(note) + "</div>";
         sub.textContent = "unavailable";
         return;
       }
       render(res.body);
     })
-    .catch(function (e) {
-      root.innerHTML = '<div class="msg">Failed to load agenda: ' + esc(e && e.message) + "</div>";
-      sub.textContent = "error";
+    .catch(function () {
+      root.innerHTML = '<div class="msg">agenda unavailable</div>';
+      sub.textContent = "unavailable";
     });
 })();
 </script>
