@@ -226,7 +226,7 @@ git commit -m 'refactor(executive): expose token-free current attempt validation
 **Step 1 — write failing shared-client tests**
 
 Cover:
-- fixed socket path and 660-second timeout;
+- fixed socket path and eleven-minute timeout;
 - exactly one newline-delimited send and no reconnect/retry;
 - response byte/frame bound;
 - exact success/refusal/status envelope keys;
@@ -244,8 +244,8 @@ Expected RED: module absent.
 **Step 2 — implement the shared client**
 
 Expose typed or exact-dict functions for:
-- `send_effect(request, *, socket_path=DEFAULT_SOCKET, timeout_seconds=660)`;
-- `send_status(request, *, socket_path=DEFAULT_SOCKET, timeout_seconds=660)`;
+- `send_effect(request, *, socket_path=DEFAULT_SOCKET, timeout_seconds=DEFAULT_CLIENT_TIMEOUT_SECONDS)`;
+- `send_status(request, *, socket_path=DEFAULT_SOCKET, timeout_seconds=DEFAULT_CLIENT_TIMEOUT_SECONDS)`;
 - exact effect/status response validation.
 
 Reuse `executive_privileged_action` and broker `validate_terminal_receipt`; do not duplicate the action catalog, receipt store or executor.
@@ -653,3 +653,29 @@ not source acceptance or production acceptance. Next: reconcile the Runtime
 owner, finish Task 2's token-free current-Attempt seam and Task 4 on the same
 carrier, then consume the installer owner's return for Task 5. Preserve review,
 current-base CI and one-time host-bootstrap gates.
+
+## 2026-09-17 continuation — hosted CI qualification
+
+Protected Skillpack pin: `eec5324c5205e8bad206512e0a936898e50b2408`;
+required procedure blobs equal the previously loaded compatible revision.
+The existing branch and acquired workspace remain the only source carrier.
+
+Hosted run `35168261078` on the prior semantic checkpoint failed three tests.
+The unchanged D8 identity scanner misclassified the client's numeric timeout
+literal and five documentation occurrences as identity additions. Expressing
+the duration as eleven minutes (`11 * 60` in code) preserves the exact timeout,
+all socket behavior and all permissions. Documentation now uses the named
+default. The working-patch scanner has zero hits and all 48 client/CLI tests pass.
+Neither the identity guard nor its positive controls were changed.
+
+The offline-acceptance receipt mismatch also reproduces locally. Its expected
+hash is deliberately unchanged: the cause has not been established. The hosted
+process-identity cancellation failure did not reproduce in the one local check;
+that is not proof of a harmless flake or permission to waive the test.
+A read-only diagnostic was blocked by the tool platform and was not retried or
+rerouted. No policy, permission, Runtime, installer or acceptance pin was changed.
+
+Next: resolve the remaining CI evidence through an approved diagnostic path,
+then obtain exact-head independent review and current-base executed proof.
+The existing Runtime ownership and installer holds remain in force; this
+qualification repair neither clears them nor installs or arms the broker.

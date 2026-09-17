@@ -247,7 +247,7 @@ The client owns:
 
 - canonical privileged socket path;
 - bounded one-frame Unix-socket request/response transport;
-- 660-second client timeout above the installed broker's 600-second child budget;
+- eleven-minute client timeout above the installed broker's ten-minute child budget;
 - exact request/status validation;
 - exact wire-envelope and terminal-receipt validation;
 - no automatic retry/failover.
@@ -289,7 +289,7 @@ Allowed login-check result states are `TERMINAL`, `REFUSED`, and `EFFECT_UNKNOWN
 - broker transport ambiguity: `EFFECT_UNKNOWN`; status-only reconciliation;
 - process crash after `ATTEMPTED` commits but before the broker socket write: identical to transport loss, `EFFECT_UNKNOWN`; stays `EFFECT_UNKNOWN` until a later status query proves terminal, or until Attempt/fence turnover or a separately frozen recovery design resolves it — no automatic retry of the same operation either way;
 - current Attempt changes after the `ATTEMPTED` authority cut: existing-family-first recovery remains available, while the receipt stays bound to the original operation and grants the successor Attempt nothing;
-- control-service shutdown/cancellation while the synchronous broker call may still be running: preserve `ATTEMPTED`/`EFFECT_UNKNOWN`; the 10-second service shutdown grace is not proof that a broker call with a 660-second client bound had no effect;
+- control-service shutdown/cancellation while the synchronous broker call may still be running: preserve `ATTEMPTED`/`EFFECT_UNKNOWN`; the ten-second service shutdown grace is not proof that a broker call with an eleven-minute client bound had no effect;
 - provider/vendor failure: terminal failed receipt; not converted to authority or success;
 - broker `NOT_FOUND` after an attempted/unknown operation: remain `EFFECT_UNKNOWN`; no no-effect assertion or automatic retry;
 - repeated identical status observation: no duplicate Event append.

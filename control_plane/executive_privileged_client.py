@@ -34,7 +34,7 @@ from control_plane.executive_privileged_broker import (
 
 
 DEFAULT_SOCKET = Path("/var/run/mastermind-executive/privileged.sock")
-DEFAULT_CLIENT_TIMEOUT_SECONDS = 660
+DEFAULT_CLIENT_TIMEOUT_SECONDS = 11 * 60
 _MAX_RESPONSE_BYTES = 128 * 1024
 _SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
 
