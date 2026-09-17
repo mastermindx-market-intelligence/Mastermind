@@ -121,8 +121,10 @@ Before running any command:
 3. verify the accepted repair head and independent review return;
 4. verify the carrier worktree is clean and no other process owns it;
 5. verify the canonical Macro checkout is current and clean; and
-6. verify both Executive intents are accepted, undispatched, `QUEUED`, READ-only/A0,
-   grounded to the exact Mastermind/Macro source, and have zero attempts.
+6. verify the directive Executive intent is accepted, undispatched, `QUEUED`,
+   READ-only/A0, grounded to the exact Mastermind/Macro source, and has zero attempts.
+   The selection intent does not exist before compose; when return code `7` creates the
+   exact packet, acquire and verify it immediately before Step 2.
 
 The directive objective is a canonical JSON mapping with exactly:
 
@@ -212,54 +214,56 @@ free authority and no operator-authored timestamp.
 
 ## Step 3 — build the one lawful sealed carrier commit
 
-`preflight` requires the sealed commit's **first parent** to equal the protected Mastermind
-SHA used by compose. The incumbent repair branch may already contain several commits. Do
-not force-push or discard them. Instead, after independent review, construct a merge commit
-whose first parent is protected master and whose second parent is the accepted repair head.
-Because the repair head is a parent of the merge commit, advancing the existing branch to
-that merge commit is still a non-force fast-forward.
+The canary option's `expected_head_sha` is the action-time remote branch/PR head acquired
+by `compose`; it is not protected master. Protected master remains source-law evidence only.
+A normal seal commit must be the direct child of that frozen carrier tip. Do not merge,
+rebase, squash, or force-push protected master into the carrier to manufacture ancestry.
 
 ```bash
 cd "$MM_ROOT"
-export REPAIR_HEAD="$(git rev-parse HEAD)"
-export PROTECTED_MASTER="$(git ls-remote origin refs/heads/master | awk '{print $1}')"
-export SEAL_WT="$(mktemp -d /private/tmp/olv1-seal-wt-XXXXXXXX)"
+export CARRIER_HEAD="$(jq -r \
+  '.options[] | select(.option_id == "OPT-OLV1-PR-TITLE-CANARY") | .expected_head_sha' \
+  "$EPISODE_DIR/bundle.json")"
 
-git worktree add --detach "$SEAL_WT" "$PROTECTED_MASTER"
-git -C "$SEAL_WT" merge --no-commit --no-ff "$REPAIR_HEAD"
+test "$(git rev-parse HEAD)" = "$CARRIER_HEAD"
+test -z "$(git status --porcelain)"
+REMOTE_BRANCH_SHA="$(git ls-remote origin "refs/heads/$BRANCH" | awk '{print $1}')"
+REMOTE_PR_SHA="$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.head.sha')"
+test "$REMOTE_BRANCH_SHA" = "$CARRIER_HEAD"
+test "$REMOTE_PR_SHA" = "$CARRIER_HEAD"
 
-install -m 0644 "$EXPECTATION_OUT" "$SEAL_WT/$EXPECTATION_REPO_PATH"
-install -m 0644 "$REQUEST_OUT" "$SEAL_WT/$REQUEST_REPO_PATH"
-git -C "$SEAL_WT" add -- \
-  "$EXPECTATION_REPO_PATH" \
-  "$REQUEST_REPO_PATH"
+install -m 0644 "$EXPECTATION_OUT" "$MM_ROOT/$EXPECTATION_REPO_PATH"
+install -m 0644 "$REQUEST_OUT" "$MM_ROOT/$REQUEST_REPO_PATH"
+git add -- "$EXPECTATION_REPO_PATH" "$REQUEST_REPO_PATH"
+git diff --cached --name-only
+# Exactly the two preregistration paths above may be staged.
 
-git -C "$SEAL_WT" diff --cached --name-only
-# The staged paths must be only the reviewed repair merge plus the two preregistration files.
-
-git -C "$SEAL_WT" commit -m "Seal OL-V1 prospective episode"
-export SEALED_COMMIT="$(git -C "$SEAL_WT" rev-parse HEAD)"
-test "$(git -C "$SEAL_WT" rev-parse "$SEALED_COMMIT^1")" = "$PROTECTED_MASTER"
-git -C "$SEAL_WT" merge-base --is-ancestor "$REPAIR_HEAD" "$SEALED_COMMIT"
+git commit -m "Seal OL-V1 prospective episode"
+export SEALED_COMMIT="$(git rev-parse HEAD)"
+test "$(git rev-parse "$SEALED_COMMIT^")" = "$CARRIER_HEAD"
 ```
 
-Advance the incumbent branch once, without force:
+Reconcile the carrier one final time immediately before the non-force push, then advance
+the incumbent branch once:
 
 ```bash
-git -C "$MM_ROOT" merge --ff-only "$SEALED_COMMIT"
-git -C "$MM_ROOT" push origin "HEAD:refs/heads/$BRANCH"
+REMOTE_BRANCH_SHA="$(git ls-remote origin "refs/heads/$BRANCH" | awk '{print $1}')"
+REMOTE_PR_SHA="$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.head.sha')"
+test "$REMOTE_BRANCH_SHA" = "$CARRIER_HEAD"
+test "$REMOTE_PR_SHA" = "$CARRIER_HEAD"
+git push origin "HEAD:refs/heads/$BRANCH"
 ```
 
 A timeout or transport cancellation does not prove the push failed. Reconcile exactly once:
 
 ```bash
-REMOTE_BRANCH_SHA="$(git -C "$MM_ROOT" ls-remote origin "refs/heads/$BRANCH" | awk '{print $1}')"
+REMOTE_BRANCH_SHA="$(git ls-remote origin "refs/heads/$BRANCH" | awk '{print $1}')"
 test "$REMOTE_BRANCH_SHA" = "$SEALED_COMMIT"
 ```
 
-If the remote state is ambiguous, stop `EFFECT_UNKNOWN`; do not retry the push blindly.
-Remove the temporary seal worktree only after the local and remote branch both identify the
-same sealed commit.
+If remote state remains ambiguous, stop `EFFECT_UNKNOWN`; do not retry the push blindly.
+The current-base GitHub merge ref and hosted checks remain separate integration evidence;
+they never change the sealed commit's parent identity.
 
 ## Step 4 — committed preflight and single-shot canary
 

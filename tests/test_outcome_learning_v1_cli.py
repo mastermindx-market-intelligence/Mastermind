@@ -38,6 +38,10 @@ from control_plane.outcome_learning_contracts import canonical_digest
 SHA40_A = "a" * 40
 SHA40_B = "b" * 40
 
+CARRIER_REPOSITORY = "mastermindx-market-intelligence/Mastermind"
+CARRIER_BRANCH = "sol/outcome-learning-v1-complete-vertical-20260902"
+CARRIER_PR_NUMBER = 398
+
 
 DIRECTIVE_INTENT_ID = "CEO-OLV1-DIRECTIVE-1"
 SELECTION_INTENT_ID = "CEO-OLV1-SELECTION-1"
@@ -257,6 +261,10 @@ class FakeRunner:
         self,
         *,
         mastermind_canonical_sha=SHA40_A,
+        carrier_canonical_sha=None,
+        carrier_pr_head_sha=None,
+        carrier_pr_branch=CARRIER_BRANCH,
+        carrier_pr_state="open",
         macro_canonical_sha=SHA40_B,
         macro_local_sha=None,
         macro_dirty=False,
@@ -272,6 +280,18 @@ class FakeRunner:
         ancestor_pairs: set[tuple[str, str]] | None = None,
     ):
         self.mastermind_canonical_sha = mastermind_canonical_sha
+        self.carrier_canonical_sha = (
+            carrier_canonical_sha
+            if carrier_canonical_sha is not None
+            else mastermind_canonical_sha
+        )
+        self.carrier_pr_head_sha = (
+            carrier_pr_head_sha
+            if carrier_pr_head_sha is not None
+            else self.carrier_canonical_sha
+        )
+        self.carrier_pr_branch = carrier_pr_branch
+        self.carrier_pr_state = carrier_pr_state
         self.macro_canonical_sha = macro_canonical_sha
         self.macro_local_sha = macro_local_sha if macro_local_sha is not None else macro_canonical_sha
         self.macro_dirty = macro_dirty
@@ -309,9 +329,38 @@ class FakeRunner:
             url, ref = args[2], args[3]
             if url == cli._CANONICAL_MASTERMIND_URL and ref == "refs/heads/master":
                 return cli.RunResult(0, f"{self.mastermind_canonical_sha}\trefs/heads/master\n", "")
+            if (
+                url == cli._CANONICAL_MASTERMIND_URL
+                and ref == f"refs/heads/{CARRIER_BRANCH}"
+            ):
+                return cli.RunResult(
+                    0,
+                    f"{self.carrier_canonical_sha}\trefs/heads/{CARRIER_BRANCH}\n",
+                    "",
+                )
             if url == cli._CANONICAL_MACRO_URL and ref == "refs/heads/main":
                 return cli.RunResult(0, f"{self.macro_canonical_sha}\trefs/heads/main\n", "")
             return cli.RunResult(1, "", f"fatal: could not resolve {ref} on {url}")
+
+        if (
+            args[:2] == ["gh", "api"]
+            and args[2] == f"repos/{CARRIER_REPOSITORY}/pulls/{CARRIER_PR_NUMBER}"
+        ):
+            payload = {
+                "number": CARRIER_PR_NUMBER,
+                "state": self.carrier_pr_state,
+                "merged": False,
+                "head": {
+                    "ref": self.carrier_pr_branch,
+                    "sha": self.carrier_pr_head_sha,
+                    "repo": {"full_name": CARRIER_REPOSITORY},
+                },
+                "base": {
+                    "ref": "master",
+                    "repo": {"full_name": CARRIER_REPOSITORY},
+                },
+            }
+            return cli.RunResult(0, json.dumps(payload), "")
 
         if args[:2] == ["gh", "api"] and "contents/config/strategic_state.yml" in args[2]:
             if self.strategic_state_unresolvable:
@@ -753,6 +802,78 @@ def test_end_to_end_seal_through_proof_cross_digests_verify(tmp_path):
     assert "What this does NOT prove" in proof_text
     assert "applied, and restored" in proof_text
     assert "MANUAL RESTORATION MAY BE OWED" not in proof_text
+
+
+# --------------------------------------------------------------------------- carrier/source separation
+
+
+def test_compose_binds_action_time_carrier_head_separately_from_protected_master(tmp_path):
+    protected_sha = SHA40_A
+    carrier_sha = "c" * 40
+    runner = FakeRunner(
+        mastermind_canonical_sha=protected_sha,
+        carrier_canonical_sha=carrier_sha,
+    )
+
+    outside_dir, _expectation, request = _compose_and_seal(tmp_path, runner)
+    episode_dir = Path(str(outside_dir).replace("outside", "episode"))
+    bundle = json.loads((episode_dir / "bundle.json").read_text())
+    canary = next(
+        option for option in bundle["options"] if option["option_id"] == cli._OPT_CANARY
+    )
+
+    assert bundle["mastermind_revision_attestation"]["revision"] == protected_sha
+    assert canary["expected_head_sha"] == carrier_sha
+    assert request["expected_parent_head"] == carrier_sha
+    assert request["expected_parent_head"] != protected_sha
+
+
+def test_compose_refuses_remote_carrier_branch_pr_head_disagreement(tmp_path):
+    runner = FakeRunner(
+        carrier_canonical_sha="c" * 40,
+        carrier_pr_head_sha="d" * 40,
+    )
+    episode_dir = tmp_path / "episode"
+    args = cli._parser().parse_args(
+        [
+            "compose",
+            "--mastermind-root", "/x",
+            "--macro-root", "/y",
+            "--episode-dir", str(episode_dir),
+            "--directive-intent-id", DIRECTIVE_INTENT_ID,
+            "--operation-key", "olv1-cli-test-op",
+        ]
+    )
+
+    rc, out = _capture_stdout(
+        lambda: cli.cmd_compose(
+            args,
+            runner=runner,
+            clock=StepClock("2026-09-17T12:00:00+00:00"),
+        )
+    )
+
+    assert rc == 5
+    assert "BLOCKER SOURCE_IDENTITY_UNVERIFIED" in out
+    assert "carrier" in out.lower()
+    assert not (episode_dir / "bundle.json").exists()
+
+
+def test_runbook_defers_selection_and_seals_directly_on_carrier_tip():
+    runbook = (cli._ROOT / "docs/runbooks/outcome-learning-v1.md").read_text(
+        encoding="utf-8"
+    )
+    gate0 = runbook.split("## Gate 0", 1)[1].split("## Step 1", 1)[0]
+    step1 = runbook.split("## Step 1", 1)[1].split("## Step 2", 1)[0]
+    step3 = runbook.split("## Step 3", 1)[1].split("## Step 4", 1)[0]
+
+    assert "both Executive intents" not in gate0
+    assert "selection intent does not exist before compose" in gate0
+    assert "accepted selection intent" in step1
+    assert "git worktree add --detach" not in step3
+    assert "CARRIER_HEAD" in step3
+    assert 'rev-parse "$SEALED_COMMIT^"' in step3
+    assert '"$CARRIER_HEAD"' in step3
 
 
 # --------------------------------------------------------------------------- BLOCKER A: canonical source identity

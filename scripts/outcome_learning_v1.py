@@ -88,10 +88,10 @@ _OPT_HOLD = "OPT-OLV1-PORTFOLIO-HOLD"
 _SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _WORKSTREAM_REF = "WS:AGENT-EVAL-FABRIC"
-_CARRIER_REF = (
-    "github:Mastermind:branch:"
-    "sol/outcome-learning-v1-complete-vertical-20260902"
-)
+_CARRIER_REPOSITORY = "mastermindx-market-intelligence/Mastermind"
+_CARRIER_BRANCH = "sol/outcome-learning-v1-complete-vertical-20260902"
+_CARRIER_PR_NUMBER = 398
+_CARRIER_REF = f"github:Mastermind:branch:{_CARRIER_BRANCH}"
 _DIRECTIVE_SCHEMA = "mastermind.olv1_directive.v1"
 _SELECTION_SCHEMA = "mastermind.olv1_selection.v1"
 _DIRECTIVE_AUTHORITY_CEILING = "COMPOSE_ONLY_NO_EFFECT_NO_PROMOTION"
@@ -674,11 +674,11 @@ def _add_binding_if_absent(revision: str, label: str, digest: str) -> str:
 
 
 def _olv1_envelope(
-    parent_head: str, *, chairman_source_ref: str, expires_at: str
+    carrier_head: str, *, chairman_source_ref: str, expires_at: str
 ) -> dict[str, Any]:
     return {
         "schema": _ENVELOPE_SCHEMA,
-        "envelope_id": f"ENV-OLV1-{parent_head[:12]}",
+        "envelope_id": f"ENV-OLV1-{carrier_head[:12]}",
         "authority_source_refs": [chairman_source_ref],
         "mode": "SUPERVISED_LIVE_CANARY",
         "allowed_actions": ["REVERSIBLE_RUNTIME_CANARY"],
@@ -697,7 +697,7 @@ def _olv1_envelope(
 
 
 def _olv1_options(
-    operation_key: str, parent_head: str, *, chairman_source_ref: str
+    operation_key: str, carrier_head: str, *, chairman_source_ref: str
 ) -> list[dict[str, Any]]:
     source_refs = [chairman_source_ref, _STRATEGIC_SOURCE_REF, _AGENT_OS_SOURCE_REF]
     canary = {
@@ -711,7 +711,7 @@ def _olv1_options(
         "operation_key": operation_key,
         "carrier_state": "EXACT_EXISTING",
         "carrier_ref": _CARRIER_REF,
-        "expected_head_sha": parent_head,
+        "expected_head_sha": carrier_head,
         "repositories": ["mastermindx-market-intelligence/Mastermind"],
         "paths": ["research/outcome_learning/"],
         "budget_units": 1,
@@ -757,7 +757,7 @@ def _olv1_options(
         "operation_key": operation_key,
         "carrier_state": "EXACT_EXISTING",
         "carrier_ref": _CARRIER_REF,
-        "expected_head_sha": parent_head,
+        "expected_head_sha": carrier_head,
         "repositories": ["mastermindx-market-intelligence/Mastermind"],
         "paths": [],
         "budget_units": 0,
@@ -1017,7 +1017,7 @@ def _validate_selection(
 # these exact GitHub remotes — never a local checkout's own branch name or working
 # tree, which a dirty/detached/mutated local checkout could otherwise self-attest.
 _CANONICAL_MASTERMIND_URL = "https://github.com/mastermindx-market-intelligence/Mastermind.git"
-_CANONICAL_MASTERMIND_REPO = "mastermindx-market-intelligence/Mastermind"
+_CANONICAL_MASTERMIND_REPO = _CARRIER_REPOSITORY
 # The canonical Macro remote is owned by data_layer/macro_refresh.py's authenticated
 # seam (MACRO_GIT_REMOTE, DEC:B1-MACRO-PRIVATE-CUTOVER): Macro is flipping
 # public -> private, and tests/test_no_anonymous_macro_reads.py forbids any other
@@ -1047,6 +1047,58 @@ def _ls_remote_sha(runner: Runner, url: str, ref: str) -> str:
             f"git ls-remote {url} {ref} returned no resolvable 40-hex sha (got {line!r})"
         )
     return sha
+
+
+def _acquire_carrier_head(runner: Runner) -> str:
+    """Acquire the exact action-time PR carrier independently from protected master.
+
+    Protected ``master`` owns source law. The existing branch + open PR own the
+    reversible effect carrier. Conflating those SHAs makes a multi-commit PR impossible
+    to seal honestly, so both owner views are reacquired and must agree exactly.
+    """
+    branch_ref = f"refs/heads/{_CARRIER_BRANCH}"
+    branch_sha = _ls_remote_sha(runner, _CANONICAL_MASTERMIND_URL, branch_ref)
+    endpoint = f"repos/{_CARRIER_REPOSITORY}/pulls/{_CARRIER_PR_NUMBER}"
+    result = runner.run(["gh", "api", endpoint])
+    if result.returncode != 0:
+        raise OutcomeLearningCliError(
+            f"carrier PR {_CARRIER_PR_NUMBER} could not be acquired: "
+            f"{result.stderr.strip()}"
+        )
+    try:
+        pr = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise OutcomeLearningCliError("carrier PR payload is not valid JSON") from exc
+    if not isinstance(pr, Mapping):
+        raise OutcomeLearningCliError("carrier PR payload is not a mapping")
+
+    head = pr.get("head")
+    base = pr.get("base")
+    if not isinstance(head, Mapping) or not isinstance(base, Mapping):
+        raise OutcomeLearningCliError("carrier PR payload lacks closed head/base identity")
+    head_repo = head.get("repo")
+    base_repo = base.get("repo")
+    if not isinstance(head_repo, Mapping) or not isinstance(base_repo, Mapping):
+        raise OutcomeLearningCliError("carrier PR payload lacks repository ownership")
+
+    if pr.get("number") != _CARRIER_PR_NUMBER:
+        raise OutcomeLearningCliError("carrier PR number does not match the frozen carrier")
+    if pr.get("state") != "open" or pr.get("merged") is True:
+        raise OutcomeLearningCliError("carrier PR is not open and unmerged")
+    if head_repo.get("full_name") != _CARRIER_REPOSITORY:
+        raise OutcomeLearningCliError("carrier PR head repository is not the canonical owner")
+    if base_repo.get("full_name") != _CARRIER_REPOSITORY or base.get("ref") != "master":
+        raise OutcomeLearningCliError("carrier PR base is not canonical Mastermind master")
+    if head.get("ref") != _CARRIER_BRANCH:
+        raise OutcomeLearningCliError(
+            f"carrier PR head branch {head.get('ref')!r} does not equal {_CARRIER_BRANCH!r}"
+        )
+    if head.get("sha") != branch_sha:
+        raise OutcomeLearningCliError(
+            f"carrier PR head {head.get('sha')!r} does not equal remote carrier branch "
+            f"{branch_sha!r}"
+        )
+    return branch_sha
 
 
 def _acquire_canonical_strategic_state(
@@ -1266,6 +1318,7 @@ def cmd_compose(
         mastermind_sha = _ls_remote_sha(
             runner, _CANONICAL_MASTERMIND_URL, "refs/heads/master"
         )
+        carrier_head_sha = _acquire_carrier_head(runner)
         strategic_blob_sha, canonical_strategic_state = (
             _acquire_canonical_strategic_state(runner, mastermind_sha)
         )
@@ -1368,13 +1421,13 @@ def cmd_compose(
 
     chairman_source_ref = directive["source_ref"]
     envelope = _olv1_envelope(
-        mastermind_sha,
+        carrier_head_sha,
         chairman_source_ref=chairman_source_ref,
         expires_at=directive_objective["expires_at"],
     )
     options = _olv1_options(
         args.operation_key,
-        mastermind_sha,
+        carrier_head_sha,
         chairman_source_ref=chairman_source_ref,
     )
     chairman_revision = _append_binding(
