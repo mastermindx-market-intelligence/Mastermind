@@ -28,6 +28,8 @@ from __future__ import annotations
 
 import json
 import math
+import os
+import tempfile
 from collections import defaultdict, deque
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -50,6 +52,52 @@ _STARTING_NAV = 1_000_000.0
 
 def _ensure_dir() -> None:
     _DATA.mkdir(parents=True, exist_ok=True)
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Replace one state artifact atomically for lock-free readers.
+
+    The temporary file lives in the destination directory, is flushed + fsynced before the
+    rename, and is removed on any pre-replace failure.  Readers therefore observe either the old
+    complete file or the new complete file, never a partially rewritten JSON/JSONL document.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    existing_mode = None
+    try:
+        existing_mode = path.stat().st_mode & 0o777
+    except FileNotFoundError:
+        pass
+
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent)
+    )
+    tmp = Path(tmp_name)
+    replaced = False
+    try:
+        if existing_mode is not None:
+            os.fchmod(fd, existing_mode)
+        else:
+            # Match Path.write_text's normal user-readable state-file contract rather than
+            # mkstemp's private 0600 default.
+            os.fchmod(fd, 0o644)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fd = -1
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+        replaced = True
+    finally:
+        if fd != -1:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        if not replaced:
+            try:
+                tmp.unlink()
+            except FileNotFoundError:
+                pass
 
 
 def _now_iso() -> str:
@@ -81,7 +129,7 @@ def _load_account() -> dict[str, Any]:
 
 def _save_account(state: dict[str, Any]) -> None:
     _ensure_dir()
-    _ACCOUNT_PATH.write_text(json.dumps(state, indent=2, default=str))
+    _atomic_write_text(_ACCOUNT_PATH, json.dumps(state, indent=2, default=str))
 
 
 def _append_fill(fill: dict) -> None:
@@ -120,7 +168,7 @@ def _load_pending() -> list[dict]:
 
 def _save_pending(orders: list[dict]) -> None:
     _ensure_dir()
-    _PENDING_PATH.write_text(json.dumps(orders, indent=2, default=str))
+    _atomic_write_text(_PENDING_PATH, json.dumps(orders, indent=2, default=str))
 
 
 def _load_theses() -> dict[str, dict]:
@@ -135,7 +183,9 @@ def _load_theses() -> dict[str, dict]:
 
 def _save_theses(theses: dict[str, dict]) -> None:
     _ensure_dir()
-    _THESES_PATH.write_text(json.dumps(theses, indent=2, default=str, ensure_ascii=False))
+    _atomic_write_text(
+        _THESES_PATH, json.dumps(theses, indent=2, default=str, ensure_ascii=False)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -589,8 +639,7 @@ def publish(*, prices: dict[str, float] | None = None, asof: str | None = None) 
                  "EXCLUDED from firm headroom/clamp math — the benchmark book must not "
                  "mechanically constrain the books it measures."),
     }
-    _PUBLISHED_PATH.parent.mkdir(parents=True, exist_ok=True)
-    _PUBLISHED_PATH.write_text(json.dumps(doc, indent=2, default=str))
+    _atomic_write_text(_PUBLISHED_PATH, json.dumps(doc, indent=2, default=str))
     return doc
 
 
@@ -675,7 +724,9 @@ def mark(*, prices: dict[str, float] | None = None, asof: str | None = None,
             if r.get("date") != asof:            # idempotent per date
                 rows.append(r)
     rows.append(row)
-    _NAV_PATH.write_text("\n".join(json.dumps(r, default=str) for r in rows) + "\n")
+    _atomic_write_text(
+        _NAV_PATH, "\n".join(json.dumps(r, default=str) for r in rows) + "\n"
+    )
     return row
 
 
