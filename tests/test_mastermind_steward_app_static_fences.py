@@ -146,6 +146,21 @@ def test_launcher_and_runbook_preserve_policy_resource_host_as_only_public_host(
     assert "preserve the exact Host authority from `policy.resource`" in runbook
 
 
+def test_launcher_trusts_forwarded_scheme_only_from_loopback_proxy():
+    launcher = LAUNCHER.read_text(encoding="utf-8")
+
+    assert "proxy_headers=True" in launcher
+    assert 'forwarded_allow_ips="127.0.0.1"' in launcher
+    assert "proxy_headers=False" not in launcher
+    for forbidden in (
+        'forwarded_allow_ips="*"',
+        "--forwarded-allow-ips",
+        "FORWARDED_ALLOW_IPS",
+        "MASTERMIND_STEWARD_TRUSTED_PROXIES",
+    ):
+        assert forbidden not in launcher
+
+
 def test_transport_and_auth_gates_share_one_optional_raw_path_normalizer():
     text = (PACKAGE / "app.py").read_text(encoding="utf-8")
 

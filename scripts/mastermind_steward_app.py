@@ -148,7 +148,8 @@ def main(argv: list[str] | None = None) -> int:
         port=args.port,
         log_level="info",
         access_log=False,
-        proxy_headers=False,
+        proxy_headers=True,
+        forwarded_allow_ips="127.0.0.1",
     )
     return 0
 
