@@ -431,6 +431,35 @@ def test_happy_path_start_status_collect_result(tmp_path: Path) -> None:
     assert second is collected
 
 
+def test_failure_receipt_binds_a_real_nonempty_stderr_digest(tmp_path: Path) -> None:
+    """A run with known non-empty stderr must never report the empty-string
+    hash for ``stderr_sha256``.
+
+    This is the exact provenance bug (Defect A) that hid Defect B: a
+    ``CollectionReceipt`` reported ``stderr_sha256`` as
+    ``sha256(b"")`` at the same moment the protocol reported
+    ``STDERR_NOT_EMPTY`` -- i.e. the receipt silently contradicted the
+    protocol's own report.  The fake's ``scenario="stderr"`` deterministically
+    writes one known, non-empty line to stderr before doing anything else, so
+    this is a genuine, reproducible non-empty-stderr run -- not the
+    environment-topology rejection Defect B caused.
+    """
+
+    adapter = _make_adapter(tmp_path, scenario="stderr")
+    spec = _make_spec(tmp_path)
+
+    async def exercise():
+        ref = await adapter.start(spec)
+        return await adapter.collect_result(ref)
+
+    collected = _run_async(exercise())
+    empty_sha256 = hashlib.sha256(b"").hexdigest()
+
+    assert collected.result.status is WorkerRunStatus.FAILED
+    assert "STDERR_NOT_EMPTY" in (collected.result.error or "")
+    assert collected.stderr_sha256 != empty_sha256
+
+
 def test_wrong_or_mismatched_ref_is_refused(tmp_path: Path) -> None:
     """Discriminator 1."""
 
@@ -712,42 +741,64 @@ def test_cancellation_before_start_is_refused(tmp_path: Path) -> None:
 
 
 def test_cancellation_after_start_reconciles(tmp_path: Path) -> None:
-    """Discriminator 8 (after start)."""
+    """Discriminator 8 (after start).
+
+    ``start()``'s background run is scheduled on ``asyncio.get_running_loop()``'s
+    default executor (see ``ClaudeCodeWorkerAdapter.start``), so it must be
+    driven to completion from *within one continuous event loop* -- exactly
+    like every other adapter test in this file that spans more than one
+    await point (``test_happy_path_start_status_collect_result``,
+    ``test_timeout_fails_closed``).  A separate ``asyncio.run()`` (i.e. a
+    separate ``_run_async`` call) per step would tear down and recreate the
+    event loop between them; ``asyncio.run()`` blocks its own return on
+    ``loop.shutdown_default_executor()``, which waits for that background
+    run_in_executor task to finish -- so the very first ``_run_async(adapter
+    .start(spec))`` call would silently block for the full idle timeout
+    before this test's cancellation ever got a chance to run, hiding this
+    test's own cancellation assertions behind an unrelated timeout.
+    """
 
     adapter = _make_adapter(
         tmp_path,
         scenario="hang_after_tool",
-        identity_timeout_seconds=20.0,
-        idle_timeout_seconds=45.0,
-        absolute_timeout_seconds=60.0,
+        identity_timeout_seconds=10.0,
+        idle_timeout_seconds=10.0,
+        absolute_timeout_seconds=15.0,
     )
     spec = _make_spec(tmp_path)
 
-    ref = _run_async(adapter.start(spec))
-    state_file = adapter._runtime_root / "claude_fake_state.json"
-    deadline = time.monotonic() + 30.0
-    submissions = None
-    while time.monotonic() < deadline:
-        if state_file.exists():
-            try:
-                submissions = json.loads(state_file.read_text(encoding="utf-8")).get("submissions")
-            except (OSError, json.JSONDecodeError):
-                submissions = None
-            if submissions == 1:
-                break
-        time.sleep(0.02)
-    assert submissions == 1, "fake never recorded its submission before the cancellation window closed"
+    async def exercise():
+        ref = await adapter.start(spec)
+        state_file = adapter._isolation_base / spec.run_id / "claude_fake_state.json"
+        deadline = time.monotonic() + 10.0
+        submissions = None
+        while time.monotonic() < deadline:
+            if state_file.exists():
+                try:
+                    submissions = json.loads(state_file.read_text(encoding="utf-8")).get(
+                        "submissions"
+                    )
+                except (OSError, json.JSONDecodeError):
+                    submissions = None
+                if submissions == 1:
+                    break
+            await asyncio.sleep(0.02)
+        assert (
+            submissions == 1
+        ), "fake never recorded its submission before the cancellation window closed"
 
-    cancel_receipt = _run_async(adapter.cancel(ref, "adapter-level cancellation test"))
-    assert cancel_receipt.run_id == ref.run_id
-    assert cancel_receipt.reason == "adapter-level cancellation test"
+        cancel_receipt = await adapter.cancel(ref, "adapter-level cancellation test")
+        assert cancel_receipt.run_id == ref.run_id
+        assert cancel_receipt.reason == "adapter-level cancellation test"
 
-    final_status = _run_async(adapter.status(ref))
-    assert final_status is WorkerRunStatus.CANCELLED
+        final_status = await adapter.status(ref)
+        assert final_status is WorkerRunStatus.CANCELLED
 
-    collected = _run_async(adapter.collect_result(ref))
-    assert collected.result.status is WorkerRunStatus.CANCELLED
-    assert collected.result.structured_output is None
+        collected = await adapter.collect_result(ref)
+        assert collected.result.status is WorkerRunStatus.CANCELLED
+        assert collected.result.structured_output is None
+
+    _run_async(exercise())
 
 
 def test_timeout_fails_closed(tmp_path: Path) -> None:

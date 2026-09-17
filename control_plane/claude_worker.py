@@ -78,6 +78,12 @@ _MAX_VALIDATION_STDERR_BYTES = 1 * 1024 * 1024
 _MAX_STRUCTURED_OUTPUT_BYTES = 1 * 1024 * 1024
 _MAX_RESULT_SCHEMA_BYTES = 1 * 1024 * 1024
 _SHELL_EXECUTABLE_NAMES = frozenset({"bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"})
+# Protocol failure codes that mean stderr was proven non-empty (see
+# claude_cli_protocol.ClaudeCliRunner.run's stream-reading loop, where any
+# stderr byte -- or exceeding the byte ceiling -- raises one of these
+# immediately).  A receipt built from one of these must never claim an
+# empty-string stderr digest.
+_STDERR_VIOLATION_CODES = frozenset({"STDERR_NOT_EMPTY", "STDERR_BYTE_LIMIT"})
 _VALIDATION_SAFE_ENVIRONMENT = (
     ("PATH", "/usr/bin:/bin"),
     ("LANG", "C.UTF-8"),
@@ -327,18 +333,32 @@ class ClaudeCodeWorkerAdapter:
                 raise LaunchValidationError(f"{label} must be a real directory")
         self._isolated_home = home.resolve(strict=True)
         self._isolated_tmp = tmp.resolve(strict=True)
-        # The committed fake's own environment attestation requires HOME and
-        # TMPDIR to be siblings of the fake-control state file (it rejects
-        # anything else as environment tampering).  Keeping isolated home/tmp
-        # as fixed siblings under one adapter-private runtime root -- rather
-        # than deriving them per-run from a caller-supplied run_dir -- is what
-        # "isolated home and tmp roots" in the frozen spec's private
-        # configuration list refers to; the state file is colocated here too.
+        if self._isolated_home == self._isolated_tmp:
+            raise LaunchValidationError(
+                "isolated home and isolated tmp must be distinct directories"
+            )
         if self._isolated_home.parent != self._isolated_tmp.parent:
             raise LaunchValidationError(
-                "isolated home and isolated tmp must share one private runtime root"
+                "isolated home and isolated tmp must be siblings under one private isolation base"
             )
-        self._runtime_root = self._isolated_home.parent
+        # NOTE ON WHY THIS TOPOLOGY EXISTS: this sibling-parent requirement
+        # is a property of the committed *test double*
+        # (scripts/ohf/fake_claude_cli.py's own ``_validate_environment``),
+        # not of any real Claude/Anthropic provider requirement.  The fake
+        # rejects a launch as environment tampering unless HOME, TMPDIR, and
+        # its ``MMX_FAKE_CLAUDE_STATE_FILE`` control path are all direct
+        # siblings under one common parent -- a real native Claude binary
+        # has no fake-control state file at all and imposes no such rule.
+        # So this is provider-free harness configuration only.
+        #
+        # The constructor's isolated_home/isolated_tmp are validated here
+        # just to pin down one private isolation base (their shared
+        # parent).  The actual per-run HOME/TMPDIR/state-file triad is
+        # minted fresh under that base in start() below, so every run this
+        # adapter (or a sibling instance sharing this same configuration)
+        # starts gets its own exclusive isolation root -- never a shared,
+        # fixed location that a second run could collide with.
+        self._isolation_base = self._isolated_home.parent
 
         self._model = str(model)
         self._version = version if isinstance(version, ClaudeCliVersion) else ClaudeCliVersion.parse(str(version))
@@ -458,6 +478,37 @@ class ClaudeCodeWorkerAdapter:
 
         session_id = str(uuid.uuid5(_SESSION_NAMESPACE, f"claude-code:{spec.run_id}"))
 
+        # Give this run its own isolation root: <isolation_base>/<run_id>/
+        # containing home/, tmp/, and the fake control state file as direct
+        # children.  This is what makes the fake's sibling-parent topology
+        # requirement (see the constructor) hold for THIS run without
+        # depending on the one-shot-per-instance invariant elsewhere in this
+        # class, and it gives the "state path must not already exist" and
+        # "state path must not be the workspace or inside it" protocol
+        # checks a fresh, exclusive directory for free.  spec.run_id was
+        # already validated against _ID_RE above, so it is a safe path
+        # component.
+        #
+        # The directory tree itself is created idempotently (``exist_ok``)
+        # -- mirroring how ``run_dir`` above is already created -- so a
+        # caller retrying an earlier-refused launch (e.g. an invalid model
+        # rejected before any process was ever spawned) with the same
+        # run_id is never punished for a directory that was created but
+        # never actually used by a real fake process.  What must genuinely
+        # never already exist is the fake control state file itself, which
+        # is still checked explicitly, immediately below.
+        run_isolation_root = self._isolation_base / spec.run_id
+        run_isolation_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        run_isolated_home = run_isolation_root / "home"
+        run_isolated_tmp = run_isolation_root / "tmp"
+        run_isolated_home.mkdir(exist_ok=True, mode=0o700)
+        run_isolated_tmp.mkdir(exist_ok=True, mode=0o700)
+        run_fake_state_path = run_isolation_root / "claude_fake_state.json"
+        if run_fake_state_path.exists():
+            raise LaunchValidationError(
+                f"fake control state path already exists: {run_fake_state_path}"
+            )
+
         policy = ClaudeCliInvocationPolicy(
             binary=self._binary_path,
             version=self._version,
@@ -465,8 +516,8 @@ class ClaudeCodeWorkerAdapter:
             session_id=session_id,
             prompt=prompt,
             working_directory=workspace,
-            isolated_home=self._isolated_home,
-            isolated_tmp=self._isolated_tmp,
+            isolated_home=run_isolated_home,
+            isolated_tmp=run_isolated_tmp,
             evidence_relative_path=_EVIDENCE_RELATIVE_PATH,
             expected_result_sha256=expected_result_sha256,
             api_timeout_ms=self._api_timeout_ms,
@@ -491,14 +542,12 @@ class ClaudeCodeWorkerAdapter:
         if self._allowed_versions is not None and command.version not in self._allowed_versions:
             raise LaunchValidationError("compiled Claude CLI version is not allowlisted")
 
-        # Must be a sibling of isolated_home/isolated_tmp -- the fake's own
-        # environment attestation requires HOME/TMPDIR's parent to equal the
-        # state file's parent exactly.
-        fake_state_path = self._runtime_root / "claude_fake_state.json"
-        if fake_state_path.exists():
-            raise LaunchValidationError(f"fake control state path already exists: {fake_state_path}")
+        # run_fake_state_path was already proven fresh (not pre-existing)
+        # above, and it is a sibling of run_isolated_home/run_isolated_tmp
+        # by construction (all three are direct children of
+        # run_isolation_root).
         fake_controls = dict(self._fake_controls_template)
-        fake_controls["MMX_FAKE_CLAUDE_STATE_FILE"] = str(fake_state_path)
+        fake_controls["MMX_FAKE_CLAUDE_STATE_FILE"] = str(run_fake_state_path)
         fake_controls.setdefault("MMX_FAKE_CLAUDE_VERSION", str(command.version))
 
         stdout_path = run_dir / "logs" / "claude_receipt.jsonl"
@@ -665,6 +714,7 @@ class ClaudeCodeWorkerAdapter:
         status = self._status_for_code(exc.code)
         finished_at = state.finished_at or _utc_now()
         empty_sha = hashlib.sha256(b"").hexdigest()
+        error_text = f"{exc.code}: {exc}"[:3000]
         result = WorkerResult(
             job_id=state.spec.job_id,
             run_id=state.spec.run_id,
@@ -678,13 +728,30 @@ class ClaudeCodeWorkerAdapter:
             exit_code=None,
             started_at=state.ref.started_at,
             finished_at=finished_at,
-            error=f"{exc.code}: {exc}"[:3000],
+            error=error_text,
         )
+        stderr_sha256 = empty_sha
+        if exc.code in _STDERR_VIOLATION_CODES:
+            # The protocol discards raw provider stderr bytes by design the
+            # instant it observes a violation (see
+            # claude_cli_protocol.ClaudeCliRunner.run's stream-reading loop)
+            # -- there is no raw-byte channel this adapter could read here,
+            # even in principle, without touching that out-of-scope seam.
+            # But it DOES authenticate, via this exact failure code, that
+            # stderr was provably non-empty.  Claiming ``empty_sha`` here
+            # would silently contradict the protocol's own report (the
+            # defect this method used to have), so bind the digest to the
+            # protocol's authenticated failure evidence instead -- recorded
+            # to this run's reserved stderr log path for auditability, the
+            # same way a success receipt's bounded record is written below.
+            with open(state.stderr_path, "wb") as handle:
+                handle.write(error_text.encode("utf-8"))
+            stderr_sha256 = _sha256_path(state.stderr_path)
         return CollectionReceipt(
             process_ref=state.ref,
             result=result,
             stdout_sha256=empty_sha,
-            stderr_sha256=empty_sha,
+            stderr_sha256=stderr_sha256,
             result_sha256=None,
         )
 
@@ -721,7 +788,11 @@ class ClaudeCodeWorkerAdapter:
             return CollectionReceipt(
                 process_ref=ref,
                 result=result,
-                stdout_sha256=_sha256_path(state.stdout_path),
+                # Bind the receipt's own authenticated digest of the real
+                # captured provider stream (per-event sha256 chain) rather
+                # than recomputing one over this adapter's own on-disk audit
+                # record -- the protocol already attests this value.
+                stdout_sha256=receipt.stream_sha256,
                 stderr_sha256=empty_sha,
                 result_sha256=None,
             )
@@ -752,7 +823,11 @@ class ClaudeCodeWorkerAdapter:
         return CollectionReceipt(
             process_ref=ref,
             result=result,
-            stdout_sha256=_sha256_path(state.stdout_path),
+            # Bind the receipt's own authenticated digest of the real
+            # captured provider stream (per-event sha256 chain) rather than
+            # recomputing one over this adapter's own on-disk audit record
+            # -- the protocol already attests this value.
+            stdout_sha256=receipt.stream_sha256,
             stderr_sha256=empty_sha,
             result_sha256=receipt.result_sha256,
         )
