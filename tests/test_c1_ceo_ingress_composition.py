@@ -145,3 +145,35 @@ def test_partial_app_config_is_refused(tmp_path):
     raw['ceo_ingress_app_peer_uid'] = os.geteuid()+10
     with pytest.raises(module.ServiceError):
         module.load_control_config(_write_config(tmp_path, raw))
+
+
+def test_app_boot_python_is_optional_but_sealed_when_present(tmp_path):
+    module = _module()
+    raw = _raw(tmp_path)
+    raw.update(
+        ceo_ingress_app_peer_uid=os.geteuid()+10,
+        ceo_ingress_app_armed=True,
+        ceo_ingress_app_macro_root=tmp_path/'macro',
+    )
+    # Backward-compatible rollout: absence keeps the prior degraded read path.
+    loaded = module.load_control_config(_write_config(tmp_path, raw))
+    assert 'ceo_ingress_app_boot_python' not in loaded
+
+    raw['ceo_ingress_app_boot_python'] = 'relative/python'
+    with pytest.raises(module.ServiceError):
+        module.load_control_config(_write_config(tmp_path, raw))
+
+    mutable = tmp_path / 'python3.12'
+    mutable.write_text('#!/bin/sh\nexit 0\n')
+    mutable.chmod(0o755)
+    raw['ceo_ingress_app_boot_python'] = str(mutable)
+    with pytest.raises(module.ServiceError, match='root-owned'):
+        module.load_control_config(_write_config(tmp_path, raw))
+
+
+def test_app_boot_python_without_app_binding_is_refused(tmp_path):
+    module = _module()
+    raw = _raw(tmp_path)
+    raw['ceo_ingress_app_boot_python'] = '/Library/Application Support/MastermindExecutive/capacity-runtimes/example/bin/python3.12'
+    with pytest.raises(module.ServiceError, match='complete App binding'):
+        module.load_control_config(_write_config(tmp_path, raw))
