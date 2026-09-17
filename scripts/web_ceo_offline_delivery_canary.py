@@ -10,11 +10,17 @@ from pathlib import Path
 from typing import Any
 
 from control_plane.executive_runtime import JobStatus, Runtime, StateConflict
-from control_plane.wake_ledger import LedgerPhase
+from control_plane.wake_ledger import (
+    ATTEMPT_PHASES,
+    EFFECT_KNOWN_PHASES,
+    LedgerPhase,
+    assert_causal,
+)
 from control_plane.wake_persist import WakeLedgerRepository
 
 
-RECEIPT_SCHEMA = "mastermind.web_ceo_offline_delivery_canary/v1"
+LEGACY_RECEIPT_SCHEMA = "mastermind.web_ceo_offline_delivery_canary/v1"
+RECEIPT_SCHEMA = "mastermind.web_ceo_offline_delivery_canary/v2"
 ERROR_SCHEMA = "mastermind.web_ceo_offline_delivery_canary.error/v1"
 _SHA1_LENGTH = 40
 _JOB_ID_PREFIX = "JOB-"
@@ -63,6 +69,91 @@ def _material(
     ):
         raise CanaryReaderError("ROOT_NOT_AGGREGATION")
     return material, material.result_envelope["role_result"]
+
+
+def _unmeasured_interventions() -> dict[str, dict[str, Any]]:
+    return {
+        name: {
+            "state": "UNMEASURED",
+            "reason": "CANONICAL_EVENT_SOURCE_ABSENT",
+            "interval_start": None,
+            "interval_end": None,
+        }
+        for name in (
+            "web_sol_turns_between_admission_and_handoff",
+            "manual_continue_edges",
+        )
+    }
+
+
+def _wake_projection(
+    runtime: Runtime,
+    *,
+    root_job_id: str,
+    attempt_id: str,
+) -> tuple[str, str | None]:
+    repository = WakeLedgerRepository(runtime)
+    matching: list[Any] = []
+    records: tuple[Any, ...] = ()
+    try:
+        request_events = [
+            event
+            for event in runtime.events.list_events(job_id=root_job_id)
+            if event.aggregate_type == "wake"
+            and event.event_type == LedgerPhase.WAKE_REQUESTED.value
+            and event.attempt_id == attempt_id
+        ]
+        for event in request_events:
+            persisted = repository.get_by_command_id(event.command_id)
+            if persisted is None:
+                raise CanaryReaderError("WAKE_OBLIGATION_INVALID")
+            obligation = persisted.record.obligation
+            if obligation is None:
+                raise CanaryReaderError("WAKE_OBLIGATION_INVALID")
+            if (
+                obligation.root_job_id == root_job_id
+                and obligation.job_id == root_job_id
+                and obligation.attempt_id == attempt_id
+            ):
+                matching.append(obligation)
+        if len(matching) > 1:
+            raise CanaryReaderError("WAKE_OBLIGATION_AMBIGUOUS")
+        if not matching:
+            return "NOT_REQUESTED", None
+        obligation = matching[0]
+        persisted_records = repository.list_records(obligation.obligation_id)
+        records = tuple(item.record for item in persisted_records)
+        assert_causal(records)
+    except CanaryReaderError:
+        raise
+    except (RuntimeError, ValueError) as exc:
+        raise CanaryReaderError("WAKE_OBLIGATION_INVALID") from exc
+    if not records or records[0].phase is not LedgerPhase.WAKE_REQUESTED:
+        raise CanaryReaderError("WAKE_OBLIGATION_INVALID")
+    phases_by_attempt: dict[int, set[LedgerPhase]] = {}
+    for record in records:
+        if record.phase in ATTEMPT_PHASES and record.attempt_n is not None:
+            phases_by_attempt.setdefault(record.attempt_n, set()).add(record.phase)
+    if any(
+        LedgerPhase.DELIVERY_ATTEMPT in phases
+        and not (phases & EFFECT_KNOWN_PHASES)
+        for phases in phases_by_attempt.values()
+    ):
+        raise CanaryReaderError("EFFECT_UNKNOWN_UNRESOLVED")
+    acknowledgements = [
+        record
+        for record in records
+        if record.phase is LedgerPhase.TARGET_ACKNOWLEDGED
+    ]
+    if len(acknowledgements) > 1:
+        raise CanaryReaderError("WAKE_OBLIGATION_AMBIGUOUS")
+    acknowledgement_mode = None
+    if acknowledgements:
+        acknowledgement = acknowledgements[0].ack
+        if acknowledgement is None:
+            raise CanaryReaderError("WAKE_OBLIGATION_INVALID")
+        acknowledgement_mode = acknowledgement.ack_mode.value
+    return records[-1].phase.value, acknowledgement_mode
 
 
 def build_receipt(
@@ -261,30 +352,16 @@ def build_receipt(
         if "EXECUTIVE_TERMINAL_RETURN_ATTEMPTED" in event_types
         else "NOT_ATTEMPTED"
     )
-    if projection == "APPLIED":
-        projection_state = "DELIVERED_NOT_CONSUMED"
-    elif projection == "EFFECT_UNKNOWN":
+    if projection == "EFFECT_UNKNOWN":
         raise CanaryReaderError("EFFECT_UNKNOWN_UNRESOLVED")
-    else:
-        projection_state = "PENDING_UNCONSUMED"
 
-    wake_records = []
-    for persisted in WakeLedgerRepository(runtime).list_wake_events():
-        obligation = persisted.record.obligation
-        if obligation is None:
-            continue
-        if (
-            obligation.root_job_id == root_job_id
-            and obligation.job_id == root_job_id
-            and obligation.attempt_id == material.attempt.attempt_id
-        ):
-            wake_records.append(persisted.record)
-    if wake_records:
-        phases = {record.phase for record in wake_records}
-        if LedgerPhase.TARGET_ACKNOWLEDGED in phases:
-            projection_state = "CONSUMED"
-        elif LedgerPhase.DELIVERED not in phases:
-            raise CanaryReaderError("EFFECT_UNKNOWN_UNRESOLVED")
+    wake_state, wake_acknowledgement_mode = _wake_projection(
+        runtime,
+        root_job_id=root_job_id,
+        attempt_id=material.attempt.attempt_id,
+    )
+    intervention_measurements = _unmeasured_interventions()
+    semantic_parent_action_state = "NOT_OBSERVED"
 
     return {
         "schema": RECEIPT_SCHEMA,
@@ -295,18 +372,28 @@ def build_receipt(
         "review_revisions": reviews,
         "repair_revisions": repairs,
         "aggregation_result_digest": material.role_result_digest,
-        "web_sol_turns_between_admission_and_handoff": 0,
-        "manual_continue_edges": 0,
-        "parent_consumption_state": projection_state,
+        "web_sol_turns_between_admission_and_handoff": None,
+        "manual_continue_edges": None,
+        "intervention_measurements": intervention_measurements,
+        "terminal_return_projection_state": projection,
+        "wake_obligation_state": wake_state,
+        "wake_acknowledgement_mode": wake_acknowledgement_mode,
+        "semantic_parent_action_state": semantic_parent_action_state,
         "production_acceptance_state": "PENDING",
+        "stage_promotion_eligible": False,
+        "proof_admissibility": {
+            "scope": "SOURCE_LINEAGE_ONLY",
+            "stage_promotion": "HOLD",
+            "legacy_v1": "NON_PROMOTABLE",
+        },
         "effect_uncertainty": "NONE",
         "source_evidence": {
             "aggregation_terminal": "RUNTIME_VALIDATED",
             "independent_review": "QUALIFIED",
             "terminal_projection": projection,
-            "wake_delivery": (
-                "REQUESTED_DELIVERED" if wake_records else "NOT_REQUESTED"
-            ),
+            "wake_obligation": wake_state,
+            "semantic_parent_action": semantic_parent_action_state,
+            "intervention_measurements": "UNMEASURED",
         },
         "observed_at": stamp,
     }

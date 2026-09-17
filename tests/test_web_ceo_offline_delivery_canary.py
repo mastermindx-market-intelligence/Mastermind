@@ -7,7 +7,25 @@ import pytest
 
 from control_plane.executive_runtime import JobStatus, Runtime
 from control_plane.executive_orchestration_principal import digest
+from control_plane.wake_events import mint_obligation
+from control_plane.wake_ledger import (
+    AckMode,
+    DeliveryAttempt,
+    LedgerPhase,
+    SourceReadHealth,
+    SourceResolutionCode,
+    TrustedAckContext,
+    acknowledge,
+    ack_record,
+    attempt_record,
+    ledger_command_id,
+    requested_record,
+    resolve_source,
+    resolved_record,
+)
+from control_plane.wake_persist import WakeLedgerRepository
 from scripts.web_ceo_offline_delivery_canary import (
+    LEGACY_RECEIPT_SCHEMA,
     RECEIPT_SCHEMA,
     build_receipt,
     main,
@@ -30,8 +48,14 @@ EXPECTED_KEYS = {
     "aggregation_result_digest",
     "web_sol_turns_between_admission_and_handoff",
     "manual_continue_edges",
-    "parent_consumption_state",
+    "intervention_measurements",
+    "terminal_return_projection_state",
+    "wake_obligation_state",
+    "wake_acknowledgement_mode",
+    "semantic_parent_action_state",
     "production_acceptance_state",
+    "stage_promotion_eligible",
+    "proof_admissibility",
     "effect_uncertainty",
     "source_evidence",
     "observed_at",
@@ -175,6 +199,8 @@ def test_canary_receipt_is_finite_deterministic_secret_safe_and_refuses_bad_inpu
     )
     assert set(first) == EXPECTED_KEYS
     assert first == second
+    assert RECEIPT_SCHEMA == "mastermind.web_ceo_offline_delivery_canary/v2"
+    assert LEGACY_RECEIPT_SCHEMA == "mastermind.web_ceo_offline_delivery_canary/v1"
     assert first["schema"] == RECEIPT_SCHEMA
     assert first["release_sha"] == release_sha
     assert first["root_job_id"] == root_id
@@ -210,16 +236,41 @@ def test_canary_receipt_is_finite_deterministic_secret_safe_and_refuses_bad_inpu
     assert first["aggregation_result_digest"] == (
         aggregation_seal["role_result_digest"]
     )
-    assert first["web_sol_turns_between_admission_and_handoff"] == 0
-    assert first["manual_continue_edges"] == 0
-    assert first["parent_consumption_state"] == "PENDING_UNCONSUMED"
+    assert first["web_sol_turns_between_admission_and_handoff"] is None
+    assert first["manual_continue_edges"] is None
+    assert first["intervention_measurements"] == {
+        "web_sol_turns_between_admission_and_handoff": {
+            "state": "UNMEASURED",
+            "reason": "CANONICAL_EVENT_SOURCE_ABSENT",
+            "interval_start": None,
+            "interval_end": None,
+        },
+        "manual_continue_edges": {
+            "state": "UNMEASURED",
+            "reason": "CANONICAL_EVENT_SOURCE_ABSENT",
+            "interval_start": None,
+            "interval_end": None,
+        },
+    }
+    assert first["terminal_return_projection_state"] == "NOT_ATTEMPTED"
+    assert first["wake_obligation_state"] == "NOT_REQUESTED"
+    assert first["wake_acknowledgement_mode"] is None
+    assert first["semantic_parent_action_state"] == "NOT_OBSERVED"
     assert first["production_acceptance_state"] == "PENDING"
+    assert first["stage_promotion_eligible"] is False
+    assert first["proof_admissibility"] == {
+        "scope": "SOURCE_LINEAGE_ONLY",
+        "stage_promotion": "HOLD",
+        "legacy_v1": "NON_PROMOTABLE",
+    }
     assert first["effect_uncertainty"] == "NONE"
     assert first["source_evidence"] == {
         "aggregation_terminal": "RUNTIME_VALIDATED",
         "independent_review": "QUALIFIED",
         "terminal_projection": "NOT_ATTEMPTED",
-        "wake_delivery": "NOT_REQUESTED",
+        "wake_obligation": "NOT_REQUESTED",
+        "semantic_parent_action": "NOT_OBSERVED",
+        "intervention_measurements": "UNMEASURED",
     }
     assert first["observed_at"] == "2026-09-14T01:02:03Z"
     rendered = json.dumps(first, sort_keys=True, separators=(",", ":"))
@@ -516,6 +567,245 @@ def test_canary_rejects_review_sequence_that_does_not_qualify_current_repair(
             observed_at="2026-09-14T01:02:03Z",
         )
 
+
+
+
+def _append_terminal_applied(runtime: Runtime, root_id: str) -> None:
+    material = runtime.validated_role_completion(
+        root_id, expected_attempt_id=runtime.jobs.get_job(root_id).current_attempt_id
+    )
+    with runtime.store.transaction() as connection:
+        runtime.store.append_event(
+            connection,
+            aggregate_type="terminal_return_projection",
+            aggregate_id=material.attempt.attempt_id,
+            event_type="EXECUTIVE_TERMINAL_RETURN_APPLIED",
+            attempt_id=material.attempt.attempt_id,
+        )
+
+
+def _append_matching_wake(
+    runtime: Runtime,
+    root_id: str,
+    *,
+    source_hex: str = "f",
+    final_phase: LedgerPhase,
+    ack_mode: AckMode = AckMode.REASONING_SESSION,
+) -> None:
+    material = runtime.validated_role_completion(
+        root_id, expected_attempt_id=runtime.jobs.get_job(root_id).current_attempt_id
+    )
+    obligation = mint_obligation(
+        wake_kind="dialogue_turn_pending",
+        source_kind="agent_dialogue_attention",
+        source_ref="agent_dialogue_attention:" + source_hex * 64,
+        declared_target_seat="ceo",
+        job_id=root_id,
+        attempt_id=material.attempt.attempt_id,
+        root_job_id=root_id,
+        source_workstream="WS:EXECUTIVE-OS",
+        source_created_at="2026-09-14T00:00:01Z",
+        emitted_at="2026-09-14T00:00:02Z",
+    )
+    repo = WakeLedgerRepository(runtime)
+    repo.append_record(requested_record(obligation), obligation=obligation)
+    if final_phase is LedgerPhase.WAKE_REQUESTED:
+        return
+    delivery = DeliveryAttempt(
+        obligation_id=obligation.obligation_id,
+        attempt_n=1,
+        attempt_command_id=ledger_command_id(
+            obligation.obligation_id, LedgerPhase.DELIVERY_ATTEMPT, attempt_n=1
+        ),
+        destination_digest="d" * 64,
+        route_digest="e" * 64,
+        binding_id="bind-canary-ceo-01",
+        binding_generation=1,
+        session_alias="EXECUTIVE-CEO-A",
+        reasoning_surface="codex",
+        wake_transport="codex-app-server",
+    )
+    repo.append_record(attempt_record(delivery, LedgerPhase.DELIVERY_ATTEMPT))
+    if final_phase is LedgerPhase.DELIVERY_ATTEMPT:
+        return
+    repo.append_record(attempt_record(delivery, LedgerPhase.DELIVERED))
+    if final_phase is LedgerPhase.DELIVERED:
+        return
+    trusted = TrustedAckContext(
+        ack_mode=ack_mode,
+        target_seat="ceo",
+        session_alias="EXECUTIVE-CEO-A",
+        reasoning_surface="codex",
+        binding_id="bind-canary-ceo-01" if ack_mode is AckMode.REASONING_SESSION else None,
+        binding_generation=1 if ack_mode is AckMode.REASONING_SESSION else None,
+        acknowledged_at="2026-09-14T00:00:03Z",
+        operator_authority_receipt=(
+            None if ack_mode is AckMode.REASONING_SESSION else "operator-receipt-001"
+        ),
+    )
+    ack = acknowledge(
+        obligation,
+        trusted=trusted,
+        claimed_obligation_ids=(obligation.obligation_id,),
+        delivered_command_id=(
+            ledger_command_id(
+                obligation.obligation_id, LedgerPhase.DELIVERED, attempt_n=1
+            )
+            if ack_mode is AckMode.REASONING_SESSION
+            else None
+        ),
+    )
+    repo.append_record(ack_record(obligation, ack))
+    if final_phase is LedgerPhase.TARGET_ACKNOWLEDGED:
+        return
+    resolution = resolve_source(
+        obligation,
+        code=SourceResolutionCode.DIALOGUE_ATTENTION_ABSENT,
+        health=SourceReadHealth.HEALTHY,
+        source_present=False,
+        snapshot_digest="a" * 64,
+        resolved_at="2026-09-14T00:00:04Z",
+    )
+    repo.append_record(resolved_record(obligation, resolution))
+
+
+def test_v2_receipt_keeps_read_time_out_of_unmeasured_intervals(tmp_path: Path) -> None:
+    runtime, root_id, *_args, release_sha = _offline_delivery_runtime(
+        tmp_path / "runtime"
+    )
+    first = build_receipt(
+        runtime,
+        root_job_id=root_id,
+        expected_release_sha=release_sha,
+        observed_at="2026-09-14T01:02:03Z",
+    )
+    later = build_receipt(
+        runtime,
+        root_job_id=root_id,
+        expected_release_sha=release_sha,
+        observed_at="2026-09-14T02:03:04Z",
+    )
+    assert first["observed_at"] != later["observed_at"]
+    assert first["intervention_measurements"] == later["intervention_measurements"]
+    assert all(
+        metric["interval_start"] is None and metric["interval_end"] is None
+        for metric in first["intervention_measurements"].values()
+    )
+
+
+@pytest.mark.parametrize(
+    ("final_phase", "expected_state", "expected_ack_mode"),
+    [
+        (LedgerPhase.DELIVERED, "DELIVERED", None),
+        (LedgerPhase.TARGET_ACKNOWLEDGED, "TARGET_ACKNOWLEDGED", "reasoning_session"),
+        (LedgerPhase.SOURCE_RESOLVED, "SOURCE_RESOLVED", "reasoning_session"),
+    ],
+)
+def test_v2_receipt_separates_wake_phase_from_semantic_and_production_acceptance(
+    tmp_path: Path,
+    final_phase: LedgerPhase,
+    expected_state: str,
+    expected_ack_mode: str | None,
+) -> None:
+    runtime, root_id, *_args, release_sha = _offline_delivery_runtime(
+        tmp_path / "runtime"
+    )
+    _append_terminal_applied(runtime, root_id)
+    _append_matching_wake(runtime, root_id, final_phase=final_phase)
+
+    receipt = build_receipt(
+        runtime,
+        root_job_id=root_id,
+        expected_release_sha=release_sha,
+        observed_at="2026-09-14T01:02:03Z",
+    )
+
+    assert receipt["terminal_return_projection_state"] == "APPLIED"
+    assert receipt["wake_obligation_state"] == expected_state
+    assert receipt["wake_acknowledgement_mode"] == expected_ack_mode
+    assert receipt["semantic_parent_action_state"] == "NOT_OBSERVED"
+    assert receipt["production_acceptance_state"] == "PENDING"
+    assert receipt["stage_promotion_eligible"] is False
+    assert "parent_consumption_state" not in receipt
+
+
+def test_v2_receipt_preserves_human_ack_mode_without_claiming_sol_action(
+    tmp_path: Path,
+) -> None:
+    runtime, root_id, *_args, release_sha = _offline_delivery_runtime(
+        tmp_path / "runtime"
+    )
+    _append_matching_wake(
+        runtime,
+        root_id,
+        final_phase=LedgerPhase.TARGET_ACKNOWLEDGED,
+        ack_mode=AckMode.HUMAN_OPERATOR,
+    )
+    receipt = build_receipt(
+        runtime,
+        root_job_id=root_id,
+        expected_release_sha=release_sha,
+        observed_at="2026-09-14T01:02:03Z",
+    )
+    assert receipt["wake_obligation_state"] == "TARGET_ACKNOWLEDGED"
+    assert receipt["wake_acknowledgement_mode"] == "human_operator"
+    assert receipt["semantic_parent_action_state"] == "NOT_OBSERVED"
+
+
+def test_v2_receipt_reports_requested_wake_without_claiming_delivery(
+    tmp_path: Path,
+) -> None:
+    runtime, root_id, *_args, release_sha = _offline_delivery_runtime(
+        tmp_path / "runtime"
+    )
+    _append_matching_wake(
+        runtime, root_id, final_phase=LedgerPhase.WAKE_REQUESTED
+    )
+    receipt = build_receipt(
+        runtime,
+        root_job_id=root_id,
+        expected_release_sha=release_sha,
+        observed_at="2026-09-14T01:02:03Z",
+    )
+    assert receipt["wake_obligation_state"] == "WAKE_REQUESTED"
+    assert receipt["wake_acknowledgement_mode"] is None
+    assert receipt["semantic_parent_action_state"] == "NOT_OBSERVED"
+    assert receipt["effect_uncertainty"] == "NONE"
+
+
+def test_v2_receipt_rejects_unresolved_wake_delivery_effect(tmp_path: Path) -> None:
+    runtime, root_id, *_args, release_sha = _offline_delivery_runtime(
+        tmp_path / "runtime"
+    )
+    _append_matching_wake(
+        runtime, root_id, final_phase=LedgerPhase.DELIVERY_ATTEMPT
+    )
+    with pytest.raises(ValueError, match="EFFECT_UNKNOWN_UNRESOLVED"):
+        build_receipt(
+            runtime,
+            root_job_id=root_id,
+            expected_release_sha=release_sha,
+            observed_at="2026-09-14T01:02:03Z",
+        )
+
+
+def test_v2_receipt_rejects_multiple_matching_wake_obligations(tmp_path: Path) -> None:
+    runtime, root_id, *_args, release_sha = _offline_delivery_runtime(
+        tmp_path / "runtime"
+    )
+    _append_matching_wake(
+        runtime, root_id, source_hex="e", final_phase=LedgerPhase.WAKE_REQUESTED
+    )
+    _append_matching_wake(
+        runtime, root_id, source_hex="f", final_phase=LedgerPhase.WAKE_REQUESTED
+    )
+    with pytest.raises(ValueError, match="WAKE_OBLIGATION_AMBIGUOUS"):
+        build_receipt(
+            runtime,
+            root_job_id=root_id,
+            expected_release_sha=release_sha,
+            observed_at="2026-09-14T01:02:03Z",
+        )
 
 def test_cli_emits_receipt_and_closed_errors(tmp_path: Path, capsys) -> None:
     fixture = _offline_delivery_runtime(tmp_path / "runtime")
