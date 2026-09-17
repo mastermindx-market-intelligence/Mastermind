@@ -31,6 +31,7 @@ from integrations.business_mcp_auth.jwks import BoundedJwksCache
 from integrations.business_mcp_auth.jwt_verifier import JwtAuthenticator
 from integrations.business_mcp_auth.mcp_adapter import MastermindTokenVerifier
 from integrations.mastermind_secretary_mcp.adapter import StewardGrounding
+from integrations.mastermind_steward_app import app as steward_app_module
 from integrations.mastermind_steward_app.app import build_authenticated_app
 from integrations.mastermind_steward_app.live_window import (
     LIVE_WINDOW_SOURCE_KIND,
@@ -567,13 +568,23 @@ def test_window_request_has_no_viewer_caused_start_resume_or_send():
     assert len(messages) == 2
 
 
-def test_non_get_window_request_is_refused_before_any_grant_or_source_work():
-    mount = _mount()
-    status, _, raw, messages = _window(mount.app(), mount, method="POST")
+def test_non_get_window_request_passes_through_before_any_grant_or_source_work():
+    """Only the exact GET mount is dispatched; a POST is the old stack's."""
 
-    assert status == 405 and json.loads(raw) == {"error": "method_not_allowed"}
+    mount = _mount()
+    disabled = _steward_app()
+    request = {
+        "path": WINDOW_PATH,
+        "headers": _headers(token=_content_token(mount.key)),
+        "method": "POST",
+    }
+
+    posted = _call(mount.app(), **request)
+
+    assert posted[:3] == _exchange(disabled, **request)
+    assert posted[0] == 404 and json.loads(posted[2]) == {"error": "not_found"}
     assert mount.state["reads"] == 0 and mount.state["accesses"] == 0
-    assert all(WINDOW_TEXT.encode() not in m.get("body", b"") for m in messages)
+    assert all(WINDOW_TEXT.encode() not in m.get("body", b"") for m in posted[3])
 
 
 def test_window_request_needs_no_network_process_or_filesystem_effect(monkeypatch):
@@ -811,22 +822,85 @@ def test_exact_dispatch_leaves_every_other_path_byte_identical():
     assert mount.state["reads"] == 0 and mount.state["accesses"] == 0
 
 
-def test_window_path_with_query_root_path_scheme_or_foreign_host_is_refused():
+def test_exact_window_request_with_foreign_scheme_or_host_is_reader_refused():
     mount = _mount()
     app = mount.app()
     token = _content_token(mount.key)
 
-    query = _window(app, mount, query=b"x=1")
-    rooted = _window(app, mount, root_path="/injected")
     plain = _window(app, mount, scheme="http")
     foreign = _call(
         app, path=WINDOW_PATH, headers=_headers(token=token, host="other.example.test")
     )
 
-    assert query[0] == 404 and rooted[0] == 404
     assert plain[0] == 403 and json.loads(plain[2]) == {"error": "transport_refused"}
     assert foreign[0] == 403
     assert mount.state["reads"] == 0 and mount.state["accesses"] == 0
+
+
+class _CountingReader:
+    """Count requests reaching the Reader resource; the real Reader still runs."""
+
+    def __init__(self) -> None:
+        self.app = None
+        self.calls = 0
+
+    async def __call__(self, scope, receive, send) -> None:
+        self.calls += 1
+        assert self.app is not None
+        await self.app(scope, receive, send)
+
+
+def _counted_reader(monkeypatch) -> _CountingReader:
+    """Wrap the Reader resource the real construction seam returns."""
+
+    counted = _CountingReader()
+    real = steward_app_module.live_window_reader
+
+    def seam(config, **kwargs):
+        reader, path = real(config, **kwargs)
+        counted.app = reader
+        return counted, path
+
+    monkeypatch.setattr(steward_app_module, "live_window_reader", seam)
+    return counted
+
+
+NON_EXACT_WINDOW_REQUESTS = (
+    ("query-string", {"query": b"x=1"}),
+    ("root-path", {"root_path": "/injected"}),
+    ("HEAD", {"method": "HEAD"}),
+    ("OPTIONS", {"method": "OPTIONS"}),
+    ("POST", {"method": "POST"}),
+    ("trailing-slash", {"path": WINDOW_PATH + "/"}),
+    ("percent-encoded", {"path": "/workspace/window/%63urrent"}),
+)
+
+
+@pytest.mark.parametrize("label,overrides", NON_EXACT_WINDOW_REQUESTS)
+def test_non_exact_window_requests_pass_through_to_the_old_stack_byte_identically(
+    label, overrides, monkeypatch
+):
+    """Dispatch is exact GET only; every other request is the old Steward stack."""
+
+    mount = _mount()
+    counted = _counted_reader(monkeypatch)
+    enabled = mount.app()
+    disabled = _steward_app()
+    request = {
+        "path": WINDOW_PATH,
+        "headers": _headers(token=_content_token(mount.key)),
+    }
+    request.update(overrides)
+
+    given = _call(enabled, **request)
+    plain = _call(disabled, **request)
+
+    assert given[0] == plain[0], label
+    assert tuple(sorted(given[1])) == tuple(sorted(plain[1])), label
+    assert given[2] == plain[2], label
+    assert given[3] == plain[3], label
+    assert counted.calls == 0, label
+    assert mount.state["reads"] == 0 and mount.state["accesses"] == 0, label
 
 
 def test_only_the_exact_configured_window_path_is_dispatched():

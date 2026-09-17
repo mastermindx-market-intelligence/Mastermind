@@ -75,11 +75,14 @@ class LiveWindowConfig:
 
 
 class LiveWindowDispatch:
-    """Send only the exact configured raw path to the Reader's own checks.
+    """Send only the exact configured GET to the Reader's own checks.
 
-    Every other request, and every non-HTTP scope, reaches the original stack
-    unchanged. There is no prefix match, redirect, second path, fallback route
-    or generated response here.
+    Dispatch requires all of: an HTTP scope, the GET method, the exact
+    canonical raw path, no query string and no ``root_path``. Every other
+    request, and every non-HTTP scope, reaches the original stack with the same
+    scope/receive/send. There is no prefix match, redirect, second path,
+    fallback route or generated response here, and the Reader is never
+    constructed or called for a request this class does not dispatch.
     """
 
     def __init__(
@@ -96,7 +99,13 @@ class LiveWindowDispatch:
         self.canonical_raw_path = canonical_raw_path
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope.get("type") == "http" and self.canonical_raw_path(scope) == self.path:
+        if (
+            scope.get("type") == "http"
+            and scope.get("method") == "GET"
+            and scope.get("query_string", b"") == b""
+            and scope.get("root_path", "") == ""
+            and self.canonical_raw_path(scope) == self.path
+        ):
             await self.reader(scope, receive, send)
             return
         await self.app(scope, receive, send)
