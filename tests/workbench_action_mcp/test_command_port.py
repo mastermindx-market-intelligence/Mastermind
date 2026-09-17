@@ -77,6 +77,7 @@ class Harness:
         recipe_root: str = RECIPE_ROOT,
         deadline: float = 5.0,
         workers: int = 4,
+        admission_evidence=None,
     ) -> None:
         self.clock = 1_800_000_000_000
         self.project = base / "project"
@@ -146,6 +147,7 @@ class Harness:
 
         self.run_io = run_io
         self.resolve = resolve
+        self.admission_evidence = admission_evidence
         self._open_port()
 
     def _open_port(self) -> None:
@@ -163,6 +165,7 @@ class Harness:
             host=self.host,
             inspector=self.inspector,
             action_ttl_ms=60_000,
+            admission_evidence=self.admission_evidence,
         )
 
     def prepare_command(self, recipe_id: str = "canary_checksum"):
@@ -1020,3 +1023,87 @@ def test_expired_apply_refuses_but_restart_evidence_read_survives(tmp_path: Path
         )["effect_state"] == "APPLIED"
     finally:
         harness.close()
+
+
+# ---------------------------------------------------------------------------
+# Durable pre-dispatch admission evidence (#670): patch/command parity.
+# ---------------------------------------------------------------------------
+
+
+class _Verdicts:
+    def __init__(self, verdict: object) -> None:
+        self.verdict = verdict
+        self.calls: list[object] = []
+
+    def __call__(self, action_ref: object) -> str:
+        self.calls.append(action_ref)
+        if isinstance(self.verdict, BaseException):
+            raise self.verdict
+        return self.verdict  # type: ignore[return-value]
+
+
+def test_unclaimed_command_stays_unknown_without_admission_evidence(tmp_path: Path) -> None:
+    harness = Harness(tmp_path)
+    try:
+        action_ref = harness.prepare_command()["action_ref"]
+        reconciled = asyncio.run(harness.reconcile(harness.caller, action_ref))
+        assert reconciled["effect_state"] == "EFFECT_UNKNOWN"
+        page = asyncio.run(
+            harness.read_result(harness.caller, {"action_ref": action_ref, "stream": "stdout"})
+        )
+        assert page["effect_state"] == "EFFECT_UNKNOWN"
+    finally:
+        harness.close()
+
+
+@pytest.mark.parametrize(
+    "verdict,expected",
+    [
+        ("REFUSED_ONLY", "NOT_APPLIED"),
+        ("ACCEPTED", "EFFECT_UNKNOWN"),
+        ("ABSENT", "EFFECT_UNKNOWN"),
+        ("UNCERTAIN", "EFFECT_UNKNOWN"),
+        (None, "EFFECT_UNKNOWN"),
+        (RuntimeError("ledger unavailable"), "EFFECT_UNKNOWN"),
+    ],
+)
+def test_unclaimed_command_reconcile_and_read_share_one_admission_verdict(
+    tmp_path: Path, verdict, expected
+) -> None:
+    evidence = _Verdicts(verdict)
+    harness = Harness(tmp_path, admission_evidence=evidence)
+    try:
+        action_ref = harness.prepare_command()["action_ref"]
+        reconciled = asyncio.run(harness.reconcile(harness.caller, action_ref))
+        page = asyncio.run(
+            harness.read_result(harness.caller, {"action_ref": action_ref, "stream": "stdout"})
+        )
+        for receipt in (reconciled, page):
+            assert receipt["effect_state"] == expected
+            assert receipt["cleanup_state"] == "CLEAN"
+            assert "exit_code" not in receipt
+            assert "process_identity" not in receipt
+        assert evidence.calls == [action_ref, action_ref]
+        assert os.listdir(harness.store_path) == []
+    finally:
+        harness.close()
+
+
+def test_command_artifact_evidence_outranks_admission_evidence(tmp_path: Path) -> None:
+    evidence = _Verdicts("REFUSED_ONLY")
+    harness = Harness(tmp_path, admission_evidence=evidence)
+    try:
+        action_ref = harness.prepare_command()["action_ref"]
+        ran = asyncio.run(harness.run(harness.caller, action_ref))
+        assert ran["effect_state"] == "APPLIED"
+        reconciled = asyncio.run(harness.reconcile(harness.caller, action_ref))
+        assert reconciled["effect_state"] == "APPLIED"
+        assert reconciled["process_identity"] == ran["process_identity"]
+        assert evidence.calls == []
+    finally:
+        harness.close()
+
+
+def test_command_admission_evidence_must_be_callable(tmp_path: Path) -> None:
+    with pytest.raises(TypeError):
+        Harness(tmp_path, admission_evidence="REFUSED_ONLY")
