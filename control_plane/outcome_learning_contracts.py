@@ -36,6 +36,7 @@ OUTCOME_SCHEMA = "mastermind.olv1_outcome.v1"
 EVALUATION_SCHEMA = "mastermind.olv1_evaluation.v1"
 SELF_MODEL_SCHEMA = "mastermind.olv1_self_model.v1"
 AGENTOS_PROJECTION_SCHEMA = "mastermind.olv1_agentos_projection.v1"
+OWNER_RENAME_EVENT_SCHEMA = "mastermind.olv1_github_rename_event_evidence.v1"
 
 PRIVACY_CLASS = "PUBLIC_SAFE"
 
@@ -233,6 +234,16 @@ def _utc_timestamp(value: Any, name: str) -> datetime:
 def _utc_text(value: Any, name: str) -> str:
     _utc_timestamp(value, name)
     return str(value)
+
+
+def _repo_path(value: Any, name: str) -> str:
+    text = _text(value, name, 300)
+    parts = text.split("/")
+    if text.startswith("/") or any(part in {"", ".", ".."} for part in parts):
+        raise OutcomeLearningContractError(
+            f"{name} must be a canonical repository-relative path"
+        )
+    return text
 
 
 def _require_strict_chronology(
@@ -783,6 +794,7 @@ def validate_canary_request(doc: Mapping[str, Any]) -> Mapping[str, Any]:
 _PREFLIGHT_REQUIRED = {
     "observed_at",
     "repository",
+    "branch",
     "pr_number",
     "pr_url",
     "head_sha",
@@ -790,6 +802,8 @@ _PREFLIGHT_REQUIRED = {
     "original_title_sha256",
     "original_title_length",
     "sealed_commit_sha",
+    "expectation_repo_path",
+    "request_repo_path",
     "expectation_blob_sha",
     "request_blob_sha",
     "expectation_content_sha256",
@@ -809,6 +823,7 @@ def validate_preflight(doc: Mapping[str, Any]) -> Mapping[str, Any]:
     item = _closed_mapping(doc, required=_PREFLIGHT_REQUIRED, where="preflight")
     _utc_timestamp(item["observed_at"], "preflight.observed_at")
     _text(item["repository"], "preflight.repository", 200)
+    _text(item["branch"], "preflight.branch", 256)
     _int(item["pr_number"], "preflight.pr_number", minimum=1)
     _text(item["pr_url"], "preflight.pr_url", _DEFAULT_TEXT_LIMIT)
     _sha40(item["head_sha"], "preflight.head_sha")
@@ -816,6 +831,16 @@ def validate_preflight(doc: Mapping[str, Any]) -> Mapping[str, Any]:
     _sha256_hex(item["original_title_sha256"], "preflight.original_title_sha256")
     _int(item["original_title_length"], "preflight.original_title_length", minimum=0)
     _sha40(item["sealed_commit_sha"], "preflight.sealed_commit_sha")
+    expectation_path = _repo_path(
+        item["expectation_repo_path"], "preflight.expectation_repo_path"
+    )
+    request_path = _repo_path(
+        item["request_repo_path"], "preflight.request_repo_path"
+    )
+    if expectation_path == request_path:
+        raise OutcomeLearningContractError(
+            "preflight expectation/request repo paths must be distinct"
+        )
     _sha40(item["expectation_blob_sha"], "preflight.expectation_blob_sha")
     _sha40(item["request_blob_sha"], "preflight.request_blob_sha")
     _sha256_hex(item["expectation_content_sha256"], "preflight.expectation_content_sha256")
@@ -837,7 +862,9 @@ _OUTCOME_REQUIRED = {
     "expectation_sealed_hash",
     "request_digest",
     "preflight",
+    "effect_attempts",
     "effect_calls",
+    "owner_effect_evidence",
     "effect_state",
     "restoration",
     "pre_effect_observation",
@@ -861,10 +888,22 @@ _PRE_EFFECT_OBSERVATION_REQUIRED = {
 #: never from ``preflight.head_equals_sealed_commit`` alone.
 _EFFECT_EDGE_REQUIRED = {
     "parent_proven",
+    "expectation_reacquired_from_sealed_commit",
+    "expectation_digest_matched",
     "request_reacquired_from_sealed_commit",
     "request_digest_matched",
     "selector_repeated_single_pr",
+    "owner_rename_events_verified",
     "bindings_verified",
+}
+_EFFECT_ATTEMPT_REQUIRED = {
+    "seq",
+    "kind",
+    "requested_at",
+    "method",
+    "endpoint",
+    "payload_title_sha256",
+    "payload_title_length",
 }
 _EFFECT_CALL_REQUIRED = {
     "seq",
@@ -885,6 +924,24 @@ _RESTORATION_REQUIRED = {
 }
 
 
+_OWNER_RENAME_EVENT_REQUIRED = {
+    "schema",
+    "repository",
+    "pr_number",
+    "event_id",
+    "actor_login",
+    "transition",
+    "created_at",
+    "observed_at",
+    "from_title_sha256",
+    "from_title_length",
+    "to_title_sha256",
+    "to_title_length",
+    "privacy_class",
+}
+_OWNER_RENAME_TRANSITIONS = ("TITLE_APPLY", "TITLE_RESTORE")
+
+
 def _validate_readback(value: Any, where: str) -> Mapping[str, Any]:
     item = _closed_mapping(value, required=_READBACK_REQUIRED, where=where)
     _utc_timestamp(item["observed_at"], f"{where}.observed_at")
@@ -899,6 +956,47 @@ def _response_status(value: Any, name: str) -> int | str:
     if value == "UNOBSERVED":
         return value
     return _int(value, name, minimum=100, maximum=_HTTP_STATUS_MAX)
+
+
+def validate_effect_attempts(value: Any) -> list[Mapping[str, Any]]:
+    if not isinstance(value, list):
+        raise OutcomeLearningContractError("effect_attempts must be a list")
+    if len(value) > 2:
+        raise OutcomeLearningContractError("effect_attempts may never exceed 2 entries")
+    for index, raw in enumerate(value):
+        item = _closed_mapping(
+            raw, required=_EFFECT_ATTEMPT_REQUIRED, where=f"effect_attempts[{index}]"
+        )
+        seq = _int(item["seq"], f"effect_attempts[{index}].seq", minimum=1, maximum=2)
+        if seq != index + 1:
+            raise OutcomeLearningContractError(
+                f"effect_attempts[{index}].seq must equal its 1-based position"
+            )
+        kind = _enum(
+            item["kind"], EFFECT_CALL_KINDS, f"effect_attempts[{index}].kind"
+        )
+        if kind != EFFECT_CALL_KINDS[index]:
+            raise OutcomeLearningContractError(
+                f"effect_attempts[{index}].kind must be {EFFECT_CALL_KINDS[index]}"
+            )
+        _utc_timestamp(
+            item["requested_at"], f"effect_attempts[{index}].requested_at"
+        )
+        if item["method"] != "PATCH":
+            raise OutcomeLearningContractError(
+                f"effect_attempts[{index}].method must be PATCH"
+            )
+        _text(item["endpoint"], f"effect_attempts[{index}].endpoint", 300)
+        _sha256_hex(
+            item["payload_title_sha256"],
+            f"effect_attempts[{index}].payload_title_sha256",
+        )
+        _int(
+            item["payload_title_length"],
+            f"effect_attempts[{index}].payload_title_length",
+            minimum=0,
+        )
+    return value
 
 
 def _validate_effect_calls(value: Any) -> list[Mapping[str, Any]]:
@@ -932,6 +1030,82 @@ def _validate_effect_calls(value: Any) -> list[Mapping[str, Any]]:
         )
         _response_status(item["response_status"], f"effect_calls[{index}].response_status")
         _validate_readback(item["readback"], f"effect_calls[{index}].readback")
+    return value
+
+
+def validate_effect_calls(value: Any) -> list[Mapping[str, Any]]:
+    return _validate_effect_calls(value)
+
+
+def validate_owner_effect_evidence(value: Any) -> list[Mapping[str, Any]]:
+    if not isinstance(value, list) or len(value) > 2:
+        raise OutcomeLearningContractError(
+            "owner_effect_evidence must be a list with at most 2 entries"
+        )
+    event_ids: list[int] = []
+    for index, raw in enumerate(value):
+        item = _closed_mapping(
+            raw,
+            required=_OWNER_RENAME_EVENT_REQUIRED,
+            where=f"owner_effect_evidence[{index}]",
+        )
+        if item["schema"] != OWNER_RENAME_EVENT_SCHEMA:
+            raise OutcomeLearningContractError(
+                f"owner_effect_evidence[{index}].schema is unsupported"
+            )
+        _text(item["repository"], f"owner_effect_evidence[{index}].repository", 200)
+        _int(item["pr_number"], f"owner_effect_evidence[{index}].pr_number", minimum=1)
+        event_ids.append(
+            _int(item["event_id"], f"owner_effect_evidence[{index}].event_id", minimum=1)
+        )
+        _text(item["actor_login"], f"owner_effect_evidence[{index}].actor_login", 200)
+        transition = _enum(
+            item["transition"],
+            _OWNER_RENAME_TRANSITIONS,
+            f"owner_effect_evidence[{index}].transition",
+        )
+        if transition != _OWNER_RENAME_TRANSITIONS[index]:
+            raise OutcomeLearningContractError(
+                f"owner_effect_evidence[{index}].transition must be "
+                f"{_OWNER_RENAME_TRANSITIONS[index]}"
+            )
+        created = _utc_timestamp(
+            item["created_at"], f"owner_effect_evidence[{index}].created_at"
+        )
+        observed = _utc_timestamp(
+            item["observed_at"], f"owner_effect_evidence[{index}].observed_at"
+        )
+        if created > observed:
+            raise OutcomeLearningContractError(
+                f"owner_effect_evidence[{index}] cannot be observed before creation"
+            )
+        _sha256_hex(
+            item["from_title_sha256"],
+            f"owner_effect_evidence[{index}].from_title_sha256",
+        )
+        _int(
+            item["from_title_length"],
+            f"owner_effect_evidence[{index}].from_title_length",
+            minimum=0,
+        )
+        _sha256_hex(
+            item["to_title_sha256"],
+            f"owner_effect_evidence[{index}].to_title_sha256",
+        )
+        _int(
+            item["to_title_length"],
+            f"owner_effect_evidence[{index}].to_title_length",
+            minimum=0,
+        )
+        if item["privacy_class"] != PRIVACY_CLASS:
+            raise OutcomeLearningContractError(
+                f"owner_effect_evidence[{index}].privacy_class must be PUBLIC_SAFE"
+            )
+        _require_public_safe(item, f"owner_effect_evidence[{index}]")
+    if len(set(event_ids)) != len(event_ids) or event_ids != sorted(event_ids):
+        raise OutcomeLearningContractError(
+            "owner_effect_evidence event_id values must be unique and increasing"
+        )
     return value
 
 
@@ -974,7 +1148,9 @@ def build_outcome(
     expectation_sealed_hash: str,
     request: Mapping[str, Any],
     preflight: Mapping[str, Any],
+    effect_attempts: Sequence[Mapping[str, Any]],
     effect_calls: Sequence[Mapping[str, Any]],
+    owner_effect_evidence: Sequence[Mapping[str, Any]],
     effect_state: str,
     restoration: Mapping[str, Any],
     pre_effect_observation: Mapping[str, Any] | None,
@@ -989,7 +1165,9 @@ def build_outcome(
         ),
         "request_digest": canonical_digest(request),
         "preflight": dict(preflight),
+        "effect_attempts": [dict(item) for item in effect_attempts],
         "effect_calls": [dict(item) for item in effect_calls],
+        "owner_effect_evidence": [dict(item) for item in owner_effect_evidence],
         "effect_state": _enum(effect_state, EFFECT_STATES, "effect_state"),
         "restoration": dict(restoration),
         "pre_effect_observation": (
@@ -1029,7 +1207,11 @@ def validate_outcome(
                 "canary request does not bind to the sealed expectation"
             )
     preflight = validate_preflight(item["preflight"])
+    effect_attempts = validate_effect_attempts(item["effect_attempts"])
     effect_calls = _validate_effect_calls(item["effect_calls"])
+    owner_effect_evidence = validate_owner_effect_evidence(
+        item["owner_effect_evidence"]
+    )
     effect_state = _enum(item["effect_state"], EFFECT_STATES, "effect_state")
     restoration = _validate_restoration(item["restoration"])
     outcome_recorded_at = _utc_timestamp(item["recorded_at"], "outcome.recorded_at")
@@ -1050,21 +1232,83 @@ def validate_outcome(
     )
     if effect_edge["bindings_verified"] is not derived_bindings_verified:
         raise OutcomeLearningContractError(
-            "effect_edge.bindings_verified must equal the conjunction of the four "
-            "named effect-edge checks"
+            "effect_edge.bindings_verified must equal the conjunction of the named "
+            "effect-edge checks"
         )
 
-    if effect_state in {"NOT_ATTEMPTED", "INVALIDATED_BEFORE_EFFECT"} and effect_calls:
+    if len(effect_calls) > len(effect_attempts):
         raise OutcomeLearningContractError(
-            f"effect_state {effect_state} requires empty effect_calls"
+            "effect_calls cannot exceed the number of pre-PATCH effect_attempts"
         )
+    for index, call in enumerate(effect_calls):
+        attempt = effect_attempts[index]
+        for field in (
+            "seq",
+            "kind",
+            "requested_at",
+            "method",
+            "endpoint",
+            "payload_title_sha256",
+        ):
+            if call[field] != attempt[field]:
+                raise OutcomeLearningContractError(
+                    f"effect_calls[{index}].{field} does not match its pre-PATCH attempt"
+                )
+
+    for index, evidence in enumerate(owner_effect_evidence):
+        if evidence["repository"] != preflight["repository"]:
+            raise OutcomeLearningContractError(
+                "owner_effect_evidence repository does not match preflight"
+            )
+        if evidence["pr_number"] != preflight["pr_number"]:
+            raise OutcomeLearningContractError(
+                "owner_effect_evidence pr_number does not match preflight"
+            )
+        attempt = effect_attempts[index]
+        if evidence["to_title_sha256"] != attempt["payload_title_sha256"]:
+            raise OutcomeLearningContractError(
+                f"owner_effect_evidence[{index}] does not match its attempted title"
+            )
+        if evidence["to_title_length"] != attempt["payload_title_length"]:
+            raise OutcomeLearningContractError(
+                f"owner_effect_evidence[{index}] title length does not match its attempt"
+            )
+        if index == 0:
+            expected_from_sha = preflight["original_title_sha256"]
+            expected_from_length = preflight["original_title_length"]
+        else:
+            expected_from_sha = effect_attempts[index - 1]["payload_title_sha256"]
+            expected_from_length = effect_attempts[index - 1]["payload_title_length"]
+        if (
+            evidence["from_title_sha256"] != expected_from_sha
+            or evidence["from_title_length"] != expected_from_length
+        ):
+            raise OutcomeLearningContractError(
+                f"owner_effect_evidence[{index}] does not continue the exact title chain"
+            )
+
+    if len(owner_effect_evidence) < len(effect_calls):
+        raise OutcomeLearningContractError(
+            "every completed effect_call requires GitHub-owner rename-event evidence"
+        )
+
+    if effect_state in {"NOT_ATTEMPTED", "INVALIDATED_BEFORE_EFFECT"}:
+        if effect_attempts or effect_calls or owner_effect_evidence:
+            raise OutcomeLearningContractError(
+                f"effect_state {effect_state} requires no attempts, calls, or owner events"
+            )
     if len(effect_calls) > 2:
         raise OutcomeLearningContractError("more than 2 effect calls is never valid")
 
     if effect_state == "APPLIED_AND_RESTORED":
-        if len(effect_calls) != 2:
+        if (
+            len(effect_attempts) != 2
+            or len(effect_calls) != 2
+            or len(owner_effect_evidence) != 2
+        ):
             raise OutcomeLearningContractError(
-                "APPLIED_AND_RESTORED requires exactly 2 effect_calls"
+                "APPLIED_AND_RESTORED requires exactly 2 attempts, 2 completed calls, "
+                "and 2 GitHub-owner rename events"
             )
         call1, call2 = effect_calls
         original_sha = preflight["original_title_sha256"]
@@ -1222,19 +1466,31 @@ def validate_outcome(
             "canary request must be recorded strictly before preflight"
         )
     chronology_cursor = preflight_time
-    for index, call in enumerate(effect_calls):
+    for index, attempt in enumerate(effect_attempts):
         requested_time = _utc_timestamp(
-            call["requested_at"], f"effect_calls[{index}].requested_at"
+            attempt["requested_at"], f"effect_attempts[{index}].requested_at"
         )
-        readback_time = _utc_timestamp(
-            call["readback"]["observed_at"],
-            f"effect_calls[{index}].readback.observed_at",
-        )
-        if chronology_cursor >= requested_time or requested_time >= readback_time:
+        if chronology_cursor >= requested_time:
             raise OutcomeLearningContractError(
-                f"effect_calls[{index}] violates strict request/readback chronology"
+                f"effect_attempts[{index}] violates strict prospective chronology"
             )
-        chronology_cursor = readback_time
+        chronology_cursor = requested_time
+        if index < len(effect_calls):
+            readback_time = _utc_timestamp(
+                effect_calls[index]["readback"]["observed_at"],
+                f"effect_calls[{index}].readback.observed_at",
+            )
+            if requested_time >= readback_time:
+                raise OutcomeLearningContractError(
+                    f"effect_calls[{index}] violates strict request/readback chronology"
+                )
+            chronology_cursor = readback_time
+    for index, evidence in enumerate(owner_effect_evidence):
+        owner_observed = _utc_timestamp(
+            evidence["observed_at"],
+            f"owner_effect_evidence[{index}].observed_at",
+        )
+        chronology_cursor = max(chronology_cursor, owner_observed)
     if observation_time is not None:
         if preflight_time >= observation_time:
             raise OutcomeLearningContractError(
@@ -2368,6 +2624,7 @@ __all__ = [
     "EXPECTATION_SCHEMA",
     "MEMORY_INFLUENCE",
     "OUTCOME_SCHEMA",
+    "OWNER_RENAME_EVENT_SCHEMA",
     "PRIVACY_CLASS",
     "PROJECTION_CANDIDATE_KINDS",
     "RESOLUTIONS",
@@ -2383,8 +2640,11 @@ __all__ = [
     "validate_agentos_projection",
     "validate_canary_request",
     "validate_evaluation",
+    "validate_effect_attempts",
+    "validate_effect_calls",
     "validate_expectation",
     "validate_outcome",
+    "validate_owner_effect_evidence",
     "validate_preflight",
     "validate_self_model",
     "verify_sealed",

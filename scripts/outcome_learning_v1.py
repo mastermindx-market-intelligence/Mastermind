@@ -44,6 +44,8 @@ if str(_ROOT) not in sys.path:
 
 from control_plane.outcome_learning_contracts import (  # noqa: E402
     CANARY_TOKEN,
+    OWNER_RENAME_EVENT_SCHEMA,
+    PRIVACY_CLASS,
     OutcomeLearningContractError,
     build_canary_request,
     build_correction_revision,
@@ -59,6 +61,8 @@ from control_plane.outcome_learning_contracts import (  # noqa: E402
     validate_canary_request,
     validate_evaluation,
     validate_expectation,
+    validate_effect_attempts,
+    validate_effect_calls,
     validate_outcome,
     validate_preflight,
     validate_remote_publication_receipt,
@@ -92,6 +96,22 @@ _CARRIER_REPOSITORY = "mastermindx-market-intelligence/Mastermind"
 _CARRIER_BRANCH = "sol/outcome-learning-v1-complete-vertical-20260902"
 _CARRIER_PR_NUMBER = 398
 _CARRIER_REF = f"github:Mastermind:branch:{_CARRIER_BRANCH}"
+_EXPECTATION_REPO_PATH = "research/outcome_learning/OLV1_EXPECTATION.json"
+_REQUEST_REPO_PATH = "research/outcome_learning/OLV1_CANARY_REQUEST.json"
+_PREFLIGHT_REPO_PATH = "research/outcome_learning/OLV1_PREFLIGHT.json"
+_OUTCOME_REPO_PATH = "research/outcome_learning/OLV1_OUTCOME.json"
+_EVALUATION_V1_REPO_PATH = "research/outcome_learning/OLV1_EVALUATION_V1.json"
+_REVISION_V1_REPO_PATH = (
+    "research/outcome_learning/OLV1_EVALUATION_REVISION_1.json"
+)
+_EVALUATION_V2_REPO_PATH = "research/outcome_learning/OLV1_EVALUATION_V2.json"
+_REVISION_V2_REPO_PATH = (
+    "research/outcome_learning/OLV1_EVALUATION_REVISION_2.json"
+)
+_SELF_MODEL_V2_REPO_PATH = "research/outcome_learning/OLV1_SELF_MODEL_V2.json"
+_PROJECTION_V2_REPO_PATH = (
+    "research/outcome_learning/OLV1_AGENTOS_PROJECTION_V2.json"
+)
 _DIRECTIVE_SCHEMA = "mastermind.olv1_directive.v1"
 _SELECTION_SCHEMA = "mastermind.olv1_selection.v1"
 _DIRECTIVE_AUTHORITY_CEILING = "COMPOSE_ONLY_NO_EFFECT_NO_PROMOTION"
@@ -495,19 +515,23 @@ def _json_artifact_content_digest(doc: Mapping[str, Any]) -> str:
 
 def _require_exact_artifact_contents(
     receipt: Mapping[str, Any],
-    expected_docs: Sequence[Mapping[str, Any]],
+    expected_docs: Mapping[str, Mapping[str, Any]],
     *,
     where: str,
 ) -> None:
-    available = Counter(
-        artifact["content_digest"] for artifact in receipt["artifact_digests"]
-    )
-    required = Counter(_json_artifact_content_digest(doc) for doc in expected_docs)
-    missing = required - available
-    if missing:
+    available = {
+        artifact["path"]: artifact["content_digest"]
+        for artifact in receipt["artifact_digests"]
+    }
+    missing_or_mismatched = {
+        path: _json_artifact_content_digest(doc)
+        for path, doc in expected_docs.items()
+        if available.get(path) != _json_artifact_content_digest(doc)
+    }
+    if missing_or_mismatched:
         raise OutcomeLearningCliError(
-            f"{where} receipt does not contain every exact committed artifact byte digest: "
-            f"missing={dict(missing)}"
+            f"{where} receipt does not contain every exact committed artifact at its "
+            f"canonical path: missing_or_mismatched={missing_or_mismatched}"
         )
 
 
@@ -722,7 +746,9 @@ def _olv1_options(
         ),
         "rollback_plan": (
             "The single restore PATCH is already part of the two-call sequence; the "
-            "carrying PR is a HOLD and is never merged."
+            "carrying PR remains HOLD throughout the canary. Canary success alone "
+            "authorizes neither a Ready transition nor merge; only the later, complete, "
+            "independently accepted evidence chain may enter release review."
         ),
         "falsifier": (
             "Any second apply call, a non-identical restoration, or head movement "
@@ -1933,6 +1959,54 @@ def cmd_seal(
 # --------------------------------------------------------------------------- preflight
 
 
+def _verify_seal_commit_shape(
+    runner: Runner,
+    mastermind_root: str | None,
+    sealed_commit: str,
+    expectation_repo_path: str,
+    request_repo_path: str,
+) -> str:
+    """Require one direct-child preregistration commit with exactly two changed paths."""
+    expectation_path = _normalize_repo_path(
+        expectation_repo_path, where="expectation repo-path"
+    )
+    request_path = _normalize_repo_path(
+        request_repo_path, where="request repo-path"
+    )
+    if expectation_path == request_path:
+        raise OutcomeLearningCliError(
+            "expectation and request repo paths must be distinct preregistration paths"
+        )
+
+    parents_line = _git(
+        runner,
+        ["rev-list", "--parents", "-n", "1", sealed_commit],
+        cwd=mastermind_root,
+    )
+    fields = parents_line.split()
+    if len(fields) != 2 or fields[0] != sealed_commit:
+        raise OutcomeLearningCliError(
+            f"sealed_commit {sealed_commit} must have exactly one parent"
+        )
+    parent = fields[1]
+    if _SHA40_RE.fullmatch(parent) is None:
+        raise OutcomeLearningCliError("sealed_commit parent is not a 40-hex commit")
+
+    changed = _git(
+        runner,
+        ["diff", "--name-only", parent, sealed_commit, "--"],
+        cwd=mastermind_root,
+    ).splitlines()
+    observed_paths = sorted(path for path in changed if path)
+    expected_paths = sorted([expectation_path, request_path])
+    if observed_paths != expected_paths:
+        raise OutcomeLearningCliError(
+            "sealed_commit must change exactly the two preregistration paths: "
+            f"expected={expected_paths!r} observed={observed_paths!r}"
+        )
+    return parent
+
+
 def _committed_blob_content_sha256(
     runner: Runner,
     mastermind_root: str | None,
@@ -1998,11 +2072,17 @@ def cmd_preflight(
         )
 
     # Sol REQUEST_REPAIR (BLOCKER B, 2026-09-02): every local-identity check below
-    # runs BEFORE the first transport call. Two independent git calls PER artifact
-    # (blob-id resolution, then a separate content read) — see
-    # _committed_blob_content_sha256 — prove the supplied file's canonical content
-    # matches what the sealed commit actually contains; only THEN is the sealed
-    # request's own content trusted for the repo/branch/ancestry cross-checks.
+    # runs BEFORE the first transport call. The seal is one direct-child commit whose
+    # complete diff is exactly the expectation/request preregistration pair. Two
+    # independent git calls PER artifact (blob-id resolution, then a separate content
+    # read) then prove the supplied canonical content matches that exact commit.
+    sealed_parent = _verify_seal_commit_shape(
+        runner,
+        args.mastermind_root,
+        args.sealed_commit,
+        args.expectation_repo_path,
+        args.request_repo_path,
+    )
     expectation_blob_sha, expectation_content_sha256 = _committed_blob_content_sha256(
         runner,
         args.mastermind_root,
@@ -2032,9 +2112,6 @@ def cmd_preflight(
             f"{request_obj['branch']!r} — refusing before any transport call"
         )
 
-    sealed_parent = _git(
-        runner, ["rev-parse", f"{args.sealed_commit}^"], cwd=args.mastermind_root
-    )
     if sealed_parent != request_obj["expected_parent_head"]:
         raise OutcomeLearningCliError(
             f"sealed_commit {args.sealed_commit}'s parent {sealed_parent} does not "
@@ -2061,6 +2138,7 @@ def cmd_preflight(
     preflight = {
         "observed_at": observed_at,
         "repository": args.repo,
+        "branch": args.branch,
         "pr_number": pr["number"],
         "pr_url": pr["html_url"],
         "head_sha": head_sha,
@@ -2068,6 +2146,12 @@ def cmd_preflight(
         "original_title_sha256": original_title_sha256,
         "original_title_length": len(original_title),
         "sealed_commit_sha": args.sealed_commit,
+        "expectation_repo_path": _normalize_repo_path(
+            args.expectation_repo_path, where="expectation repo-path"
+        ),
+        "request_repo_path": _normalize_repo_path(
+            args.request_repo_path, where="request repo-path"
+        ),
         "expectation_blob_sha": expectation_blob_sha,
         "request_blob_sha": request_blob_sha,
         "expectation_content_sha256": expectation_content_sha256,
@@ -2080,6 +2164,102 @@ def cmd_preflight(
     print(f"head_equals_sealed_commit={preflight['head_equals_sealed_commit']}")
     print(f"seal_provenance={preflight['seal_provenance']}")
     return 0
+
+
+def _reacquire_sealed_episode(
+    runner: Runner,
+    mastermind_root: str | None,
+    preflight: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any], str]:
+    """Re-prove the complete sealed episode from commit:path before owner I/O."""
+    validate_preflight(preflight)
+    sealed_commit = preflight["sealed_commit_sha"]
+    parent = _verify_seal_commit_shape(
+        runner,
+        mastermind_root,
+        sealed_commit,
+        preflight["expectation_repo_path"],
+        preflight["request_repo_path"],
+    )
+    expectation_blob_sha, expectation_text = _resolve_committed_blob(
+        runner,
+        mastermind_root,
+        sealed_commit,
+        preflight["expectation_repo_path"],
+        where="effect-edge expectation",
+    )
+    request_blob_sha, request_text = _resolve_committed_blob(
+        runner,
+        mastermind_root,
+        sealed_commit,
+        preflight["request_repo_path"],
+        where="effect-edge request",
+    )
+    if expectation_blob_sha != preflight["expectation_blob_sha"]:
+        raise OutcomeLearningCliError(
+            "effect-edge expectation blob does not match preflight"
+        )
+    if request_blob_sha != preflight["request_blob_sha"]:
+        raise OutcomeLearningCliError(
+            "effect-edge request blob does not match preflight"
+        )
+    try:
+        expectation = json.loads(expectation_text)
+        request = json.loads(request_text)
+    except json.JSONDecodeError as exc:
+        raise OutcomeLearningCliError(
+            "effect-edge committed expectation/request is not valid JSON"
+        ) from exc
+    validate_expectation(expectation)
+    validate_canary_request(request)
+    expectation_digest = canonical_digest(expectation).removeprefix("sha256:")
+    request_digest = canonical_digest(request).removeprefix("sha256:")
+    if expectation_digest != preflight["expectation_content_sha256"]:
+        raise OutcomeLearningCliError(
+            "effect-edge expectation digest does not match preflight"
+        )
+    if request_digest != preflight["request_content_sha256"]:
+        raise OutcomeLearningCliError(
+            "effect-edge request digest does not match preflight"
+        )
+    if request["expectation_sealed_hash"] != expectation["sealed_hash"]:
+        raise OutcomeLearningCliError(
+            "effect-edge request does not bind the committed expectation"
+        )
+    if request["operation_key"] != expectation["operation_key"]:
+        raise OutcomeLearningCliError(
+            "effect-edge request/expectation operation_key mismatch"
+        )
+    if request["expected_parent_head"] != parent:
+        raise OutcomeLearningCliError(
+            "effect-edge sealed parent does not match the committed request"
+        )
+    if request["repository"] != preflight["repository"]:
+        raise OutcomeLearningCliError(
+            "effect-edge request repository does not match preflight"
+        )
+    if request["branch"] != preflight["branch"]:
+        raise OutcomeLearningCliError(
+            "effect-edge request branch does not match preflight"
+        )
+    if expectation["context"]["repository"] != request["repository"]:
+        raise OutcomeLearningCliError(
+            "effect-edge expectation repository does not match the request"
+        )
+    if expectation["chosen_action"] != _OPT_CANARY:
+        raise OutcomeLearningCliError(
+            "effect-edge expectation did not select the OL-V1 canary"
+        )
+    if (
+        preflight["head_sha"] != sealed_commit
+        or preflight["head_equals_sealed_commit"] is not True
+    ):
+        raise OutcomeLearningCliError(
+            "effect-edge preflight head is not the exact sealed commit"
+        )
+    if preflight["base_ref"] != "master":
+        raise OutcomeLearningCliError("effect-edge preflight base_ref must be master")
+    return dict(expectation), dict(request), parent
 
 
 # --------------------------------------------------------------------------- canary
@@ -2148,6 +2328,323 @@ _JOURNAL_TERMINAL_STATES = frozenset(
 )
 
 
+_JOURNAL_SCHEMA = "mastermind.olv1_canary_journal.v1"
+_JOURNAL_STATES = frozenset(
+    {
+        "PREPARED",
+        "APPLY_SENT",
+        "APPLIED_READBACK",
+        "RESTORE_SENT",
+        "RESTORED",
+        "EFFECT_UNKNOWN",
+        "INVALIDATED_BEFORE_EFFECT",
+    }
+)
+_JOURNAL_REQUIRED = {
+    "schema",
+    "state",
+    "bound_identity",
+    "selector_observation",
+    "effect_attempts",
+    "effect_calls",
+    "reconciliation",
+    "pre_effect_observation",
+    "recorded_at",
+}
+_JOURNAL_IDENTITY_REQUIRED = {
+    "repository",
+    "branch",
+    "operation_key",
+    "expectation_sealed_hash",
+    "sealed_commit_sha",
+    "expected_parent_head",
+    "preflight_pr_number",
+    "canary_token",
+    "request_digest",
+}
+_SELECTOR_OBSERVATION_REQUIRED = {
+    "observed_at",
+    "match_count",
+    "matched_pr_number",
+}
+_RECONCILIATION_REQUIRED = {
+    "attempted",
+    "observed_title_sha256",
+    "observed_head_sha",
+    "observed_at",
+}
+
+
+def _closed_journal_mapping(
+    value: Any, *, required: set[str], where: str
+) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        raise OutcomeLearningCliError(f"{where} must be a mapping")
+    keys = set(value)
+    missing = required - keys
+    extra = keys - required
+    if missing or extra:
+        raise OutcomeLearningCliError(
+            f"{where} has invalid fields missing={sorted(missing)} unknown={sorted(extra)}"
+        )
+    return value
+
+
+def _make_attempt(
+    seq: int,
+    kind: str,
+    endpoint: str,
+    payload_title: str,
+    requested_at: str,
+) -> dict[str, Any]:
+    return {
+        "seq": seq,
+        "kind": kind,
+        "requested_at": requested_at,
+        "method": "PATCH",
+        "endpoint": endpoint,
+        "payload_title_sha256": _sha256_hex_text(payload_title),
+        "payload_title_length": len(payload_title),
+    }
+
+
+def _journal_record(
+    *,
+    state: str,
+    bound_identity: Mapping[str, Any],
+    recorded_at: str,
+    selector_observation: Mapping[str, Any] | None = None,
+    effect_attempts: Sequence[Mapping[str, Any]] = (),
+    effect_calls: Sequence[Mapping[str, Any]] = (),
+    reconciliation: Mapping[str, Any] | None = None,
+    pre_effect_observation: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    record = {
+        "schema": _JOURNAL_SCHEMA,
+        "state": state,
+        "bound_identity": dict(bound_identity),
+        "selector_observation": (
+            dict(selector_observation) if selector_observation is not None else None
+        ),
+        "effect_attempts": [dict(item) for item in effect_attempts],
+        "effect_calls": [dict(item) for item in effect_calls],
+        "reconciliation": dict(reconciliation) if reconciliation is not None else None,
+        "pre_effect_observation": (
+            dict(pre_effect_observation) if pre_effect_observation is not None else None
+        ),
+        "recorded_at": recorded_at,
+    }
+    _validate_journal_record(record)
+    return record
+
+
+def _validate_journal_record(record: Mapping[str, Any]) -> Mapping[str, Any]:
+    item = _closed_journal_mapping(
+        record, required=_JOURNAL_REQUIRED, where="journal"
+    )
+    if item["schema"] != _JOURNAL_SCHEMA:
+        raise OutcomeLearningCliError("journal schema is unsupported")
+    state = item["state"]
+    if state not in _JOURNAL_STATES:
+        raise OutcomeLearningCliError(f"unknown journal state {state!r}")
+    identity = _closed_journal_mapping(
+        item["bound_identity"],
+        required=_JOURNAL_IDENTITY_REQUIRED,
+        where="journal.bound_identity",
+    )
+    for field in ("repository", "branch", "operation_key", "canary_token"):
+        if not isinstance(identity[field], str) or not identity[field]:
+            raise OutcomeLearningCliError(
+                f"journal.bound_identity.{field} must be non-empty text"
+            )
+    for field in ("sealed_commit_sha", "expected_parent_head"):
+        if _SHA40_RE.fullmatch(str(identity[field])) is None:
+            raise OutcomeLearningCliError(
+                f"journal.bound_identity.{field} must be 40 lowercase hex"
+            )
+    if not isinstance(identity["preflight_pr_number"], int):
+        raise OutcomeLearningCliError(
+            "journal.bound_identity.preflight_pr_number must be an integer"
+        )
+    for field in ("expectation_sealed_hash", "request_digest"):
+        value = str(identity[field])
+        if not value.startswith("sha256:") and field == "expectation_sealed_hash":
+            raise OutcomeLearningCliError(
+                "journal expectation_sealed_hash must be a sha256 digest"
+            )
+    if _SHA256_RE.fullmatch(str(identity["request_digest"])) is None:
+        raise OutcomeLearningCliError(
+            "journal bound request_digest must be 64 lowercase hex"
+        )
+    recorded_time = _parse_iso_utc(str(item["recorded_at"]))
+    selector = item["selector_observation"]
+    if selector is not None:
+        selector = _closed_journal_mapping(
+            selector,
+            required=_SELECTOR_OBSERVATION_REQUIRED,
+            where="journal.selector_observation",
+        )
+        selector_time = _parse_iso_utc(str(selector["observed_at"]))
+        if not isinstance(selector["match_count"], int) or selector["match_count"] < 0:
+            raise OutcomeLearningCliError(
+                "journal selector match_count must be a nonnegative integer"
+            )
+        matched = selector["matched_pr_number"]
+        if matched is not None and (not isinstance(matched, int) or matched <= 0):
+            raise OutcomeLearningCliError(
+                "journal selector matched_pr_number must be null or positive"
+            )
+        if selector_time > recorded_time:
+            raise OutcomeLearningCliError(
+                "journal selector observation cannot postdate the journal record"
+            )
+
+    attempts = validate_effect_attempts(item["effect_attempts"])
+    calls = validate_effect_calls(item["effect_calls"])
+    if len(calls) > len(attempts):
+        raise OutcomeLearningCliError(
+            "journal completed calls cannot exceed pre-PATCH attempts"
+        )
+    for index, call in enumerate(calls):
+        attempt = attempts[index]
+        for field in (
+            "seq",
+            "kind",
+            "requested_at",
+            "method",
+            "endpoint",
+            "payload_title_sha256",
+        ):
+            if call[field] != attempt[field]:
+                raise OutcomeLearningCliError(
+                    f"journal call {index + 1} does not match its pre-PATCH attempt"
+                )
+    pre_effect = item["pre_effect_observation"]
+    if pre_effect is not None:
+        pre_effect = _closed_journal_mapping(
+            pre_effect,
+            required={
+                "observed_head_sha",
+                "observed_title_sha256",
+                "observed_title_length",
+                "observed_at",
+            },
+            where="journal.pre_effect_observation",
+        )
+        if _SHA40_RE.fullmatch(str(pre_effect["observed_head_sha"])) is None:
+            raise OutcomeLearningCliError(
+                "journal pre-effect head must be 40 lowercase hex"
+            )
+        if _SHA256_RE.fullmatch(str(pre_effect["observed_title_sha256"])) is None:
+            raise OutcomeLearningCliError(
+                "journal pre-effect title hash must be 64 lowercase hex"
+            )
+        if (
+            not isinstance(pre_effect["observed_title_length"], int)
+            or pre_effect["observed_title_length"] < 0
+        ):
+            raise OutcomeLearningCliError(
+                "journal pre-effect title length must be nonnegative"
+            )
+        pre_effect_time = _parse_iso_utc(str(pre_effect["observed_at"]))
+        if pre_effect_time > recorded_time:
+            raise OutcomeLearningCliError(
+                "journal pre-effect observation cannot postdate the journal record"
+            )
+
+    reconciliation = item["reconciliation"]
+    if reconciliation is not None:
+        reconciliation = _closed_journal_mapping(
+            reconciliation,
+            required=_RECONCILIATION_REQUIRED,
+            where="journal.reconciliation",
+        )
+        if reconciliation["attempted"] is not True:
+            raise OutcomeLearningCliError(
+                "journal reconciliation.attempted must be True"
+            )
+        for field, pattern in (
+            ("observed_title_sha256", _SHA256_RE),
+            ("observed_head_sha", _SHA40_RE),
+        ):
+            value = reconciliation[field]
+            if value is not None and pattern.fullmatch(str(value)) is None:
+                raise OutcomeLearningCliError(
+                    f"journal reconciliation.{field} has invalid shape"
+                )
+        if _parse_iso_utc(str(reconciliation["observed_at"])) > recorded_time:
+            raise OutcomeLearningCliError(
+                "journal reconciliation cannot postdate the journal record"
+            )
+    selector_single = bool(
+        selector is not None
+        and selector["match_count"] == 1
+        and selector["matched_pr_number"] == identity["preflight_pr_number"]
+    )
+    if state == "PREPARED":
+        valid = (
+            selector is None
+            and not attempts
+            and not calls
+            and reconciliation is None
+            and pre_effect is None
+        )
+    elif state == "INVALIDATED_BEFORE_EFFECT":
+        valid = (
+            selector is not None
+            and not attempts
+            and not calls
+            and reconciliation is None
+            and (pre_effect is None or selector_single)
+            and (pre_effect is not None or not selector_single)
+        )
+    elif state == "APPLY_SENT":
+        valid = (
+            selector_single
+            and pre_effect is not None
+            and len(attempts) == 1
+            and not calls
+            and reconciliation is None
+        )
+    elif state == "APPLIED_READBACK":
+        valid = (
+            selector_single
+            and pre_effect is not None
+            and len(attempts) == 1
+            and len(calls) == 1
+            and reconciliation is None
+        )
+    elif state == "RESTORE_SENT":
+        valid = (
+            selector_single
+            and pre_effect is not None
+            and len(attempts) == 2
+            and len(calls) == 1
+            and reconciliation is None
+        )
+    elif state == "RESTORED":
+        valid = (
+            selector_single
+            and pre_effect is not None
+            and len(attempts) == 2
+            and len(calls) == 2
+            and reconciliation is None
+        )
+    else:
+        valid = (
+            selector_single
+            and pre_effect is not None
+            and len(attempts) in {1, 2}
+            and len(calls) <= len(attempts)
+            and reconciliation is not None
+        )
+    if not valid:
+        raise OutcomeLearningCliError(
+            f"journal state {state} violates its closed required/forbidden shape"
+        )
+    return item
+
+
 def _canonical_journal_identity(
     request: Mapping[str, Any], preflight: Mapping[str, Any]
 ) -> dict[str, Any]:
@@ -2192,6 +2689,7 @@ def _reserve_journal(journal_path: Path, record: dict[str, Any]) -> None:
     (exclusive create) is the ENTIRE single-shot guard: whichever of two racing
     invocations wins this call proceeds, and the other sees ``FileExistsError``
     unconditionally — regardless of what state a pre-existing reservation is in."""
+    _validate_journal_record(record)
     journal_path.parent.mkdir(parents=True, exist_ok=True, mode=stat.S_IRWXU)
     try:
         fd = os.open(str(journal_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
@@ -2209,6 +2707,7 @@ def _advance_journal(journal_path: Path, record: dict[str, Any]) -> None:
     """Atomically advance a reservation already on disk: write a temp file in the
     SAME directory, then ``os.replace`` over the reservation — a concurrent reader
     (or a crash) never observes a partially-written state."""
+    _validate_journal_record(record)
     tmp_path = journal_path.with_name(journal_path.name + f".tmp{os.getpid()}")
     tmp_path.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     os.replace(str(tmp_path), str(journal_path))
@@ -2222,46 +2721,20 @@ def cmd_canary(
     clock: Clock | None = None,
     journal_root: Path | None = None,
 ) -> int:
-    """Apply-then-restore, no retry, with one canonical host-owned journal."""
+    """Apply once, restore once, and persist a closed single-shot journal."""
     runner = runner or SubprocessRunner()
     transport = transport or GhCliTransport(runner)
 
     preflight = _read_json(args.preflight)
     validate_preflight(preflight)
-
-    # Reacquire the request from the exact committed blob before any transport call.
-    cat_file = runner.run(
-        ["git", "cat-file", "-p", preflight["request_blob_sha"]],
-        cwd=args.mastermind_root,
+    expectation, request, _sealed_parent = _reacquire_sealed_episode(
+        runner, args.mastermind_root, preflight
     )
-    if cat_file.returncode != 0:
+    if request["expectation_sealed_hash"] != expectation["sealed_hash"]:
         raise OutcomeLearningCliError(
-            f"could not reacquire the committed request blob "
-            f"{preflight['request_blob_sha']}: {cat_file.stderr.strip()}"
+            "effect-edge committed request/expectation binding mismatch"
         )
-    try:
-        request = json.loads(cat_file.stdout)
-    except json.JSONDecodeError as exc:
-        raise OutcomeLearningCliError(
-            "reacquired committed request blob is not valid JSON"
-        ) from exc
-    validate_canary_request(request)
     reacquired_digest = canonical_digest(request).removeprefix("sha256:")
-    if reacquired_digest != preflight["request_content_sha256"]:
-        raise OutcomeLearningCliError(
-            "reacquired committed request content does not match "
-            f"preflight.request_content_sha256 (reacquired={reacquired_digest}, "
-            f"preflight={preflight['request_content_sha256']})"
-        )
-    if request["repository"] != preflight["repository"]:
-        raise OutcomeLearningCliError(
-            f"reacquired request.repository {request['repository']!r} does not match "
-            f"preflight.repository {preflight['repository']!r}"
-        )
-    if preflight["head_equals_sealed_commit"] is not True:
-        raise OutcomeLearningCliError(
-            "refusing to canary: preflight.head_equals_sealed_commit is not True"
-        )
 
     journal_path = _canonical_journal_path(
         request, preflight, journal_root=journal_root
@@ -2274,18 +2747,17 @@ def cmd_canary(
     prepared_at = _event_time(clock, after=preflight["observed_at"])
     _reserve_journal(
         journal_path,
-        {
-            "state": "PREPARED",
-            "bound_identity": bound_identity,
-            "recorded_at": prepared_at,
-        },
+        _journal_record(
+            state="PREPARED",
+            bound_identity=bound_identity,
+            recorded_at=prepared_at,
+        ),
     )
 
     endpoint = f"repos/{request['repository']}/pulls/{preflight['pr_number']}"
     original_sha = preflight["original_title_sha256"]
     sealed_head = preflight["sealed_commit_sha"]
 
-    # Re-run the exact owner selector after reserving the one lawful carrier.
     _, prs = transport.get(
         f"repos/{request['repository']}/pulls?head="
         f"{request['repository'].split('/')[0]}:{request['branch']}&state=open"
@@ -2296,18 +2768,25 @@ def cmd_canary(
         and len(prs) == 1
         and prs[0].get("number") == preflight["pr_number"]
     )
+    selector_observation = {
+        "observed_at": selector_at,
+        "match_count": len(prs) if isinstance(prs, list) else 0,
+        "matched_pr_number": (
+            prs[0].get("number")
+            if isinstance(prs, list) and len(prs) == 1
+            else None
+        ),
+    }
     if not selector_ok:
         terminal_at = _event_time(clock, after=selector_at)
         _advance_journal(
             journal_path,
-            {
-                "state": "INVALIDATED_BEFORE_EFFECT",
-                "bound_identity": bound_identity,
-                "effect_calls": [],
-                "reconciliation": None,
-                "pre_effect_observation": None,
-                "recorded_at": terminal_at,
-            },
+            _journal_record(
+                state="INVALIDATED_BEFORE_EFFECT",
+                bound_identity=bound_identity,
+                selector_observation=selector_observation,
+                recorded_at=terminal_at,
+            ),
         )
         print(
             "effect_state=INVALIDATED_BEFORE_EFFECT (owner branch selector no longer "
@@ -2315,7 +2794,6 @@ def cmd_canary(
         )
         return 6
 
-    # Observe the exact PR once more immediately before the first possible PATCH.
     _, current = transport.get(endpoint)
     freshness_at = _event_time(clock, after=selector_at)
     live_head = current["head"]["sha"]
@@ -2331,14 +2809,13 @@ def cmd_canary(
         terminal_at = _event_time(clock, after=freshness_at)
         _advance_journal(
             journal_path,
-            {
-                "state": "INVALIDATED_BEFORE_EFFECT",
-                "bound_identity": bound_identity,
-                "effect_calls": [],
-                "reconciliation": None,
-                "pre_effect_observation": pre_effect_observation,
-                "recorded_at": terminal_at,
-            },
+            _journal_record(
+                state="INVALIDATED_BEFORE_EFFECT",
+                bound_identity=bound_identity,
+                selector_observation=selector_observation,
+                pre_effect_observation=pre_effect_observation,
+                recorded_at=terminal_at,
+            ),
         )
         print(
             "effect_state=INVALIDATED_BEFORE_EFFECT "
@@ -2348,16 +2825,24 @@ def cmd_canary(
 
     original_title = live_title
     applied_title = original_title + " " + request["canary_token"]
-    applied_sha = _sha256_hex_text(applied_title)
     apply_requested_at = _event_time(clock, after=freshness_at)
+    apply_attempt = _make_attempt(
+        1,
+        "TITLE_APPLY",
+        endpoint,
+        applied_title,
+        apply_requested_at,
+    )
     _advance_journal(
         journal_path,
-        {
-            "state": "APPLY_SENT",
-            "bound_identity": bound_identity,
-            "pre_effect_observation": pre_effect_observation,
-            "recorded_at": apply_requested_at,
-        },
+        _journal_record(
+            state="APPLY_SENT",
+            bound_identity=bound_identity,
+            selector_observation=selector_observation,
+            effect_attempts=[apply_attempt],
+            pre_effect_observation=pre_effect_observation,
+            recorded_at=apply_requested_at,
+        ),
     )
     try:
         status1, applied_doc = transport.patch(endpoint, {"title": applied_title})
@@ -2366,7 +2851,7 @@ def cmd_canary(
             1,
             "TITLE_APPLY",
             endpoint,
-            applied_sha,
+            apply_attempt["payload_title_sha256"],
             status1,
             applied_doc,
             requested_at=apply_requested_at,
@@ -2379,63 +2864,83 @@ def cmd_canary(
         terminal_at = _event_time(clock, after=reconciliation["observed_at"])
         _advance_journal(
             journal_path,
-            {
-                "state": "EFFECT_UNKNOWN",
-                "bound_identity": bound_identity,
-                "effect_calls": [],
-                "reconciliation": reconciliation,
-                "pre_effect_observation": pre_effect_observation,
-                "recorded_at": terminal_at,
-            },
+            _journal_record(
+                state="EFFECT_UNKNOWN",
+                bound_identity=bound_identity,
+                selector_observation=selector_observation,
+                effect_attempts=[apply_attempt],
+                reconciliation=reconciliation,
+                pre_effect_observation=pre_effect_observation,
+                recorded_at=terminal_at,
+            ),
         )
         print("effect_state=EFFECT_UNKNOWN (apply raised)")
         return 3
 
     _advance_journal(
         journal_path,
-        {
-            "state": "APPLIED_READBACK",
-            "bound_identity": bound_identity,
-            "effect_calls": [call1],
-            "pre_effect_observation": pre_effect_observation,
-            "recorded_at": apply_observed_at,
-        },
+        _journal_record(
+            state="APPLIED_READBACK",
+            bound_identity=bound_identity,
+            selector_observation=selector_observation,
+            effect_attempts=[apply_attempt],
+            effect_calls=[call1],
+            pre_effect_observation=pre_effect_observation,
+            recorded_at=apply_observed_at,
+        ),
     )
     restore_requested_at = _event_time(clock, after=apply_observed_at)
+    restore_attempt = _make_attempt(
+        2,
+        "TITLE_RESTORE",
+        endpoint,
+        original_title,
+        restore_requested_at,
+    )
+    attempts = [apply_attempt, restore_attempt]
     _advance_journal(
         journal_path,
-        {
-            "state": "RESTORE_SENT",
-            "bound_identity": bound_identity,
-            "effect_calls": [call1],
-            "pre_effect_observation": pre_effect_observation,
-            "recorded_at": restore_requested_at,
-        },
+        _journal_record(
+            state="RESTORE_SENT",
+            bound_identity=bound_identity,
+            selector_observation=selector_observation,
+            effect_attempts=attempts,
+            effect_calls=[call1],
+            pre_effect_observation=pre_effect_observation,
+            recorded_at=restore_requested_at,
+        ),
     )
     try:
-        restore_payload_sha = _sha256_hex_text(original_title)
         status2, restored_doc = transport.patch(endpoint, {"title": original_title})
         restore_observed_at = _event_time(clock, after=restore_requested_at)
         call2 = _make_call(
             2,
             "TITLE_RESTORE",
             endpoint,
-            restore_payload_sha,
+            restore_attempt["payload_title_sha256"],
             status2,
             restored_doc,
             requested_at=restore_requested_at,
             observed_at=restore_observed_at,
         )
+        effect_calls = [call1, call2]
         clean = (
-            call1["readback"]["title_sha256"] == applied_sha
+            call1["readback"]["title_sha256"]
+            == apply_attempt["payload_title_sha256"]
             and call1["readback"]["head_sha"] == sealed_head
             and call2["readback"]["title_sha256"] == original_sha
             and call2["readback"]["head_sha"] == sealed_head
         )
-        effect_calls = [call1, call2]
-        state = "RESTORED" if clean else "EFFECT_UNKNOWN"
-        reconciliation = None
-        evidence_at = restore_observed_at
+        if clean:
+            state = "RESTORED"
+            reconciliation = None
+            evidence_at = restore_observed_at
+        else:
+            reconciliation = _reconcile(
+                transport, endpoint, clock=clock, after=restore_observed_at
+            )
+            state = "EFFECT_UNKNOWN"
+            evidence_at = reconciliation["observed_at"]
     except Exception:  # noqa: BLE001 - restore may have crossed the effect boundary
         reconciliation = _reconcile(
             transport, endpoint, clock=clock, after=restore_requested_at
@@ -2447,20 +2952,23 @@ def cmd_canary(
     terminal_at = _event_time(clock, after=evidence_at)
     _advance_journal(
         journal_path,
-        {
-            "state": state,
-            "bound_identity": bound_identity,
-            "effect_calls": effect_calls,
-            "reconciliation": reconciliation,
-            "pre_effect_observation": pre_effect_observation,
-            "recorded_at": terminal_at,
-        },
+        _journal_record(
+            state=state,
+            bound_identity=bound_identity,
+            selector_observation=selector_observation,
+            effect_attempts=attempts,
+            effect_calls=effect_calls,
+            reconciliation=reconciliation,
+            pre_effect_observation=pre_effect_observation,
+            recorded_at=terminal_at,
+        ),
     )
     if state == "EFFECT_UNKNOWN":
         print("effect_state=EFFECT_UNKNOWN")
         return 3
     print("effect_state=APPLIED_AND_RESTORED")
     return 0
+
 
 # --------------------------------------------------------------------------- outcome
 
@@ -2473,49 +2981,184 @@ _JOURNAL_STATE_TO_EFFECT_STATE = {
 }
 
 
-def _derive_effect_edge(journal: Mapping[str, Any]) -> dict[str, bool]:
-    """BLOCKER F: which Blocker B/C revalidations actually happened for this
-    episode, honestly derived from the journal's own recorded control flow —
-    ``cmd_canary`` raises BEFORE ever reserving a journal if request reacquisition,
-    its digest check, or the repository cross-check fail, so any journal that exists
-    at all proves those three; the owner-selector re-run is the first step that can
-    leave a journal in INVALIDATED_BEFORE_EFFECT with no pre-effect observation."""
-    state = journal["state"]
-    selector_repeated_single_pr = not (
-        state == "INVALIDATED_BEFORE_EFFECT" and journal.get("pre_effect_observation") is None
+def _owner_rename_evidence(
+    *,
+    transport: GhTransport,
+    preflight: Mapping[str, Any],
+    effect_attempts: Sequence[Mapping[str, Any]],
+    effect_calls: Sequence[Mapping[str, Any]],
+    observed_at: str,
+) -> list[dict[str, Any]]:
+    """Bind attempted title transitions to complete GitHub issue-event evidence."""
+    if not effect_attempts:
+        return []
+    endpoint = (
+        f"repos/{preflight['repository']}/issues/{preflight['pr_number']}"
+        "/events?per_page=100"
     )
-    parent_proven = True
-    request_reacquired_from_sealed_commit = True
-    request_digest_matched = True
-    bindings_verified = (
-        parent_proven
-        and request_reacquired_from_sealed_commit
-        and request_digest_matched
-        and selector_repeated_single_pr
+    _, payload = transport.get(endpoint)
+    if not isinstance(payload, list):
+        raise OutcomeLearningCliError("GitHub issue-events response was not a list")
+    if len(payload) >= 100:
+        raise OutcomeLearningCliError(
+            "GitHub issue-events page is full; rename-event evidence may be incomplete"
+        )
+
+    window_start = _parse_iso_utc(str(effect_attempts[0]["requested_at"]))
+    # Owner events can become observable just after the local terminal journal write;
+    # bind through the read-only owner observation rather than assuming zero clock lag.
+    window_end = _parse_iso_utc(str(observed_at))
+    candidates: list[dict[str, Any]] = []
+    for raw in payload:
+        if not isinstance(raw, Mapping) or raw.get("event") != "renamed":
+            continue
+        event_id = raw.get("id")
+        actor = raw.get("actor")
+        rename = raw.get("rename")
+        created_at = raw.get("created_at")
+        if (
+            type(event_id) is not int
+            or event_id <= 0
+            or not isinstance(actor, Mapping)
+            or not isinstance(actor.get("login"), str)
+            or not actor.get("login")
+            or not isinstance(rename, Mapping)
+            or not isinstance(rename.get("from"), str)
+            or not isinstance(rename.get("to"), str)
+            or not isinstance(created_at, str)
+        ):
+            raise OutcomeLearningCliError("GitHub rename event has an invalid shape")
+        created = _parse_iso_utc(created_at)
+        if window_start <= created <= window_end:
+            candidates.append(
+                {
+                    "id": event_id,
+                    "actor_login": actor["login"],
+                    "created_at": created_at,
+                    "created": created,
+                    "from": rename["from"],
+                    "to": rename["to"],
+                }
+            )
+    candidates.sort(key=lambda item: (item["created"], item["id"]))
+    if len({item["id"] for item in candidates}) != len(candidates):
+        raise OutcomeLearningCliError("GitHub rename event ids are not unique")
+
+    evidence: list[dict[str, Any]] = []
+    previous_sha = preflight["original_title_sha256"]
+    previous_length = preflight["original_title_length"]
+    cursor = 0
+    selected_ids: set[int] = set()
+    for attempt in effect_attempts:
+        matches: list[tuple[int, dict[str, Any]]] = []
+        requested = _parse_iso_utc(str(attempt["requested_at"]))
+        for index in range(cursor, len(candidates)):
+            event = candidates[index]
+            if event["created"] < requested:
+                continue
+            if (
+                _sha256_hex_text(event["from"]) == previous_sha
+                and len(event["from"]) == previous_length
+                and _sha256_hex_text(event["to"])
+                == attempt["payload_title_sha256"]
+                and len(event["to"]) == attempt["payload_title_length"]
+            ):
+                matches.append((index, event))
+        if not matches:
+            break
+        if len(matches) != 1:
+            raise OutcomeLearningCliError(
+                f"GitHub owner evidence is ambiguous for {attempt['kind']}"
+            )
+        index, event = matches[0]
+        selected_ids.add(event["id"])
+        evidence.append(
+            {
+                "schema": OWNER_RENAME_EVENT_SCHEMA,
+                "repository": preflight["repository"],
+                "pr_number": preflight["pr_number"],
+                "event_id": event["id"],
+                "actor_login": event["actor_login"],
+                "transition": attempt["kind"],
+                "created_at": event["created_at"],
+                "observed_at": observed_at,
+                "from_title_sha256": _sha256_hex_text(event["from"]),
+                "from_title_length": len(event["from"]),
+                "to_title_sha256": _sha256_hex_text(event["to"]),
+                "to_title_length": len(event["to"]),
+                "privacy_class": PRIVACY_CLASS,
+            }
+        )
+        previous_sha = attempt["payload_title_sha256"]
+        previous_length = attempt["payload_title_length"]
+        cursor = index + 1
+
+    unbound = [item["id"] for item in candidates if item["id"] not in selected_ids]
+    if unbound:
+        raise OutcomeLearningCliError(
+            f"unbound GitHub rename events occurred inside the effect window: {unbound}"
+        )
+    if len(evidence) < len(effect_calls):
+        raise OutcomeLearningCliError(
+            "GitHub owner rename-event evidence is missing for a completed effect call"
+        )
+    return evidence
+
+def _derive_effect_edge(
+    journal: Mapping[str, Any],
+    owner_effect_evidence: Sequence[Mapping[str, Any]],
+) -> dict[str, bool]:
+    selector = journal.get("selector_observation")
+    selector_repeated_single_pr = bool(
+        isinstance(selector, Mapping)
+        and selector.get("match_count") == 1
+        and selector.get("matched_pr_number")
+        == journal["bound_identity"]["preflight_pr_number"]
     )
-    return {
-        "parent_proven": parent_proven,
-        "request_reacquired_from_sealed_commit": request_reacquired_from_sealed_commit,
-        "request_digest_matched": request_digest_matched,
+    owner_events_verified = len(owner_effect_evidence) >= len(
+        journal.get("effect_calls", [])
+    )
+    checks = {
+        "parent_proven": True,
+        "expectation_reacquired_from_sealed_commit": True,
+        "expectation_digest_matched": True,
+        "request_reacquired_from_sealed_commit": True,
+        "request_digest_matched": True,
         "selector_repeated_single_pr": selector_repeated_single_pr,
-        "bindings_verified": bindings_verified,
+        "owner_rename_events_verified": owner_events_verified,
     }
+    return {**checks, "bindings_verified": all(checks.values())}
 
 
 def cmd_outcome(
     args: argparse.Namespace,
     *,
+    runner: Runner | None = None,
+    transport: GhTransport | None = None,
     clock: Clock | None = None,
     journal_root: Path | None = None,
 ) -> int:
-    """Assemble an outcome only from the canonical terminal journal identity."""
+    """Assemble an outcome from sealed bytes, a closed journal, and owner events."""
+    runner = runner or SubprocessRunner()
+    transport = transport or GhCliTransport(runner)
     preflight = _read_json(args.preflight)
-    expectation = _read_json(args.expectation)
-    request = _read_json(args.request)
+    supplied_expectation = _read_json(args.expectation)
+    supplied_request = _read_json(args.request)
     validate_preflight(preflight)
-    validate_expectation(expectation)
-    validate_canary_request(request)
+    validate_expectation(supplied_expectation)
+    validate_canary_request(supplied_request)
 
+    expectation, request, _sealed_parent = _reacquire_sealed_episode(
+        runner, args.mastermind_root, preflight
+    )
+    if canonical_digest(expectation) != canonical_digest(supplied_expectation):
+        raise OutcomeLearningCliError(
+            "supplied expectation does not equal the exact committed expectation"
+        )
+    if canonical_digest(request) != canonical_digest(supplied_request):
+        raise OutcomeLearningCliError(
+            "supplied request does not equal the exact committed request"
+        )
     if request["operation_key"] != expectation["operation_key"]:
         raise OutcomeLearningCliError(
             "request.operation_key does not match expectation.operation_key"
@@ -2524,43 +3167,44 @@ def cmd_outcome(
         raise OutcomeLearningCliError(
             "request.expectation_sealed_hash does not match expectation.sealed_hash"
         )
-    request_digest = canonical_digest(request).removeprefix("sha256:")
-    expectation_digest = canonical_digest(expectation).removeprefix("sha256:")
-    if preflight["request_content_sha256"] != request_digest:
-        raise OutcomeLearningCliError(
-            "preflight.request_content_sha256 does not match the supplied request"
-        )
-    if preflight["expectation_content_sha256"] != expectation_digest:
-        raise OutcomeLearningCliError(
-            "preflight.expectation_content_sha256 does not match the supplied expectation"
-        )
 
+    request_digest = canonical_digest(request).removeprefix("sha256:")
     journal_path = _canonical_journal_path(
         request, preflight, journal_root=journal_root
     )
     journal = _read_json(journal_path)
+    _validate_journal_record(journal)
     expected_identity = _canonical_journal_identity(request, preflight)
     if expected_identity["request_digest"] != request_digest:
         raise OutcomeLearningCliError(
             "canonical journal request identity does not match the supplied request"
         )
-    if journal.get("bound_identity") != expected_identity:
+    if journal["bound_identity"] != expected_identity:
         raise OutcomeLearningCliError(
             "canonical journal bound_identity does not match the supplied episode"
         )
 
-    journal_state = journal.get("state")
+    journal_state = journal["state"]
     if journal_state not in _JOURNAL_TERMINAL_STATES:
         raise OutcomeLearningCliError(
-            f"journal is in non-terminal state {journal_state!r} — refusing "
-            "(a crash mid-sequence is never replayed or interpreted as an outcome)"
+            f"journal is in non-terminal state {journal_state!r} — refusing"
         )
     effect_state = _JOURNAL_STATE_TO_EFFECT_STATE[journal_state]
-    effect_calls = journal.get("effect_calls", [])
-    reconciliation = journal.get("reconciliation")
-    pre_effect_observation = journal.get("pre_effect_observation")
+    effect_attempts = list(journal["effect_attempts"])
+    effect_calls = list(journal["effect_calls"])
+    reconciliation = journal["reconciliation"]
+    pre_effect_observation = journal["pre_effect_observation"]
     original_sha = preflight["original_title_sha256"]
     sealed_head = preflight["sealed_commit_sha"]
+
+    owner_observed_at = _event_time(clock, after=journal["recorded_at"])
+    owner_effect_evidence = _owner_rename_evidence(
+        transport=transport,
+        preflight=preflight,
+        effect_attempts=effect_attempts,
+        effect_calls=effect_calls,
+        observed_at=owner_observed_at,
+    )
 
     if effect_state == "INVALIDATED_BEFORE_EFFECT":
         if pre_effect_observation is None:
@@ -2608,8 +3252,7 @@ def cmd_outcome(
     elif effect_calls:
         last = effect_calls[-1]
         restoration = {
-            "byte_identical": last["readback"]["title_sha256"] == original_sha,
-            "prestate_title_sha256": original_sha,
+            "byte_identical": last["readback"]["title_sha256"] == original_sha,            "prestate_title_sha256": original_sha,
             "poststate_title_sha256": last["readback"]["title_sha256"],
             "head_unchanged": last["readback"]["head_sha"] == sealed_head,
         }
@@ -2624,17 +3267,20 @@ def cmd_outcome(
     outcome_pre_effect_observation = (
         pre_effect_observation if effect_state == "INVALIDATED_BEFORE_EFFECT" else None
     )
+    outcome_recorded_at = _event_time(clock, after=owner_observed_at)
     outcome = build_outcome(
         operation_key=expectation["operation_key"],
         expectation_sealed_hash=expectation["sealed_hash"],
         request=request,
         preflight=preflight,
+        effect_attempts=effect_attempts,
         effect_calls=effect_calls,
+        owner_effect_evidence=owner_effect_evidence,
         effect_state=effect_state,
         restoration=restoration,
         pre_effect_observation=outcome_pre_effect_observation,
-        effect_edge=_derive_effect_edge(journal),
-        recorded_at=_event_time(clock, after=journal["recorded_at"]),
+        effect_edge=_derive_effect_edge(journal, owner_effect_evidence),
+        recorded_at=outcome_recorded_at,
     )
     validate_outcome(outcome, expectation, request)
     _write_artifact(args.out, outcome)
@@ -2966,6 +3612,7 @@ def _verify_remote_proof(
     *,
     expectation: Mapping[str, Any],
     request: Mapping[str, Any],
+    outcome: Mapping[str, Any],
     evaluation: Mapping[str, Any],
     self_model: Mapping[str, Any],
     projection: Mapping[str, Any],
@@ -3060,12 +3707,24 @@ def _verify_remote_proof(
     )
     _require_exact_artifact_contents(
         evidence_receipt,
-        [chain[0]["payload"], chain[0]],
+        {
+            _EXPECTATION_REPO_PATH: expectation,
+            _REQUEST_REPO_PATH: request,
+            _PREFLIGHT_REPO_PATH: outcome["preflight"],
+            _OUTCOME_REPO_PATH: outcome,
+            _EVALUATION_V1_REPO_PATH: chain[0]["payload"],
+            _REVISION_V1_REPO_PATH: chain[0],
+        },
         where="evidence publication",
     )
     _require_exact_artifact_contents(
         final_receipt,
-        [evaluation, chain[-1], self_model, projection],
+        {
+            _EVALUATION_V2_REPO_PATH: evaluation,
+            _REVISION_V2_REPO_PATH: chain[-1],
+            _SELF_MODEL_V2_REPO_PATH: self_model,
+            _PROJECTION_V2_REPO_PATH: projection,
+        },
         where="final publication",
     )
     _verify_live_owner_check(owner_checks[0], transport=transport)
@@ -3112,6 +3771,7 @@ def cmd_proof(
         _verify_remote_proof(
             expectation=expectation,
             request=request,
+            outcome=outcome,
             evaluation=evaluation,
             self_model=self_model,
             projection=projection,
@@ -3321,6 +3981,11 @@ def _parser() -> argparse.ArgumentParser:
     p_outcome.add_argument("--preflight", required=True)
     p_outcome.add_argument("--expectation", required=True)
     p_outcome.add_argument("--request", required=True)
+    p_outcome.add_argument(
+        "--mastermind-root",
+        default=str(_ROOT),
+        help="checkout used to reacquire exact committed expectation/request blobs",
+    )
     p_outcome.add_argument("--out", required=True)
     p_outcome.set_defaults(func=cmd_outcome)
 

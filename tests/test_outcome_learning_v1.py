@@ -15,6 +15,8 @@ import pytest
 
 from control_plane.outcome_learning_contracts import (
     CANARY_TOKEN,
+    OWNER_RENAME_EVENT_SCHEMA,
+    PRIVACY_CLASS,
     OutcomeLearningContractError,
     build_canary_request,
     build_expectation,
@@ -55,9 +57,12 @@ SHA40_B = "b" * 40
 #: Sol REQUEST_REPAIR (BLOCKER F): every Blocker B/C revalidation actually performed.
 FULLY_VERIFIED_EFFECT_EDGE = {
     "parent_proven": True,
+    "expectation_reacquired_from_sealed_commit": True,
+    "expectation_digest_matched": True,
     "request_reacquired_from_sealed_commit": True,
     "request_digest_matched": True,
     "selector_repeated_single_pr": True,
+    "owner_rename_events_verified": True,
     "bindings_verified": True,
 }
 
@@ -162,6 +167,7 @@ def make_clean_outcome(expectation, request, *, head_sha=SHA40_B, original_title
     preflight = {
         "observed_at": PREFLIGHT_AT,
         "repository": "mastermindx-market-intelligence/Mastermind",
+        "branch": "sol/outcome-learning-v1-complete-vertical-20260902",
         "pr_number": 1,
         "pr_url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/1",
         "head_sha": head_sha,
@@ -169,6 +175,8 @@ def make_clean_outcome(expectation, request, *, head_sha=SHA40_B, original_title
         "original_title_sha256": original_sha,
         "original_title_length": len(original_title),
         "sealed_commit_sha": head_sha,
+        "expectation_repo_path": "research/outcome_learning/OLV1_EXPECTATION.json",
+        "request_repo_path": "research/outcome_learning/OLV1_CANARY_REQUEST.json",
         "expectation_blob_sha": SHA40_A,
         "request_blob_sha": SHA40_A,
         "expectation_content_sha256": canonical_digest(expectation).removeprefix("sha256:"),
@@ -209,6 +217,52 @@ def make_clean_outcome(expectation, request, *, head_sha=SHA40_B, original_title
             },
         },
     ]
+    effect_attempts = [
+        {
+            "seq": call["seq"],
+            "kind": call["kind"],
+            "requested_at": call["requested_at"],
+            "method": call["method"],
+            "endpoint": call["endpoint"],
+            "payload_title_sha256": call["payload_title_sha256"],
+            "payload_title_length": (
+                len(applied_title) if call["seq"] == 1 else len(original_title)
+            ),
+        }
+        for call in effect_calls
+    ]
+    owner_effect_evidence = [
+        {
+            "schema": OWNER_RENAME_EVENT_SCHEMA,
+            "repository": preflight["repository"],
+            "pr_number": preflight["pr_number"],
+            "event_id": 1001,
+            "actor_login": "olv1-test-operator",
+            "transition": "TITLE_APPLY",
+            "created_at": CALL1_OBSERVED_AT,
+            "observed_at": CALL1_OBSERVED_AT,
+            "from_title_sha256": original_sha,
+            "from_title_length": len(original_title),
+            "to_title_sha256": applied_sha,
+            "to_title_length": len(applied_title),
+            "privacy_class": PRIVACY_CLASS,
+        },
+        {
+            "schema": OWNER_RENAME_EVENT_SCHEMA,
+            "repository": preflight["repository"],
+            "pr_number": preflight["pr_number"],
+            "event_id": 1002,
+            "actor_login": "olv1-test-operator",
+            "transition": "TITLE_RESTORE",
+            "created_at": CALL2_OBSERVED_AT,
+            "observed_at": CALL2_OBSERVED_AT,
+            "from_title_sha256": applied_sha,
+            "from_title_length": len(applied_title),
+            "to_title_sha256": original_sha,
+            "to_title_length": len(original_title),
+            "privacy_class": PRIVACY_CLASS,
+        },
+    ]
     restoration = {
         "byte_identical": True,
         "prestate_title_sha256": original_sha,
@@ -220,7 +274,9 @@ def make_clean_outcome(expectation, request, *, head_sha=SHA40_B, original_title
         expectation_sealed_hash=expectation["sealed_hash"],
         request=request,
         preflight=preflight,
+        effect_attempts=effect_attempts,
         effect_calls=effect_calls,
+        owner_effect_evidence=owner_effect_evidence,
         pre_effect_observation=None,
         effect_edge=FULLY_VERIFIED_EFFECT_EDGE,
         effect_state="APPLIED_AND_RESTORED",
@@ -622,7 +678,9 @@ def test_selector_stage_invalidation_has_a_closed_zero_patch_truth_shape():
     expectation, request, outcome = make_episode()
     selector_refusal = dict(outcome)
     selector_refusal["effect_state"] = "INVALIDATED_BEFORE_EFFECT"
+    selector_refusal["effect_attempts"] = []
     selector_refusal["effect_calls"] = []
+    selector_refusal["owner_effect_evidence"] = []
     selector_refusal["pre_effect_observation"] = None
     selector_refusal["restoration"] = {
         "byte_identical": None,

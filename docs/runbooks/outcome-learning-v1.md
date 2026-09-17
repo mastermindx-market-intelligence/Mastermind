@@ -20,6 +20,13 @@ This runbook is for the real vertical after the exact repair head has received i
 review. Repair work itself must stop at zero effect and HOLD; it must not run the canary,
 push evidence, claim production proof, or merge itself.
 
+OL-V1 on PR #398 is a one-shot mechanism proof, not a recurring effect service. The
+six-path boundary governs source-head review; after that exact head is approved, this same
+carrier may add only the frozen `research/outcome_learning/` artifacts named below and must
+receive new exact-head evidence review. Once the accepted episode is merged, the carrier is
+consumed. Any second episode requires a separately preregistered successor version/carrier,
+fresh authority, and a new prospective expectation; it must not replay this operation.
+
 ## Existing planes only
 
 OL-V1 extends, but does not replace:
@@ -44,6 +51,8 @@ plane.
 - The effect journal path is host-owned and identity-derived. The public CLI has no journal
   path or root override.
 - The canary is at most two PATCH calls: apply once, restore once. There is no effect retry.
+- Outcome assembly reacquires the sealed expectation/request and requires GitHub-owner rename
+  events for every completed PATCH; the host journal cannot self-author effect success.
 - `EFFECT_UNKNOWN` is terminal until one reconciliation on the same carrier resolves it.
 - Initial artifacts are immutable. Every correction is an append-only successor with an
   exact predecessor revision id, prior payload digest, owner evidence, and chronology.
@@ -110,6 +119,40 @@ export REVISION_V2_REPO_PATH=research/outcome_learning/OLV1_EVALUATION_REVISION_
 export SELF_MODEL_V2_REPO_PATH=research/outcome_learning/OLV1_SELF_MODEL_V2.json
 export PROJECTION_V2_REPO_PATH=research/outcome_learning/OLV1_AGENTOS_PROJECTION_V2.json
 export LOCAL_PROOF_V2_REPO_PATH=research/outcome_learning/OLV1_LOCAL_CANDIDATE_V2.md
+
+assert_exact_staged_paths() {
+  EXPECTED_PATHS="$(printf '%s\n' "$@" | LC_ALL=C sort)"
+  ACTUAL_PATHS="$(git -C "$MM_ROOT" diff --cached --name-only | LC_ALL=C sort)"
+  if [ "$ACTUAL_PATHS" != "$EXPECTED_PATHS" ]; then
+    printf 'refusing unexpected staged paths\nexpected:\n%s\nobserved:\n%s\n' \
+      "$EXPECTED_PATHS" "$ACTUAL_PATHS" >&2
+    return 1
+  fi
+}
+
+push_once_and_reconcile() {
+  EXPECTED_HEAD="$1"
+  set +e
+  git -C "$MM_ROOT" push origin "HEAD:refs/heads/$BRANCH"
+  PUSH_RC=$?
+  REMOTE_BRANCH_SHA="$(git -C "$MM_ROOT" ls-remote origin \
+    "refs/heads/$BRANCH" | awk '{print $1}')"
+  BRANCH_READ_RC=$?
+  REMOTE_PR_SHA="$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.head.sha')"
+  PR_READ_RC=$?
+  set -e
+
+  if [ "$BRANCH_READ_RC" -ne 0 ] || [ "$PR_READ_RC" -ne 0 ] || \
+     [ "$REMOTE_BRANCH_SHA" != "$EXPECTED_HEAD" ] || \
+     [ "$REMOTE_PR_SHA" != "$EXPECTED_HEAD" ]; then
+    printf 'EFFECT_UNKNOWN: push/readback unresolved; no retry\n' >&2
+    printf 'push_rc=%s branch_rc=%s pr_rc=%s expected=%s branch=%s pr=%s\n' \
+      "$PUSH_RC" "$BRANCH_READ_RC" "$PR_READ_RC" "$EXPECTED_HEAD" \
+      "$REMOTE_BRANCH_SHA" "$REMOTE_PR_SHA" >&2
+    return 1
+  fi
+  printf 'push_reconciled expected=%s push_rc=%s\n' "$EXPECTED_HEAD" "$PUSH_RC"
+}
 ```
 
 ## Gate 0 — recover current authority and exact carrier
@@ -232,36 +275,22 @@ REMOTE_PR_SHA="$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.head.sha')"
 test "$REMOTE_BRANCH_SHA" = "$CARRIER_HEAD"
 test "$REMOTE_PR_SHA" = "$CARRIER_HEAD"
 
+mkdir -p "$MM_ROOT/research/outcome_learning"
 install -m 0644 "$EXPECTATION_OUT" "$MM_ROOT/$EXPECTATION_REPO_PATH"
 install -m 0644 "$REQUEST_OUT" "$MM_ROOT/$REQUEST_REPO_PATH"
 git add -- "$EXPECTATION_REPO_PATH" "$REQUEST_REPO_PATH"
-git diff --cached --name-only
-# Exactly the two preregistration paths above may be staged.
+assert_exact_staged_paths "$EXPECTATION_REPO_PATH" "$REQUEST_REPO_PATH"
 
 git commit -m "Seal OL-V1 prospective episode"
 export SEALED_COMMIT="$(git rev-parse HEAD)"
 test "$(git rev-parse "$SEALED_COMMIT^")" = "$CARRIER_HEAD"
+push_once_and_reconcile "$SEALED_COMMIT"
 ```
 
-Reconcile the carrier one final time immediately before the non-force push, then advance
-the incumbent branch once:
+The push helper sends exactly once, then reads the remote branch and PR exactly once even
+when the client reports a nonzero result. Ambiguous or mismatched readback stops
+`EFFECT_UNKNOWN`; it never retries the push.
 
-```bash
-REMOTE_BRANCH_SHA="$(git ls-remote origin "refs/heads/$BRANCH" | awk '{print $1}')"
-REMOTE_PR_SHA="$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.head.sha')"
-test "$REMOTE_BRANCH_SHA" = "$CARRIER_HEAD"
-test "$REMOTE_PR_SHA" = "$CARRIER_HEAD"
-git push origin "HEAD:refs/heads/$BRANCH"
-```
-
-A timeout or transport cancellation does not prove the push failed. Reconcile exactly once:
-
-```bash
-REMOTE_BRANCH_SHA="$(git ls-remote origin "refs/heads/$BRANCH" | awk '{print $1}')"
-test "$REMOTE_BRANCH_SHA" = "$SEALED_COMMIT"
-```
-
-If remote state remains ambiguous, stop `EFFECT_UNKNOWN`; do not retry the push blindly.
 The current-base GitHub merge ref and hosted checks remain separate integration evidence;
 they never change the sealed commit's parent identity.
 
@@ -280,9 +309,10 @@ python3 "$MM_ROOT/scripts/outcome_learning_v1.py" preflight \
   --out "$PREFLIGHT_OUT"
 ```
 
-`preflight` independently resolves both committed blobs, verifies canonical content,
-verifies the sealed commit's first parent, selects exactly one open PR, and requires the PR
-head to equal the sealed commit.
+`preflight` independently proves that the sealed commit has exactly one parent and that
+its complete changed-path set is exactly the expectation/request preregistration pair. It
+then resolves both committed blobs, verifies canonical content, selects exactly one open PR,
+and requires the PR head to equal the sealed commit.
 
 Only after all gates remain valid may the supervised operator run:
 
@@ -317,6 +347,7 @@ python3 "$MM_ROOT/scripts/outcome_learning_v1.py" outcome \
   --preflight "$PREFLIGHT_OUT" \
   --expectation "$EXPECTATION_OUT" \
   --request "$REQUEST_OUT" \
+  --mastermind-root "$MM_ROOT" \
   --out "$OUTCOME_OUT"
 
 python3 "$MM_ROOT/scripts/outcome_learning_v1.py" evaluate \
@@ -357,6 +388,8 @@ be `OL-V1 Local Candidate Proof`; it is not production evidence.
 Copy only public-safe artifacts into the existing research path:
 
 ```bash
+cd "$MM_ROOT"
+test -z "$(git status --porcelain)"
 install -m 0644 "$PREFLIGHT_OUT" "$MM_ROOT/$PREFLIGHT_REPO_PATH"
 install -m 0644 "$OUTCOME_OUT" "$MM_ROOT/$OUTCOME_REPO_PATH"
 install -m 0644 "$EVALUATION_V1_OUT" "$MM_ROOT/$EVALUATION_V1_REPO_PATH"
@@ -365,7 +398,6 @@ install -m 0644 "$SELF_MODEL_V1_OUT" "$MM_ROOT/$SELF_MODEL_V1_REPO_PATH"
 install -m 0644 "$PROJECTION_V1_OUT" "$MM_ROOT/$PROJECTION_V1_REPO_PATH"
 install -m 0644 "$LOCAL_PROOF_V1_OUT" "$MM_ROOT/$LOCAL_PROOF_V1_REPO_PATH"
 
-cd "$MM_ROOT"
 git add -- \
   "$PREFLIGHT_REPO_PATH" \
   "$OUTCOME_REPO_PATH" \
@@ -374,10 +406,17 @@ git add -- \
   "$SELF_MODEL_V1_REPO_PATH" \
   "$PROJECTION_V1_REPO_PATH" \
   "$LOCAL_PROOF_V1_REPO_PATH"
-git diff --cached --name-only
+assert_exact_staged_paths \
+  "$PREFLIGHT_REPO_PATH" \
+  "$OUTCOME_REPO_PATH" \
+  "$EVALUATION_V1_REPO_PATH" \
+  "$REVISION_V1_REPO_PATH" \
+  "$SELF_MODEL_V1_REPO_PATH" \
+  "$PROJECTION_V1_REPO_PATH" \
+  "$LOCAL_PROOF_V1_REPO_PATH"
 git commit -m "Record OL-V1 initial evidence"
 export EVIDENCE_COMMIT="$(git rev-parse HEAD)"
-git push origin "HEAD:refs/heads/$BRANCH"
+push_once_and_reconcile "$EVIDENCE_COMMIT"
 ```
 
 Reconcile the remote once; do not infer success from the local command alone. Then capture
@@ -394,6 +433,10 @@ python3 scripts/outcome_learning_v1.py capture-publication \
   --pr-number "$PR_NUMBER" \
   --target-commit "$EVIDENCE_COMMIT" \
   --frozen-evidence-commit "$EVIDENCE_COMMIT" \
+  --artifact "$EXPECTATION_REPO_PATH" \
+  --artifact "$REQUEST_REPO_PATH" \
+  --artifact "$PREFLIGHT_REPO_PATH" \
+  --artifact "$OUTCOME_REPO_PATH" \
   --artifact "$EVALUATION_V1_REPO_PATH" \
   --artifact "$REVISION_V1_REPO_PATH" \
   --artifact "$SELF_MODEL_V1_REPO_PATH" \
@@ -468,24 +511,30 @@ published and checked remotely.
 ## Step 8 — publish the maturation candidate and require terminal hosted checks
 
 ```bash
+cd "$MM_ROOT"
+test -z "$(git status --porcelain)"
 install -m 0644 "$EVALUATION_V2_OUT" "$MM_ROOT/$EVALUATION_V2_REPO_PATH"
 install -m 0644 "$REVISION_V2_OUT" "$MM_ROOT/$REVISION_V2_REPO_PATH"
 install -m 0644 "$SELF_MODEL_V2_OUT" "$MM_ROOT/$SELF_MODEL_V2_REPO_PATH"
 install -m 0644 "$PROJECTION_V2_OUT" "$MM_ROOT/$PROJECTION_V2_REPO_PATH"
 install -m 0644 "$LOCAL_PROOF_V2_OUT" "$MM_ROOT/$LOCAL_PROOF_V2_REPO_PATH"
 
-cd "$MM_ROOT"
 git add -- \
   "$EVALUATION_V2_REPO_PATH" \
   "$REVISION_V2_REPO_PATH" \
   "$SELF_MODEL_V2_REPO_PATH" \
   "$PROJECTION_V2_REPO_PATH" \
   "$LOCAL_PROOF_V2_REPO_PATH"
-git diff --cached --name-only
+assert_exact_staged_paths \
+  "$EVALUATION_V2_REPO_PATH" \
+  "$REVISION_V2_REPO_PATH" \
+  "$SELF_MODEL_V2_REPO_PATH" \
+  "$PROJECTION_V2_REPO_PATH" \
+  "$LOCAL_PROOF_V2_REPO_PATH"
 git commit -m "Mature OL-V1 delayed owner evidence"
 export MATURATION_COMMIT="$(git rev-parse HEAD)"
 test "$MATURATION_COMMIT" != "$EVIDENCE_COMMIT"
-git push origin "HEAD:refs/heads/$BRANCH"
+push_once_and_reconcile "$MATURATION_COMMIT"
 ```
 
 After the remote branch and PR both identify `MATURATION_COMMIT`, wait for every latest
@@ -540,8 +589,9 @@ python3 "$MM_ROOT/scripts/outcome_learning_v1.py" proof \
 The output title is `OL-V1 Production Proof`. It names both immutable commits and states
 that it is an external attestation about `MATURATION_COMMIT`. Before writing, the command
 recomputes every receipt artifact from the exact git commit, requires the evidence receipt
-to contain the exact revision-1 evaluation and envelope, requires the final receipt to
-contain the exact matured evaluation/revision/self-model/projection bytes, proves git
+to contain the exact expectation, request, preflight, outcome, revision-1 evaluation, and
+revision-1 envelope at their canonical paths, requires the final receipt to contain the exact
+matured evaluation/revision/self-model/projection bytes, proves git
 ancestry, re-reads the frozen owner check by immutable check-run id, and re-reads the live
 final branch, PR, and complete latest check set. Generate it before any later branch move.
 The command refuses a production-proof output path inside Mastermind; committing it would
@@ -580,6 +630,7 @@ use the same generic contract plus a real owner evidence adapter; never add a lo
 | selector changed before effect | `INVALIDATED_BEFORE_EFFECT`, zero PATCH |
 | freshness changed before effect | `INVALIDATED_BEFORE_EFFECT`, zero PATCH |
 | apply/restore ambiguity | `EFFECT_UNKNOWN`, no retry, one same-carrier reconciliation |
+| completed PATCH lacks exact GitHub rename event | outcome refuses; journal alone is not proof |
 | journal already exists | refuse every repeat, regardless of journal state |
 | remote branch/PR drift | no publication receipt; do not infer or retry a push |
 | check name missing/duplicated or SHA mismatched | no maturation files |

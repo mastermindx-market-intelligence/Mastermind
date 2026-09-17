@@ -276,6 +276,8 @@ class FakeRunner:
         boot_generated_at="2026-09-02T12:00:00Z",
         committed_blobs: dict[str, str] | None = None,
         sealed_commit_parent: str | None = None,
+        sealed_commit_parents: tuple[str, ...] | None = None,
+        sealed_commit_changed_paths: list[str] | None = None,
         intent_documents: dict[str, dict] | None = None,
         ancestor_pairs: set[tuple[str, str]] | None = None,
     ):
@@ -305,6 +307,16 @@ class FakeRunner:
         self.boot_generated_at = boot_generated_at
         self.committed_blobs = dict(committed_blobs or {})
         self.sealed_commit_parent = sealed_commit_parent
+        self.sealed_commit_parents = (
+            tuple(sealed_commit_parents)
+            if sealed_commit_parents is not None
+            else ((sealed_commit_parent,) if sealed_commit_parent is not None else ())
+        )
+        self.sealed_commit_changed_paths = list(
+            sealed_commit_changed_paths
+            if sealed_commit_changed_paths is not None
+            else [EXPECTATION_REPO_PATH, REQUEST_REPO_PATH]
+        )
         self.ancestor_pairs = set(ancestor_pairs or set())
         default_intents = _accepted_intent_documents(
             intent_id=DIRECTIVE_INTENT_ID,
@@ -404,6 +416,18 @@ class FakeRunner:
                 return cli.RunResult(1, "", "fatal: no parent for this commit")
             return cli.RunResult(0, self.sealed_commit_parent + "\n", "")
 
+        if args[:4] == ["git", "rev-list", "--parents", "-n"]:
+            sealed_commit = args[-1]
+            fields = [sealed_commit, *self.sealed_commit_parents]
+            return cli.RunResult(0, " ".join(fields) + "\n", "")
+
+        if args[:3] == ["git", "diff", "--name-only"]:
+            return cli.RunResult(
+                0,
+                "".join(f"{path}\n" for path in self.sealed_commit_changed_paths),
+                "",
+            )
+
         if args[:2] == ["git", "rev-parse"] and len(args) == 3 and ":" in args[2]:
             _sealed, _, repo_path = args[2].partition(":")
             if repo_path in self.committed_blobs:
@@ -443,6 +467,8 @@ class FakeTransport:
         raise_on_restore=False,
         pr_number=42,
         selector_prs=None,
+        events=None,
+        event_actor="olv1-test-operator",
     ):
         self.title = title
         self.head_sha = head_sha
@@ -454,6 +480,9 @@ class FakeTransport:
         # None -> the single-PR-matching-pr_number happy path; else an explicit list
         # of PR summaries to return from the owner branch selector.
         self._selector_prs = selector_prs
+        self.events = list(events or [])
+        self.event_actor = event_actor
+        self._next_event_id = 1000
 
     def get(self, endpoint):
         self.gets += 1
@@ -461,6 +490,8 @@ class FakeTransport:
             if self._selector_prs is not None:
                 return 200, self._selector_prs
             return 200, [{"number": self.pr_number}]
+        if endpoint.endswith("/events?per_page=100"):
+            return 200, list(self.events)
         return 200, {
             "number": self.pr_number,
             "html_url": f"https://github.com/mastermindx-market-intelligence/Mastermind/pull/{self.pr_number}",
@@ -478,7 +509,18 @@ class FakeTransport:
             # scenario. The title is left mutated; only a reconciliation GET (not
             # this raised patch) can reveal that.
             raise RuntimeError("simulated transient failure crossing the effect boundary")
+        previous_title = self.title
         self.title = payload["title"]
+        self._next_event_id += 1
+        self.events.append(
+            {
+                "id": self._next_event_id,
+                "event": "renamed",
+                "actor": {"login": self.event_actor},
+                "created_at": f"2026-09-17T12:30:0{4 + self.patches}Z",
+                "rename": {"from": previous_title, "to": self.title},
+            }
+        )
         return 200, {
             "number": self.pr_number,
             "title": self.title,
@@ -667,12 +709,42 @@ def _run_canary(
     )
 
 
-def _canary_runner_for(outside_dir: Path) -> FakeRunner:
+def _canary_runner_for(outside_dir: Path, request: dict | None = None) -> FakeRunner:
+    request = request or json.loads((outside_dir / "request.json").read_text())
     return FakeRunner(
         committed_blobs={
+            EXPECTATION_REPO_PATH: (outside_dir / "expectation.json").read_text(encoding="utf-8"),
             REQUEST_REPO_PATH: (outside_dir / "request.json").read_text(encoding="utf-8"),
-        }
+        },
+        sealed_commit_parent=request["expected_parent_head"],
     )
+
+def _run_outcome(
+    outside_dir: Path,
+    request: dict,
+    transport: FakeTransport,
+    *,
+    runner: FakeRunner | None = None,
+    clock: StepClock | None = None,
+) -> int:
+    runner = runner or _canary_runner_for(outside_dir, request)
+    args = cli._parser().parse_args(
+        [
+            "outcome",
+            "--preflight", str(outside_dir / "preflight.json"),
+            "--expectation", str(outside_dir / "expectation.json"),
+            "--request", str(outside_dir / "request.json"),
+            "--mastermind-root", "/x",
+            "--out", str(outside_dir / "outcome.json"),
+        ]
+    )
+    return cli.cmd_outcome(
+        args,
+        runner=runner,
+        transport=transport,
+        clock=clock or StepClock("2026-09-17T12:40:00+00:00"),
+    )
+
 
 # --------------------------------------------------------------------------- happy path
 
@@ -699,15 +771,7 @@ def test_end_to_end_seal_through_proof_cross_digests_verify(tmp_path):
     assert journal["reconciliation"] is None
     assert transport.title == "Some PR title"  # restored byte-identically
 
-    rc = cli.main(
-        [
-            "outcome",
-            "--preflight", str(outside_dir / "preflight.json"),
-            "--expectation", str(outside_dir / "expectation.json"),
-            "--request", str(outside_dir / "request.json"),
-            "--out", str(outside_dir / "outcome.json"),
-        ]
-    )
+    rc = _run_outcome(outside_dir, request, transport)
     assert rc == 0
     outcome = json.loads((outside_dir / "outcome.json").read_text())
     assert outcome["expectation_sealed_hash"] == expectation["sealed_hash"]
@@ -874,6 +938,60 @@ def test_runbook_defers_selection_and_seals_directly_on_carrier_tip():
     assert "CARRIER_HEAD" in step3
     assert 'rev-parse "$SEALED_COMMIT^"' in step3
     assert '"$CARRIER_HEAD"' in step3
+
+
+def test_canary_preregistration_holds_carrier_without_forbidding_later_release():
+    options = cli._olv1_options(
+        "olv1-cli-test-op",
+        "c" * 40,
+        chairman_source_ref="CEO_INTENT:CEO-OLV1-DIRECTIVE-1:sha256:" + "f" * 64,
+    )
+    canary = next(item for item in options if item["option_id"] == cli._OPT_CANARY)
+    rollback = canary["rollback_plan"]
+
+    assert "never merged" not in rollback
+    assert "remains hold throughout the canary" in rollback.lower()
+    assert "canary success alone" in rollback.lower()
+    assert "ready" in rollback.lower()
+    assert "merge" in rollback.lower()
+
+
+def test_runbook_fail_closes_artifact_paths_and_push_readback():
+    runbook = (cli._ROOT / "docs/runbooks/outcome-learning-v1.md").read_text(
+        encoding="utf-8"
+    )
+    step3 = runbook.split("## Step 3", 1)[1].split("## Step 4", 1)[0]
+    step6 = runbook.split("## Step 6", 1)[1].split("## Step 7", 1)[0]
+    step8 = runbook.split("## Step 8", 1)[1].split("## Step 9", 1)[0]
+
+    assert 'mkdir -p "$MM_ROOT/research/outcome_learning"' in step3
+    assert "assert_exact_staged_paths()" in runbook
+    assert "push_once_and_reconcile()" in runbook
+    assert "set +e" in runbook
+    assert "PUSH_RC=$?" in runbook
+    assert runbook.count(
+        'git -C "$MM_ROOT" push origin "HEAD:refs/heads/$BRANCH"'
+    ) == 1
+
+    for section, expected_commit in (
+        (step3, "SEALED_COMMIT"),
+        (step6, "EVIDENCE_COMMIT"),
+        (step8, "MATURATION_COMMIT"),
+    ):
+        assert "assert_exact_staged_paths" in section
+        assert f'push_once_and_reconcile "${expected_commit}"' in section
+        assert "git diff --cached --name-only" not in section
+
+    for required in (
+        "EXPECTATION_REPO_PATH",
+        "REQUEST_REPO_PATH",
+        "PREFLIGHT_REPO_PATH",
+        "OUTCOME_REPO_PATH",
+    ):
+        assert f'--artifact "${required}"' in step6
+
+    assert "one-shot mechanism proof" in runbook
+    assert "separately preregistered successor" in runbook
 
 
 # --------------------------------------------------------------------------- BLOCKER A: canonical source identity
@@ -1138,6 +1256,46 @@ def test_repair_b_operation_key_mismatch_refuses(tmp_path):
             runner=runner,
             clock=StepClock("2026-09-17T12:10:00+00:00"),
         )
+@pytest.mark.parametrize(
+    ("runner_kwargs", "message"),
+    [
+        (
+            {"sealed_commit_parents": (SHA40_A, "d" * 40)},
+            "exactly one parent",
+        ),
+        (
+            {
+                "sealed_commit_parents": (SHA40_A,),
+                "sealed_commit_changed_paths": [
+                    EXPECTATION_REPO_PATH,
+                    REQUEST_REPO_PATH,
+                    "control_plane/unrelated.py",
+                ],
+            },
+            "exactly the two preregistration paths",
+        ),
+    ],
+)
+def test_preflight_refuses_nonminimal_seal_commit_before_transport(
+    tmp_path, runner_kwargs, message
+):
+    outside_dir, _expectation, request = _compose_and_seal(tmp_path, FakeRunner())
+    transport = FakeTransport()
+    runner = FakeRunner(
+        committed_blobs={
+            EXPECTATION_REPO_PATH: (outside_dir / "expectation.json").read_text(),
+            REQUEST_REPO_PATH: (outside_dir / "request.json").read_text(),
+        },
+        sealed_commit_parent=request["expected_parent_head"],
+        **runner_kwargs,
+    )
+
+    with pytest.raises(cli.OutcomeLearningCliError, match=message):
+        _run_preflight(outside_dir, transport, request, runner=runner)
+    assert transport.gets == 0
+    assert transport.patches == 0
+
+
 def test_repair_b_parent_head_mismatch_refuses(tmp_path):
     runner = FakeRunner()
     episode_dir = tmp_path / "episode"
@@ -1239,6 +1397,107 @@ def test_repair_b_preflight_cross_checks_repo_and_branch_before_transport(tmp_pa
     assert transport.gets == 0
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("expectation_blob_sha", "f" * 40),
+        ("expectation_content_sha256", "f" * 64),
+        ("expectation_repo_path", "research/outcome_learning/OTHER_EXPECTATION.json"),
+        ("request_repo_path", "research/outcome_learning/OTHER_REQUEST.json"),
+        ("branch", "a-different-carrier-branch"),
+    ],
+)
+def test_canary_reacquires_full_sealed_episode_before_any_transport(
+    tmp_path, field, value
+):
+    outside_dir, _expectation, request = _compose_and_seal(tmp_path, FakeRunner())
+    preflight_transport = FakeTransport()
+    preflight = _run_preflight(outside_dir, preflight_transport, request)
+    preflight[field] = value
+    (outside_dir / "preflight.json").write_text(json.dumps(preflight))
+
+    live_transport = FakeTransport()
+    with pytest.raises(cli.OutcomeLearningCliError):
+        _run_canary(
+            outside_dir,
+            preflight,
+            live_transport,
+            runner=_canary_runner_for(outside_dir, request),
+        )
+    assert live_transport.gets == 0
+    assert live_transport.patches == 0
+
+
+def test_outcome_refuses_terminal_journal_without_github_owner_events(tmp_path):
+    outside_dir, _expectation, request = _compose_and_seal(tmp_path, FakeRunner())
+    transport = FakeTransport()
+    preflight = _run_preflight(outside_dir, transport, request)
+    assert (
+        _run_canary(
+            outside_dir,
+            preflight,
+            transport,
+            runner=_canary_runner_for(outside_dir, request),
+        )
+        == 0
+    )
+    assert len(transport.events) == 2
+    transport.events.clear()
+
+    with pytest.raises(cli.OutcomeLearningCliError, match="owner|rename|event"):
+        _run_outcome(outside_dir, request, transport)
+    assert not (outside_dir / "outcome.json").exists()
+
+
+def test_outcome_embeds_two_exact_github_owner_rename_events(tmp_path):
+    outside_dir, _expectation, request = _compose_and_seal(tmp_path, FakeRunner())
+    transport = FakeTransport()
+    preflight = _run_preflight(outside_dir, transport, request)
+    assert (
+        _run_canary(
+            outside_dir,
+            preflight,
+            transport,
+            runner=_canary_runner_for(outside_dir, request),
+        )
+        == 0
+    )
+    assert _run_outcome(outside_dir, request, transport) == 0
+    outcome = json.loads((outside_dir / "outcome.json").read_text())
+    evidence = outcome["owner_effect_evidence"]
+    assert [item["transition"] for item in evidence] == [
+        "TITLE_APPLY",
+        "TITLE_RESTORE",
+    ]
+    assert [item["event_id"] for item in evidence] == [1001, 1002]
+    assert all(item["actor_login"] == transport.event_actor for item in evidence)
+    assert outcome["effect_edge"]["owner_rename_events_verified"] is True
+    assert outcome["effect_edge"]["bindings_verified"] is True
+
+
+def test_outcome_refuses_unknown_terminal_journal_fields(tmp_path):
+    outside_dir, _expectation, request = _compose_and_seal(tmp_path, FakeRunner())
+    transport = FakeTransport()
+    preflight = _run_preflight(outside_dir, transport, request)
+    assert (
+        _run_canary(
+            outside_dir,
+            preflight,
+            transport,
+            runner=_canary_runner_for(outside_dir, request),
+        )
+        == 0
+    )
+    journal_path = _journal_path(outside_dir, request)
+    journal = json.loads(journal_path.read_text())
+    journal["forged_terminal_claim"] = True
+    journal_path.write_text(json.dumps(journal))
+
+    with pytest.raises(cli.OutcomeLearningCliError, match="unknown|journal"):
+        _run_outcome(outside_dir, request, transport)
+    assert not (outside_dir / "outcome.json").exists()
+
+
 # --------------------------------------------------------------------------- BLOCKER C: effect-edge revalidation
 
 
@@ -1253,7 +1512,13 @@ def test_repair_c_reacquisition_digest_mismatch_refuses_zero_transport(tmp_path)
     preflight = _run_preflight(outside_dir, transport, request)
 
     forged_request = json.dumps({**request, "operation_key": "a-forged-operation-key"})
-    canary_runner = FakeRunner(committed_blobs={REQUEST_REPO_PATH: forged_request})
+    canary_runner = FakeRunner(
+        committed_blobs={
+            EXPECTATION_REPO_PATH: (outside_dir / "expectation.json").read_text(),
+            REQUEST_REPO_PATH: forged_request,
+        },
+        sealed_commit_parent=request["expected_parent_head"],
+    )
     live_transport = FakeTransport()
     with pytest.raises(cli.OutcomeLearningCliError, match="does not match"):
         _run_canary(outside_dir, preflight, live_transport, runner=canary_runner)
@@ -1293,14 +1558,41 @@ def test_repair_d_crash_after_apply_refuses_next_invocation(tmp_path):
     preflight_transport = FakeTransport()
     preflight = _run_preflight(outside_dir, preflight_transport, request)
     journal_path = _journal_path(outside_dir, request)
+    endpoint = f"repos/{request['repository']}/pulls/{preflight['pr_number']}"
+    applied_title = "Some PR title " + request["canary_token"]
+    attempt = cli._make_attempt(
+        1, "TITLE_APPLY", endpoint, applied_title, "2026-09-17T12:30:03Z"
+    )
+    call = cli._make_call(
+        1,
+        "TITLE_APPLY",
+        endpoint,
+        attempt["payload_title_sha256"],
+        200,
+        {"title": applied_title, "head": {"sha": preflight["sealed_commit_sha"]}},
+        requested_at=attempt["requested_at"],
+        observed_at="2026-09-17T12:30:04Z",
+    )
     journal_path.write_text(
         json.dumps(
-            {
-                "state": "APPLIED_READBACK",  # non-terminal — simulates a crash here
-                "bound_identity": cli._canonical_journal_identity(request, preflight),
-                "effect_calls": [],
-                "recorded_at": "2026-09-02T12:03:00Z",
-            }
+            cli._journal_record(
+                state="APPLIED_READBACK",
+                bound_identity=cli._canonical_journal_identity(request, preflight),
+                selector_observation={
+                    "observed_at": "2026-09-17T12:30:01Z",
+                    "match_count": 1,
+                    "matched_pr_number": preflight["pr_number"],
+                },
+                effect_attempts=[attempt],
+                effect_calls=[call],
+                pre_effect_observation={
+                    "observed_head_sha": preflight["sealed_commit_sha"],
+                    "observed_title_sha256": preflight["original_title_sha256"],
+                    "observed_title_length": preflight["original_title_length"],
+                    "observed_at": "2026-09-17T12:30:02Z",
+                },
+                recorded_at="2026-09-17T12:30:04Z",
+            )
         )
     )
 
@@ -1311,17 +1603,7 @@ def test_repair_d_crash_after_apply_refuses_next_invocation(tmp_path):
     assert transport.patches == 0
 
     with pytest.raises(cli.OutcomeLearningCliError, match="non-terminal state"):
-        cli.cmd_outcome(
-            cli._parser().parse_args(
-                [
-                    "outcome",
-                    "--preflight", str(outside_dir / "preflight.json"),
-                    "--expectation", str(outside_dir / "expectation.json"),
-                    "--request", str(outside_dir / "request.json"),
-                    "--out", str(outside_dir / "outcome.json"),
-                ]
-            )
-        )
+        _run_outcome(outside_dir, request, transport)
 
 
 def test_repair_d_same_dir_concurrency_race_second_invocation_refused(tmp_path):
@@ -1335,11 +1617,11 @@ def test_repair_d_same_dir_concurrency_race_second_invocation_refused(tmp_path):
     journal_path = _journal_path(outside_dir, request)
     journal_path.write_text(
         json.dumps(
-            {
-                "state": "PREPARED",
-                "bound_identity": cli._canonical_journal_identity(request, preflight),
-                "recorded_at": "2026-09-02T12:03:00Z",
-            }
+            cli._journal_record(
+                state="PREPARED",
+                bound_identity=cli._canonical_journal_identity(request, preflight),
+                recorded_at="2026-09-17T12:30:00Z",
+            )
         )
     )
     transport = FakeTransport()
@@ -1355,9 +1637,25 @@ def test_repair_d_reservation_is_exclusive_create_not_exists_check(tmp_path):
     guard is the atomic primitive itself, not a separate exists()-then-create
     sequence with a race window between the two."""
     path = tmp_path / "reservation.json"
-    cli._reserve_journal(path, {"state": "PREPARED"})
+    identity = {
+        "repository": "mastermindx-market-intelligence/Mastermind",
+        "branch": "sol/outcome-learning-v1-complete-vertical-20260902",
+        "operation_key": "olv1-cli-test-op",
+        "expectation_sealed_hash": "sha256:" + "1" * 64,
+        "sealed_commit_sha": SHA40_B,
+        "expected_parent_head": SHA40_A,
+        "preflight_pr_number": 42,
+        "canary_token": "[OL-V1-CANARY]",
+        "request_digest": "2" * 64,
+    }
+    record = cli._journal_record(
+        state="PREPARED",
+        bound_identity=identity,
+        recorded_at="2026-09-17T12:30:00Z",
+    )
+    cli._reserve_journal(path, record)
     with pytest.raises(cli.OutcomeLearningCliError, match="already exists"):
-        cli._reserve_journal(path, {"state": "PREPARED"})
+        cli._reserve_journal(path, record)
 
 
 # --------------------------------------------------------------------------- BLOCKER E: truthful drift
@@ -1381,15 +1679,7 @@ def test_repair_e_drift_outcome_reports_observed_state_honestly(tmp_path):
     assert obs is not None
     assert obs["observed_title_sha256"] == cli._sha256_hex_text(drifted_transport.title)
 
-    rc = cli.main(
-        [
-            "outcome",
-            "--preflight", str(outside_dir / "preflight.json"),
-            "--expectation", str(outside_dir / "expectation.json"),
-            "--request", str(outside_dir / "request.json"),
-            "--out", str(outside_dir / "outcome.json"),
-        ]
-    )
+    rc = _run_outcome(outside_dir, request, drifted_transport)
     assert rc == 0
     outcome = json.loads((outside_dir / "outcome.json").read_text())
     restoration = outcome["restoration"]
@@ -1415,7 +1705,9 @@ def test_repair_e_fabricated_byte_identical_rejected_by_contracts():
     original_sha = outcome["preflight"]["original_title_sha256"]
     bad = dict(outcome)
     bad["effect_state"] = "INVALIDATED_BEFORE_EFFECT"
+    bad["effect_attempts"] = []
     bad["effect_calls"] = []
+    bad["owner_effect_evidence"] = []
     bad["pre_effect_observation"] = {
         "observed_head_sha": outcome["preflight"]["sealed_commit_sha"],
         "observed_title_sha256": "9" * 64,  # differs from original_sha
@@ -1450,15 +1742,7 @@ def test_repair_f_proof_refuses_a_tampered_evaluation(tmp_path):
     preflight = _run_preflight(outside_dir, transport, request)
     rc = _run_canary(outside_dir, preflight, transport, runner=_canary_runner_for(outside_dir))
     assert rc == 0
-    cli.main(
-        [
-            "outcome",
-            "--preflight", str(outside_dir / "preflight.json"),
-            "--expectation", str(outside_dir / "expectation.json"),
-            "--request", str(outside_dir / "request.json"),
-            "--out", str(outside_dir / "outcome.json"),
-        ]
-    )
+    assert _run_outcome(outside_dir, request, transport) == 0
     cli.main(
         [
             "evaluate",
@@ -1574,7 +1858,8 @@ def test_ambiguous_readback_mismatch_without_exception_reports_effect_unknown(tm
     journal = json.loads(_journal_path(outside_dir, request).read_text())
     assert journal["state"] == "EFFECT_UNKNOWN"
     assert len(journal["effect_calls"]) == 2
-    assert journal["reconciliation"] is None
+    assert journal["reconciliation"] is not None
+    assert journal["reconciliation"]["attempted"] is True
 
 
 def test_apply_succeeds_restore_raises_journals_call1_and_observed_poststate(tmp_path):
@@ -1597,15 +1882,7 @@ def test_apply_succeeds_restore_raises_journals_call1_and_observed_poststate(tmp
     assert journal["reconciliation"]["observed_title_sha256"] == mutated_title_sha
     assert transport.title != "Some PR title"
 
-    rc = cli.main(
-        [
-            "outcome",
-            "--preflight", str(outside_dir / "preflight.json"),
-            "--expectation", str(outside_dir / "expectation.json"),
-            "--request", str(outside_dir / "request.json"),
-            "--out", str(outside_dir / "outcome.json"),
-        ]
-    )
+    rc = _run_outcome(outside_dir, request, transport)
     assert rc == 0
     outcome = json.loads((outside_dir / "outcome.json").read_text())
     restoration = outcome["restoration"]
@@ -2344,6 +2621,10 @@ def _production_proof_fixture(tmp_path):
     )
 
     evidence_docs = {
+        "research/outcome_learning/OLV1_EXPECTATION.json": docs["expectation"],
+        "research/outcome_learning/OLV1_CANARY_REQUEST.json": docs["request"],
+        "research/outcome_learning/OLV1_PREFLIGHT.json": docs["outcome"]["preflight"],
+        "research/outcome_learning/OLV1_OUTCOME.json": docs["outcome"],
         "research/outcome_learning/OLV1_EVALUATION_V1.json": docs["evaluation"],
         "research/outcome_learning/OLV1_EVALUATION_REVISION_1.json": docs["revision_1"],
     }
@@ -2471,6 +2752,35 @@ def test_production_proof_requires_revision_chain_and_two_remote_receipts(tmp_pa
     assert "frozen evidence commit" in proof.lower()
     assert "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" in proof
     assert transport.patches == 0
+
+
+@pytest.mark.parametrize(
+    "missing_path",
+    [
+        "research/outcome_learning/OLV1_EXPECTATION.json",
+        "research/outcome_learning/OLV1_CANARY_REQUEST.json",
+        "research/outcome_learning/OLV1_PREFLIGHT.json",
+        "research/outcome_learning/OLV1_OUTCOME.json",
+    ],
+)
+def test_production_proof_requires_durable_source_and_outcome_artifacts(
+    tmp_path, missing_path
+):
+    args, runner, transport, files = _production_proof_fixture(tmp_path)
+    receipt = dict(files["evidence_receipt"])
+    receipt["artifact_digests"] = [
+        artifact
+        for artifact in receipt["artifact_digests"]
+        if artifact["path"] != missing_path
+    ]
+    (tmp_path / "evidence_receipt.json").write_text(json.dumps(receipt))
+
+    with pytest.raises(
+        cli.OutcomeLearningCliError,
+        match="evidence publication.*exact committed artifact",
+    ):
+        cli.cmd_proof(args, runner=runner, transport=transport)
+    assert not (tmp_path / "production_proof.md").exists()
 
 
 def test_production_proof_refuses_receipt_without_exact_artifact_bytes(tmp_path):
