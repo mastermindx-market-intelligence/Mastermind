@@ -354,7 +354,7 @@
     try {
       const result=await Promise.race([Promise.resolve().then(()=>read({signal:controller.signal})),cancelled,timeout]);
       if(connection.epoch!==epoch||controller.signal.aborted)return false;
-      if(result&&[401,403].includes(result.status)) {
+      if(result&&['401','403'].includes(String(result.status))) {
         clearProtected();sourceStatus('Access unavailable · displayed source cleared.');return false;
       }
       if(!result||result.status!==200) {

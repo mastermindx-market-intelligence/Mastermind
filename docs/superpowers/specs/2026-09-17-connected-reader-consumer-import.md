@@ -37,7 +37,7 @@ and never imports or calls the broker, sockets, network, or I/O.
 - **G1 — safe-content classifier:** NOT DONE. Production reads require an
   owner-supplied `ContentDecision`; no default classifier is provided. Grantor:
   the Steward application/content policy owner (Steward app #463 merge
-  686af274d8ae1558f3f3ae35e0b3aae68be80a01), not broker/auth/reader. (owner
+  "686af274d8ae1558f3f3ae35e0b3aae68be80a01"), not broker/auth/reader. (owner
   ruled by Sol R83 item 2, root ts 1789607891.352309; #463's historical source
   tasks are closed and no current writer is inferred from them; no
   edit/start/merge authority is implied).
@@ -46,7 +46,7 @@ and never imports or calls the broker, sockets, network, or I/O.
   workspace content-read scope, which is mutually exclusive with the current
   Steward read scope. Grantor: Sol, through a new enrolled scope or an owner
   change to the Steward app (#463 merge
-  686af274d8ae1558f3f3ae35e0b3aae68be80a01) by its current qualified
+  "686af274d8ae1558f3f3ae35e0b3aae68be80a01") by its current qualified
   application/content owner (to be returned with its admitted carrier).
 - **G4 — installed content service / broker read:** NOT DONE. The broker
   observation endpoint is reachable only through its configured Unix-domain
@@ -55,7 +55,7 @@ and never imports or calls the broker, sockets, network, or I/O.
 - **G5 — application mount:** NOT DONE. The reader requires a same-origin
   `https` resource at an allowed origin; no production route is mounted.
   Grantor: the current qualified application owner of the Steward app (#463
-  merge 686af274d8ae1558f3f3ae35e0b3aae68be80a01); #599 retains shared-auth
+  merge "686af274d8ae1558f3f3ae35e0b3aae68be80a01"); #599 retains shared-auth
   ancestry only.
 - **G6 — provider canary / live proof:** NOT DONE. Terminal acceptance requires
   an observed live upstream response; autonomous production deployment remains

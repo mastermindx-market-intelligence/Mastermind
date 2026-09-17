@@ -8,6 +8,7 @@ Tests using OwnerFixture establish consumer semantics, not real user login.
 from __future__ import annotations
 import asyncio
 import hashlib
+from http import HTTPStatus
 import json
 import re
 from collections.abc import Awaitable, Callable
@@ -82,30 +83,30 @@ class NativeOutputReadResource:
         if scope.get('type')!='http':raise ValueError('HTTP resource only')
         if (scope.get('path','').encode('ascii',errors='replace')!=self._path
             or scope.get('raw_path')!=self._path or scope.get('root_path') or scope.get('query_string')):
-            await reply(404,{'error':'not_found'});return
-        if scope.get('method')!='GET':await reply(405,{'error':'method_not_allowed'});return
-        if scope.get('scheme')!='https':await reply(403,{'error':'transport_refused'});return
+            await reply(HTTPStatus.NOT_FOUND,{'error':'not_found'});return
+        if scope.get('method')!='GET':await reply(HTTPStatus.METHOD_NOT_ALLOWED,{'error':'method_not_allowed'});return
+        if scope.get('scheme')!='https':await reply(HTTPStatus.FORBIDDEN,{'error':'transport_refused'});return
         raw_headers=scope.get('headers',[])
         if not isinstance(raw_headers,(list,tuple)) or len(raw_headers)>64:
-            await reply(400,{'error':'invalid_request'});return
+            await reply(HTTPStatus.BAD_REQUEST,{'error':'invalid_request'});return
         headers={}
         for pair in raw_headers:
             if (not isinstance(pair,(list,tuple)) or len(pair)!=2 or
                 not all(isinstance(x,bytes) for x in pair) or len(pair[1])>17000):
-                await reply(400,{'error':'invalid_request'});return
+                await reply(HTTPStatus.BAD_REQUEST,{'error':'invalid_request'});return
             k,v=pair;headers.setdefault(k.lower(),[]).append(v)
         if (len(headers.get(b'host',[]))!=1 or any(len(headers.get(k,[]))>1 for k in
               (b'authorization',b'origin',b'content-length')) or b'transfer-encoding' in headers):
-            await reply(400,{'error':'invalid_request'});return
+            await reply(HTTPStatus.BAD_REQUEST,{'error':'invalid_request'});return
         if headers[b'host'][0]!=self._host or headers.get(b'origin',[self._origin])[0]!=self._origin:
-            await reply(403,{'error':'transport_refused'});return
-        if headers.get(b'content-length',[b'0'])[0]!=b'0':await reply(400,{'error':'invalid_request'});return
+            await reply(HTTPStatus.FORBIDDEN,{'error':'transport_refused'});return
+        if headers.get(b'content-length',[b'0'])[0]!=b'0':await reply(HTTPStatus.BAD_REQUEST,{'error':'invalid_request'});return
         auths=headers.get(b'authorization',[])
-        if not auths:await reply(401,{'error':'authentication_required'});return
+        if not auths:await reply(HTTPStatus.UNAUTHORIZED,{'error':'authentication_required'});return
         try:
             header=auths[0].decode('ascii')
             if header!=header.strip() or any(ord(c)<32 or ord(c)==127 for c in header):raise ValueError()
-        except (UnicodeError,ValueError):await reply(400,{'error':'invalid_request'});return
+        except (UnicodeError,ValueError):await reply(HTTPStatus.BAD_REQUEST,{'error':'invalid_request'});return
         async def empty_request_body():
             # ASGI may split even an empty GET into several empty frames.
             # Bound both frames and total wait; no content may enter this read.
@@ -118,11 +119,11 @@ class NativeOutputReadResource:
             return False
         try:empty=await asyncio.wait_for(empty_request_body(),self._timeout)
         except Exception:empty=False
-        if not empty:await reply(400,{'error':'invalid_request'});return
+        if not empty:await reply(HTTPStatus.BAD_REQUEST,{'error':'invalid_request'});return
         try:
             first=_ticket(await asyncio.wait_for(self._owner.authorize(header,self._resource,self._ref),self._timeout))
         except Exception:first=None
-        if first is None:await reply(401,{'error':'authentication_required'});return
+        if first is None:await reply(HTTPStatus.UNAUTHORIZED,{'error':'authentication_required'});return
         encoded=None
         try:
             raw=await asyncio.wait_for(self._owner.read(self._ref),self._timeout)
@@ -146,8 +147,8 @@ class NativeOutputReadResource:
         try:
             final=_ticket(await asyncio.wait_for(self._owner.authorize(header,self._resource,self._ref),self._timeout))
         except Exception:final=None
-        if final is None or final!=first:await reply(403,{'error':'access_changed'});return
-        if encoded is None:await reply(502,{'error':'source_unavailable'});return
+        if final is None or final!=first:await reply(HTTPStatus.FORBIDDEN,{'error':'access_changed'});return
+        if encoded is None:await reply(HTTPStatus.BAD_GATEWAY,{'error':'source_unavailable'});return
         await reply(200,encoded)
 
 

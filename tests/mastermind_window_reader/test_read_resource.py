@@ -3,6 +3,7 @@ import asyncio
 import copy
 import hashlib
 import json
+from http import HTTPStatus
 from pathlib import Path
 
 import pytest
@@ -84,6 +85,11 @@ def test_transport_or_auth_denial_never_reads_source(headers,status):
 def test_exact_read_only_surface(kwargs,status):
     owner=OwnerFixture();got=call(app(owner),**kwargs)
     assert got[0]==status and not any(c[0]=='read' for c in owner.calls)
+
+def test_http_status_values_are_plain_asgi_integers():
+    assert int(HTTPStatus.NOT_FOUND)==404
+    owner=OwnerFixture();got=call(app(owner),query=b'path=/etc/passwd')
+    assert got[0]==404
 
 @pytest.mark.parametrize('change',[
  lambda o:setattr(o,'ticket',None),
