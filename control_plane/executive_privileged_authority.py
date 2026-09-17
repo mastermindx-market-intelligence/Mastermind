@@ -16,6 +16,7 @@ asserts a ready-to-work claim for any worker slot.
 from __future__ import annotations
 
 import dataclasses
+import enum
 import hashlib
 import json
 import re
@@ -31,6 +32,36 @@ FAMILY_KEY_SCHEMA = "mastermind.executive_privileged_readiness_family_key/v1"
 BINDING_SCHEMA = "mastermind.executive_privileged_readiness_binding/v1"
 RESULT_SCHEMA = "mastermind.executive_privileged_readiness_result/v1"
 
+READINESS_AGGREGATE_TYPE = "privileged_readiness"
+
+# The merged PR #613 broker emits exactly four wire error codes. Three of them
+# are pre-effect refusals; EFFECT_UNKNOWN names an unresolved effect and must
+# never be projected as a refusal. This set reuses that merged domain rather
+# than forking a second reason vocabulary.
+BROKER_REFUSAL_REASON_CODES = frozenset(
+    {"PEER_UNAUTHORIZED", "REQUEST_ID_CONFLICT", "REFUSED"}
+)
+BROKER_EFFECT_UNKNOWN_ERROR = "EFFECT_UNKNOWN"
+
+REASON_ORIGIN_BROKER = "BROKER"
+
+RESULT_CANONICAL_KEYS = frozenset(
+    {
+        "schema_version",
+        "family_id",
+        "operation_id",
+        "state",
+        "replayed",
+        "observed_at_ms",
+        "evidence_currency",
+        "observation_scope",
+        "binding",
+        "receipt",
+        "reason_origin",
+        "reason_code",
+    }
+)
+
 FAMILY_ID_PREFIX = "pvrf-"
 OPERATION_ID_PREFIX = "pvr-"
 _ID_HEX_LENGTH = 48
@@ -43,6 +74,8 @@ _RELEASE_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _BOOT_UUID_RE = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 )
+_FAMILY_ID_RE = re.compile(r"^pvrf-[0-9a-f]{48}$")
+_OPERATION_ID_RE = re.compile(r"^pvr-[0-9a-f]{48}$")
 _ADAPTER_FALLBACK_RE = re.compile(r"^adapter-[0-9]+$")
 _NIL_BOOT_UUID = "00000000-0000-0000-0000-000000000000"
 
@@ -282,7 +315,171 @@ class ReadinessBinding:
         return f"{OPERATION_ID_PREFIX}{digest[:_ID_HEX_LENGTH]}"
 
 
+class ReadinessResultState(str, enum.Enum):
+    """The closed login-check result domain.
+
+    There is deliberately no ready-to-work member: the fixed
+    ``observation_scope`` below bounds every member to point-in-time
+    login-status evidence.
+    """
+
+    TERMINAL = "TERMINAL"
+    REFUSED = "REFUSED"
+    EFFECT_UNKNOWN = "EFFECT_UNKNOWN"
+
+
+class ReadinessEvidenceCurrency(str, enum.Enum):
+    """How current the binding's release/boot/policy facts are at return time.
+
+    This bounds only fact freshness. Neither member asserts a worker is
+    usable, that a credential is valid, or that a provider account resolved.
+    """
+
+    CURRENT = "CURRENT"
+    HISTORICAL = "HISTORICAL"
+
+
+class ReadinessEventPhase(str, enum.Enum):
+    """The closed set of durable ``events`` rows one operation family may hold."""
+
+    INTENT = "PRIVILEGED_READINESS_INTENT"
+    ATTEMPTED = "PRIVILEGED_READINESS_ATTEMPTED"
+    TERMINAL = "PRIVILEGED_READINESS_TERMINAL"
+    BROKER_REFUSED = "PRIVILEGED_READINESS_BROKER_REFUSED"
+    EFFECT_UNKNOWN = "PRIVILEGED_READINESS_EFFECT_UNKNOWN"
+    RECONCILED = "PRIVILEGED_READINESS_RECONCILED"
+
+
+def result_state_for_broker_error(code: Any) -> ReadinessResultState:
+    """Map one merged-broker wire error code onto the closed result domain.
+
+    ``EFFECT_UNKNOWN`` is an unresolved effect, never a refusal, so it must not
+    collapse into ``REFUSED``. An unrecognised code fails closed instead of
+    defaulting, so a future broker code cannot silently become a refusal.
+    """
+
+    if not isinstance(code, str):
+        raise PrivilegedReadinessError("broker error code is not a string")
+    if code == BROKER_EFFECT_UNKNOWN_ERROR:
+        return ReadinessResultState.EFFECT_UNKNOWN
+    if code in BROKER_REFUSAL_REASON_CODES:
+        return ReadinessResultState.REFUSED
+    raise PrivilegedReadinessError(f"broker error code {code!r} is outside the reviewed domain")
+
+
+def evidence_currency_for(
+    binding: "ReadinessBinding",
+    *,
+    current_boot_id: Any,
+    current_release_sha: Any,
+    current_authority_policy_hash: Any,
+) -> ReadinessEvidenceCurrency:
+    """Compare a stored binding against freshly observed host facts.
+
+    ``CURRENT`` requires exact equality on all three facts. Any mismatch, any
+    unprovable fact (``None``), and any malformed observation yields
+    ``HISTORICAL``. Boot-session UUID case is representation, not identity, so
+    both spellings canonicalize before comparison.
+    """
+
+    if not isinstance(binding, ReadinessBinding):
+        raise PrivilegedReadinessError("evidence currency requires a validated binding")
+    try:
+        observed_boot_id = validate_boot_id(current_boot_id)
+        observed_release_sha = validate_release_sha(current_release_sha)
+        observed_policy_hash = validate_sha256_hex(
+            current_authority_policy_hash, "current_authority_policy_hash"
+        )
+    except PrivilegedReadinessError:
+        return ReadinessEvidenceCurrency.HISTORICAL
+    if (
+        observed_boot_id == binding.boot_id
+        and observed_release_sha == binding.release_sha
+        and observed_policy_hash == binding.authority_policy_hash
+    ):
+        return ReadinessEvidenceCurrency.CURRENT
+    return ReadinessEvidenceCurrency.HISTORICAL
+
+
+@dataclasses.dataclass(frozen=True)
+class ReadinessResult:
+    """One secret-free login-check result projection.
+
+    State/receipt/reason coherence is enforced at construction so a consumer
+    can never read a success receipt off a refusal or an unresolved effect.
+    """
+
+    family_id: str
+    operation_id: str
+    state: ReadinessResultState
+    replayed: bool
+    observed_at_ms: int
+    evidence_currency: ReadinessEvidenceCurrency
+    binding: "ReadinessBinding"
+    receipt: Mapping[str, Any] | None = None
+    reason_origin: str | None = None
+    reason_code: str | None = None
+
+    def __post_init__(self) -> None:
+        _require_pattern(self.family_id, "family_id", _FAMILY_ID_RE)
+        _require_pattern(self.operation_id, "operation_id", _OPERATION_ID_RE)
+        if not isinstance(self.state, ReadinessResultState):
+            raise PrivilegedReadinessError("state is outside the closed result domain")
+        if not isinstance(self.evidence_currency, ReadinessEvidenceCurrency):
+            raise PrivilegedReadinessError("evidence_currency is outside the closed domain")
+        if type(self.replayed) is not bool:
+            raise PrivilegedReadinessError("replayed must be a real boolean")
+        if type(self.observed_at_ms) is not int or self.observed_at_ms <= 0:
+            raise PrivilegedReadinessError("observed_at_ms must be a positive integer")
+        if not isinstance(self.binding, ReadinessBinding):
+            raise PrivilegedReadinessError("binding must be a validated ReadinessBinding")
+        if self.state is ReadinessResultState.TERMINAL:
+            if not isinstance(self.receipt, Mapping):
+                raise PrivilegedReadinessError("a terminal result requires a validated receipt")
+            if self.reason_origin is not None or self.reason_code is not None:
+                raise PrivilegedReadinessError("a terminal result carries no refusal reason")
+        elif self.state is ReadinessResultState.REFUSED:
+            if self.receipt is not None:
+                raise PrivilegedReadinessError("a refusal carries no receipt")
+            if self.reason_origin != REASON_ORIGIN_BROKER:
+                raise PrivilegedReadinessError("a refusal reason must originate at the broker")
+            if self.reason_code not in BROKER_REFUSAL_REASON_CODES:
+                raise PrivilegedReadinessError("refusal reason_code is outside the broker domain")
+        else:
+            if self.receipt is not None:
+                raise PrivilegedReadinessError("an unresolved effect carries no receipt")
+            if self.reason_origin is not None or self.reason_code is not None:
+                raise PrivilegedReadinessError("an unresolved effect carries no refusal reason")
+
+    def to_canonical_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": RESULT_SCHEMA,
+            "family_id": self.family_id,
+            "operation_id": self.operation_id,
+            "state": self.state.value,
+            "replayed": self.replayed,
+            "observed_at_ms": self.observed_at_ms,
+            "evidence_currency": self.evidence_currency.value,
+            "observation_scope": OBSERVATION_SCOPE,
+            "binding": self.binding.to_canonical_dict(),
+            "receipt": dict(self.receipt) if self.receipt is not None else None,
+            "reason_origin": self.reason_origin,
+            "reason_code": self.reason_code,
+        }
+
+
 __all__ = [
+    "BROKER_EFFECT_UNKNOWN_ERROR",
+    "BROKER_REFUSAL_REASON_CODES",
+    "REASON_ORIGIN_BROKER",
+    "READINESS_AGGREGATE_TYPE",
+    "RESULT_CANONICAL_KEYS",
+    "ReadinessEventPhase",
+    "ReadinessEvidenceCurrency",
+    "ReadinessResult",
+    "ReadinessResultState",
+    "evidence_currency_for",
+    "result_state_for_broker_error",
     "BINDING_CANONICAL_KEYS",
     "BINDING_SCHEMA",
     "FAMILY_ID_PREFIX",
