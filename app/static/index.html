@@ -3208,6 +3208,7 @@ var I18N = {
   'trades.title':         { en: 'Trade History', zh: '交易历史' },
   'trades.loading':       { en: 'Loading trades…', zh: '加载交易中…' },
   'trades.empty':         { en: 'No trade history yet — positions accrue here as the ledger is updated.', zh: '暂无交易历史 — 账本更新后将显示。' },
+  'trades.unavailable':   { en: 'Trade history unavailable — the portfolio ledger could not be read.', zh: '交易历史暂不可用 — 无法读取组合账本。' },
   'trades.ticker':        { en: 'Ticker', zh: '代码' },
   'trades.sleeve':        { en: 'Sleeve', zh: '仓位类型' },
   'trades.opened':        { en: 'Opened', zh: '开仓日期' },
@@ -4858,9 +4859,14 @@ function _pendingOrdersHtml() {
 function renderTrades() {
   var el = E('trades');
   var data = _trades || {};
-  var hist = data.history || [];
-
   var h2 = '<h2><span class="l-en">Trade History</span><span class="l-zh">交易历史</span> <span style="font-weight:400;font-size:11px;color:var(--muted);margin-left:6px">' + t('trades.blotter_sub') + '</span></h2>';
+
+  if (data.error === 'trades_unavailable' || data.snapshot_status === 'unavailable') {
+    el.innerHTML = h2 + '<div class="mm-empty"><span class="mm-empty-icon">!</span>' + t('trades.unavailable') + '</div>';
+    return;
+  }
+
+  var hist = data.history || [];
   var pendHtml = _pendingOrdersHtml();
 
   if (!hist.length) {
