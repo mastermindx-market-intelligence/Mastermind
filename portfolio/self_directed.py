@@ -235,6 +235,76 @@ def _today() -> str:
     return datetime.now(timezone.utc).date().isoformat()
 
 
+class SelfDirectedMarkUnavailable(RuntimeError):
+    """A held Self-Directed position has no truthful mark for the requested date."""
+
+
+def _positive_price(value) -> Optional[float]:
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return None
+    return value if math.isfinite(value) and value > 0 else None
+
+
+def _carry_stale_max_days() -> int:
+    """Use the canonical marking layer's carry horizon; keep the dependency lazy."""
+    try:
+        from portfolio import marks
+        return int(marks._stale_max_days())
+    except Exception:  # noqa: BLE001
+        return 30
+
+
+def _persisted_position_mark(pos: dict, asof: str) -> Optional[float]:
+    """Return a prior observed market mark only when its dated provenance is eligible for `asof`."""
+    px = _positive_price(pos.get("current_price"))
+    mark_asof = str(pos.get("current_price_asof") or "")[:10]
+    if px is None or not mark_asof:
+        return None
+    try:
+        age_days = (date.fromisoformat(asof) - date.fromisoformat(mark_asof)).days
+    except (TypeError, ValueError):
+        return None
+    if age_days < 0 or age_days > _carry_stale_max_days():
+        return None
+    return px
+
+
+def _resolve_position_mark(ticker: str, pos: dict, prices: dict[str, float], asof: str) -> tuple[Optional[float], bool]:
+    """Resolve one held-position mark without crossing the requested clock.
+
+    Returns ``(price, observed_now)``. Explicit prices win. When the daily-mark job installs the
+    canonical resolver, its miss is authoritative — do not fall through to an unrelated live quote.
+    Without a resolver, undated live/snapshot access is allowed only for today's mark. A bounded,
+    dated persisted market observation is the final carry; cost basis is never a market mark.
+    """
+    px = _positive_price(prices.get(ticker))
+    if px is None and _price_resolver is not None:
+        try:
+            px = _positive_price(_price_resolver(ticker))
+        except Exception:  # noqa: BLE001
+            px = None
+    elif px is None and asof == _today():
+        px = _positive_price(_live_quote(ticker) or _stockdata_price(ticker))
+    if px is not None:
+        return px, True
+    return _persisted_position_mark(pos, asof), False
+
+
+def _resolve_benchmark_mark(ticker: str, prices: dict[str, float], asof: str) -> Optional[float]:
+    """Resolve benchmark without ever relabelling a current quote as a historical mark."""
+    px = _positive_price(prices.get(ticker))
+    if px is None and _price_resolver is not None:
+        try:
+            px = _positive_price(_price_resolver(ticker))
+        except Exception:  # noqa: BLE001
+            px = None
+    elif px is None and asof == _today():
+        px = _positive_price(_live_quote(ticker) or _stockdata_price(ticker))
+    return px
+
+
 # ---------------------------------------------------------------------------
 # core fill mechanics (mutates the passed account dict; returns a fill or None)
 # ---------------------------------------------------------------------------
@@ -463,23 +533,30 @@ def publish(*, prices: dict[str, float] | None = None, asof: str | None = None) 
 
     Schema matches paper_account's published format so _load_book() reads it without modification:
     {schema, portfolio_id, as_of, nav, positions:[{ticker, weight, shares, market_value}]}.
-    Un-priced names are included at weight derived from avg_cost (an honest approximation tagged in
-    the note). Best-effort; never raises; returns the written doc or None on failure."""
+    Every positive-share position must resolve from the requested-date observation or the bounded,
+    dated persisted market mark. Cost basis is never a market-value substitute. Raises the typed
+    SelfDirectedMarkUnavailable refusal before touching the publication when a held line is unknown."""
     asof_str = str(asof or _today())[:10]
     state = _load_account()
-    prices_map = {(k or "").upper(): float(v) for k, v in (prices or {}).items() if v and v > 0}
+    prices_map = {(k or "").upper(): float(v) for k, v in (prices or {}).items() if _positive_price(v) is not None}
     positions_raw = state.get("positions", {})
 
-    # Mark every position (live price > avg_cost fallback — honest approximation)
     marks: dict[str, float] = {}
-    for ticker in positions_raw:
-        px = prices_map.get(ticker) or _current_price(ticker)
-        if px and px > 0:
-            marks[ticker] = float(px)
+    for ticker, pos in positions_raw.items():
+        shares = float(pos.get("shares") or 0.0)
+        if shares <= 0:
+            continue
+        px, _observed = _resolve_position_mark(ticker, pos, prices_map, asof_str)
+        if px is None:
+            raise SelfDirectedMarkUnavailable(
+                f"no truthful mark for held self-directed position {ticker} at {asof_str}"
+            )
+        marks[ticker] = px
 
     invested = sum(
-        (pos.get("shares") or 0.0) * marks.get(tk, pos.get("avg_cost") or 0.0)
+        float(pos.get("shares") or 0.0) * marks[tk]
         for tk, pos in positions_raw.items()
+        if float(pos.get("shares") or 0.0) > 0
     )
     cash = state.get("cash", 0.0)
     nav = cash + invested
@@ -489,14 +566,14 @@ def publish(*, prices: dict[str, float] | None = None, asof: str | None = None) 
         shares = float(pos.get("shares") or 0.0)
         if shares <= 0:
             continue
-        px = marks.get(ticker, pos.get("avg_cost") or 0.0)
-        mv = shares * px if px else None
-        w = round(mv / nav, 6) if (mv is not None and nav > 0) else None
+        px = marks[ticker]
+        mv = shares * px
+        w = round(mv / nav, 6) if nav > 0 else None
         rows.append({
             "ticker": ticker,
             "shares": round(shares, 6),
-            "current_price": round(marks[ticker], 4) if ticker in marks else None,
-            "market_value": round(mv, 2) if mv is not None else None,
+            "current_price": round(px, 4),
+            "market_value": round(mv, 2),
             "weight": w,
         })
 
@@ -508,58 +585,71 @@ def publish(*, prices: dict[str, float] | None = None, asof: str | None = None) 
         "currency": "USD",
         "positions": rows,
         "note": ("Self-directed book published for firm-wide concentration visibility. "
-                 "Positions at live mark (avg_cost fallback for unpriced names). "
+                 "Positions use requested-date or bounded persisted market marks; never cost basis. "
                  "EXCLUDED from firm headroom/clamp math — the benchmark book must not "
                  "mechanically constrain the books it measures."),
     }
-    try:
-        _PUBLISHED_PATH.parent.mkdir(parents=True, exist_ok=True)
-        _PUBLISHED_PATH.write_text(json.dumps(doc, indent=2, default=str))
-        return doc
-    except Exception:  # noqa: BLE001
-        return None
+    _PUBLISHED_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _PUBLISHED_PATH.write_text(json.dumps(doc, indent=2, default=str))
+    return doc
 
 
 def mark(*, prices: dict[str, float] | None = None, asof: str | None = None,
          benchmark: str = "SPY", mark_source: str = "self_directed_mark") -> Optional[dict]:
-    """Snapshot this book's NAV to nav_history.jsonl (idempotent per date), so the CIO review and
-    the improvement agenda see it alongside the paper_account books. Uses the SAME price resolution
-    as book() (the injected marking layer first, then the legacy accessor) — a held name with no
-    mark falls back to its avg_cost for the NAV total ONLY (never written back as a price). The
-    benchmark line (spy_nav) initialises its shares on the first mark, mirroring paper_account.mark.
-    Best-effort; never raises."""
+    """Snapshot this book's truthful NAV to nav_history.jsonl (idempotent per date).
+
+    Explicit/canonical requested-date observations win; the final fallback is the existing dated
+    persisted market observation while it remains within the canonical carry horizon. Historical
+    marks never borrow an undated current quote, and cost basis is never substituted for a market
+    mark. If any positive-share holding is still unknown, raise SelfDirectedMarkUnavailable before
+    mutating account mark provenance or appending a NAV row.
+    """
     asof = str(asof or _today())[:10]
     state = _load_account()
-    prices = {(k or "").upper(): v for k, v in (prices or {}).items() if v and v > 0}
+    prices = {(k or "").upper(): v for k, v in (prices or {}).items() if _positive_price(v) is not None}
     positions = state.get("positions", {})
 
-    invested = 0.0
-    stored_mark_changed = False
+    resolved: dict[str, float] = {}
+    observed_updates: dict[str, float] = {}
     for ticker, pos in positions.items():
-        observed = prices.get(ticker) or _current_price(ticker)
-        try:
-            observed = float(observed) if observed is not None else None
-        except (TypeError, ValueError):
-            observed = None
-        if observed is not None and math.isfinite(observed) and observed > 0:
+        shares = float(pos.get("shares") or 0.0)
+        if shares <= 0:
+            continue
+        px, observed_now = _resolve_position_mark(ticker, pos, prices, asof)
+        if px is None:
+            raise SelfDirectedMarkUnavailable(
+                f"no truthful mark for held self-directed position {ticker} at {asof}"
+            )
+        resolved[ticker] = px
+        if observed_now:
             previous_asof = str(pos.get("current_price_asof") or "")[:10]
             try:
                 may_update = not previous_asof or date.fromisoformat(previous_asof) <= date.fromisoformat(asof)
             except (TypeError, ValueError):
                 may_update = True
             if may_update:
-                pos["current_price"] = round(observed, 4)
-                pos["current_price_asof"] = asof
-                pos["current_price_source"] = str(mark_source or "self_directed_mark")
-                pos["current_price_time_kind"] = "portfolio_mark_date"
-                stored_mark_changed = True
-        px = observed if observed is not None and observed > 0 else (pos.get("avg_cost") or 0.0)
-        invested += (pos.get("shares") or 0.0) * px
+                observed_updates[ticker] = px
+
+    invested = sum(
+        float(pos.get("shares") or 0.0) * resolved[ticker]
+        for ticker, pos in positions.items()
+        if float(pos.get("shares") or 0.0) > 0
+    )
     cash = state.get("cash", 0.0)
     nav = cash + invested
 
+    # Only after every held line is priceable may requested-date observations advance provenance.
+    stored_mark_changed = False
+    for ticker, observed in observed_updates.items():
+        pos = positions[ticker]
+        pos["current_price"] = round(observed, 4)
+        pos["current_price_asof"] = asof
+        pos["current_price_source"] = str(mark_source or "self_directed_mark")
+        pos["current_price_time_kind"] = "portfolio_mark_date"
+        stored_mark_changed = True
+
     # benchmark shares are pinned on the first mark (back-compat with the paper_account convention)
-    spy_px = prices.get(benchmark) or _current_price(benchmark)
+    spy_px = _resolve_benchmark_mark(benchmark, prices, asof)
     if state.get("spy_shares") is None and spy_px and spy_px > 0:
         state["spy_shares"] = _STARTING_NAV / spy_px
         state["spy_inception_price"] = spy_px
@@ -571,24 +661,21 @@ def mark(*, prices: dict[str, float] | None = None, asof: str | None = None,
     row = {"date": asof, "nav": round(nav, 2), "cash": round(cash, 2),
            "invested": round(invested, 2),
            "spy_nav": round(spy_nav, 2) if spy_nav is not None else None}
-    try:
-        _ensure_dir()
-        rows: list[dict] = []
-        if _NAV_PATH.exists():
-            for line in _NAV_PATH.read_text().splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    r = json.loads(line)
-                except Exception:
-                    continue
-                if r.get("date") != asof:            # idempotent per date
-                    rows.append(r)
-        rows.append(row)
-        _NAV_PATH.write_text("\n".join(json.dumps(r, default=str) for r in rows) + "\n")
-    except Exception:
-        pass
+    _ensure_dir()
+    rows: list[dict] = []
+    if _NAV_PATH.exists():
+        for line in _NAV_PATH.read_text().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                r = json.loads(line)
+            except Exception:
+                continue
+            if r.get("date") != asof:            # idempotent per date
+                rows.append(r)
+    rows.append(row)
+    _NAV_PATH.write_text("\n".join(json.dumps(r, default=str) for r in rows) + "\n")
     return row
 
 
