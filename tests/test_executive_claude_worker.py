@@ -40,6 +40,24 @@ _EXACT_MODEL = "claude-opus-4-6"
 _FIXTURE_VERSION = "2.1.239"
 
 
+def _passing_canary() -> dict[str, object]:
+    return {
+        "schema_version": "mastermind.executive_secret_canary/v1",
+        "passed": True,
+        "checks": {
+            "control_service_environment": "DENIED",
+            "administrative_checkout": "DENIED",
+            "executive_database": "DENIED",
+            "other_worker_home": "DENIED",
+            "forbidden_production_path": "DENIED",
+        },
+        "receipt_sha256": "a" * 64,
+        "control_environment_probe_sha256": "b" * 64,
+        "observed_at": "2026-09-17T00:00:00Z",
+        "worker_auth_exception": "DEDICATED_CODEX_HOME_ONLY",
+    }
+
+
 def _fixture_claude_binary(tmp_path: Path) -> Path:
     binary = tmp_path / "fixture-claude"
     binary.write_text(
@@ -176,10 +194,10 @@ def _workspace_and_spec(
     return WorkerLaunchSpec(**values)  # type: ignore[arg-type]
 
 
-def test_descriptor_is_unimplemented_but_resolves_the_exact_native_class() -> None:
+def test_descriptor_is_implemented_and_resolves_the_exact_native_class() -> None:
     descriptor = adapter_descriptor("claude-code")
 
-    assert descriptor.implemented is False
+    assert descriptor.implemented is True
     assert descriptor.implementation == "control_plane.claude_worker.ClaudeCodeWorkerAdapter"
     assert adapter_implementation("claude-code") is ClaudeCodeWorkerAdapter
     for alias in ("claude", "claude-cli", "claude-code-v1", "claude-compatible"):
@@ -644,6 +662,57 @@ def test_unknown_or_ambiguous_process_reference_refuses(tmp_path: Path) -> None:
         await adapter.collect_result(ref)
 
     asyncio.run(execute())
+
+
+def test_complete_launch_attestation_is_redacted_and_principal_bound(
+    tmp_path: Path,
+) -> None:
+    prompt = "private Claude job packet that must only be hashed"
+    binary = _fixture_claude_binary(tmp_path)
+    (tmp_path / "mode").write_text("success", encoding="utf-8")
+    adapter = _adapter(tmp_path, binary)
+    spec = _workspace_and_spec(
+        tmp_path,
+        prompt=prompt,
+        expected_worker_uid=os.geteuid(),
+        expected_worker_gid=os.getegid(),
+        worker_user=__import__("pwd").getpwuid(os.geteuid()).pw_name,
+        secret_canary_verdict=_passing_canary(),
+        require_secret_canary=True,
+    )
+
+    async def execute():
+        ref = await adapter.start(spec)
+        attestation = adapter.launch_attestation(ref)
+        receipt = await adapter.collect_result(ref)
+        return ref, attestation, receipt
+
+    ref, attestation, receipt = asyncio.run(execute())
+    document = attestation.to_dict()
+    assert receipt.result.status is WorkerRunStatus.SUCCEEDED
+    assert document["schema_version"] == "mastermind.executive_launch_attestation/v1"
+    assert document["executable_path"] == str(binary.resolve())
+    assert len(document["permission_profile_sha256"]) == 64
+    assert document["prompt_sha256"] == __import__("hashlib").sha256(
+        prompt.encode("utf-8")
+    ).hexdigest()
+    assert document["expected_base_sha"] == spec.expected_base_sha
+    assert document["observed_base_sha"] == ref.base_sha
+    assert document["workspace_identity"]["path"] == str(
+        Path(spec.workspace_path).resolve()
+    )
+    assert document["worker_identity"]["effective_uid"] == os.geteuid()
+    assert document["provider_home_identity"]["path"] == str(
+        (Path(spec.run_dir) / "home").resolve()
+    )
+    assert document["secret_canary_verdict"]["passed"] is True
+    assert document["launch_nonce"] == ref.launch_nonce
+    assert document["process_identity"]["pid"] == ref.pid
+    assert document["process_identity"]["session_id"] == ref.session_id == ref.pid
+    serialized = json.dumps(document, sort_keys=True)
+    assert prompt not in serialized
+    assert "structured_output" not in serialized
+    assert sorted(document["environment_keys"]) == document["environment_keys"]
 
 
 def test_status_and_direct_validation_fail_closed_before_common_sandbox(

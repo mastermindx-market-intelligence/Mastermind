@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import platform
+import pwd
 import re
 import selectors
 import signal
@@ -23,11 +24,14 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from control_plane.codex_worker import (
+    LAUNCH_ATTESTATION_SCHEMA_VERSION,
     CodexWorkerAdapter,
+    LaunchAttestation,
     LaunchValidationError,
     ProcessIdentityError,
     ProcessInspector as LocalProcessInspector,
     ResultValidationError,
+    _canonical_sha256,
     _create_private_file,
     _ensure_private_directory,
     _ensure_run_directory,
@@ -36,12 +40,14 @@ from control_plane.codex_worker import (
     _is_protected_workspace_path,
     _is_relative_to,
     _normalise_relative_path,
+    _path_identity,
     _path_matches_patterns,
     _process_group_exists,
     _read_limited,
     _utc_now,
     _wait_for_process_group_exit,
     validate_json_schema,
+    validate_secret_canary_verdict,
 )
 from control_plane.worker_execution_contract import (
     ArtifactReceipt,
@@ -195,6 +201,7 @@ class _RunState:
     violation: asyncio.Event
     process_wait_task: asyncio.Task[int]
     deadline: float
+    launch_attestation: LaunchAttestation | None = None
     stdout: bytearray = dataclasses.field(default_factory=bytearray)
     stderr: bytearray = dataclasses.field(default_factory=bytearray)
     stdout_task: asyncio.Task[None] | None = None
@@ -553,6 +560,46 @@ def _closed_launch_environment(home: Path, tmp: Path, spec: WorkerLaunchSpec) ->
         "GIT_CONFIG_GLOBAL": "/dev/null",
         "GIT_CONFIG_NOSYSTEM": "1",
         "GIT_OPTIONAL_LOCKS": "0",
+    }
+
+
+def _redacted_launch_argv(argv: Sequence[str]) -> tuple[str, ...]:
+    """Bind exact flags while replacing prompt/schema bodies with their digests."""
+
+    rendered: list[str] = []
+    index = 0
+    while index < len(argv):
+        value = str(argv[index])
+        if value == "--json-schema":
+            if index + 1 >= len(argv):
+                raise ClaudeLaunchError("compiled Claude command lost its JSON schema")
+            schema = str(argv[index + 1]).encode("utf-8", "strict")
+            rendered.extend(
+                (value, f"<json-schema-sha256:{hashlib.sha256(schema).hexdigest()}>")
+            )
+            index += 2
+            continue
+        if index == len(argv) - 1:
+            prompt = value.encode("utf-8", "strict")
+            rendered.append(f"<prompt-sha256:{hashlib.sha256(prompt).hexdigest()}>")
+        else:
+            rendered.append(value)
+        index += 1
+    return tuple(rendered)
+
+
+def _permission_profile(spec: WorkerLaunchSpec) -> dict[str, Any]:
+    tools, preapproved, forbidden = _tool_policy(spec)
+    return {
+        "tools": list(tools),
+        "preapproved_tools": list(preapproved),
+        "forbidden_tools": list(forbidden),
+        "isolation_manifest_sha256": spec.isolation_manifest_sha256,
+        "network_enabled": False,
+        "safe_mode": True,
+        "session_persistence": False,
+        "mcp_servers": [],
+        "shell_environment_policy": "include_only",
     }
 
 
@@ -1268,6 +1315,12 @@ class ClaudeCodeWorkerAdapter:
     async def start(self, spec: WorkerLaunchSpec) -> WorkerProcessRef:
         workspace, run_dir, home, tmp, baseline, schema = self._validate_spec(spec)
         _assert_claude_binary_unchanged(self.binary)
+        canary_verdict = validate_secret_canary_verdict(
+            spec.secret_canary_verdict,
+            require_passed=bool(spec.require_secret_canary),
+        )
+        argv = self._launch_argv(spec, schema)
+        environment = _closed_launch_environment(home, tmp, spec)
         stdout_path = run_dir / "logs" / "stdout.json"
         stderr_path = run_dir / "logs" / "stderr.log"
         result_path = run_dir / "output" / "result.json"
@@ -1280,12 +1333,12 @@ class ClaudeCodeWorkerAdapter:
         try:
             result_evidence = _bind_private_evidence(result_path)
             process = await asyncio.create_subprocess_exec(
-                *self._launch_argv(spec, schema),
+                *argv,
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(workspace),
-                env=_closed_launch_environment(home, tmp, spec),
+                env=environment,
                 start_new_session=True,
                 limit=128 * 1024,
             )
@@ -1364,10 +1417,57 @@ class ClaudeCodeWorkerAdapter:
             effective_uid=int(getattr(identity, "effective_uid")), effective_gid=int(getattr(identity, "effective_gid")),
             real_uid=int(getattr(identity, "real_uid")), real_gid=int(getattr(identity, "real_gid")),
         )
+        try:
+            observed_user = pwd.getpwuid(ref.effective_uid).pw_name
+        except KeyError:
+            observed_user = None
+        state.launch_attestation = LaunchAttestation(
+            schema_version=LAUNCH_ATTESTATION_SCHEMA_VERSION,
+            created_at=_utc_now(),
+            executable_path=self.binary.real_path,
+            binary=self.binary,
+            rendered_argv=_redacted_launch_argv(argv),
+            environment_keys=tuple(sorted(environment)),
+            permission_profile_sha256=_canonical_sha256(_permission_profile(spec)),
+            prompt_sha256=hashlib.sha256(spec.prompt.encode("utf-8", "strict")).hexdigest(),
+            expected_base_sha=spec.expected_base_sha,
+            observed_base_sha=baseline.head,
+            workspace_identity={**_path_identity(workspace), "git_head": baseline.head},
+            worker_identity={
+                "requested_user": spec.worker_user,
+                "observed_user": observed_user,
+                "expected_uid": spec.expected_worker_uid,
+                "expected_gid": spec.expected_worker_gid,
+                "effective_uid": ref.effective_uid,
+                "effective_gid": ref.effective_gid,
+                "real_uid": ref.real_uid,
+                "real_gid": ref.real_gid,
+            },
+            provider_home_identity=_path_identity(home),
+            secret_canary_verdict=canary_verdict,
+            launch_nonce=ref.launch_nonce,
+            process_identity={
+                "pid": ref.pid,
+                "pgid": ref.pgid,
+                "session_id": ref.session_id,
+                "start_identity": ref.process_start_identity,
+                "boot_id": ref.boot_session_id,
+                "effective_uid": ref.effective_uid,
+                "effective_gid": ref.effective_gid,
+                "real_uid": ref.real_uid,
+                "real_gid": ref.real_gid,
+            },
+        )
         state.ref = ref
         self._runs[spec.run_id] = state
         state.monitor_task = asyncio.create_task(self._monitor(state))
         return ref
+
+    def launch_attestation(self, ref: WorkerProcessRef) -> LaunchAttestation:
+        state = self._state(ref)
+        if state.launch_attestation is None:
+            raise ClaudeProcessIdentityError("Claude launch attestation is unavailable")
+        return state.launch_attestation
 
     async def status(self, ref: WorkerProcessRef) -> WorkerRunStatus:
         state = self._state(ref)
