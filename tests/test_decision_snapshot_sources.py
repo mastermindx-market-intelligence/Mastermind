@@ -1595,10 +1595,14 @@ def test_settlement_source_that_is_a_regular_file_fails_closed(repo_roots):
     assert receipt["status"] == "INVALID"
 
 
-def test_settlement_symlinked_json_entry_fails_closed(repo_roots):
+def test_settlement_eligible_symlinked_json_entry_fails_closed(repo_roots):
+    """An eligible (pre-cutoff) symlinked entry must still poison the whole manifest closed
+    — the cutoff partition (Task 8 repair 5, I1) only excuses *post*-cutoff entries."""
     repo, _ = repo_roots
     directory = _seed_settlement(repo, ["r001.json"])
-    (directory / "r002.json").symlink_to(directory / "r001.json")
+    link = directory / "r002.json"
+    link.symlink_to(directory / "r001.json")
+    os.utime(link, (_PRE_CUTOFF_EPOCH, _PRE_CUTOFF_EPOCH), follow_symlinks=False)
     os.utime(directory, (_PRE_CUTOFF_EPOCH, _PRE_CUTOFF_EPOCH))
     receipt, result = _settlement_receipt(repo)
     assert receipt["status"] == "INVALID"
@@ -1606,13 +1610,76 @@ def test_settlement_symlinked_json_entry_fails_closed(repo_roots):
     assert "r001.json" not in json.dumps(result["sections"]["historical_memory"])
 
 
-def test_settlement_nonregular_json_entry_fails_closed(repo_roots):
+def test_settlement_post_cutoff_symlinked_json_entry_has_zero_effect(repo_roots):
+    """Task 8 repair 5, I1: a symlink dated *after* the cutoff must never reach the
+    regular-file refusal at all — it is invisible, and the eligible sibling still composes."""
     repo, _ = repo_roots
     directory = _seed_settlement(repo, ["r001.json"])
-    (directory / "nested.json").mkdir()
+    link = directory / "r002.json"
+    link.symlink_to(directory / "r001.json")
+    os.utime(link, (_POST_CUTOFF_EPOCH, _POST_CUTOFF_EPOCH), follow_symlinks=False)
+    os.utime(directory, (_PRE_CUTOFF_EPOCH, _PRE_CUTOFF_EPOCH))
+    receipt, result = _settlement_receipt(repo)
+    assert receipt["status"] == "AVAILABLE"
+    assert receipt["coverage_state"] == "COMPLETE"
+    assert receipt["rows_returned"] == 1
+    rendered = json.dumps(result["sections"]["historical_memory"])
+    assert "r001.json" in rendered
+    assert "r002.json" not in rendered
+
+
+def test_settlement_eligible_nonregular_json_entry_fails_closed(repo_roots):
+    """An eligible (pre-cutoff) non-regular entry must still poison the whole manifest
+    closed — only a *post*-cutoff non-regular entry may have zero effect (I1)."""
+    repo, _ = repo_roots
+    directory = _seed_settlement(repo, ["r001.json"])
+    nested = directory / "nested.json"
+    nested.mkdir()
+    os.utime(nested, (_PRE_CUTOFF_EPOCH, _PRE_CUTOFF_EPOCH))
     os.utime(directory, (_PRE_CUTOFF_EPOCH, _PRE_CUTOFF_EPOCH))
     receipt, _ = _settlement_receipt(repo)
     assert receipt["status"] == "INVALID"
+
+
+def test_settlement_post_cutoff_nonregular_json_entry_has_zero_effect(repo_roots):
+    """Task 8 repair 5, I1: a directory named ``*.json`` dated after the cutoff must never
+    reach the regular-file refusal — it is invisible, and the eligible sibling still
+    composes AVAILABLE/COMPLETE."""
+    repo, _ = repo_roots
+    directory = _seed_settlement(repo, ["r001.json"])
+    nested = directory / "nested.json"
+    nested.mkdir()
+    os.utime(nested, (_POST_CUTOFF_EPOCH, _POST_CUTOFF_EPOCH))
+    os.utime(directory, (_PRE_CUTOFF_EPOCH, _PRE_CUTOFF_EPOCH))
+    receipt, result = _settlement_receipt(repo)
+    assert receipt["status"] == "AVAILABLE"
+    assert receipt["coverage_state"] == "COMPLETE"
+    assert receipt["rows_returned"] == 1
+    rendered = json.dumps(result["sections"]["historical_memory"])
+    assert "r001.json" in rendered
+    assert "nested.json" not in rendered
+
+
+def test_settlement_thousands_of_future_names_cannot_trip_the_eligible_metadata_ceiling(
+    repo_roots, monkeypatch,
+):
+    """Task 8 repair 5, I1 (budget form): a flood of post-cutoff receipt names — the shape
+    of a continuously-settling book — must never sum into the metadata ceiling. Only the
+    encoded size of the single pre-cutoff eligible name may count."""
+    repo, _ = repo_roots
+    monkeypatch.setattr(sources, "MAX_MANIFEST_METADATA_BYTES", 200)
+    directory = _seed_settlement(repo, ["r001.json"])
+    future_names = [f"future_{i:06d}.json" for i in range(5_000)]
+    overrides = {name: _POST_CUTOFF_EPOCH for name in future_names}
+    _seed_settlement(repo, future_names, entry_overrides=overrides)
+    os.utime(directory, (_PRE_CUTOFF_EPOCH, _PRE_CUTOFF_EPOCH))
+    receipt, result = _settlement_receipt(repo)
+    assert receipt["status"] == "AVAILABLE"
+    assert receipt["coverage_state"] == "COMPLETE"
+    assert receipt["rows_returned"] == 1
+    rendered = json.dumps(result["sections"]["historical_memory"])
+    assert "r001.json" in rendered
+    assert "future_000000.json" not in rendered
 
 
 def test_settlement_directory_changed_during_enumeration_fails_closed(repo_roots, monkeypatch):

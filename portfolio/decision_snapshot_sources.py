@@ -596,13 +596,17 @@ def _parse_json(raw: bytes) -> tuple[Any | None, str | None]:
 _MANIFEST_NAME_OVERHEAD_BYTES = 3  # JSON quoting plus one separator per encoded name
 
 
-def _stable_directory_manifest(directory: Path) -> dict[str, Any]:
-    """Fixed-path, no-follow, stable first-party directory-manifest read.
+def _stable_directory_manifest(directory: Path, cutoff: str) -> dict[str, Any]:
+    """Fixed-path, no-follow, stable, cutoff-partitioned first-party directory-manifest read.
 
     Returns ``{"entries": sorted_name_mtime_pairs, "dir_mtime_ns": int | None,
     "error_code": str | None}`` — ``entries`` is a list of ``(name, st_mtime_ns)`` tuples
-    sorted by name, one per eligible ``.json`` entry, with no cutoff partitioning applied
-    here (the caller partitions, since the caller alone knows ``decision_cutoff``).
+    sorted by name, one per *eligible* ``.json`` entry: every entry whose own mtime is after
+    ``cutoff`` is dropped immediately, before either fail-closed check below ever sees it, so
+    a post-cutoff entry can be a symlink, a directory, or one of an unbounded flood of names
+    with zero effect on this manifest. Only the eligible census is ever checked for
+    regular-file refusal or summed against the metadata ceiling — an *eligible* symlink or
+    non-regular entry still fails the whole manifest closed, exactly as before.
     ``dir_mtime_ns`` is the directory's own stable mtime, reported only as a stability
     diagnostic — it is never mixed into an entry's mtime, and the caller must never derive a
     ``known_at`` or generation input from it: a directory holding zero eligible entries (be
@@ -616,11 +620,13 @@ def _stable_directory_manifest(directory: Path) -> dict[str, Any]:
     * rejects a symlinked or non-directory source before opening anything, then opens the
       directory itself with ``O_DIRECTORY|O_NOFOLLOW`` and enumerates through that fd, so a
       path component swapped mid-read cannot redirect it;
-    * refuses any matching entry that is a symlink or not a regular file, failing closed
+    * lstats every matching entry first (never following it) and drops it before any other
+      check the instant its own mtime proves it is after ``cutoff``;
+    * refuses any *eligible* entry that is a symlink or not a regular file, failing closed
       rather than returning partial truth about a directory it does not understand;
-    * bounds total encoded filename metadata, failing closed on overflow — a manifest is
-      metadata about an unbounded directory, and an unbounded name census is not bounded
-      capture;
+    * bounds total encoded filename metadata for the eligible census only, failing closed on
+      overflow — a manifest is metadata about an unbounded directory, and an unbounded name
+      census is not bounded capture;
     * re-fstats the directory afterwards and rejects any identity or mtime change during
       enumeration;
     * captures each eligible entry's own mtime untouched by the directory's mtime — the
@@ -660,6 +666,11 @@ def _stable_directory_manifest(directory: Path) -> dict[str, Any]:
                     info = entry.stat(follow_symlinks=False)
                 except OSError:
                     return _failed("SETTLEMENT_ENTRY_NOT_REGULAR")
+                if _utc_from_mtime_ns(info.st_mtime_ns) > cutoff:
+                    # Post-cutoff: this entry is completely invisible to the manifest. It
+                    # must never reach the type refusal or the metadata ceiling below —
+                    # neither may ever be tripped by evidence this cutoff never saw.
+                    continue
                 if entry.is_symlink() or not stat.S_ISREG(info.st_mode):
                     return _failed("SETTLEMENT_ENTRY_NOT_REGULAR")
                 encoded_bytes += len(entry.name.encode("utf-8")) + _MANIFEST_NAME_OVERHEAD_BYTES
@@ -1101,7 +1112,7 @@ def capture_book_state(book: str, *, decision_cutoff: str, recorded_at: str) -> 
     )
     sections.setdefault("historical_memory", _section("historical_memory", []))
     emit("historical_memory", _SETTLEMENT_RECEIPTS_SOURCE_ID)
-    manifest = _stable_directory_manifest(settlement_dir)
+    manifest = _stable_directory_manifest(settlement_dir, cutoff)
     manifest_error = manifest["error_code"]
     if manifest_error == "MISSING":
         receipt["status"] = "ABSENT_OPTIONAL"
@@ -1130,15 +1141,13 @@ def capture_book_state(book: str, *, decision_cutoff: str, recorded_at: str) -> 
         _merge_into_section(sections["historical_memory"], rows=[], coverage_state="BLOCKED",
                              omitted_rows=0, gaps=[gap])
     else:
-        # Partition every entry independently against the cutoff — never gate the whole
-        # directory on one aggregate clock. A post-cutoff entry is completely invisible to
-        # this receipt's bytes: it contributes no row, no count, no gap, no coverage
-        # degradation, no digest input, no generation input, and no known_at effect. Only
-        # ``eligible`` below may ever touch any of those.
-        eligible: list[tuple[str, int]] = [
-            (name, mtime_ns) for name, mtime_ns in manifest["entries"]
-            if _utc_from_mtime_ns(mtime_ns) <= cutoff
-        ]
+        # ``_stable_directory_manifest`` already partitioned every entry independently
+        # against the cutoff — never gating the whole directory on one aggregate clock — so
+        # ``manifest["entries"]`` here is already the eligible census. A post-cutoff entry
+        # was completely invisible to this receipt's bytes from the moment it was read: no
+        # row, no count, no gap, no coverage degradation, no digest input, no generation
+        # input, and no known_at effect.
+        eligible: list[tuple[str, int]] = manifest["entries"]
 
         if not eligible:
             # Zero eligible evidence is one stable optional-absence representation,
