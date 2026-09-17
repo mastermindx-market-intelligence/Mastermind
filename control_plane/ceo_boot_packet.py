@@ -121,10 +121,12 @@ def resolve_macro_root(
 ) -> tuple[Path | None, str | None, list[dict[str, Any]]]:
     """Locate a Macro checkout to read Agent OS from.
 
-    Returns ``(resolved_path, resolved_via, candidates_tried)``.  The ladder is
-    ``flag -> MASTERMIND_MACRO_ROOT -> sibling ../Macro Dashboard -> vendor/macro``
-    and the first *usable* candidate wins; a candidate is usable only when the
-    directory exists and carries both ``scripts/agentos.py`` and an ``agentos/`` store.
+    Returns ``(resolved_path, resolved_via, candidates_tried)``.  A non-null explicit
+    flag is authoritative and never falls through when unusable.  Without a flag, the
+    discovery ladder is ``MASTERMIND_MACRO_ROOT -> sibling ../Macro Dashboard ->
+    vendor/macro`` and the first *usable* candidate wins; a candidate is usable only
+    when the directory exists and carries both ``scripts/agentos.py`` and an
+    ``agentos/`` store.
 
     The sibling checkout deliberately outranks ``vendor/macro``.  The vendor pin exists
     so app code can import a *fixed* Macro engine revision and is therefore stale by
@@ -135,14 +137,16 @@ def resolve_macro_root(
     Every candidate tried is recorded (path + why it was rejected) so an unresolved
     packet can be diagnosed without re-running anything.
     """
-    sources: list[tuple[str, Path | None]] = [
-        ("flag", Path(explicit) if explicit else None),
-        ("env", Path(environ[ENV_MACRO_ROOT]) if environ.get(ENV_MACRO_ROOT) else None),
-        ("sibling", repo_root.parent / "Macro Dashboard"),
-        # `vendor/macro` is a tracked symlink; resolve it so the recorded path names
-        # the real target rather than the link.
-        ("vendor", (repo_root / "vendor" / "macro").resolve()),
-    ]
+    if explicit is not None:
+        sources: list[tuple[str, Path | None]] = [("flag", Path(explicit))]
+    else:
+        sources = [
+            ("env", Path(environ[ENV_MACRO_ROOT]) if environ.get(ENV_MACRO_ROOT) else None),
+            ("sibling", repo_root.parent / "Macro Dashboard"),
+            # `vendor/macro` is a tracked symlink; resolve it so the recorded path names
+            # the real target rather than the link.
+            ("vendor", (repo_root / "vendor" / "macro").resolve()),
+        ]
 
     candidates: list[dict[str, Any]] = []
     for via, path in sources:
@@ -354,6 +358,88 @@ def git_sha(path: Path) -> str | None:
 def git_branch(path: Path) -> str | None:
     """Public name for :func:`_git_branch`.  A wrapper, for the reason above."""
     return _git_branch(path)
+
+
+def build_packet_in_interpreter(
+    *,
+    boot_python: Path | None,
+    repo_root: Path,
+    macro_root: Path,
+    timeout: float = DEFAULT_TIMEOUT,
+    now: str | None = None,
+) -> dict[str, Any]:
+    """Build one grounded packet in a sealed YAML-capable read interpreter.
+
+    This is an orientation-only process boundary owned by the canonical boot-packet
+    module.  It never enters the MCP integration package, never inherits HOME or
+    ambient Git configuration, and accepts child output only when schema plus both
+    repository SHAs match fresh host observations.
+    """
+    root = Path(repo_root).resolve()
+    macro = Path(macro_root).resolve()
+
+    def fallback(reason: str) -> dict[str, Any]:
+        packet = build_packet(
+            repo_root=root, macro_root_flag=os.fspath(macro), now=now, timeout=timeout
+        )
+        packet["degraded"] = [
+            f"installed boot helper unavailable: {reason}",
+            *(str(item) for item in (packet.get("degraded") or [])),
+        ]
+        return packet
+
+    if boot_python is None:
+        return fallback("interpreter_not_configured")
+    python = Path(boot_python).resolve()
+    argv = [
+        os.fspath(python), "-I", "-B",
+        os.fspath(root / "scripts" / "ceo_boot_packet.py"),
+        "--json", "--macro-root", os.fspath(macro),
+        "--timeout", str(timeout),
+    ]
+    if now is not None:
+        argv.extend(["--now", str(now)])
+    env = {
+        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONNOUSERSITE": "1",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_CONFIG_COUNT": "2",
+        "GIT_CONFIG_KEY_0": "safe.directory",
+        "GIT_CONFIG_VALUE_0": os.fspath(root),
+        "GIT_CONFIG_KEY_1": "safe.directory",
+        "GIT_CONFIG_VALUE_1": os.fspath(macro),
+        "GIT_OPTIONAL_LOCKS": "0",
+        "GIT_TERMINAL_PROMPT": "0",
+        "MACRO_MASTERMIND_REPO": os.fspath(root),
+    }
+    try:
+        process = subprocess.run(
+            argv, cwd=os.fspath(root), env=env, capture_output=True, text=True,
+            check=False, timeout=timeout + 10.0,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return fallback("process_unavailable")
+    if process.returncode != 0:
+        return fallback("process_failed")
+    try:
+        packet = json.loads(process.stdout)
+    except (TypeError, ValueError):
+        return fallback("invalid_json")
+    if not isinstance(packet, dict) or packet.get("schema") != SCHEMA:
+        return fallback("schema_mismatch")
+    expected_mastermind = git_sha(root)
+    expected_macro = git_sha(macro)
+    if (
+        not expected_mastermind or not expected_macro
+        or (packet.get("mastermind") or {}).get("sha") != expected_mastermind
+        or (packet.get("macro") or {}).get("sha") != expected_macro
+    ):
+        return fallback("grounding_mismatch")
+    return packet
 
 
 def load_strategic_summary() -> tuple[dict[str, Any] | None, str | None]:

@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Web Sol — Profile snapshot</title>
+  <link rel="stylesheet" href="census.css">
+</head>
+<body>
+  <header>
+    <div><p class="eyebrow">MASTERMIND / WEB SOL</p><h1>Profile snapshot</h1></div>
+    <button id="refresh" type="button">Refresh snapshot</button>
+  </header>
+  <p id="scope" class="scope">Normal ChatGPT tabs in this browser profile only.</p>
+  <section id="summary" class="summary" aria-label="Snapshot counts"></section>
+  <div id="status" class="status" role="status" aria-live="polite">Preparing read-only census.</div>
+  <p id="timestamp" class="timestamp"></p>
+  <main>
+    <table>
+      <thead><tr><th scope="col">Observed surface</th><th scope="col">Generation cue</th><th scope="col">Browser state</th><th scope="col">Model / effort</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </main>
+  <footer>
+    <p><strong>Observation is not execution.</strong> A stop-button cue is not an Executive START or proof of server compute. No cue is not proof of idle capacity.</p>
+    <p>Selected model, selected effort and served model remain unverified. Closed chats, other profiles and server-only work are outside this snapshot.</p>
+    <p class="privacy">No conversation text, account identity, private URL, browser-control action or ChatGPT submission.</p>
+  </footer>
+  <script src="instance_config.js"></script>
+  <script src="census_core.js"></script>
+  <script src="census.js"></script>
+</body>
+</html>

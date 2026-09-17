@@ -393,3 +393,41 @@ def test_deploy_rejects_health_when_scheduler_is_not_running(tmp_path):
     assert events.read_text(encoding="utf-8").splitlines() == [new_sha, old_sha]
     assert (tmp_path / "remote" / ".deployed_git_sha").read_text().strip() == old_sha
     assert "health check returned 503; rolling back" in result.stdout
+
+
+@pytest.mark.parametrize("package", ["common", "integrations"])
+@pytest.mark.parametrize("preexisting", [False, True])
+def test_partial_copy_rolls_back_shared_runtime_packages(tmp_path, package, preexisting):
+    """Whole-source rsync ships these packages; rollback must cover them too."""
+    env, events, old_sha, _new_sha = _fake_transport(tmp_path, fail_new_release=False)
+    remote = tmp_path / "remote"
+    package_dir = remote / package
+    if preexisting:
+        package_dir.mkdir()
+        (package_dir / "module.py").write_text("old-package\n", encoding="utf-8")
+    env["FAKE_PACKAGE_NAME"] = package
+    _write_executable(
+        tmp_path / "bin" / "rsync",
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        "if [[ \" $* \" == *\" -azn \"* ]]; then printf '%s/module.py\\n' \"$FAKE_PACKAGE_NAME\"; exit 0; fi\n"
+        "mkdir -p \"$FAKE_REMOTE/$FAKE_PACKAGE_NAME\"\n"
+        "printf 'new-package\\n' >\"$FAKE_REMOTE/$FAKE_PACKAGE_NAME/module.py\"\n"
+        "printf 'new-only\\n' >\"$FAKE_REMOTE/$FAKE_PACKAGE_NAME/introduced.py\"\n"
+        "exit 23\n",
+    )
+    result = subprocess.run(
+        ["bash", str(DEPLOY_SCRIPT)], env=env, text=True, capture_output=True, check=False,
+        timeout=30,
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "rsync did not complete" in result.stdout
+    assert events.read_text().splitlines() == [old_sha]
+    assert (remote / ".deployed_git_sha").read_text().strip() == old_sha
+    if preexisting:
+        assert (package_dir / "module.py").read_text() == "old-package\n"
+        assert not (package_dir / "introduced.py").exists()
+    else:
+        assert not package_dir.exists()
+    # The failure must not touch the separate authoritative book data.
+    assert (tmp_path / "live-data/portfolios/autonomous/account.json").read_text() == '{"cash":1000000}\n'

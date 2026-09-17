@@ -415,3 +415,77 @@ def test_coercion_of_bad_numeric_fields_never_raises(monkeypatch, tmp_path):
     assert p["entry"] is None and p["invalidation"] is None and p["conviction"] is None
     # entry_discipline degrades to no_plan (entry/invalidation missing), never raises
     assert pf.entry_discipline("NUM", 12.0)["status"] == "no_plan"
+
+
+@pytest.mark.parametrize("phase,action", [
+    ("pre_trigger", "wait"), ("triggered_pre_t1", "hold"),
+    ("between_t1_t2", "trim"), ("at_t1", "hold"),
+    ("at_t2", "trail"), ("overtime", "trim"),
+])
+def test_published_closure_overrides_retained_phase_and_action(monkeypatch, tmp_path, phase, action):
+    from brain import portfolio_intelligence as pi
+    closed = _board()[2]
+    closed.update(closed=True, phase=phase, recommended_action=action)
+    live = _board()[0]
+    path = _install(monkeypatch, tmp_path, _index([closed, live]))
+    real_path = tmp_path / "site" / "prophet" / "index.json"
+    real_path.parent.mkdir(parents=True)
+    path.rename(real_path)
+    monkeypatch.setattr(pf, "_ARTIFACT_PATH", real_path)
+    monkeypatch.setattr(pi, "_V", tmp_path)
+    assert len(pf.index()["plans"]) == 2  # history is retained, not deleted
+    assert pf.index()["plans"][0]["closed"] is True
+    assert [p["ticker"] for p in pf.plans()] == ["AAA"]
+    assert pf.plan_for("CCC") is None
+    assert "CCC" not in pf.candidate_tickers()
+    assert pf.entry_discipline("CCC", 30)["status"] == "no_plan"
+    packet = pi.prophet_board(limit=10, held=["CCC"])
+    assert packet["health"]["available"] is True
+    assert all(r["ticker"] != "CCC" for r in packet["management"])
+    assert packet["held_without_active_plan"] == ["CCC"]
+    assert packet["context_only"] is True
+
+
+def test_closed_episode_cannot_replace_open_episode_of_same_ticker(monkeypatch, tmp_path):
+    live = _board()[0]
+    live.update(id="AAA-OPEN", closed=False)
+    closed = dict(live)
+    closed.update(id="AAA-CLOSED", closed=True, _signal_date=_dstr(0), _conviction_score=100)
+    _install(monkeypatch, tmp_path, _index([closed, live]))
+    assert pf.plan_for("AAA")["plan_id"] == "AAA-OPEN"
+    assert pf.candidate_tickers() == ["AAA"]
+    assert [p["plan_id"] for p in pf.plans()] == ["AAA-OPEN"]
+
+
+@pytest.mark.parametrize("closure", [False, "absent"])
+def test_open_and_legacy_plan_payloads_remain_identical(monkeypatch, tmp_path, closure):
+    plan = _board()[0]
+    expected = pf._normalize(plan)
+    if closure != "absent":
+        plan["closed"] = closure
+    _install(monkeypatch, tmp_path, _index([plan]))
+    assert pf.plans() == [expected]
+
+
+@pytest.mark.parametrize("closure", [None, 0, 1, "true", "false", [], {}])
+def test_unknown_closure_value_contributes_no_active_plan(monkeypatch, tmp_path, closure):
+    plan = _board()[0]
+    plan["closed"] = closure
+    _install(monkeypatch, tmp_path, _index([plan]))
+    assert pf.plans() == [] and pf.plan_for("AAA") is None
+    assert len(pf.index()["plans"]) == 1
+
+
+def test_existing_artifact_refresh_removes_newly_closed_plan(monkeypatch, tmp_path):
+    plan = _board()[0]
+    plan["closed"] = False
+    path = _install(monkeypatch, tmp_path, _index([plan]))
+    assert pf.plan_for("AAA") is not None
+    stamp = path.stat().st_mtime_ns
+    plan["closed"] = True
+    path.write_text(json.dumps(_index([plan])))
+    os.utime(path, ns=(stamp + 1_000_000_000, stamp + 1_000_000_000))
+    # Use the existing refresh owner; no manual cache reset or new lifecycle.
+    assert pf.plan_for("AAA") is None
+    assert pf.plans() == []
+    assert pf.index()["plans"][0]["closed"] is True

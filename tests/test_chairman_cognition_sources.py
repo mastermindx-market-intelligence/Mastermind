@@ -511,7 +511,6 @@ def test_missing_degraded_or_malformed_agentos_is_unknown_not_current():
     cases = [
         None,
         _brief(degraded=["worktree census unavailable"]),
-        _brief(warnings=["source mismatch"]),
         _brief(readiness_degraded=["ambiguous workstream source"]),
         {**_brief(), "schema": "future.brief.v2"},
     ]

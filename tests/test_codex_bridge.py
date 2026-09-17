@@ -474,12 +474,10 @@ def test_every_codex_agent_layer_denies_parent_portfolio_writes():
         for server, denied in codex_bridge._DELEGATION_DENIED_TOOLS.items():
             actual = set(servers[server]["disabled_tools"])
             assert denied <= actual
-            # Codex applies disabled_tools after the parent's enabled_tools. Therefore every
-            # certified write is absent while the parent-selected read list remains unchanged.
-            parent_enabled = codex_bridge._DELEGATION_READ_TOOLS[server] | denied
-            effective_child = parent_enabled - actual
-            assert not (effective_child & denied)
-            assert codex_bridge._DELEGATION_READ_TOOLS[server] <= effective_child
+            # The four portfolio servers are disabled, not alternative read transports.
+            # Active-book reads remain available through the fixed research surface below.
+            assert servers[server]["enabled"] is False
+            assert servers[server]["command"] == "false"
         research = servers["research"]
         assert research["command"] == "sh"
         assert research["args"] == [
@@ -594,3 +592,165 @@ def test_external_macro_plane_skips_git_refresh(monkeypatch):
     out = macro_refresh.refresh_and_check(log=lambda _: None)
     assert out["asof"] == "2026-07-29"
     assert out["refreshed_to"] is None
+
+
+# Standalone native-role files are deserialized before parent config overlays.
+# A deny-only MCP table is invalid transport, even when the parent is inert.
+@pytest.mark.parametrize("role_name", [
+    "default", "explorer", "worker", "deep-reasoner", "narrative-analyst",
+    "quant-coder", "signal-scout",
+])
+def test_native_role_has_standalone_disabled_transports(role_name):
+    from brain import codex_bridge
+
+    path = codex_bridge._ROOT / ".codex" / "agents" / f"{role_name}.toml"
+    role = tomllib.loads(path.read_text(encoding="utf-8"))
+    assert role["sandbox_mode"] == "read-only"
+    for name, denied in codex_bridge._DELEGATION_DENIED_TOOLS.items():
+        server = role["mcp_servers"][name]
+        assert set(server) == {"command", "enabled", "disabled_tools"}
+        assert server["command"] == "false"
+        assert server["enabled"] is False
+        assert set(server["disabled_tools"]) == denied
+
+
+def _native_role_fixture(tmp_path):
+    import shutil
+    from brain import codex_bridge
+
+    shutil.copytree(codex_bridge._ROOT / ".codex", tmp_path / ".codex")
+    return tmp_path / ".codex" / "agents" / "worker.toml"
+
+
+@pytest.mark.parametrize("replacement", [
+    'enabled = false',
+    'command = "false"',
+    'command = "false"\nenabled = true',
+    'command = "false"\nenabled = 0',
+    'command = "false"\nenabled = "false"',
+    'command = "sh"\nenabled = false',
+    'command = ""\nenabled = false',
+    'command = "false"\nenabled = false\nurl = "https://invalid.example"',
+    'command = "false"\nenabled = false\nargs = ["ignored"]',
+    'command = "false"\nenabled = false\nenabled_tools = ["submit_book"]',
+])
+def test_native_role_invalid_transport_refuses_before_process(
+    replacement, tmp_path, monkeypatch,
+):
+    from brain import codex_bridge
+
+    path = _native_role_fixture(tmp_path)
+    # Build a valid synthetic base even when testing the pre-fix source.
+    # The separate seven-role test checks the actual repository artifacts.
+    for profile in path.parent.glob("*.toml"):
+        text = profile.read_text(encoding="utf-8")
+        for name in ("bot", "desk", "china", "hk"):
+            text = text.replace(f"[mcp_servers.{name}]\ndisabled_tools",
+                f'[mcp_servers.{name}]\ncommand = "false"\nenabled = false\ndisabled_tools')
+        profile.write_text(text, encoding="utf-8")
+    text = path.read_text(encoding="utf-8")
+    needle = '[mcp_servers.bot]\ncommand = "false"\nenabled = false'
+    assert text.count(needle) == 1
+    path.write_text(text.replace(needle, '[mcp_servers.bot]\n' + replacement), encoding="utf-8")
+    calls = []
+
+    async def forbidden_exec(*argv, **kwargs):
+        calls.append(argv)
+        raise AssertionError("invalid native roles must refuse before any launch")
+
+    monkeypatch.setattr(codex_bridge, "_ROOT", tmp_path)
+    monkeypatch.setattr(codex_bridge, "available", lambda: True)
+    monkeypatch.setattr(codex_bridge, "codex_path", lambda: "/unused/codex")
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", forbidden_exec)
+    result = asyncio.run(codex_bridge.reason(
+        "synthetic read-only delegation", allowed_tools=["Task"],
+        mcp_servers={"bot": {}, "desk": {}}, book="autonomous",
+    ))
+    assert calls == []
+    assert result["ok"] is False
+    assert "fixed disabled transport" in result["error"]
+
+
+@pytest.mark.parametrize("mode", ["workspace-write", "danger-full-access", None])
+def test_native_role_sandbox_drift_refuses(mode, tmp_path, monkeypatch):
+    from brain import codex_bridge
+
+    path = _native_role_fixture(tmp_path)
+    text = path.read_text(encoding="utf-8")
+    replacement = "" if mode is None else f'sandbox_mode = "{mode}"'
+    path.write_text(text.replace('sandbox_mode = "read-only"', replacement), encoding="utf-8")
+    monkeypatch.setattr(codex_bridge, "_ROOT", tmp_path)
+    error = codex_bridge._delegation_authority_error(
+        allowed_tools=["Task"], mcp_servers={"bot": {}, "desk": {}},
+        cwd=tmp_path, book="autonomous",
+    )
+    assert error is not None
+
+
+@pytest.mark.parametrize("book,servers", [
+    ("autonomous", {"bot": {}, "desk": {}}),
+    ("china", {"china": {}}),
+    ("hk", {"hk": {}}),
+])
+def test_native_role_valid_book_preserves_existing_admission(book, servers):
+    from brain import codex_bridge
+
+    assert codex_bridge._delegation_authority_error(
+        allowed_tools=["Task"], mcp_servers=servers,
+        cwd=codex_bridge._ROOT, book=book,
+    ) is None
+
+
+@pytest.mark.parametrize("transport", [
+    'enabled = false', 'command = "false"',
+    'command = "false"\nenabled = true',
+    'command = "false"\nenabled = 0',
+    'command = "sh"\nenabled = false',
+    'command = "false"\nenabled = false\nurl = "https://invalid.example"',
+])
+def test_native_role_guard_rejects_transport_drift(transport, tmp_path, monkeypatch):
+    """Pure admission check: no availability check or process path is exercised."""
+    from brain import codex_bridge
+
+    path = _native_role_fixture(tmp_path)
+    for profile in path.parent.glob("*.toml"):
+        text = profile.read_text(encoding="utf-8")
+        for name in ("bot", "desk", "china", "hk"):
+            text = text.replace(f"[mcp_servers.{name}]\ndisabled_tools",
+                f'[mcp_servers.{name}]\ncommand = "false"\nenabled = false\ndisabled_tools')
+        profile.write_text(text, encoding="utf-8")
+    text = path.read_text(encoding="utf-8")
+    old = '[mcp_servers.bot]\ncommand = "false"\nenabled = false'
+    assert text.count(old) == 1
+    path.write_text(text.replace(old, '[mcp_servers.bot]\n' + transport), encoding="utf-8")
+    monkeypatch.setattr(codex_bridge, "_ROOT", tmp_path)
+    error = codex_bridge._delegation_authority_error(
+        allowed_tools=["Task"], mcp_servers={"bot": {}, "desk": {}},
+        cwd=tmp_path, book="autonomous")
+    assert error is not None
+
+
+@pytest.mark.parametrize("value", ['123', 'true', '[["nested"]]'])
+def test_native_role_guard_typed_deny_list_refuses(value, tmp_path, monkeypatch):
+    from brain import codex_bridge
+
+    path = _native_role_fixture(tmp_path)
+    text = path.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    inside = False
+    for index, line in enumerate(lines):
+        if line == "[mcp_servers.bot]":
+            inside = True
+        elif line.startswith("["):
+            inside = False
+        if inside and line.startswith("disabled_tools = "):
+            lines[index] = "disabled_tools = " + value
+            break
+    else:
+        raise AssertionError("fixture has no bot deny list")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    monkeypatch.setattr(codex_bridge, "_ROOT", tmp_path)
+    error = codex_bridge._delegation_authority_error(
+        allowed_tools=["Task"], mcp_servers={"bot": {}, "desk": {}},
+        cwd=tmp_path, book="autonomous")
+    assert error is not None

@@ -1,0 +1,31 @@
+{
+  "schema": "mastermind.slack_observation.v1",
+  "available": true,
+  "observed_at": "2026-08-27T08:00:00Z",
+  "channels": [
+    {
+      "channel_id": "C0BSBM78V1N",
+      "member_ids": ["U0BRETDUAS2", "U0BS3H525NW"]
+    }
+  ],
+  "messages": [
+    {
+      "channel_id": "C0BSBM78V1N",
+      "ts": "1787817955.208049",
+      "thread_ts": null,
+      "sender_id": "U0BRETDUAS2",
+      "operation_key": "hybrid-workforce-cheap-provider-census-20260827-sol-001",
+      "payload_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "transport": "DELIVERY_ONLY",
+      "message_class": "READ_ONLY_COMMISSION",
+      "target_principal_id": "U0BS3H525NW",
+      "delivered": true,
+      "acked": false,
+      "receiver_eligible": true,
+      "ack_required": true,
+      "created_at": "2026-08-27T08:05:55Z",
+      "source_law_sha": "cef4332d3682991e3e1c3d6160da17cd0a3a8f63",
+      "freeze_at": null
+    }
+  ]
+}

@@ -174,13 +174,13 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
 
     adapter = CodexWorkerAdapter(
         args.codex_binary,
+        codex_home=args.codex_home,
         allowed_versions=frozenset({args.allowed_version}),
         required_team_identifier=_OPENAI_TEAM_IDENTIFIER,
     )
     supervisor = ExecutiveSupervisor(
         runtime,
         adapter,
-        codex_home=args.codex_home,
         runs_root=proof_root / "runs",
         instance_id="phase1b-proof-success",
     )
@@ -239,7 +239,6 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
     killer = ExecutiveSupervisor(
         reopened_after_success,
         adapter,
-        codex_home=args.codex_home,
         runs_root=proof_root / "runs",
         instance_id="phase1b-proof-before-restart",
     )
@@ -272,13 +271,13 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
     restarted_runtime = Runtime.at(proof_root, lease_seconds=60)
     restarted_adapter = CodexWorkerAdapter(
         args.codex_binary,
+        codex_home=args.codex_home,
         allowed_versions=frozenset({args.allowed_version}),
         required_team_identifier=_OPENAI_TEAM_IDENTIFIER,
     )
     restarted = ExecutiveSupervisor(
         restarted_runtime,
         restarted_adapter,
-        codex_home=args.codex_home,
         runs_root=proof_root / "runs",
         instance_id="phase1b-proof-after-restart",
     )

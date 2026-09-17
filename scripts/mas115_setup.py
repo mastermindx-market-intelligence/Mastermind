@@ -38,6 +38,7 @@ from control_plane import surface_bindings as sb
 from integrations.chairman_surfaces import chatgpt
 from integrations.chairman_surfaces import nonseat_canary as canary
 from integrations.chairman_surfaces import nonseat_canary_vendors as vendors
+from integrations.chairman_surfaces import mas115_profile_search_health as profile_search_health
 from integrations.chairman_surfaces import mas115_multilogin_port_policy as port_policy
 
 
@@ -47,6 +48,7 @@ _CONFIRM_ENROLL = "ENROLL THREE CHAIRMAN SEATS"
 _CONFIRM_BOOTSTRAP_PEER = "BOOTSTRAP THE EXISTING DISPOSABLE PEER LIFECYCLE"
 _CONFIRM_CREATE_PEER = "CREATE ONE DISPOSABLE PEER PROFILE"
 _CONFIRM_ROLLBACK_PEER = "REMOVE THE OPERATION-CREATED PEER PROFILE"
+_CONFIRM_PROFILE_SEARCH_HEALTH = "OBSERVE MULTILOGIN PROFILE SEARCH HEALTH ONCE"
 _MAX_PRIVATE_URL_BYTES = 8 * 1024
 
 
@@ -205,11 +207,19 @@ def build_provision(row: dict, *, browser_type: str | None) -> dict:
     return doc
 
 
-def assert_current_nonseat(bound_doc: dict, row: dict, *, now: datetime) -> None:
+def assert_current_nonseat(
+    bound_doc: dict, row: dict, *, now: datetime,
+    current_environment_snapshot=None,
+) -> None:
     """Require the canonical fresh three-seat census before any provision write."""
-    _manager, _folder_id, profile_id = _identity(row)
+    manager, folder_id, profile_id = _identity(row)
     census = canary._current_chairman_profile_census(  # noqa: SLF001 — reuse the canary's load-bearing gate
-        bound_doc, now=now, candidate_profile_id=profile_id,
+        bound_doc,
+        now=now,
+        candidate_profile_id=profile_id,
+        candidate_vendor=manager,
+        candidate_folder_id=folder_id,
+        current_environment_snapshot=current_environment_snapshot,
     )
     if census == "collision":
         raise SetupRefusal("the selected disposable profile collides with a Chairman seat")
@@ -357,11 +367,15 @@ def _prepare_anchor_with_peer_lifecycle(
 def _migrate_legacy_provision(
     path=canary.DEFAULT_PROVISION_PATH, *, bindings_loader=None, now=None,
     peer_intent_path=None, peer_provision_path=None,
+    current_environment_snapshot=None,
 ):
     """Atomically migrate only the exact validated historical provision."""
 
     migrated, code = canary.load_legacy_provision_for_migration(
-        path, bindings_loader=bindings_loader, now=now,
+        path,
+        bindings_loader=bindings_loader,
+        now=now,
+        current_environment_snapshot=current_environment_snapshot,
     )
     if migrated is None:
         return None, code
@@ -381,7 +395,10 @@ def _migrate_legacy_provision(
         )
     _atomic_private_json(migrated, path)
     loaded, code = canary.load_provision(
-        path, bindings_loader=bindings_loader, now=now,
+        path,
+        bindings_loader=bindings_loader,
+        now=now,
+        current_environment_snapshot=current_environment_snapshot,
     )
     if loaded is not None and should_initialize_peer:
         _exact_initialized_peer_lifecycle(
@@ -399,12 +416,27 @@ def credential_setup_argv(vendor: str) -> list[str]:
     return [sys.executable, os.fspath(helper)]
 
 
-def _load_current_provision():
+def _acquire_current_environment_snapshot():
+    """Acquire and immediately seal one strict local environment observation."""
+
+    try:
+        raw = chatgpt._strict_list_local_environments()  # noqa: SLF001
+        snapshot = canary._seal_current_environment_snapshot(raw)  # noqa: SLF001
+    except Exception:  # noqa: BLE001 — setup exposes one fixed refusal
+        raise SetupRefusal(
+            "the current local managed-browser census is unavailable"
+        ) from None
+    if snapshot is None:
+        raise SetupRefusal("the current local managed-browser census is unavailable")
+    return snapshot
+
+
+def _load_current_provision(*, current_environment_snapshot=None):
     """Load the provision with the live UTC reference time required by its census gate."""
-    return canary.load_provision(
-        canary.DEFAULT_PROVISION_PATH,
-        now=datetime.now(timezone.utc),
-    )
+    kwargs = {"now": datetime.now(timezone.utc)}
+    if current_environment_snapshot is not None:
+        kwargs["current_environment_snapshot"] = current_environment_snapshot
+    return canary.load_provision(canary.DEFAULT_PROVISION_PATH, **kwargs)
 
 
 def _private_url(prompt: str) -> str:
@@ -470,9 +502,15 @@ def provision_interactive() -> int:
     if problems or bound_doc is None:
         raise SetupRefusal("enroll all three Chairman ChatGPT seats before preparing a disposable profile")
     print("In the vendor profile list, use Copy profile ID on the disposable non-Chairman profile.")
-    candidates = _candidate_rows(chatgpt.list_local_environments())
+    current_environment_snapshot = _acquire_current_environment_snapshot()
+    candidates = [dict(row) for row in current_environment_snapshot.rows]
     refreshed = _copied_profile("Paste the disposable profile ID (input is hidden): ", candidates)
-    assert_current_nonseat(bound_doc, refreshed, now=datetime.now(timezone.utc))
+    assert_current_nonseat(
+        bound_doc,
+        refreshed,
+        now=datetime.now(timezone.utc),
+        current_environment_snapshot=current_environment_snapshot,
+    )
     if refreshed.get("running") is True:
         raise SetupRefusal("the selected disposable profile is running; stop it cleanly before provisioning")
 
@@ -485,7 +523,9 @@ def provision_interactive() -> int:
         raise SetupRefusal("disposable acknowledgement did not match; nothing was written")
     _prepare_anchor_with_peer_lifecycle(provision)
 
-    loaded, code = _load_current_provision()
+    loaded, code = _load_current_provision(
+        current_environment_snapshot=current_environment_snapshot,
+    )
     if loaded is None:
         raise SetupRefusal(f"the written provision failed its safety preflight ({code}); it was not accepted")
     print("Disposable profile provisioned. The canary has not been run.")
@@ -496,20 +536,52 @@ def _matching_local_row(bound_doc: dict) -> dict:
     """Re-identify the anchor provision's exact profile in the fresh local
     census, then re-run the three-seat exclusion against it. Raises
     :class:`SetupRefusal` on any missing/ambiguous/colliding state."""
-    loaded, code = _load_current_provision()
+    current_environment_snapshot = _acquire_current_environment_snapshot()
+    loaded, code = _load_current_provision(
+        current_environment_snapshot=current_environment_snapshot,
+    )
     if loaded is None:
         raise SetupRefusal(f"the disposable profile provision is unavailable ({code}); prepare it first")
-    candidates = _candidate_rows(chatgpt.list_local_environments())
     matches = [
-        row for row in candidates
-        if row.get("env_manager") == "multilogin"
-        and row.get("profile_id") == loaded.get("profile_id")
-        and row.get("folder_id") == loaded.get("folder_id")
+        row for row in current_environment_snapshot.rows
+        if row["env_manager"] == "multilogin"
+        and row["profile_id"] == loaded.get("profile_id")
+        and row["folder_id"] == loaded.get("folder_id")
     ]
     if len(matches) != 1:
         raise SetupRefusal("the disposable profile could not be re-identified in the local census")
-    assert_current_nonseat(bound_doc, matches[0], now=datetime.now(timezone.utc))
-    return matches[0]
+    if matches[0]["running"] is True:
+        raise SetupRefusal("the disposable profile is running; stop it cleanly before continuing")
+    row = dict(matches[0])
+    assert_current_nonseat(
+        bound_doc,
+        row,
+        now=datetime.now(timezone.utc),
+        current_environment_snapshot=current_environment_snapshot,
+    )
+    return row
+
+
+def profile_search_health_interactive(vendor: str) -> int:
+    """Run one confirmed, read-only Multilogin Profile Search observation."""
+
+    if vendor != "multilogin":
+        return profile_search_health.run_coordinator_profile_search_health_refusal()
+
+    prompt = (
+        f"Type {_CONFIRM_PROFILE_SEARCH_HEALTH!r} to perform one read-only "
+        "Profile Search health observation: "
+    )
+    print(prompt, file=sys.stderr, end="", flush=True)
+    try:
+        # ``input`` already removes the terminal newline.  An empty prompt keeps
+        # stdout machine-clean while preserving the exact operator ceremony.
+        confirmation = input("")
+    except (EOFError, KeyboardInterrupt):
+        return profile_search_health.run_coordinator_profile_search_health_refusal()
+    if confirmation != _CONFIRM_PROFILE_SEARCH_HEALTH:
+        return profile_search_health.run_coordinator_profile_search_health_refusal()
+    return profile_search_health.run_coordinator_profile_search_health()
 
 
 def create_peer_interactive() -> int:
@@ -643,6 +715,13 @@ def main(argv=None) -> int:
     )
     run_parser = sub.add_parser("run-canary", help="run the accepted disposable canary")
     run_parser.add_argument("--vendor", default="multilogin", choices=("multilogin", "gologin"))
+    health_parser = sub.add_parser(
+        "profile-search-health",
+        help="observe one bounded Multilogin Profile Search census",
+    )
+    health_parser.add_argument(
+        "--vendor", default="multilogin", choices=("multilogin", "gologin"),
+    )
     create_peer_parser = sub.add_parser(
         "create-peer-profile", help="create the one missing stopped disposable peer profile",
     )
@@ -670,11 +749,15 @@ def main(argv=None) -> int:
         if args.command == "configure-canary-port":
             if args.vendor != "multilogin":
                 raise SetupRefusal("fixed-port configuration is supported only for Multilogin")
-            provision, code = _load_current_provision()
+            current_environment_snapshot = _acquire_current_environment_snapshot()
+            provision, code = _load_current_provision(
+                current_environment_snapshot=current_environment_snapshot,
+            )
             if provision is None:
                 provision, code = _migrate_legacy_provision(
                     canary.DEFAULT_PROVISION_PATH,
                     now=datetime.now(timezone.utc),
+                    current_environment_snapshot=current_environment_snapshot,
                 )
             if provision is None or provision.get("vendor") != "multilogin":
                 raise SetupRefusal(
@@ -691,6 +774,8 @@ def main(argv=None) -> int:
                 "--vendor", args.vendor,
                 "--provision-path", str(Path(canary.DEFAULT_PROVISION_PATH).expanduser()),
             ])
+        if args.command == "profile-search-health":
+            return profile_search_health_interactive(args.vendor)
         if args.command == "create-peer-profile":
             if args.vendor != "multilogin":
                 raise SetupRefusal("GoLogin peer profiles remain unsupported; no disposable peer profile will be created")

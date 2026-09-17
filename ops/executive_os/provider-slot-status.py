@@ -20,6 +20,9 @@ from typing import Any, Callable, Sequence
 
 
 _SCRIPT_DIRECTORY = Path(__file__).resolve().parent
+_RELEASE_ROOT = _SCRIPT_DIRECTORY.parents[1]
+if os.fspath(_RELEASE_ROOT) not in sys.path:
+    sys.path.insert(0, os.fspath(_RELEASE_ROOT))
 if __package__ in {None, ""} and str(_SCRIPT_DIRECTORY) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIRECTORY))
 

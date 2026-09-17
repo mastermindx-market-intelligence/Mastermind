@@ -1,0 +1,17 @@
+{
+  "schema": "mastermind.identity_observation.v1",
+  "available": true,
+  "observed_at": "2026-08-27T08:00:00Z",
+  "bindings": [
+    {
+      "seat": "ChatGPT2",
+      "slack_principal": "U0BSB73JWNL",
+      "github_account": null,
+      "linear_actor": null,
+      "executive_worker": null,
+      "provider_realm": "codex-pro-02",
+      "role": "sol_ceo",
+      "service_actor": null
+    }
+  ]
+}

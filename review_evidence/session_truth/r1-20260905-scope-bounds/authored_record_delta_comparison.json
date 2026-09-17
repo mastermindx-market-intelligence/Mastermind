@@ -1,0 +1,18 @@
+{
+  "status": "AUTHORED_RECORD_DELTA_PASS",
+  "current_source_sha": "88af13cfedd1e4baba11e9dbcf410e35875312fe",
+  "historical_source_sha": "a1b3d9eab5ba0b024a7008e64e44a16767348849",
+  "current_state_digest": "sha256:1ffd5b9dee45873ce9c6c20d3f9e56e3246849991b17e528b74bce5d3957ded2",
+  "historical_state_digest": "sha256:c5232b80c6de9a9f94a9af81b1e427e07d69ab5850a4ce2c7c7b16b04ad649ad",
+  "current_semantic_hash": "sha256:ff8b51824ef92747217208e0f2cc7e43399ef8b9230450c6cc7c6a2149e5b5d1",
+  "historical_semantic_hash": "sha256:53bf1225210f71a06232b60f0e2e7f2d601454122fc84943c394c1b33c403d2b",
+  "derived_historical_with_current_source_sha_hash": "sha256:17474c2a47f1ff18d91b7b1d9c3eec701d6d7f07978d0f703b33072923cdbcb8",
+  "derived_control_is_not_another_real_acquisition": true,
+  "changed_record_paths": [
+    "agentos/handoffs/CHAIRMAN-CONTROL-ROOM-2026-09-05-cockpit-b0-live-recovery.md"
+  ],
+  "derived_control_changed_semantic_leaves": [
+    "/observations/agentos/contexts/0/source_records_digest",
+    "/observations/agentos/state/source_records_digest"
+  ]
+}

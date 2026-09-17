@@ -8,10 +8,15 @@ lease path.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
+import hmac
 import json
 import math
+import os
 import re
+import sys
 from enum import Enum
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -22,7 +27,7 @@ from control_plane.executive_agent_capabilities import (
 from control_plane.worker_adapter import adapter_descriptor
 
 
-ROUTER_SCHEMA_VERSION = "mastermind.executive_worker_routes/v1"
+ROUTER_SCHEMA_VERSION = "mastermind.executive_worker_routes/v2"
 DEFAULT_POLICY_PATH = (
     Path(__file__).resolve().parent.parent / "config" / "executive_worker_routes.json"
 )
@@ -232,6 +237,112 @@ class ModelAlias:
 
 
 @dataclasses.dataclass(frozen=True)
+class SuitabilityTier:
+    """One ordered equivalence class of already-lawful worker aliases."""
+
+    tier_id: str
+    model_aliases: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        tier_id = _bounded_id(self.tier_id, field="tier_id")
+        if not isinstance(self.model_aliases, tuple) or not self.model_aliases:
+            raise RoutingPolicyError("model_aliases must be a non-empty tuple")
+        aliases: list[str] = []
+        for raw_alias in self.model_aliases:
+            alias = _bounded_id(raw_alias, field="model_aliases")
+            if alias in aliases:
+                raise RoutingPolicyError(
+                    f"model_aliases contains duplicate alias {alias!r}"
+                )
+            aliases.append(alias)
+        object.__setattr__(self, "tier_id", tier_id)
+        object.__setattr__(self, "model_aliases", tuple(aliases))
+
+    def to_dict(self) -> dict[str, object]:
+        return {"tier_id": self.tier_id, "model_aliases": list(self.model_aliases)}
+
+
+def _tier_aliases(value: Any, *, field: str) -> tuple[str, ...]:
+    if not isinstance(value, (list, tuple)):
+        raise RoutingPolicyError(f"{field} must be a list")
+    if not value:
+        raise RoutingPolicyError(f"{field} cannot be empty")
+    if len(value) > 16:
+        raise RoutingPolicyError(f"{field} exceeds its 16-item ceiling")
+    aliases: list[str] = []
+    for raw_alias in value:
+        alias = _bounded_id(raw_alias, field=field)
+        if alias in aliases:
+            raise RoutingPolicyError(f"{field} contains duplicate alias {alias!r}")
+        aliases.append(alias)
+    return tuple(aliases)
+
+
+def _parse_suitability_tiers(
+    value: Any,
+    *,
+    field: str,
+    model_aliases: Mapping[str, ModelAlias],
+    required_capabilities: tuple[str, ...],
+) -> tuple[SuitabilityTier, ...]:
+    if not isinstance(value, (list, tuple)):
+        raise RoutingPolicyError(f"{field} must be a list")
+    if not value:
+        raise RoutingPolicyError(f"{field} cannot be empty")
+    if len(value) > 16:
+        raise RoutingPolicyError(f"{field} exceeds its 16-item ceiling")
+
+    tiers: list[SuitabilityTier] = []
+    seen_tier_ids: set[str] = set()
+    seen_aliases: set[str] = set()
+    expected_keys = {"tier_id", "model_aliases"}
+    for index, raw_tier in enumerate(value):
+        item_field = f"{field}[{index}]"
+        if not isinstance(raw_tier, dict):
+            raise RoutingPolicyError(f"{item_field} must be an object")
+        unknown_keys = set(raw_tier) - expected_keys
+        if unknown_keys:
+            raise RoutingPolicyError(
+                f"{item_field} contains unknown keys {sorted(unknown_keys)!r}"
+            )
+        missing_keys = expected_keys - set(raw_tier)
+        if missing_keys:
+            raise RoutingPolicyError(
+                f"{item_field} omits required keys {sorted(missing_keys)!r}"
+            )
+        tier_id = _bounded_id(raw_tier["tier_id"], field=f"{item_field}.tier_id")
+        if tier_id in seen_tier_ids:
+            raise RoutingPolicyError(f"{field} contains duplicate tier_id {tier_id!r}")
+        aliases = _tier_aliases(
+            raw_tier["model_aliases"], field=f"{item_field}.model_aliases"
+        )
+        execution_profiles: set[tuple[str, str]] = set()
+        for alias in aliases:
+            profile = model_aliases.get(alias)
+            if profile is None or not profile.worker_eligible:
+                raise RoutingPolicyError(
+                    f"{field} names ineligible alias {alias!r}"
+                )
+            if not set(required_capabilities).issubset(profile.capabilities):
+                raise RoutingPolicyError(
+                    f"alias {alias!r} lacks capabilities required by {field!r}"
+                )
+            if alias in seen_aliases:
+                raise RoutingPolicyError(f"{field} contains duplicate alias {alias!r}")
+            execution_profiles.add(
+                (profile.execution_profile_id, profile.execution_profile_digest)
+            )
+        if len(execution_profiles) != 1:
+            raise RoutingPolicyError(
+                f"{item_field} aliases must share one execution profile"
+            )
+        seen_tier_ids.add(tier_id)
+        seen_aliases.update(aliases)
+        tiers.append(SuitabilityTier(tier_id, aliases))
+    return tuple(tiers)
+
+
+@dataclasses.dataclass(frozen=True)
 class MeteredCognitionReceipt:
     """Bounded evidence required before a paid Sol-cognition exception."""
 
@@ -376,7 +487,14 @@ class WorkRequest:
 
 
 @dataclasses.dataclass(frozen=True)
-class RoutingDecision:
+class _RoutingDecisionCompatibility:
+    """Preserve the inspected v1 field name without accepting a flat input."""
+
+    preferred_model_aliases: tuple[str, ...] = dataclasses.field(init=False)
+
+
+@dataclasses.dataclass(frozen=True)
+class RoutingDecision(_RoutingDecisionCompatibility):
     mode: RouteMode
     policy_version: str
     task_kind: str
@@ -386,7 +504,7 @@ class RoutingDecision:
     execution_profile_digest: str
     capability_policy_version: str
     capability_policy_digest: str
-    preferred_model_aliases: tuple[str, ...]
+    suitability_tiers: tuple[SuitabilityTier, ...]
     required_capabilities: tuple[str, ...]
     excluded_worker_ids: tuple[str, ...]
     reason_codes: tuple[str, ...]
@@ -399,10 +517,22 @@ class RoutingDecision:
     def worker_eligible(self) -> bool:
         return self.mode is RouteMode.WORKER
 
+    @property
+    def preferred_model_aliases(self) -> tuple[str, ...]:
+        """Compatibility projection for existing persisted Job constraints."""
+
+        if not self.suitability_tiers:
+            return ()
+        return self.suitability_tiers[0].model_aliases
+
     def to_dict(self) -> dict[str, Any]:
         value = dataclasses.asdict(self)
         value["mode"] = self.mode.value
         value["worker_eligible"] = self.worker_eligible
+        value["suitability_tiers"] = [
+            tier.to_dict() for tier in self.suitability_tiers
+        ]
+        value["preferred_model_aliases"] = list(self.preferred_model_aliases)
         value["cognition_route"] = (
             self.cognition_route.value if self.cognition_route is not None else None
         )
@@ -422,7 +552,6 @@ class RoutingDecision:
             else None
         )
         for key in (
-            "preferred_model_aliases",
             "required_capabilities",
             "excluded_worker_ids",
             "reason_codes",
@@ -596,46 +725,42 @@ class ModelRouter:
         routes_raw = raw.get("routes")
         if not isinstance(routes_raw, dict):
             raise RoutingPolicyError("routing policy requires routes")
+        unknown_task_kinds = set(routes_raw) - _WORKER_TASKS
+        if unknown_task_kinds:
+            raise RoutingPolicyError(
+                "routing policy contains unknown route keys "
+                f"{sorted(unknown_task_kinds)!r}"
+            )
         routes: dict[str, dict[str, Any]] = {}
         for task_kind in sorted(_WORKER_TASKS):
             route = routes_raw.get(task_kind)
             if not isinstance(route, dict):
                 raise RoutingPolicyError(f"routing policy omits {task_kind!r}")
+            expected_route_keys = {"required_capabilities", "routine", "elevated"}
+            unknown_route_keys = set(route) - expected_route_keys
+            if unknown_route_keys:
+                raise RoutingPolicyError(
+                    f"routes.{task_kind} contains unknown keys "
+                    f"{sorted(unknown_route_keys)!r}"
+                )
+            missing_route_keys = expected_route_keys - set(route)
+            if missing_route_keys:
+                raise RoutingPolicyError(
+                    f"routes.{task_kind} omits required keys "
+                    f"{sorted(missing_route_keys)!r}"
+                )
             capabilities = _string_list(
                 route.get("required_capabilities"),
                 field=f"routes.{task_kind}.required_capabilities",
             )
             normalized: dict[str, Any] = {"required_capabilities": capabilities}
             for risk in ("routine", "elevated"):
-                aliases = _string_list(
-                    route.get(risk), field=f"routes.{task_kind}.{risk}"
+                normalized[risk] = _parse_suitability_tiers(
+                    route[risk],
+                    field=f"routes.{task_kind}.{risk}",
+                    model_aliases=model_aliases,
+                    required_capabilities=capabilities,
                 )
-                if not aliases:
-                    raise RoutingPolicyError(
-                        f"routes.{task_kind}.{risk} cannot be empty"
-                    )
-                for alias in aliases:
-                    profile = model_aliases.get(alias)
-                    if profile is None or not profile.worker_eligible:
-                        raise RoutingPolicyError(
-                            f"routes.{task_kind}.{risk} names ineligible alias {alias!r}"
-                        )
-                    if not set(capabilities).issubset(profile.capabilities):
-                        raise RoutingPolicyError(
-                            f"alias {alias!r} lacks capabilities required by {task_kind!r}"
-                        )
-                execution_profiles = {
-                    (
-                        model_aliases[alias].execution_profile_id,
-                        model_aliases[alias].execution_profile_digest,
-                    )
-                    for alias in aliases
-                }
-                if len(execution_profiles) != 1:
-                    raise RoutingPolicyError(
-                        f"routes.{task_kind}.{risk} fallback aliases must share one execution profile"
-                    )
-                normalized[risk] = aliases
             routes[task_kind] = normalized
         return cls(
             policy_version=policy_version,
@@ -752,7 +877,11 @@ class ModelRouter:
                 execution_profile_digest=lead_profile.execution_profile_digest,
                 capability_policy_version=lead_profile.capability_policy_version,
                 capability_policy_digest=lead_profile.capability_policy_digest,
-                preferred_model_aliases=("frontier.orchestrator",),
+                suitability_tiers=(
+                    SuitabilityTier(
+                        "frontier.lead", ("frontier.orchestrator",)
+                    ),
+                ),
                 required_capabilities=request.required_capabilities,
                 excluded_worker_ids=request.excluded_worker_ids,
                 reason_codes=tuple(reasons),
@@ -785,20 +914,23 @@ class ModelRouter:
             )
 
         route = self.routes[request.task_kind]
-        aliases = tuple(route[request.risk])
-        first_profile = self.model_aliases[aliases[0]]
+        suitability_tiers = tuple(route[request.risk])
+        first_profile = self.model_aliases[
+            suitability_tiers[0].model_aliases[0]
+        ]
         capabilities = tuple(
             sorted(
                 set(route["required_capabilities"])
                 | set(request.required_capabilities)
             )
         )
-        for alias in aliases:
-            profile = self.model_aliases[alias]
-            if not set(capabilities).issubset(profile.capabilities):
-                raise RoutingPolicyError(
-                    f"route alias {alias!r} cannot satisfy requested capabilities"
-                )
+        for tier in suitability_tiers:
+            for alias in tier.model_aliases:
+                profile = self.model_aliases[alias]
+                if not set(capabilities).issubset(profile.capabilities):
+                    raise RoutingPolicyError(
+                        f"route alias {alias!r} cannot satisfy requested capabilities"
+                    )
         reasons.extend(
             [
                 f"bounded_{request.task_kind}",
@@ -818,7 +950,7 @@ class ModelRouter:
             execution_profile_digest=first_profile.execution_profile_digest,
             capability_policy_version=first_profile.capability_policy_version,
             capability_policy_digest=first_profile.capability_policy_digest,
-            preferred_model_aliases=aliases,
+            suitability_tiers=suitability_tiers,
             required_capabilities=capabilities,
             excluded_worker_ids=request.excluded_worker_ids,
             reason_codes=tuple(reasons),
@@ -858,6 +990,150 @@ def route_work(
     )
 
 
+def _make_capacity_owner_seam() -> Any:
+    """Build a closure-held capacity-owner HMAC seam.
+
+    The keyed seal protects owner artifacts from cross-boundary substitution
+    and accidental mutation. It is not a boundary against an attacker already
+    executing arbitrary Python in this process; a real owner boundary would
+    require a separate process or OS capability.
+    """
+
+    key_bytes: bytes | None = None
+
+    class _OwnerSeam:
+        __slots__ = ()
+
+        @staticmethod
+        def seal(payload: Mapping[str, Any]) -> bytes:
+            if key_bytes is None:
+                raise RoutingPolicyError("capacity owner key is not available")
+            canonical = json.dumps(
+                dict(payload),
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+                allow_nan=False,
+            ).encode("utf-8")
+            return hmac.new(key_bytes, canonical, hashlib.sha256).digest()
+
+        @staticmethod
+        def verify(payload: Mapping[str, Any], digest: bytes) -> bool:
+            try:
+                return isinstance(digest, bytes) and hmac.compare_digest(
+                    _OwnerSeam.seal(payload), digest
+                )
+            except (TypeError, ValueError):
+                return False
+
+        @staticmethod
+        @contextmanager
+        def install_test_key(key: bytes | None):
+            """Install fixture HMAC state only while pytest owns this test."""
+
+            nonlocal key_bytes
+            if "pytest" not in sys.modules or os.environ.get(
+                "PYTEST_CURRENT_TEST"
+            ) is None:
+                raise RoutingPolicyError("capacity owner test key is test-only")
+            if key is not None and (
+                not isinstance(key, (bytes, bytearray)) or len(key) < 16
+            ):
+                raise RoutingPolicyError("capacity owner test key is invalid")
+            previous = key_bytes
+            key_bytes = bytes(key) if key is not None else None
+            try:
+                yield
+            finally:
+                key_bytes = previous
+
+    return _OwnerSeam()
+
+
+_CAPACITY_OWNER_SEAM = _make_capacity_owner_seam()
+
+
+def set_capacity_owner_test_key(key: bytes | None) -> None:
+    """Refuse direct injection; use the fixture-only closure seam instead."""
+
+    del key
+    raise RoutingPolicyError("capacity owner test key is test-only")
+
+
+def _capacity_fact_payload(
+    *,
+    worker_id: str,
+    state: Any,
+    source: Any,
+    generation: int,
+) -> dict[str, Any]:
+    return {
+        "generation": generation,
+        "source": getattr(source, "value", source),
+        "state": getattr(state, "value", state),
+        "worker_id": worker_id,
+    }
+
+
+def _capacity_fact_seal(payload: Mapping[str, Any]) -> str:
+    return _CAPACITY_OWNER_SEAM.seal(payload).hex()
+
+
+def export_capacity_owner_fact(
+    *,
+    worker_id: str,
+    state: Any,
+    generation: int,
+) -> Any:
+    """Mint one keyed-sealed capacity fact. This is the only lawful mint."""
+
+    from control_plane.executive_steward import SourceOwner
+    from ops.executive_os.capacity_owner_facts import CapacityOwnerFact
+
+    payload = _capacity_fact_payload(
+        worker_id=worker_id,
+        state=state,
+        source=SourceOwner.CAPACITY,
+        generation=generation,
+    )
+    return CapacityOwnerFact(
+        worker_id=worker_id,
+        state=state,
+        source=SourceOwner.CAPACITY,
+        generation=generation,
+        _seal=_capacity_fact_seal(payload),
+    )
+
+
+def verify_capacity_owner_fact(fact: Any) -> None:
+    """Re-verify the owner HMAC over the fact's canonical public fields."""
+
+    from ops.executive_os.capacity_owner_facts import (
+        CapacityOwnerFact,
+        CapacityOwnerFactError,
+    )
+
+    if type(fact) is not CapacityOwnerFact:
+        raise CapacityOwnerFactError("capacity_fact is not an owner-minted instance")
+    seal = object.__getattribute__(fact, "_seal")
+    try:
+        verified = isinstance(seal, str) and _CAPACITY_OWNER_SEAM.verify(
+            _capacity_fact_payload(
+                worker_id=fact.worker_id,
+                state=fact.state,
+                source=fact.source,
+                generation=fact.generation,
+            ),
+            bytes.fromhex(seal),
+        )
+    except (TypeError, ValueError):
+        verified = False
+    if not verified:
+        raise CapacityOwnerFactError(
+            "capacity_fact seal does not match worker_id, generation"
+        )
+
+
 __all__ = [
     "ChatReasoningMode",
     "CognitionRoute",
@@ -872,6 +1148,10 @@ __all__ = [
     "RouteMode",
     "RoutingDecision",
     "RoutingPolicyError",
+    "SuitabilityTier",
     "WorkRequest",
+    "export_capacity_owner_fact",
     "route_work",
+    "set_capacity_owner_test_key",
+    "verify_capacity_owner_fact",
 ]

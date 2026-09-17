@@ -29,8 +29,11 @@ from typing import Any, Mapping, Sequence, Union
 
 from control_plane.executive_delegation_identity import ExecutiveDelegationIdentity
 from control_plane.executive_dialogue_observation import (
+    CanonicalTerminalWakeCandidate,
+    CanonicalTerminalWakeRead,
     DialogueCandidateReference,
     TerminalProjectionReceiptReference,
+    read_runtime_canonical_terminal_wake,
     terminal_projection_receipt_reference,
 )
 from control_plane.executive_runtime import (
@@ -103,6 +106,19 @@ from integrations.slack_agent_dialogue.turn_runtime_primitives import (
     CandidateCollectionOverflow,
     CandidateCollectionTimeout,
     CandidateCollectionUnavailable,
+    HostExecutionState,
+    RuntimeBindingIdentity,
+    SourceDisposition,
+    WatchedResponsibility,
+    WatchedSource,
+    WatchedSourceConflict,
+    WatcherAction,
+    WatcherHealth,
+    WatcherPassOutcome,
+    WatcherPassReceipt,
+    WatcherProjection,
+    WatcherSide,
+    project_watched_source,
 )
 from integrations.slack_agent_dialogue.wake_projection import (
     compose_persisted_turn_observer,
@@ -143,6 +159,161 @@ class ActiveWaiterStateUnavailable(RuntimeError):
     def __init__(self) -> None:
         super().__init__("ACTIVE_WAITER_STATE_UNAVAILABLE")
         self.code = "ACTIVE_WAITER_STATE_UNAVAILABLE"
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeWatchedSourceProjection:
+    """Read-only RCH-2 projection over one canonical Runtime snapshot.
+
+    The exact binding field is populated only when the current binding equals
+    the watched source's public binding identity.  Raw provider handles and
+    account labels never cross this projection.
+    """
+
+    projection: WatcherProjection
+    canonical_candidate: CanonicalTerminalWakeCandidate
+    canonical_terminal_wake: CanonicalTerminalWakeRead
+    exact_runtime_binding: RuntimeBindingIdentity | None
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.projection) is not WatcherProjection
+            or type(self.canonical_candidate) is not CanonicalTerminalWakeCandidate
+            or type(self.canonical_terminal_wake) is not CanonicalTerminalWakeRead
+            or self.projection.source.canonical_source_identity
+            != (
+                self.canonical_candidate.root_job_id,
+                self.canonical_candidate.job_id,
+                self.canonical_candidate.attempt_id,
+                self.canonical_candidate.worker_id,
+            )
+            or self.projection.canonical_terminal_applied
+            is not self.canonical_terminal_wake.terminal_applied
+            or any(
+                (
+                    self.canonical_terminal_wake.action_authoritative,
+                    self.canonical_terminal_wake.provider_action_authorized,
+                    self.canonical_terminal_wake.wake_write_authorized,
+                    self.canonical_terminal_wake.lifecycle_write_authorized,
+                )
+            )
+            or (
+                self.exact_runtime_binding is not None
+                and type(self.exact_runtime_binding) is not RuntimeBindingIdentity
+            )
+            or (
+                self.projection.action is WatcherAction.EXACT_RUNTIME_BINDING_WAKE
+                and self.exact_runtime_binding != self.projection.source.runtime_binding
+            )
+            or (
+                self.projection.action is not WatcherAction.EXACT_RUNTIME_BINDING_WAKE
+                and self.exact_runtime_binding is not None
+            )
+        ):
+            raise WatchedSourceConflict("WATCH_PROJECTION_INVALID")
+
+
+def project_runtime_watched_source(
+    *,
+    control_runtime: object,
+    source_root_job_id: str,
+    canonical_candidate: CanonicalTerminalWakeCandidate,
+    source: WatchedSource,
+    schedule_generation: str,
+    receipts: Sequence[WatcherPassReceipt],
+    aggregate_sources: Sequence[WatchedSource] = (),
+    current_sol_can_act: bool,
+    sidecar: bool,
+    current_runtime_binding: RuntimeBinding | None,
+) -> RuntimeWatchedSourceProjection:
+    """Consume W3C-R2 truth once, then project zero-authority watcher evidence.
+
+    The protected W3C-R2 facade owns terminal phases, Event validation, physical
+    receipt normalization, history inspection, and correlated Wake truth.  This
+    adapter neither rereads Slack nor reconstructs any of those facts.
+    """
+
+    if (
+        type(source) is not WatchedSource
+        or type(canonical_candidate) is not CanonicalTerminalWakeCandidate
+        or type(source_root_job_id) is not str
+        or source_root_job_id != canonical_candidate.root_job_id
+        or source.canonical_source_identity
+        != (
+            canonical_candidate.root_job_id,
+            canonical_candidate.job_id,
+            canonical_candidate.attempt_id,
+            canonical_candidate.worker_id,
+        )
+        or type(current_sol_can_act) is not bool
+        or type(sidecar) is not bool
+        or (current_sol_can_act and sidecar)
+        or (
+            current_runtime_binding is not None
+            and type(current_runtime_binding) is not RuntimeBinding
+        )
+    ):
+        raise WatchedSourceConflict("WATCH_PROJECTION_INVALID")
+
+    canonical = read_runtime_canonical_terminal_wake(
+        runtime=control_runtime,
+        source_root_job_id=source_root_job_id,
+        candidate=canonical_candidate,
+    )
+    if (
+        type(canonical) is not CanonicalTerminalWakeRead
+        or canonical.state not in {"ABSENT", "RESOLVED"}
+        or canonical.reason == "CANDIDATE_NOT_CANONICAL"
+        or (canonical.state == "RESOLVED" and not canonical.terminal_applied)
+    ):
+        raise WatchedSourceConflict("CANONICAL_WATCHER_READ_INVALID")
+    if any(
+        (
+            canonical.action_authoritative,
+            canonical.provider_action_authorized,
+            canonical.wake_write_authorized,
+            canonical.lifecycle_write_authorized,
+        )
+    ):
+        raise WatchedSourceConflict("CANONICAL_WATCHER_AUTHORITY_CONFLICT")
+
+    current_identity: RuntimeBindingIdentity | None = None
+    if current_runtime_binding is not None:
+        try:
+            current_identity = RuntimeBindingIdentity.from_runtime_binding(
+                current_runtime_binding
+            )
+        except WatchedSourceConflict:
+            current_identity = None
+    exact_binding_available = (
+        source.runtime_binding is not None
+        and current_identity == source.runtime_binding
+    )
+    binding_reconciliation_required = (
+        source.runtime_binding is not None
+        and current_identity != source.runtime_binding
+    )
+    projection = project_watched_source(
+        source,
+        schedule_generation=schedule_generation,
+        receipts=receipts,
+        aggregate_sources=aggregate_sources,
+        current_sol_can_act=current_sol_can_act,
+        sidecar=sidecar,
+        exact_runtime_binding_available=exact_binding_available,
+        runtime_binding_reconciliation_required=binding_reconciliation_required,
+        canonical_terminal_applied=canonical.terminal_applied,
+    )
+    return RuntimeWatchedSourceProjection(
+        projection=projection,
+        canonical_candidate=canonical_candidate,
+        canonical_terminal_wake=canonical,
+        exact_runtime_binding=(
+            source.runtime_binding
+            if projection.action is WatcherAction.EXACT_RUNTIME_BINDING_WAKE
+            else None
+        ),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -1456,17 +1627,33 @@ __all__ = [
     "MAX_TURN_CANDIDATES_PER_PASS",
     "ActiveWaiterStateUnavailable",
     "AgentRelayTurnRuntime",
+    "CanonicalTerminalWakeCandidate",
+    "CanonicalTerminalWakeRead",
+    "HostExecutionState",
     "ObservationOutcome",
     "ObservationReceipt",
     "PrivateRelayAuthorityPolicy",
     "RelayRuntimeConfig",
     "RelayRuntimeError",
     "RelayTurnCandidate",
+    "RuntimeBindingIdentity",
+    "RuntimeWatchedSourceProjection",
+    "SourceDisposition",
     "TurnRoutingFactsError",
+    "WatchedResponsibility",
+    "WatchedSource",
+    "WatchedSourceConflict",
+    "WatcherAction",
+    "WatcherHealth",
+    "WatcherPassOutcome",
+    "WatcherPassReceipt",
+    "WatcherProjection",
+    "WatcherSide",
     "build_service",
     "build_executive_observation_candidate_source",
     "build_turn_runtime",
     "main",
+    "project_runtime_watched_source",
     "read_private_token_file",
     "run_relay",
 ]

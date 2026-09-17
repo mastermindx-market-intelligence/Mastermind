@@ -62,9 +62,9 @@ def _valid_state() -> dict[str, object]:
     return state
 
 
-def test_reader_sends_exact_no_input_state_frame_and_returns_validated_result(tmp_path: Path):
+def test_reader_sends_exact_no_input_state_frame_and_returns_validated_result(short_socket_root: Path):
     state_reader = _module()
-    socket_path = tmp_path / "ceo-ingress.sock"
+    socket_path = short_socket_root / "ceo-ingress.sock"
     observed_frames: list[dict[str, object]] = []
     expected = _valid_state()
 
@@ -98,9 +98,9 @@ def test_reader_sends_exact_no_input_state_frame_and_returns_validated_result(tm
     assert observed_frames == [{"schema": STATE_REQUEST_SCHEMA}]
 
 
-def test_reader_refuses_invalid_hot_state_result(tmp_path: Path):
+def test_reader_refuses_invalid_hot_state_result(short_socket_root: Path):
     state_reader = _module()
-    socket_path = tmp_path / "ceo-ingress.sock"
+    socket_path = short_socket_root / "ceo-ingress.sock"
 
     async def exercise():
         async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
@@ -131,9 +131,9 @@ def test_reader_refuses_invalid_hot_state_result(tmp_path: Path):
     asyncio.run(exercise())
 
 
-def test_reader_refuses_oversize_response_without_waiting_for_unbounded_line(tmp_path: Path):
+def test_reader_refuses_oversize_response_without_waiting_for_unbounded_line(short_socket_root: Path):
     state_reader = _module()
-    socket_path = tmp_path / "ceo-ingress.sock"
+    socket_path = short_socket_root / "ceo-ingress.sock"
 
     async def exercise():
         async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):

@@ -38,6 +38,7 @@ from control_plane.wake_ledger import (
     WakeLedgerRecord,
     WakeRetryPolicy,
     attempt_record,
+    assert_causal,
     eligible_for_nudge,
     ledger_command_id,
     make_delivery_attempt,
@@ -162,6 +163,12 @@ class PersistedNudgeState(str, Enum):
     TARGET_UNAVAILABLE = "TARGET_UNAVAILABLE"
     FAILED = "FAILED"
     RECONCILIATION_REQUIRED = "RECONCILIATION_REQUIRED"
+
+
+class PersistedDeliveredAckState(str, Enum):
+    RECORDED = "RECORDED"
+    HOLD = "HOLD"
+    EFFECT_UNKNOWN = "EFFECT_UNKNOWN"
 
 
 class FabricOutcome(str, Enum):
@@ -348,6 +355,14 @@ class PersistedNudgeResult:
     @property
     def nudge_id(self) -> str:
         return self.nudge_attempt.nudge_id
+
+
+@dataclasses.dataclass(frozen=True)
+class PersistedDeliveredAckResult:
+    """Closed result of one ACK-only reconciliation of a delivered nudge."""
+
+    state: PersistedDeliveredAckState
+    reason: str
 
 
 def coalesce_nudge(routes: Sequence[WakeRoute]) -> NudgePlan:
@@ -1084,6 +1099,100 @@ async def dispatch_persisted_nudge(
         transport=transport,
         target_ack_projection=target_ack_projection,
         target_registry=target_registry,
+    )
+
+
+async def reconcile_persisted_delivered_ack(
+    repo: WakeLedgerRepository,
+    pairs: Sequence[tuple[WakeObligation, WakeRoute]],
+    *,
+    dispatcher: WakeDispatcher,
+    binding: RuntimeBinding,
+    target_registry: SessionTargetRegistry,
+    descriptor: WakeTransportDescriptor | None = None,
+) -> PersistedDeliveredAckResult:
+    """Drain one already-delivered provider ACK without resending the Wake."""
+
+    hold = lambda reason: PersistedDeliveredAckResult(
+        PersistedDeliveredAckState.HOLD, reason
+    )
+    if (
+        not isinstance(repo, WakeLedgerRepository)
+        or len(pairs) != 1
+        or not isinstance(binding, RuntimeBinding)
+        or not isinstance(target_registry, SessionTargetRegistry)
+    ):
+        return hold("ACK_RECONCILIATION_REFUSED")
+    obligation, route = pairs[0]
+    if route.obligation_id != obligation.obligation_id:
+        return hold("ACK_ROUTE_REFUSED")
+    records = tuple(item.record for item in repo.list_records(obligation.obligation_id))
+    try:
+        assert_causal(records)
+    except Exception:
+        return hold("ACK_HISTORY_REFUSED")
+    attempts = tuple(record for record in records if record.phase is LedgerPhase.DELIVERY_ATTEMPT)
+    phases = tuple(record.phase for record in records)
+    if (
+        phases.count(LedgerPhase.WAKE_REQUESTED) != 1
+        or len(attempts) != 1
+        or phases.count(LedgerPhase.DELIVERED) != 1
+        or LedgerPhase.FAILED in phases
+        or LedgerPhase.TARGET_UNAVAILABLE in phases
+    ):
+        return hold("ACK_HISTORY_INELIGIBLE")
+    try:
+        nudge_attempt = _load_persisted_nudge(repo, attempts[0])
+        if (
+            len(nudge_attempt.attempts) != 1
+            or nudge_attempt.obligation_ids != (obligation.obligation_id,)
+            or not nudge_attempt.attempts[0].matches_route(route)
+        ):
+            return hold("ACK_NUDGE_IDENTITY_REFUSED")
+        if (
+            LedgerPhase.TARGET_ACKNOWLEDGED in phases
+            or LedgerPhase.SOURCE_RESOLVED in phases
+        ):
+            return PersistedDeliveredAckResult(
+                PersistedDeliveredAckState.RECORDED, "ACK_ALREADY_RECORDED"
+            )
+        resolved_descriptor = descriptor or _descriptor(route.wake_transport)
+        _assert_binding_ready(binding, route, resolved_descriptor)
+        if str(getattr(dispatcher, "transport_id", "") or "") != route.wake_transport:
+            return hold("ACK_DISPATCHER_REFUSED")
+        wake = _nudge_from(
+            nudge_attempt.attempts, binding=binding, first_route=route
+        )
+        reconcile = getattr(dispatcher, "reconcile", None)
+        if not callable(reconcile):
+            return hold("ACK_PROVIDER_UNAVAILABLE")
+        raw = await reconcile(wake)
+        raw_receipt, projection = normalize_transport_completion(raw)
+        receipt = authenticate_transport_receipt(
+            raw_receipt, expected_nudge_id=wake.nudge_id
+        )
+        if receipt.outcome is not TransportOutcome.DELIVERED or projection is None:
+            return hold("ACK_PROJECTION_UNAVAILABLE")
+        if (
+            projection.nudge_id != wake.nudge_id
+            or projection.obligation_ids != (obligation.obligation_id,)
+        ):
+            return hold("ACK_PROJECTION_REFUSED")
+        acknowledge_consumed_wakes(
+            repo.runtime,
+            target_registry,
+            claim=WakeAckClaim((obligation.obligation_id,)),
+            trusted=projection,
+        )
+    except WakePreSubmitError:
+        return hold("ACK_PROVIDER_UNAVAILABLE")
+    except Exception:
+        return PersistedDeliveredAckResult(
+            PersistedDeliveredAckState.EFFECT_UNKNOWN,
+            "ACK_EFFECT_UNKNOWN",
+        )
+    return PersistedDeliveredAckResult(
+        PersistedDeliveredAckState.RECORDED, "ACK_RECORDED"
     )
 
 

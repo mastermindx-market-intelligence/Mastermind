@@ -140,6 +140,7 @@ class FakeAdapter:
         self.direct_validation_calls: list[tuple[str, ...]] = []
         self.spec = None
         self.ref = None
+        self.provider_home: Path | None = None
 
     async def start(self, spec):
         self.spec = spec
@@ -258,7 +259,7 @@ class FakeAdapter:
         )
 
     def launch_attestation(self, ref):
-        assert self.spec is not None and ref == self.ref
+        assert self.spec is not None and ref == self.ref and self.provider_home is not None
         return {
             "schema_version": LAUNCH_ATTESTATION_SCHEMA_VERSION,
             "created_at": ref.started_at,
@@ -289,7 +290,7 @@ class FakeAdapter:
                 "effective_uid": os.geteuid(),
                 "effective_gid": os.getegid(),
             },
-            "provider_home_identity": {"path": str(self.spec.codex_home)},
+            "provider_home_identity": {"path": str(self.provider_home)},
             "secret_canary_verdict": {
                 "schema_version": "mastermind.executive_secret_canary/v1",
                 "passed": True,
@@ -397,10 +398,10 @@ def _runtime_and_job(
 def _supervisor(runtime: Runtime, tmp_path: Path, adapter: FakeAdapter) -> ExecutiveSupervisor:
     codex_home = tmp_path / "codex-home"
     codex_home.mkdir(mode=0o700, exist_ok=True)
+    adapter.provider_home = codex_home
     return ExecutiveSupervisor(
         runtime,
         adapter,  # type: ignore[arg-type]
-        codex_home=codex_home,
         runs_root=tmp_path / "runs",
         isolation_roots=(tmp_path / "workspaces", tmp_path / "runs"),
         heartbeat_interval_seconds=0.01,

@@ -28,6 +28,11 @@ from control_plane.codex_worker import (
     CodexWorkerAdapter,
     load_codex_attestation_receipt,
 )
+from control_plane.codex_provider_realm import (
+    REVIEWED_CODEX_PROVIDER_REALMS,
+    CodexProviderRealm,
+    provider_home_credential_loader,
+)
 from control_plane.codex_operator_adapter import CodexOperatorAdapter
 from control_plane.executive_autonomy import (
     AutonomyRefusal,
@@ -52,10 +57,17 @@ from control_plane.executive_worker_broker import (
     activate_launchd_socket,
 )
 from control_plane.executive_ambient_process import DarwinDistnotedClassifier
+from control_plane.subscription_harness_bindings import (
+    HarnessBindingError,
+    SubscriptionHarnessBinding,
+    get_binding,
+)
+from control_plane.worker_adapter import adapter_descriptor
 from control_plane.worker_browser_b1 import BrowserGenerationResource
 
 
 CONFIG_SCHEMA_VERSION = "mastermind.executive_worker_broker_config/v4"
+SUBSCRIPTION_CONFIG_SCHEMA_VERSION = "mastermind.executive_worker_broker_config/v5"
 AUTONOMY_RECEIPT = Path(
     "/Library/Application Support/MastermindExecutive/config/autonomy-state-v1.json"
 )
@@ -86,6 +98,7 @@ _CONFIG_FIELDS = frozenset(
         "operator_harness_armed",
     }
 )
+_SUBSCRIPTION_CONFIG_FIELDS = _CONFIG_FIELDS | frozenset({"harness_binding_id"})
 _CONTROL_ENV_ATTESTATION_FIELDS = frozenset(
     {
         "schema_version",
@@ -141,10 +154,17 @@ def _load_config(path: Path, *, require_root_owner: bool) -> dict[str, Any]:
         value = json.loads(raw.decode("utf-8", errors="strict"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise WorkerConfigError("worker config is not valid UTF-8 JSON") from exc
-    if not isinstance(value, dict) or set(value) != _CONFIG_FIELDS:
+    if not isinstance(value, dict):
         raise WorkerConfigError("worker config fields do not match the schema")
-    if value.get("schema_version") != CONFIG_SCHEMA_VERSION:
+    schema_version = value.get("schema_version")
+    if schema_version == CONFIG_SCHEMA_VERSION:
+        expected_fields = _CONFIG_FIELDS
+    elif schema_version == SUBSCRIPTION_CONFIG_SCHEMA_VERSION:
+        expected_fields = _SUBSCRIPTION_CONFIG_FIELDS
+    else:
         raise WorkerConfigError("worker config schema version is unsupported")
+    if set(value) != expected_fields:
+        raise WorkerConfigError("worker config fields do not match the schema")
     versions = value.get("allowed_codex_versions")
     if (
         not isinstance(versions, list)
@@ -170,6 +190,12 @@ def _load_config(path: Path, *, require_root_owner: bool) -> dict[str, Any]:
         raise WorkerConfigError("production worker config must require the secret canary")
     if not isinstance(value.get("operator_harness_armed"), bool):
         raise WorkerConfigError("operator_harness_armed must be boolean")
+    if schema_version == SUBSCRIPTION_CONFIG_SCHEMA_VERSION:
+        binding = _resolve_subscription_binding(value.get("harness_binding_id"))
+        if value["operator_harness_armed"] is not False:
+            raise WorkerConfigError("subscription Codex workers cannot arm the operator harness")
+        if binding.implementation_state == "SPEC_ONLY":
+            raise WorkerConfigError("subscription harness binding is not implemented")
     allowed_groups = value.get("allowed_supplementary_gids")
     if (
         not isinstance(allowed_groups, list)
@@ -181,6 +207,61 @@ def _load_config(path: Path, *, require_root_owner: bool) -> dict[str, Any]:
     ):
         raise WorkerConfigError("allowed supplementary groups are invalid")
     return value
+
+
+def _resolve_subscription_binding(value: Any) -> SubscriptionHarnessBinding:
+    if not isinstance(value, str) or not value or value != value.strip():
+        raise WorkerConfigError("subscription harness binding id is invalid")
+    try:
+        binding = get_binding(value)
+        descriptor = adapter_descriptor(binding.adapter_id)
+    except (HarnessBindingError, ValueError) as exc:
+        raise WorkerConfigError("subscription harness binding is not reviewed") from exc
+    if binding.adapter_id != "codex-cli" or not descriptor.implemented:
+        raise WorkerConfigError("subscription harness binding is not implemented by Codex")
+    wire_api = binding.protocol
+    matches = tuple(
+        realm
+        for realm in REVIEWED_CODEX_PROVIDER_REALMS.values()
+        if realm.provider_alias == binding.provider
+        and realm.base_url == binding.effective_base_url
+        and realm.wire_api == wire_api
+    )
+    if len(matches) != 1:
+        raise WorkerConfigError("subscription harness binding has no exact reviewed realm")
+    return binding
+
+
+def _resolve_subscription_realm(
+    binding: SubscriptionHarnessBinding,
+) -> CodexProviderRealm:
+    wire_api = binding.protocol
+    matches = tuple(
+        realm
+        for realm in REVIEWED_CODEX_PROVIDER_REALMS.values()
+        if realm.provider_alias == binding.provider
+        and realm.base_url == binding.effective_base_url
+        and realm.wire_api == wire_api
+    )
+    if len(matches) != 1:
+        raise WorkerConfigError("subscription harness binding has no exact reviewed realm")
+    return matches[0]
+
+
+def _subscription_binding_for_config(
+    config: Mapping[str, Any],
+) -> SubscriptionHarnessBinding | None:
+    if config.get("schema_version") != SUBSCRIPTION_CONFIG_SCHEMA_VERSION:
+        return None
+    return _resolve_subscription_binding(config.get("harness_binding_id"))
+
+
+def _assert_service_activation_allowed(config: Mapping[str, Any]) -> None:
+    binding = _subscription_binding_for_config(config)
+    if binding is None:
+        return
+    if binding.implementation_state != "PROVEN_LIVE" or not binding.autonomous_allowed:
+        raise WorkerConfigError("subscription harness binding is not armed for autonomous service")
 
 
 def _canonical_sha256(value: Any) -> str:
@@ -423,11 +504,26 @@ def _build_broker(
         expected_binary_path=Path(config["codex_binary"]),
         expected_owner_gid=policy.worker_gid,
     )
+    binding = _subscription_binding_for_config(config)
+    provider_realm = _resolve_subscription_realm(binding) if binding is not None else None
+    credential_loader = (
+        provider_home_credential_loader(
+            policy.provider_home,
+            provider_realm,
+            expected_uid=policy.worker_uid,
+            expected_gid=policy.worker_gid,
+        )
+        if provider_realm is not None
+        else None
+    )
     adapter = CodexWorkerAdapter(
         Path(config["codex_binary"]),
+        codex_home=policy.provider_home,
         binary_attestation=binary_attestation,
         allowed_versions=frozenset(config["allowed_codex_versions"]),
         required_team_identifier=str(config["required_team_identifier"]),
+        provider_realm=provider_realm,
+        provider_credential_loader=credential_loader,
     )
     sweeper = DedicatedUIDSweeper(
         policy.worker_uid,
@@ -499,6 +595,7 @@ def _build_broker(
         adapter,
         policy,
         sweeper,
+        adapter_id="codex-cli",
         operator_adapter_factory=operator_adapter_factory,
         operator_resource_factory=operator_resource_factory,
         operator_harness_armed=armed,
@@ -582,7 +679,7 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 json.dumps(
                     {
-                        "schema_version": CONFIG_SCHEMA_VERSION,
+                        "schema_version": value["schema_version"],
                         "valid": True,
                         "worker_id": value["worker_id"],
                         "worker_uid": value["worker_uid"],
@@ -595,6 +692,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         config_path = Path(args.config)
         config = _load_config(config_path, require_root_owner=True)
+        _assert_service_activation_allowed(config)
         autonomy_guard = None
         if config.get("operator_harness_armed") is True:
             own_config_sha256 = sha256_file(config_path)

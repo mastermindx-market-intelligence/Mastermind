@@ -405,7 +405,10 @@ def _terminal_w3c_material(runtime):
             },
         ),
         thread_ts=THREAD_TS,
-        current_worker=_terminal_snapshot(),
+        current_worker=dataclasses.replace(
+            _terminal_snapshot(),
+            attempt_id=terminal.attempt_id,
+        ),
         actor=caller(),
         terminal_candidate=terminal,
         terminal_projection_receipt=receipt,
@@ -1929,6 +1932,9 @@ def test_run_relay_terminal_observation_reaches_physical_reread_and_existing_wak
             self.resolve_calls = []
             self.reconcile_requests = []
             self.submit_requests = []
+            self.source_snapshots = []
+            self.source_reconcile_requests = []
+            self.source_submit_requests = []
             type(self).instances.append(self)
 
         async def resolve(self, *, parent, thread_ts):
@@ -1963,6 +1969,34 @@ def test_run_relay_terminal_observation_reaches_physical_reread_and_existing_wak
                     operation=SUBMIT_WAKE,
                     obligation=obligation,
                     route=route,
+                )
+            )
+
+        async def reconcile_dialogue_sources(self, snapshot):
+            self.source_snapshots.append(snapshot)
+            return {
+                "state": "NOT_APPLICABLE",
+                "reason": "NONCANARY_PROFILE",
+            }
+
+        async def reconcile_from_source(self, source, obligation, route):
+            self.source_reconcile_requests.append(
+                self._wake_request(
+                    operation=RECONCILE_WAKE,
+                    obligation=obligation,
+                    route=route,
+                    source_observation=source,
+                )
+            )
+            return WakeCarrierState.MISSING
+
+        async def submit_from_source(self, source, obligation, route):
+            self.source_submit_requests.append(
+                self._wake_request(
+                    operation=SUBMIT_WAKE,
+                    obligation=obligation,
+                    route=route,
+                    source_observation=source,
                 )
             )
 
@@ -2010,7 +2044,533 @@ def test_run_relay_terminal_observation_reaches_physical_reread_and_existing_wak
     assert observation_client.resolve_calls == [
         (dict(candidate.dialogue_parent), candidate.thread_ts)
     ]
-    assert len(observation_client.reconcile_requests) == 1
-    assert len(observation_client.submit_requests) == 1
+    assert observation_client.reconcile_requests == []
+    assert observation_client.submit_requests == []
+    assert len(observation_client.source_snapshots) == 1
+    assert len(observation_client.source_reconcile_requests) == 1
+    assert len(observation_client.source_submit_requests) == 1
+    expected_physical_source = {
+        "workspace_id": terminal_engine.policy.workspace_id,
+        "channel_id": terminal_engine.policy.channel_id,
+        "thread_ts": candidate.thread_ts,
+        "parent_fingerprint": candidate.dialogue_parent["fingerprint"],
+        "operation_key": candidate.dialogue_parent["operation_key"],
+        "predecessor_message_key": terminal_message["message_key"],
+        "predecessor_message_fingerprint": terminal_message["fingerprint"],
+    }
+    source_snapshot = observation_client.source_snapshots[0]
+    snapshot_message = next(
+        message.to_dict()
+        for message in source_snapshot.messages
+        if message.to_dict()["message_key"] == terminal_message["message_key"]
+    )
+    assert {
+        "workspace_id": source_snapshot.workspace_id,
+        "channel_id": source_snapshot.channel_id,
+        "thread_ts": source_snapshot.thread_ts,
+        "parent_fingerprint": source_snapshot.parent_fingerprint,
+        "operation_key": source_snapshot.operation_key,
+        "predecessor_message_key": snapshot_message["message_key"],
+        "predecessor_message_fingerprint": snapshot_message["fingerprint"],
+    } == expected_physical_source
+    expected_source_observation = {
+        key: expected_physical_source[key]
+        for key in (
+            "workspace_id",
+            "channel_id",
+            "thread_ts",
+            "predecessor_message_key",
+            "predecessor_message_fingerprint",
+        )
+    }
+    assert observation_client.source_reconcile_requests[0][
+        "source_observation"
+    ] == expected_source_observation
+    assert observation_client.source_submit_requests[0][
+        "source_observation"
+    ] == expected_source_observation
+    for request in (
+        observation_client.source_reconcile_requests[0],
+        observation_client.source_submit_requests[0],
+    ):
+        assert {
+            **request["source_observation"],
+            "parent_fingerprint": request["parent"]["fingerprint"],
+            "operation_key": request["parent"]["operation_key"],
+        } == expected_physical_source
     assert terminal_engine.client.channel_history_call_count == 4
     assert terminal_engine.client.thread_history_call_count == 2
+
+
+def _canonical_watch_candidate(runtime):
+    return runtime.CanonicalTerminalWakeCandidate(
+        root_job_id="JOB-" + "1" * 32,
+        job_id="JOB-" + "2" * 32,
+        attempt_id="ATT-" + "3" * 32,
+        worker_id="WRK-" + "4" * 32,
+    )
+
+
+def _canonical_watch_read(
+    runtime,
+    *,
+    terminal_result_applied: bool = False,
+    **changed,
+):
+    values = {
+        "state": "ABSENT",
+        "reason": (
+            "CORRELATED_WAKE_ABSENT"
+            if terminal_result_applied
+            else "CANONICAL_TERMINAL_ABSENT"
+        ),
+        "terminal_state": "APPLIED" if terminal_result_applied else "MISSING",
+        "wake_state": "ABSENT",
+        "terminal_applied": terminal_result_applied,
+    }
+    values.update(changed)
+    return runtime.CanonicalTerminalWakeRead(**values)
+
+
+def _current_runtime_binding(source, *, binding_id=None, generation=None):
+    from control_plane.session_targets import RuntimeBinding
+
+    exact = source.runtime_binding
+    assert exact is not None
+    return RuntimeBinding(
+        session_alias=exact.session_alias,
+        binding_id=binding_id or exact.binding_id,
+        binding_generation=(
+            exact.binding_generation if generation is None else generation
+        ),
+        native_handle="provider-private-current-task",
+        account_label="provider-private-account",
+        reasoning_surface=exact.reasoning_surface,
+    )
+
+
+@pytest.mark.parametrize(
+    "host_execution",
+    (
+        "IDLE_GATED",
+        "ACTIVELY_BUSY",
+    ),
+)
+def test_responsibility_projection_sidecar_uses_exact_binding_for_idle_and_busy(
+    monkeypatch,
+    host_execution: str,
+) -> None:
+    runtime = _runtime()
+    from tests.test_slack_agent_dialogue_turn_runtime_primitives import (
+        _watch_pass,
+        _watched_source,
+    )
+
+    source = _watched_source()
+    receipt = _watch_pass(
+        source,
+        opportunity="window-01",
+        outcome=runtime.WatcherPassOutcome.ACTIONABLE_EVENT_DETECTED,
+        execution=runtime.HostExecutionState(host_execution),
+    )
+    canonical = _canonical_watch_read(runtime)
+    calls = []
+
+    def canonical_read(**kwargs):
+        calls.append(kwargs)
+        return canonical
+
+    monkeypatch.setattr(runtime, "read_runtime_canonical_terminal_wake", canonical_read)
+    control_runtime = object()
+    candidate = _canonical_watch_candidate(runtime)
+
+    projected = runtime.project_runtime_watched_source(
+        control_runtime=control_runtime,
+        source_root_job_id=candidate.root_job_id,
+        canonical_candidate=candidate,
+        source=source,
+        schedule_generation="b" * 64,
+        receipts=(receipt,),
+        current_sol_can_act=False,
+        sidecar=True,
+        current_runtime_binding=_current_runtime_binding(source),
+    )
+
+    assert projected.projection.state is runtime.WatcherHealth.CURRENT
+    assert projected.projection.action is runtime.WatcherAction.EXACT_RUNTIME_BINDING_WAKE
+    assert projected.exact_runtime_binding == source.runtime_binding
+    assert projected.canonical_candidate is candidate
+    assert projected.canonical_terminal_wake is canonical
+    assert "provider-private-current-task" not in repr(projected)
+    assert "provider-private-account" not in repr(projected)
+    assert calls == [
+        {
+            "runtime": control_runtime,
+            "source_root_job_id": candidate.root_job_id,
+            "candidate": candidate,
+        }
+    ]
+
+
+def test_responsibility_projection_current_sol_acts_same_carrier_without_native_wake(
+    monkeypatch,
+) -> None:
+    runtime = _runtime()
+    from tests.test_slack_agent_dialogue_turn_runtime_primitives import (
+        _watch_pass,
+        _watched_source,
+    )
+
+    source = _watched_source()
+    receipt = _watch_pass(
+        source,
+        opportunity="window-01",
+        outcome=runtime.WatcherPassOutcome.ACTIONABLE_EVENT_DETECTED,
+        execution=runtime.HostExecutionState.ACTIVELY_BUSY,
+    )
+    monkeypatch.setattr(
+        runtime,
+        "read_runtime_canonical_terminal_wake",
+        lambda **_kwargs: _canonical_watch_read(runtime),
+    )
+
+    projected = runtime.project_runtime_watched_source(
+        control_runtime=object(),
+        source_root_job_id=_canonical_watch_candidate(runtime).root_job_id,
+        canonical_candidate=_canonical_watch_candidate(runtime),
+        source=source,
+        schedule_generation="b" * 64,
+        receipts=(receipt,),
+        current_sol_can_act=True,
+        sidecar=False,
+        current_runtime_binding=None,
+    )
+
+    assert projected.projection.action is runtime.WatcherAction.SAME_CARRIER_ACTION
+    assert projected.exact_runtime_binding is None
+    assert projected.projection.native_wake_authorized is False
+
+
+@pytest.mark.parametrize(
+    "binding_change",
+    (
+        {"binding_id": "bind-newest-visible0002"},
+        {"generation": 8},
+    ),
+)
+def test_responsibility_projection_never_falls_back_to_newest_runtime_binding(
+    monkeypatch,
+    binding_change,
+) -> None:
+    runtime = _runtime()
+    from tests.test_slack_agent_dialogue_turn_runtime_primitives import (
+        _watch_pass,
+        _watched_source,
+    )
+
+    source = _watched_source()
+    receipt = _watch_pass(
+        source,
+        opportunity="window-01",
+        outcome=runtime.WatcherPassOutcome.ACTIONABLE_EVENT_DETECTED,
+    )
+    monkeypatch.setattr(
+        runtime,
+        "read_runtime_canonical_terminal_wake",
+        lambda **_kwargs: _canonical_watch_read(runtime),
+    )
+
+    projected = runtime.project_runtime_watched_source(
+        control_runtime=object(),
+        source_root_job_id=_canonical_watch_candidate(runtime).root_job_id,
+        canonical_candidate=_canonical_watch_candidate(runtime),
+        source=source,
+        schedule_generation="b" * 64,
+        receipts=(receipt,),
+        current_sol_can_act=False,
+        sidecar=True,
+        current_runtime_binding=_current_runtime_binding(
+            source,
+            **binding_change,
+        ),
+    )
+
+    assert projected.projection.action is (
+        runtime.WatcherAction.SESSION_LOST_RUNTIME_BINDING_RECONCILIATION_REQUIRED
+    )
+    assert (
+        projected.projection.reason
+        == "SESSION_LOST/RUNTIME_BINDING_RECONCILIATION_REQUIRED"
+    )
+    assert projected.exact_runtime_binding is None
+
+
+def test_sidecar_source_without_exact_binding_is_target_unavailable(
+    monkeypatch,
+) -> None:
+    runtime = _runtime()
+    from tests.test_slack_agent_dialogue_turn_runtime_primitives import (
+        _watch_pass,
+        _watched_source,
+    )
+
+    source = _watched_source(runtime_binding=False)
+    receipt = _watch_pass(
+        source,
+        opportunity="window-01",
+        outcome=runtime.WatcherPassOutcome.ACTIONABLE_EVENT_DETECTED,
+    )
+    monkeypatch.setattr(
+        runtime,
+        "read_runtime_canonical_terminal_wake",
+        lambda **_kwargs: _canonical_watch_read(runtime),
+    )
+
+    projected = runtime.project_runtime_watched_source(
+        control_runtime=object(),
+        source_root_job_id=_canonical_watch_candidate(runtime).root_job_id,
+        canonical_candidate=_canonical_watch_candidate(runtime),
+        source=source,
+        schedule_generation="b" * 64,
+        receipts=(receipt,),
+        current_sol_can_act=False,
+        sidecar=True,
+        current_runtime_binding=None,
+    )
+
+    assert projected.projection.action is runtime.WatcherAction.EXACT_TARGET_UNAVAILABLE
+    assert projected.projection.reason == "EXACT_TARGET_UNAVAILABLE"
+    assert projected.exact_runtime_binding is None
+
+
+def test_invalid_dual_action_owner_refuses_before_canonical_read(monkeypatch) -> None:
+    runtime = _runtime()
+    from tests.test_slack_agent_dialogue_turn_runtime_primitives import _watched_source
+
+    calls = 0
+
+    def canonical_read(**_kwargs):
+        nonlocal calls
+        calls += 1
+        return _canonical_watch_read(runtime)
+
+    monkeypatch.setattr(runtime, "read_runtime_canonical_terminal_wake", canonical_read)
+    source = _watched_source()
+
+    with pytest.raises(
+        runtime.WatchedSourceConflict,
+        match="WATCH_PROJECTION_INVALID",
+    ):
+        runtime.project_runtime_watched_source(
+            control_runtime=object(),
+            source_root_job_id=_canonical_watch_candidate(runtime).root_job_id,
+            canonical_candidate=_canonical_watch_candidate(runtime),
+            source=source,
+            schedule_generation="b" * 64,
+            receipts=(),
+            current_sol_can_act=True,
+            sidecar=True,
+            current_runtime_binding=_current_runtime_binding(source),
+        )
+
+    assert calls == 0
+
+
+def test_runtime_projection_refuses_different_canonical_source_before_read(
+    monkeypatch,
+) -> None:
+    runtime = _runtime()
+    from tests.test_slack_agent_dialogue_turn_runtime_primitives import _watched_source
+
+    calls = 0
+
+    def canonical_read(**_kwargs):
+        nonlocal calls
+        calls += 1
+        return _canonical_watch_read(runtime)
+
+    monkeypatch.setattr(runtime, "read_runtime_canonical_terminal_wake", canonical_read)
+    source = _watched_source()
+    candidate = dataclasses.replace(
+        _canonical_watch_candidate(runtime),
+        job_id="JOB-" + "9" * 32,
+    )
+
+    with pytest.raises(
+        runtime.WatchedSourceConflict,
+        match="WATCH_PROJECTION_INVALID",
+    ):
+        runtime.project_runtime_watched_source(
+            control_runtime=object(),
+            source_root_job_id=candidate.root_job_id,
+            canonical_candidate=candidate,
+            source=source,
+            schedule_generation="b" * 64,
+            receipts=(),
+            current_sol_can_act=True,
+            sidecar=False,
+            current_runtime_binding=None,
+        )
+
+    assert calls == 0
+
+
+def test_remote_complete_with_applied_result_but_without_sol_stop_remains_current(
+    monkeypatch,
+) -> None:
+    runtime = _runtime()
+    from tests.test_slack_agent_dialogue_turn_runtime_primitives import _watched_source
+
+    source = _watched_source(
+        disposition=runtime.SourceDisposition.REMOTE_COMPLETE_AWAITING_STOP,
+    )
+    canonical = _canonical_watch_read(runtime, terminal_result_applied=True)
+    monkeypatch.setattr(
+        runtime,
+        "read_runtime_canonical_terminal_wake",
+        lambda **_kwargs: canonical,
+    )
+
+    projected = runtime.project_runtime_watched_source(
+        control_runtime=object(),
+        source_root_job_id=_canonical_watch_candidate(runtime).root_job_id,
+        canonical_candidate=_canonical_watch_candidate(runtime),
+        source=source,
+        schedule_generation="b" * 64,
+        receipts=(),
+        current_sol_can_act=True,
+        sidecar=False,
+        current_runtime_binding=None,
+    )
+
+    assert projected.canonical_terminal_wake.terminal_applied is True
+    # W3C-R2 terminal truth is the worker RESULT projection.  Sol STOP is the
+    # separate watched-source disposition transition and is intentionally absent.
+    assert source.disposition is runtime.SourceDisposition.REMOTE_COMPLETE_AWAITING_STOP
+    assert projected.projection.state is runtime.WatcherHealth.CURRENT
+    assert projected.projection.reason == "REMOTE_COMPLETE_AWAITING_STOP"
+    assert projected.projection.action is runtime.WatcherAction.NO_ACTION
+    assert projected.projection.release_origination_authorized is False
+
+
+def test_runtime_projection_refuses_any_canonical_write_authority(monkeypatch) -> None:
+    runtime = _runtime()
+    from tests.test_slack_agent_dialogue_turn_runtime_primitives import _watched_source
+
+    source = _watched_source()
+    monkeypatch.setattr(
+        runtime,
+        "read_runtime_canonical_terminal_wake",
+        lambda **_kwargs: _canonical_watch_read(
+            runtime,
+            action_authoritative=True,
+        ),
+    )
+
+    with pytest.raises(
+        runtime.WatchedSourceConflict,
+        match="CANONICAL_WATCHER_AUTHORITY_CONFLICT",
+    ):
+        runtime.project_runtime_watched_source(
+            control_runtime=object(),
+            source_root_job_id=_canonical_watch_candidate(runtime).root_job_id,
+            canonical_candidate=_canonical_watch_candidate(runtime),
+            source=source,
+            schedule_generation="b" * 64,
+            receipts=(),
+            current_sol_can_act=False,
+            sidecar=True,
+            current_runtime_binding=_current_runtime_binding(source),
+        )
+
+
+@pytest.mark.parametrize(
+    ("state", "reason"),
+    (
+        ("UNAVAILABLE", "CANONICAL_TERMINAL_UNAVAILABLE"),
+        ("CONFLICT", "CANONICAL_TERMINAL_CONFLICT"),
+        ("EFFECT_UNKNOWN", "CANONICAL_TERMINAL_EFFECT_UNKNOWN"),
+        ("AMBIGUOUS", "MULTIPLE_WAKE_OBLIGATIONS"),
+        ("ABSENT", "CANDIDATE_NOT_CANONICAL"),
+    ),
+)
+def test_runtime_projection_refuses_unusable_canonical_read(
+    monkeypatch,
+    state: str,
+    reason: str,
+) -> None:
+    runtime = _runtime()
+    from tests.test_slack_agent_dialogue_turn_runtime_primitives import (
+        _watch_pass,
+        _watched_source,
+    )
+
+    source = _watched_source()
+    monkeypatch.setattr(
+        runtime,
+        "read_runtime_canonical_terminal_wake",
+        lambda **_kwargs: _canonical_watch_read(
+            runtime,
+            state=state,
+            reason=reason,
+        ),
+    )
+
+    with pytest.raises(
+        runtime.WatchedSourceConflict,
+        match="CANONICAL_WATCHER_READ_INVALID",
+    ):
+        runtime.project_runtime_watched_source(
+            control_runtime=object(),
+            source_root_job_id=_canonical_watch_candidate(runtime).root_job_id,
+            canonical_candidate=_canonical_watch_candidate(runtime),
+            source=source,
+            schedule_generation="b" * 64,
+            receipts=(
+                _watch_pass(
+                    source,
+                    opportunity="window-01",
+                    outcome=runtime.WatcherPassOutcome.ACTIONABLE_EVENT_DETECTED,
+                ),
+            ),
+            current_sol_can_act=True,
+            sidecar=False,
+            current_runtime_binding=None,
+        )
+
+
+def test_runtime_projection_receipt_cannot_misbind_canonical_terminal_state() -> None:
+    runtime = _runtime()
+    from tests.test_slack_agent_dialogue_turn_runtime_primitives import _watched_source
+
+    source = _watched_source()
+    projection = runtime.project_watched_source(
+        source,
+        schedule_generation="b" * 64,
+        receipts=(),
+        canonical_terminal_applied=False,
+    )
+
+    with pytest.raises(
+        runtime.WatchedSourceConflict,
+        match="WATCH_PROJECTION_INVALID",
+    ):
+        runtime.RuntimeWatchedSourceProjection(
+            projection=projection,
+            canonical_candidate=_canonical_watch_candidate(runtime),
+            canonical_terminal_wake=_canonical_watch_read(
+                runtime,
+                terminal_result_applied=True,
+            ),
+            exact_runtime_binding=None,
+        )
+
+
+def test_runtime_projection_is_default_disarmed_and_has_no_new_control_plane() -> None:
+    runtime = _runtime()
+
+    assert "watcher" not in runtime.RelayRuntimeConfig.__dataclass_fields__
+    assert "schedule" not in runtime.RelayRuntimeConfig.__dataclass_fields__
+    assert not hasattr(runtime.RuntimeWatchedSourceProjection, "submit")
+    assert not hasattr(runtime.RuntimeWatchedSourceProjection, "retry")
+    assert not hasattr(runtime.RuntimeWatchedSourceProjection, "create_task")

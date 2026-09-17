@@ -14,19 +14,18 @@ import json
 import re
 from enum import Enum
 from types import MappingProxyType
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
 
 from control_plane.executive_delegation_identity import ExecutiveDelegationIdentity
 from control_plane.executive_runtime import AttemptStatus, WorkerStatus
 from control_plane.session_targets import RuntimeBinding
-from integrations.mastermind_company_mcp.adapter import DialogueBinding
-from integrations.mastermind_company_mcp.schemas import (
-    SERVER_IDENTITY,
-    SERVER_VERSION,
-    TOOL_SCHEMA_DIGEST,
-)
+from control_plane.wake_events import ATTEMPT_ID_RE, JOB_ID_RE
 from integrations.slack_agent_dialogue.contract import DialogueContractError
 from integrations.slack_agent_dialogue.contract_v2 import validate_parent_v2
+
+
+if TYPE_CHECKING:
+    from integrations.mastermind_company_mcp.adapter import DialogueBinding
 
 
 BINDING_SCHEMA = "mastermind.company_dialogue_runtime_binding.v1"
@@ -46,8 +45,6 @@ _ACTIVE_ATTEMPT_STATUSES = frozenset(
     }
 )
 _THREAD_TS_RE = re.compile(r"\A[1-9][0-9]{9,15}\.[0-9]{6}\Z")
-_JOB_ID_RE = re.compile(r"\AJOB-[1-9][0-9]*\Z")
-_ATTEMPT_ID_RE = re.compile(r"\AATT-[1-9][0-9]*\Z")
 _WORKER_ID_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
 _PROFILE_ID_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 _SHA256_RE = re.compile(r"\A[0-9a-f]{64}\Z")
@@ -171,9 +168,9 @@ def _valid_identity(identity: ExecutiveDelegationIdentity) -> bool:
     return bool(
         isinstance(identity, ExecutiveDelegationIdentity)
         and isinstance(identity.job_id, str)
-        and _JOB_ID_RE.fullmatch(identity.job_id)
+        and JOB_ID_RE.fullmatch(identity.job_id)
         and isinstance(identity.root_job_id, str)
-        and _JOB_ID_RE.fullmatch(identity.root_job_id)
+        and JOB_ID_RE.fullmatch(identity.root_job_id)
         and isinstance(identity.operation_key, str)
         and _PUBLIC_TOKEN_RE.fullmatch(identity.operation_key)
         and isinstance(identity.session_ref, str)
@@ -185,11 +182,11 @@ def _valid_current_shape(current: CurrentWorkerDialogueSnapshot) -> bool:
     return bool(
         isinstance(current, CurrentWorkerDialogueSnapshot)
         and isinstance(current.root_job_id, str)
-        and _JOB_ID_RE.fullmatch(current.root_job_id)
+        and JOB_ID_RE.fullmatch(current.root_job_id)
         and isinstance(current.job_id, str)
-        and _JOB_ID_RE.fullmatch(current.job_id)
+        and JOB_ID_RE.fullmatch(current.job_id)
         and isinstance(current.attempt_id, str)
-        and _ATTEMPT_ID_RE.fullmatch(current.attempt_id)
+        and ATTEMPT_ID_RE.fullmatch(current.attempt_id)
         and isinstance(current.worker_id, str)
         and _WORKER_ID_RE.fullmatch(current.worker_id)
         and isinstance(current.execution_profile_id, str)
@@ -208,7 +205,7 @@ def _valid_actor_shape(actor: WorkerDialogueCaller) -> bool:
     return bool(
         isinstance(actor, WorkerDialogueCaller)
         and isinstance(actor.attempt_id, str)
-        and _ATTEMPT_ID_RE.fullmatch(actor.attempt_id)
+        and ATTEMPT_ID_RE.fullmatch(actor.attempt_id)
         and isinstance(actor.worker_id, str)
         and _WORKER_ID_RE.fullmatch(actor.worker_id)
         and isinstance(actor.execution_profile_id, str)
@@ -253,6 +250,13 @@ def resolve_company_dialogue_binding(
     actor: WorkerDialogueCaller,
 ) -> CompanyDialogueBindingResolution:
     """Resolve one exact current worker to the existing dialogue parent."""
+
+    from integrations.mastermind_company_mcp.adapter import DialogueBinding
+    from integrations.mastermind_company_mcp.schemas import (
+        SERVER_IDENTITY,
+        SERVER_VERSION,
+        TOOL_SCHEMA_DIGEST,
+    )
 
     if current is None:
         return _result(

@@ -2527,6 +2527,7 @@ html[data-theme="light"] body.page-mm {
 .mm-dec-status.filled{color:var(--up);background:color-mix(in srgb,var(--up) 13%,var(--panel2));border-color:color-mix(in srgb,var(--up) 32%,transparent)}
 .mm-dec-status.queued{color:var(--warn);background:color-mix(in srgb,var(--warn) 13%,var(--panel2));border-color:color-mix(in srgb,var(--warn) 32%,transparent)}
 .mm-dec-status.rejected{color:var(--down);background:color-mix(in srgb,var(--down) 13%,var(--panel2));border-color:color-mix(in srgb,var(--down) 32%,transparent)}
+.mm-dec-status.missing{color:var(--down);background:color-mix(in srgb,var(--down) 13%,var(--panel2));border-color:color-mix(in srgb,var(--down) 32%,transparent)}
 .mm-dec-status.nochange{color:var(--muted);background:color-mix(in srgb,var(--muted) 10%,var(--panel2))}
 .mm-dec-status.unknown{color:var(--warn);background:color-mix(in srgb,var(--warn) 10%,var(--panel2));border-color:color-mix(in srgb,var(--warn) 25%,transparent)}
 .mm-dec-settled{font-size:10px;color:var(--muted);font-variant-numeric:tabular-nums}
@@ -5342,17 +5343,20 @@ function renderDeskScheduler() {
   var rows = '';
   (d.jobs || []).forEach(function(j) {
     var ok = j.last_status === 'ok';
-    var skipped = j.last_status === 'skip' || j.last_skipped;
+    var skipped = j.last_status === 'skip' || (!j.last_status && j.last_skipped);
     var errored = j.last_status === 'error';
-    var dot = ok ? '●' : (skipped ? '◌' : (errored ? '✕' : '○'));
+    var dot = ok ? '●' : (errored ? '✕' : (skipped ? '◌' : '○'));
     var dotColor = ok ? 'var(--up)' : (errored ? 'var(--down)' : 'var(--muted)');
     var nextStr = j.next_run_time ? j.next_run_time.replace('T', ' ').slice(0, 16) + ' UTC' : '—';
     var lastStr = j.last_finished ? j.last_finished.replace('T', ' ').slice(0, 16) + ' UTC' : (j.last_started ? j.last_started.replace('T', ' ').slice(0, 16) + ' UTC…' : '—');
     var sevStr = j.last_severity ? esc(j.last_severity) : '';
+    var reasonStr = String(j.last_reason || '').replace(/_/g, ' ').trim();
+    var targetStr = String(j.last_target_status || '').replace(/_/g, ' ').trim();
+    var detailStr = reasonStr || targetStr;
     rows += '<tr>'
       + '<td style="font-family:monospace;font-size:11px;color:var(--muted);padding:4px 8px 4px 0">' + esc(j.id) + '</td>'
       + '<td style="padding:4px 8px;text-align:center"><span style="color:' + dotColor + ';font-size:13px">' + dot + '</span></td>'
-      + '<td style="padding:4px 8px;font-size:11px;color:var(--text)">' + esc(j.last_status || '—') + (sevStr ? ' <span style="color:var(--warn);font-size:10px">(' + sevStr + ')</span>' : '') + '</td>'
+      + '<td style="padding:4px 8px;font-size:11px;color:var(--text)">' + esc(j.last_status || '—') + (sevStr ? ' <span style="color:var(--warn);font-size:10px">(' + sevStr + ')</span>' : '') + (detailStr ? '<div style="color:var(--muted);font-size:10px;margin-top:2px">' + esc(detailStr) + '</div>' : '') + '</td>'
       + '<td style="padding:4px 8px;font-size:11px;color:var(--muted)">' + esc(lastStr) + '</td>'
       + '<td style="padding:4px 8px;font-size:11px;color:var(--muted)">' + esc(nextStr) + '</td>'
       + '</tr>';
@@ -6624,6 +6628,13 @@ function _decisionPresentation(d, isZh) {
     // Accepted v2 rows expose the rail-adjusted target.  A legacy queued row may lack that
     // projection; its raw proposal stays visible only under the explicit proposed label.
     rows = effective !== null ? effective : proposed;
+  } else if (targetStatus === 'rejected_no_submission') {
+    kind = 'missing';
+    label = isZh ? '决策缺失 — 需要恢复' : 'DECISION MISSING — RECOVERY REQUIRED';
+    note = isZh ? '本次投资组合经理未提交有效决策；纸面账户保持不变，需要恢复模型与调度链路。'
+                : 'The portfolio manager produced no valid portfolio decision; the paper account was carried unchanged and the reasoning path requires recovery.';
+    rowsLabel = isZh ? '未提交目标仓位' : 'No target positions submitted';
+    rows = [];
   } else if (targetStatus && targetStatus !== 'executed') {
     kind = 'rejected';
     label = isZh ? '未应用 / 已拒绝' : 'NOT APPLIED / REJECTED';

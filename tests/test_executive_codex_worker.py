@@ -664,6 +664,7 @@ def _fixture(
     binary, attestation = _fake_binary(tmp_path)
     adapter = cw.CodexWorkerAdapter(
         binary,
+        codex_home=codex_home,
         binary_attestation=attestation,
         allowed_versions=frozenset({"test-0"}),
         required_team_identifier=None,
@@ -676,7 +677,6 @@ def _fixture(
         run_dir=run_dir,
         prompt=prompt,
         result_schema_path=schema_path,
-        codex_home=codex_home,
         authorities=authorities,
         authority=authority,
         expected_base_sha=head,
@@ -690,6 +690,53 @@ def _fixture(
 
 def _capture(run_dir: Path) -> dict:
     return json.loads((run_dir / "output" / "capture.json").read_text(encoding="utf-8"))
+
+
+def test_codex_adapter_refuses_start_without_one_configured_private_home(
+    tmp_path: Path,
+) -> None:
+    configured, spec, _workspace_path, _run_dir = _fixture(tmp_path)
+    adapter = cw.CodexWorkerAdapter(
+        configured.binary.real_path,
+        binary_attestation=configured.binary,
+        allowed_versions=frozenset({"test-0"}),
+        required_team_identifier=None,
+    )
+
+    with pytest.raises(cw.LaunchValidationError, match="Codex home is not configured"):
+        asyncio.run(adapter.start(spec))
+
+
+@pytest.mark.parametrize("second_name", ["codex-home", "second-codex-home"])
+def test_codex_adapter_rejects_every_second_home_binding(
+    tmp_path: Path, second_name: str
+) -> None:
+    adapter, _spec, _workspace_path, _run_dir = _fixture(tmp_path)
+    second = tmp_path / second_name
+    second.mkdir(mode=0o700, exist_ok=True)
+
+    with pytest.raises(cw.LaunchValidationError, match="already configured"):
+        adapter._bind_legacy_codex_home(second)
+
+
+def test_codex_adapter_revalidates_private_home_at_start_time(tmp_path: Path) -> None:
+    adapter, spec, _workspace_path, _run_dir = _fixture(tmp_path)
+    configured_home = adapter.codex_home
+    moved_home = tmp_path / "moved-codex-home"
+    configured_home.rename(moved_home)
+    configured_home.symlink_to(moved_home, target_is_directory=True)
+
+    with pytest.raises(cw.LaunchValidationError, match="real directory"):
+        asyncio.run(adapter.start(spec))
+
+
+def test_codex_adapter_types_missing_private_home_at_start_time(tmp_path: Path) -> None:
+    adapter, spec, _workspace_path, _run_dir = _fixture(tmp_path)
+    configured_home = adapter.codex_home
+    configured_home.rename(tmp_path / "removed-codex-home")
+
+    with pytest.raises(cw.LaunchValidationError, match="CODEX_HOME is unavailable"):
+        asyncio.run(adapter.start(spec))
 
 
 def test_success_uses_exact_one_shot_argv_empty_env_and_private_logs(tmp_path: Path):
@@ -783,15 +830,15 @@ def test_complete_launch_attestation_is_redacted_and_principal_bound(tmp_path: P
             secret_canary_verdict=_passing_canary(),
             require_secret_canary=True,
         )
-        (spec.codex_home / "auth.json").write_text(
+        (adapter.codex_home / "auth.json").write_text(
             '{"token":"dedicated-auth-secret-canary"}', encoding="utf-8"
         )
         ref = await adapter.start(spec)
         attestation = adapter.launch_attestation(ref)
         receipt = await adapter.collect_result(ref)
-        return ref, attestation, receipt, spec, workspace
+        return ref, attestation, receipt, spec, workspace, adapter
 
-    ref, attestation, receipt, spec, workspace = asyncio.run(exercise())
+    ref, attestation, receipt, spec, workspace, adapter = asyncio.run(exercise())
     document = attestation.to_dict()
     assert receipt.result.status is cw.WorkerRunStatus.SUCCEEDED
     assert document["schema_version"] == cw.LAUNCH_ATTESTATION_SCHEMA_VERSION
@@ -803,7 +850,7 @@ def test_complete_launch_attestation_is_redacted_and_principal_bound(tmp_path: P
     assert document["workspace_identity"]["path"] == str(workspace.resolve())
     assert document["worker_identity"]["effective_uid"] == os.geteuid()
     assert document["worker_identity"]["effective_gid"] == os.getegid()
-    assert document["provider_home_identity"]["path"] == str(spec.codex_home.resolve())
+    assert document["provider_home_identity"]["path"] == str(adapter.codex_home.resolve())
     assert document["secret_canary_verdict"]["passed"] is True
     assert document["launch_nonce"] == ref.launch_nonce
     assert document["process_identity"]["pid"] == ref.pid
@@ -1021,7 +1068,7 @@ def test_real_codex_sandbox_profile_enforces_exact_write_and_sensitive_denials(
     environment = {
         "PATH": cw._SAFE_PATH,
         "HOME": str(sandbox_home),
-        "CODEX_HOME": str(spec.codex_home),
+        "CODEX_HOME": str(adapter.codex_home),
         "TMPDIR": str(sandbox_tmp) + "/",
         "LANG": "C.UTF-8",
         "LC_ALL": "C.UTF-8",
@@ -1066,13 +1113,13 @@ def test_real_codex_sandbox_profile_enforces_exact_write_and_sensitive_denials(
     assert not (workspace / "proof" / "other.md").exists()
     assert probe(controller_db, os.O_RDONLY).returncode != 0
     assert probe(controller_wal, os.O_RDONLY).returncode != 0
-    assert probe(Path(spec.codex_home) / "auth.json", os.O_RDONLY).returncode != 0
+    assert probe(adapter.codex_home / "auth.json", os.O_RDONLY).returncode != 0
     # The read-only base profile must not make the interactive user's home or
     # unrelated Git/credential material ambiently readable.  The probe opens
     # only a directory descriptor and never enumerates or reads its contents.
     assert probe(Path.home(), os.O_RDONLY).returncode != 0
 
-    native_adapter = cw.CodexWorkerAdapter(binary)
+    native_adapter = cw.CodexWorkerAdapter(binary, codex_home=adapter.codex_home)
     receipt = asyncio.run(
         native_adapter.run_validation_argv(
             spec,

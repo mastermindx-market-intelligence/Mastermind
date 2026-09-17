@@ -70,9 +70,9 @@ def test_main_uses_unbuffered_real_pipe_stdio_for_native_framing(monkeypatch):
 
 def test_post_bind_identity_read_failure_is_truthful_cleanup_failure(
     monkeypatch,
-    tmp_path,
+    short_socket_root,
 ):
-    private = tmp_path / "private"
+    private = short_socket_root / "private"
     private.mkdir(mode=0o700)
     os.chmod(private, 0o700)
     destination = private / "identity-read.sock"

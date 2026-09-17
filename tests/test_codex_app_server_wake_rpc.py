@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import inspect
+import threading
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,20 +17,30 @@ from control_plane import runtime_binding_projection
 from control_plane.executive_worker_broker import (
     BrokerEffectUnknownError,
     BrokerPreSubmitError,
+    BrokerProtocolError,
     RemoteBrokerError,
 )
 from control_plane.operator_harness_contract import (
     ATTENTION_TURN_INSTRUCTION,
     AttentionTurnObservation,
+    AuthRealmFact,
+    CapabilityManifest,
     LaunchDecision,
+    NativeHelperPolicy,
+    ObservedHarnessAttestation,
+    ObservedTriState,
+    OperationId,
     ProcessGenerationRef,
     ProcessIdentityObservation,
     ProcessLiveness,
+    ProviderSessionHandoff,
     ProviderWriterState,
     ReconcileObservation,
+    RequestedExecutionProfile,
     SessionEpochRef,
     TurnRef,
     WorkerLocalWakeAckProjection,
+    WorkspaceIdentity,
     runtime_binding_id_for,
 )
 from control_plane.session_targets import RuntimeBinding
@@ -38,6 +49,11 @@ from control_plane.operator_harness_wire import (
     attention_turn_observation,
     reconcile_observation,
     to_wire,
+)
+from control_plane.operator_materialization_receipt import (
+    MATERIALIZATION_STATUS_SCHEMA,
+    build_operator_materialization_receipt,
+    requested_profile_digest,
 )
 from control_plane.remote_codex_operator_adapter import RemoteCodexOperatorAdapter
 from control_plane.wake_dispatcher import WakePreSubmitError
@@ -1439,6 +1455,198 @@ def test_remote_adapter_uses_one_closed_worker_broker_attention_operation() -> N
     assert timeout is not None
 
 
+@dataclass
+class FakeMaterializationStatusClient:
+    response: dict[str, Any]
+    calls: list[tuple[str, object, float | None]] = field(default_factory=list)
+
+    def request_sync(
+        self,
+        operation: str,
+        payload: Mapping[str, Any],
+        *,
+        timeout_seconds: float | None = None,
+    ) -> dict[str, Any]:
+        self.calls.append((operation, dict(payload), timeout_seconds))
+        return dict(self.response)
+
+
+def test_remote_adapter_uses_one_bounded_materialization_status_request() -> None:
+    attempt_id = "ATT-STATUS"
+    epoch = SessionEpochRef("epoch-status", attempt_id, "worker-123", 1)
+    generation = ProcessGenerationRef(
+        "generation-status", epoch.session_epoch_id, 1, "worker-123"
+    )
+    workspace = WorkspaceIdentity("/tmp/status-workspace", "b" * 40, 1, 2, 3, 4)
+    requested = RequestedExecutionProfile(
+        worker_id="worker-123",
+        provider="openai-codex",
+        requested_model="gpt-5.6-sol",
+        harness_kind="codex-app-server",
+        harness_binary_digest="a" * 64,
+        harness_version="0.147.0",
+        workspace=workspace,
+        sandbox_policy="read-only",
+        approval_policy="never",
+        network_policy="disabled",
+        capabilities=CapabilityManifest(),
+        native_helper_policy=NativeHelperPolicy.DISABLED,
+        authority_policy_hash="c" * 64,
+    )
+    process = {
+        "pid": 4242,
+        "pgid": 4242,
+        "process_start_identity": "start-4242",
+        "boot_id": "boot-status",
+    }
+    receipt = build_operator_materialization_receipt(
+        operation_command_id=f"ohf-op:start:{attempt_id}",
+        operation_kind="start_session",
+        attempt_id=attempt_id,
+        worker_id="worker-123",
+        session_epoch_id=epoch.session_epoch_id,
+        process_generation_id=generation.process_generation_id,
+        generation_number=1,
+        requested_profile_digest=requested_profile_digest(to_wire(requested)),
+        provider_session_id=NATIVE_HANDLE,
+        process_identity=process,
+        observed_attestation=to_wire(
+            ObservedHarnessAttestation(
+                served_model="gpt-5.6-sol",
+                harness_version="0.147.0",
+                harness_binary_digest="a" * 64,
+                capabilities=(),
+                effective_skills=(),
+                effective_mcp=(),
+                effective_plugins_or_apps=(),
+                sandbox_state="read-only",
+                approval_state="never",
+                network_state="disabled",
+                effective_config_digest="d" * 64,
+                auth=AuthRealmFact(
+                    worker_id="worker-123",
+                    provider="openai-codex",
+                ),
+                workspace=workspace,
+                supports_subagent_capability_ceiling=ObservedTriState.FALSE,
+            )
+        ),
+        process_credentials={
+            "process_identity": process,
+            "os_principal_name": "fixture-worker",
+            "os_principal_uid": 501,
+        },
+        provider_home_identity={
+            "path": "/var/empty/worker-123",
+            "device": 1,
+            "inode": 2,
+            "uid": 501,
+            "gid": 20,
+            "mode": 0o700,
+        },
+        created_at="2026-09-03T00:00:00+00:00",
+    )
+    broker = FakeMaterializationStatusClient(
+        {
+            "schema_version": MATERIALIZATION_STATUS_SCHEMA,
+            "status": "RECEIPT_ONLY_AFTER_RESTART",
+            "receipt": receipt.to_dict(),
+        }
+    )
+    remote = RemoteCodexOperatorAdapter(broker, turn_input_loader=lambda _turn: "unused")
+
+    observed = remote.materialization_status(
+        operation_id=OperationId(f"ohf-op:start:{attempt_id}"),
+        requested=requested,
+        epoch=epoch,
+        generation=generation,
+    )
+
+    assert observed.status == "RECEIPT_ONLY_AFTER_RESTART"
+    assert observed.receipt == receipt
+    assert len(broker.calls) == 1
+    operation, payload, timeout = broker.calls[0]
+    assert operation == "ohf-materialization-status"
+    assert payload == {
+        "operation_id": to_wire(OperationId(f"ohf-op:start:{attempt_id}")),
+        "requested": to_wire(requested),
+        "epoch": to_wire(epoch),
+        "generation": to_wire(generation),
+    }
+    assert timeout == 30
+
+    drifted = dataclasses.replace(requested, requested_model="gpt-drift")
+    mismatched_remote = RemoteCodexOperatorAdapter(
+        FakeMaterializationStatusClient(dict(broker.response)),
+        turn_input_loader=lambda _turn: "unused",
+    )
+    with pytest.raises(BrokerProtocolError, match="identity"):
+        mismatched_remote.materialization_status(
+            operation_id=OperationId(f"ohf-op:start:{attempt_id}"),
+            requested=drifted,
+            epoch=epoch,
+            generation=generation,
+        )
+
+
+def test_remote_materialization_status_refuses_mixed_identities_before_transport() -> None:
+    attempt_id = "ATT-MIXED"
+    epoch = SessionEpochRef("epoch-mixed", attempt_id, "worker-123", 1)
+    generation = ProcessGenerationRef("generation-mixed", "epoch-mixed", 1, "worker-123")
+    workspace = WorkspaceIdentity("/tmp/mixed-workspace", "b" * 40, 1, 2, 3, 4)
+    requested = RequestedExecutionProfile(
+        worker_id="worker-123",
+        provider="openai-codex",
+        requested_model="gpt-5.6-sol",
+        harness_kind="codex-app-server",
+        harness_binary_digest="a" * 64,
+        harness_version="0.147.0",
+        workspace=workspace,
+        sandbox_policy="read-only",
+        approval_policy="never",
+        network_policy="disabled",
+        capabilities=CapabilityManifest(),
+        native_helper_policy=NativeHelperPolicy.DISABLED,
+        authority_policy_hash="c" * 64,
+    )
+
+    def assert_refused(**updates: Any) -> None:
+        client = FakeMaterializationStatusClient(
+            {
+                "schema_version": MATERIALIZATION_STATUS_SCHEMA,
+                "status": "ABSENT",
+                "receipt": None,
+            }
+        )
+        remote = RemoteCodexOperatorAdapter(
+            client, turn_input_loader=lambda _turn: "unused"
+        )
+        with pytest.raises(BrokerProtocolError, match="identity"):
+            remote.materialization_status(
+                operation_id=updates.get(
+                    "operation_id", OperationId(f"ohf-op:start:{attempt_id}")
+                ),
+                requested=updates.get("requested", requested),
+                epoch=epoch,
+                generation=updates.get("generation", generation),
+                provider_session=updates.get("provider_session"),
+            )
+        assert client.calls == []
+
+    assert_refused(requested=dataclasses.replace(requested, worker_id="worker-other"))
+    assert_refused(
+        generation=dataclasses.replace(generation, worker_id="worker-other")
+    )
+    assert_refused(
+        generation=dataclasses.replace(generation, session_epoch_id="epoch-other")
+    )
+    assert_refused(
+        operation_id=OperationId(f"ohf-op:recover-resume:{attempt_id}"),
+        generation=dataclasses.replace(generation, generation_number=2),
+        provider_session=ProviderSessionHandoff(NATIVE_HANDLE, "worker-other"),
+    )
+
+
 def _real_broker_with_owned_adapter(
     adapter: Any, *, busy: bool = False
 ) -> broker_module.ExecutiveWorkerBroker:
@@ -1826,6 +2034,85 @@ def test_broker_pre_submit_refusal_maps_to_wake_target_unavailable() -> None:
         _deliver_via_wake_client(fake)
 
     assert error.value.reason_code == "target_unavailable"
+
+
+def test_final_guard_runs_in_worker_thread_immediately_before_provider_io() -> None:
+    order: list[tuple[str, int]] = []
+
+    class Adapter(FakeRemoteAttentionAdapter):
+        def deliver_attention(self, **kwargs):
+            order.append(("provider", threading.get_ident()))
+            return super().deliver_attention(**kwargs)
+
+    fake = Adapter(
+        response=AttentionTurnObservation(
+            process_generation_id=GENERATION.process_generation_id,
+            provider_session_id=NATIVE_HANDLE,
+            nudge_id=NUDGE_ID,
+            provider_native_turn_id="turn-wake-456",
+            accepted=True,
+            delivered=True,
+        )
+    )
+    client = CodexCurrentWriterWakeClient(
+        operator_adapter=fake,
+        generation=GENERATION,
+        attempt_id=ATTEMPT_ID,
+        runtime_binding=BINDING,
+        pre_submit_guard=lambda: order.append(("guard", threading.get_ident())),
+    )
+    caller_thread = threading.get_ident()
+
+    asyncio.run(
+        client.deliver_wake(
+            native_handle=NATIVE_HANDLE,
+            nudge_id=NUDGE_ID,
+            opaque_ids=OPAQUE_IDS,
+            instruction=CODEX_WAKE_INSTRUCTION,
+        )
+    )
+
+    assert [name for name, _thread in order] == ["guard", "provider"]
+    assert order[0][1] == order[1][1]
+    assert order[0][1] != caller_thread
+
+
+def test_final_guard_refusal_is_typed_and_reconcile_never_calls_guard() -> None:
+    calls = 0
+
+    def refuse() -> None:
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("binding moved")
+
+    fake = FakeRemoteAttentionAdapter()
+    client = CodexCurrentWriterWakeClient(
+        operator_adapter=fake,
+        generation=GENERATION,
+        attempt_id=ATTEMPT_ID,
+        runtime_binding=BINDING,
+        pre_submit_guard=refuse,
+    )
+    with pytest.raises(WakePreSubmitError) as error:
+        asyncio.run(
+            client.deliver_wake(
+                native_handle=NATIVE_HANDLE,
+                nudge_id=NUDGE_ID,
+                opaque_ids=OPAQUE_IDS,
+                instruction=CODEX_WAKE_INSTRUCTION,
+            )
+        )
+    assert error.value.reason_code == "target_unavailable"
+    assert fake.calls == []
+    with pytest.raises(Exception):
+        asyncio.run(
+            client.reconcile_wake(
+                native_handle=NATIVE_HANDLE,
+                nudge_id=NUDGE_ID,
+                opaque_ids=OPAQUE_IDS,
+            )
+        )
+    assert calls == 1
 
 
 def test_broker_effect_unknown_never_maps_to_safe_refusal() -> None:

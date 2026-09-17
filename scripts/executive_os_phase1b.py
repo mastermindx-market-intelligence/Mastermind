@@ -239,9 +239,10 @@ def _supervisor(args: argparse.Namespace, runtime: Runtime):
 
     adapter = CodexWorkerAdapter(
         args.codex_binary,
+        codex_home=args.codex_home,
         allowed_versions=frozenset(args.allowed_version),
     )
-    return ExecutiveSupervisor(runtime, adapter, codex_home=args.codex_home)
+    return ExecutiveSupervisor(runtime, adapter)
 
 
 def main(argv: list[str] | None = None) -> int:

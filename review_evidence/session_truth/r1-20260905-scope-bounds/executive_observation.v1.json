@@ -1,0 +1,5 @@
+{
+  "schema": "mastermind.executive_observation.v1",
+  "available": false,
+  "reason": "EXECUTIVE_READ_PATH_UNAVAILABLE"
+}

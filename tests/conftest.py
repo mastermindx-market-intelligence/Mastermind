@@ -546,3 +546,18 @@ def _reset_operator_rate_buckets():
     except Exception:
         pass
     yield
+
+
+@pytest.fixture
+def short_socket_root():
+    import shutil
+    import tempfile
+
+    # Keep the test-owned AF_UNIX root below Darwin's fixed 104-byte limit;
+    # pytest's nested tmp_path can exceed the production path budget.
+    value = Path(tempfile.mkdtemp(prefix="mmx-wsx-t1-", dir="/tmp"))
+    os.chmod(value, 0o700)
+    try:
+        yield value
+    finally:
+        shutil.rmtree(value, ignore_errors=True)

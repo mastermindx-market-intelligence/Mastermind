@@ -37,6 +37,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from common.bounded_sync_executor import (
+    BoundedSyncExecutor,
+    SyncExecutionTimeout,
+    SyncExecutorClosed,
+    SyncExecutorCloseTimeout,
+    SyncExecutorLoopConflict,
+)
 from common.redaction import sanitize_external_text
 from control_plane import ceo_boot_packet, ceo_intent, executive_inbox
 from control_plane.executive_runtime import Runtime
@@ -73,6 +80,19 @@ __all__ = [
     "GatewayConfig",
     "load_gateway_config",
 ]
+
+
+def _refuse_explicit_e1_path(value: Path | str, field: str) -> str:
+    """Reject lexical and symlink-resolved installed paths before E1 use."""
+
+    normalized = refuse_production_path(str(value), field)
+    try:
+        resolved = Path(normalized).resolve()
+    except OSError as exc:
+        raise GatewayError(
+            "invalid_input", "E1 configuration path cannot be resolved"
+        ) from exc
+    return refuse_production_path(str(resolved), field)
 
 
 # ---------------------------------------------------------------------------
@@ -121,6 +141,10 @@ class GatewayConfig:
 
     mode: ServerMode
     repo_root: Path
+    #: Explicit temporary runtime for the E1 read profile.  It is host
+    #: configuration, never a model/tool argument, and defaults to legacy root
+    #: grounding when omitted.
+    read_runtime_root: Path | str | None = None
     fixture: FixtureBackend | None = None
     macro_root_flag: str | None = None
     bind_host: str = "127.0.0.1"
@@ -130,7 +154,29 @@ class GatewayConfig:
     now: str | None = None
 
     def __post_init__(self) -> None:
+        raw_repo_root = self.repo_root
+        raw_macro_root = self.macro_root_flag
+        raw_runtime_root = self.read_runtime_root
+        # E1 is the only readonly profile with an explicit temporary runtime.
+        # Fence all of its operator coordinates before accepting/resolving any
+        # one of them; legacy readonly's omitted runtime behavior stays intact.
+        if raw_runtime_root is not None:
+            _refuse_explicit_e1_path(raw_repo_root, "repo_root")
+            if raw_macro_root is not None:
+                _refuse_explicit_e1_path(raw_macro_root, "macro_root")
+            _refuse_explicit_e1_path(raw_runtime_root, "read_runtime_root")
         object.__setattr__(self, "repo_root", Path(self.repo_root).resolve())
+        if self.read_runtime_root is not None:
+            if self.mode is not ServerMode.READONLY or self.fixture is not None:
+                raise GatewayError(
+                    "invalid_input",
+                    "read_runtime_root is only valid for non-fixture readonly reads",
+                )
+            requested_root = Path(self.read_runtime_root)
+            resolved_root = Path(
+                _refuse_explicit_e1_path(requested_root, "read_runtime_root")
+            )
+            object.__setattr__(self, "read_runtime_root", resolved_root)
         # Validated even though HTTP transport is not wired in this wave, so a
         # later change that wires it cannot introduce a public bind by omission.
         object.__setattr__(self, "bind_host", loopback_bind_host(self.bind_host))
@@ -160,7 +206,28 @@ class GatewayConfig:
 
         if self.fixture is not None:
             return Path(self.fixture.runtime_root)
+        if self.read_runtime_root is not None:
+            return Path(self.read_runtime_root)
         return self.repo_root
+
+    def reverify_read_runtime_root(self) -> None:
+        """Refuse a moved explicit E1 runtime root before every read."""
+
+        if self.read_runtime_root is None:
+            return
+        root = Path(self.read_runtime_root)
+        try:
+            _refuse_explicit_e1_path(root, "read_runtime_root")
+            _refuse_explicit_e1_path(
+                root / executive_inbox.DB_RELATIVE_PATH, "read_runtime_db"
+            )
+        except GatewayError as exc:
+            # The E1 profile must not disclose a production coordinate when a
+            # previously accepted temporary tree is replaced with a symlink.
+            # Preserve the typed refusal while making its public text generic.
+            raise GatewayError(
+                exc.code, "temporary E1 runtime configuration is unavailable"
+            ) from exc
 
 
 def load_gateway_config(
@@ -240,6 +307,10 @@ def load_gateway_config(
 #: into an opaque ``internal_error``.  Everything else is opaque by default.
 _TRANSPORT_ERRORS = (ConnectionError, FileNotFoundError, OSError)
 
+#: ``aclose`` is truthful but bounded: no read thread is cancelled, and a later
+#: close may succeed after work that outlived this private shutdown budget ends.
+_CLOSE_TIMEOUT_SECONDS = 5.0
+
 
 class ExecutiveMcpGateway:
     """Five tools over existing Executive OS primitives.  No new authority."""
@@ -253,6 +324,7 @@ class ExecutiveMcpGateway:
         runtime_factory: Callable[[Path], Runtime] | None = None,
         transport: Callable[..., Any] | None = None,
         clock: Callable[[], str] | None = None,
+        read_executor: BoundedSyncExecutor | None = None,
     ) -> None:
         self.config = config
         self._packet_builder = packet_builder or ceo_boot_packet.build_packet
@@ -260,17 +332,40 @@ class ExecutiveMcpGateway:
         self._runtime_factory = runtime_factory or _open_readonly_runtime
         self._transport = transport or send_control_request
         self._clock = clock or _utc_now_z
-        # Bounded reader concurrency; exactly one modifying call in flight (R12).
-        self._read_semaphore = asyncio.Semaphore(MAX_CONCURRENT_READS)
+        # One single-attempt owner supplies admission, physical capacity, worker
+        # entry, abandonment, drain and close.  Retry policy remains here.
+        self._read_executor = read_executor or BoundedSyncExecutor(
+            max_concurrency=MAX_CONCURRENT_READS
+        )
         self._write_lock = asyncio.Lock()
         self._closed = False
 
     # -- lifecycle ---------------------------------------------------------
 
+    @property
+    def _read_attempts(self) -> set[Any]:
+        """Compatibility projection; the shared executor owns these attempts."""
+
+        return set(self._read_executor.attempts_snapshot())
+
     async def aclose(self) -> None:
-        """Graceful shutdown.  The gateway holds no durable state to flush."""
+        """Close admission and truthfully drain the single attempt owner."""
 
         self._closed = True
+        try:
+            await self._read_executor.aclose(timeout=_CLOSE_TIMEOUT_SECONDS)
+        except SyncExecutorCloseTimeout as exc:
+            waiting = exc.active_physical_operations + exc.pending_operations
+            raise GatewayError(
+                "timeout",
+                "gateway close timed out waiting for "
+                f"{waiting} active physical read(s)",
+            ) from exc
+        except SyncExecutorLoopConflict as exc:
+            raise GatewayError(
+                "backend_unavailable",
+                "gateway read executor is owned by another live event loop",
+            ) from exc
 
     # -- public entry point ------------------------------------------------
 
@@ -292,6 +387,11 @@ class ExecutiveMcpGateway:
                 code=exc.code, message=exc.message,
             )
         try:
+            if self._closed:
+                raise GatewayError(
+                    "backend_unavailable",
+                    "gateway is closed and cannot admit new calls",
+                )
             validated = validate_tool_arguments(spec.name, arguments)
             if spec.name == MODIFYING_TOOL:
                 return await self._run_submit(validated, generated_at)
@@ -319,30 +419,48 @@ class ExecutiveMcpGateway:
     async def _run_read(
         self, name: str, arguments: Mapping[str, Any], generated_at: str
     ) -> dict[str, Any]:
-        async with self._read_semaphore:
-            attempts = MAX_READ_RETRIES + 1
-            last: BaseException | None = None
-            for _ in range(attempts):
-                try:
-                    return await asyncio.wait_for(
-                        asyncio.to_thread(self._read, name, arguments, generated_at),
-                        timeout=READ_TIMEOUT_SECONDS,
-                    )
-                except _TRANSPORT_ERRORS as exc:
-                    # A transient transport failure only.  A GatewayError is a
-                    # decision and is never retried.
-                    last = exc
-                    continue
-                except asyncio.TimeoutError as exc:
-                    raise GatewayError(
-                        "timeout",
-                        f"{name} exceeded the {READ_TIMEOUT_SECONDS:g}s read budget",
-                    ) from exc
+        attempts = MAX_READ_RETRIES + 1
+        last: BaseException | None = None
+        for _ in range(attempts):
+            try:
+                return await self._run_read_attempt(name, arguments, generated_at)
+            except SyncExecutionTimeout as exc:
+                # This must precede the broad OSError transport family.
+                raise GatewayError(
+                    "timeout",
+                    f"{name} exceeded the {READ_TIMEOUT_SECONDS:g}s read budget",
+                ) from exc
+            except _TRANSPORT_ERRORS as exc:
+                # A completed, genuine transient transport failure is retried.
+                # GatewayError remains a decision and is never retried.
+                last = exc
+                continue
+        raise GatewayError(
+            "backend_unavailable",
+            f"{name} could not read Executive OS state: "
+            f"{sanitize_external_text(last)}",
+        )
+
+    async def _run_read_attempt(
+        self, name: str, arguments: Mapping[str, Any], generated_at: str
+    ) -> dict[str, Any]:
+        """Delegate one physical attempt; retry policy remains in ``_run_read``."""
+
+        try:
+            return await self._read_executor.run(
+                lambda: self._read(name, arguments, generated_at),
+                timeout=READ_TIMEOUT_SECONDS,
+            )
+        except SyncExecutorClosed as exc:
             raise GatewayError(
                 "backend_unavailable",
-                f"{name} could not read Executive OS state: "
-                f"{sanitize_external_text(last)}",
-            )
+                "gateway is closed and cannot admit new calls",
+            ) from exc
+        except SyncExecutorLoopConflict as exc:
+            raise GatewayError(
+                "backend_unavailable",
+                "gateway read executor is owned by another live event loop",
+            ) from exc
 
     def _read(
         self, name: str, arguments: Mapping[str, Any], generated_at: str
@@ -366,16 +484,24 @@ class ExecutiveMcpGateway:
     def _collect(self) -> tuple[dict[str, Any], dict[str, Any]]:
         """The boot packet and the inbox built FROM it — never re-derived."""
 
+        self.config.reverify_read_runtime_root()
         packet = self._packet_builder(
             repo_root=self.config.repo_root,
             macro_root_flag=self.config.macro_root_flag,
             now=self.config.now,
             timeout=self.config.boot_packet_timeout,
         )
+        inbox_kwargs: dict[str, Any] = {
+            "repo_root": self.config.repo_root,
+            "boot_packet": packet,
+            "now": self.config.now,
+        }
+        # Fixture mode's historical inbox semantics remain repository-grounded;
+        # only the explicit E1 root changes all four read projections.
+        if self.config.read_runtime_root is not None:
+            inbox_kwargs["runtime_root"] = self.config.runtime_root
         inbox = self._inbox_builder(
-            repo_root=self.config.repo_root,
-            boot_packet=packet,
-            now=self.config.now,
+            **inbox_kwargs,
         )
         return packet, inbox
 
@@ -403,7 +529,8 @@ class ExecutiveMcpGateway:
         return [
             "mode=fixture: executive_job and ceo_intent_status read the temporary "
             "fixture runtime, while executive_state and executive_inbox project the "
-            "reviewed repository checkout"
+            "reviewed repository checkout; the fixture lane is BUILT_NOT_PROVEN, "
+            "not live"
         ]
 
     def _executive_state(self) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
@@ -456,6 +583,7 @@ class ExecutiveMcpGateway:
 
     def _runtime(self) -> Runtime:
         try:
+            self.config.reverify_read_runtime_root()
             return self._runtime_factory(Path(self.config.runtime_root))
         except Exception as exc:  # noqa: BLE001 — named degradation, never empty success
             raise GatewayError(
