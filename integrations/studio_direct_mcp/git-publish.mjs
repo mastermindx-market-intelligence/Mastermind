@@ -58,7 +58,7 @@ export const STUDIO_GIT_COMMIT_CURRENT_CHANGES_TOOL = Object.freeze({
     'single-line commit message. Ignored files stay uncommitted. A private temporary index prevents ' +
     'pre-commit staging side effects; after the fenced ref update is known applied, the real index is ' +
     'synchronized to that exact commit. Compare-and-swap ref update prevents stale-head publication. ' +
-    'It never pushes, accepts paths, changes remotes, or accepts shell commands.',
+    'It never contacts origin, pushes, accepts paths, changes remotes, or accepts shell commands.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -271,6 +271,7 @@ export function createGitPublisher(config, dependencies = {}) {
   if (!cfg) throw new TypeError('git publish is not configured');
   const execFile = dependencies.execFile ?? execFileDefault;
   const realpath = dependencies.realpath ?? realpathDefault;
+  const remove = dependencies.rm ?? rm;
 
   async function run(file, args, { cwd, timeoutMs = cfg.commandTimeoutMs, envExtra = {} } = {}) {
     return execFile(file, args, {
@@ -301,7 +302,7 @@ export function createGitPublisher(config, dependencies = {}) {
     return git(cwd, args, { ...options, envExtra: { GIT_INDEX_FILE: indexPath } });
   }
 
-  async function workspace(operationId) {
+  async function workspace(operationId, { observeRemote = true } = {}) {
     const operation = validateOperationId(operationId);
     const { stdout } = await run(
       cfg.workspaceCli,
@@ -342,15 +343,18 @@ export function createGitPublisher(config, dependencies = {}) {
     if (!SHA_RE.test(localHead)) throw new Error('local HEAD is invalid');
     if (!cfg.allowedRemoteUrls.includes(remoteUrl)) throw new Error('origin URL is outside the configured Mastermind remote boundary');
 
-    let remoteHead = null;
     const ref = `refs/heads/${branch}`;
-    const { stdout: lsOut } = await git(workspacePath, ['ls-remote', '--heads', 'origin', ref]);
-    const lines = String(lsOut ?? '').trim() ? String(lsOut).trim().split(/\r?\n/) : [];
-    if (lines.length > 1) throw new Error('origin returned multiple exact branch refs');
-    if (lines.length === 1) {
-      const match = lines[0].match(/^([0-9a-f]{40})\s+refs\/heads\/(.+)$/);
-      if (!match || match[2] !== branch) throw new Error('origin returned an invalid exact branch ref');
-      remoteHead = match[1];
+    let remoteHead;
+    if (observeRemote) {
+      remoteHead = null;
+      const { stdout: lsOut } = await git(workspacePath, ['ls-remote', '--heads', 'origin', ref]);
+      const lines = String(lsOut ?? '').trim() ? String(lsOut).trim().split(/\r?\n/) : [];
+      if (lines.length > 1) throw new Error('origin returned multiple exact branch refs');
+      if (lines.length === 1) {
+        const match = lines[0].match(/^([0-9a-f]{40})\s+refs\/heads\/(.+)$/);
+        if (!match || match[2] !== branch) throw new Error('origin returned an invalid exact branch ref');
+        remoteHead = match[1];
+      }
     }
 
     return {
@@ -358,7 +362,7 @@ export function createGitPublisher(config, dependencies = {}) {
       workspacePath,
       branch,
       localHead,
-      remoteHead,
+      ...(observeRemote ? { remoteHead } : {}),
       clean: String(statusOut ?? '') === '',
       remoteUrl,
       ref,
@@ -383,7 +387,7 @@ export function createGitPublisher(config, dependencies = {}) {
     const operationId = validateOperationId(args.operation_id);
     const expectedHead = validateExpectedHead(args.expected_head_sha);
     const message = validateCommitMessage(args.message);
-    const before = await workspace(operationId);
+    const before = await workspace(operationId, { observeRemote: false });
     if (before.localHead !== expectedHead) {
       return {
         schema: 'mastermind.studio_git_commit_result.v1',
@@ -399,6 +403,7 @@ export function createGitPublisher(config, dependencies = {}) {
 
     const scratch = await mkdtemp(path.join(tmpdir(), 'studio-git-commit-'));
     const indexPath = path.join(scratch, 'index');
+    let refUpdateAttempted = false;
     try {
       await gitWithIndex(before.workspacePath, ['read-tree', expectedHead], indexPath);
       await gitWithIndex(before.workspacePath, ['add', '-A', '--', '.'], indexPath);
@@ -442,7 +447,7 @@ export function createGitPublisher(config, dependencies = {}) {
 
         let observed = null;
         try {
-          observed = await workspace(operationId);
+          observed = await workspace(operationId, { observeRemote: false });
         } catch {
           // The ref update itself is already known applied. A failed readback
           // cannot turn that known effect into EFFECT_UNKNOWN.
@@ -469,18 +474,22 @@ export function createGitPublisher(config, dependencies = {}) {
           effect_state: 'APPLIED',
           code: complete ? successCode : (current ? 'APPLIED_INDEX_SYNC_FAILED' : 'APPLIED_BUT_SUPERSEDED'),
           action_ref: ref,
+          operation_id: observed.operationId,
+          branch: observed.branch,
           previous_head_sha: expectedHead,
           commit_head_sha: commitHead,
+          local_head_sha: observed.localHead,
+          clean: observed.clean,
           index_synced: indexSynced,
-          ...publicStatus(observed),
         };
       }
 
+      refUpdateAttempted = true;
       try {
         await git(before.workspacePath, ['update-ref', before.ref, commitHead, expectedHead]);
       } catch {
         try {
-          const observed = await workspace(operationId);
+          const observed = await workspace(operationId, { observeRemote: false });
           if (observed.localHead === commitHead) {
             return finishKnownApplied('APPLIED_AFTER_AMBIGUOUS_UPDATE_RETURN');
           }
@@ -502,7 +511,15 @@ export function createGitPublisher(config, dependencies = {}) {
 
       return finishKnownApplied('APPLIED');
     } finally {
-      await rm(scratch, { recursive: true, force: true });
+      try {
+        await remove(scratch, { recursive: true, force: true });
+      } catch (error) {
+        // Before the ref update is admitted, cleanup failure can still fail the
+        // operation normally. Once the ref update may have run, however, a
+        // scratch cleanup error must never overwrite APPLIED/EFFECT_UNKNOWN
+        // source truth with a synthetic NOT_APPLIED gateway precheck result.
+        if (!refUpdateAttempted) throw error;
+      }
     }
   }
 
