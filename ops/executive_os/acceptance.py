@@ -2553,9 +2553,40 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
                 label=f"TCP listener scan for {account}",
                 check=False,
             )
+            # Darwin lsof uses exit 1 with completely empty stdout/stderr when
+            # a privileged query has no matches.  That exact observation is the
+            # only negative proof accepted here; every other non-listener shape
+            # is UNKNOWN and must fail closed rather than becoming a false zero.
+            if (
+                completed.returncode == 1
+                and not completed.stdout
+                and not completed.stderr
+            ):
+                continue
+
             lines = completed.stdout.splitlines()
-            if len(lines) > 1:
-                raise AcceptanceError(f"{account} owns a TCP listener")
+            if completed.returncode == 0 and len(lines) > 1:
+                header = lines[0].split()
+                rows = [line.split() for line in lines[1:] if line.strip()]
+                valid_table = (
+                    len(header) >= 2
+                    and header[0] == b"COMMAND"
+                    and header[1] == b"PID"
+                    and header[-1] == b"NAME"
+                    and bool(rows)
+                    and all(
+                        len(row) >= 10
+                        and row[-3] == b"TCP"
+                        and row[-1] == b"(LISTEN)"
+                        for row in rows
+                    )
+                )
+                if valid_table:
+                    raise AcceptanceError(f"{account} owns a TCP listener")
+
+            raise AcceptanceError(
+                f"TCP listener scan for {account} did not produce a complete observation"
+            )
         if not CONTROL_SOCKET.is_socket() or not WORKER_SOCKET.is_socket():
             raise AcceptanceError("private Unix launchd sockets are unavailable")
 
