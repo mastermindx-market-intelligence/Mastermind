@@ -3,6 +3,7 @@ the data contracts the page JS fetches at runtime.
 """
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import math
@@ -1350,13 +1351,16 @@ def api_portfolio(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
             }
 
         # ------------------------------------------------------------------
-        # Live marks: attach current price + unrealized P&L to each position
-        # (Polygon delayed quotes via the account's avg-cost lots). Degrades to
-        # nulls offline so the client always renders an honest dash.
+        # Live account overlay: stage the entire reconciliation on a deep copy.
+        # The persisted strategy snapshot remains useful evidence if this read fails, but a
+        # half-applied account_preview / position overlay is not a truthful state.
         # ------------------------------------------------------------------
         if not archived:
+            payload.pop("account_preview", None)
             try:
                 from portfolio import paper_account
+
+                staged = copy.deepcopy(payload)
                 prices = _book_marks(portfolio)
                 # positions_pnl({}) still returns every actual account lot with honest null marks.
                 # This matters when the daily strategy snapshot has zero rows but the paper account
@@ -1367,7 +1371,7 @@ def api_portfolio(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
                 account = paper_account._load_account(portfolio)
                 cash = float(account.get("cash") or 0.0)
                 starting_nav = float(account.get("starting_nav") or 1_000_000.0)
-                payload["account_preview"] = {
+                staged["account_preview"] = {
                     "inception_date": account.get("inception_date"),
                     "starting_nav": starting_nav,
                     "current_nav": round(float(account_nav), 2),
@@ -1381,7 +1385,7 @@ def api_portfolio(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
                     "benchmark_name_zh": registry.benchmark_name_zh(portfolio),
                 }
                 published_tickers: set[str] = set()
-                for pos in payload.get("positions", []):
+                for pos in staged.get("positions", []):
                     ticker = pos.get("ticker")
                     if ticker:
                         published_tickers.add(ticker)
@@ -1438,9 +1442,17 @@ def api_portfolio(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
                                 quote.get("is_live") or quote.get("source") == "yahoo_intraday"
                             ),
                         })
-                    payload.setdefault("positions", []).append(account_row)
-            except Exception:
-                pass
+                    staged.setdefault("positions", []).append(account_row)
+                staged["account_reconciliation_status"] = "available"
+                payload = staged
+            except Exception as exc:  # noqa: BLE001 - preserve the complete persisted snapshot
+                _log.warning("portfolio account reconciliation failed for %s: %s", portfolio, type(exc).__name__)
+                payload["account_reconciliation_status"] = "unavailable"
+                payload["snapshot_status"] = "partial"
+                failed_sources = list(payload.get("failed_sources") or [])
+                if "account_reconciliation" not in failed_sources:
+                    failed_sources.append("account_reconciliation")
+                payload["failed_sources"] = failed_sources
 
         # Every book gets canonical human-readable security names on read. This
         # repairs historical US/China/HK payloads without mutating runtime state.
