@@ -38,3 +38,8 @@ def test_package_contains_no_second_lifecycle_or_provider_adapter() -> None:
         "resume_provider",
     ):
         assert forbidden not in text
+
+
+def test_package_init_does_not_eagerly_import_optional_auth_or_web_dependencies() -> None:
+    tree = ast.parse((ROOT / "__init__.py").read_text(encoding="utf-8"))
+    assert not any(isinstance(node, (ast.Import, ast.ImportFrom)) for node in tree.body)

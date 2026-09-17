@@ -164,7 +164,7 @@ async def request(app, bearer: str):
     return sent[0]["status"], json.loads(body)
 
 
-def build(*, sink: Sink | None = None, scopes=(CONTENT_SCOPE,)):
+def build(*, sink: Sink | None = None, scopes=(CONTENT_SCOPE,), now_func=None):
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     accepted_policy = policy(scopes=scopes)
     fetcher = Fetcher(json.dumps({"keys": [jwk(private_key)]}, separators=(",", ":")).encode())
@@ -186,7 +186,7 @@ def build(*, sink: Sink | None = None, scopes=(CONTENT_SCOPE,)):
         current_access=current_access,
         read_source=read_source,
         source_ref=SOURCE,
-        now=lambda: NOW,
+        now=now_func or (lambda: NOW),
         allowed_origin=ORIGIN,
         audit_sink=audit,
     )
@@ -223,3 +223,17 @@ def test_failed_closed_audit_prevents_content_release() -> None:
     assert status == 401
     assert body == {"error": "authentication_required"}
     assert len(access_calls) == 1
+
+
+def test_token_expiry_between_source_read_and_final_authorization_refuses_release() -> None:
+    values = iter((NOW, NOW, EXPIRES_AT + 31))
+    app, accepted_policy, private_key, audit, access_calls = build(
+        now_func=lambda: next(values)
+    )
+
+    status, body = asyncio.run(request(app, token(private_key, accepted_policy)))
+
+    assert status == 403
+    assert body == {"error": "access_changed"}
+    assert len(access_calls) == 1
+    assert audit.events[-1].accepted is False
