@@ -208,17 +208,17 @@ case "$CODEX_VERSION" in
   ''|*[!0-9A-Za-z._-]*) /bin/echo "Codex version is invalid" >&2; exit 65 ;;
 esac
 INSTALLED_CODEX_BINARY="$SYSTEM_BIN/codex-$CODEX_VERSION"
-# Provider readiness is deliberately post-install. Once --verify-ready is
-# selected, the installed root-owned binary is the execution/identity source;
-# the mutable Homebrew enrollment source may have upgraded after installation
-# and must not veto an otherwise exact installed release. Enrollment and the
-# pre-install --verify-only path continue to use the explicit/source binary.
-if [ "$VERIFY_READY" = "true" ]; then
-  [ -x "$INSTALLED_CODEX_BINARY" ] && [ ! -L "$INSTALLED_CODEX_BINARY" ] || {
-    /bin/echo "install the exact release before --verify-ready" >&2
-    exit 65
-  }
+# Once this reviewed version is installed, bind every auth/readiness operation
+# to that root-owned versioned binary. The mutable Homebrew enrollment source is
+# only a pre-install bootstrap input and may legitimately upgrade afterward; it
+# must not break credential rotation, Personal-Pro enrollment, --verify-only, or
+# readiness for an already-installed exact release. --verify-ready remains
+# strictly post-install and therefore refuses when the installed binary is absent.
+if [ -x "$INSTALLED_CODEX_BINARY" ] && [ ! -L "$INSTALLED_CODEX_BINARY" ]; then
   CODEX_BINARY="$INSTALLED_CODEX_BINARY"
+elif [ "$VERIFY_READY" = "true" ]; then
+  /bin/echo "install the exact release before --verify-ready" >&2
+  exit 65
 fi
 for absolute_path in "$PROVIDER_HOME" "$CODEX_BINARY" "$READINESS_RECEIPT"; do
   case "$absolute_path" in
