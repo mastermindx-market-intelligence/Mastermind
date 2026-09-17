@@ -201,6 +201,22 @@ def test_oversized_custom_sequence_is_bounded_before_io(api):
     assert keys.reads == 4 and registry.calls == []
 
 
+def test_oversized_inner_key_is_rejected_without_full_copy(api):
+    import tracemalloc
+
+    malformed = ["worker-a"] * 65_536
+    registry = Registry()
+    tracemalloc.start()
+    try:
+        with pytest.raises(api.CapacityJoinError, match="CANDIDATE_KEY_INVALID"):
+            api.read_remote_capacity_joins(registry, [malformed])
+        _current, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert peak < 65_536
+    assert registry.calls == []
+
+
 def test_no_unbounded_worker_materialization(api):
     registry = Registry()
     def forbidden(_):

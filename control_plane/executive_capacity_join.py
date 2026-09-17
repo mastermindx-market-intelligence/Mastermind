@@ -115,9 +115,11 @@ def _candidate_keys(value: object) -> tuple[tuple[str, str], ...]:
         _refuse("CANDIDATE_COUNT_INVALID")
     keys: list[tuple[str, str]] = []
     for raw in snapshot:
-        if type(raw) not in (tuple, list):
+        if type(raw) not in (tuple, list) or len(raw) != 2:
             _refuse("CANDIDATE_KEY_INVALID")
-        key = tuple(raw)
+        # Freeze only the accepted two-item key. The third-item cap detects a
+        # concurrent growth without copying an arbitrarily large malformed list.
+        key = tuple(islice(iter(raw), 3))
         if len(key) != 2:
             _refuse("CANDIDATE_KEY_INVALID")
         worker_id, quota_class = key
