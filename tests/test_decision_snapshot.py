@@ -816,10 +816,11 @@ def test_settlement_directory_clock_alone_reuses_the_same_generation(snapshot_ro
     assert len(_artifacts()) == 1
 
 
-def test_settlement_new_future_receipt_mints_a_correction(snapshot_root):
-    """The settlement manifest's actual evidence clock is each entry's own mtime: a new
-    post-cutoff receipt landing alongside an unchanged eligible one must mint a new
-    correction, since the source's coverage genuinely degraded."""
+def test_settlement_new_future_receipt_has_zero_effect_and_reuses_the_snapshot(snapshot_root):
+    """Task 8 repair 4, finding A (principal reproduction): a settlement receipt landing
+    *after* an already-composed cutoff must have zero effect on that cutoff's snapshot — a
+    same-cutoff recompose must reuse the exact prior snapshot, not mint a spurious
+    correction from evidence that did not exist at the cutoff."""
     _seed_account()
     settlement_dir = (
         sources._ROOT / "data" / "portfolios" / "autonomous" / "settlement_receipts"
@@ -840,9 +841,42 @@ def test_settlement_new_future_receipt_mints_a_correction(snapshot_root):
     future_entry.write_text("{}", encoding="utf-8")
     os.utime(future_entry, (_FUTURE_EPOCH, _FUTURE_EPOCH))
     os.utime(settlement_dir, (_PRE_CUTOFF_EPOCH, _PRE_CUTOFF_EPOCH))
-    corrected = snapshots.create_snapshot(
+    recomposed = snapshots.create_snapshot(
         "autonomous", decision_cutoff="2026-09-15T20:00:00Z",
         recorded_at="2026-09-15T20:10:00Z",
+    )
+    assert recomposed["created"] is False
+    assert recomposed["snapshot_id"] == original["snapshot_id"]
+    assert len(_artifacts()) == 1
+
+
+def test_settlement_eligible_mtime_change_at_same_cutoff_mints_a_correction(snapshot_root):
+    """Task 8 repair 4, finding A (second reproduction): moving an *eligible* receipt's own
+    mtime (both old and new values still <= cutoff) is a real change to the evidence this
+    receipt attests to and must mint a correction — the settlement generation must hash
+    (name, mtime_ns), not names alone."""
+    _seed_account()
+    settlement_dir = (
+        sources._ROOT / "data" / "portfolios" / "autonomous" / "settlement_receipts"
+    )
+    settlement_dir.mkdir(parents=True, exist_ok=True)
+    entry = settlement_dir / "r001.json"
+    entry.write_text("{}", encoding="utf-8")
+    os.utime(entry, (_PRE_CUTOFF_EPOCH, _PRE_CUTOFF_EPOCH))
+    os.utime(settlement_dir, (_PRE_CUTOFF_EPOCH, _PRE_CUTOFF_EPOCH))
+
+    original = snapshots.create_snapshot(
+        "autonomous", decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:01:00Z",
+    )
+    assert original["created"] is True
+
+    later_still_eligible = _PRE_CUTOFF_EPOCH + 1_800  # +30m, still well before the cutoff
+    os.utime(entry, (later_still_eligible, later_still_eligible))
+    os.utime(settlement_dir, (later_still_eligible, later_still_eligible))
+    corrected = snapshots.create_snapshot(
+        "autonomous", decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:40:00Z",
     )
     assert corrected["created"] is True
     assert corrected["snapshot_id"] != original["snapshot_id"]
@@ -1003,6 +1037,54 @@ def test_snapshot_dir_symlinked_root_is_rejected_and_nothing_outside_is_touched(
     with pytest.raises(snapshots.SnapshotCorrupt):
         snapshots.persist_snapshot(_sealed_snapshot())
 
+    assert list(outside.iterdir()) == []
+
+
+def test_parent_component_symlink_cannot_escape_the_snapshot_root(snapshot_root, tmp_path):
+    """Task 8 repair 4, finding B (principal reproduction): a symlink swapped in for a
+    *parent* component of the snapshot path — not the leaf — must be refused exactly like a
+    symlinked leaf. Before the fix, ``_open_snapshot_directory`` opened the whole path by
+    string, following any symlinked parent; only the leaf's own lstat was checked."""
+    outside = tmp_path / "outside"
+    (outside / "autonomous").mkdir(parents=True)
+    (outside / "autonomous" / "planted.json").write_text("{}", encoding="utf-8")
+
+    decision_snapshots_dir = snapshot_root / "data" / "shadow" / "decision_snapshots"
+    decision_snapshots_dir.parent.mkdir(parents=True, exist_ok=True)
+    decision_snapshots_dir.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(snapshots.SnapshotCorrupt):
+        snapshots.list_snapshots("autonomous")
+    with pytest.raises(snapshots.SnapshotCorrupt):
+        snapshots.load_snapshot("autonomous", "sha256:" + "a" * 64)
+    with pytest.raises(snapshots.SnapshotCorrupt):
+        snapshots.persist_snapshot(_sealed_snapshot())
+
+    # Nothing under the symlink target was read, written, or listed through.
+    assert sorted(p.name for p in (outside / "autonomous").iterdir()) == ["planted.json"]
+    assert (outside / "autonomous" / "planted.json").read_text(encoding="utf-8") == "{}"
+
+
+@pytest.mark.parametrize("component_index", [0, 1, 2])
+def test_every_intermediate_path_component_symlink_is_refused(
+    snapshot_root, tmp_path, component_index,
+):
+    """Every component between ``_ROOT`` and the leaf — not just ``decision_snapshots`` —
+    must be walked descriptor-relative with O_NOFOLLOW. Parametrized over ``data``,
+    ``data/shadow``, and ``data/shadow/decision_snapshots`` each swapped for a symlink."""
+    components = ["data", "shadow", "decision_snapshots"]
+    outside = tmp_path / f"outside_{component_index}"
+    outside.mkdir()
+
+    target_path = snapshot_root
+    for name in components[:component_index]:
+        target_path = target_path / name
+        target_path.mkdir(exist_ok=True)
+    symlinked_component = target_path / components[component_index]
+    symlinked_component.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(snapshots.SnapshotCorrupt):
+        snapshots.persist_snapshot(_sealed_snapshot())
     assert list(outside.iterdir()) == []
 
 

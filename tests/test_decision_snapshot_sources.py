@@ -1434,10 +1434,9 @@ def test_settlement_manifest_exactly_at_cutoff_remains_eligible(repo_roots):
 
 
 def test_settlement_mixed_pre_and_post_cutoff_preserves_the_eligible_receipt(repo_roots):
-    """Task 8 repair 3, finding A: the previous implementation gated the *whole* directory
-    on one aggregate max-mtime, so one post-cutoff receipt silently discarded every eligible
-    pre-cutoff sibling too. Partitioning per-entry must preserve r001.json while excluding
-    only settlement-future.json, and degrade coverage instead of blanking the source."""
+    """Task 8 repair 4, finding A: a post-cutoff receipt must be completely invisible to
+    this receipt's bytes — no row, no count, no gap, no coverage effect — while an eligible
+    sibling (r001.json) is preserved in full: AVAILABLE/COMPLETE, never merely PARTIAL."""
     repo, _ = repo_roots
     _seed_settlement(
         repo,
@@ -1446,32 +1445,56 @@ def test_settlement_mixed_pre_and_post_cutoff_preserves_the_eligible_receipt(rep
     )
     receipt, result = _settlement_receipt(repo)
     assert receipt["status"] == "AVAILABLE"
-    assert receipt["coverage_state"] == "PARTIAL"
+    assert receipt["coverage_state"] == "COMPLETE"
     assert receipt["known_at"] == "2026-09-15T19:00:00Z"
     assert receipt["clock_basis"] == "FILE_MTIME_FIRST_PARTY_STATE"
     assert receipt["rows_total"] == receipt["rows_returned"] == 1
-    assert result["sections"]["historical_memory"]["coverage_state"] == "PARTIAL"
+    assert result["sections"]["historical_memory"]["coverage_state"] == "COMPLETE"
     rendered = json.dumps(result["sections"]["historical_memory"])
     assert "settlement-future.json" not in rendered
     assert "r001.json" in rendered
     codes = [g["code"] for g in result["gaps"] if g["source_id"] == sources._SETTLEMENT_RECEIPTS_SOURCE_ID]
-    assert "FUTURE_AT_CUTOFF" in codes
+    assert "FUTURE_AT_CUTOFF" not in codes
 
 
-def test_settlement_all_future_receipts_is_not_complete(repo_roots):
-    """A directory holding only post-cutoff receipts is not the same claim as an empty
-    directory: it must never be AVAILABLE (no eligible evidence to found known_at on), and
-    it must never be COMPLETE."""
+def test_settlement_all_future_receipts_normalizes_to_optional_absence(repo_roots):
+    """Task 8 repair 4, finding A: zero eligible evidence is one stable optional-absence
+    representation — a directory holding only post-cutoff receipts must present exactly like
+    an absent or genuinely empty directory, never a distinct FUTURE_AT_CUTOFF/BLOCKED claim
+    founded on evidence that has zero effect at this cutoff."""
     repo, _ = repo_roots
     _seed_settlement(repo, ["settlement-future.json"], entry_epoch=_POST_CUTOFF_EPOCH)
     receipt, result = _settlement_receipt(repo)
-    assert receipt["status"] == "FUTURE_AT_CUTOFF"
-    assert receipt["coverage_state"] == "BLOCKED"
+    assert receipt["status"] == "ABSENT_OPTIONAL"
+    assert receipt["coverage_state"] == "COMPLETE"
     assert receipt["known_at"] is None
     assert receipt["filesystem_observed_at"] is None
     assert receipt["rows_total"] == receipt["rows_returned"] == 0
-    assert result["sections"]["historical_memory"]["coverage_state"] == "BLOCKED"
+    assert result["sections"]["historical_memory"]["coverage_state"] == "COMPLETE"
     assert "settlement-future.json" not in json.dumps(result["sections"]["historical_memory"])
+
+
+def test_settlement_zero_eligible_states_share_one_generation(repo_roots):
+    """Absent, genuinely empty, and holding-only-post-cutoff-entries must be indistinguishable
+    at this cutoff: an absent directory, an empty directory, and a directory holding only a
+    future receipt must all mint the exact same receipt shape and correction generation."""
+    repo, _ = repo_roots
+    absent_receipt, _ = _settlement_receipt(repo)
+
+    _seed_settlement(repo, [])  # creates the directory with zero entries
+    empty_receipt, _ = _settlement_receipt(repo)
+
+    future_repo_dir = _settlement_dir(repo)
+    for f in future_repo_dir.iterdir():
+        f.unlink()
+    _seed_settlement(repo, ["settlement-future.json"], entry_epoch=_POST_CUTOFF_EPOCH)
+    future_only_receipt, _ = _settlement_receipt(repo)
+
+    for candidate in (empty_receipt, future_only_receipt):
+        assert candidate["status"] == absent_receipt["status"] == "ABSENT_OPTIONAL"
+        assert candidate["coverage_state"] == absent_receipt["coverage_state"] == "COMPLETE"
+        assert candidate["known_at"] == absent_receipt["known_at"] is None
+        assert candidate["correction_generation"] == absent_receipt["correction_generation"]
 
 
 def test_settlement_directory_mtime_alone_never_forces_future_state(repo_roots):
@@ -1503,10 +1526,11 @@ def test_settlement_generation_is_unaffected_by_directory_mtime_alone(repo_roots
     assert before == after
 
 
-def test_settlement_generation_changes_when_future_exclusion_state_changes(repo_roots):
-    """A change purely to the future-excluded side of the partition — a new post-cutoff
-    receipt lands, with the eligible set untouched — must still mint a new generation, since
-    the source's overall coverage and evidence state genuinely changed."""
+def test_settlement_generation_is_unaffected_by_future_exclusion_state_changes(repo_roots):
+    """Task 8 repair 4, finding A (principal reproduction): a new post-cutoff receipt landing
+    alongside an unchanged eligible one has zero effect on this cutoff's evidence — it must
+    reuse the exact same generation and rows, not mint a spurious correction from evidence
+    the cutoff never saw."""
     repo, _ = repo_roots
     directory = _seed_settlement(repo, ["r001.json"])
 
@@ -1526,7 +1550,25 @@ def test_settlement_generation_changes_when_future_exclusion_state_changes(repo_
     after_generation, after_rows = snapshot()
 
     assert after_rows == before_rows == ["r001.json"]
-    assert after_generation != before_generation
+    assert after_generation == before_generation
+
+
+def test_settlement_generation_changes_when_eligible_mtime_moves(repo_roots):
+    """Task 8 repair 4, finding A (second reproduction): moving an eligible entry's own
+    mtime — both the old and new values still <= cutoff — must mint a new generation. A
+    generation keyed on names alone is blind to this; it must hash (name, mtime_ns)."""
+    repo, _ = repo_roots
+    directory = _seed_settlement(repo, ["r001.json"])
+    before, _ = _settlement_receipt(repo)
+
+    later_still_eligible = _PRE_CUTOFF_EPOCH + 1_800
+    os.utime(directory / "r001.json", (later_still_eligible, later_still_eligible))
+    os.utime(directory, (later_still_eligible, later_still_eligible))
+    after, _ = _settlement_receipt(repo)
+
+    assert after["correction_generation"] != before["correction_generation"]
+    assert after["artifact_digest"] != before["artifact_digest"]
+    assert after["known_at"] != before["known_at"]
 
 
 def test_settlement_source_that_is_a_symlinked_directory_fails_closed(repo_roots):

@@ -31,6 +31,12 @@ _SNAPSHOT_ID_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _MAX_LIST_LIMIT = 100
 _GAP_SORT_FIELDS = ("code", "source_id", "section_id", "owner", "detail")
 
+# The fixed literal path, one component at a time, from ``_ROOT`` to the snapshot leaf
+# directory. Every component is a closed constant — never caller input — and is opened
+# descriptor-relative to its already-contained parent, so a symlink substituted for *any*
+# component (not just the leaf) is refused before it can be traversed.
+_SNAPSHOT_DIR_COMPONENTS = ("data", "shadow", "decision_snapshots", _BOOK_ID)
+
 
 class DecisionSnapshotError(Exception):
     """Base error for the Decision Snapshot composer and store."""
@@ -84,33 +90,66 @@ def _snapshot_path(book: str, snapshot_id: str) -> Path:
 # in this module.
 # ---------------------------------------------------------------------------
 
-def _open_snapshot_directory(directory: Path, *, create: bool = False) -> int | None:
-    """Open the fixed snapshot directory, refusing a symlinked or non-directory leaf.
+def _open_dir_relative(parent_fd: int, name: str, *, create: bool) -> int | None:
+    """Open literal component ``name`` beneath ``parent_fd``, descriptor-relative, refusing
+    to follow a symlink or open anything but a directory.
 
-    With ``create=False`` (reads/scans), returns ``None`` when nothing exists yet — the
-    store has never persisted a snapshot for this book. With ``create=True`` (writes), the
-    directory is created first when absent. Either way, an existing symlinked or
-    non-directory leaf is a corrupt storage root, not an absent one, and fails closed — it
-    is never silently followed or written through.
+    With ``create=False``, an absent component returns ``None``. With ``create=True``, an
+    absent component is ``mkdir``'d first (descriptor-relative) and then reopened the same
+    no-follow way; a create race against a concurrent writer is resolved by reopening, never
+    by trusting the unverified path, and a race that lands a symlink or non-directory in the
+    component's place still fails the reopen and fails closed. Any other symlinked or
+    non-directory component — created or pre-existing — is corrupt storage and raises
+    ``SnapshotCorrupt`` rather than being silently followed.
     """
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
     try:
-        leaf = directory.lstat()
+        return os.open(name, flags, dir_fd=parent_fd)
     except FileNotFoundError:
         if not create:
             return None
-        directory.mkdir(parents=True, exist_ok=True)
-    else:
-        if stat.S_ISLNK(leaf.st_mode):
-            raise SnapshotCorrupt(f"{directory} is a symlink, not the snapshot directory")
-        if not stat.S_ISDIR(leaf.st_mode):
-            raise SnapshotCorrupt(f"{directory} is not a directory")
-    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
-    try:
-        return os.open(str(directory), flags)
-    except FileNotFoundError:
-        return None
+        try:
+            os.mkdir(name, 0o777, dir_fd=parent_fd)
+        except FileExistsError:
+            pass
+        except OSError as exc:
+            raise SnapshotCorrupt(f"unable to create {name!r}: {exc}") from exc
+        try:
+            return os.open(name, flags, dir_fd=parent_fd)
+        except OSError as exc:
+            raise SnapshotCorrupt(f"unable to open {name!r} after creation: {exc}") from exc
     except OSError as exc:
-        raise SnapshotCorrupt(f"unable to open snapshot directory {directory}: {exc}") from exc
+        raise SnapshotCorrupt(f"{name!r} is not a plain directory: {exc}") from exc
+
+
+def _open_snapshot_directory(*, create: bool = False) -> int | None:
+    """Open the fixed snapshot leaf directory by walking every literal path component from
+    ``_ROOT``, descriptor-relative, refusing a symlink or non-directory at any step.
+
+    No caller-supplied path or root ever reaches this function — every component in
+    ``_SNAPSHOT_DIR_COMPONENTS`` is a closed literal — and containment is structural, not a
+    resolve-then-check race: each ``open`` is relative to the already-opened, already-proven
+    parent descriptor, so a symlink substituted for any intermediate component (not merely
+    the leaf) can never redirect the walk outside ``_ROOT``.
+
+    With ``create=False`` (reads/scans), returns ``None`` as soon as any component is
+    absent — the store has never persisted a snapshot for this book. With ``create=True``
+    (writes), an absent component is created in place before the walk continues.
+    """
+    root_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    try:
+        fd = os.open(str(_ROOT), root_flags)
+    except OSError as exc:
+        raise SnapshotCorrupt(f"unable to open snapshot storage root {_ROOT}: {exc}") from exc
+    for name in _SNAPSHOT_DIR_COMPONENTS:
+        try:
+            next_fd = _open_dir_relative(fd, name, create=create)
+        finally:
+            os.close(fd)
+        if next_fd is None:
+            return None
+        fd = next_fd
+    return fd
 
 
 def _find_regular_entry(dir_fd: int, expected_name: str) -> tuple[str, os.stat_result] | None:
@@ -166,16 +205,6 @@ def _read_regular_entry_bytes(dir_fd: int, name: str, entry_stat: os.stat_result
     finally:
         os.close(fd)
     return raw
-
-
-def _read_named_entry_bytes(dir_fd: int, name: str) -> bytes | None:
-    """Stat-then-read ``name`` directly beneath ``dir_fd`` when its identity was not
-    already established by a prior scan (the create-once existing-file comparison)."""
-    try:
-        entry_stat = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
-    except FileNotFoundError:
-        return None
-    return _read_regular_entry_bytes(dir_fd, name, entry_stat)
 
 
 def _verify_and_load(raw: bytes) -> dict[str, Any]:
@@ -264,13 +293,20 @@ def persist_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     encoded = canonical_json_bytes(snapshot)
     if len(encoded) > c.MAX_SNAPSHOT_BYTES:
         raise SnapshotInvalidRequest("snapshot exceeds max size")
-    dir_fd = _open_snapshot_directory(directory, create=True)
+    dir_fd = _open_snapshot_directory(create=True)
     if dir_fd is None:
         raise SnapshotCorrupt(f"unable to open snapshot directory {directory} after creation")
     try:
         created = _create_once(dir_fd, filename, encoded)
         if not created:
-            existing = _read_named_entry_bytes(dir_fd, filename)
+            # The O_EXCL create reported an existing entry: locate it through the directory
+            # scan and open the filesystem-sourced name, exactly like load_snapshot — never
+            # reopen by the caller-derived ``filename`` string directly.
+            match = _find_regular_entry(dir_fd, filename)
+            existing = (
+                _read_regular_entry_bytes(dir_fd, match[0], match[1])
+                if match is not None else None
+            )
             if existing is None or existing != encoded:
                 raise SnapshotCorrupt(
                     f"existing snapshot at {directory / filename} does not match canonical bytes"
@@ -289,7 +325,7 @@ def load_snapshot(book: str, snapshot_id: str) -> dict[str, Any]:
     # form — before any lstat/open/scandir call is made.
     directory = snapshot_dir(book)
     expected_name = _snapshot_filename(snapshot_id)
-    dir_fd = _open_snapshot_directory(directory)
+    dir_fd = _open_snapshot_directory()
     if dir_fd is None:
         raise SnapshotNotFound(f"snapshot {snapshot_id!r} not found for book {book!r}")
     try:
@@ -309,8 +345,8 @@ def load_snapshot(book: str, snapshot_id: str) -> dict[str, Any]:
 
 
 def _scan_verified_snapshots(book: str) -> list[dict[str, Any]]:
-    directory = snapshot_dir(book)
-    dir_fd = _open_snapshot_directory(directory)
+    snapshot_dir(book)  # validates ``book`` against the closed literal before any fs call
+    dir_fd = _open_snapshot_directory()
     if dir_fd is None:
         return []
     try:
