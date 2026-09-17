@@ -37,6 +37,7 @@ const DEFAULT_DELAY_MS = Number.parseInt(process.env.FIXTURE_DELAY_MS || '200', 
 const THROW = process.env.FIXTURE_THROW === '1';
 const HANG_MS = Number.parseInt(process.env.FIXTURE_HANG_MS || '0', 10);
 const NEVER = process.env.FIXTURE_NEVER === '1';
+const READ_DELAY_MS = Number.parseInt(process.env.FIXTURE_READ_DELAY_MS || '0', 10);
 const MARKER_PATH = process.env.FIXTURE_MARKER_PATH
   || `${tmpdir()}/private-studio-mcp-marker-${PID}.txt`;
 const EFFECT_LOG = process.env.FIXTURE_EFFECT_LOG
@@ -44,7 +45,7 @@ const EFFECT_LOG = process.env.FIXTURE_EFFECT_LOG
 
 const server = new McpServer(
   { name: 'studio-test-fixture', version: '0.0.0' },
-  { capabilities: { tools: {} } },
+  { capabilities: { tools: {}, resources: {} } },
 );
 
 // Track every effect call, including those that hang or time out.
@@ -82,6 +83,55 @@ server.registerTool(
   async ({ value }) => {
     return { content: [{ type: 'text', text: JSON.stringify({ echoed: value }) }] };
   },
+);
+
+server.registerTool(
+  'read_file',
+  {
+    title: 'Read file fixture',
+    description: 'Test-only timeout-safe read. It performs no filesystem read or write.',
+    inputSchema: { path: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
+  async ({ path: requestedPath }) => {
+    const id = randomUUID();
+    await recordEffect({ tool: 'read_file', id, phase: 'start' });
+    if (READ_DELAY_MS > 0) {
+      await new Promise((resolve) => setTimeout(resolve, READ_DELAY_MS));
+    }
+    await recordEffect({ tool: 'read_file', id, phase: 'resolved' });
+    return {
+      content: [{ type: 'text', text: JSON.stringify({ requestedPath: requestedPath ?? null, pid: PID }) }],
+    };
+  },
+);
+
+const PRIORITY_RESOURCE_URI = 'ui://studio-test/priority';
+server.registerResource(
+  'priority',
+  PRIORITY_RESOURCE_URI,
+  { mimeType: 'text/plain' },
+  async () => {
+    const id = randomUUID();
+    await recordEffect({ tool: 'priority_resource', id, phase: 'start' });
+    await recordEffect({ tool: 'priority_resource', id, phase: 'resolved' });
+    return {
+      contents: [{ uri: PRIORITY_RESOURCE_URI, mimeType: 'text/plain', text: 'priority-resource-ok' }],
+    };
+  },
+);
+
+server.registerTool(
+  'request_meta',
+  {
+    title: 'Request metadata fixture',
+    description: 'Returns request metadata received by the fixture backend.',
+    inputSchema: {},
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
+  async (_args, extra) => ({
+    content: [{ type: 'text', text: JSON.stringify(extra?._meta ?? {}) }],
+  }),
 );
 
 server.registerTool(

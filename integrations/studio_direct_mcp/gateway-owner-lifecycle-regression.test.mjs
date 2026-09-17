@@ -43,7 +43,7 @@ async function setup(t, options = {}, env = {}) {
 
 test('private default preserves child across completed effects, DELETE and twelve new sessions', async t => {
   assert.equal(resolvePrivateTunnelConfig({accountLabel:'review',port:0}).config.backendMode, 'shared-account');
-  const {gateway,connect,paths} = await setup(t);
+  const {gateway,connect,paths} = await setup(t, {reclaimIdleGraceMs:250});
   const first = await connect();
   const original = await paths(first.client);
   await first.client.callTool({name:'delayed_effect',arguments:{marker:'initial',delayMs:0}});
@@ -102,7 +102,10 @@ test('one aggregate execution and queue bound applies across frontend sessions',
     if(entry.phase==='start') peak=Math.max(peak,++active);
     if(entry.phase==='resolved') active--;
   }
-  assert.equal(peak,4);
+  // Shared-account production reserves one of four active backend slots for
+  // MCP catalog/template traffic, so ordinary tool work peaks at three while
+  // retaining the historical eight-request accepted+queued bound.
+  assert.equal(peak,3);
   assert.equal(active,0);
   assert.equal(gateway.stats().requests.busy,2);
   assert.equal(gateway.stats().backend.spawns,1);

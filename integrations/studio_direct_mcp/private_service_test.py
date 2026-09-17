@@ -6,6 +6,7 @@ Contracts:
   * launchd argv is absolute node + installed private-tunnel-gateway.mjs + config.json
   * First stage refuses foreign unmanifested dest files and parent-dir symlinks
   * Idempotent restage only when incoming hashes, port, configHash, and plistHash match
+  * Explicit stopped-service upgrade accepts only exact known v1 installs and preserves runtime state
   * Account labels are already-lowercase, <=64, no silent aliasing
   * Port 45017 is reserved; source/node/backend must be absolute
   * Config omits publicUrl, keeps 5h idle/64 sessions, and enables bounded typed Git
@@ -169,6 +170,32 @@ def _seed_node_modules(roots: dict):
     (roots["base"] / "node_modules").mkdir()
 
 
+def _convert_to_legacy_install(roots: dict) -> dict:
+    """Rewrite one staged fixture to the exact pre-typed-Git v1 file set."""
+    config = json.loads(roots["config"].read_text(encoding="utf-8"))
+    config.pop("gitPublish", None)
+    roots["config"].write_text(
+        json.dumps(config, indent=2, sort_keys=True), encoding="utf-8"
+    )
+    (roots["base"] / "git-publish.mjs").unlink()
+
+    manifest = json.loads(roots["manifest"].read_text(encoding="utf-8"))
+    manifest["files"].pop("git-publish.mjs")
+    manifest["configHash"] = svc._sha256_file(roots["config"])
+    roots["manifest"].write_text(
+        json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8"
+    )
+    return manifest
+
+
+def _make_upgrade_source(tmp: Path) -> Path:
+    source = tmp / "upgrade-src"
+    source.mkdir(parents=True, exist_ok=True)
+    for name in svc.STAGE_FILES:
+        (source / name).write_text(f"// upgraded {name} contents\n", encoding="utf-8")
+    return source
+
+
 # -------------------------------------------------------------------
 # Identity & structure
 # -------------------------------------------------------------------
@@ -194,6 +221,32 @@ class TestIdentity(unittest.TestCase):
         self.assertIn("port", svc.MANIFEST_KEYS)
         self.assertIn("plistHash", svc.MANIFEST_KEYS)
         self.assertIn("configHash", svc.MANIFEST_KEYS)
+
+    def test_v1_manifest_accepts_only_current_or_exact_legacy_filesets(self):
+        digest = "0" * 64
+        base = {
+            "version": 1,
+            "account": "test-account",
+            "label": _label_for("test-account"),
+            "configHash": digest,
+            "plistHash": digest,
+            "source": "/tmp/src",
+            "node": "/tmp/node",
+            "backend": "/tmp/backend",
+            "host": "127.0.0.1",
+            "port": 45018,
+        }
+        current = {name: digest for name in svc.STAGE_FILES}
+        legacy = {name: digest for name in svc.LEGACY_STAGE_FILES_V1}
+        self.assertTrue(svc._valid_manifest({**base, "files": current}, "test-account", _label_for("test-account")))
+        self.assertTrue(svc._valid_manifest({**base, "files": legacy}, "test-account", _label_for("test-account")))
+        partial = dict(legacy)
+        partial.pop(next(iter(partial)))
+        self.assertFalse(svc._valid_manifest({**base, "files": partial}, "test-account", _label_for("test-account")))
+        extra = dict(current)
+        extra["surprise.mjs"] = digest
+        self.assertFalse(svc._valid_manifest({**base, "files": extra}, "test-account", _label_for("test-account")))
+        self.assertFalse(svc._valid_manifest({**base, "version": 2, "files": current}, "test-account", _label_for("test-account")))
 
     def test_dir_mode_is_0700(self):
         self.assertEqual(svc.DIR_MODE, 0o700)
@@ -426,6 +479,7 @@ class TestStage(unittest.TestCase):
                 self.assertNotIn("publicUrl", config)
                 self.assertEqual(config["idleTimeoutMs"], 1_800_000)
                 self.assertEqual(config["requestTimeoutMs"], 300_000)
+                self.assertEqual(config["reclaimIdleGraceMs"], 30_000)
                 self.assertEqual(config["maxSessions"], 64)
                 self.assertEqual(config["gitPublish"]["enabled"], True)
                 self.assertEqual(
@@ -688,6 +742,151 @@ class TestStage(unittest.TestCase):
 
 
 # -------------------------------------------------------------------
+# Upgrade
+# -------------------------------------------------------------------
+
+class TestUpgrade(unittest.TestCase):
+    def test_legacy_install_upgrades_stopped_and_preserves_runtime_state(self):
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            home = tmp / "home"
+            home.mkdir()
+            (home / "Library" / "LaunchAgents").mkdir(parents=True)
+            with mock.patch.dict(os.environ, {"HOME": str(home)}):
+                _src, node, backend, _ = _do_stage(tmp, home)
+                roots = svc._build_runtime_roots("test-account")
+                _seed_node_modules(roots)
+                legacy = _convert_to_legacy_install(roots)
+                (roots["state"] / "oauth-state.json").write_text("STATE\n")
+                (roots["logs"] / "prior.log").write_text("LOG\n")
+                (roots["node_modules"] / "marker").write_text("DEPS\n")
+                upgraded_source = _make_upgrade_source(tmp)
+
+                with mock.patch.object(svc, "_run", CmdRecorder()):
+                    rc, out = _capture_stdout(
+                        lambda: svc.cmd_upgrade(
+                            _stage_args(upgraded_source, node, backend)
+                        )
+                    )
+                self.assertEqual(rc, 0)
+                payload = json.loads(out)
+                self.assertTrue(payload["upgraded"])
+                self.assertEqual(payload["previousSource"], legacy["source"])
+                self.assertEqual(payload["source"], str(upgraded_source))
+
+                manifest = json.loads(roots["manifest"].read_text())
+                self.assertEqual(set(manifest["files"]), set(svc.STAGE_FILES))
+                self.assertEqual(manifest["source"], str(upgraded_source))
+                self.assertTrue((roots["base"] / "git-publish.mjs").is_file())
+                config = json.loads(roots["config"].read_text())
+                self.assertTrue(config["gitPublish"]["enabled"])
+                self.assertEqual(config["reclaimIdleGraceMs"], 30_000)
+                self.assertEqual((roots["state"] / "oauth-state.json").read_text(), "STATE\n")
+                self.assertEqual((roots["logs"] / "prior.log").read_text(), "LOG\n")
+                self.assertEqual((roots["node_modules"] / "marker").read_text(), "DEPS\n")
+                svc._verify_staged_install("test-account", _label_for("test-account"), roots)
+
+    def test_legacy_install_can_be_stopped_before_upgrade(self):
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            home = tmp / "home"
+            home.mkdir()
+            (home / "Library" / "LaunchAgents").mkdir(parents=True)
+            label = _label_for("test-account")
+            with mock.patch.dict(os.environ, {"HOME": str(home)}):
+                _do_stage(tmp, home)
+                roots = svc._build_runtime_roots("test-account")
+                _seed_node_modules(roots)
+                _convert_to_legacy_install(roots)
+                plist_path = str(roots["plist"])
+                prints = iter([
+                    FakeResult(0, _print_running(plist_path, label), ""),
+                    FakeResult(1, "", "not loaded"),
+                ])
+
+                def handler(cmd):
+                    if cmd[:2] == ["launchctl", "print"]:
+                        return next(prints)
+                    if cmd[:2] == ["launchctl", "bootout"]:
+                        return FakeResult(0, "", "")
+                    return FakeResult(1, "", "unused")
+
+                rec = CmdRecorder(handler=handler)
+                with mock.patch.object(svc, "_run", rec):
+                    rc, out = _capture_stdout(
+                        lambda: svc.cmd_stop(mock.Mock(account="test-account"))
+                    )
+                self.assertEqual(rc, 0)
+                self.assertTrue(json.loads(out)["stopped"])
+                self.assertTrue(any(c[:2] == ["launchctl", "bootout"] for c in rec.calls))
+
+    def test_upgrade_refuses_running_service_before_writes(self):
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            home = tmp / "home"
+            home.mkdir()
+            (home / "Library" / "LaunchAgents").mkdir(parents=True)
+            label = _label_for("test-account")
+            with mock.patch.dict(os.environ, {"HOME": str(home)}):
+                _src, node, backend, _ = _do_stage(tmp, home)
+                roots = svc._build_runtime_roots("test-account")
+                _seed_node_modules(roots)
+                upgraded_source = _make_upgrade_source(tmp)
+                before = roots["manifest"].read_bytes()
+
+                def handler(cmd):
+                    if cmd[:2] == ["launchctl", "print"]:
+                        return FakeResult(0, _print_running(str(roots["plist"]), label), "")
+                    return FakeResult(1, "", "unused")
+
+                with mock.patch.object(svc, "_run", CmdRecorder(handler=handler)):
+                    with self.assertRaisesRegex(SystemExit, "running"):
+                        svc.cmd_upgrade(_stage_args(upgraded_source, node, backend))
+                self.assertEqual(roots["manifest"].read_bytes(), before)
+
+    def test_upgrade_refuses_tampered_install(self):
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            home = tmp / "home"
+            home.mkdir()
+            (home / "Library" / "LaunchAgents").mkdir(parents=True)
+            with mock.patch.dict(os.environ, {"HOME": str(home)}):
+                _src, node, backend, _ = _do_stage(tmp, home)
+                roots = svc._build_runtime_roots("test-account")
+                _seed_node_modules(roots)
+                roots["gateway"].write_text("TAMPERED\n")
+                with mock.patch.object(svc, "_run", CmdRecorder()):
+                    with self.assertRaisesRegex(SystemExit, "hash mismatch"):
+                        svc.cmd_upgrade(_stage_args(_make_upgrade_source(tmp), node, backend))
+
+    def test_upgrade_refuses_port_node_or_backend_change(self):
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            home = tmp / "home"
+            home.mkdir()
+            (home / "Library" / "LaunchAgents").mkdir(parents=True)
+            with mock.patch.dict(os.environ, {"HOME": str(home)}):
+                _src, node, backend, _ = _do_stage(tmp, home, port=45018)
+                roots = svc._build_runtime_roots("test-account")
+                _seed_node_modules(roots)
+                upgraded_source = _make_upgrade_source(tmp)
+                other_node = tmp / "other-node"
+                other_node.write_text("node2\n")
+                other_backend = tmp / "other-backend.mjs"
+                other_backend.write_text("backend2\n")
+                cases = [
+                    _stage_args(upgraded_source, node, backend, port=45019),
+                    _stage_args(upgraded_source, other_node, backend),
+                    _stage_args(upgraded_source, node, other_backend),
+                ]
+                for args in cases:
+                    with self.subTest(args=args):
+                        with mock.patch.object(svc, "_run", CmdRecorder()):
+                            with self.assertRaisesRegex(SystemExit, "must match"):
+                                svc.cmd_upgrade(args)
+
+
+# -------------------------------------------------------------------
 # Start
 # -------------------------------------------------------------------
 
@@ -927,7 +1126,7 @@ class TestCLI(unittest.TestCase):
     def test_parser_has_expected_subcommands(self):
         parser = svc.build_parser()
         sub = next(a for a in parser._actions if hasattr(a, "choices") and a.choices)
-        self.assertEqual(set(sub.choices), {"stage", "start", "status", "stop"})
+        self.assertEqual(set(sub.choices), {"stage", "upgrade", "start", "status", "stop"})
 
     def test_stage_requires_all_args(self):
         parser = svc.build_parser()
@@ -937,6 +1136,13 @@ class TestCLI(unittest.TestCase):
             parser.parse_args(["stage", "--account", "test"])
         with self.assertRaises(SystemExit):
             parser.parse_args(["stage", "--account", "test", "--port", "45018", "--source", "/x", "--node", "/x"])
+
+    def test_upgrade_requires_all_args(self):
+        parser = svc.build_parser()
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["upgrade"])
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["upgrade", "--account", "test"])
 
     def test_start_status_stop_require_account(self):
         parser = svc.build_parser()

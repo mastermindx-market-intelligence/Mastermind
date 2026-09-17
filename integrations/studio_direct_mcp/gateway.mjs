@@ -19,20 +19,20 @@
  *  - No retries, no replay. A tools/call is sent to the backend exactly once.
  *    Nothing is persisted, so a reconnect cannot replay anything. No event
  *    store is configured, so SSE resume deliberately carries no backlog.
- *  - If a backend tools/call times out or the backend disconnects, the call
- *    may or may not have taken effect: the gateway answers EFFECT_UNKNOWN,
- *    taints that session, closes the backend and refuses further work on the
- *    session. A fresh explicit `initialize` makes a brand new session and
- *    replays nothing.
+ *  - A timed-out mutation or ambiguous backend loss may or may not have taken
+ *    effect: the gateway answers EFFECT_UNKNOWN, taints that frontend session,
+ *    and refuses further work on it. A small closed allowlist of audited,
+ *    side-effect-free reads instead returns READ_TIMEOUT without taint. Neither
+ *    path ever retries or replays the call.
  *  - Session capacity is reserved under a single admit lock so concurrent
  *    `initialize` calls cannot exceed `maxSessions`. When
- *    `reclaimIdleCatalogSessions` is explicitly true, a full map may evict
- *    the oldest fully quiescent catalog/read-only session to admit one new
- *    initialize. Default (public) gateways never evict this way. Eviction
- *    never replays work. In-flight HTTP, limiter-active/queued work, tainted
- *    EFFECT_UNKNOWN sessions, and any session that ever admitted an
- *    effectful or interactive call are not victims in per-session mode.
- *    Shared-account mode can reclaim completed work because its child survives.
+ *    `reclaimIdleCatalogSessions` is explicitly true, a full map may evict a
+ *    fully quiescent capacity victim to admit one new initialize. Default
+ *    public gateways never evict this way. Per-session mode retains the
+ *    conservative historical rule: tainted/effectful/interactive sessions are
+ *    never victims because the frontend owns its backend child. Shared-account
+ *    mode may reclaim a quiescent tainted/effectful frontend shell because its
+ *    BackendOwner and live process/search handles survive independently.
  *  - Backend child processes are only ever closed through their own
  *    `StdioClientTransport.close()`. The gateway never scans processes and
  *    never signals a process it does not own.
@@ -100,7 +100,7 @@ import {
 } from './git-publish.mjs';
 
 /** Gateway version. Kept independent of the backend's version. */
-export const GATEWAY_VERSION = '0.1.0';
+export const GATEWAY_VERSION = '0.1.4';
 
 const BOOT_MS = Date.now();
 const BOOT_NS = process.hrtime.bigint();
@@ -114,11 +114,13 @@ const MAX_BODY_BYTES = 10 * 1024 * 1024;
 const MAX_SESSIONS_DEFAULT = 8;
 const MAX_PER_SESSION_CONCURRENCY = 4;
 const MAX_QUEUED_PER_SESSION = 4;
+/** Reserve one shared-backend slot for MCP catalog/template traffic. */
+const CATALOG_RESERVED_BACKEND_SLOTS = 1;
 const REQUEST_TIMEOUT_MS_DEFAULT = 60_000;
 const IDLE_TIMEOUT_MS_DEFAULT = 30 * 60 * 1000;
 const SESSION_SWEEP_INTERVAL_MS = 60_000;
-/** New sessions are not reclaim victims until they have sat this long. */
-const RECLAIM_MIN_AGE_MS = 250;
+/** Shared-account frontend shells must be idle this long before capacity reclaim. */
+const RECLAIM_IDLE_GRACE_MS_DEFAULT = 30_000;
 
 /**
  * Closed vocabulary used in logs and in stats.byClassification, so log
@@ -183,6 +185,30 @@ const KNOWN_READONLY_TOOL_NAMES = new Set([
   'list_directory',
   'get_file_info',
   'list_allowed_directories',
+]);
+
+/**
+ * Read calls whose timeout cannot create an external effect. This is
+ * deliberately narrower than backend readOnlyHint: e.g. start_search is
+ * metadata-read-only but creates a live search handle, so it stays ambiguous
+ * if the response is lost. These calls may return READ_TIMEOUT without
+ * poisoning the frontend session; the gateway still never retries them.
+ */
+const TIMEOUT_SAFE_READ_TOOL_NAMES = new Set([
+  'read_file',
+  'read_multiple_files',
+  'list_directory',
+  'get_file_info',
+  'list_allowed_directories',
+  'read_process_output',
+  'list_sessions',
+  'list_processes',
+  'list_searches',
+  'get_more_search_results',
+  'get_config',
+  'get_recent_tool_calls',
+  'get_usage_stats',
+  'get_prompts',
 ]);
 
 /** Names that imply live subprocess, search, or session-handle state. */
@@ -260,6 +286,8 @@ export function resolveConfig(partial = {}) {
   }
 
   cfg.maxSessions = clampInt(cfg.maxSessions, 1, 1024, MAX_SESSIONS_DEFAULT);
+  cfg.reclaimIdleGraceMs = clampInt(
+    cfg.reclaimIdleGraceMs, 250, 10 * 60 * 1000, RECLAIM_IDLE_GRACE_MS_DEFAULT);
   cfg.maxPerSessionConcurrency = clampInt(
     cfg.maxPerSessionConcurrency, 1, 64, MAX_PER_SESSION_CONCURRENCY);
   cfg.requestTimeoutMs = clampInt(
@@ -450,33 +478,62 @@ function stableStringify(value) {
  * directly to the next waiter instead of being decremented and immediately
  * re-contested. That keeps the cap exact under contention.
  */
-function createLimiter(max, maxQueued) {
+function createLimiter(max, maxQueued, { reservePriority = 0 } = {}) {
   let active = 0;
+  let activeNormal = 0;
   let queue = [];
+  const reserved = Math.min(Math.max(0, reservePriority), Math.max(0, max - 1));
+  const normalCap = Math.max(1, max - reserved);
+  // Preserve the historical normal-work outstanding bound (max + maxQueued)
+  // even though one active slot is held for catalog traffic.
+  const normalQueueCap = maxQueued + reserved;
+  const priorityQueueCap = reserved > 0 ? reserved : maxQueued;
+
+  function canRun(priority) {
+    if (active >= max) return false;
+    return priority || activeNormal < normalCap;
+  }
+
+  function admit(waiter) {
+    active += 1;
+    if (!waiter.priority) activeNormal += 1;
+    waiter.resolve(waiter.priority ? 'priority' : 'normal');
+  }
 
   return {
     get active() { return active; },
     get queued() { return queue.length; },
-    acquire() {
-      if (active < max) {
+    acquire({ priority = false } = {}) {
+      const waiter = { priority: priority === true };
+      if (canRun(waiter.priority)) {
         active += 1;
-        return Promise.resolve();
+        if (!waiter.priority) activeNormal += 1;
+        return Promise.resolve(waiter.priority ? 'priority' : 'normal');
       }
-      if (queue.length >= maxQueued) {
+      const normalQueued = queue.reduce((n, w) => n + (w.priority ? 0 : 1), 0);
+      const priorityQueued = queue.length - normalQueued;
+      if ((!waiter.priority && normalQueued >= normalQueueCap) ||
+          (waiter.priority && priorityQueued >= priorityQueueCap)) {
         const err = new Error('Server busy: per-session concurrency cap reached');
         err.code = 'STUDIO_BUSY';
         return Promise.reject(err);
       }
       return new Promise((resolve, reject) => {
-        queue.push({ resolve, reject });
+        queue.push({ ...waiter, resolve, reject });
       });
     },
-    release() {
-      const next = queue.shift();
-      if (next) {
-        next.resolve(); // slot handed off; `active` unchanged
-      } else if (active > 0) {
-        active -= 1;
+    release(kind = 'normal') {
+      if (active > 0) active -= 1;
+      if (kind === 'normal' && activeNormal > 0) activeNormal -= 1;
+
+      // Preserve one bounded priority lane for MCP catalog/template traffic.
+      // Within each class, FIFO order remains stable.
+      while (active < max) {
+        let index = queue.findIndex((w) => w.priority && canRun(true));
+        if (index < 0) index = queue.findIndex((w) => !w.priority && canRun(false));
+        if (index < 0) break;
+        const [next] = queue.splice(index, 1);
+        admit(next);
       }
     },
     drain(reason) {
@@ -606,7 +663,9 @@ class BackendOwner {
     this.closePromise = null;
     this.closing = false;
     this.sessions = new Set();
-    this.limiter = createLimiter(cfg.maxPerSessionConcurrency, MAX_QUEUED_PER_SESSION);
+    this.limiter = createLimiter(cfg.maxPerSessionConcurrency, MAX_QUEUED_PER_SESSION, {
+      reservePriority: CATALOG_RESERVED_BACKEND_SLOTS,
+    });
   }
 
   async getClient() {
@@ -737,6 +796,12 @@ class GatewaySession {
     return this.readonlyToolNames.has(name) || KNOWN_READONLY_TOOL_NAMES.has(name);
   }
 
+  isTimeoutSafeReadTool(name) {
+    // Timeout safety is deliberately stricter than readOnlyHint. Only names
+    // audited into this closed set can avoid EFFECT_UNKNOWN on timeout.
+    return typeof name === 'string' && TIMEOUT_SAFE_READ_TOOL_NAMES.has(name);
+  }
+
   noteAdmittedWork(body) {
     if (this.reclaimUnsafe) return;
     const method = typeof body?.method === 'string' ? body.method : '';
@@ -745,15 +810,26 @@ class GatewaySession {
     this.reclaimUnsafe = true;
   }
 
-  isQuiescentCatalogVictim() {
-    if (this.destroyed || this.tainted || (!this.owner && this.reclaimUnsafe)) return false;
+  isQuiescentCapacityVictim() {
+    if (this.destroyed) return false;
     if (!this.initialized) return false;
     if (this.httpRequestsInFlight > 0) return false;
     if (this.backendOpsInFlight > 0) return false;
     if (this.limiter.active > 0 || this.limiter.queued > 0) return false;
     if (this.backendState === 'connecting') return false;
-    // A session that only just finished initialize is not "abandoned".
-    if (Date.now() - this.createdAt < RECLAIM_MIN_AGE_MS) return false;
+    // Reclaim only after a real idle grace measured from the most recent
+    // admitted request. Native ChatGPT can initialize, then send its initialized
+    // notification and UI-template resources/read on the same session seconds
+    // later. Creation age alone races that bootstrap sequence under churn.
+    if (Date.now() - this.lastActive < this.cfg.reclaimIdleGraceMs) return false;
+
+    // Per-session mode preserves the conservative historical rule: effectful
+    // or tainted sessions are never capacity victims because destroying the
+    // frontend also owns/tears down its backend child. In shared-account mode
+    // the frontend is only a disposable routing shell; the BackendOwner and
+    // all process/search handles survive. A tainted frontend therefore becomes
+    // the *preferred* victim once its request/queue activity has fully unwound.
+    if (!this.owner && (this.tainted || this.reclaimUnsafe)) return false;
     return true;
   }
 
@@ -833,7 +909,7 @@ class GatewaySession {
         }
         session.bumpTool(LIST_TOOLS_KEY);
         return out;
-      }, { kind: 'tools/list' }));
+      }, { kind: 'tools/list', catalogPriority: true }));
 
     server.setRequestHandler(CallToolRequestSchema, async (request, extra) =>
       session.callTool(request, extra));
@@ -853,7 +929,7 @@ class GatewaySession {
             timeout: session.cfg.requestTimeoutMs,
             signal: extra?.signal,
           });
-        }, { kind: request.method }));
+        }, { kind: request.method, catalogPriority: true }));
     };
     proxyCatalog(ListResourcesRequestSchema, 'resources', 'listResources', { resources: [] });
     proxyCatalog(ListResourceTemplatesRequestSchema, 'resources', 'listResourceTemplates', { resourceTemplates: [] });
@@ -925,8 +1001,19 @@ class GatewaySession {
 
       try {
         // Exactly one attempt. There is no retry loop anywhere in this file.
+        // Preserve the caller's existing JSON-RPC identity across the gateway
+        // boundary. Desktop Commander's TerminalManager can retain this value
+        // on spawned sessions so a lost start_process result can be reconciled
+        // by request identity instead of replaying the command or inventing a
+        // second lifecycle/state plane.
+        const backendMeta = {
+          ...(request?.params?._meta && typeof request.params._meta === 'object'
+            ? request.params._meta
+            : {}),
+          mastermind_remote_call_id: String(extra?.requestId),
+        };
         const result = await backend.client.callTool(
-          { name, arguments: request?.params?.arguments ?? {} },
+          { name, arguments: request?.params?.arguments ?? {}, _meta: backendMeta },
           undefined,
           { timeout: this.cfg.requestTimeoutMs, signal: extra?.signal },
         );
@@ -947,12 +1034,13 @@ class GatewaySession {
   }
 
   /**
-   * A backend tools/call that throws is ambiguous. A timeout or a dead backend
-   * leaves the tool's effect unknown, so the session must be tainted and the
-   * caller must be told EFFECT_UNKNOWN. That is surfaced as a JSON-RPC error
-   * rather than an `isError` tool result: an effect-unknown failure is an
-   * infrastructure failure, not a tool verdict, and it has to be impossible to
-   * mistake for a successful call.
+   * A timed-out or disconnected backend call is ambiguous unless the tool is
+   * one of the explicitly audited, side-effect-free timeout-safe reads. Those
+   * reads return READ_TIMEOUT without taint and are never retried. Every other
+   * timeout/backend-loss path preserves EFFECT_UNKNOWN, taints the frontend,
+   * and refuses further work on that session. EFFECT_UNKNOWN is surfaced as a
+   * JSON-RPC error rather than an `isError` tool result so it cannot be mistaken
+   * for a tool verdict.
    *
    * A clean JSON-RPC error from a still-live backend (unknown tool, invalid
    * arguments) is deterministic — the tool provably did not run — so it is
@@ -970,6 +1058,17 @@ class GatewaySession {
 
     // Only protocol validation/method errors prove a non-executed call.
     const deterministic = [ErrorCode.InvalidParams, ErrorCode.MethodNotFound, ErrorCode.InvalidRequest].includes(err?.code);
+    if (timedOut && !backendGone && this.isTimeoutSafeReadTool(toolName)) {
+      this.stats.requests.timeouts += 1;
+      log('warn', 'tool_call_read_timeout', {
+        sid: this.tag, tool: toolName, durationMs, classification: CLASSIFICATION.TOOL_ERROR,
+      });
+      return {
+        content: [{ type: 'text', text: 'READ_TIMEOUT: backend read exceeded the gateway deadline; no retry was performed.' }],
+        isError: true,
+      };
+    }
+
     if (timedOut || backendGone || !deterministic) {
       const reason = timedOut ? 'backend timeout' : 'backend disconnected';
       this.taint(reason);
@@ -1164,11 +1263,10 @@ class GatewaySession {
     this.stats.requests.backendOps += 1;
     this.backendOpsInFlight += 1;
     const limiter = this.owner?.limiter ?? this.limiter;
-    let acquired = false;
+    let acquired = null;
     try {
       try {
-        await limiter.acquire();
-        acquired = true;
+        acquired = await limiter.acquire({ priority: meta.catalogPriority === true });
       } catch (err) {
         this.stats.requests.busy += 1;
         log('warn', 'backend_slot_rejected', {sid:this.tag, kind:meta.kind,
@@ -1178,7 +1276,7 @@ class GatewaySession {
       if (this.destroyed || this.tainted) throw new Error('Session closed or tainted before dispatch');
       return await fn();
     } finally {
-      if (acquired) limiter.release();
+      if (acquired) limiter.release(acquired);
       this.backendOpsInFlight -= 1;
       this.touch();
     }
@@ -1200,6 +1298,7 @@ class GatewaySession {
     this.tainted = true;
     this.taintedReason = reason;
     this.stats.sessions.tainted += 1;
+    log('warn', 'session_tainted', { sid: this.tag, reason });
 
     if (this.owner) {
       // Shared mode: drain only this session's limiter (not the shared one),
@@ -1296,25 +1395,45 @@ export async function startGateway(partialConfig = {}, auth = {}) {
     return run;
   }
 
-  function findOldestCatalogVictim() {
-    let oldest = null;
+  function findCapacityVictim() {
+    let oldestTainted = null;
+    let oldestNormal = null;
     for (const session of sessions.values()) {
-      if (!session.isQuiescentCatalogVictim()) continue;
-      if (!oldest || session.createdAt < oldest.createdAt) oldest = session;
+      if (!session.isQuiescentCapacityVictim()) continue;
+      if (session.tainted) {
+        if (!oldestTainted || session.createdAt < oldestTainted.createdAt) oldestTainted = session;
+      } else if (!oldestNormal || session.createdAt < oldestNormal.createdAt) {
+        oldestNormal = session;
+      }
     }
-    return oldest;
+    return oldestTainted || oldestNormal;
+  }
+
+  function capacityCounts() {
+    let tainted = 0;
+    let reclaimable = 0;
+    let busy = 0;
+    for (const session of sessions.values()) {
+      if (session.tainted) tainted += 1;
+      if (session.isQuiescentCapacityVictim()) reclaimable += 1;
+      if (session.httpRequestsInFlight > 0 || session.backendOpsInFlight > 0 ||
+          session.limiter.active > 0 || session.limiter.queued > 0 ||
+          session.backendState === 'connecting') busy += 1;
+    }
+    return { tainted, reclaimable, busy };
   }
 
   function canAdmitNewSession() {
     if (sessions.size < cfg.maxSessions) return true;
-    return cfg.reclaimIdleCatalogSessions && findOldestCatalogVictim() !== null;
+    return cfg.reclaimIdleCatalogSessions && findCapacityVictim() !== null;
   }
 
-  function reclaimCatalogVictim(victim) {
+  function reclaimCapacityVictim(victim) {
     sessions.delete(victim.id);
     stats.sessions.reclaimed += 1;
-    log('info', 'session_reclaimed', { sid: victim.tag, reason: 'capacity' });
-    void victim.destroy('capacity_reclaim');
+    const reason = victim.tainted ? 'tainted_capacity' : 'capacity';
+    log('info', 'session_reclaimed', { sid: victim.tag, reason });
+    void victim.destroy(reason);
   }
 
   /** Only a NEW frontend session can acquire a replacement generation. */
@@ -1391,6 +1510,7 @@ export async function startGateway(partialConfig = {}, auth = {}) {
   // Deliberately says nothing else: no ids, paths, or principals.
   app.get('/readyz', (_req, res) => {
     const accepting = Boolean(listeningAddress);
+    const counts = capacityCounts();
     res.status(200).json({
       ok: true,
       ready: accepting && canAdmitNewSession(),
@@ -1401,6 +1521,9 @@ export async function startGateway(partialConfig = {}, auth = {}) {
         active: sessions.size,
         capacity: cfg.maxSessions,
         full: sessions.size >= cfg.maxSessions,
+        tainted: counts.tainted,
+        reclaimable: counts.reclaimable,
+        busy: counts.busy,
       },
     });
   });
@@ -1616,8 +1739,8 @@ export async function startGateway(partialConfig = {}, auth = {}) {
 
     const reserved = await withAdmitLock(async () => {
       if (sessions.size >= cfg.maxSessions && cfg.reclaimIdleCatalogSessions) {
-        const victim = findOldestCatalogVictim();
-        if (victim) reclaimCatalogVictim(victim);
+        const victim = findCapacityVictim();
+        if (victim) reclaimCapacityVictim(victim);
       }
       if (sessions.size >= cfg.maxSessions) {
         return { status: 'capacity' };
