@@ -460,7 +460,9 @@ def _synthetic_carry_targets(book_id: str, inputs: list) -> dict:
     Cold-start: an empty do-nothing book inherits PROD's target weights on the first day prod has a
     non-empty allocation, so it has a real inception snapshot to carry (a do-nothing book that starts
     empty and never trades would carry $0 of positions forever). After that inception it NEVER changes
-    its targets — it just re-marks its held weights each run (held_value / nav)."""
+    its inventory — `run()` skips rebalance for an already-seeded do-nothing book and only re-marks it.
+    The returned weights keep the held symbols in the common price/thesis plumbing; they are not an
+    execution target after inception."""
     acct = _load_account(book_id)
     positions = acct.get("positions") or {}
     if positions:                                          # already seeded → carry current holdings
@@ -468,8 +470,6 @@ def _synthetic_carry_targets(book_id: str, inputs: list) -> dict:
             (p.get("shares") or 0.0) * (p.get("avg_cost") or 0.0) for p in positions.values())
         if nav <= 0:
             return {t: 0.0 for t in positions}
-        # target = current dollar weight at avg_cost (a mark-agnostic snapshot; _rebalance re-solves
-        # shares at live prices but the delta is ~0 since these ARE the held shares).
         return {t: round((p.get("shares") or 0.0) * (p.get("avg_cost") or 0.0) / nav, 4)
                 for t, p in positions.items()}
     # cold-start inception: adopt prod's weights so there is something to freeze
@@ -529,7 +529,13 @@ def run(asof: str, prices: dict | None = None, inputs: list | None = None) -> di
         bid = p["id"]
         targets = targets_by_book[bid]
         try:
-            if targets or _has_inputs:
+            # The do-nothing arm has exactly ONE trade edge: its cold-start inception. Once any
+            # position exists, price drift or new signals must never alter shares or cash; only marks
+            # may change NAV. Previously it rebalanced every run to avg-cost-derived weights, creating
+            # the very churn this counterfactual is supposed to measure against.
+            frozen_carry = (p.get("synthetic") == "do_nothing"
+                            and bool(_load_account(bid).get("positions")))
+            if not frozen_carry and (targets or _has_inputs):
                 _rebalance(bid, targets, px, asof)
             nav_rows = _nav_rows(bid)
             row = _mark(bid, px, asof)
