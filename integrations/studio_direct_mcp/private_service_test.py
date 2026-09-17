@@ -170,21 +170,19 @@ def _seed_node_modules(roots: dict):
     (roots["base"] / "node_modules").mkdir()
 
 
-def _convert_to_legacy_install(roots: dict) -> dict:
-    """Rewrite one staged fixture to the exact pre-typed-Git v1 file set."""
+def _convert_to_legacy_install(roots: dict, *, typed_git: bool = False) -> dict:
+    """Recreate one exact historical layout; never include newly staged modules."""
     config = json.loads(roots["config"].read_text(encoding="utf-8"))
-    config.pop("gitPublish", None)
-    roots["config"].write_text(
-        json.dumps(config, indent=2, sort_keys=True), encoding="utf-8"
-    )
-    (roots["base"] / "git-publish.mjs").unlink()
-
+    if not typed_git:
+        config.pop("gitPublish", None)
+    roots["config"].write_text(json.dumps(config, indent=2, sort_keys=True), encoding="utf-8")
     manifest = json.loads(roots["manifest"].read_text(encoding="utf-8"))
-    manifest["files"].pop("git-publish.mjs")
+    removed = ("output-budget.mjs",) if typed_git else ("output-budget.mjs", "git-publish.mjs")
+    for name in removed:
+        (roots["base"] / name).unlink()
+        manifest["files"].pop(name)
     manifest["configHash"] = svc._sha256_file(roots["config"])
-    roots["manifest"].write_text(
-        json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8"
-    )
+    roots["manifest"].write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
     return manifest
 
 
@@ -206,6 +204,7 @@ class TestIdentity(unittest.TestCase):
             set(svc.STAGE_FILES),
             {
                 "gateway.mjs",
+                "output-budget.mjs",
                 "git-publish.mjs",
                 "private-tunnel-auth.mjs",
                 "private-tunnel-gateway.mjs",
@@ -240,6 +239,10 @@ class TestIdentity(unittest.TestCase):
         legacy = {name: digest for name in svc.LEGACY_STAGE_FILES_V1}
         self.assertTrue(svc._valid_manifest({**base, "files": current}, "test-account", _label_for("test-account")))
         self.assertTrue(svc._valid_manifest({**base, "files": legacy}, "test-account", _label_for("test-account")))
+        typed_legacy = {name: digest for name in svc.STAGE_FILES if name != "output-budget.mjs"}
+        self.assertTrue(svc._valid_manifest({**base, "files": typed_legacy}, "test-account", _label_for("test-account")))
+        self.assertNotIn("output-budget.mjs", svc.LEGACY_STAGE_FILES_V1)
+        self.assertNotIn("git-publish.mjs", svc.LEGACY_STAGE_FILES_V1)
         partial = dict(legacy)
         partial.pop(next(iter(partial)))
         self.assertFalse(svc._valid_manifest({**base, "files": partial}, "test-account", _label_for("test-account")))
@@ -747,6 +750,12 @@ class TestStage(unittest.TestCase):
 
 class TestUpgrade(unittest.TestCase):
     def test_legacy_install_upgrades_stopped_and_preserves_runtime_state(self):
+        self._assert_historical_upgrade(typed_git=False)
+
+    def test_typed_git_install_upgrades_stopped_and_preserves_runtime_state(self):
+        self._assert_historical_upgrade(typed_git=True)
+
+    def _assert_historical_upgrade(self, *, typed_git):
         with tempfile.TemporaryDirectory() as raw:
             tmp = Path(raw)
             home = tmp / "home"
@@ -756,7 +765,7 @@ class TestUpgrade(unittest.TestCase):
                 _src, node, backend, _ = _do_stage(tmp, home)
                 roots = svc._build_runtime_roots("test-account")
                 _seed_node_modules(roots)
-                legacy = _convert_to_legacy_install(roots)
+                legacy = _convert_to_legacy_install(roots, typed_git=typed_git)
                 (roots["state"] / "oauth-state.json").write_text("STATE\n")
                 (roots["logs"] / "prior.log").write_text("LOG\n")
                 (roots["node_modules"] / "marker").write_text("DEPS\n")
@@ -778,6 +787,7 @@ class TestUpgrade(unittest.TestCase):
                 self.assertEqual(set(manifest["files"]), set(svc.STAGE_FILES))
                 self.assertEqual(manifest["source"], str(upgraded_source))
                 self.assertTrue((roots["base"] / "git-publish.mjs").is_file())
+                self.assertTrue((roots["base"] / "output-budget.mjs").is_file())
                 config = json.loads(roots["config"].read_text())
                 self.assertTrue(config["gitPublish"]["enabled"])
                 self.assertEqual(config["reclaimIdleGraceMs"], 30_000)
