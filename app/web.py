@@ -3771,14 +3771,32 @@ def api_firm_allocator(rebuild: bool = False) -> JSONResponse:
         if rebuild:
             artifact = _fa.build_latest()
         else:
-            artifact = _fa.latest_artifact()
-            if artifact is None:
+            read_status, artifact = _fa.latest_artifact_checked()
+            if read_status == "unavailable":
+                return JSONResponse({
+                    "advisory_only": True,
+                    "computed": False,
+                    "read_status": "unavailable",
+                    "error": "firm_allocator_artifact_unavailable",
+                    "reason": "firm allocator artifact unavailable",
+                })
+            if read_status == "absent":
                 artifact = _fa.build_latest()
+        if artifact and artifact.get("build_status") == "unavailable":
+            return JSONResponse({**artifact, "read_status": "unavailable"})
+        if artifact and artifact.get("persist_status") == "unavailable":
+            return JSONResponse({**artifact, "read_status": "partial"})
         return JSONResponse(artifact or {"advisory_only": True, "computed": False,
                                          "reason": "no artifact available"})
     except Exception as exc:  # noqa: BLE001 — never 500
-        return JSONResponse({"advisory_only": True, "computed": False,
-                             "reason": f"firm_allocator endpoint error: {exc}"})
+        _log.warning("firm allocator endpoint failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "advisory_only": True,
+            "computed": False,
+            "read_status": "unavailable",
+            "error": "firm_allocator_unavailable",
+            "reason": "firm allocator unavailable",
+        })
 
 
 @router.get("/api/desk/experiments")

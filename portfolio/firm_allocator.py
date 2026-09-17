@@ -471,41 +471,63 @@ def build_latest(
             pkts = mandate_packets
 
         artifact = _compute(lc, bm, pkts, book_ids=book_ids)
-        _persist(artifact)
+        if not _persist(artifact):
+            return {
+                **artifact,
+                "computed": True,
+                "persist_status": "unavailable",
+                "error": "firm_allocator_persist_unavailable",
+                "reason": "firm allocator computed but persistence unavailable",
+            }
         return artifact
-    except Exception as exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         return {
             "asof": date.today().isoformat(),
             "formula_version": _FORMULA_VERSION,
             "advisory_only": True,
             "computed": False,
-            "reason": f"firm_allocator.build_latest crashed: {exc!r}"[:400],
-            "books": {},
-            "firm": {},
+            "build_status": "unavailable",
+            "error": "firm_allocator_build_unavailable",
+            "reason": "firm allocator unavailable",
+            "books": None,
+            "firm": None,
         }
 
 
-def latest_artifact() -> dict | None:
-    """Read the most recent persisted allocator artifact.  Returns None if absent."""
+def latest_artifact_checked() -> tuple[str, dict | None]:
+    """Read the newest persisted artifact with an explicit absent/unavailable distinction."""
     try:
         files = sorted(_OUT_DIR.glob("*.json")) if _OUT_DIR.exists() else []
-        if not files:
-            return None
-        return json.loads(files[-1].read_text())
     except Exception:  # noqa: BLE001
-        return None
+        return "unavailable", None
+    if not files:
+        return "absent", None
+    try:
+        artifact = json.loads(files[-1].read_text())
+    except Exception:  # noqa: BLE001
+        return "unavailable", None
+    if not isinstance(artifact, dict):
+        return "unavailable", None
+    return "available", artifact
+
+
+def latest_artifact() -> dict | None:
+    """Legacy read: artifact when available, otherwise None."""
+    status, artifact = latest_artifact_checked()
+    return artifact if status == "available" else None
 
 
 # ---------------------------------------------------------------------------
 # Internal
 # ---------------------------------------------------------------------------
 
-def _persist(artifact: dict) -> None:
-    """Write artifact to data/allocator/<asof>.json.  Never raises."""
+def _persist(artifact: dict) -> bool:
+    """Write artifact to data/allocator/<asof>.json and report durability."""
     try:
         _OUT_DIR.mkdir(parents=True, exist_ok=True)
         asof = artifact.get("asof") or date.today().isoformat()
         p = _OUT_DIR / f"{asof}.json"
         p.write_text(json.dumps(artifact, indent=2))
+        return True
     except Exception:  # noqa: BLE001
-        pass
+        return False
