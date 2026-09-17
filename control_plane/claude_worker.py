@@ -13,7 +13,7 @@ import os
 import re
 import stat
 import subprocess
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Sequence
 
 from control_plane.worker_execution_contract import (
@@ -37,6 +37,7 @@ _MOVING_MODEL_ALIASES = frozenset({"haiku", "opus", "sonnet"})
 _READ_TOOLS = ("Glob", "Grep", "Read")
 _WRITE_TOOLS = ("Edit", "Write")
 _TEST_TOOL = "Bash"
+_SAFE_PERMISSION_PATH_SEGMENT_RE = re.compile(r"^[A-Za-z0-9*?][A-Za-z0-9._*?-]*$")
 _FORBIDDEN_TOOLS = (
     "Agent",
     "NotebookEdit",
@@ -56,6 +57,10 @@ class ClaudeWorkerNotImplementedError(ClaudeWorkerContractError):
     """A lifecycle operation intentionally deferred to Task 2."""
 
 
+class ClaudeLaunchEnvironmentUnavailableError(ClaudeWorkerContractError):
+    """Task 2 has not yet established the native worker launch environment."""
+
+
 @dataclasses.dataclass(frozen=True)
 class ClaudeAuthObservation:
     """Closed, non-secret readiness facts for the later auth-status probe."""
@@ -65,12 +70,22 @@ class ClaudeAuthObservation:
     exit_code: int | None
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
+class ClaudeLaunchEnvironment:
+    """An explicit Task 2 boundary, not a subprocess environment mapping."""
+
+    def as_subprocess_environment(self) -> dict[str, str]:
+        raise ClaudeLaunchEnvironmentUnavailableError(
+            "Claude worker launch environment is not realized until Task 2"
+        )
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
 class ClaudeInvocation:
     """One complete, closed foreground invocation policy."""
 
     argv: tuple[str, ...]
-    environment: dict[str, str]
+    environment: ClaudeLaunchEnvironment
 
 
 @dataclasses.dataclass(frozen=True)
@@ -98,21 +113,88 @@ class _DeferredProcessInspector:
         raise ClaudeWorkerNotImplementedError("Claude process inspection is not implemented")
 
 
-def _sha256_path(path: Path) -> str:
-    digest = hashlib.sha256()
-    size = 0
+def _binary_identity(info: os.stat_result) -> tuple[int, int, int, int, int, int, int]:
+    return (
+        int(info.st_dev),
+        int(info.st_ino),
+        int(info.st_size),
+        stat.S_IMODE(info.st_mode),
+        int(info.st_uid),
+        int(info.st_gid),
+        int(info.st_mtime_ns),
+    )
+
+
+def _require_safe_binary_stat(info: os.stat_result) -> None:
+    if not stat.S_ISREG(info.st_mode) or not info.st_mode & 0o111:
+        raise ClaudeWorkerContractError("Claude binary is not an executable regular file")
+    if stat.S_IMODE(info.st_mode) & 0o022:
+        raise ClaudeWorkerContractError("Claude binary must not be group/other writable")
+    if not 0 < info.st_size <= _MAX_BINARY_BYTES:
+        raise ClaudeWorkerContractError(
+            "Claude binary size is outside the attestation ceiling"
+        )
+
+
+def _open_direct_binary(path: Path) -> int:
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise ClaudeWorkerContractError(
+            "Claude binary attestation requires no-follow file opening"
+        )
     try:
-        with path.open("rb") as handle:
-            while chunk := handle.read(1024 * 1024):
-                size += len(chunk)
-                if size > _MAX_BINARY_BYTES:
-                    raise ClaudeWorkerContractError(
-                        "Claude binary exceeds attestation ceiling"
-                    )
-                digest.update(chunk)
+        return os.open(
+            path,
+            os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0),
+        )
     except OSError as exc:
         raise ClaudeWorkerContractError("Claude binary is unavailable") from exc
-    return digest.hexdigest()
+
+
+def _direct_binary_stat(path: Path) -> os.stat_result:
+    fd = _open_direct_binary(path)
+    try:
+        info = os.fstat(fd)
+        _require_safe_binary_stat(info)
+        return info
+    finally:
+        os.close(fd)
+
+
+def _sha256_direct_binary(path: Path) -> tuple[os.stat_result, str]:
+    digest = hashlib.sha256()
+    size = 0
+    fd = _open_direct_binary(path)
+    try:
+        before = os.fstat(fd)
+        _require_safe_binary_stat(before)
+        while chunk := os.read(fd, 1024 * 1024):
+            size += len(chunk)
+            if size > _MAX_BINARY_BYTES:
+                raise ClaudeWorkerContractError(
+                    "Claude binary exceeds attestation ceiling"
+                )
+            digest.update(chunk)
+        after = os.fstat(fd)
+        if _binary_identity(before) != _binary_identity(after):
+            raise ClaudeWorkerContractError("Claude binary changed during attestation")
+        return before, digest.hexdigest()
+    finally:
+        os.close(fd)
+
+
+def _configured_direct_binary(claude_binary: Path) -> Path:
+    try:
+        lexical = claude_binary.lstat()
+    except OSError as exc:
+        raise ClaudeWorkerContractError("Claude binary is unavailable") from exc
+    if stat.S_ISLNK(lexical.st_mode):
+        raise ClaudeWorkerContractError("Claude binary must not be a symlink")
+    try:
+        real_path = claude_binary.resolve(strict=True)
+    except OSError as exc:
+        raise ClaudeWorkerContractError("Claude binary is unavailable") from exc
+    _direct_binary_stat(real_path)
+    return real_path
 
 
 def _closed_probe_environment() -> dict[str, str]:
@@ -140,17 +222,8 @@ def attest_claude_code_binary(
         not isinstance(version, str) or not version for version in allowed_versions
     ):
         raise ClaudeWorkerContractError("Claude binary versions must be a non-empty allowlist")
-    try:
-        real_path = claude_binary.resolve(strict=True)
-        info = real_path.stat()
-    except OSError as exc:
-        raise ClaudeWorkerContractError("Claude binary is unavailable") from exc
-    if not stat.S_ISREG(info.st_mode) or not os.access(real_path, os.X_OK):
-        raise ClaudeWorkerContractError("Claude binary is not an executable regular file")
-    if not 0 < info.st_size <= _MAX_BINARY_BYTES:
-        raise ClaudeWorkerContractError(
-            "Claude binary size is outside the attestation ceiling"
-        )
+    real_path = _configured_direct_binary(claude_binary)
+    pre_probe, pre_probe_sha256 = _sha256_direct_binary(real_path)
     try:
         completed = subprocess.run(
             [str(real_path), "--version"],
@@ -170,11 +243,19 @@ def attest_claude_code_binary(
     version = match.group("version")
     if version not in allowed_versions:
         raise ClaudeWorkerContractError("Claude binary version is not allowlisted")
+    info, sha256 = _sha256_direct_binary(real_path)
+    if (
+        _binary_identity(pre_probe) != _binary_identity(info)
+        or pre_probe_sha256 != sha256
+    ):
+        raise ClaudeWorkerContractError("Claude binary changed during version probe")
+    if _configured_direct_binary(claude_binary) != real_path:
+        raise ClaudeWorkerContractError("Claude binary changed during attestation")
     return BinaryAttestation(
         path=str(claude_binary),
         real_path=str(real_path),
         version=version,
-        sha256=_sha256_path(real_path),
+        sha256=sha256,
         # Claude identity is non-secret filesystem/version evidence.  Unlike
         # Codex, this contract does not assume an OpenAI signing identity.
         team_identifier=None,
@@ -186,6 +267,29 @@ def attest_claude_code_binary(
         gid=int(info.st_gid),
         mtime_ns=int(info.st_mtime_ns),
     )
+
+
+def _assert_claude_binary_unchanged(attestation: BinaryAttestation) -> None:
+    """Refuse a launch when the exact attested executable identity drifted."""
+
+    configured = Path(attestation.path)
+    if not configured.is_absolute():
+        raise ClaudeWorkerContractError("attested Claude binary changed")
+    real_path = _configured_direct_binary(configured)
+    if str(real_path) != attestation.real_path:
+        raise ClaudeWorkerContractError("attested Claude binary changed")
+    info, sha256 = _sha256_direct_binary(real_path)
+    expected = (
+        attestation.device,
+        attestation.inode,
+        attestation.size,
+        attestation.mode,
+        attestation.uid,
+        attestation.gid,
+        attestation.mtime_ns,
+    )
+    if _binary_identity(info) != expected or sha256 != attestation.sha256:
+        raise ClaudeWorkerContractError("attested Claude binary changed")
 
 
 def _validate_exact_model(exact_model: str) -> str:
@@ -224,28 +328,45 @@ def _requested_capabilities(spec: WorkerLaunchSpec) -> frozenset[str]:
 def _allowed_write_paths(spec: WorkerLaunchSpec) -> tuple[str, ...]:
     paths: list[str] = []
     for candidate in spec.allowed_artifact_paths:
-        if not isinstance(candidate, str) or not candidate or candidate != candidate.strip():
-            raise ClaudeWorkerContractError("unsupported or unmapped Claude capabilities")
-        path = PurePosixPath(candidate)
-        if path.is_absolute() or ".." in path.parts or str(path) in {".", ""}:
-            raise ClaudeWorkerContractError("unsupported or unmapped Claude capabilities")
-        paths.append(str(path))
+        if (
+            not isinstance(candidate, str)
+            or not candidate
+            or candidate != candidate.strip()
+            or "\\" in candidate
+            or "//" in candidate
+            or any(ord(character) < 32 or ord(character) == 127 for character in candidate)
+        ):
+            raise ClaudeWorkerContractError("Claude write permission path is not safe")
+        parts = candidate.split("/")
+        if any(
+            part in {"", ".", ".."}
+            or _SAFE_PERMISSION_PATH_SEGMENT_RE.fullmatch(part) is None
+            for part in parts
+        ):
+            raise ClaudeWorkerContractError("Claude write permission path is not safe")
+        if (
+            parts[0] in {".git", ".codex", ".claude"}
+            or candidate == "config.toml"
+            or any(part == ".env" or part.startswith(".env.") for part in parts)
+        ):
+            raise ClaudeWorkerContractError("Claude write permission path is not safe")
+        paths.append(candidate)
     if len(paths) != len(set(paths)):
-        raise ClaudeWorkerContractError("unsupported or unmapped Claude capabilities")
+        raise ClaudeWorkerContractError("duplicate Claude write permission path")
     return tuple(sorted(paths))
 
 
-def _tool_policy(spec: WorkerLaunchSpec) -> tuple[str, str, str, list[str]]:
+def _tool_policy(
+    spec: WorkerLaunchSpec,
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
     requested = _requested_capabilities(spec)
     tools: list[str] = []
-    allowed: list[str] = []
+    preapproved: list[str] = []
     forbidden = list(_FORBIDDEN_TOOLS)
-    settings_allowed: list[str] = []
 
     if "READ" in requested:
         tools.extend(_READ_TOOLS)
-        allowed.extend(_READ_TOOLS)
-        settings_allowed.extend(f"{tool}(./**)" for tool in _READ_TOOLS)
+        preapproved.extend(f"{tool}(./**)" for tool in _READ_TOOLS)
     if "WRITE_BRANCH" in requested:
         paths = _allowed_write_paths(spec)
         if not paths:
@@ -253,21 +374,18 @@ def _tool_policy(spec: WorkerLaunchSpec) -> tuple[str, str, str, list[str]]:
         tools.extend(_WRITE_TOOLS)
         for path in paths:
             scoped_tools = (f"Edit(./{path})", f"Write(./{path})")
-            allowed.extend(scoped_tools)
-            settings_allowed.extend(scoped_tools)
+            preapproved.extend(scoped_tools)
     if "RUN_TESTS" in requested:
         tools.append(_TEST_TOOL)
-        allowed.append("Bash(python3 -m pytest *)")
-        settings_allowed.append("Bash(python3 -m pytest *)")
+        preapproved.append("Bash(python3 -m pytest *)")
 
     for tool in ("Bash", "Edit", "Write"):
         if tool not in tools:
             forbidden.append(tool)
     return (
-        ",".join(sorted(tools)),
-        ",".join(sorted(allowed)),
-        ",".join(sorted(forbidden)),
-        sorted(settings_allowed),
+        tuple(sorted(tools)),
+        tuple(sorted(preapproved)),
+        tuple(sorted(forbidden)),
     )
 
 
@@ -322,17 +440,17 @@ class ClaudeCodeWorkerAdapter:
     def compile_launch(self, spec: WorkerLaunchSpec) -> ClaudeInvocation:
         """Compile existing grants into one closed, foreground CLI command."""
 
-        tools, allowed_tools, forbidden_tools, settings_allowed = _tool_policy(spec)
+        tools, preapproved, forbidden = _tool_policy(spec)
         settings = {
             "autoMemoryEnabled": False,
             "disableAllHooks": True,
             "enableAllProjectMcpServers": False,
             "enabledMcpjsonServers": [],
             "permissions": {
-                "allow": settings_allowed,
+                "allow": list(preapproved),
                 "ask": [],
                 "defaultMode": "dontAsk",
-                "deny": list(_FORBIDDEN_TOOLS),
+                "deny": list(forbidden),
                 "disableBypassPermissionsMode": "disable",
             },
             "switchModelsOnFlag": False,
@@ -352,11 +470,11 @@ class ClaudeCodeWorkerAdapter:
             "--permission-mode",
             "dontAsk",
             "--tools",
-            tools,
+            ",".join(tools),
             "--allowedTools",
-            allowed_tools,
+            ",".join(preapproved),
             "--disallowedTools",
-            forbidden_tools,
+            ",".join(forbidden),
             "--strict-mcp-config",
             "--mcp-config",
             '{"mcpServers":{}}',
@@ -365,7 +483,7 @@ class ClaudeCodeWorkerAdapter:
             _canonical_json(settings),
             spec.prompt,
         )
-        return ClaudeInvocation(argv=argv, environment=_closed_probe_environment())
+        return ClaudeInvocation(argv=argv, environment=ClaudeLaunchEnvironment())
 
     async def start(self, spec: WorkerLaunchSpec) -> WorkerProcessRef:
         del spec
@@ -404,7 +522,10 @@ __all__ = [
     "ClaudeAuthObservation",
     "ClaudeCodeWorkerAdapter",
     "ClaudeInvocation",
+    "ClaudeLaunchEnvironment",
+    "ClaudeLaunchEnvironmentUnavailableError",
     "ClaudeWorkerContractError",
     "ClaudeWorkerNotImplementedError",
     "attest_claude_code_binary",
+    "_assert_claude_binary_unchanged",
 ]

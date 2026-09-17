@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from control_plane import claude_worker
 from control_plane.claude_worker import (
     ClaudeCodeWorkerAdapter,
     ClaudeWorkerContractError,
@@ -112,6 +113,33 @@ def test_constructor_attests_an_absolute_versioned_non_secret_binary(tmp_path: P
         )
 
 
+def test_binary_attestation_refuses_symlink_unsafe_mode_and_changed_bytes(
+    tmp_path: Path,
+) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    linked = tmp_path / "linked-claude"
+    linked.symlink_to(binary)
+    with pytest.raises(ClaudeWorkerContractError, match="must not be a symlink"):
+        attest_claude_code_binary(
+            linked, allowed_versions=frozenset({_FIXTURE_VERSION})
+        )
+
+    binary.chmod(0o777)
+    with pytest.raises(ClaudeWorkerContractError, match="group/other writable"):
+        attest_claude_code_binary(
+            binary, allowed_versions=frozenset({_FIXTURE_VERSION})
+        )
+
+    binary.chmod(0o700)
+    attestation = attest_claude_code_binary(
+        binary, allowed_versions=frozenset({_FIXTURE_VERSION})
+    )
+    binary.write_text("#!/bin/sh\nexit 64\n", encoding="utf-8")
+    binary.chmod(0o700)
+    with pytest.raises(ClaudeWorkerContractError, match="changed"):
+        claude_worker._assert_claude_binary_unchanged(attestation)
+
+
 def test_compiler_projects_only_read_write_and_test_capabilities(
     tmp_path: Path,
 ) -> None:
@@ -156,11 +184,7 @@ def test_compiler_projects_only_read_write_and_test_capabilities(
             "enabledMcpjsonServers": [],
             "permissions": {
                 "allow": (
-                    [
-                        "Glob(./**)",
-                        "Grep(./**)",
-                        "Read(./**)",
-                    ]
+                    ["Glob(./**)", "Grep(./**)", "Read(./**)"]
                     if invocation is read_only
                     else [
                         "Bash(python3 -m pytest *)",
@@ -173,15 +197,30 @@ def test_compiler_projects_only_read_write_and_test_capabilities(
                 ),
                 "ask": [],
                 "defaultMode": "dontAsk",
-                "deny": [
-                    "Agent",
-                    "NotebookEdit",
-                    "Skill",
-                    "Task",
-                    "WebFetch",
-                    "WebSearch",
-                    "mcp__*",
-                ],
+                "deny": (
+                    [
+                        "Agent",
+                        "Bash",
+                        "Edit",
+                        "NotebookEdit",
+                        "Skill",
+                        "Task",
+                        "WebFetch",
+                        "WebSearch",
+                        "Write",
+                        "mcp__*",
+                    ]
+                    if invocation is read_only
+                    else [
+                        "Agent",
+                        "NotebookEdit",
+                        "Skill",
+                        "Task",
+                        "WebFetch",
+                        "WebSearch",
+                        "mcp__*",
+                    ]
+                ),
                 "disableBypassPermissionsMode": "disable",
             },
             "switchModelsOnFlag": False,
@@ -191,14 +230,36 @@ def test_compiler_projects_only_read_write_and_test_capabilities(
     read_allowed = read_only.argv[read_only.argv.index("--allowedTools") + 1]
     write_tools = write_and_test.argv[write_and_test.argv.index("--tools") + 1]
     write_allowed = write_and_test.argv[write_and_test.argv.index("--allowedTools") + 1]
-    assert read_tools == read_allowed == "Glob,Grep,Read"
+    assert read_tools == "Glob,Grep,Read"
+    assert read_allowed == "Glob(./**),Grep(./**),Read(./**)"
     assert write_tools == "Bash,Edit,Glob,Grep,Read,Write"
     assert write_allowed == (
-        "Bash(python3 -m pytest *),Edit(./src/allowed.py),Glob,Grep,Read,"
+        "Bash(python3 -m pytest *),Edit(./src/allowed.py),Glob(./**),Grep(./**),"
+        "Read(./**),"
         "Write(./src/allowed.py)"
     )
     assert "Edit" not in write_allowed.split(",")
     assert "Write" not in write_allowed.split(",")
+    for invocation in (read_only, write_and_test):
+        settings = json.loads(
+            invocation.argv[invocation.argv.index("--settings") + 1]
+        )
+        allowed = invocation.argv[
+            invocation.argv.index("--allowedTools") + 1
+        ].split(",")
+        denied = invocation.argv[
+            invocation.argv.index("--disallowedTools") + 1
+        ].split(",")
+        assert settings["permissions"]["allow"] == allowed
+        assert settings["permissions"]["deny"] == denied
+        assert not {
+            "Bash",
+            "Edit",
+            "Glob",
+            "Grep",
+            "Read",
+            "Write",
+        }.intersection(allowed)
     assert read_only.argv[read_only.argv.index("--disallowedTools") + 1] == (
         "Agent,Bash,Edit,NotebookEdit,Skill,Task,WebFetch,WebSearch,Write,mcp__*"
     )
@@ -228,6 +289,52 @@ def test_compiler_refuses_an_empty_capability_grant(tmp_path: Path) -> None:
         adapter.compile_launch(_spec(tmp_path, authorities=(), authority=None))
 
 
+@pytest.mark.parametrize(
+    "path",
+    (
+        "/absolute.py",
+        "",
+        ".",
+        "..",
+        "a/../b.py",
+        "a//b.py",
+        "a/./b.py",
+        r"a\b.py",
+        "src/\x00x.py",
+        "src/\x1fx.py",
+        "src/x),Bash(*)",
+        ".git/config",
+        ".codex/config.toml",
+        ".claude/settings.json",
+        "config.toml",
+        ".env",
+        ".env.secret",
+    ),
+)
+def test_compiler_refuses_unsafe_write_permission_path(
+    tmp_path: Path, path: str
+) -> None:
+    with pytest.raises(ClaudeWorkerContractError, match="not safe"):
+        _adapter(tmp_path).compile_launch(
+            _spec(
+                tmp_path,
+                authorities=("READ", "WRITE_BRANCH"),
+                allowed_artifact_paths=(path,),
+            )
+        )
+
+
+def test_compiler_refuses_duplicate_write_permission_paths(tmp_path: Path) -> None:
+    with pytest.raises(ClaudeWorkerContractError, match="duplicate"):
+        _adapter(tmp_path).compile_launch(
+            _spec(
+                tmp_path,
+                authorities=("READ", "WRITE_BRANCH"),
+                allowed_artifact_paths=("src/**/*.py", "src/**/*.py"),
+            )
+        )
+
+
 def test_compiler_uses_closed_environment_without_ambient_secrets(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -242,16 +349,12 @@ def test_compiler_uses_closed_environment_without_ambient_secrets(
         monkeypatch.setenv(name, value)
 
     invocation = _adapter(tmp_path).compile_launch(_spec(tmp_path))
-    serialized = json.dumps({"argv": invocation.argv, "environment": invocation.environment})
+    serialized = json.dumps({"argv": invocation.argv, "environment": repr(invocation.environment)})
 
-    assert invocation.environment == {
-        "HOME": "/var/empty",
-        "LANG": "C.UTF-8",
-        "LC_ALL": "C.UTF-8",
-        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
-        "TZ": "UTC",
-    }
+    with pytest.raises(TypeError):
+        invocation.environment["ANTHROPIC_AUTH_TOKEN"] = "must-not-fit"  # type: ignore[index]
+    with pytest.raises(ClaudeWorkerContractError, match="not realized"):
+        invocation.environment.as_subprocess_environment()
     for name, value in ambient.items():
-        assert name not in invocation.environment
         assert name not in serialized
         assert value not in serialized
