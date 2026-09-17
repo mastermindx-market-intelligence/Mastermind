@@ -102,3 +102,26 @@ source law returns to Sol; never fix it by excluding a module or guard.
 The phase ends at an exact source-and-test checkpoint, not harness completion.
 Next: consume this repair's current-head checks and owner/reviewer returns on
 #692, then continue the existing #687 environment/backend qualification DAG.
+
+
+## Executed repair evidence
+
+The source repair commit `891a50f6cca878f778276a40949eee9306d75c25` was exercised
+on the managed MacBook with CPython 3.12.14, pytest 9.1.1 and PyYAML 6.0.3.
+Four new boundary/scope tests were first RED against the original candidate.
+The repaired focused suite is 15 tests; the combined evaluator and two pure
+Executive host-contract suites are 787 tests, zero failures/errors/skips.
+Command family: `PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
+<isolated-python> -m pytest --noconftest -p no:cacheprovider -q
+ tests/test_agent_eval*.py tests/test_executive_host_capacity.py
+ tests/test_executive_host_pressure.py` (continued as one argv list).
+The explicit `--noconftest` excludes unrelated global repository fixtures;
+this is full execution of those selected modules, NOT full repository CI.
+
+Three temporary mutations each failed the named boundary test: removing exact
+wave admission, removing the core control-plane import ban, and adding a bridge
+ambient environment read. Original bytes were restored in all cases and the
+15-test focused suite passed again; the worktree was clean. AST comparison
+against the recovered candidate proves the relocated algorithm/imports are
+unchanged except for the module documentation. Full hosted CI, current-base
+release proof, independent review and shared-owner adoption remain separate.
