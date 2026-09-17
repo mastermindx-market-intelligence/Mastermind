@@ -2485,8 +2485,18 @@ def api_self_directed_history() -> JSONResponse:
         _attach_security_names(payload.get("pending"))
         return JSONResponse(payload)
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"history": [], "pending": [], "realized_total": 0.0,
-                             "n_closed": 0, "n_buys": 0, "win_rate": None, "error": str(exc)})
+        _log.warning("self-directed history read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "history_status": "unavailable",
+            "error": "self_directed_history_unavailable",
+            "history": None,
+            "pending": None,
+            "realized_total": None,
+            "n_closed": None,
+            "n_buys": None,
+            "win_rate": None,
+            "market": None,
+        })
 
 
 @router.get("/api/self_directed/search")
