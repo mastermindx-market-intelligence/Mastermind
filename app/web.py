@@ -3771,9 +3771,14 @@ def api_scheduler() -> JSONResponse:
     """
     try:
         from app.scheduler import scheduler_health
-        return JSONResponse({"jobs": scheduler_health()})
+        return JSONResponse({"scheduler_status": "available", "jobs": scheduler_health()})
     except Exception as exc:  # noqa: BLE001 — operator endpoint; must never raise
-        return JSONResponse({"jobs": [], "note": f"Scheduler health unavailable: {exc}"})
+        _log.warning("scheduler health read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "scheduler_status": "unavailable",
+            "jobs": None,
+            "error": "scheduler_health_unavailable",
+        })
 
 
 @router.get("/api/provenance")
