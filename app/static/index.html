@@ -3714,7 +3714,7 @@ var _papersLoaded = false, _papersLoad = null;
 var _calibLoaded = false, _calibLoad = null;
 var _pendingSelfSelect = false;   // set when loaded at /self — auto-select that tab once portfolios load
 var _portfolios = [];             // [{id,name,tagline,kind,manager,status}] from /api/portfolios
-var _decisions = [];              // autonomous Brain daily decision log (/api/decisions)
+var _decisions = [], _decisionsStatus = 'loading'; // selected Brain decision log + load truth
 var DECISION_PREVIEW_COUNT = 5, _decisionsExpanded = false;
 // run drilldown cache
 var _runLogCache = {};
@@ -6348,7 +6348,11 @@ window.setPortfolio = function(id) {
   clearTimeout(_liveTimer);
   _liveFetchSeq += 1;
   _liveMarks = null;
-  if (id !== _portfolio) _decisionsExpanded = false;
+  if (id !== _portfolio) {
+    _decisionsExpanded = false;
+    _decisions = [];
+    _decisionsStatus = 'loading';
+  }
   _portfolio = id;
   renderPortfolioSwitch();
   applyPortfolioScope();
@@ -6528,6 +6532,19 @@ function renderDecisions() {
   var more = E('dec-more');
   if (!host) return;
   var isZh = document.documentElement.getAttribute('data-lang') === 'zh';
+  if (_decisionsStatus === 'loading') {
+    host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">…</span>' +
+      '<span class="l-en">Loading decision journal…</span><span class="l-zh">正在加载决策日志…</span></div>';
+    if (more) more.hidden = true;
+    return;
+  }
+  if (_decisionsStatus === 'unavailable') {
+    host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">!</span>' +
+      '<span class="l-en">Decision journal unavailable — the last load did not complete.</span>' +
+      '<span class="l-zh">决策日志暂不可用 — 最近一次加载未完成。</span></div>';
+    if (more) more.hidden = true;
+    return;
+  }
   if (!_decisions || !_decisions.length) {
     host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">○</span>' +
       (isZh ? '尚无决策日志——大脑首次运行后出现。' : 'No decisions logged yet — appears after the Brain’s first run.') + '</div>';
@@ -7650,11 +7667,13 @@ function _fetchPortfolioDetails(id, base) {
     fetch('/api/decisions' + pf).then(function(r){ return r.ok ? r.json() : null; }).catch(function() { return null; }),
     fetch('/api/risk' + pf).then(function(r){ return r.ok ? r.json() : null; }).catch(function() { return null; }),
   ]).then(function(res) {
-    var dec = (res[2] && res[2].status === 'fulfilled' ? res[2].value : null) || {};
+    var decResponse = res[2] && res[2].status === 'fulfilled' ? res[2].value : null;
+    var dec = decResponse || {};
     return Object.assign({}, base, {
       trades: res[0] && res[0].status === 'fulfilled' ? res[0].value : null,
       performance: res[1] && res[1].status === 'fulfilled' ? res[1].value : null,
-      decisions: dec.decisions || [],
+      decisions: Array.isArray(dec.decisions) ? dec.decisions : null,
+      decisionsStatus: decResponse && dec.error !== 'decisions_unavailable' ? null : 'unavailable',
       risk: res[3] && res[3].status === 'fulfilled' ? res[3].value : null,
       cachedAt: Date.now(),
       complete: true,
@@ -7676,7 +7695,8 @@ function _fetchPortfolioSnapshot(id) {
 
 function _applyPortfolioSnapshot(snapshot) {
   if (!snapshot) return;
-  if (Object.prototype.hasOwnProperty.call(snapshot, 'decisions')) _decisions = snapshot.decisions || [];
+  if (Array.isArray(snapshot.decisions)) _decisions = snapshot.decisions;
+  if (Object.prototype.hasOwnProperty.call(snapshot, 'decisionsStatus')) _decisionsStatus = snapshot.decisionsStatus || null;
   if (Object.prototype.hasOwnProperty.call(snapshot, 'book')) _book = snapshot.book;
   if (Object.prototype.hasOwnProperty.call(snapshot, 'trades')) _trades = snapshot.trades;
   if (Object.prototype.hasOwnProperty.call(snapshot, 'performance')) _perf = snapshot.performance;

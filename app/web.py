@@ -1753,7 +1753,13 @@ def api_decisions(portfolio: str = "autonomous", limit: int = 60) -> JSONRespons
                              "archived": registry.is_archived(portfolio),
                              "scope": "mastermind_portfolio"})
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"decisions": [], "error": str(exc)})
+        _log.warning("decision journal read failed for %s: %s", portfolio, type(exc).__name__)
+        return JSONResponse({
+            "portfolio": portfolio,
+            "decisions": None,
+            "decision_log_status": "unavailable",
+            "error": "decisions_unavailable",
+        })
 
 
 @router.get("/api/posture")
