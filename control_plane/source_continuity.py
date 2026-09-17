@@ -18,6 +18,7 @@ from typing import Mapping
 
 RECEIPT_SCHEMA = "mastermind.source_continuity_receipt/v1"
 REFUSAL_SCHEMA = "mastermind.source_continuity_refusal/v1"
+WRITER_GATE_SCHEMA = "mastermind.source_continuity_writer_gate/v1"
 RECEIPT_VERSION = "v1"
 MAX_REMOTE_BLOB_BYTES = 10_000_000
 
@@ -33,6 +34,57 @@ _VERIFIED_AT_RE = re.compile(
     r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$"
 )
 _SAFE_BLOB_MODES = frozenset({"100644", "100755"})
+# Branch-rule types that cannot block or alter an owner-mediated expected-head
+# update of an existing branch: they govern ref creation/renaming or how pull
+# requests merge into the branch, never a direct fast-forward ref update. Every
+# other type is applicable, so a future write-blocking rule fails closed instead
+# of being silently excluded.
+_WRITER_GATE_INERT_RULE_TYPES = frozenset(
+    {"merge_queue", "branch_name_pattern", "tag_name_pattern"}
+)
+# Applicable rules a tree-preserving fast-forward fence commit cannot violate:
+# it creates no ref, deletes none, and rewrites no history. Their rulesets need
+# no accepted-integration bypass to leave the expected-head path executable.
+_WRITER_GATE_NON_MUTATING_RULE_TYPES = frozenset(
+    {"creation", "deletion", "non_fast_forward"}
+)
+# Closed snapshot of GitHub branch-rule types understood by this verifier.
+# Any applicable future type is retained and classified unavailable rather than
+# silently dropped, because its effect on expected-head mutation is unknown.
+_WRITER_GATE_KNOWN_RULE_TYPES = frozenset(
+    {
+        "creation",
+        "update",
+        "deletion",
+        "required_linear_history",
+        "merge_queue",
+        "required_deployments",
+        "required_signatures",
+        "pull_request",
+        "required_status_checks",
+        "non_fast_forward",
+        "commit_message_pattern",
+        "commit_author_email_pattern",
+        "committer_email_pattern",
+        "branch_name_pattern",
+        "tag_name_pattern",
+        "workflows",
+        "code_scanning",
+        "code_quality",
+        "code_coverage",
+        "copilot_code_review",
+        "license_compliance_scanning",
+        "file_path_restriction",
+        "max_file_path_length",
+        "file_extension_restriction",
+        "file_size",
+        "lock_branch",
+    }
+)
+_RULESET_SOURCE_TYPES = frozenset({"Repository", "Organization"})
+_RULESET_ENFORCEMENTS = frozenset({"active", "evaluate", "disabled"})
+_BYPASS_MODES = frozenset({"always", "pull_request", "exempt"})
+_MAX_GITHUB_ID = 2_147_483_647
 
 
 class ReceiptKind(str, Enum):
@@ -59,6 +111,24 @@ class CollisionState(str, Enum):
     DISJOINT = "DISJOINT"
     OVERLAP = "OVERLAP"
     INCOMPLETE = "INCOMPLETE"
+
+
+class WriterGateState(str, Enum):
+    ACTIVE = "TECHNICAL_WRITER_GATE_ACTIVE"
+    UNAVAILABLE = "TECHNICAL_WRITER_GATE_UNAVAILABLE"
+
+
+class WriterGateDefect(str, Enum):
+    RULES_ABSENT = "RULES_ABSENT"
+    UPDATE_RULE_MISSING = "UPDATE_RULE_MISSING"
+    DELETION_RULE_MISSING = "DELETION_RULE_MISSING"
+    NON_FAST_FORWARD_RULE_MISSING = "NON_FAST_FORWARD_RULE_MISSING"
+    CREATION_RESTRICTED = "CREATION_RESTRICTED"
+    ENFORCEMENT_NOT_ACTIVE = "ENFORCEMENT_NOT_ACTIVE"
+    BYPASS_WIDENED = "BYPASS_WIDENED"
+    UNKNOWN_APPLICABLE_RULE = "UNKNOWN_APPLICABLE_RULE"
+    OWNER_INTEGRATION_ABSENT = "OWNER_INTEGRATION_ABSENT"
+    LEGACY_PROTECTION_PRESENT = "LEGACY_PROTECTION_PRESENT"
 
 
 class RefusalCode(str, Enum):
@@ -675,3 +745,347 @@ def verify_source_continuity(
             "receipt_digest": digest,
         }
     )
+
+
+# --- RCH-1A stage 1: technical writer gate (evidence only) -------------------
+
+
+@dataclass(frozen=True)
+class WriterGateRequest:
+    operation_key: str
+    repository: str
+    branch: str
+    accepted_integration_id: int | None
+    verified_at: str
+
+
+@dataclass(frozen=True)
+class BranchRuleFact:
+    rule_type: str
+    ruleset_id: int
+    ruleset_source_type: str
+
+
+@dataclass(frozen=True)
+class BypassActorFact:
+    actor_type: str
+    actor_id: int | None
+    bypass_mode: str
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "actor_type": self.actor_type,
+            "actor_id": self.actor_id,
+            "bypass_mode": self.bypass_mode,
+        }
+
+
+@dataclass(frozen=True)
+class RulesetFact:
+    ruleset_id: int
+    source_type: str
+    enforcement: str
+    bypass_actors: tuple[BypassActorFact, ...]
+
+
+@dataclass(frozen=True)
+class WriterGateFacts:
+    """Exact GitHub readback for one branch.
+
+    `legacy_branch_protected` is the separate classic branch-protection
+    observation, never the branch summary's `protected` flag: that flag covers
+    branch protections *or* rulesets, so it cannot distinguish a ruleset-only
+    branch from one carrying a concurrent classic layer. Absence must come from
+    an actual absent readback; an unreadable or malformed one is a refusal.
+    """
+
+    repository: str
+    branch: str
+    branch_head_sha: str
+    legacy_branch_protected: bool
+    branch_rules: tuple[BranchRuleFact, ...]
+    rulesets: tuple[RulesetFact, ...]
+    readback_complete: bool
+
+
+@dataclass(frozen=True)
+class WriterGateReceipt:
+    """Classification of one branch's GitHub ref enforcement. Evidence only.
+
+    `ACTIVE` means a stale writer is technically unable to update or delete the
+    branch, no concurrent classic branch protection clouds that reading, and
+    only the accepted source-writer integration can mediate an expected-head
+    update. It grants no release, fence, merge, or transfer authority; the
+    RCH-1A recovery transaction remains a separate owner.
+    """
+
+    operation_key: str
+    repository: str
+    branch: str
+    branch_head_sha: str
+    legacy_branch_protected: bool
+    accepted_integration_id: int | None
+    enforcing_ruleset_ids: tuple[int, ...]
+    rule_types: tuple[str, ...]
+    bypass_actors: tuple[BypassActorFact, ...]
+    defects: tuple[WriterGateDefect, ...]
+    state: WriterGateState
+    verified_at: str
+    receipt_digest: str
+
+    @property
+    def authority_effect(self) -> str:
+        return "NONE"
+
+    @property
+    def writer_release_authorized(self) -> bool:
+        return False
+
+    @property
+    def fence_authorized(self) -> bool:
+        return False
+
+    @property
+    def merge_authorized(self) -> bool:
+        return False
+
+    @property
+    def receiver_transfer_authorized(self) -> bool:
+        return False
+
+    def _payload_without_digest(self) -> dict[str, object]:
+        return {
+            "schema": WRITER_GATE_SCHEMA,
+            "receipt_version": RECEIPT_VERSION,
+            "operation_key": self.operation_key,
+            "repository": self.repository,
+            "branch": self.branch,
+            "branch_head_sha": self.branch_head_sha,
+            "legacy_branch_protected": self.legacy_branch_protected,
+            "accepted_integration_id": self.accepted_integration_id,
+            "enforcing_ruleset_ids": list(self.enforcing_ruleset_ids),
+            "rule_types": list(self.rule_types),
+            "bypass_actors": [actor.to_dict() for actor in self.bypass_actors],
+            "defects": [defect.value for defect in self.defects],
+            "state": self.state.value,
+            "verified_at": self.verified_at,
+            "authority_effect": self.authority_effect,
+            "writer_release_authorized": self.writer_release_authorized,
+            "fence_authorized": self.fence_authorized,
+            "merge_authorized": self.merge_authorized,
+            "receiver_transfer_authorized": self.receiver_transfer_authorized,
+        }
+
+    def to_dict(self) -> dict[str, object]:
+        payload = self._payload_without_digest()
+        payload["receipt_digest"] = self.receipt_digest
+        return payload
+
+
+def _is_github_id(value: object) -> bool:
+    return _is_nonnegative_int(value) and 0 < value <= _MAX_GITHUB_ID
+
+
+def _writer_gate_request_is_valid(request: WriterGateRequest) -> bool:
+    if not isinstance(request, WriterGateRequest):
+        return False
+    if not isinstance(request.operation_key, str) or _OPERATION_RE.fullmatch(request.operation_key) is None:
+        return False
+    if not isinstance(request.repository, str) or _REPOSITORY_RE.fullmatch(request.repository) is None:
+        return False
+    if ".." in request.repository:
+        return False
+    if not _is_safe_ref(request.branch):
+        return False
+    if request.accepted_integration_id is not None and not _is_github_id(
+        request.accepted_integration_id
+    ):
+        return False
+    if not isinstance(request.verified_at, str) or _VERIFIED_AT_RE.fullmatch(request.verified_at) is None:
+        return False
+    try:
+        parsed = datetime.fromisoformat(request.verified_at.removesuffix("Z") + "+00:00")
+    except ValueError:
+        return False
+    return parsed.utcoffset() is not None
+
+
+def writer_gate_request_is_valid(request: WriterGateRequest) -> bool:
+    """Return whether a writer-gate request is safe to use for remote probes."""
+
+    return _writer_gate_request_is_valid(request)
+
+
+def _bypass_actor_is_valid(actor: object) -> bool:
+    return (
+        isinstance(actor, BypassActorFact)
+        and isinstance(actor.actor_type, str)
+        and bool(actor.actor_type)
+        and (actor.actor_id is None or _is_github_id(actor.actor_id))
+        and isinstance(actor.bypass_mode, str)
+        and actor.bypass_mode in _BYPASS_MODES
+    )
+
+
+def _ruleset_fact_is_valid(ruleset: object) -> bool:
+    if (
+        not isinstance(ruleset, RulesetFact)
+        or not _is_github_id(ruleset.ruleset_id)
+        or ruleset.source_type not in _RULESET_SOURCE_TYPES
+        or ruleset.enforcement not in _RULESET_ENFORCEMENTS
+        or not isinstance(ruleset.bypass_actors, tuple)
+        or not all(_bypass_actor_is_valid(actor) for actor in ruleset.bypass_actors)
+    ):
+        return False
+    return len(set(ruleset.bypass_actors)) == len(ruleset.bypass_actors)
+
+
+def _branch_rule_fact_is_valid(rule: object) -> bool:
+    return (
+        isinstance(rule, BranchRuleFact)
+        and isinstance(rule.rule_type, str)
+        and bool(rule.rule_type)
+        and _is_github_id(rule.ruleset_id)
+        and rule.ruleset_source_type in _RULESET_SOURCE_TYPES
+    )
+
+
+def _writer_gate_facts_are_valid(facts: WriterGateFacts) -> bool:
+    if (
+        not isinstance(facts, WriterGateFacts)
+        or not isinstance(facts.repository, str)
+        or _REPOSITORY_RE.fullmatch(facts.repository) is None
+        or not _is_safe_ref(facts.branch)
+        or not _is_sha(facts.branch_head_sha)
+        or type(facts.legacy_branch_protected) is not bool
+        or type(facts.readback_complete) is not bool
+        or not isinstance(facts.branch_rules, tuple)
+        or not isinstance(facts.rulesets, tuple)
+    ):
+        return False
+    if not all(_branch_rule_fact_is_valid(rule) for rule in facts.branch_rules):
+        return False
+    if len(set(facts.branch_rules)) != len(facts.branch_rules):
+        return False
+    if not all(_ruleset_fact_is_valid(ruleset) for ruleset in facts.rulesets):
+        return False
+    ruleset_ids = [ruleset.ruleset_id for ruleset in facts.rulesets]
+    if len(set(ruleset_ids)) != len(ruleset_ids):
+        return False
+    by_id = {ruleset.ruleset_id: ruleset for ruleset in facts.rulesets}
+    return all(
+        rule.ruleset_id not in by_id
+        or by_id[rule.ruleset_id].source_type == rule.ruleset_source_type
+        for rule in facts.branch_rules
+    )
+
+
+def verify_technical_writer_gate(
+    request: WriterGateRequest,
+    facts: WriterGateFacts,
+) -> WriterGateReceipt | SourceContinuityRefusal:
+    """Classify one branch's technical writer gate from exact GitHub readback.
+
+    Fails closed: any unreadable, incomplete, or mismatched fact is a refusal;
+    any readable configuration short of the frozen RCH-1A gate is an
+    `UNAVAILABLE` receipt naming every defect. Neither outcome carries
+    authority.
+    """
+
+    if not _writer_gate_request_is_valid(request):
+        return _refusal(RefusalCode.INVALID_REQUEST, exit_code=2)
+    if not _writer_gate_facts_are_valid(facts):
+        return _refusal(RefusalCode.REMOTE_FACTS_INVALID, exit_code=2)
+    if facts.repository != request.repository or facts.branch != request.branch:
+        return _refusal(RefusalCode.REMOTE_IDENTITY_MISMATCH, exit_code=2)
+
+    applicable_rules = tuple(
+        rule
+        for rule in facts.branch_rules
+        if rule.rule_type not in _WRITER_GATE_INERT_RULE_TYPES
+    )
+    unknown_rules = tuple(
+        rule
+        for rule in applicable_rules
+        if rule.rule_type not in _WRITER_GATE_KNOWN_RULE_TYPES
+    )
+    rulesets_by_id = {ruleset.ruleset_id: ruleset for ruleset in facts.rulesets}
+    enforcing_ids = tuple(sorted({rule.ruleset_id for rule in applicable_rules}))
+    if not facts.readback_complete or any(
+        ruleset_id not in rulesets_by_id for ruleset_id in enforcing_ids
+    ):
+        return _refusal(RefusalCode.REMOTE_CENSUS_INCOMPLETE, exit_code=2)
+
+    present_types = {rule.rule_type for rule in applicable_rules}
+    defects: set[WriterGateDefect] = set()
+    if facts.legacy_branch_protected:
+        # Classic branch protection is enforced alongside rulesets and can
+        # independently require pull requests or status checks, restrict push
+        # access, or lock the ref. V1 does not model that configuration, so a
+        # present classic layer never proves the accepted integration keeps a
+        # direct expected-head path, whatever the rulesets say.
+        defects.add(WriterGateDefect.LEGACY_PROTECTION_PRESENT)
+    if not applicable_rules:
+        defects.add(WriterGateDefect.RULES_ABSENT)
+    else:
+        if unknown_rules:
+            defects.add(WriterGateDefect.UNKNOWN_APPLICABLE_RULE)
+        if "update" not in present_types:
+            defects.add(WriterGateDefect.UPDATE_RULE_MISSING)
+        if "deletion" not in present_types:
+            defects.add(WriterGateDefect.DELETION_RULE_MISSING)
+        if "non_fast_forward" not in present_types:
+            defects.add(WriterGateDefect.NON_FAST_FORWARD_RULE_MISSING)
+        if "creation" in present_types:
+            defects.add(WriterGateDefect.CREATION_RESTRICTED)
+
+        accepted = request.accepted_integration_id
+        owner_actor = (
+            None
+            if accepted is None
+            else BypassActorFact(actor_type="Integration", actor_id=accepted, bypass_mode="always")
+        )
+        for ruleset_id in enforcing_ids:
+            ruleset = rulesets_by_id[ruleset_id]
+            if ruleset.enforcement != "active":
+                defects.add(WriterGateDefect.ENFORCEMENT_NOT_ACTIVE)
+            if any(actor != owner_actor for actor in ruleset.bypass_actors):
+                defects.add(WriterGateDefect.BYPASS_WIDENED)
+        mutation_ruleset_ids = {
+            rule.ruleset_id
+            for rule in applicable_rules
+            if rule.rule_type not in _WRITER_GATE_NON_MUTATING_RULE_TYPES
+        }
+        if owner_actor is None or any(
+            owner_actor not in rulesets_by_id[ruleset_id].bypass_actors
+            for ruleset_id in mutation_ruleset_ids
+        ):
+            defects.add(WriterGateDefect.OWNER_INTEGRATION_ABSENT)
+
+    bypass_actors = tuple(
+        sorted(
+            {
+                actor
+                for ruleset_id in enforcing_ids
+                for actor in rulesets_by_id[ruleset_id].bypass_actors
+            },
+            key=lambda actor: (actor.actor_type, actor.actor_id or 0, actor.bypass_mode),
+        )
+    )
+    receipt = WriterGateReceipt(
+        operation_key=request.operation_key,
+        repository=request.repository,
+        branch=request.branch,
+        branch_head_sha=facts.branch_head_sha,
+        legacy_branch_protected=facts.legacy_branch_protected,
+        accepted_integration_id=request.accepted_integration_id,
+        enforcing_ruleset_ids=enforcing_ids,
+        rule_types=tuple(sorted(present_types)),
+        bypass_actors=bypass_actors,
+        defects=tuple(sorted(defects, key=lambda defect: defect.value)),
+        state=WriterGateState.UNAVAILABLE if defects else WriterGateState.ACTIVE,
+        verified_at=request.verified_at,
+        receipt_digest="",
+    )
+    digest = _digest(receipt._payload_without_digest())
+    return WriterGateReceipt(**{**receipt.__dict__, "receipt_digest": digest})
