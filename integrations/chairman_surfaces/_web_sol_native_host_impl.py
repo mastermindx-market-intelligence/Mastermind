@@ -61,6 +61,9 @@ _PROBE_KEYS = frozenset(
 _SERVER_SOCKET_IDENTITIES: dict[int, tuple[int, int]] = {}
 _TYPED_REENTRY_NONCES: set[str] = set()
 MAX_TYPED_REENTRY_NONCES = 256
+_SUBMIT_CONTINUATION_NONCES: set[str] = set()
+_SUBMIT_CONTINUATION_TURNS: set[str] = set()
+MAX_SUBMIT_CONTINUATION_EFFECTS = 256
 
 
 class NativeHostError(RuntimeError):
@@ -481,15 +484,30 @@ def _timeout_code(request: dict[str, Any]) -> str:
         return "foreground_effect_unknown"
     if request.get("action") == "TYPED_REENTRY":
         return "typed_reentry_timeout"
+    if request.get("action") == "SUBMIT_CONTINUATION":
+        return "continuation_submit_effect_unknown"
     return "census_timeout" if request.get("schema") == census.REQUEST_SCHEMA else "inspect_timeout"
+
+
+def _receipt_match_fields(request: dict[str, Any]) -> tuple[str, ...]:
+    if request.get("schema") == census.REQUEST_SCHEMA:
+        return census.IDENTITY_FIELDS
+    fields = list(_MATCH_FIELDS)
+    if request.get("action") == wsp.SurfaceAction.TYPED_REENTRY.value:
+        fields.extend(("operation_id", "result_digest", "obligation_digest"))
+    if request.get("action") == wsp.SurfaceAction.SUBMIT_CONTINUATION.value:
+        fields.extend(("turn_id", "directive_digest"))
+    return tuple(fields)
 
 
 def _receipt_matches(
     request: dict[str, Any],
     receipt: dict[str, Any],
 ) -> bool:
-    fields = census.IDENTITY_FIELDS if request.get("schema") == census.REQUEST_SCHEMA else _MATCH_FIELDS
-    return all(receipt.get(field) == request[field] for field in fields)
+    return all(
+        receipt.get(field) == request[field]
+        for field in _receipt_match_fields(request)
+    )
 
 
 def _untrusted_receipt_code(request: dict[str, Any], default: str) -> str:
@@ -497,6 +515,8 @@ def _untrusted_receipt_code(request: dict[str, Any], default: str) -> str:
         return "foreground_effect_unknown"
     if request.get("action") == "TYPED_REENTRY":
         return "typed_reentry_effect_unknown"
+    if request.get("action") == "SUBMIT_CONTINUATION":
+        return "continuation_submit_effect_unknown"
     return default
 
 
@@ -541,7 +561,22 @@ def forward_request(
         )
     if accepted.get("action") == wsp.SurfaceAction.TYPED_REENTRY.value:
         _TYPED_REENTRY_NONCES.add(accepted["nonce"])
-    fields = census.IDENTITY_FIELDS if is_census else _MATCH_FIELDS
+    if accepted.get("action") == wsp.SurfaceAction.SUBMIT_CONTINUATION.value:
+        if accepted["nonce"] in _SUBMIT_CONTINUATION_NONCES:
+            raise NativeHostError("continuation_nonce_reused")
+        if accepted["turn_id"] in _SUBMIT_CONTINUATION_TURNS:
+            raise NativeHostError("continuation_turn_reused")
+        if (
+            len(_SUBMIT_CONTINUATION_NONCES) >= MAX_SUBMIT_CONTINUATION_EFFECTS
+            or len(_SUBMIT_CONTINUATION_TURNS) >= MAX_SUBMIT_CONTINUATION_EFFECTS
+        ):
+            raise wsp._error(
+                "$.turn_id",
+                "continuation effect ledger full; SUBMIT_CONTINUATION is closed",
+            )
+        _SUBMIT_CONTINUATION_NONCES.add(accepted["nonce"])
+        _SUBMIT_CONTINUATION_TURNS.add(accepted["turn_id"])
+    fields = _receipt_match_fields(accepted)
     exchange_deadline = deadline or Deadline(ends_at=monotonic() + timeout)
     _remaining_or_timeout(
         exchange_deadline,

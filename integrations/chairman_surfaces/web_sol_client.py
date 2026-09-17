@@ -115,6 +115,7 @@ def _request(
     operation_id: str | None = None,
     result_digest: str | None = None,
     obligation_digest: str | None = None,
+    turn_id: str | None = None,
 ) -> dict[str, Any]:
     accepted = _accepted_binding(binding)
     request = {
@@ -134,6 +135,13 @@ def _request(
                 "operation_id": operation_id,
                 "result_digest": result_digest,
                 "obligation_digest": obligation_digest,
+            }
+        )
+    if action == wsp.SurfaceAction.SUBMIT_CONTINUATION.value:
+        request.update(
+            {
+                "turn_id": turn_id,
+                "directive_digest": wsp.CONTINUATION_DIRECTIVE_DIGEST,
             }
         )
     return wsp.validate_request(request)
@@ -331,6 +339,8 @@ def _transport_failure_code(
         return "foreground_effect_unknown"
     if sent and action == "TYPED_REENTRY":
         return "typed_reentry_effect_unknown"
+    if sent and action == "SUBMIT_CONTINUATION":
+        return "continuation_submit_effect_unknown"
     if action == "CENSUS":
         return "census_unavailable"
     if sent:
@@ -423,6 +433,8 @@ def _untrusted_receipt_code(action: str, default: str) -> str:
         return "foreground_effect_unknown"
     if action == "TYPED_REENTRY":
         return "typed_reentry_effect_unknown"
+    if action == "SUBMIT_CONTINUATION":
+        return "continuation_submit_effect_unknown"
     return default
 
 
@@ -437,6 +449,7 @@ def _invoke(
     operation_id: str | None = None,
     result_digest: str | None = None,
     obligation_digest: str | None = None,
+    turn_id: str | None = None,
 ) -> dict[str, Any]:
     request = _request(
         binding,
@@ -448,6 +461,7 @@ def _invoke(
         operation_id=operation_id,
         result_digest=result_digest,
         obligation_digest=obligation_digest,
+        turn_id=turn_id,
     )
     try:
         instance_id = wsi.adapter_instance_id(binding)
@@ -470,14 +484,19 @@ def _invoke(
         raise WebSolExtensionError(
             _untrusted_receipt_code(action, "invalid_receipt")
         ) from exc
-    for field in (
+    match_fields = [
         "binding_id",
         "conversation_fingerprint",
         "binding_fingerprint",
         "action",
         "operation_key",
         "nonce",
-    ):
+    ]
+    if action == wsp.SurfaceAction.TYPED_REENTRY.value:
+        match_fields.extend(("operation_id", "result_digest", "obligation_digest"))
+    if action == wsp.SurfaceAction.SUBMIT_CONTINUATION.value:
+        match_fields.extend(("turn_id", "directive_digest"))
+    for field in match_fields:
         if accepted[field] != request[field]:
             raise WebSolExtensionError(
                 _untrusted_receipt_code(action, "receipt_identity_mismatch")
@@ -545,6 +564,33 @@ def typed_reentry_via_extension(
         operation_id=operation_id,
         result_digest=result_digest,
         obligation_digest=obligation_digest,
+        issued_at=issued_at,
+        expires_at=expires_at,
+        nonce=nonce,
+    )
+
+
+def submit_continuation_via_extension(
+    binding: dict[str, Any],
+    *,
+    operation_key: str,
+    turn_id: str,
+    issued_at: str,
+    expires_at: str,
+    nonce: str,
+) -> dict[str, Any]:
+    """Submit the one fixed Mastermind continuation directive at most once.
+
+    The caller supplies no prompt, text, selector, URL, retry, or account field.
+    ``turn_id`` is an existing provider/model-turn correlation identity; when
+    Executive OHF is the caller it is the canonical ``TurnRef.turn_id``.
+    """
+
+    return _invoke(
+        binding,
+        action="SUBMIT_CONTINUATION",
+        operation_key=operation_key,
+        turn_id=turn_id,
         issued_at=issued_at,
         expires_at=expires_at,
         nonce=nonce,
