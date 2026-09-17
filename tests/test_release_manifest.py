@@ -168,6 +168,10 @@ class TestAclRefusal:
 
 
 class TestOwnershipPolicy:
+    @pytest.mark.skipif(
+        getattr(os, "geteuid", lambda: 1000)() == 0,
+        reason="a root test process creates root-owned objects, inverting the premise",
+    )
     def test_non_root_release_object_is_still_rejected(self, release: Path) -> None:
         """No ``unowned`` fixture: the real root:wheel policy must still bite."""
         with pytest.raises(ReleaseManifestError, match="is not root:wheel"):
