@@ -140,6 +140,33 @@ def _read_first_mapping_checked(paths):
     return None, had_failure
 
 
+def _ticker_record_checked(mapping, ticker):
+    """Return one ticker record plus whether the mapping shape was invalid."""
+    if mapping is None:
+        return None, False
+    tickers = mapping.get("tickers")
+    if tickers is None:
+        return None, False
+    if not isinstance(tickers, dict):
+        return None, True
+    record = tickers.get(ticker)
+    if record is not None and not isinstance(record, dict):
+        return None, True
+    return record, False
+
+
+def _list_field_checked(mapping, key):
+    """Return one optional list field plus whether its persisted shape was invalid."""
+    if mapping is None:
+        return [], False
+    value = mapping.get(key)
+    if value is None:
+        return [], False
+    if not isinstance(value, list):
+        return [], True
+    return value, False
+
+
 def _pick(d, keys):
     """Shallow projection — {k: d[k]} for the keys present (drops noise/bulk)."""
     d = d or {}
@@ -349,23 +376,82 @@ async def get_divergences(args):
       {"type": "object", "properties": {"ticker": {"type": "string"}}, "required": ["ticker"]})
 async def get_altdata(args):
     t = (args.get("ticker") or "").upper()
-    bt = (_read_json(_V / "site" / "altdata" / "by_ticker.json")
-          or _read_json(_V / "data" / "altdata" / "by_ticker.json") or {})
-    rec = (bt.get("tickers") or {}).get(t)
-    latent = _read_json(_V / "site" / "altdata" / "latent.json") or {}
+    flow_store, flow_read_failed = _read_first_mapping_checked((
+        _V / "site" / "altdata" / "by_ticker.json",
+        _V / "data" / "altdata" / "by_ticker.json",
+    ))
+    rec, flow_shape_failed = _ticker_record_checked(flow_store, t)
+    flow_failed = flow_read_failed or flow_shape_failed
+    flow_available = flow_store is not None and not flow_shape_failed
+
+    latent, graph_read_failed = _read_first_mapping_checked((
+        _V / "site" / "altdata" / "latent.json",
+    ))
+    watch, watch_shape_failed = _list_field_checked(latent, "watch")
+    mismatches, mismatch_shape_failed = _list_field_checked(latent, "mismatches")
+    graph_failed = graph_read_failed or watch_shape_failed or mismatch_shape_failed
+    graph_available = latent is not None and not (watch_shape_failed or mismatch_shape_failed)
+
     graph = None
-    for w in (latent.get("watch") or []):
-        if (w.get("ticker") or "").upper() == t:
-            graph = {"in_graph": True, "themes": [th.get("en") for th in (w.get("themes") or [])],
-                     "trump_people": w.get("trump_people"), "top_holder": (w.get("top_holder") or {}).get("owner"),
-                     "alt_corroborated": w.get("alt_corroborated"), "note": w.get("note")}
+    for row in watch:
+        if not isinstance(row, dict):
+            graph_failed = True
+            continue
+        if (row.get("ticker") or "").upper() != t:
+            continue
+        themes = row.get("themes") or []
+        if not isinstance(themes, list) or any(not isinstance(theme, dict) for theme in themes):
+            graph_failed = True
+            themes = []
+        top_holder = row.get("top_holder") or {}
+        if not isinstance(top_holder, dict):
+            graph_failed = True
+            top_holder = {}
+        graph = {
+            "in_graph": True,
+            "themes": [theme.get("en") for theme in themes],
+            "trump_people": row.get("trump_people"),
+            "top_holder": top_holder.get("owner"),
+            "alt_corroborated": row.get("alt_corroborated"),
+            "note": row.get("note"),
+        }
+        break
+
+    mismatch = None
+    for row in mismatches:
+        if not isinstance(row, dict):
+            graph_failed = True
+            continue
+        tickers = {(row.get("repointed_ticker") or "").upper(), (row.get("entity_ticker") or "").upper()}
+        if t in tickers:
+            mismatch = row
             break
-    mismatch = next((m for m in (latent.get("mismatches") or [])
-                     if t in {(m.get("repointed_ticker") or "").upper(), (m.get("entity_ticker") or "").upper()}), None)
+
+    failed_sources = []
+    if flow_failed:
+        failed_sources.append("altdata_flow")
+    if graph_failed:
+        failed_sources.append("altdata_graph")
+    payload = {
+        "ticker": t,
+        "flow": rec,
+        "latent_graph": graph,
+        "label_mismatch": mismatch,
+        "note": "Public-record alt-data (congress/insider/govt-contract/SEC EDGAR — macro engine Signal Intelligence Desk). Context-only — informs narrative, never sizes alone.",
+    }
+    if failed_sources:
+        payload["read_status"] = (
+            "unavailable"
+            if flow_failed and graph_failed and not flow_available and not graph_available
+            else "partial"
+        )
+        payload["failed_sources"] = failed_sources
+        if payload["read_status"] == "unavailable":
+            payload["error"] = "ticker_altdata_unavailable"
+        return _json(payload)
     if rec is None and graph is None and mismatch is None:
         return _ok(f"no alt-data signal for {t} — not flagged by any political/insider/contract channel.")
-    return _json({"ticker": t, "flow": rec, "latent_graph": graph, "label_mismatch": mismatch,
-                  "note": "Public-record alt-data (congress/insider/govt-contract/SEC EDGAR — macro engine Signal Intelligence Desk). Context-only — informs narrative, never sizes alone."})
+    return _json(payload)
 
 
 @tool("get_news",
@@ -376,9 +462,24 @@ async def get_altdata(args):
       {"type": "object", "properties": {"ticker": {"type": "string"}}, "required": ["ticker"]})
 async def get_news(args):
     t = (args.get("ticker") or "").upper()
-    bt = (_read_json(_V / "site" / "news" / "by_ticker.json")
-          or _read_json(_V / "data" / "news" / "by_ticker.json") or {})
-    rec = (bt.get("tickers") or {}).get(t)
+    store, read_failed = _read_first_mapping_checked((
+        _V / "site" / "news" / "by_ticker.json",
+        _V / "data" / "news" / "by_ticker.json",
+    ))
+    rec, shape_failed = _ticker_record_checked(store, t)
+    failed = read_failed or shape_failed
+    healthy_store = store is not None and not shape_failed
+    if failed:
+        payload = {
+            "ticker": t,
+            "news": rec,
+            "read_status": "partial" if healthy_store else "unavailable",
+            "failed_sources": ["news"],
+            "note": "News evidence did not fully load; missing fields are unknown, not negative evidence.",
+        }
+        if payload["read_status"] == "unavailable":
+            payload["error"] = "ticker_news_unavailable"
+        return _json(payload)
     if rec is None:
         return _ok(f"no news-flow signal for {t} — not covered by the macro news surface.")
     return _json({"ticker": t, "news": rec,
@@ -395,20 +496,76 @@ async def get_news(args):
       {"type": "object", "properties": {"ticker": {"type": "string"}}, "required": ["ticker"]})
 async def get_intelligence(args):
     t = (args.get("ticker") or "").upper()
-    uni = (_read_json(_V / "site" / "intelligence" / "by_ticker.json")
-           or _read_json(_V / "data" / "intelligence" / "by_ticker.json") or {})
-    rec = (uni.get("tickers") or {}).get(t)
-    if rec is None:
-        # the unified bundle isn't published yet — compose from the standalone feeds
-        news = ((_read_json(_V / "site" / "news" / "by_ticker.json") or {}).get("tickers") or {}).get(t)
-        mm = (_read_json(_V / "site" / "altdata" / "mastermind.json") or {}).get("signals") or []
-        alt = next((s for s in mm if (s.get("ticker") or "").upper() == t), None)
-        if news is None and alt is None:
-            return _ok(f"no news or alt-data intelligence for {t}.")
-        rec = {"ticker": t, "news": news, "alt": alt, "has_news": bool(news), "has_alt": bool(alt)}
-    return _json({"ticker": t, **rec,
-                  "note": "News flow (what the tape says) + alt-data signal (what smart money does), side "
-                          "by side. Context-only — the divergence between them is the read; never sizes alone."})
+    unified_store, unified_read_failed = _read_first_mapping_checked((
+        _V / "site" / "intelligence" / "by_ticker.json",
+        _V / "data" / "intelligence" / "by_ticker.json",
+    ))
+    rec, unified_shape_failed = _ticker_record_checked(unified_store, t)
+    unified_failed = unified_read_failed or unified_shape_failed
+    unified_available = unified_store is not None and not unified_shape_failed
+
+    if rec is not None:
+        payload = {"ticker": t, **rec,
+                   "note": "News flow (what the tape says) + alt-data signal (what smart money does), side by side. Context-only — the divergence between them is the read; never sizes alone."}
+        if unified_failed:
+            payload["read_status"] = "partial"
+            payload["failed_sources"] = ["unified_intelligence"]
+        return _json(payload)
+
+    news_store, news_read_failed = _read_first_mapping_checked((
+        _V / "site" / "news" / "by_ticker.json",
+        _V / "data" / "news" / "by_ticker.json",
+    ))
+    news, news_shape_failed = _ticker_record_checked(news_store, t)
+    news_failed = news_read_failed or news_shape_failed
+    news_available = news_store is not None and not news_shape_failed
+
+    alt_store, alt_read_failed = _read_first_mapping_checked((
+        _V / "site" / "altdata" / "mastermind.json",
+    ))
+    signals, signals_shape_failed = _list_field_checked(alt_store, "signals")
+    alt_failed = alt_read_failed or signals_shape_failed
+    alt_available = alt_store is not None and not signals_shape_failed
+    alt = None
+    for row in signals:
+        if not isinstance(row, dict):
+            alt_failed = True
+            continue
+        if (row.get("ticker") or "").upper() == t:
+            alt = row
+            break
+
+    failed_sources = []
+    if unified_failed:
+        failed_sources.append("unified_intelligence")
+    if news_failed:
+        failed_sources.append("news")
+    if alt_failed:
+        failed_sources.append("altdata")
+
+    composed = {"ticker": t, "news": news, "alt": alt, "has_news": bool(news), "has_alt": bool(alt)}
+    if failed_sources:
+        payload = {
+            **composed,
+            "read_status": (
+                "unavailable"
+                if unified_failed and news_failed and alt_failed
+                and not unified_available and not news_available and not alt_available
+                else "partial"
+            ),
+            "failed_sources": failed_sources,
+            "note": "Intelligence evidence did not fully load; missing fields are unknown, not negative evidence.",
+        }
+        if payload["read_status"] == "unavailable":
+            payload["error"] = "ticker_intelligence_unavailable"
+        return _json(payload)
+
+    if news is None and alt is None:
+        return _ok(f"no news or alt-data intelligence for {t}.")
+    return _json({
+        **composed,
+        "note": "News flow (what the tape says) + alt-data signal (what smart money does), side by side. Context-only — the divergence between them is the read; never sizes alone.",
+    })
 
 
 @tool("get_quote",
