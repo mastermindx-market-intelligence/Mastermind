@@ -3662,6 +3662,33 @@ var fmtTsShort = function(s) {
 
 // ── state ────────────────────────────────────────────────────────────────────
 var _book = null, _trades = null, _activity = [], _research = [];
+var _researchStatus = 'loading';
+function _researchUnavailable() {
+  return { research_status: 'unavailable', error: 'research_feed_unavailable', notes: null };
+}
+function _researchFetch() {
+  return fetch('/api/research')
+    .then(function(r) { return r.ok ? r.json() : _researchUnavailable(); })
+    .catch(function() { return _researchUnavailable(); });
+}
+function _applyResearchFeed(data) {
+  if (Array.isArray(data)) {
+    _research = data; _researchStatus = null;
+  } else {
+    _research = []; _researchStatus = 'unavailable';
+  }
+  _researchPage = 0;
+  return _research;
+}
+window.retryResearchFeed = function() {
+  _researchStatus = 'loading';
+  _safeRender('research', renderResearch);
+  return _researchFetch().then(function(data) {
+    _applyResearchFeed(data);
+    _safeRender('research', renderResearch);
+    return _research;
+  });
+};
 var _shadowBooks = null;          // parallel forward shadow-book leaderboard (/api/shadow_books)
 var _predictions = null;          // universe-wide prediction log coverage + cross-sectional scorecard
 var _engineBacktest = null;       // historical engine-backtest verdict (/api/engine_backtest)
@@ -3712,9 +3739,9 @@ var _runsStatus = 'loading';
 var RUNS_RENDER_CHUNK = 60, _runsVisible = RUNS_RENDER_CHUNK;
 var _risk = null;                 // portfolio safety scorecard (/api/risk) — the risk backtest
 var _papers = [];                 // research papers (the Research page rows)
+var _papersStatus = 'loading';
 var PAPERS_RENDER_CHUNK = 60, _papersVisible = PAPERS_RENDER_CHUNK;
 var _researchRevision = 0, _researchRenderedKey = '';
-var _papersErr = null;            // server-side error from /api/research_papers, surfaced in the empty state
 var _openPaperId = null;          // id of the paper currently shown in the thesis modal (for PDF export)
 var _calib = null;                // outcome ledger (the Calibration sub-page)
 var _researchSub = 'theses';      // 'theses' | 'calibration'
@@ -5098,6 +5125,20 @@ function renderBrainLog() {
 // ── RESEARCH FEED ─────────────────────────────────────────────────────────────
 function renderResearch() {
   var el = E('research');
+  if (_researchStatus === 'loading') {
+    el.innerHTML = collH2('research', 'Research Feed', '研究动态') + '<div class="mm-empty"><span class="mm-empty-icon">…</span>' +
+      '<span class="l-en">Loading research feed…</span><span class="l-zh">正在加载研究动态…</span></div>';
+    applyColl('research');
+    return;
+  }
+  if (_researchStatus === 'unavailable') {
+    el.innerHTML = collH2('research', 'Research Feed', '研究动态') + '<div class="mm-empty"><span class="mm-empty-icon">!</span>' +
+      '<span class="l-en">Research feed unavailable — this read did not complete.</span>' +
+      '<span class="l-zh">研究动态暂不可用 — 本次读取未完成。</span>' +
+      '<div style="margin-top:8px"><button class="mm-pager-btn" type="button" onclick="retryResearchFeed()"><span class="l-en">Retry</span><span class="l-zh">重试</span></button></div></div>';
+    applyColl('research');
+    return;
+  }
   if (!_research.length) {
     el.innerHTML = collH2('research', 'Research Feed', '研究动态') + '<div class="mm-empty"><span class="mm-empty-icon">○</span>' + t('research.empty') + '</div>';
     applyColl('research');
@@ -5164,6 +5205,10 @@ function _actionMeta(a) {
 function _ciClass(n) { return n == null ? '' : (n >= 72 ? 'hi' : n >= 60 ? 'mid' : 'lo'); }
 function _scoreCell(n) { return n == null ? '—' : n; }
 
+function _researchPapersUnavailable() {
+  return { paper_status: 'unavailable', error: 'research_papers_unavailable', papers: null };
+}
+
 function renderResearchPapers() {
   var host = E('rp-host');
   if (!host) return;
@@ -5171,14 +5216,23 @@ function renderResearchPapers() {
     _researchRevision,
     _papersVisible,
     document.documentElement.getAttribute('data-lang') || 'en',
-    _papersErr || '',
+    _papersStatus || '',
   ].join('|');
   if (_researchRenderedKey === renderKey) return;
   _researchRenderedKey = renderKey;
+  if (_papersStatus === 'loading') {
+    host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">…</span>' +
+      '<span class="l-en">Loading research papers…</span><span class="l-zh">正在加载研究论文…</span></div>';
+    return;
+  }
+  if (_papersStatus === 'unavailable') {
+    host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">!</span>' +
+      '<span class="l-en">Research papers unavailable — this read did not complete. Reopen this view to retry.</span>' +
+      '<span class="l-zh">研究论文暂不可用 — 本次读取未完成。重新打开此页面即可重试。</span></div>';
+    return;
+  }
   if (!_papers.length) {
-    host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">○</span>' + t('rp.empty')
-      + (_papersErr ? '<div style="margin-top:8px;font-size:11.5px;color:var(--down)">' + esc(String(_papersErr)) + '</div>' : '')
-      + '</div>';
+    host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">○</span>' + t('rp.empty') + '</div>';
     return;
   }
   var shownPapers = _papers.slice(0, _papersVisible);
@@ -5249,13 +5303,21 @@ function _ensureRuns() {
 function _ensureResearchPapers() {
   if (_papersLoaded) { renderResearchPapers(); return Promise.resolve(_papers); }
   if (_papersLoad) return _papersLoad;
-  _papersLoad = fetch('/api/research_papers').then(function(r) {
-      return r.ok ? r.json() : { papers: [], error: 'research papers unavailable' };
-    }).catch(function(e) { return { papers: [], error: String(e || 'fetch failed') }; })
+  _papersStatus = 'loading';
+  _researchRenderedKey = '';
+  if (_currentView === 'research') _safeRender('researchPapers', renderResearchPapers);
+  _papersLoad = fetch('/api/research_papers')
+    .then(function(r) { return r.ok ? r.json() : _researchPapersUnavailable(); })
+    .catch(function() { return _researchPapersUnavailable(); })
     .then(function(data) {
-      data = data || {};
-      _papers = data.papers || []; _papersErr = data.error || null;
-      _papersLoaded = true; _papersLoad = null; _researchRevision += 1; _researchRenderedKey = '';
+      data = data || _researchPapersUnavailable();
+      if (data.paper_status === 'unavailable' || data.error === 'research_papers_unavailable') {
+        _papers = []; _papersStatus = 'unavailable';
+      } else {
+        _papers = Array.isArray(data.papers) ? data.papers : []; _papersStatus = null;
+      }
+      _papersLoaded = _papersStatus !== 'unavailable';
+      _papersLoad = null; _researchRevision += 1; _researchRenderedKey = '';
       if (_currentView === 'research') _safeRender('researchPapers', renderResearchPapers);
       return _papers;
     });
@@ -8016,7 +8078,7 @@ function _hydrateShared() {
   _sharedLoad = loadPortfolios().then(function() {
     return Promise.allSettled([
       fetch('/api/activity').then(function(r)  { return r.ok ? r.json() : [];   }).catch(function() { return []; }),
-      fetch('/api/research').then(function(r)  { return r.ok ? r.json() : [];   }).catch(function() { return []; }),
+      _researchFetch(),
       _learningFetch('/api/shadow_books', 'shadow_books'),
       _learningFetch('/api/predictions', 'predictions'),
       _learningFetch('/api/engine_backtest', 'engine_backtest'),
@@ -8030,7 +8092,7 @@ function _hydrateShared() {
         ebtRes = s[4], fzRes = s[5], fundRes = s[6],
         studentRes = s[7], distillRes = s[8];
     _activity    = (actRes.status    === 'fulfilled' ? actRes.value     : null) || [];
-    _research    = (researchRes.status === 'fulfilled' ? researchRes.value : null) || [];
+    _applyResearchFeed(researchRes.status === 'fulfilled' ? researchRes.value : _researchUnavailable());
     _shadowBooks    = shadowRes.status === 'fulfilled' ? shadowRes.value : null;
     _predictions    = predRes.status   === 'fulfilled' ? predRes.value   : null;
     _engineBacktest = ebtRes.status    === 'fulfilled' ? ebtRes.value    : null;
