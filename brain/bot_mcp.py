@@ -117,6 +117,29 @@ def _read_json(p: Path):
     return json.loads(p.read_text()) if p.exists() else None
 
 
+def _read_first_mapping_checked(paths):
+    """Read the first available JSON source while preserving unreadable-source truth.
+
+    Returns ``(mapping, had_failure)``. Missing paths are legitimate absence; malformed,
+    unreadable, or wrong-shaped paths set ``had_failure`` but do not prevent a lower-priority
+    mirror from being consumed. This is intentionally narrow and used only by the ticker deep-dive.
+    """
+    had_failure = False
+    for path in paths:
+        try:
+            value = _read_json(path)
+        except Exception:  # noqa: BLE001 - caller projects a closed source status
+            had_failure = True
+            continue
+        if value is None:
+            continue
+        if not isinstance(value, dict):
+            had_failure = True
+            continue
+        return value, had_failure
+    return None, had_failure
+
+
 def _pick(d, keys):
     """Shallow projection — {k: d[k]} for the keys present (drops noise/bulk)."""
     d = d or {}
@@ -465,23 +488,48 @@ async def get_intake_candidates(args):
       {"type": "object", "properties": {"ticker": {"type": "string"}}, "required": ["ticker"]})
 async def get_ticker_package(args):
     t = (args.get("ticker") or "").upper()
-    uni = (_read_json(_V / "site" / "intelligence" / "by_ticker.json")
-           or _read_json(_V / "data" / "intelligence" / "by_ticker.json") or {})
+    uni, intelligence_failed = _read_first_mapping_checked((
+        _V / "site" / "intelligence" / "by_ticker.json",
+        _V / "data" / "intelligence" / "by_ticker.json",
+    ))
+    uni = uni or {}
     intel = (uni.get("tickers") or {}).get(t)
     pkg = {"ticker": t, "intelligence": intel}
+    failed_sources = []
+    if intelligence_failed:
+        failed_sources.append("intelligence")
     try:
         from portfolio import lenses
-        s = lenses.synthesize(lenses.decision_matrix(t, "name"))
-        pkg["lenses"] = {"divergences": s.get("divergences"), "confluence": s.get("confluence"),
-                         "vetoes": s.get("vetoes")}
-    except Exception as e:  # noqa: BLE001
-        pkg["lenses"] = {"error": f"decision matrix unavailable ({e})"}
+        synthesis = lenses.synthesize(lenses.decision_matrix(t, "name"))
+        pkg["lenses"] = {
+            "divergences": synthesis.get("divergences"),
+            "confluence": synthesis.get("confluence"),
+            "vetoes": synthesis.get("vetoes"),
+        }
+    except Exception:  # noqa: BLE001
+        failed_sources.append("lenses")
+        pkg["lenses"] = {
+            "read_status": "unavailable",
+            "error": "ticker_package_lenses_unavailable",
+        }
     try:
         from brain import intake
         prov = next((c for c in intake.queue(60) if c["ticker"] == t), None)
         pkg["intake"] = prov
     except Exception:  # noqa: BLE001
+        failed_sources.append("intake")
         pkg["intake"] = None
+
+    if failed_sources:
+        pkg["failed_sources"] = failed_sources
+        pkg["read_status"] = "unavailable" if len(failed_sources) == 3 else "partial"
+        if pkg["read_status"] == "unavailable":
+            pkg["error"] = "ticker_package_unavailable"
+        pkg["note"] = (
+            "Ticker-package evidence is incomplete; missing fields are unknown, not negative evidence."
+        )
+        return _json(pkg)
+
     if intel is None and pkg.get("intake") is None:
         return _ok(f"no per-ticker intelligence for {t} — not flagged by any dashboard engine.")
     pkg["note"] = ("Full per-name picture: intelligence facets + lens divergences + intake provenance. "
