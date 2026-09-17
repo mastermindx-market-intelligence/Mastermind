@@ -5220,13 +5220,23 @@ function _ensureResearchPapers() {
   return _papersLoad;
 }
 
+function _calibrationUnavailable() {
+  return {
+    ledger_status: 'unavailable', error: 'outcome_ledger_unavailable',
+    summary: null, reliability_curve: null, lens_edge: null, lens_weights: null, records: null
+  };
+}
+
 function _ensureCalibration() {
   if (_calibLoaded) { renderCalibrationPage(); return Promise.resolve(_calib); }
   if (_calibLoad) return _calibLoad;
-  _calibLoad = fetch('/api/outcome_ledger').then(function(r) { return r.ok ? r.json() : null; })
-    .catch(function() { return null; })
+  _calibLoad = fetch('/api/outcome_ledger')
+    .then(function(r) { return r.ok ? r.json() : _calibrationUnavailable(); })
+    .catch(function() { return _calibrationUnavailable(); })
     .then(function(data) {
-      _calib = data; _calibLoaded = true; _calibLoad = null;
+      _calib = data || _calibrationUnavailable();
+      _calibLoaded = _calib.ledger_status !== 'unavailable' && _calib.error !== 'outcome_ledger_unavailable';
+      _calibLoad = null;
       if (_currentView === 'research' && _researchSub === 'calibration') {
         _safeRender('calibration', renderCalibrationPage);
       }
@@ -5257,19 +5267,27 @@ function renderCalibrationPage() {
   var host = E('calib-host');
   if (!host) return;
   var d = _calib || {};
-  var sum = d.summary || {};
-  var curve = d.reliability_curve || [];
-  var edge = d.lens_edge || [];
-  var weights = d.lens_weights || {};
-  var records = d.records || [];
-  var building = (!sum.n) || sum.status === 'building';
-
   var html = '';
 
   // header + explainer
   html += '<h2><span class="l-en">Calibration — has the engine earned its confidence?</span>' +
           '<span class="l-zh">校准 — 引擎配得上它的信心吗？</span></h2>';
   html += '<div class="mm-cal-explain">' + t('cal.explain') + '</div>';
+
+  if (d.ledger_status === 'unavailable' || d.error === 'outcome_ledger_unavailable') {
+    html += '<div class="mm-cal-building"><span class="ic">!</span><span class="tx">' +
+      '<span class="l-en"><strong>Calibration data unavailable</strong> — the outcome ledger could not be read. Reopen this view to retry.</span>' +
+      '<span class="l-zh"><strong>校准数据暂不可用</strong> — 无法读取结果账本。重新打开此页面即可重试。</span></span></div>';
+    host.innerHTML = html;
+    return;
+  }
+
+  var sum = d.summary || {};
+  var curve = d.reliability_curve || [];
+  var edge = d.lens_edge || [];
+  var weights = d.lens_weights || {};
+  var records = d.records || [];
+  var building = (!sum.n) || sum.status === 'building';
 
   // building / empty banner
   if (building) {
