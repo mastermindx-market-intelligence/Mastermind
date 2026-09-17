@@ -35,6 +35,8 @@ after source work and safe serialization before releasing bytes.
 
 - `ManagedTurnWindowSource`: adapts one existing projection, full `TurnKey`, and
   already-issued reader grant. It performs no grant or provider effects.
+- `BrokerTurnWindowSource`: validates the existing `ohf-observe-turn` wire result
+  and supplies the same reader without exposing broker/native identifiers to the caller.
 - `LiveWindowReader`: drains bounded pages, preserves correction identity,
   discloses gaps, applies content decisions, and emits a strict public document.
 - `build_business_workspace_content_resource`: composes the current Business JWT
