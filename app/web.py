@@ -2460,12 +2460,8 @@ def api_self_directed_history() -> JSONResponse:
             _attach_security_names(payload.get("pending"))
             return JSONResponse(payload)
     except Exception as exc:  # noqa: BLE001
-        _log.warning("self_directed history failed: %s", type(exc).__name__)
-        return JSONResponse({
-            "history": [], "pending": [], "realized_total": None,
-            "n_closed": None, "n_buys": None, "win_rate": None,
-            "error": "self_directed_history_unavailable",
-        })
+        return JSONResponse({"history": [], "pending": [], "realized_total": 0.0,
+                             "n_closed": 0, "n_buys": 0, "win_rate": None, "error": str(exc)})
 
 
 @router.get("/api/self_directed/search")
@@ -2473,10 +2469,14 @@ def api_self_directed_search(q: str = "") -> JSONResponse:
     """Live US-stock search (ticker or company name) for the order ticket."""
     try:
         from data_layer import polygon
-        return JSONResponse({"results": polygon.search_tickers(q)})
+        return JSONResponse({"search_status": "available", "results": polygon.search_tickers(q)})
     except Exception as exc:  # noqa: BLE001
         _log.warning("self_directed search failed: %s", type(exc).__name__)
-        return JSONResponse({"results": [], "error": "self_directed_search_unavailable"})
+        return JSONResponse({
+            "search_status": "unavailable",
+            "results": None,
+            "error": "self_directed_search_unavailable",
+        })
 
 
 @router.get("/api/self_directed/quote")
@@ -2484,11 +2484,16 @@ def api_self_directed_quote(ticker: str = "") -> JSONResponse:
     """Live price + company name + market state for one ticker (order-ticket display)."""
     try:
         from portfolio import self_directed
-        return JSONResponse(self_directed.quote_info(ticker))
+        payload = self_directed.quote_info(ticker)
+        return JSONResponse({"quote_status": "available", **payload})
     except Exception as exc:  # noqa: BLE001
         _log.warning("self_directed quote failed: %s", type(exc).__name__)
         return JSONResponse({
-            "ticker": (ticker or "").upper(), "price": None, "name": "",
+            "quote_status": "unavailable",
+            "ticker": (ticker or "").upper(),
+            "price": None,
+            "name": None,
+            "market": None,
             "error": "self_directed_quote_unavailable",
         })
 
@@ -2538,7 +2543,10 @@ def api_self_directed_cancel(order_id: str = "") -> JSONResponse:
     try:
         with lock:
             from portfolio import self_directed
-            return JSONResponse({"ok": self_directed.cancel_order(order_id)})
+            removed = self_directed.cancel_order(order_id)
+            if not removed:
+                return JSONResponse({"ok": False, "error": "self_directed_cancel_not_found"})
+            return JSONResponse({"ok": True})
     except Exception as exc:  # noqa: BLE001
         _log.warning("self_directed cancel failed: %s", type(exc).__name__)
         return JSONResponse(
