@@ -2,13 +2,14 @@
 import copy, hashlib, json
 from pathlib import Path
 import pytest
-pytest.importorskip('playwright.sync_api', reason='Playwright unavailable in this environment', exc_type=ImportError)
-from playwright.sync_api import sync_playwright, expect
 from tests.mastermind_window_reader._browser_support import browser_available, browser_launch_kwargs
 from integrations.mastermind_window_reader.recorded_view import render_capture
 
 _AVAILABLE, _REASON = browser_available()
+
 pytestmark = pytest.mark.skipif(not _AVAILABLE, reason=_REASON)
+pytest.importorskip('playwright.sync_api', reason=_REASON or 'Playwright unavailable in this environment', exc_type=ImportError)
+from playwright.sync_api import sync_playwright, expect
 
 
 ROOT=Path(__file__).resolve().parents[0]

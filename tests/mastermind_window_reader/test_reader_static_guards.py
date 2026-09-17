@@ -44,6 +44,8 @@ def test_browser_modules_use_capability_driven_qualification():
         assert 'pytest.mark.skip(' not in source
         assert 'browser_available()' in source
         assert 'pytest.mark.skipif(' in source
+        assert source.index('_AVAILABLE, _REASON = browser_available()') < source.index('playwright.sync_api')
+        assert source.index('pytest.mark.skipif(') < source.index('playwright.sync_api')
         assert "importorskip('playwright.sync_api'" in source
         launches = re.findall(r'chromium\.launch\([^\n]*', source)
         assert launches
@@ -51,6 +53,21 @@ def test_browser_modules_use_capability_driven_qualification():
             launch == 'chromium.launch(**browser_launch_kwargs())'
             for launch in launches
         )
+
+
+def test_verify_script_refuses_output_inside_repository(tmp_path, monkeypatch):
+    pytest.importorskip('jwt')
+    pytest.importorskip('playwright.sync_api')
+    import scripts.verify_window_browser as verifier
+    repo = Path(verifier.__file__).resolve().parents[1]
+    monkeypatch.chdir(repo)
+    with pytest.raises(SystemExit):
+        verifier.resolve_output_dir(str(repo))
+    with pytest.raises(SystemExit):
+        verifier.resolve_output_dir(str(repo / 'evidence'))
+    with pytest.raises(SystemExit):
+        verifier.resolve_output_dir('.')
+    assert verifier.resolve_output_dir(str(tmp_path)) == tmp_path.resolve()
 
 
 def test_browser_available_reports_missing_dependency_without_raising(monkeypatch):

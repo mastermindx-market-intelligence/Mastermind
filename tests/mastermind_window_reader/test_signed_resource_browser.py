@@ -7,8 +7,6 @@ import asyncio,copy,hashlib,json
 import pytest
 
 pytest.importorskip('jwt', reason='PyJWT unavailable in this environment')
-pytest.importorskip('playwright.sync_api', reason='Playwright unavailable in this environment', exc_type=ImportError)
-from playwright.sync_api import sync_playwright,expect
 from cryptography.hazmat.primitives.asymmetric import rsa
 from tests.mastermind_window_reader._browser_support import browser_available, browser_launch_kwargs
 from integrations.mastermind_window_reader.recorded_view import render_connection_shell
@@ -18,6 +16,8 @@ CAP=json.loads(RAW)
 
 _AVAILABLE, _REASON = browser_available()
 pytestmark = pytest.mark.skipif(not _AVAILABLE, reason=_REASON)
+pytest.importorskip('playwright.sync_api', reason=_REASON or 'Playwright unavailable in this environment', exc_type=ImportError)
+from playwright.sync_api import sync_playwright,expect
 
 @pytest.fixture(scope='module')
 def browser():

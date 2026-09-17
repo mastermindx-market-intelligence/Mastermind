@@ -90,6 +90,7 @@ def test_http_status_values_are_plain_asgi_integers():
     assert int(HTTPStatus.NOT_FOUND)==404
     owner=OwnerFixture();got=call(app(owner),query=b'path=/etc/passwd')
     assert got[0]==404
+    assert type(got[0]) is int
 
 @pytest.mark.parametrize('change',[
  lambda o:setattr(o,'ticket',None),

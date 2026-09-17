@@ -6,6 +6,12 @@ from playwright.sync_api import sync_playwright
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))  # run as a script: put the repository root ahead of scripts/
+
+def resolve_output_dir(raw):
+    out_dir=Path(raw).resolve()
+    if out_dir==ROOT or ROOT in out_dir.parents:raise SystemExit('refusing --out inside the repository root: '+str(out_dir))
+    return out_dir
+
 from integrations.mastermind_window_reader.recorded_view import render_connection_shell
 from tests.mastermind_window_reader._browser_support import browser_launch_kwargs
 from tests.mastermind_window_reader.test_window_resource import signed_window
@@ -17,7 +23,7 @@ def main():
     parser=argparse.ArgumentParser()
     parser.add_argument('--out',default=tempfile.mkdtemp(prefix='window-browser-'))
     args=parser.parse_args()
-    out_dir=Path(args.out).resolve();out_dir.mkdir(parents=True,exist_ok=True)
+    out_dir=resolve_output_dir(args.out);out_dir.mkdir(parents=True,exist_ok=True)
     key=rsa.generate_private_key(public_exponent=65537,key_size=2048)
     app,state,source=signed_window(key);signed=token(key)
     calls=[]

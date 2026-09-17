@@ -74,6 +74,7 @@ class NativeOutputReadResource:
 
     async def __call__(self,scope,receive,send):
         async def reply(status,payload):
+            status=int(status)
             raw=payload if isinstance(payload,bytes) else json.dumps(payload,separators=(',',':')).encode()
             await send({'type':'http.response.start','status':status,'headers':[
                 (b'content-type',b'application/json; charset=utf-8'),(b'cache-control',b'no-store'),
