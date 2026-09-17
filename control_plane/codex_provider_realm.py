@@ -294,20 +294,33 @@ ALIBABA_TOKEN_PLAN = CodexProviderRealm(
 )
 
 REVIEWED_CODEX_PROVIDER_REALMS = {
-    realm.realm_id: realm for realm in (ALIBABA_TOKEN_PLAN,)
+    realm.realm_id: realm for realm in (MINIMAX_TOKEN_PLAN, ALIBABA_TOKEN_PLAN,)
 }
 
 CANDIDATE_CODEX_PROVIDER_REALMS_SPEC_ONLY = {
-    realm.realm_id: realm for realm in (MINIMAX_TOKEN_PLAN, OPENCODE_GO_TOKEN_PLAN,)
+    realm.realm_id: realm for realm in (OPENCODE_GO_TOKEN_PLAN,)
 }
 
-# Kit-side Responses transport was observed with Codex 0.147 against MiniMax's
-# OpenAI-compatible base, but it is not officially documented. Promotion to the
-# reviewed registry requires an exact-head native execution proof. No worker
-# binding is authorized from this candidate collection. The OpenCode Go realm
-# is SPEC-ONLY; kit-side Responses transport was proven only for some upstream
-# models (see kit GO_PROOF_LEDGER) and promotion requires the reviewed exact-head
-# native execution proof; no worker binding is authorized from it.
+# MiniMax Token Plan was promoted out of quarantine by the exact-head native
+# transport proof recorded in the secret-free, reviewable repository artifact:
+# review_evidence/provider_realms/minimax_codex_responses_20260915.json
+# (source receipt SHA-256
+# 84771422af5ef24e12f6ec0e82a2b107763fceaca77f1c7c7915493802bee3dd).
+# It records codex-cli 0.154.0, rc 0, MiniMax-M3 and wire_api "responses"
+# without credential fingerprints, credential type tags or host-local paths.
+# The observed helper used the existing `minimax` pool; the candidate
+# `minimax-codex` binding was not executed. The artifact therefore proves only
+# transport reachability -- not a governed-path canary, capacity observation,
+# usage-policy decision or autonomous-routing grant -- so
+# this realm is reviewed for transport and no worker binding is armed by the
+# promotion. The binding it enables (minimax-token-plan.codex-responses) stays
+# BUILT_NOT_PROVEN with autonomous_allowed false, and a live lane still requires
+# every per-binding enrollment, capacity, canary and usage-policy gate.
+#
+# The OpenCode Go realm remains SPEC-ONLY and quarantined: kit-side Responses
+# transport was proven only for some upstream models (see kit GO_PROOF_LEDGER)
+# and promotion requires the reviewed exact-head native execution proof; no
+# worker binding is authorized from it.
 
 ProviderCredentialLoader = Callable[[], str]
 
