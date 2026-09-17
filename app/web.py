@@ -590,7 +590,14 @@ def _quote_provenance(tickers: list[str]) -> dict[str, dict[str, Any]]:
     return out
 
 
-_PERSISTED_MARK_MAX_AGE_DAYS = 30
+def _dashboard_mark_max_age_days() -> int | None:
+    """Canonical dashboard carry horizon from portfolio.marks; None means reject carry."""
+    try:
+        from portfolio import marks
+        value = int(marks._stale_max_days())
+    except Exception:  # noqa: BLE001 -- no local fallback policy
+        return None
+    return value if value >= 0 else None
 
 
 def _date_part(value: Any) -> date | None:
@@ -636,8 +643,9 @@ def _persisted_book_quotes(
     """Last valid per-position marks for the dashboard's *display-only* fallback.
 
     This is deliberately separate from every fill/rebalance price path.  It reads only the book's
-    persisted account and published portfolio snapshot, rejects future-dated or >30-calendar-day
-    marks, and returns the book's BASE-currency price with explicit provenance.  The published
+    persisted account and published portfolio snapshot, rejects future-dated marks or carries beyond
+    the canonical portfolio.marks horizon, and returns the book's BASE-currency price with explicit
+    provenance.  The published
     snapshot wins ties because it also records whether the strategy published after the cash market
     had closed.  Legacy account ``current_price`` fields without an as-of are never trusted on their
     own; an existing close snapshot can still attest the same holding during the upgrade cutover.
@@ -646,6 +654,9 @@ def _persisted_book_quotes(
     if not wanted:
         return {}
     target_date = _date_part(asof) or date.today()
+    max_age_days = _dashboard_mark_max_age_days()
+    if max_age_days is None:
+        return {}
     base = _portfolio_dir(portfolio_id)
     snapshot = _read_json_object(base / "latest.json")
     if portfolio_id == "self_directed":
@@ -714,7 +725,7 @@ def _persisted_book_quotes(
         eligible = []
         for mark_date, priority, px, meta in rows:
             age_days = (target_date - mark_date).days
-            if age_days < 0 or age_days > _PERSISTED_MARK_MAX_AGE_DAYS:
+            if age_days < 0 or age_days > max_age_days:
                 continue
             eligible.append((mark_date, priority, px, meta, age_days))
         if not eligible:
@@ -748,13 +759,16 @@ def _select_dashboard_quote(
     """
     if current and current.get("source") == "yahoo_intraday":
         return current
+    max_age_days = _dashboard_mark_max_age_days()
+    if max_age_days is None:
+        return None
     target_date = _date_part(asof) or date.today()
     if current:
         current_date = _date_part(current.get("as_of"))
         current_age = (target_date - current_date).days if current_date is not None else None
         current_is_bounded = (
             current_age is not None
-            and 0 <= current_age <= _PERSISTED_MARK_MAX_AGE_DAYS
+            and 0 <= current_age <= max_age_days
         )
         if not current_is_bounded:
             current = None
