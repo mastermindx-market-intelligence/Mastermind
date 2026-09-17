@@ -242,9 +242,9 @@ one evidence-only receipt (`mastermind.source_continuity_writer_gate/v1`):
 - `TECHNICAL_WRITER_GATE_UNAVAILABLE` — any readable configuration short of that, naming every defect
   (`RULES_ABSENT`, `UPDATE_RULE_MISSING`, `DELETION_RULE_MISSING`, `NON_FAST_FORWARD_RULE_MISSING`,
   `CREATION_RESTRICTED`, `ENFORCEMENT_NOT_ACTIVE`, `BYPASS_WIDENED`, `UNKNOWN_APPLICABLE_RULE`,
-  `OWNER_INTEGRATION_ABSENT`). Unknown applicable branch-rule types are retained in the receipt and
-  fail closed; the adapter must never filter them out merely because the current classifier does not
-  yet know their semantics.
+  `OWNER_INTEGRATION_ABSENT`, `LEGACY_PROTECTION_PRESENT`). Unknown applicable branch-rule types are
+  retained in the receipt and fail closed; the adapter must never filter them out merely because the
+  current classifier does not yet know their semantics.
 - a fixed refusal when the readback is invalid, incomplete, mismatched, or moved during the proof. A
   refusal is never `ACTIVE`.
 
@@ -257,6 +257,18 @@ tree-preserving fence commit creates no ref, deletes none and rewrites no histor
 applicable rule — `lock_branch`, `pull_request`, `required_signatures`, `required_status_checks`,
 content and pattern restrictions, and any type this verifier does not yet know — must leave the
 accepted integration an executable expected-head path, or the gate is `UNAVAILABLE`.
+
+Classic branch protection is a second enforcement layer, read separately. GitHub enforces branch
+protections and rulesets alongside one another, and the
+branch summary `protected` flag is not a classic-protection observation — it is true for a
+ruleset-only branch as well. The gate therefore reads the branch's own classic protection endpoint,
+and `legacy_branch_protected` on the receipt is that reading alone. Because a classic layer can
+independently require pull requests or status checks, restrict push access to named actors, or lock
+the ref, V1 requires `no concurrent classic branch protection` for `ACTIVE`: any present layer is
+`LEGACY_PROTECTION_PRESENT` and `UNAVAILABLE`, whatever the rulesets say. Absence must come from an
+actual absent readback; an unreadable, malformed or moved one is a refusal and is never converted to
+absence. A later version may model the complete classic configuration and prove the accepted
+integration retains the exact expected-head path; until then the conservative reading stands.
 
 Neither state changes the §3.6 ordering or any fence: `EFFECT_UNKNOWN remains exact-session sticky`,
 local dirt and unpushed commits remain nontransferable, and the receipt authorizes no release, fence

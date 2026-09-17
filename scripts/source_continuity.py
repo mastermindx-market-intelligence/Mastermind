@@ -135,6 +135,25 @@ class _RemoteProbeError(Exception):
     pass
 
 
+class _RemoteResourceMissing(_RemoteProbeError):
+    """A 404 on an endpoint whose absence is itself a lawful observation.
+
+    Subclasses `_RemoteProbeError` so every existing caller keeps failing
+    closed unchanged; only an explicit optional readback may read it as
+    absence. Transports signal it by the marker attribute, not by class
+    identity, so an injected transport can raise its own type.
+    """
+
+    source_continuity_resource_missing = True
+
+
+_MISSING = object()
+
+
+def _is_resource_missing(error: BaseException) -> bool:
+    return getattr(error, "source_continuity_resource_missing", False) is True
+
+
 class _ReadBudgetExceeded(Exception):
     pass
 
@@ -159,6 +178,7 @@ class _BoundedHTTPGet:
         self._calls = 0
         self._bytes = 0
         self._conditional_observations: list[_ConditionalObservation] = []
+        self._missing_observations: list[str] = []
         self.parallel_safe = (
             transport is _stdlib_http_get
             or getattr(transport, "_source_continuity_parallel_safe", False) is True
@@ -256,11 +276,29 @@ class _BoundedHTTPGet:
         self._account_payload(payload)
         return payload
 
+    def get_optional(self, url: str, *, token: str, timeout: float) -> object:
+        """GET a resource that may lawfully be absent.
+
+        Only an absence the transport marks as such becomes `_MISSING`; every
+        other failure propagates and fails closed. The absence is recorded so
+        a resource that appears mid-proof is caught as a change.
+        """
+
+        try:
+            return self(url, token=token, timeout=timeout)
+        except Exception as error:
+            if not _is_resource_missing(error):
+                raise
+        with self._lock:
+            self._missing_observations.append(url)
+        return _MISSING
+
     def validate_unchanged(self, *, token: str) -> bool:
         if not self.conditional_validation_available:
             raise _RemoteProbeError()
         with self._lock:
             observations = tuple(self._conditional_observations)
+            absences = tuple(self._missing_observations)
         for observation in observations:
             call_timeout = self._admit_call(_HTTP_TIMEOUT_SECONDS)
             payload = self._transport(
@@ -283,6 +321,17 @@ class _BoundedHTTPGet:
                 self._account_payload(payload.payload)
                 return False
             raise _RemoteProbeError()
+        for url in absences:
+            call_timeout = self._admit_call(_HTTP_TIMEOUT_SECONDS)
+            try:
+                payload = self._transport(url, token=token, timeout=call_timeout)
+            except Exception as error:
+                if _is_resource_missing(error):
+                    continue
+                raise
+            if isinstance(payload, _HTTPRepresentation):
+                self._account_payload(payload.payload)
+            return False
         return True
 
 
@@ -504,6 +553,8 @@ def _stdlib_http_get(
             return _HTTPRepresentation(payload=None, etag=etag, not_modified=True)
         if exc.code in {401, 403}:
             raise _AuthProbeError() from None
+        if exc.code == 404:
+            raise _RemoteResourceMissing() from None
         raise _RemoteProbeError() from None
     except (URLError, TimeoutError, OSError):
         raise _RemoteProbeError() from None
@@ -529,8 +580,29 @@ def _api(http_get: HTTPGet, token: str, endpoint: str) -> object:
     )
 
 
+def _api_optional(http_get: HTTPGet, token: str, endpoint: str) -> object:
+    """Read an endpoint whose absence is a lawful observation, else `_MISSING`."""
+
+    if not isinstance(endpoint, str) or endpoint.startswith(("http://", "https://")):
+        raise _RemoteProbeError()
+    url = f"{_API_ROOT}/{endpoint}"
+    optional = getattr(http_get, "get_optional", None)
+    if optional is not None:
+        return optional(url, token=token, timeout=_HTTP_TIMEOUT_SECONDS)
+    try:
+        return http_get(url, token=token, timeout=_HTTP_TIMEOUT_SECONDS)
+    except Exception as error:
+        if not _is_resource_missing(error):
+            raise
+    return _MISSING
+
+
 def _branch_endpoint(repository: str, branch: str) -> str:
     return f"repos/{repository}/branches/{quote(branch, safe='')}"
+
+
+def _branch_protection_endpoint(repository: str, branch: str) -> str:
+    return f"repos/{repository}/branches/{quote(branch, safe='')}/protection"
 
 
 def _branch_rules_endpoint(repository: str, branch: str) -> str:
@@ -1725,12 +1797,26 @@ def _probe_writer_gate_facts(
     if not isinstance(branch_payload, dict):
         raise _RemoteProbeError()
     branch_commit = branch_payload.get("commit")
-    protected = branch_payload.get("protected")
+    # The summary `protected` flag covers branch protections *or* rulesets, so
+    # it is only a shape check here. Classic protection is its own readback.
+    summary_protected = branch_payload.get("protected")
     if (
         not isinstance(branch_commit, dict)
         or not _is_sha(branch_commit.get("sha"))
-        or type(protected) is not bool
+        or type(summary_protected) is not bool
     ):
+        raise _RemoteProbeError()
+
+    protection = _api_optional(
+        http_get,
+        token,
+        _branch_protection_endpoint(request.repository, request.branch),
+    )
+    if protection is _MISSING:
+        legacy_branch_protected = False
+    elif isinstance(protection, dict):
+        legacy_branch_protected = True
+    else:
         raise _RemoteProbeError()
 
     rules = _parse_branch_rules(
@@ -1758,7 +1844,7 @@ def _probe_writer_gate_facts(
         repository=request.repository,
         branch=request.branch,
         branch_head_sha=branch_commit["sha"],
-        legacy_branch_protected=protected,
+        legacy_branch_protected=legacy_branch_protected,
         branch_rules=rules,
         rulesets=rulesets,
         readback_complete=True,

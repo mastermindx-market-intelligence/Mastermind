@@ -50,8 +50,11 @@ def _contract():
     return module
 
 
+CLI_MODULE_NAME = "source_continuity_writer_gate_cli_under_test"
+
+
 def _cli_module():
-    name = "source_continuity_writer_gate_cli_under_test"
+    name = CLI_MODULE_NAME
     spec = importlib.util.spec_from_file_location(name, CLI_PATH)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -246,7 +249,9 @@ def test_legacy_branch_protection_alone_never_satisfies_the_gate() -> None:
             rulesets=(),
         ),
     )
-    payload = _assert_unavailable(module, result, "RULES_ABSENT")
+    payload = _assert_unavailable(
+        module, result, "LEGACY_PROTECTION_PRESENT", "RULES_ABSENT"
+    )
     assert payload["legacy_branch_protected"] is True
 
 
@@ -576,6 +581,26 @@ def _branch_endpoint(branch: str = BRANCH) -> str:
     return f"repos/{REPOSITORY}/branches/{quote(branch, safe='')}"
 
 
+def _protection_endpoint(branch: str = BRANCH) -> str:
+    return f"repos/{REPOSITORY}/branches/{quote(branch, safe='')}/protection"
+
+
+class _MissingResource(Exception):
+    """A fake 404 on an endpoint whose absence is itself a lawful observation."""
+
+    source_continuity_resource_missing = True
+
+
+def _cli_probe_error() -> type[BaseException]:
+    """`_RemoteProbeError` of the exact CLI module object under test.
+
+    `_cli_module()` re-executes the module per test, so the fake transport must
+    resolve the class when it is called, never from an earlier execution.
+    """
+
+    return sys.modules[CLI_MODULE_NAME]._RemoteProbeError
+
+
 class _GateHTTP:
     """Endpoint-keyed fake of authenticated GitHub GETs for the writer gate."""
 
@@ -587,6 +612,10 @@ class _GateHTTP:
         org_rulesets=None,
         branch=None,
         move_rules_on_second_read: bool = False,
+        protection=None,
+        protection_unreadable: bool = False,
+        protection_on_second_read=None,
+        protection_absent_on_second_read: bool = False,
     ) -> None:
         self.calls: list[tuple[str, str, float]] = []
         self.rules = [] if rules is None else rules
@@ -594,7 +623,26 @@ class _GateHTTP:
         self.org_rulesets = {} if org_rulesets is None else org_rulesets
         self.branch = branch or {"commit": {"sha": HEAD_SHA}, "protected": False}
         self.move_rules_on_second_read = move_rules_on_second_read
+        self.protection = protection
+        self.protection_unreadable = protection_unreadable
+        self.protection_on_second_read = protection_on_second_read
+        self.protection_absent_on_second_read = protection_absent_on_second_read
         self.rules_reads = 0
+        self.protection_reads = 0
+
+    def _classic_protection(self):
+        self.protection_reads += 1
+        if self.protection_unreadable:
+            raise _cli_probe_error()()
+        current = self.protection
+        if self.protection_reads > 1:
+            if self.protection_on_second_read is not None:
+                current = self.protection_on_second_read
+            elif self.protection_absent_on_second_read:
+                current = None
+        if current is None:
+            raise _MissingResource()
+        return current
 
     def __call__(self, url: str, *, token: str, timeout: float):
         self.calls.append((url, token, timeout))
@@ -604,6 +652,8 @@ class _GateHTTP:
         endpoint = url.removeprefix(API_ROOT + "/")
         if endpoint == _branch_endpoint():
             return self.branch
+        if endpoint == _protection_endpoint():
+            return self._classic_protection()
         if endpoint == _rules_endpoint():
             self.rules_reads += 1
             if self.move_rules_on_second_read and self.rules_reads > 1:
@@ -707,13 +757,14 @@ def test_cli_active_gate_prints_one_receipt_from_read_only_probes(capsys) -> Non
     assert payload["writer_release_authorized"] is False
     assert payload["fence_authorized"] is False
     endpoints = [url.removeprefix(API_ROOT + "/") for url, _, _ in http.calls]
-    assert endpoints[:3] == [
+    assert endpoints[:4] == [
         _branch_endpoint(),
+        _protection_endpoint(),
         _rules_endpoint(),
         f"repos/{REPOSITORY}/rulesets/{REPO_RULESET}",
     ]
     # Second observation re-reads the same facts; nothing else is touched.
-    assert set(endpoints) == set(endpoints[:3])
+    assert set(endpoints) == set(endpoints[:4])
     assert all(TOKEN not in url for url, _, _ in http.calls)
 
 
@@ -930,6 +981,7 @@ def test_review_return_release_maintainer_records_the_writer_gate_state() -> Non
     assert "does not block a clean RCH-1 same-PR release" in text
     assert "must be recorded in the release commission" in text
     assert "neither state grants" in text
+    assert "`legacy_branch_protected` is the branch's own classic branch-protection readback" in text
 
 
 # --- R1 exact review blockers: lock_branch, unknown rules, bypass modes ------
@@ -1317,3 +1369,214 @@ def test_cli_accepted_integration_exempt_mode_is_widened_and_unmediated(capsys) 
     assert exit_code == 0
     assert payload["state"] == "TECHNICAL_WRITER_GATE_UNAVAILABLE"
     assert payload["defects"] == ["BYPASS_WIDENED", "OWNER_INTEGRATION_ABSENT"]
+
+
+# --- R2 exact review blocker: concurrent classic branch protection ----------
+
+
+def test_legacy_protection_flag_is_load_bearing_in_the_active_predicate() -> None:
+    """The exact discriminator from review 5233167865 / ruling 5709838127."""
+
+    module = _contract()
+    absent = _verify(module, facts=_active_facts(module, legacy_branch_protected=False))
+    present = _verify(module, facts=_active_facts(module, legacy_branch_protected=True))
+
+    assert isinstance(absent, module.WriterGateReceipt)
+    assert absent.state is module.WriterGateState.ACTIVE
+    assert absent.to_dict()["defects"] == []
+    _assert_unavailable(module, present, "LEGACY_PROTECTION_PRESENT")
+
+
+def test_classic_protection_is_reported_on_the_receipt_face() -> None:
+    module = _contract()
+    result = _verify(module, facts=_active_facts(module, legacy_branch_protected=True))
+    assert isinstance(result, module.WriterGateReceipt)
+    payload = result.to_dict()
+    assert payload["legacy_branch_protected"] is True
+    assert payload["state"] == "TECHNICAL_WRITER_GATE_UNAVAILABLE"
+    assert payload["merge_authorized"] is False
+
+
+def test_legacy_protection_defect_is_a_member_of_the_closed_defect_set() -> None:
+    module = _contract()
+    assert module.WriterGateDefect.LEGACY_PROTECTION_PRESENT.value == "LEGACY_PROTECTION_PRESENT"
+
+
+_CLASSIC_SHAPES = {
+    "lock": {"lock_branch": {"enabled": True}},
+    "restricted_apps": {
+        "restrictions": {"users": [], "teams": [], "apps": [{"id": ACCEPTED_APP}]}
+    },
+    "required_pull_request": {
+        "required_pull_request_reviews": {"required_approving_review_count": 1}
+    },
+    "required_status_checks": {"required_status_checks": {"strict": True, "contexts": []}},
+    "enforce_admins": {"enforce_admins": {"enabled": True}},
+}
+
+
+def test_cli_probes_classic_protection_separately_from_the_branch_summary() -> None:
+    module = _cli_module()
+    http = _active_http(branch={"commit": {"sha": HEAD_SHA}, "protected": True})
+    _run(module, _argv(), http=http)
+    endpoints = {url.removeprefix(API_ROOT + "/") for url, _token, _timeout in http.calls}
+    assert _protection_endpoint() in endpoints
+    assert _branch_endpoint() in endpoints
+
+
+def test_cli_ruleset_only_protected_branch_stays_active(capsys) -> None:
+    module = _cli_module()
+    http = _active_http(branch={"commit": {"sha": HEAD_SHA}, "protected": True})
+    exit_code = _run(module, _argv(), http=http)
+    payload = json.loads(capsys.readouterr().out.strip())
+
+    assert exit_code == 0
+    assert payload["state"] == "TECHNICAL_WRITER_GATE_ACTIVE"
+    assert payload["legacy_branch_protected"] is False
+    assert payload["defects"] == []
+
+
+@pytest.mark.parametrize("shape", sorted(_CLASSIC_SHAPES))
+def test_cli_concurrent_classic_protection_never_reaches_active(shape, capsys) -> None:
+    module = _cli_module()
+    http = _active_http(
+        branch={"commit": {"sha": HEAD_SHA}, "protected": True},
+        protection=_CLASSIC_SHAPES[shape],
+    )
+    exit_code = _run(module, _argv(), http=http)
+    payload = json.loads(capsys.readouterr().out.strip())
+
+    assert exit_code == 0
+    assert payload["state"] == "TECHNICAL_WRITER_GATE_UNAVAILABLE"
+    assert payload["legacy_branch_protected"] is True
+    assert payload["defects"] == ["LEGACY_PROTECTION_PRESENT"]
+    assert payload["writer_release_authorized"] is False
+
+
+def test_cli_unreadable_classic_protection_fails_closed_instead_of_absent(capsys) -> None:
+    module = _cli_module()
+    http = _active_http(protection_unreadable=True)
+    exit_code = _run(module, _argv(), http=http)
+    payload = json.loads(capsys.readouterr().out.strip())
+
+    assert exit_code == 2
+    assert payload["code"] == "REMOTE_PROBE_FAILED"
+
+
+def test_cli_malformed_classic_protection_payload_fails_closed(capsys) -> None:
+    module = _cli_module()
+    http = _active_http(protection=["not", "an", "object"])
+    exit_code = _run(module, _argv(), http=http)
+    payload = json.loads(capsys.readouterr().out.strip())
+
+    assert exit_code == 2
+    assert payload["code"] == "REMOTE_PROBE_FAILED"
+
+
+def test_cli_classic_protection_appearing_between_observations_refuses(capsys) -> None:
+    module = _cli_module()
+    http = _active_http(protection_on_second_read=_CLASSIC_SHAPES["lock"])
+    exit_code = _run(module, _argv(), http=http)
+    payload = json.loads(capsys.readouterr().out.strip())
+
+    assert exit_code == 1
+    assert payload["code"] == "REMOTE_PROOF_CHANGED"
+
+
+def test_cli_classic_protection_disappearing_between_observations_refuses(capsys) -> None:
+    module = _cli_module()
+    http = _active_http(
+        protection=_CLASSIC_SHAPES["lock"],
+        protection_absent_on_second_read=True,
+    )
+    exit_code = _run(module, _argv(), http=http)
+    payload = json.loads(capsys.readouterr().out.strip())
+
+    assert exit_code == 1
+    assert payload["code"] == "REMOTE_PROOF_CHANGED"
+
+
+def test_session_close_law_pins_the_classic_protection_layer() -> None:
+    text = SESSION_CLOSE_PATH.read_text(encoding="utf-8")
+    assert "LEGACY_PROTECTION_PRESENT" in text
+    assert "branch summary `protected` flag is not a classic-protection observation" in text
+    assert "no concurrent classic branch protection" in text
+
+
+# --- conditional revalidation of an absent optional readback ----------------
+
+
+class _ConditionalTransport:
+    """Real-transport-shaped fake: ETag revalidation plus lawful 404 absence."""
+
+    _source_continuity_conditional = True
+
+    def __init__(self, module, *, missing, appears: bool = False, unreadable: bool = False) -> None:
+        self.module = module
+        self.missing = missing
+        self.appears = appears
+        self.unreadable = unreadable
+        self.reads: dict[str, int] = {}
+
+    def __call__(self, url, *, token, timeout, if_none_match=None):
+        assert token == TOKEN and timeout > 0
+        self.reads[url] = self.reads.get(url, 0) + 1
+        if url == self.missing:
+            if self.unreadable and self.reads[url] > 1:
+                raise self.module._RemoteProbeError()
+            if not self.appears or self.reads[url] == 1:
+                raise self.module._RemoteResourceMissing()
+            return self.module._HTTPRepresentation(
+                payload={"lock_branch": {"enabled": True}},
+                etag='"' + "a" * 32 + '"',
+                not_modified=False,
+            )
+        etag = '"' + f"{abs(hash(url)):032x}"[:32] + '"'
+        if if_none_match is None:
+            return self.module._HTTPRepresentation(
+                payload={"url": url}, etag=etag, not_modified=False
+            )
+        return self.module._HTTPRepresentation(payload=None, etag=etag, not_modified=True)
+
+
+_ABSENT_URL = f"{API_ROOT}/repos/{REPOSITORY}/branches/x/protection"
+_PRESENT_URL = f"{API_ROOT}/repos/{REPOSITORY}/branches/x"
+
+
+def _bounded_with_absence(module, **overrides):
+    transport = _ConditionalTransport(module, missing=_ABSENT_URL, **overrides)
+    bounded = module._BoundedHTTPGet(transport)
+    assert bounded(_PRESENT_URL, token=TOKEN, timeout=20.0) == {"url": _PRESENT_URL}
+    assert bounded.get_optional(_ABSENT_URL, token=TOKEN, timeout=20.0) is module._MISSING
+    return bounded
+
+
+def test_conditional_validation_accepts_an_optional_resource_that_stays_absent() -> None:
+    module = _cli_module()
+    bounded = _bounded_with_absence(module)
+    assert bounded.validate_unchanged(token=TOKEN) is True
+
+
+def test_conditional_validation_detects_an_absent_resource_that_appears() -> None:
+    module = _cli_module()
+    bounded = _bounded_with_absence(module, appears=True)
+    assert bounded.validate_unchanged(token=TOKEN) is False
+
+
+def test_conditional_validation_fails_closed_on_an_unreadable_absence_recheck() -> None:
+    module = _cli_module()
+    bounded = _bounded_with_absence(module, unreadable=True)
+    with pytest.raises(module._RemoteProbeError):
+        bounded.validate_unchanged(token=TOKEN)
+
+
+def test_get_optional_never_swallows_a_real_probe_failure() -> None:
+    module = _cli_module()
+
+    def failing(url, *, token, timeout):
+        raise module._RemoteProbeError()
+
+    bounded = module._BoundedHTTPGet(failing)
+    with pytest.raises(module._RemoteProbeError):
+        bounded.get_optional(_ABSENT_URL, token=TOKEN, timeout=20.0)
+    assert bounded._missing_observations == []

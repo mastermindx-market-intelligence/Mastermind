@@ -128,6 +128,7 @@ class WriterGateDefect(str, Enum):
     BYPASS_WIDENED = "BYPASS_WIDENED"
     UNKNOWN_APPLICABLE_RULE = "UNKNOWN_APPLICABLE_RULE"
     OWNER_INTEGRATION_ABSENT = "OWNER_INTEGRATION_ABSENT"
+    LEGACY_PROTECTION_PRESENT = "LEGACY_PROTECTION_PRESENT"
 
 
 class RefusalCode(str, Enum):
@@ -789,6 +790,15 @@ class RulesetFact:
 
 @dataclass(frozen=True)
 class WriterGateFacts:
+    """Exact GitHub readback for one branch.
+
+    `legacy_branch_protected` is the separate classic branch-protection
+    observation, never the branch summary's `protected` flag: that flag covers
+    branch protections *or* rulesets, so it cannot distinguish a ruleset-only
+    branch from one carrying a concurrent classic layer. Absence must come from
+    an actual absent readback; an unreadable or malformed one is a refusal.
+    """
+
     repository: str
     branch: str
     branch_head_sha: str
@@ -803,9 +813,10 @@ class WriterGateReceipt:
     """Classification of one branch's GitHub ref enforcement. Evidence only.
 
     `ACTIVE` means a stale writer is technically unable to update or delete the
-    branch and only the accepted source-writer integration can mediate an
-    expected-head update. It grants no release, fence, merge, or transfer
-    authority; the RCH-1A recovery transaction remains a separate owner.
+    branch, no concurrent classic branch protection clouds that reading, and
+    only the accepted source-writer integration can mediate an expected-head
+    update. It grants no release, fence, merge, or transfer authority; the
+    RCH-1A recovery transaction remains a separate owner.
     """
 
     operation_key: str
@@ -1007,6 +1018,13 @@ def verify_technical_writer_gate(
 
     present_types = {rule.rule_type for rule in applicable_rules}
     defects: set[WriterGateDefect] = set()
+    if facts.legacy_branch_protected:
+        # Classic branch protection is enforced alongside rulesets and can
+        # independently require pull requests or status checks, restrict push
+        # access, or lock the ref. V1 does not model that configuration, so a
+        # present classic layer never proves the accepted integration keeps a
+        # direct expected-head path, whatever the rulesets say.
+        defects.add(WriterGateDefect.LEGACY_PROTECTION_PRESENT)
     if not applicable_rules:
         defects.add(WriterGateDefect.RULES_ABSENT)
     else:

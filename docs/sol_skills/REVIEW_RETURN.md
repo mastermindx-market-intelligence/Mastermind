@@ -244,6 +244,11 @@ observed state must be recorded in the release commission:
   `rule_types` is the applicable census: only the inert `merge_queue`/`branch_name_pattern`/
   `tag_name_pattern` types are excluded, so confirm the branch carries no other rule you expected to
   see before relying on the state.
+* `legacy_branch_protected` is the branch's own classic branch-protection readback, not the ambiguous
+  branch summary flag. Classic protection is enforced alongside rulesets, so any present layer is
+  `LEGACY_PROTECTION_PRESENT` and `UNAVAILABLE` in V1 — the receipt does not model whether that layer
+  leaves the accepted integration an expected-head path. An unreadable or moved classic readback is a
+  refusal, never absence.
 
 The receipt is evidence only; neither state grants Ready, merge, fence, retry, receiver-transfer, or
 production authority, and neither weakens `EFFECT_UNKNOWN`, local-dirt, or exact-session stickiness.
