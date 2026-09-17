@@ -55,55 +55,104 @@ class SnapshotInvalidRequest(DecisionSnapshotError):
 def snapshot_dir(book: str) -> Path:
     if book != _BOOK_ID:
         raise SnapshotInvalidRequest(f"unknown book {book!r}")
-    return _ROOT / "data" / "shadow" / "decision_snapshots" / book
+    # The validated caller value is never interpolated into the path — only the closed
+    # literal is, so a filesystem expression here can never carry caller-controlled text
+    # even though the two are proven equal above.
+    return _ROOT / "data" / "shadow" / "decision_snapshots" / _BOOK_ID
+
+
+def _snapshot_filename(snapshot_id: str) -> str:
+    if not isinstance(snapshot_id, str) or not _SNAPSHOT_ID_RE.fullmatch(snapshot_id):
+        raise SnapshotInvalidRequest(f"invalid snapshot_id {snapshot_id!r}")
+    return f"{snapshot_id.split(':', 1)[1]}.json"
 
 
 def _snapshot_path(book: str, snapshot_id: str) -> Path:
-    directory = snapshot_dir(book)
-    if not isinstance(snapshot_id, str) or not _SNAPSHOT_ID_RE.fullmatch(snapshot_id):
-        raise SnapshotInvalidRequest(f"invalid snapshot_id {snapshot_id!r}")
-    hex_part = snapshot_id.split(":", 1)[1]
-    return directory / f"{hex_part}.json"
+    return snapshot_dir(book) / _snapshot_filename(snapshot_id)
 
 
 # ---------------------------------------------------------------------------
-# Bounded, symlink-refusing byte reads
+# Bounded, descriptor-relative, symlink-refusing byte reads
+#
+# No caller-supplied path is ever joined and handed to lstat/open/scandir. Every access
+# below is proven contained beneath the fixed snapshot root before it happens: the
+# directory is opened once (refusing a symlinked or non-directory leaf), and every file
+# within it is then read only through that directory descriptor, by a filename either
+# enumerated straight off the filesystem (never a caller string) or, for a brand-new
+# create-once write, a filename built purely from characters a closed regex already proved
+# safe. There is no path join between caller input and an lstat/open/scandir call anywhere
+# in this module.
 # ---------------------------------------------------------------------------
 
-def _read_regular_file_bytes(path: Path) -> bytes | None:
-    """Read a snapshot file's bytes, refusing symlinks and non-regular files.
+def _open_snapshot_directory(directory: Path, *, create: bool = False) -> int | None:
+    """Open the fixed snapshot directory, refusing a symlinked or non-directory leaf.
 
-    Returns ``None`` only when the path does not exist; every other failure mode raises
-    ``SnapshotCorrupt`` rather than silently disappearing.
+    With ``create=False`` (reads/scans), returns ``None`` when nothing exists yet — the
+    store has never persisted a snapshot for this book. With ``create=True`` (writes), the
+    directory is created first when absent. Either way, an existing symlinked or
+    non-directory leaf is a corrupt storage root, not an absent one, and fails closed — it
+    is never silently followed or written through.
     """
     try:
-        pre = path.lstat()
+        leaf = directory.lstat()
+    except FileNotFoundError:
+        if not create:
+            return None
+        directory.mkdir(parents=True, exist_ok=True)
+    else:
+        if stat.S_ISLNK(leaf.st_mode):
+            raise SnapshotCorrupt(f"{directory} is a symlink, not the snapshot directory")
+        if not stat.S_ISDIR(leaf.st_mode):
+            raise SnapshotCorrupt(f"{directory} is not a directory")
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        return os.open(str(directory), flags)
     except FileNotFoundError:
         return None
-    if not stat.S_ISREG(pre.st_mode):
-        raise SnapshotCorrupt(f"{path} is not a regular file")
+    except OSError as exc:
+        raise SnapshotCorrupt(f"unable to open snapshot directory {directory}: {exc}") from exc
+
+
+def _find_regular_entry(dir_fd: int, expected_name: str) -> tuple[str, os.stat_result] | None:
+    """Find ``expected_name`` among the directory's real entries, returning the matched
+    entry's own name and lstat — never the caller's ``expected_name`` string itself — so a
+    subsequent open reads a filesystem-sourced value, not a caller-constructed path."""
+    with os.scandir(dir_fd) as entries:
+        for entry in entries:
+            if entry.name != expected_name:
+                continue
+            return entry.name, entry.stat(follow_symlinks=False)
+    return None
+
+
+def _read_regular_entry_bytes(dir_fd: int, name: str, entry_stat: os.stat_result) -> bytes | None:
+    """Read ``name``'s bytes via a descriptor-relative open beneath ``dir_fd``, refusing
+    symlinks and non-regular files. Returns ``None`` only if the entry vanished between
+    enumeration and open; every other failure mode raises ``SnapshotCorrupt``."""
+    if stat.S_ISLNK(entry_stat.st_mode) or not stat.S_ISREG(entry_stat.st_mode):
+        raise SnapshotCorrupt(f"{name} is not a regular file")
     # Refuse before opening, not after reading: a sibling may be arbitrarily large (a
     # sparse file advertises an enormous st_size while occupying almost no blocks), and a
     # snapshot can never lawfully exceed this ceiling, so reading one to discover it is
     # corrupt would allocate attacker-chosen memory for no evidentiary gain.
-    if pre.st_size > c.MAX_SNAPSHOT_BYTES:
-        raise SnapshotCorrupt(f"{path} exceeds the {c.MAX_SNAPSHOT_BYTES}-byte snapshot limit")
+    if entry_stat.st_size > c.MAX_SNAPSHOT_BYTES:
+        raise SnapshotCorrupt(f"{name} exceeds the {c.MAX_SNAPSHOT_BYTES}-byte snapshot limit")
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     try:
-        fd = os.open(str(path), flags)
+        fd = os.open(name, flags, dir_fd=dir_fd)
     except FileNotFoundError:
         return None
     except OSError as exc:
-        raise SnapshotCorrupt(f"unable to open {path}: {exc}") from exc
+        raise SnapshotCorrupt(f"unable to open {name!r}: {exc}") from exc
     try:
         post = os.fstat(fd)
-        if post.st_dev != pre.st_dev or post.st_ino != pre.st_ino:
-            raise SnapshotCorrupt(f"{path} identity changed between stat and open")
-        # Re-check against the opened descriptor: the pre-open lstat is advisory, and the
+        if post.st_dev != entry_stat.st_dev or post.st_ino != entry_stat.st_ino:
+            raise SnapshotCorrupt(f"{name} identity changed between stat and open")
+        # Re-check against the opened descriptor: the pre-open stat is advisory, and the
         # read below is sized from st_size.
         if post.st_size > c.MAX_SNAPSHOT_BYTES:
             raise SnapshotCorrupt(
-                f"{path} exceeds the {c.MAX_SNAPSHOT_BYTES}-byte snapshot limit"
+                f"{name} exceeds the {c.MAX_SNAPSHOT_BYTES}-byte snapshot limit"
             )
         chunks: list[bytes] = []
         remaining = post.st_size
@@ -117,6 +166,16 @@ def _read_regular_file_bytes(path: Path) -> bytes | None:
     finally:
         os.close(fd)
     return raw
+
+
+def _read_named_entry_bytes(dir_fd: int, name: str) -> bytes | None:
+    """Stat-then-read ``name`` directly beneath ``dir_fd`` when its identity was not
+    already established by a prior scan (the create-once existing-file comparison)."""
+    try:
+        entry_stat = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return None
+    return _read_regular_entry_bytes(dir_fd, name, entry_stat)
 
 
 def _verify_and_load(raw: bytes) -> dict[str, Any]:
@@ -162,20 +221,16 @@ def _write_all(fd: int, data: bytes) -> None:
         written += n
 
 
-def _fsync_directory(directory: Path) -> None:
-    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
-    dir_fd = os.open(str(directory), flags)
-    try:
-        os.fsync(dir_fd)
-    finally:
-        os.close(dir_fd)
+def _create_once(dir_fd: int, filename: str, encoded: bytes) -> bool:
+    """Create ``filename`` beneath ``dir_fd`` with O_EXCL, refusing to follow a symlink.
 
-
-def _create_once(path: Path, encoded: bytes) -> bool:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    ``filename`` is composed purely of the 64 hex characters a closed regex already proved
+    safe plus a fixed ``.json`` suffix — never a caller string joined onto a path — and is
+    opened relative to the already-contained ``dir_fd``, never via a constructed ``Path``.
+    """
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     try:
-        fd = os.open(str(path), flags, 0o600)
+        fd = os.open(filename, flags, 0o600, dir_fd=dir_fd)
     except FileExistsError:
         return False
     try:
@@ -183,19 +238,19 @@ def _create_once(path: Path, encoded: bytes) -> bool:
         os.fsync(fd)
     except BaseException:
         os.close(fd)
-        # O_EXCL just created this exact path, so it is never pre-existing: safe to unlink.
+        # O_EXCL just created this exact entry, so it is never pre-existing: safe to unlink.
         try:
-            os.unlink(path)
+            os.unlink(filename, dir_fd=dir_fd)
         except FileNotFoundError:
             pass
         try:
-            _fsync_directory(path.parent)
+            os.fsync(dir_fd)
         except OSError:
             pass  # best-effort durability for the cleanup; the original error still wins.
         raise
     else:
         os.close(fd)
-    _fsync_directory(path.parent)
+    os.fsync(dir_fd)
     return True
 
 
@@ -204,18 +259,25 @@ def persist_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     c.verify_snapshot(snapshot)
     book = snapshot["book"]
     snapshot_id = snapshot["snapshot_id"]
-    path = _snapshot_path(book, snapshot_id)
+    directory = snapshot_dir(book)
+    filename = _snapshot_filename(snapshot_id)
     encoded = canonical_json_bytes(snapshot)
     if len(encoded) > c.MAX_SNAPSHOT_BYTES:
         raise SnapshotInvalidRequest("snapshot exceeds max size")
-    created = _create_once(path, encoded)
-    if not created:
-        existing = _read_regular_file_bytes(path)
-        if existing is None or existing != encoded:
-            raise SnapshotCorrupt(
-                f"existing snapshot at {path} does not match canonical bytes"
-            )
-    return {"created": created, "path": str(path), "snapshot": dict(snapshot)}
+    dir_fd = _open_snapshot_directory(directory, create=True)
+    if dir_fd is None:
+        raise SnapshotCorrupt(f"unable to open snapshot directory {directory} after creation")
+    try:
+        created = _create_once(dir_fd, filename, encoded)
+        if not created:
+            existing = _read_named_entry_bytes(dir_fd, filename)
+            if existing is None or existing != encoded:
+                raise SnapshotCorrupt(
+                    f"existing snapshot at {directory / filename} does not match canonical bytes"
+                )
+    finally:
+        os.close(dir_fd)
+    return {"created": created, "path": str(directory / filename), "snapshot": dict(snapshot)}
 
 
 # ---------------------------------------------------------------------------
@@ -223,8 +285,21 @@ def persist_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 def load_snapshot(book: str, snapshot_id: str) -> dict[str, Any]:
-    path = _snapshot_path(book, snapshot_id)
-    raw = _read_regular_file_bytes(path)
+    # Both inputs are fully validated — and the directory resolved to its closed literal
+    # form — before any lstat/open/scandir call is made.
+    directory = snapshot_dir(book)
+    expected_name = _snapshot_filename(snapshot_id)
+    dir_fd = _open_snapshot_directory(directory)
+    if dir_fd is None:
+        raise SnapshotNotFound(f"snapshot {snapshot_id!r} not found for book {book!r}")
+    try:
+        match = _find_regular_entry(dir_fd, expected_name)
+        if match is None:
+            raise SnapshotNotFound(f"snapshot {snapshot_id!r} not found for book {book!r}")
+        name, entry_stat = match
+        raw = _read_regular_entry_bytes(dir_fd, name, entry_stat)
+    finally:
+        os.close(dir_fd)
     if raw is None:
         raise SnapshotNotFound(f"snapshot {snapshot_id!r} not found for book {book!r}")
     payload = _verify_and_load(raw)
@@ -235,15 +310,25 @@ def load_snapshot(book: str, snapshot_id: str) -> dict[str, Any]:
 
 def _scan_verified_snapshots(book: str) -> list[dict[str, Any]]:
     directory = snapshot_dir(book)
-    if not directory.is_dir():
+    dir_fd = _open_snapshot_directory(directory)
+    if dir_fd is None:
         return []
-    out: list[dict[str, Any]] = []
-    for path in sorted(directory.glob("*.json")):
-        raw = _read_regular_file_bytes(path)
-        if raw is None:
-            continue
-        out.append(_verify_and_load(raw))
-    return out
+    try:
+        candidates: list[tuple[str, os.stat_result]] = []
+        with os.scandir(dir_fd) as entries:
+            for entry in entries:
+                if not entry.name.endswith(".json"):
+                    continue
+                candidates.append((entry.name, entry.stat(follow_symlinks=False)))
+        out: list[dict[str, Any]] = []
+        for name, entry_stat in sorted(candidates, key=lambda item: item[0]):
+            raw = _read_regular_entry_bytes(dir_fd, name, entry_stat)
+            if raw is None:
+                continue
+            out.append(_verify_and_load(raw))
+        return out
+    finally:
+        os.close(dir_fd)
 
 
 def _manifest_row(snapshot: Mapping[str, Any]) -> dict[str, Any]:

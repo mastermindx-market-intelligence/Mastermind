@@ -952,3 +952,82 @@ def test_corrupt_regular_sibling_is_never_silently_hidden_by_list_or_latest(snap
         snapshots.list_snapshots("autonomous")
     with pytest.raises(snapshots.SnapshotCorrupt):
         snapshots.latest_snapshot("autonomous")
+
+
+# ---------------------------------------------------------------------------
+# Task 8 repair 3 — structural path confinement (CodeQL py/path-injection)
+# ---------------------------------------------------------------------------
+
+def test_snapshot_dir_uses_the_closed_literal_never_the_validated_book_variable():
+    """Behaviorally, joining ``book`` or ``_BOOK_ID`` produces the same path once the
+    equality check above has passed — so this must be a structural check, not a runtime
+    one, to actually catch a regression back to interpolating the validated variable."""
+    import inspect
+
+    source = inspect.getsource(snapshots.snapshot_dir)
+    assert "/ _BOOK_ID" in source
+    assert "/ book" not in source
+    assert snapshots.snapshot_dir("autonomous").name == snapshots._BOOK_ID
+
+
+def test_load_and_persist_reject_traversal_and_absolute_snapshot_ids(snapshot_root):
+    payload = _sealed_snapshot()
+    snapshots.persist_snapshot(payload)
+    for bad_id in (
+        "../../secret",
+        "/etc/passwd",
+        "sha256:" + "a" * 63 + "/",
+        "sha256:" + "a" * 62 + "/x",
+        "sha256:" + "A" * 64,  # uppercase hex is not the closed lowercase form
+    ):
+        with pytest.raises(snapshots.SnapshotInvalidRequest):
+            snapshots.load_snapshot("autonomous", bad_id)
+
+
+def test_snapshot_dir_symlinked_root_is_rejected_and_nothing_outside_is_touched(
+    snapshot_root, tmp_path,
+):
+    """A storage root replaced by a symlink to an arbitrary directory must never be
+    followed for reads, scans, or writes — and nothing in the symlink target may be
+    touched."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    leaf = snapshots.snapshot_dir("autonomous")
+    leaf.parent.mkdir(parents=True, exist_ok=True)
+    leaf.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(snapshots.SnapshotCorrupt):
+        snapshots.list_snapshots("autonomous")
+    with pytest.raises(snapshots.SnapshotCorrupt):
+        snapshots.load_snapshot("autonomous", "sha256:" + "a" * 64)
+    with pytest.raises(snapshots.SnapshotCorrupt):
+        snapshots.persist_snapshot(_sealed_snapshot())
+
+    assert list(outside.iterdir()) == []
+
+
+def test_snapshot_dir_non_directory_root_is_rejected(snapshot_root):
+    """A storage root that exists as a plain file (not a directory, not a symlink) must
+    fail closed the same way a symlinked root does."""
+    leaf = snapshots.snapshot_dir("autonomous")
+    leaf.parent.mkdir(parents=True, exist_ok=True)
+    leaf.write_text("not a directory", encoding="utf-8")
+
+    with pytest.raises(snapshots.SnapshotCorrupt):
+        snapshots.list_snapshots("autonomous")
+    with pytest.raises(snapshots.SnapshotCorrupt):
+        snapshots.persist_snapshot(_sealed_snapshot())
+
+
+def test_exact_id_read_path_never_joins_a_caller_string_into_a_filesystem_call():
+    """Structural regression guard: the exact-ID load path must resolve its target only by
+    enumerating the fixed directory and matching a filesystem-sourced entry name — never by
+    handing a caller-derived Path straight to lstat/open. Fails if a future edit reintroduces
+    ``directory / snapshot_id``-style construction ahead of a filesystem call in
+    ``load_snapshot``."""
+    import inspect
+
+    source = inspect.getsource(snapshots.load_snapshot)
+    assert "_snapshot_path(" not in source
+    assert "_read_regular_file_bytes(" not in source
+    assert "_find_regular_entry(" in source
