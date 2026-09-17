@@ -3039,21 +3039,18 @@ _QUAD_ZH = {
 
 @router.get("/api/activity")
 def api_activity() -> JSONResponse:
-    """Reverse-chronological activity timeline (cap 60).
+    """Reverse-chronological Brain Log activity, preserving partial-source read truth.
 
-    Assembles events from:
-      - positions_ledger history entries  (kind "trade")
-      - decisions[] in latest.json        (kind "decision")
-      - research note files               (kind "research")
-      - runs table via latest.json as_of  (kind "run")
-
-    Each event also carries title_zh / detail_zh so the Brain Log renders in
-    Chinese when zh is toggled (see the localisation maps above).
+    A completely successful read keeps the legacy JSON-list contract. If one or more source
+    families fail, return a typed envelope so the dashboard can distinguish partial/unavailable
+    evidence from a genuinely empty timeline. A failed family contributes no half-read rows.
     """
     events: list[dict] = []
+    failed_sources: list[str] = []
 
     # --- trades from ledger history ---
     try:
+        source_events: list[dict] = []
         ledger_path = _data() / "portfolio" / "positions_ledger.json"
         if ledger_path.exists():
             ledger = json.loads(ledger_path.read_text())
@@ -3068,25 +3065,22 @@ def api_activity() -> JSONResponse:
                     still_open = entry.get("still_open")
                     verb_zh = _TRADE_VERB_ZH.get(ev.lower(), ev.upper())
                     sleeve_zh = _SLEEVE_ZH.get(sleeve.lower(), sleeve)
-                    events.append({
+                    source_events.append({
                         "ts": ts,
                         "kind": "trade",
                         "title": f"{ev.upper()} {ticker}{w_str}",
                         "title_zh": f"{verb_zh} {ticker}{w_str}",
-                        "detail": (
-                            f"{sleeve} sleeve | "
-                            f"{'open' if still_open else 'closed'}"
-                        ),
-                        "detail_zh": (
-                            f"{sleeve_zh}组合 | "
-                            f"{'持有中' if still_open else '已平仓'}"
-                        ),
+                        "detail": f"{sleeve} sleeve | {'open' if still_open else 'closed'}",
+                        "detail_zh": f"{sleeve_zh}组合 | {'持有中' if still_open else '已平仓'}",
                     })
-    except Exception:
-        pass
+        events.extend(source_events)
+    except Exception as exc:  # noqa: BLE001 - one source may fail without erasing the others
+        _log.warning("activity trades read failed: %s", type(exc).__name__)
+        failed_sources.append("trades")
 
-    # --- decisions from latest.json ---
+    # --- decisions + top-level run event from latest.json ---
     try:
+        source_events = []
         portfolio_path = _data() / "portfolio" / "latest.json"
         if portfolio_path.exists():
             portfolio = json.loads(portfolio_path.read_text())
@@ -3097,7 +3091,7 @@ def api_activity() -> JSONResponse:
                 thesis = d.get("thesis") or ""
                 lean_zh = _DECISION_LEAN_ZH.get(lean.lower(), lean.upper())
                 thesis_zh = _cached_zh(thesis) or thesis
-                events.append({
+                source_events.append({
                     "ts": d.get("logged_at") or asof or "",
                     "kind": "decision",
                     "title": f"Decision: {lean.upper()} {subject}",
@@ -3105,32 +3099,28 @@ def api_activity() -> JSONResponse:
                     "detail": thesis[:200],
                     "detail_zh": thesis_zh[:200],
                 })
-            # top-level run event
             if asof:
-                regime = (portfolio.get("regime") or {})
+                regime = portfolio.get("regime") or {}
                 quad = regime.get("quad_name") or regime.get("quad")
                 quad_zh = _QUAD_ZH.get(quad, quad)
                 gross_pct = portfolio.get("gross", 0) * 100
                 cash_pct = portfolio.get("cash", 0) * 100
-                events.append({
+                source_events.append({
                     "ts": asof,
                     "kind": "run",
                     "title": f"Book rebuilt — {asof}",
                     "title_zh": f"组合重建 — {asof}",
-                    "detail": (
-                        f"Quad: {quad} | "
-                        f"gross={gross_pct:.1f}% cash={cash_pct:.1f}%"
-                    ),
-                    "detail_zh": (
-                        f"象限：{quad_zh} | "
-                        f"总敞口={gross_pct:.1f}% 现金={cash_pct:.1f}%"
-                    ),
+                    "detail": f"Quad: {quad} | gross={gross_pct:.1f}% cash={cash_pct:.1f}%",
+                    "detail_zh": f"象限：{quad_zh} | 总敞口={gross_pct:.1f}% 现金={cash_pct:.1f}%",
                 })
-    except Exception:
-        pass
+        events.extend(source_events)
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("activity decisions read failed: %s", type(exc).__name__)
+        failed_sources.append("decisions")
 
     # --- research notes (deduped on title+body, newest kept) ---
     try:
+        source_events = []
         notes_dir = _data() / "research" / "notes"
         if notes_dir.exists():
             parsed = [n for n in (_parse_note(p) for p in notes_dir.glob("*.md"))
@@ -3142,39 +3132,45 @@ def api_activity() -> JSONResponse:
                 if key in seen:
                     continue
                 seen.add(key)
-                tickers_str = (", ".join(note["tickers"]) if note.get("tickers") else "")
+                tickers_str = ", ".join(note["tickers"]) if note.get("tickers") else ""
                 title = note["title"]
                 body_md = note.get("body_md") or ""
                 title_zh = _cached_zh(title) or title
                 body_zh = _cached_zh(body_md) or body_md
-                events.append({
+                source_events.append({
                     "ts": note["date"],
                     "kind": "research",
                     "title": title,
                     "title_zh": title_zh,
-                    "detail": (
-                        (f"Tickers: {tickers_str} | " if tickers_str else "")
-                        + body_md[:160]
-                    ),
-                    "detail_zh": (
-                        (f"标的：{tickers_str} | " if tickers_str else "")
-                        + body_zh[:160]
-                    ),
+                    "detail": (f"Tickers: {tickers_str} | " if tickers_str else "") + body_md[:160],
+                    "detail_zh": (f"标的：{tickers_str} | " if tickers_str else "") + body_zh[:160],
                 })
-    except Exception:
-        pass
+        events.extend(source_events)
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("activity research read failed: %s", type(exc).__name__)
+        failed_sources.append("research")
 
-    # flag actions logged today so the Brain Log can highlight + tag them "new".
-    # Wall-clock date is the trading-day source of truth here (matches the data's as_of).
     today_iso = date.today().isoformat()
-    for e in events:
-        e["today"] = (e.get("ts") or "")[:10] == today_iso
+    for event in events:
+        event["today"] = (event.get("ts") or "")[:10] == today_iso
+    events.sort(key=lambda event: event.get("ts") or "", reverse=True)
+    bounded = events[:60]
 
-    # sort newest first, cap at 60
-    events.sort(key=lambda e: e.get("ts") or "", reverse=True)
-    return JSONResponse(events[:60])
-
-
+    if len(failed_sources) == 3:
+        return JSONResponse({
+            "activity_status": "unavailable",
+            "events": None,
+            "failed_sources": failed_sources,
+            "error": "activity_unavailable",
+        })
+    if failed_sources:
+        return JSONResponse({
+            "activity_status": "partial",
+            "events": bounded,
+            "failed_sources": failed_sources,
+        })
+    # Preserve the original successful contract for existing readers.
+    return JSONResponse(bounded)
 
 
 @router.get("/api/runs")
