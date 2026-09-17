@@ -2300,3 +2300,110 @@ def test_attestation_validator_refuses_each_stale_fresh_observation_fact(fact: s
             expected_pid=_EXPECTED_PID,
             inspector=_FakeProcessInspector(),
         )
+
+
+@pytest.mark.parametrize(
+    "field,bad_value",
+    [
+        ("pgid", 4242.0),
+        ("session_id", 4242.0),
+        ("effective_uid", 501.0),
+        ("effective_gid", 20.0),
+        ("real_uid", 501.0),
+        ("real_gid", 20.0),
+        ("pgid", True),
+        ("effective_uid", -1),
+    ],
+)
+def test_attestation_validator_refuses_non_exact_identity_integer_types(
+    field, bad_value
+):
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    document = _good_document()
+    document["process_identity"][field] = bad_value
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            document,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=_FakeProcessInspector(),
+        )
+
+
+@pytest.mark.parametrize(
+    "field,bad_value",
+    [
+        ("start_identity", ""),
+        ("start_identity", "value\nsecond"),
+        ("boot_id", "value\x00suffix"),
+        ("boot_id", "x" * 257),
+        ("boot_id", 7),
+    ],
+)
+def test_attestation_validator_refuses_unsafe_identity_text(field, bad_value):
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    document = _good_document()
+    document["process_identity"][field] = bad_value
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            document,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=_FakeProcessInspector(),
+        )
+
+
+@pytest.mark.parametrize(
+    "bad_path",
+    [
+        "/tmp/\x00bad",
+        "/tmp/python\nother",
+        "/tmp/../python",
+        "/tmp//python",
+        "//tmp/python",
+        "relative/python",
+    ],
+)
+def test_attestation_validator_refuses_noncanonical_executable_paths(bad_path):
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    document = _good_document()
+    document["python_executable_path"] = bad_path
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            document,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=_FakeProcessInspector(),
+        )
+
+
+@pytest.mark.parametrize(
+    "expected,document_value",
+    [
+        ("B" * 40, "b" * 40),
+        ("b" * 39, "b" * 39),
+        ("b" * 40, "B" * 40),
+        ("b" * 40, "b" * 39),
+    ],
+)
+def test_attestation_validator_requires_exact_lowercase_commit_identity(
+    expected, document_value
+):
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    document = _good_document()
+    document["release_commit_sha"] = document_value
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            document,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=expected,
+            expected_pid=_EXPECTED_PID,
+            inspector=_FakeProcessInspector(),
+        )

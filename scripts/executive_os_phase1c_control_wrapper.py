@@ -23,6 +23,9 @@ from control_plane.codex_worker import ProcessInspector  # noqa: E402
 SCHEMA_VERSION = "mastermind.executive_control_environment_attestation/v1"
 SENTINEL_NAME = "EXECUTIVE_CONTROL_CANARY_VALUE"
 _VALUE_RE = re.compile(r"^[0-9a-f]{64}$")
+_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
+_MAX_IDENTITY_TEXT_BYTES = 256
+_MAX_EXECUTABLE_PATH_BYTES = 4096
 
 
 # W1H3F R13 (Sol R80, PR #677 comment 5704046553): the closed field sets are
@@ -60,6 +63,62 @@ PROCESS_IDENTITY_FIELDS = frozenset(
 
 class ControlWrapperError(RuntimeError):
     pass
+
+
+def _bounded_identity_integer(
+    value: object, *, name: str, minimum: int
+) -> int:
+    if type(value) is not int or not (minimum <= value <= 2**31 - 1):
+        raise ControlWrapperError(
+            f"attestation process identity fact {name} is not a bounded integer"
+        )
+    return value
+
+
+def _bounded_identity_text(value: object, *, name: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise ControlWrapperError(
+            f"attestation process identity fact {name} is not a non-empty string"
+        )
+    try:
+        encoded = value.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise ControlWrapperError(
+            f"attestation process identity fact {name} is not valid UTF-8"
+        ) from exc
+    if (
+        len(encoded) > _MAX_IDENTITY_TEXT_BYTES
+        or any(ord(character) < 0x20 or ord(character) == 0x7F for character in value)
+    ):
+        raise ControlWrapperError(
+            f"attestation process identity fact {name} is not bounded safe text"
+        )
+    return value
+
+
+def _canonical_executable_path(value: object) -> str:
+    if not isinstance(value, str) or not value:
+        raise ControlWrapperError(
+            "attestation python_executable_path is not a canonical absolute POSIX path"
+        )
+    try:
+        encoded = value.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise ControlWrapperError(
+            "attestation python_executable_path is not valid UTF-8"
+        ) from exc
+    if (
+        len(encoded) > _MAX_EXECUTABLE_PATH_BYTES
+        or any(ord(character) < 0x20 or ord(character) == 0x7F for character in value)
+        or not os.path.isabs(value)
+        or value.startswith("//")
+        or os.path.normpath(value) != value
+        or not Path(value).name
+    ):
+        raise ControlWrapperError(
+            "attestation python_executable_path is not a canonical absolute POSIX path"
+        )
+    return value
 
 
 def _sha256(path: Path) -> str:
@@ -177,9 +236,13 @@ def validate_control_environment_attestation(
     identity = document["process_identity"]
     if not isinstance(identity, dict) or set(identity) != PROCESS_IDENTITY_FIELDS:
         raise ControlWrapperError("attestation process_identity is not the exact closed set")
-    pid = identity["pid"]
-    if type(pid) is not int or isinstance(pid, bool) or not (0 < pid <= 2**31 - 1):
-        raise ControlWrapperError("attestation pid is not a bounded integer")
+    pid = _bounded_identity_integer(identity["pid"], name="pid", minimum=1)
+    for integer_name in ("pgid", "session_id"):
+        _bounded_identity_integer(identity[integer_name], name=integer_name, minimum=1)
+    for integer_name in ("effective_uid", "effective_gid", "real_uid", "real_gid"):
+        _bounded_identity_integer(identity[integer_name], name=integer_name, minimum=0)
+    for text_name in ("start_identity", "boot_id"):
+        _bounded_identity_text(identity[text_name], name=text_name)
     if pid != expected_pid:
         raise ControlWrapperError("attestation pid does not match the live process pid")
     try:
@@ -213,7 +276,9 @@ def validate_control_environment_attestation(
         raise ControlWrapperError("attestation config_sha256 is not the live config digest")
     if (
         not isinstance(expected_release_commit_sha, str)
-        or not expected_release_commit_sha
+        or _COMMIT_RE.fullmatch(expected_release_commit_sha) is None
+        or not isinstance(document["release_commit_sha"], str)
+        or _COMMIT_RE.fullmatch(document["release_commit_sha"]) is None
         or document["release_commit_sha"] != expected_release_commit_sha
     ):
         raise ControlWrapperError(
@@ -233,15 +298,7 @@ def validate_control_environment_attestation(
             raise ControlWrapperError(
                 f"attestation {digest_field} is not 64 lowercase hex"
             )
-    executable_path = document["python_executable_path"]
-    if (
-        not isinstance(executable_path, str)
-        or not executable_path
-        or not os.path.isabs(executable_path)
-    ):
-        raise ControlWrapperError(
-            "attestation python_executable_path is not an absolute POSIX path"
-        )
+    _canonical_executable_path(document["python_executable_path"])
     if document["sentinel_present"] is not True:
         raise ControlWrapperError("attestation sentinel_present is not exactly True")
     return document

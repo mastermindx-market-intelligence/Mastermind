@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import copy
 import dataclasses
+import hashlib
 import json
 import os
 import socket
@@ -26,7 +27,11 @@ from ops.executive_os import autonomy_control as control
 SHA = "c" * 40
 # W1H3F R13: constants used by the live-attestation validator ride in the probe.
 _STATUS_PID = 4242
-_CONFIG_DIGEST = "a" * 64
+# Probe fixtures model the already-root-read current control bytes.  The parsed
+# object is separately supplied by the root-json seam; this constant makes the
+# digest comparison itself load-bearing without a preimage trick.
+_CONTROL_CONFIG_RAW = b"packet09-control-config-r80-v1\n"
+_CONFIG_DIGEST = hashlib.sha256(_CONTROL_CONFIG_RAW).hexdigest()
 # The good document's release_commit_sha matches ``SHA`` so a default
 # ``_good_attestation_doc()`` is admitted under the canonical probe call
 # ``host._ceo_admission_probe(SHA, _CONFIG_DIGEST)``.
@@ -6022,10 +6027,7 @@ def _drive_probe(
         "control_environment_attestation_path": os.fspath(attestation_path),
     }
     if root_json_returns is None:
-        root_json_returns = (
-            default_control,
-            json.dumps(default_control, sort_keys=True).encode("utf-8"),
-        )
+        root_json_returns = (default_control, _CONTROL_CONFIG_RAW)
 
     monkeypatch.setattr(control, "CONTROL_CONFIG", config_path)
     monkeypatch.setattr(
@@ -6660,3 +6662,133 @@ def test_ceo_admission_probe_signature_accepts_expected_control_sha256():
         control.ProductionCeoSubmitHost._ceo_admission_probe
     ).parameters
     assert list(parameters) == ["self", "expected_sha", "expected_control_sha256"]
+
+
+def test_production_ceo_admission_probe_refuses_post_reconcile_control_byte_drift(
+    monkeypatch, tmp_path
+):
+    """B1: current root-owned bytes must still equal the transaction digest."""
+
+    host = control.ProductionCeoSubmitHost()
+    attestation_path = tmp_path / "attestation.json"
+    drifted_raw = b"packet09-control-config-r80-drifted\n"
+    assert hashlib.sha256(drifted_raw).hexdigest() != _CONFIG_DIGEST
+    _drive_probe(
+        monkeypatch,
+        tmp_path=tmp_path,
+        attestation_doc=_good_attestation_doc(),
+        inspector=_LiveFakeInspector(),
+        root_json_returns=(
+            {
+                "control_uid": 501,
+                "control_environment_attestation_path": os.fspath(attestation_path),
+            },
+            drifted_raw,
+        ),
+    )
+
+    assert host._ceo_admission_probe(SHA, _CONFIG_DIGEST) is False
+
+
+# ---------------------------------------------------------------------------
+# R81 authority-parity closure: the authority-granting read must assert every
+# current-state invariant that ARM refuses. A self-consistent receipt is only
+# evidence of agreement; it cannot authorize an otherwise forbidden state.
+# ---------------------------------------------------------------------------
+
+_R81_AUTHORITY_CASES = (
+    ("coo_autonomy_armed", "coo_autonomy_armed"),
+    ("coo_operator_harness_armed", "coo_operator_harness_armed"),
+    ("ceo_ingress_app_unarmed", "ceo_ingress_app_unarmed"),
+    ("app_binding_invalid", "app_binding_invalid"),
+    ("app_acl_invalid", "app_acl_invalid"),
+    ("app_topology_invalid", "app_topology_invalid"),
+    ("app_peer_invalid", "app_peer_invalid"),
+    ("separation_equal_uids", "ceo_ingress_separation_invalid"),
+)
+
+
+def _apply_r81_unauthorized_state(host, case):
+    if case == "coo_autonomy_armed":
+        host.control_config["coo_autonomy_armed"] = True
+    elif case == "coo_operator_harness_armed":
+        host.control_config["coo_operator_harness_armed"] = True
+    elif case == "ceo_ingress_app_unarmed":
+        host.control_config["ceo_ingress_app_armed"] = False
+    elif case == "app_binding_invalid":
+        host.binding_overrides["binding_valid"] = False
+    elif case == "app_acl_invalid":
+        host.binding_overrides["acl_valid"] = False
+    elif case == "app_topology_invalid":
+        host.binding_overrides["topology_valid"] = False
+    elif case == "app_peer_invalid":
+        host.binding_overrides["app_peer_user"] = "_mastermind_wrong_peer"
+    elif case == "separation_equal_uids":
+        host.control_config["ceo_ingress_peer_uid"] = host.control_config[
+            "ceo_ingress_app_peer_uid"
+        ]
+    else:  # pragma: no cover - closed table above
+        raise AssertionError(case)
+
+
+def _seal_r81_self_consistent_receipt(host):
+    """Re-seal the unauthenticated document around current unauthorized facts."""
+
+    receipt = copy.deepcopy(host.receipt)
+    binding = host.executive_app_binding()
+    for field in control._CEO_SUBMIT_CONTROL_FIELDS:
+        receipt["projection"][field] = host.control_config[field]
+    receipt["projection"].update(
+        {
+            "app_peer_user": binding.app_peer_user,
+            "app_binding_valid": binding.binding_valid,
+            "app_acl_valid": binding.acl_valid,
+            "app_topology_valid": binding.topology_valid,
+        }
+    )
+    _recompute_receipt_digest(receipt)
+    assert control.validate_ceo_submit_receipt_document(receipt, armed=True) is True
+    return receipt, binding
+
+
+@pytest.mark.parametrize(("case", "expected_code"), _R81_AUTHORITY_CASES)
+def test_arm_and_authority_read_share_every_authority_invariant(case, expected_code):
+    """R81: every ARM authority refusal is also a sink/read refusal."""
+
+    arm_host = FakeCeoSubmitHost()
+    _apply_r81_unauthorized_state(arm_host, case)
+    before = copy.deepcopy(arm_host.control_config)
+    with pytest.raises(control.CeoSubmitAdmissionError) as raised:
+        control.execute_ceo_submit_arm(arm_host, _ceo_submit_request(), now=NOW)
+    assert raised.value.code == expected_code
+    assert arm_host.control_writes == 0
+    assert arm_host.worker_writes == 0
+    assert arm_host.receipt_writes == 0
+    assert arm_host.marker is False
+    assert arm_host.control_config == before
+
+    read_host = _armed_ceo_submit_host()
+    _apply_r81_unauthorized_state(read_host, case)
+    receipt, binding = _seal_r81_self_consistent_receipt(read_host)
+    read_host.receipt = receipt
+    worker_sha = control.sha256_bytes(control.encode_config(read_host.worker_config))
+
+    assert (
+        control.ceo_submit_sink_eligible(
+            control_config=read_host.control_config,
+            worker_config=read_host.worker_config,
+            worker_config_sha256=worker_sha,
+            receipt=receipt,
+            binding=binding,
+            expected_sha=SHA,
+            installed_sha=SHA,
+        )
+        is False
+    )
+    assert (
+        control.evaluate_ceo_submit_status(read_host, _ceo_submit_request()).state
+        == "CEO_SUBMIT_ARMED_UNBOUND"
+    )
+    assert read_host.control_writes == 1  # the original legitimate ARM only
+    assert read_host.worker_writes == 0
+    assert read_host.receipt_writes == 1

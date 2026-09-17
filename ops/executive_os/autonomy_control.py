@@ -846,6 +846,53 @@ def _ceo_submit_binding_matches_control(
     )
 
 
+def _ceo_submit_arm_state_refusal(
+    control: Mapping[str, Any], binding: ExecutiveAppBinding
+) -> str | None:
+    """Return the first current-evidence ARM authority refusal, in fixed order.
+
+    R81: a self-digested receipt is correlation evidence, not authority. ARM
+    and sink/status readback therefore consume the same current-state owner.
+    """
+
+    if binding.app_peer_user != EXECUTIVE_APP_USER:
+        return "app_peer_invalid"
+    if binding.binding_valid is not True:
+        return "app_binding_invalid"
+    if binding.acl_valid is not True:
+        return "app_acl_invalid"
+    if binding.topology_valid is not True:
+        return "app_topology_invalid"
+    if control.get("ceo_ingress_app_armed") is not True:
+        return "ceo_ingress_app_unarmed"
+    app_peer_uid = control.get("ceo_ingress_app_peer_uid")
+    ingress_peer_uid = control.get("ceo_ingress_peer_uid")
+    if (
+        type(app_peer_uid) is not int
+        or type(ingress_peer_uid) is not int
+        or type(binding.app_peer_uid) is not int
+        or type(binding.ingress_peer_uid) is not int
+        or app_peer_uid == ingress_peer_uid
+        or binding.app_peer_uid != app_peer_uid
+    ):
+        return "ceo_ingress_separation_invalid"
+    if not _ceo_submit_binding_matches_control(control, binding):
+        return "app_binding_invalid"
+    if control.get("coo_autonomy_armed") is not False:
+        return "coo_autonomy_armed"
+    if control.get("coo_operator_harness_armed") is not False:
+        return "coo_operator_harness_armed"
+    return None
+
+
+def _ceo_submit_arm_state_authorized(
+    control: Mapping[str, Any], binding: ExecutiveAppBinding
+) -> bool:
+    """Whether current canonical evidence authorizes CEO-submit ARM/readback."""
+
+    return _ceo_submit_arm_state_refusal(control, binding) is None
+
+
 def ceo_submit_projection(
     transaction: TransactionContext,
     admission: CeoSubmitAdmission,
@@ -865,10 +912,11 @@ def ceo_submit_projection(
     ``app_binding_invalid`` refusal made DISARM and rollback unreachable when
     transport was absent.
 
-    Only the declared field set is bound: the postimage control values that
-    carry authority, the host-observed App binding facts, and the transaction
-    identity.  The whole control document is never bound, so an unrelated later
-    COO field cannot invalidate the receipt.
+    Only the declared authority fields and host-observed App binding facts are
+    rebound from current evidence. ``transaction_id`` is a correlation label:
+    it is required to be well formed and equal in the outer document and
+    projection, but it is not an authority source. The whole control document
+    is never bound, so an unrelated later COO field cannot invalidate the receipt.
     """
 
     control = transaction.candidates.control
@@ -911,7 +959,12 @@ def ceo_submit_projection_digest(projection: Mapping[str, Any]) -> str:
 def validate_ceo_submit_receipt_document(
     receipt: Mapping[str, Any], *, armed: bool
 ) -> bool:
-    """Validate the sealed receipt document without consulting live facts."""
+    """Validate receipt shape without treating self-described facts as authority.
+
+    ``transaction_id`` is a correlation label only: the outer and projected
+    values must be well formed and equal. Current authority is asserted later
+    from canonical evidence by ``_ceo_submit_arm_state_authorized``.
+    """
 
     if not isinstance(receipt, Mapping) or set(receipt) != _CEO_SUBMIT_RECEIPT_FIELDS:
         return False
@@ -1106,7 +1159,7 @@ def ceo_submit_sink_eligible(
     projection_digest = receipt["projection_digest"]
     if not isinstance(binding, ExecutiveAppBinding) or not binding.present:
         return False
-    if not _ceo_submit_binding_matches_control(control_config, binding):
+    if not _ceo_submit_arm_state_authorized(control_config, binding):
         return False
     recomputed = {field: control_config[field] for field in _CEO_SUBMIT_CONTROL_FIELDS}
     if set(recomputed) != _CEO_SUBMIT_CONTROL_FIELDS:
@@ -1458,20 +1511,13 @@ def evaluate_ceo_submit_arm_admission(
         or binding.app_peer_uid != app_peer_uid
     ):
         raise CeoSubmitAdmissionError("ceo_ingress_separation_invalid")
-    # R76 ARM-side live-binding comparison.  The earlier gates
-    # (binding_valid, acl_valid, topology_valid) cover only three of the six
-    # projection facts; the live socket path, launchd socket name and App
-    # macro root were UNCOVERED here, leaving ARM reachable with a drift the
-    # closed projection would still publish.  ``_ceo_submit_binding_matches_control``
-    # compares all six live facts (app_peer_uid, app_armed, ingress_peer_uid,
-    # app_macro_root, ingress_socket_path, launchd_socket_name) to the control
-    # config in one helper call and one digest-stable equality, so the gate
-    # chain stays one helper, one comparison, no duplicate.  The peer facts
-    # are also rechecked here so the status/read-back path sees a drift the
-    # same way ARM does -- the structural separation gate above is for ARM
-    # ONLY and does not run in status.
-    if not _ceo_submit_binding_matches_control(configs.control, binding):
-        raise CeoSubmitAdmissionError("app_binding_invalid")
+    # R81 authority parity: one current-evidence owner is consumed by both
+    # ARM and sink/status readback. The earlier gates preserve the existing
+    # typed refusal order before config loading; this assertion catches any
+    # disagreement between canonical control evidence and the live binding.
+    authority_refusal = _ceo_submit_arm_state_refusal(configs.control, binding)
+    if authority_refusal is not None:
+        raise CeoSubmitAdmissionError(authority_refusal)
     if separation.coo_autonomy_armed:
         raise CeoSubmitAdmissionError("coo_autonomy_armed")
     if separation.coo_operator_harness_armed:
@@ -3440,9 +3486,16 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
             return False
         try:
             control_gid = grp.getgrnam(CONTROL_GROUP).gr_gid
-            control, _raw = _root_json(
+            control, control_raw = _root_json(
                 CONTROL_CONFIG, modes=frozenset({0o440}), gid=control_gid
             )
+            if (
+                not isinstance(expected_control_sha256, str)
+                or re.fullmatch(r"[0-9a-f]{64}", expected_control_sha256) is None
+                or hashlib.sha256(control_raw).hexdigest()
+                != expected_control_sha256
+            ):
+                return False
             attestation_path = control.get("control_environment_attestation_path")
             if (
                 not isinstance(attestation_path, str)
