@@ -204,16 +204,19 @@ class _StewardTransportGuard:
         resource_path: str,
         metadata_path: str,
         allowed_hosts: Sequence[str],
+        loopback_hosts: Sequence[str],
         allowed_origins: Sequence[str],
     ) -> None:
         self.app = app
         self.resource = resource_path.encode("ascii")
-        self.public = {
+        self.metadata = metadata_path.encode("ascii")
+        self.operator = {
             b"/healthz",
             b"/readyz",
-            metadata_path.encode("ascii"),
         }
+        self.public = self.operator | {self.metadata}
         self.allowed_hosts = tuple(allowed_hosts)
+        self.loopback_hosts = tuple(loopback_hosts)
         self.allowed_origins = frozenset(allowed_origins)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
@@ -243,9 +246,17 @@ class _StewardTransportGuard:
         if host is None:
             await _reply(scope, receive, send, 400, "invalid_request")
             return
-        if not _host_matches(host, self.allowed_hosts):
-            await _reply(scope, receive, send, 421, "misdirected_request")
-            return
+        if raw_path in self.operator:
+            if not _host_matches(host, self.loopback_hosts):
+                await _reply(scope, receive, send, 421, "misdirected_request")
+                return
+        else:
+            if scope.get("scheme") != "https":
+                await _reply(scope, receive, send, 403, "transport_refused")
+                return
+            if not _host_matches(host, self.allowed_hosts):
+                await _reply(scope, receive, send, 421, "misdirected_request")
+                return
         if origins:
             origin = _ascii(origins[0])
             if origin is None:
@@ -397,12 +408,12 @@ def _url_path(url: str, label: str) -> str:
     return (parsed.path or "/").rstrip("/") or "/"
 
 
+_LOOPBACK_HOSTS = ("127.0.0.1:*", "localhost:*", "[::1]:*")
+
+
 def _allowed_hosts(policy: ResourcePolicy) -> list[str]:
-    values = ["127.0.0.1:*", "localhost:*", "[::1]:*"]
     resource_host = urlsplit(policy.resource).netloc
-    if resource_host and resource_host not in values:
-        values.append(resource_host)
-    return values
+    return [resource_host] if resource_host else []
 
 
 def build_authenticated_app(
@@ -501,10 +512,12 @@ def build_authenticated_app(
             )
         )
     middleware += [
-        Middleware(_StewardTransportGuard,
+        Middleware(
+            _StewardTransportGuard,
             resource_path=resource_path,
             metadata_path=metadata_path,
             allowed_hosts=hosts,
+            loopback_hosts=_LOOPBACK_HOSTS,
             allowed_origins=origins,
         ),
         Middleware(
