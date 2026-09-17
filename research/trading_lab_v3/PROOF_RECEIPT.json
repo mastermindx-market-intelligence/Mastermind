@@ -1,0 +1,49 @@
+{
+  "schema": "trading_lab.research_proof_receipt.v1",
+  "date": "2026-09-12",
+  "carrier": "Mastermind PR 566 / sol/paper-cash-trading-suite-20260911",
+  "source_readback_commit": "a73f5c208cfb1b323f67bacaf8ffb171d63094dd",
+  "scope": "read-only research candidate; no production import or release",
+  "local_test_command": "python -m pytest tests/test_preflight.py tests/test_api.py -q",
+  "local_results": {"passed": 120, "failed": 0, "errors": 0, "skipped": 0},
+  "source_blobs_verified_equal_to_tested_local_bytes": {
+    "backend/preflight.py": "7bb95db31c69a851e8a23c5826c1ee31fb5941cc",
+    "backend/fixtures.py": "754644abe4b2314f308cdad0fa25d34020642f00",
+    "backend/server.py": "c611e09b1f19edf7cbeffc814a2591e00c160452",
+    "tests/test_preflight.py": "da2d7850a37b6e45bd00e7650cf7b8312b362635",
+    "tests/test_api.py": "3b1f86541977c92fa0b6b214e2b4a4cf132de18f"
+  },
+  "negative_controls": {
+    "scope": "six deliberate mutations, not exhaustive mutation coverage",
+    "caught_by_assertion_failure": [
+      "ignore_cash_reservations", "allow_expired_quotes", "trust_review_label_without_content",
+      "reuse_preview_after_price_or_size_change", "allow_real_account_in_paper_preflight",
+      "mislabel_preview_execution_authority"
+    ]
+  },
+  "visual_artifact": {
+    "passed": 37,
+    "responsive_combinations": 24,
+    "page_errors": 0,
+    "network_requests": 0,
+    "method": "Chromium in-memory HTML rendering with network denied; preset backend output fixtures",
+    "browser_to_http_proof": false,
+    "blocked_attempt": "ERR_BLOCKED_BY_ADMINISTRATOR for loopback navigation; no bypass attempted",
+    "prior_harness_failure": "Duplicate const on reusing document realm; new-page harness repair and successful rerun"
+  },
+  "packaging": {
+    "git_contains": "backend, fixtures, core/API tests, architecture summary and separate Macro handoff",
+    "conversation_bundle": "Mastermind_Trading_Lab_V3_Implementation.zip",
+    "visual_assets_committed": false,
+    "complete_visual_bundle_needed_for_root_ui_route": true
+  },
+  "not_proven": [
+    "full repository CI", "independent review", "real user authentication", "RLS or database transactions",
+    "paper execution", "legacy account migration", "LLM review", "current market model",
+    "browser-to-served-backend integration", "production deployment", "investment edge", "user outcome improvement"
+  ],
+  "executive_read": "MCP SSE probe returned 429; no receiver assignment or runtime admission claimed",
+  "execution_authority": false,
+  "order_submitted": false,
+  "production_status": "PRODUCTION_INERT"
+}
