@@ -1006,7 +1006,12 @@ def research_paper_pdf(id: str = "", ticker: str = "") -> Response:
     try:
         from brain import research_paper
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"error": f"research store unavailable: {exc}"}, status_code=503)
+        _log.warning("research paper store import failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "error": "research_store_unavailable",
+            "note": "research store unavailable",
+        }, status_code=503)
 
     paper = None
     try:
@@ -1016,15 +1021,24 @@ def research_paper_pdf(id: str = "", ticker: str = "") -> Response:
         if paper is None and ticker:
             paper = research_paper.latest_for(ticker)
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"error": f"could not load paper: {exc}"}, status_code=500)
+        _log.warning("research paper read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "error": "research_paper_unavailable",
+            "note": "research paper unavailable",
+        }, status_code=500)
     if paper is None:
-        return JSONResponse({"error": "research paper not found"}, status_code=404)
+        return JSONResponse({"error": "research paper not found", "note": "research paper not found"}, status_code=404)
 
     try:
         from app import research_pdf
     except Exception as exc:  # noqa: BLE001 — reportlab missing, etc.
-        return JSONResponse({"error": f"PDF engine unavailable (is reportlab installed?): {exc}"},
-                            status_code=503)
+        _log.warning("research PDF engine import failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "error": "research_pdf_engine_unavailable",
+            "note": "PDF engine unavailable",
+        }, status_code=503)
 
     meta = {}
     try:
@@ -1034,7 +1048,12 @@ def research_paper_pdf(id: str = "", ticker: str = "") -> Response:
     try:
         pdf = research_pdf.build(paper, meta)
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"error": f"PDF generation failed: {exc}"}, status_code=500)
+        _log.warning("research PDF generation failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "error": "research_pdf_generation_failed",
+            "note": "PDF generation failed",
+        }, status_code=500)
 
     tkr = (paper.get("ticker") or "research").upper()
     datestr = str(paper.get("asof") or paper.get("generated_at") or "")[:10]
