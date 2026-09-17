@@ -612,3 +612,44 @@ This task is **not** delegated to an ordinary coding worker.
 11. Record exact Runtime Events, broker receipt/request ID, merged release SHA, host/boot identity, no-prompt evidence and remaining P3/P4/P5 gates in durable owners.
 
 Only after these observations may P2-1 become `PROVEN_LIVE` on the Studio. Then advance directly to the P3 secret-free credential-renewal vertical.
+
+
+## 2026-09-16 continuation — supervisor portion of Task 2
+
+The existing PR #703 and operation remain canonical. The local immutable-binding
+commits after `f3dd1b0b` are preserved, not replaced. Task 1, Task 3, the pure
+Task 4 request/binding primitives, and Task 2's **supervisor-only** portion are
+implemented. The Runtime portion of Task 2 and the actual Event-backed controller
+are not implemented or accepted by this checkpoint.
+
+`validate_effective_grant` now consumes the same Job's preauthorized
+`AuthorityDecision` without loading policy or resolving filesystem paths. It
+retains grant-shape, scope, policy and digest refusal and rejects mismatched
+preauthorized scope. The compatibility method authorizes once before delegating.
+Only prompt JSON and `WorkerLaunchSpec.authorities` remove the closed
+`REQUEST_WORKER_LOGIN_CHECK` capability. Profile admission, durable launch
+evidence and persisted grants retain the full authority.
+
+Regression-first supervisor proof began with 16 failures and 2 passing negative
+controls. The expanded eight-file compatibility campaign passes 364 tests.
+Four in-memory fault controls (worker permission leakage, accepted policy drift,
+ignored grant digest, ignored decision scope) each produce real test failures;
+they never rewrite the source file. The earlier socket test race was corrected
+by consuming its request before dropping the response. Deterministic send/receive
+loss tests preserve the one-send/no-retry contract; no client production behavior
+was weakened to make the test green.
+
+Current holds remain explicit: #699 requires incumbent RuntimeBinding/source
+reconciliation before `executive_runtime.py` edits; #653 retains installer and
+phase1c composition custody. The controller, installation, native Claude/Codex
+consumption and root-effect/recovery proof remain unbuilt or unproven. The Studio
+still has no privileged broker plist/config/socket/client. No password, sudoers,
+credential, root service, provider session or production Runtime was modified.
+
+Direct source work used the existing acquired workspace as a small
+`CRITICAL_PATH_SHORTCUT`; the discovered Executive app reports fixture mode and
+was not used as real worker admission. This is a Draft/HOLD source continuation,
+not source acceptance or production acceptance. Next: reconcile the Runtime
+owner, finish Task 2's token-free current-Attempt seam and Task 4 on the same
+carrier, then consume the installer owner's return for Task 5. Preserve review,
+current-base CI and one-time host-bootstrap gates.

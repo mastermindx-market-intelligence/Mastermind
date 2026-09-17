@@ -120,23 +120,19 @@ def test_send_effect_raises_on_transport_loss_without_retry(short_socket_root: P
     from control_plane import executive_privileged_client as client
 
     socket_path = short_socket_root / "drop.sock"
-    ready = threading.Event()
+    observed = []
 
-    def server() -> None:
-        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        listener.bind(str(socket_path))
-        listener.listen(1)
-        ready.set()
-        connection, _ = listener.accept()
-        connection.close()
-        listener.close()
+    def drop_response(connection, data):
+        # Consume the request before closing: exercise response loss, not a
+        # scheduler-dependent BrokenPipeError while the client is still sending.
+        observed.append(json.loads(data))
 
-    thread = threading.Thread(target=server, daemon=True)
-    thread.start()
-    assert ready.wait(2)
+    thread = _serve_once(socket_path, drop_response)
     with pytest.raises(RuntimeError, match="closed before a response"):
         client.send_effect(_effect_request(), socket_path=socket_path, timeout_seconds=2)
     thread.join(2)
+    assert not thread.is_alive()
+    assert observed == [_effect_request()]
 
 
 def test_send_effect_rejects_response_exceeding_byte_bound(short_socket_root: Path) -> None:
@@ -291,3 +287,41 @@ def test_send_effect_has_no_caller_selectable_socket_positional() -> None:
 
     with pytest.raises(TypeError):
         client.send_effect(_effect_request(), "/tmp/should-not-be-positional")
+
+
+@pytest.mark.parametrize("operation", ["send_effect", "send_status"])
+@pytest.mark.parametrize("failed_stage", ["send", "receive"])
+def test_transport_failure_never_reconnects_or_resends(monkeypatch, operation, failed_stage):
+    from control_plane import executive_privileged_client as client
+
+    calls = []
+    failure = BrokenPipeError("send lost") if failed_stage == "send" else ConnectionResetError("response lost")
+
+    class FailedConnection:
+        def settimeout(self, value):
+            calls.append("timeout")
+        def connect(self, path):
+            calls.append("connect")
+        def sendall(self, payload):
+            calls.append("send")
+            if failed_stage == "send":
+                raise failure
+        def recv(self, size):
+            calls.append("receive")
+            raise failure
+        def close(self):
+            calls.append("close")
+
+    def make_connection(*args):
+        calls.append("socket")
+        return FailedConnection()
+
+    monkeypatch.setattr(client.socket, "socket", make_connection)
+    request = _effect_request() if operation == "send_effect" else _status_request()
+    with pytest.raises(type(failure)) as caught:
+        getattr(client, operation)(request)
+    assert caught.value is failure
+    expected = ["socket", "timeout", "connect", "send"]
+    if failed_stage == "receive":
+        expected.append("receive")
+    assert calls == expected + ["close"]
