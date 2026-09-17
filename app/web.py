@@ -2398,8 +2398,17 @@ def api_trades(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
             "snapshot_status": account_status,
         })
     except Exception as exc:
-        return JSONResponse({"open": [], "closed": [], "history": [],
-                             "pending": [], "market": {}, "error": str(exc)})
+        _log.warning("trade history read failed for %s: %s", portfolio, type(exc).__name__)
+        return JSONResponse({
+            "portfolio": portfolio,
+            "open": None,
+            "closed": None,
+            "history": None,
+            "pending": None,
+            "market": None,
+            "snapshot_status": "unavailable",
+            "error": "trades_unavailable",
+        })
 
 
 # ---------------------------------------------------------------------------
