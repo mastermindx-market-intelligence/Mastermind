@@ -1324,6 +1324,48 @@ def test_company_consult_clock_failure_is_definite_pre_dispatch_internal_error()
     assert sink.calls == []
 
 
+def test_company_consult_real_post_dispatch_cancellation_is_effect_unknown() -> None:
+    secret = "secret-post-dispatch-cancellation-detail.not-for-logs"
+
+    class BlockingDispatcher:
+        def __init__(self) -> None:
+            self.started = asyncio.Event()
+            self.calls: list[tuple[str, dict]] = []
+
+        async def __call__(self, operation: str, request: dict) -> dict:
+            self.calls.append((operation, copy.deepcopy(request)))
+            self.started.set()
+            await asyncio.Future()
+            raise AssertionError("unreachable")
+
+    async def exercise() -> None:
+        sink = BlockingDispatcher()
+        gateway, _ = _gateway(dispatcher=sink)
+        task = asyncio.create_task(
+            gateway.call(
+                "company.consult",
+                {
+                    "to": _peer().peer_ref,
+                    "question": "Preserve cancellation as post-effect uncertainty.",
+                    "evidence_refs": [],
+                    "artifact_revisions": [],
+                },
+            )
+        )
+        await sink.started.wait()
+
+        task.cancel(secret)
+        response = await task
+
+        assert task.cancelled() is False
+        assert response["ok"] is False
+        assert response["error"]["code"] == "EFFECT_UNKNOWN"
+        assert secret not in repr(response)
+        assert len(sink.calls) == 1
+
+    asyncio.run(exercise())
+
+
 def test_company_consult_dispatch_failure_after_invocation_remains_effect_unknown() -> None:
     class FailingDispatcher:
         def __init__(self) -> None:

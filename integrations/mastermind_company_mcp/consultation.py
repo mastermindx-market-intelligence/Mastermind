@@ -1,6 +1,7 @@
 """Frozen four-tool Company MCP consultation facet (hermetic producer slice)."""
 from __future__ import annotations
 
+import asyncio
 import copy
 import datetime as dt
 import dataclasses
@@ -665,6 +666,8 @@ class CompanyConsultationGateway:
             return _result_after_dispatch(tool_name, self._service_data(response))
         except ConsultationPeerRefused as exc:
             return _error(tool_name, exc.code, data=exc.data)
+        except asyncio.CancelledError:
+            return _error(tool_name, "EFFECT_UNKNOWN")
         except Exception:
             return _error(tool_name, "EFFECT_UNKNOWN")
 
