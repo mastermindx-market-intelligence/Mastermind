@@ -474,6 +474,7 @@ _CENSUS_SOURCE_KINDS = (
     ("manifest.json", "extension_manifest"),
     ("background.js", "extension_background"),
     ("content.js", "extension_content"),
+    ("continuation_core.js", "extension_continuation_core"),
     ("census.html", "extension_census_html"),
     ("census.css", "extension_census_css"),
     ("census_core.js", "extension_census_core"),
@@ -538,7 +539,7 @@ def render_census_extension_bundle(
     source_files: Mapping[str, bytes],
     expected_source_digests: Mapping[str, str],
 ) -> DeploymentBundle:
-    """Render ten complete CENSUS1 artifacts; perform no installation.
+    """Render the complete CENSUS1 package artifacts; perform no installation.
 
     The caller must authenticate the source commit and supply independently
     established asset digests. Matching caller-supplied hashes proves integrity,

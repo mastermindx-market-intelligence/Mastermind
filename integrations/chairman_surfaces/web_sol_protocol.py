@@ -23,9 +23,20 @@ HELLO_ACK_SCHEMA = "mastermind.web_sol_transport_hello_ack.v1"
 INSTANCE_CONFIG_SCHEMA = "mastermind.web_sol_instance_config.v1"
 TRANSPORT_CAPABILITY_SCHEMA = "mastermind.web_sol_transport_capabilities.v1"
 TRANSPORT_PROTOCOL_MAJOR = 1
-WEB_SOL_PACKAGE_VERSION = "0.2.0"
+WEB_SOL_PACKAGE_VERSION = "0.3.0"
 MAX_ACTION_TTL_SECONDS = 60
 ALLOWED_FUTURE_SKEW_SECONDS = 5
+CONTINUATION_DIRECTIVE_TEXT = (
+    "SOL CONTINUE\n\n"
+    "Continue the same logical responsibility.\n"
+    "Recover current canonical state before acting; Project/chat history is advisory only.\n"
+    "Do not restart completed work.\n"
+    "Recover any open reciprocal worker dialogue before creating replacement work.\n"
+    "Advance the highest-leverage unfinished critical-path capability within the existing authorized scope."
+)
+CONTINUATION_DIRECTIVE_DIGEST = hashlib.sha256(
+    CONTINUATION_DIRECTIVE_TEXT.encode("utf-8")
+).hexdigest()
 
 
 class WebSolProtocolError(ValueError):
@@ -36,6 +47,7 @@ class SurfaceAction(str, Enum):
     INSPECT = "INSPECT"
     FOREGROUND = "FOREGROUND"
     TYPED_REENTRY = "TYPED_REENTRY"
+    SUBMIT_CONTINUATION = "SUBMIT_CONTINUATION"
 
 
 class ReceiptStatus(str, Enum):
@@ -46,6 +58,9 @@ class ReceiptStatus(str, Enum):
     NOT_CONSUMED = "NOT_CONSUMED"
     CONVERSATION_CLOSED = "CONVERSATION_CLOSED"
     TYPED_REENTRY_BLOCKED = "TYPED_REENTRY_BLOCKED"
+    CONTINUATION_NOT_SUBMITTED = "CONTINUATION_NOT_SUBMITTED"
+    CONTINUATION_SUBMIT_EFFECT_UNKNOWN = "CONTINUATION_SUBMIT_EFFECT_UNKNOWN"
+    CONTINUATION_STARTED = "CONTINUATION_STARTED"
     TARGET_NOT_FOUND = "TARGET_NOT_FOUND"
     TARGET_CHANGED = "TARGET_CHANGED"
     AUTH_REQUIRED = "AUTH_REQUIRED"
@@ -77,6 +92,11 @@ _TYPED_REENTRY_PAYLOAD_KEYS = frozenset({
     "obligation_digest",
 })
 _TYPED_REENTRY_KEYS = _REQUEST_KEYS | _TYPED_REENTRY_PAYLOAD_KEYS
+_SUBMIT_CONTINUATION_PAYLOAD_KEYS = frozenset({
+    "turn_id",
+    "directive_digest",
+})
+_SUBMIT_CONTINUATION_KEYS = _REQUEST_KEYS | _SUBMIT_CONTINUATION_PAYLOAD_KEYS
 _RECEIPT_KEYS = frozenset(
     {
         "schema",
@@ -92,6 +112,7 @@ _RECEIPT_KEYS = frozenset(
     }
 )
 _TYPED_REENTRY_RECEIPT_KEYS = _RECEIPT_KEYS | _TYPED_REENTRY_PAYLOAD_KEYS
+_SUBMIT_CONTINUATION_RECEIPT_KEYS = _RECEIPT_KEYS | _SUBMIT_CONTINUATION_PAYLOAD_KEYS
 _PROBE_KEYS = frozenset(
     {
         "schema",
@@ -151,6 +172,7 @@ _FORBIDDEN_KEYS = frozenset(
     }
 )
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
+_TURN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{2,255}$")
 _SEMVER_RE = re.compile(
     r"^(?:0|[1-9][0-9]*)\."
     r"(?:0|[1-9][0-9]*)\."
@@ -252,6 +274,11 @@ def _require_nonce(value: Any, path: str) -> None:
 def _require_nullable_nonce(value: Any, path: str) -> None:
     if value is not None:
         _require_nonce(value, path)
+
+
+def _require_turn_id(value: Any, path: str) -> None:
+    if not isinstance(value, str) or _TURN_ID_RE.fullmatch(value) is None:
+        raise _error(path, "must be a bounded opaque turn identity")
 
 
 def _require_package_version(value: Any, path: str) -> None:
@@ -410,7 +437,10 @@ def _require_action(value: Any, path: str) -> SurfaceAction:
     try:
         return SurfaceAction(value)
     except (ValueError, TypeError) as exc:
-        raise _error(path, "must be INSPECT, FOREGROUND, or TYPED_REENTRY") from exc
+        raise _error(
+            path,
+            "must be INSPECT, FOREGROUND, TYPED_REENTRY, or SUBMIT_CONTINUATION",
+        ) from exc
 
 
 def _validate_identity_fields(
@@ -436,6 +466,15 @@ def _validate_identity_fields(
             if field not in value:
                 raise _error(f"$.{field}", "required for TYPED_REENTRY")
             _require_hex64(value[field], f"$.{field}")
+    if action is SurfaceAction.SUBMIT_CONTINUATION:
+        if "turn_id" not in value:
+            raise _error("$.turn_id", "required for SUBMIT_CONTINUATION")
+        if "directive_digest" not in value:
+            raise _error("$.directive_digest", "required for SUBMIT_CONTINUATION")
+        _require_turn_id(value["turn_id"], "$.turn_id")
+        _require_hex64(value["directive_digest"], "$.directive_digest")
+        if value["directive_digest"] != CONTINUATION_DIRECTIVE_DIGEST:
+            raise _error("$.directive_digest", "does not match the fixed continuation directive")
     return action
 
 
@@ -507,13 +546,13 @@ def validate_request(value: dict[str, Any]) -> dict[str, Any]:
 
     _walk_forbidden(value)
     action = value.get("action") if isinstance(value, dict) else None
-    request = _require_exact_keys(
-        value,
-        _TYPED_REENTRY_KEYS
-        if action == SurfaceAction.TYPED_REENTRY.value
-        else _REQUEST_KEYS,
-        "$",
-    )
+    if action == SurfaceAction.TYPED_REENTRY.value:
+        request_keys = _TYPED_REENTRY_KEYS
+    elif action == SurfaceAction.SUBMIT_CONTINUATION.value:
+        request_keys = _SUBMIT_CONTINUATION_KEYS
+    else:
+        request_keys = _REQUEST_KEYS
+    request = _require_exact_keys(value, request_keys, "$")
     _require_schema(request["schema"], ACTION_SCHEMA, "$.schema")
     _validate_identity_fields(request, include_time=True)
     return copy.deepcopy(request)
@@ -688,6 +727,45 @@ def _validate_receipt_semantics(
         )
         return
 
+    if status is ReceiptStatus.CONTINUATION_NOT_SUBMITTED:
+        _require_probe_truth(
+            action is SurfaceAction.SUBMIT_CONTINUATION,
+            "$.status",
+            "CONTINUATION_NOT_SUBMITTED requires SUBMIT_CONTINUATION action",
+        )
+        return
+
+    if status is ReceiptStatus.CONTINUATION_SUBMIT_EFFECT_UNKNOWN:
+        _require_probe_truth(
+            action is SurfaceAction.SUBMIT_CONTINUATION,
+            "$.status",
+            "CONTINUATION_SUBMIT_EFFECT_UNKNOWN requires SUBMIT_CONTINUATION action",
+        )
+        return
+
+    if status is ReceiptStatus.CONTINUATION_STARTED:
+        _require_probe_truth(
+            action is SurfaceAction.SUBMIT_CONTINUATION,
+            "$.status",
+            "CONTINUATION_STARTED requires SUBMIT_CONTINUATION action",
+        )
+        _require_probe_truth(
+            probe["target_present"] and probe["exact_conversation_loaded"],
+            "$.observation.exact_conversation_loaded",
+            "CONTINUATION_STARTED requires the exact target to remain loaded",
+        )
+        _require_probe_truth(
+            probe["generation_state"] == "active",
+            "$.observation.generation_state",
+            "must be active for CONTINUATION_STARTED",
+        )
+        _require_probe_truth(
+            probe["auth_required"] is not True,
+            "$.observation.auth_required",
+            "must not be true for CONTINUATION_STARTED",
+        )
+        return
+
     if status is ReceiptStatus.TARGET_NOT_FOUND:
         _require_probe_truth(
             not probe["target_present"],
@@ -725,13 +803,13 @@ def validate_receipt(value: dict[str, Any]) -> dict[str, Any]:
 
     _walk_forbidden(value)
     action = value.get("action") if isinstance(value, dict) else None
-    receipt = _require_exact_keys(
-        value,
-        _TYPED_REENTRY_RECEIPT_KEYS
-        if action == SurfaceAction.TYPED_REENTRY.value
-        else _RECEIPT_KEYS,
-        "$",
-    )
+    if action == SurfaceAction.TYPED_REENTRY.value:
+        receipt_keys = _TYPED_REENTRY_RECEIPT_KEYS
+    elif action == SurfaceAction.SUBMIT_CONTINUATION.value:
+        receipt_keys = _SUBMIT_CONTINUATION_RECEIPT_KEYS
+    else:
+        receipt_keys = _RECEIPT_KEYS
+    receipt = _require_exact_keys(value, receipt_keys, "$")
     _require_schema(receipt["schema"], RECEIPT_SCHEMA, "$.schema")
     action = _validate_identity_fields(receipt, include_time=False)
     _parse_zulu(receipt["observed_at"], "$.observed_at")

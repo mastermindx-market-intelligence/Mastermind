@@ -2,7 +2,9 @@
 
 importScripts("instance_config.js");
 importScripts("census_core.js");
+importScripts("continuation_core.js");
 
+const K = globalThis.MMXWebSolContinuation;
 const PROBE_KIND = "MMX_WEB_SOL_PROBE";
 const REPROBE_KIND = "MMX_WEB_SOL_REPROBE";
 const ACTION_SCHEMA = "mastermind.web_sol_surface_action.v1";
@@ -12,8 +14,8 @@ const HELLO_SCHEMA = "mastermind.web_sol_transport_hello.v1";
 const HELLO_ACK_SCHEMA = "mastermind.web_sol_transport_hello_ack.v1";
 const INSTANCE_CONFIG_SCHEMA = "mastermind.web_sol_instance_config.v1";
 const TRANSPORT_PROTOCOL_MAJOR = 1;
-const PACKAGE_VERSION = "0.2.0";
-const EXPECTED_CAPABILITY_DIGEST = "89a0dcb05a6c1c31000f841671e6cbf6c29a69dd73ed9726c8b5b99535485e50";
+const PACKAGE_VERSION = "0.3.0";
+const EXPECTED_CAPABILITY_DIGEST = "8aea42a362cf25d0a5e3a9ebfd7f4ded649af0b456b67a6f0ea952f85691c04a";
 const MAX_ACTION_TTL_MS = 60000;
 const ALLOWED_FUTURE_SKEW_MS = 5000;
 const CHATGPT_TAB_PATTERNS = Object.freeze([
@@ -116,7 +118,6 @@ function validProbeEvent(event) {
 function validActionRequest(request) {
   if (!exactKeys(request, ACTION_KEYS) || request.schema !== ACTION_SCHEMA) return false;
   if (request.action !== "INSPECT" && request.action !== "FOREGROUND") return false;
-  if (request.action === "TYPED_REENTRY") return false;
   if (!isHex64(request.conversation_fingerprint) || !isHex64(request.binding_fingerprint)) return false;
   if (typeof request.binding_id !== "string" ||
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(request.binding_id)) return false;
@@ -203,6 +204,8 @@ function receipt(request, status, observation) {
     result.result_digest = request.result_digest;
     result.obligation_digest = request.obligation_digest;
   }
+  if (request.action === "SUBMIT_CONTINUATION") Object.assign(result, {
+    turn_id: request.turn_id, directive_digest: request.directive_digest});
   return result;
 }
 
@@ -360,6 +363,15 @@ async function handleTypedReentry(request) {
   return receipt(request, "CONSUMED", result.observation);
 }
 
+function validSubmitContinuationRequest(request) {
+  return K?.validRequest(request) === true;
+}
+async function handleSubmitContinuation(request) {
+  const outcome = await K.handle(request, {resolveExactTarget, freshProbe,
+    requestWindowStatus, unknownObservation, sendMessage: (i, v) => chrome.tabs.sendMessage(i, v, {frameId: 0})});
+  return receipt(request, outcome.status, outcome.observation || unknownObservation());
+}
+
 const CENSUS_REQUEST_SCHEMA = "mastermind.web_sol_census_request.v1";
 const CENSUS_RECEIPT_SCHEMA = "mastermind.web_sol_census_receipt.v1";
 const CENSUS_HEADERS = Object.freeze(["schema", "scope", "adapter_instance_id", "started_at", "completed_at",
@@ -438,7 +450,8 @@ function validCensusPopup(event, sender) {
 async function handleNativeRequest(request, port) {
   if (request && request.schema === CENSUS_REQUEST_SCHEMA) return handleCensusRequest(request, port);
   const typedReentry = validTypedReentryRequest(request);
-  if (!typedReentry && !validActionRequest(request)) return;
+  const submitContinuation = validSubmitContinuationRequest(request);
+  if (!typedReentry && !submitContinuation && !validActionRequest(request)) return;
   const accepted = Object.freeze({...request});
   const windowStatus = requestWindowStatus(accepted);
   if (windowStatus) {
@@ -448,7 +461,8 @@ async function handleNativeRequest(request, port) {
   const result = accepted.action === "INSPECT"
     ? await handleInspect(accepted)
     : accepted.action === "FOREGROUND" ? await handleForeground(accepted)
-    : typedReentry ? await handleTypedReentry(accepted) : null;
+    : typedReentry ? await handleTypedReentry(accepted)
+    : submitContinuation ? await handleSubmitContinuation(accepted) : null;
   if (result) port.postMessage(result);
   return result;
 }
