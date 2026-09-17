@@ -206,7 +206,9 @@ def _requested_capabilities(spec: WorkerLaunchSpec) -> frozenset[str]:
     if spec.authority is not None:
         raw.append(spec.authority)
     if not raw:
-        raw.append("READ")
+        raise ClaudeWorkerContractError(
+            "Claude execution requires an explicit capability grant"
+        )
     if any(not isinstance(value, str) or not value.strip() for value in raw):
         raise ClaudeWorkerContractError("worker authorities must be non-empty strings")
     requested = frozenset(value.strip().upper() for value in raw)
@@ -249,9 +251,10 @@ def _tool_policy(spec: WorkerLaunchSpec) -> tuple[str, str, str, list[str]]:
         if not paths:
             raise ClaudeWorkerContractError("unsupported or unmapped Claude capabilities")
         tools.extend(_WRITE_TOOLS)
-        allowed.extend(_WRITE_TOOLS)
         for path in paths:
-            settings_allowed.extend((f"Edit(./{path})", f"Write(./{path})"))
+            scoped_tools = (f"Edit(./{path})", f"Write(./{path})")
+            allowed.extend(scoped_tools)
+            settings_allowed.extend(scoped_tools)
     if "RUN_TESTS" in requested:
         tools.append(_TEST_TOOL)
         allowed.append("Bash(python3 -m pytest *)")

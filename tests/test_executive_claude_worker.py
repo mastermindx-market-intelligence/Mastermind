@@ -193,7 +193,12 @@ def test_compiler_projects_only_read_write_and_test_capabilities(
     write_allowed = write_and_test.argv[write_and_test.argv.index("--allowedTools") + 1]
     assert read_tools == read_allowed == "Glob,Grep,Read"
     assert write_tools == "Bash,Edit,Glob,Grep,Read,Write"
-    assert write_allowed == "Bash(python3 -m pytest *),Edit,Glob,Grep,Read,Write"
+    assert write_allowed == (
+        "Bash(python3 -m pytest *),Edit(./src/allowed.py),Glob,Grep,Read,"
+        "Write(./src/allowed.py)"
+    )
+    assert "Edit" not in write_allowed.split(",")
+    assert "Write" not in write_allowed.split(",")
     assert read_only.argv[read_only.argv.index("--disallowedTools") + 1] == (
         "Agent,Bash,Edit,NotebookEdit,Skill,Task,WebFetch,WebSearch,Write,mcp__*"
     )
@@ -214,6 +219,13 @@ def test_compiler_refuses_unknown_or_unmapped_capabilities(tmp_path: Path) -> No
     ):
         with pytest.raises(ClaudeWorkerContractError, match="unsupported or unmapped"):
             adapter.compile_launch(_spec(tmp_path, authorities=authorities))
+
+
+def test_compiler_refuses_an_empty_capability_grant(tmp_path: Path) -> None:
+    adapter = _adapter(tmp_path)
+
+    with pytest.raises(ClaudeWorkerContractError, match="explicit capability grant"):
+        adapter.compile_launch(_spec(tmp_path, authorities=(), authority=None))
 
 
 def test_compiler_uses_closed_environment_without_ambient_secrets(
