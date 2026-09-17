@@ -29,6 +29,7 @@ import pwd
 import stat
 import subprocess
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -182,8 +183,9 @@ def test_default_path_only_symlink_identity_refuses_without_following(monkeypatc
 
     assert "macOS ACL open failed" in str(excinfo.value)
     flags = observation.flags
-    assert flags & os.O_NOFOLLOW, "the default branch must keep O_NOFOLLOW"
-    assert not flags & O_SYMLINK, "the default branch must not add O_SYMLINK"
+    assert flags == (
+        os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
+    ), "the default branch flag word must be exactly O_RDONLY|O_NOFOLLOW|O_CLOEXEC|O_NONBLOCK"
     assert observation.lstats == ["link"]
     assert observation.fstats == [], "an ELOOP open must not be observed further"
 
@@ -236,6 +238,39 @@ def test_opt_in_without_expected_identity_refuses_before_open(monkeypatch):
 
     assert "requires the caller's pre-open lstat" in str(excinfo.value)
     assert observation.opens == [] and observation.fstats == [] and observation.lstats == []
+
+
+@pytest.mark.parametrize(
+    "identity",
+    [
+        object(),
+        types.SimpleNamespace(st_mode=stat.S_IFLNK),
+        (stat.S_IFLNK, 22, 11),
+    ],
+    ids=["object-without-attributes", "namespace-without-identity", "plain-tuple"],
+)
+def test_opt_in_with_non_stat_result_identity_refuses_before_open(monkeypatch, identity):
+    """Reviewer LOW (semantic): a malformed pre-open identity is a typed refusal.
+
+    The opt-in requires the caller's real ``os.stat_result``. An object without
+    ``st_mode``, one that reports ``S_IFLNK`` without ``st_dev``/``st_ino``, and a
+    plain tuple must all raise ``FilesystemSecurityError`` before any open rather
+    than leaking an ``AttributeError`` from the S_ISLNK check or the post-open
+    identity comparison. This is platform-independent and never skips.
+    """
+
+    _darwin(monkeypatch)
+    monkeypatch.setattr(os, "O_SYMLINK", O_SYMLINK, raising=False)
+    observation = _Observation(
+        target="link", observed=_stat_result(stat.S_IFLNK)
+    ).install(monkeypatch)
+
+    with pytest.raises(FilesystemSecurityError) as excinfo:
+        has_macos_acl("link", expected_identity=identity, allow_symlink=True)
+
+    assert "requires an os.stat_result pre-open identity" in str(excinfo.value)
+    assert observation.opens == [], "a malformed identity must refuse before any open"
+    assert observation.fstats == [] and observation.acl_reads == []
 
 
 @pytest.mark.parametrize(
@@ -360,7 +395,10 @@ def test_opt_in_input_validation_is_platform_independent(monkeypatch):
 
 
 def test_symlink_branch_flags_include_o_symlink_and_exclude_o_nofollow(monkeypatch):
-    """Contract 4 (semantic): the opt-in flags are exactly the no-follow-escape set."""
+    """Contract 4 (semantic): the opt-in flag word is exactly the no-follow-escape set.
+
+    Reviewer GAP: equality (not membership) so an extra flag bit cannot hide.
+    """
 
     _darwin(monkeypatch)
     monkeypatch.setattr(os, "O_SYMLINK", O_SYMLINK, raising=False)
@@ -370,9 +408,12 @@ def test_symlink_branch_flags_include_o_symlink_and_exclude_o_nofollow(monkeypat
     assert has_macos_acl("link", expected_identity=link_info, allow_symlink=True) is False
 
     flags = observation.flags
-    assert flags & O_SYMLINK, "the opt-in open must request O_SYMLINK"
-    assert not flags & os.O_NOFOLLOW, "O_NOFOLLOW would make the link open fail (ELOOP)"
-    assert flags & os.O_CLOEXEC and flags & os.O_NONBLOCK
+    assert flags == (
+        os.O_RDONLY
+        | O_SYMLINK
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NONBLOCK", 0)
+    ), "the opt-in flag word must be exactly O_RDONLY|O_SYMLINK|O_CLOEXEC|O_NONBLOCK"
     assert observation.acl_reads == [FAKE_DESCRIPTOR]
     assert observation.closed == [FAKE_DESCRIPTOR]
 

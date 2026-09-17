@@ -91,6 +91,8 @@ def has_macos_acl(
     a caller-supplied ``descriptor``: the symlink observation must own the
     ``O_SYMLINK`` open itself, so the trusted flags are part of the observation
     rather than something a caller can assert by handing over a descriptor.
+    ``expected_identity`` must be the caller's real ``os.stat_result``; any other
+    object refuses before any open instead of leaking an ``AttributeError``.
     ``O_SYMLINK`` must be a native, nonzero ``int`` (``bool`` is rejected); a
     missing, zero, or non-integer attribute refuses before any open.
     """
@@ -107,6 +109,11 @@ def has_macos_acl(
         if expected_identity is None:
             raise FilesystemSecurityError(
                 "macOS ACL symlink observation requires the caller's pre-open lstat"
+            )
+        if not isinstance(expected_identity, os.stat_result):
+            raise FilesystemSecurityError(
+                "macOS ACL symlink observation requires an os.stat_result "
+                "pre-open identity"
             )
         if not stat.S_ISLNK(expected_identity.st_mode):
             raise FilesystemSecurityError(
