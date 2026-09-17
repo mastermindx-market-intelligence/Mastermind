@@ -65,6 +65,7 @@ def has_macos_acl(
     *,
     expected_identity: os.stat_result | None = None,
     descriptor: int | None = None,
+    allow_symlink: bool = False,
 ) -> bool:
     """Return whether a Darwin object has ACL_TYPE_EXTENDED entries.
 
@@ -73,24 +74,63 @@ def has_macos_acl(
     and its matching pre-open lstat so metadata and ACL observation share one
     object. An open file descriptor remains valid after unlink, but this
     function still fails closed when the pre-open and opened identities differ.
+
+    ``allow_symlink`` is a narrow, manifest-only opt-in for observing a release
+    symlink's *own* ACL. It is never inferred and never re-baselined: it requires
+    the caller to supply the pre-open ``expected_identity`` it already validated,
+    and that lstat must itself be a symlink. The descriptor is then opened with
+    the native ``O_SYMLINK`` flag and without ``O_NOFOLLOW``, and the ACL is read
+    through the same descriptor-bound acquisition regular files use, so only an
+    observed symlink of exactly that identity is accepted. A missing opt-in, a
+    missing ``expected_identity``, a non-symlink identity, or a missing native
+    ``O_SYMLINK`` all fail closed instead of falling back to a fresh ``lstat`` or
+    to the ordinary file/directory path, so every path-only caller keeps refusing
+    symlinks exactly as before.
     """
 
     if sys.platform != "darwin":
         return False
 
-    try:
-        before = os.lstat(path) if expected_identity is None else expected_identity
-    except OSError as exc:
-        raise FilesystemSecurityError(
-            f"macOS ACL observation target is unavailable: errno={exc.errno}"
-        ) from exc
+    if expected_identity is None:
+        if allow_symlink:
+            raise FilesystemSecurityError(
+                "macOS ACL symlink observation requires the caller's pre-open lstat"
+            )
+        try:
+            before = os.lstat(path)
+        except OSError as exc:
+            raise FilesystemSecurityError(
+                f"macOS ACL observation target is unavailable: errno={exc.errno}"
+            ) from exc
+    else:
+        before = expected_identity
 
-    flags = (
-        os.O_RDONLY
-        | getattr(os, "O_NOFOLLOW", 0)
-        | getattr(os, "O_CLOEXEC", 0)
-        | getattr(os, "O_NONBLOCK", 0)
-    )
+    observe_symlink = False
+    if allow_symlink:
+        if not stat.S_ISLNK(before.st_mode):
+            raise FilesystemSecurityError(
+                "macOS ACL symlink observation requires a symlink pre-open identity"
+            )
+        observe_symlink = True
+
+    if observe_symlink:
+        if not hasattr(os, "O_SYMLINK"):
+            raise FilesystemSecurityError(
+                "macOS ACL symlink observation is unavailable: O_SYMLINK is not native"
+            )
+        flags = (
+            os.O_RDONLY
+            | os.O_SYMLINK
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NONBLOCK", 0)
+        )
+    else:
+        flags = (
+            os.O_RDONLY
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NONBLOCK", 0)
+        )
     close_descriptor = False
     if descriptor is None:
         try:
@@ -106,7 +146,10 @@ def has_macos_acl(
             raise FilesystemSecurityError("macOS ACL object is unavailable") from exc
         if _identity(observed) != _identity(before):
             raise FilesystemSecurityError("macOS ACL observation identity changed")
-        if not stat.S_ISREG(observed.st_mode) and not stat.S_ISDIR(observed.st_mode):
+        if observe_symlink:
+            if not stat.S_ISLNK(observed.st_mode):
+                raise FilesystemSecurityError("macOS ACL object is not a symlink")
+        elif not stat.S_ISREG(observed.st_mode) and not stat.S_ISDIR(observed.st_mode):
             raise FilesystemSecurityError("macOS ACL object is not a file or directory")
 
         acl = _acl_get_fd(opened_descriptor)

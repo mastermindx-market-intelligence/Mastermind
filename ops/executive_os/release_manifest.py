@@ -27,9 +27,13 @@ class ReleaseManifestError(RuntimeError):
     pass
 
 
-def _has_acl(path: Path) -> bool:
+def _has_acl(path: Path, info: os.stat_result) -> bool:
     try:
-        return has_macos_acl(path)
+        return has_macos_acl(
+            path,
+            expected_identity=info,
+            allow_symlink=stat.S_ISLNK(info.st_mode),
+        )
     except FilesystemSecurityError:
         raise ReleaseManifestError(f"cannot inspect release ACL: {path.name}")
 
@@ -49,7 +53,7 @@ def _release_root(path: Path) -> Path:
     _validate_owned_info(info, label=".")
     if stat.S_IMODE(info.st_mode) & 0o055 != 0o055:
         raise ReleaseManifestError("release root must be traversable by both service UIDs")
-    if _has_acl(lexical):
+    if _has_acl(lexical, info):
         raise ReleaseManifestError("release root has a filesystem ACL")
     return lexical.resolve(strict=True)
 
@@ -75,7 +79,7 @@ def _entries(root: Path) -> list[dict[str, Any]]:
                 continue
             info = path.lstat()
             _validate_owned_info(info, label=relative)
-            if _has_acl(path):
+            if _has_acl(path, info):
                 raise ReleaseManifestError(f"release object has a filesystem ACL: {relative}")
             common = {
                 "path": relative,
@@ -155,7 +159,7 @@ def verify(root: Path, commit_sha: str, tree_sha: str) -> dict[str, Any]:
     if stat.S_IMODE(info.st_mode) & 0o022:
         raise ReleaseManifestError("release manifest is writable by group or other")
     _validate_owned_info(info, label=MANIFEST_NAME)
-    if _has_acl(manifest):
+    if _has_acl(manifest, info):
         raise ReleaseManifestError("release manifest has a filesystem ACL")
     try:
         persisted = json.loads(manifest.read_text(encoding="utf-8"))
