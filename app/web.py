@@ -1529,7 +1529,12 @@ def api_portfolio(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
 
         return JSONResponse(payload)
     except Exception as exc:
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        _log.warning("portfolio snapshot read failed for %s: %s", portfolio, type(exc).__name__)
+        return JSONResponse({
+            "error": "portfolio_unavailable",
+            "snapshot_status": "unavailable",
+            "portfolio_id": portfolio,
+        }, status_code=500)
 
 
 # The tab-switcher status payload is just NAV/return chips — re-pricing every book on every poll or
