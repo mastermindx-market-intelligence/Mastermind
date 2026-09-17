@@ -1,0 +1,109 @@
+{
+  "kind": "design_arithmetic_verification",
+  "cases": 225,
+  "exact_fraction_arithmetic": true,
+  "market_data_used": false,
+  "production_code_changed": false,
+  "predictive_validation": false,
+  "source_pin": "0fe8074ff953b2ced9025ed40f0f66019c759967",
+  "publication_reuse": {
+    "status": "source_qualified_not_deployed",
+    "macro_source": "e729d0fd9d48868b49a1911d4098c689b3d373bd",
+    "terminal_source": "87969fb4aff5836410ffd166cc39289b562a41bc",
+    "existing_suites": [
+      "tests/test_build_options_structure_intraday.py",
+      "tests/test_options_structure_intraday.py"
+    ],
+    "existing_tests_passed": 106,
+    "pytest_exit": 0,
+    "full_macro_suite": false,
+    "initial_archive_omissions": [
+      "collectors/",
+      "config.yml"
+    ],
+    "source_changes_to_pass": false,
+    "network_free_compatibility": {
+      "evidence_class": "exact_existing_modules_synthetic_matrix_fixture_compatibility",
+      "macro_source": "e729d0fd9d48868b49a1911d4098c689b3d373bd",
+      "terminal_source": "87969fb4aff5836410ffd166cc39289b562a41bc",
+      "fixture_sha256": "aec8db52ee2b47d38a67f6f1165466a4c432894b4b81783135eb2ac80e70bbc2",
+      "cases": [
+        {
+          "root": "SPY",
+          "sha256": "939ac8854bc4633c88edb3b24c33c112e4143c2b3b3be7953812062cbba589a0",
+          "source_asof": "2026-07-10T21:04:11.412870+00:00",
+          "cells": 416,
+          "roundtrip_equal": true,
+          "duplicate_idempotent": true,
+          "collision_refused": true
+        },
+        {
+          "root": "QQQ",
+          "sha256": "88b18b9f08965241bf21aada1786bacccc1ebafdc6d91a086505b29893259c95",
+          "source_asof": "2026-07-10T21:04:19.876204+00:00",
+          "cells": 311,
+          "roundtrip_equal": true,
+          "duplicate_idempotent": true,
+          "collision_refused": true
+        }
+      ],
+      "network_events": 0,
+      "remote_writes": 0,
+      "production_proof": false,
+      "historical_index_or_correction_contract_proven": false
+    },
+    "existing_reader": {
+      "evidence_class": "exact_reader_synthetic_roundtrip",
+      "rows": [
+        {
+          "root": "SPY",
+          "valid_original_root": true,
+          "wrong_root_refused": true
+        },
+        {
+          "root": "QQQ",
+          "valid_original_root": true,
+          "wrong_root_refused": true
+        }
+      ],
+      "terminal_source": "87969fb4aff5836410ffd166cc39289b562a41bc",
+      "production_proof": false,
+      "history_selector_implemented": false
+    },
+    "probe_files": {
+      "matrix_compatibility_probe.py": {
+        "sha256": "a65f5669a672e6c1b23d2bd565b3fe672724b5f7108826ec50273aff0068ef09",
+        "execution_root": "exact-source archive; see source refs and fixture export in reuse receipt"
+      },
+      "matrix_reader_probe.mjs": {
+        "sha256": "c474db461cc4c779c7b5f1a1b8033534b0186611cdfac3bd6aa9afdbb1150c30",
+        "execution_root": "exact-source archive; see source refs and fixture export in reuse receipt"
+      }
+    },
+    "historical_discovery_and_correction_interface": "not_implemented_or_accepted",
+    "source_snapshot": "/Volumes/Mastermind/agent-evidence/aion-options-publication-reuse-20260916-sol-001",
+    "skillpack_pin": "8ba7deedde164c90298d3e88785d98e02fa5e2d2",
+    "roundtrip_limit": "decoded fixture equality and immutable canonical artifact bytes; not a claim of original market publication or preservation of arbitrary JSON whitespace",
+    "source_archive_paths": [
+      "engine",
+      "lib",
+      "scripts",
+      "config",
+      "contracts",
+      "collectors",
+      "config.yml",
+      "tests/test_build_options_structure_intraday.py",
+      "tests/test_options_structure_intraday.py",
+      "tests/__init__.py"
+    ],
+    "terminal_exports": [
+      "terminal/public/data/matrix_fixture.json",
+      "terminal/components/gexdesk/matrixDoc.ts"
+    ],
+    "commands": [
+      "python -m pytest tests/test_build_options_structure_intraday.py tests/test_options_structure_intraday.py -q -o addopts= -p no:cacheprovider --basetemp=<isolated-test-temp>",
+      "python matrix_compatibility_probe.py",
+      "node --experimental-strip-types matrix_reader_probe.mjs"
+    ]
+  }
+}
