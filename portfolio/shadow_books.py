@@ -115,7 +115,7 @@ def _policy_weight(policy: dict, r: dict) -> float:
     if not comm:                                           # committee didn't run for this name
         wp = r.get("weight_prod")
         return round(float(wp if wp is not None else wf), 4)
-    if policy["calibration"]:                              # exactly what prod did (committee+calib on)
+    if policy["calibration"]:                              # exactly what prod did (calib on)
         return round(float(r.get("weight_prod") or 0.0), 4)
     # calibration OFF but committee ON → re-derive NEXUS from SENTINEL's RAW confidence (pure fn)
     sent = r.get("sentinel") or {}
@@ -380,28 +380,31 @@ def _book_summary(policy: dict, theses: list, account: dict, nav_rows: list) -> 
 def _gather_prices(tickers: set, seed: dict | None, asof: str | None = None) -> dict:
     """Mark every needed symbol through the ONE marking layer (portfolio.marks, W-L / L1) so the
     do-nothing + defensive arms — and every policy arm — read the same price every other book does
-    (polygon-EOD → yahoo-parquet → last-good-carry, never avg_cost). Any symbol `marks` can't price
-    falls back to the legacy paper_account accessor, and `seed` (test/shared fetch) always wins."""
+    (polygon-EOD → yahoo-parquet → last-good-carry, never avg_cost). `seed` (test/shared fetch)
+    always wins. The legacy undated current-price accessor is same-day-only: a historical/future
+    replay miss stays unpriced rather than borrowing a price from a different clock."""
     px = {(k or "").upper(): v for k, v in (seed or {}).items() if v and v > 0}
     want = {(t or "").upper() for t in tickers} | {"SPY", *(_DEFENSIVE_BASKET)}
     want = {t for t in want if t}
+    mark_asof = str(asof)[:10] if asof else str(date.today())
     try:
         from portfolio import marks
-        marked = marks.prices_for(want, asof or str(date.today()), seed=px, persist=False)
+        marked = marks.prices_for(want, mark_asof, seed=px, persist=False)
         for t, v in marked.items():
             if t not in px and v and v > 0:
                 px[t] = v
     except Exception:  # noqa: BLE001
         pass
-    try:
-        from portfolio import paper_account
-        for t in want:
-            if t not in px or not px.get(t):
-                q = paper_account._current_price(t)
-                if q and q > 0:
-                    px[t] = q
-    except Exception:  # noqa: BLE001
-        pass
+    if mark_asof == str(date.today()):
+        try:
+            from portfolio import paper_account
+            for t in want:
+                if t not in px or not px.get(t):
+                    q = paper_account._current_price(t)
+                    if q and q > 0:
+                        px[t] = q
+        except Exception:  # noqa: BLE001
+            pass
     return px
 
 
