@@ -3706,6 +3706,7 @@ window.researchPage = function(d) {
 };
 var _expandedIdx = null;
 var _perf = null, _runs = [], _rejected = [];
+var _runsStatus = 'loading';
 // Long histories stay in memory but only a bounded window enters the DOM. Hidden/collapsed
 // history used to create tens of thousands of nodes and made every view-class toggle expensive.
 var RUNS_RENDER_CHUNK = 60, _runsVisible = RUNS_RENDER_CHUNK;
@@ -4250,10 +4251,33 @@ function runsH2() {
   return '<h2 class="mm-coll-h2" onclick="toggleCollapse(\'runs\')"><span class="mm-coll-chev">&#9654;</span><span class="l-en">Brain Activity &mdash; Full Trace</span><span class="l-zh">脑波活动 &mdash; 完整追踪</span> <span style="font-weight:400;font-size:11px;color:var(--muted);margin-left:6px">' + t('runs.subtitle') + '</span></h2>';
 }
 
+function _runsUnavailable() {
+  return { run_status: 'unavailable', error: 'run_history_unavailable', runs: null };
+}
+function _runlogUnavailable(runId) {
+  return { trace_status: 'unavailable', error: 'runlog_unavailable', run_id: runId, steps: null };
+}
+function _runlogFetch(runId) {
+  return fetch('/api/runlog?run_id=' + encodeURIComponent(runId))
+    .then(function(r) { return r.ok ? r.json() : _runlogUnavailable(runId); })
+    .catch(function() { return _runlogUnavailable(runId); });
+}
+
 function renderRuns() {
   var el = E('runs');
   if (!el) return;
   var runs = _runs || [];
+  if (_runsStatus === 'loading') {
+    el.innerHTML = runsH2() + '<div class="mm-empty"><span class="mm-empty-icon">…</span>' +
+      '<span class="l-en">Loading run history…</span><span class="l-zh">正在加载运行历史…</span></div>';
+    return;
+  }
+  if (_runsStatus === 'unavailable') {
+    el.innerHTML = runsH2() + '<div class="mm-empty"><span class="mm-empty-icon">!</span>' +
+      '<span class="l-en">Run history unavailable — this read did not complete. Reopen this panel to retry.</span>' +
+      '<span class="l-zh">运行历史暂不可用 — 本次读取未完成。重新打开此面板即可重试。</span></div>';
+    return;
+  }
   if (!runs.length) {
     el.innerHTML = runsH2() + '<div class="mm-empty"><span class="mm-empty-icon">○</span>' + t('runs.empty') + '</div>';
     return;
@@ -4326,16 +4350,14 @@ window.toggleRun = function(ri, runId) {
   }
 
   stepsEl.innerHTML = '<div class="mm-run-steps-loading">' + t('runs.loading_trace') + '</div>';
-  fetch('/api/runlog?run_id=' + encodeURIComponent(runId))
-    .then(function(r) { return r.ok ? r.json() : null; })
-    .then(function(data) {
-      if (!data) { stepsEl.innerHTML = '<div class="mm-run-steps-loading" style="color:var(--down)">' + t('runs.fail_trace') + '</div>'; return; }
-      _runLogCache[runId] = data.steps || [];
-      renderSteps(ri, _runLogCache[runId]);
-    })
-    .catch(function() {
+  _runlogFetch(runId).then(function(data) {
+    if (data.trace_status === 'unavailable') {
       stepsEl.innerHTML = '<div class="mm-run-steps-loading" style="color:var(--down)">' + t('runs.err_trace') + '</div>';
-    });
+      return;
+    }
+    _runLogCache[runId] = data.steps || [];
+    renderSteps(ri, _runLogCache[runId]);
+  });
 };
 
 function renderSteps(ri, steps) {
@@ -5205,10 +5227,19 @@ window.showMorePapers = function() {
 function _ensureRuns() {
   if (_runsLoaded) { renderRuns(); return Promise.resolve(_runs); }
   if (_runsLoad) return _runsLoad;
-  _runsLoad = fetch('/api/runs').then(function(r) { return r.ok ? r.json() : []; })
-    .catch(function() { return []; })
-    .then(function(rows) {
-      _runs = rows || []; _runsLoaded = true; _runsLoad = null;
+  _runsStatus = 'loading';
+  _safeRender('runs', renderRuns);
+  _runsLoad = fetch('/api/runs')
+    .then(function(r) { return r.ok ? r.json() : _runsUnavailable(); })
+    .catch(function() { return _runsUnavailable(); })
+    .then(function(data) {
+      if (Array.isArray(data)) {
+        _runs = data; _runsStatus = null;
+      } else {
+        _runs = []; _runsStatus = 'unavailable';
+      }
+      _runsLoaded = _runsStatus !== 'unavailable';
+      _runsLoad = null;
       _safeRender('runs', renderRuns); applyColl('runs');
       return _runs;
     });
@@ -6974,17 +7005,25 @@ window.toggleDecReason = function(i, runId) {
   body.style.display = open ? 'block' : 'none';
   if (caret) caret.textContent = open ? '▾' : '▸';
   var traceEl = E('dec-trace-' + i);
-  if (open && runId && traceEl && !traceEl.getAttribute('data-loaded')) {
-    traceEl.setAttribute('data-loaded', '1');
-    fetch('/api/runlog?run_id=' + encodeURIComponent(runId))
-      .then(function(r) { return r.ok ? r.json() : null; })
-      .then(function(run) { traceEl.innerHTML = _renderRunTrace(run); })
-      .catch(function() { traceEl.innerHTML = '<div class="mm-dec-trace-load">evidence trace unavailable</div>'; });
+  if (open && runId && traceEl && !traceEl.getAttribute('data-loaded') && !traceEl.getAttribute('data-loading')) {
+    traceEl.setAttribute('data-loading', '1');
+    _runlogFetch(runId).then(function(run) {
+      traceEl.removeAttribute('data-loading');
+      if (run.trace_status === 'unavailable') {
+        traceEl.innerHTML = '<div class="mm-dec-trace-load">evidence trace unavailable</div>';
+        return;
+      }
+      traceEl.setAttribute('data-loaded', '1');
+      traceEl.innerHTML = _renderRunTrace(run);
+    });
   }
 };
 
 // Render auditable tool calls/results. Internal reasoning blocks are intentionally omitted.
 function _renderRunTrace(run) {
+  if (run && run.trace_status === 'unavailable') {
+    return '<div class="mm-dec-trace-load">evidence trace unavailable</div>';
+  }
   var steps = (run && run.steps) || [];
   if (!steps.length) return '<div class="mm-dec-trace-load">no additional tool evidence recorded for this run</div>';
   return '<div class="mm-trace">' + steps.map(function(s) {
