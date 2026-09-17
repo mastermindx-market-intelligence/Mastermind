@@ -20,7 +20,6 @@ import subprocess
 import time
 import uuid
 from pathlib import Path
-from pathlib import PurePosixPath
 from typing import Any, Mapping, Sequence
 
 from control_plane.codex_worker import (
@@ -84,9 +83,6 @@ _MAX_STDERR_BYTES = 4 * 1024 * 1024
 _MAX_RESULT_BYTES = 1 * 1024 * 1024
 _MAX_AUTH_JSON_BYTES = 16 * 1024
 _MAX_AUTH_STRING_BYTES = 1024
-_MAX_VALIDATION_ARGV_BYTES = 64 * 1024
-_MAX_VALIDATION_STDOUT_BYTES = 4 * 1024 * 1024
-_MAX_VALIDATION_STDERR_BYTES = 1 * 1024 * 1024
 _MAX_PROCESS_CENSUS_BYTES = 64 * 1024
 _MAX_PROCESS_CENSUS_MEMBERS = 256
 _DARWIN_PROCESS_RUN_STATES = frozenset("IRSTUZ")
@@ -122,7 +118,7 @@ class ClaudeWorkerContractError(RuntimeError):
 
 
 class ClaudeWorkerNotImplementedError(ClaudeWorkerContractError):
-    """A lifecycle operation intentionally deferred to Task 2."""
+    """A lifecycle operation is held until its reviewed common owner exists."""
 
 
 class ClaudeAuthStatusError(ClaudeWorkerContractError):
@@ -722,21 +718,6 @@ async def _pump_claude_stream(
     except Exception:
         state.stream_errors.append(f"{name} stream failure")
         state.violation.set()
-
-
-async def _read_stream_limited(
-    reader: asyncio.StreamReader, maximum: int
-) -> tuple[bytes, bool]:
-    result = bytearray()
-    total = 0
-    exceeded = False
-    while chunk := await reader.read(64 * 1024):
-        total += len(chunk)
-        if total <= maximum:
-            result.extend(chunk)
-        else:
-            exceeded = True
-    return bytes(result), exceeded
 
 
 def _run_bounded_auth_status(argv: Sequence[str], *, timeout: float, env: Mapping[str, str]) -> tuple[bytes, bytes, int]:
@@ -1769,52 +1750,11 @@ class ClaudeCodeWorkerAdapter:
         *,
         timeout_seconds: float = 300.0,
     ) -> ValidationReceipt:
-        if isinstance(argv, (str, bytes)) or not isinstance(argv, Sequence):
-            raise ClaudeLaunchError("validation command must be argv")
-        exact = tuple(argv)
-        if not exact or any(not isinstance(value, str) or not value or "\x00" in value for value in exact):
-            raise ClaudeLaunchError("validation argv is invalid")
-        if sum(len(value.encode("utf-8")) + 1 for value in exact) > _MAX_VALIDATION_ARGV_BYTES:
-            raise ClaudeLaunchError("validation argv exceeds byte cap")
-        if PurePosixPath(exact[0]).name.lower() in _SHELL_NAMES:
-            raise ClaudeLaunchError("validation argv may not invoke a shell")
-        timeout = float(timeout_seconds)
-        if not 0.1 <= timeout <= 3600:
-            raise ClaudeLaunchError("validation timeout is outside the bounded contract")
-        workspace, run_dir, _home, _tmp, baseline, _schema = self._validate_spec(
-            dataclasses.replace(spec, run_id=f"validation-{uuid.uuid4().hex[:16]}", model=self.exact_model)
-        )
-        del baseline
-        home = _ensure_private_directory(run_dir / "validation-home")
-        tmp = _ensure_private_directory(run_dir / "validation-tmp")
-        process = await asyncio.create_subprocess_exec(
-            *exact, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE, cwd=str(workspace),
-            env=_closed_launch_environment(home, tmp, spec), start_new_session=True,
-        )
-        if process.stdout is None or process.stderr is None:
-            raise ClaudeLaunchError("validation pipes are unavailable")
-        out_task = asyncio.create_task(_read_stream_limited(process.stdout, _MAX_VALIDATION_STDOUT_BYTES))
-        err_task = asyncio.create_task(_read_stream_limited(process.stderr, _MAX_VALIDATION_STDERR_BYTES))
-        timed_out, error = False, None
-        try:
-            await asyncio.wait_for(process.wait(), timeout=timeout)
-        except asyncio.TimeoutError:
-            timed_out, error = True, "validation timed out"
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            await process.wait()
-        stdout, stdout_exceeded = await out_task
-        stderr, stderr_exceeded = await err_task
-        if stdout_exceeded or stderr_exceeded:
-            error = error or "validation output exceeded byte cap"
-        return ValidationReceipt(
-            argv=exact, exit_code=process.returncode,
-            stdout_sha256=hashlib.sha256(stdout).hexdigest(), stdout_size=len(stdout),
-            stderr_sha256=hashlib.sha256(stderr).hexdigest(), stderr_size=len(stderr),
-            timed_out=timed_out, error=error,
+        """Refuse validation until Task 3 composes the reviewed common sandbox."""
+
+        del spec, argv, timeout_seconds
+        raise ClaudeWorkerNotImplementedError(
+            "Claude validation requires common broker sandbox composition"
         )
 
 

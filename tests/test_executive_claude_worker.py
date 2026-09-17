@@ -30,7 +30,6 @@ from control_plane.worker_adapter import (
 from control_plane.worker_execution_contract import (
     CancelReceipt,
     CollectionReceipt,
-    ValidationReceipt,
     WorkerLaunchSpec,
     WorkerProcessRef,
     WorkerRunStatus,
@@ -647,23 +646,55 @@ def test_unknown_or_ambiguous_process_reference_refuses(tmp_path: Path) -> None:
     asyncio.run(execute())
 
 
-def test_status_and_shell_free_validation_use_common_contracts(tmp_path: Path) -> None:
+def test_status_and_direct_validation_fail_closed_before_common_sandbox(
+    tmp_path: Path,
+) -> None:
     binary = _fixture_claude_binary(tmp_path)
     (tmp_path / "mode").write_text("success", encoding="utf-8")
     adapter = _adapter(tmp_path, binary)
     spec = _workspace_and_spec(tmp_path)
 
-    async def execute() -> ValidationReceipt:
+    async def execute() -> None:
         ref = await adapter.start(spec)
         assert await adapter.status(ref) is WorkerRunStatus.RUNNING
         await adapter.collect_result(ref)
-        return await adapter.run_validation_argv(spec, ("/usr/bin/true",), timeout_seconds=1)
+        with pytest.raises(
+            claude_worker.ClaudeWorkerNotImplementedError,
+            match="common broker sandbox",
+        ):
+            await adapter.run_validation_argv(
+                spec, ("/usr/bin/true",), timeout_seconds=1
+            )
 
-    validation = asyncio.run(execute())
-    assert isinstance(validation, ValidationReceipt)
-    assert validation.exit_code == 0
-    with pytest.raises(ClaudeWorkerContractError, match="shell"):
-        asyncio.run(adapter.run_validation_argv(spec, ("/bin/sh", "-c", "true")))
+    asyncio.run(execute())
+
+
+def test_direct_validation_cannot_mutate_workspace_without_common_sandbox(
+    tmp_path: Path,
+) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    adapter = _adapter(tmp_path, binary)
+    spec = _workspace_and_spec(tmp_path)
+    target = Path(spec.workspace_path) / "UNAUTHORIZED_VALIDATION_WRITE.txt"
+
+    with pytest.raises(
+        claude_worker.ClaudeWorkerNotImplementedError,
+        match="common broker sandbox",
+    ):
+        asyncio.run(
+            adapter.run_validation_argv(
+                spec,
+                (
+                    "/usr/bin/python3",
+                    "-c",
+                    "from pathlib import Path; "
+                    "Path('UNAUTHORIZED_VALIDATION_WRITE.txt').write_text('escaped')",
+                ),
+                timeout_seconds=1,
+            )
+        )
+
+    assert not target.exists()
 
 
 def test_auth_observation_uses_principal_neutral_environment(
