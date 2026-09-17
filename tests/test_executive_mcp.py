@@ -225,16 +225,17 @@ def _imported_modules(path: Path) -> set[str]:
 # ===========================================================================
 
 
-def test_18_01_tool_census_is_exactly_five():
-    assert len(TOOL_SPECS) == 5
+def test_18_01_tool_census_is_exactly_six():
+    assert len(TOOL_SPECS) == 6
     assert tool_names() == (
         "executive_state",
         "executive_inbox",
         "executive_job",
+        "executive_fabric",
         "ceo_intent_status",
         "submit_ceo_intent",
     )
-    assert len({spec.name for spec in TOOL_SPECS}) == 5
+    assert len({spec.name for spec in TOOL_SPECS}) == 6
 
 
 def test_18_02_03_04_no_resources_prompts_or_sampling_are_exposed():
@@ -293,7 +294,7 @@ def test_18_05_no_dynamic_tool_registration_exists():
 def test_18_06_07_read_annotations_and_single_modifying_tool():
     read_only = [spec for spec in TOOL_SPECS if spec.read_only]
     modifying = [spec for spec in TOOL_SPECS if not spec.read_only]
-    assert len(read_only) == 4
+    assert len(read_only) == 5
     assert [spec.name for spec in modifying] == [MODIFYING_TOOL]
     for spec in read_only:
         assert spec.annotations["readOnlyHint"] is True

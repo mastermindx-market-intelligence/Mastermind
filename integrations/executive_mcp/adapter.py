@@ -1,4 +1,4 @@
-"""integrations.executive_mcp.adapter — the five tools, over existing primitives.
+"""integrations.executive_mcp.adapter — the six tools, over existing primitives.
 
 This module is the whole behavioural surface of the gateway.  It composes the
 existing Executive OS reads (CEO boot packet, Executive Inbox, runtime
@@ -45,7 +45,7 @@ from common.bounded_sync_executor import (
     SyncExecutorLoopConflict,
 )
 from common.redaction import sanitize_external_text
-from control_plane import ceo_boot_packet, ceo_intent, executive_inbox
+from control_plane import ceo_boot_packet, ceo_intent, executive_inbox, fabric_job_view
 from control_plane.executive_runtime import Runtime
 from control_plane.executive_service import send_control_request
 
@@ -471,6 +471,8 @@ class ExecutiveMcpGateway:
             data, grounding, degraded = self._executive_inbox()
         elif name == "executive_job":
             data, grounding, degraded = self._executive_job(str(arguments["job_id"]))
+        elif name == "executive_fabric":
+            data, grounding, degraded = self._executive_fabric(arguments)
         elif name == "ceo_intent_status":
             data, grounding, degraded = self._ceo_intent_status(str(arguments["intent_id"]))
         else:  # pragma: no cover — tool_spec already refused an unknown name
@@ -527,7 +529,8 @@ class ExecutiveMcpGateway:
         if self.config.fixture is None:
             return []
         return [
-            "mode=fixture: executive_job and ceo_intent_status read the temporary "
+            "mode=fixture: executive_job, executive_fabric, and ceo_intent_status read "
+            "the temporary "
             "fixture runtime, while executive_state and executive_inbox project the "
             "reviewed repository checkout; the fixture lane is BUILT_NOT_PROVEN, "
             "not live"
@@ -611,6 +614,74 @@ class ExecutiveMcpGateway:
             "source": "control_plane.executive_runtime registries (no raw SQL)",
         }
         return data, grounding, self._mode_note()
+
+    @staticmethod
+    def _redact_runtime_coordinates(value: Any, paths: tuple[str, ...], label: str) -> Any:
+        """Replace configured host runtime coordinates before crossing MCP."""
+
+        if isinstance(value, Mapping):
+            return {
+                str(key): ExecutiveMcpGateway._redact_runtime_coordinates(
+                    item, paths, label
+                )
+                for key, item in value.items()
+            }
+        if isinstance(value, (list, tuple)):
+            return [
+                ExecutiveMcpGateway._redact_runtime_coordinates(item, paths, label)
+                for item in value
+            ]
+        if isinstance(value, str):
+            redacted = value
+            for path in paths:
+                if path:
+                    redacted = redacted.replace(path, label)
+            return redacted
+        return value
+
+    def _executive_fabric(
+        self, arguments: Mapping[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
+        """Read one canonical Fabric projection without adding a lifecycle owner."""
+
+        self.config.reverify_read_runtime_root()
+        runtime_root = Path(self.config.runtime_root)
+        try:
+            if arguments["view"] == "roots":
+                document = fabric_job_view.list_roots(
+                    runtime_root,
+                    limit=int(arguments["limit"]),
+                    control_config_path=None,
+                )
+            else:
+                document = fabric_job_view.read_fabric_view(
+                    runtime_root,
+                    str(arguments["root_job_id"]),
+                    control_config_path=None,
+                )
+        except Exception as exc:  # noqa: BLE001 — path-safe typed refusal
+            raise GatewayError(
+                "backend_unavailable", "Fabric job view is unavailable"
+            ) from exc
+
+        runtime_label = self._runtime_label()
+        paths = tuple(
+            sorted(
+                {str(runtime_root), str(runtime_root.resolve())},
+                key=len,
+                reverse=True,
+            )
+        )
+        data = self._redact_runtime_coordinates(document, paths, runtime_label)
+        if not isinstance(data, dict):  # defensive: projector contract is a document
+            raise GatewayError("backend_unavailable", "Fabric job view is unavailable")
+        degraded = [str(entry) for entry in (data.get("degraded") or [])]
+        degraded.extend(self._mode_note())
+        grounding = {
+            "runtime": runtime_label,
+            "source": "control_plane.fabric_job_view (existing registries; no raw SQL)",
+        }
+        return data, grounding, degraded
 
     def _ceo_intent_status(
         self, intent_id: str
