@@ -3662,6 +3662,28 @@ var fmtTsShort = function(s) {
 
 // ── state ────────────────────────────────────────────────────────────────────
 var _book = null, _trades = null, _activity = [], _research = [];
+var _activityStatus = 'loading', _activityFailedSources = [];
+function _activityUnavailable() {
+  return { activity_status: 'unavailable', error: 'activity_unavailable', events: null, failed_sources: [] };
+}
+function _activityFetch() {
+  return fetch('/api/activity')
+    .then(function(r) { return r.ok ? r.json() : _activityUnavailable(); })
+    .catch(function() { return _activityUnavailable(); });
+}
+function _applyActivityFeed(data) {
+  if (Array.isArray(data)) {
+    _activity = data; _activityStatus = 'available'; _activityFailedSources = []; return;
+  }
+  data = data || _activityUnavailable();
+  _activityStatus = data.activity_status || 'unavailable';
+  _activity = Array.isArray(data.events) ? data.events : [];
+  _activityFailedSources = Array.isArray(data.failed_sources) ? data.failed_sources : [];
+}
+window.retryBrainActivity = function() {
+  _activityStatus = 'loading'; renderBrainLog();
+  return _activityFetch().then(function(data) { _applyActivityFeed(data); renderBrainLog(); });
+};
 var _researchStatus = 'loading';
 function _researchUnavailable() {
   return { research_status: 'unavailable', error: 'research_feed_unavailable', notes: null };
@@ -5079,45 +5101,61 @@ window.tradesPage = function(d) {
 // ── BRAIN LOG ─────────────────────────────────────────────────────────────────
 function renderBrainLog() {
   var el = E('brainlog');
+  if (_activityStatus === 'loading') {
+    el.innerHTML = collH2('brainlog', 'Brain Log', '脑波日志') + '<div class="mm-empty"><span class="mm-empty-icon">…</span>' +
+      '<span class="l-en">Loading activity…</span><span class="l-zh">正在加载动态…</span></div>';
+    applyColl('brainlog'); return;
+  }
+  if (_activityStatus === 'unavailable') {
+    el.innerHTML = collH2('brainlog', 'Brain Log', '脑波日志') + '<div class="mm-empty"><span class="mm-empty-icon">!</span>' +
+      '<span class="l-en">Brain Log unavailable — activity evidence could not be read.</span>' +
+      '<span class="l-zh">脑波日志暂不可用 — 无法读取动态证据。</span>' +
+      '<div style="margin-top:8px"><button class="mm-pager-btn" type="button" onclick="retryBrainActivity()"><span class="l-en">Retry</span><span class="l-zh">重试</span></button></div></div>';
+    applyColl('brainlog'); return;
+  }
+
+  var partial = '';
+  if (_activityStatus === 'partial') {
+    var sources = _activityFailedSources.join(', ');
+    partial = '<div class="mm-cal-building" style="margin-bottom:10px"><span class="ic">!</span><span class="tx">' +
+      '<span class="l-en"><strong>Partial activity</strong> — unavailable sources: ' + esc(sources || 'unknown') + '.</span>' +
+      '<span class="l-zh"><strong>动态不完整</strong> — 暂不可用来源：' + esc(sources || 'unknown') + '。</span>' +
+      ' <button class="mm-pager-btn" type="button" onclick="retryBrainActivity()"><span class="l-en">Retry</span><span class="l-zh">重试</span></button></span></div>';
+  }
   if (!_activity.length) {
-    el.innerHTML = collH2('brainlog', 'Brain Log', '脑波日志') + '<div class="mm-empty"><span class="mm-empty-icon">○</span>' + t('brain.empty') + '</div>';
-    applyColl('brainlog');
-    return;
+    var emptyCopy = _activityStatus === 'partial'
+      ? '<span class="l-en">No events were available from the readable activity sources.</span><span class="l-zh">当前可读取的动态来源没有可显示事件。</span>'
+      : t('brain.empty');
+    el.innerHTML = collH2('brainlog', 'Brain Log', '脑波日志') + partial + '<div class="mm-empty"><span class="mm-empty-icon">○</span>' + emptyCopy + '</div>';
+    applyColl('brainlog'); return;
   }
 
   var pages = Math.max(1, Math.ceil(_activity.length / BRAIN_PAGE_SIZE));
-  _brainPage = Math.max(0, Math.min(pages - 1, _brainPage));   // clamp (data may have shrunk on reload)
+  _brainPage = Math.max(0, Math.min(pages - 1, _brainPage));
   var start = _brainPage * BRAIN_PAGE_SIZE;
   var pageItems = _activity.slice(start, start + BRAIN_PAGE_SIZE);
   var ICONS = { trade: '↕', decision: '◉', research: '◎', run: '▷' };
   var KIND_ZH = { trade: '交易', decision: '决策', research: '研究', run: '运行' };
   var isZh = document.documentElement.getAttribute('data-lang') === 'zh';
-  var html = collH2('brainlog', 'Brain Log', '脑波日志') + '<div class="mm-timeline">';
+  var html = collH2('brainlog', 'Brain Log', '脑波日志') + partial + '<div class="mm-timeline">';
   pageItems.forEach(function(e, i) {
     var kind = e.kind || 'run';
     var isLast = i === pageItems.length - 1;
-    // zh title/detail come from /api/activity (deterministic labels + cached free-text);
-    // fall back to English when a _zh field is absent so nothing ever renders blank
     var title = (isZh && e.title_zh) ? e.title_zh : (e.title || '—');
     var detail = (isZh && e.detail_zh) ? e.detail_zh : (e.detail || '');
     var kindLabel = (isZh && KIND_ZH[kind]) ? KIND_ZH[kind] : kind;
-    // actions logged today (e.today, set server-side) get a "NEW" tag + a highlighted row
     var newBadge = e.today ? '<span class="mm-new-badge">' + (isZh ? '新' : 'NEW') + '</span>' : '';
     html += '<div class="mm-tl-item' + (e.today ? ' mm-tl-today' : '') + '">' +
       '<div class="mm-tl-ts">' + fmtTsShort(e.ts) + '</div>' +
-      '<div class="mm-tl-node">' +
-        '<div class="mm-tl-dot k-' + kind + '"></div>' +
-        (isLast ? '' : '<div class="mm-tl-line"></div>') +
-      '</div>' +
-      '<div class="mm-tl-content">' +
-        '<div><span class="mm-kind-chip mm-kind-' + kind + '">' + (ICONS[kind]||'·') + ' ' + kindLabel + '</span>' + newBadge + '</div>' +
+      '<div class="mm-tl-node"><div class="mm-tl-dot k-' + kind + '"></div>' +
+        (isLast ? '' : '<div class="mm-tl-line"></div>') + '</div>' +
+      '<div class="mm-tl-content"><div><span class="mm-kind-chip mm-kind-' + kind + '">' +
+        (ICONS[kind]||'·') + ' ' + kindLabel + '</span>' + newBadge + '</div>' +
         '<div class="mm-tl-title">' + esc(title) + '</div>' +
         (detail ? '<div class="mm-tl-detail">' + esc(detail.slice(0,200)) + (detail.length > 200 ? '…' : '') + '</div>' : '') +
-      '</div>' +
-    '</div>';
+      '</div></div>';
   });
-  html += '</div>';
-  html += _pager(_brainPage, pages, 'brainPage');
+  html += '</div>' + _pager(_brainPage, pages, 'brainPage');
   el.innerHTML = html;
   applyColl('brainlog');
 }
@@ -8077,7 +8115,7 @@ function _hydrateShared() {
   if (_sharedLoad) return _sharedLoad;
   _sharedLoad = loadPortfolios().then(function() {
     return Promise.allSettled([
-      fetch('/api/activity').then(function(r)  { return r.ok ? r.json() : [];   }).catch(function() { return []; }),
+      _activityFetch(),
       _researchFetch(),
       _learningFetch('/api/shadow_books', 'shadow_books'),
       _learningFetch('/api/predictions', 'predictions'),
@@ -8091,7 +8129,7 @@ function _hydrateShared() {
     var actRes = s[0], researchRes = s[1], shadowRes = s[2], predRes = s[3],
         ebtRes = s[4], fzRes = s[5], fundRes = s[6],
         studentRes = s[7], distillRes = s[8];
-    _activity    = (actRes.status    === 'fulfilled' ? actRes.value     : null) || [];
+    _applyActivityFeed(actRes.status === 'fulfilled' ? actRes.value : _activityUnavailable());
     _applyResearchFeed(researchRes.status === 'fulfilled' ? researchRes.value : _researchUnavailable());
     _shadowBooks    = shadowRes.status === 'fulfilled' ? shadowRes.value : null;
     _predictions    = predRes.status   === 'fulfilled' ? predRes.value   : null;
