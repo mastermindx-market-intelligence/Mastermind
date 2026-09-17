@@ -34,13 +34,56 @@ _VERIFIED_AT_RE = re.compile(
     r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$"
 )
 _SAFE_BLOB_MODES = frozenset({"100644", "100755"})
-_WRITER_GATE_REQUIRED_RULE_TYPES = ("update", "deletion", "non_fast_forward")
-_WRITER_GATE_RELEVANT_RULE_TYPES = frozenset(
-    _WRITER_GATE_REQUIRED_RULE_TYPES + ("creation",)
+# Branch-rule types that cannot block or alter an owner-mediated expected-head
+# update of an existing branch: they govern ref creation/renaming or how pull
+# requests merge into the branch, never a direct fast-forward ref update. Every
+# other type is applicable, so a future write-blocking rule fails closed instead
+# of being silently excluded.
+_WRITER_GATE_INERT_RULE_TYPES = frozenset(
+    {"merge_queue", "branch_name_pattern", "tag_name_pattern"}
+)
+# Applicable rules a tree-preserving fast-forward fence commit cannot violate:
+# it creates no ref, deletes none, and rewrites no history. Their rulesets need
+# no accepted-integration bypass to leave the expected-head path executable.
+_WRITER_GATE_NON_MUTATING_RULE_TYPES = frozenset(
+    {"creation", "deletion", "non_fast_forward"}
+)
+# Closed snapshot of GitHub branch-rule types understood by this verifier.
+# Any applicable future type is retained and classified unavailable rather than
+# silently dropped, because its effect on expected-head mutation is unknown.
+_WRITER_GATE_KNOWN_RULE_TYPES = frozenset(
+    {
+        "creation",
+        "update",
+        "deletion",
+        "required_linear_history",
+        "merge_queue",
+        "required_deployments",
+        "required_signatures",
+        "pull_request",
+        "required_status_checks",
+        "non_fast_forward",
+        "commit_message_pattern",
+        "commit_author_email_pattern",
+        "committer_email_pattern",
+        "branch_name_pattern",
+        "tag_name_pattern",
+        "workflows",
+        "code_scanning",
+        "code_quality",
+        "code_coverage",
+        "copilot_code_review",
+        "license_compliance_scanning",
+        "file_path_restriction",
+        "max_file_path_length",
+        "file_extension_restriction",
+        "file_size",
+        "lock_branch",
+    }
 )
 _RULESET_SOURCE_TYPES = frozenset({"Repository", "Organization"})
 _RULESET_ENFORCEMENTS = frozenset({"active", "evaluate", "disabled"})
-_BYPASS_MODES = frozenset({"always", "pull_request"})
+_BYPASS_MODES = frozenset({"always", "pull_request", "exempt"})
 _MAX_GITHUB_ID = 2_147_483_647
 
 
@@ -83,6 +126,7 @@ class WriterGateDefect(str, Enum):
     CREATION_RESTRICTED = "CREATION_RESTRICTED"
     ENFORCEMENT_NOT_ACTIVE = "ENFORCEMENT_NOT_ACTIVE"
     BYPASS_WIDENED = "BYPASS_WIDENED"
+    UNKNOWN_APPLICABLE_RULE = "UNKNOWN_APPLICABLE_RULE"
     OWNER_INTEGRATION_ABSENT = "OWNER_INTEGRATION_ABSENT"
 
 
@@ -944,21 +988,30 @@ def verify_technical_writer_gate(
     if facts.repository != request.repository or facts.branch != request.branch:
         return _refusal(RefusalCode.REMOTE_IDENTITY_MISMATCH, exit_code=2)
 
-    relevant_rules = tuple(
-        rule for rule in facts.branch_rules if rule.rule_type in _WRITER_GATE_RELEVANT_RULE_TYPES
+    applicable_rules = tuple(
+        rule
+        for rule in facts.branch_rules
+        if rule.rule_type not in _WRITER_GATE_INERT_RULE_TYPES
+    )
+    unknown_rules = tuple(
+        rule
+        for rule in applicable_rules
+        if rule.rule_type not in _WRITER_GATE_KNOWN_RULE_TYPES
     )
     rulesets_by_id = {ruleset.ruleset_id: ruleset for ruleset in facts.rulesets}
-    enforcing_ids = tuple(sorted({rule.ruleset_id for rule in relevant_rules}))
+    enforcing_ids = tuple(sorted({rule.ruleset_id for rule in applicable_rules}))
     if not facts.readback_complete or any(
         ruleset_id not in rulesets_by_id for ruleset_id in enforcing_ids
     ):
         return _refusal(RefusalCode.REMOTE_CENSUS_INCOMPLETE, exit_code=2)
 
-    present_types = {rule.rule_type for rule in relevant_rules}
+    present_types = {rule.rule_type for rule in applicable_rules}
     defects: set[WriterGateDefect] = set()
-    if not relevant_rules:
+    if not applicable_rules:
         defects.add(WriterGateDefect.RULES_ABSENT)
     else:
+        if unknown_rules:
+            defects.add(WriterGateDefect.UNKNOWN_APPLICABLE_RULE)
         if "update" not in present_types:
             defects.add(WriterGateDefect.UPDATE_RULE_MISSING)
         if "deletion" not in present_types:
@@ -978,15 +1031,16 @@ def verify_technical_writer_gate(
             ruleset = rulesets_by_id[ruleset_id]
             if ruleset.enforcement != "active":
                 defects.add(WriterGateDefect.ENFORCEMENT_NOT_ACTIVE)
-            if any(
-                actor.actor_type != "Integration" or actor.actor_id != accepted
-                for actor in ruleset.bypass_actors
-            ):
+            if any(actor != owner_actor for actor in ruleset.bypass_actors):
                 defects.add(WriterGateDefect.BYPASS_WIDENED)
-        update_ruleset_ids = {rule.ruleset_id for rule in relevant_rules if rule.rule_type == "update"}
+        mutation_ruleset_ids = {
+            rule.ruleset_id
+            for rule in applicable_rules
+            if rule.rule_type not in _WRITER_GATE_NON_MUTATING_RULE_TYPES
+        }
         if owner_actor is None or any(
             owner_actor not in rulesets_by_id[ruleset_id].bypass_actors
-            for ruleset_id in update_ruleset_ids
+            for ruleset_id in mutation_ruleset_ids
         ):
             defects.add(WriterGateDefect.OWNER_INTEGRATION_ABSENT)
 

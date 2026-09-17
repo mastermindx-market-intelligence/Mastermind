@@ -1738,8 +1738,9 @@ def _probe_writer_gate_facts(
     )
     referenced: dict[int, str] = {}
     for rule in rules:
-        if rule.rule_type not in {"creation", "update", "deletion", "non_fast_forward"}:
-            continue
+        # Preserve every active applicable rule. The pure verifier owns the
+        # closed semantics and fails unknown future types unavailable rather
+        # than letting the adapter silently erase them.
         if rule.ruleset_source_type not in {"Repository", "Organization"}:
             return _refusal(RefusalCode.REMOTE_FACTS_INVALID, 2)
         if referenced.setdefault(rule.ruleset_id, rule.ruleset_source_type) != rule.ruleset_source_type:

@@ -236,7 +236,14 @@ observed state must be recorded in the release commission:
   `RELEASE_BLOCKED` until reconciled. Checkpoint abandonment after writer loss (RCH-1A) is not available
   on that branch.
 * `TECHNICAL_WRITER_GATE_ACTIVE` records that stale writers are technically fenced by GitHub and only the
-  accepted source-writer integration can mediate an expected-head update.
+  accepted source-writer integration in `always` mode can mediate an expected-head update. Before
+  relying on this state, review the receipt's complete `rule_types`, `enforcing_ruleset_ids` and
+  `bypass_actors`: `lock_branch` and every other applicable mutation rule must preserve that same
+  mediation path; an unknown applicable rule is `UNKNOWN_APPLICABLE_RULE`; the accepted integration
+  in `pull_request` mode and every `exempt` or additional actor are `BYPASS_WIDENED`, never `ACTIVE`.
+  `rule_types` is the applicable census: only the inert `merge_queue`/`branch_name_pattern`/
+  `tag_name_pattern` types are excluded, so confirm the branch carries no other rule you expected to
+  see before relying on the state.
 
 The receipt is evidence only; neither state grants Ready, merge, fence, retry, receiver-transfer, or
 production authority, and neither weakens `EFFECT_UNKNOWN`, local-dirt, or exact-session stickiness.

@@ -234,13 +234,29 @@ it from exact GitHub readback of the branch's active rules and the rulesets that
 one evidence-only receipt (`mastermind.source_continuity_writer_gate/v1`):
 
 - `TECHNICAL_WRITER_GATE_ACTIVE` — active `update`, `deletion` and `non_fast_forward` rules cover the
-  branch, branch `creation` is not restricted, every enforcing ruleset is `active`, and the only bypass
-  actor is the one accepted source-writer integration in `always` mode.
+  branch, branch `creation` is not restricted, every additional applicable mutation rule (including
+  `lock_branch`) retains the same expected-head mediation path, every enforcing ruleset is `active`,
+  and the complete effective bypass set is exactly the one accepted source-writer integration in
+  `always` mode. The same integration in `pull_request` mode is not equivalent. GitHub's valid
+  `exempt` mode is evidence, but any `exempt` actor widens the effective bypass set.
 - `TECHNICAL_WRITER_GATE_UNAVAILABLE` — any readable configuration short of that, naming every defect
   (`RULES_ABSENT`, `UPDATE_RULE_MISSING`, `DELETION_RULE_MISSING`, `NON_FAST_FORWARD_RULE_MISSING`,
-  `CREATION_RESTRICTED`, `ENFORCEMENT_NOT_ACTIVE`, `BYPASS_WIDENED`, `OWNER_INTEGRATION_ABSENT`).
+  `CREATION_RESTRICTED`, `ENFORCEMENT_NOT_ACTIVE`, `BYPASS_WIDENED`, `UNKNOWN_APPLICABLE_RULE`,
+  `OWNER_INTEGRATION_ABSENT`). Unknown applicable branch-rule types are retained in the receipt and
+  fail closed; the adapter must never filter them out merely because the current classifier does not
+  yet know their semantics.
 - a fixed refusal when the readback is invalid, incomplete, mismatched, or moved during the proof. A
   refusal is never `ACTIVE`.
+
+Applicability is closed by exclusion, never by enumeration. Every active branch rule is applicable
+except the inert set `merge_queue`, `branch_name_pattern` and `tag_name_pattern`, which govern ref
+creation/renaming or how pull requests merge into the branch and cannot block a direct fast-forward
+ref update; the receipt's `rule_types` is that applicable census. Of the applicable rules, only
+`creation`, `deletion` and `non_fast_forward` need no accepted-integration bypass, because a
+tree-preserving fence commit creates no ref, deletes none and rewrites no history. Every other
+applicable rule — `lock_branch`, `pull_request`, `required_signatures`, `required_status_checks`,
+content and pattern restrictions, and any type this verifier does not yet know — must leave the
+accepted integration an executable expected-head path, or the gate is `UNAVAILABLE`.
 
 Neither state changes the §3.6 ordering or any fence: `EFFECT_UNKNOWN remains exact-session sticky`,
 local dirt and unpushed commits remain nontransferable, and the receipt authorizes no release, fence

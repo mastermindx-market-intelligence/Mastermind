@@ -226,7 +226,7 @@ def test_merge_queue_only_ruleset_does_not_count_as_a_writer_gate() -> None:
         module,
         facts=_active_facts(
             module,
-            branch_rules=_rules(module, "merge_queue", "pull_request"),
+            branch_rules=_rules(module, "merge_queue", "branch_name_pattern"),
             rulesets=(_ruleset(module, bypass_actors=()),),
         ),
     )
@@ -382,7 +382,12 @@ def test_accepted_integration_with_pull_request_bypass_cannot_mediate_a_fence_pu
             rulesets=(_ruleset(module, bypass_actors=(_actor(module, bypass_mode="pull_request"),)),),
         ),
     )
-    _assert_unavailable(module, result, "OWNER_INTEGRATION_ABSENT")
+    _assert_unavailable(
+        module,
+        result,
+        "BYPASS_WIDENED",
+        "OWNER_INTEGRATION_ABSENT",
+    )
 
 
 def test_accepted_integration_must_bypass_every_ruleset_that_restricts_update() -> None:
@@ -893,6 +898,29 @@ def test_session_close_law_separates_procedural_release_from_technical_custody()
     assert "scripts/source_continuity.py writer-gate" in text
     assert "checkpoint abandonment after writer loss is prohibited" in text
     assert "EFFECT_UNKNOWN remains exact-session sticky" in text
+    assert "Applicability is closed by exclusion, never by enumeration" in text
+    assert "UNKNOWN_APPLICABLE_RULE" in text
+    for inert in ("merge_queue", "branch_name_pattern", "tag_name_pattern"):
+        assert inert in text
+    assert "must leave the\naccepted integration an executable expected-head path" in text
+
+
+def test_law_inert_and_non_mutating_sets_match_the_verifier_contract() -> None:
+    module = _contract()
+    assert module._WRITER_GATE_INERT_RULE_TYPES == frozenset(
+        {"merge_queue", "branch_name_pattern", "tag_name_pattern"}
+    )
+    assert module._WRITER_GATE_NON_MUTATING_RULE_TYPES == frozenset(
+        {"creation", "deletion", "non_fast_forward"}
+    )
+    assert module._WRITER_GATE_INERT_RULE_TYPES <= module._WRITER_GATE_KNOWN_RULE_TYPES
+    assert module._WRITER_GATE_NON_MUTATING_RULE_TYPES <= module._WRITER_GATE_KNOWN_RULE_TYPES
+    assert not (
+        module._WRITER_GATE_INERT_RULE_TYPES & module._WRITER_GATE_NON_MUTATING_RULE_TYPES
+    )
+    assert "lock_branch" in module._WRITER_GATE_KNOWN_RULE_TYPES
+    assert "lock_branch" not in module._WRITER_GATE_INERT_RULE_TYPES
+    assert "lock_branch" not in module._WRITER_GATE_NON_MUTATING_RULE_TYPES
 
 
 def test_review_return_release_maintainer_records_the_writer_gate_state() -> None:
@@ -902,3 +930,390 @@ def test_review_return_release_maintainer_records_the_writer_gate_state() -> Non
     assert "does not block a clean RCH-1 same-PR release" in text
     assert "must be recorded in the release commission" in text
     assert "neither state grants" in text
+
+
+# --- R1 exact review blockers: lock_branch, unknown rules, bypass modes ------
+
+
+def test_lock_branch_without_exact_owner_bypass_blocks_active_gate() -> None:
+    module = _contract()
+    facts = _active_facts(
+        module,
+        branch_rules=(
+            *_rules(module, "update", "deletion", "non_fast_forward"),
+            *_rules(
+                module,
+                "lock_branch",
+                ruleset_id=ORG_RULESET,
+                source_type="Organization",
+            ),
+        ),
+        rulesets=(
+            _ruleset(module),
+            _ruleset(
+                module,
+                ruleset_id=ORG_RULESET,
+                source_type="Organization",
+                bypass_actors=(),
+            ),
+        ),
+    )
+    result = _verify(module, facts=facts)
+    payload = _assert_unavailable(module, result, "OWNER_INTEGRATION_ABSENT")
+    assert payload["rule_types"] == [
+        "deletion",
+        "lock_branch",
+        "non_fast_forward",
+        "update",
+    ]
+    assert payload["enforcing_ruleset_ids"] == [REPO_RULESET, ORG_RULESET]
+
+
+def test_lock_branch_with_exact_owner_always_retains_expected_head_mutation_path() -> None:
+    module = _contract()
+    facts = _active_facts(
+        module,
+        branch_rules=(
+            *_rules(module, "update", "deletion", "non_fast_forward"),
+            *_rules(
+                module,
+                "lock_branch",
+                ruleset_id=ORG_RULESET,
+                source_type="Organization",
+            ),
+        ),
+        rulesets=(
+            _ruleset(module),
+            _ruleset(module, ruleset_id=ORG_RULESET, source_type="Organization"),
+        ),
+    )
+    result = _verify(module, facts=facts)
+    assert isinstance(result, module.WriterGateReceipt)
+    payload = result.to_dict()
+    assert payload["state"] == "TECHNICAL_WRITER_GATE_ACTIVE"
+    assert payload["defects"] == []
+    assert payload["rule_types"] == [
+        "deletion",
+        "lock_branch",
+        "non_fast_forward",
+        "update",
+    ]
+    assert payload["enforcing_ruleset_ids"] == [REPO_RULESET, ORG_RULESET]
+
+
+def test_unknown_applicable_rule_fails_closed_instead_of_disappearing() -> None:
+    module = _contract()
+    unknown = "future_ref_mutation_guard"
+    result = _verify(
+        module,
+        facts=_active_facts(
+            module,
+            branch_rules=(
+                *_rules(module, "update", "deletion", "non_fast_forward"),
+                *_rules(
+                    module,
+                    unknown,
+                    ruleset_id=ORG_RULESET,
+                    source_type="Organization",
+                ),
+            ),
+            rulesets=(
+                _ruleset(module),
+                _ruleset(module, ruleset_id=ORG_RULESET, source_type="Organization"),
+            ),
+        ),
+    )
+    payload = _assert_unavailable(module, result, "UNKNOWN_APPLICABLE_RULE")
+    assert unknown in payload["rule_types"]
+    assert payload["enforcing_ruleset_ids"] == [REPO_RULESET, ORG_RULESET]
+
+
+def test_same_accepted_integration_pull_request_bypass_is_widened() -> None:
+    module = _contract()
+    result = _verify(
+        module,
+        facts=_active_facts(
+            module,
+            rulesets=(
+                _ruleset(
+                    module,
+                    bypass_actors=(
+                        _actor(module),
+                        _actor(module, bypass_mode="pull_request"),
+                    ),
+                ),
+            ),
+        ),
+    )
+    payload = _assert_unavailable(module, result, "BYPASS_WIDENED")
+    assert {
+        "actor_type": "Integration",
+        "actor_id": ACCEPTED_APP,
+        "bypass_mode": "pull_request",
+    } in payload["bypass_actors"]
+
+
+def test_exempt_actor_is_valid_but_widens_the_bypass_set() -> None:
+    module = _contract()
+    result = _verify(
+        module,
+        facts=_active_facts(
+            module,
+            rulesets=(
+                _ruleset(
+                    module,
+                    bypass_actors=(
+                        _actor(module),
+                        _actor(
+                            module,
+                            actor_type="RepositoryRole",
+                            actor_id=5,
+                            bypass_mode="exempt",
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+    payload = _assert_unavailable(module, result, "BYPASS_WIDENED")
+    assert {
+        "actor_type": "RepositoryRole",
+        "actor_id": 5,
+        "bypass_mode": "exempt",
+    } in payload["bypass_actors"]
+
+
+def test_cli_lock_branch_ruleset_is_read_and_can_block_owner_mediation(capsys) -> None:
+    module = _cli_module()
+    http = _GateHTTP(
+        rules=[
+            _rule_row("update"),
+            _rule_row("deletion"),
+            _rule_row("non_fast_forward"),
+            _rule_row("lock_branch", ORG_RULESET, "Organization"),
+        ],
+        rulesets={REPO_RULESET: _ruleset_row()},
+        org_rulesets={
+            ORG_RULESET: _ruleset_row(
+                ORG_RULESET,
+                source_type="Organization",
+                bypass_actors=[],
+            )
+        },
+    )
+    exit_code = _run(module, _argv(), http=http)
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert exit_code == 0
+    assert payload["state"] == "TECHNICAL_WRITER_GATE_UNAVAILABLE"
+    assert payload["defects"] == ["OWNER_INTEGRATION_ABSENT"]
+    assert payload["enforcing_ruleset_ids"] == [REPO_RULESET, ORG_RULESET]
+    assert "lock_branch" in payload["rule_types"]
+    endpoints = {url.removeprefix(API_ROOT + "/") for url, _, _ in http.calls}
+    assert f"orgs/{ORG}/rulesets/{ORG_RULESET}" in endpoints
+
+
+def test_cli_exempt_actor_is_widened_not_malformed(capsys) -> None:
+    module = _cli_module()
+    http = _active_http(
+        rulesets={
+            REPO_RULESET: _ruleset_row(
+                bypass_actors=[
+                    {
+                        "actor_id": ACCEPTED_APP,
+                        "actor_type": "Integration",
+                        "bypass_mode": "always",
+                    },
+                    {
+                        "actor_id": 5,
+                        "actor_type": "RepositoryRole",
+                        "bypass_mode": "exempt",
+                    },
+                ]
+            )
+        }
+    )
+    exit_code = _run(module, _argv(), http=http)
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert exit_code == 0
+    assert payload["state"] == "TECHNICAL_WRITER_GATE_UNAVAILABLE"
+    assert payload["defects"] == ["BYPASS_WIDENED"]
+
+
+def test_cli_unknown_applicable_rule_is_unavailable_not_filtered(capsys) -> None:
+    module = _cli_module()
+    unknown = "future_ref_mutation_guard"
+    http = _GateHTTP(
+        rules=[
+            _rule_row("update"),
+            _rule_row("deletion"),
+            _rule_row("non_fast_forward"),
+            _rule_row(unknown, ORG_RULESET, "Organization"),
+        ],
+        rulesets={REPO_RULESET: _ruleset_row()},
+        org_rulesets={ORG_RULESET: _ruleset_row(ORG_RULESET, source_type="Organization")},
+    )
+    exit_code = _run(module, _argv(), http=http)
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert exit_code == 0
+    assert payload["state"] == "TECHNICAL_WRITER_GATE_UNAVAILABLE"
+    assert payload["defects"] == ["UNKNOWN_APPLICABLE_RULE"]
+    assert unknown in payload["rule_types"]
+
+
+# --- R1 completeness: every applicable write-blocking rule, not only lock_branch
+
+
+MUTATION_BLOCKING_RULE_TYPES = (
+    "pull_request",
+    "required_status_checks",
+    "required_signatures",
+    "required_deployments",
+    "required_linear_history",
+    "commit_message_pattern",
+    "commit_author_email_pattern",
+    "committer_email_pattern",
+    "workflows",
+    "code_scanning",
+    "file_path_restriction",
+    "max_file_path_length",
+    "file_extension_restriction",
+    "file_size",
+)
+
+
+def _split_ruleset_facts(module, *, second_rule: str, second_bypass=None):
+    """Frozen gate in ruleset 1; one extra rule in a separate org ruleset 2."""
+
+    return _active_facts(
+        module,
+        branch_rules=(
+            *_rules(module, "update", "deletion", "non_fast_forward"),
+            *_rules(module, second_rule, ruleset_id=ORG_RULESET, source_type="Organization"),
+        ),
+        rulesets=(
+            _ruleset(module),
+            _ruleset(
+                module,
+                ruleset_id=ORG_RULESET,
+                source_type="Organization",
+                **({} if second_bypass is None else {"bypass_actors": second_bypass}),
+            ),
+        ),
+    )
+
+
+@pytest.mark.parametrize("rule_type", MUTATION_BLOCKING_RULE_TYPES)
+def test_every_applicable_mutation_rule_requires_the_same_owner_mediation(rule_type: str) -> None:
+    # Blocker 1 is not only about lock_branch: any active rule that can block or
+    # alter an owner-mediated expected-head update must retain that mediation.
+    module = _contract()
+    result = _verify(module, facts=_split_ruleset_facts(module, second_rule=rule_type, second_bypass=()))
+    payload = _assert_unavailable(module, result, "OWNER_INTEGRATION_ABSENT")
+    assert rule_type in payload["rule_types"]
+    assert payload["enforcing_ruleset_ids"] == [REPO_RULESET, ORG_RULESET]
+
+
+@pytest.mark.parametrize("rule_type", MUTATION_BLOCKING_RULE_TYPES)
+def test_applicable_mutation_rule_mediated_by_the_accepted_integration_stays_active(rule_type: str) -> None:
+    module = _contract()
+    result = _verify(module, facts=_split_ruleset_facts(module, second_rule=rule_type))
+    assert isinstance(result, module.WriterGateReceipt)
+    payload = result.to_dict()
+    assert payload["state"] == "TECHNICAL_WRITER_GATE_ACTIVE"
+    assert payload["defects"] == []
+    assert rule_type in payload["rule_types"]
+
+
+@pytest.mark.parametrize("rule_type", ["deletion", "non_fast_forward", "creation"])
+def test_rules_that_cannot_block_a_fast_forward_fence_need_no_owner_bypass(rule_type: str) -> None:
+    # A tree-preserving fence commit neither deletes, rewrites history, nor
+    # creates a ref, so these rules do not need the owner bypass to be mediated.
+    module = _contract()
+    result = _verify(module, facts=_split_ruleset_facts(module, second_rule=rule_type, second_bypass=()))
+    assert isinstance(result, module.WriterGateReceipt)
+    payload = result.to_dict()
+    assert "OWNER_INTEGRATION_ABSENT" not in payload["defects"]
+    expected = ["CREATION_RESTRICTED"] if rule_type == "creation" else []
+    assert payload["defects"] == expected
+
+
+@pytest.mark.parametrize("rule_type", ["merge_queue", "branch_name_pattern", "tag_name_pattern"])
+def test_inert_rule_types_never_form_or_widen_a_writer_gate(rule_type: str) -> None:
+    # Preserves the live master reading: a merge-queue ruleset is not custody.
+    module = _contract()
+    alone = _verify(
+        module,
+        request=_request(module, accepted_integration_id=None),
+        facts=_active_facts(
+            module,
+            branch_rules=_rules(module, rule_type),
+            rulesets=(_ruleset(module, bypass_actors=()),),
+        ),
+    )
+    payload = _assert_unavailable(module, alone, "RULES_ABSENT")
+    assert payload["rule_types"] == []
+    assert payload["enforcing_ruleset_ids"] == []
+
+    beside = _verify(module, facts=_split_ruleset_facts(module, second_rule=rule_type, second_bypass=()))
+    assert isinstance(beside, module.WriterGateReceipt)
+    assert beside.to_dict()["state"] == "TECHNICAL_WRITER_GATE_ACTIVE"
+    assert beside.to_dict()["enforcing_ruleset_ids"] == [REPO_RULESET]
+
+
+def test_cli_pull_request_rule_in_an_unmediated_ruleset_blocks_the_gate(capsys) -> None:
+    module = _cli_module()
+    http = _GateHTTP(
+        rules=[
+            _rule_row("update"),
+            _rule_row("deletion"),
+            _rule_row("non_fast_forward"),
+            _rule_row("pull_request", ORG_RULESET, "Organization"),
+        ],
+        rulesets={REPO_RULESET: _ruleset_row()},
+        org_rulesets={
+            ORG_RULESET: _ruleset_row(ORG_RULESET, source_type="Organization", bypass_actors=[])
+        },
+    )
+    exit_code = _run(module, _argv(), http=http)
+    payload = json.loads(capsys.readouterr().out.strip())
+
+    assert exit_code == 0
+    assert payload["state"] == "TECHNICAL_WRITER_GATE_UNAVAILABLE"
+    assert payload["defects"] == ["OWNER_INTEGRATION_ABSENT"]
+    assert "pull_request" in payload["rule_types"]
+
+
+def test_accepted_integration_in_exempt_mode_never_proves_owner_mediation() -> None:
+    # `exempt` is valid GitHub evidence, but it is not the frozen `always`
+    # mediation path, even for the accepted integration itself.
+    module = _contract()
+    result = _verify(
+        module,
+        facts=_active_facts(
+            module,
+            rulesets=(_ruleset(module, bypass_actors=(_actor(module, bypass_mode="exempt"),)),),
+        ),
+    )
+    payload = _assert_unavailable(module, result, "BYPASS_WIDENED", "OWNER_INTEGRATION_ABSENT")
+    assert payload["bypass_actors"] == [
+        {"actor_type": "Integration", "actor_id": ACCEPTED_APP, "bypass_mode": "exempt"}
+    ]
+
+
+def test_cli_accepted_integration_exempt_mode_is_widened_and_unmediated(capsys) -> None:
+    module = _cli_module()
+    http = _active_http(
+        rulesets={
+            REPO_RULESET: _ruleset_row(
+                bypass_actors=[
+                    {"actor_id": ACCEPTED_APP, "actor_type": "Integration", "bypass_mode": "exempt"}
+                ]
+            )
+        }
+    )
+    exit_code = _run(module, _argv(), http=http)
+    payload = json.loads(capsys.readouterr().out.strip())
+
+    assert exit_code == 0
+    assert payload["state"] == "TECHNICAL_WRITER_GATE_UNAVAILABLE"
+    assert payload["defects"] == ["BYPASS_WIDENED", "OWNER_INTEGRATION_ABSENT"]
