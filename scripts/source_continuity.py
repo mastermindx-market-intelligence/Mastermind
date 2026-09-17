@@ -143,6 +143,80 @@ class _HTTPRepresentation:
 class _ConditionalObservation:
     url: str
     etag: str
+    roster_semantics: object
+
+
+# A changed HTTP 200 is semantically revalidatable only for the open-PR roster
+# pages used by the collision census. Every other endpoint keeps the original
+# unconditional changed-representation refusal required by #346.
+_UNPROVABLE = object()
+
+
+def _open_pull_roster_semantics(url: object, payload: object) -> object:
+    if not isinstance(url, str) or not url.startswith(_API_ROOT + "/repos/"):
+        return _UNPROVABLE
+    path, separator, query = url.partition("?")
+    if separator != "?":
+        return _UNPROVABLE
+    segments = path[len(_API_ROOT) + 1 :].split("/")
+    if len(segments) != 4 or segments[0] != "repos" or segments[3] != "pulls":
+        return _UNPROVABLE
+
+    pairs: list[tuple[str, str]] = []
+    for raw_part in query.split("&"):
+        key, equals, value = raw_part.partition("=")
+        if equals != "=" or not key:
+            return _UNPROVABLE
+        pairs.append((key, value))
+    if len(pairs) != 3 or len({key for key, _ in pairs}) != 3:
+        return _UNPROVABLE
+    params = dict(pairs)
+    page = params.get("page")
+    if (
+        params.get("state") != "open"
+        or params.get("per_page") != str(_PAGE_SIZE)
+        or page is None
+        or not page.isdigit()
+        or int(page) <= 0
+        or int(page) > _MAX_PAGES
+    ):
+        return _UNPROVABLE
+
+    if not isinstance(payload, list) or len(payload) > _PAGE_SIZE:
+        return _UNPROVABLE
+    rows: list[tuple[int, str, str, str, str]] = []
+    seen_numbers: set[int] = set()
+    for row in payload:
+        if not isinstance(row, dict):
+            return _UNPROVABLE
+        number = row.get("number")
+        head = row.get("head")
+        base = row.get("base")
+        if type(number) is not int or number <= 0 or number in seen_numbers:
+            return _UNPROVABLE
+        if not isinstance(head, dict) or not isinstance(base, dict):
+            return _UNPROVABLE
+        head_repo = head.get("repo")
+        base_repo = base.get("repo")
+        if not isinstance(head_repo, dict) or not isinstance(base_repo, dict):
+            return _UNPROVABLE
+        head_sha = head.get("sha")
+        base_sha = base.get("sha")
+        head_repository = head_repo.get("full_name")
+        base_repository = base_repo.get("full_name")
+        if (
+            not _is_sha(head_sha)
+            or not _is_sha(base_sha)
+            or not _is_safe_repository(head_repository)
+            or not _is_safe_repository(base_repository)
+        ):
+            return _UNPROVABLE
+        state = row.get("state")
+        if state is not None and state != "open":
+            return _UNPROVABLE
+        seen_numbers.add(number)
+        rows.append((number, head_sha, head_repository, base_sha, base_repository))
+    return tuple(sorted(rows))
 
 
 class _BoundedHTTPGet:
@@ -152,6 +226,7 @@ class _BoundedHTTPGet:
         self._calls = 0
         self._bytes = 0
         self._conditional_observations: list[_ConditionalObservation] = []
+        self._semantic_revalidations: list[str] = []
         self.parallel_safe = (
             transport is _stdlib_http_get
             or getattr(transport, "_source_continuity_parallel_safe", False) is True
@@ -240,9 +315,14 @@ class _BoundedHTTPGet:
                 raise _RemoteProbeError()
             representation = payload
             self._account_payload(representation.payload)
+            roster_semantics = _open_pull_roster_semantics(url, representation.payload)
             with self._lock:
                 self._conditional_observations.append(
-                    _ConditionalObservation(url=url, etag=representation.etag)
+                    _ConditionalObservation(
+                        url=url,
+                        etag=representation.etag,
+                        roster_semantics=roster_semantics,
+                    )
                 )
             return representation.payload
 
@@ -273,8 +353,20 @@ class _BoundedHTTPGet:
                     raise _RemoteProbeError()
                 continue
             if payload.not_modified is False:
+                # Account every changed body before deciding. Only an open-PR roster
+                # page may survive changed representation, and only with identical
+                # collision-roster semantics. All other endpoints refuse here.
                 self._account_payload(payload.payload)
-                return False
+                with self._lock:
+                    self._semantic_revalidations.append(observation.url)
+                if observation.roster_semantics is _UNPROVABLE:
+                    return False
+                if (
+                    _open_pull_roster_semantics(observation.url, payload.payload)
+                    != observation.roster_semantics
+                ):
+                    return False
+                continue
             raise _RemoteProbeError()
         return True
 
