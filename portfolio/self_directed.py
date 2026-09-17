@@ -705,85 +705,133 @@ def book(*, prices: dict[str, float] | None = None, now: datetime | None = None,
          resolve_missing_prices: bool = True) -> dict:
     """The Self-Directed book contract for the dashboard.
 
-    Settles pending orders first (if the market is open), then returns positions with live
-    marks + weights, the allocation scorecard, the market state, and the pending queue.
-    `prices` (TICKER→px) overrides live marks (used by tests / a shared price fetch).
+    Settles pending orders first (if the market is open), then returns positions, valuation
+    completeness, allocation, market state, and the pending queue. ``prices`` overrides the live
+    accessor. A missing current quote may use only the existing bounded, dated persisted market
+    mark; cost basis is execution history and is never substituted as market value.
 
-    `read_only=True` skips the settle_pending() side-effect so a GET request does not
-    mutate state files.  ``resolve_missing_prices=False`` also prevents per-name live
-    network fallbacks; the session-aware dashboard endpoint uses it while markets are
-    closed so an unpriced name cannot trigger an overnight quote request.  The scheduled
-    mark-sweep and existing interactive routes retain the default live fallback."""
+    When any positive-share holding remains unpriced, per-line known marks still render but aggregate
+    NAV/invested/weights/return are ``None`` and ``valuation_complete`` is false. This keeps unknown
+    coverage visibly unknown instead of manufacturing a flat return.
+
+    ``read_only=True`` skips ``settle_pending()`` so a GET request does not mutate state files.
+    ``resolve_missing_prices=False`` prevents per-name network/live fallbacks; bounded persisted
+    market marks remain eligible because they are local, dated observations.
+    """
     if not read_only:
         settle_pending(now=now, market_open=market_open, prices=prices)
     state = _load_account()
     theses = _load_theses()
-    prices = dict(prices or {})
+    prices = {(k or "").upper(): v for k, v in (prices or {}).items()}
+    asof = _today()
 
     positions_raw = state.get("positions", {})
     marks: dict[str, float] = {}
+    unpriced: list[str] = []
     for ticker, pos in positions_raw.items():
-        px = prices.get(ticker)
+        shares = float(pos.get("shares") or 0.0)
+        px = _positive_price(prices.get(ticker))
         if px is None and resolve_missing_prices:
-            px = _current_price(ticker)
-        if px and px > 0:
-            marks[ticker] = float(px)
+            px = _positive_price(_current_price(ticker))
+        if px is None:
+            px = _persisted_position_mark(pos, asof)
+        if px is not None:
+            marks[ticker] = px
+        elif shares > 1e-9:
+            unpriced.append(ticker)
 
-    invested = 0.0
-    for ticker, pos in positions_raw.items():
-        px = marks.get(ticker, pos.get("avg_cost") or 0.0)
-        invested += pos.get("shares", 0.0) * px
-    cash = state.get("cash", 0.0)
-    nav = cash + invested
+    valuation_complete = not unpriced
+    cash = float(state.get("cash", 0.0))
+    invested = None
+    nav = None
+    if valuation_complete:
+        invested = sum(
+            float(pos.get("shares") or 0.0) * marks.get(ticker, 0.0)
+            for ticker, pos in positions_raw.items()
+        )
+        nav = cash + invested
 
     positions: list[dict] = []
     for ticker, pos in positions_raw.items():
         shares = float(pos.get("shares") or 0.0)
         avg = float(pos.get("avg_cost") or 0.0)
         px = marks.get(ticker)
-        mv = shares * px if px else None
+        mv = shares * px if px is not None else None
         th = theses.get(ticker) or {}
         positions.append({
             "ticker": ticker,
             "shares": round(shares, 6),
             "avg_cost": round(avg, 4) if avg else None,
-            "current_price": round(px, 4) if px else None,
+            "current_price": round(px, 4) if px is not None else None,
             "market_value": round(mv, 2) if mv is not None else None,
-            "unrealized_pnl": round((px - avg) * shares, 2) if (px and avg) else None,
-            "unrealized_pct": round((px / avg - 1) * 100, 2) if (px and avg) else None,
-            "weight": round(mv / nav, 6) if (mv is not None and nav > 0) else None,
+            "unrealized_pnl": round((px - avg) * shares, 2) if (px is not None and avg) else None,
+            "unrealized_pct": round((px / avg - 1) * 100, 2) if (px is not None and avg) else None,
+            "weight": (
+                round(mv / nav, 6)
+                if (valuation_complete and mv is not None and nav is not None and nav > 0)
+                else None
+            ),
             "thesis": th.get("note"),
             "thesis_updated_at": th.get("updated_at"),
         })
-    # heaviest weight first; un-priced names sink to the bottom
-    positions.sort(key=lambda p: (p["weight"] if p["weight"] is not None else -1), reverse=True)
+    # heaviest weight first when valuation is complete; otherwise keep deterministic ticker order.
+    if valuation_complete:
+        positions.sort(
+            key=lambda p: (p["weight"] if p["weight"] is not None else -1), reverse=True
+        )
+    else:
+        positions.sort(key=lambda p: p["ticker"])
 
     weights = [p["weight"] for p in positions if p["weight"] is not None]
-    total_unreal = sum(p["unrealized_pnl"] for p in positions if p["unrealized_pnl"] is not None)
+    total_unreal = (
+        sum(p["unrealized_pnl"] for p in positions if p["unrealized_pnl"] is not None)
+        if valuation_complete
+        else None
+    )
+    starting_nav = float(state.get("starting_nav", _STARTING_NAV) or _STARTING_NAV)
 
     pending = _mark_pending(_load_pending(), prices, resolve_missing=resolve_missing_prices)
 
     return {
-        "starting_nav": state.get("starting_nav", _STARTING_NAV),
+        "starting_nav": starting_nav,
         "inception_date": state.get("inception_date"),
-        "nav": round(nav, 2),
+        "valuation_complete": valuation_complete,
+        "unpriced_tickers": sorted(unpriced),
+        "nav": round(nav, 2) if nav is not None else None,
         "cash": round(cash, 2),
-        "invested": round(invested, 2),
+        "invested": round(invested, 2) if invested is not None else None,
         "positions": positions,
         "allocation": {
-            "cash_pct": round(cash / nav, 6) if nav > 0 else 1.0,
-            "invested_pct": round(invested / nav, 6) if nav > 0 else 0.0,
-            "gross": round(invested / nav, 6) if nav > 0 else 0.0,
+            "cash_pct": (
+                round(cash / nav, 6) if (valuation_complete and nav is not None and nav > 0)
+                else (1.0 if valuation_complete else None)
+            ),
+            "invested_pct": (
+                round(invested / nav, 6)
+                if (valuation_complete and invested is not None and nav is not None and nav > 0)
+                else (0.0 if valuation_complete else None)
+            ),
+            "gross": (
+                round(invested / nav, 6)
+                if (valuation_complete and invested is not None and nav is not None and nav > 0)
+                else (0.0 if valuation_complete else None)
+            ),
             "n_positions": len(positions),
-            "largest_weight": round(max(weights), 6) if weights else 0.0,
-            "total_unrealized_pnl": round(total_unreal, 2),
-            "total_return_pct": round((nav - state.get("starting_nav", _STARTING_NAV))
-                                      / state.get("starting_nav", _STARTING_NAV) * 100, 4),
+            "largest_weight": (
+                round(max(weights), 6) if weights else 0.0
+            ) if valuation_complete else None,
+            "total_unrealized_pnl": (
+                round(total_unreal, 2) if total_unreal is not None else None
+            ),
+            "total_return_pct": (
+                round((nav - starting_nav) / starting_nav * 100, 4)
+                if (valuation_complete and nav is not None and starting_nav > 0)
+                else None
+            ),
         },
         "pending": pending,
         "market": _market_status(),
     }
-
 
 def _mark_pending(pending: list[dict], prices: dict[str, float],
                   resolve_missing: bool = True) -> list[dict]:

@@ -5839,7 +5839,7 @@ function renderSelf() {
 
 function renderSelfHeader() {
   var b = _self || {}, a = b.allocation || {};
-  if (E('sd-nav'))   E('sd-nav').textContent = fmtNav(b.nav != null ? b.nav : 1000000);
+  if (E('sd-nav'))   E('sd-nav').textContent = b.nav != null ? fmtNav(b.nav) : '—';
   if (E('sd-cash'))  E('sd-cash').textContent = b.cash != null ? fmtNav(b.cash) : '—';
   if (E('sd-cash-pct')) E('sd-cash-pct').textContent = a.cash_pct != null ? pctInt(a.cash_pct) : '';
   if (E('sd-invested')) E('sd-invested').textContent = b.invested != null ? fmtNav(b.invested) : '—';
@@ -5888,6 +5888,18 @@ function renderSelfMarket() {
 function renderSelfAlloc() {
   var host = E('sd-alloc-host'); if (!host) return;
   var b = _self || {}, a = b.allocation || {};
+  if (b.error) {
+    host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">!</span>' +
+      '<span class="l-en">Self-Directed portfolio data unavailable.</span>' +
+      '<span class="l-zh">自主管理组合数据暂不可用。</span></div>';
+    return;
+  }
+  if (b.valuation_complete === false && ((b.positions) || []).length) {
+    host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">!</span>' +
+      '<span class="l-en">Self-Directed valuation unavailable — one or more holdings are missing a valid market mark.</span>' +
+      '<span class="l-zh">自主管理组合估值暂不可用 — 一个或多个持仓缺少有效市场价格。</span></div>';
+    return;
+  }
   var pos = ((b.positions) || []).filter(function(p){ return p.weight != null && p.weight > 0; });
   if (!pos.length) {
     host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">○</span>' + t('sd.alloc_empty') + '</div>';
@@ -5915,7 +5927,13 @@ function renderSelfAlloc() {
 
 function renderSelfPositions() {
   var host = E('sd-positions-host'); if (!host) return;
-  var pos = ((_self || {}).positions) || [];
+  var b = _self || {}, pos = b.positions || [];
+  if (b.error) {
+    host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">!</span>' +
+      '<span class="l-en">Self-Directed portfolio data unavailable.</span>' +
+      '<span class="l-zh">自主管理组合数据暂不可用。</span></div>';
+    return;
+  }
   if (!pos.length) {
     host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">○</span><span class="l-en">No positions yet — place your first order above.</span><span class="l-zh">暂无持仓 — 请在上方下单。</span></div>';
     return;
