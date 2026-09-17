@@ -9,7 +9,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from control_plane.executive_dialogue_observation import (
+    inspect_terminal_return_history,
+    terminal_return_event_material,
+)
 from control_plane.executive_runtime import JobStatus, Runtime, StateConflict
+from control_plane.executive_terminal_return import reduce_terminal_return
 from control_plane.wake_ledger import (
     ATTEMPT_PHASES,
     EFFECT_KNOWN_PHASES,
@@ -154,6 +159,35 @@ def _wake_projection(
             raise CanaryReaderError("WAKE_OBLIGATION_INVALID")
         acknowledgement_mode = acknowledgement.ack_mode.value
     return records[-1].phase.value, acknowledgement_mode
+
+
+def _terminal_projection(runtime: Runtime, material: Any) -> str:
+    try:
+        terminal_events = runtime.events.list_events(
+            aggregate_type="terminal_return_projection",
+            aggregate_id=material.attempt.attempt_id,
+        )
+        if sum(
+            event.event_type == "EXECUTIVE_TERMINAL_RETURN_APPLIED"
+            for event in terminal_events
+        ) > 1:
+            raise CanaryReaderError("TERMINAL_PROJECTION_AMBIGUOUS")
+        candidate = reduce_terminal_return(material=material)
+        _command_base, event_material = terminal_return_event_material(candidate)
+        with runtime.store.read() as connection:
+            phase = inspect_terminal_return_history(
+                runtime,
+                connection,
+                candidate=candidate,
+                material=event_material,
+            )
+    except CanaryReaderError:
+        raise
+    except (RuntimeError, TypeError, ValueError) as exc:
+        raise CanaryReaderError("TERMINAL_PROJECTION_INVALID") from exc
+    if phase in {"ATTEMPTED", "EFFECT_UNKNOWN"}:
+        raise CanaryReaderError("EFFECT_UNKNOWN_UNRESOLVED")
+    return phase or "NOT_ATTEMPTED"
 
 
 def build_receipt(
@@ -332,28 +366,7 @@ def build_receipt(
     ):
         raise CanaryReaderError("INDEPENDENT_REVIEW_INCOMPLETE")
 
-    terminal_events = [
-        event
-        for event in runtime.events.list_events(
-            aggregate_type="terminal_return_projection",
-            aggregate_id=material.attempt.attempt_id,
-        )
-    ]
-    event_types = [event.event_type for event in terminal_events]
-    applied_count = event_types.count("EXECUTIVE_TERMINAL_RETURN_APPLIED")
-    if applied_count > 1:
-        raise CanaryReaderError("TERMINAL_PROJECTION_AMBIGUOUS")
-    projection = (
-        "APPLIED"
-        if "EXECUTIVE_TERMINAL_RETURN_APPLIED" in event_types
-        else "EFFECT_UNKNOWN"
-        if "EXECUTIVE_TERMINAL_RETURN_EFFECT_UNKNOWN" in event_types
-        else "ATTEMPTED"
-        if "EXECUTIVE_TERMINAL_RETURN_ATTEMPTED" in event_types
-        else "NOT_ATTEMPTED"
-    )
-    if projection == "EFFECT_UNKNOWN":
-        raise CanaryReaderError("EFFECT_UNKNOWN_UNRESOLVED")
+    projection = _terminal_projection(runtime, material)
 
     wake_state, wake_acknowledgement_mode = _wake_projection(
         runtime,

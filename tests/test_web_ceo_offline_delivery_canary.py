@@ -5,8 +5,13 @@ from pathlib import Path
 
 import pytest
 
+from control_plane.executive_dialogue_observation import (
+    terminal_return_event_material,
+    terminal_return_phase_spec,
+)
 from control_plane.executive_runtime import JobStatus, Runtime
 from control_plane.executive_orchestration_principal import digest
+from control_plane.executive_terminal_return import reduce_terminal_return
 from control_plane.wake_events import mint_obligation
 from control_plane.wake_ledger import (
     AckMode,
@@ -283,23 +288,149 @@ def test_canary_receipt_is_finite_deterministic_secret_safe_and_refuses_bad_inpu
         build_receipt(runtime, root_job_id=root_id, expected_release_sha="b" * 40)
 
 
+def _append_terminal_phase(
+    runtime: Runtime,
+    root_id: str,
+    *,
+    final_phase: str,
+    duplicate_applied: bool = False,
+) -> None:
+    root = runtime.jobs.get_job(root_id)
+    assert root is not None and root.current_attempt_id is not None
+    material = runtime.validated_role_completion(
+        root_id, expected_attempt_id=root.current_attempt_id
+    )
+    candidate = reduce_terminal_return(material=material)
+    command_base, event_material = terminal_return_event_material(candidate)
+    by_phase = {
+        phase_name: (event_type, command_id)
+        for phase_name, event_type, command_id in terminal_return_phase_spec(
+            command_base
+        )
+    }
+    sequences = {
+        "PREPARED": ("PREPARED",),
+        "PRE_SUBMIT_REFUSED": ("PREPARED", "PRE_SUBMIT_REFUSED"),
+        "ATTEMPTED": ("PREPARED", "ATTEMPTED"),
+        "PROVEN_NO_EFFECT": ("PREPARED", "ATTEMPTED", "PROVEN_NO_EFFECT"),
+        "EFFECT_UNKNOWN": ("PREPARED", "ATTEMPTED", "EFFECT_UNKNOWN"),
+        "APPLIED": ("PREPARED", "ATTEMPTED", "APPLIED"),
+    }
+    projection_receipt = {
+        "action": "POSTED",
+        "message_key": candidate.message_key,
+        "fingerprint": "b" * 64,
+        "message_ts": "1787961600.000002",
+        "duplicate_timestamps": [],
+        "thread_ts": "1787961600.000001",
+        "parent_author_user_id": "U0123456789",
+        "parent_fingerprint": "e" * 64,
+    }
+    with runtime.store.transaction() as connection:
+        for phase in sequences[final_phase]:
+            event_type, command_id = by_phase[phase]
+            payload = dict(event_material)
+            if phase == "APPLIED":
+                payload["projection_receipt"] = projection_receipt
+            runtime.store.append_event(
+                connection,
+                aggregate_type="terminal_return_projection",
+                aggregate_id=candidate.attempt_id,
+                event_type=event_type,
+                actor="executive-control-service",
+                job_id=candidate.job_id,
+                attempt_id=candidate.attempt_id,
+                worker_id=candidate.worker_id,
+                payload=payload,
+                command_id=command_id,
+            )
+        if duplicate_applied:
+            event_type, command_id = by_phase["APPLIED"]
+            runtime.store.append_event(
+                connection,
+                aggregate_type="terminal_return_projection",
+                aggregate_id=candidate.attempt_id,
+                event_type=event_type,
+                actor="executive-control-service",
+                job_id=candidate.job_id,
+                attempt_id=candidate.attempt_id,
+                worker_id=candidate.worker_id,
+                payload={**event_material, "projection_receipt": projection_receipt},
+                command_id=f"{command_id}:duplicate",
+            )
+
+
 def test_canary_rejects_unresolved_terminal_effect_unknown(tmp_path: Path) -> None:
     runtime, root_id, *_args, release_sha = _offline_delivery_runtime(
         tmp_path / "runtime"
     )
+    _append_terminal_phase(runtime, root_id, final_phase="EFFECT_UNKNOWN")
+
+    with pytest.raises(ValueError, match="EFFECT_UNKNOWN_UNRESOLVED"):
+        build_receipt(
+            runtime,
+            root_job_id=root_id,
+            expected_release_sha=release_sha,
+            observed_at="2026-09-14T01:02:03Z",
+        )
+
+
+def test_canary_rejects_attempted_terminal_projection_as_unresolved_effect(
+    tmp_path: Path,
+) -> None:
+    runtime, root_id, *_args, release_sha = _offline_delivery_runtime(
+        tmp_path / "runtime"
+    )
+    _append_terminal_phase(runtime, root_id, final_phase="ATTEMPTED")
+    with pytest.raises(ValueError, match="EFFECT_UNKNOWN_UNRESOLVED"):
+        build_receipt(
+            runtime,
+            root_job_id=root_id,
+            expected_release_sha=release_sha,
+            observed_at="2026-09-14T01:02:03Z",
+        )
+
+
+@pytest.mark.parametrize(
+    "phase",
+    ("PREPARED", "PRE_SUBMIT_REFUSED", "PROVEN_NO_EFFECT"),
+)
+def test_canary_reports_exact_known_terminal_projection_phase(
+    tmp_path: Path,
+    phase: str,
+) -> None:
+    runtime, root_id, *_args, release_sha = _offline_delivery_runtime(
+        tmp_path / "runtime"
+    )
+    _append_terminal_phase(runtime, root_id, final_phase=phase)
+    receipt = build_receipt(
+        runtime,
+        root_job_id=root_id,
+        expected_release_sha=release_sha,
+        observed_at="2026-09-14T01:02:03Z",
+    )
+    assert receipt["terminal_return_projection_state"] == phase
+    assert receipt["effect_uncertainty"] == "NONE"
+
+
+def test_canary_rejects_malformed_terminal_projection_family(tmp_path: Path) -> None:
+    runtime, root_id, *_args, release_sha = _offline_delivery_runtime(
+        tmp_path / "runtime"
+    )
+    root = runtime.jobs.get_job(root_id)
+    assert root is not None and root.current_attempt_id is not None
     material = runtime.validated_role_completion(
-        root_id, expected_attempt_id=runtime.jobs.get_job(root_id).current_attempt_id
+        root_id, expected_attempt_id=root.current_attempt_id
     )
     with runtime.store.transaction() as connection:
         runtime.store.append_event(
             connection,
             aggregate_type="terminal_return_projection",
             aggregate_id=material.attempt.attempt_id,
-            event_type="EXECUTIVE_TERMINAL_RETURN_EFFECT_UNKNOWN",
+            event_type="EXECUTIVE_TERMINAL_RETURN_APPLIED",
             attempt_id=material.attempt.attempt_id,
         )
-
-    with pytest.raises(ValueError, match="EFFECT_UNKNOWN_UNRESOLVED"):
+    with pytest.raises(ValueError, match="TERMINAL_PROJECTION_INVALID"):
         build_receipt(
             runtime,
             root_job_id=root_id,
@@ -312,18 +443,9 @@ def test_canary_rejects_ambiguous_terminal_projection(tmp_path: Path) -> None:
     runtime, root_id, *_args, release_sha = _offline_delivery_runtime(
         tmp_path / "runtime"
     )
-    material = runtime.validated_role_completion(
-        root_id, expected_attempt_id=runtime.jobs.get_job(root_id).current_attempt_id
+    _append_terminal_phase(
+        runtime, root_id, final_phase="APPLIED", duplicate_applied=True
     )
-    for _ in range(2):
-        with runtime.store.transaction() as connection:
-            runtime.store.append_event(
-                connection,
-                aggregate_type="terminal_return_projection",
-                aggregate_id=material.attempt.attempt_id,
-                event_type="EXECUTIVE_TERMINAL_RETURN_APPLIED",
-                attempt_id=material.attempt.attempt_id,
-            )
 
     with pytest.raises(ValueError, match="TERMINAL_PROJECTION_AMBIGUOUS"):
         build_receipt(
@@ -571,17 +693,7 @@ def test_canary_rejects_review_sequence_that_does_not_qualify_current_repair(
 
 
 def _append_terminal_applied(runtime: Runtime, root_id: str) -> None:
-    material = runtime.validated_role_completion(
-        root_id, expected_attempt_id=runtime.jobs.get_job(root_id).current_attempt_id
-    )
-    with runtime.store.transaction() as connection:
-        runtime.store.append_event(
-            connection,
-            aggregate_type="terminal_return_projection",
-            aggregate_id=material.attempt.attempt_id,
-            event_type="EXECUTIVE_TERMINAL_RETURN_APPLIED",
-            attempt_id=material.attempt.attempt_id,
-        )
+    _append_terminal_phase(runtime, root_id, final_phase="APPLIED")
 
 
 def _append_matching_wake(

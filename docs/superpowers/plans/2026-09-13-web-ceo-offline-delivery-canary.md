@@ -21,8 +21,10 @@ and non-promotable. Version 2 emits `null` plus an explicit `UNMEASURED` reason 
 source exists, keeps the receipt read time out of interval endpoints, and separates terminal-return
 projection, exact Wake phase, trusted acknowledgement mode, semantic parent/Sol action and production
 acceptance. Wake `TARGET_ACKNOWLEDGED` or `SOURCE_RESOLVED` is never relabeled as semantic or product
-acceptance. Multiple matching obligations, malformed causal history and unresolved effect uncertainty
-fail closed. The reader remains read-only and creates no telemetry, lifecycle, queue or acceptance store.
+acceptance. Terminal-return state is reconstructed through the existing immutable phase owner: exact
+known-zero phases remain visible, while `ATTEMPTED`, `EFFECT_UNKNOWN`, malformed history, multiple
+matching obligations and unresolved Wake delivery effects fail closed. The reader remains read-only
+and creates no telemetry, lifecycle, queue or acceptance store.
 
 ## Global Constraints
 
