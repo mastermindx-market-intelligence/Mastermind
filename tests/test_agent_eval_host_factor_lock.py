@@ -10,7 +10,8 @@ import copy
 
 import pytest
 
-from scripts.agent_eval import host_factor_lock, validity
+from scripts import agent_eval_host_factor_lock as host_factor_lock
+from scripts.agent_eval import validity
 from scripts.agent_eval.errors import ContractError
 from tests.agent_eval_factories import (
     REPO_REF_BASE,
@@ -259,3 +260,147 @@ def test_snapshot_digest_is_exact_canonical_owner_bytes() -> None:
     changed = copy.deepcopy(snapshot)
     changed["physical_memory_bytes"] += 1
     assert host_factor_lock.host_capacity_snapshot_digest(changed) != digest
+
+
+# A2 source-boundary repair regressions. Principal source plan:
+# harness-convergence-a2-boundary-repair-20260917-sol-001 / PR #692.
+# Keep these tests inside Agent Eval's existing scope fence.
+
+def test_host_bridge_is_explicitly_outside_the_inert_core() -> None:
+    from pathlib import Path
+    from tests import test_agent_eval_inertness as fence
+
+    root = Path(__file__).resolve().parents[1]
+    assert (root / "scripts/agent_eval_host_factor_lock.py").is_file()
+    assert not (root / "scripts/agent_eval/host_factor_lock.py").exists()
+    assert "control_plane" in fence.FORBIDDEN_IMPORT_MODULES
+    # Do not exempt any core module or shrink the core's discovery surface.
+    expected = set((root / "scripts/agent_eval").glob("*.py"))
+    expected.add(root / "scripts/agent_evaluation.py")
+    assert set(fence.PRODUCTION_FILES) == expected
+
+
+def test_host_bridge_wave_has_only_exact_authorized_paths() -> None:
+    from tests import test_agent_eval_inertness as fence
+
+    admitted = {
+        "scripts/agent_eval_host_factor_lock.py",
+        "tests/test_agent_eval_host_factor_lock.py",
+        "docs/superpowers/plans/2026-09-17-agent-eval-host-factor-boundary-repair.md",
+    }
+    for path in admitted:
+        assert path in fence.ALLOWED_PATHS, path
+        assert fence._changed_path_is_allowed(path)
+        assert fence._is_program_surface_path(path)
+    assert fence._fence_not_applicable_reason(admitted) is None
+    for path in (
+        "scripts/agent_eval/host_factor_lock.py",
+        "scripts/agent_eval_host_factor_other.py",
+        "scripts/agent_eval/arbitrary_runtime_bridge.py",
+        "tests/test_agent_eval_host_factor_other.py",
+        "control_plane/executive_host_capacity.py",
+        "config/host_factor.json",
+        ".github/workflows/host_factor.yml",
+    ):
+        assert not fence._changed_path_is_allowed(path), path
+
+
+def test_host_bridge_has_a_closed_pure_owner_dependency_closure() -> None:
+    import ast
+    from pathlib import Path
+    from tests import test_agent_eval_inertness as fence
+
+    root = Path(__file__).resolve().parents[1]
+    bridge = root / "scripts/agent_eval_host_factor_lock.py"
+    assert bridge.is_file()
+    allowed_bridge_imports = {
+        "__future__", "hashlib", "collections.abc", "typing",
+        "control_plane.executive_host_capacity", "scripts.agent_eval",
+        "scripts.agent_eval.errors",
+    }
+    assert fence._imported_module_names(fence._parse(bridge)) == allowed_bridge_imports
+    closure = {
+        "scripts/agent_eval_host_factor_lock.py": {"control_plane.executive_host_capacity"},
+        "control_plane/__init__.py": set(),
+        "control_plane/executive_host_capacity.py": {"control_plane.executive_host_pressure"},
+        "control_plane/executive_host_pressure.py": set(),
+    }
+    for relative, allowed_owners in closure.items():
+        tree = fence._parse(root / relative)
+        imports = fence._imported_module_names(tree)
+        owners = {n for n in imports if n == "control_plane" or n.startswith("control_plane.")}
+        assert owners == allowed_owners, relative
+        forbidden = {
+            n for n in imports
+            if any(n == v or n.startswith(v + ".") for v in fence.FORBIDDEN_IMPORT_MODULES)
+        }
+        assert forbidden == allowed_owners, relative
+        assert not (fence._dotted_attribute_accesses(tree) & fence.FORBIDDEN_ATTRIBUTE_ACCESS)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                assert node.func.id not in {"eval", "exec", "__import__"}, relative
+
+
+def test_host_bridge_reuses_canonical_owner_functions() -> None:
+    from control_plane import executive_host_capacity as owner
+
+    assert host_factor_lock.validate_host_capacity_snapshot is owner.validate_host_capacity_snapshot
+    assert host_factor_lock.canonical_host_capacity_json is owner.canonical_host_capacity_json
+
+
+def test_host_bridge_import_reads_no_environment_and_creates_no_effect(tmp_path) -> None:
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    assert (root / "scripts/agent_eval_host_factor_lock.py").is_file()
+    script = f"""
+import sys, os, json, hashlib, re, typing, collections.abc, datetime, uuid, unicodedata
+sys.dont_write_bytecode = True
+sys.path.insert(0, {str(root)!r})
+class NoEnvironment(dict):
+    def __getitem__(self, key): raise AssertionError('ambient environment read')
+    def get(self, key, default=None): raise AssertionError('ambient environment read')
+    def __iter__(self): raise AssertionError('ambient environment enumeration')
+    def keys(self): raise AssertionError('ambient environment enumeration')
+    def items(self): raise AssertionError('ambient environment enumeration')
+    def values(self): raise AssertionError('ambient environment enumeration')
+    def __contains__(self, key): raise AssertionError('ambient environment read')
+os.environ = NoEnvironment()
+def audit(event, args):
+    if event.startswith(('socket.', 'subprocess.', 'sqlite3.')) or event in {{'os.system', 'os.fork', 'os.posix_spawn'}}:
+        raise AssertionError('forbidden import effect: ' + event)
+sys.addaudithook(audit)
+from scripts import agent_eval_host_factor_lock
+assert {{n for n in sys.modules if n.startswith('control_plane.')}} == {{
+    'control_plane.executive_host_capacity', 'control_plane.executive_host_pressure'}}
+"""
+    before = set(tmp_path.iterdir())
+    result = subprocess.run(
+        [sys.executable, "-B", "-c", script], cwd=tmp_path, capture_output=True,
+        text=True, timeout=15, env={"PATH": os.environ.get("PATH", "")},
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == ""
+    assert result.stderr == ""
+    assert set(tmp_path.iterdir()) == before
+
+
+def test_host_bridge_real_verification_needs_no_ambient_environment(monkeypatch) -> None:
+    import os
+
+    scenario, config_a, config_b, experiment = _graph()
+    snapshot = _snapshot()
+    left = _finalized_run(scenario, config_a, experiment, arm_id="arm_a", snapshot=snapshot)
+    right = _finalized_run(scenario, config_b, experiment, arm_id="arm_b", snapshot=snapshot)
+    class NoEnvironment(dict):
+        def __getitem__(self, key):
+            raise AssertionError("ambient environment read")
+        def get(self, key, default=None):
+            raise AssertionError("ambient environment read")
+    monkeypatch.setattr(os, "environ", NoEnvironment())
+    result = host_factor_lock.verify_host_factor_evidence_lock(left, snapshot, right, snapshot)
+    assert result["scope"] == "HOST_FACTOR_EVIDENCE_LOCK_VERIFIED"
+    assert result["left"]["run_digest"] == left["run_digest"]

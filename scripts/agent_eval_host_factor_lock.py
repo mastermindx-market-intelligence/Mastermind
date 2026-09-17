@@ -1,7 +1,12 @@
-"""Host-generation evidence-lock verification for Agent Evaluation.
+"""Host-generation evidence-lock composition outside the inert Agent Eval core.
 
-This module consumes existing finalized Agent Evaluation run receipts plus the
-canonical Executive host-capacity snapshot.  It does not persist a new schema,
+This explicitly invoked bridge consumes finalized Agent Evaluation run receipts
+plus the canonical Executive host-capacity snapshot. It lives OUTSIDE
+``scripts.agent_eval`` so that package keeps its unconditional no-control-plane
+import rule. Neither the core nor its CLI imports this bridge; do not add a
+compatibility shim back into that package. The bridge imports only the two
+pure Executive host-contract modules, covered by its own dependency/inertness
+regressions.  It does not persist a new schema,
 allocate hosts, choose routes, rank workers, or widen the evaluation lifecycle.
 
 A run is *evidence-locked* to a host observation only when its immutable
