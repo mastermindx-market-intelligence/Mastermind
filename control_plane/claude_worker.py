@@ -1,9 +1,7 @@
 """Bounded native Claude Code command compiler for the common worker harness.
 
-This Task 1 adapter intentionally stops before provider process lifecycle,
-authentication observation, or result parsing.  It owns only immutable
-provider-private construction, binary attestation, and the closed invocation
-policy that later lifecycle work will execute.
+This native adapter owns immutable provider-private construction, binary
+attestation, closed auth observation, and one bounded foreground lifecycle.
 """
 from __future__ import annotations
 
@@ -29,7 +27,6 @@ from control_plane.codex_worker import (
     ProcessIdentityError,
     ProcessInspector as LocalProcessInspector,
     ResultValidationError,
-    _authority_set,
     _create_private_file,
     _ensure_private_directory,
     _ensure_run_directory,
@@ -39,9 +36,10 @@ from control_plane.codex_worker import (
     _is_relative_to,
     _normalise_relative_path,
     _path_matches_patterns,
+    _process_group_exists,
     _read_limited,
-    _sha256_path,
     _utc_now,
+    _wait_for_process_group_exit,
     validate_json_schema,
 )
 from control_plane.worker_execution_contract import (
@@ -87,9 +85,6 @@ _MAX_AUTH_STRING_BYTES = 1024
 _MAX_VALIDATION_ARGV_BYTES = 64 * 1024
 _MAX_VALIDATION_STDOUT_BYTES = 4 * 1024 * 1024
 _MAX_VALIDATION_STDERR_BYTES = 1 * 1024 * 1024
-_AUTH_ENV_PATH_KEYS = frozenset(
-    {"HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "CLAUDE_CONFIG_DIR", "SSL_CERT_FILE", "SSL_CERT_DIR"}
-)
 _DENIED_PROVIDER_ENV_KEYS = frozenset(
     {
         "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
@@ -158,11 +153,11 @@ class ClaudeAuthObservation:
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class ClaudeLaunchEnvironment:
-    """An explicit Task 2 boundary, not a subprocess environment mapping."""
+    """An immutable seam, not a caller-supplied subprocess mapping."""
 
     def as_subprocess_environment(self) -> dict[str, str]:
         raise ClaudeLaunchEnvironmentUnavailableError(
-            "Claude worker launch environment is not realized until Task 2"
+            "Claude worker launch environment is not realized for callers"
         )
 
 
@@ -187,32 +182,38 @@ class _ClaudeConfiguration:
 @dataclasses.dataclass
 class _RunState:
     spec: WorkerLaunchSpec
-    ref: WorkerProcessRef
+    ref: WorkerProcessRef | None
     process: asyncio.subprocess.Process
     baseline: Any
     schema: Any
-    stdout_task: asyncio.Task[tuple[bytes, bool]]
-    stderr_task: asyncio.Task[tuple[bytes, bool]]
+    stdout_evidence: _BoundEvidence
+    stderr_evidence: _BoundEvidence
+    result_evidence: _BoundEvidence
+    violation: asyncio.Event
+    process_wait_task: asyncio.Task[int]
+    deadline: float
+    stdout: bytearray = dataclasses.field(default_factory=bytearray)
+    stderr: bytearray = dataclasses.field(default_factory=bytearray)
+    stdout_task: asyncio.Task[None] | None = None
+    stderr_task: asyncio.Task[None] | None = None
+    monitor_task: asyncio.Task[None] | None = None
+    termination_lock: asyncio.Lock = dataclasses.field(default_factory=asyncio.Lock)
     status: WorkerRunStatus = WorkerRunStatus.RUNNING
+    stream_errors: list[str] = dataclasses.field(default_factory=list)
     cancel_reason: str | None = None
     timed_out: bool = False
     escalated: bool = False
+    finished_at: str | None = None
     receipt: CollectionReceipt | None = None
 
 
-class _DeferredProcessInspector:
-    """Avoid implying that Task 1 has process identity/runtime support."""
-
-    def boot_session_id(self) -> str:
-        raise ClaudeWorkerNotImplementedError("Claude process inspection is not implemented")
-
-    def identity(self, pid: int) -> tuple[str, int]:
-        del pid
-        raise ClaudeWorkerNotImplementedError("Claude process inspection is not implemented")
-
-    def inspect(self, pid: int) -> object:
-        del pid
-        raise ClaudeWorkerNotImplementedError("Claude process inspection is not implemented")
+@dataclasses.dataclass
+class _BoundEvidence:
+    path: Path
+    fd: int
+    device: int
+    inode: int
+    uid: int
 
 
 def _binary_identity(info: os.stat_result) -> tuple[int, int, int, int, int, int, int]:
@@ -508,22 +509,14 @@ def _closed_auth_environment(source: Mapping[str, str] | None = None) -> dict[st
     incoming = os.environ if source is None else source
     if any(not isinstance(key, str) or _provider_environment_key_is_denied(key) for key in incoming):
         raise ClaudeAuthStatusError("provider credential environment is refused")
-    result = {"PATH": _SAFE_PATH, "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "TMPDIR": "/tmp", "TZ": "UTC"}
-    for key in _AUTH_ENV_PATH_KEYS:
-        value = incoming.get(key)
-        if value is None:
-            continue
-        if (
-            not isinstance(value, str)
-            or not value
-            or len(value.encode("utf-8", "strict")) > 4096
-            or _CONTROL_RE.search(value)
-            or _SECRET_VALUE_RE.search(value)
-            or not Path(value).is_absolute()
-        ):
-            raise ClaudeAuthStatusError("provider credential environment is refused")
-        result[key] = value
-    return result
+    return {
+        "HOME": "/var/empty",
+        "PATH": _SAFE_PATH,
+        "LANG": "C",
+        "LC_ALL": "C",
+        "TMPDIR": "/tmp",
+        "TZ": "UTC",
+    }
 
 
 def _closed_launch_environment(home: Path, tmp: Path, spec: WorkerLaunchSpec) -> dict[str, str]:
@@ -567,8 +560,12 @@ def _strict_json(raw: bytes, *, maximum: int, error_type: type[ClaudeWorkerContr
             object_pairs_hook=_reject_duplicate_json_keys,
             parse_constant=_reject_json_constant,
         )
-    except (UnicodeDecodeError, ValueError, TypeError, RecursionError) as exc:
-        raise error_type("provider JSON is malformed") from exc
+    except (UnicodeDecodeError, ValueError, TypeError, RecursionError):
+        # JSONDecodeError retains its raw document.  Leave this except block
+        # before raising so no provider bytes survive in exception chaining.
+        value = None
+    if value is None:
+        raise error_type("provider JSON is malformed") from None
     if not isinstance(value, dict):
         raise error_type("provider JSON root is not an object")
     return value
@@ -595,36 +592,129 @@ def _raw_output_is_sensitive(raw: bytes) -> bool:
     return _SECRET_KEY_RE.search(text) is not None or _SECRET_VALUE_RE.search(text) is not None
 
 
-def _write_private_bytes(path: Path, payload: bytes) -> str:
-    info = path.lstat()
-    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) & 0o077:
-        raise ClaudeResultValidationError("result output path is not private")
-    flags = os.O_WRONLY | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
-    fd = os.open(path, flags)
+def _validate_discard_only(value: Any, *, depth: int = 0) -> None:
+    if depth > 16:
+        raise ClaudeAuthStatusError("auth discard data exceeds the bounded contract")
+    if isinstance(value, str):
+        if (
+            len(value.encode("utf-8", "strict")) > _MAX_AUTH_STRING_BYTES
+            or _CONTROL_RE.search(value)
+            or _SECRET_VALUE_RE.search(value)
+        ):
+            raise ClaudeAuthStatusError("auth discard data is unsafe")
+        return
+    if value is None or isinstance(value, bool) or isinstance(value, (int, float)):
+        return
+    if isinstance(value, Mapping):
+        if len(value) > 64:
+            raise ClaudeAuthStatusError("auth discard data exceeds the bounded contract")
+        for key, item in value.items():
+            if (
+                not isinstance(key, str)
+                or len(key.encode("utf-8", "strict")) > 128
+                or _SECRET_KEY_RE.search(key)
+            ):
+                raise ClaudeAuthStatusError("auth discard data is unsafe")
+            _validate_discard_only(item, depth=depth + 1)
+        return
+    if isinstance(value, list):
+        if len(value) > 64:
+            raise ClaudeAuthStatusError("auth discard data exceeds the bounded contract")
+        for item in value:
+            _validate_discard_only(item, depth=depth + 1)
+        return
+    raise ClaudeAuthStatusError("auth discard data is unsupported")
+
+
+def _bind_private_evidence(path: Path) -> _BoundEvidence:
+    fd = _create_private_file(path)
     try:
-        offset = 0
-        while offset < len(payload):
-            written = os.write(fd, payload[offset:])
-            if written <= 0:
-                raise OSError("short result write")
-            offset += written
-        os.fsync(fd)
-    finally:
+        info = os.fstat(fd)
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_nlink != 1
+            or info.st_uid != os.geteuid()
+            or stat.S_IMODE(info.st_mode) & 0o077
+        ):
+            raise ClaudeResultValidationError("created evidence file is not private")
+        return _BoundEvidence(path, fd, int(info.st_dev), int(info.st_ino), int(info.st_uid))
+    except Exception:
         os.close(fd)
+        raise
+
+
+def _verify_bound_evidence(evidence: _BoundEvidence) -> None:
+    if evidence.fd < 0:
+        raise ClaudeResultValidationError("evidence descriptor is closed")
+    try:
+        opened = os.fstat(evidence.fd)
+        named = evidence.path.lstat()
+    except OSError as exc:
+        raise ClaudeResultValidationError("evidence path is unavailable") from exc
+    for info in (opened, named):
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_nlink != 1
+            or info.st_uid != evidence.uid
+            or stat.S_IMODE(info.st_mode) & 0o077
+            or int(info.st_dev) != evidence.device
+            or int(info.st_ino) != evidence.inode
+        ):
+            raise ClaudeResultValidationError("evidence identity changed")
+
+
+def _write_bound_evidence(evidence: _BoundEvidence, payload: bytes) -> str:
+    _verify_bound_evidence(evidence)
+    os.lseek(evidence.fd, 0, os.SEEK_SET)
+    os.ftruncate(evidence.fd, 0)
+    offset = 0
+    while offset < len(payload):
+        written = os.write(evidence.fd, payload[offset:])
+        if written <= 0:
+            raise OSError("short evidence write")
+        offset += written
+    os.fsync(evidence.fd)
+    _verify_bound_evidence(evidence)
     return hashlib.sha256(payload).hexdigest()
 
 
-async def _read_stream_limited(reader: asyncio.StreamReader, maximum: int) -> tuple[bytes, bool]:
-    chunks: list[bytes] = []
+async def _pump_claude_stream(
+    reader: asyncio.StreamReader,
+    *,
+    name: str,
+    maximum: int,
+    target: bytearray,
+    state: _RunState,
+) -> None:
+    total = 0
+    accepting = True
+    try:
+        while chunk := await reader.read(64 * 1024):
+            total += len(chunk)
+            if accepting and total <= maximum:
+                target.extend(chunk)
+            elif accepting:
+                accepting = False
+                state.stream_errors.append(f"{name} exceeded byte cap")
+                state.violation.set()
+    except Exception:
+        state.stream_errors.append(f"{name} stream failure")
+        state.violation.set()
+
+
+async def _read_stream_limited(
+    reader: asyncio.StreamReader, maximum: int
+) -> tuple[bytes, bool]:
+    result = bytearray()
     total = 0
     exceeded = False
     while chunk := await reader.read(64 * 1024):
         total += len(chunk)
         if total <= maximum:
-            chunks.append(chunk)
+            result.extend(chunk)
         else:
             exceeded = True
-    return b"".join(chunks), exceeded
+    return bytes(result), exceeded
 
 
 def _run_bounded_auth_status(argv: Sequence[str], *, timeout: float, env: Mapping[str, str]) -> tuple[bytes, bytes, int]:
@@ -805,9 +895,7 @@ class ClaudeCodeWorkerAdapter:
         parsed = _strict_json(
             stdout, maximum=_MAX_AUTH_JSON_BYTES, error_type=ClaudeAuthStatusError
         )
-        if set(parsed) - _RAW_AUTH_ALLOWED_KEYS or any(
-            _contains_secret_shaped(value) for value in parsed.values()
-        ):
+        if set(parsed) - _RAW_AUTH_ALLOWED_KEYS:
             raise ClaudeAuthStatusError("auth observation contains unsupported sensitive data")
         logged_in = parsed.get("loggedIn")
         if (
@@ -816,15 +904,23 @@ class ClaudeCodeWorkerAdapter:
             or (exit_code == 0) is not logged_in
         ):
             raise ClaudeAuthStatusError("auth observation response is unsupported")
-        for key, value in parsed.items():
-            if key == "loggedIn":
-                continue
-            if value is not None and (
-                not isinstance(value, str)
-                or len(value.encode("utf-8", "strict")) > _MAX_AUTH_STRING_BYTES
-                or _CONTROL_RE.search(value)
-            ):
-                raise ClaudeAuthStatusError("auth observation response is unsupported")
+        for key in (
+            "email", "organization", "subscriptionType", "apiKeySource",
+            "accountId", "organizationId",
+        ):
+            if key in parsed:
+                _validate_discard_only(parsed[key])
+        if logged_in and (
+            not isinstance(parsed.get("authMethod"), str)
+            or not isinstance(parsed.get("apiProvider"), str)
+            or _CONTROL_RE.search(parsed["authMethod"])
+            or _CONTROL_RE.search(parsed["apiProvider"])
+            or _SECRET_VALUE_RE.search(parsed["authMethod"])
+            or _SECRET_VALUE_RE.search(parsed["apiProvider"])
+            or len(parsed["authMethod"].encode("utf-8", "strict")) > _MAX_AUTH_STRING_BYTES
+            or len(parsed["apiProvider"].encode("utf-8", "strict")) > _MAX_AUTH_STRING_BYTES
+        ):
+            raise ClaudeAuthStatusError("auth observation response is unsupported")
         if not logged_in:
             return ClaudeAuthObservation(
                 client_version=self.binary.version,
@@ -936,6 +1032,8 @@ class ClaudeCodeWorkerAdapter:
                 and getattr(identity, "session_id", None) == ref.session_id
                 and getattr(identity, "effective_uid", None) == ref.effective_uid
                 and getattr(identity, "effective_gid", None) == ref.effective_gid
+                and getattr(identity, "real_uid", None) == ref.real_uid
+                and getattr(identity, "real_gid", None) == ref.real_gid
             )
         except Exception:
             return False
@@ -946,12 +1044,14 @@ class ClaudeCodeWorkerAdapter:
         stdout_path = run_dir / "logs" / "stdout.json"
         stderr_path = run_dir / "logs" / "stderr.log"
         result_path = run_dir / "output" / "result.json"
-        stdout_fd = _create_private_file(stdout_path)
-        stderr_fd: int | None = None
+        stdout_evidence = _bind_private_evidence(stdout_path)
         try:
-            stderr_fd = _create_private_file(stderr_path)
-            result_fd = _create_private_file(result_path)
-            os.close(result_fd)
+            stderr_evidence = _bind_private_evidence(stderr_path)
+        except Exception:
+            os.close(stdout_evidence.fd)
+            raise
+        try:
+            result_evidence = _bind_private_evidence(result_path)
             process = await asyncio.create_subprocess_exec(
                 *self._launch_argv(spec, schema),
                 stdin=asyncio.subprocess.DEVNULL,
@@ -962,17 +1062,45 @@ class ClaudeCodeWorkerAdapter:
                 start_new_session=True,
                 limit=128 * 1024,
             )
+            deadline = asyncio.get_running_loop().time() + float(spec.timeout_seconds)
         except Exception:
-            os.close(stdout_fd)
-            if stderr_fd is not None:
-                os.close(stderr_fd)
+            os.close(stdout_evidence.fd)
+            os.close(stderr_evidence.fd)
+            try:
+                os.close(result_evidence.fd)
+            except UnboundLocalError:
+                pass
             raise
-        else:
-            os.close(stdout_fd)
-            assert stderr_fd is not None
-            os.close(stderr_fd)
         if process.stdout is None or process.stderr is None:
+            for evidence in (stdout_evidence, stderr_evidence, result_evidence):
+                os.close(evidence.fd)
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            await process.wait()
             raise ClaudeLaunchError("foreground process pipes are unavailable")
+        state = _RunState(
+            spec=spec, ref=None, process=process, baseline=baseline, schema=schema,
+            stdout_evidence=stdout_evidence, stderr_evidence=stderr_evidence,
+            result_evidence=result_evidence, violation=asyncio.Event(),
+            process_wait_task=asyncio.create_task(process.wait()),
+            deadline=deadline,
+        )
+        # Draining precedes synchronous identity inspection so a fast writer
+        # cannot block on the pipe while process metadata is being collected.
+        state.stdout_task = asyncio.create_task(
+            _pump_claude_stream(
+                process.stdout, name="stdout", maximum=_MAX_STDOUT_BYTES,
+                target=state.stdout, state=state,
+            )
+        )
+        state.stderr_task = asyncio.create_task(
+            _pump_claude_stream(
+                process.stderr, name="stderr", maximum=_MAX_STDERR_BYTES,
+                target=state.stderr, state=state,
+            )
+        )
         try:
             identity = self.inspector.inspect(process.pid)
             boot = self.inspector.boot_session_id()
@@ -990,7 +1118,9 @@ class ClaudeCodeWorkerAdapter:
                 os.killpg(process.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
-            await process.wait()
+            await state.process_wait_task
+            await asyncio.gather(state.stdout_task, state.stderr_task, return_exceptions=True)
+            self._close_evidence(state)
             raise ClaudeProcessIdentityError("Claude process identity is unavailable") from exc
         ref = WorkerProcessRef(
             run_id=spec.run_id, pid=process.pid, pgid=process.pid,
@@ -1002,39 +1132,36 @@ class ClaudeCodeWorkerAdapter:
             effective_uid=int(getattr(identity, "effective_uid")), effective_gid=int(getattr(identity, "effective_gid")),
             real_uid=int(getattr(identity, "real_uid")), real_gid=int(getattr(identity, "real_gid")),
         )
-        state = _RunState(
-            spec, ref, process, baseline, schema,
-            asyncio.create_task(_read_stream_limited(process.stdout, _MAX_STDOUT_BYTES)),
-            asyncio.create_task(_read_stream_limited(process.stderr, _MAX_STDERR_BYTES)),
-        )
+        state.ref = ref
         self._runs[spec.run_id] = state
+        state.monitor_task = asyncio.create_task(self._monitor(state))
         return ref
 
     async def status(self, ref: WorkerProcessRef) -> WorkerRunStatus:
         state = self._state(ref)
         if state.receipt is not None:
             return state.receipt.result.status
-        if state.process.returncode is None:
-            if not self._identity_matches(ref):
-                raise ClaudeProcessIdentityError("Claude process identity is ambiguous")
+        if state.monitor_task is not None and state.monitor_task.done():
+            # Collection alone validates a terminal provider result.
             return WorkerRunStatus.CANCELLING if state.cancel_reason else WorkerRunStatus.RUNNING
-        return WorkerRunStatus.CANCELLING if state.cancel_reason else WorkerRunStatus.RUNNING
+        return state.status
 
     async def collect_result(self, ref: WorkerProcessRef) -> CollectionReceipt:
         state = self._state(ref)
         if state.receipt is not None:
             return state.receipt
-        if state.process.returncode is None:
-            try:
-                await asyncio.wait_for(state.process.wait(), timeout=float(state.spec.timeout_seconds))
-            except asyncio.TimeoutError:
-                state.timed_out = True
-                await self._terminate(state, f"timeout after {state.spec.timeout_seconds:g}s")
-        stdout, stdout_exceeded = await state.stdout_task
-        stderr, stderr_exceeded = await state.stderr_task
+        try:
+            if state.monitor_task is None:
+                raise ClaudeProcessIdentityError("Claude run monitor is unavailable")
+            await state.monitor_task
+        except BaseException:
+            self._close_evidence(state)
+            raise
         status, output, session, usage, result_hash = WorkerRunStatus.FAILED, None, None, {}, None
+        artifacts: tuple[ArtifactReceipt, ...] = ()
         error: str | None = None
         git_after = None
+        changed: tuple[str, ...] = ()
         try:
             if self._identity_matches(ref):
                 raise ClaudeProcessIdentityError("process identity is still live after exit")
@@ -1042,17 +1169,15 @@ class ClaudeCodeWorkerAdapter:
                 status, error = WorkerRunStatus.TIMED_OUT, "worker timed out"
             elif state.cancel_reason:
                 status, error = WorkerRunStatus.CANCELLED, "worker cancelled"
+            elif state.stream_errors:
+                raise ClaudeResultValidationError("provider stream exceeded its bounded contract")
             elif state.process.returncode != 0:
                 status, error = WorkerRunStatus.FAILED, "provider process failed"
-            elif stdout_exceeded or stderr_exceeded:
-                raise ClaudeResultValidationError("provider output exceeded byte cap")
+            elif _raw_output_is_sensitive(bytes(state.stdout)) or _raw_output_is_sensitive(bytes(state.stderr)):
+                raise ClaudeResultValidationError("provider stream contains sensitive data")
             else:
                 output, session, usage = self._parse_provider_result(
-                    stdout, state.schema, state.spec
-                )
-                result_hash = _write_private_bytes(
-                    Path(ref.result_path),
-                    _canonical_json(output).encode("utf-8") + b"\n",
+                    bytes(state.stdout), state.schema, state.spec
                 )
                 artifacts = CodexWorkerAdapter._artifact_receipts(self, state, output)
                 workspace = Path(state.spec.workspace_path).resolve(strict=True)
@@ -1065,14 +1190,16 @@ class ClaudeCodeWorkerAdapter:
                     raise ClaudeResultValidationError("workspace changed unauthorized paths")
                 if set(changed) != {artifact.path for artifact in artifacts}:
                     raise ClaudeResultValidationError("Git changes do not match artifact manifest")
+                _write_bound_evidence(state.stdout_evidence, bytes(state.stdout))
+                _write_bound_evidence(state.stderr_evidence, bytes(state.stderr))
+                result_hash = _write_bound_evidence(
+                    state.result_evidence,
+                    self._bounded_result_bytes(output),
+                )
                 status = WorkerRunStatus.SUCCEEDED
         except (ClaudeWorkerContractError, LaunchValidationError, ProcessIdentityError, ResultValidationError, OSError, UnicodeError, ValueError):
             if status not in {WorkerRunStatus.TIMED_OUT, WorkerRunStatus.CANCELLED}:
                 status, error = WorkerRunStatus.INVALID_RESULT, "provider result rejected"
-        if not _raw_output_is_sensitive(stdout) and not _raw_output_is_sensitive(stderr):
-            _write_private_bytes(Path(ref.stdout_path), stdout)
-            _write_private_bytes(Path(ref.stderr_path), stderr)
-        artifacts = () if status is not WorkerRunStatus.SUCCEEDED else CodexWorkerAdapter._artifact_receipts(self, state, output or {})
         worker_result = WorkerResult(
             job_id=state.spec.job_id, run_id=state.spec.run_id, worker_id=state.spec.worker_id,
             status=status, structured_output=output if status is WorkerRunStatus.SUCCEEDED else None,
@@ -1080,28 +1207,37 @@ class ClaudeCodeWorkerAdapter:
             git_manifest={
                 "base_sha": state.baseline.head,
                 "head_sha": git_after.head if git_after is not None else None,
-                "changed_paths": list(_git_changed_paths(Path(state.spec.workspace_path).resolve(strict=True))) if git_after else [],
+                "changed_paths": list(changed),
             },
             usage=usage if status is WorkerRunStatus.SUCCEEDED else {},
             provider_session_id=session if status is WorkerRunStatus.SUCCEEDED else None,
-            exit_code=state.process.returncode, started_at=ref.started_at, finished_at=_utc_now(), error=error,
+            exit_code=state.process.returncode, started_at=ref.started_at,
+            finished_at=state.finished_at or _utc_now(), error=error,
         )
-        receipt = CollectionReceipt(
-            process_ref=dataclasses.replace(ref, provider_session_id=worker_result.provider_session_id),
-            result=worker_result,
-            stdout_sha256=hashlib.sha256(stdout).hexdigest(),
-            stderr_sha256=hashlib.sha256(stderr).hexdigest(),
-            result_sha256=result_hash if status is WorkerRunStatus.SUCCEEDED else None,
-        )
-        state.status, state.receipt = status, receipt
-        return receipt
+        try:
+            receipt = CollectionReceipt(
+                process_ref=dataclasses.replace(ref, provider_session_id=worker_result.provider_session_id),
+                result=worker_result,
+                stdout_sha256=hashlib.sha256(state.stdout).hexdigest(),
+                stderr_sha256=hashlib.sha256(state.stderr).hexdigest(),
+                result_sha256=result_hash if status is WorkerRunStatus.SUCCEEDED else None,
+            )
+            state.status, state.receipt = status, receipt
+            return receipt
+        finally:
+            self._close_evidence(state)
 
     async def cancel(self, ref: WorkerProcessRef, reason: str) -> CancelReceipt:
         state = self._state(ref)
         if not isinstance(reason, str) or not reason.strip() or len(reason) > 1000:
             raise ClaudeLaunchError("cancellation reason is invalid")
         sent, escalated, already = await self._terminate(state, reason.strip())
-        return CancelReceipt(ref.run_id, reason.strip(), sent, escalated, already, _utc_now())
+        if state.monitor_task is not None:
+            await state.monitor_task
+        return CancelReceipt(
+            ref.run_id, reason.strip(), sent, escalated, already,
+            state.finished_at or _utc_now(),
+        )
 
     def _state(self, ref: WorkerProcessRef) -> _RunState:
         state = self._runs.get(ref.run_id)
@@ -1109,35 +1245,142 @@ class ClaudeCodeWorkerAdapter:
             raise ClaudeProcessIdentityError("unknown or mismatched Claude process reference")
         return state
 
-    async def _terminate(self, state: _RunState, reason: str) -> tuple[bool, bool, bool]:
-        if state.process.returncode is not None:
-            return False, False, True
-        if not self._identity_matches(state.ref):
-            raise ClaudeProcessIdentityError("refusing to signal ambiguous Claude process identity")
-        state.cancel_reason = reason
-        state.status = WorkerRunStatus.CANCELLING
+    async def _terminate(
+        self, state: _RunState, reason: str | None
+    ) -> tuple[bool, bool, bool]:
+        ref = state.ref
+        if ref is None:
+            raise ClaudeProcessIdentityError("Claude process identity is unavailable")
+        async with state.termination_lock:
+            leader_already_exited = state.process_wait_task.done()
+            sent = escalated = False
+            if not leader_already_exited:
+                if not self._identity_matches(ref):
+                    # The leader may have exited between the monitor's task
+                    # sample and its identity check.  With no surviving exact
+                    # process group there is nothing left to signal; a live
+                    # group remains ambiguous and must quarantine.
+                    try:
+                        group_exists = _process_group_exists(ref.pgid)
+                    except ProcessIdentityError:
+                        raise ClaudeProcessIdentityError(
+                            "Claude process group identity is ambiguous"
+                        ) from None
+                    if group_exists:
+                        raise ClaudeProcessIdentityError(
+                            "refusing to signal ambiguous Claude process identity"
+                        )
+                    await state.process_wait_task
+                    return False, False, True
+                if reason is not None:
+                    state.cancel_reason = reason
+                    state.status = WorkerRunStatus.CANCELLING
+                try:
+                    os.killpg(ref.pgid, signal.SIGTERM)
+                    sent = True
+                except ProcessLookupError:
+                    pass
+                try:
+                    await asyncio.wait_for(
+                        asyncio.shield(state.process_wait_task),
+                        timeout=float(state.spec.cancel_grace_seconds),
+                    )
+                except asyncio.TimeoutError:
+                    if self.inspector.boot_session_id() != ref.boot_session_id:
+                        raise ClaudeProcessIdentityError("process boot identity changed before SIGKILL")
+                    if self._identity_matches(ref):
+                        pass
+                    else:
+                        try:
+                            group_exists = _process_group_exists(ref.pgid)
+                        except ProcessIdentityError:
+                            raise ClaudeProcessIdentityError(
+                                "Claude process group identity is ambiguous"
+                            ) from None
+                        if not group_exists:
+                            raise ClaudeProcessIdentityError(
+                                "process identity disappeared without its group"
+                            )
+                    try:
+                        os.killpg(ref.pgid, signal.SIGKILL)
+                        sent = escalated = True
+                    except ProcessLookupError:
+                        pass
+                    await state.process_wait_task
+            await state.process_wait_task
+            residual = await self._kill_residual_process_group(state)
+            return sent or residual, escalated or residual, leader_already_exited and not residual
+
+    async def _kill_residual_process_group(self, state: _RunState) -> bool:
+        ref = state.ref
         try:
-            os.killpg(state.ref.pgid, signal.SIGTERM)
-            sent = True
+            if ref is None or not _process_group_exists(ref.pgid):
+                return False
+            os.killpg(ref.pgid, signal.SIGKILL)
         except ProcessLookupError:
-            return False, False, True
+            return False
+        state.escalated = True
         try:
-            await asyncio.wait_for(
-                state.process.wait(), timeout=float(state.spec.cancel_grace_seconds)
+            if not await _wait_for_process_group_exit(ref.pgid):
+                raise ClaudeProcessIdentityError("Claude process group survived SIGKILL")
+        except ProcessIdentityError:
+            raise ClaudeProcessIdentityError("Claude process group identity is ambiguous") from None
+        return True
+
+    async def _monitor(self, state: _RunState) -> None:
+        violation_task = asyncio.create_task(state.violation.wait())
+        failed = False
+        try:
+            done, _pending = await asyncio.wait(
+                {state.process_wait_task, violation_task},
+                timeout=max(0.0, state.deadline - asyncio.get_running_loop().time()),
+                return_when=asyncio.FIRST_COMPLETED,
             )
-            return sent, False, False
-        except asyncio.TimeoutError:
-            if not self._identity_matches(state.ref):
-                raise ClaudeProcessIdentityError(
-                    "Claude process identity changed before SIGKILL escalation"
-                )
-            try:
-                os.killpg(state.ref.pgid, signal.SIGKILL)
-            except ProcessLookupError:
-                return sent, False, True
-            await state.process.wait()
-            state.escalated = True
-            return sent, True, False
+            if not done:
+                state.timed_out = True
+                await self._terminate(state, None)
+            elif violation_task in done and state.violation.is_set():
+                if not state.process_wait_task.done():
+                    await self._terminate(state, None)
+            await state.process_wait_task
+            async with state.termination_lock:
+                residual = await self._kill_residual_process_group(state)
+            if residual:
+                state.stream_errors.append("provider left a residual process group")
+                state.violation.set()
+        except BaseException:
+            failed = True
+            raise
+        finally:
+            violation_task.cancel()
+            await asyncio.gather(violation_task, return_exceptions=True)
+            tasks = tuple(task for task in (state.stdout_task, state.stderr_task) if task is not None)
+            if failed:
+                for task in tasks:
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            state.finished_at = _utc_now()
+
+    @staticmethod
+    def _close_evidence(state: _RunState) -> None:
+        for evidence in (
+            state.stdout_evidence,
+            state.stderr_evidence,
+            state.result_evidence,
+        ):
+            if evidence.fd >= 0:
+                try:
+                    os.close(evidence.fd)
+                except OSError:
+                    pass
+                evidence.fd = -1
+
+    @staticmethod
+    def _bounded_result_bytes(output: Mapping[str, Any]) -> bytes:
+        payload = _canonical_json(output).encode("utf-8") + b"\n"
+        if len(payload) > _MAX_RESULT_BYTES:
+            raise ClaudeResultValidationError("structured result exceeded byte cap")
+        return payload
 
     def _parse_provider_result(
         self, raw: bytes, schema: Any, spec: WorkerLaunchSpec

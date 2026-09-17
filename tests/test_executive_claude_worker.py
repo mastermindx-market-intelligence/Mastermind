@@ -58,6 +58,9 @@ def _fixture_claude_binary(tmp_path: Path) -> Path:
         '    auth-token) printf \'{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","email":"Bearer abcdefghijklmnopqrstuvwxyz"}\\n\'; exit 0 ;;\n'
         '    auth-nonzero) printf \'{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty"}\\n\'; exit 9 ;;\n'
         '    auth-sleep) sleep 2; exit 0 ;;\n'
+        '    auth-discard-nested) printf \'{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","accountId":{"safe":[1,{"nested":true}]},"organizationId":[null,7],"email":{"nested":"discard"}}\\n\'; exit 0 ;;\n'
+        '    auth-discard-secret) printf \'{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","organization":{"credential":"CREDENTIAL-SENTINEL"}}\\n\'; exit 0 ;;\n'
+        '    auth-malformed-sentinel) printf \'CREDENTIAL-SENTINEL{not-json\\n\'; exit 0 ;;\n'
         '  esac\n'
         'fi\n'
         'case "$mode" in\n'
@@ -66,6 +69,13 @@ def _fixture_claude_binary(tmp_path: Path) -> Path:
         '  malformed) printf \'not-json\\n\' ;;\n'
         '  model-mismatch) printf \'{"is_error":false,"model":"another-model","structured_output":{"outcome":"ok","artifacts":[]}}\\n\' ;;\n'
         '  secret-output) printf \'{"is_error":false,"model":"claude-opus-4-6","structured_output":{"outcome":"CREDENTIAL-SENTINEL","token":"CREDENTIAL-SENTINEL","artifacts":[]}}\\n\' ;;\n'
+        '  secret-stderr) printf \'{"is_error":false,"model":"claude-opus-4-6","structured_output":{"outcome":"ok","artifacts":[]}}\\n\'; printf \'CREDENTIAL-SENTINEL\\n\' >&2 ;;\n'
+        '  refusal-pure) printf \'{"is_error":true,"model":"claude-opus-4-6","structured_output":{"outcome":"ok","artifacts":[]}}\\n\' ;;\n'
+        '  malformed-sentinel) printf \'CREDENTIAL-SENTINEL{not-json\\n\' ;;\n'
+        '  descendant) (sleep 1) & printf \'{"is_error":false,"model":"claude-opus-4-6","structured_output":{"outcome":"ok","artifacts":[]}}\\n\' ;;\n'
+        '  stream-cap) printf \'abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz\\n\'; sleep 1 ;;\n'
+        '  delayed-success) sleep 0.2; printf \'{"is_error":false,"model":"claude-opus-4-6","structured_output":{"outcome":"ok","artifacts":[]}}\\n\' ;;\n'
+        '  git-change) printf \'changed\\n\' > unexpected.txt; printf \'{"is_error":false,"model":"claude-opus-4-6","structured_output":{"outcome":"ok","artifacts":[]}}\\n\' ;;\n'
         '  sleep) sleep 2 ;;\n'
         '  *) printf \'{"is_error":true,"subtype":"error"}\\n\' ;;\n'
         'esac\n'
@@ -153,7 +163,7 @@ def _workspace_and_spec(
         "result_schema_path": schema,
         "authorities": ("READ",),
         "model": _EXACT_MODEL,
-        "timeout_seconds": 0.15,
+        "timeout_seconds": 0.5,
         "cancel_grace_seconds": 0.1,
     }
     values.update(changes)
@@ -624,20 +634,7 @@ def test_unknown_or_ambiguous_process_reference_refuses(tmp_path: Path) -> None:
         with pytest.raises(ClaudeWorkerContractError):
             await adapter.status(altered)
 
-        class AmbiguousInspector:
-            def boot_session_id(self) -> str:
-                return ref.boot_session_id
-
-            def inspect(self, _pid: int) -> object:
-                return object()
-
-            def identity(self, _pid: int) -> tuple[str, int]:
-                return "other", ref.pgid
-
-        adapter.inspector = AmbiguousInspector()
-        with pytest.raises(ClaudeWorkerContractError):
-            await adapter.status(ref)
-        os.killpg(ref.pgid, 15)
+        await adapter.cancel(ref, "legacy cleanup")
         await adapter.collect_result(ref)
 
     asyncio.run(execute())
@@ -660,3 +657,218 @@ def test_status_and_shell_free_validation_use_common_contracts(tmp_path: Path) -
     assert validation.exit_code == 0
     with pytest.raises(ClaudeWorkerContractError, match="shell"):
         asyncio.run(adapter.run_validation_argv(spec, ("/bin/sh", "-c", "true")))
+
+
+def test_auth_observation_uses_principal_neutral_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    ambient = {
+        "HOME": "/private/chairman-home",
+        "XDG_CONFIG_HOME": "/private/xdg-config",
+        "XDG_CACHE_HOME": "/private/xdg-cache",
+        "CLAUDE_CONFIG_DIR": "/private/claude-config",
+        "SSL_CERT_FILE": "/private/certificate",
+        "ARBITRARY_AMBIENT_VARIABLE": "ambient-sentinel",
+    }
+    for key, value in ambient.items():
+        monkeypatch.setenv(key, value)
+
+    _adapter(tmp_path, binary).observe_auth_status(timeout_seconds=1)
+
+    child = (tmp_path / "environment").read_text(encoding="utf-8")
+    assert "HOME=/var/empty" in child
+    for key, value in ambient.items():
+        if key == "HOME":
+            assert child.count("HOME=") == 1
+            continue
+        assert f"{key}=" not in child
+        assert value not in child
+
+
+def test_auth_discard_fields_accept_safe_nested_values_and_reject_nested_secrets(
+    tmp_path: Path,
+) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    adapter = _adapter(tmp_path, binary)
+    (tmp_path / "mode").write_text("auth-discard-nested", encoding="utf-8")
+    assert adapter.observe_auth_status(timeout_seconds=1).ready is True
+
+    (tmp_path / "mode").write_text("auth-discard-secret", encoding="utf-8")
+    with pytest.raises(ClaudeWorkerContractError) as raised:
+        adapter.observe_auth_status(timeout_seconds=1)
+    assert "CREDENTIAL-SENTINEL" not in str(raised.value)
+
+
+def test_malformed_json_never_retains_raw_payload_in_exception_chain(tmp_path: Path) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    adapter = _adapter(tmp_path, binary)
+    (tmp_path / "mode").write_text("auth-malformed-sentinel", encoding="utf-8")
+
+    with pytest.raises(ClaudeWorkerContractError) as auth_raised:
+        adapter.observe_auth_status(timeout_seconds=1)
+    assert auth_raised.value.__cause__ is None
+    assert auth_raised.value.__context__ is None
+    assert "CREDENTIAL-SENTINEL" not in repr(auth_raised.value)
+
+    (tmp_path / "mode").write_text("malformed-sentinel", encoding="utf-8")
+    async def malformed() -> CollectionReceipt:
+        return await adapter.collect_result(await adapter.start(_workspace_and_spec(tmp_path)))
+
+    receipt = asyncio.run(malformed())
+    assert receipt.result.status is WorkerRunStatus.INVALID_RESULT
+    assert "CREDENTIAL-SENTINEL" not in str(receipt.result.error)
+
+
+def test_foreground_environment_is_private_and_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    (tmp_path / "mode").write_text("success", encoding="utf-8")
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "CREDENTIAL-SENTINEL")
+    monkeypatch.setenv("ARBITRARY_AMBIENT_VARIABLE", "ambient-sentinel")
+    adapter = _adapter(tmp_path, binary)
+    spec = _workspace_and_spec(tmp_path)
+
+    async def execute() -> CollectionReceipt:
+        return await adapter.collect_result(await adapter.start(spec))
+
+    receipt = asyncio.run(execute())
+    assert receipt.result.status is WorkerRunStatus.SUCCEEDED
+    child = (tmp_path / "environment").read_text(encoding="utf-8")
+    assert f"HOME={spec.run_dir / 'home'}" in child
+    assert f"TMPDIR={spec.run_dir / 'tmp'}" in child
+    assert "ANTHROPIC_AUTH_TOKEN" not in child
+    assert "CREDENTIAL-SENTINEL" not in child
+    assert "ARBITRARY_AMBIENT_VARIABLE" not in child
+
+
+def test_launch_relative_timeout_and_descendant_pipe_are_bounded(tmp_path: Path) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    (tmp_path / "mode").write_text("sleep", encoding="utf-8")
+    adapter = _adapter(tmp_path, binary)
+    spec = _workspace_and_spec(tmp_path, timeout_seconds=0.08)
+
+    async def timeout_after_delay() -> CollectionReceipt:
+        ref = await adapter.start(spec)
+        await asyncio.sleep(0.16)
+        return await asyncio.wait_for(adapter.collect_result(ref), timeout=0.5)
+
+    assert asyncio.run(timeout_after_delay()).result.status is WorkerRunStatus.TIMED_OUT
+
+    (tmp_path / "mode").write_text("descendant", encoding="utf-8")
+    descendant_adapter = _adapter(tmp_path, binary)
+    descendant_spec = _workspace_and_spec(tmp_path, run_id="run-descendant", timeout_seconds=1)
+
+    async def collect_descendant() -> CollectionReceipt:
+        return await asyncio.wait_for(
+            descendant_adapter.collect_result(await descendant_adapter.start(descendant_spec)),
+            timeout=0.5,
+        )
+
+    assert asyncio.run(collect_descendant()).result.status is WorkerRunStatus.INVALID_RESULT
+
+
+def test_stream_violation_and_pure_refusal_never_succeed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    (tmp_path / "mode").write_text("stream-cap", encoding="utf-8")
+    monkeypatch.setattr(claude_worker, "_MAX_STDOUT_BYTES", 16)
+    adapter = _adapter(tmp_path, binary)
+
+    async def capped() -> CollectionReceipt:
+        return await adapter.collect_result(await adapter.start(_workspace_and_spec(tmp_path)))
+
+    assert asyncio.run(capped()).result.status is WorkerRunStatus.INVALID_RESULT
+
+    monkeypatch.setattr(claude_worker, "_MAX_STDOUT_BYTES", 32 * 1024 * 1024)
+    (tmp_path / "mode").write_text("refusal-pure", encoding="utf-8")
+    refused_adapter = _adapter(tmp_path, binary)
+
+    async def refused() -> CollectionReceipt:
+        return await refused_adapter.collect_result(
+            await refused_adapter.start(_workspace_and_spec(tmp_path, run_id="run-refusal-pure"))
+        )
+
+    assert asyncio.run(refused()).result.status is WorkerRunStatus.INVALID_RESULT
+
+
+def test_cancel_identity_ambiguity_fails_closed_then_real_identity_cleans_up(
+    tmp_path: Path,
+) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    (tmp_path / "mode").write_text("sleep", encoding="utf-8")
+    adapter = _adapter(tmp_path, binary)
+    real_inspector = adapter.inspector
+
+    async def execute() -> CollectionReceipt:
+        ref = await adapter.start(_workspace_and_spec(tmp_path, timeout_seconds=1))
+
+        class AmbiguousInspector:
+            def boot_session_id(self) -> str:
+                return ref.boot_session_id
+
+            def inspect(self, _pid: int) -> object:
+                return object()
+
+            def identity(self, _pid: int) -> tuple[str, int]:
+                return "other", ref.pgid
+
+        adapter.inspector = AmbiguousInspector()
+        with pytest.raises(ClaudeWorkerContractError):
+            await adapter.cancel(ref, "operator requested")
+        adapter.inspector = real_inspector
+        cancellation = await adapter.cancel(ref, "operator requested")
+        assert cancellation.signal_sent is True
+        return await adapter.collect_result(ref)
+
+    assert asyncio.run(execute()).result.status is WorkerRunStatus.CANCELLED
+
+
+def test_secret_stderr_and_replaced_bound_evidence_never_succeed(
+    tmp_path: Path,
+) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    (tmp_path / "mode").write_text("secret-stderr", encoding="utf-8")
+    adapter = _adapter(tmp_path, binary)
+
+    async def secret_stderr() -> CollectionReceipt:
+        return await adapter.collect_result(await adapter.start(_workspace_and_spec(tmp_path)))
+
+    secret_receipt = asyncio.run(secret_stderr())
+    assert secret_receipt.result.status is WorkerRunStatus.INVALID_RESULT
+    assert "CREDENTIAL-SENTINEL" not in Path(secret_receipt.process_ref.stderr_path).read_text()
+
+    for label in ("stdout_path", "stderr_path", "result_path"):
+        (tmp_path / "mode").write_text("delayed-success", encoding="utf-8")
+        replacing_adapter = _adapter(tmp_path, binary)
+        spec = _workspace_and_spec(
+            tmp_path, run_id=f"run-replace-{label}", timeout_seconds=0.7
+        )
+        victim = tmp_path / f"victim-{label}"
+        victim.write_text("victim-data", encoding="utf-8")
+
+        async def replace_then_collect() -> CollectionReceipt:
+            ref = await replacing_adapter.start(spec)
+            target = Path(getattr(ref, label))
+            target.unlink()
+            os.link(victim, target)
+            return await replacing_adapter.collect_result(ref)
+
+        receipt = asyncio.run(replace_then_collect())
+        assert receipt.result.status is WorkerRunStatus.INVALID_RESULT
+        assert victim.read_text(encoding="utf-8") == "victim-data"
+
+
+def test_post_parse_git_rejection_leaves_bound_result_empty(tmp_path: Path) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    (tmp_path / "mode").write_text("git-change", encoding="utf-8")
+    adapter = _adapter(tmp_path, binary)
+
+    async def execute() -> CollectionReceipt:
+        return await adapter.collect_result(await adapter.start(_workspace_and_spec(tmp_path)))
+
+    receipt = asyncio.run(execute())
+    assert receipt.result.status is WorkerRunStatus.INVALID_RESULT
+    assert Path(receipt.process_ref.result_path).read_bytes() == b""
