@@ -406,3 +406,14 @@ def test_config_refuses_relative_broker_socket(tmp_path: Path) -> None:
     values["broker_socket_path"] = Path("relative.sock")
     with pytest.raises(ValueError, match="broker socket"):
         RemoteWorkerGatewayConfig(**values)
+
+
+def test_config_refuses_non_string_worker_allowlist_identity(tmp_path: Path) -> None:
+    config = _placeholder_config(tmp_path, listen_host="127.0.0.1")
+    values = {
+        field.name: getattr(config, field.name)
+        for field in config.__dataclass_fields__.values()
+    }
+    values["allowed_worker_ids"] = {12}
+    with pytest.raises(ValueError, match="worker allowlist"):
+        RemoteWorkerGatewayConfig(**values)

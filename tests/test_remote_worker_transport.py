@@ -287,3 +287,33 @@ def test_tls_contexts_require_tls_1_3_and_fingerprint(tmp_path: Path) -> None:
     context = build_client_ssl_context(binding)
     assert context.minimum_version == ssl.TLSVersion.TLSv1_3
     assert context.verify_mode == ssl.CERT_REQUIRED
+
+
+def test_versioned_broker_operation_round_trips_through_transport() -> None:
+    request = build_request(
+        IDENTITY,
+        "capacity-observe/v1",
+        {"schema_version": "mastermind.executive_worker_capacity_observe_request/v1"},
+    )
+    validate_request(
+        request,
+        expected_host_ref=HOST_REF,
+        allowed_worker_ids={"WORKER-001"},
+        allowed_operations={"capacity-observe/v1"},
+    )
+    assert request["broker_operation"] == "capacity-observe/v1"
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        "capacity-observe/v0",
+        "capacity-observe/v01",
+        "capacity//v1",
+        "capacity-observe/v1/extra",
+        "../v1",
+    ],
+)
+def test_transport_rejects_arbitrary_path_like_operation_names(operation: str) -> None:
+    with pytest.raises(TransportValidationError):
+        build_request(IDENTITY, operation, {})
