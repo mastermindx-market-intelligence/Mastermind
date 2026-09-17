@@ -343,7 +343,7 @@ def run(asof: str, prices: dict | None = None, inputs: list | None = None) -> di
             needed |= set(tw)
         for p in POLICIES:                      # also re-mark names still held from prior runs
             needed |= set(S._load_account(p["id"]).get("positions", {}))
-        px = S._gather_prices(needed, prices)
+        px = S._gather_prices(needed, prices, asof)
 
         # Same empty-inputs LIQUIDATION guard as shadow_books.run: on a carried/quiet day (inputs==[])
         # the input-derived books (prod/L1/L2/L3/desk_proxy) all target {}, and an unguarded rebalance
