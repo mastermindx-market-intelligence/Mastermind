@@ -115,7 +115,7 @@ def _policy_weight(policy: dict, r: dict) -> float:
     if not comm:                                           # committee didn't run for this name
         wp = r.get("weight_prod")
         return round(float(wp if wp is not None else wf), 4)
-    if policy["calibration"]:                              # exactly what prod did (calib on)
+    if policy["calibration"]:                              # exactly what prod did (committee+calib on)
         return round(float(r.get("weight_prod") or 0.0), 4)
     # calibration OFF but committee ON → re-derive NEXUS from SENTINEL's RAW confidence (pure fn)
     sent = r.get("sentinel") or {}
@@ -176,15 +176,26 @@ def _save_account(book_id: str, acct: dict) -> None:
     (d / "account.json").write_text(json.dumps(acct, indent=2, default=str))
 
 
+class ShadowMarkUnavailable(RuntimeError):
+    """A held shadow position has no canonical mark; refuse to fabricate a new NAV."""
+
+
 def _mark_to(prices: dict, positions: dict) -> float:
-    """Mark held positions: a live price if available, else the avg cost (so a missing quote can't
-    swing NAV) — mirrors the prod paper_account convention."""
+    """Value held positions only from canonical marks supplied for this run.
+
+    ``portfolio.marks`` already owns bounded last-good carry. If that layer leaves a held name
+    unpriced, snapping it back to avg_cost manufactures a return and can rewrite forward A/B
+    evidence. Refuse the book valuation instead; the prior dated NAV remains the last truthful mark.
+    """
     inv = 0.0
     for t, p in positions.items():
+        shares = float(p.get("shares") or 0.0)
+        if shares <= 0:
+            continue
         px = prices.get(t)
         if not px or px <= 0:
-            px = p.get("avg_cost") or 0.0
-        inv += (p.get("shares") or 0.0) * px
+            raise ShadowMarkUnavailable(f"no canonical mark for held shadow position {t}")
+        inv += shares * float(px)
     return inv
 
 
@@ -193,6 +204,8 @@ def _rebalance(book_id: str, targets: dict, prices: dict, asof: str) -> None:
     if not acct.get("inception_date"):
         acct["inception_date"] = asof
     positions = acct.setdefault("positions", {})
+    # A rebalance requires a complete pre-trade NAV for every held line. If canonical marks cannot
+    # value one, _mark_to refuses before any cash/position mutation happens.
     nav = acct.get("cash", 0.0) + _mark_to(prices, positions)
     if nav <= 0:
         nav = _STARTING_NAV
@@ -234,6 +247,8 @@ def _append_nav(book_id: str, row: dict, asof: str) -> None:
 def _mark(book_id: str, prices: dict, asof: str) -> dict:
     acct = _load_account(book_id)
     positions = acct.get("positions", {})
+    # Refuse before appending a dated row when any held line is unpriced. Public drivers catch the
+    # typed refusal per book, so one stale/missing symbol cannot sink the build or fabricate NAV.
     invested = _mark_to(prices, positions)
     nav = acct.get("cash", 0.0) + invested
     row = {"date": asof, "nav": round(nav, 2), "cash": round(acct.get("cash", 0.0), 2),
