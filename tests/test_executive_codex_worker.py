@@ -2824,3 +2824,147 @@ def test_validation_cancellation_preserves_cancelled_error_when_identity_cleanup
                     await process.wait()
 
     asyncio.run(exercise())
+
+
+def test_start_attestation_identity_failure_reaps_unpublished_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    spawned: list[asyncio.subprocess.Process] = []
+    created_fds: list[int] = []
+    real_create_subprocess_exec = cw.asyncio.create_subprocess_exec
+    real_path_identity = cw._path_identity
+    real_create_private_file = cw._create_private_file
+
+    async def recording_create_subprocess_exec(*args, **kwargs):
+        process = await real_create_subprocess_exec(*args, **kwargs)
+        spawned.append(process)
+        return process
+
+    def recording_create_private_file(path: Path):
+        fd = real_create_private_file(path)
+        created_fds.append(fd)
+        return fd
+
+    def fail_attestation_identity(path: Path):
+        if spawned:
+            raise OSError("attestation identity race")
+        return real_path_identity(path)
+
+    monkeypatch.setattr(cw.asyncio, "create_subprocess_exec", recording_create_subprocess_exec)
+    monkeypatch.setattr(cw, "_create_private_file", recording_create_private_file)
+    monkeypatch.setattr(cw, "_path_identity", fail_attestation_identity)
+
+    async def exercise():
+        adapter, spec, _workspace_path, _run_dir = _fixture(
+            tmp_path, prompt="sleep", timeout=30, grace=0.1
+        )
+        process = None
+        try:
+            with pytest.raises(OSError, match="attestation identity race"):
+                await adapter.start(spec)
+            assert len(spawned) == 1
+            process = spawned[0]
+            assert spec.run_id not in adapter._runs
+            for _ in range(50):
+                if process.returncode is not None:
+                    break
+                await asyncio.sleep(0.01)
+            open_fds = []
+            for fd in created_fds:
+                try:
+                    os.fstat(fd)
+                except OSError:
+                    continue
+                open_fds.append(fd)
+            assert process.returncode is not None and open_fds == [], (
+                "launch-attestation refusal leaked unpublished resources: "
+                f"process_alive={process.returncode is None}, open_fds={open_fds}"
+            )
+        finally:
+            if process is None and spawned:
+                process = spawned[0]
+            if process is not None and process.returncode is None:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                await asyncio.wait_for(process.wait(), 2.0)
+            for fd in created_fds:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+
+    asyncio.run(exercise())
+
+
+
+def test_start_prepublication_state_failure_reaps_unpublished_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    spawned: list[asyncio.subprocess.Process] = []
+    created_fds: list[int] = []
+    real_create_subprocess_exec = cw.asyncio.create_subprocess_exec
+    real_create_private_file = cw._create_private_file
+
+    async def recording_create_subprocess_exec(*args, **kwargs):
+        process = await real_create_subprocess_exec(*args, **kwargs)
+        spawned.append(process)
+        return process
+
+    def recording_create_private_file(path: Path):
+        fd = real_create_private_file(path)
+        created_fds.append(fd)
+        return fd
+
+    def fail_state_parser():
+        raise RuntimeError("prepublication state construction failed")
+
+    monkeypatch.setattr(cw.asyncio, "create_subprocess_exec", recording_create_subprocess_exec)
+    monkeypatch.setattr(cw, "_create_private_file", recording_create_private_file)
+    monkeypatch.setattr(cw, "_JSONLState", fail_state_parser)
+
+    async def exercise():
+        adapter, spec, _workspace_path, _run_dir = _fixture(
+            tmp_path, prompt="sleep", timeout=30, grace=0.1
+        )
+        process = None
+        try:
+            with pytest.raises(
+                RuntimeError, match="prepublication state construction failed"
+            ):
+                await adapter.start(spec)
+            assert len(spawned) == 1
+            process = spawned[0]
+            assert spec.run_id not in adapter._runs
+            for _ in range(50):
+                if process.returncode is not None:
+                    break
+                await asyncio.sleep(0.01)
+            open_fds = []
+            for fd in created_fds:
+                try:
+                    os.fstat(fd)
+                except OSError:
+                    continue
+                open_fds.append(fd)
+            assert process.returncode is not None and open_fds == [], (
+                "prepublication state refusal leaked resources: "
+                f"process_alive={process.returncode is None}, open_fds={open_fds}"
+            )
+        finally:
+            if process is None and spawned:
+                process = spawned[0]
+            if process is not None and process.returncode is None:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                await asyncio.wait_for(process.wait(), 2.0)
+            for fd in created_fds:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+
+    asyncio.run(exercise())

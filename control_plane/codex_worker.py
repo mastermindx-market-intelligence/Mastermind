@@ -3234,93 +3234,108 @@ class CodexWorkerAdapter:
             os.close(stdout_fd)
             os.close(stderr_fd)
             raise
-        ref = ProcessRef(
-            run_id=spec.run_id,
-            pid=process.pid,
-            pgid=pgid,
-            process_start_identity=start_identity,
-            boot_session_id=boot_id,
-            launch_nonce=uuid4().hex,
-            provider_session_id=None,
-            stdout_path=str(stdout_path),
-            stderr_path=str(stderr_path),
-            result_path=str(result_path),
-            started_at=_utc_now(),
-            binary=self.binary,
-            base_sha=baseline.head,
-            session_id=observed_identity.session_id,
-            effective_uid=observed_identity.effective_uid,
-            effective_gid=observed_identity.effective_gid,
-            real_uid=observed_identity.real_uid,
-            real_gid=observed_identity.real_gid,
-        )
+        process_wait_task: asyncio.Task[int] | None = None
         try:
-            observed_user = pwd.getpwuid(observed_identity.effective_uid).pw_name
-        except KeyError:
-            observed_user = None
-        permission_profile = {
-            "permission_overrides": self._permission_overrides(
-                spec,
-                workspace,
-                codex_home=codex_home,
-            ),
-            "isolation_manifest_sha256": spec.isolation_manifest_sha256,
-            "network_enabled": False,
-            "disabled_features": list(_DISABLED_FEATURES),
-            "shell_environment_policy": "include_only",
-        }
-        launch_attestation = LaunchAttestation(
-            schema_version=LAUNCH_ATTESTATION_SCHEMA_VERSION,
-            created_at=_utc_now(),
-            executable_path=self.binary.real_path,
-            binary=self.binary,
-            rendered_argv=_redact_argv(argv),
-            environment_keys=tuple(sorted(environment)),
-            permission_profile_sha256=_canonical_sha256(permission_profile),
-            prompt_sha256=hashlib.sha256(spec.prompt.encode("utf-8")).hexdigest(),
-            expected_base_sha=spec.expected_base_sha,
-            observed_base_sha=baseline.head,
-            workspace_identity={**_path_identity(workspace), "git_head": baseline.head},
-            worker_identity={
-                "requested_user": spec.worker_user,
-                "observed_user": observed_user,
-                "expected_uid": spec.expected_worker_uid,
-                "expected_gid": spec.expected_worker_gid,
-                "effective_uid": observed_identity.effective_uid,
-                "effective_gid": observed_identity.effective_gid,
-                "real_uid": observed_identity.real_uid,
-                "real_gid": observed_identity.real_gid,
-            },
-            provider_home_identity=_path_identity(codex_home),
-            secret_canary_verdict=canary_verdict,
-            launch_nonce=ref.launch_nonce,
-            process_identity={
-                "pid": ref.pid,
-                "pgid": ref.pgid,
-                "session_id": ref.session_id,
-                "start_identity": ref.process_start_identity,
-                "boot_id": ref.boot_session_id,
-                "effective_uid": ref.effective_uid,
-                "effective_gid": ref.effective_gid,
-                "real_uid": ref.real_uid,
-                "real_gid": ref.real_gid,
-            },
-        )
-        parser = _JSONLState()
-        state = _RunState(
-            spec=spec,
-            ref=ref,
-            process=process,
-            parser=parser,
-            baseline=baseline,
-            stdout_fd=stdout_fd,
-            stderr_fd=stderr_fd,
-            violation=asyncio.Event(),
-            process_wait_task=asyncio.create_task(process.wait()),
-            launch_attestation=launch_attestation,
-            finalization=finalization,
-            status=WorkerRunStatus.RUNNING,
-        )
+            ref = ProcessRef(
+                run_id=spec.run_id,
+                pid=process.pid,
+                pgid=pgid,
+                process_start_identity=start_identity,
+                boot_session_id=boot_id,
+                launch_nonce=uuid4().hex,
+                provider_session_id=None,
+                stdout_path=str(stdout_path),
+                stderr_path=str(stderr_path),
+                result_path=str(result_path),
+                started_at=_utc_now(),
+                binary=self.binary,
+                base_sha=baseline.head,
+                session_id=observed_identity.session_id,
+                effective_uid=observed_identity.effective_uid,
+                effective_gid=observed_identity.effective_gid,
+                real_uid=observed_identity.real_uid,
+                real_gid=observed_identity.real_gid,
+            )
+            try:
+                observed_user = pwd.getpwuid(observed_identity.effective_uid).pw_name
+            except KeyError:
+                observed_user = None
+            permission_profile = {
+                "permission_overrides": self._permission_overrides(
+                    spec,
+                    workspace,
+                    codex_home=codex_home,
+                ),
+                "isolation_manifest_sha256": spec.isolation_manifest_sha256,
+                "network_enabled": False,
+                "disabled_features": list(_DISABLED_FEATURES),
+                "shell_environment_policy": "include_only",
+            }
+            launch_attestation = LaunchAttestation(
+                schema_version=LAUNCH_ATTESTATION_SCHEMA_VERSION,
+                created_at=_utc_now(),
+                executable_path=self.binary.real_path,
+                binary=self.binary,
+                rendered_argv=_redact_argv(argv),
+                environment_keys=tuple(sorted(environment)),
+                permission_profile_sha256=_canonical_sha256(permission_profile),
+                prompt_sha256=hashlib.sha256(spec.prompt.encode("utf-8")).hexdigest(),
+                expected_base_sha=spec.expected_base_sha,
+                observed_base_sha=baseline.head,
+                workspace_identity={**_path_identity(workspace), "git_head": baseline.head},
+                worker_identity={
+                    "requested_user": spec.worker_user,
+                    "observed_user": observed_user,
+                    "expected_uid": spec.expected_worker_uid,
+                    "expected_gid": spec.expected_worker_gid,
+                    "effective_uid": observed_identity.effective_uid,
+                    "effective_gid": observed_identity.effective_gid,
+                    "real_uid": observed_identity.real_uid,
+                    "real_gid": observed_identity.real_gid,
+                },
+                provider_home_identity=_path_identity(codex_home),
+                secret_canary_verdict=canary_verdict,
+                launch_nonce=ref.launch_nonce,
+                process_identity={
+                    "pid": ref.pid,
+                    "pgid": ref.pgid,
+                    "session_id": ref.session_id,
+                    "start_identity": ref.process_start_identity,
+                    "boot_id": ref.boot_session_id,
+                    "effective_uid": ref.effective_uid,
+                    "effective_gid": ref.effective_gid,
+                    "real_uid": ref.real_uid,
+                    "real_gid": ref.real_gid,
+                },
+            )
+            parser = _JSONLState()
+            process_wait_task = asyncio.create_task(process.wait())
+            state = _RunState(
+                spec=spec,
+                ref=ref,
+                process=process,
+                parser=parser,
+                baseline=baseline,
+                stdout_fd=stdout_fd,
+                stderr_fd=stderr_fd,
+                violation=asyncio.Event(),
+                process_wait_task=process_wait_task,
+                launch_attestation=launch_attestation,
+                finalization=finalization,
+                status=WorkerRunStatus.RUNNING,
+            )
+        except Exception:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            if process_wait_task is None:
+                await process.wait()
+            else:
+                await process_wait_task
+            os.close(stdout_fd)
+            os.close(stderr_fd)
+            raise
         self._runs[spec.run_id] = state
         state.stdout_task = asyncio.create_task(_pump_stream(
             process.stdout,
