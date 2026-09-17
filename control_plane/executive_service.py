@@ -1604,6 +1604,15 @@ class _ModuleBackupBackend:
 
 
 CEO_APP_READ_SCHEMA = ceo_ingress.APP_READ_SCHEMA
+CEO_APP_READ_TOOLS = frozenset(
+    {
+        "executive_state",
+        "executive_inbox",
+        "executive_job",
+        "executive_fabric",
+        "ceo_intent_status",
+    }
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -3797,10 +3806,10 @@ class ExecutiveControlService:
                     else:
                         if set(parsed) != {"schema", "tool", "arguments"}:
                             raise ValueError("invalid read frame")
-                        if parsed["tool"] not in {
-                            "executive_state", "executive_inbox",
-                            "executive_job", "ceo_intent_status",
-                        } or not isinstance(parsed["arguments"], dict):
+                        if (
+                            parsed["tool"] not in CEO_APP_READ_TOOLS
+                            or not isinstance(parsed["arguments"], dict)
+                        ):
                             raise ValueError("invalid read operation")
                         if app_binding.read_provider is None:
                             await self._send_ceo_ingress_error(

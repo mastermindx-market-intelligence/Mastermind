@@ -313,7 +313,7 @@ _CLOSE_TIMEOUT_SECONDS = 5.0
 
 
 class ExecutiveMcpGateway:
-    """Five tools over existing Executive OS primitives.  No new authority."""
+    """Six tools over existing Executive OS primitives.  No new authority."""
 
     def __init__(
         self,
@@ -329,6 +329,7 @@ class ExecutiveMcpGateway:
         self.config = config
         self._packet_builder = packet_builder or ceo_boot_packet.build_packet
         self._inbox_builder = inbox_builder or executive_inbox.build_inbox
+        self._runtime_factory_is_explicit = runtime_factory is not None
         self._runtime_factory = runtime_factory or _open_readonly_runtime
         self._transport = transport or send_control_request
         self._clock = clock or _utc_now_z
@@ -639,13 +640,32 @@ class ExecutiveMcpGateway:
             return redacted
         return value
 
+    def _fabric_runtime_root(self) -> Path:
+        """Resolve the root owned by the configured read provider."""
+
+        self.config.reverify_read_runtime_root()
+        configured_root = Path(self.config.runtime_root)
+        if not self._runtime_factory_is_explicit:
+            return configured_root
+        try:
+            runtime = self._runtime()
+            runtime_root = runtime.store.root
+        except Exception as exc:  # noqa: BLE001 — path-safe typed refusal
+            raise GatewayError(
+                "backend_unavailable", "Fabric job view is unavailable"
+            ) from exc
+        if not isinstance(runtime_root, (str, Path)):
+            raise GatewayError(
+                "backend_unavailable", "Fabric job view is unavailable"
+            )
+        return Path(runtime_root)
+
     def _executive_fabric(
         self, arguments: Mapping[str, Any]
     ) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
         """Read one canonical Fabric projection without adding a lifecycle owner."""
 
-        self.config.reverify_read_runtime_root()
-        runtime_root = Path(self.config.runtime_root)
+        runtime_root = self._fabric_runtime_root()
         try:
             if arguments["view"] == "roots":
                 document = fabric_job_view.list_roots(
