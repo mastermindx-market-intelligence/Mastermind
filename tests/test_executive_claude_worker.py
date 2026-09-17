@@ -794,7 +794,7 @@ def test_second_start_on_one_adapter_instance_is_refused(tmp_path: Path) -> None
     # No optimistic double spawn: the adapter's state still names only the
     # first run, and the second spec's run directory was never touched.
     assert adapter._state.ref == first_ref
-    assert not (Path(spec_b.run_dir) / "claude_fake_state.json").exists()
+    assert not any(Path(spec_b.run_dir).iterdir())
 
 
 def test_identity_timeout_fails_closed_and_never_returns_a_ref(tmp_path: Path) -> None:

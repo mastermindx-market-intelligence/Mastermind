@@ -327,6 +327,18 @@ class ClaudeCodeWorkerAdapter:
                 raise LaunchValidationError(f"{label} must be a real directory")
         self._isolated_home = home.resolve(strict=True)
         self._isolated_tmp = tmp.resolve(strict=True)
+        # The committed fake's own environment attestation requires HOME and
+        # TMPDIR to be siblings of the fake-control state file (it rejects
+        # anything else as environment tampering).  Keeping isolated home/tmp
+        # as fixed siblings under one adapter-private runtime root -- rather
+        # than deriving them per-run from a caller-supplied run_dir -- is what
+        # "isolated home and tmp roots" in the frozen spec's private
+        # configuration list refers to; the state file is colocated here too.
+        if self._isolated_home.parent != self._isolated_tmp.parent:
+            raise LaunchValidationError(
+                "isolated home and isolated tmp must share one private runtime root"
+            )
+        self._runtime_root = self._isolated_home.parent
 
         self._model = str(model)
         self._version = version if isinstance(version, ClaudeCliVersion) else ClaudeCliVersion.parse(str(version))
@@ -479,11 +491,14 @@ class ClaudeCodeWorkerAdapter:
         if self._allowed_versions is not None and command.version not in self._allowed_versions:
             raise LaunchValidationError("compiled Claude CLI version is not allowlisted")
 
-        run_dir_state_path = run_dir / "claude_fake_state.json"
-        if run_dir_state_path.exists():
-            raise LaunchValidationError(f"fake control state path already exists: {run_dir_state_path}")
+        # Must be a sibling of isolated_home/isolated_tmp -- the fake's own
+        # environment attestation requires HOME/TMPDIR's parent to equal the
+        # state file's parent exactly.
+        fake_state_path = self._runtime_root / "claude_fake_state.json"
+        if fake_state_path.exists():
+            raise LaunchValidationError(f"fake control state path already exists: {fake_state_path}")
         fake_controls = dict(self._fake_controls_template)
-        fake_controls["MMX_FAKE_CLAUDE_STATE_FILE"] = str(run_dir_state_path)
+        fake_controls["MMX_FAKE_CLAUDE_STATE_FILE"] = str(fake_state_path)
         fake_controls.setdefault("MMX_FAKE_CLAUDE_VERSION", str(command.version))
 
         stdout_path = run_dir / "logs" / "claude_receipt.jsonl"
