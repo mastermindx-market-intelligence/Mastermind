@@ -174,9 +174,34 @@ def _stock_price(t: str):
 # ---------------- READ tools ----------------
 @tool("get_regime", "Current US macro regime read (quad, growth/inflation scores, liquidity).", {})
 async def get_regime(args):
-    d = _read_json(_V / "data" / "regime" / "latest.json") or {}
     keys = ["date", "quad", "quad_name", "growth_score", "inflation_score", "liquidity_overlay", "cycle_tag"]
-    out = {k: d.get(k) for k in keys} | {"sector_rs_top": (d.get("sector_rs") or [])[:6]}
+    d, core_failed = _read_first_mapping_checked((
+        _V / "data" / "regime" / "latest.json",
+    ))
+    if d is None:
+        out = {k: None for k in keys} | {
+            "sector_rs_top": None,
+            "read_status": "unavailable",
+            "regime_status": "unavailable" if core_failed else "absent",
+            "error": "regime_core_unavailable" if core_failed else "regime_core_absent",
+        }
+        if core_failed:
+            out["failed_sources"] = ["regime"]
+        return _json(out)
+
+    sector_rs = d.get("sector_rs")
+    if sector_rs is not None and not isinstance(sector_rs, list):
+        return _json({
+            **{k: None for k in keys},
+            "sector_rs_top": None,
+            "read_status": "unavailable",
+            "regime_status": "unavailable",
+            "error": "regime_core_unavailable",
+            "failed_sources": ["regime"],
+        })
+
+    out = {k: d.get(k) for k in keys} | {"sector_rs_top": (sector_rs or [])[:6]}
+    failed_sources = []
     # E1.1 — append the market_view brief + label_vs_planes line (ADDITIVE; absent view → keys absent).
     # This replaces the ad-hoc 7-key slice so the autonomous Brain reads the same perception layer as
     # the judgment seats — the incident's root cause was the Brain seeing ONLY the label.
@@ -197,8 +222,8 @@ async def get_regime(args):
                 for row in (enrichment.get("plane_summaries") or [])
             ]
             out["market_view"] = compact_mv
-    except Exception:  # noqa: BLE001 — additive; never break the tool
-        pass
+    except Exception:  # noqa: BLE001 — preserve the healthy regime core
+        failed_sources.append("market_view")
     try:
         from brain import decision_context as _dc
 
@@ -234,8 +259,13 @@ async def get_regime(args):
                 "data_quality": dc.get("data_quality"),
                 "neural_web_health": dc.get("neural_web_health"),
             }
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception:  # noqa: BLE001 — preserve the healthy regime core
+        failed_sources.append("decision_context")
+
+    if failed_sources:
+        out["read_status"] = "partial"
+        out["failed_sources"] = failed_sources
+        out["note"] = "Regime core is available; named context sources did not complete."
     return _json(out)
 
 
