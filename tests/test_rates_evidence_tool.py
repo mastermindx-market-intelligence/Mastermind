@@ -143,3 +143,61 @@ def test_real_sdk_memory_transport_preserves_complete_rates_contract(rates_files
     assert out["authority"]["can_size"] is False
     assert "_transport_truncated" not in out
     assert len(text.encode("utf-8")) <= 8000
+
+
+@pytest.fixture
+def ticker_rates_files(rates_files, tmp_path, monkeypatch):
+    root=tmp_path/"ticker_macro"
+    target=root/"site/intelligence/by_ticker.json"
+    target.parent.mkdir(parents=True)
+    target.write_text(json.dumps({"as_of":"2026-09-10",
+        "tickers":{"AMD":{"ticker":"AMD","read":"existing stock evidence"}}}))
+    monkeypatch.setattr(bot_mcp,"_V",root)
+    from portfolio import lenses
+    from brain import intake
+    monkeypatch.setattr(lenses,"decision_matrix",lambda *_:{})
+    monkeypatch.setattr(lenses,"synthesize",lambda _: {"divergences":[],"confluence":[],"vetoes":[]})
+    monkeypatch.setattr(intake,"queue",lambda _:[])
+    return rates_files,target
+
+
+def test_stock_tool_actual_sdk_keeps_rates_dates_separate(ticker_rates_files):
+    (ric,_source,output),target=ticker_rates_files
+    before=(ric.read_bytes(),target.read_bytes())
+    async def roundtrip():
+        server=bot_mcp.build_server()["instance"]
+        async with create_connected_server_and_client_session(
+            server,read_timeout_seconds=timedelta(seconds=10),raise_exceptions=True
+        ) as session:
+            return await session.call_tool("get_ticker_package",{"ticker":"AMD"})
+    result=asyncio.run(roundtrip())
+    assert result.isError is False
+    text=result.content[0].text; out=json.loads(text)
+    assert out["ticker"]=="AMD"
+    assert out["rates_context"]["series"]["10y"]["level"]==4.5
+    assert out["rates_context"]["artifact_asof"]=="2026-09-16"
+    assert out["rates_relationship"]["intelligence_artifact_asof"]=="2026-09-10"
+    assert out["rates_relationship"]["decision_time_join"]=="not_established"
+    assert out["rates_context"]["authority"]["can_rank"] is False
+    assert len(text.encode("utf-8"))<=8000
+    assert before==(ric.read_bytes(),target.read_bytes())
+    assert not output.exists()
+
+
+def test_stock_sdk_handler_preserves_name_when_rates_missing(ticker_rates_files):
+    (ric,_source,_output),_target=ticker_rates_files
+    ric.unlink()
+    out=json.loads(asyncio.run(bot_mcp.get_ticker_package.handler({"ticker":"AMD"}))["content"][0]["text"])
+    assert out["intelligence"]["read"]=="existing stock evidence"
+    assert out["rates_context"]["status"]=="unavailable"
+    assert out["rates_context"]["coverage"]["context_rows"]==0
+
+
+def test_stock_tool_ignores_caller_supplied_rates_cutoff_and_authority(ticker_rates_files):
+    out=json.loads(asyncio.run(bot_mcp.get_ticker_package.handler({
+        "ticker":"AMD","rates_cutoff":"1900-01-01","can_trade":True,
+        "source_path":"/not/an/accepted/source"}))["content"][0]["text"])
+    assert out["rates_context"]["analysis_mode"]=="dated_context"
+    assert out["rates_context"]["analysis_cutoff"] is None
+    assert out["rates_context"]["authority"]["can_trade"] is False
+    assert "/not/an/accepted/source" not in json.dumps(out)

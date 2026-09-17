@@ -477,7 +477,8 @@ async def get_intake_candidates(args):
       "side, with the brain summary), the decision-matrix divergences/confluence/vetoes (where the lenses "
       "agree or disagree), and the intake provenance (which engines flagged it). Call this once you've "
       "picked a name off the briefing/intake queue and want the full picture before a verdict. "
-      "Context-only — informs conviction, never sizes alone.",
+      "Includes separately dated US market rates, not a stock-specific sensitivity, historical join, "
+      "or entry signal. Context-only — informs conviction, never sizes alone.",
       {"type": "object", "properties": {"ticker": {"type": "string"}}, "required": ["ticker"]})
 async def get_ticker_package(args):
     t = (args.get("ticker") or "").upper()
@@ -502,7 +503,17 @@ async def get_ticker_package(args):
         return _ok(f"no per-ticker intelligence for {t} — not flagged by any dashboard engine.")
     pkg["note"] = ("Full per-name picture: intelligence facets + lens divergences + intake provenance. "
                    "The divergence between demand-tape and supply-smart-money is the read; never sizes alone.")
-    return _json(pkg)
+    # Reuse the same read-only rates owner. This is not an episode-time or beta join.
+    from brain.rates_evidence import annotate_ticker_package, serialize_ticker_package
+    try:
+        rates_reply = await get_rates_evidence.handler({})
+        rates = json.loads(rates_reply["content"][0]["text"])
+    except Exception:  # optional market evidence cannot erase a name or leak backend errors
+        rates = None
+    pkg = annotate_ticker_package(
+        pkg, rates, intelligence_artifact_asof=uni.get("as_of", uni.get("asof"))
+    )
+    return serialize_ticker_package(pkg, _json)
 
 
 @tool("get_fundamentals",

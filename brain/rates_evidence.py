@@ -6,6 +6,8 @@ cutoff withholds untimed or later-built values; it cannot reconstruct past data.
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+from copy import deepcopy
+import json
 import math
 import re
 from typing import Any
@@ -215,3 +217,134 @@ def project_rates(
                         "Turn watches describe source state, not confirmed reversals or entry signals.",
                         "Source schema lacks historical-vintage lineage; cutoff inspection is not certified replay."],
     }
+
+
+def annotate_ticker_package(
+    package: dict[str, Any],
+    rates: Any,
+    *,
+    intelligence_artifact_asof: Any = None,
+) -> dict[str, Any]:
+    """Attach existing market context without changing a name's evidence or rank.
+
+    This is not a candidate-episode join. The two artifacts retain separate dates;
+    no historical receipt, ticker beta, leadership, or entry decision is inferred.
+    """
+    unavailable = project_rates(None)
+    candidate = _dict(rates)
+    valid = (
+        candidate.get("schema") == unavailable["schema"]
+        and candidate.get("authority") == unavailable["authority"]
+        and candidate.get("as_observed_replay_certified") is False
+        and candidate.get("current_session_freshness") == "not_certified"
+        and set(unavailable).issubset(candidate)
+    )
+    try:
+        valid = valid and len(json.dumps(candidate, allow_nan=False).encode("utf-8")) <= 16000
+    except (TypeError, ValueError, OverflowError):
+        valid = False
+    if not valid:
+        candidate = unavailable
+        candidate["issues"].append("rates_context_contract_unavailable")
+    # The projector owns the schema; unknown top-level additions are not forwarded.
+    evidence = {key: deepcopy(candidate[key]) for key in unavailable}
+    day = _day(intelligence_artifact_asof)
+    time_kind, instant = _clock(intelligence_artifact_asof)
+    artifact_label = day.isoformat() if day else instant.isoformat() if instant else None
+    out = dict(package)
+    out["rates_context"] = evidence
+    out["rates_context_status"] = evidence["status"]
+    out["rates_relationship"] = {
+        "scope": "US_market_context_only",
+        "ticker_specific_sensitivity": "not_provided",
+        "decision_time_join": "not_established",
+        "intelligence_artifact_asof": artifact_label,
+        "intelligence_time_kind": time_kind,
+        "historical_candidate_evidence_modified": False,
+    }
+    return out
+
+
+
+def _columnar_ticker_rates(rates: dict[str, Any]) -> dict[str, Any] | None:
+    """Lossless presentation only: factor repeated row fields, never omit facts."""
+    series = _dict(rates.get("series"))
+    if set(series) != set(_TENORS):
+        return None
+    first = _dict(series[_TENORS[0]])
+    if not first or any(set(_dict(series[t])) != set(first) for t in _TENORS):
+        return None
+    shared = {key: deepcopy(value) for key, value in first.items()
+              if all(series[t][key] == value for t in _TENORS)}
+    columns = [key for key in first if key not in shared]
+    packed = {key: deepcopy(value) for key, value in rates.items()
+              if key not in ("schema", "series")}
+    packed["schema"] = "decision_context.rates_evidence.columnar.v1"
+    packed["source_schema"] = rates["schema"]
+    packed["series"] = {
+        "shared": shared,
+        "columns": columns,
+        "rows": {tenor: [deepcopy(series[tenor][key]) for key in columns] for tenor in _TENORS},
+    }
+    return packed
+
+
+def serialize_ticker_package(package: dict[str, Any], serializer: Any) -> dict[str, Any]:
+    """Use the existing serializer, detecting loss of the added rates contract.
+
+    Does not change the generic JSON owner. If compaction changes rates or their
+    qualification, omit that whole addition explicitly, not isolated caveats.
+    Optional rates also cannot crowd out previously deliverable stock evidence.
+    """
+    def render(value: dict[str, Any]) -> tuple[Any, Any]:
+        try:
+            response = serializer(deepcopy(value))
+            content = response["content"]
+            if len(content) != 1 or content[0].get("type") != "text":
+                return None, None
+            text = content[0]["text"]
+            if not isinstance(text, str) or len(text.encode("utf-8")) > 8000:
+                return None, None
+            decoded = json.loads(text)
+            return (response, decoded) if isinstance(decoded, dict) else (None, None)
+        except Exception:  # transport errors are never forwarded as source evidence
+            return None, None
+
+    protected = ("rates_context", "rates_context_status", "rates_relationship")
+    primary = {key: value for key, value in package.items() if key not in protected}
+    _baseline_response, baseline = render(primary)
+
+    def preserves_primary(decoded: Any) -> bool:
+        return (isinstance(decoded, dict) and isinstance(baseline, dict)
+                and all(decoded.get(key) == value for key, value in baseline.items()
+                        if key != "_transport_truncated"))
+
+    response, decoded = render(package)
+    if (preserves_primary(decoded)
+            and all(decoded.get(key) == package.get(key) for key in protected)):
+        return response
+    packed_rates = _columnar_ticker_rates(_dict(package.get("rates_context")))
+    if packed_rates is not None:
+        packed = dict(package)
+        packed["rates_context"] = packed_rates
+        packed["rates_context_encoding"] = "columnar_shared_fields_v1"
+        response, decoded = render(packed)
+        if (preserves_primary(decoded)
+                and all(decoded.get(key) == packed.get(key)
+                        for key in (*protected, "rates_context_encoding"))):
+            return response
+    reduced = {key: value for key, value in package.items() if key != "rates_context"}
+    reduced["rates_context_status"] = "omitted_transport_budget"
+    reduced["rates_context_tool"] = "get_rates_evidence"
+    response, decoded = render(reduced)
+    if (preserves_primary(decoded) and "rates_context" not in decoded
+            and decoded.get("rates_context_status") == "omitted_transport_budget"
+            and decoded.get("rates_context_tool") == "get_rates_evidence"):
+        return response
+    ticker = package.get("ticker")
+    ticker = ticker[:32] if isinstance(ticker, str) else None
+    failure = {"ticker": ticker, "status": "unavailable_transport_budget",
+               "rates_context_status": "omitted_transport_budget",
+               "decision_time_join": "not_established",
+               "next_reads": ["get_intelligence", "get_rates_evidence"]}
+    return {"content": [{"type": "text", "text": json.dumps(failure, allow_nan=False)}]}

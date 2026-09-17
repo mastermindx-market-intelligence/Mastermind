@@ -35,3 +35,16 @@ Compatibility: exact #495 head `9dba2614b8394b75f23e8be77cf08bf21072dece` modifi
 ### Dated context is not current-session certification
 
 The non-cutoff mode is `dated_context`, not `current_context`. All outputs explicitly retain `current_session_freshness=not_certified` with a basis limited to alignment with the supplied market-as-of date. Even two matching old snapshots cannot certify present-session freshness. This differs from—and does not replace—the separate `as_observed_replay_certified=false` limitation. No new market calendar, freshness owner or policy threshold is added.
+
+
+## Existing stock-package integration and wire contract
+
+Within the same original consumer operation, `get_ticker_package` now calls the existing read-only rates handler for names that already have intelligence/intake evidence. Unknown names keep their existing no-evidence response. `annotate_ticker_package` preserves the stock payload, attaches canonical all-false-authority rates and a separate date relationship, and does not infer ticker rate beta, leadership, historical candidate knowledge, an entry verdict or freshness.
+
+`serialize_ticker_package` delegates to the unchanged generic serializer. It compares previously deliverable stock fields against the no-rates baseline and validates complete rates/qualification after serialization. Object-form is preferred; the alternative columnar representation factors shared row fields without dropping any information. For that representation, reconstruct each tenor with `{**series.shared, **dict(zip(series.columns, series.rows[tenor]))}` and restore `schema=source_schema`. `rates_context_encoding` identifies the representation. No new persistence, source authority, consumer registry or generic serialization owner is introduced.
+
+When either rates or primary stock evidence would be lost, omit the whole rates payload explicitly and name `get_rates_evidence`. Responses unable to preserve the primary baseline within the 8,000-byte UTF-8 ceiling are explicitly unavailable, never represented as complete research. Existing lens/intake meanings, scores, ranking, generic JSON helpers, overnight read and action registration remain outside this amendment.
+
+The test contract includes missing/wrong-source schema, forged authority, separate artifact dates, input immutability, no new candidate on rates alone, source-read exceptions, UTF-8 budget, rates qualification loss, primary-evidence displacement and exact lossless reconstruction. Source-body tests are distinct from real SDK tests. The existing SDK test file contains the latter for canonical CI; local SDK/runtime access is held after the platform refusal and is not retried on another environment.
+
+Final captured-input/source-body differential, proof limits and continuation are recorded in the latest section of `RATES_AWARE_REPLAY_INPUT_BOUNDARY_2026-09-17.md`. This is still a rates-context consumer change, not the parent selection/timing suite or accepted release.
