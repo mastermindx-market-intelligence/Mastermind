@@ -5,6 +5,8 @@ import stat
 import subprocess
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 OPS = ROOT / "ops" / "executive_os"
@@ -207,3 +209,82 @@ def test_runbook_defers_every_privileged_action_until_exact_merged_master() -> N
     assert "merge-base --is-ancestor" in stage_two
     assert "/usr/bin/mktemp -d /private/tmp/mastermind-phase1c-acceptance.XXXXXX" in stage_two
     assert "provision-python-runtime.sh" in stage_two and "--verify-only" in stage_two
+
+
+def _runtime_use_probe_source() -> str:
+    source = _source()
+    body = source.split("assert_runtime_not_in_use() {", 1)[1].split(
+        "\n}\n\narchive_partial_and_restore_prior()", 1
+    )[0]
+    return "assert_runtime_not_in_use() {" + body + "\n}\n"
+
+
+def _run_runtime_use_probe(tmp_path: Path, mode: str) -> subprocess.CompletedProcess[str]:
+    runtime_root = tmp_path / "Python.framework" / "Versions" / "3.12"
+    runtime_root.mkdir(parents=True)
+    (runtime_root / "Python").write_text("framework", encoding="utf-8")
+    python_binary = runtime_root / "bin" / "python3.12"
+    python_binary.parent.mkdir()
+    python_binary.write_text("binary", encoding="utf-8")
+
+    lsof = tmp_path / "lsof"
+    lsof.write_text(
+        """#!/bin/bash
+case "${FAKE_LSOF_MODE:?}" in
+  idle) exit 1 ;;
+  active) printf '12345\\n23456\\n'; exit 0 ;;
+  diagnostic) printf 'lsof: observation incomplete\\n' >&2; exit 1 ;;
+  broken) exit 2 ;;
+  missing) exit 127 ;;
+  empty_success) exit 0 ;;
+  malformed) printf 'not-a-pid\\n'; exit 0 ;;
+  *) exit 99 ;;
+esac
+""",
+        encoding="utf-8",
+    )
+    lsof.chmod(0o755)
+
+    function = _runtime_use_probe_source().replace("/usr/sbin/lsof", str(lsof))
+    harness = tmp_path / "probe.sh"
+    harness.write_text(
+        "#!/bin/bash\nset -euo pipefail\n"
+        f"RUNTIME_ROOT={runtime_root!s}\n"
+        f"PYTHON_BINARY={python_binary!s}\n"
+        + function
+        + "assert_runtime_not_in_use\n",
+        encoding="utf-8",
+    )
+    harness.chmod(0o755)
+    return subprocess.run(
+        ["/bin/bash", str(harness)],
+        env={"FAKE_LSOF_MODE": mode, "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_runtime_use_probe_accepts_exact_idle_observation(tmp_path: Path) -> None:
+    result = _run_runtime_use_probe(tmp_path, "idle")
+    assert result.returncode == 0, result.stderr
+
+
+def test_runtime_use_probe_rejects_active_python(tmp_path: Path) -> None:
+    result = _run_runtime_use_probe(tmp_path, "active")
+    assert result.returncode == 75
+    assert "Python 3.12 is in use" in result.stderr
+    assert "12345" in result.stderr and "23456" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "mode", ["diagnostic", "broken", "missing", "empty_success", "malformed"]
+)
+def test_runtime_use_probe_fails_closed_when_lsof_is_not_truthful(
+    tmp_path: Path, mode: str
+) -> None:
+    result = _run_runtime_use_probe(tmp_path, mode)
+    assert result.returncode == 75, (mode, result.stdout, result.stderr)
+    assert "runtime use inspection failed" in result.stderr
+    assert "observation incomplete" not in result.stderr
+    assert "not-a-pid" not in result.stderr
