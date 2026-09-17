@@ -204,13 +204,26 @@ class TestLinkAclObserver:
             fs_security.has_macos_link_acl(release / "vendor" / "absent")
 
 
-class TestInstallerMutationBoundary:
-    """The ordering invariant that turns this class of defect back into an abort.
+class TestReleasePublicationIsAtomic:
+    """The release directory and its manifest must appear together.
 
-    ``install.sh`` disables and boots out the control plane as its first
-    mutation. Any check derived purely from the source commit must therefore run
-    before that point, or a deterministic failure strands the host with every
-    Executive daemon stopped -- which is exactly what happened on 2026-09-17.
+    Note on what is deliberately NOT asserted here. It is tempting to require
+    that the release manifest run before ``install.sh`` touches launchd, so a
+    manifest failure cannot strand the control plane disabled. That ordering is
+    already spoken for: ``test_c1_installer_relay_fence`` requires the C1 Relay
+    to be confirmed booted out *before* any release tree is extracted, so that a
+    running relay can never observe a half-built generation. Fencing wins; the
+    installer is designed to leave its daemons stopped on failure, and the
+    operator ceremony restores them.
+
+    Preventing a *preventable* failure from reaching that point belongs one
+    layer up, in the bootstrap ceremony, which replays the real manifest walk
+    over the target tree as the operator before any root step runs.
+
+    What remains enforceable here is atomicity: a release directory that exists
+    without its manifest fails the verify branch of every later install of the
+    same SHA, turning one failed install into a permanently unusable release
+    root. That is what the 2026-09-17 failure left behind.
     """
 
     @staticmethod
@@ -226,17 +239,6 @@ class TestInstallerMutationBoundary:
                 return number
         raise AssertionError(f"install.sh no longer contains {pattern!r}")
 
-    def test_release_manifest_runs_before_any_launchctl_call(self) -> None:
-        lines = self._installer_lines()
-        manifest = self._first_line_matching(lines, r"release_manifest\.py")
-        launchctl = self._first_line_matching(lines, r"launchctl ")
-
-        assert manifest < launchctl, (
-            f"install.sh reaches launchctl at line {launchctl} before the release "
-            f"manifest at line {manifest}; a manifest failure would again leave the "
-            "control plane disabled"
-        )
-
     def test_manifest_is_created_before_the_release_is_published(self) -> None:
         lines = self._installer_lines()
         create = self._first_line_matching(lines, r'release_manifest\.py" create')
@@ -245,12 +247,37 @@ class TestInstallerMutationBoundary:
         assert create < publish, (
             "install.sh publishes the release before writing its manifest; a failure "
             "in between leaves a manifest-less release that fails the verify branch "
-            "of every later install"
+            "of every later install of that SHA"
         )
 
-    def test_staging_is_discarded_on_an_early_failure(self) -> None:
+    def test_the_manifest_is_built_against_staging_not_the_release_root(self) -> None:
         lines = self._installer_lines()
-        trap = self._first_line_matching(lines, r"trap discard_release_staging EXIT")
-        staging = self._first_line_matching(lines, r'STAGING="\$\(/usr/bin/mktemp')
+        create_line = lines[
+            self._first_line_matching(lines, r'release_manifest\.py" create') - 1
+        ]
 
-        assert trap < staging, "staging is created before its cleanup trap is armed"
+        assert "$STAGING/" in create_line, (
+            "the manifest must be built from the staged copy so it can be published "
+            "together with it"
+        )
+
+    def test_staging_is_cleaned_up_when_the_install_fails(self) -> None:
+        source = "\n".join(self._installer_lines())
+        cleanup_start = source.index("leave_installed_services_stopped() {")
+        cleanup_end = source.index("trap leave_installed_services_stopped EXIT")
+        cleanup = source[cleanup_start:cleanup_end]
+
+        assert 'rm -rf -- "$STAGING"' in cleanup, (
+            "a failed install must not leave its staging directory inside releases/"
+        )
+
+    def test_the_relay_fence_still_precedes_the_release_extraction(self) -> None:
+        """Guards the ordering this change originally, and wrongly, inverted."""
+        source = "\n".join(self._installer_lines())
+        relay_confirmed = source.index('print "system/$RELAY_LABEL"')
+        archive = source.index('/usr/bin/git -C "$SOURCE_REPO" archive')
+
+        assert relay_confirmed < archive, (
+            "the C1 Relay must be confirmed booted out before any release tree is "
+            "extracted, so a running relay cannot observe a half-built generation"
+        )

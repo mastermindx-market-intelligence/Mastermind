@@ -655,56 +655,11 @@ case "$(/usr/bin/stat -f '%Sp' "$AUTH_PATH")" in
   *+) /bin/echo "dedicated worker auth has an unexpected filesystem ACL" >&2; exit 65 ;;
 esac
 
-# Build and admit the exact-SHA release while the installed services are still
-# running. Every check below is derived from the source commit alone, so any
-# failure here is deterministic and reproducible: it must abort before the
-# mutation boundary rather than strand the control plane disabled. Publishing
-# the release only once its manifest exists also keeps the two atomic -- a
-# release directory without its manifest would fail the verify branch of every
-# later install of the same SHA.
-STAGING=""
-discard_release_staging() {
-  if [ -n "${STAGING:-}" ] && [ -d "$STAGING" ]; then
-    /bin/rm -rf -- "$STAGING"
-  fi
-}
-trap discard_release_staging EXIT
-
-if [ ! -d "$RELEASE_ROOT" ]; then
-  STAGING="$(/usr/bin/mktemp -d "$SYSTEM_ROOT/releases/.install.$EXPECTED_SHA.XXXXXX")"
-  /usr/bin/git -C "$SOURCE_REPO" archive --format=tar "$EXPECTED_SHA" | /usr/bin/tar -xf - -C "$STAGING"
-  /usr/sbin/chown -R root:wheel "$STAGING"
-  /bin/chmod -R go-w "$STAGING"
-  # mktemp creates the staging root as 0700. Both non-root service UIDs need
-  # read/traverse access to the immutable release, while only root may mutate.
-  /bin/chmod 0755 "$STAGING"
-  "$PYTHON_BINARY" -I -S -B "$STAGING/ops/executive_os/release_manifest.py" create \
-    --root "$STAGING" --commit-sha "$EXPECTED_SHA" --tree-sha "$TREE_SHA"
-  /usr/sbin/chown root:wheel "$STAGING/.executive-release-manifest.json"
-  /bin/mv "$STAGING" "$RELEASE_ROOT"
-  STAGING=""
-else
-  "$PYTHON_BINARY" -I -S -B "$RELEASE_ROOT/ops/executive_os/release_manifest.py" verify \
-    --root "$RELEASE_ROOT" --commit-sha "$EXPECTED_SHA" --tree-sha "$TREE_SHA"
-fi
-[ -x "$RELEASE_ROOT/ops/executive_os/autonomy-control.sh" ] \
-  && [ -f "$RELEASE_ROOT/ops/executive_os/autonomy_control.py" ] \
-  && [ ! -L "$RELEASE_ROOT/ops/executive_os/autonomy_control.py" ] \
-  && [ -f "$RELEASE_ROOT/ops/executive_os/credential_rotation_interlock.py" ] \
-  && [ ! -L "$RELEASE_ROOT/ops/executive_os/credential_rotation_interlock.py" ] || {
-  /bin/echo "installed autonomy control surface is unavailable or unsafe" >&2
-  exit 65
-}
-if [ -n "$(/usr/bin/find "$RELEASE_ROOT" -exec /usr/bin/stat -f '%Sp' {} \; \
-  | /usr/bin/awk '/\+/{found=1} END {if(found) print "ACL"}')" ]; then
-  /bin/echo "installed release contains a filesystem ACL" >&2
-  exit 65
-fi
-
 # Cross the mutation boundary only after the identity, runtime, source, auth,
-# exact-SHA, and release-tree preflight above. From here to process exit the
-# trap keeps all install-owned daemons, including a separately prepared C1
-# Relay, disabled and booted out across generation mutation and rollback.
+# and exact-SHA preflight above. From here to process exit the trap keeps all
+# install-owned daemons, including a separately prepared C1 Relay, disabled
+# and booted out across generation mutation and rollback.
+STAGING=""
 leave_installed_services_stopped() {
   /bin/launchctl disable "system/$RELAY_LABEL" >/dev/null 2>&1 || true
   /bin/launchctl disable "system/$CONTROL_LABEL" >/dev/null 2>&1 || true
@@ -759,6 +714,43 @@ if /bin/launchctl print "system/$BACKUP_LABEL" >/dev/null 2>&1; then
 fi
 if /bin/launchctl print "system/$PRIVILEGED_LABEL" >/dev/null 2>&1; then
   /bin/echo "privileged LaunchDaemon remained loaded after bootout" >&2
+  exit 65
+fi
+
+if [ ! -d "$RELEASE_ROOT" ]; then
+  STAGING="$(/usr/bin/mktemp -d "$SYSTEM_ROOT/releases/.install.$EXPECTED_SHA.XXXXXX")"
+  /usr/bin/git -C "$SOURCE_REPO" archive --format=tar "$EXPECTED_SHA" | /usr/bin/tar -xf - -C "$STAGING"
+  /usr/sbin/chown -R root:wheel "$STAGING"
+  /bin/chmod -R go-w "$STAGING"
+  # mktemp creates the staging root as 0700. Both non-root service UIDs need
+  # read/traverse access to the immutable release, while only root may mutate.
+  /bin/chmod 0755 "$STAGING"
+  # The manifest is written into staging and published with it in a single mv,
+  # so the release directory and the manifest describing it appear together. A
+  # release directory that exists without its manifest would fail the verify
+  # branch of every later install of the same SHA, turning one failed install
+  # into a permanently unusable release root. Staging is still cleaned up by
+  # leave_installed_services_stopped on any failure before the mv.
+  "$PYTHON_BINARY" -I -S -B "$STAGING/ops/executive_os/release_manifest.py" create \
+    --root "$STAGING" --commit-sha "$EXPECTED_SHA" --tree-sha "$TREE_SHA"
+  /usr/sbin/chown root:wheel "$STAGING/.executive-release-manifest.json"
+  /bin/mv "$STAGING" "$RELEASE_ROOT"
+  STAGING=""
+else
+  "$PYTHON_BINARY" -I -S -B "$RELEASE_ROOT/ops/executive_os/release_manifest.py" verify \
+    --root "$RELEASE_ROOT" --commit-sha "$EXPECTED_SHA" --tree-sha "$TREE_SHA"
+fi
+[ -x "$RELEASE_ROOT/ops/executive_os/autonomy-control.sh" ] \
+  && [ -f "$RELEASE_ROOT/ops/executive_os/autonomy_control.py" ] \
+  && [ ! -L "$RELEASE_ROOT/ops/executive_os/autonomy_control.py" ] \
+  && [ -f "$RELEASE_ROOT/ops/executive_os/credential_rotation_interlock.py" ] \
+  && [ ! -L "$RELEASE_ROOT/ops/executive_os/credential_rotation_interlock.py" ] || {
+  /bin/echo "installed autonomy control surface is unavailable or unsafe" >&2
+  exit 65
+}
+if [ -n "$(/usr/bin/find "$RELEASE_ROOT" -exec /usr/bin/stat -f '%Sp' {} \; \
+  | /usr/bin/awk '/\+/{found=1} END {if(found) print "ACL"}')" ]; then
+  /bin/echo "installed release contains a filesystem ACL" >&2
   exit 65
 fi
 
