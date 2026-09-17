@@ -484,16 +484,21 @@ def test_public_steward_routes_require_https_and_exact_resource_host_before_auth
 
 
 def test_health_and_readiness_remain_loopback_http_only():
-    app, _, verifier_calls, port = _build()
+    loopback_app, _, loopback_verifier_calls, loopback_port = _build()
 
-    with TestClient(app, base_url="http://127.0.0.1:8766") as loopback:
+    with TestClient(
+        loopback_app, base_url="http://127.0.0.1:8766"
+    ) as loopback:
         health = loopback.get("/healthz")
         ready = loopback.get("/readyz")
 
     assert health.status_code == 200
     assert ready.status_code == 200
+    assert loopback_verifier_calls == []
+    assert loopback_port.calls == []
 
-    with TestClient(app, base_url=BASE_URL) as public:
+    public_app, _, public_verifier_calls, public_port = _build()
+    with TestClient(public_app, base_url=BASE_URL) as public:
         public_health = public.get("/healthz")
         public_ready = public.get("/readyz")
 
@@ -501,8 +506,8 @@ def test_health_and_readiness_remain_loopback_http_only():
     assert public_health.json() == {"error": "misdirected_request"}
     assert public_ready.status_code == 421
     assert public_ready.json() == {"error": "misdirected_request"}
-    assert verifier_calls == []
-    assert port.calls == []
+    assert public_verifier_calls == []
+    assert public_port.calls == []
 
 
 def test_canonical_mcp_path_uses_a1_missing_and_invalid_token_challenges():
