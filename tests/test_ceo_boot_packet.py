@@ -743,6 +743,30 @@ def _allow_test_sealing(monkeypatch):
     monkeypatch.setattr(
         mod, "require_sealed_root_path", lambda path, **_kwargs: Path(path).resolve()
     )
+    monkeypatch.setattr(
+        mod, "require_sealed_root_tree", lambda path, **_kwargs: Path(path).resolve()
+    )
+
+
+def _helper_runner(repo, macro, mastermind_sha, macro_sha, packet, *, seen=None):
+    def run(argv, *, cwd, timeout, max_bytes, env=None):
+        if argv and argv[0] == "git":
+            sha = mastermind_sha if Path(cwd).resolve() == repo.resolve() else macro_sha
+            return {
+                "code": 0, "stdout": sha + "\n", "stderr": "",
+                "timed_out": False, "limit_exceeded": False, "invalid_utf8": False,
+            }
+        if seen is not None:
+            seen["argv"] = list(argv)
+            seen["cwd"] = Path(cwd)
+            seen["timeout"] = timeout
+            seen["max_bytes"] = max_bytes
+            seen["env"] = dict(env or {})
+        return {
+            "code": 0, "stdout": json.dumps(packet), "stderr": "",
+            "timed_out": False, "limit_exceeded": False, "invalid_utf8": False,
+        }
+    return run
 
 
 def test_build_packet_in_interpreter_isolated_and_grounded(tmp_path, monkeypatch):
@@ -764,21 +788,7 @@ def test_build_packet_in_interpreter_isolated_and_grounded(tmp_path, monkeypatch
     }
     seen = {}
 
-    class Result:
-        returncode = 0
-        stdout = json.dumps(packet)
-
-    def fake_run(argv, **kwargs):
-        seen["argv"] = list(argv)
-        seen["kwargs"] = dict(kwargs)
-        return Result()
-
-    def fake_sha(path):
-        return mastermind_sha if path.resolve() == repo.resolve() else macro_sha
-
     _allow_test_sealing(monkeypatch)
-    monkeypatch.setattr(mod.subprocess, "run", fake_run)
-    monkeypatch.setattr(mod, "git_sha", fake_sha)
     result = mod.build_packet_in_interpreter(
         boot_python=boot_python,
         code_root=code,
@@ -786,6 +796,8 @@ def test_build_packet_in_interpreter_isolated_and_grounded(tmp_path, monkeypatch
         macro_root=macro,
         timeout=3.0,
         now="2026-09-16T10:00:00Z",
+        max_output_bytes=16384,
+        runner=_helper_runner(repo, macro, mastermind_sha, macro_sha, packet, seen=seen),
     )
     assert result == packet
     assert seen["argv"][:4] == [
@@ -794,7 +806,8 @@ def test_build_packet_in_interpreter_isolated_and_grounded(tmp_path, monkeypatch
     ]
     assert "--repo-root" in seen["argv"]
     assert str(repo.resolve()) in seen["argv"]
-    env = seen["kwargs"]["env"]
+    assert seen["max_bytes"] == 16384
+    env = seen["env"]
     assert "HOME" not in env
     assert env["PYTHONNOUSERSITE"] == "1"
     assert env["GIT_CONFIG_COUNT"] == "2"
@@ -816,15 +829,11 @@ def test_build_packet_in_interpreter_grounding_mismatch_degrades(tmp_path, monke
         "schema": SCHEMA,
         "mastermind": {"sha": "c" * 40},
         "macro": {"sha": "d" * 40},
+        "strategic_state": {"company_phase": "TEST"},
+        "brief": {"schema": mod.BRIEF_SCHEMA},
     }
 
-    class Result:
-        returncode = 0
-        stdout = json.dumps(packet)
-
     _allow_test_sealing(monkeypatch)
-    monkeypatch.setattr(mod.subprocess, "run", lambda *a, **k: Result())
-    monkeypatch.setattr(mod, "git_sha", lambda _p: "a" * 40)
     monkeypatch.setattr(
         mod, "build_packet", lambda **_kwargs: {"schema": SCHEMA, "degraded": []}
     )
@@ -834,10 +843,10 @@ def test_build_packet_in_interpreter_grounding_mismatch_degrades(tmp_path, monke
         repo_root=repo,
         macro_root=macro,
         timeout=3.0,
+        runner=_helper_runner(repo, macro, expected_sha, expected_sha, packet),
     )
-    assert result["degraded"] == [
-        "installed boot helper unavailable: grounding_mismatch"
-    ]
+    assert result["degraded"][0] == "installed boot helper unavailable: grounding_mismatch"
+    assert "Restore the installed CEO boot helper" in result["next_recommended_act"]
 
 
 def test_build_packet_in_interpreter_requires_strategy_and_brief(tmp_path, monkeypatch):
@@ -866,25 +875,16 @@ def test_build_packet_in_interpreter_requires_strategy_and_brief(tmp_path, monke
         },
     ]
 
-    class Result:
-        returncode = 0
-        stdout = ""
-
     _allow_test_sealing(monkeypatch)
-    monkeypatch.setattr(
-        mod, "git_sha",
-        lambda path: mastermind_sha if path.resolve() == repo.resolve() else macro_sha,
-    )
     monkeypatch.setattr(
         mod, "build_packet", lambda **_kwargs: {"schema": SCHEMA, "degraded": []}
     )
     reasons = []
     for packet in packets:
-        Result.stdout = json.dumps(packet)
-        monkeypatch.setattr(mod.subprocess, "run", lambda *a, **k: Result())
         result = mod.build_packet_in_interpreter(
             boot_python=tmp_path / "sealed-python",
             code_root=code, repo_root=repo, macro_root=macro, timeout=3.0,
+            runner=_helper_runner(repo, macro, mastermind_sha, macro_sha, packet),
         )
         reasons.append(result["degraded"][0])
     assert reasons == [
@@ -902,23 +902,176 @@ def test_build_packet_in_interpreter_refuses_wrong_code_generation(tmp_path, mon
     macro.mkdir(parents=True)
     _allow_test_sealing(monkeypatch)
     monkeypatch.setattr(
-        mod, "git_sha",
-        lambda path: "a" * 40 if path.resolve() == repo.resolve() else "b" * 40,
+        mod, "build_packet", lambda **_kwargs: {"schema": SCHEMA, "degraded": []}
+    )
+
+    def git_only(argv, *, cwd, timeout, max_bytes, env=None):
+        if argv[0] != "git":
+            pytest.fail("wrong code generation must refuse before helper launch")
+        sha = "a" * 40 if Path(cwd).resolve() == repo.resolve() else "b" * 40
+        return {
+            "code": 0, "stdout": sha + "\n", "stderr": "",
+            "timed_out": False, "limit_exceeded": False, "invalid_utf8": False,
+        }
+
+    result = mod.build_packet_in_interpreter(
+        boot_python=tmp_path / "sealed-python",
+        code_root=code, repo_root=repo, macro_root=macro, timeout=3.0,
+        runner=git_only,
+    )
+    assert result["degraded"][0] == "installed boot helper unavailable: code_grounding_mismatch"
+
+
+@pytest.mark.parametrize(
+    ("child_flags", "reason"),
+    [
+        ({"timed_out": True}, "process_timeout"),
+        ({"invalid_utf8": True}, "invalid_utf8"),
+        ({"limit_exceeded": True}, "output_limit_exceeded"),
+    ],
+)
+def test_build_packet_in_interpreter_child_failures_degrade(
+    tmp_path, monkeypatch, child_flags, reason
+):
+    repo = tmp_path / "mastermind"
+    mastermind_sha = "a" * 40
+    macro_sha = "b" * 40
+    code = tmp_path / "release" / mastermind_sha
+    macro = tmp_path / "macro" / macro_sha
+    repo.mkdir()
+    code.mkdir(parents=True)
+    macro.mkdir(parents=True)
+    _allow_test_sealing(monkeypatch)
+    monkeypatch.setattr(
+        mod, "build_packet", lambda **_kwargs: {"schema": SCHEMA, "degraded": []}
+    )
+
+    def runner(argv, *, cwd, timeout, max_bytes, env=None):
+        if argv[0] == "git":
+            sha = mastermind_sha if Path(cwd).resolve() == repo.resolve() else macro_sha
+            return {
+                "code": 0, "stdout": sha + "\n", "stderr": "",
+                "timed_out": False, "limit_exceeded": False, "invalid_utf8": False,
+            }
+        result = {
+            "code": 0, "stdout": "{}", "stderr": "",
+            "timed_out": False, "limit_exceeded": False, "invalid_utf8": False,
+        }
+        result.update(child_flags)
+        return result
+
+    result = mod.build_packet_in_interpreter(
+        boot_python=tmp_path / "sealed-python", code_root=code,
+        repo_root=repo, macro_root=macro, timeout=3.0, runner=runner,
+    )
+    assert result["degraded"][0] == f"installed boot helper unavailable: {reason}"
+
+
+def test_build_packet_in_interpreter_uses_one_total_deadline(tmp_path, monkeypatch):
+    repo = tmp_path / "mastermind"
+    mastermind_sha = "a" * 40
+    macro_sha = "b" * 40
+    code = tmp_path / "release" / mastermind_sha
+    macro = tmp_path / "macro" / macro_sha
+    repo.mkdir()
+    code.mkdir(parents=True)
+    macro.mkdir(parents=True)
+    _allow_test_sealing(monkeypatch)
+    monkeypatch.setattr(
+        mod, "build_packet", lambda **_kwargs: {"schema": SCHEMA, "degraded": []}
+    )
+    clock = [100.0]
+    seen_timeouts = []
+    monkeypatch.setattr(mod.time, "monotonic", lambda: clock[0])
+
+    def runner(argv, *, cwd, timeout, max_bytes, env=None):
+        seen_timeouts.append(timeout)
+        clock[0] += min(2.0, timeout)
+        sha = mastermind_sha if Path(cwd).resolve() == repo.resolve() else macro_sha
+        return {
+            "code": 0, "stdout": sha + "\n", "stderr": "",
+            "timed_out": False, "limit_exceeded": False, "invalid_utf8": False,
+        }
+
+    result = mod.build_packet_in_interpreter(
+        boot_python=tmp_path / "sealed-python", code_root=code,
+        repo_root=repo, macro_root=macro, timeout=3.0, runner=runner,
+    )
+    assert seen_timeouts[0] <= 3.0
+    assert seen_timeouts[1] <= 1.0
+    assert result["degraded"][0] == "installed boot helper unavailable: deadline_exhausted"
+
+
+def test_require_sealed_root_tree_accepts_immutable_descendants(tmp_path, monkeypatch):
+    root = tmp_path / "macro"
+    nested = root / "agentos"
+    nested.mkdir(parents=True)
+    leaf = nested / "record.md"
+    leaf.write_text("ok")
+    real_lstat = Path.lstat
+    monkeypatch.setattr(mod, "require_sealed_root_path", lambda path, **_kwargs: Path(path))
+
+    class FakeStat:
+        def __init__(self, source):
+            self.st_mode = source.st_mode & ~0o222
+            self.st_uid = 0
+            self.st_nlink = 1
+
+    monkeypatch.setattr(Path, "lstat", lambda path: FakeStat(real_lstat(path)))
+    assert mod.require_sealed_root_tree(root) == root
+
+
+def test_build_packet_in_interpreter_sealing_failure_degrades(tmp_path, monkeypatch):
+    repo = tmp_path / "mastermind"
+    code = tmp_path / "release" / ("a" * 40)
+    macro = tmp_path / "macro" / ("b" * 40)
+    repo.mkdir()
+    code.mkdir(parents=True)
+    macro.mkdir(parents=True)
+    monkeypatch.setattr(
+        mod, "require_sealed_root_path",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("unsealed")),
     )
     monkeypatch.setattr(
         mod, "build_packet", lambda **_kwargs: {"schema": SCHEMA, "degraded": []}
     )
-    monkeypatch.setattr(
-        mod.subprocess, "run",
-        lambda *a, **k: pytest.fail("wrong code generation must refuse before launch"),
-    )
+
+    def no_spawn(*_args, **_kwargs):
+        pytest.fail("sealing refusal must happen before any subprocess")
+
     result = mod.build_packet_in_interpreter(
-        boot_python=tmp_path / "sealed-python",
-        code_root=code, repo_root=repo, macro_root=macro, timeout=3.0,
+        boot_python=tmp_path / "sealed-python", code_root=code,
+        repo_root=repo, macro_root=macro, timeout=3.0, runner=no_spawn,
     )
-    assert result["degraded"] == [
-        "installed boot helper unavailable: code_grounding_mismatch"
-    ]
+    assert result["degraded"][0] == "installed boot helper unavailable: sealing_invalid"
+
+
+def test_require_sealed_root_tree_rejects_mutable_descendant(tmp_path, monkeypatch):
+    root = tmp_path / "macro"
+    root.mkdir()
+    good = root / "good.txt"
+    bad = root / "bad.txt"
+    good.write_text("ok")
+    bad.write_text("bad")
+    real_lstat = Path.lstat
+    monkeypatch.setattr(mod, "require_sealed_root_path", lambda path, **_kwargs: Path(path))
+
+    class FakeStat:
+        def __init__(self, source, *, writable=False):
+            self.st_mode = source.st_mode
+            if writable:
+                self.st_mode = (self.st_mode & ~0o777) | 0o666
+            self.st_uid = 0
+            self.st_nlink = 1
+
+    def fake_lstat(path):
+        source = real_lstat(path)
+        return FakeStat(source, writable=Path(path).name == "bad.txt")
+
+    monkeypatch.setattr(Path, "lstat", fake_lstat)
+    with pytest.raises(ValueError, match="mutable or non-root"):
+        mod.require_sealed_root_tree(root)
+
 
 
 def test_cli_json_output_cap_refuses_before_write(monkeypatch, capsys):

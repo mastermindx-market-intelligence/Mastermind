@@ -10,12 +10,25 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from control_plane import ceo_boot_packet, executive_ceo_ingress, executive_inbox
+from control_plane.chairman_control_room_remote import default_runner as _bounded_runner
 from integrations.executive_mcp.adapter import (
     ExecutiveMcpGateway, GatewayConfig, _open_readonly_runtime,
 )
 from integrations.executive_mcp.schemas import (
-    GatewayError, MODIFYING_TOOL, ServerMode, validate_tool_arguments,
+    GatewayError, MODIFYING_TOOL, READ_TIMEOUT_SECONDS, ServerMode, validate_tool_arguments,
 )
+
+
+# The installed App transport waits 65s, while the canonical MCP read executor owns
+# a 30s budget.  Keep the whole boot-packet operation six seconds inside that
+# executor deadline for envelope construction, scheduling and process-group reap.
+_INSTALLED_PACKET_RESERVE_SECONDS = 6.0
+_INSTALLED_PACKET_BUDGET_SECONDS = READ_TIMEOUT_SECONDS - _INSTALLED_PACKET_RESERVE_SECONDS
+# Current canonical ceo_brief.v1 is ~435 KiB before the final MCP projection is
+# bounded.  Keep process capture finite with >2x observed headroom; the returned
+# envelope is still independently capped by ``self.config.max_response_bytes``.
+_INSTALLED_PACKET_PROCESS_MAX_BYTES = 1024 * 1024
+assert _INSTALLED_PACKET_BUDGET_SECONDS > 0
 
 
 class InstalledExecutiveReaders(ExecutiveMcpGateway):
@@ -35,7 +48,9 @@ class InstalledExecutiveReaders(ExecutiveMcpGateway):
         # The imported module itself identifies the immutable installed release.
         # Never execute helper code from the mutable admin/grounding checkout.
         self._code_root = Path(__file__).resolve().parents[2]
-        self._boot_python = Path(boot_python).resolve() if boot_python is not None else None
+        # Preserve the literal path: execution-time sealing must be able to detect a
+        # symlink even after config-time validation.
+        self._boot_python = Path(boot_python) if boot_python is not None else None
         super().__init__(
             GatewayConfig(
                 mode=ServerMode.READONLY, repo_root=self._source_root,
@@ -52,20 +67,24 @@ class InstalledExecutiveReaders(ExecutiveMcpGateway):
         requested_repo = Path(kwargs.get("repo_root", self._source_root)).resolve()
         requested_macro = Path(kwargs.get("macro_root_flag", self._macro_root)).resolve()
         if requested_repo != self._source_root or requested_macro != self._macro_root:
-            packet = ceo_boot_packet.build_packet(**kwargs)
-            packet["degraded"] = [
-                "installed boot helper unavailable: source_binding_mismatch",
-                *(str(item) for item in (packet.get("degraded") or [])),
-            ]
-            return packet
+            raise GatewayError(
+                "grounding_unavailable",
+                "installed read source binding differs from the host-owned binding",
+            )
         return ceo_boot_packet.build_packet_in_interpreter(
             boot_python=self._boot_python,
             code_root=self._code_root,
             repo_root=self._source_root,
             macro_root=self._macro_root,
-            # Keep the primary helper below the public 30s read timeout.
-            timeout=min(float(kwargs.get("timeout", ceo_boot_packet.DEFAULT_TIMEOUT)), 20.0),
+            # One TOTAL packet deadline, derived from the canonical 30s read executor.
+            # Pre/post grounding probes, the child and fallback all consume this same budget.
+            timeout=min(
+                float(kwargs.get("timeout", ceo_boot_packet.DEFAULT_TIMEOUT)),
+                _INSTALLED_PACKET_BUDGET_SECONDS,
+            ),
             now=kwargs.get("now"),
+            max_output_bytes=_INSTALLED_PACKET_PROCESS_MAX_BYTES,
+            runner=_bounded_runner,
         )
 
     def _canonical_inbox(self, **kwargs: Any) -> dict[str, Any]:

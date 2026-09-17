@@ -155,25 +155,27 @@ def test_installed_boot_helper_delegates_to_canonical_boot_owner(tmp_path, monke
     )
     try:
         result = readers._installed_packet(
-            repo_root=repo, macro_root_flag=str(macro), timeout=3.0,
+            repo_root=repo, macro_root_flag=str(macro), timeout=60.0,
             now='2026-09-16T10:00:00Z',
         )
         assert result == expected
         assert seen == {
-            'boot_python': boot_python.resolve(),
+            'boot_python': boot_python,
             'code_root': Path(installed_module.__file__).resolve().parents[2],
             'repo_root': repo.resolve(),
             'macro_root': macro.resolve(),
-            'timeout': 3.0,
+            'timeout': installed_module._INSTALLED_PACKET_BUDGET_SECONDS,
             'now': '2026-09-16T10:00:00Z',
+            'max_output_bytes': installed_module._INSTALLED_PACKET_PROCESS_MAX_BYTES,
+            'runner': installed_module._bounded_runner,
         }
+        assert seen['timeout'] < installed_module.READ_TIMEOUT_SECONDS
         assert seen['code_root'] != repo.resolve()
     finally:
         asyncio.run(readers.aclose())
 
 
-def test_installed_boot_helper_binding_mismatch_degrades_locally(tmp_path, monkeypatch):
-    from control_plane import ceo_boot_packet
+def test_installed_boot_helper_binding_mismatch_refuses(tmp_path, monkeypatch):
     from integrations.executive_mcp import installed as installed_module
 
     repo = tmp_path / 'mastermind'
@@ -182,20 +184,46 @@ def test_installed_boot_helper_binding_mismatch_degrades_locally(tmp_path, monke
     other = tmp_path / 'other'
     for path in (repo, macro, runtime, other):
         path.mkdir()
-    monkeypatch.setattr(
-        ceo_boot_packet, 'build_packet',
-        lambda **_kwargs: {'schema': ceo_boot_packet.SCHEMA, 'degraded': []},
-    )
     readers = installed_module.InstalledExecutiveReaders(
         repo_root=repo, macro_root=macro, runtime_root=runtime,
         boot_python=tmp_path / 'sealed-python',
     )
     try:
-        result = readers._installed_packet(
-            repo_root=other, macro_root_flag=str(macro), timeout=3.0,
-        )
-        assert result['degraded'] == [
-            'installed boot helper unavailable: source_binding_mismatch'
-        ]
+        with pytest.raises(installed_module.GatewayError) as exc:
+            readers._installed_packet(
+                repo_root=other, macro_root_flag=str(macro), timeout=3.0,
+            )
+        assert exc.value.code == 'grounding_unavailable'
+    finally:
+        asyncio.run(readers.aclose())
+
+
+def test_installed_reader_preserves_literal_boot_path_for_symlink_recheck(tmp_path, monkeypatch):
+    from control_plane import ceo_boot_packet
+    from integrations.executive_mcp import installed as installed_module
+
+    repo = tmp_path / 'mastermind'
+    macro = tmp_path / 'macro'
+    runtime = tmp_path / 'runtime'
+    for path in (repo, macro, runtime):
+        path.mkdir()
+    target = tmp_path / 'python-real'
+    target.write_text('python')
+    link = tmp_path / 'python-link'
+    link.symlink_to(target)
+    seen = {}
+
+    def fake_builder(**kwargs):
+        seen.update(kwargs)
+        return {'schema': ceo_boot_packet.SCHEMA, 'degraded': []}
+
+    monkeypatch.setattr(ceo_boot_packet, 'build_packet_in_interpreter', fake_builder)
+    readers = installed_module.InstalledExecutiveReaders(
+        repo_root=repo, macro_root=macro, runtime_root=runtime, boot_python=link,
+    )
+    try:
+        readers._installed_packet(repo_root=repo, macro_root_flag=str(macro), timeout=1.0)
+        assert seen['boot_python'] == link
+        assert seen['boot_python'].is_symlink()
     finally:
         asyncio.run(readers.aclose())

@@ -709,8 +709,16 @@ def _terminate_process_group(proc) -> bool:
         return False
 
 
-def default_runner(argv, *, cwd: Path, timeout: float, max_bytes: int) -> dict[str, Any]:
-    """Run a command with incremental hard-capped capture and prompt reap."""
+def default_runner(
+    argv, *, cwd: Path, timeout: float, max_bytes: int,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Run a command with incremental hard-capped capture and prompt reap.
+
+    ``env`` is optional so authority-sensitive callers can provide a closed
+    environment without bypassing this process-group owner. Existing callers that
+    omit it retain byte-for-byte ambient-environment behavior.
+    """
     try:
         proc = subprocess.Popen(
             [os.fspath(item) for item in argv],
@@ -721,6 +729,7 @@ def default_runner(argv, *, cwd: Path, timeout: float, max_bytes: int) -> dict[s
             text=False,
             close_fds=True,
             start_new_session=True,
+            env=(dict(env) if env is not None else None),
         )
     except OSError:
         return {

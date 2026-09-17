@@ -311,18 +311,30 @@ root-owned release that loaded `integrations/executive_mcp/installed.py`. It run
 release's existing `scripts/ceo_boot_packet.py` under the sealed interpreter with
 `-I -B`; the mutable admin checkout named by `proof_source_repository` is grounding
 data only and is never executed or placed on `sys.path`. The helper revalidates the
-interpreter, installed code root, exact Mastermind boot/strategy files, Macro snapshot
-root, and `scripts/agentos.py` at execution time. Its environment has no HOME/global
-Git configuration, exact `safe.directory` bindings for the grounding checkout and
-Macro snapshot, and `MACRO_MASTERMIND_REPO` pinned to the immutable installed release.
-The child JSON is bounded before write and the installed read caps the primary helper
-execution at 20 seconds under the public 30-second read timeout. A child packet is
-preferred only when its schema and both repository SHAs match fresh host
-observations **and** it contains a real strategic-state mapping plus `ceo_brief.v1`.
-Process failure, malformed/oversized output, missing orientation, or grounding drift
-falls back to the prior stdlib-only packet with an explicit degraded reason; it never
-changes admission state. Supply the actual sealed Macro snapshot when provisioning
-the App, or omit all App fields when installing control without it.
+literal interpreter, installed code root, exact Mastermind boot/strategy files, and
+the **entire** staged Macro snapshot at execution time: every Macro descendant must
+be root-owned, non-group/other-writable, non-symlink, and every regular file must be
+single-link. Its environment has no HOME/global Git configuration, exact
+`safe.directory` bindings for the grounding checkout and Macro snapshot, and
+`MACRO_MASTERMIND_REPO` pinned to the immutable installed release.
+
+One group-owning bounded runner owns the pre/post Git probes, child process tree and
+fallback under a **single 24-second packet deadline**, derived from the canonical
+30-second MCP read-executor budget with six seconds reserved for scheduling, process
+reap and envelope construction. The installed network launcher separately waits 65
+seconds for the CeoIngress response, so the 30-second executor is the limiting
+production budget. The child and Agent OS subprocess output are incrementally capped at **1 MiB**
+(current sealed `ceo_brief.v1` is about 435 KiB and the healthy boot packet about
+458 KiB); the final MCP data projection is independently capped to 16 KiB. Timeout
+or overflow kills/reaps the whole process group before fallback. A child packet is
+preferred only when its schema and
+both repository SHAs match fresh pre/post host observations **and** it contains a
+real strategic-state mapping plus `ceo_brief.v1`. Process failure, malformed/oversized
+output, missing orientation, or grounding drift falls back within the same total
+deadline, prepends the exact helper failure, and makes restoration of that helper the
+next recommended act; it never changes admission state. Supply the actual sealed
+Macro snapshot when provisioning the App, or omit all App fields when installing
+control without it.
 
 The App peer can use existing v2 submit/status frames and two closed internal
 read frames on the same CeoIngress socket. The four public tools and schemas

@@ -33,6 +33,7 @@ from control_plane.ceo_boot_packet import (  # noqa: E402  (after sys.path boots
     build_packet,
     render_packet,
 )
+from control_plane.chairman_control_room_remote import default_runner  # noqa: E402
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -77,6 +78,8 @@ def main(argv: list[str] | None = None) -> int:
         since=args.since,
         now=args.now,
         timeout=args.timeout,
+        runner=default_runner,
+        max_output_bytes=args.max_json_bytes,
     )
 
     if args.json:

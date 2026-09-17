@@ -712,6 +712,23 @@ def test_bounded_runner_kills_and_reaps_continuous_stdout_stderr_and_timeout(tmp
     assert result["code"] is not None
 
 
+def test_bounded_runner_accepts_closed_environment(tmp_path):
+    result = remote.default_runner(
+        [
+            sys.executable, "-c",
+            "import os; print(os.environ.get('MMX_ONLY')); print('HOME' in os.environ)",
+        ],
+        cwd=tmp_path,
+        timeout=2.0,
+        max_bytes=1024,
+        env={"MMX_ONLY": "present"},
+    )
+    assert result["code"] == 0
+    assert result["stdout"].splitlines() == ["present", "False"]
+    assert result["timed_out"] is False
+    assert result["limit_exceeded"] is False
+
+
 def test_bounded_runner_cleanup_never_uses_unbounded_wait_on_unkillable_fake_proc(
     monkeypatch,
 ):

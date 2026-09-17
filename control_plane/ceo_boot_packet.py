@@ -51,6 +51,7 @@ import os
 import stat
 import subprocess
 import sys
+import time
 from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
@@ -402,6 +403,65 @@ def require_sealed_root_path(
     return candidate
 
 
+def require_sealed_root_tree(path: Path, *, max_entries: int = 10000) -> Path:
+    """Require one recursively sealed root-owned read snapshot.
+
+    Every descendant must be root-owned, non-group/other-writable and non-symlink.
+    Regular files must be single-link.  The bound prevents an unexpectedly large tree
+    from turning a read-time integrity check into an unbounded filesystem walk.
+    """
+    if type(max_entries) is not int or max_entries <= 0:
+        raise ValueError("sealed tree entry limit must be a positive integer")
+    root = require_sealed_root_path(Path(path), kind="directory")
+    seen = 0
+    try:
+        for current, dirs, files in os.walk(root, topdown=True, followlinks=False):
+            for name in (*dirs, *files):
+                seen += 1
+                if seen > max_entries:
+                    raise ValueError("sealed tree exceeds the reviewed entry limit")
+                node = Path(current) / name
+                info = node.lstat()
+                mode = stat.S_IMODE(info.st_mode)
+                if stat.S_ISLNK(info.st_mode) or info.st_uid != 0 or mode & 0o022:
+                    raise ValueError("sealed tree contains a mutable or non-root entry")
+                if stat.S_ISDIR(info.st_mode):
+                    continue
+                if stat.S_ISREG(info.st_mode) and info.st_nlink == 1:
+                    continue
+                raise ValueError("sealed tree contains an unsupported or multiply-linked entry")
+    except ValueError:
+        raise
+    except OSError as exc:
+        raise ValueError("sealed tree is unavailable") from exc
+    return root
+
+
+def _deadline_runner(runner: Runner, *, deadline: float) -> Runner:
+    """Clamp every subprocess owned by ``runner`` to one shared deadline."""
+
+    def run(
+        argv, *, cwd: Path, timeout: float, max_bytes: int,
+        env: Mapping[str, str] | None = None,
+    ):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return {
+                "code": None, "stdout": "", "stderr": "",
+                "timed_out": True, "limit_exceeded": False, "invalid_utf8": False,
+            }
+        kwargs = {
+            "cwd": cwd,
+            "timeout": min(float(timeout), remaining),
+            "max_bytes": max_bytes,
+        }
+        if env is not None:
+            kwargs["env"] = env
+        return runner(argv, **kwargs)
+
+    return run
+
+
 def build_packet_in_interpreter(
     *,
     boot_python: Path | None,
@@ -411,57 +471,113 @@ def build_packet_in_interpreter(
     timeout: float = DEFAULT_TIMEOUT,
     now: str | None = None,
     max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES,
+    runner: Runner | None = None,
 ) -> dict[str, Any]:
-    """Build one grounded packet in a sealed YAML-capable read interpreter.
+    """Build one grounded packet inside one total, process-tree-owned deadline.
 
     Executable code comes only from ``code_root`` (the immutable installed release)
     and the sealed Macro snapshot. ``repo_root`` is grounding/data only: it supplies
-    Git identity but is never placed on ``sys.path`` or executed.
+    Git identity but is never placed on ``sys.path`` or executed.  All subprocesses
+    in this boundary -- pre/post grounding, the child, and fallback -- share one
+    deadline and one group-owning bounded runner.
     """
     root = Path(repo_root).resolve()
     macro = Path(macro_root).resolve()
+    try:
+        total_timeout = float(timeout)
+    except (TypeError, ValueError):
+        total_timeout = 0.0
+    if total_timeout <= 0:
+        total_timeout = 0.001
+
+    if runner is None:
+        raise ValueError("installed boot helper requires a bounded process-group runner")
+
+    deadline = time.monotonic() + total_timeout
+    bounded_runner = _deadline_runner(runner, deadline=deadline)
+    safe_output_limit = (
+        max_output_bytes
+        if type(max_output_bytes) is int and max_output_bytes > 0
+        else min(DEFAULT_MAX_OUTPUT_BYTES, 64 * 1024)
+    )
+
+    def remaining() -> float:
+        return max(0.0, deadline - time.monotonic())
 
     def fallback(reason: str) -> dict[str, Any]:
         packet = build_packet(
-            repo_root=root, macro_root_flag=os.fspath(macro), now=now,
-            timeout=min(float(timeout), 5.0),
+            repo_root=root,
+            macro_root_flag=os.fspath(macro),
+            now=now,
+            timeout=max(0.001, min(5.0, remaining())),
+            runner=bounded_runner,
+            max_output_bytes=safe_output_limit,
         )
         packet["degraded"] = [
             f"installed boot helper unavailable: {reason}",
             *(str(item) for item in (packet.get("degraded") or [])),
         ]
+        # The helper failure is the actionable fault.  Do not let the stdlib fallback
+        # misdiagnose a healthy strategic_state.yml merely because PyYAML is absent.
+        packet["next_recommended_act"] = (
+            f"Restore the installed CEO boot helper — {reason}. "
+            "This fallback packet is degraded and is not complete CEO orientation."
+        )
         return packet
-
-    if boot_python is None:
-        return fallback("interpreter_not_configured")
-    try:
-        python = require_sealed_root_path(Path(boot_python), kind="file", executable=True)
-        source = require_sealed_root_path(Path(code_root), kind="directory")
-        script = require_sealed_root_path(source / "scripts" / "ceo_boot_packet.py", kind="file")
-        require_sealed_root_path(source / "control_plane" / "ceo_boot_packet.py", kind="file")
-        require_sealed_root_path(source / "control_plane" / "strategic_state.py", kind="file")
-        require_sealed_root_path(source / "config" / "strategic_state.yml", kind="file")
-        require_sealed_root_path(macro, kind="directory")
-        require_sealed_root_path(macro / "scripts" / "agentos.py", kind="file")
-    except ValueError:
-        return fallback("sealing_invalid")
 
     if type(max_output_bytes) is not int or max_output_bytes <= 0:
         return fallback("output_limit_invalid")
-    expected_mastermind = git_sha(root)
-    expected_macro = git_sha(macro)
+    if boot_python is None:
+        return fallback("interpreter_not_configured")
+
+    try:
+        # Preserve the literal configured interpreter path so execution-time symlink
+        # refusal rechecks the same property that config load proved.
+        python = require_sealed_root_path(Path(boot_python), kind="file", executable=True)
+        source = require_sealed_root_path(Path(code_root), kind="directory")
+        script = require_sealed_root_path(
+            source / "scripts" / "ceo_boot_packet.py", kind="file"
+        )
+        require_sealed_root_path(
+            source / "control_plane" / "ceo_boot_packet.py", kind="file"
+        )
+        require_sealed_root_path(
+            source / "control_plane" / "strategic_state.py", kind="file"
+        )
+        require_sealed_root_path(source / "config" / "strategic_state.yml", kind="file")
+        # Macro is both executed (agentos.py) and consumed as organizational data.
+        # Seal the whole staged snapshot, not just its root and entrypoint.
+        macro = require_sealed_root_tree(macro)
+    except ValueError:
+        return fallback("sealing_invalid")
+
+    if remaining() <= 0:
+        return fallback("deadline_exhausted")
+
+    expected_mastermind = _bounded_git(
+        root, "rev-parse", "HEAD", runner=bounded_runner,
+        max_output_bytes=safe_output_limit,
+    )
+    expected_macro = _bounded_git(
+        macro, "rev-parse", "HEAD", runner=bounded_runner,
+        max_output_bytes=safe_output_limit,
+    )
     if not expected_mastermind or not expected_macro:
         return fallback("grounding_unavailable")
     if source.name != expected_mastermind:
         return fallback("code_grounding_mismatch")
     if macro.name != expected_macro:
         return fallback("macro_grounding_mismatch")
+
+    child_budget = remaining()
+    if child_budget <= 0:
+        return fallback("deadline_exhausted")
     argv = [
         os.fspath(python), "-I", "-B", os.fspath(script),
         "--json", "--repo-root", os.fspath(root),
         "--macro-root", os.fspath(macro),
-        "--timeout", str(timeout),
-        "--max-json-bytes", str(max_output_bytes),
+        "--timeout", str(child_budget),
+        "--max-json-bytes", str(safe_output_limit),
     ]
     if now is not None:
         argv.extend(["--now", str(now)])
@@ -483,28 +599,49 @@ def build_packet_in_interpreter(
         # Macro sibling checks see immutable Mastermind code, never the mutable admin checkout.
         "MACRO_MASTERMIND_REPO": os.fspath(source),
     }
+    # The reviewed runner owns a fresh process group, incrementally caps both
+    # streams, and kills/reaps the entire descendant tree on timeout/overflow.
     try:
-        process = subprocess.run(
-            argv, cwd=os.fspath(source), env=env, capture_output=True, text=True,
-            check=False, timeout=timeout,
+        process = bounded_runner(
+            argv, cwd=source, timeout=child_budget, max_bytes=safe_output_limit, env=env
         )
-    except subprocess.TimeoutExpired:
-        return fallback("process_timeout")
-    except UnicodeError:
-        return fallback("invalid_utf8")
-    except OSError:
+    except Exception:  # noqa: BLE001 - stable degraded boundary
         return fallback("process_unavailable")
-    if process.returncode != 0:
+    if not isinstance(process, Mapping):
+        return fallback("process_unavailable")
+    if process.get("timed_out") is True:
+        return fallback("process_timeout")
+    if process.get("limit_exceeded") is True:
+        return fallback("output_limit_exceeded")
+    if process.get("invalid_utf8") is True:
+        return fallback("invalid_utf8")
+    if process.get("code") != 0:
         return fallback("process_failed")
+    stdout = process.get("stdout")
+    if type(stdout) is not str:
+        return fallback("invalid_output")
     try:
-        packet = json.loads(process.stdout)
+        packet = json.loads(stdout)
     except (TypeError, ValueError):
         return fallback("invalid_json")
     if not isinstance(packet, dict) or packet.get("schema") != SCHEMA:
         return fallback("schema_mismatch")
+
+    # Re-observe both identities after the child.  Any movement during the read is a
+    # degradation, and these probes still consume the SAME total deadline.
+    post_mastermind = _bounded_git(
+        root, "rev-parse", "HEAD", runner=bounded_runner,
+        max_output_bytes=safe_output_limit,
+    )
+    post_macro = _bounded_git(
+        macro, "rev-parse", "HEAD", runner=bounded_runner,
+        max_output_bytes=safe_output_limit,
+    )
     if (
-        (packet.get("mastermind") or {}).get("sha") != expected_mastermind
-        or (packet.get("macro") or {}).get("sha") != expected_macro
+        post_mastermind != expected_mastermind
+        or post_macro != expected_macro
+        or (packet.get("mastermind") or {}).get("sha") != post_mastermind
+        or (packet.get("macro") or {}).get("sha") != post_macro
     ):
         return fallback("grounding_mismatch")
     if not isinstance(packet.get("strategic_state"), Mapping):
