@@ -816,6 +816,36 @@ def test_capacity_boot_runtime_attestor_allows_root_owned_sealed_ancestor_with_d
     assert result == contract.site_packages
 
 
+def test_capacity_boot_runtime_attestor_keeps_runtime_root_on_exact_group(
+    tmp_path: Path, monkeypatch,
+):
+    import stat
+    from types import SimpleNamespace
+
+    packet, contract = _capacity_runtime_contract_fixture(tmp_path, monkeypatch)
+    contract.trusted_ancestors = (contract.runtime_root,)
+    contract.strict_group_ancestors = (contract.runtime_root,)
+    original_lstat = Path.lstat
+
+    def lstat(path):
+        if path == contract.runtime_root:
+            observed = original_lstat(path)
+            return SimpleNamespace(
+                st_mode=observed.st_mode, st_uid=contract.owner_uid,
+                st_gid=contract.owner_gid + 1, st_nlink=observed.st_nlink,
+            )
+        return original_lstat(path)
+
+    monkeypatch.setattr(Path, "lstat", lstat)
+    with pytest.raises(RuntimeError, match="capacity runtime ancestor metadata differs"):
+        packet.attest_capacity_boot_runtime(
+            contract.python_binary,
+            runner=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("probe must not run after runtime-root group drift")
+            ),
+        )
+
+
 @pytest.mark.parametrize("owner_delta,mode", [(1, 0o755), (0, 0o775)])
 def test_capacity_boot_runtime_attestor_refuses_untrusted_traversal_ancestor(
     tmp_path: Path, monkeypatch, owner_delta: int, mode: int,

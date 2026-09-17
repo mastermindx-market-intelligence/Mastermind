@@ -283,6 +283,7 @@ class _CapacityBootRuntimeContract:
     owner_uid: int
     owner_gid: int
     trusted_ancestors: tuple[Path, ...]
+    strict_group_ancestors: tuple[Path, ...]
     verify_pyyaml_record: Callable[[Path], str]
     runtime_tree_digest: Callable[[Path], str]
 
@@ -313,6 +314,9 @@ def _capacity_runtime_contract() -> _CapacityBootRuntimeContract:
             system_root / "capacity-runtimes",
             runtime_root,
         ),
+        strict_group_ancestors=(
+            system_root, system_root / "capacity-runtimes", runtime_root,
+        ),
         verify_pyyaml_record=capacity_host_artifacts.verify_pyyaml_record,
         runtime_tree_digest=capacity_host_artifacts.runtime_tree_digest,
     )
@@ -323,14 +327,19 @@ def _require_capacity_runtime_metadata(contract: Any) -> None:
     trusted_ancestors = tuple(
         Path(value) for value in getattr(contract, "trusted_ancestors", (runtime_root,))
     )
+    strict_group_ancestors = frozenset(
+        Path(value)
+        for value in getattr(contract, "strict_group_ancestors", (runtime_root,))
+    )
     for ancestor in trusted_ancestors:
         observed = ancestor.lstat()
         if (
             not stat.S_ISDIR(observed.st_mode)
             or observed.st_uid != contract.owner_uid
             # Generic macOS traversal ancestors such as /Library/Application Support
-            # may be root:admin while remaining sealed. Group identity is not part
-            # of the trust boundary here; root ownership plus no group/other write is.
+            # may be root:admin while remaining sealed. The Mastermind-owned subtree
+            # stays on the capacity owner's exact root:wheel group contract.
+            or (ancestor in strict_group_ancestors and observed.st_gid != contract.owner_gid)
             or stat.S_IMODE(observed.st_mode) & 0o022
         ):
             raise RuntimeError("capacity runtime ancestor metadata differs")
