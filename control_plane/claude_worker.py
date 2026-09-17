@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import enum
 import hashlib
 import json
 import os
@@ -85,6 +86,8 @@ _MAX_AUTH_STRING_BYTES = 1024
 _MAX_VALIDATION_ARGV_BYTES = 64 * 1024
 _MAX_VALIDATION_STDOUT_BYTES = 4 * 1024 * 1024
 _MAX_VALIDATION_STDERR_BYTES = 1 * 1024 * 1024
+_MAX_PROCESS_CENSUS_BYTES = 64 * 1024
+_MAX_PROCESS_CENSUS_MEMBERS = 256
 _DENIED_PROVIDER_ENV_KEYS = frozenset(
     {
         "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
@@ -216,6 +219,18 @@ class _BoundEvidence:
     device: int
     inode: int
     uid: int
+
+
+@dataclasses.dataclass(frozen=True)
+class _ProcessGroupMember:
+    pid: int
+    state: str
+
+
+class _LaunchCleanupOutcome(enum.Enum):
+    ABSENT = "absent"
+    OWNED_CLEANED = "owned_cleaned"
+    AMBIGUOUS = "ambiguous"
 
 
 def _binary_identity(info: os.stat_result) -> tuple[int, int, int, int, int, int, int]:
@@ -778,35 +793,60 @@ def _run_bounded_auth_status(argv: Sequence[str], *, timeout: float, env: Mappin
             process.wait()
 
 
-def _process_group_member_pids(pgid: int) -> tuple[int, ...]:
+def _process_group_member_pids(pgid: int) -> tuple[_ProcessGroupMember, ...]:
     """Observe group membership through the OS, never infer it from a PGID alone."""
 
     try:
-        completed = subprocess.run(
-            ("/bin/ps", "-axo", "pid=,pgid="),
+        process = subprocess.Popen(
+            ("/bin/ps", "-axo", "pid=,pgid=,state="),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             env=_closed_probe_environment(),
-            timeout=2,
-            check=False,
         )
-    except (OSError, subprocess.SubprocessError) as exc:
+    except OSError:
         raise ClaudeProcessIdentityError("cannot observe Claude process group") from None
-    if completed.returncode != 0:
-        raise ClaudeProcessIdentityError("cannot observe Claude process group")
-    members: list[int] = []
+    assert process.stdout is not None
+    selector = selectors.DefaultSelector()
+    captured = bytearray()
+    deadline = time.monotonic() + 2
     try:
-        for line in completed.stdout.decode("ascii", "strict").splitlines():
-            fields = line.split()
-            if len(fields) != 2:
+        selector.register(process.stdout, selectors.EVENT_READ)
+        while selector.get_map():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError
+            if not selector.select(remaining):
+                raise TimeoutError
+            chunk = os.read(process.stdout.fileno(), min(8192, _MAX_PROCESS_CENSUS_BYTES - len(captured) + 1))
+            if not chunk:
+                selector.unregister(process.stdout)
+                continue
+            captured.extend(chunk)
+            if len(captured) > _MAX_PROCESS_CENSUS_BYTES:
                 raise ValueError
-            pid, observed_group = (int(fields[0]), int(fields[1]))
+        if process.wait(timeout=max(0.01, deadline - time.monotonic())) != 0:
+            raise ValueError
+        members: list[_ProcessGroupMember] = []
+        for line in captured.decode("ascii", "strict").splitlines():
+            fields = line.split()
+            if len(fields) != 3:
+                raise ValueError
+            pid, observed_group, state = int(fields[0]), int(fields[1]), fields[2]
             if pid > 0 and observed_group == pgid:
-                members.append(pid)
-    except (UnicodeDecodeError, ValueError):
+                if state not in {"R", "S", "T", "U", "I", "Z"}:
+                    raise ValueError
+                members.append(_ProcessGroupMember(pid, state))
+                if len(members) > _MAX_PROCESS_CENSUS_MEMBERS:
+                    raise ValueError
+    except (UnicodeDecodeError, ValueError, TimeoutError, OSError, subprocess.SubprocessError):
         raise ClaudeProcessIdentityError("cannot observe Claude process group") from None
-    return tuple(sorted(set(members)))
+    finally:
+        selector.close()
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+    return tuple(sorted(members, key=lambda member: member.pid))
 
 
 class ClaudeCodeWorkerAdapter:
@@ -1086,12 +1126,15 @@ class ClaudeCodeWorkerAdapter:
     def _owned_residual_members(self, ref: WorkerProcessRef) -> tuple[int, ...]:
         if self.inspector.boot_session_id() != ref.boot_session_id:
             raise ClaudeProcessIdentityError("Claude process boot identity changed")
-        members = _process_group_member_pids(ref.pgid)
+        members = tuple(
+            member for member in _process_group_member_pids(ref.pgid)
+            if member.state != "Z"
+        )
         if not members:
             return ()
-        for pid in members:
+        for member in members:
             try:
-                identity = self.inspector.inspect(pid)
+                identity = self.inspector.inspect(member.pid)
             except ProcessIdentityError:
                 raise ClaudeProcessIdentityError("Claude process group membership is ambiguous") from None
             except Exception:
@@ -1105,11 +1148,27 @@ class ClaudeCodeWorkerAdapter:
                 and getattr(identity, "real_gid", None) == ref.real_gid
             ):
                 raise ClaudeProcessIdentityError("Claude process group membership changed")
-        return members
+        return tuple(member.pid for member in members)
+
+    def _signal_owned_group(self, ref: WorkerProcessRef, signum: signal.Signals) -> bool:
+        """Take a final ownership sample immediately before process-group signal."""
+
+        leader = self._exact_leader_identity(ref)
+        members = () if leader is not None else self._owned_residual_members(ref)
+        if leader is None and not members:
+            return False
+        # The first observation only decides whether a second, adjacent
+        # sample is warranted.  The second sample is the signal authority.
+        leader = self._exact_leader_identity(ref)
+        members = () if leader is not None else self._owned_residual_members(ref)
+        if leader is None and not members:
+            return False
+        os.killpg(ref.pgid, signum)
+        return True
 
     async def _safe_launch_failure_cleanup(
         self, process: asyncio.subprocess.Process
-    ) -> None:
+    ) -> _LaunchCleanupOutcome:
         """Signal an unaccepted launch only after a two-sample ownership proof."""
 
         try:
@@ -1136,10 +1195,13 @@ class ClaudeCodeWorkerAdapter:
                 or expected[1] != process.pid
                 or expected[2] != process.pid
             ):
-                return
+                return _LaunchCleanupOutcome.AMBIGUOUS
             os.killpg(process.pid, signal.SIGKILL)
-        except (ProcessLookupError, ProcessIdentityError, OSError, AttributeError):
-            return
+            return _LaunchCleanupOutcome.OWNED_CLEANED
+        except ProcessLookupError:
+            return _LaunchCleanupOutcome.ABSENT
+        except (ProcessIdentityError, OSError, AttributeError):
+            return _LaunchCleanupOutcome.AMBIGUOUS
 
     async def start(self, spec: WorkerLaunchSpec) -> WorkerProcessRef:
         workspace, run_dir, home, tmp, baseline, schema = self._validate_spec(spec)
@@ -1177,8 +1239,15 @@ class ClaudeCodeWorkerAdapter:
         if process.stdout is None or process.stderr is None:
             for evidence in (stdout_evidence, stderr_evidence, result_evidence):
                 os.close(evidence.fd)
-            await self._safe_launch_failure_cleanup(process)
-            await process.wait()
+            outcome = await self._safe_launch_failure_cleanup(process)
+            try:
+                await asyncio.wait_for(asyncio.shield(process.wait()), timeout=0.2)
+            except asyncio.TimeoutError:
+                raise ClaudeProcessIdentityError(
+                    "unaccepted Claude launch could not be safely reaped"
+                ) from None
+            if outcome is _LaunchCleanupOutcome.AMBIGUOUS:
+                raise ClaudeProcessIdentityError("unaccepted Claude launch identity is ambiguous")
             raise ClaudeLaunchError("foreground process pipes are unavailable")
         state = _RunState(
             spec=spec, ref=None, process=process, baseline=baseline, schema=schema,
@@ -1214,10 +1283,28 @@ class ClaudeCodeWorkerAdapter:
             ):
                 raise ClaudeProcessIdentityError("Claude process principal does not match worker")
         except Exception as exc:
-            await self._safe_launch_failure_cleanup(process)
-            await state.process_wait_task
+            outcome = await self._safe_launch_failure_cleanup(process)
+            try:
+                await asyncio.wait_for(
+                    asyncio.shield(state.process_wait_task), timeout=0.2
+                )
+            except asyncio.TimeoutError:
+                for task in (state.stdout_task, state.stderr_task):
+                    if task is not None:
+                        task.cancel()
+                await asyncio.gather(
+                    state.stdout_task, state.stderr_task, return_exceptions=True
+                )
+                self._close_evidence(state)
+                raise ClaudeProcessIdentityError(
+                    "unaccepted Claude launch could not be safely reaped"
+                ) from None
             await asyncio.gather(state.stdout_task, state.stderr_task, return_exceptions=True)
             self._close_evidence(state)
+            if outcome is _LaunchCleanupOutcome.AMBIGUOUS:
+                raise ClaudeProcessIdentityError(
+                    "unaccepted Claude launch identity is ambiguous"
+                ) from None
             raise ClaudeProcessIdentityError("Claude process identity is unavailable") from exc
         ref = WorkerProcessRef(
             run_id=spec.run_id, pid=process.pid, pgid=process.pid,
@@ -1249,7 +1336,40 @@ class ClaudeCodeWorkerAdapter:
             return state.receipt
         if state.collection_task is None:
             state.collection_task = asyncio.create_task(self._collect_once(state, ref))
-        return await asyncio.shield(state.collection_task)
+            state.collection_task.add_done_callback(self._retrieve_terminal_exception)
+        return await self._await_shared_collection(state.collection_task)
+
+    @staticmethod
+    async def _await_shared_collection(
+        task: asyncio.Task[CollectionReceipt],
+    ) -> CollectionReceipt:
+        waiter: asyncio.Future[CollectionReceipt] = (
+            asyncio.get_running_loop().create_future()
+        )
+
+        def deliver(completed: asyncio.Task[CollectionReceipt]) -> None:
+            if waiter.cancelled():
+                try:
+                    completed.exception()
+                except asyncio.CancelledError:
+                    pass
+                return
+            if completed.cancelled():
+                waiter.cancel()
+                return
+            exception = completed.exception()
+            if exception is not None:
+                waiter.set_exception(exception)
+            else:
+                waiter.set_result(completed.result())
+
+        task.add_done_callback(deliver)
+        return await waiter
+
+    @staticmethod
+    def _retrieve_terminal_exception(task: asyncio.Task[CollectionReceipt]) -> None:
+        if not task.cancelled():
+            task.exception()
 
     async def _collect_once(
         self, state: _RunState, ref: WorkerProcessRef
@@ -1267,7 +1387,7 @@ class ClaudeCodeWorkerAdapter:
         git_after = None
         changed: tuple[str, ...] = ()
         try:
-            if self._identity_matches(ref):
+            if self._exact_leader_identity(ref) is not None:
                 raise ClaudeProcessIdentityError("process identity is still live after exit")
             if state.timed_out:
                 status, error = WorkerRunStatus.TIMED_OUT, "worker timed out"
@@ -1301,6 +1421,8 @@ class ClaudeCodeWorkerAdapter:
                     self._bounded_result_bytes(output),
                 )
                 status = WorkerRunStatus.SUCCEEDED
+        except ClaudeProcessIdentityError:
+            raise
         except (ClaudeWorkerContractError, LaunchValidationError, ProcessIdentityError, ResultValidationError, OSError, UnicodeError, ValueError):
             if status not in {WorkerRunStatus.TIMED_OUT, WorkerRunStatus.CANCELLED}:
                 status, error = WorkerRunStatus.INVALID_RESULT, "provider result rejected"
@@ -1371,8 +1493,7 @@ class ClaudeCodeWorkerAdapter:
                     state.cancel_reason = reason
                     state.status = WorkerRunStatus.CANCELLING
                 try:
-                    os.killpg(ref.pgid, signal.SIGTERM)
-                    sent = True
+                    sent = self._signal_owned_group(ref, signal.SIGTERM)
                 except ProcessLookupError:
                     pass
                 try:
@@ -1387,8 +1508,8 @@ class ClaudeCodeWorkerAdapter:
                             "process identity disappeared without an owned group"
                         )
                     try:
-                        os.killpg(ref.pgid, signal.SIGKILL)
-                        sent = escalated = True
+                        escalated = self._signal_owned_group(ref, signal.SIGKILL)
+                        sent = sent or escalated
                     except ProcessLookupError:
                         pass
                     await state.process_wait_task
@@ -1404,6 +1525,9 @@ class ClaudeCodeWorkerAdapter:
             leader = self._exact_leader_identity(ref)
             members = self._owned_residual_members(ref)
             if leader is None and not members:
+                census = _process_group_member_pids(ref.pgid)
+                if census and all(member.state == "Z" for member in census):
+                    return False
                 try:
                     group_exists = _process_group_exists(ref.pgid)
                 except ProcessIdentityError:
@@ -1425,12 +1549,16 @@ class ClaudeCodeWorkerAdapter:
                 ) from None
             if not group_exists:
                 return False
-            os.killpg(ref.pgid, signal.SIGKILL)
+            if not self._signal_owned_group(ref, signal.SIGKILL):
+                return False
         except ProcessLookupError:
             return False
         state.escalated = True
         try:
-            if not await _wait_for_process_group_exit(ref.pgid):
+            if not await _wait_for_process_group_exit(ref.pgid, timeout=0.2):
+                census = _process_group_member_pids(ref.pgid)
+                if census and all(member.state == "Z" for member in census):
+                    return True
                 raise ClaudeProcessIdentityError("Claude process group survived SIGKILL")
         except ProcessIdentityError:
             # Darwin may report EPERM for an already-reaped group coordinate.

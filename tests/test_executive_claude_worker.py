@@ -1014,3 +1014,197 @@ def test_foreign_or_permission_denied_residual_group_never_receives_signal(
             await adapter._kill_residual_process_group(state)
 
     asyncio.run(execute())
+
+
+def test_terminal_identity_ambiguity_cannot_mint_success(
+    tmp_path: Path,
+) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    (tmp_path / "mode").write_text("success", encoding="utf-8")
+    adapter = _adapter(tmp_path, binary)
+
+    async def execute() -> None:
+        ref = await adapter.start(_workspace_and_spec(tmp_path))
+        state = adapter._runs[ref.run_id]
+        assert state.monitor_task is not None
+        await state.monitor_task
+
+        class ReusedInspector:
+            def boot_session_id(self) -> str:
+                return ref.boot_session_id
+
+            def inspect(self, _pid: int) -> object:
+                class Foreign:
+                    start_identity = "reused-start"
+                    pgid = ref.pgid
+                    session_id = ref.session_id
+                    effective_uid = ref.effective_uid
+                    effective_gid = ref.effective_gid
+                    real_uid = ref.real_uid
+                    real_gid = ref.real_gid
+                return Foreign()
+
+        adapter.inspector = ReusedInspector()
+        with pytest.raises(claude_worker.ClaudeProcessIdentityError):
+            await adapter.collect_result(ref)
+        assert state.receipt is None
+
+    asyncio.run(execute())
+
+
+def test_cancel_rechecks_ownership_at_the_final_signal_boundary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    (tmp_path / "mode").write_text("sleep", encoding="utf-8")
+    adapter = _adapter(tmp_path, binary)
+
+    async def execute() -> None:
+        ref = await adapter.start(_workspace_and_spec(tmp_path, timeout_seconds=1))
+        real_identity = ClaudeCodeWorkerAdapter._exact_leader_identity
+        real_killpg = claude_worker.os.killpg
+        observations = 0
+
+        def changes_after_early_proof(
+            _adapter: ClaudeCodeWorkerAdapter, observed_ref: object
+        ) -> object | None:
+            nonlocal observations
+            observations += 1
+            if observations == 1:
+                return real_identity(_adapter, observed_ref)  # type: ignore[arg-type]
+            raise claude_worker.ClaudeProcessIdentityError("identity changed")
+
+        signals: list[tuple[int, int]] = []
+        monkeypatch.setattr(
+            ClaudeCodeWorkerAdapter, "_exact_leader_identity", changes_after_early_proof
+        )
+        monkeypatch.setattr(
+            claude_worker.os, "killpg", lambda pgid, sig: signals.append((pgid, sig))
+        )
+        with pytest.raises(claude_worker.ClaudeProcessIdentityError):
+            await adapter.cancel(ref, "operator requested")
+        assert signals == []
+
+        monkeypatch.setattr(ClaudeCodeWorkerAdapter, "_exact_leader_identity", real_identity)
+        monkeypatch.setattr(claude_worker.os, "killpg", real_killpg)
+        await adapter.cancel(ref, "operator requested")
+        assert (await adapter.collect_result(ref)).result.status is WorkerRunStatus.CANCELLED
+
+    asyncio.run(execute())
+
+
+def test_unprovable_launch_cleanup_is_bounded_and_closes_evidence(
+    tmp_path: Path,
+) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    (tmp_path / "mode").write_text("sleep", encoding="utf-8")
+    adapter = _adapter(tmp_path, binary)
+
+    class AmbiguousInspector:
+        def boot_session_id(self) -> str:
+            return "unknown"
+
+        def inspect(self, _pid: int) -> object:
+            raise claude_worker.ProcessIdentityError("unavailable")
+
+    adapter.inspector = AmbiguousInspector()
+
+    async def execute() -> None:
+        with pytest.raises(claude_worker.ClaudeProcessIdentityError):
+            await asyncio.wait_for(
+                adapter.start(_workspace_and_spec(tmp_path, timeout_seconds=1)),
+                timeout=0.4,
+            )
+
+    asyncio.run(execute())
+
+
+def test_abandoned_failed_collection_retrieves_shared_task_exception(
+    tmp_path: Path,
+) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    (tmp_path / "mode").write_text("success", encoding="utf-8")
+    adapter = _adapter(tmp_path, binary)
+
+    async def execute() -> None:
+        ref = await adapter.start(_workspace_and_spec(tmp_path))
+        state = adapter._runs[ref.run_id]
+        assert state.monitor_task is not None
+        await state.monitor_task
+        loop = asyncio.get_running_loop()
+        reported: list[dict[str, object]] = []
+        old_handler = loop.get_exception_handler()
+        loop.set_exception_handler(lambda _loop, context: reported.append(context))
+        try:
+            async def fail_monitor() -> None:
+                await asyncio.sleep(0.02)
+
+            state.monitor_task = asyncio.create_task(fail_monitor())
+
+            class ReusedInspector:
+                def boot_session_id(self) -> str:
+                    return ref.boot_session_id
+
+                def inspect(self, _pid: int) -> object:
+                    class Foreign:
+                        start_identity = "reused-start"
+                        pgid = ref.pgid
+                        session_id = ref.session_id
+                        effective_uid = ref.effective_uid
+                        effective_gid = ref.effective_gid
+                        real_uid = ref.real_uid
+                        real_gid = ref.real_gid
+                    return Foreign()
+
+            adapter.inspector = ReusedInspector()
+            waiter = asyncio.create_task(adapter.collect_result(ref))
+            await asyncio.sleep(0)
+            waiter.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await waiter
+            await asyncio.sleep(0.05)
+            assert not reported
+            with pytest.raises(claude_worker.ClaudeProcessIdentityError):
+                await adapter.collect_result(ref)
+        finally:
+            loop.set_exception_handler(old_handler)
+
+    asyncio.run(execute())
+
+
+def test_zombie_only_or_unreadable_residual_census_never_signals(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    (tmp_path / "mode").write_text("success", encoding="utf-8")
+    adapter = _adapter(tmp_path, binary)
+
+    async def execute() -> None:
+        ref = await adapter.start(_workspace_and_spec(tmp_path))
+        await adapter.collect_result(ref)
+        state = adapter._runs[ref.run_id]
+        signals: list[tuple[int, int]] = []
+        monkeypatch.setattr(
+            claude_worker.os, "killpg", lambda pgid, sig: signals.append((pgid, sig))
+        )
+        monkeypatch.setattr(
+            claude_worker,
+            "_process_group_member_pids",
+            lambda _pgid: (claude_worker._ProcessGroupMember(99, "Z"),),
+        )
+        monkeypatch.setattr(claude_worker, "_process_group_exists", lambda _pgid: True)
+        assert not await adapter._kill_residual_process_group(state)
+        assert signals == []
+
+        monkeypatch.setattr(
+            claude_worker,
+            "_process_group_member_pids",
+            lambda _pgid: (_ for _ in ()).throw(
+                claude_worker.ClaudeProcessIdentityError("census refused")
+            ),
+        )
+        with pytest.raises(claude_worker.ClaudeProcessIdentityError):
+            await adapter._kill_residual_process_group(state)
+        assert signals == []
+
+    asyncio.run(execute())
