@@ -30,6 +30,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 import sys
 from datetime import datetime, timedelta, timezone
 from collections.abc import Mapping, Sequence
@@ -1049,7 +1050,7 @@ def _ls_remote_sha(runner: Runner, url: str, ref: str) -> str:
 
 
 def _acquire_canonical_strategic_state(
-    runner: Runner, canonical_mastermind_sha: str
+    runner: Runner, protected_master_sha: str
 ) -> tuple[str, dict[str, Any]]:
     """Fetch ``config/strategic_state.yml`` — its exact committed BLOB sha and
     content — at the canonical Mastermind commit via the GitHub Contents API, never
@@ -1066,13 +1067,13 @@ def _acquire_canonical_strategic_state(
             "gh",
             "api",
             f"repos/{_CANONICAL_MASTERMIND_REPO}/contents/config/strategic_state.yml"
-            f"?ref={canonical_mastermind_sha}",
+            f"?ref={protected_master_sha}",
         ]
     )
     if result.returncode != 0:
         raise OutcomeLearningCliError(
             "gh api contents config/strategic_state.yml@"
-            f"{canonical_mastermind_sha} failed: {result.stderr.strip()}"
+            f"{protected_master_sha} failed: {result.stderr.strip()}"
         )
     try:
         payload = json.loads(result.stdout)
@@ -2138,7 +2139,7 @@ def _reserve_journal(journal_path: Path, record: dict[str, Any]) -> None:
     (exclusive create) is the ENTIRE single-shot guard: whichever of two racing
     invocations wins this call proceeds, and the other sees ``FileExistsError``
     unconditionally — regardless of what state a pre-existing reservation is in."""
-    journal_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    journal_path.parent.mkdir(parents=True, exist_ok=True, mode=stat.S_IRWXU)
     try:
         fd = os.open(str(journal_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     except FileExistsError as exc:

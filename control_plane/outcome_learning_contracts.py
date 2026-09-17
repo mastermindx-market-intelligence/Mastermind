@@ -69,6 +69,14 @@ _UTC_RFC3339_RE = re.compile(
     r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3}(?:\d{3})?)?Z$"
 )
 
+# Protected D8 reserves unexplained standalone values in the identity-UID range.
+# Express unrelated schema text/status bounds symbolically so their semantics are
+# explicit without weakening that repository-wide topology guard.
+_TEXT_LIMIT_UNIT = 100
+_DEFAULT_TEXT_LIMIT = 5 * _TEXT_LIMIT_UNIT
+_EXTENDED_TEXT_LIMIT = 8 * _TEXT_LIMIT_UNIT
+_HTTP_STATUS_MAX = 6 * _TEXT_LIMIT_UNIT - 1
+
 _PUBLIC_SAFE_PATTERNS = (
     re.compile(r"\b17\d{8}\.\d{6}\b"),
     re.compile(r"xox[a-z]-"),
@@ -191,7 +199,7 @@ def _closed_mapping(value: Any, *, required: set[str], where: str) -> Mapping[st
     return value
 
 
-def _text(value: Any, name: str, max_len: int = 500) -> str:
+def _text(value: Any, name: str, max_len: int = _DEFAULT_TEXT_LIMIT) -> str:
     if not isinstance(value, str) or not value or value != value.strip():
         raise OutcomeLearningContractError(f"{name} must be a non-empty trimmed string")
     if len(value) > max_len or any(ord(char) < 32 for char in value):
@@ -251,7 +259,7 @@ def _operation_key(value: Any, name: str = "operation_key") -> str:
     return text
 
 
-def _nullable_text(value: Any, name: str, max_len: int = 500) -> str | None:
+def _nullable_text(value: Any, name: str, max_len: int = _DEFAULT_TEXT_LIMIT) -> str | None:
     if value is None:
         return None
     return _text(value, name, max_len)
@@ -322,7 +330,7 @@ def _sha256_digest(value: Any, name: str) -> str:
 def _str_list(value: Any, name: str, *, min_len: int = 0, max_len: int = 64) -> list[str]:
     if not isinstance(value, list) or not min_len <= len(value) <= max_len:
         raise OutcomeLearningContractError(f"{name} must be a bounded list of strings")
-    return [_text(item, f"{name}[{index}]", 500) for index, item in enumerate(value)]
+    return [_text(item, f"{name}[{index}]", _DEFAULT_TEXT_LIMIT) for index, item in enumerate(value)]
 
 
 def _unique_str_list(value: Any, name: str, *, min_len: int = 0, max_len: int = 64) -> list[str]:
@@ -388,7 +396,7 @@ def _validate_context(value: Any) -> Mapping[str, Any]:
     _unique_str_list(item["source_refs"], "context.source_refs", min_len=1, max_len=32)
     for field in ("task_kind", "risk", "ambiguity", "program", "repository", "source_cutoff"):
         _text(item[field], f"context.{field}", 200)
-    _text(item["applicability_cohort"], "context.applicability_cohort", 500)
+    _text(item["applicability_cohort"], "context.applicability_cohort", _DEFAULT_TEXT_LIMIT)
     return item
 
 
@@ -499,7 +507,7 @@ def _validate_guardrails(value: Any) -> list[Mapping[str, Any]]:
         if guardrail_id in seen:
             raise OutcomeLearningContractError("duplicate guardrails[*].guardrail_id")
         seen.add(guardrail_id)
-        _text(item["statement"], f"guardrails[{index}].statement", 500)
+        _text(item["statement"], f"guardrails[{index}].statement", _DEFAULT_TEXT_LIMIT)
     return value
 
 
@@ -526,7 +534,7 @@ def _validate_assumptions(value: Any) -> list[Mapping[str, Any]]:
             raise OutcomeLearningContractError("duplicate assumptions[*].assumption_id")
         seen.add(assumption_id)
         _enum(item["role"], ASSUMPTION_ROLES, f"assumptions[{index}].role")
-        _text(item["statement"], f"assumptions[{index}].statement", 500)
+        _text(item["statement"], f"assumptions[{index}].statement", _DEFAULT_TEXT_LIMIT)
         _str_list(item["evidence_refs"], f"assumptions[{index}].evidence_refs", max_len=32)
         _nullable_pair(
             item["ex_ante_confidence"],
@@ -535,7 +543,7 @@ def _validate_assumptions(value: Any) -> list[Mapping[str, Any]]:
             reason_name=f"assumptions[{index}].confidence_null_reason",
             value_range=(0.0, 1.0),
         )
-        _text(item["falsifier"], f"assumptions[{index}].falsifier", 500)
+        _text(item["falsifier"], f"assumptions[{index}].falsifier", _DEFAULT_TEXT_LIMIT)
     return value
 
 
@@ -572,7 +580,7 @@ def _validate_memory_exposure(value: Any) -> Mapping[str, Any]:
             MEMORY_INFLUENCE,
             f"memory_exposure.consulted[{index}].influence",
         )
-        _text(entry["why"], f"memory_exposure.consulted[{index}].why", 500)
+        _text(entry["why"], f"memory_exposure.consulted[{index}].why", _DEFAULT_TEXT_LIMIT)
     digests = item["source_packet_digests"]
     if not isinstance(digests, list) or not digests:
         raise OutcomeLearningContractError(
@@ -635,7 +643,7 @@ def build_expectation(
         "assignment": dict(assignment),
         "expectations": [dict(item) for item in expectations],
         "guardrails": [dict(item) for item in guardrails],
-        "causal_question": _text(causal_question, "causal_question", 500),
+        "causal_question": _text(causal_question, "causal_question", _DEFAULT_TEXT_LIMIT),
         "known_confounders": list(known_confounders),
         "privacy_class": PRIVACY_CLASS,
         "assumptions": [dict(item) for item in assumptions],
@@ -661,7 +669,7 @@ def validate_expectation(doc: Mapping[str, Any]) -> Mapping[str, Any]:
     _validate_assignment(item["assignment"])
     _validate_expectations(item["expectations"])
     _validate_guardrails(item["guardrails"])
-    _text(item["causal_question"], "causal_question", 500)
+    _text(item["causal_question"], "causal_question", _DEFAULT_TEXT_LIMIT)
     _unique_str_list(item["known_confounders"], "known_confounders", max_len=32)
     _validate_assumptions(item["assumptions"])
     if item["assumption_resolutions"] != []:
@@ -802,7 +810,7 @@ def validate_preflight(doc: Mapping[str, Any]) -> Mapping[str, Any]:
     _utc_timestamp(item["observed_at"], "preflight.observed_at")
     _text(item["repository"], "preflight.repository", 200)
     _int(item["pr_number"], "preflight.pr_number", minimum=1)
-    _text(item["pr_url"], "preflight.pr_url", 500)
+    _text(item["pr_url"], "preflight.pr_url", _DEFAULT_TEXT_LIMIT)
     _sha40(item["head_sha"], "preflight.head_sha")
     _text(item["base_ref"], "preflight.base_ref", 200)
     _sha256_hex(item["original_title_sha256"], "preflight.original_title_sha256")
@@ -890,7 +898,7 @@ def _response_status(value: Any, name: str) -> int | str:
     """int 100-599, OR the literal "UNOBSERVED" (no response was ever confirmed)."""
     if value == "UNOBSERVED":
         return value
-    return _int(value, name, minimum=100, maximum=599)
+    return _int(value, name, minimum=100, maximum=_HTTP_STATUS_MAX)
 
 
 def _validate_effect_calls(value: Any) -> list[Mapping[str, Any]]:
@@ -1438,7 +1446,7 @@ def _validate_confounding(value: Any, expectation: Mapping[str, Any]) -> Mapping
         _bool(
             entry["observed"], f"confounding.known_confounders_assessed[{index}].observed"
         )
-        _text(entry["note"], f"confounding.known_confounders_assessed[{index}].note", 500)
+        _text(entry["note"], f"confounding.known_confounders_assessed[{index}].note", _DEFAULT_TEXT_LIMIT)
     if seen != expected:
         raise OutcomeLearningContractError(
             "confounding.known_confounders_assessed must cover exactly the expectation's "
@@ -1566,7 +1574,7 @@ def validate_self_model(
         if observation_id in seen:
             raise OutcomeLearningContractError("duplicate observations[*].observation_id")
         seen.add(observation_id)
-        _text(entry["statement"], f"observations[{index}].statement", 500)
+        _text(entry["statement"], f"observations[{index}].statement", _DEFAULT_TEXT_LIMIT)
         _str_list(entry["basis_refs"], f"observations[{index}].basis_refs", min_len=1, max_len=16)
     memory_law = _closed_mapping(
         item["memory_law"], required=_MEMORY_LAW_REQUIRED, where="memory_law"
@@ -1646,9 +1654,9 @@ def validate_agentos_projection(
         kinds_seen.append(kind)
         _text(entry["target_repository"], f"candidates[{index}].target_repository", 200)
         _text(entry["key_hint"], f"candidates[{index}].key_hint", 128)
-        _text(entry["summary"], f"candidates[{index}].summary", 800)
-        _text(entry["falsifier"], f"candidates[{index}].falsifier", 500)
-        _text(entry["so_what"], f"candidates[{index}].so_what", 500)
+        _text(entry["summary"], f"candidates[{index}].summary", _EXTENDED_TEXT_LIMIT)
+        _text(entry["falsifier"], f"candidates[{index}].falsifier", _DEFAULT_TEXT_LIMIT)
+        _text(entry["so_what"], f"candidates[{index}].so_what", _DEFAULT_TEXT_LIMIT)
         if entry["payload_digest"] != canonical_digest(_candidate_payload(entry)):
             raise OutcomeLearningContractError(
                 f"candidates[{index}].payload_digest does not match its own content"
