@@ -10,7 +10,7 @@ from collections import defaultdict
 from collections.abc import Mapping
 from datetime import date
 from typing import Any
-from control_plane.project_recovery_contract import TERMINAL_WAVE, TERMINAL_WORKSTREAM
+from control_plane.project_recovery_contract import TERMINAL_WAVE, TERMINAL_WORKSTREAM, workstream_wave_rows
 
 RUNTIME_UNKNOWN={"RUNTIME_STATE_UNAVAILABLE","RUNTIME_STATE_STALE"}
 PROOF_DEBT={"GITHUB_MERGE_WITH_PROOF_OPEN"}
@@ -31,7 +31,7 @@ def build_recovery_indexes(session_truth: Mapping[str,Any], agentos_state: Mappi
         wid=_ws_id(row["key"]); workstreams[wid]=row
         program=row.get("program")
         if isinstance(program,str) and program: by_program[program].append(wid)
-        for wave in row.get("waves") or []:
+        for wave in workstream_wave_rows(row, label=f"workstream[{row.get('key') or 'unknown'}]"):
             if isinstance(wave,Mapping) and isinstance(wave.get("id"),str): waves[(wid,wave["id"])]=wave
     reg=agentos_state.get("program_registry") or {}
     programs={r["key"]:r for r in reg.get("programs",[]) if isinstance(r,Mapping) and isinstance(r.get("key"),str)} if reg.get("available") is True else {}
@@ -79,7 +79,7 @@ def _nonterminal(row:Mapping[str,Any])->bool: return _ws_status(row) not in TERM
 def has_valid_wait(row: Mapping[str, Any], *, as_of: str) -> bool:
     if wait_state(row.get("wait") if isinstance(row.get("wait"), Mapping) else None, as_of=as_of) == "VALID":
         return True
-    for wave in row.get("waves") or []:
+    for wave in workstream_wave_rows(row, label=f"workstream[{row.get('key') or 'unknown'}]"):
         if isinstance(wave, Mapping) and wait_state(wave.get("wait") if isinstance(wave.get("wait"), Mapping) else None, as_of=as_of) == "VALID":
             return True
     return False
@@ -89,7 +89,7 @@ def _typed_gate(row:Mapping[str,Any], *, as_of:str) -> bool:
     # Overdue waits become CEO attention; they must not be laundered into resurrection.
     if wait_state(row.get("wait") if isinstance(row.get("wait"),Mapping) else None,as_of=as_of) in {"VALID", "OVERDUE"}: return True
     if _ws_status(row)=="blocked" or bool(row.get("blocked_by")) or isinstance(row.get("needs_ceo"),Mapping): return True
-    waves=row.get("waves") or []
+    waves=workstream_wave_rows(row, label=f"workstream[{row.get('key') or 'unknown'}]")
     for wave in waves:
         if not isinstance(wave,Mapping): continue
         if wait_state(wave.get("wait") if isinstance(wave.get("wait"),Mapping) else None,as_of=as_of) in {"VALID", "OVERDUE"}: return True
@@ -121,7 +121,7 @@ def detect_recovery_findings(session_truth: Mapping[str,Any], agentos_state: Map
             try:
                 if date.fromisoformat(needs["by_when"]) < date.fromisoformat(as_of): out.append(_finding("CEO_DECISION_OVERDUE",ws,"CEO_ATTENTION",workstream=ws,program=program,evidence=[{"by_when":needs["by_when"]}],action="Surface the bounded Chairman/Sol decision; do not dispatch worker work from prose."))
             except ValueError: pass
-        waves=row.get("waves") or []
+        waves=workstream_wave_rows(row, label=f"workstream[{row.get('key') or 'unknown'}]")
         for wave in waves:
             if not isinstance(wave, Mapping): continue
             wwait = wave.get("wait") if isinstance(wave.get("wait"), Mapping) else None

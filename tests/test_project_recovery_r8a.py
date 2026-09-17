@@ -130,3 +130,33 @@ def test_unbound_open_pr_blocks_false_resurrection():
     row=next(x for x in out if x["code"]=="RUNTIME_OWNERSHIP_UNKNOWN")
     assert row["evidence"]==[{"unbound_open_prs":1}]
     assert not any(x["code"]=="ACTIVE_WITHOUT_CARRIER" for x in out)
+
+def test_canonical_agentos_wave_detail_drives_wave_wait_classification():
+    row = ws(
+        waves={"awaiting_ci": 0, "done": 0, "dropped": 0, "in_progress": 1, "todo": 0},
+        wave_detail=[
+            {
+                "id": "W1",
+                "status": "in_progress",
+                "wait": {
+                    "kind": "calendar_window",
+                    "review_after": "2026-09-01",
+                    "condition": "review after window",
+                },
+            }
+        ],
+    )
+    assessment = assess_recovery(
+        session(),
+        agent([row], [{"key": "alpha", "lifecycle_state": "building"}]),
+        as_of="2026-09-14",
+        observed_at="2026-09-14T12:00:00Z",
+    )
+    assert any(
+        finding["code"] == "MISSED_REVIEW_GATE" and finding.get("wave") == "W1"
+        for finding in assessment["findings"]
+    )
+    assert not any(
+        finding["code"] == "ACTIVE_WITHOUT_CARRIER"
+        for finding in assessment["findings"]
+    )

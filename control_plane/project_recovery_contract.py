@@ -55,6 +55,18 @@ def _unique(rows: Any, key: str, label: str) -> None:
         if value in seen: raise ProjectRecoveryContractError(f"duplicate {label} {value}")
         seen.add(value)
 
+def workstream_wave_rows(row: Mapping[str, Any], *, label: str) -> list[Any]:
+    """Return the canonical Agent OS wave rows without reading its rollup as rows."""
+    if "wave_detail" in row:
+        waves = row.get("wave_detail")
+        if not isinstance(waves, list):
+            raise ProjectRecoveryContractError(f"{label}.wave_detail must be a list")
+        return waves
+    waves = row.get("waves") or []
+    if not isinstance(waves, list):
+        raise ProjectRecoveryContractError(f"{label}.wave_detail must be a list")
+    return waves
+
 def validate_inputs(session_truth: Mapping[str,Any], agentos_state: Mapping[str,Any], *, as_of: str) -> tuple[dict[str,Any],dict[str,Any],str]:
     if not isinstance(session_truth, Mapping) or session_truth.get("schema") != RECEIPT_SCHEMA: raise ProjectRecoveryContractError("session_truth schema is incompatible")
     if not isinstance(session_truth.get("scope"), Mapping): raise ProjectRecoveryContractError("session_truth.scope must be an object")
@@ -68,8 +80,7 @@ def validate_inputs(session_truth: Mapping[str,Any], agentos_state: Mapping[str,
     _unique(rows, "key", "workstream")
     for index, row in enumerate(rows):
         _validate_wait(row.get("wait"), f"workstream[{index}].wait")
-        waves = row.get("waves") or []
-        if not isinstance(waves, list): raise ProjectRecoveryContractError(f"workstream[{index}].waves must be a list")
+        waves = workstream_wave_rows(row, label=f"workstream[{index}]")
         for wave_index, wave in enumerate(waves):
             if not isinstance(wave, Mapping): raise ProjectRecoveryContractError(f"workstream[{index}].waves rows must be objects")
             _validate_wait(wave.get("wait"), f"workstream[{index}].waves[{wave_index}].wait")
