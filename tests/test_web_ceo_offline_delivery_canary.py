@@ -781,6 +781,43 @@ def _append_matching_wake(
     repo.append_record(resolved_record(obligation, resolution))
 
 
+def test_v2_reader_uses_exact_event_scopes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime, root_id, *_args, release_sha = _offline_delivery_runtime(
+        tmp_path / "runtime"
+    )
+    root = runtime.jobs.get_job(root_id)
+    assert root is not None and root.current_attempt_id is not None
+    original = runtime.events.list_events
+    calls: list[dict[str, str]] = []
+
+    def recording_list_events(**kwargs):
+        calls.append(dict(kwargs))
+        return original(**kwargs)
+
+    monkeypatch.setattr(runtime.events, "list_events", recording_list_events)
+    receipt = build_receipt(
+        runtime,
+        root_job_id=root_id,
+        expected_release_sha=release_sha,
+        observed_at="2026-09-14T01:02:03Z",
+    )
+
+    assert receipt["root_job_id"] == root_id
+    assert {
+        "job_id": root_id,
+        "aggregate_type": "job",
+        "aggregate_id": root_id,
+    } in calls
+    assert {
+        "job_id": root_id,
+        "attempt_id": root.current_attempt_id,
+        "aggregate_type": "wake",
+    } in calls
+
+
 def test_v2_receipt_keeps_read_time_out_of_unmeasured_intervals(tmp_path: Path) -> None:
     runtime, root_id, *_args, release_sha = _offline_delivery_runtime(
         tmp_path / "runtime"

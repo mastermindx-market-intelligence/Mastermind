@@ -103,10 +103,12 @@ def _wake_projection(
     try:
         request_events = [
             event
-            for event in runtime.events.list_events(job_id=root_job_id)
-            if event.aggregate_type == "wake"
-            and event.event_type == LedgerPhase.WAKE_REQUESTED.value
-            and event.attempt_id == attempt_id
+            for event in runtime.events.list_events(
+                job_id=root_job_id,
+                attempt_id=attempt_id,
+                aggregate_type="wake",
+            )
+            if event.event_type == LedgerPhase.WAKE_REQUESTED.value
         ]
         for event in request_events:
             persisted = repository.get_by_command_id(event.command_id)
@@ -216,7 +218,11 @@ def build_receipt(
 
     creation_events = [
         event
-        for event in runtime.events.list_events(job_id=root_job_id)
+        for event in runtime.events.list_events(
+            job_id=root_job_id,
+            aggregate_type="job",
+            aggregate_id=root_job_id,
+        )
         if event.event_type == "JOB_CREATED"
     ]
     if len(creation_events) != 1:
