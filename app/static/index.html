@@ -5607,8 +5607,12 @@ function renderDeskPage() {
 function renderDeskScheduler() {
   var host = E('desk-scheduler'); if (!host) return;
   var d = _deskData.scheduler;
+  if (d && (d.scheduler_status === 'unavailable' || d.status === 'unavailable')) {
+    host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">!</span>Scheduler health unavailable — this read did not complete.</div>';
+    return;
+  }
   if (!d || !(d.jobs || []).length) {
-    host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">⊙</span>Scheduler not available (apscheduler absent or no run events yet).</div>';
+    host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">○</span>No scheduler jobs reported.</div>';
     return;
   }
   var rows = '';
