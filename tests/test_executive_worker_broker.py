@@ -264,6 +264,13 @@ def _reviewed_codex_kwargs(root: Path) -> dict:
     )
     codex_home = root / "codex-home"
     codex_home.mkdir(mode=0o700, exist_ok=True)
+    # Temporary fixture prerequisite while the incumbent Codex owner (#586)
+    # owns the auth-free common-validation correction. This is synthetic test
+    # state only; PF1 does not treat it as native-Claude production readiness.
+    auth = codex_home / "auth.json"
+    if not auth.exists():
+        auth.write_text("{}\n", encoding="utf-8")
+        auth.chmod(0o600)
     return {
         "binary_path": binary,
         "codex_home": codex_home,
