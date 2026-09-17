@@ -30,6 +30,12 @@ def _resolve_target(wrapper: Path, target_text: str) -> Path:
         target = REPO_ROOT / target_text.removeprefix("$RELEASE_ROOT/")
     elif target_text.startswith("$RELEASE_STAGE/"):
         target = REPO_ROOT / target_text.removeprefix("$RELEASE_STAGE/")
+    elif target_text.startswith("$STAGING/"):
+        # install.sh builds the release manifest inside the staging directory,
+        # before staging is published as $RELEASE_ROOT, so that a release
+        # directory without its manifest can never exist. Staging holds the same
+        # extracted tree as $RELEASE_ROOT and resolves the same way.
+        target = REPO_ROOT / target_text.removeprefix("$STAGING/")
     elif target_text.startswith("$release/"):
         target = REPO_ROOT / target_text.removeprefix("$release/")
     else:
