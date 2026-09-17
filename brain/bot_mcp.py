@@ -149,6 +149,29 @@ def _stock_price(t: str):
 
 
 # ---------------- READ tools ----------------
+@tool(
+    "get_rates_evidence",
+    "Dated US nominal Treasury evidence: maturity-specific levels, basis-point changes, "
+    "and source-clock limitations. Context only, not live yield ticks, real-rate timing, "
+    "policy surprises, or buy/sell signals.",
+    {},
+)
+async def get_rates_evidence(args):
+    """Read the canonical rates projection without publishing or granting authority."""
+    from brain import decision_context as _dc
+    from brain.rates_evidence import project_rates
+
+    try:
+        context = _dc.build(write=False)
+        rates = context["rates_evidence"]
+        if not isinstance(rates, dict) or rates.get("schema") != "decision_context.rates_evidence.v1":
+            raise ValueError("unexpected rates projection contract")
+    except Exception:  # additive read: never disclose backend exception contents
+        rates = project_rates(None)
+        rates["issues"].append("decision_context_read_failed")
+    return _json(rates)
+
+
 @tool("get_regime", "Current US macro regime read (quad, growth/inflation scores, liquidity).", {})
 async def get_regime(args):
     d = _read_json(_V / "data" / "regime" / "latest.json") or {}
@@ -785,7 +808,7 @@ async def propose_portfolio_action(args):
     )
 
 
-_READ = [get_regime, get_overnight_tape, get_themes, get_standouts, get_portfolio, get_decision_matrix, get_divergences,
+_READ = [get_regime, get_rates_evidence, get_overnight_tape, get_themes, get_standouts, get_portfolio, get_decision_matrix, get_divergences,
          get_altdata, get_news, get_intelligence, get_intel_hub, get_daily_briefing, get_intake_candidates,
          get_ticker_package, get_fundamentals, get_options, get_anticipation, get_quote,
          evaluate_gate, read_signal]

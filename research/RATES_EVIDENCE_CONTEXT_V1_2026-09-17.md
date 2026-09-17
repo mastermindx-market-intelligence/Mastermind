@@ -19,3 +19,14 @@ Task 3: run focused and adjacent decision-context tests; exercise actual pinned 
 Task 4: publish scoped source and evidence to a draft PR; obtain independent exact-head review and required concluded checks before release. No autonomous deployment or source-authority promotion. Persist the delivery frontier, exact branch/head and remaining upstream data requirements.
 
 Direct execution rationale: CRITICAL_PATH_SHORTCUT; this bounded existing-consumer integration is independent of the researchers and does not select a trading model.
+
+
+## Actual read consumer amendment
+
+The existing `decision_context.v2` projection is now accompanied by one additive `get_rates_evidence` read in the existing `brain/bot_mcp.py` server. This is the concrete model-facing read path, not a new server, generic endpoint, registry, publication writer, lifecycle, or trading engine. It calls the canonical `decision_context.build(write=False)` and returns only the bounded rates projection. It accepts no source path, account, provider, policy or trade parameters.
+
+The earlier prompt-summary preservation test was insufficient to establish actual seat visibility: `get_regime` deliberately narrows its payload, and PM prompt rendering selects named sections. This amendment closes that information-loss gap for the existing read-tool surface, without expanding the portfolio sizing prompt or changing a recommendation. Prophet/Terminal UI and strategy integration remain separate unproven steps.
+
+Failure behavior is closed unavailable evidence with no raw exception detail. Per-maturity dates, missingness, percent/basis-point units, observed-interval horizons, New York observation date conventions, false replay certification and all-false action authority survive the SDK memory transport. The read never writes `data/decision_context`, and absence never becomes flat rates or calm risk.
+
+Compatibility: exact #495 head `9dba2614b8394b75f23e8be77cf08bf21072dece` modifies the existing serializer helpers, while exact #772 head `cd34f2a9c1e94308e73cd86097037e3c131143f7` modifies `get_overnight_tape`. Our only named tool-server changes are the new function and `_READ` registration. The immutable sibling changes are AST-member disjoint. The #495 proposed serializer also round-trips the actual rates payload without alteration in an isolated in-memory test. This is compatibility evidence, not acceptance, custody transfer, or release of either sibling.
