@@ -16,7 +16,11 @@ _RELEASE_ROOT = Path(__file__).resolve().parents[2]
 if os.fspath(_RELEASE_ROOT) not in sys.path:
     sys.path.insert(0, os.fspath(_RELEASE_ROOT))
 
-from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
+from control_plane.fs_security import (
+    FilesystemSecurityError,
+    has_macos_acl,
+    has_macos_link_acl,
+)
 
 
 SCHEMA_VERSION = "mastermind.executive_release_manifest/v1"
@@ -32,6 +36,17 @@ def _has_acl(path: Path) -> bool:
         return has_macos_acl(path)
     except FilesystemSecurityError:
         raise ReleaseManifestError(f"cannot inspect release ACL: {path.name}")
+
+
+def _has_link_acl(path: Path) -> bool:
+    # A symbolic link cannot be opened with O_NOFOLLOW, so the descriptor-based
+    # observer used for files and directories can only fail closed on one. The
+    # link still carries its own ACL namespace, so it is observed rather than
+    # skipped.
+    try:
+        return has_macos_link_acl(path)
+    except FilesystemSecurityError:
+        raise ReleaseManifestError(f"cannot inspect release symlink ACL: {path.name}")
 
 
 def _validate_owned_info(info: os.stat_result, *, label: str) -> None:
@@ -75,15 +90,21 @@ def _entries(root: Path) -> list[dict[str, Any]]:
                 continue
             info = path.lstat()
             _validate_owned_info(info, label=relative)
-            if _has_acl(path):
-                raise ReleaseManifestError(f"release object has a filesystem ACL: {relative}")
             common = {
                 "path": relative,
                 "mode": stat.S_IMODE(info.st_mode),
                 "uid": info.st_uid,
                 "gid": info.st_gid,
             }
+            # The object type decides which ACL observer applies, so it is
+            # resolved before any ACL inspection. Routing a symbolic link into
+            # the descriptor-based observer made every release carrying one
+            # unbuildable.
             if stat.S_ISLNK(info.st_mode):
+                if _has_link_acl(path):
+                    raise ReleaseManifestError(
+                        f"release symlink has a filesystem ACL: {relative}"
+                    )
                 target = os.readlink(path)
                 if os.path.isabs(target):
                     raise ReleaseManifestError(f"absolute release symlink is forbidden: {relative}")
@@ -96,8 +117,16 @@ def _entries(root: Path) -> list[dict[str, Any]]:
                     ) from exc
                 result.append({**common, "type": "symlink", "target": target})
             elif stat.S_ISDIR(info.st_mode):
+                if _has_acl(path):
+                    raise ReleaseManifestError(
+                        f"release object has a filesystem ACL: {relative}"
+                    )
                 result.append({**common, "type": "directory"})
             elif stat.S_ISREG(info.st_mode):
+                if _has_acl(path):
+                    raise ReleaseManifestError(
+                        f"release object has a filesystem ACL: {relative}"
+                    )
                 result.append(
                     {
                         **common,

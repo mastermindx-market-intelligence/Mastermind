@@ -56,6 +56,26 @@ def _acl_free(acl: int) -> int:
     return acl_free(acl)
 
 
+def _bind_macos_link_acl_function() -> Any:
+    # Bound separately from the descriptor observers so a platform without the
+    # non-portable link accessor degrades only the symbolic-link observation
+    # instead of failing every existing file and directory caller.
+    libc = ctypes.CDLL(None, use_errno=True)
+    try:
+        acl_get_link_np = libc.acl_get_link_np
+    except AttributeError as exc:
+        raise FilesystemSecurityError("macOS link ACL observer is unavailable") from exc
+    acl_get_link_np.argtypes = [ctypes.c_char_p, ctypes.c_int]
+    acl_get_link_np.restype = ctypes.c_void_p
+    return acl_get_link_np
+
+
+def _acl_get_link(path: bytes) -> int | None:
+    acl_get_link_np = _bind_macos_link_acl_function()
+    ctypes.set_errno(0)
+    return acl_get_link_np(path, ACL_TYPE_EXTENDED)
+
+
 def _identity(info: os.stat_result) -> tuple[int, int]:
     return info.st_dev, info.st_ino
 
@@ -145,4 +165,76 @@ def has_macos_acl(
                 raise FilesystemSecurityError("macOS ACL descriptor close failed") from exc
 
 
-__all__ = ["FilesystemSecurityError", "has_macos_acl"]
+def has_macos_link_acl(
+    path: Path | str,
+    *,
+    expected_identity: os.stat_result | None = None,
+) -> bool:
+    """Return whether a Darwin symbolic link has ACL_TYPE_EXTENDED entries.
+
+    ``has_macos_acl`` opens its target with ``O_NOFOLLOW``, which by definition
+    cannot open a symbolic link, so it can only ever fail closed on one. macOS
+    nevertheless allows an ACL to be attached to the link itself (``chmod -h
+    +a``), and refusing to look is not the same as proving none is present.
+    This observes the link with ``acl_get_link_np``, which never follows, and
+    brackets the observation with ``lstat`` so a path swapped underneath the
+    call fails closed instead of reporting another object's ACL.
+    """
+
+    if sys.platform != "darwin":
+        return False
+
+    try:
+        before = os.lstat(path) if expected_identity is None else expected_identity
+    except OSError as exc:
+        raise FilesystemSecurityError(
+            f"macOS link ACL observation target is unavailable: errno={exc.errno}"
+        ) from exc
+    if not stat.S_ISLNK(before.st_mode):
+        raise FilesystemSecurityError("macOS link ACL object is not a symbolic link")
+
+    acl = _acl_get_link(os.fsencode(path))
+    acl_error_number = ctypes.get_errno()
+
+    try:
+        after = os.lstat(path)
+    except OSError as exc:
+        if acl:
+            _acl_free(acl)
+        raise FilesystemSecurityError(
+            f"macOS link ACL observation target is unavailable: errno={exc.errno}"
+        ) from exc
+    if not stat.S_ISLNK(after.st_mode) or _identity(after) != _identity(before):
+        if acl:
+            _acl_free(acl)
+        raise FilesystemSecurityError("macOS link ACL observation identity changed")
+
+    if not acl:
+        if acl_error_number == errno.ENOENT:
+            return False
+        raise FilesystemSecurityError(
+            f"macOS link ACL observation failed: errno={acl_error_number}"
+        )
+
+    entry = ctypes.c_void_p()
+    try:
+        result = _acl_get_entry(acl, ACL_FIRST_ENTRY, ctypes.byref(entry))
+    except BaseException:
+        _acl_free(acl)
+        raise
+    enumeration_error_number = ctypes.get_errno()
+    try:
+        if result != 0:
+            raise FilesystemSecurityError(
+                f"macOS link ACL enumeration failed: errno={enumeration_error_number}"
+            )
+        if not getattr(entry, "_obj", entry):
+            raise FilesystemSecurityError(
+                "macOS link ACL object has no enumerable entries"
+            )
+        return True
+    finally:
+        _acl_free(acl)
+
+
+__all__ = ["FilesystemSecurityError", "has_macos_acl", "has_macos_link_acl"]
