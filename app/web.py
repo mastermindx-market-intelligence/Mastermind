@@ -2887,7 +2887,15 @@ def api_mastermind_ai() -> JSONResponse:
         payload["legacy_route_prefix"] = "/api/mastermind_ai"
         return JSONResponse(payload)
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"schema": "mastermind_ai_status.v1", "error": str(exc)})
+        _log.warning("mastermind portfolio loop status read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "schema": "mastermind_ai_status.v1",
+            "read_status": "unavailable",
+            "product_scope": "mastermind_portfolio_loop",
+            "public_chatbot_separate": True,
+            "legacy_route_prefix": "/api/mastermind_ai",
+            "error": "mastermind_ai_status_unavailable",
+        })
 
 
 @router.get("/api/mastermind_ai/loop_log")
@@ -2900,7 +2908,13 @@ def api_mastermind_ai_loop_log(n: int = 50) -> JSONResponse:
         return JSONResponse({"loop_log": mastermind_ai.loop_log(limit=n),
                              "reviews": mastermind_ai.reviews(limit=12)})
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"loop_log": [], "reviews": [], "error": str(exc)})
+        _log.warning("mastermind portfolio loop log read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "loop_log": None,
+            "reviews": None,
+            "error": "mastermind_ai_loop_log_unavailable",
+        })
 
 
 @router.get("/api/mastermind_ai/improvements")
@@ -2912,8 +2926,15 @@ def api_mastermind_ai_improvements() -> JSONResponse:
         from brain import mastermind_ai
         return JSONResponse(mastermind_ai.improvements())
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"pins": [], "agenda_top": [], "lessons_by_taxonomy": {},
-                             "error": str(exc)})
+        _log.warning("mastermind portfolio improvements read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "pins": None,
+            "self_tune": None,
+            "agenda_top": None,
+            "lessons_by_taxonomy": None,
+            "error": "mastermind_ai_improvements_unavailable",
+        })
 
 
 @router.get("/api/mastermind_ai/reflection")
@@ -2926,7 +2947,12 @@ def api_mastermind_ai_reflection() -> JSONResponse:
         return JSONResponse(nw_reflection.latest() or {"schema": nw_reflection.SCHEMA,
                                                        "state": "absent"})
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"state": "absent", "error": str(exc)})
+        _log.warning("mastermind portfolio reflection read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "state": "unavailable",
+            "error": "mastermind_ai_reflection_unavailable",
+        })
 
 
 class _MMAISettingsReq(BaseModel):
