@@ -25,6 +25,7 @@ MAX_PREIMAGE_BYTES = 1_048_576
 MAX_TOTAL_PREIMAGE_BYTES = 4_194_304
 
 _OPERATION_RE = re.compile(r"\A[a-z0-9][a-z0-9-]{0,127}\Z")
+_CLEANUP_NONCE_RE = re.compile(r"\A[0-9a-f]{32}\Z")
 
 _PRIVATE_DIRECTORY_MODE = stat.S_IRWXU
 _PERMISSION_BITS_MASK = stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO
@@ -73,6 +74,7 @@ class PreparedDeployment:
     expected_gid: int
     preimages: tuple[ArtifactPreimage, ...]
     directory_preimages: tuple[DirectoryPreimage, ...]
+    cleanup_nonce: str
     prepared_digest: str
     _state: str = dataclasses.field(default="PREPARED", repr=False)
 
@@ -114,6 +116,12 @@ def _canonical_bytes(value: object) -> bytes:
 def _operation_key(value: Any) -> str:
     if not isinstance(value, str) or _OPERATION_RE.fullmatch(value) is None:
         raise WebSolDeploymentApplyError("OPERATION_INVALID")
+    return value
+
+
+def _cleanup_nonce(value: Any) -> str:
+    if type(value) is not str or _CLEANUP_NONCE_RE.fullmatch(value) is None:
+        raise WebSolDeploymentApplyError("PREPARED_INTEGRITY_MISMATCH")
     return value
 
 
@@ -293,10 +301,12 @@ def _prepared_digest_from_state(
     plan: deployment.DeploymentPlan,
     expected_uid: int,
     expected_gid: int,
+    cleanup_nonce: str,
     preimages: tuple[ArtifactPreimage, ...] | list[ArtifactPreimage],
     directory_preimages: tuple[DirectoryPreimage, ...] | list[DirectoryPreimage],
 ) -> str:
     try:
+        nonce = _cleanup_nonce(cleanup_nonce)
         plan_rows = _plan_rows(bundle, plan)
         artifacts = {str(row.destination): row for row in bundle.artifacts}
         target_rows: list[dict[str, object]] = []
@@ -346,6 +356,7 @@ def _prepared_digest_from_state(
                 "bundle_digest": bundle.bundle_digest,
                 "expected_uid": expected_uid,
                 "expected_gid": expected_gid,
+                "cleanup_nonce": nonce,
                 "directories": directory_rows,
                 "targets": target_rows,
             }
@@ -369,6 +380,10 @@ def prepare_deployment(
     if type(expected_gid) is not int or expected_gid < 0:
         raise WebSolDeploymentApplyError("OWNER_INVALID")
     operation = _operation_key(operation_key)
+    try:
+        cleanup_nonce = _cleanup_nonce(os.urandom(16).hex())
+    except OSError as exc:
+        raise WebSolDeploymentApplyError("CLEANUP_NONCE_UNAVAILABLE") from exc
     root = _install_root(install_root, uid=expected_uid, gid=expected_gid)
     rows = _plan_rows(bundle, plan)
     artifacts = sorted(bundle.artifacts, key=lambda row: str(row.destination))
@@ -392,6 +407,7 @@ def prepare_deployment(
         expected_gid=expected_gid,
         preimages=(),
         directory_preimages=directory_preimages,
+        cleanup_nonce=cleanup_nonce,
         prepared_digest="",
     )
     directories_by_path = {row.path: row for row in directory_preimages}
@@ -486,6 +502,7 @@ def prepare_deployment(
         plan=plan,
         expected_uid=expected_uid,
         expected_gid=expected_gid,
+        cleanup_nonce=cleanup_nonce,
         preimages=preimages,
         directory_preimages=directory_preimages,
     )
@@ -498,6 +515,7 @@ def prepare_deployment(
         expected_gid=expected_gid,
         preimages=tuple(preimages),
         directory_preimages=directory_preimages,
+        cleanup_nonce=cleanup_nonce,
         prepared_digest=prepared_digest,
     )
 
@@ -781,6 +799,7 @@ def _validate_prepared_digest(prepared: PreparedDeployment) -> None:
             plan=prepared.plan,
             expected_uid=prepared.expected_uid,
             expected_gid=prepared.expected_gid,
+            cleanup_nonce=prepared.cleanup_nonce,
             preimages=prepared.preimages,
             directory_preimages=prepared.directory_preimages,
         )
@@ -947,6 +966,14 @@ def _remove_owned_partial_temporary_at(
 ) -> None:
     try:
         info = os.stat(name, dir_fd=parent_descriptor, follow_symlinks=False)
+        identity = (
+            info.st_dev,
+            info.st_ino,
+            info.st_mode,
+            info.st_nlink,
+            info.st_uid,
+            info.st_gid,
+        )
         if (
             stat.S_ISLNK(info.st_mode)
             or not stat.S_ISREG(info.st_mode)
@@ -956,8 +983,16 @@ def _remove_owned_partial_temporary_at(
             or info.st_gid != prepared.expected_gid
         ):
             raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN")
+        if not _named_entry_identity_matches(
+            parent_descriptor,
+            name,
+            identity,
+        ):
+            raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN")
         os.unlink(name, dir_fd=parent_descriptor)
         os.fsync(parent_descriptor)
+        if not _named_entry_absent(parent_descriptor, name):
+            raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN")
     except WebSolDeploymentApplyError:
         raise
     except OSError as exc:
@@ -1022,10 +1057,11 @@ def _cleanup_quarantine_name(
     name: str,
     prepared: PreparedDeployment,
 ) -> str:
-    if not name or name in {".", ".."} or "/" in name or "\\x00" in name:
+    if not name or name in {".", ".."} or "/" in name or "\x00" in name:
         raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN")
+    nonce = _cleanup_nonce(prepared.cleanup_nonce)
     digest = hashlib.sha256(
-        f"{prepared.prepared_digest}\\0{name}".encode("utf-8")
+        f"{nonce}\0{name}".encode("utf-8")
     ).hexdigest()[:24]
     return f".mmx-clean-{digest}.tmp"
 
@@ -1075,16 +1111,29 @@ def _cleanup_exact_temporary_at(
     content: bytes,
     mode: int,
     prepared: PreparedDeployment,
+    *,
+    effect_unknown_code: str = "APPLY_EFFECT_UNKNOWN",
 ) -> bool:
-    """Remove one exact owned temporary without unlinking a substituted name."""
+    """Quarantine one owned temporary and refuse detected pathname substitution.
 
+    The final removal is necessarily pathname-based on supported Darwin/Linux
+    APIs, so an identity check is performed immediately before unlink and the
+    private quarantine name is transaction-randomized to narrow the residual
+    same-uid race.
+    """
+
+    if effect_unknown_code not in {
+        "APPLY_EFFECT_UNKNOWN",
+        "ROLLBACK_EFFECT_UNKNOWN",
+    }:
+        raise WebSolDeploymentApplyError("PREPARED_INTEGRITY_MISMATCH")
     quarantine_name = _cleanup_quarantine_name(name, prepared)
     source_absent = _named_entry_absent(parent_descriptor, name)
     quarantine_absent = _named_entry_absent(parent_descriptor, quarantine_name)
     if source_absent and quarantine_absent:
         return False
     if not source_absent and not quarantine_absent:
-        raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN")
+        raise WebSolDeploymentApplyError(effect_unknown_code)
 
     if not source_absent:
         try:
@@ -1105,10 +1154,16 @@ def _cleanup_exact_temporary_at(
                     prepared,
                 )
             ):
-                raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN") from exc
+                raise WebSolDeploymentApplyError(effect_unknown_code) from exc
 
     if not _named_entry_absent(parent_descriptor, name):
-        raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN")
+        raise WebSolDeploymentApplyError(effect_unknown_code)
+    try:
+        quarantine_identity = _named_entry_identity(
+            parent_descriptor, quarantine_name
+        )
+    except OSError as exc:
+        raise WebSolDeploymentApplyError(effect_unknown_code) from exc
     if not _named_file_matches(
         parent_descriptor,
         quarantine_name,
@@ -1120,9 +1175,25 @@ def _cleanup_exact_temporary_at(
             parent_descriptor,
             quarantine_name,
             name,
-            effect_unknown_code="APPLY_EFFECT_UNKNOWN",
+            effect_unknown_code=effect_unknown_code,
         )
-        raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN")
+        raise WebSolDeploymentApplyError(effect_unknown_code)
+    if not _named_entry_identity_matches(
+        parent_descriptor,
+        quarantine_name,
+        quarantine_identity,
+    ):
+        if (
+            _named_entry_absent(parent_descriptor, name)
+            and not _named_entry_absent(parent_descriptor, quarantine_name)
+        ):
+            _restore_quarantined_entry_at(
+                parent_descriptor,
+                quarantine_name,
+                name,
+                effect_unknown_code=effect_unknown_code,
+            )
+        raise WebSolDeploymentApplyError(effect_unknown_code)
 
     try:
         os.unlink(quarantine_name, dir_fd=parent_descriptor)
@@ -1132,27 +1203,19 @@ def _cleanup_exact_temporary_at(
             _named_entry_absent(parent_descriptor, name)
             and _named_entry_absent(parent_descriptor, quarantine_name)
         ):
-            raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN") from exc
+            raise WebSolDeploymentApplyError(effect_unknown_code) from exc
     if not (
         _named_entry_absent(parent_descriptor, name)
         and _named_entry_absent(parent_descriptor, quarantine_name)
     ):
-        raise WebSolDeploymentApplyError("APPLY_EFFECT_UNKNOWN")
+        raise WebSolDeploymentApplyError(effect_unknown_code)
     return True
 
 
-def _atomic_rename_at(
-    parent_descriptor: int,
-    source_name: str,
-    target_name: str,
+def _atomic_rename_binding(
     *,
     exchange: bool,
-) -> None:
-    """Atomically exchange two names or rename without replacing a target."""
-
-    for name in (source_name, target_name):
-        if not name or name in {".", ".."} or "/" in name or "\x00" in name:
-            raise WebSolDeploymentApplyError("ATOMIC_RENAME_INVALID")
+) -> tuple[Any, int]:
     try:
         libc = ctypes.CDLL(None, use_errno=True)
         if sys.platform == "darwin":
@@ -1173,6 +1236,27 @@ def _atomic_rename_at(
         ctypes.c_uint,
     ]
     rename.restype = ctypes.c_int
+    return rename, flags
+
+
+def _require_atomic_rename_support() -> None:
+    _atomic_rename_binding(exchange=False)
+    _atomic_rename_binding(exchange=True)
+
+
+def _atomic_rename_at(
+    parent_descriptor: int,
+    source_name: str,
+    target_name: str,
+    *,
+    exchange: bool,
+) -> None:
+    """Atomically exchange two names or rename without replacing a target."""
+
+    for name in (source_name, target_name):
+        if not name or name in {".", ".."} or "/" in name or "\x00" in name:
+            raise WebSolDeploymentApplyError("ATOMIC_RENAME_INVALID")
+    rename, flags = _atomic_rename_binding(exchange=exchange)
     ctypes.set_errno(0)
     if rename(
         parent_descriptor,
@@ -1361,6 +1445,7 @@ def _exchange_exact_target_at(
                 temporary_content,
                 temporary_mode,
                 prepared,
+                effect_unknown_code=effect_unknown_code,
             )
             raise
         elif _named_file_matches(
@@ -1376,6 +1461,7 @@ def _exchange_exact_target_at(
                 temporary_content,
                 temporary_mode,
                 prepared,
+                effect_unknown_code=effect_unknown_code,
             )
             raise WebSolDeploymentApplyError(conflict_code) from exc
         else:
@@ -1402,6 +1488,7 @@ def _exchange_exact_target_at(
             expected_target_content,
             expected_target_mode,
             prepared,
+            effect_unknown_code=effect_unknown_code,
         )
         if not removed:
             raise WebSolDeploymentApplyError(effect_unknown_code)
@@ -1458,6 +1545,7 @@ def _exchange_exact_target_at(
         temporary_content,
         temporary_mode,
         prepared,
+        effect_unknown_code=effect_unknown_code,
     )
     if not removed:
         raise WebSolDeploymentApplyError(effect_unknown_code)
@@ -1498,6 +1586,7 @@ def apply_deployment(prepared: PreparedDeployment) -> AppliedDeployment:
     """Apply one prepared bundle exactly once and verify every postimage."""
 
     _assert_prepared(prepared)
+    _require_atomic_rename_support()
     created_directories: list[Path] = []
     artifacts = {
         str(item.destination): item for item in prepared.bundle.artifacts
@@ -1697,6 +1786,7 @@ def _rollback_absent_target_at(
             artifact.content,
             artifact.mode,
             prepared,
+            effect_unknown_code="ROLLBACK_EFFECT_UNKNOWN",
         )
         if not removed:
             raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN")
@@ -1827,14 +1917,21 @@ def _restore_file(
 def _remove_created_directory(
     directory: Path,
     prepared: PreparedDeployment,
+    *,
+    effect_unknown_code: str = "ROLLBACK_EFFECT_UNKNOWN",
 ) -> None:
+    if effect_unknown_code not in {
+        "APPLY_EFFECT_UNKNOWN",
+        "ROLLBACK_EFFECT_UNKNOWN",
+    }:
+        raise WebSolDeploymentApplyError("PREPARED_INTEGRITY_MISMATCH")
     parent_descriptor = _open_verified_directory(directory.parent, prepared)
     child_descriptor = -1
     try:
         if not _created_directory_matches(
             parent_descriptor, directory.name, prepared
         ):
-            raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN")
+            raise WebSolDeploymentApplyError(effect_unknown_code)
         try:
             child_descriptor = os.open(
                 directory.name,
@@ -1842,34 +1939,50 @@ def _remove_created_directory(
                 dir_fd=parent_descriptor,
             )
         except OSError as exc:
-            raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN") from exc
+            raise WebSolDeploymentApplyError(effect_unknown_code) from exc
         if not _directory_binding_current(
             child_descriptor, directory, prepared
         ):
-            raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN")
+            raise WebSolDeploymentApplyError(effect_unknown_code)
+        opened = os.fstat(child_descriptor)
+        identity = (
+            opened.st_dev,
+            opened.st_ino,
+            opened.st_mode,
+            opened.st_nlink,
+            opened.st_uid,
+            opened.st_gid,
+        )
         try:
             if os.listdir(child_descriptor):
-                raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN")
+                raise WebSolDeploymentApplyError(effect_unknown_code)
         except OSError as exc:
-            raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN") from exc
+            raise WebSolDeploymentApplyError(effect_unknown_code) from exc
+        if not (
+            _named_entry_identity_matches(
+                parent_descriptor, directory.name, identity
+            )
+            and _directory_binding_current(
+                child_descriptor, directory, prepared
+            )
+        ):
+            raise WebSolDeploymentApplyError(effect_unknown_code)
         try:
             os.rmdir(directory.name, dir_fd=parent_descriptor)
             os.fsync(parent_descriptor)
         except OSError as exc:
             if not _named_entry_absent(parent_descriptor, directory.name):
-                raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN") from exc
+                raise WebSolDeploymentApplyError(effect_unknown_code) from exc
             try:
                 os.fsync(parent_descriptor)
             except OSError as fsync_exc:
-                raise WebSolDeploymentApplyError(
-                    "ROLLBACK_EFFECT_UNKNOWN"
-                ) from fsync_exc
+                raise WebSolDeploymentApplyError(effect_unknown_code) from fsync_exc
         if not _named_entry_absent(parent_descriptor, directory.name):
-            raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN")
+            raise WebSolDeploymentApplyError(effect_unknown_code)
         if not _directory_binding_current(
             parent_descriptor, directory.parent, prepared
         ):
-            raise WebSolDeploymentApplyError("ROLLBACK_EFFECT_UNKNOWN")
+            raise WebSolDeploymentApplyError(effect_unknown_code)
     finally:
         if child_descriptor >= 0:
             os.close(child_descriptor)
@@ -1932,7 +2045,11 @@ def _abort_partial_apply(
             key=lambda path: (len(path.parts), str(path)),
             reverse=True,
         ):
-            _remove_created_directory(directory, prepared)
+            _remove_created_directory(
+                directory,
+                prepared,
+                effect_unknown_code="APPLY_EFFECT_UNKNOWN",
+            )
         if (
             any(
                 row.path not in preserved

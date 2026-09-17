@@ -998,6 +998,75 @@ def test_parent_symlink_swap_at_replace_never_writes_outside_install_root(
     assert attack_temp.read_bytes() == first.content
 
 
+
+def test_rollback_present_exchange_cleanup_uses_rollback_effect_code(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle, install_root = _bundle(tmp_path)
+    artifact = sorted(bundle.artifacts, key=lambda row: str(row.destination))[1]
+    artifact.destination.parent.mkdir(parents=True, mode=0o700)
+    prior = b"exact-prior-for-rollback-cleanup-code"
+    artifact.destination.write_bytes(prior)
+    artifact.destination.chmod(0o640)
+    prepared = applier.prepare_deployment(
+        bundle,
+        deployment.plan_deployment(bundle, {str(artifact.destination): prior}),
+        install_root=install_root,
+        expected_uid=install_root.stat().st_uid,
+        expected_gid=install_root.stat().st_gid,
+        operation_key="web-sol-install1-transactional-applier-source-20260916-sol-001",
+    )
+    applier.apply_deployment(prepared)
+    row = next(item for item in prepared.preimages if item.path == artifact.destination)
+    assert row.prior_bytes is not None and row.prior_mode is not None
+    rollback_name = (
+        f".{artifact.destination.name}.mmx-"
+        f"{prepared.prepared_digest[:16]}.rollback.tmp"
+    )
+    parent_descriptor = applier._open_verified_directory(
+        artifact.destination.parent,
+        prepared,
+    )
+    original_unlink = applier.os.unlink
+    injected = False
+
+    try:
+        applier._write_exact_temporary_at(
+            parent_descriptor,
+            rollback_name,
+            row.prior_bytes,
+            row.prior_mode,
+            prepared,
+        )
+
+        def fail_quarantine_unlink(name, *args, **kwargs):
+            nonlocal injected
+            if str(name).startswith(".mmx-clean-"):
+                injected = True
+                raise OSError("injected rollback cleanup failure")
+            return original_unlink(name, *args, **kwargs)
+
+        monkeypatch.setattr(applier.os, "unlink", fail_quarantine_unlink)
+
+        with pytest.raises(
+            applier.WebSolDeploymentApplyError,
+            match="ROLLBACK_EFFECT_UNKNOWN",
+        ):
+            applier._rollback_present_target_at(
+                parent_descriptor,
+                rollback_name,
+                artifact.destination.name,
+                row,
+                artifact,
+                prepared,
+            )
+
+        assert injected is True
+        assert artifact.destination.read_bytes() == prior
+    finally:
+        applier.os.close(parent_descriptor)
+
 def test_present_target_changed_after_rollback_temporary_write_is_preserved(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

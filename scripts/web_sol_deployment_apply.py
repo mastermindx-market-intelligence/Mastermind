@@ -410,6 +410,7 @@ def _private_state_document(
         "request": request_document,
         "prepared": {
             "prepared_digest": prepared.prepared_digest,
+            "cleanup_nonce": prepared.cleanup_nonce,
             "preimages": [_encoded_preimage(row) for row in prepared.preimages],
             "directory_preimages": [
                 _encoded_directory_preimage(row)
@@ -1062,7 +1063,9 @@ def _decode_private_state(
     bundle, plan, request_meta = _decode_request(request_document)
     prepared_row = _exact_dict(
         row["prepared"],
-        frozenset({"prepared_digest", "preimages", "directory_preimages"}),
+        frozenset(
+            {"prepared_digest", "cleanup_nonce", "preimages", "directory_preimages"}
+        ),
     )
     artifacts = {str(item.destination): item for item in bundle.artifacts}
     preimages = tuple(
@@ -1087,18 +1090,25 @@ def _decode_private_state(
     ):
         raise applier.WebSolDeploymentApplyError("STATE_INVALID")
     prepared_digest = _digest(prepared_row["prepared_digest"])
+    try:
+        cleanup_nonce = applier._cleanup_nonce(  # noqa: SLF001
+            prepared_row["cleanup_nonce"]
+        )
+    except applier.WebSolDeploymentApplyError as exc:
+        raise applier.WebSolDeploymentApplyError("STATE_INVALID") from exc
     prepared = applier.PreparedDeployment(
         operation_key=request_meta["operation_key"], bundle=bundle, plan=plan,
         install_root=request_meta["install_root"],
         expected_uid=request_meta["expected_uid"],
         expected_gid=request_meta["expected_gid"],
         preimages=preimages, directory_preimages=directory_preimages,
-        prepared_digest=prepared_digest,
+        cleanup_nonce=cleanup_nonce, prepared_digest=prepared_digest,
     )
     try:
         recomputed = applier._prepared_digest_from_state(  # noqa: SLF001
             operation_key=prepared.operation_key, bundle=bundle, plan=plan,
             expected_uid=prepared.expected_uid, expected_gid=prepared.expected_gid,
+            cleanup_nonce=cleanup_nonce,
             preimages=preimages, directory_preimages=directory_preimages,
         )
     except applier.WebSolDeploymentApplyError as exc:
