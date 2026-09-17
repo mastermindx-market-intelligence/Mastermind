@@ -173,6 +173,18 @@ def _ticker_record_checked(mapping, ticker):
     return record, False
 
 
+def _mapping_field_checked(mapping, key):
+    """Return one optional mapping field plus whether its persisted shape was invalid."""
+    if mapping is None:
+        return {}, False
+    value = mapping.get(key)
+    if value is None:
+        return {}, False
+    if not isinstance(value, dict):
+        return {}, True
+    return value, False
+
+
 def _list_field_checked(mapping, key):
     """Return one optional list field plus whether its persisted shape was invalid."""
     if mapping is None:
@@ -896,23 +908,50 @@ async def get_ticker_package(args):
       {"type": "object", "properties": {"ticker": {"type": "string"}}, "required": ["ticker"]})
 async def get_fundamentals(args):
     t = (args.get("ticker") or "").upper()
-    d = _read_json(_V / "site" / "stockdata" / f"{t}.json")
-    if not d:
+    data, read_failed = _read_first_nonempty_mapping_checked((
+        _V / "site" / "stockdata" / f"{t}.json",
+    ))
+    if data is None:
+        if read_failed:
+            return _json({
+                "ticker": t,
+                "read_status": "unavailable",
+                "error": "ticker_fundamentals_unavailable",
+                "failed_sources": ["fundamentals"],
+            })
         return _ok(f"no stock file for {t} (covered: S&P 1500 + crypto; ships in the Pages artifact).")
-    return _json({
-        "ticker": t, "name": d.get("name"), "sector": d.get("sector"), "asof": d.get("asof"),
-        "valuation": _pick(d.get("valuation"), ["trailing_pe", "forward_pe", "forward_tier", "price_to_book",
-                           "price_to_sales", "earnings_yield", "shareholder_yield", "value_z"]),
-        "financials": _pick(d.get("financials"), ["gross_margin", "net_margin", "fcf_margin", "rev_growth",
-                            "ni_growth", "roe", "roa", "debt_to_assets", "accruals"]),
-        "earnings": _pick(d.get("earnings"), ["next_date", "eps_forecast", "sue_z", "summary"]),
-        "analyst": _pick(d.get("analyst"), ["rating", "target", "forward_pe", "div_yield"]),
-        "accounting_quality": _pick(d.get("accounting_quality"), ["verdict", "headline", "piotroski", "n_caution"]),
-        "factors": _pick(d.get("factors"), ["composite", "fundamental_score"]),
-        "tech": _pick(d.get("tech"), ["price", "pct_vs_50dma", "pct_vs_200dma", "rsi14", "off_52w_high_pct"]),
-        "conviction": _pick(d.get("conviction"), ["score", "band", "verdict", "size", "risk",
-                            "cycle_blocked", "cautions"]),
-    })
+
+    specs = {
+        "valuation": ["trailing_pe", "forward_pe", "forward_tier", "price_to_book",
+                      "price_to_sales", "earnings_yield", "shareholder_yield", "value_z"],
+        "financials": ["gross_margin", "net_margin", "fcf_margin", "rev_growth",
+                       "ni_growth", "roe", "roa", "debt_to_assets", "accruals"],
+        "earnings": ["next_date", "eps_forecast", "sue_z", "summary"],
+        "analyst": ["rating", "target", "forward_pe", "div_yield"],
+        "accounting_quality": ["verdict", "headline", "piotroski", "n_caution"],
+        "factors": ["composite", "fundamental_score"],
+        "tech": ["price", "pct_vs_50dma", "pct_vs_200dma", "rsi14", "off_52w_high_pct"],
+        "conviction": ["score", "band", "verdict", "size", "risk", "cycle_blocked", "cautions"],
+    }
+    projected = {}
+    section_failed = False
+    for key, fields in specs.items():
+        section, failed = _mapping_field_checked(data, key)
+        section_failed = section_failed or failed
+        projected[key] = None if failed else _pick(section, fields)
+
+    payload = {
+        "ticker": t,
+        "name": data.get("name"),
+        "sector": data.get("sector"),
+        "asof": data.get("asof"),
+        **projected,
+    }
+    if section_failed:
+        payload["read_status"] = "partial"
+        payload["failed_sources"] = ["fundamentals"]
+        payload["note"] = "Fundamental evidence is incomplete; malformed sections are unknown."
+    return _json(payload)
 
 
 @tool("get_options",
@@ -923,18 +962,42 @@ async def get_fundamentals(args):
       {"type": "object", "properties": {"ticker": {"type": "string"}}, "required": ["ticker"]})
 async def get_options(args):
     t = (args.get("ticker") or "").upper()
-    d = _read_json(_V / "site" / "gex" / f"{t}.json")
-    if not d:
+    data, read_failed = _read_first_nonempty_mapping_checked((
+        _V / "site" / "gex" / f"{t}.json",
+    ))
+    if data is None:
+        if read_failed:
+            return _json({
+                "ticker": t,
+                "read_status": "unavailable",
+                "error": "ticker_options_unavailable",
+                "failed_sources": ["options"],
+            })
         return _ok(f"no options/GEX file for {t} (only the ~liquid options universe is covered).")
-    return _json({
-        "ticker": t, "asof": (d.get("meta") or {}).get("asof"),
-        "summary": _pick(d.get("summary"), ["spot", "regime", "tier", "net_gex_bn", "gamma_flip",
-                         "dist_to_flip_pct", "magnet_up", "magnet_down", "iv30", "put_call_oi_ratio",
-                         "max_pain", "call_wall", "put_wall"]),
-        "expected_move": _pick(d.get("expected_move"), ["daily_pct", "weekly_pct", "front"]),
-        "vol_hole": _pick(d.get("vol_hole"), ["state", "bias", "upper", "lower", "to_upper_pct",
-                          "to_lower_pct", "compression"]),
-    })
+
+    meta, meta_failed = _mapping_field_checked(data, "meta")
+    summary, summary_failed = _mapping_field_checked(data, "summary")
+    expected_move, move_failed = _mapping_field_checked(data, "expected_move")
+    vol_hole, vol_failed = _mapping_field_checked(data, "vol_hole")
+    section_failed = meta_failed or summary_failed or move_failed or vol_failed
+    payload = {
+        "ticker": t,
+        "asof": None if meta_failed else meta.get("asof"),
+        "summary": None if summary_failed else _pick(summary, [
+            "spot", "regime", "tier", "net_gex_bn", "gamma_flip", "dist_to_flip_pct",
+            "magnet_up", "magnet_down", "iv30", "put_call_oi_ratio", "max_pain",
+            "call_wall", "put_wall",
+        ]),
+        "expected_move": None if move_failed else _pick(expected_move, ["daily_pct", "weekly_pct", "front"]),
+        "vol_hole": None if vol_failed else _pick(vol_hole, [
+            "state", "bias", "upper", "lower", "to_upper_pct", "to_lower_pct", "compression",
+        ]),
+    }
+    if section_failed:
+        payload["read_status"] = "partial"
+        payload["failed_sources"] = ["options"]
+        payload["note"] = "Options evidence is incomplete; malformed sections are unknown."
+    return _json(payload)
 
 
 @tool("get_anticipation",
@@ -945,13 +1008,22 @@ async def get_options(args):
       {"type": "object", "properties": {"ticker": {"type": "string"}}, "required": ["ticker"]})
 async def get_anticipation(args):
     t = (args.get("ticker") or "").upper()
-    d = _read_json(_V / "site" / "anticipationdata" / f"{t}.json")
-    if not d:
+    data, read_failed = _read_first_nonempty_mapping_checked((
+        _V / "site" / "anticipationdata" / f"{t}.json",
+    ))
+    if data is None:
+        if read_failed:
+            return _json({
+                "ticker": t,
+                "read_status": "unavailable",
+                "error": "ticker_anticipation_unavailable",
+                "failed_sources": ["anticipation"],
+            })
         return _ok(f"no anticipation file for {t} (only the curated forward-signal watchlist is covered).")
     return _json({
-        "ticker": t, "name": d.get("name"), "group": d.get("group"), "as_of": d.get("as_of"),
-        **_pick(d, ["anticipation_index", "index_band", "confluence_value", "n_go_legs",
-                    "direction_trust", "trust", "vol_cone_ann", "horizons", "drivers", "guards", "caveats"]),
+        "ticker": t, "name": data.get("name"), "group": data.get("group"), "as_of": data.get("as_of"),
+        **_pick(data, ["anticipation_index", "index_band", "confluence_value", "n_go_legs",
+                      "direction_trust", "trust", "vol_cone_ann", "horizons", "drivers", "guards", "caveats"]),
     })
 
 
