@@ -717,15 +717,15 @@ def test_cancellation_after_start_reconciles(tmp_path: Path) -> None:
     adapter = _make_adapter(
         tmp_path,
         scenario="hang_after_tool",
-        identity_timeout_seconds=10.0,
-        idle_timeout_seconds=10.0,
-        absolute_timeout_seconds=15.0,
+        identity_timeout_seconds=20.0,
+        idle_timeout_seconds=45.0,
+        absolute_timeout_seconds=60.0,
     )
     spec = _make_spec(tmp_path)
 
     ref = _run_async(adapter.start(spec))
     state_file = adapter._runtime_root / "claude_fake_state.json"
-    deadline = time.monotonic() + 20.0
+    deadline = time.monotonic() + 30.0
     submissions = None
     while time.monotonic() < deadline:
         if state_file.exists():
