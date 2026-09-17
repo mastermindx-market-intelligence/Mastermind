@@ -141,16 +141,15 @@ def validate_status_response(
     *,
     expected_request_id: str,
 ) -> dict[str, object]:
-    """Validate a wire status response's shape and its exact correlation to the request id.
+    """Validate the exact broker status envelope and complete historical receipt.
 
-    Returns the response unchanged. Raises ``RuntimeError`` for a
-    malformed, uncorrelated, or unknown status envelope. Terminal
-    (effect-succeeded) and read-only status retrieval remain separate
-    classifications: this only proves the status query itself is well
-    formed and correlated, not that a historical effect succeeded.
+    A successful query does not assert that the original effect succeeded.
+    Historical receipt/marker releases deliberately need not equal the currently
+    installed release. Validation grants no effect or retry authority.
     """
     if (
-        response.get("schema") != WIRE_RESPONSE_SCHEMA
+        not isinstance(response, Mapping)
+        or response.get("schema") != WIRE_RESPONSE_SCHEMA
         or response.get("ok") is not True
         or response.get("query") is not True
         or response.get("request_id") != expected_request_id
@@ -158,24 +157,30 @@ def validate_status_response(
         or _SHA40_RE.fullmatch(response["installed_release_sha"]) is None
     ):
         raise RuntimeError("privileged broker returned an invalid status response")
+    base_keys = frozenset({
+        "schema", "ok", "query", "status", "request_id", "installed_release_sha",
+    })
     status = response.get("status")
     if status == STATUS_TERMINAL:
-        receipt = response.get("receipt")
-        if not isinstance(receipt, dict) or receipt.get("request_id") != expected_request_id:
-            raise RuntimeError("privileged broker returned an uncorrelated terminal receipt")
-        exit_code = receipt.get("exit_code")
-        outcome = receipt.get("outcome")
-        if (
-            isinstance(exit_code, bool)
-            or not isinstance(exit_code, int)
-            or outcome not in ("SUCCEEDED", "FAILED")
-            or (outcome == "SUCCEEDED") != (exit_code == 0)
-        ):
-            raise RuntimeError("privileged broker returned an invalid terminal receipt")
-        return dict(response)
-    if status in (STATUS_EFFECT_UNKNOWN, STATUS_NOT_FOUND):
-        return dict(response)
-    raise RuntimeError("privileged broker returned an unknown status")
+        expected_keys = base_keys | {"receipt"}
+    elif status == STATUS_EFFECT_UNKNOWN:
+        expected_keys = base_keys | {"marker_release_sha"}
+    elif status == STATUS_NOT_FOUND:
+        expected_keys = base_keys
+    else:
+        raise RuntimeError("privileged broker returned an unknown status")
+    if frozenset(response) != expected_keys:
+        raise RuntimeError("privileged broker returned an invalid status envelope")
+    result = dict(response)
+    if status == STATUS_TERMINAL:
+        result["receipt"] = validate_terminal_receipt(
+            response["receipt"], expected_request_id=expected_request_id,
+        )
+    elif status == STATUS_EFFECT_UNKNOWN:
+        marker_release = response["marker_release_sha"]
+        if not isinstance(marker_release, str) or _SHA40_RE.fullmatch(marker_release) is None:
+            raise RuntimeError("privileged broker returned an invalid marker release")
+    return result
 
 
 __all__ = [

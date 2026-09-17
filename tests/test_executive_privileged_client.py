@@ -222,7 +222,7 @@ def test_validate_status_response_terminal() -> None:
         "status": "TERMINAL",
         "request_id": "req-001",
         "installed_release_sha": "a" * 40,
-        "receipt": {"request_id": "req-001", "outcome": "SUCCEEDED", "exit_code": 0},
+        "receipt": _receipt(),
     }
     validated = client.validate_status_response(response, expected_request_id="req-001")
     assert validated["status"] == "TERMINAL"
@@ -240,6 +240,8 @@ def test_validate_status_response_non_terminal_statuses(status: str) -> None:
         "request_id": "req-001",
         "installed_release_sha": "a" * 40,
     }
+    if status == "EFFECT_UNKNOWN":
+        response["marker_release_sha"] = "b" * 40
     validated = client.validate_status_response(response, expected_request_id="req-001")
     assert validated["status"] == status
 

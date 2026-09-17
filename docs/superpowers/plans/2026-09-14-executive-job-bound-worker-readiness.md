@@ -679,3 +679,33 @@ Next: resolve the remaining CI evidence through an approved diagnostic path,
 then obtain exact-head independent review and current-base executed proof.
 The existing Runtime ownership and installer holds remain in force; this
 qualification repair neither clears them nor installs or arms the broker.
+
+
+## 2026-09-17 continuation — complete status-receipt validation
+
+The existing shared client now validates the exact broker-produced status shape
+and reuses the broker's complete terminal-receipt validator. Previously an
+incomplete receipt or an unreviewed extra field could pass through status lookup
+to the existing CLI. Unknown outcomes require the original marker's release;
+NOT_FOUND contains neither receipt nor marker. Historical receipt/marker releases
+remain distinct from the currently installed release. No effect or retry is added.
+
+Regression-first proof exposed 41 failures with six valid-path controls before
+repair. The expanded source campaign includes actual temporary Unix-socket frames
+through the unchanged CLI, and four in-memory weakened validators are caught.
+Exact counts, immutable source hashes and current-base proof belong to the PR and
+native evidence under this operation's `ci-repair-20260917` directory.
+
+The cancellation failure now has an exact dependency: existing PR #586 at
+`3c30592a0957ab25aa59bbb3398a7010823ca99a` has a non-author CHANGES_REQUESTED review
+for bounded cleanup on uncertain pre-latch paths. A model-free discriminator
+reproduces the old group-absence exception with zero real processes or signals.
+Do not build another cancellation repair or revive terminal historical PR #392.
+
+PR #699 retains Runtime custody; PR #653 retains installer custody. The prior
+blocked acceptance diagnostic was not retried, and its expected digest is unchanged.
+The Executive app still reports fixture mode; no real worker admission is claimed.
+This narrow direct repair used LOWER_TOTAL_OVERHEAD and the same acquired workspace.
+Next: review this exact source delta and resolve the existing dependency holds;
+then resume the Runtime/controller/installer sequence. No broker installation,
+root effect, credential operation, production acceptance or parent closure occurred.
