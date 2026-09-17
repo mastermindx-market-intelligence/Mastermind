@@ -54,10 +54,12 @@ from control_plane.worker_execution_contract import (
     MAX_ARTIFACTS,
     MAX_ARTIFACT_BYTES,
     MAX_ARTIFACT_TOTAL_BYTES,
+    LAUNCH_ATTESTATION_SCHEMA_VERSION,
     ArtifactReceipt,
     BinaryAttestation,
     CancelReceipt,
     CollectionReceipt,
+    LaunchAttestation,
     ValidationReceipt,
     WorkerLaunchSpec,
     WorkerProcessRef,
@@ -135,7 +137,6 @@ _JSONL_EVENT_TYPES = frozenset({
     "error",
 })
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
-LAUNCH_ATTESTATION_SCHEMA_VERSION = "mastermind.executive_launch_attestation/v1"
 SECRET_CANARY_SCHEMA_VERSION = "mastermind.executive_secret_canary/v1"
 ISOLATION_MANIFEST_SCHEMA_VERSION = "mastermind.executive_isolation_manifest/v1"
 _SECRET_CANARY_CHECKS = frozenset(
@@ -249,48 +250,6 @@ class ProcessIdentity:
     effective_gid: int
     real_uid: int
     real_gid: int
-
-
-@dataclasses.dataclass(frozen=True)
-class LaunchAttestation:
-    """Complete, secret-free launch receipt persisted before RUNNING."""
-
-    schema_version: str
-    created_at: str
-    executable_path: str
-    binary: BinaryAttestation
-    rendered_argv: tuple[str, ...]
-    environment_keys: tuple[str, ...]
-    permission_profile_sha256: str
-    prompt_sha256: str
-    expected_base_sha: str | None
-    observed_base_sha: str
-    workspace_identity: Mapping[str, Any]
-    worker_identity: Mapping[str, Any]
-    provider_home_identity: Mapping[str, Any]
-    secret_canary_verdict: Mapping[str, Any]
-    launch_nonce: str
-    process_identity: Mapping[str, Any]
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "schema_version": self.schema_version,
-            "created_at": self.created_at,
-            "executable_path": self.executable_path,
-            "binary": dataclasses.asdict(self.binary),
-            "rendered_argv": list(self.rendered_argv),
-            "environment_keys": list(self.environment_keys),
-            "permission_profile_sha256": self.permission_profile_sha256,
-            "prompt_sha256": self.prompt_sha256,
-            "expected_base_sha": self.expected_base_sha,
-            "observed_base_sha": self.observed_base_sha,
-            "workspace_identity": _jsonable(self.workspace_identity),
-            "worker_identity": _jsonable(self.worker_identity),
-            "provider_home_identity": _jsonable(self.provider_home_identity),
-            "secret_canary_verdict": _jsonable(self.secret_canary_verdict),
-            "launch_nonce": self.launch_nonce,
-            "process_identity": dict(self.process_identity),
-        }
 
 
 @dataclasses.dataclass(frozen=True)
