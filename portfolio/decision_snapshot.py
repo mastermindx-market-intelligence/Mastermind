@@ -28,6 +28,7 @@ from portfolio import decision_snapshot_sources as sources
 _ROOT = Path(__file__).resolve().parent.parent
 _BOOK_ID = "autonomous"
 _SNAPSHOT_ID_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+_SNAPSHOT_FILENAME_RE = re.compile(r"^[0-9a-f]{64}\.json$")
 _MAX_LIST_LIMIT = 100
 _GAP_SORT_FIELDS = ("code", "source_id", "section_id", "owner", "detail")
 
@@ -250,13 +251,29 @@ def _write_all(fd: int, data: bytes) -> None:
         written += n
 
 
+def _sanitize_snapshot_filename(filename: str) -> str:
+    """Recompute ``filename`` through ``os.path.basename`` — a path-component sanitizer
+    static analysis recognizes as a barrier — and assert the sanitized component still
+    equals the strict closed ``<64hex>.json`` form before it is allowed anywhere near
+    ``os.open``/``os.unlink``. Any divergence (a path separator, a hidden ``..`` segment,
+    anything not exactly 64 lowercase hex characters plus ``.json``) is corrupt input.
+    """
+    sanitized = os.path.basename(filename)
+    if sanitized != filename or not _SNAPSHOT_FILENAME_RE.fullmatch(sanitized):
+        raise SnapshotCorrupt(f"unsafe snapshot filename component {filename!r}")
+    return sanitized
+
+
 def _create_once(dir_fd: int, filename: str, encoded: bytes) -> bool:
     """Create ``filename`` beneath ``dir_fd`` with O_EXCL, refusing to follow a symlink.
 
     ``filename`` is composed purely of the 64 hex characters a closed regex already proved
     safe plus a fixed ``.json`` suffix — never a caller string joined onto a path — and is
     opened relative to the already-contained ``dir_fd``, never via a constructed ``Path``.
+    It is re-sanitized immediately below, right beside the ``os.open``/``os.unlink`` calls,
+    so neither sink is ever reached by anything but a freshly re-verified basename.
     """
+    filename = _sanitize_snapshot_filename(filename)
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     try:
         fd = os.open(filename, flags, 0o600, dir_fd=dir_fd)
@@ -287,9 +304,13 @@ def persist_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     c.validate_snapshot(snapshot)
     c.verify_snapshot(snapshot)
     book = snapshot["book"]
-    snapshot_id = snapshot["snapshot_id"]
+    # ``verify_snapshot`` above already proved ``snapshot["snapshot_id"] ==
+    # content_digest(unsealed)``; recompute that same digest here rather than reading the
+    # id back off the caller's mapping, so the filename this module derives never traces
+    # back to a caller-supplied string — only to bytes this function itself just hashed.
+    recomputed_id = c.content_digest({k: v for k, v in snapshot.items() if k != "snapshot_id"})
     directory = snapshot_dir(book)
-    filename = _snapshot_filename(snapshot_id)
+    filename = _snapshot_filename(recomputed_id)
     encoded = canonical_json_bytes(snapshot)
     if len(encoded) > c.MAX_SNAPSHOT_BYTES:
         raise SnapshotInvalidRequest("snapshot exceeds max size")

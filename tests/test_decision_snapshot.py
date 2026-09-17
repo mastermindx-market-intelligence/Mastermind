@@ -1018,6 +1018,83 @@ def test_load_and_persist_reject_traversal_and_absolute_snapshot_ids(snapshot_ro
             snapshots.load_snapshot("autonomous", bad_id)
 
 
+def test_persist_rejects_hostile_snapshot_id_before_any_filesystem_write(snapshot_root):
+    """Task 8 repair 5, I2: a caller-supplied ``snapshot_id`` carrying a traversal/absolute/
+    hostile string must never reach the create sink — it is rejected by contract validation
+    (malformed shape) or the digest-equality check (well-formed but wrong), and no file is
+    ever created under the snapshot directory either way."""
+    base = _sealed_snapshot()
+    for bad_id in (
+        "../../secret",
+        "/etc/passwd",
+        "sha256:" + "a" * 63 + "/",
+        "sha256:" + "a" * 62 + "/x",
+        "sha256:" + "A" * 64,
+        "sha256:" + "f" * 64,  # well-formed shape, but does not match the recomputed digest
+    ):
+        tampered = {**base, "snapshot_id": bad_id}
+        with pytest.raises(c.DecisionSnapshotContractError):
+            snapshots.persist_snapshot(tampered)
+    directory = snapshots.snapshot_dir("autonomous")
+    assert not directory.exists() or list(directory.glob("*.json")) == []
+
+
+def test_create_once_sink_only_ever_receives_the_sanitized_basename():
+    """Structural regression for Task 8 repair 5, I2: ``_create_once`` must sanitize
+    ``filename`` through ``_sanitize_snapshot_filename`` (a basename-based barrier) before
+    either the ``os.open`` create or the ``os.unlink`` cleanup — never pass the parameter
+    straight through. Fails if a future edit restores a direct caller-string flow into
+    either sink."""
+    import inspect
+
+    source = inspect.getsource(snapshots._create_once)
+    sanitize_line = next(
+        i for i, line in enumerate(source.splitlines())
+        if "_sanitize_snapshot_filename(filename)" in line
+    )
+    open_line = next(
+        i for i, line in enumerate(source.splitlines()) if "os.open(filename" in line
+    )
+    unlink_line = next(
+        i for i, line in enumerate(source.splitlines()) if "os.unlink(filename" in line
+    )
+    assert sanitize_line < open_line < unlink_line
+
+    sanitizer_source = inspect.getsource(snapshots._sanitize_snapshot_filename)
+    assert "os.path.basename(filename)" in sanitizer_source
+    assert "_SNAPSHOT_FILENAME_RE.fullmatch(sanitized)" in sanitizer_source
+
+
+def test_persist_snapshot_derives_filename_from_a_locally_recomputed_digest():
+    """Task 8 repair 5, I2: ``persist_snapshot`` must not read ``snapshot["snapshot_id"]``
+    straight off the caller's mapping to build the filename — even though
+    ``verify_snapshot`` already proves the two equal at runtime, CodeQL's default taint
+    model does not credit that proof, so the filename must trace only to a digest this
+    function recomputes itself."""
+    import inspect
+
+    source = inspect.getsource(snapshots.persist_snapshot)
+    assert "c.content_digest(" in source
+    assert '_snapshot_filename(recomputed_id)' in source
+    assert '_snapshot_filename(snapshot["snapshot_id"])' not in source
+    assert "_snapshot_filename(snapshot_id)" not in source
+
+
+def test_sanitize_snapshot_filename_rejects_anything_off_the_closed_form():
+    for hostile in (
+        "../escape.json",
+        "/etc/passwd",
+        "a" * 63 + ".json",  # 63 hex chars, not 64
+        "a" * 64 + ".JSON",
+        "a" * 64,  # missing .json suffix
+        "a" * 64 + ".json/../x",
+    ):
+        with pytest.raises(snapshots.SnapshotCorrupt):
+            snapshots._sanitize_snapshot_filename(hostile)
+    valid = "a" * 64 + ".json"
+    assert snapshots._sanitize_snapshot_filename(valid) == valid
+
+
 def test_snapshot_dir_symlinked_root_is_rejected_and_nothing_outside_is_touched(
     snapshot_root, tmp_path,
 ):
