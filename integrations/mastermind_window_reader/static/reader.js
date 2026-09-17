@@ -120,7 +120,7 @@
     data.relations.forEach(r=>{const e=make('div','relation');e.dataset.relation=r.kind;e.append(make('strong','',labels[r.kind]),make('p','',r.from+' → '+r.to));relSection.append(e);});
     if(!data.relations.length)relSection.append(make('p','detail-intro','No relationships were recorded in this capture.'));
     nodes.push(relSection);
-    const links=make('p','detail-note');const pr=make('a','',`Open repository PR #${data.lane.pr}`);pr.href='https://github.com/'+data.lane.repository+'/pull/'+data.lane.pr;pr.target='_blank';pr.rel='noopener noreferrer';links.append(pr,document.createTextNode(' · Opens an external source; this reader does not refresh its status.'));nodes.push(links);
+    const links=make('p','detail-note');const validRepository=/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(data.lane.repository);const validPr=Number.isInteger(data.lane.pr)&&data.lane.pr>0;if(validRepository&&validPr){const pr=make('a','',`Open repository PR #${data.lane.pr}`);pr.href='https://github.com/'+data.lane.repository+'/pull/'+data.lane.pr;pr.target='_blank';pr.rel='noopener noreferrer';links.append(pr,document.createTextNode(' · Opens an external source; this reader does not refresh its status.'));}else{links.append('PR reference unavailable',document.createTextNode(' · Opens an external source; this reader does not refresh its status.'));}nodes.push(links);
     showDetail('Recorded connections',nodes,el('connections'));
   }
   function updateHeader() {

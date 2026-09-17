@@ -7,6 +7,7 @@ import asyncio,copy,hashlib,json
 import pytest
 
 pytest.importorskip('jwt', reason='PyJWT unavailable in this environment')
+pytest.importorskip('playwright.sync_api', reason='Playwright unavailable in this environment', exc_type=ImportError)
 from playwright.sync_api import sync_playwright,expect
 from cryptography.hazmat.primitives.asymmetric import rsa
 from integrations.mastermind_window_reader.recorded_view import render_connection_shell
