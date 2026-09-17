@@ -526,3 +526,32 @@ def test_request_sync_structural_seam_matches_existing_worker_client() -> None:
     local = inspect.signature(WorkerBrokerClient.request_sync)
     assert tuple(remote.parameters) == tuple(local.parameters)
     assert "timeout_seconds" in remote.parameters
+
+
+async def test_capacity_observe_post_write_loss_is_no_effect_and_zero_retry(
+    paths: _Paths,
+) -> None:
+    client = RemoteWorkerBrokerClient(
+        _binding(paths),
+        IDENTITY,
+        allowed_operations={"capacity-observe/v1"},
+    )
+    calls = 0
+
+    async def exchange() -> object:
+        nonlocal calls
+        calls += 1
+        return _Reader(b""), _Writer()
+
+    client._open_connection = exchange
+    with pytest.raises(TransportError) as raised:
+        await client.request(
+            "capacity-observe/v1",
+            {
+                "schema_version": (
+                    "mastermind.executive_worker_capacity_observe_request/v1"
+                )
+            },
+        )
+    assert raised.value.classification is TransportEffect.NO_EFFECT
+    assert calls == 1
