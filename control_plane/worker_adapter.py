@@ -60,6 +60,10 @@ ADAPTER_DESCRIPTORS: dict[str, AdapterDescriptor] = {
             ".ClaudeSubscriptionWorkerAdapter"
         ),
     ),
+    "claude-code": AdapterDescriptor(
+        adapter_id="claude-code",
+        implemented=False,
+    ),
     # Clean, deliberately unarmed seams for later provider work.  A routing
     # policy cannot bind a live worker through an unimplemented descriptor.
     "openai-compatible": AdapterDescriptor(

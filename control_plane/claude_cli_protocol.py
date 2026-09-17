@@ -28,9 +28,10 @@ import sys
 import threading
 import time
 import uuid
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path, PurePosixPath
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 
 _MINIMUM_VERSION = (2, 1, 248)
@@ -306,6 +307,23 @@ class ClaudeCliEvent:
     event_type: str
     subtype: str | None
     sha256: str
+
+
+@dataclasses.dataclass(frozen=True)
+class ClaudeCliProcessIdentity:
+    """Out-of-band, pre-terminal process identity for one proven invocation.
+
+    Published through ``identity_sink`` at most once, only after the
+    process's own process-group identity has been proven, and only before
+    the stream-reading loop begins.  This is a notification seam only; it
+    never participates in any sha256 or digest computation carried by
+    :class:`ClaudeCliRunReceipt`.
+    """
+
+    pid: int
+    pgid: int
+    start_identity: str
+    started_at: str
 
 
 @dataclasses.dataclass(frozen=True)
@@ -3159,6 +3177,7 @@ class ClaudeCliRunner:
         *,
         cancel_event: threading.Event | None = None,
         fake_controls: Mapping[str, str] | None = None,
+        identity_sink: Callable[[ClaudeCliProcessIdentity], None] | None = None,
     ) -> ClaudeCliRunReceipt:
         self._mark_started_once()
         _validate_command_integrity(command)
@@ -3277,6 +3296,32 @@ class ClaudeCliRunner:
                         ClaudeCliObservation.OUTCOME_UNRECONCILED,
                         "Claude CLI process was not isolated in its own group",
                     )
+                elif identity_sink is not None:
+                    identity_tuple = _process_identity(process.pid)
+                    if identity_tuple is None:
+                        failure = (
+                            "PROCESS_IDENTITY_UNPROVEN",
+                            ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                            "Claude CLI process identity could not be attested",
+                        )
+                    else:
+                        try:
+                            identity_sink(
+                                ClaudeCliProcessIdentity(
+                                    pid=process.pid,
+                                    pgid=observed_pgid,
+                                    start_identity=identity_tuple[3],
+                                    started_at=datetime.now(timezone.utc).isoformat(
+                                        timespec="milliseconds"
+                                    ),
+                                )
+                            )
+                        except Exception:
+                            failure = (
+                                "IDENTITY_SINK_FAILED",
+                                ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                                "Claude CLI identity sink raised before stream reading began",
+                            )
 
             if failure is None and (process.stdout is None or process.stderr is None):
                 failure = (
@@ -3752,6 +3797,7 @@ __all__ = [
     "ClaudeCliFailureEvidence",
     "ClaudeCliInvocationPolicy",
     "ClaudeCliObservation",
+    "ClaudeCliProcessIdentity",
     "ClaudeCliProtocolError",
     "ClaudeCliRunReceipt",
     "ClaudeCliRunner",
