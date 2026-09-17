@@ -1418,46 +1418,56 @@ class ClaudeCodeWorkerAdapter:
             real_uid=int(getattr(identity, "real_uid")), real_gid=int(getattr(identity, "real_gid")),
         )
         try:
-            observed_user = pwd.getpwuid(ref.effective_uid).pw_name
-        except KeyError:
-            observed_user = None
-        state.launch_attestation = LaunchAttestation(
-            schema_version=LAUNCH_ATTESTATION_SCHEMA_VERSION,
-            created_at=_utc_now(),
-            executable_path=self.binary.real_path,
-            binary=self.binary,
-            rendered_argv=_redacted_launch_argv(argv),
-            environment_keys=tuple(sorted(environment)),
-            permission_profile_sha256=_canonical_sha256(_permission_profile(spec)),
-            prompt_sha256=hashlib.sha256(spec.prompt.encode("utf-8", "strict")).hexdigest(),
-            expected_base_sha=spec.expected_base_sha,
-            observed_base_sha=baseline.head,
-            workspace_identity={**_path_identity(workspace), "git_head": baseline.head},
-            worker_identity={
-                "requested_user": spec.worker_user,
-                "observed_user": observed_user,
-                "expected_uid": spec.expected_worker_uid,
-                "expected_gid": spec.expected_worker_gid,
-                "effective_uid": ref.effective_uid,
-                "effective_gid": ref.effective_gid,
-                "real_uid": ref.real_uid,
-                "real_gid": ref.real_gid,
-            },
-            provider_home_identity=_path_identity(home),
-            secret_canary_verdict=canary_verdict,
-            launch_nonce=ref.launch_nonce,
-            process_identity={
-                "pid": ref.pid,
-                "pgid": ref.pgid,
-                "session_id": ref.session_id,
-                "start_identity": ref.process_start_identity,
-                "boot_id": ref.boot_session_id,
-                "effective_uid": ref.effective_uid,
-                "effective_gid": ref.effective_gid,
-                "real_uid": ref.real_uid,
-                "real_gid": ref.real_gid,
-            },
-        )
+            try:
+                observed_user = pwd.getpwuid(ref.effective_uid).pw_name
+            except KeyError:
+                observed_user = None
+            state.launch_attestation = LaunchAttestation(
+                schema_version=LAUNCH_ATTESTATION_SCHEMA_VERSION,
+                created_at=_utc_now(),
+                executable_path=self.binary.real_path,
+                binary=self.binary,
+                rendered_argv=_redacted_launch_argv(argv),
+                environment_keys=tuple(sorted(environment)),
+                permission_profile_sha256=_canonical_sha256(_permission_profile(spec)),
+                prompt_sha256=hashlib.sha256(spec.prompt.encode("utf-8", "strict")).hexdigest(),
+                expected_base_sha=spec.expected_base_sha,
+                observed_base_sha=baseline.head,
+                workspace_identity={**_path_identity(workspace), "git_head": baseline.head},
+                worker_identity={
+                    "requested_user": spec.worker_user,
+                    "observed_user": observed_user,
+                    "expected_uid": spec.expected_worker_uid,
+                    "expected_gid": spec.expected_worker_gid,
+                    "effective_uid": ref.effective_uid,
+                    "effective_gid": ref.effective_gid,
+                    "real_uid": ref.real_uid,
+                    "real_gid": ref.real_gid,
+                },
+                provider_home_identity=_path_identity(home),
+                secret_canary_verdict=canary_verdict,
+                launch_nonce=ref.launch_nonce,
+                process_identity={
+                    "pid": ref.pid,
+                    "pgid": ref.pgid,
+                    "session_id": ref.session_id,
+                    "start_identity": ref.process_start_identity,
+                    "boot_id": ref.boot_session_id,
+                    "effective_uid": ref.effective_uid,
+                    "effective_gid": ref.effective_gid,
+                    "real_uid": ref.real_uid,
+                    "real_gid": ref.real_gid,
+                },
+            )
+        except Exception as exc:
+            outcome = await self._safe_launch_failure_cleanup(process)
+            try:
+                await self._quarantine_launch_failure(state, outcome)
+            except ClaudeProcessIdentityError:
+                raise
+            raise ClaudeProcessIdentityError(
+                "Claude launch attestation is unavailable"
+            ) from exc
         state.ref = ref
         self._runs[spec.run_id] = state
         state.monitor_task = asyncio.create_task(self._monitor(state))

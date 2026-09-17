@@ -715,6 +715,62 @@ def test_complete_launch_attestation_is_redacted_and_principal_bound(
     assert sorted(document["environment_keys"]) == document["environment_keys"]
 
 
+
+def test_launch_attestation_failure_reaps_unpublished_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    (tmp_path / "mode").write_text("sleep", encoding="utf-8")
+    adapter = _adapter(tmp_path, binary)
+    real_inspector = adapter.inspector
+    observed_pids: list[int] = []
+
+    class RecordingInspector:
+        def boot_session_id(self) -> str:
+            return real_inspector.boot_session_id()
+
+        def inspect(self, pid: int) -> object:
+            observed_pids.append(pid)
+            return real_inspector.inspect(pid)
+
+    adapter.inspector = RecordingInspector()
+    monkeypatch.setattr(
+        claude_worker,
+        "_path_identity",
+        lambda _path: (_ for _ in ()).throw(OSError("attestation identity race")),
+    )
+
+    async def execute() -> tuple[BaseException | None, bool]:
+        error: BaseException | None = None
+        leaked = False
+        try:
+            await adapter.start(_workspace_and_spec(tmp_path, timeout_seconds=5))
+        except BaseException as exc:  # inspect the exact refusal type below
+            error = exc
+        pid = observed_pids[0] if observed_pids else None
+        if pid is not None:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                leaked = False
+            else:
+                leaked = True
+                try:
+                    os.killpg(pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                await asyncio.sleep(0.05)
+        return error, leaked
+
+    error, leaked = asyncio.run(execute())
+    assert leaked is False
+    assert isinstance(error, claude_worker.ClaudeProcessIdentityError)
+    assert str(error) in {
+        "Claude launch attestation is unavailable",
+        "unaccepted Claude launch could not be safely reaped",
+    }
+    assert adapter._runs == {}
+
 def test_status_and_direct_validation_fail_closed_before_common_sandbox(
     tmp_path: Path,
 ) -> None:
