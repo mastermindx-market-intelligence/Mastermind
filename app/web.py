@@ -1221,7 +1221,8 @@ def api_live_marks(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
                 },
             }
         return JSONResponse(payload, headers={"Cache-Control": "no-store"})
-    except Exception as exc:  # noqa: BLE001 — live preview must degrade, never sink the dashboard
+    except Exception as exc:  # noqa: BLE001 — degrade without claiming the book is empty
+        _log.warning("live marks read failed for %s: %s", pid, type(exc).__name__)
         return JSONResponse({
             "schema_version": "live_marks.v1",
             "portfolio": pid,
@@ -1231,8 +1232,8 @@ def api_live_marks(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
             "poll_after_seconds": 60 if session["is_open"] else session["poll_after_seconds"],
             "positions": [],
             "performance": {},
-            "pricing": {"priced_positions": 0, "total_positions": 0, "complete": False},
-            "error": str(exc),
+            "pricing": {"priced_positions": None, "total_positions": None, "complete": False},
+            "error": "live_marks_unavailable",
         }, headers={"Cache-Control": "no-store"})
 
 
