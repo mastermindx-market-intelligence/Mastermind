@@ -101,7 +101,10 @@ _NON_PRODUCTION_IDENTITY_DIRS = {
 }
 _NON_PRODUCTION_IDENTITY_FILES = {"package-lock.json", "pnpm-lock.yaml", "yarn.lock"}
 _PERMISSION_MODE_MARKERS = ("chmod", "umask", "st_mode", "dir_mode", "file_mode", "permission")
-_HTTP_STATUS_MARKERS = ("status", "sendjsonerror", "http", "response.", "res.status", "statuscode")
+_HTTP_STATUS_MARKERS = (
+    "sendjsonerror(", "err?.status", "http_fallback", "http_code",
+    ".status(", "response.status", "statuscode",
+)
 _COMMENT_PREFIXES = ("#", "//", "/*", "*/", "* ")
 
 
@@ -121,10 +124,29 @@ def _is_production_identity_scan_path(path: str) -> bool:
     return True
 
 
+def _line_mentions_identity_name(line: str) -> bool:
+    try:
+        for token in tokenize.generate_tokens(io.StringIO(line + "\n").readline):
+            if token.type not in {tokenize.NAME, tokenize.STRING}:
+                continue
+            text = token.string.lower()
+            if "_mastermind_" in text:
+                return True
+            if token.type == tokenize.NAME and (
+                {"uid", "uids", "gid", "gids", "peer", "peers"} & set(text.split("_"))
+            ):
+                return True
+    except (IndentationError, tokenize.TokenError):
+        pass
+    return False
+
+
 def _is_known_non_identity_numeric(line: str, token_text: str, value: int) -> bool:
     stripped = line.lstrip()
     if stripped.startswith(_COMMENT_PREFIXES):
         return True
+    if _line_mentions_identity_name(line):
+        return False
     lowered = line.lower()
     if (
         token_text.lower().startswith("0o")
@@ -518,10 +540,12 @@ def test_d8_scanner_rejects_hidden_numeric_aliases_across_production_files():
             "diff --git a/control_plane/new_identity.py b/control_plane/new_identity.py",
             "--- /dev/null",
             "+++ b/control_plane/new_identity.py",
-            "@@ -0,0 +1,3 @@",
+            "@@ -0,0 +1,5 @@",
             '+worker_uid = config["worker_uid"]',
             "+DIR_MODE = 0o700",
             '+worker_user = "_mastermind_shadow"',
+            "+HTTP_WORKER_UID_CODE = 501",
+            "+UID_DIR_MODE = 0o765",
             "diff --git a/common/identity_constants.py b/common/identity_constants.py",
             "--- /dev/null",
             "+++ b/common/identity_constants.py",
@@ -533,9 +557,24 @@ def test_d8_scanner_rejects_hidden_numeric_aliases_across_production_files():
         ]
     )
     assert _scan_added_identity_diff(diff) == [
-        "_mastermind_shadow", "501", "450", "459", "0o765", "777",
+        "_mastermind_shadow", "501", "0o765", "501", "450", "459", "0o765", "777",
     ]
 
+
+def test_d8_http_exemption_cannot_hide_identity_shaped_aliases():
+    diff = "\n".join(
+        [
+            "diff --git a/common/identity_status.py b/common/identity_status.py",
+            "--- /dev/null",
+            "+++ b/common/identity_status.py",
+            "@@ -0,0 +1,4 @@",
+            "+status_uid = 501",
+            "+http_peer_uid = 459",
+            "+status_peer = 501",
+            "+response_peer = 459",
+        ]
+    )
+    assert _scan_added_identity_diff(diff) == ["501", "459", "501", "459"]
 
 
 def test_d8_scanner_rejects_mastermind_identity_name_in_unrelated_source():
@@ -556,10 +595,11 @@ def test_d8_scanner_ignores_unrelated_protocol_modes_and_nonproduction_paths():
             "diff --git a/integrations/service/gateway.mjs b/integrations/service/gateway.mjs",
             "--- /dev/null",
             "+++ b/integrations/service/gateway.mjs",
-            "@@ -0,0 +1,3 @@",
+            "@@ -0,0 +1,4 @@",
             "+sendJsonError(res, 404, 'not found');",
             "+const status = Number(err?.statusCode || 500);",
-            "+return status >= 400 && status < 600;",
+            "+return sendJsonError(res, status >= 400 && status < 600 ? status : 500);",
+            "+res.set('Allow', 'POST, DELETE').status(405).json({});",
             "diff --git a/integrations/service/gateway.py b/integrations/service/gateway.py",
             "--- /dev/null",
             "+++ b/integrations/service/gateway.py",
