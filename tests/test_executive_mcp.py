@@ -674,10 +674,10 @@ def test_schema_snapshot_is_pinned():
     assert snapshot["server_version"] == schemas.SERVER_VERSION
 
 
-def test_schema_snapshot_is_sensitive_to_a_sixth_tool(monkeypatch: pytest.MonkeyPatch):
+def test_schema_snapshot_is_sensitive_to_an_unreviewed_seventh_tool(monkeypatch: pytest.MonkeyPatch):
     extra = schemas.ToolSpec(
         name="executive_debug_exec",
-        description="a sixth tool that must never exist",
+        description="an unreviewed seventh tool that must never exist",
         input_schema=dict(schemas._EMPTY_INPUT),
         output_description="",
         read_only=False,
