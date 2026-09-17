@@ -114,6 +114,7 @@ def _item(value: Any) -> VisibleItem:
         "ITEM_BOUND",
     )
     _require(type(value["truncated"]) is bool, "ITEM_INVALID")
+    _require(value["truncated"] is False, "TRUNCATION_UNSUPPORTED")
     _require(value["gap"] is None, "ITEM_INVALID")
     return VisibleItem(
         source_item_id=value["source_item_id"],

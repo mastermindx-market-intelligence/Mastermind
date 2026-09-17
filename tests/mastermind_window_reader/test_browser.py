@@ -4,9 +4,12 @@ from pathlib import Path
 import pytest
 pytest.importorskip('playwright.sync_api', reason='Playwright unavailable in this environment', exc_type=ImportError)
 from playwright.sync_api import sync_playwright, expect
+from tests.mastermind_window_reader._browser_support import browser_available, browser_launch_kwargs
 from integrations.mastermind_window_reader.recorded_view import render_capture
 
-pytestmark = pytest.mark.skip(reason='Playwright/Chromium unavailable in this environment')
+_AVAILABLE, _REASON = browser_available()
+pytestmark = pytest.mark.skipif(not _AVAILABLE, reason=_REASON)
+
 
 ROOT=Path(__file__).resolve().parents[0]
 CAP=json.loads((ROOT/'recorded_lane_capture.json').read_bytes())
@@ -14,7 +17,7 @@ CAP=json.loads((ROOT/'recorded_lane_capture.json').read_bytes())
 @pytest.fixture(scope='module')
 def browser():
     with sync_playwright() as p:
-        b=p.chromium.launch(executable_path='/usr/bin/chromium',headless=True,args=['--no-sandbox'])
+        b=p.chromium.launch(headless=True,args=['--no-sandbox'],**browser_launch_kwargs())
         yield b
         b.close()
 

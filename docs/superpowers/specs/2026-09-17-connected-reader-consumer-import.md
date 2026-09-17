@@ -38,10 +38,7 @@ and never imports or calls the broker, sockets, network, or I/O.
   owner-supplied `ContentDecision`; no default classifier is provided. Grantor:
   Sol. (owner ruled by Sol R83 item 2, root ts 1789607891.352309; no
   edit/start/merge authority on #599 is implied).
-- **G2 — registered auth client:** NOT DONE. Production authentication requires
-  the incumbent `JwtAuthenticator`; live dynamic client registration is not
-  established. Grantor: Chairman/Sol via an authorized Auth0 tenant-admin
-  surface.
+- **G2 — viewer-specific registered client:** NOT DONE. The Connected Reader viewer surface needs its own registered client; registration of another client (for example the Codex-Astra dynamic client registration) does not automatically cover this viewer. The owner must name the intended viewer surface, its existing registered client reference, issuer/resource/audience, the exact approved content scope, the source-permission owner, and the enrollment receipt or its absence. Grantor: the source-permission owner through the viewer's own enrollment (Sol source-boundary clarification, root ts 1789610946.339469).
 - **G3 — production scope enrollment:** NOT DONE. Production requires the
   workspace content-read scope, which is mutually exclusive with the current
   Steward read scope. Grantor: Sol, through a new enrolled scope or an owner

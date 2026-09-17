@@ -6,18 +6,20 @@ pytest.importorskip('jwt', reason='PyJWT unavailable in this environment')
 pytest.importorskip('playwright.sync_api', reason='Playwright unavailable in this environment', exc_type=ImportError)
 from playwright.sync_api import sync_playwright,expect
 from cryptography.hazmat.primitives.asymmetric import rsa
+from tests.mastermind_window_reader._browser_support import browser_available, browser_launch_kwargs
 from integrations.mastermind_window_reader.recorded_view import render_connection_shell
 from tests.mastermind_window_reader.test_window_resource import signed_window
 from tests.mastermind_window_reader.test_read_resource import request
 from tests.mastermind_window_reader.test_existing_auth_composition import token
 from tests.mastermind_window_reader.test_live_window import REF,KEY
 
-pytestmark = pytest.mark.skip(reason='Playwright/Chromium unavailable in this environment')
+_AVAILABLE, _REASON = browser_available()
+pytestmark = pytest.mark.skipif(not _AVAILABLE, reason=_REASON)
 
 @pytest.fixture(scope='module')
 def browser():
     with sync_playwright() as p:
-        b=p.chromium.launch(executable_path='/usr/bin/chromium',headless=True,args=['--no-sandbox'])
+        b=p.chromium.launch(headless=True,args=['--no-sandbox'],**browser_launch_kwargs())
         yield b;b.close()
 
 @pytest.fixture

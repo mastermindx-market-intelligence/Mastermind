@@ -1,12 +1,19 @@
 import re
 import shutil
 import subprocess
+import importlib
 from pathlib import Path
 
 import pytest
 
 
 READER = Path(__file__).resolve().parents[2] / 'integrations/mastermind_window_reader/static/reader.js'
+BROWSER_MODULES = tuple((Path(__file__).parent / name for name in (
+    'test_browser.py',
+    'test_live_window_browser.py',
+    'test_refresh_browser.py',
+    'test_signed_resource_browser.py',
+)))
 
 
 def test_pr_repository_and_number_are_guarded():
@@ -20,3 +27,36 @@ def test_reader_javascript_parses():
     if shutil.which('node') is None:
         pytest.skip('node unavailable in this environment')
     subprocess.run(['node', '--check', str(READER)], check=True)
+
+
+def test_browser_modules_use_capability_driven_qualification():
+    for module_path in BROWSER_MODULES:
+        source = module_path.read_text(encoding='utf-8')
+        assert 'pytest.mark.skip(' not in source
+        assert 'browser_available()' in source
+        assert 'pytest.mark.skipif(' in source
+        assert "importorskip('playwright.sync_api'" in source
+
+
+def test_browser_available_reports_missing_dependency_without_raising(monkeypatch):
+    from tests.mastermind_window_reader._browser_support import (
+        browser_available,
+        reset_browser_available_cache,
+    )
+
+    original_import_module = importlib.import_module
+
+    def refuse_playwright(name):
+        if name == 'playwright.sync_api':
+            raise ImportError('simulated absent Playwright')
+        return original_import_module(name)
+
+    reset_browser_available_cache()
+    monkeypatch.setattr(importlib, 'import_module', refuse_playwright)
+    try:
+        available, reason = browser_available()
+    finally:
+        monkeypatch.undo()
+        reset_browser_available_cache()
+    assert available is False
+    assert reason.startswith('BROWSER_UNAVAILABLE: ')

@@ -75,6 +75,14 @@ def test_wrong_item_type_refuses_whole_window():
         broker_window_source.rehydrate(value)
 
 
+def test_truncated_true_is_refused_as_unsupported():
+    value = wire()
+    value["items"][0]["truncated"] = True
+    with pytest.raises(WindowError) as raised:
+        broker_window_source.rehydrate(value)
+    assert str(raised.value) == "TRUNCATION_UNSUPPORTED"
+
+
 def test_missing_item_key_refuses_whole_window():
     value = wire()
     del value["items"][0]["truncated"]
