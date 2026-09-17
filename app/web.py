@@ -590,7 +590,18 @@ def _quote_provenance(tickers: list[str]) -> dict[str, dict[str, Any]]:
     return out
 
 
-_PERSISTED_MARK_MAX_AGE_DAYS = 30
+def _mark_carry_max_age_days() -> int:
+    """Canonical display-carry horizon from the ONE portfolio marking policy.
+
+    ``portfolio.marks._stale_max_days`` already owns doctrine loading and its degrade-safe default.
+    If the module itself is unavailable, fail closed to same-day-only rather than invent a second
+    fallback policy here.
+    """
+    try:
+        from portfolio import marks
+        return max(0, int(marks._stale_max_days()))
+    except Exception:  # noqa: BLE001
+        return 0
 
 
 def _date_part(value: Any) -> date | None:
@@ -710,11 +721,12 @@ def _persisted_book_quotes(
         ))
 
     out: dict[str, dict[str, Any]] = {}
+    max_age_days = _mark_carry_max_age_days()
     for ticker, rows in candidates.items():
         eligible = []
         for mark_date, priority, px, meta in rows:
             age_days = (target_date - mark_date).days
-            if age_days < 0 or age_days > _PERSISTED_MARK_MAX_AGE_DAYS:
+            if age_days < 0 or age_days > max_age_days:
                 continue
             eligible.append((mark_date, priority, px, meta, age_days))
         if not eligible:
@@ -754,7 +766,7 @@ def _select_dashboard_quote(
         current_age = (target_date - current_date).days if current_date is not None else None
         current_is_bounded = (
             current_age is not None
-            and 0 <= current_age <= _PERSISTED_MARK_MAX_AGE_DAYS
+            and 0 <= current_age <= _mark_carry_max_age_days()
         )
         if not current_is_bounded:
             current = None
