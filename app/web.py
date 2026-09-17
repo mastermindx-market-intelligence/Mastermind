@@ -3189,7 +3189,12 @@ def api_runs() -> JSONResponse:
                 r["summary_zh"] = sz
         return JSONResponse(runs)
     except Exception as exc:
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        _log.warning("run history read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "run_status": "unavailable",
+            "error": "run_history_unavailable",
+            "runs": None,
+        }, status_code=500)
 
 
 @router.get("/api/runlog")
@@ -3201,7 +3206,13 @@ def api_runlog(run_id: str | None = None) -> JSONResponse:
         from brain import runlog
         return JSONResponse(runlog.read_run(run_id or None))
     except Exception as exc:
-        return JSONResponse({"run_id": run_id, "steps": [], "error": str(exc)}, status_code=500)
+        _log.warning("run trace read failed for %s: %s", run_id or "latest", type(exc).__name__)
+        return JSONResponse({
+            "trace_status": "unavailable",
+            "run_id": run_id,
+            "steps": None,
+            "error": "runlog_unavailable",
+        }, status_code=500)
 
 
 # ---------------------------------------------------------------------------
