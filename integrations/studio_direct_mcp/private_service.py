@@ -63,6 +63,15 @@ STAGE_FILES = (
     "package-lock.json",
 )
 
+# Version-1 installs created before typed Git did not stage git-publish.mjs.
+# Accept only that exact historical set (or the current set) so the canonical
+# installer can stop and upgrade those known installs without accepting an
+# arbitrary manifest shape.
+LEGACY_STAGE_FILES_V1 = tuple(name for name in STAGE_FILES if name != "git-publish.mjs")
+KNOWN_MANIFEST_FILESETS = frozenset(
+    (frozenset(STAGE_FILES), frozenset(LEGACY_STAGE_FILES_V1))
+)
+
 MANIFEST_KEYS = (
     "version",
     "account",
@@ -321,6 +330,7 @@ def _build_config(
         "maxSessions": MAX_SESSIONS,
         "requestTimeoutMs": REQUEST_TIMEOUT_MS,
         "idleTimeoutMs": IDLE_TIMEOUT_MS,
+        "reclaimIdleGraceMs": 30_000,
         "gitPublish": _typed_git_config(user_root),
     }
 
@@ -369,17 +379,17 @@ def _valid_manifest(data, account: str, label: str) -> bool:
         return False
     if any(k not in data for k in MANIFEST_KEYS):
         return False
+    if data.get("version") != 1:
+        return False
     if data.get("account") != account:
         return False
     if data.get("label") != label:
         return False
     files = data.get("files")
-    if not isinstance(files, dict):
+    if not isinstance(files, dict) or frozenset(files) not in KNOWN_MANIFEST_FILESETS:
         return False
-    for name in STAGE_FILES:
-        digest = files.get(name)
-        if not _sha256_hex(digest):
-            return False
+    if any(not _sha256_hex(digest) for digest in files.values()):
+        return False
     if not _sha256_hex(data.get("configHash")):
         return False
     if not _sha256_hex(data.get("plistHash")):
@@ -409,9 +419,11 @@ def _read_manifest(
     return data
 
 
-def _installed_file_hashes(base: Path) -> dict[str, str] | None:
+def _installed_file_hashes(
+    base: Path, names: tuple[str, ...] = STAGE_FILES
+) -> dict[str, str] | None:
     hashes: dict[str, str] = {}
-    for name in STAGE_FILES:
+    for name in names:
         dest = base / name
         if dest.is_symlink() or not dest.is_file():
             return None
@@ -521,7 +533,8 @@ def _verify_prior_install(
             "--account, --source, --node, --backend, --port"
         )
     incoming = {src.name: _sha256_file(src) for src in _check_source_files(source)}
-    installed = _installed_file_hashes(roots["base"])
+    prior_names = tuple(prior["files"].keys())
+    installed = _installed_file_hashes(roots["base"], prior_names)
     if installed != prior.get("files"):
         raise SystemExit(
             "refusing restage: existing file hashes diverge; "
@@ -606,27 +619,19 @@ def _validate_port(port: int) -> None:
         raise SystemExit("--port must be between 1024 and 65535")
 
 
-def cmd_stage(args) -> int:
-    account = args.account
-    _validate_account_label(account)
-    label = f"com.mastermind.studio-direct-private.{account}"
-    host = "127.0.0.1"
-
-    if not os.path.isabs(args.source):
-        raise SystemExit("--source must be absolute")
-    source = Path(args.source)
-    if source.is_symlink() or not source.is_dir():
-        raise SystemExit(f"source dir invalid: {source}")
-    node_abs = _resolve_abs("--node", args.node)
-    backend_abs = _resolve_abs("--backend", args.backend)
-    port = int(args.port)
-    _validate_port(port)
-
-    roots = _build_runtime_roots(account)
-    _preflight_stage(
-        source, node_abs, backend_abs, account, label, host, port, roots
-    )
-
+def _write_install(
+    source: Path,
+    node_abs: Path,
+    backend_abs: Path,
+    account: str,
+    label: str,
+    host: str,
+    port: int,
+    roots: dict,
+    *,
+    result_key: str,
+    previous_source: str | None = None,
+) -> int:
     user_root = _user_root()
     _ensure_secure_dir(roots["base"])
     _ensure_secure_dir(roots["state"])
@@ -677,22 +682,49 @@ def cmd_stage(args) -> int:
         json.dumps(manifest, indent=2, sort_keys=True),
     )
 
-    print(
-        json.dumps(
-            {
-                "staged": True,
-                "account": account,
-                "label": label,
-                "runtime": str(roots["base"]),
-                "plist": str(roots["plist"]),
-                "manifest": str(roots["manifest"]),
-                "gateway": str(roots["gateway"]),
-                "port": port,
-            }
-        )
-    )
+    result = {
+        result_key: True,
+        "account": account,
+        "label": label,
+        "runtime": str(roots["base"]),
+        "plist": str(roots["plist"]),
+        "manifest": str(roots["manifest"]),
+        "gateway": str(roots["gateway"]),
+        "port": port,
+        "source": str(source),
+    }
+    if previous_source is not None:
+        result["previousSource"] = previous_source
+    print(json.dumps(result))
     return 0
 
+
+
+def cmd_stage(args) -> int:
+    account = args.account
+    _validate_account_label(account)
+    label = f"com.mastermind.studio-direct-private.{account}"
+    host = "127.0.0.1"
+
+    if not os.path.isabs(args.source):
+        raise SystemExit("--source must be absolute")
+    source = Path(args.source)
+    if source.is_symlink() or not source.is_dir():
+        raise SystemExit(f"source dir invalid: {source}")
+    node_abs = _resolve_abs("--node", args.node)
+    backend_abs = _resolve_abs("--backend", args.backend)
+    port = int(args.port)
+    _validate_port(port)
+
+    roots = _build_runtime_roots(account)
+    _preflight_stage(
+        source, node_abs, backend_abs, account, label, host, port, roots
+    )
+
+    return _write_install(
+        source, node_abs, backend_abs, account, label, host, port, roots,
+        result_key="staged",
+    )
 
 def _verify_staged_install(
     account: str,
@@ -702,11 +734,11 @@ def _verify_staged_install(
     manifest_path = roots["manifest"]
     manifest = _read_manifest(manifest_path, account, label, required=True)
 
-    for name in STAGE_FILES:
+    for name, expected_hash in manifest["files"].items():
         path = roots["base"] / name
         if path.is_symlink() or not path.is_file():
             raise SystemExit(f"not staged: {name} missing")
-        if _sha256_file(path) != manifest["files"][name]:
+        if _sha256_file(path) != expected_hash:
             raise SystemExit(f"not staged: {name} hash mismatch")
 
     deps = roots["node_modules"]
@@ -752,6 +784,45 @@ def _verify_staged_install(
         raise SystemExit("plist is not our exact install")
 
     return manifest
+
+
+def cmd_upgrade(args) -> int:
+    account = args.account
+    _validate_account_label(account)
+    label = f"com.mastermind.studio-direct-private.{account}"
+    host = "127.0.0.1"
+
+    if not os.path.isabs(args.source):
+        raise SystemExit("--source must be absolute")
+    source = Path(args.source)
+    if source.is_symlink() or not source.is_dir():
+        raise SystemExit(f"source dir invalid: {source}")
+    _check_source_files(source)
+    node_abs = _resolve_abs("--node", args.node)
+    backend_abs = _resolve_abs("--backend", args.backend)
+    port = int(args.port)
+    _validate_port(port)
+
+    roots = _build_runtime_roots(account)
+    if _launchd_inspect(label) is not None:
+        raise SystemExit("refusing upgrade while service is running; stop first")
+    prior = _verify_staged_install(account, label, roots)
+    if (
+        prior.get("node") != str(node_abs)
+        or prior.get("backend") != str(backend_abs)
+        or prior.get("host") != host
+        or prior.get("port") != port
+    ):
+        raise SystemExit(
+            "refusing upgrade: node, backend, host and port must match the existing install"
+        )
+    for path in _stage_dest_files(roots):
+        _assert_dest_safe(path)
+
+    return _write_install(
+        source, node_abs, backend_abs, account, label, host, port, roots,
+        result_key="upgraded", previous_source=str(prior.get("source") or ""),
+    )
 
 
 def cmd_start(args) -> int:
@@ -843,13 +914,14 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="private_service")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    s = sub.add_parser("stage")
-    s.add_argument("--account", required=True)
-    s.add_argument("--port", type=int, required=True)
-    s.add_argument("--source", required=True)
-    s.add_argument("--node", required=True)
-    s.add_argument("--backend", required=True)
-    s.set_defaults(func=cmd_stage)
+    for name in ("stage", "upgrade"):
+        s = sub.add_parser(name)
+        s.add_argument("--account", required=True)
+        s.add_argument("--port", type=int, required=True)
+        s.add_argument("--source", required=True)
+        s.add_argument("--node", required=True)
+        s.add_argument("--backend", required=True)
+        s.set_defaults(func=globals()[f"cmd_{name}"])
 
     for name in ("start", "status", "stop"):
         sp = sub.add_parser(name)

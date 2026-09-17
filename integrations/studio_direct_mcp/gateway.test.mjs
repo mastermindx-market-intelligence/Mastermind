@@ -421,9 +421,96 @@ test('SDK tool requests progress through a single HTTP connection after initiali
   }
 });
 
+test('shared backend reserves one slot for catalog traffic while typed Git remains advertised', { timeout: 15_000 }, async () => {
+  const { gw, effectLog } = await bootGateway({
+    backendMode: 'shared-account',
+    maxSessions: 8,
+    maxPerSessionConcurrency: 4,
+    requestTimeoutMs: 10_000,
+    gitPublish: {
+      enabled: true,
+      workspaceCli: '/usr/bin/true',
+      gitBinary: '/usr/bin/git',
+      sourceRepository: REPO_ROOT,
+      allowedRemoteUrls: ['https://github.com/mastermindx-market-intelligence/Mastermind.git'],
+    },
+  }, { FIXTURE_READ_DELAY_MS: '1000' });
+
+  const actors = [];
+  for (let i = 0; i < 5; i += 1) {
+    const actor = newClient('tok-alice');
+    await connect(actor.client, gw.url, actor.transportOpts);
+    actors.push(actor);
+  }
+
+  const catalog = await actors[4].client.listTools();
+  const names = new Set(catalog.tools.map((tool) => tool.name));
+  for (const name of [
+    'studio_git_publish_status',
+    'studio_git_commit_current_changes',
+    'studio_git_push_current_branch',
+  ]) {
+    assert.ok(names.has(name), `typed Git tool missing from combined catalog: ${name}`);
+  }
+
+  const resources = await actors[4].client.listResources();
+  assert.ok(resources.resources.some((resource) => resource.uri === 'ui://studio-test/priority'));
+
+  const ordinary = actors.slice(0, 4).map((actor, index) => actor.client.callTool({
+    name: 'read_file',
+    arguments: { path: `/fixture-priority-${index}` },
+  }, undefined, { timeout: 5000 }));
+
+  let starts = 0;
+  const startDeadline = Date.now() + 1500;
+  while (Date.now() < startDeadline) {
+    const text = await readFile(effectLog, 'utf8').catch(() => '');
+    starts = text.split('\n').filter(Boolean).map((line) => JSON.parse(line))
+      .filter((event) => event.tool === 'read_file' && event.phase === 'start').length;
+    if (starts >= 3) break;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal(starts, 3, 'ordinary work must consume only three of four shared backend slots');
+
+  const resourceStarted = performance.now();
+  const resource = await actors[4].client.readResource({ uri: 'ui://studio-test/priority' });
+  const resourceLatencyMs = performance.now() - resourceStarted;
+  assert.equal(resource.contents[0].text, 'priority-resource-ok');
+  assert.ok(resourceLatencyMs < 500,
+    `priority resource should bypass saturated ordinary work; latency=${Math.round(resourceLatencyMs)}ms`);
+
+  await Promise.all(ordinary);
+
+  const events = (await readFile(effectLog, 'utf8')).split('\n').filter(Boolean).map((line) => JSON.parse(line));
+  let activeReads = 0;
+  let activeTotal = 0;
+  let peakReads = 0;
+  let peakTotal = 0;
+  let readsAtResourceStart = null;
+  for (const event of events) {
+    if (event.tool !== 'read_file' && event.tool !== 'priority_resource') continue;
+    if (event.phase === 'start') {
+      if (event.tool === 'read_file') activeReads += 1;
+      activeTotal += 1;
+      if (event.tool === 'priority_resource') readsAtResourceStart = activeReads;
+      peakReads = Math.max(peakReads, activeReads);
+      peakTotal = Math.max(peakTotal, activeTotal);
+    } else if (event.phase === 'resolved') {
+      if (event.tool === 'read_file') activeReads -= 1;
+      activeTotal -= 1;
+    }
+  }
+  assert.equal(readsAtResourceStart, 3,
+    'catalog resource must start while three ordinary calls occupy the normal slots');
+  assert.equal(peakReads, 3, 'ordinary shared-backend concurrency must remain capped at three');
+  assert.equal(peakTotal, 4, 'catalog traffic may consume the reserved fourth slot');
+  assert.equal(activeReads, 0);
+  assert.equal(activeTotal, 0);
+});
+
 test('backend timeout marks session EFFECT_UNKNOWN and rejects retry; new session good', async () => {
   const { gw, markerPath, effectLog } = await bootGateway(
-    { requestTimeoutMs: 300 },
+    { requestTimeoutMs: 1500 },
     { FIXTURE_NEVER: '1' },
   );
   try {
@@ -492,6 +579,56 @@ test('backend timeout marks session EFFECT_UNKNOWN and rejects retry; new sessio
     assert.ok(fresh.content?.[0]?.text.includes('fresh-ok'),
       'new session must not replay tainted state');
   } finally { /* cleanup */ }
+});
+
+test('timeout-safe read returns READ_TIMEOUT without taint or replay', async () => {
+  const { gw } = await bootGateway(
+    { requestTimeoutMs: 1500 },
+    { FIXTURE_READ_DELAY_MS: '3500' },
+  );
+  const a = newClient('tok-alice');
+  await connect(a.client, gw.url, a.transportOpts);
+
+  const result = await a.client.callTool({
+    name: 'read_file', arguments: { path: '/fixture-only' },
+  }, undefined, { timeout: 5000 });
+  assert.equal(result.isError, true);
+  assert.match(result.content?.[0]?.text || '', /READ_TIMEOUT/);
+  assert.equal(gw.stats().sessions.tainted, 0, 'timeout-safe read must not taint the frontend session');
+  assert.equal(gw.stats().requests.timeouts, 1);
+
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  const fresh = await a.client.callTool({ name: 'echo', arguments: { value: 'same-session-ok' } });
+  assert.match(fresh.content?.[0]?.text || '', /same-session-ok/);
+  assert.equal(gw.stats().sessions.tainted, 0);
+});
+
+test('backend request metadata preserves the exact outer JSON-RPC call id', async () => {
+  const { gw } = await bootGateway();
+  const a = newClient('tok-alice');
+  const transport = await connect(a.client, gw.url, a.transportOpts);
+  assert.ok(transport.sessionId);
+
+  const body = JSON.stringify({
+    jsonrpc: '2.0',
+    id: 'outer-call-correlation-001',
+    method: 'tools/call',
+    params: {
+      name: 'request_meta',
+      arguments: {},
+      _meta: { caller_tag: 'preserve-me' },
+    },
+  });
+  const response = await rawPost(gw.port, {
+    'content-type': 'application/json',
+    accept: 'application/json, text/event-stream',
+    authorization: 'Bearer tok-alice',
+    'mcp-session-id': transport.sessionId,
+  }, body);
+  assert.equal(response.status, 200, response.body);
+  assert.match(response.body, /preserve-me/);
+  assert.match(response.body, /mastermind_remote_call_id/);
+  assert.match(response.body, /outer-call-correlation-001/);
 });
 
 test('readiness reflects accepting MCP traffic', async () => {

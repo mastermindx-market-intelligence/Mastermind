@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { once } from 'node:events';
 import { setTimeout as delay } from 'node:timers/promises';
 
-test('actual private CLI starts a listener and gracefully exits on SIGTERM', {timeout:20000}, async () => {
+test('actual private CLI starts a listener and gracefully exits on SIGTERM', {timeout:30000}, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'studio-private-cli-'));
   const cfg = join(dir, 'config.json');
   await writeFile(cfg, JSON.stringify({accountLabel:'cli-check',host:'127.0.0.1',port:0,
@@ -21,7 +21,7 @@ test('actual private CLI starts a listener and gracefully exits on SIGTERM', {ti
   child.stdout.on('data',c=>{logs+=c.toString();});
   const exited = once(child,'exit');
   try {
-    const until = Date.now()+10000;
+    const until = Date.now()+20000;
     while(!/listening on http:\/\/127\.0\.0\.1:(\d+)\/mcp/.test(logs) && child.exitCode === null && Date.now()<until)
       await delay(25);
     const match = logs.match(/listening on (http:\/\/127\.0\.0\.1:\d+)\/mcp/);

@@ -161,6 +161,8 @@ test('reclaimIdleCatalogSessions defaults off and is explicit-true only', () => 
   assert.equal(gatewayMod.resolveConfig({ reclaimIdleCatalogSessions: true }).reclaimIdleCatalogSessions, true);
   assert.equal(gatewayMod.resolveConfig({ reclaimIdleCatalogSessions: 'yes' }).reclaimIdleCatalogSessions, false);
   assert.equal(gatewayMod.resolveConfig({ reclaimIdleCatalogSessions: 1 }).reclaimIdleCatalogSessions, false);
+  assert.equal(unset.reclaimIdleGraceMs, 30_000);
+  assert.equal(gatewayMod.resolveConfig({ reclaimIdleGraceMs: 250 }).reclaimIdleGraceMs, 250);
 });
 
 test('default public behavior does not evict idle catalog sessions at capacity', async () => {
@@ -178,7 +180,7 @@ test('default public behavior does not evict idle catalog sessions at capacity',
 });
 
 test('opt-in reclaim evicts oldest abandoned catalog session and 404s the old id', async () => {
-  const { gw } = await bootGateway({ maxSessions: 2, reclaimIdleCatalogSessions: true });
+  const { gw } = await bootGateway({ maxSessions: 2, reclaimIdleCatalogSessions: true, reclaimIdleGraceMs: 250 });
   const first = await openAbandonedCatalogSession(gw);
   const second = await openAbandonedCatalogSession(gw);
   assert.equal(gw.stats().sessions.active, 2);
@@ -202,8 +204,14 @@ test('opt-in reclaim evicts oldest abandoned catalog session and 404s the old id
   });
   assert.equal(kept.status, 200, 'newer catalog session must remain');
 
-  const again = await rawInitialize(gw, 202);
-  assert.equal(again.status, 200, 'repeated initialize must keep succeeding by evicting the next safe idle');
+  const immediate = await rawInitialize(gw, 202);
+  assert.equal(immediate.status, 503,
+    'recent tools/list activity must refresh the idle grace and block immediate reclaim');
+
+  await delay(300);
+  const again = await rawInitialize(gw, 203);
+  assert.equal(again.status, 200,
+    'after the refreshed idle grace expires, capacity reclaim may admit the next initialize');
   assert.equal(gw.stats().sessions.reclaimed, 2);
 });
 
@@ -248,7 +256,7 @@ test('in-flight HTTP and queued limiter work are not reclaimed', async () => {
 });
 
 test('tainted and interactive/effectful idle sessions are not reclaimed', async () => {
-  const { gw } = await bootGateway({ maxSessions: 3, reclaimIdleCatalogSessions: true });
+  const { gw } = await bootGateway({ maxSessions: 3, reclaimIdleCatalogSessions: true, reclaimIdleGraceMs: 250 });
 
   const effectful = newClient();
   const effectfulT = await connect(effectful.client, gw.url, effectful.transportOpts);
@@ -276,6 +284,7 @@ test('tainted and interactive/effectful idle sessions are not reclaimed', async 
   );
 
   assert.equal(gw.stats().sessions.active, 3);
+  await delay(300);
 
   const init = await rawInitialize(gw, 401);
   assert.equal(init.status, 503, 'no safe victim among tainted/interactive/effectful');
@@ -300,7 +309,7 @@ test('tainted and interactive/effectful idle sessions are not reclaimed', async 
 });
 
 test('concurrent initialize at cap stays bounded with and without reclaim', async () => {
-  const { gw } = await bootGateway({ maxSessions: 2, reclaimIdleCatalogSessions: true });
+  const { gw } = await bootGateway({ maxSessions: 2, reclaimIdleCatalogSessions: true, reclaimIdleGraceMs: 250 });
   await openAbandonedCatalogSession(gw);
   await openAbandonedCatalogSession(gw);
 
@@ -345,7 +354,7 @@ test('readyz is false when it cannot admit and never exposes ids or principals',
   assert.ok(!dumped.includes('alice'), 'readyz must not include a principal');
   assert.ok(!dumped.includes(FIXTURE_PATH), 'readyz must not include a filesystem path');
 
-  const { gw: reclaiming } = await bootGateway({ maxSessions: 1, reclaimIdleCatalogSessions: true });
+  const { gw: reclaiming } = await bootGateway({ maxSessions: 1, reclaimIdleCatalogSessions: true, reclaimIdleGraceMs: 250 });
   await openAbandonedCatalogSession(reclaiming);
   const canReclaim = await (await fetch(new URL('/readyz', reclaiming.url))).json();
   assert.equal(canReclaim.ready, true, 'full but reclaimable catalog capacity is still ready');
@@ -354,6 +363,7 @@ test('readyz is false when it cannot admit and never exposes ids or principals',
   const { gw: blocked } = await bootGateway({
     maxSessions: 1,
     reclaimIdleCatalogSessions: true,
+    reclaimIdleGraceMs: 250,
     requestTimeoutMs: 30_000,
   });
   const busy = newClient();
@@ -362,6 +372,7 @@ test('readyz is false when it cannot admit and never exposes ids or principals',
     name: 'delayed_effect',
     arguments: { marker: 'CHURN-READYZ', delayMs: 0 },
   });
+  await delay(300);
   const cannot = await (await fetch(new URL('/readyz', blocked.url))).json();
   assert.equal(cannot.ready, false, 'full of unreclaimable sessions must not claim ready');
 });
