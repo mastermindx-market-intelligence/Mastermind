@@ -9,6 +9,7 @@ import pwd
 import re
 import stat
 import sys
+import unicodedata
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -65,6 +66,10 @@ class ControlWrapperError(RuntimeError):
     pass
 
 
+def _contains_control_character(value: str) -> bool:
+    return any(unicodedata.category(character) == "Cc" for character in value)
+
+
 def _bounded_identity_integer(
     value: object, *, name: str, minimum: int
 ) -> int:
@@ -88,7 +93,7 @@ def _bounded_identity_text(value: object, *, name: str) -> str:
         ) from exc
     if (
         len(encoded) > _MAX_IDENTITY_TEXT_BYTES
-        or any(ord(character) < 0x20 or ord(character) == 0x7F for character in value)
+        or _contains_control_character(value)
     ):
         raise ControlWrapperError(
             f"attestation process identity fact {name} is not bounded safe text"
@@ -109,7 +114,7 @@ def _canonical_executable_path(value: object) -> str:
         ) from exc
     if (
         len(encoded) > _MAX_EXECUTABLE_PATH_BYTES
-        or any(ord(character) < 0x20 or ord(character) == 0x7F for character in value)
+        or _contains_control_character(value)
         or not os.path.isabs(value)
         or value.startswith("//")
         or os.path.normpath(value) != value

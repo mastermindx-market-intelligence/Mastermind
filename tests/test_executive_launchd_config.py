@@ -2332,6 +2332,54 @@ def test_attestation_validator_refuses_non_exact_identity_integer_types(
         )
 
 
+def test_attestation_validator_refuses_unicode_control_in_matching_identity_text():
+    """B2: fresh matching identity text still refuses Unicode Cc controls."""
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    unsafe_identity = "1723500000.\u0085"
+    document = _good_document()
+    document["process_identity"]["start_identity"] = unsafe_identity
+    inspector = _FakeProcessInspector(
+        identity=_FakeIdentity(
+            pgid=4242,
+            session_id=4242,
+            start_identity=unsafe_identity,
+            effective_uid=501,
+            effective_gid=20,
+            real_uid=501,
+            real_gid=20,
+        )
+    )
+
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            document,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=inspector,
+        )
+
+
+def test_attestation_validator_refuses_unicode_control_in_executable_path():
+    """B2: a canonical-looking absolute path refuses Unicode Cc controls."""
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    document = _good_document()
+    document["python_executable_path"] = "/tmp/python\u0085bin"
+
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            document,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=_FakeProcessInspector(),
+        )
+
+
 @pytest.mark.parametrize(
     "field,bad_value",
     [
