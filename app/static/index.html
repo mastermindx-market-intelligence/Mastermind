@@ -6055,10 +6055,9 @@ window.downloadPaperPdf = function() {
   fetch('/research_paper.pdf?id=' + encodeURIComponent(_openPaperId))
     .then(function(r) {
       if (!r.ok) {
-        return r.text().then(function(body) {
-          var msg = 'HTTP ' + r.status;
-          try { var j = JSON.parse(body); if (j && j.error) msg = j.error; } catch (e) { if (body) msg = body; }
-          throw new Error(msg);
+        return r.json().catch(function(){ return null; }).then(function(j) {
+          var msg = (j && j.note) ? j.note : (r.status === 404 ? 'research paper not found' : 'PDF generation failed');
+          return Promise.reject({ safeMessage: msg });
         });
       }
       return r.blob();
@@ -6070,7 +6069,7 @@ window.downloadPaperPdf = function() {
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       setTimeout(function() { URL.revokeObjectURL(url); }, 5000);
     })
-    .catch(function(e) { alert('PDF generation failed: ' + (e && e.message ? e.message : e)); })
+    .catch(function(e) { alert((e && e.safeMessage) ? e.safeMessage : 'PDF generation failed'); })
     .finally(function() { if (btn) { btn.disabled = false; btn.innerHTML = orig; } });
 };
 
