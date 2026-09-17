@@ -490,8 +490,10 @@ class FakeTransport:
             if self._selector_prs is not None:
                 return 200, self._selector_prs
             return 200, [{"number": self.pr_number}]
-        if endpoint.endswith("/events?per_page=100"):
-            return 200, list(self.events)
+        if "/events?per_page=100&page=" in endpoint:
+            page = int(endpoint.rsplit("page=", 1)[1])
+            start = (page - 1) * 100
+            return 200, list(self.events[start:start + 100])
         return 200, {
             "number": self.pr_number,
             "html_url": f"https://github.com/mastermindx-market-intelligence/Mastermind/pull/{self.pr_number}",
@@ -767,6 +769,7 @@ def test_end_to_end_seal_through_proof_cross_digests_verify(tmp_path):
     assert journal_path.exists()
     journal = json.loads(journal_path.read_text())
     assert journal["state"] == "RESTORED"
+    assert journal["owner_event_baseline"]["rename_event_ids"] == []
     assert len(journal["effect_calls"]) == 2
     assert journal["reconciliation"] is None
     assert transport.title == "Some PR title"  # restored byte-identically
@@ -1583,6 +1586,10 @@ def test_repair_d_crash_after_apply_refuses_next_invocation(tmp_path):
                     "match_count": 1,
                     "matched_pr_number": preflight["pr_number"],
                 },
+                owner_event_baseline={
+                    "observed_at": "2026-09-17T12:30:02.500000Z",
+                    "rename_event_ids": [],
+                },
                 effect_attempts=[attempt],
                 effect_calls=[call],
                 pre_effect_observation={
@@ -1707,6 +1714,7 @@ def test_repair_e_fabricated_byte_identical_rejected_by_contracts():
     bad["effect_state"] = "INVALIDATED_BEFORE_EFFECT"
     bad["effect_attempts"] = []
     bad["effect_calls"] = []
+    bad["owner_event_baseline"] = None
     bad["owner_effect_evidence"] = []
     bad["pre_effect_observation"] = {
         "observed_head_sha": outcome["preflight"]["sealed_commit_sha"],
@@ -2243,6 +2251,143 @@ def test_canonical_journal_path_is_host_rooted_and_identity_bound(tmp_path):
     assert SHA40_B in path.parts
     assert "/tmp/attacker-chosen" not in str(path)
 
+
+
+class PaginatedIssueEventTransport:
+    def __init__(self, pages):
+        self.pages = pages
+        self.endpoints = []
+
+    def get(self, endpoint):
+        self.endpoints.append(endpoint)
+        page = int(endpoint.rsplit("page=", 1)[1])
+        return 200, list(self.pages.get(page, []))
+
+    def patch(self, endpoint, payload):
+        raise AssertionError("owner evidence reconciliation is read-only")
+
+
+def _rename_event(event_id, *, created_at, before, after):
+    return {
+        "id": event_id,
+        "event": "renamed",
+        "actor": {"login": "olv1-test-operator"},
+        "created_at": created_at,
+        "rename": {"from": before, "to": after},
+    }
+
+
+def test_owner_evidence_uses_baseline_and_paginates_past_first_full_page():
+    import hashlib
+
+    original = "Some PR title"
+    applied = original + " [OL-V1-CANARY]"
+    unrelated = [
+        {
+            "id": index,
+            "event": "commented",
+            "actor": {"login": "someone"},
+            "created_at": "2026-09-17T12:00:00Z",
+        }
+        for index in range(1, 101)
+    ]
+    transport = PaginatedIssueEventTransport(
+        {
+            1: unrelated,
+            2: [
+                _rename_event(1001, created_at="2026-09-17T12:30:05Z", before=original, after=applied),
+                _rename_event(1002, created_at="2026-09-17T12:30:06Z", before=applied, after=original),
+            ],
+        }
+    )
+    attempts = [
+        {
+            "seq": 1,
+            "kind": "TITLE_APPLY",
+            "requested_at": "2026-09-17T12:30:05.500000Z",
+            "method": "PATCH",
+            "endpoint": "repos/o/r/pulls/42",
+            "payload_title_sha256": hashlib.sha256(applied.encode()).hexdigest(),
+            "payload_title_length": len(applied),
+        },
+        {
+            "seq": 2,
+            "kind": "TITLE_RESTORE",
+            "requested_at": "2026-09-17T12:30:06.500000Z",
+            "method": "PATCH",
+            "endpoint": "repos/o/r/pulls/42",
+            "payload_title_sha256": hashlib.sha256(original.encode()).hexdigest(),
+            "payload_title_length": len(original),
+        },
+    ]
+    evidence = cli._owner_rename_evidence(
+        transport=transport,
+        preflight={
+            "repository": "o/r",
+            "pr_number": 42,
+            "original_title_sha256": hashlib.sha256(original.encode()).hexdigest(),
+            "original_title_length": len(original),
+        },
+        owner_event_baseline={
+            "observed_at": "2026-09-17T12:30:04.900000Z",
+            "rename_event_ids": [],
+        },
+        effect_attempts=attempts,
+        effect_calls=[{"kind": "TITLE_APPLY"}, {"kind": "TITLE_RESTORE"}],
+        observed_at="2026-09-17T12:30:07Z",
+    )
+    assert [item["event_id"] for item in evidence] == [1001, 1002]
+    assert transport.endpoints == [
+        "repos/o/r/issues/42/events?per_page=100&page=1",
+        "repos/o/r/issues/42/events?per_page=100&page=2",
+    ]
+
+
+def test_owner_evidence_rejects_an_event_already_present_in_baseline():
+    import hashlib
+
+    original = "Some PR title"
+    applied = original + " [OL-V1-CANARY]"
+    event = _rename_event(1001, created_at="2026-09-17T12:30:05Z", before=original, after=applied)
+    transport = PaginatedIssueEventTransport({1: [event]})
+    with pytest.raises(cli.OutcomeLearningCliError, match="missing for a completed effect call"):
+        cli._owner_rename_evidence(
+            transport=transport,
+            preflight={
+                "repository": "o/r",
+                "pr_number": 42,
+                "original_title_sha256": hashlib.sha256(original.encode()).hexdigest(),
+                "original_title_length": len(original),
+            },
+            owner_event_baseline={
+                "observed_at": "2026-09-17T12:30:04Z",
+                "rename_event_ids": [1001],
+            },
+            effect_attempts=[{
+                "seq": 1,
+                "kind": "TITLE_APPLY",
+                "requested_at": "2026-09-17T12:30:05.500000Z",
+                "method": "PATCH",
+                "endpoint": "repos/o/r/pulls/42",
+                "payload_title_sha256": hashlib.sha256(applied.encode()).hexdigest(),
+                "payload_title_length": len(applied),
+            }],
+            effect_calls=[{"kind": "TITLE_APPLY"}],
+            observed_at="2026-09-17T12:30:07Z",
+        )
+
+
+def test_issue_event_pagination_refuses_when_bound_is_exhausted():
+    pages = {
+        page: [
+            {"id": (page - 1) * 100 + index + 1, "event": "commented"}
+            for index in range(100)
+        ]
+        for page in range(1, 11)
+    }
+    transport = PaginatedIssueEventTransport(pages)
+    with pytest.raises(cli.OutcomeLearningCliError, match="pagination bound"):
+        cli._fetch_issue_events(transport, "o/r", 42)
 
 # --------------------------------------------------------------------------- 2026-09-17 remote maturation shell
 

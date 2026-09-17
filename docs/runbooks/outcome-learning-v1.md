@@ -132,15 +132,21 @@ assert_exact_staged_paths() {
 
 push_once_and_reconcile() {
   EXPECTED_HEAD="$1"
+  case "$-" in *e*) HAD_ERREXIT=1 ;; *) HAD_ERREXIT=0 ;; esac
   set +e
   git -C "$MM_ROOT" push origin "HEAD:refs/heads/$BRANCH"
   PUSH_RC=$?
-  REMOTE_BRANCH_SHA="$(git -C "$MM_ROOT" ls-remote origin \
-    "refs/heads/$BRANCH" | awk '{print $1}')"
+  LS_REMOTE_OUTPUT="$(git -C "$MM_ROOT" ls-remote origin \
+    "refs/heads/$BRANCH")"
   BRANCH_READ_RC=$?
+  if [ "$BRANCH_READ_RC" -eq 0 ]; then
+    REMOTE_BRANCH_SHA="$(printf '%s\n' "$LS_REMOTE_OUTPUT" | awk 'NR == 1 {print $1}')"
+  else
+    REMOTE_BRANCH_SHA=""
+  fi
   REMOTE_PR_SHA="$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.head.sha')"
   PR_READ_RC=$?
-  set -e
+  if [ "$HAD_ERREXIT" -eq 1 ]; then set -e; else set +e; fi
 
   if [ "$BRANCH_READ_RC" -ne 0 ] || [ "$PR_READ_RC" -ne 0 ] || \
      [ "$REMOTE_BRANCH_SHA" != "$EXPECTED_HEAD" ] || \
@@ -330,7 +336,10 @@ The journal is reserved before the first GitHub read under:
 ```
 
 Its identity includes repository, branch, operation, expectation, request, sealed commit,
-and PR. There is no CLI path override.
+and PR. There is no CLI path override. After freshness passes and before the first PATCH,
+the canary also captures a complete bounded/paginated baseline of owner rename-event IDs.
+Outcome evidence must use rename events absent from that baseline, so GitHub's second-precision
+event clock cannot invalidate a legitimate microsecond local attempt or revive an old event.
 
 Canary terminal states:
 

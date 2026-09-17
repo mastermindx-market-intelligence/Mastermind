@@ -42,6 +42,7 @@ from control_plane.outcome_learning_evaluator import (
 EXPECTATION_AT = "2026-09-02T12:00:00Z"
 REQUEST_AT = "2026-09-02T12:00:01Z"
 PREFLIGHT_AT = "2026-09-02T12:00:02Z"
+OWNER_BASELINE_AT = "2026-09-02T12:00:02.500000Z"
 CALL1_REQUESTED_AT = "2026-09-02T12:00:03Z"
 CALL1_OBSERVED_AT = "2026-09-02T12:00:04Z"
 CALL2_REQUESTED_AT = "2026-09-02T12:00:05Z"
@@ -274,6 +275,10 @@ def make_clean_outcome(expectation, request, *, head_sha=SHA40_B, original_title
         expectation_sealed_hash=expectation["sealed_hash"],
         request=request,
         preflight=preflight,
+        owner_event_baseline={
+            "observed_at": OWNER_BASELINE_AT,
+            "rename_event_ids": [],
+        },
         effect_attempts=effect_attempts,
         effect_calls=effect_calls,
         owner_effect_evidence=owner_effect_evidence,
@@ -680,6 +685,7 @@ def test_selector_stage_invalidation_has_a_closed_zero_patch_truth_shape():
     selector_refusal["effect_state"] = "INVALIDATED_BEFORE_EFFECT"
     selector_refusal["effect_attempts"] = []
     selector_refusal["effect_calls"] = []
+    selector_refusal["owner_event_baseline"] = None
     selector_refusal["owner_effect_evidence"] = []
     selector_refusal["pre_effect_observation"] = None
     selector_refusal["restoration"] = {
@@ -708,6 +714,39 @@ def test_selector_stage_invalidation_has_a_closed_zero_patch_truth_shape():
     ):
         validate_outcome(impossible, expectation, request)
 
+
+
+def test_owner_evidence_longer_than_attempts_refuses_with_contract_error():
+    expectation, request, outcome = make_episode()
+    bad = copy.deepcopy(outcome)
+    bad["effect_attempts"] = bad["effect_attempts"][:1]
+    bad["effect_calls"] = bad["effect_calls"][:1]
+    bad["effect_state"] = "EFFECT_UNKNOWN"
+    with pytest.raises(
+        OutcomeLearningContractError,
+        match="owner_effect_evidence cannot exceed effect_attempts",
+    ):
+        validate_outcome(bad, expectation, request)
+
+
+def test_owner_event_contract_rejects_baseline_reuse_and_pre_attempt_time():
+    expectation, request, outcome = make_episode()
+
+    reused = copy.deepcopy(outcome)
+    reused["owner_event_baseline"]["rename_event_ids"] = [1001]
+    with pytest.raises(
+        OutcomeLearningContractError,
+        match="already present in the pre-effect baseline",
+    ):
+        validate_outcome(reused, expectation, request)
+
+    backdated = copy.deepcopy(outcome)
+    backdated["owner_effect_evidence"][0]["created_at"] = PREFLIGHT_AT
+    with pytest.raises(
+        OutcomeLearningContractError,
+        match="predates its attempted PATCH",
+    ):
+        validate_outcome(backdated, expectation, request)
 
 def test_timestamps_are_canonical_utc_and_episode_chronology_is_strict():
     expectation, request, outcome = make_episode()

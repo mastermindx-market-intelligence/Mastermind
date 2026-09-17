@@ -64,6 +64,7 @@ from control_plane.outcome_learning_contracts import (  # noqa: E402
     validate_effect_attempts,
     validate_effect_calls,
     validate_outcome,
+    validate_owner_event_baseline,
     validate_preflight,
     validate_remote_publication_receipt,
     validate_revision_chain,
@@ -2345,6 +2346,7 @@ _JOURNAL_REQUIRED = {
     "state",
     "bound_identity",
     "selector_observation",
+    "owner_event_baseline",
     "effect_attempts",
     "effect_calls",
     "reconciliation",
@@ -2414,6 +2416,7 @@ def _journal_record(
     bound_identity: Mapping[str, Any],
     recorded_at: str,
     selector_observation: Mapping[str, Any] | None = None,
+    owner_event_baseline: Mapping[str, Any] | None = None,
     effect_attempts: Sequence[Mapping[str, Any]] = (),
     effect_calls: Sequence[Mapping[str, Any]] = (),
     reconciliation: Mapping[str, Any] | None = None,
@@ -2425,6 +2428,9 @@ def _journal_record(
         "bound_identity": dict(bound_identity),
         "selector_observation": (
             dict(selector_observation) if selector_observation is not None else None
+        ),
+        "owner_event_baseline": (
+            dict(owner_event_baseline) if owner_event_baseline is not None else None
         ),
         "effect_attempts": [dict(item) for item in effect_attempts],
         "effect_calls": [dict(item) for item in effect_calls],
@@ -2499,6 +2505,17 @@ def _validate_journal_record(record: Mapping[str, Any]) -> Mapping[str, Any]:
                 "journal selector observation cannot postdate the journal record"
             )
 
+    owner_event_baseline = validate_owner_event_baseline(
+        item["owner_event_baseline"]
+    )
+    baseline_time = None
+    if owner_event_baseline is not None:
+        baseline_time = _parse_iso_utc(str(owner_event_baseline["observed_at"]))
+        if baseline_time > recorded_time:
+            raise OutcomeLearningCliError(
+                "journal owner-event baseline cannot postdate the journal record"
+            )
+
     attempts = validate_effect_attempts(item["effect_attempts"])
     calls = validate_effect_calls(item["effect_calls"])
     if len(calls) > len(attempts):
@@ -2552,6 +2569,20 @@ def _validate_journal_record(record: Mapping[str, Any]) -> Mapping[str, Any]:
                 "journal pre-effect observation cannot postdate the journal record"
             )
 
+    if owner_event_baseline is not None:
+        if pre_effect is None:
+            raise OutcomeLearningCliError(
+                "journal owner-event baseline requires a pre-effect observation"
+            )
+        if pre_effect_time >= baseline_time:
+            raise OutcomeLearningCliError(
+                "journal owner-event baseline must be observed after pre-effect freshness"
+            )
+        if attempts and baseline_time >= _parse_iso_utc(str(attempts[0]["requested_at"])):
+            raise OutcomeLearningCliError(
+                "journal owner-event baseline must precede the first PATCH attempt"
+            )
+
     reconciliation = item["reconciliation"]
     if reconciliation is not None:
         reconciliation = _closed_journal_mapping(
@@ -2584,6 +2615,7 @@ def _validate_journal_record(record: Mapping[str, Any]) -> Mapping[str, Any]:
     if state == "PREPARED":
         valid = (
             selector is None
+            and owner_event_baseline is None
             and not attempts
             and not calls
             and reconciliation is None
@@ -2592,6 +2624,7 @@ def _validate_journal_record(record: Mapping[str, Any]) -> Mapping[str, Any]:
     elif state == "INVALIDATED_BEFORE_EFFECT":
         valid = (
             selector is not None
+            and owner_event_baseline is None
             and not attempts
             and not calls
             and reconciliation is None
@@ -2601,6 +2634,7 @@ def _validate_journal_record(record: Mapping[str, Any]) -> Mapping[str, Any]:
     elif state == "APPLY_SENT":
         valid = (
             selector_single
+            and owner_event_baseline is not None
             and pre_effect is not None
             and len(attempts) == 1
             and not calls
@@ -2609,6 +2643,7 @@ def _validate_journal_record(record: Mapping[str, Any]) -> Mapping[str, Any]:
     elif state == "APPLIED_READBACK":
         valid = (
             selector_single
+            and owner_event_baseline is not None
             and pre_effect is not None
             and len(attempts) == 1
             and len(calls) == 1
@@ -2617,6 +2652,7 @@ def _validate_journal_record(record: Mapping[str, Any]) -> Mapping[str, Any]:
     elif state == "RESTORE_SENT":
         valid = (
             selector_single
+            and owner_event_baseline is not None
             and pre_effect is not None
             and len(attempts) == 2
             and len(calls) == 1
@@ -2625,6 +2661,7 @@ def _validate_journal_record(record: Mapping[str, Any]) -> Mapping[str, Any]:
     elif state == "RESTORED":
         valid = (
             selector_single
+            and owner_event_baseline is not None
             and pre_effect is not None
             and len(attempts) == 2
             and len(calls) == 2
@@ -2633,6 +2670,7 @@ def _validate_journal_record(record: Mapping[str, Any]) -> Mapping[str, Any]:
     else:
         valid = (
             selector_single
+            and owner_event_baseline is not None
             and pre_effect is not None
             and len(attempts) in {1, 2}
             and len(calls) <= len(attempts)
@@ -2711,6 +2749,74 @@ def _advance_journal(journal_path: Path, record: dict[str, Any]) -> None:
     tmp_path = journal_path.with_name(journal_path.name + f".tmp{os.getpid()}")
     tmp_path.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     os.replace(str(tmp_path), str(journal_path))
+
+
+_MAX_ISSUE_EVENT_PAGES = 10
+
+
+def _fetch_issue_events(
+    transport: GhTransport,
+    repository: str,
+    pr_number: int,
+) -> list[Mapping[str, Any]]:
+    """Read a complete, bounded GitHub issue-event history page by page."""
+    events: list[Mapping[str, Any]] = []
+    seen_ids: set[int] = set()
+    for page in range(1, _MAX_ISSUE_EVENT_PAGES + 1):
+        endpoint = (
+            f"repos/{repository}/issues/{pr_number}/events?per_page=100&page={page}"
+        )
+        _, payload = transport.get(endpoint)
+        if not isinstance(payload, list):
+            raise OutcomeLearningCliError(
+                f"GitHub issue-events page {page} was not a list"
+            )
+        for index, raw in enumerate(payload):
+            if not isinstance(raw, Mapping):
+                raise OutcomeLearningCliError(
+                    f"GitHub issue-events page {page} item {index} was not a mapping"
+                )
+            event_id = raw.get("id")
+            if type(event_id) is not int or event_id <= 0:
+                raise OutcomeLearningCliError(
+                    f"GitHub issue-events page {page} item {index} has invalid id"
+                )
+            if event_id in seen_ids:
+                raise OutcomeLearningCliError(
+                    f"GitHub issue-events response repeats event id {event_id}"
+                )
+            seen_ids.add(event_id)
+            events.append(raw)
+        if len(payload) < 100:
+            return events
+    raise OutcomeLearningCliError(
+        "GitHub issue-event pagination bound exceeded before a terminal short page"
+    )
+
+
+def _capture_owner_event_baseline(
+    transport: GhTransport,
+    preflight: Mapping[str, Any],
+    *,
+    clock: Clock | None,
+    after: str,
+) -> dict[str, Any]:
+    events = _fetch_issue_events(
+        transport,
+        str(preflight["repository"]),
+        int(preflight["pr_number"]),
+    )
+    rename_ids = sorted(
+        int(event["id"])
+        for event in events
+        if event.get("event") == "renamed"
+    )
+    baseline = {
+        "observed_at": _event_time(clock, after=after),
+        "rename_event_ids": rename_ids,
+    }
+    validate_owner_event_baseline(baseline)
+    return baseline
 
 
 def cmd_canary(
@@ -2823,9 +2929,17 @@ def cmd_canary(
         )
         return 6
 
+    owner_event_baseline = _capture_owner_event_baseline(
+        transport,
+        preflight,
+        clock=clock,
+        after=freshness_at,
+    )
     original_title = live_title
     applied_title = original_title + " " + request["canary_token"]
-    apply_requested_at = _event_time(clock, after=freshness_at)
+    apply_requested_at = _event_time(
+        clock, after=owner_event_baseline["observed_at"]
+    )
     apply_attempt = _make_attempt(
         1,
         "TITLE_APPLY",
@@ -2839,6 +2953,7 @@ def cmd_canary(
             state="APPLY_SENT",
             bound_identity=bound_identity,
             selector_observation=selector_observation,
+            owner_event_baseline=owner_event_baseline,
             effect_attempts=[apply_attempt],
             pre_effect_observation=pre_effect_observation,
             recorded_at=apply_requested_at,
@@ -2868,6 +2983,7 @@ def cmd_canary(
                 state="EFFECT_UNKNOWN",
                 bound_identity=bound_identity,
                 selector_observation=selector_observation,
+                owner_event_baseline=owner_event_baseline,
                 effect_attempts=[apply_attempt],
                 reconciliation=reconciliation,
                 pre_effect_observation=pre_effect_observation,
@@ -2883,6 +2999,7 @@ def cmd_canary(
             state="APPLIED_READBACK",
             bound_identity=bound_identity,
             selector_observation=selector_observation,
+            owner_event_baseline=owner_event_baseline,
             effect_attempts=[apply_attempt],
             effect_calls=[call1],
             pre_effect_observation=pre_effect_observation,
@@ -2904,6 +3021,7 @@ def cmd_canary(
             state="RESTORE_SENT",
             bound_identity=bound_identity,
             selector_observation=selector_observation,
+            owner_event_baseline=owner_event_baseline,
             effect_attempts=attempts,
             effect_calls=[call1],
             pre_effect_observation=pre_effect_observation,
@@ -2956,6 +3074,7 @@ def cmd_canary(
             state=state,
             bound_identity=bound_identity,
             selector_observation=selector_observation,
+            owner_event_baseline=owner_event_baseline,
             effect_attempts=attempts,
             effect_calls=effect_calls,
             reconciliation=reconciliation,
@@ -2985,32 +3104,25 @@ def _owner_rename_evidence(
     *,
     transport: GhTransport,
     preflight: Mapping[str, Any],
+    owner_event_baseline: Mapping[str, Any],
     effect_attempts: Sequence[Mapping[str, Any]],
     effect_calls: Sequence[Mapping[str, Any]],
     observed_at: str,
 ) -> list[dict[str, Any]]:
-    """Bind attempted title transitions to complete GitHub issue-event evidence."""
+    """Bind attempted title transitions to post-baseline GitHub owner evidence."""
     if not effect_attempts:
         return []
-    endpoint = (
-        f"repos/{preflight['repository']}/issues/{preflight['pr_number']}"
-        "/events?per_page=100"
+    validate_owner_event_baseline(owner_event_baseline)
+    baseline_ids = set(owner_event_baseline["rename_event_ids"])
+    payload = _fetch_issue_events(
+        transport,
+        str(preflight["repository"]),
+        int(preflight["pr_number"]),
     )
-    _, payload = transport.get(endpoint)
-    if not isinstance(payload, list):
-        raise OutcomeLearningCliError("GitHub issue-events response was not a list")
-    if len(payload) >= 100:
-        raise OutcomeLearningCliError(
-            "GitHub issue-events page is full; rename-event evidence may be incomplete"
-        )
-
-    window_start = _parse_iso_utc(str(effect_attempts[0]["requested_at"]))
-    # Owner events can become observable just after the local terminal journal write;
-    # bind through the read-only owner observation rather than assuming zero clock lag.
     window_end = _parse_iso_utc(str(observed_at))
     candidates: list[dict[str, Any]] = []
     for raw in payload:
-        if not isinstance(raw, Mapping) or raw.get("event") != "renamed":
+        if raw.get("event") != "renamed":
             continue
         event_id = raw.get("id")
         actor = raw.get("actor")
@@ -3028,8 +3140,10 @@ def _owner_rename_evidence(
             or not isinstance(created_at, str)
         ):
             raise OutcomeLearningCliError("GitHub rename event has an invalid shape")
+        if event_id in baseline_ids:
+            continue
         created = _parse_iso_utc(created_at)
-        if window_start <= created <= window_end:
+        if created <= window_end:
             candidates.append(
                 {
                     "id": event_id,
@@ -3041,9 +3155,6 @@ def _owner_rename_evidence(
                 }
             )
     candidates.sort(key=lambda item: (item["created"], item["id"]))
-    if len({item["id"] for item in candidates}) != len(candidates):
-        raise OutcomeLearningCliError("GitHub rename event ids are not unique")
-
     evidence: list[dict[str, Any]] = []
     previous_sha = preflight["original_title_sha256"]
     previous_length = preflight["original_title_length"]
@@ -3051,10 +3162,12 @@ def _owner_rename_evidence(
     selected_ids: set[int] = set()
     for attempt in effect_attempts:
         matches: list[tuple[int, dict[str, Any]]] = []
-        requested = _parse_iso_utc(str(attempt["requested_at"]))
+        requested_floor = _parse_iso_utc(
+            str(attempt["requested_at"])
+        ).replace(microsecond=0)
         for index in range(cursor, len(candidates)):
             event = candidates[index]
-            if event["created"] < requested:
+            if event["created"] < requested_floor:
                 continue
             if (
                 _sha256_hex_text(event["from"]) == previous_sha
@@ -3096,13 +3209,14 @@ def _owner_rename_evidence(
     unbound = [item["id"] for item in candidates if item["id"] not in selected_ids]
     if unbound:
         raise OutcomeLearningCliError(
-            f"unbound GitHub rename events occurred inside the effect window: {unbound}"
+            f"unbound GitHub rename events occurred after the pre-effect baseline: {unbound}"
         )
     if len(evidence) < len(effect_calls):
         raise OutcomeLearningCliError(
             "GitHub owner rename-event evidence is missing for a completed effect call"
         )
     return evidence
+
 
 def _derive_effect_edge(
     journal: Mapping[str, Any],
@@ -3192,6 +3306,7 @@ def cmd_outcome(
     effect_state = _JOURNAL_STATE_TO_EFFECT_STATE[journal_state]
     effect_attempts = list(journal["effect_attempts"])
     effect_calls = list(journal["effect_calls"])
+    owner_event_baseline = journal["owner_event_baseline"]
     reconciliation = journal["reconciliation"]
     pre_effect_observation = journal["pre_effect_observation"]
     original_sha = preflight["original_title_sha256"]
@@ -3201,6 +3316,7 @@ def cmd_outcome(
     owner_effect_evidence = _owner_rename_evidence(
         transport=transport,
         preflight=preflight,
+        owner_event_baseline=owner_event_baseline,
         effect_attempts=effect_attempts,
         effect_calls=effect_calls,
         observed_at=owner_observed_at,
@@ -3252,7 +3368,8 @@ def cmd_outcome(
     elif effect_calls:
         last = effect_calls[-1]
         restoration = {
-            "byte_identical": last["readback"]["title_sha256"] == original_sha,            "prestate_title_sha256": original_sha,
+            "byte_identical": last["readback"]["title_sha256"] == original_sha,
+            "prestate_title_sha256": original_sha,
             "poststate_title_sha256": last["readback"]["title_sha256"],
             "head_unchanged": last["readback"]["head_sha"] == sealed_head,
         }
@@ -3275,6 +3392,7 @@ def cmd_outcome(
         preflight=preflight,
         effect_attempts=effect_attempts,
         effect_calls=effect_calls,
+        owner_event_baseline=owner_event_baseline,
         owner_effect_evidence=owner_effect_evidence,
         effect_state=effect_state,
         restoration=restoration,
@@ -3965,9 +4083,9 @@ def _parser() -> argparse.ArgumentParser:
         "--request",
         required=True,
         help=(
-            "kept for operator bookkeeping/consistency only — Sol REQUEST_REPAIR "
-            "(BLOCKER C) reacquires the actual request content from its committed "
-            "blob (preflight.request_blob_sha) and never reads this file's bytes"
+            "kept for operator bookkeeping/consistency only — the effect edge "
+            "reacquires expectation and request from their exact sealed-commit repo "
+            "paths, cross-checks both blob ids/digests, and never trusts this file's bytes"
         ),
     )
     p_canary.add_argument(

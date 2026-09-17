@@ -864,6 +864,7 @@ _OUTCOME_REQUIRED = {
     "preflight",
     "effect_attempts",
     "effect_calls",
+    "owner_event_baseline",
     "owner_effect_evidence",
     "effect_state",
     "restoration",
@@ -924,6 +925,7 @@ _RESTORATION_REQUIRED = {
 }
 
 
+_OWNER_EVENT_BASELINE_REQUIRED = {"observed_at", "rename_event_ids"}
 _OWNER_RENAME_EVENT_REQUIRED = {
     "schema",
     "repository",
@@ -1035,6 +1037,33 @@ def _validate_effect_calls(value: Any) -> list[Mapping[str, Any]]:
 
 def validate_effect_calls(value: Any) -> list[Mapping[str, Any]]:
     return _validate_effect_calls(value)
+
+
+def validate_owner_event_baseline(
+    value: Any,
+) -> Mapping[str, Any] | None:
+    if value is None:
+        return None
+    item = _closed_mapping(
+        value,
+        required=_OWNER_EVENT_BASELINE_REQUIRED,
+        where="owner_event_baseline",
+    )
+    _utc_timestamp(item["observed_at"], "owner_event_baseline.observed_at")
+    event_ids = item["rename_event_ids"]
+    if not isinstance(event_ids, list) or len(event_ids) > 1000:
+        raise OutcomeLearningContractError(
+            "owner_event_baseline.rename_event_ids must be a list with at most 1000 entries"
+        )
+    validated = [
+        _int(value, f"owner_event_baseline.rename_event_ids[{index}]", minimum=1)
+        for index, value in enumerate(event_ids)
+    ]
+    if validated != sorted(validated) or len(set(validated)) != len(validated):
+        raise OutcomeLearningContractError(
+            "owner_event_baseline.rename_event_ids must be sorted and unique"
+        )
+    return item
 
 
 def validate_owner_effect_evidence(value: Any) -> list[Mapping[str, Any]]:
@@ -1150,6 +1179,7 @@ def build_outcome(
     preflight: Mapping[str, Any],
     effect_attempts: Sequence[Mapping[str, Any]],
     effect_calls: Sequence[Mapping[str, Any]],
+    owner_event_baseline: Mapping[str, Any] | None,
     owner_effect_evidence: Sequence[Mapping[str, Any]],
     effect_state: str,
     restoration: Mapping[str, Any],
@@ -1167,6 +1197,9 @@ def build_outcome(
         "preflight": dict(preflight),
         "effect_attempts": [dict(item) for item in effect_attempts],
         "effect_calls": [dict(item) for item in effect_calls],
+        "owner_event_baseline": (
+            dict(owner_event_baseline) if owner_event_baseline is not None else None
+        ),
         "owner_effect_evidence": [dict(item) for item in owner_effect_evidence],
         "effect_state": _enum(effect_state, EFFECT_STATES, "effect_state"),
         "restoration": dict(restoration),
@@ -1209,6 +1242,9 @@ def validate_outcome(
     preflight = validate_preflight(item["preflight"])
     effect_attempts = validate_effect_attempts(item["effect_attempts"])
     effect_calls = _validate_effect_calls(item["effect_calls"])
+    owner_event_baseline = validate_owner_event_baseline(
+        item["owner_event_baseline"]
+    )
     owner_effect_evidence = validate_owner_effect_evidence(
         item["owner_effect_evidence"]
     )
@@ -1255,6 +1291,16 @@ def validate_outcome(
                     f"effect_calls[{index}].{field} does not match its pre-PATCH attempt"
                 )
 
+    if len(owner_effect_evidence) > len(effect_attempts):
+        raise OutcomeLearningContractError(
+            "owner_effect_evidence cannot exceed effect_attempts"
+        )
+    baseline_ids = (
+        set(owner_event_baseline["rename_event_ids"])
+        if owner_event_baseline is not None
+        else set()
+    )
+
     for index, evidence in enumerate(owner_effect_evidence):
         if evidence["repository"] != preflight["repository"]:
             raise OutcomeLearningContractError(
@@ -1265,6 +1311,26 @@ def validate_outcome(
                 "owner_effect_evidence pr_number does not match preflight"
             )
         attempt = effect_attempts[index]
+        if owner_event_baseline is None:
+            raise OutcomeLearningContractError(
+                "owner_effect_evidence requires owner_event_baseline"
+            )
+        if evidence["event_id"] in baseline_ids:
+            raise OutcomeLearningContractError(
+                f"owner_effect_evidence[{index}].event_id was already present in the pre-effect baseline"
+            )
+        event_created = _utc_timestamp(
+            evidence["created_at"],
+            f"owner_effect_evidence[{index}].created_at",
+        )
+        attempt_requested = _utc_timestamp(
+            attempt["requested_at"],
+            f"effect_attempts[{index}].requested_at",
+        )
+        if event_created < attempt_requested.replace(microsecond=0):
+            raise OutcomeLearningContractError(
+                f"owner_effect_evidence[{index}] predates its attempted PATCH at GitHub second precision"
+            )
         if evidence["to_title_sha256"] != attempt["payload_title_sha256"]:
             raise OutcomeLearningContractError(
                 f"owner_effect_evidence[{index}] does not match its attempted title"
@@ -1290,6 +1356,15 @@ def validate_outcome(
     if len(owner_effect_evidence) < len(effect_calls):
         raise OutcomeLearningContractError(
             "every completed effect_call requires GitHub-owner rename-event evidence"
+        )
+
+    if effect_attempts and owner_event_baseline is None:
+        raise OutcomeLearningContractError(
+            "every attempted effect requires a pre-effect owner_event_baseline"
+        )
+    if not effect_attempts and owner_event_baseline is not None:
+        raise OutcomeLearningContractError(
+            "owner_event_baseline must be None when no effect was attempted"
         )
 
     if effect_state in {"NOT_ATTEMPTED", "INVALIDATED_BEFORE_EFFECT"}:
@@ -1466,6 +1541,16 @@ def validate_outcome(
             "canary request must be recorded strictly before preflight"
         )
     chronology_cursor = preflight_time
+    if owner_event_baseline is not None:
+        baseline_time = _utc_timestamp(
+            owner_event_baseline["observed_at"],
+            "owner_event_baseline.observed_at",
+        )
+        if chronology_cursor >= baseline_time:
+            raise OutcomeLearningContractError(
+                "owner_event_baseline must be observed strictly after preflight"
+            )
+        chronology_cursor = baseline_time
     for index, attempt in enumerate(effect_attempts):
         requested_time = _utc_timestamp(
             attempt["requested_at"], f"effect_attempts[{index}].requested_at"
@@ -2644,6 +2729,7 @@ __all__ = [
     "validate_effect_calls",
     "validate_expectation",
     "validate_outcome",
+    "validate_owner_event_baseline",
     "validate_owner_effect_evidence",
     "validate_preflight",
     "validate_self_model",
