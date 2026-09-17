@@ -2560,3 +2560,267 @@ def test_validation_finalization_state_survives_cancellation_after_transport_clo
 def test_local_schema_validator_fails_closed_on_unknown_keyword():
     with pytest.raises(cw.ResultValidationError, match="unsupported JSON Schema"):
         cw.validate_json_schema({"x": 1}, {"type": "object", "unevaluatedProperties": False})
+
+
+def test_monitor_bounds_owned_tasks_after_pre_latch_identity_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def exercise() -> None:
+        monkeypatch.setattr(cw, "_LOCAL_TRANSPORT_FINALIZATION_SECONDS", 0.01)
+
+        def forbidden_group_probe(_pgid: int) -> bool:
+            raise AssertionError("cleanup must not probe a PID/PGID after identity failure")
+
+        def forbidden_signal(_pgid: int, _sig: int) -> None:
+            raise AssertionError("cleanup must not signal after identity failure")
+
+        monkeypatch.setattr(cw, "_process_group_exists", forbidden_group_probe)
+        monkeypatch.setattr(cw.os, "killpg", forbidden_signal)
+
+        never = asyncio.Event()
+        process_wait_task = asyncio.create_task(never.wait())
+        stdout_task = asyncio.create_task(never.wait())
+        stderr_task = asyncio.create_task(never.wait())
+        state = type("State", (), {})()
+        state.violation = asyncio.Event()
+        state.violation.set()
+        state.process = type("Process", (), {"returncode": None})()
+        state.process_wait_task = process_wait_task
+        state.stdout_task = stdout_task
+        state.stderr_task = stderr_task
+        state.spec = type("Spec", (), {"timeout_seconds": 1.0})()
+        state.timed_out = False
+        state.stream_errors = []
+        state.finalization = type(
+            "Finalization",
+            (),
+            {"group_proven_absent": False, "error": None},
+        )()
+        state.finished_at = None
+
+        adapter = object.__new__(cw.CodexWorkerAdapter)
+
+        async def fail_before_absence_latch(_state) -> None:
+            raise cw.ProcessIdentityError(
+                "process identity changed before final settlement"
+            )
+
+        monkeypatch.setattr(adapter, "_terminate", fail_before_absence_latch)
+        monitor_task = asyncio.create_task(adapter._monitor(state))
+        owned_tasks = (process_wait_task, stdout_task, stderr_task)
+        try:
+            done, _pending = await asyncio.wait({monitor_task}, timeout=0.2)
+            assert monitor_task in done, (
+                "pre-latch identity failure left adapter-owned tasks unbounded"
+            )
+            await monitor_task
+            assert all(task.done() for task in owned_tasks)
+            assert any(
+                "process identity changed before final settlement" in error
+                for error in state.stream_errors
+            )
+            assert state.finalization.error == (
+                "process identity changed before final settlement"
+            )
+            assert state.finished_at is not None
+        finally:
+            for task in owned_tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*owned_tasks, return_exceptions=True)
+            if not monitor_task.done():
+                monitor_task.cancel()
+            await asyncio.gather(monitor_task, return_exceptions=True)
+
+    asyncio.run(exercise())
+
+
+def test_validation_identity_failure_retires_owned_tasks_and_preserves_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def exercise() -> None:
+        adapter, spec, _workspace_path, _run_dir = _fixture(tmp_path)
+        monkeypatch.setattr(cw, "_LOCAL_STREAM_DRAIN_SECONDS", 0.01)
+        recorded_hash_tasks: list[asyncio.Task[object]] = []
+        terminate_calls = 0
+        kill_calls: list[tuple[int, int]] = []
+        original_killpg = cw.os.killpg
+
+        async def never_finish_hash(*_args, **_kwargs):
+            task = asyncio.current_task()
+            assert task is not None
+            recorded_hash_tasks.append(task)
+            await asyncio.Event().wait()
+            raise AssertionError("cancelled hash task resumed")
+
+        async def fail_validation_termination(*_args, **_kwargs) -> bool:
+            nonlocal terminate_calls
+            terminate_calls += 1
+            raise cw.ProcessIdentityError(
+                "validation process identity changed before final settlement"
+            )
+
+        async def observed_returncode(_process) -> int:
+            return 0
+
+        def traced_killpg(pgid: int, sig: int) -> None:
+            kill_calls.append((pgid, sig))
+            original_killpg(pgid, sig)
+
+        monkeypatch.setattr(cw, "_hash_validation_stream", never_finish_hash)
+        monkeypatch.setattr(cw, "_wait_for_known_returncode", observed_returncode)
+        monkeypatch.setattr(
+            adapter,
+            "_terminate_validation_process",
+            fail_validation_termination,
+        )
+        monkeypatch.setattr(cw.os, "killpg", traced_killpg)
+
+        try:
+            with pytest.raises(
+                cw.ProcessIdentityError,
+                match="validation process identity changed before final settlement",
+            ):
+                await asyncio.wait_for(
+                    adapter.run_validation_argv(
+                        spec,
+                        ("/usr/bin/true",),
+                        timeout_seconds=5,
+                    ),
+                    timeout=1.0,
+                )
+            assert terminate_calls == 1
+            assert len(recorded_hash_tasks) == 2
+            assert all(task.done() for task in recorded_hash_tasks), (
+                "validation identity failure leaked stream/hash tasks"
+            )
+            assert kill_calls == []
+        finally:
+            for task in recorded_hash_tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*recorded_hash_tasks, return_exceptions=True)
+
+    asyncio.run(exercise())
+
+
+def test_validation_uses_private_codex_home_without_requiring_provider_auth(
+    tmp_path: Path,
+) -> None:
+    adapter, spec, _workspace_path, _run_dir = _fixture(tmp_path)
+    (adapter.codex_home / "auth.json").unlink()
+
+    with pytest.raises(
+        cw.LaunchValidationError,
+        match="dedicated CODEX_HOME/auth.json is required",
+    ):
+        asyncio.run(adapter.start(spec))
+
+    receipt = asyncio.run(
+        adapter.run_validation_argv(
+            spec,
+            ("/usr/bin/true",),
+            timeout_seconds=5,
+        )
+    )
+    assert receipt.exit_code == 0
+    assert receipt.error is None
+    assert receipt.timed_out is False
+
+
+def test_validation_still_requires_private_real_codex_home_without_auth(
+    tmp_path: Path,
+) -> None:
+    adapter, spec, _workspace_path, _run_dir = _fixture(tmp_path)
+    (adapter.codex_home / "auth.json").unlink()
+    adapter.codex_home.chmod(0o755)
+
+    with pytest.raises(
+        cw.LaunchValidationError,
+        match="CODEX_HOME must be mode 0700 or narrower",
+    ):
+        asyncio.run(
+            adapter.run_validation_argv(
+                spec,
+                ("/usr/bin/true",),
+                timeout_seconds=5,
+            )
+        )
+
+
+def test_validation_cancellation_preserves_cancelled_error_when_identity_cleanup_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def exercise() -> None:
+        adapter, spec, _workspace_path, _run_dir = _fixture(tmp_path)
+        recorded_hash_tasks: list[asyncio.Task[object]] = []
+        processes: list[asyncio.subprocess.Process] = []
+        kill_calls: list[tuple[int, int]] = []
+        original_create = asyncio.create_subprocess_exec
+        original_killpg = cw.os.killpg
+
+        async def never_finish_hash(*_args, **_kwargs):
+            task = asyncio.current_task()
+            assert task is not None
+            recorded_hash_tasks.append(task)
+            await asyncio.Event().wait()
+            raise AssertionError("cancelled hash task resumed")
+
+        async def capture_process(*args, **kwargs):
+            process = await original_create(*args, **kwargs)
+            processes.append(process)
+            return process
+
+        async def fail_validation_termination(*_args, **_kwargs) -> bool:
+            raise cw.ProcessIdentityError("validation cleanup identity failure")
+
+        def traced_killpg(pgid: int, sig: int) -> None:
+            kill_calls.append((pgid, sig))
+            original_killpg(pgid, sig)
+
+        monkeypatch.setattr(cw, "_hash_validation_stream", never_finish_hash)
+        monkeypatch.setattr(
+            adapter,
+            "_terminate_validation_process",
+            fail_validation_termination,
+        )
+        monkeypatch.setattr(cw.asyncio, "create_subprocess_exec", capture_process)
+        monkeypatch.setattr(cw.os, "killpg", traced_killpg)
+
+        task = asyncio.create_task(
+            adapter.run_validation_argv(
+                spec,
+                ("/bin/sleep", "60"),
+                timeout_seconds=5,
+            )
+        )
+        try:
+            for _ in range(200):
+                if processes and len(recorded_hash_tasks) == 2:
+                    break
+                await asyncio.sleep(0.01)
+            assert processes and len(recorded_hash_tasks) == 2
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(task, timeout=1.0)
+            assert all(hash_task.done() for hash_task in recorded_hash_tasks)
+            assert kill_calls == []
+        finally:
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            for hash_task in recorded_hash_tasks:
+                if not hash_task.done():
+                    hash_task.cancel()
+            await asyncio.gather(*recorded_hash_tasks, return_exceptions=True)
+            for process in processes:
+                if process.returncode is None:
+                    try:
+                        original_killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    await process.wait()
+
+    asyncio.run(exercise())

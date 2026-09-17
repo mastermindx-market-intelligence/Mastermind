@@ -2510,3 +2510,216 @@ def test_legacy_cli_describe_keeps_its_original_snapshot_payload(capsys):
     expected["pinned_snapshot_sha256"] = SCHEMA_SNAPSHOT_SHA256
     expected["mode"] = "readonly"
     assert actual == expected
+
+
+def _www_authenticate(sent: list[dict[str, Any]]) -> bytes | None:
+    for key, value in sent[0].get("headers", []):
+        if key.lower() == b"www-authenticate":
+            return value
+    return None
+
+
+async def _asgi(
+    app: Any,
+    *,
+    method: str = "POST",
+    path: str = "/mcp",
+    host: bytes = b"e1.local",
+    extra_headers: tuple[tuple[bytes, bytes], ...] | list[tuple[bytes, bytes]] = (),
+    events: list[dict[str, Any]] | None = None,
+    receive: Any = None,
+) -> list[dict[str, Any]]:
+    pending = list(events) if events is not None else [{"type": "http.request", "body": b"", "more_body": False}]
+
+    async def default_receive() -> dict[str, Any]:
+        return pending.pop(0) if pending else {"type": "http.disconnect"}
+
+    sent: list[dict[str, Any]] = []
+
+    async def send(event: dict[str, Any]) -> None:
+        sent.append(dict(event))
+
+    await app(
+        {
+            "type": "http",
+            "asgi": {"version": "3.0", "spec_version": "2.3"},
+            "http_version": "1.1",
+            "scheme": "http",
+            "method": method,
+            "path": path,
+            "raw_path": path.encode("ascii") if path.isascii() else b"",
+            "query_string": b"",
+            "headers": [
+                (b"host", host),
+                (b"accept", b"application/json, text/event-stream"),
+                *extra_headers,
+            ],
+            "client": ("127.0.0.1", 9000),
+            "server": ("127.0.0.1", 9001),
+        },
+        receive or default_receive,
+        send,
+    )
+    return sent
+
+
+_EMPTY_FRAMES = {
+    "cl0": ([(b"content-length", b"0")], [{"type": "http.request", "body": b"", "more_body": False}]),
+    "omitted_cl": ((), [{"type": "http.request", "body": b"", "more_body": False}]),
+    "chunked_empty": (
+        [(b"transfer-encoding", b"chunked")],
+        [
+            {"type": "http.request", "body": b"", "more_body": True},
+            {"type": "http.request", "body": b"", "more_body": False},
+        ],
+    ),
+}
+_NONEMPTY_BODIES = (
+    ("initialize", b'{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'),
+    ("list", b'{"jsonrpc":"2.0","id":1,"method":"tools/list"}'),
+    ("call", b'{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"executive_state","arguments":{}}}'),
+    ("whitespace", b" "),
+    ("object", b"{}"),
+)
+
+
+def _build_e1_mcp(tmp_path: Path) -> tuple[Any, Any, Any]:
+    sys.path.insert(0, str(Path(__file__).parent))
+    try:
+        import test_mastermind_executive_app_asgi as auth_fixture
+    finally:
+        sys.path.pop(0)
+    from integrations.mastermind_executive_app.app import AppSettings
+    from integrations.mastermind_executive_app.gateway import AppPolicies
+    import integrations.executive_mcp.server as server_module
+
+    class Sink:
+        def emit(self, _event: Any) -> None:
+            pass
+
+    key = auth_fixture.rsa_key.__wrapped__()
+    app = server_module.build_e1_mcp_app(
+        AppSettings(
+            policies=AppPolicies(read=auth_fixture._read_policy(), submit=auth_fixture._submit_policy()),
+            mastermind_root=tmp_path / "mastermind",
+            macro_root_flag=str(tmp_path / "macro"),
+            runtime_root=tmp_path / "runtime",
+            environ={},
+            ceo_ingress_socket_path=None,
+            read_only=True,
+            jwks_cache=auth_fixture._FakeJwksCache(key),
+            clock=lambda: auth_fixture.NOW,
+        ),
+        audit_sink=Sink(),
+    )
+    return app, key, auth_fixture
+
+
+def test_e1_empty_post_guard_before_auth_and_http_contract(tmp_path, monkeypatch):
+    """Empty POST /mcp is 400 before Authentication/RequireAuth; nonempty stays 401."""
+    import httpx
+
+    from integrations.business_mcp_auth.metadata import protected_resource_metadata
+    from integrations.executive_mcp import e1_http as e1_http_module
+
+    monkeypatch.setattr(e1_http_module, "PREAUTH_RECEIVE_DEADLINE_SECONDS", 0.05)
+    app, key, auth_fixture = _build_e1_mcp(tmp_path)
+
+    async def exercise() -> None:
+        async with app._app.router.lifespan_context(app._app):
+            for name, (extra, events) in _EMPTY_FRAMES.items():
+                sent = await _asgi(app, extra_headers=extra, events=events)
+                assert sent[0]["status"] == 400, (name, sent[0]["status"], sent[-1].get("body"))
+                assert b"empty" in sent[-1]["body"]
+                assert _www_authenticate(sent) is None
+
+            challenges: list[bytes] = []
+            for name, body in _NONEMPTY_BODIES:
+                sent = await _asgi(
+                    app,
+                    extra_headers=[(b"content-length", str(len(body)).encode())],
+                    events=[{"type": "http.request", "body": body, "more_body": False}],
+                )
+                assert sent[0]["status"] == 401, (name, sent[0]["status"])
+                challenge = _www_authenticate(sent)
+                assert challenge
+                challenges.append(challenge)
+            assert len(set(challenges)) == 1
+
+            misleading = await _asgi(
+                app,
+                extra_headers=[(b"content-length", b"0")],
+                events=[{"type": "http.request", "body": b"{}", "more_body": False}],
+            )
+            assert misleading[0]["status"] == 401
+            assert _www_authenticate(misleading) == challenges[0]
+
+            overflow = await _asgi(
+                app,
+                extra_headers=[(b"content-length", b"65537")],
+                events=[{"type": "http.request", "body": b"x" * 65537, "more_body": False}],
+            )
+            assert overflow[0]["status"] == 413
+            assert b"65536" in overflow[-1]["body"]
+            assert _www_authenticate(overflow) is None
+
+            disconnected = await _asgi(app, events=[{"type": "http.disconnect"}])
+            assert disconnected[0]["status"] == 400
+            assert _www_authenticate(disconnected) is None
+
+            async def stalled() -> dict[str, Any]:
+                await asyncio.sleep(1)
+                return {"type": "http.request", "body": b"x", "more_body": False}
+
+            deadline = await _asgi(app, receive=stalled)
+            assert deadline[0]["status"] == 400
+            assert b"deadline" in deadline[-1]["body"]
+            assert _www_authenticate(deadline) is None
+
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://e1.local"
+            ) as client:
+                missing = await client.get("/mcp")
+                assert missing.status_code != 400
+                assert missing.status_code != 401
+                assert "www-authenticate" not in missing.headers
+                metadata = await client.get(auth_fixture.METADATA_PATH)
+                assert metadata.status_code == 200
+                assert metadata.json() == protected_resource_metadata(auth_fixture._read_policy())
+                well_known = await client.get("/.well-known/oauth-protected-resource/mcp")
+                assert well_known.status_code == 404
+                token = auth_fixture._read_token(key)
+                initialized = await client.post(
+                    "/mcp",
+                    headers={
+                        "authorization": f"Bearer {token}",
+                        "accept": "application/json, text/event-stream",
+                        "mcp-protocol-version": "2025-06-18",
+                    },
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "initialize",
+                        "params": {
+                            "protocolVersion": "2025-06-18",
+                            "capabilities": {},
+                            "clientInfo": {"name": "test", "version": "1"},
+                        },
+                    },
+                )
+                assert initialized.status_code == 200, initialized.text
+                assert "result" in initialized.json()
+                duplicate = await client.post(
+                    "/mcp",
+                    headers=[
+                        ("authorization", f"Bearer {token}"),
+                        ("authorization", f"Bearer {token}"),
+                        ("accept", "application/json, text/event-stream"),
+                        ("mcp-protocol-version", "2025-06-18"),
+                    ],
+                    json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+                )
+                assert duplicate.status_code == 401
+                assert "www-authenticate" in duplicate.headers
+
+    asyncio.run(exercise())

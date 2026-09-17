@@ -166,6 +166,27 @@ _RESOURCE_KEYS = frozenset(
         "runtime_manifest_path",
     }
 )
+_COMPANY_CONSULTATION_FORBIDDEN_AUTHORITY = (
+    "write",
+    "source",
+    "credential",
+    "pr",
+    "push",
+    "deploy",
+    "admin",
+)
+COMPANY_CONSULTATION_SCHEMA = "mastermind.company_consultation_mcp.v1"
+COMPANY_CONSULTATION_SERVER_IDENTITY = "mastermind-company-consultation-mcp"
+COMPANY_CONSULTATION_SERVER_VERSION = "1.0.0"
+COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST = (
+    "f9463e714240c5ac347bb029788b88d5556ad9d77c69eabcec1b7038e210a722"
+)
+COMPANY_CONSULTATION_ENABLED_TOOLS = (
+    "company.peers",
+    "company.consult",
+    "company.reply",
+    "company.consultation",
+)
 _PROFILE_KEYS = frozenset(
     {
         "enabled",
@@ -405,6 +426,98 @@ class McpServerGrant:
             args = json.dumps(list(self.args), ensure_ascii=True, separators=(",", ":"))
             values.insert(1, f"{prefix}.args={args}")
         return tuple(values)
+
+
+@dataclasses.dataclass(frozen=True)
+class CompanyConsultationGrantProfile:
+    """Distinct unarmed policy projection for the W6-C1 Company MCP facet."""
+
+    capability: str
+    profile_id: str
+    server_identity: str
+    server_version: str
+    enabled_tools: tuple[str, ...]
+    tool_schema_digest: str
+    policy_digest: str
+    requester_actor_ref: tuple[tuple[str, str], ...]
+    recipient_actor_ref: tuple[tuple[str, str], ...]
+    recipient_peer_ref: str
+    recipient_binding: tuple[tuple[str, str | int], ...]
+    peer_cardinality: int
+    forwarding: bool
+    broadcast: bool
+    spawn: bool
+    read_grant: dict[str, object]
+    reply_grant: dict[str, object]
+    response_budget: dict[str, int]
+    forbidden_authority: tuple[str, ...]
+
+
+def build_company_consultation_grant_profile(
+    *,
+    capability_id: str,
+    profile_id: str,
+    requester_actor_ref: Mapping[str, Any],
+    recipient_actor_ref: Mapping[str, Any],
+    recipient_peer_ref: str,
+    recipient_binding: Mapping[str, Any],
+    consultation_packet: str,
+    artifact_revisions: tuple[Mapping[str, Any], ...],
+) -> CompanyConsultationGrantProfile:
+    """Build a distinct fixture-ready profile without changing production policy."""
+
+    tools = COMPANY_CONSULTATION_ENABLED_TOOLS
+    normalized = {
+        "capability": COMPANY_CONSULTATION_SCHEMA,
+        "profile_id": profile_id,
+        "server_identity": COMPANY_CONSULTATION_SERVER_IDENTITY,
+        "server_version": COMPANY_CONSULTATION_SERVER_VERSION,
+        "enabled_tools": list(tools),
+        "tool_schema_digest": COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST,
+        "requester_actor_ref": dict(requester_actor_ref),
+        "recipient_actor_ref": dict(recipient_actor_ref),
+        "recipient_peer_ref": recipient_peer_ref,
+        "recipient_binding": dict(recipient_binding),
+        "peer_cardinality": 1,
+        "forwarding": False,
+        "broadcast": False,
+        "spawn": False,
+        "read_grant": {
+            "consultation_packet": consultation_packet,
+            "artifact_revisions": [dict(item) for item in artifact_revisions],
+        },
+        "reply_grant": {"max_appends": 1, "correlated": True},
+        "response_budget": {
+            "max_answers": 1,
+            "max_evidence_reads": 4,
+            "max_forward_hops": 0,
+            "max_payload_bytes": 32768,
+        },
+        "forbidden_authority": list(_COMPANY_CONSULTATION_FORBIDDEN_AUTHORITY),
+    }
+    if not capability_id or not profile_id:
+        raise CapabilityPolicyError("Company consultation profile ids are required")
+    return CompanyConsultationGrantProfile(
+        capability=COMPANY_CONSULTATION_SCHEMA,
+        profile_id=profile_id,
+        server_identity=COMPANY_CONSULTATION_SERVER_IDENTITY,
+        server_version=COMPANY_CONSULTATION_SERVER_VERSION,
+        enabled_tools=tools,
+        tool_schema_digest=COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST,
+        policy_digest=_digest(normalized),
+        requester_actor_ref=tuple(dict(requester_actor_ref).items()),
+        recipient_actor_ref=tuple(dict(recipient_actor_ref).items()),
+        recipient_peer_ref=recipient_peer_ref,
+        recipient_binding=tuple(dict(recipient_binding).items()),
+        peer_cardinality=1,
+        forwarding=False,
+        broadcast=False,
+        spawn=False,
+        read_grant=dict(normalized["read_grant"]),
+        reply_grant=dict(normalized["reply_grant"]),
+        response_budget=dict(normalized["response_budget"]),
+        forbidden_authority=_COMPANY_CONSULTATION_FORBIDDEN_AUTHORITY,
+    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1563,6 +1676,7 @@ __all__ = [
     "DEFAULT_CAPABILITY_POLICY_PATH",
     "DEFAULT_CAPABILITY_SOURCE_ROOT",
     "CapabilityPolicyError",
+    "CompanyConsultationGrantProfile",
     "ExecutionCapabilityProfile",
     "ExecutionCapabilityRegistry",
     "McpServerGrant",
@@ -1570,5 +1684,6 @@ __all__ = [
     "ResourceGrant",
     "app_server_security_config_digest",
     "app_server_security_config_projection",
+    "build_company_consultation_grant_profile",
     "observed_mcp_tool_schema_digest",
 ]

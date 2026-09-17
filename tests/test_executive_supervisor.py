@@ -16,13 +16,13 @@ from control_plane.ceo_intent import INTENT_SCHEMA_V2, submit_intent
 from control_plane.codex_worker import (
     BinaryAttestation,
     CollectionReceipt,
-    LAUNCH_ATTESTATION_SCHEMA_VERSION,
     ProcessIdentityError,
     ProcessRef,
     ValidationReceipt,
     WorkerResult,
     WorkerRunStatus,
 )
+from control_plane.worker_execution_contract import LAUNCH_ATTESTATION_SCHEMA_VERSION
 from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry
 from control_plane.executive_runtime import (
     AttemptLease,
@@ -697,6 +697,99 @@ def test_run_once_persists_process_checkpoint_result_receipt_and_reopens(tmp_pat
     assert reopened_job is not None and reopened_job.status is JobStatus.COMPLETED
     assert reopened_attempt is not None and reopened_attempt.status is AttemptStatus.COMPLETED
     assert reopened_attempt.result == reopened_job.result
+
+
+def test_complete_launch_attestation_reads_schema_version_from_common_contract(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Supervisor gate must compare against the common contract constant,
+    not against ``control_plane.codex_worker.LAUNCH_ATTESTATION_SCHEMA_VERSION``.
+
+    Mutating the Codex module's constant must not flip the verdict on a
+    non-Codex adapter that legitimately emits the COMMON attestation
+    schema.  The carried effective grant activates the gate branch that
+    requires a complete launch attestation even when the supervisor is
+    not configured with ``require_complete_launch_attestation=True``.
+    """
+
+    import control_plane.codex_worker as codex_worker_module
+    import control_plane.worker_execution_contract as worker_contract_module
+
+    monkeypatch.setattr(
+        codex_worker_module,
+        "LAUNCH_ATTESTATION_SCHEMA_VERSION",
+        "codex.adulterated_attestation/v9",
+    )
+
+    def fake_effective_grant(job, attempt):
+        return {
+            "schema_version": "mastermind.executive_effective_grant/v1",
+            "authorities": ["READ", "RESEARCH", "WRITE_BRANCH", "RUN_TESTS"],
+            "write_paths": ["research/proof.md"],
+            "validation_argv": ["/usr/bin/true"],
+            "policy_sha": "p" * 64,
+            "job_id": job.job_id,
+            "role": "primary",
+        }
+
+    monkeypatch.setattr(
+        ExecutiveSupervisor,
+        "_effective_grant",
+        staticmethod(fake_effective_grant),
+    )
+
+    runtime, job_id, _workspace = _runtime_and_job(tmp_path)
+    inspector = FakeInspector()
+    adapter = FakeAdapter(inspector)
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir(mode=0o700, exist_ok=True)
+    adapter.provider_home = codex_home
+    supervisor = ExecutiveSupervisor(
+        runtime,
+        adapter,  # type: ignore[arg-type]
+        runs_root=tmp_path / "runs",
+        isolation_roots=(tmp_path / "workspaces", tmp_path / "runs"),
+        heartbeat_interval_seconds=0.01,
+        inspector=adapter.inspector,
+        process_controller=FakeProcessController(adapter.inspector),
+        secret_canary_verdict={
+            "schema_version": "mastermind.executive_secret_canary/v1",
+            "passed": True,
+            "checks": {
+                "control_service_environment": "DENIED",
+                "administrative_checkout": "DENIED",
+                "executive_database": "DENIED",
+                "other_worker_home": "DENIED",
+                "forbidden_production_path": "DENIED",
+            },
+            "receipt_sha256": "a" * 64,
+            "control_environment_probe_sha256": "b" * 64,
+            "observed_at": "2026-08-11T00:00:00Z",
+            "worker_auth_exception": "DEDICATED_CODEX_HOME_ONLY",
+        },
+        require_complete_launch_attestation=False,
+        instance_id="supervisor-fixture-common-contract",
+    )
+
+    receipt = asyncio.run(supervisor.run_once(job_id))
+
+    assert receipt.attempt.status is AttemptStatus.COMPLETED
+    persisted_attestation = receipt.attempt.launch_metadata["launch_attestation"]
+    assert (
+        persisted_attestation["schema_version"]
+        == worker_contract_module.LAUNCH_ATTESTATION_SCHEMA_VERSION
+    )
+    assert (
+        persisted_attestation["schema_version"]
+        == "mastermind.executive_launch_attestation/v1"
+    )
+    assert (
+        persisted_attestation["schema_version"]
+        != codex_worker_module.LAUNCH_ATTESTATION_SCHEMA_VERSION
+    )
+    assert persisted_attestation.get("effective_grant_digest") == (
+        receipt.attempt.effective_grant_digest
+    )
 
 
 def test_terminal_state_is_not_persisted_when_assignment_seal_fails(

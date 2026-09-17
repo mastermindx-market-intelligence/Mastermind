@@ -15,6 +15,7 @@ import hashlib
 import json
 import os
 import queue
+import re
 import stat
 import subprocess
 import sys
@@ -24,11 +25,16 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+_RELEASE_ROOT = Path(__file__).resolve().parents[2]
+if os.fspath(_RELEASE_ROOT) not in sys.path:
+    sys.path.insert(0, os.fspath(_RELEASE_ROOT))
+
 _SCRIPT_DIRECTORY = Path(__file__).resolve().parent
 if __package__ in {None, ""} and str(_SCRIPT_DIRECTORY) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIRECTORY))
 
 try:
+    from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
     from ops.executive_os.provider_identity_policy import (
         COMPANY_WORKSPACE_BINDING_CLASS,
         EXPECTED_AUTH_MODE,
@@ -86,14 +92,11 @@ def _sha256_file(path: Path) -> str:
 
 
 def _assert_no_macos_acl(path: Path) -> None:
-    completed = subprocess.run(
-        ["/usr/bin/stat", "-f", "%Sp", os.fspath(path)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        text=True,
-        check=False,
-    )
-    if completed.returncode != 0 or completed.stdout.strip().endswith("+"):
+    try:
+        present = has_macos_acl(path)
+    except FilesystemSecurityError:
+        raise IdentityProbeError("binary_acl_invalid")
+    if present:
         raise IdentityProbeError("binary_acl_invalid")
 
 

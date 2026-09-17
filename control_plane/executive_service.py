@@ -21,6 +21,7 @@ import hashlib
 import inspect
 import json
 import os
+import pwd
 import re
 import signal
 import socket
@@ -117,6 +118,7 @@ from control_plane.executive_workspace import (
 CONTROL_PROTOCOL_VERSION = "mastermind.executive_control/v1"
 DEFAULT_MAX_REQUEST_BYTES = 64 * 1024
 DEFAULT_MAX_RESPONSE_BYTES = 1024 * 1024
+_PRODUCTION_CONTROL_SOCKET = Path("/var/run/mastermind-executive/control.sock")
 DIALOGUE_OBSERVATION_IO_TIMEOUT_SECONDS = 5.0
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _BACKUP_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.sqlite3$")
@@ -168,6 +170,10 @@ _CLIENT_GONE = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
 
 class ServiceError(RuntimeProofError):
     """A private control-service request could not be completed safely."""
+
+
+class _CeoSubmitUnarmedError(ServiceError):
+    code = "ceo_submit_unarmed"
 
 
 class SupervisorProtocol(Protocol):
@@ -1345,6 +1351,7 @@ class ServiceConfig:
     effort: str = "xhigh"
     cost_class: str = "standard"
     coo_autonomy_armed: bool = False
+    ceo_submit_armed: bool = False
     coo_operator_harness_armed: bool = False
     coo_tick_interval_seconds: float = 15.0
     coo_model_alias: str = "coo.sealed"
@@ -1396,6 +1403,8 @@ class ServiceConfig:
                 raise ValueError(f"invalid {field_name}")
         if not isinstance(self.coo_autonomy_armed, bool):
             raise ValueError("coo_autonomy_armed must be boolean")
+        if not isinstance(self.ceo_submit_armed, bool):
+            raise ValueError("ceo_submit_armed must be boolean")
         if not isinstance(self.coo_operator_harness_armed, bool):
             raise ValueError("coo_operator_harness_armed must be boolean")
         if self.coo_operator_harness_armed and not self.coo_autonomy_armed:
@@ -1594,6 +1603,31 @@ class _ModuleBackupBackend:
         return function(database_path, manifest_path)
 
 
+CEO_APP_READ_SCHEMA = ceo_ingress.APP_READ_SCHEMA
+
+
+@dataclasses.dataclass(frozen=True)
+class CeoIngressAppBinding:
+    """Host-owned capability for one App peer on the existing ingress.
+
+    It neither changes C1's peer nor arms C1. The App can send v2 frames
+    only; the existing admission owner still validates every request.
+    """
+
+    peer_uid: int
+    armed: bool
+    grounding_provider: ceo_ingress.GroundingProvider
+    read_provider: Any | None = None
+
+    def __post_init__(self) -> None:
+        if type(self.peer_uid) is not int or self.peer_uid < 0:
+            raise ValueError("App peer uid must be a nonnegative integer")
+        if type(self.armed) is not bool:
+            raise ValueError("App admission arming must be boolean")
+        if not callable(getattr(self.grounding_provider, "observe", None)):
+            raise ValueError("App binding requires a grounding provider")
+
+
 class ExecutiveControlService:
     """One private AF_UNIX service around one durable Executive runtime."""
 
@@ -1620,6 +1654,7 @@ class ExecutiveControlService:
             CeoIngressDialogueSourceProvider | None
         ) = None,
         ceo_ingress_armed: bool = False,
+        ceo_ingress_app_binding: CeoIngressAppBinding | None = None,
         ceo_ingress_activated_socket: socket.socket | None = None,
         terminal_return_projector: TerminalReturnProjector | None = None,
         terminal_return_projector_factory: (
@@ -1807,6 +1842,14 @@ class ExecutiveControlService:
                         "ceo_ingress_activated_socket must already be listening"
                     ) from exc
             self._ceo_ingress_socket_path = resolved_ceo_ingress_path
+        if ceo_ingress_app_binding is not None:
+            if type(ceo_ingress_app_binding) is not CeoIngressAppBinding:
+                raise ValueError("App binding must be a CeoIngressAppBinding")
+            if self._ceo_ingress_socket_path is None:
+                raise ValueError("App binding requires the existing CeoIngress socket")
+            if ceo_ingress_app_binding.peer_uid == ceo_ingress_peer_uid:
+                raise ValueError("App and C1 must have distinct peer uids")
+        self._ceo_ingress_app_binding = ceo_ingress_app_binding
         self._ceo_ingress_peer_uid = ceo_ingress_peer_uid
         self._ceo_ingress_grounding_provider = ceo_ingress_grounding_provider
         if (
@@ -2340,6 +2383,50 @@ class ExecutiveControlService:
             if mode & 0o007:
                 raise ServiceError("launchd control socket must not be world-accessible")
 
+    def _grant_app_socket_access(self) -> None:
+        """One named-user ACL; C1 ownership, modes and groups stay intact.
+
+        Reapply after launchd recreates its socket. The existing bootstrap's
+        root-owned 0755 parent already allows traversal and stays untouched.
+        A private service-owned parent receives only a traversal ACL. No root
+        subprocess, broad group, or Runtime ACL is needed.
+        """
+        binding = self._ceo_ingress_app_binding
+        if binding is None or binding.peer_uid == os.geteuid():
+            return
+        if sys.platform != "darwin":
+            raise ServiceError("installed App socket permissions require macOS")
+        name = pwd.getpwuid(binding.peer_uid).pw_name
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]*", name) is None:
+            raise ServiceError("App service identity is invalid")
+        path = self._ceo_ingress_socket_path
+        assert path is not None
+        for node, permissions, directory in (
+            (path.parent, "search", True), (path, "read,write", False),
+        ):
+            before = node.lstat()
+            if directory and (stat.S_ISDIR(before.st_mode)
+                    and before.st_uid == 0
+                    and stat.S_IMODE(before.st_mode) == 0o755):
+                # bootstrap-host.sh owns this shared parent. All peers can
+                # traverse it already; each socket retains its own authority.
+                continue
+            if (before.st_uid != os.geteuid() or stat.S_ISLNK(before.st_mode)
+                    or before.st_mode & 0o007
+                    or not (stat.S_ISDIR(before.st_mode) if directory else stat.S_ISSOCK(before.st_mode))):
+                raise ServiceError("App socket custody is unavailable")
+            rule = f"user:{name} allow {permissions}"
+            observed = subprocess.run(
+                ["/bin/ls", "-lde", str(node)], check=True, capture_output=True, text=True,
+            ).stdout
+            if not any(line.strip().split(": ", 1)[-1] == rule for line in observed.splitlines()[1:]):
+                subprocess.run(["/bin/chmod", "+a", rule, str(node)], check=True, capture_output=True)
+            after = node.lstat()
+            if (after.st_dev, after.st_ino, after.st_mode, after.st_uid, after.st_gid) != (
+                before.st_dev, before.st_ino, before.st_mode, before.st_uid, before.st_gid,
+            ):
+                raise ServiceError("App socket identity changed while applying access")
+
     async def _bind_ceo_ingress_server(self, *, start_serving: bool) -> None:
         """Construct (bind) the dedicated CeoIngress listener; see ``_bind_operator_server``."""
 
@@ -2368,6 +2455,9 @@ class ExecutiveControlService:
                 start_serving=start_serving,
                 **activated_options,
             )
+
+        if self._ceo_ingress_launchd_activated:
+            self._grant_app_socket_access()
 
     def _prepare_dialogue_observation_socket_path(self) -> None:
         """Prepare only the exact dedicated W3C directory and stale inode."""
@@ -2709,6 +2799,10 @@ class ExecutiveControlService:
         if ceo_ingress_tasks:
             await asyncio.gather(*ceo_ingress_tasks, return_exceptions=True)
         self._ceo_ingress_tasks.clear()
+        if self._ceo_ingress_app_binding is not None:
+            read_provider = self._ceo_ingress_app_binding.read_provider
+            if read_provider is not None:
+                await read_provider.aclose()
         observation_task_set = getattr(self, "_dialogue_observation_tasks", None)
         observation_tasks = [
             task
@@ -2781,6 +2875,12 @@ class ExecutiveControlService:
         configured = {int(value) for value in self.config.allowed_peer_uids}
         return configured or {os.geteuid()}
 
+    def _is_production_control_socket(self) -> bool:
+        return (
+            Path(self.config.socket_path).resolve(strict=False)
+            == _PRODUCTION_CONTROL_SOCKET.resolve(strict=False)
+        )
+
     async def _handle_connection(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
@@ -2824,6 +2924,9 @@ class ExecutiveControlService:
                 return
             try:
                 result = await self._dispatch_request(request)
+            except _CeoSubmitUnarmedError as exc:
+                await self._send_error(writer, exc.code, str(exc))
+                return
             except (RuntimeProofError, ValueError) as exc:
                 await self._send_error(writer, "request_failed", str(exc)[:1000])
                 return
@@ -3581,14 +3684,11 @@ class ExecutiveControlService:
     ) -> None:
         """The dedicated CeoIngress protocol handler (§7, §8, R1 §2).
 
-        Peer identity is authenticated against the ONE exact configured
-        ingress peer uid — separate from the generic Operator
-        ``allowed_peer_uids`` set — before any body read/parsing.  There is no
-        generic dispatcher on this path: everything past peer authentication
-        and the startup-readiness gate is delegated to
-        ``executive_ceo_ingress.handle_frame``, which owns the three closed
-        submit/status/state frame validators and typed error law.  Exactly one
-        frame is read and one response is written per connection (§7.3).
+        Kernel identity selects the exact C1 or optional App capability before
+        any body read. Neither uses the generic Operator allowlist. The App's
+        closed read frames project existing canonical state; all admission
+        remains with ``executive_ceo_ingress.handle_frame`` and its existing
+        validators. Exactly one bounded frame and response use each connection.
         """
 
         task = asyncio.current_task()
@@ -3623,7 +3723,9 @@ class ExecutiveControlService:
                     "platform exposes no trusted local peer uid",
                 )
                 return
-            if peer != self._ceo_ingress_peer_uid:
+            app_binding = self._ceo_ingress_app_binding
+            app_peer = app_binding is not None and peer == app_binding.peer_uid
+            if peer != self._ceo_ingress_peer_uid and not app_peer:
                 await self._send_ceo_ingress_error(
                     writer, "peer_denied", "peer uid is not authorized"
                 )
@@ -3682,6 +3784,59 @@ class ExecutiveControlService:
                     writer, "invalid_json", "request is not valid JSON"
                 )
                 return
+            if app_peer and isinstance(parsed, Mapping) and parsed.get("schema") in {
+                ceo_ingress.APP_READ_SCHEMA, ceo_ingress.APP_GROUNDING_SCHEMA,
+            }:
+                try:
+                    if parsed["schema"] == ceo_ingress.APP_GROUNDING_SCHEMA:
+                        if set(parsed) != {"schema"}:
+                            raise ValueError("invalid grounding frame")
+                        result = await ceo_ingress._observe_trusted_grounding(
+                            app_binding.grounding_provider
+                        )
+                    else:
+                        if set(parsed) != {"schema", "tool", "arguments"}:
+                            raise ValueError("invalid read frame")
+                        if parsed["tool"] not in {
+                            "executive_state", "executive_inbox",
+                            "executive_job", "ceo_intent_status",
+                        } or not isinstance(parsed["arguments"], dict):
+                            raise ValueError("invalid read operation")
+                        if app_binding.read_provider is None:
+                            await self._send_ceo_ingress_error(
+                                writer, "ingress_unavailable", "installed readers are unavailable"
+                            )
+                            return
+                        result = await app_binding.read_provider.call(
+                            parsed["tool"], parsed["arguments"]
+                        )
+                    await self._send_ceo_ingress_response(writer, {"ok": True, "result": result})
+                except ceo_ingress.CeoIngressError as exc:
+                    await self._send_ceo_ingress_error(writer, exc.code, exc.message)
+                except Exception:
+                    await self._send_ceo_ingress_error(
+                        writer, "invalid_input", "installed read was refused"
+                    )
+                return
+            if app_peer and (
+                not isinstance(parsed, Mapping)
+                or parsed.get("schema") not in {
+                    ceo_ingress.SUBMIT_SCHEMA_V2, ceo_ingress.STATUS_SCHEMA_V2,
+                }
+            ):
+                await self._send_ceo_ingress_error(
+                    writer, "peer_denied", "frame is not authorized for this peer"
+                )
+                return
+            if app_peer and (
+                not app_binding.armed
+                or self._service_state not in {"READY", "AWAITING_CANARY"}
+            ):
+                await self._send_ceo_ingress_error(
+                    writer, "ingress_unavailable",
+                    "Executive CEO ingress is not currently admitting requests",
+                )
+                return
             if (
                 isinstance(parsed, Mapping)
                 and parsed.get("schema")
@@ -3698,10 +3853,12 @@ class ExecutiveControlService:
                 result = await ceo_ingress.handle_frame(
                     parsed,
                     runtime=self._require_runtime(),
-                    grounding_provider=self._ceo_ingress_grounding_provider,
+                    grounding_provider=(app_binding.grounding_provider if app_peer
+                                        else self._ceo_ingress_grounding_provider),
                     workspace_root=self.config.proof_workspace_root,
                     service_state=self._service_state,
-                    ceo_ingress_armed=self._ceo_ingress_armed,
+                    ceo_ingress_armed=(app_binding.armed if app_peer
+                                       else self._ceo_ingress_armed),
                     # Strict-v2 selection is trusted host composition.  The
                     # source-free public frame cannot opt itself into (or out
                     # of) the terminal-return admission path.
@@ -4583,6 +4740,18 @@ class ExecutiveControlService:
         self._require_shared_git_handoff(workspace)
         return observation
 
+    def _require_initial_coo_workspace(self, root: Job) -> dict[str, Any]:
+        """Reuse one read-only initial-workspace rule at selection and execution."""
+        observation = self._require_coo_workspace(root)
+        if (
+            observation["head"] != self.config.proof_base_sha
+            or observation["launch_clean"] is not True
+        ):
+            raise ServiceError(
+                "new COO root requires the clean exact reviewed-base workspace"
+            )
+        return observation
+
     def _require_coo_worker_composed(self) -> None:
         runtime = self._require_runtime()
         binding = self._require_current_coo_binding()
@@ -4792,14 +4961,7 @@ class ExecutiveControlService:
                 if job.parent_job_id == root_id
             ]
             if not children:
-                observation = self._require_coo_workspace(root)
-                if (
-                    observation["head"] != self.config.proof_base_sha
-                    or observation["launch_clean"] is not True
-                ):
-                    raise ServiceError(
-                        "new COO root requires the clean exact reviewed-base workspace"
-                    )
+                self._require_initial_coo_workspace(root)
             live = {
                 value
                 for value, task in self._dispatch_tasks.items()
@@ -4841,7 +5003,15 @@ class ExecutiveControlService:
         finally:
             self._coo_action_tasks.discard(task)
 
-    def _next_bound_coo_root(self) -> str | None:
+    def _next_bound_coo_root(
+        self, *, prestart_refusals: dict[str, Exception] | None = None
+    ) -> str | None:
+        """Select one root, optionally collecting ephemeral pre-start diagnostics.
+
+        Only a QUEUED root with no child or Attempt history may be deferred.
+        Existing work and ambiguous effects retain their reconciliation path.
+        No persistent exclusion, new queue or retry state is introduced.
+        """
         runtime = self._require_runtime()
         with runtime.store.read() as connection:
             rows = connection.execute(
@@ -4865,8 +5035,30 @@ class ExecutiveControlService:
                 event.event_type == "COO_CYCLE_BLOCKED"
                 for event in runtime.events.list_events(job_id=root.job_id)
             )
-            if not blocked:
-                return root.job_id
+            if blocked:
+                continue
+            if (
+                root.status is JobStatus.QUEUED
+                and root.attempt_count == 0
+                and root.current_attempt_id is None
+            ):
+                with runtime.store.read() as connection:
+                    child = connection.execute(
+                        "SELECT 1 FROM jobs WHERE parent_job_id=? LIMIT 1",
+                        (root.job_id,),
+                    ).fetchone()
+                    attempt = connection.execute(
+                        "SELECT 1 FROM attempts WHERE job_id=? LIMIT 1",
+                        (root.job_id,),
+                    ).fetchone()
+                if child is None and attempt is None:
+                    try:
+                        self._require_initial_coo_workspace(root)
+                    except (OSError, ServiceError, StateConflict) as exc:
+                        if prestart_refusals is not None:
+                            prestart_refusals[root.job_id] = exc
+                        continue
+            return root.job_id
         return None
 
     def _record_coo_tick_refusal(self, root_job_id: str, exc: Exception) -> None:
@@ -4922,9 +5114,27 @@ class ExecutiveControlService:
             try:
                 if not self.config.coo_autonomy_armed:
                     continue
-                root_id = self._next_bound_coo_root()
+                # Validate before writing even a diagnostic refusal. The existing
+                # per-action guard revalidates immediately before useful work.
+                self._require_current_autonomy()
+                prestart_refusals: dict[str, Exception] = {}
+                selected_root_id = self._next_bound_coo_root(
+                    prestart_refusals=prestart_refusals
+                )
+                for refused_root_id, refusal in prestart_refusals.items():
+                    self._record_coo_tick_refusal(refused_root_id, refusal)
+                # A diagnostic-write failure must not be attributed to a healthy
+                # root that has not yet been selected for any action.
+                root_id = selected_root_id
                 if root_id is not None:
                     await self._run_coo_cycle(root_id)
+                elif prestart_refusals:
+                    self._coo_last_tick_at = datetime.now(timezone.utc).isoformat(
+                        timespec="seconds"
+                    )
+                    self._coo_last_error = (
+                        "ServiceError: no usable never-started COO workspace"
+                    )
             except Exception as exc:
                 self._coo_last_tick_at = datetime.now(timezone.utc).isoformat(
                     timespec="seconds"
@@ -5852,6 +6062,8 @@ class ExecutiveControlService:
                 )
             )
         if command == "submit-ceo-intent":
+            if self._is_production_control_socket() and not self.config.ceo_submit_armed:
+                raise _CeoSubmitUnarmedError("CEO intent submission is not armed")
             # The bounded CEO write bridge (Phase 1E-A).  It validates one typed
             # envelope, lets the existing authority policy adjudicate it inside
             # create_job, and returns a receipt naming the resulting QUEUED Job.

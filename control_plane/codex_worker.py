@@ -38,6 +38,7 @@ import re
 import signal
 import stat
 import subprocess
+import weakref
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterator, Mapping, Sequence
@@ -53,10 +54,12 @@ from control_plane.worker_execution_contract import (
     MAX_ARTIFACTS,
     MAX_ARTIFACT_BYTES,
     MAX_ARTIFACT_TOTAL_BYTES,
+    LAUNCH_ATTESTATION_SCHEMA_VERSION,
     ArtifactReceipt,
     BinaryAttestation,
     CancelReceipt,
     CollectionReceipt,
+    LaunchAttestation,
     ValidationReceipt,
     WorkerLaunchSpec,
     WorkerProcessRef,
@@ -136,7 +139,6 @@ _JSONL_EVENT_TYPES = frozenset({
     "error",
 })
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
-LAUNCH_ATTESTATION_SCHEMA_VERSION = "mastermind.executive_launch_attestation/v1"
 SECRET_CANARY_SCHEMA_VERSION = "mastermind.executive_secret_canary/v1"
 ISOLATION_MANIFEST_SCHEMA_VERSION = "mastermind.executive_isolation_manifest/v1"
 _SECRET_CANARY_CHECKS = frozenset(
@@ -250,48 +252,6 @@ class ProcessIdentity:
     effective_gid: int
     real_uid: int
     real_gid: int
-
-
-@dataclasses.dataclass(frozen=True)
-class LaunchAttestation:
-    """Complete, secret-free launch receipt persisted before RUNNING."""
-
-    schema_version: str
-    created_at: str
-    executable_path: str
-    binary: BinaryAttestation
-    rendered_argv: tuple[str, ...]
-    environment_keys: tuple[str, ...]
-    permission_profile_sha256: str
-    prompt_sha256: str
-    expected_base_sha: str | None
-    observed_base_sha: str
-    workspace_identity: Mapping[str, Any]
-    worker_identity: Mapping[str, Any]
-    provider_home_identity: Mapping[str, Any]
-    secret_canary_verdict: Mapping[str, Any]
-    launch_nonce: str
-    process_identity: Mapping[str, Any]
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "schema_version": self.schema_version,
-            "created_at": self.created_at,
-            "executable_path": self.executable_path,
-            "binary": dataclasses.asdict(self.binary),
-            "rendered_argv": list(self.rendered_argv),
-            "environment_keys": list(self.environment_keys),
-            "permission_profile_sha256": self.permission_profile_sha256,
-            "prompt_sha256": self.prompt_sha256,
-            "expected_base_sha": self.expected_base_sha,
-            "observed_base_sha": self.observed_base_sha,
-            "workspace_identity": _jsonable(self.workspace_identity),
-            "worker_identity": _jsonable(self.worker_identity),
-            "provider_home_identity": _jsonable(self.provider_home_identity),
-            "secret_canary_verdict": _jsonable(self.secret_canary_verdict),
-            "launch_nonce": self.launch_nonce,
-            "process_identity": dict(self.process_identity),
-        }
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1275,7 +1235,7 @@ def _create_private_file(path: Path) -> int:
         raise LaunchValidationError(f"run output already exists: {path}") from exc
 
 
-def _validate_codex_home(path: Path) -> Path:
+def _validate_codex_home_directory(path: Path) -> Path:
     try:
         info = path.lstat()
         resolved = path.resolve(strict=True)
@@ -1285,6 +1245,11 @@ def _validate_codex_home(path: Path) -> Path:
         raise LaunchValidationError("CODEX_HOME must be a real directory")
     if stat.S_IMODE(info.st_mode) & 0o077:
         raise LaunchValidationError("CODEX_HOME must be mode 0700 or narrower")
+    return resolved
+
+
+def _validate_codex_home(path: Path) -> Path:
+    resolved = _validate_codex_home_directory(path)
     auth = resolved / "auth.json"
     try:
         auth_info = auth.lstat()
@@ -2034,22 +1999,51 @@ async def _wait_for_known_returncode(
     return int(process.returncode)
 
 
+async def _settle_or_cancel_owned_tasks(
+    tasks: Sequence[asyncio.Task[Any] | None],
+    *,
+    timeout: float | None = None,
+) -> bool:
+    """Bound only the exact adapter-owned local tasks supplied by the caller."""
+
+    current = asyncio.current_task()
+    seen: set[int] = set()
+    pending: list[asyncio.Task[Any]] = []
+    for task in tasks:
+        if task is None or task is current or task.done() or id(task) in seen:
+            continue
+        seen.add(id(task))
+        pending.append(task)
+    if not pending:
+        return True
+    budget = (
+        _LOCAL_TRANSPORT_FINALIZATION_SECONDS
+        if timeout is None
+        else float(timeout)
+    )
+    try:
+        _done, remaining = await asyncio.wait(pending, timeout=budget)
+    except asyncio.CancelledError:
+        remaining = {task for task in pending if not task.done()}
+        for task in remaining:
+            task.cancel()
+        await asyncio.gather(*remaining, return_exceptions=True)
+        raise
+    if not remaining:
+        return True
+    for task in remaining:
+        task.cancel()
+    await asyncio.gather(*remaining, return_exceptions=True)
+    return False
+
+
 async def _bounded_task_convergence(
     tasks: Sequence[asyncio.Task[Any]],
     *,
     label: str,
 ) -> None:
-    pending = tuple(task for task in tasks if not task.done())
-    if not pending:
+    if await _settle_or_cancel_owned_tasks(tasks):
         return
-    _done, remaining = await asyncio.wait(
-        pending, timeout=_LOCAL_TRANSPORT_FINALIZATION_SECONDS
-    )
-    if not remaining:
-        return
-    for task in remaining:
-        task.cancel()
-    await asyncio.gather(*remaining, return_exceptions=True)
     raise ProcessIdentityError(f"{label} owned tasks did not converge")
 
 
@@ -2061,9 +2055,13 @@ def _record_worker_forced_retirement(state: _RunState) -> None:
         state.stream_errors.append(marker)
         state.violation.set()
 
+_CONSTRUCTED_CODEX_ADAPTERS: weakref.WeakSet["CodexWorkerAdapter"] = weakref.WeakSet()
+
 
 class CodexWorkerAdapter:
     """One-host, one-shot Codex process adapter with no queue/runtime authority."""
+
+    adapter_id = "codex-cli"
 
     def __init__(
         self,
@@ -2074,6 +2072,8 @@ class CodexWorkerAdapter:
         allowed_versions: frozenset[str] | None = None,
         required_team_identifier: str | None = _OPENAI_TEAM_IDENTIFIER,
         inspector: ProcessInspector | None = None,
+        provider_realm: Any | None = None,
+        provider_credential_loader: Any | None = None,
     ) -> None:
         path = Path(binary_path)
         if not path.is_absolute():
@@ -2093,8 +2093,17 @@ class CodexWorkerAdapter:
         ):
             raise BinaryAttestationError("injected Codex signer is not allowlisted")
         self._codex_home = Path(codex_home) if codex_home is not None else None
+        self.provider_realm = provider_realm
+        self.provider_credential_loader = provider_credential_loader
+        if (provider_realm is None) != (provider_credential_loader is None):
+            from control_plane.codex_provider_realm import ProviderRealmError
+
+            raise ProviderRealmError(
+                "provider realm and credential loader must be configured together"
+            )
         self.inspector = inspector or ProcessInspector()
         self._runs: dict[str, _RunState] = {}
+        _CONSTRUCTED_CODEX_ADAPTERS.add(self)
 
     @property
     def codex_home(self) -> Path:
@@ -2102,10 +2111,17 @@ class CodexWorkerAdapter:
             raise LaunchValidationError("Codex home is not configured")
         return self._codex_home
 
+    def _validated_codex_home_directory(self) -> Path:
+        """Re-open the private provider-home directory without reading auth."""
+
+        return _validate_codex_home_directory(self.codex_home)
+
     def _validated_codex_home(self) -> Path:
         """Re-open the adapter-private provider home at each execution edge."""
 
-        return _validate_codex_home(self.codex_home)
+        if self.provider_realm is None or self.provider_realm.requires_codex_auth_file:
+            return _validate_codex_home(self.codex_home)
+        return self._validated_codex_home_directory()
 
     def _bind_legacy_codex_home(self, _codex_home: str | os.PathLike[str]) -> None:
         """Reject every attempt to inject a second provider-home authority."""
@@ -2196,10 +2212,10 @@ class CodexWorkerAdapter:
                 raise LaunchValidationError("configured worker account does not exist") from exc
             if worker_account.pw_uid != expected_uid or worker_account.pw_gid != expected_gid:
                 raise LaunchValidationError("configured worker account UID/GID does not match")
-            for label, protected_path in (
-                ("provider home", codex_home),
-                ("provider auth", codex_home / "auth.json"),
-            ):
+            protected_paths = [("provider home", codex_home)]
+            if self.provider_realm is None or self.provider_realm.requires_codex_auth_file:
+                protected_paths.append(("provider auth", codex_home / "auth.json"))
+            for label, protected_path in protected_paths:
                 if protected_path.lstat().st_uid != expected_uid:
                     raise LaunchValidationError(
                         f"{label} is not owned by the configured worker principal"
@@ -2637,14 +2653,18 @@ class CodexWorkerAdapter:
                 codex_home=codex_home,
             )
         )
+        if self.provider_realm is not None:
+            for override in self.provider_realm.config_overrides():
+                argv.extend(["-c", override])
         for feature in _DISABLED_FEATURES:
             argv.extend(["--disable", feature])
         argv.append("-")
         return argv
 
-    @staticmethod
-    def _environment(spec: LaunchSpec, home: Path, tmp: Path, codex_home: Path) -> dict[str, str]:
-        return {
+    def _environment(
+        self, spec: LaunchSpec, home: Path, tmp: Path, codex_home: Path
+    ) -> dict[str, str]:
+        environment = {
             "HOME": str(home),
             "USER": spec.worker_user,
             "LOGNAME": spec.worker_user,
@@ -2662,6 +2682,17 @@ class CodexWorkerAdapter:
             "GIT_CONFIG_NOSYSTEM": "1",
             "GIT_OPTIONAL_LOCKS": "0",
         }
+        if self.provider_realm is not None:
+            loader = self.provider_credential_loader
+            if loader is None:
+                raise LaunchValidationError("provider credential loader is unavailable")
+            try:
+                credential = loader()
+                credential = self.provider_realm.validate_credential(credential)
+            except Exception:
+                raise LaunchValidationError("provider credential is unavailable") from None
+            environment[self.provider_realm.env_key] = credential
+        return environment
 
     @staticmethod
     def _validation_environment(spec: LaunchSpec, home: Path, tmp: Path) -> dict[str, str]:
@@ -2833,7 +2864,7 @@ class CodexWorkerAdapter:
         if not 0.1 <= timeout <= 3600:
             raise LaunchValidationError("validation timeout is out of bounds")
 
-        codex_home = self._validated_codex_home()
+        codex_home = self._validated_codex_home_directory()
         _authority_set(spec)
         workspace_lexical = Path(spec.workspace_path)
         if not workspace_lexical.is_absolute():
@@ -3051,24 +3082,31 @@ class CodexWorkerAdapter:
                     label="validation stream finalization",
                 )
                 error = error or "validation required forced local stream finalization"
-        except asyncio.CancelledError:
-            await asyncio.shield(
-                self._terminate_validation_process(
-                    process,
-                    wait_task,
-                    finalization,
-                    pid=process.pid,
-                    pgid=pgid,
-                    start_identity=start_identity,
-                    boot_id=boot_id,
-                    grace_seconds=min(float(spec.cancel_grace_seconds), 5.0),
-                )
+        except ProcessIdentityError:
+            await _settle_or_cancel_owned_tasks(
+                (wait_task, stdout_task, stderr_task),
+                timeout=_LOCAL_STREAM_DRAIN_SECONDS,
             )
-            await asyncio.shield(
-                _bounded_task_convergence(
-                    (stdout_task, stderr_task),
-                    label="validation cancellation finalization",
+            raise
+        except asyncio.CancelledError:
+            try:
+                await asyncio.shield(
+                    self._terminate_validation_process(
+                        process,
+                        wait_task,
+                        finalization,
+                        pid=process.pid,
+                        pgid=pgid,
+                        start_identity=start_identity,
+                        boot_id=boot_id,
+                        grace_seconds=min(float(spec.cancel_grace_seconds), 5.0),
+                    )
                 )
+            except ProcessIdentityError:
+                pass
+            await _settle_or_cancel_owned_tasks(
+                (wait_task, stdout_task, stderr_task),
+                timeout=_LOCAL_STREAM_DRAIN_SECONDS,
             )
             raise
         finally:
@@ -3562,13 +3600,21 @@ class CodexWorkerAdapter:
                 try:
                     await self._terminate(state)
                 except ProcessIdentityError as exc:
-                    state.stream_errors.append(str(exc))
+                    message = str(exc)[:3000]
+                    if message not in state.stream_errors:
+                        state.stream_errors.append(message)
+                    if state.finalization.error is None:
+                        state.finalization.error = message
                     termination_failed = True
             elif violation_task in done and state.violation.is_set() and not state.process_wait_task.done():
                 try:
                     await self._terminate(state)
                 except ProcessIdentityError as exc:
-                    state.stream_errors.append(str(exc))
+                    message = str(exc)[:3000]
+                    if message not in state.stream_errors:
+                        state.stream_errors.append(message)
+                    if state.finalization.error is None:
+                        state.finalization.error = message
                     termination_failed = True
             elif returncode_task in done and not state.process_wait_task.done():
                 try:
@@ -3580,8 +3626,29 @@ class CodexWorkerAdapter:
                     try:
                         await self._terminate(state)
                     except ProcessIdentityError as exc:
-                        state.stream_errors.append(str(exc))
+                        message = str(exc)[:3000]
+                        if message not in state.stream_errors:
+                            state.stream_errors.append(message)
+                        if state.finalization.error is None:
+                            state.finalization.error = message
                         termination_failed = True
+
+            if termination_failed and not state.finalization.group_proven_absent:
+                converged = await _settle_or_cancel_owned_tasks(
+                    (
+                        state.process_wait_task,
+                        state.stdout_task,
+                        state.stderr_task,
+                    )
+                )
+                if not converged:
+                    marker = (
+                        "worker pre-latch identity failure required bounded "
+                        "local task cancellation"
+                    )
+                    if marker not in state.stream_errors:
+                        state.stream_errors.append(marker)
+                return
 
             if not (termination_failed and state.finalization.group_proven_absent):
                 await state.process_wait_task

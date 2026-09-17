@@ -30,6 +30,11 @@ def _repo_python_import_closure(root: Path) -> set[str]:
         # The entrypoint loads this exact module through importlib after setting
         # the immutable release root; keep that one dynamic edge explicit.
         "control_plane/chairman_control_room_remote.py",
+        # Executive runtime reads are local-only.  The remote collector reaches
+        # the same explicit unavailable/degraded path without shipping SQLite,
+        # registries, brokers, or execution modules.
+        "control_plane/chairman_control_room.py",
+        "control_plane/executive_inbox.py",
     }
     closure: set[str] = set()
 
@@ -56,11 +61,22 @@ def _repo_python_import_closure(root: Path) -> set[str]:
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
-                    queue_module(alias.name)
+                    if alias.name.startswith("control_plane."):
+                        queue_module(alias.name)
             elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-                queue_module(node.module)
                 for alias in node.names:
-                    queue_module(f"{node.module}.{alias.name}")
+                    if (
+                        node.module == "control_plane"
+                        and alias.name != "executive_runtime"
+                    ):
+                        queue_module(f"control_plane.{alias.name}")
+                    elif (
+                        node.module.startswith("control_plane.")
+                        and node.module != "control_plane.executive_runtime"
+                    ):
+                        queue_module(node.module)
+        if getattr(tree, "type_ignores", None):
+            raise ValueError("TYPE_CHECKING imports must remain explicit in the release proof")
     return closure
 
 
@@ -435,7 +451,7 @@ def test_installer_exact_extracted_allowlist_boots_under_isolated_python(tmp_pat
     assert sum(
         path.startswith("control_plane/") and path.endswith(".py")
         for path in manifest["files"]
-    ) == 28
+    ) == 7
     assert "config/strategic_state.yml" in manifest["files"]
     assert not any(path.startswith(".git/") for path in manifest["files"])
     for unrelated in (
@@ -796,7 +812,7 @@ def test_installer_verify_source_only_refuses_unsafe_source(tmp_path, problem):
     elif problem == "hardlink":
         target = repo / "control_plane/chairman_control_room.py"
         target.unlink()
-        os.link(repo / "control_plane/ceo_intent.py", target)
+        os.link(repo / "control_plane/executive_inbox.py", target)
         _git("add", "control_plane/chairman_control_room.py", cwd=repo)
         _git("commit", "-qm", "hard", cwd=repo)
         commit, tree = _git("rev-parse", "HEAD", cwd=repo), _git("rev-parse", "HEAD^{tree}", cwd=repo)
