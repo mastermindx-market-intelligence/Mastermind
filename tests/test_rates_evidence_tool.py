@@ -55,6 +55,8 @@ def test_file_backed_read_uses_canonical_builder_without_publishing(rates_files)
     assert out["series"]["10y"]["level"] == 4.5
     assert out["series"]["10y"]["velocity_bp"]["5d"] == 12.0
     assert out["observation_timezone"] == "America/New_York"
+    assert out["analysis_mode"] == "dated_context"
+    assert out["current_session_freshness"] == "not_certified"
     assert out["horizon_basis"] == "observed_intervals_not_verified_exchange_sessions"
     assert out["authority"]["allowed_effect"] == "annotate_only"
     assert not any(v for k,v in out["authority"].items() if k.startswith("can_"))

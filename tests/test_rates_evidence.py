@@ -277,3 +277,26 @@ def test_current_context_legacy_untimed_rows_stay_dated_not_certified():
     assert out["coverage"] == {"requested_rows": 5, "context_rows": 5, "timed_context_rows": 0}
     assert out["as_observed_replay_certified"] is False
     assert project(a, "2026-09-17T22:00:00Z")["coverage"]["context_rows"] == 0
+
+
+
+def test_matching_old_snapshot_dates_do_not_certify_current_session_freshness():
+    a = source()
+    a["asof"] = "2020-01-02"
+    a["built"] = "2020-01-03T12:00:00Z"
+    a["yield_momentum"]["asof"] = "2020-01-02"
+    for row in a["yield_momentum"]["series"].values():
+        row["as_of"] = "2020-01-02"
+        row["available_at"] = "2020-01-02T21:00:00Z"
+    out = project(a, asof="2020-01-02")
+    assert out["coverage"]["context_rows"] == 5
+    assert out["analysis_mode"] == "dated_context"
+    assert out["current_session_freshness"] == "not_certified"
+    assert out["freshness_basis"] == "aligned_to_supplied_market_asof_not_current_session"
+
+
+def test_cutoff_inspection_does_not_certify_live_freshness():
+    out = project(source(), "2026-09-16T22:00:00Z")
+    assert out["analysis_mode"] == "cutoff_inspection"
+    assert out["current_session_freshness"] == "not_certified"
+    assert out["as_observed_replay_certified"] is False

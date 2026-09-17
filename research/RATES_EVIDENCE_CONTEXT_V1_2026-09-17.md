@@ -30,3 +30,8 @@ The earlier prompt-summary preservation test was insufficient to establish actua
 Failure behavior is closed unavailable evidence with no raw exception detail. Per-maturity dates, missingness, percent/basis-point units, observed-interval horizons, New York observation date conventions, false replay certification and all-false action authority survive the SDK memory transport. The read never writes `data/decision_context`, and absence never becomes flat rates or calm risk.
 
 Compatibility: exact #495 head `9dba2614b8394b75f23e8be77cf08bf21072dece` modifies the existing serializer helpers, while exact #772 head `cd34f2a9c1e94308e73cd86097037e3c131143f7` modifies `get_overnight_tape`. Our only named tool-server changes are the new function and `_READ` registration. The immutable sibling changes are AST-member disjoint. The #495 proposed serializer also round-trips the actual rates payload without alteration in an isolated in-memory test. This is compatibility evidence, not acceptance, custody transfer, or release of either sibling.
+
+
+### Dated context is not current-session certification
+
+The non-cutoff mode is `dated_context`, not `current_context`. All outputs explicitly retain `current_session_freshness=not_certified` with a basis limited to alignment with the supplied market-as-of date. Even two matching old snapshots cannot certify present-session freshness. This differs from—and does not replace—the separate `as_observed_replay_certified=false` limitation. No new market calendar, freshness owner or policy threshold is added.
