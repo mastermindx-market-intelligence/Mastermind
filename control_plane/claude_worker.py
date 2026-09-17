@@ -88,6 +88,7 @@ _MAX_VALIDATION_STDOUT_BYTES = 4 * 1024 * 1024
 _MAX_VALIDATION_STDERR_BYTES = 1 * 1024 * 1024
 _MAX_PROCESS_CENSUS_BYTES = 64 * 1024
 _MAX_PROCESS_CENSUS_MEMBERS = 256
+_LAUNCH_QUARANTINE_CLEANUP_SECONDS = 0.2
 _DENIED_PROVIDER_ENV_KEYS = frozenset(
     {
         "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
@@ -1203,6 +1204,56 @@ class ClaudeCodeWorkerAdapter:
         except (ProcessIdentityError, OSError, AttributeError):
             return _LaunchCleanupOutcome.AMBIGUOUS
 
+    @staticmethod
+    def _retrieve_task_exception(task: asyncio.Task[Any]) -> None:
+        if not task.cancelled():
+            try:
+                task.exception()
+            except asyncio.CancelledError:
+                pass
+
+    async def _quarantine_launch_failure(
+        self, state: _RunState, outcome: _LaunchCleanupOutcome
+    ) -> None:
+        """Spend one absolute post-refusal budget on all cleanup operations."""
+
+        deadline = asyncio.get_running_loop().time() + _LAUNCH_QUARANTINE_CLEANUP_SECONDS
+        tasks = tuple(
+            task for task in (state.stdout_task, state.stderr_task) if task is not None
+        )
+        try:
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                raise asyncio.TimeoutError
+            await asyncio.wait_for(
+                asyncio.shield(state.process_wait_task), timeout=remaining
+            )
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                raise asyncio.TimeoutError
+            await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True), timeout=remaining
+            )
+        except asyncio.TimeoutError:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            raise ClaudeProcessIdentityError(
+                "unaccepted Claude launch could not be safely reaped"
+            ) from None
+        finally:
+            for task in (state.process_wait_task, *tasks):
+                if not task.done():
+                    task.add_done_callback(self._retrieve_task_exception)
+            self._close_evidence(state)
+        if outcome is _LaunchCleanupOutcome.AMBIGUOUS:
+            raise ClaudeProcessIdentityError(
+                "unaccepted Claude launch identity is ambiguous"
+            )
+
     async def start(self, spec: WorkerLaunchSpec) -> WorkerProcessRef:
         workspace, run_dir, home, tmp, baseline, schema = self._validate_spec(spec)
         _assert_claude_binary_unchanged(self.binary)
@@ -1241,7 +1292,10 @@ class ClaudeCodeWorkerAdapter:
                 os.close(evidence.fd)
             outcome = await self._safe_launch_failure_cleanup(process)
             try:
-                await asyncio.wait_for(asyncio.shield(process.wait()), timeout=0.2)
+                await asyncio.wait_for(
+                    asyncio.shield(process.wait()),
+                    timeout=_LAUNCH_QUARANTINE_CLEANUP_SECONDS,
+                )
             except asyncio.TimeoutError:
                 raise ClaudeProcessIdentityError(
                     "unaccepted Claude launch could not be safely reaped"
@@ -1285,26 +1339,9 @@ class ClaudeCodeWorkerAdapter:
         except Exception as exc:
             outcome = await self._safe_launch_failure_cleanup(process)
             try:
-                await asyncio.wait_for(
-                    asyncio.shield(state.process_wait_task), timeout=0.2
-                )
-            except asyncio.TimeoutError:
-                for task in (state.stdout_task, state.stderr_task):
-                    if task is not None:
-                        task.cancel()
-                await asyncio.gather(
-                    state.stdout_task, state.stderr_task, return_exceptions=True
-                )
-                self._close_evidence(state)
-                raise ClaudeProcessIdentityError(
-                    "unaccepted Claude launch could not be safely reaped"
-                ) from None
-            await asyncio.gather(state.stdout_task, state.stderr_task, return_exceptions=True)
-            self._close_evidence(state)
-            if outcome is _LaunchCleanupOutcome.AMBIGUOUS:
-                raise ClaudeProcessIdentityError(
-                    "unaccepted Claude launch identity is ambiguous"
-                ) from None
+                await self._quarantine_launch_failure(state, outcome)
+            except ClaudeProcessIdentityError:
+                raise
             raise ClaudeProcessIdentityError("Claude process identity is unavailable") from exc
         ref = WorkerProcessRef(
             run_id=spec.run_id, pid=process.pid, pgid=process.pid,

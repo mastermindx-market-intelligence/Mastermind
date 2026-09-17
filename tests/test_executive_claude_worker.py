@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import time
 
 import pytest
 
@@ -79,6 +80,7 @@ def _fixture_claude_binary(tmp_path: Path) -> Path:
         '  nonzero-secret) printf \'{"is_error":false,"model":"claude-opus-4-6","structured_output":{"outcome":"ok","artifacts":[]}}\\n\'; printf \'CREDENTIAL-SENTINEL\\n\' >&2; exit 9 ;;\n'
         '  nonzero) printf \'ordinary fixture failure\\n\' >&2; exit 9 ;;\n'
         '  sleep) sleep 2 ;;\n'
+        '  sleep-short) sleep 0.35 ;;\n'
         '  *) printf \'{"is_error":true,"subtype":"error"}\\n\' ;;\n'
         'esac\n'
         "exit 0\n",
@@ -1097,7 +1099,7 @@ def test_unprovable_launch_cleanup_is_bounded_and_closes_evidence(
     tmp_path: Path,
 ) -> None:
     binary = _fixture_claude_binary(tmp_path)
-    (tmp_path / "mode").write_text("sleep", encoding="utf-8")
+    (tmp_path / "mode").write_text("sleep-short", encoding="utf-8")
     adapter = _adapter(tmp_path, binary)
 
     class AmbiguousInspector:
@@ -1110,11 +1112,14 @@ def test_unprovable_launch_cleanup_is_bounded_and_closes_evidence(
     adapter.inspector = AmbiguousInspector()
 
     async def execute() -> None:
+        started = time.monotonic()
         with pytest.raises(claude_worker.ClaudeProcessIdentityError):
             await asyncio.wait_for(
                 adapter.start(_workspace_and_spec(tmp_path, timeout_seconds=1)),
-                timeout=0.4,
+                timeout=1.5,
             )
+        assert time.monotonic() - started < 1.2
+        await asyncio.sleep(0.25)
 
     asyncio.run(execute())
 
