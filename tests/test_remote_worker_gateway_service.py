@@ -314,6 +314,12 @@ def test_service_lifecycle_closes_the_gateway_server(tmp_path):
             assert received is config
             events.append("gateway")
 
+        async def broker_call(self, operation, payload):
+            assert operation == "status"
+            assert payload == {}
+            events.append("probe")
+            return {"broker_pid": 123}
+
         async def start_server(self):
             events.append("start")
             return Server()
@@ -333,6 +339,7 @@ def test_service_lifecycle_closes_the_gateway_server(tmp_path):
         broker.close()
     assert events == [
         "gateway",
+        "probe",
         "start",
         "enter",
         "shutdown",
@@ -386,6 +393,44 @@ def test_service_refuses_unsafe_broker_socket_before_listener(tmp_path, defect):
         assert calls == []
     finally:
         broker.close()
+
+
+def test_service_refuses_stale_broker_socket_before_listener(tmp_path):
+    service = _service_module()
+    config, broker = _config_with_live_broker_socket(service, tmp_path)
+    events: list[str] = []
+    broker.close()  # Leaves a mode-0600 AF_UNIX node with no listening broker.
+
+    class ForbiddenGateway:
+        def __init__(self, received):
+            assert received is config
+            events.append("gateway")
+
+        async def broker_call(self, operation, payload):
+            assert operation == "status"
+            assert payload == {}
+            events.append("probe")
+            raise ConnectionRefusedError("stale broker socket")
+
+        async def start_server(self):
+            events.append("listener")
+            raise AssertionError("listener must not start")
+
+    async def shutdown():
+        raise AssertionError("shutdown wait must not start")
+
+    with pytest.raises(
+        service.RemoteWorkerGatewayServiceError,
+        match="GATEWAY_BROKER_UNAVAILABLE",
+    ):
+        asyncio.run(
+            service.serve_remote_worker_gateway(
+                config,
+                gateway_factory=ForbiddenGateway,
+                shutdown_waiter=shutdown,
+            )
+        )
+    assert events == ["gateway", "probe"]
 
 
 def test_entrypoint_check_config_is_secret_free_and_does_not_start(tmp_path):
