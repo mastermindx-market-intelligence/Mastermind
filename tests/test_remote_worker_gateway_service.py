@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import importlib.util
 import io
 import json
 import os
 import plistlib
+import socket
 import stat
 from pathlib import Path
 from types import SimpleNamespace
@@ -141,6 +143,30 @@ def test_launchd_renderer_is_fixed_and_contains_no_endpoint_or_tls_path(tmp_path
     assert b"server.key" not in rendered
     assert b"server.crt" not in rendered
     assert b"ca.crt" not in rendered
+    raw_template = TEMPLATE.read_bytes()
+    assert b"__CONTROL_USER__" in raw_template
+    assert b"__CONTROL_GROUP__" in raw_template
+    assert b"_mastermind_exec" not in raw_template
+
+
+def test_launchd_renderer_refuses_template_owned_service_identity(tmp_path):
+    service = _service_module()
+    root, config_path, _ = _fixture(tmp_path)
+    tampered = TEMPLATE.read_bytes().replace(b"__CONTROL_USER__", b"_mastermind_exec")
+    with pytest.raises(
+        service.RemoteWorkerGatewayServiceError,
+        match="GATEWAY_PLIST_TEMPLATE_INVALID",
+    ):
+        service.render_remote_worker_gateway_plist(
+            tampered,
+            python_binary=Path("/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12"),
+            entrypoint=Path("/opt/mastermind/releases/abc/scripts/executive_os_remote_worker_gateway.py"),
+            config_path=config_path,
+            release_root=Path("/opt/mastermind/releases/abc"),
+            control_home=Path("/Library/Application Support/MastermindExecutive/control-home"),
+            stdout_path=Path("/var/log/mastermind-executive/mh1/stdout.log"),
+            stderr_path=Path("/var/log/mastermind-executive/mh1/stderr.log"),
+        )
 
 
 @pytest.mark.parametrize("operation", [
@@ -253,10 +279,20 @@ def test_allowlists_must_be_sorted_unique_nonempty_arrays(tmp_path):
             _load(service, root, config_path)
 
 
-def test_service_lifecycle_closes_the_gateway_server(tmp_path):
-    service = _service_module()
+def _config_with_live_broker_socket(service, tmp_path):
     root, config_path, _ = _fixture(tmp_path)
     config = _load(service, root, config_path)
+    socket_path = tmp_path / "worker-broker.sock"
+    broker = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    broker.bind(str(socket_path))
+    os.chown(socket_path, os.geteuid(), os.getegid(), follow_symlinks=False)
+    socket_path.chmod(0o600)
+    return dataclasses.replace(config, broker_socket_path=socket_path), broker
+
+
+def test_service_lifecycle_closes_the_gateway_server(tmp_path):
+    service = _service_module()
+    config, broker = _config_with_live_broker_socket(service, tmp_path)
     events: list[str] = []
 
     class Server:
@@ -285,13 +321,16 @@ def test_service_lifecycle_closes_the_gateway_server(tmp_path):
     async def shutdown():
         events.append("shutdown")
 
-    asyncio.run(
-        service.serve_remote_worker_gateway(
-            config,
-            gateway_factory=Gateway,
-            shutdown_waiter=shutdown,
+    try:
+        asyncio.run(
+            service.serve_remote_worker_gateway(
+                config,
+                gateway_factory=Gateway,
+                shutdown_waiter=shutdown,
+            )
         )
-    )
+    finally:
+        broker.close()
     assert events == [
         "gateway",
         "start",
@@ -301,6 +340,52 @@ def test_service_lifecycle_closes_the_gateway_server(tmp_path):
         "close",
         "wait_closed",
     ]
+
+
+@pytest.mark.parametrize("defect", ["missing", "regular", "mode"])
+def test_service_refuses_unsafe_broker_socket_before_listener(tmp_path, defect):
+    service = _service_module()
+    config, broker = _config_with_live_broker_socket(service, tmp_path)
+    broker_socket = Path(config.broker_socket_path)
+    calls: list[str] = []
+
+    try:
+        if defect == "missing":
+            broker.close()
+            broker_socket.unlink()
+        elif defect == "regular":
+            broker.close()
+            broker_socket.unlink()
+            broker_socket.write_bytes(b"not-a-socket")
+            broker_socket.chmod(0o600)
+        else:
+            broker_socket.chmod(0o660)
+
+        class ForbiddenGateway:
+            def __init__(self, _config):
+                calls.append("gateway")
+
+            async def start_server(self):
+                calls.append("listener")
+                raise AssertionError("listener must not start")
+
+        async def shutdown():
+            raise AssertionError("shutdown wait must not start")
+
+        with pytest.raises(
+            service.RemoteWorkerGatewayServiceError,
+            match="GATEWAY_BROKER_SOCKET_INVALID",
+        ):
+            asyncio.run(
+                service.serve_remote_worker_gateway(
+                    config,
+                    gateway_factory=ForbiddenGateway,
+                    shutdown_waiter=shutdown,
+                )
+            )
+        assert calls == []
+    finally:
+        broker.close()
 
 
 def test_entrypoint_check_config_is_secret_free_and_does_not_start(tmp_path):
