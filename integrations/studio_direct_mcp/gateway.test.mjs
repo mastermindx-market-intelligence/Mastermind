@@ -461,7 +461,11 @@ test('tools/list publishes gateway-owned neutral backend metadata and privacy-mi
     JSON.parse(ping.content?.find((item) => item.type === 'text')?.text ?? '{}');
   assert.equal(Object.hasOwn(payload, 'hostname'), false, 'ping must not expose a raw host name');
   assert.equal(Object.hasOwn(payload, 'pid'), false, 'ping must not expose the gateway process id');
-  assert.match(payload.generation, /^[a-z0-9-]+$/i);
+  assert.match(
+    payload.generation,
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    'gateway generation must be an ephemeral random UUID, not a host-derived identifier',
+  );
   assert.equal(payload.gatewayVersion, '0.1.5');
 });
 
