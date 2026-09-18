@@ -1,6 +1,11 @@
 """Macro-scale Source Continuity profile regressions; no real HTTP or token."""
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
+import sys
+
 import pytest
 
 import test_source_continuity as fx
@@ -20,6 +25,38 @@ def _foreign_file_calls(http) -> list[str]:
         for url, _, _ in http.calls
         if "/files?" in url and f"/pulls/{fx.PR_NUMBER}/" not in url
     ]
+
+
+def test_cli_bootstrap_does_not_write_repository_bytecode(tmp_path) -> None:
+    checkout = tmp_path / "checkout"
+    for relative in (
+        "scripts/source_continuity.py",
+        "control_plane/__init__.py",
+        "control_plane/source_continuity.py",
+    ):
+        source = fx.ROOT / relative
+        destination = checkout / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+
+    env = os.environ.copy()
+    env.pop("PYTHONDONTWRITEBYTECODE", None)
+    env.pop("PYTHONPYCACHEPREFIX", None)
+    completed = subprocess.run(
+        [sys.executable, str(checkout / "scripts/source_continuity.py"), "--help"],
+        cwd=checkout,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 2
+    assert '"code":"INVALID_REQUEST"' in completed.stdout
+    created = sorted(
+        path.relative_to(checkout).as_posix() for path in checkout.rglob("*.pyc")
+    )
+    assert created == []
 
 
 def test_macro_400_profile_is_exact() -> None:

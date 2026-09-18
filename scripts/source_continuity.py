@@ -22,6 +22,11 @@ import re
 import stat
 import subprocess
 import sys
+
+# This read-only adapter audits ignored/untracked repository state. Prevent its
+# own repository imports from creating bytecode dirt before that audit runs.
+sys.dont_write_bytecode = True
+
 from threading import Lock
 from time import monotonic
 from typing import Callable, Mapping, Sequence
@@ -69,7 +74,7 @@ _PAGE_SIZE = 100
 _MAX_PAGES = 10
 _MAX_FOREIGN_FILE_PAGES = 30
 _FOREIGN_PR_WORKERS = 4
-_MAX_COLLISION_PRS = 400
+_MAX_COLLISION_PRS = 4 * _PAGE_SIZE
 # One invocation-local cooperative budget spans both observations, not hard preemption.
 _MAX_HTTP_CALLS = 1152
 _HTTP_READ_BUDGET_SECONDS = 300.0
