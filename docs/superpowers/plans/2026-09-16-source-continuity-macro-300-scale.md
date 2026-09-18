@@ -57,13 +57,16 @@ def test_macro_scale_estate_completes(count, capsys, monkeypatch):
 - [ ] **Step 2: Add 301 and exact resource-boundary discriminators**
 
 ```python
-def test_macro_301_refuses_before_foreign_files(capsys, monkeypatch):
+def test_macro_301_refuses_before_foreign_file_enumeration(capsys, monkeypatch):
     module = fx._cli_module()
     monkeypatch.setattr(module, "monotonic", budget.Clock())
     http = budget.EstateHTTP(301)
     rc, payload = budget.run_cli(module, capsys, http)
     assert rc == 2 and payload["code"] == "REMOTE_CENSUS_INCOMPLETE"
-    assert not any("/files?" in url for url, _, _ in http.calls)
+    assert not any(
+        "/files?" in url and f"/pulls/{fx.PR_NUMBER}/" not in url
+        for url, _, _ in http.calls
+    )
 ```
 
 For a 300-PR control run, record the actual admitted call count and normalized byte total, then prove exact-count/exact-byte success and one-unit-under refusal. Use `Clock.now = 239.999` for success and `Clock.now = 240.0` for refusal, matching the incumbent `current >= deadline` rule.
