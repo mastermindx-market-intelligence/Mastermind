@@ -302,7 +302,59 @@ export function createGitPublisher(config, dependencies = {}) {
     return git(cwd, args, { ...options, envExtra: { GIT_INDEX_FILE: indexPath } });
   }
 
-  async function workspace(operationId, { observeRemote = true } = {}) {
+  async function verifyDestinationBinding(binding) {
+    const {workspacePath, remoteUrl, gitArgs} = binding;
+    for (const mode of [[], ['--push']]) {
+      const {stdout} = await git(workspacePath, [...gitArgs, 'remote', 'get-url', ...mode, '--all', 'origin']);
+      if (oneLine(stdout, 'pinned origin destination') !== remoteUrl) {
+        throw new Error('pinned origin destination changed or was rewritten');
+      }
+    }
+  }
+
+  async function captureDestination(workspacePath, branch) {
+    const {stdout} = await git(workspacePath, ['remote', 'get-url', '--push', '--all', 'origin']);
+    const remoteUrl = oneLine(stdout, 'complete effective push destination');
+    if (!cfg.allowedRemoteUrls.includes(remoteUrl)) {
+      throw new Error('effective push destination is outside the configured Mastermind remote boundary');
+    }
+    // Empty values clear inherited URL lists, then bind one destination for
+    // both push and readback. Keep origin identity, hooks, credentials and all
+    // unrelated repository controls; never persist a config change.
+    const gitArgs = Object.freeze([
+      '-c', 'remote.origin.url=', '-c', `remote.origin.url=${remoteUrl}`,
+      '-c', 'remote.origin.pushurl=', '-c', `remote.origin.pushurl=${remoteUrl}`,
+      // Git applies remote.mirror after parsing --no-mirror; constrain both.
+      '-c', 'remote.origin.mirror=false',
+    ]);
+    const binding = Object.freeze({workspacePath, branch, remoteUrl, gitArgs});
+    await verifyDestinationBinding(binding);
+    return binding;
+  }
+
+  async function boundedSubmodulePolicy(workspacePath) {
+    async function value(key, boolean = false) {
+      try {
+        const {stdout} = await git(workspacePath, ['config', ...(boolean ? ['--bool'] : []), '--get', key]);
+        return String(stdout).trim();
+      } catch (error) {
+        if (error.code === 1) return null;
+        throw error;
+      }
+    }
+    const pushPolicy = await value('push.recurseSubmodules');
+    if (pushPolicy === 'check') return 'check';
+    if (pushPolicy === 'no' || pushPolicy === 'false') return 'no';
+    if (pushPolicy !== null) {
+      throw new Error('submodule-pushing policy is outside the one-repository publication boundary');
+    }
+    if (await value('submodule.recurse', true) === 'true') {
+      throw new Error('recursive submodule policy requires explicit non-pushing publication policy');
+    }
+    return 'no';
+  }
+
+  async function workspace(operationId, { observeRemote = true, remoteBinding = null } = {}) {
     const operation = validateOperationId(operationId);
     const { stdout } = await run(
       cfg.workspaceCli,
@@ -332,7 +384,7 @@ export function createGitPublisher(config, dependencies = {}) {
       git(workspacePath, ['symbolic-ref', '--quiet', '--short', 'HEAD']),
       git(workspacePath, ['rev-parse', 'HEAD']),
       git(workspacePath, ['status', '--porcelain=v1', '--untracked-files=all']),
-      git(workspacePath, ['remote', 'get-url', 'origin']),
+      remoteBinding ? Promise.resolve({stdout: remoteBinding.remoteUrl}) : git(workspacePath, ['remote', 'get-url', 'origin']),
     ]);
     const top = await realpath(oneLine(topOut, 'workspace top level'));
     const currentBranch = oneLine(branchOut, 'current branch');
@@ -345,9 +397,15 @@ export function createGitPublisher(config, dependencies = {}) {
 
     const ref = `refs/heads/${branch}`;
     let remoteHead;
+    let binding;
     if (observeRemote) {
+      binding = remoteBinding ?? await captureDestination(workspacePath, branch);
+      if (binding.workspacePath !== workspacePath || binding.branch !== branch) {
+        throw new Error('original publication destination lost its workspace or branch binding');
+      }
+      await verifyDestinationBinding(binding);
       remoteHead = null;
-      const { stdout: lsOut } = await git(workspacePath, ['ls-remote', '--heads', 'origin', ref]);
+      const { stdout: lsOut } = await git(workspacePath, [...binding.gitArgs, 'ls-remote', '--heads', 'origin', ref]);
       const lines = String(lsOut ?? '').trim() ? String(lsOut).trim().split(/\r?\n/) : [];
       if (lines.length > 1) throw new Error('origin returned multiple exact branch refs');
       if (lines.length === 1) {
@@ -362,7 +420,7 @@ export function createGitPublisher(config, dependencies = {}) {
       workspacePath,
       branch,
       localHead,
-      ...(observeRemote ? { remoteHead } : {}),
+      ...(observeRemote ? { remoteHead, remoteBinding: binding } : {}),
       clean: String(statusOut ?? '') === '',
       remoteUrl,
       ref,
@@ -564,17 +622,19 @@ export function createGitPublisher(config, dependencies = {}) {
       };
     }
 
+    const submodulePolicy = await boundedSubmodulePolicy(before.workspacePath);
+    await verifyDestinationBinding(before.remoteBinding);
     try {
       await git(
         before.workspacePath,
         // Push the fenced commit object, never mutable HEAD. A concurrent local
         // branch advance after precheck must not widen the authorized remote effect.
-        ['push', '--porcelain', 'origin', `${expectedHead}:${before.ref}`],
+        [...before.remoteBinding.gitArgs, 'push', '--porcelain', '--no-follow-tags', '--no-force', '--no-mirror', `--recurse-submodules=${submodulePolicy}`, 'origin', `${expectedHead}:${before.ref}`],
         { timeoutMs: cfg.pushTimeoutMs },
       );
     } catch (error) {
       try {
-        const afterFailure = await workspace(operationId);
+        const afterFailure = await workspace(operationId, {remoteBinding: before.remoteBinding});
         if (afterFailure.remoteHead === expectedHead) {
           return {
             schema: 'mastermind.studio_git_push_result.v1',
@@ -604,7 +664,7 @@ export function createGitPublisher(config, dependencies = {}) {
     }
 
     try {
-      const after = await workspace(operationId);
+      const after = await workspace(operationId, {remoteBinding: before.remoteBinding});
       if (after.remoteHead === expectedHead) {
         return {
           schema: 'mastermind.studio_git_push_result.v1',
