@@ -94,9 +94,9 @@ def test_compaction_never_silently_changes_rates():
         out["_transport_truncated"]=True
         return serializer(out)
     out=decode(RE.serialize_ticker_package(attach(), compact))
-    assert "rates_context" not in out
-    assert out["rates_context_status"]=="omitted_transport_budget"
-    assert out["rates_context_tool"]=="get_rates_evidence"
+    # The stock compactor never receives optional rates, so it cannot alter them.
+    assert out["rates_context"]==rates()
+    assert out["rates_context_status"]==rates()["status"]
     assert out["intelligence"]==package()["intelligence"]
 
 
@@ -187,8 +187,8 @@ def test_optional_rates_cannot_displace_preexisting_stock_evidence():
         return serializer(out)
     result=decode(RE.serialize_ticker_package(attach(),compress_stock_only))
     assert result["intelligence"]==package()["intelligence"]
-    assert "rates_context" not in result
-    assert result["rates_context_status"]=="omitted_transport_budget"
+    assert result["rates_context"]==rates()
+    assert result["rates_context_status"]==rates()["status"]
 
 
 
@@ -204,11 +204,36 @@ def restore_rates_table(table):
 
 def test_lossless_rates_table_fits_without_removing_stock_facts():
     p=attach(); p["intelligence"]={"text":""}
-    p["intelligence"]["text"]="x"*(8100-len(json.dumps(p)))
-    assert len(json.dumps(p))==8100
+    compact_size=lambda obj:len(json.dumps(obj,ensure_ascii=False,separators=(",", ":")).encode("utf-8"))
+    p["intelligence"]["text"]="x"*(8100-compact_size(p))
+    assert compact_size(p)==8100  # even whitespace-free object form cannot fit
     response=RE.serialize_ticker_package(p,serializer); out=decode(response)
     assert "rates_context" in out
     assert out["rates_context_encoding"]=="columnar_shared_fields_v1"
     assert restore_rates_table(out["rates_context"])==p["rates_context"]
     assert out["intelligence"]==p["intelligence"]
     assert len(response["content"][0]["text"].encode("utf-8"))<=8000
+
+
+def test_lossless_whitespace_preserves_an_otherwise_deliverable_stock():
+    original = package()
+    original["intelligence"] = {"readings": [0] * 1400, "pad": ""}
+    original["intelligence"]["pad"] = "x" * (8000 - len(json.dumps(original)))
+    assert len(json.dumps(original).encode("utf-8")) == 8000
+    result = RE.serialize_ticker_package(attach(original), serializer)
+    out = decode(result)
+    assert out.get("status") != "unavailable_transport_budget"
+    for key, value in original.items():
+        assert out[key] == value
+    assert len(result["content"][0]["text"].encode("utf-8")) <= 8000
+
+
+def test_rates_do_not_reenter_the_lossy_primary_serializer():
+    calls = []
+    def primary_serializer(obj):
+        calls.append(copy.deepcopy(obj))
+        return serializer(obj)
+    out = decode(RE.serialize_ticker_package(attach(), primary_serializer))
+    assert out["rates_context"] == rates()
+    assert len(calls) == 1
+    assert "rates_context" not in calls[0]

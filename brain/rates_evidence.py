@@ -291,57 +291,59 @@ def _columnar_ticker_rates(rates: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def serialize_ticker_package(package: dict[str, Any], serializer: Any) -> dict[str, Any]:
-    """Use the existing serializer, detecting loss of the added rates contract.
+    """Preserve the existing stock serializer's result and add lossless rates.
 
-    Does not change the generic JSON owner. If compaction changes rates or their
-    qualification, omit that whole addition explicitly, not isolated caveats.
-    Optional rates also cannot crowd out previously deliverable stock evidence.
+    The generic owner sees primary stock evidence exactly once. Its decoded
+    result is never subjected to another lossy compaction because of this
+    optional context. Only JSON whitespace and repeated rates fields may shrink.
+    The 8,000-byte ceiling is this consumer's budget, not a claimed SDK limit.
     """
-    def render(value: dict[str, Any]) -> tuple[Any, Any]:
-        try:
-            response = serializer(deepcopy(value))
-            content = response["content"]
-            if len(content) != 1 or content[0].get("type") != "text":
-                return None, None
-            text = content[0]["text"]
-            if not isinstance(text, str) or len(text.encode("utf-8")) > 8000:
-                return None, None
-            decoded = json.loads(text)
-            return (response, decoded) if isinstance(decoded, dict) else (None, None)
-        except Exception:  # transport errors are never forwarded as source evidence
-            return None, None
-
     protected = ("rates_context", "rates_context_status", "rates_relationship")
     primary = {key: value for key, value in package.items() if key not in protected}
-    _baseline_response, baseline = render(primary)
+    baseline = None
+    envelope = None
+    try:
+        envelope = serializer(deepcopy(primary))
+        content = envelope["content"]
+        if len(content) == 1 and content[0].get("type") == "text":
+            text = content[0]["text"]
+            if isinstance(text, str) and len(text) <= 64000:
+                decoded = json.loads(text)
+                if isinstance(decoded, dict):
+                    baseline = decoded
+    except Exception:  # backend exception contents are not research evidence
+        baseline = None
 
-    def preserves_primary(decoded: Any) -> bool:
-        return (isinstance(decoded, dict) and isinstance(baseline, dict)
-                and all(decoded.get(key) == value for key, value in baseline.items()
-                        if key != "_transport_truncated"))
-
-    response, decoded = render(package)
-    if (preserves_primary(decoded)
-            and all(decoded.get(key) == package.get(key) for key in protected)):
-        return response
-    packed_rates = _columnar_ticker_rates(_dict(package.get("rates_context")))
-    if packed_rates is not None:
-        packed = dict(package)
-        packed["rates_context"] = packed_rates
-        packed["rates_context_encoding"] = "columnar_shared_fields_v1"
-        response, decoded = render(packed)
-        if (preserves_primary(decoded)
-                and all(decoded.get(key) == packed.get(key)
-                        for key in (*protected, "rates_context_encoding"))):
+    def encode(value: dict[str, Any]) -> dict[str, Any] | None:
+        try:
+            text = json.dumps(value, ensure_ascii=False, allow_nan=False,
+                              separators=(",", ":"))
+            if len(text.encode("utf-8")) > 8000 or envelope is None:
+                return None
+            response = deepcopy(envelope)
+            response["content"][0]["text"] = text
             return response
-    reduced = {key: value for key, value in package.items() if key != "rates_context"}
-    reduced["rates_context_status"] = "omitted_transport_budget"
-    reduced["rates_context_tool"] = "get_rates_evidence"
-    response, decoded = render(reduced)
-    if (preserves_primary(decoded) and "rates_context" not in decoded
-            and decoded.get("rates_context_status") == "omitted_transport_budget"
-            and decoded.get("rates_context_tool") == "get_rates_evidence"):
-        return response
+        except Exception:  # invalid JSON scalars/encoding are closed unavailable
+            return None
+
+    if baseline is not None:
+        full = {**baseline, **{key: deepcopy(package.get(key)) for key in protected}}
+        response = encode(full)
+        if response is not None:
+            return response
+        packed_rates = _columnar_ticker_rates(_dict(package.get("rates_context")))
+        if packed_rates is not None:
+            packed = {**full, "rates_context": packed_rates,
+                      "rates_context_encoding": "columnar_shared_fields_v1"}
+            response = encode(packed)
+            if response is not None:
+                return response
+        # No rates numbers remain, so there is no numerical join to qualify.
+        reduced = {**baseline, "rates_context_status": "omitted_transport_budget",
+                   "rates_context_tool": "get_rates_evidence"}
+        response = encode(reduced)
+        if response is not None:
+            return response
     ticker = package.get("ticker")
     ticker = ticker[:32] if isinstance(ticker, str) else None
     failure = {"ticker": ticker, "status": "unavailable_transport_budget",
