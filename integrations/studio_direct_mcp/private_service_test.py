@@ -167,7 +167,19 @@ def _do_stage(tmp: Path, home: Path, account: str = "test-account", port: int = 
 
 def _seed_node_modules(roots: dict):
     roots["base"].mkdir(parents=True, exist_ok=True)
-    (roots["base"] / "node_modules").mkdir()
+    deps = roots["base"] / "node_modules"
+    deps.mkdir()
+    package = deps / "fixture-package"
+    package.mkdir()
+    (package / "index.js").write_text("export const fixture = 1;\n", encoding="utf-8")
+
+
+def _seal_runtime(account: str = "test-account", recorder=None):
+    rec = recorder or CmdRecorder()
+    with mock.patch.object(svc, "_run", rec):
+        return _capture_stdout(
+            lambda: svc.cmd_seal_runtime(mock.Mock(account=account))
+        )
 
 
 def _convert_to_legacy_install(roots: dict, *, typed_git: bool = False) -> dict:
@@ -177,6 +189,9 @@ def _convert_to_legacy_install(roots: dict, *, typed_git: bool = False) -> dict:
         config.pop("gitPublish", None)
     roots["config"].write_text(json.dumps(config, indent=2, sort_keys=True), encoding="utf-8")
     manifest = json.loads(roots["manifest"].read_text(encoding="utf-8"))
+    manifest["version"] = 1
+    for key in ("nodeHash", "backendHash", "dependencyTreeHash"):
+        manifest.pop(key, None)
     removed = ("output-budget.mjs",) if typed_git else ("output-budget.mjs", "git-publish.mjs")
     for name in removed:
         (roots["base"] / name).unlink()
@@ -214,12 +229,15 @@ class TestIdentity(unittest.TestCase):
         )
         self.assertEqual(svc.PRIVATE_GATEWAY_NAME, "private-tunnel-gateway.mjs")
 
-    def test_manifest_keys_include_plist_hash(self):
-        self.assertIn("account", svc.MANIFEST_KEYS)
-        self.assertIn("label", svc.MANIFEST_KEYS)
-        self.assertIn("port", svc.MANIFEST_KEYS)
-        self.assertIn("plistHash", svc.MANIFEST_KEYS)
-        self.assertIn("configHash", svc.MANIFEST_KEYS)
+    def test_manifest_keys_include_runtime_identity(self):
+        self.assertIn("account", svc.MANIFEST_KEYS_V2)
+        self.assertIn("label", svc.MANIFEST_KEYS_V2)
+        self.assertIn("port", svc.MANIFEST_KEYS_V2)
+        self.assertIn("plistHash", svc.MANIFEST_KEYS_V2)
+        self.assertIn("configHash", svc.MANIFEST_KEYS_V2)
+        self.assertIn("nodeHash", svc.MANIFEST_KEYS_V2)
+        self.assertIn("backendHash", svc.MANIFEST_KEYS_V2)
+        self.assertIn("dependencyTreeHash", svc.MANIFEST_KEYS_V2)
 
     def test_v1_manifest_accepts_only_current_or_exact_legacy_filesets(self):
         digest = "0" * 64
@@ -794,6 +812,9 @@ class TestUpgrade(unittest.TestCase):
                 self.assertEqual((roots["state"] / "oauth-state.json").read_text(), "STATE\n")
                 self.assertEqual((roots["logs"] / "prior.log").read_text(), "LOG\n")
                 self.assertEqual((roots["node_modules"] / "marker").read_text(), "DEPS\n")
+                self.assertEqual(manifest["version"], svc.MANIFEST_VERSION)
+                self.assertIsNone(manifest["dependencyTreeHash"])
+                _seal_runtime()
                 svc._verify_staged_install("test-account", _label_for("test-account"), roots)
 
     def test_legacy_install_can_be_stopped_before_upgrade(self):
@@ -897,6 +918,184 @@ class TestUpgrade(unittest.TestCase):
 
 
 # -------------------------------------------------------------------
+# Runtime identity seal
+# -------------------------------------------------------------------
+
+class TestRuntimeSeal(unittest.TestCase):
+    def _staged_runtime(self, tmp: Path, home: Path):
+        src, node, backend, _ = _do_stage(tmp, home)
+        roots = svc._build_runtime_roots("test-account")
+        _seed_node_modules(roots)
+        return src, node, backend, roots
+
+    def test_stage_records_runtime_hashes_but_leaves_dependencies_unsealed(self):
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            home = tmp / "home"
+            home.mkdir()
+            (home / "Library" / "LaunchAgents").mkdir(parents=True)
+            with mock.patch.dict(os.environ, {"HOME": str(home)}):
+                _src, node, backend, _ = _do_stage(tmp, home)
+                roots = svc._build_runtime_roots("test-account")
+                manifest = json.loads(roots["manifest"].read_text())
+                self.assertEqual(manifest["version"], svc.MANIFEST_VERSION)
+                self.assertEqual(manifest["nodeHash"], svc._sha256_file(node))
+                self.assertEqual(manifest["backendHash"], svc._sha256_file(backend))
+                self.assertIsNone(manifest["dependencyTreeHash"])
+
+    def test_start_refuses_unsealed_runtime_before_launchd_effect(self):
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            home = tmp / "home"
+            home.mkdir()
+            (home / "Library" / "LaunchAgents").mkdir(parents=True)
+            with mock.patch.dict(os.environ, {"HOME": str(home)}):
+                _src, _node, _backend, roots = self._staged_runtime(tmp, home)
+                rec = CmdRecorder()
+                with mock.patch.object(svc, "_run", rec):
+                    with self.assertRaisesRegex(SystemExit, "not sealed"):
+                        svc.cmd_start(mock.Mock(account="test-account"))
+                self.assertFalse(any(c[:2] == ["launchctl", "bootstrap"] for c in rec.calls))
+
+    def test_seal_runtime_binds_dependency_tree_and_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            home = tmp / "home"
+            home.mkdir()
+            (home / "Library" / "LaunchAgents").mkdir(parents=True)
+            with mock.patch.dict(os.environ, {"HOME": str(home)}):
+                _src, _node, _backend, roots = self._staged_runtime(tmp, home)
+                rc, out = _seal_runtime()
+                self.assertEqual(rc, 0)
+                first = json.loads(out)["dependencyTreeHash"]
+                self.assertRegex(first, r"^[0-9a-f]{64}$")
+                manifest = json.loads(roots["manifest"].read_text())
+                self.assertEqual(manifest["dependencyTreeHash"], first)
+                rc, out = _seal_runtime()
+                self.assertEqual(rc, 0)
+                self.assertEqual(json.loads(out)["dependencyTreeHash"], first)
+
+    def test_seal_runtime_refuses_loaded_service_without_manifest_write(self):
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            home = tmp / "home"
+            home.mkdir()
+            (home / "Library" / "LaunchAgents").mkdir(parents=True)
+            label = _label_for("test-account")
+            with mock.patch.dict(os.environ, {"HOME": str(home)}):
+                _src, _node, _backend, roots = self._staged_runtime(tmp, home)
+                before = roots["manifest"].read_bytes()
+                def handler(cmd):
+                    if cmd[:2] == ["launchctl", "print"]:
+                        return FakeResult(0, _print_running(str(roots["plist"]), label), "")
+                    return FakeResult(1, "", "unused")
+                with mock.patch.object(svc, "_run", CmdRecorder(handler=handler)):
+                    with self.assertRaisesRegex(SystemExit, "loaded"):
+                        svc.cmd_seal_runtime(mock.Mock(account="test-account"))
+                self.assertEqual(roots["manifest"].read_bytes(), before)
+
+    def test_seal_runtime_refuses_node_or_backend_drift(self):
+        for target_name in ("node", "backend"):
+            with self.subTest(target=target_name), tempfile.TemporaryDirectory() as raw:
+                tmp = Path(raw)
+                home = tmp / "home"
+                home.mkdir()
+                (home / "Library" / "LaunchAgents").mkdir(parents=True)
+                with mock.patch.dict(os.environ, {"HOME": str(home)}):
+                    _src, node, backend, roots = self._staged_runtime(tmp, home)
+                    target = node if target_name == "node" else backend
+                    target.write_text(target.read_text() + "DRIFT\n", encoding="utf-8")
+                    before = roots["manifest"].read_bytes()
+                    with self.assertRaisesRegex(SystemExit, "hash mismatch"):
+                        _seal_runtime()
+                    self.assertEqual(roots["manifest"].read_bytes(), before)
+
+    def test_start_refuses_same_path_runtime_drift_before_launchd_effect(self):
+        for target_name in ("node", "backend", "dependency"):
+            with self.subTest(target=target_name), tempfile.TemporaryDirectory() as raw:
+                tmp = Path(raw)
+                home = tmp / "home"
+                home.mkdir()
+                (home / "Library" / "LaunchAgents").mkdir(parents=True)
+                with mock.patch.dict(os.environ, {"HOME": str(home)}):
+                    _src, node, backend, roots = self._staged_runtime(tmp, home)
+                    _seal_runtime()
+                    if target_name == "node":
+                        node.write_text(node.read_text() + "DRIFT\n", encoding="utf-8")
+                    elif target_name == "backend":
+                        backend.write_text(backend.read_text() + "DRIFT\n", encoding="utf-8")
+                    else:
+                        dep = roots["node_modules"] / "fixture-package" / "index.js"
+                        dep.write_text("export const fixture = 2;\n", encoding="utf-8")
+                    rec = CmdRecorder()
+                    with mock.patch.object(svc, "_run", rec):
+                        with self.assertRaisesRegex(SystemExit, "hash mismatch"):
+                            svc.cmd_start(mock.Mock(account="test-account"))
+                    self.assertFalse(any(c[:2] == ["launchctl", "bootstrap"] for c in rec.calls))
+
+    def test_dependency_tree_refuses_change_between_stability_scans(self):
+        with mock.patch.object(
+            svc,
+            "_dependency_tree_hash_once",
+            side_effect=["a" * 64, "b" * 64],
+        ):
+            with self.assertRaisesRegex(SystemExit, "changed while hashing"):
+                svc._dependency_tree_hash(Path("/unused"))
+
+    def test_dependency_symlink_is_bound_and_escape_is_refused(self):
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            home = tmp / "home"
+            home.mkdir()
+            (home / "Library" / "LaunchAgents").mkdir(parents=True)
+            with mock.patch.dict(os.environ, {"HOME": str(home)}):
+                _src, _node, _backend, roots = self._staged_runtime(tmp, home)
+                deps = roots["node_modules"]
+                bin_dir = deps / ".bin"
+                bin_dir.mkdir()
+                link = bin_dir / "fixture"
+                link.symlink_to("../fixture-package/index.js")
+                _seal_runtime()
+                link.unlink()
+                other = deps / "fixture-package" / "other.js"
+                other.write_text("export const other = 1;\n", encoding="utf-8")
+                link.symlink_to("../fixture-package/other.js")
+                with self.assertRaisesRegex(SystemExit, "dependency tree hash mismatch"):
+                    svc.cmd_start(mock.Mock(account="test-account"))
+
+                # A fresh unsealed install cannot bless a dependency link that
+                # resolves outside node_modules.
+                roots["manifest"].unlink()
+                # Restage on a clean fixture for a direct seal refusal.
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            home = tmp / "home"
+            home.mkdir()
+            (home / "Library" / "LaunchAgents").mkdir(parents=True)
+            with mock.patch.dict(os.environ, {"HOME": str(home)}):
+                _src, _node, _backend, roots = self._staged_runtime(tmp, home)
+                outside = tmp / "outside.js"
+                outside.write_text("outside\n", encoding="utf-8")
+                link = roots["node_modules"] / "escape"
+                link.symlink_to(outside)
+                with self.assertRaisesRegex(SystemExit, "escapes node_modules"):
+                    _seal_runtime()
+
+    def test_legacy_manifest_must_upgrade_before_start(self):
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            home = tmp / "home"
+            home.mkdir()
+            (home / "Library" / "LaunchAgents").mkdir(parents=True)
+            with mock.patch.dict(os.environ, {"HOME": str(home)}):
+                _do_stage(tmp, home)
+                roots = svc._build_runtime_roots("test-account")
+                _seed_node_modules(roots)
+                _convert_to_legacy_install(roots, typed_git=True)
+                with self.assertRaisesRegex(SystemExit, "legacy manifest"):
+                    svc.cmd_start(mock.Mock(account="test-account"))
+
+# -------------------------------------------------------------------
 # Start
 # -------------------------------------------------------------------
 
@@ -911,6 +1110,7 @@ class TestStart(unittest.TestCase):
                 _do_stage(tmp, home)
                 roots = svc._build_runtime_roots("test-account")
                 _seed_node_modules(roots)
+                _seal_runtime()
                 recorder = CmdRecorder()
                 with mock.patch.object(svc, "_run", recorder):
                     rc, out = _capture_stdout(
@@ -933,6 +1133,7 @@ class TestStart(unittest.TestCase):
                 _do_stage(tmp, home)
                 roots = svc._build_runtime_roots("test-account")
                 _seed_node_modules(roots)
+                _seal_runtime()
                 plist_path = str(roots["plist"])
 
                 def handler(cmd):
@@ -1093,6 +1294,41 @@ class TestStop(unittest.TestCase):
                 self.assertFalse(any(c[1] == "bootout" for c in rec.calls))
 
 
+    def test_stop_remains_available_after_runtime_byte_drift(self):
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            home = tmp / "home"
+            home.mkdir()
+            (home / "Library" / "LaunchAgents").mkdir(parents=True)
+            label = _label_for("test-account")
+            with mock.patch.dict(os.environ, {"HOME": str(home)}):
+                _src, node, _backend, _ = _do_stage(tmp, home)
+                roots = svc._build_runtime_roots("test-account")
+                _seed_node_modules(roots)
+                _seal_runtime()
+                node.write_text(node.read_text() + "DRIFT\n", encoding="utf-8")
+                dep = roots["node_modules"] / "fixture-package" / "index.js"
+                dep.write_text("DRIFT\n", encoding="utf-8")
+                prints = iter([
+                    FakeResult(0, _print_running(str(roots["plist"]), label), ""),
+                    FakeResult(1, "", "not loaded"),
+                ])
+                def handler(cmd):
+                    if cmd[:2] == ["launchctl", "print"]:
+                        return next(prints)
+                    if cmd[:2] == ["launchctl", "bootout"]:
+                        return FakeResult(0, "", "")
+                    return FakeResult(1, "", "unused")
+                rec = CmdRecorder(handler=handler)
+                with mock.patch.object(svc, "_run", rec):
+                    rc, out = _capture_stdout(
+                        lambda: svc.cmd_stop(mock.Mock(account="test-account"))
+                    )
+                self.assertEqual(rc, 0)
+                self.assertTrue(json.loads(out)["stopped"])
+                self.assertTrue(any(c[:2] == ["launchctl", "bootout"] for c in rec.calls))
+
+
 # -------------------------------------------------------------------
 # Status
 # -------------------------------------------------------------------
@@ -1136,7 +1372,10 @@ class TestCLI(unittest.TestCase):
     def test_parser_has_expected_subcommands(self):
         parser = svc.build_parser()
         sub = next(a for a in parser._actions if hasattr(a, "choices") and a.choices)
-        self.assertEqual(set(sub.choices), {"stage", "upgrade", "start", "status", "stop"})
+        self.assertEqual(
+            set(sub.choices),
+            {"stage", "upgrade", "seal-runtime", "start", "status", "stop"},
+        )
 
     def test_stage_requires_all_args(self):
         parser = svc.build_parser()
@@ -1154,9 +1393,9 @@ class TestCLI(unittest.TestCase):
         with self.assertRaises(SystemExit):
             parser.parse_args(["upgrade", "--account", "test"])
 
-    def test_start_status_stop_require_account(self):
+    def test_seal_start_status_stop_require_account(self):
         parser = svc.build_parser()
-        for cmd in ("start", "status", "stop"):
+        for cmd in ("seal-runtime", "start", "status", "stop"):
             with self.assertRaises(SystemExit):
                 parser.parse_args([cmd])
 
