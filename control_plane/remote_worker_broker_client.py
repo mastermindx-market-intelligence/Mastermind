@@ -29,6 +29,7 @@ from control_plane.remote_worker_transport import (
 
 _READ_ONLY_OPERATIONS = frozenset(
     {
+        "capacity-observe/v1",
         "ohf-identity",
         "ohf-materialization-status",
     }
