@@ -1223,7 +1223,19 @@ async def save_research_note(args):
           "prob_correct": {"type": "number"}},
        "required": ["subject", "lean", "thesis"]})
 async def propose_thesis(args):
-    _append(_PROPOSALS, {"source": "claude_cli", "status": "proposed", **args})
+    try:
+        from brain import research_desk
+        research_desk.enqueue_proposal(
+            {"source": "claude_cli", "status": "proposed", **args},
+            queue_path=_PROPOSALS,
+        )
+    except Exception:  # noqa: BLE001 - atomic queue owner guarantees no canonical replace on failure
+        return _json({
+            "write_status": "unavailable",
+            "error": "research_proposal_queue_unavailable",
+            "proposal_queued": False,
+            "note": "Research proposal was not queued because canonical persistence did not complete.",
+        })
     return _ok(f"thesis proposed for {args['subject']} ({args['lean']}) → review queue. NOT executed.")
 
 
