@@ -116,6 +116,46 @@ def test_native_scan_and_read_accept_both_existing_exact_policies(settings, rsa_
     asyncio.run(exercise())
 
 
+def test_native_default_jwks_generation_is_shared_across_outer_and_inner_auth(
+    settings, rsa_key, monkeypatch
+):
+    """One OAuth authority gets one bounded key generation per MCP process."""
+
+    from integrations.mastermind_executive_app import gateway as gateway_module
+
+    created = []
+
+    def fake_default(_policy):
+        cache = fixture._FakeJwksCache(rsa_key)
+        created.append(cache)
+        return cache
+
+    monkeypatch.setattr(gateway_module, "_default_jwks_cache", fake_default)
+    default_settings = dataclasses.replace(settings, jwks_cache=None)
+    app = transport.build_executive_mcp_app(default_settings, audit_sink=Sink())
+
+    async def exercise():
+        async with app._app.router.lifespan_context(app._app):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1"
+            ) as client:
+                token = fixture._submit_token(rsa_key)
+                initialized = await rpc(client, token, "initialize", {
+                    "protocolVersion": "2025-06-18", "capabilities": {},
+                    "clientInfo": {"name": "executive-test", "version": "1"},
+                })
+                assert "tools" in initialized["capabilities"]
+                _, body = await call(client, token, "executive_state", {})
+                assert body["ok"] is True, body
+
+    asyncio.run(exercise())
+
+    # Outer MCP auth and the inner direct-App auth both received this exact cache.
+    # The submit-capable token crosses read->submit fallback in both layers, so a
+    # second factory call would prove the duplicated refresh plane still exists.
+    assert len(created) == 1
+    assert created[0].calls == [fixture.KID] * 6
+
 def test_read_token_gets_submit_scope_challenge_before_socket_effect(settings, rsa_key):
     async def exercise():
         async with connection(settings) as client:
