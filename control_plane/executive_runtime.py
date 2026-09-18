@@ -224,6 +224,22 @@ COO_CYCLE_BLOCK_REASONS = frozenset(
 _ESCALATION_RANK = {"coo": 0, "ceo": 1, "chairman": 2}
 _COST_CLASS_RANK = {"small": 0, "default": 1, "frontier": 2}
 _MAX_JOB_DEPTH = 64
+
+# G8 bounded Runtime acquisition. These are owner policy ceilings, never
+# caller-controlled page sizes. The root-member ceiling reuses the protected
+# COO max_children_total=16 contract; generic admitted Jobs are capped at
+# twenty Attempts by the existing CEO-intent boundary. A sentinel row is read
+# at each query boundary but is never converted to a public Job/Attempt.
+BOUNDED_RUNTIME_DISCOVERY_SCHEMA = "mastermind.executive_runtime_root_discovery/v1"
+BOUNDED_RUNTIME_ROOT_SNAPSHOT_SCHEMA = "mastermind.executive_runtime_root_snapshot/v1"
+BOUNDED_RUNTIME_ROOT_DISCOVERY_MAX_ROOTS = 64
+BOUNDED_RUNTIME_ROOT_MAX_CHILDREN = 16
+BOUNDED_RUNTIME_JOB_MAX_ATTEMPTS = 20
+BOUNDED_RUNTIME_ROOT_MAX_ATTEMPTS_TOTAL = (
+    (1 + BOUNDED_RUNTIME_ROOT_MAX_CHILDREN)
+    * BOUNDED_RUNTIME_JOB_MAX_ATTEMPTS
+)
+
 _SCHEMA_UPGRADE_BARRIER = "executive-schema-upgrade.in-progress.json"
 _NORMALIZED_V4_SCHEMA_DIGEST = (
     "56054e6e64ca6e69e878ce6488bb5527e1051212db94bae0fbf625eed78ca6a4"
@@ -1181,6 +1197,52 @@ class Attempt:
         value = dataclasses.asdict(self)
         value["status"] = self.status.value
         return value
+
+
+@dataclasses.dataclass(frozen=True)
+class BoundedRuntimeRootDiscovery:
+    """Finite owner-issued root discovery from one Runtime read snapshot."""
+
+    schema_version: str
+    roots: tuple[Job, ...]
+    truncated: bool
+    snapshot_digest: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "roots": [job.to_dict() for job in self.roots],
+            "truncated": self.truncated,
+            "snapshot_digest": self.snapshot_digest,
+        }
+
+
+@dataclasses.dataclass(frozen=True)
+class BoundedRuntimeRootSnapshot:
+    """Finite exact-root Job/Attempt materialization from one Runtime snapshot."""
+
+    schema_version: str
+    root_job_id: str
+    jobs: tuple[Job, ...]
+    attempts: tuple[Attempt, ...]
+    jobs_truncated: bool
+    attempts_truncated_job_ids: tuple[str, ...]
+    snapshot_digest: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "root_job_id": self.root_job_id,
+            "jobs": [job.to_dict() for job in self.jobs],
+            "attempts": [attempt.to_dict() for attempt in self.attempts],
+            "jobs_truncated": self.jobs_truncated,
+            "attempts_truncated_job_ids": list(self.attempts_truncated_job_ids),
+            "snapshot_digest": self.snapshot_digest,
+        }
+
+
+def _bounded_runtime_snapshot_digest(payload: Mapping[str, Any]) -> str:
+    return hashlib.sha256(_json_dumps(dict(payload)).encode("utf-8")).hexdigest()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -17953,6 +18015,127 @@ class Runtime:
         except BaseException:
             binding.invalidate()
             raise
+
+    def discover_job_roots_bounded(self) -> BoundedRuntimeRootDiscovery:
+        """Discover a finite root set without materializing the full Job table.
+
+        The SQL statement itself owns the ceiling. One sentinel row proves
+        truncation and is discarded before the trusted row decoder runs.
+        """
+
+        with self.store.read() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM jobs
+                WHERE parent_job_id IS NULL AND root_job_id=job_id
+                ORDER BY priority DESC,created_at_ms,job_id
+                LIMIT ?
+                """,
+                (BOUNDED_RUNTIME_ROOT_DISCOVERY_MAX_ROOTS + 1,),
+            ).fetchall()
+            truncated = len(rows) > BOUNDED_RUNTIME_ROOT_DISCOVERY_MAX_ROOTS
+            roots = tuple(
+                _job_from_row(row)
+                for row in rows[:BOUNDED_RUNTIME_ROOT_DISCOVERY_MAX_ROOTS]
+            )
+            payload = {
+                "schema_version": BOUNDED_RUNTIME_DISCOVERY_SCHEMA,
+                "roots": [job.to_dict() for job in roots],
+                "truncated": truncated,
+            }
+            return BoundedRuntimeRootDiscovery(
+                schema_version=BOUNDED_RUNTIME_DISCOVERY_SCHEMA,
+                roots=roots,
+                truncated=truncated,
+                snapshot_digest=_bounded_runtime_snapshot_digest(payload),
+            )
+
+    def read_job_root_bounded(self, root_job_id: str) -> BoundedRuntimeRootSnapshot:
+        """Read one exact root and its finite Job/Attempt scope at the owner.
+
+        This is additive to the legacy list APIs. Consumers cannot supply a
+        page size or SQL. Root membership is selected by authoritative stored
+        root_job_id and every query is bounded before object conversion.
+        """
+
+        root_token = str(root_job_id or "").strip()
+        if not root_token:
+            raise StateConflict("bounded Runtime read requires an exact root Job")
+
+        with self.store.read() as connection:
+            root_row = connection.execute(
+                """
+                SELECT * FROM jobs
+                WHERE job_id=? AND parent_job_id IS NULL AND root_job_id=job_id
+                """,
+                (root_token,),
+            ).fetchone()
+            if root_row is None:
+                raise StateConflict("bounded Runtime read requires an exact root Job")
+            root = _job_from_row(root_row)
+
+            child_rows = connection.execute(
+                """
+                SELECT * FROM jobs
+                WHERE root_job_id=? AND job_id<>?
+                ORDER BY depth,created_at_ms,job_id
+                LIMIT ?
+                """,
+                (root_token, root_token, BOUNDED_RUNTIME_ROOT_MAX_CHILDREN + 1),
+            ).fetchall()
+            jobs_truncated = len(child_rows) > BOUNDED_RUNTIME_ROOT_MAX_CHILDREN
+            selected_child_rows = child_rows[:BOUNDED_RUNTIME_ROOT_MAX_CHILDREN]
+            for row in selected_child_rows:
+                if (
+                    str(row["root_job_id"] or "") != root_token
+                    or row["parent_job_id"] is None
+                    or str(row["job_id"]) == root_token
+                ):
+                    raise PersistenceError("bounded Runtime root membership is invalid")
+            children = tuple(_job_from_row(row) for row in selected_child_rows)
+            jobs = (root, *children)
+
+            attempts: list[Attempt] = []
+            truncated_attempt_jobs: list[str] = []
+            for job in jobs:
+                attempt_rows = connection.execute(
+                    """
+                    SELECT * FROM attempts
+                    WHERE job_id=?
+                    ORDER BY attempt_number,created_at_ms,attempt_id
+                    LIMIT ?
+                    """,
+                    (job.job_id, BOUNDED_RUNTIME_JOB_MAX_ATTEMPTS + 1),
+                ).fetchall()
+                if len(attempt_rows) > BOUNDED_RUNTIME_JOB_MAX_ATTEMPTS:
+                    truncated_attempt_jobs.append(job.job_id)
+                attempts.extend(
+                    _attempt_from_row(row)
+                    for row in attempt_rows[:BOUNDED_RUNTIME_JOB_MAX_ATTEMPTS]
+                )
+
+            if len(attempts) > BOUNDED_RUNTIME_ROOT_MAX_ATTEMPTS_TOTAL:
+                raise PersistenceError("bounded Runtime attempt budget exceeded")
+
+            attempts_tuple = tuple(attempts)
+            truncated_tuple = tuple(truncated_attempt_jobs)
+            payload = {
+                "schema_version": BOUNDED_RUNTIME_ROOT_SNAPSHOT_SCHEMA,
+                "root_job_id": root_token,
+                "jobs": [job.to_dict() for job in jobs],
+                "attempts": [attempt.to_dict() for attempt in attempts_tuple],
+                "jobs_truncated": jobs_truncated,
+                "attempts_truncated_job_ids": list(truncated_tuple),
+            }
+            return BoundedRuntimeRootSnapshot(
+                schema_version=BOUNDED_RUNTIME_ROOT_SNAPSHOT_SCHEMA,
+                root_job_id=root_token,
+                jobs=jobs,
+                attempts=attempts_tuple,
+                jobs_truncated=jobs_truncated,
+                attempts_truncated_job_ids=truncated_tuple,
+                snapshot_digest=_bounded_runtime_snapshot_digest(payload),
+            )
 
     def commit_initial_capacity_placement(
         self,
