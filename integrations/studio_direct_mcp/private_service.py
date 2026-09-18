@@ -15,6 +15,7 @@ import json
 import os
 import plistlib
 import re
+import stat
 import subprocess
 import sys
 import tempfile
@@ -74,7 +75,8 @@ KNOWN_MANIFEST_FILESETS = frozenset(
     (frozenset(STAGE_FILES), frozenset(LEGACY_STAGE_FILES_V2), frozenset(LEGACY_STAGE_FILES_V1))
 )
 
-MANIFEST_KEYS = (
+MANIFEST_VERSION = 2
+MANIFEST_KEYS_V1 = (
     "version",
     "account",
     "label",
@@ -86,6 +88,11 @@ MANIFEST_KEYS = (
     "backend",
     "host",
     "port",
+)
+MANIFEST_KEYS_V2 = MANIFEST_KEYS_V1 + (
+    "nodeHash",
+    "backendHash",
+    "dependencyTreeHash",
 )
 
 
@@ -126,6 +133,105 @@ def _sha256_hex(value: str) -> bool:
     return isinstance(value, str) and len(value) == 64 and all(
         c in "0123456789abcdef" for c in value
     )
+
+
+def _stable_regular_file_hash(path: Path, *, label: str) -> str:
+    """Hash one exact regular file and refuse identity drift while reading it."""
+
+    try:
+        before = path.lstat()
+    except OSError:
+        raise SystemExit(f"{label} missing") from None
+    if path.is_symlink() or not stat.S_ISREG(before.st_mode):
+        raise SystemExit(f"{label} must be a regular non-symlink file")
+    digest = _sha256_file(path)
+    try:
+        after = path.lstat()
+    except OSError:
+        raise SystemExit(f"{label} changed while hashing") from None
+    identity = lambda info: (
+        info.st_dev,
+        info.st_ino,
+        info.st_mode,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+    )
+    if identity(before) != identity(after):
+        raise SystemExit(f"{label} changed while hashing")
+    return digest
+
+
+def _dependency_tree_hash_once(root: Path) -> str:
+    """Return one host-path-independent digest of the installed dependency tree."""
+
+    if root.is_symlink() or not root.is_dir():
+        raise SystemExit(
+            "not staged: node_modules missing; "
+            "parent must run npm ci --omit=dev --ignore-scripts"
+        )
+    try:
+        resolved_root = root.resolve(strict=True)
+        root_info = root.lstat()
+    except OSError:
+        raise SystemExit("not staged: node_modules unavailable") from None
+    entries: list[tuple[object, ...]] = [
+        (".", "directory", stat.S_IMODE(root_info.st_mode))
+    ]
+    stack = [root]
+    while stack:
+        directory = stack.pop()
+        try:
+            children = sorted(os.scandir(directory), key=lambda item: item.name)
+        except OSError:
+            raise SystemExit("not staged: dependency tree unreadable") from None
+        for child in children:
+            path = Path(child.path)
+            rel = path.relative_to(root).as_posix()
+            try:
+                info = path.lstat()
+            except OSError:
+                raise SystemExit("not staged: dependency tree changed while hashing") from None
+            mode = stat.S_IMODE(info.st_mode)
+            if stat.S_ISLNK(info.st_mode):
+                try:
+                    target = os.readlink(path)
+                except OSError:
+                    raise SystemExit("not staged: dependency symlink unreadable") from None
+                if os.path.isabs(target):
+                    raise SystemExit("not staged: dependency symlink escapes node_modules")
+                try:
+                    resolved_target = (path.parent / target).resolve(strict=True)
+                    resolved_target.relative_to(resolved_root)
+                except (OSError, ValueError):
+                    raise SystemExit("not staged: dependency symlink escapes node_modules") from None
+                entries.append((rel, "symlink", mode, target))
+            elif stat.S_ISDIR(info.st_mode):
+                entries.append((rel, "directory", mode))
+                stack.append(path)
+            elif stat.S_ISREG(info.st_mode):
+                digest = _stable_regular_file_hash(path, label="dependency file")
+                entries.append((rel, "file", mode, info.st_size, digest))
+            else:
+                raise SystemExit("not staged: unsupported dependency entry")
+    payload = json.dumps(
+        sorted(entries, key=lambda item: str(item[0])),
+        sort_keys=False,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _dependency_tree_hash(root: Path) -> str:
+    """Require two identical dependency observations so concurrent drift refuses."""
+
+    first = _dependency_tree_hash_once(root)
+    second = _dependency_tree_hash_once(root)
+    if first != second:
+        raise SystemExit("not staged: dependency tree changed while hashing")
+    return first
 
 
 def _user_root() -> Path:
@@ -379,23 +485,31 @@ def _write_plist(plist_path: Path, payload: dict) -> None:
 def _valid_manifest(data, account: str, label: str) -> bool:
     if not isinstance(data, dict):
         return False
-    if any(k not in data for k in MANIFEST_KEYS):
+    version = data.get("version")
+    expected_keys = (
+        frozenset(MANIFEST_KEYS_V1)
+        if version == 1
+        else frozenset(MANIFEST_KEYS_V2)
+        if version == MANIFEST_VERSION
+        else None
+    )
+    if expected_keys is None or frozenset(data) != expected_keys:
         return False
-    if data.get("version") != 1:
-        return False
-    if data.get("account") != account:
-        return False
-    if data.get("label") != label:
+    if data.get("account") != account or data.get("label") != label:
         return False
     files = data.get("files")
     if not isinstance(files, dict) or frozenset(files) not in KNOWN_MANIFEST_FILESETS:
         return False
     if any(not _sha256_hex(digest) for digest in files.values()):
         return False
-    if not _sha256_hex(data.get("configHash")):
+    if not _sha256_hex(data.get("configHash")) or not _sha256_hex(data.get("plistHash")):
         return False
-    if not _sha256_hex(data.get("plistHash")):
-        return False
+    if version == MANIFEST_VERSION:
+        if not _sha256_hex(data.get("nodeHash")) or not _sha256_hex(data.get("backendHash")):
+            return False
+        dependency_hash = data.get("dependencyTreeHash")
+        if dependency_hash is not None and not _sha256_hex(dependency_hash):
+            return False
     return True
 
 
@@ -534,6 +648,15 @@ def _verify_prior_install(
             "stop the service first and pass the exact same "
             "--account, --source, --node, --backend, --port"
         )
+    if prior.get("version") == MANIFEST_VERSION:
+        if _stable_regular_file_hash(node_abs, label="node") != prior.get("nodeHash"):
+            raise SystemExit("refusing restage: node hash diverges")
+        if _stable_regular_file_hash(backend_abs, label="backend") != prior.get("backendHash"):
+            raise SystemExit("refusing restage: backend hash diverges")
+        sealed_dependencies = prior.get("dependencyTreeHash")
+        if sealed_dependencies is not None:
+            if _dependency_tree_hash(roots["node_modules"]) != sealed_dependencies:
+                raise SystemExit("refusing restage: dependency tree hash diverges")
     incoming = {src.name: _sha256_file(src) for src in _check_source_files(source)}
     prior_names = tuple(prior["files"].keys())
     installed = _installed_file_hashes(roots["base"], prior_names)
@@ -609,6 +732,7 @@ def _preflight_stage(
         )
     for path in _stage_dest_files(roots):
         _assert_dest_safe(path)
+    return prior
 
 
 def _validate_port(port: int) -> None:
@@ -633,6 +757,7 @@ def _write_install(
     *,
     result_key: str,
     previous_source: str | None = None,
+    dependency_tree_hash: str | None = None,
 ) -> int:
     user_root = _user_root()
     _ensure_secure_dir(roots["base"])
@@ -667,13 +792,16 @@ def _write_install(
     _write_plist(roots["plist"], plist)
 
     manifest = {
-        "version": 1,
+        "version": MANIFEST_VERSION,
         "account": account,
         "label": label,
         "files": files,
         "source": str(source),
         "node": str(node_abs),
         "backend": str(backend_abs),
+        "nodeHash": _stable_regular_file_hash(node_abs, label="node"),
+        "backendHash": _stable_regular_file_hash(backend_abs, label="backend"),
+        "dependencyTreeHash": dependency_tree_hash,
         "host": host,
         "port": port,
         "configHash": _sha256_file(roots["config"]),
@@ -719,19 +847,27 @@ def cmd_stage(args) -> int:
     _validate_port(port)
 
     roots = _build_runtime_roots(account)
-    _preflight_stage(
+    prior = _preflight_stage(
         source, node_abs, backend_abs, account, label, host, port, roots
+    )
+    retained_dependency_hash = (
+        prior.get("dependencyTreeHash")
+        if isinstance(prior, dict) and prior.get("version") == MANIFEST_VERSION
+        else None
     )
 
     return _write_install(
         source, node_abs, backend_abs, account, label, host, port, roots,
         result_key="staged",
+        dependency_tree_hash=retained_dependency_hash,
     )
 
 def _verify_staged_install(
     account: str,
     label: str,
     roots: dict,
+    *,
+    require_runtime_seal: bool = True,
 ) -> dict:
     manifest_path = roots["manifest"]
     manifest = _read_manifest(manifest_path, account, label, required=True)
@@ -772,6 +908,18 @@ def _verify_staged_install(
         raise SystemExit("not staged: node missing")
     if backend.is_symlink() or not backend.is_file():
         raise SystemExit("not staged: backend missing")
+    if require_runtime_seal:
+        if manifest.get("version") != MANIFEST_VERSION:
+            raise SystemExit("not staged: legacy manifest must be upgraded and runtime sealed")
+        if _stable_regular_file_hash(node, label="node") != manifest.get("nodeHash"):
+            raise SystemExit("not staged: node hash mismatch")
+        if _stable_regular_file_hash(backend, label="backend") != manifest.get("backendHash"):
+            raise SystemExit("not staged: backend hash mismatch")
+        sealed_dependencies = manifest.get("dependencyTreeHash")
+        if sealed_dependencies is None:
+            raise SystemExit("not staged: runtime dependencies are not sealed")
+        if _dependency_tree_hash(deps) != sealed_dependencies:
+            raise SystemExit("not staged: dependency tree hash mismatch")
 
     plist = _load_plist(roots["plist"])
     if plist is None:
@@ -808,7 +956,11 @@ def cmd_upgrade(args) -> int:
     roots = _build_runtime_roots(account)
     if _launchd_inspect(label) is not None:
         raise SystemExit("refusing upgrade while service is running; stop first")
-    prior = _verify_staged_install(account, label, roots)
+    prior = _verify_staged_install(
+        account, label, roots, require_runtime_seal=False
+    )
+    if prior.get("version") == MANIFEST_VERSION and prior.get("dependencyTreeHash") is not None:
+        _verify_staged_install(account, label, roots, require_runtime_seal=True)
     if (
         prior.get("node") != str(node_abs)
         or prior.get("backend") != str(backend_abs)
@@ -825,6 +977,41 @@ def cmd_upgrade(args) -> int:
         source, node_abs, backend_abs, account, label, host, port, roots,
         result_key="upgraded", previous_source=str(prior.get("source") or ""),
     )
+
+
+def cmd_seal_runtime(args) -> int:
+    account = args.account
+    _validate_account_label(account)
+    label = f"com.mastermind.studio-direct-private.{account}"
+    roots = _build_runtime_roots(account)
+    if _launchd_inspect(label) is not None:
+        raise SystemExit("refusing runtime seal while service is loaded; stop first")
+    manifest = _verify_staged_install(
+        account, label, roots, require_runtime_seal=False
+    )
+    if manifest.get("version") != MANIFEST_VERSION:
+        raise SystemExit("legacy manifest must be upgraded before runtime seal")
+    node = Path(manifest["node"])
+    backend = Path(manifest["backend"])
+    if _stable_regular_file_hash(node, label="node") != manifest.get("nodeHash"):
+        raise SystemExit("runtime seal refused: node hash mismatch")
+    if _stable_regular_file_hash(backend, label="backend") != manifest.get("backendHash"):
+        raise SystemExit("runtime seal refused: backend hash mismatch")
+    dependency_hash = _dependency_tree_hash(roots["node_modules"])
+    prior_hash = manifest.get("dependencyTreeHash")
+    if prior_hash is not None and prior_hash != dependency_hash:
+        raise SystemExit("runtime seal refused: dependency tree changed after seal")
+    sealed = dict(manifest)
+    sealed["dependencyTreeHash"] = dependency_hash
+    _atomic_write_text(
+        roots["manifest"], json.dumps(sealed, indent=2, sort_keys=True)
+    )
+    print(json.dumps({
+        "sealed": True,
+        "account": account,
+        "dependencyTreeHash": dependency_hash,
+    }, sort_keys=True))
+    return 0
 
 
 def cmd_start(args) -> int:
@@ -891,7 +1078,9 @@ def cmd_stop(args) -> int:
         print(json.dumps({"stopped": True, "already": True, "account": account}))
         return 0
 
-    _verify_staged_install(account, label, roots)
+    _verify_staged_install(
+        account, label, roots, require_runtime_seal=False
+    )
 
     if info.get("path") != str(roots["plist"]):
         raise SystemExit("loaded job is not our exact install")
@@ -925,10 +1114,11 @@ def build_parser() -> argparse.ArgumentParser:
         s.add_argument("--backend", required=True)
         s.set_defaults(func=globals()[f"cmd_{name}"])
 
-    for name in ("start", "status", "stop"):
+    for name in ("seal-runtime", "start", "status", "stop"):
         sp = sub.add_parser(name)
         sp.add_argument("--account", required=True)
-        sp.set_defaults(func=globals()[f"cmd_{name}"])
+        function_name = "cmd_seal_runtime" if name == "seal-runtime" else f"cmd_{name}"
+        sp.set_defaults(func=globals()[function_name])
 
     return p
 
