@@ -421,6 +421,50 @@ test('SDK tool requests progress through a single HTTP connection after initiali
   }
 });
 
+test('tools/list publishes gateway-owned neutral backend metadata and privacy-minimal ping', async () => {
+  const { gw } = await bootGateway();
+  const a = newClient('tok-alice');
+  await connect(a.client, gw.url, a.transportOpts);
+
+  const listed = await a.client.listTools();
+  const byName = new Map(listed.tools.map((tool) => [tool.name, tool]));
+  assert.equal(
+    byName.get('read_file')?.description,
+    'Reads one allowed local file or supported URL, with bounded paging for supported formats.',
+  );
+  assert.equal(
+    byName.get('echo')?.description,
+    'Backend MCP capability. The input schema defines accepted parameters and annotations describe its effect posture.',
+  );
+  assert.notEqual(
+    byName.get('echo')?.description,
+    'Returns its argument object verbatim. Read-only, no side effects.',
+    'backend-authored prose must not cross the gateway metadata boundary',
+  );
+
+  const directivePattern =
+    /required workflow|always\b|never\b|only correct tool|must use|do not use|prefer this|critical rule/i;
+  for (const tool of listed.tools) {
+    assert.doesNotMatch(
+      tool.description ?? '',
+      directivePattern,
+      `tool description contains classifier-directed language: ${tool.name}`,
+    );
+  }
+
+  const ping = await a.client.callTool(
+    { name: 'studio_ping', arguments: {} },
+    undefined,
+    { timeout: 2000 },
+  );
+  const payload = ping.structuredContent ??
+    JSON.parse(ping.content?.find((item) => item.type === 'text')?.text ?? '{}');
+  assert.equal(Object.hasOwn(payload, 'hostname'), false, 'ping must not expose a raw host name');
+  assert.equal(Object.hasOwn(payload, 'pid'), false, 'ping must not expose the gateway process id');
+  assert.match(payload.generation, /^[a-z0-9-]+$/i);
+  assert.equal(payload.gatewayVersion, '0.1.5');
+});
+
 test('shared backend reserves one slot for catalog traffic while typed Git remains advertised', { timeout: 15_000 }, async () => {
   const { gw, effectLog } = await bootGateway({
     backendMode: 'shared-account',
