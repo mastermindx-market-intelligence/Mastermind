@@ -52,6 +52,43 @@ def test_bounded_ceilings_track_existing_owner_policy():
     )
 
 
+def test_bounded_queries_put_sentinel_limits_in_sqlite(tmp_path, monkeypatch):
+    _root, runtime = _runtime(tmp_path)
+    root = runtime.jobs.create_job("root")
+    runtime.jobs.create_job("child", parent_job_id=root.job_id)
+
+    traces = []
+    original_connect = er.sqlite3.connect
+
+    def connect(*args, **kwargs):
+        connection = original_connect(*args, **kwargs)
+        connection.set_trace_callback(traces.append)
+        return connection
+
+    monkeypatch.setattr(er.sqlite3, "connect", connect)
+    runtime.discover_job_roots_bounded()
+    runtime.read_job_root_bounded(root.job_id)
+
+    normalized = [" ".join(sql.split()) for sql in traces]
+    assert any(
+        "WHERE parent_job_id IS NULL AND root_job_id=job_id" in sql
+        and f"LIMIT {er.BOUNDED_RUNTIME_ROOT_DISCOVERY_MAX_ROOTS + 1}" in sql
+        for sql in normalized
+    )
+    assert any(
+        "WHERE root_job_id=" in sql
+        and "job_id<>" in sql
+        and f"LIMIT {er.BOUNDED_RUNTIME_ROOT_MAX_CHILDREN + 1}" in sql
+        for sql in normalized
+    )
+    assert any(
+        "FROM attempts" in sql
+        and "WHERE job_id=" in sql
+        and f"LIMIT {er.BOUNDED_RUNTIME_JOB_MAX_ATTEMPTS + 1}" in sql
+        for sql in normalized
+    )
+
+
 def test_root_discovery_is_sql_bounded_before_job_conversion(tmp_path, monkeypatch):
     _root, runtime = _runtime(tmp_path)
     for index in range(er.BOUNDED_RUNTIME_ROOT_DISCOVERY_MAX_ROOTS + 3):
