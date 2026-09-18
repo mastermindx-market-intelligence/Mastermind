@@ -26,11 +26,16 @@ from control_plane.ceo_intent import (
     FORBIDDEN_PROGRAMS,
     MAX_ENVELOPE_BYTES,
     INTENT_SCHEMA,
+    INTENT_SCHEMA_SERVICE,
+    INTENT_SCHEMA_V2,
     RECEIPT_SCHEMA,
+    RECEIPT_SCHEMA_SERVICE,
+    CeoIntentConflict,
     CeoIntentError,
     canonical_bytes,
     command_id_for,
     intent_fingerprint,
+    resolve_intent,
     submit_intent,
     validate_intent,
 )
@@ -176,6 +181,37 @@ def _v2_intent(tmp_path: Path, **overrides) -> dict:
             },
         }
     )
+    intent.update(overrides)
+    return intent
+
+
+def _service_intent(tmp_path: Path, **overrides) -> dict:
+    """A bounded non-CEO service-principal envelope on the existing sink.
+
+    READ/RESEARCH only, ``svc-`` intent id, reserved actors refused.  Sibling of
+    ``_intent`` / ``_v2_intent``: same grounding and department, different
+    principal class.
+    """
+
+    intent = {
+        "schema": INTENT_SCHEMA_SERVICE,
+        "intent_id": "svc-2026-09-18-A",
+        "actor": "svc-site-maintenance",
+        "objective": "Audit published site and source health for the VPS site.",
+        "department": "executive-infrastructure",
+        "priority": 3,
+        "grounding": {
+            "mastermind_sha": _MASTERMIND_SHA,
+            "macro_sha": _MACRO_SHA,
+        },
+        "principal_id": "svc-site-maintenance",
+        "task_kind": "research",
+        "execution_contract": {
+            "requested_authorities": ["READ", "RESEARCH"],
+            "authority_level": "A0",
+            "attempt_limit": 3,
+        },
+    }
     intent.update(overrides)
     return intent
 
@@ -687,6 +723,142 @@ def test_submission_does_not_dispatch(tmp_path: Path, short_socket_root: Path):
 
 
 # ---------------------------------------------------------------------------
+# 8b. service schema — happy path, retry, conflict, actor, no-dispatch, refusals
+# ---------------------------------------------------------------------------
+
+
+def test_service_schema_happy_path_creates_exactly_one_queued_coo_job(tmp_path: Path):
+    runtime = Runtime.at(tmp_path / "runtime")
+    intent = _service_intent(tmp_path)
+    receipt = _submit(runtime, intent, tmp_path)
+
+    assert receipt["schema"] == RECEIPT_SCHEMA_SERVICE
+    assert receipt["accepted"] is True
+    assert receipt["duplicate"] is False
+    assert receipt["dispatched"] is False
+    assert receipt["intent_id"] == "svc-2026-09-18-A"
+    assert receipt["fingerprint"] == intent_fingerprint(validate_intent(intent))
+
+    jobs = runtime.jobs.list_jobs()
+    assert len(jobs) == 1
+    job = jobs[0]
+    assert job.job_id == receipt["job_id"]
+    assert job.status is JobStatus.QUEUED
+    assert job.owner_seat == "coo"
+    assert job.escalation_target == "coo"
+    assert job.orchestration_role is None
+    assert set(job.requested_authorities) <= {"READ", "RESEARCH"}
+    assert job.requested_authorities == ["READ", "RESEARCH"]
+    assert job.attempt_count == 0
+    assert job.current_attempt_id is None
+
+    event = next(
+        e for e in runtime.events.list_events(job_id=job.job_id) if e.event_type == "JOB_CREATED"
+    )
+    provenance = event.payload["provenance"]
+    assert provenance["schema"] == INTENT_SCHEMA_SERVICE
+    assert provenance["intent_id"] == "svc-2026-09-18-A"
+    assert provenance["actor"] == "svc-site-maintenance"
+    assert provenance["principal_id"] == "svc-site-maintenance"
+    assert provenance["task_kind"] == "research"
+    assert provenance["requested_authorities"] == ["READ", "RESEARCH"]
+    assert provenance["effective_authorities"] == ["READ", "RESEARCH"]
+    assert provenance["write_authorities"] == []
+    assert provenance["fingerprint"] == receipt["fingerprint"]
+    assert provenance["grounding"] == intent["grounding"]
+
+
+def test_service_schema_identical_retry_reconciles_to_the_same_job(tmp_path: Path):
+    runtime = Runtime.at(tmp_path / "runtime")
+    intent = _service_intent(tmp_path)
+    first = _submit(runtime, intent, tmp_path)
+    second = _submit(runtime, intent, tmp_path)
+    assert first["duplicate"] is False
+    assert second["duplicate"] is True
+    assert second["job_id"] == first["job_id"]
+    assert second["fingerprint"] == first["fingerprint"]
+    assert second["dispatched"] is False
+    assert second["schema"] == RECEIPT_SCHEMA_SERVICE
+    assert len(runtime.jobs.list_jobs()) == 1
+
+
+def test_service_schema_conflicting_retry_under_the_same_intent_id_fails_closed(
+    tmp_path: Path,
+):
+    runtime = Runtime.at(tmp_path / "runtime")
+    first = _submit(runtime, _service_intent(tmp_path), tmp_path)
+    with pytest.raises(CeoIntentConflict, match="already accepted with a different envelope"):
+        _submit(
+            runtime,
+            _service_intent(tmp_path, objective="Something else entirely."),
+            tmp_path,
+        )
+    assert first["accepted"] is True
+    assert len(runtime.jobs.list_jobs()) == 1
+
+
+def test_service_actor_confers_no_privilege(tmp_path: Path):
+    """The service actor is provenance, not privilege: MERGE is still refused."""
+
+    runtime = Runtime.at(tmp_path / "runtime")
+    for actor in ("svc-site-maintenance", "svc-other-actor"):
+        intent = _service_intent(tmp_path, actor=actor, intent_id=f"svc-{actor}")
+        intent["execution_contract"] = {"requested_authorities": ["MERGE"]}
+        with pytest.raises(CeoIntentError, match="READ/RESEARCH only"):
+            _submit(runtime, intent, tmp_path)
+    assert runtime.jobs.list_jobs() == []
+
+
+def test_service_submission_does_not_dispatch(tmp_path: Path):
+    runtime = Runtime.at(tmp_path / "runtime")
+    receipt = _submit(runtime, _service_intent(tmp_path), tmp_path)
+    job = runtime.jobs.get_job(receipt["job_id"])
+    assert receipt["dispatched"] is False
+    assert job.status is JobStatus.QUEUED
+    assert job.current_attempt_id is None
+    assert job.attempt_count == 0
+    assert runtime.attempts.list_attempts() == []
+
+
+def test_service_schema_refuses_write_reserved_actor_and_closed_values(tmp_path: Path):
+    runtime = Runtime.at(tmp_path / "runtime")
+    base = _service_intent(tmp_path)
+    probes = (
+        (
+            {"execution_contract": {"requested_authorities": ["WRITE_BRANCH"]}},
+            "READ/RESEARCH only",
+        ),
+        (
+            {"execution_contract": {"requested_authorities": ["RUN_TESTS"]}},
+            "READ/RESEARCH only",
+        ),
+        ({"actor": "ceo-sol"}, "reserved identity"),
+        ({"actor": "chairman"}, "reserved identity"),
+        ({"actor": "chris"}, "reserved identity"),
+        ({"actor": "operator"}, "reserved identity"),
+        ({"intent_id": "esp-not-svc"}, "must start with 'svc-'"),
+        ({"intent_id": "CEO-2026-08-13-A"}, "must start with 'svc-'"),
+        ({"task_kind": "implementation"}, "intent.task_kind must be"),
+        ({"principal_id": "site-maintenance"}, "intent.principal_id has an unsupported form"),
+        ({"extra_key": "x"}, r"unexpected key\(s\): \['extra_key'\]"),
+    )
+    for overrides, match in probes:
+        probe = dict(base)
+        probe.update(overrides)
+        with pytest.raises(CeoIntentError, match=match):
+            _submit(runtime, probe, tmp_path)
+
+    v2_shaped = dict(base)
+    v2_shaped["intent_kind"] = "executive_coo_cycle"
+    v2_shaped["business_impact"] = "material"
+    with pytest.raises(
+        CeoIntentError, match=r"unexpected key\(s\): \['business_impact', 'intent_kind'\]"
+    ):
+        _submit(runtime, v2_shaped, tmp_path)
+    assert runtime.jobs.list_jobs() == []
+
+
+# ---------------------------------------------------------------------------
 # 9. Agent OS is never written
 # ---------------------------------------------------------------------------
 
@@ -1004,8 +1176,14 @@ def test_bounds_are_refusals(tmp_path: Path):
         validate_intent(_intent(tmp_path, objective="x" * 4001))
     with pytest.raises(CeoIntentError, match="must be between -100 and 100"):
         validate_intent(_intent(tmp_path, priority=101))
-    with pytest.raises(CeoIntentError, match="intent.schema must be"):
+    with pytest.raises(CeoIntentError, match="intent.schema must be") as excinfo:
         validate_intent(_intent(tmp_path, schema="mastermind.ceo_intent.v3"))
+    message = str(excinfo.value)
+    assert INTENT_SCHEMA in message
+    assert INTENT_SCHEMA_V2 in message
+    assert INTENT_SCHEMA_SERVICE in message
+    # The third legal value is the service schema itself — it validates.
+    assert validate_intent(_service_intent(tmp_path))["schema"] == INTENT_SCHEMA_SERVICE
     intent = _intent(tmp_path)
     intent["execution_contract"] = dict(intent["execution_contract"], requested_authorities=[])
     with pytest.raises(CeoIntentError, match="must not be empty"):
@@ -1151,8 +1329,6 @@ def test_a_forged_provenance_record_cannot_produce_a_receipt(tmp_path: Path):
     able to make `status` hand back a receipt for an objective the CEO never sent.
     """
 
-    from control_plane.ceo_intent import resolve_intent
-
     runtime = Runtime.at(tmp_path / "runtime")
     forged = runtime.jobs.create_job(
         "An objective the CEO never sent.",
@@ -1174,6 +1350,28 @@ def test_a_forged_provenance_record_cannot_produce_a_receipt(tmp_path: Path):
     )
     with pytest.raises(CeoIntentError, match="naming intent"):
         resolve_intent(runtime, "CEO-MISLABELLED")
+
+    # A non-closed schema is still refused after the service schema joined the set.
+    runtime.jobs.create_job(
+        "A foreign schema is not a closed intent.",
+        requested_authorities=["READ"],
+        command_id=command_id_for("svc-FORGED-FOREIGN"),
+        provenance={
+            "schema": "mastermind.executive_service_principal.v1",
+            "intent_id": "svc-FORGED-FOREIGN",
+            "fingerprint": "0" * 64,
+        },
+    )
+    with pytest.raises(CeoIntentError, match="provenance schema"):
+        resolve_intent(runtime, "svc-FORGED-FOREIGN")
+
+    # A matching service-schema record reconciles: the closed set now includes it.
+    service = _submit(runtime, _service_intent(tmp_path), tmp_path)
+    resolved = resolve_intent(runtime, "svc-2026-09-18-A")
+    assert resolved["schema"] == RECEIPT_SCHEMA_SERVICE
+    assert resolved["job_id"] == service["job_id"]
+    assert resolved["fingerprint"] == service["fingerprint"]
+    assert resolved["duplicate"] is False
 
 
 def test_create_job_bounds_a_caller_supplied_command_id(tmp_path: Path):
