@@ -69,6 +69,7 @@ def test_clean_snapshot_refuses_non_directory_git_metadata_before_git(
         ("commondir", "../shared.git\n"),
         ("shallow", "0" * 40 + "\n"),
         ("objects/info/alternates", "/tmp/foreign-objects\n"),
+        ("objects/info/http-alternates", "https://example.invalid/objects/\n"),
         ("objects/pack/pack-test.promisor", ""),
     ],
 )
@@ -91,6 +92,33 @@ def test_clean_snapshot_refuses_unsafe_git_topology_markers_before_git(
         nonlocal calls
         calls += 1
         raise AssertionError("unsafe topology must refuse before Git execution")
+
+    env = _installed_child_env(code_root=repo, macro_root=repo)
+    with pytest.raises(GatewayError, match="repository topology is unsafe"):
+        _clean_git_snapshot(
+            repo, runner=runner, env=env, label="Mastermind source",
+        )
+    assert calls == 0
+
+
+def test_clean_snapshot_refuses_symlinked_object_store_before_git(tmp_path: Path):
+    from integrations.executive_mcp.installed import (
+        _clean_git_snapshot,
+        _installed_child_env,
+    )
+    from integrations.executive_mcp.schemas import GatewayError
+
+    repo, _tracked = _clean_repo(tmp_path)
+    objects = repo / ".git" / "objects"
+    external_objects = tmp_path / "external-objects"
+    objects.rename(external_objects)
+    objects.symlink_to(external_objects, target_is_directory=True)
+    calls = 0
+
+    def runner(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise AssertionError("symlinked object store must refuse before Git execution")
 
     env = _installed_child_env(code_root=repo, macro_root=repo)
     with pytest.raises(GatewayError, match="repository topology is unsafe"):

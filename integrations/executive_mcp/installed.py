@@ -59,10 +59,23 @@ def _direct_git_directory(path: Path, *, label: str) -> Path | None:
         raise GatewayError(
             "backend_unavailable", f"installed {label} repository topology is unsafe"
         )
+    objects_root = git_metadata / "objects"
+    try:
+        objects_stat = objects_root.lstat()
+    except OSError as exc:
+        raise GatewayError(
+            "backend_unavailable", f"installed {label} repository topology is unsafe"
+        ) from exc
+    if not stat.S_ISDIR(objects_stat.st_mode) or stat.S_ISLNK(objects_stat.st_mode):
+        raise GatewayError(
+            "backend_unavailable", f"installed {label} repository topology is unsafe"
+        )
+
     fixed_markers = (
         git_metadata / "commondir",
         git_metadata / "shallow",
-        git_metadata / "objects" / "info" / "alternates",
+        objects_root / "info" / "alternates",
+        objects_root / "info" / "http-alternates",
     )
     try:
         if any(marker.exists() or marker.is_symlink() for marker in fixed_markers):
