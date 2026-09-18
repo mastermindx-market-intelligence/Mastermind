@@ -523,3 +523,35 @@ def test_clean_snapshot_refuses_missing_reachable_parent_commit(tmp_path: Path):
         _clean_git_snapshot(
             repo, runner=_default_packet_runner, env=env, label="Mastermind source",
         )
+
+
+def test_clean_snapshot_refuses_missing_reachable_parent_even_with_commit_graph(
+    tmp_path: Path,
+):
+    from integrations.executive_mcp.installed import (
+        _clean_git_snapshot,
+        _default_packet_runner,
+        _installed_child_env,
+    )
+    from integrations.executive_mcp.schemas import GatewayError
+
+    repo, tracked = _clean_repo(tmp_path)
+    tracked.write_text("second\n", encoding="utf-8")
+    _git(repo, "add", "tracked.txt")
+    _git(repo, "commit", "-q", "-m", "second")
+    _git(repo, "commit-graph", "write", "--reachable")
+
+    parent_oid = _git(repo, "rev-parse", "HEAD^").stdout.strip()
+    parent_object = repo / ".git" / "objects" / parent_oid[:2] / parent_oid[2:]
+    assert parent_object.is_file()
+    parent_object.unlink()
+    assert subprocess.run(
+        ["git", "-C", str(repo), "cat-file", "-e", parent_oid],
+        capture_output=True,
+    ).returncode != 0
+
+    env = _installed_child_env(code_root=repo, macro_root=repo)
+    with pytest.raises(GatewayError, match="repository objects are incomplete"):
+        _clean_git_snapshot(
+            repo, runner=_default_packet_runner, env=env, label="Mastermind source",
+        )

@@ -473,10 +473,16 @@ def _clean_git_snapshot(
             raise GatewayError("backend_unavailable", f"installed {label} tree is unsupported")
         expected[rel] = (mode, oid)
 
-    object_expectations: dict[str, str] = {head: "commit"}
+    expected_object_types: dict[str, str] = {head: "commit"}
     for _rel, (_mode, object_oid) in expected.items():
-        object_expectations[object_oid] = "blob"
-    object_input = ("\n".join(object_expectations) + "\n").encode("ascii")
+        expected_object_types[object_oid] = "blob"
+
+    # A commit-graph can let rev-list enumerate a missing parent as a bare oid.
+    # Enumeration is therefore not existence proof: every reachable object must
+    # cross the no-lazy-fetch object database boundary below.
+    required_objects = set(reachable_objects)
+    required_objects.update(expected_object_types)
+    object_input = ("\n".join(sorted(required_objects)) + "\n").encode("ascii")
     try:
         object_result = runner(
             ["git", "cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize)"],
@@ -505,7 +511,7 @@ def _clean_git_snapshot(
         if (
             len(parts) != 3
             or not _valid_sha(parts[0])
-            or parts[1] not in {"blob", "commit"}
+            or parts[1] not in {"blob", "commit", "tree", "tag"}
             or not parts[2].isdigit()
             or parts[0] in observed_objects
         ):
@@ -513,7 +519,10 @@ def _clean_git_snapshot(
                 "backend_unavailable", f"installed {label} repository objects are incomplete"
             )
         observed_objects[parts[0]] = parts[1]
-    if observed_objects != object_expectations:
+    if set(observed_objects) != required_objects or any(
+        observed_objects.get(object_id) != expected_type
+        for object_id, expected_type in expected_object_types.items()
+    ):
         raise GatewayError(
             "backend_unavailable", f"installed {label} repository objects are incomplete"
         )
