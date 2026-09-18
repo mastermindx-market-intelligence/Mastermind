@@ -34,6 +34,7 @@ from control_plane.executive_runtime import (
     StateConflict,
     WorkerStatus,
 )
+import control_plane.executive_supervisor as executive_supervisor_mod
 from control_plane.executive_supervisor import (
     ExecutiveSupervisor,
     IdentitySafeProcessController,
@@ -1348,24 +1349,189 @@ def test_commission_artifact_is_group_readable_but_non_writable_when_shared(
     )
     verified = supervisor.verified_commission(root, workspace)
     assert verified is not None
-    target_dir = tmp_path / "shared-run" / "input"
+    run_dir = tmp_path / "shared-run"
+    run_dir.mkdir(mode=0o770)
+    os.chown(run_dir, -1, os.getegid())
+    os.chmod(run_dir, 0o770)
+    target_dir = run_dir / "input"
 
     packet = supervisor.materialize_commission(verified, input_dir=target_dir)
 
     assert packet is not None
     local_path = Path(packet["verified_local_path"])
     info = local_path.stat()
+    run_info = run_dir.stat()
+    parent = local_path.parent.stat()
+    assert stat.S_IMODE(run_info.st_mode) == 0o770
+    assert run_info.st_gid == os.getegid()
+    assert run_info.st_mode & stat.S_IXGRP
+    assert stat.S_IMODE(parent.st_mode) == 0o750
+    assert parent.st_gid == os.getegid()
+    assert parent.st_mode & stat.S_IXGRP
     assert stat.S_IMODE(info.st_mode) == 0o440
     assert info.st_gid == os.getegid()
+    assert info.st_mode & stat.S_IRGRP
+    assert not info.st_mode & (stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH)
+    # The original defect made this parent 0700: a distinct UID sharing only
+    # the worker GID could not traverse it.  These group bits discriminate that
+    # failure without requiring privileged uid switching in hermetic CI.
     assert subprocess.run(
         ["/bin/cat", str(local_path)], check=True, capture_output=True
     ).stdout == content
 
 
+def test_local_commission_ignores_git_replacement_objects(
+    tmp_path: Path,
+) -> None:
+    original = b"# Original immutable commission\n"
+    replacement = b"# Malicious replacement commission\n"
+    runtime, root, workspace, _ = _strict_v2_root_with_commission(
+        tmp_path, content=original
+    )
+    original_commit = subprocess.run(
+        ["git", "-C", str(workspace), "rev-parse", "HEAD"],
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    (workspace / "research" / "commission.md").write_bytes(replacement)
+    subprocess.run(
+        ["git", "-C", str(workspace), "add", "research/commission.md"], check=True
+    )
+    subprocess.run(
+        [
+            "git", "-C", str(workspace),
+            "-c", "user.name=Mastermind Test",
+            "-c", "user.email=test@example.invalid",
+            "-c", "commit.gpgsign=false",
+            "commit", "-q", "-m", "replacement fixture",
+        ],
+        check=True,
+    )
+    replacement_commit = subprocess.run(
+        ["git", "-C", str(workspace), "rev-parse", "HEAD"],
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    subprocess.run(
+        ["git", "-C", str(workspace), "replace", original_commit, replacement_commit],
+        check=True,
+    )
+    ordinary = subprocess.run(
+        ["git", "-C", str(workspace), "cat-file", "blob",
+         f"{original_commit}:research/commission.md"],
+        check=True, capture_output=True,
+    ).stdout
+    assert ordinary == replacement, "fixture must prove replacement refs are active"
+
+    verified = _supervisor(
+        runtime, tmp_path, FakeAdapter(FakeInspector())
+    ).verified_commission(root, workspace)
+
+    assert verified is not None
+    assert verified.content == original
+    assert verified.content_sha256 == hashlib.sha256(original).hexdigest()
+
+
+def test_missing_local_commission_commit_uses_exact_remote_blob(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    content = b"# Remote immutable commission\n\nExact dynamic handoff.\n"
+    commit = "f" * 40
+    runtime, root, workspace, _ = _strict_v2_root_with_commission(
+        tmp_path,
+        content=content,
+        ref_commit=commit,
+        digest=hashlib.sha256(content).hexdigest(),
+    )
+    calls: list[tuple[str, str, str]] = []
+
+    def fetch(*, repository: str, commit: str, path: str) -> bytes:
+        calls.append((repository, commit, path))
+        return content
+
+    monkeypatch.setattr(executive_supervisor_mod, "_fetch_remote_commission", fetch)
+    supervisor = _supervisor(runtime, tmp_path, FakeAdapter(FakeInspector()))
+
+    verified = supervisor.verified_commission(root, workspace)
+
+    assert verified is not None and verified.content == content
+    assert calls == [(
+        "mastermindx-market-intelligence/Mastermind",
+        commit,
+        "research/commission.md",
+    )]
+
+
+def test_missing_local_commission_commit_remote_failure_refuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime, root, workspace, _ = _strict_v2_root_with_commission(
+        tmp_path, ref_commit="f" * 40
+    )
+
+    def fetch(**_kwargs):
+        raise SupervisorError("immutable commission remote evidence is unavailable")
+
+    monkeypatch.setattr(executive_supervisor_mod, "_fetch_remote_commission", fetch)
+    supervisor = _supervisor(runtime, tmp_path, FakeAdapter(FakeInspector()))
+
+    with pytest.raises(
+        SupervisorError, match="immutable commission remote evidence is unavailable"
+    ):
+        supervisor.verified_commission(root, workspace)
+
+
+def test_remote_commission_fetch_uses_only_fixed_exact_github_raw_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    content = b"# exact remote commission\n"
+    commit = "a" * 40
+
+    class Response:
+        headers = {"Content-Length": str(len(content))}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def geturl(self):
+            return (
+                "https://raw.githubusercontent.com/"
+                "mastermindx-market-intelligence/Mastermind/"
+                f"{commit}/research/executive_commissions/commission.md"
+            )
+
+        def read(self, limit):
+            assert limit == (1 << 19) + 1
+            return content
+
+    class Opener:
+        def open(self, request, *, timeout):
+            assert timeout == 10.0
+            assert request.full_url == (
+                "https://raw.githubusercontent.com/"
+                "mastermindx-market-intelligence/Mastermind/"
+                f"{commit}/research/executive_commissions/commission.md"
+            )
+            assert request.get_header("User-agent") == "Mastermind-Executive-Commission/1"
+            return Response()
+
+    monkeypatch.setattr(
+        executive_supervisor_mod.urllib.request,
+        "build_opener",
+        lambda *_handlers: Opener(),
+    )
+
+    assert executive_supervisor_mod._fetch_remote_commission(
+        repository="mastermindx-market-intelligence/Mastermind",
+        commit=commit,
+        path="research/executive_commissions/commission.md",
+    ) == content
+
+
 @pytest.mark.parametrize(
     ("fixture_kwargs", "message"),
     [
-        ({"ref_commit": "f" * 40}, "Git evidence is unavailable"),
         ({"ref_path": "research/missing.md"}, "Git evidence is unavailable"),
         ({"content": b""}, "commission blob is empty"),
         ({"content": b"x" * (512 * 1024 + 1)}, "exceeds the 512 KiB ceiling"),

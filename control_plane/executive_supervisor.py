@@ -25,6 +25,9 @@ import signal
 import stat
 import subprocess
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from enum import Enum
 from pathlib import Path
 from typing import Any, Mapping, Protocol, Sequence
@@ -71,6 +74,8 @@ from control_plane.executive_workspace import (
 RESULT_SCHEMA_VERSION = "mastermind.executive_worker_result/v1"
 _COMMISSION_MAX_BYTES = 1 << 19
 _CANONICAL_COMMISSION_REPOSITORY = "mastermindx-market-intelligence/Mastermind"
+_COMMISSION_RAW_HOST = "raw.githubusercontent.com"
+_COMMISSION_FETCH_TIMEOUT_SECONDS = 10.0
 _GIT_ENV = {
     "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
     "GIT_CONFIG_GLOBAL": "/dev/null",
@@ -508,10 +513,18 @@ def _write_private_json(path: Path, value: Any) -> None:
 
 
 def _write_private_bytes(path: Path, payload: bytes) -> None:
-    """Create one owner-only, fsynced byte artifact without overwriting evidence."""
+    """Create one fsynced byte artifact without mutating its prepared parent."""
 
-    path.parent.mkdir(parents=True, exist_ok=True, mode=stat.S_IRWXU)
-    os.chmod(path.parent, 0o700)
+    try:
+        parent = path.parent.lstat()
+    except OSError as exc:
+        raise SupervisorError("commission input directory is unavailable") from exc
+    if (
+        stat.S_ISLNK(parent.st_mode)
+        or not stat.S_ISDIR(parent.st_mode)
+        or parent.st_uid != os.geteuid()
+    ):
+        raise SupervisorError("commission input directory is not control-owned")
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
     descriptor = os.open(path, flags, 0o600)
     try:
@@ -578,6 +591,61 @@ def _commission_git_output(workspace: Path, *argv: str) -> bytes:
     return bytes(proc.stdout)
 
 
+def _commission_local_commit_exists(workspace: Path, commit: str) -> bool:
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(workspace), "cat-file", "-e", f"{commit}^{{commit}}"],
+            check=False,
+            capture_output=True,
+            timeout=10,
+            env=_GIT_ENV,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise SupervisorError("immutable commission Git evidence is unavailable") from exc
+    return proc.returncode == 0
+
+
+def _fetch_remote_commission(
+    *, repository: str, commit: str, path: str
+) -> bytes:
+    """Read one exact public GitHub blob without credentials or mutable refs."""
+
+    if repository != _CANONICAL_COMMISSION_REPOSITORY:
+        raise SupervisorError("commission repository is outside the canonical Executive repository")
+    encoded_path = urllib.parse.quote(path, safe="/")
+    url = f"https://{_COMMISSION_RAW_HOST}/{repository}/{commit}/{encoded_path}"
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/octet-stream",
+            "User-Agent": "Mastermind-Executive-Commission/1",
+        },
+        method="GET",
+    )
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    try:
+        with opener.open(request, timeout=_COMMISSION_FETCH_TIMEOUT_SECONDS) as response:
+            final = urllib.parse.urlparse(response.geturl())
+            if final.scheme != "https" or final.hostname != _COMMISSION_RAW_HOST:
+                raise SupervisorError("commission fetch escaped the canonical GitHub raw host")
+            length = response.headers.get("Content-Length")
+            if length is not None:
+                try:
+                    declared = int(length)
+                except ValueError as exc:
+                    raise SupervisorError("commission fetch returned an invalid content length") from exc
+                if declared < 1 or declared > _COMMISSION_MAX_BYTES:
+                    raise SupervisorError("commission blob is empty or exceeds the 512 KiB ceiling")
+            content = response.read(_COMMISSION_MAX_BYTES + 1)
+    except SupervisorError:
+        raise
+    except (OSError, urllib.error.URLError, ValueError) as exc:
+        raise SupervisorError("immutable commission remote evidence is unavailable") from exc
+    if not content or len(content) > _COMMISSION_MAX_BYTES:
+        raise SupervisorError("commission blob is empty or exceeds the 512 KiB ceiling")
+    return bytes(content)
+
+
 def _verify_commission_workspace(job: Job, workspace: Path) -> None:
     """Bind Git reads to the exact Executive-assigned workspace, never a remote label."""
 
@@ -623,17 +691,21 @@ def verify_commission_for_job(
 
     commit = ref.commit
     path = ref.path
-    _commission_git_output(workspace, "cat-file", "-e", f"{commit}^{{commit}}")
-    size_raw = _commission_git_output(workspace, "cat-file", "-s", f"{commit}:{path}")
-    try:
-        size = int(size_raw.decode("ascii", errors="strict").strip())
-    except (UnicodeDecodeError, ValueError) as exc:
-        raise SupervisorError("commission blob size is not canonical") from exc
-    if size < 1 or size > _COMMISSION_MAX_BYTES:
-        raise SupervisorError("commission blob is empty or exceeds the 512 KiB ceiling")
-    content = _commission_git_output(workspace, "cat-file", "blob", f"{commit}:{path}")
-    if len(content) != size:
-        raise SupervisorError("commission blob size changed during verification")
+    if _commission_local_commit_exists(workspace, commit):
+        size_raw = _commission_git_output(workspace, "cat-file", "-s", f"{commit}:{path}")
+        try:
+            size = int(size_raw.decode("ascii", errors="strict").strip())
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise SupervisorError("commission blob size is not canonical") from exc
+        if size < 1 or size > _COMMISSION_MAX_BYTES:
+            raise SupervisorError("commission blob is empty or exceeds the 512 KiB ceiling")
+        content = _commission_git_output(workspace, "cat-file", "blob", f"{commit}:{path}")
+        if len(content) != size:
+            raise SupervisorError("commission blob size changed during verification")
+    else:
+        content = _fetch_remote_commission(
+            repository=ref.repository, commit=commit, path=path
+        )
     digest = hashlib.sha256(content).hexdigest()
     if digest != ref.content_sha256:
         raise SupervisorError("commission content digest differs from immutable source")
@@ -916,6 +988,22 @@ class ExecutiveSupervisor:
 
         if commission is None:
             return None
+        parent_mode = stat.S_IRWXU
+        if self.shared_run_gid is not None:
+            parent_mode |= stat.S_IRGRP | stat.S_IXGRP
+        input_dir.mkdir(parents=True, exist_ok=True, mode=parent_mode)
+        info = input_dir.lstat()
+        if (
+            stat.S_ISLNK(info.st_mode)
+            or not stat.S_ISDIR(info.st_mode)
+            or info.st_uid != os.geteuid()
+        ):
+            raise SupervisorError("commission input directory is not control-owned")
+        if self.shared_run_gid is None:
+            os.chmod(input_dir, parent_mode)
+        else:
+            os.chown(input_dir, -1, self.shared_run_gid)
+            os.chmod(input_dir, parent_mode)
         target = input_dir / "commission-context.md"
         _write_private_bytes(target, commission.content)
         if self.shared_run_gid is None:

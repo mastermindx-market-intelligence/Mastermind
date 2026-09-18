@@ -172,19 +172,23 @@ repository + exact 40-hex commit + repository-relative path + content SHA-256
 That reference is canonical context/provenance, **not authority**. The effective Job
 grant, allowed paths, validation and provider/lifecycle controls remain authoritative.
 Before either the sealed worker or read-only Operator planner consumes the commission,
-the supervisor resolves the exact blob from the **durable Job-assigned workspace's** local
-Git object store (no network fetch), requires the canonical Mastermind repository identity,
-verifies that the Git top-level is exactly that assigned workspace, verifies the commit
-object, 512 KiB text-size ceiling, UTF-8 encoding and content digest, and fails closed
-before a new provider process starts on disagreement. Mutable local Git remote labels are
-not repository identity; production worker clones deliberately carry no remotes. Sealed
-workers receive the verified bytes as a non-writable run-input artifact: owner-readable
-`0400` for same-principal execution or control-owned/group-readable `0440` for the existing
-dedicated-worker shared group. The Operator planner receives the same verified bytes in
-its internal provider prompt because that lane has no separate local run-input file
-argument. Cancellation/containment of an already-live Operator remains available even if a
-later commission verification fails; that failure still blocks every new/resumed model
-turn.
+the supervisor first binds resolution to the **durable Job-assigned workspace** and the
+canonical Mastermind repository identity. If the exact commission commit already exists in
+that credentialless clone, the blob is read from the local Git object store. A commission
+commit published after the installed worker base is intentionally allowed to be absent from
+that clone; in that one case the control plane performs one credential-free HTTPS read from
+the fixed `raw.githubusercontent.com/mastermindx-market-intelligence/Mastermind` origin at
+the exact 40-hex commit and repository-relative path. Mutable branches, local remote labels,
+credentials, proxies, redirects off the fixed raw host and caller-selected hosts are never
+used. Both paths enforce the 512 KiB text-size ceiling, UTF-8/NUL checks and exact SHA-256
+content digest before a new provider effect. Local `GIT_NO_REPLACE_OBJECTS=1` prevents
+replacement-object interpretation. Sealed workers receive the verified bytes as a
+non-writable run-input artifact: owner-readable `0400` for same-principal execution or
+control-owned/group-readable `0440` for the existing dedicated-worker shared group. The
+Operator planner receives the same verified bytes in its internal provider prompt because
+that lane has no separate local run-input file argument. Cancellation/containment of an
+already-live Operator remains available even if a later commission verification fails;
+that failure still blocks every new/resumed model turn.
 
 This keeps the Web CEO call small and typed while preserving a complete worker brief.
 Do not add `handoff_ref`, raw prompt text, Drive URLs, or another caller-authored context
