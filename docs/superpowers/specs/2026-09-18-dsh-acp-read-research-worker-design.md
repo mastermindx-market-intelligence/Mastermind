@@ -312,3 +312,57 @@ This design is based on current executable and source evidence, not only prose:
 3. After custody is explicit, implement provider-free N1 in one fresh branch/PR with RED-first tests.
 4. Do not request or load a real OpenCode Go credential until provider realm/binding/capacity/canary/usage gates are explicitly cleared.
 5. After provider-free N1 proof, perform one bounded real read/research canary; only then consider write/test capability or rich sustained operation.
+
+## 18. Evidence split and exact native ordering amendment
+
+The first design used “native pre-work observation” as shorthand for the facts joined before prompt. Pinned DSH source and the real ACP process make the production split more precise. Do **not** invent a pre-first-request session header or reach into private ACP model-control state.
+
+### Agent/composition evidence
+
+Pinned `AcpSession.create` awaits `ctx.agents.create(...)`. The Agent factory completes setup and serial creation listeners before that await resolves; ACP `session/new` then obtains model config options and only afterward returns its response. Therefore a reviewed same-process composition plugin may observe the exact created Agent during the existing serial `agent/created` edge, after its scoped setup is complete and before the parent can receive successful `session/new`.
+
+That child-side attestation covers facts the exact Agent owns:
+- exact ACP/native session identity;
+- exact scoped tool schemas and definition/composition provenance;
+- presentation mode / forbidden transport absence;
+- reviewed source/profile recipe identity;
+- completeness/refusal facts for the admitted native composition.
+
+It does **not** claim OS ProcessGeneration origin by itself and does not need a public inspector. The parent still joins it to existing native-process/launch evidence.
+
+### Model evidence
+
+Before the first request, `Session.requestHeader()` is legitimately undefined. N1 must not fabricate a request header merely to prove model identity.
+
+The ACP server itself returns `configOptions` from its live `AcpModelControl` after Agent creation. The existing Mastermind ACP turn verifies the exact DSH opaque selector `[provider, model]` and, if needed, applies and rereads that concrete option before prompt. Treat that **observed ACP native config state** as the pre-prompt effective route evidence.
+
+Thus the parent pre-prompt gate joins two independently observed classes:
+
+```text
+child exact-Agent composition attestation
++ existing native process/launch identity
++ ACP session/new exact session id
++ ACP observed model/config option
+-> existing OHF/profile comparison
+-> ALLOW or refuse
+-> only then session/prompt
+```
+
+No caller echo becomes observation, and no hidden inference is required.
+
+## 19. Real DSH tool lifecycle amendment
+
+A real provider-free pinned DSH ACP process was run with one in-memory tool while bypassing Mastermind's intentional tool-update refusal **only for observation**. It made zero external provider calls and requested no interactive permission. The exact semantic update sequence was:
+
+1. `tool_call`: `status=in_progress`, `kind=other`, title `n1_fixture_read`, exact `toolCallId`, bounded `rawInput={}`;
+2. `tool_call_update`: same id, `status=completed`, one text content block carrying the tool result;
+3. final `agent_message_chunk` with the schema-result text;
+4. terminal `end_turn`.
+
+The fixture model performed two internal model steps: one to originate the tool call and one after the tool result. This is expected native Agent-loop behavior and must not be mistaken for a transport retry. Future provider accounting must distinguish native sequential model steps from retries/fallbacks.
+
+N1's ACP observation policy should therefore admit exactly the lifecycle above for the reviewed read tools, while keeping unknown tool ids/names/statuses/content and all permission/callback surfaces fail-closed. ACP remains an observer, not the tool grant.
+
+### Additional provider-free seam evidence
+
+A DSH-shaped Chat Completions request for `deepseek-v4.1-flash` passed through the existing `GoHarnessEndpoint` with synthetic upstream transport. Exact model/session/body were preserved, the child-side Authorization capability was not forwarded upstream, one endpoint call occurred, and zero external provider calls occurred. This establishes request-shape compatibility only; the protected Go realm/binding hold remains unchanged.
