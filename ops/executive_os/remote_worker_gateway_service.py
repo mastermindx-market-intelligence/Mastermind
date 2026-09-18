@@ -516,6 +516,15 @@ async def serve_remote_worker_gateway(
     gateway = gateway_factory(config)
     if _broker_socket_identity(config.broker_socket_path) != broker_identity:
         _refuse("GATEWAY_BROKER_SOCKET_INVALID")
+    try:
+        broker_status = await asyncio.wait_for(
+            gateway.broker_call("status", {}),
+            timeout=config.request_timeout_seconds,
+        )
+    except Exception:
+        raise RemoteWorkerGatewayServiceError("GATEWAY_BROKER_UNAVAILABLE") from None
+    if not isinstance(broker_status, Mapping):
+        _refuse("GATEWAY_BROKER_UNAVAILABLE")
     server = await gateway.start_server()
     try:
         async with server:
