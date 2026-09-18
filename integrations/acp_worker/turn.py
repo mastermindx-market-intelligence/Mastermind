@@ -36,6 +36,9 @@ class AcpProfile:
     model_option_id: str = "model"
     auth_method: str | None = None
     required_mode: str | None = None
+    # Concrete ACP servers may use an opaque provider+model selector while
+    # WorkerLaunchSpec.model remains the provider-neutral requested model id.
+    model_option_provider: str | None = None
 
     def __post_init__(self) -> None:
         for value in dataclasses.astuple(self):
@@ -44,6 +47,14 @@ class AcpProfile:
         # No interactive enrollment or environment-token injection in this port.
         if self.auth_method not in (None, "cached_token"):
             raise ValueError("ACP authentication method is not admitted")
+
+    def model_option_value(self, model: str) -> str:
+        """Render the reviewed server-private selector for one requested model."""
+        if not _TOKEN.fullmatch(model):
+            raise ValueError("invalid ACP model identifier")
+        if self.model_option_provider is None:
+            return model
+        return json.dumps([self.model_option_provider, model], separators=(",", ":"))
 
 
 @dataclasses.dataclass(frozen=True)
@@ -133,6 +144,7 @@ class AcpReadOnlyTurn:
         self._session: str | None = None
         self._early_sessions: set[str] = set()
         self._model: str | None = None
+        self._model_option_value: str | None = None
         self._phase = "setup"
         self._chunks: list[str] = []
         self._bytes = 0
@@ -189,7 +201,7 @@ class AcpReadOnlyTurn:
             return
         self.validate_update(update)
 
-    def validate_update(self, update: Any, *, commit: bool = True) -> None:
+    def validate_update(self, update: Any, *, commit: bool = True) -> str | None:
         try:
             data = _document(update)
             kind = data.get("sessionUpdate")
@@ -208,7 +220,10 @@ class AcpReadOnlyTurn:
                     self._chunks.append(text)
             elif kind == "config_option_update":
                 option = _model_option(data.get("configOptions"), self.profile.model_option_id)
-                if self._phase == "prompt" and option.get("currentValue") != self._model:
+                if (
+                    self._phase == "prompt"
+                    and option.get("currentValue") != self._model_option_value
+                ):
                     raise _Refused("ACP_MODEL_DRIFT")
             elif kind == "current_mode_update":
                 if self.profile.required_mode is None or data.get("currentModeId") != self.profile.required_mode:
@@ -222,8 +237,11 @@ class AcpReadOnlyTurn:
                 if (self._phase != "prompt" or content.get("type") != "text"
                         or not isinstance(content.get("text"), str)):
                     raise _Refused("ACP_UNEXPECTED_CONTENT")
+            return None
         except (_Refused, UnicodeError, AttributeError) as exc:
-            self._refuse(str(exc) if isinstance(exc, _Refused) else "ACP_SCHEMA_DRIFT")
+            reason = str(exc) if isinstance(exc, _Refused) else "ACP_SCHEMA_DRIFT"
+            self._refuse(reason)
+            return reason
 
     def _task(self, awaitable: Any) -> asyncio.Task[Any]:
         task = asyncio.create_task(awaitable)
@@ -332,14 +350,16 @@ class AcpReadOnlyTurn:
             if self.profile.required_mode is not None and session.get("modes", {}).get("currentModeId") != self.profile.required_mode:
                 raise _Refused("ACP_MODE_MISMATCH")
             option = _model_option(session.get("configOptions"), self.profile.model_option_id)
-            if spec.model not in _option_values(option):
+            model_option_value = self.profile.model_option_value(spec.model)
+            if model_option_value not in _option_values(option):
                 raise _Refused("ACP_MODEL_UNAVAILABLE")
-            if option.get("currentValue") != spec.model:
+            self._model_option_value = model_option_value
+            if option.get("currentValue") != model_option_value:
                 changed = _document(await self._bounded(conn.set_config_option(
                     session_id=self._session, config_id=self.profile.model_option_id,
-                    value=spec.model), deadline))
+                    value=model_option_value), deadline))
                 option = _model_option(changed.get("configOptions"), self.profile.model_option_id)
-            if option.get("currentValue") != spec.model:
+            if option.get("currentValue") != model_option_value:
                 raise _Refused("ACP_MODEL_MISMATCH")
             self._model = spec.model
             if self._error or cancelled.is_set():
