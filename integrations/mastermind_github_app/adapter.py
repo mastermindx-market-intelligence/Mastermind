@@ -371,6 +371,20 @@ class GithubPatchGateway:
                 issues=(IssueCode.PRECONDITION_CHANGED,),
                 status=ToolStatus.REFUSED,
             )
+        # A consumed owner-native permit proves that a prior invocation crossed the
+        # attempt-claim boundary. A negative GitHub read alone cannot prove that
+        # invocation never reached GitHub, so replay stays effect-unknown unless
+        # the owner reports a stronger terminal REFUSED state.
+        if target.attempt_permit.state is PatchAttemptState.CONSUMED:
+            return self._effect_unknown_receipt(
+                COMMIT_TOOL,
+                now,
+                claims,
+                native_request_attempts=0,
+                observation=prior,
+                issues=(IssueCode.PRIOR_EFFECT_UNKNOWN,),
+            )
+
         attempt_issue, attempt_status = self._attempt_readiness(target.attempt_permit)
         if attempt_issue is not None:
             return self._receipt(
@@ -484,6 +498,11 @@ class GithubPatchGateway:
             for item in compilation.files
         )
         attempts = 1
+        # Once the native call begins, assume an effect may have crossed unless
+        # the typed lower boundary positively proves it was refused pre-send.
+        # A successful response is also effect-possible until canonical readback
+        # proves the exact commit.
+        effect_possible = True
         try:
             await self._github.commit_branch_patch(
                 target,
@@ -492,15 +511,19 @@ class GithubPatchGateway:
                 claims.normalized_effect_digest,
                 files,
             )
-        except NativeCommitError:
-            pass
+        except NativeCommitError as exc:
+            effect_possible = exc.effect_possible
         except Exception:
-            pass
+            effect_possible = True
 
         post = await self._observe(token_target, claims)
         if post.state is EffectState.APPLIED and post.complete:
             return self._receipt(COMMIT_TOOL, now, claims, post, native_request_attempts=attempts)
-        if post.state is EffectState.NOT_APPLIED and post.complete:
+        if (
+            post.state is EffectState.NOT_APPLIED
+            and post.complete
+            and not effect_possible
+        ):
             return self._receipt(
                 COMMIT_TOOL,
                 now,
