@@ -69,11 +69,11 @@ _PAGE_SIZE = 100
 _MAX_PAGES = 10
 _MAX_FOREIGN_FILE_PAGES = 30
 _FOREIGN_PR_WORKERS = 4
-_MAX_COLLISION_PRS = 256
+_MAX_COLLISION_PRS = 300
 # One invocation-local cooperative budget spans both observations, not hard preemption.
-_MAX_HTTP_CALLS = 640
-_HTTP_READ_BUDGET_SECONDS = 180.0
-_MAX_HTTP_NORMALIZED_BYTES = 32 * 1024 * 1024
+_MAX_HTTP_CALLS = 768
+_HTTP_READ_BUDGET_SECONDS = 240.0
+_MAX_HTTP_NORMALIZED_BYTES = 64 * 1024 * 1024
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 _HOLD_LABELS = frozenset({"hold", "hold-for-sol", "hold_for_sol"})
