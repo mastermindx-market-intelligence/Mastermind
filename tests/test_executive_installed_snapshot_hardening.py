@@ -555,3 +555,205 @@ def test_clean_snapshot_refuses_missing_reachable_parent_even_with_commit_graph(
         _clean_git_snapshot(
             repo, runner=_default_packet_runner, env=env, label="Mastermind source",
         )
+
+
+@pytest.mark.parametrize("shape", ["ignored", "tracked", "no-repository"])
+def test_clean_snapshot_refuses_root_without_direct_git_before_git(
+    tmp_path: Path, shape: str,
+):
+    from integrations.executive_mcp.installed import (
+        _clean_git_snapshot,
+        _installed_child_env,
+    )
+    from integrations.executive_mcp.schemas import GatewayError
+
+    ancestor = tmp_path / "ancestor"
+    ancestor.mkdir()
+    subprocess.run(["git", "init", "-q", str(ancestor)], check=True)
+    _git(ancestor, "config", "user.email", "test@example.invalid")
+    _git(ancestor, "config", "user.name", "Test")
+    (ancestor / "README.md").write_text("ancestor\n", encoding="utf-8")
+    nested = ancestor / "payload"
+    nested.mkdir()
+    if shape == "ignored":
+        (ancestor / ".gitignore").write_text("payload/\n", encoding="utf-8")
+        record = nested / "agentos" / "workstreams" / "example.md"
+        record.parent.mkdir(parents=True)
+        record.write_text("UNCOMMITTED\n", encoding="utf-8")
+    elif shape == "tracked":
+        (nested / "tracked.txt").write_text("tracked\n", encoding="utf-8")
+        _git(ancestor, "add", "payload/tracked.txt")
+    else:
+        nested = tmp_path / "not-a-repository"
+        nested.mkdir()
+    _git(ancestor, "add", "README.md", ".gitignore") if shape == "ignored" else None
+    _git(ancestor, "commit", "-q", "-m", "ancestor") if shape != "no-repository" else None
+
+    calls = 0
+    def runner(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise AssertionError("missing direct .git must refuse before Git execution")
+
+    env = _installed_child_env(code_root=ancestor, macro_root=nested)
+    with pytest.raises(GatewayError, match="repository topology is unsafe"):
+        _clean_git_snapshot(
+            nested, runner=runner, env=env, label="Macro source",
+        )
+    assert calls == 0
+
+
+def test_installed_collector_refuses_when_direct_git_disappears_before_child(
+    tmp_path: Path,
+):
+    import json
+    import shutil
+    from integrations.executive_mcp.installed import (
+        InstalledBootPacketCollector,
+        _default_packet_runner,
+    )
+    from integrations.executive_mcp.schemas import GatewayError
+
+    mastermind_fixture = tmp_path / "mastermind-fixture"
+    macro_fixture = tmp_path / "macro-fixture"
+    mastermind_fixture.mkdir()
+    macro_fixture.mkdir()
+    repo, _tracked = _clean_repo(mastermind_fixture)
+    macro, _macro_tracked = _clean_repo(macro_fixture)
+    code = tmp_path / "immutable-release"
+    (code / "scripts").mkdir(parents=True)
+    python = tmp_path / "python"
+    python.write_text("fixture", encoding="utf-8")
+    source_sha = _git(repo, "rev-parse", "HEAD").stdout.strip()
+    macro_sha = _git(macro, "rev-parse", "HEAD").stdout.strip()
+    helper_called = False
+    removed = False
+
+    def runner(argv, **kwargs):
+        nonlocal helper_called, removed
+        if str(argv[0]) == "git":
+            result = _default_packet_runner(argv, **kwargs)
+            # Remove Macro metadata after the source pre-observation completes.
+            if Path(kwargs["cwd"]) == repo and not removed:
+                shutil.rmtree(macro / ".git")
+                removed = True
+            return result
+        helper_called = True
+        return {
+            "code": 0,
+            "stdout": json.dumps({
+                "schema": "mastermind.ceo_boot_packet.v1",
+                "mastermind": {"root": str(repo), "sha": source_sha, "branch": "HEAD"},
+                "macro": {
+                    "root": str(macro), "sha": macro_sha,
+                    "resolved_via": "flag", "candidates_tried": [],
+                },
+            }),
+            "stderr": "", "timed_out": False,
+            "limit_exceeded": False, "invalid_utf8": False,
+        }
+
+    collector = InstalledBootPacketCollector(
+        source_root=repo, macro_root=macro, code_root=code,
+        python_executable=python, runner=runner, expected_source_sha=source_sha,
+    )
+    with pytest.raises(GatewayError, match="repository topology is unsafe"):
+        collector(
+            repo_root=repo, macro_root_flag=str(macro), now=None, timeout=5.0,
+        )
+    assert helper_called is False
+
+
+def test_installed_grounding_observer_refuses_nested_root_without_direct_git(
+    tmp_path: Path,
+):
+    import subprocess
+    from integrations.executive_mcp.installed import InstalledExecutiveReaders
+
+    ancestor = tmp_path / "ancestor"
+    ancestor.mkdir()
+    subprocess.run(["git", "init", "-q", str(ancestor)], check=True)
+    _git(ancestor, "config", "user.email", "test@example.invalid")
+    _git(ancestor, "config", "user.name", "Test")
+    (ancestor / ".gitignore").write_text("payload/\n", encoding="utf-8")
+    (ancestor / "README.md").write_text("ancestor\n", encoding="utf-8")
+    _git(ancestor, "add", ".gitignore", "README.md")
+    _git(ancestor, "commit", "-q", "-m", "ancestor")
+
+    nested = ancestor / "payload"
+    record = nested / "agentos" / "workstreams" / "example.md"
+    record.parent.mkdir(parents=True)
+    record.write_text("UNCOMMITTED\n", encoding="utf-8")
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+
+    readers = InstalledExecutiveReaders(
+        repo_root=ancestor, macro_root=nested, runtime_root=runtime,
+    )
+    with pytest.raises(ValueError, match="grounding is unavailable"):
+        readers.observe()
+
+
+def test_installed_collector_refuses_if_git_disappears_after_macro_presnapshot(
+    tmp_path: Path,
+):
+    import json
+    import shutil
+    from integrations.executive_mcp.installed import (
+        InstalledBootPacketCollector,
+        _default_packet_runner,
+    )
+    from integrations.executive_mcp.schemas import GatewayError
+
+    mastermind_fixture = tmp_path / "mastermind-fixture-2"
+    macro_fixture = tmp_path / "macro-fixture-2"
+    mastermind_fixture.mkdir()
+    macro_fixture.mkdir()
+    repo, _tracked = _clean_repo(mastermind_fixture)
+    macro, _macro_tracked = _clean_repo(macro_fixture)
+    code = tmp_path / "immutable-release-2"
+    (code / "scripts").mkdir(parents=True)
+    python = tmp_path / "python-2"
+    python.write_text("fixture", encoding="utf-8")
+    source_sha = _git(repo, "rev-parse", "HEAD").stdout.strip()
+    macro_sha = _git(macro, "rev-parse", "HEAD").stdout.strip()
+    macro_git_calls = 0
+    helper_called = False
+
+    def runner(argv, **kwargs):
+        nonlocal macro_git_calls, helper_called
+        if str(argv[0]) == "git":
+            result = _default_packet_runner(argv, **kwargs)
+            if Path(kwargs["cwd"]) == macro:
+                macro_git_calls += 1
+                # A real production snapshot currently issues exactly five
+                # bounded Git observations. Remove metadata only after the
+                # complete pre-snapshot has already been observed.
+                if macro_git_calls == 5:
+                    shutil.rmtree(macro / ".git")
+            return result
+        helper_called = True
+        return {
+            "code": 0,
+            "stdout": json.dumps({
+                "schema": "mastermind.ceo_boot_packet.v1",
+                "mastermind": {"root": str(repo), "sha": source_sha, "branch": "HEAD"},
+                "macro": {
+                    "root": str(macro), "sha": macro_sha,
+                    "resolved_via": "flag", "candidates_tried": [],
+                },
+            }),
+            "stderr": "", "timed_out": False,
+            "limit_exceeded": False, "invalid_utf8": False,
+        }
+
+    collector = InstalledBootPacketCollector(
+        source_root=repo, macro_root=macro, code_root=code,
+        python_executable=python, runner=runner, expected_source_sha=source_sha,
+    )
+    with pytest.raises(GatewayError, match="repository topology is unsafe"):
+        collector(
+            repo_root=repo, macro_root_flag=str(macro), now=None, timeout=5.0,
+        )
+    assert macro_git_calls == 5
+    assert helper_called is False

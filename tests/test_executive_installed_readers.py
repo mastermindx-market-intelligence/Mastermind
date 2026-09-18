@@ -49,6 +49,7 @@ def test_installed_boot_packet_collector_uses_dependency_python_and_exact_roots(
         code_root=code,
         python_executable=python,
         runner=runner, expected_source_sha="a" * 40,
+        _allow_synthetic_fixture=True,
     )
     actual = collector(
         repo_root=repo,
@@ -306,6 +307,7 @@ def test_installed_boot_packet_collector_refuses_foreign_packet_roots(tmp_path: 
     collector = InstalledBootPacketCollector(
         source_root=repo, macro_root=macro, code_root=repo,
         python_executable=python, runner=runner, expected_source_sha="a" * 40,
+        _allow_synthetic_fixture=True,
     )
     with pytest.raises(GatewayError, match="roots"):
         collector(repo_root=repo, macro_root_flag=str(macro), now=None, timeout=5.0)
@@ -343,6 +345,7 @@ def test_installed_boot_packet_collector_preserves_configured_python_environment
     collector = InstalledBootPacketCollector(
         source_root=repo, macro_root=macro, code_root=repo,
         python_executable=configured_python, runner=runner, expected_source_sha="a" * 40,
+        _allow_synthetic_fixture=True,
     )
     collector(repo_root=repo, macro_root_flag=str(macro), now=None, timeout=5.0)
 
@@ -414,6 +417,7 @@ def test_installed_collector_scopes_git_trust_and_mastermind_sibling(tmp_path: P
     collector = InstalledBootPacketCollector(
         source_root=repo, macro_root=macro, code_root=repo,
         python_executable=python, runner=runner, expected_source_sha="a" * 40,
+        _allow_synthetic_fixture=True,
     )
     collector(repo_root=repo, macro_root_flag=str(macro), now=None, timeout=5.0)
 
@@ -477,6 +481,7 @@ def test_installed_grounding_observer_uses_scoped_git_trust(tmp_path: Path):
         repo_root=repo, macro_root=macro, runtime_root=runtime,
         boot_python=python, packet_runner=runner, code_root=repo,
         expected_source_sha="a" * 40,
+        _allow_synthetic_fixture=True,
     )
     observed = readers.observe()
 
@@ -529,6 +534,7 @@ def test_installed_collector_executes_immutable_code_root_and_binds_clean_snapsh
     collector = InstalledBootPacketCollector(
         source_root=repo, macro_root=macro, code_root=code,
         python_executable=python, runner=runner, expected_source_sha="a" * 40,
+        _allow_synthetic_fixture=True,
     )
     actual = collector(repo_root=repo, macro_root_flag=str(macro), now=None, timeout=7.0)
 
@@ -567,6 +573,7 @@ def test_installed_collector_refuses_dirty_source_before_helper(tmp_path: Path):
     collector = InstalledBootPacketCollector(
         source_root=repo, macro_root=macro, code_root=code,
         python_executable=python, runner=runner, expected_source_sha="a" * 40,
+        _allow_synthetic_fixture=True,
     )
     with pytest.raises(GatewayError, match="clean"):
         collector(repo_root=repo, macro_root_flag=str(macro), now=None, timeout=7.0)
@@ -603,6 +610,7 @@ def test_installed_collector_refuses_source_sha_change_after_read(tmp_path: Path
     collector = InstalledBootPacketCollector(
         source_root=repo, macro_root=macro, code_root=code,
         python_executable=python, runner=runner, expected_source_sha="a" * 40,
+        _allow_synthetic_fixture=True,
     )
     with pytest.raises(GatewayError, match="changed"):
         collector(repo_root=repo, macro_root_flag=str(macro), now=None, timeout=7.0)
@@ -634,6 +642,7 @@ def test_installed_collector_reserves_inner_timeout_margin(tmp_path: Path):
     collector = InstalledBootPacketCollector(
         source_root=repo, macro_root=macro, code_root=code,
         python_executable=python, runner=runner, expected_source_sha="a" * 40,
+        _allow_synthetic_fixture=True,
     )
     collector(repo_root=repo, macro_root_flag=str(macro), now=None, timeout=7.0)
     argv = helper["argv"]

@@ -350,9 +350,14 @@ def _content_paths_for_scope(paths: set[str], scope: str) -> set[str]:
 def _clean_git_snapshot(
     path: Path, *, runner: PacketRunner, env: Mapping[str, str], label: str,
     content_scope: str = "all", include_seal: bool = False,
+    _allow_synthetic_fixture: bool = False,
 ) -> str | tuple[str, str]:
-    """Bind HEAD plus raw path existence, hashing only bytes the named reader consumes."""
+    """Bind one explicitly admitted direct repository to its raw consumed bytes."""
     git_metadata = _direct_git_directory(path, label=label)
+    if git_metadata is None and not _allow_synthetic_fixture:
+        raise GatewayError(
+            "backend_unavailable", f"installed {label} repository topology is unsafe"
+        )
     real_checkout = git_metadata is not None
 
     def observe(args: list[str], *, max_bytes: int) -> str:
@@ -618,10 +623,17 @@ def _clone_tree(source: Path, destination: Path, *, deadline: float) -> None:
 
 
 @contextmanager
-def _materialized_macro_root(source: Path, *, timeout: float) -> Iterator[Path]:
-    if not (source / ".git").is_dir() or (source / ".git").is_symlink():
-        yield source
-        return
+def _materialized_macro_root(
+    source: Path, *, timeout: float, _allow_synthetic_fixture: bool = False,
+) -> Iterator[Path]:
+    git_metadata = _direct_git_directory(source, label="Macro source")
+    if git_metadata is None:
+        if _allow_synthetic_fixture:
+            yield source
+            return
+        raise GatewayError(
+            "backend_unavailable", "installed Macro source repository topology is unsafe"
+        )
     try:
         with tempfile.TemporaryDirectory(prefix="mmx-executive-macro-") as temporary:
             temporary_root = Path(temporary).resolve()
@@ -678,6 +690,7 @@ class InstalledBootPacketCollector:
         self, *, source_root: Path, macro_root: Path, code_root: Path,
         python_executable: Path, runner: PacketRunner | None = None,
         expected_source_sha: str | None = None,
+        _allow_synthetic_fixture: bool = False,
     ) -> None:
         self._source_root = Path(source_root).resolve()
         self._macro_root = Path(macro_root).resolve()
@@ -687,6 +700,7 @@ class InstalledBootPacketCollector:
         # site-packages under -I and recreate the missing-dependency failure.
         self._python = Path(python_executable).absolute()
         self._runner = runner or _default_packet_runner
+        self._allow_synthetic_fixture = bool(_allow_synthetic_fixture)
         if not all(
             path.is_absolute()
             for path in (
@@ -702,10 +716,12 @@ class InstalledBootPacketCollector:
         source_observation = _clean_git_snapshot(
             self._source_root, runner=self._runner, env=env, label="Mastermind source",
             content_scope="identity", include_seal=True,
+            _allow_synthetic_fixture=self._allow_synthetic_fixture,
         )
         macro_observation = _clean_git_snapshot(
             self._macro_root, runner=self._runner, env=env, label="Macro source",
             content_scope="macro_brief", include_seal=True,
+            _allow_synthetic_fixture=self._allow_synthetic_fixture,
         )
         if not isinstance(source_observation, tuple) or not isinstance(macro_observation, tuple):
             raise GatewayError("backend_unavailable", "installed snapshot seal is unavailable")
@@ -727,7 +743,10 @@ class InstalledBootPacketCollector:
         pre_source_sha, pre_macro_sha, pre_source_seal, pre_macro_seal = (
             self._snapshot_pair(live_env)
         )
-        with _materialized_macro_root(self._macro_root, timeout=float(timeout)) as packet_macro_root:
+        with _materialized_macro_root(
+            self._macro_root, timeout=float(timeout),
+            _allow_synthetic_fixture=self._allow_synthetic_fixture,
+        ) as packet_macro_root:
             child_env = _installed_child_env(
                 code_root=self._code_root, macro_root=packet_macro_root,
             )
@@ -737,6 +756,7 @@ class InstalledBootPacketCollector:
                     packet_macro_root, runner=self._runner, env=child_env,
                     label="materialized Macro source", content_scope="macro_brief",
                     include_seal=True,
+                    _allow_synthetic_fixture=self._allow_synthetic_fixture,
                 )
                 if not isinstance(observed_materialized, tuple):
                     raise GatewayError(
@@ -768,6 +788,7 @@ class InstalledBootPacketCollector:
                         packet_macro_root, runner=self._runner, env=child_env,
                         label="materialized Macro source", content_scope="macro_brief",
                         include_seal=True,
+                        _allow_synthetic_fixture=self._allow_synthetic_fixture,
                     )
                 except GatewayError as exc:
                     raise GatewayError(
@@ -839,6 +860,7 @@ class InstalledExecutiveReaders(ExecutiveMcpGateway):
         self, *, repo_root: Path, macro_root: Path, runtime_root: Path,
         boot_python: Path | None = None, packet_runner: PacketRunner | None = None,
         code_root: Path | None = None, expected_source_sha: str | None = None,
+        _allow_synthetic_fixture: bool = False,
     ) -> None:
         if not all(Path(p).is_absolute() for p in (repo_root, macro_root, runtime_root)):
             raise ValueError("installed read roots must be absolute")
@@ -857,12 +879,14 @@ class InstalledExecutiveReaders(ExecutiveMcpGateway):
         self._expected_source_sha = expected_source_sha
         self._boot_python = Path(boot_python).absolute() if boot_python is not None else None
         self._read_runner = packet_runner or _default_packet_runner
+        self._allow_synthetic_fixture = bool(_allow_synthetic_fixture)
         packet_builder = self._installed_packet
         if self._boot_python is not None:
             packet_builder = InstalledBootPacketCollector(
                 source_root=self._source_root, macro_root=self._macro_root,
                 code_root=self._code_root, python_executable=self._boot_python,
                 runner=packet_runner, expected_source_sha=expected_source_sha,
+                _allow_synthetic_fixture=self._allow_synthetic_fixture,
             )
         elif packet_runner is not None:
             raise ValueError("packet_runner requires boot_python")
@@ -917,10 +941,12 @@ class InstalledExecutiveReaders(ExecutiveMcpGateway):
             mastermind_sha = _clean_git_snapshot(
                 self._source_root, runner=self._read_runner, env=env,
                 label="Mastermind source",
+                _allow_synthetic_fixture=self._allow_synthetic_fixture,
             )
             macro_sha = _clean_git_snapshot(
                 self._macro_root, runner=self._read_runner, env=env,
                 label="Macro source",
+                _allow_synthetic_fixture=self._allow_synthetic_fixture,
             )
         except GatewayError as exc:
             raise ValueError("installed grounding is unavailable") from exc
