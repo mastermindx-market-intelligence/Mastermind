@@ -107,8 +107,7 @@ const BOOT_MS = Date.now();
 const BOOT_NS = process.hrtime.bigint();
 const HOSTNAME = os.hostname();
 /** Unique for the lifetime of this gateway process. */
-const GATEWAY_GENERATION =
-  `${process.pid.toString(36)}-${BOOT_MS.toString(36)}-${randomUUID().slice(0, 8)}`;
+const GATEWAY_GENERATION = randomUUID();
 
 /** Body cap: write_file/write_pdf payloads, still bounded. */
 const MAX_BODY_BYTES = 10 * 1024 * 1024;
@@ -562,9 +561,11 @@ const STUDIO_PING_TOOL = Object.freeze({
   name: 'studio_ping',
   title: 'Studio Gateway Ping',
   description:
-    'Reports private Studio gateway liveness with a process-generation token, per-call nonce, ' +
-    'wall-clock timestamp, monotonic age, call duration, gateway version, and MCP session reference. ' +
-    'The gateway answers this probe without invoking the Desktop Commander backend or filesystem.',
+    'Reports private Studio gateway liveness with an ephemeral process-generation nonce, per-call ' +
+    'nonce, wall-clock timestamp, monotonic age, call duration, gateway version, and MCP session ' +
+    'reference. The generation nonce is randomized at process start and is not a host, hardware, ' +
+    'operating-system, or durable device identifier. The gateway answers this probe without invoking ' +
+    'the Desktop Commander backend or filesystem.',
   inputSchema: {
     type: 'object',
     properties: {},
