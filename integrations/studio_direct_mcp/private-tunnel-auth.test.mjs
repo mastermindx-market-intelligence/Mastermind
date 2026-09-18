@@ -375,7 +375,11 @@ test('main() loads JSON config and starts a loopback private gateway', async () 
   const client = newClient();
   await connect(client, gw.url);
   const ping = await client.callTool({ name: 'studio_ping', arguments: {} });
-  assert.ok(ping.content?.[0]?.text.includes('hostname'), ping.content?.[0]?.text);
+  const payload = ping.structuredContent ??
+    JSON.parse(ping.content?.find((item) => item.type === 'text')?.text ?? '{}');
+  assert.equal(Object.hasOwn(payload, 'hostname'), false, 'ping must not expose host identity');
+  assert.equal(Object.hasOwn(payload, 'pid'), false, 'ping must not expose process identity');
+  assert.match(payload.generation, /^[0-9a-f-]{36}$/i, 'ephemeral generation nonce returned');
 
   // Detach them again so this test process keeps no CLI shutdown path.
   gw.signals.dispose();
@@ -449,7 +453,11 @@ test('No Auth SDK client initializes, lists tools and pings without any bearer',
   assert.ok(listed.tools.some((t) => t.name === 'echo'), 'fixture echo tool exposed');
 
   const ping = await client.callTool({ name: 'studio_ping', arguments: {} });
-  assert.ok(ping.content?.[0]?.text.includes('hostname'), ping.content?.[0]?.text);
+  const payload = ping.structuredContent ??
+    JSON.parse(ping.content?.find((item) => item.type === 'text')?.text ?? '{}');
+  assert.equal(Object.hasOwn(payload, 'hostname'), false, 'ping must not expose host identity');
+  assert.equal(Object.hasOwn(payload, 'pid'), false, 'ping must not expose process identity');
+  assert.match(payload.generation, /^[0-9a-f-]{36}$/i, 'ephemeral generation nonce returned');
 
   const echoed = await client.callTool({ name: 'echo', arguments: { value: 'no-auth-ok' } });
   assert.ok(echoed.content?.[0]?.text.includes('no-auth-ok'), echoed.content?.[0]?.text);
