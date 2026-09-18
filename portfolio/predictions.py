@@ -21,14 +21,20 @@ absent from the panel simply stays unresolved.
 """
 from __future__ import annotations
 
+import fcntl
 import glob
 import json
+import os
+import tempfile
+import threading
 from collections import defaultdict
+from contextlib import contextmanager
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
 _PRED_DIR = _ROOT / "data" / "shadow" / "predictions"
 _LEDGER = _PRED_DIR / "ledger.jsonl"
+_LOCAL_LOCK = threading.RLock()
 _STOCKDATA = _ROOT / "vendor" / "macro" / "site" / "stockdata"
 _BREADTH = _ROOT / "vendor" / "macro" / "data" / "breadth"
 
@@ -168,57 +174,118 @@ def _label(panel: dict, spy, ticker: str, entry_iso: str, horizon: int, asof_iso
 # ─────────────────────────────────────────────────────────────────────────────
 # isolated prediction ledger
 # ─────────────────────────────────────────────────────────────────────────────
+def _lock_path() -> Path:
+    return _LEDGER.with_name(f".{_LEDGER.name}.lock")
+
+
+@contextmanager
+def _ledger_lock():
+    """Serialize prediction-ledger read/modify/write across threads and processes."""
+    with _LOCAL_LOCK:
+        _PRED_DIR.mkdir(parents=True, exist_ok=True)
+        with _lock_path().open("a+", encoding="utf-8") as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                try:
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+                except OSError:
+                    pass
+
+
 def _load_ledger() -> list:
-    try:
-        return [json.loads(l) for l in _LEDGER.read_text().splitlines() if l.strip()]
-    except Exception:  # noqa: BLE001
+    if not _LEDGER.exists():
         return []
+    rows = []
+    for line in _LEDGER.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        if not isinstance(row, dict):
+            raise ValueError("prediction ledger row is not a mapping")
+        rows.append(row)
+    return rows
 
 
-def _save_ledger(rows: list) -> None:
-    # soft cap: keep all open + the most-recent resolved
+def _bounded_rows(rows: list) -> list[dict]:
+    if not all(isinstance(row, dict) for row in rows):
+        raise ValueError("prediction ledger rows must be mappings")
     openr = [r for r in rows if r.get("status") == "open"]
     resr = [r for r in rows if r.get("status") != "open"]
     if len(resr) > _MAX_RESOLVED:
         resr = sorted(resr, key=lambda r: r.get("resolved_on") or "")[-_MAX_RESOLVED:]
+    return openr + resr
+
+
+def _save_ledger_unlocked(rows: list) -> None:
+    """Atomically replace the canonical prediction ledger; preserve prior bytes on failure."""
+    payload = "".join(json.dumps(r, default=str) + "\n" for r in _bounded_rows(rows))
+    _PRED_DIR.mkdir(parents=True, exist_ok=True)
+    tmp_name = None
     try:
-        _PRED_DIR.mkdir(parents=True, exist_ok=True)
-        _LEDGER.write_text("".join(json.dumps(r, default=str) + "\n" for r in (openr + resr)))
-    except Exception:  # noqa: BLE001
-        pass
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=_PRED_DIR, prefix=f".{_LEDGER.name}.",
+            suffix=".tmp", delete=False,
+        ) as tmp:
+            tmp_name = tmp.name
+            tmp.write(payload)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+        os.replace(tmp_name, _LEDGER)
+        tmp_name = None
+    finally:
+        if tmp_name:
+            try:
+                Path(tmp_name).unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def _save_ledger(rows: list) -> None:
+    with _ledger_lock():
+        _save_ledger_unlocked(rows)
 
 
 def record(asof: str) -> dict:
-    """Open one prediction per (name, HORIZON) the engine has an opinion on (deduped while open, like
-    the prod ledger), then label every open prediction forward and resolve the matured ones. Returns
-    coverage. Best-effort; never raises."""
+    """Open/resolve prediction tiers and publish one serialized canonical successor.
+
+    Missing market data remains best-effort: unresolved predictions stay open. Canonical prediction
+    ledger read/publish failures propagate to the scheduler's existing failure boundary rather than
+    masquerading as zero coverage or a successful in-memory update.
+    """
     asof_iso = str(asof)[:10]
-    ledger = _load_ledger()
-    # dedup on (ticker, horizon) so each horizon tier re-enters on its OWN clock. Legacy rows carry
-    # horizon_d=21 and id '...-pred', so they fold into the (tk, 21) canonical tier seamlessly.
-    open_keys = {(r["ticker"], int(r.get("horizon_d") or _HORIZON))
-                 for r in ledger if r.get("status") == "open"}
-    for u in universe():
-        tk = u["ticker"]
-        for h in _HORIZONS:
-            if (tk, h) in open_keys:
-                continue
-            pid = f"{asof_iso}-{tk}-pred" if h == _HORIZON else f"{asof_iso}-{tk}-pred{h}"
-            ledger.append({"id": pid, "ticker": tk, "asof": asof_iso,
-                           "dir": u["dir"], "score": u["score"], "band": u["band"],
-                           "prob": _prob(u["score"]), "entry_px": u["price"], "horizon_d": h,
-                           "status": "open", "realized": None, "resolved_on": None})
-            open_keys.add((tk, h))
+    universe_rows = universe()
     panel, spy = _load_panel(), _spy_series()
-    if panel and spy is not None:
-        for r in ledger:
-            if r.get("status") != "open":
-                continue
-            rr = _label(panel, spy, r["ticker"], r["asof"], int(r.get("horizon_d") or _HORIZON), asof_iso)
-            if rr is not None:
-                r["status"], r["realized"], r["resolved_on"] = "resolved", rr, asof_iso
-    _save_ledger(ledger)
-    return coverage(ledger)
+    with _ledger_lock():
+        ledger = _load_ledger()
+        # dedup on (ticker, horizon) so each horizon tier re-enters on its OWN clock. Legacy rows carry
+        # horizon_d=21 and id '...-pred', so they fold into the (tk, 21) canonical tier seamlessly.
+        open_keys = {(r["ticker"], int(r.get("horizon_d") or _HORIZON))
+                     for r in ledger if r.get("status") == "open"}
+        for u in universe_rows:
+            tk = u["ticker"]
+            for h in _HORIZONS:
+                if (tk, h) in open_keys:
+                    continue
+                pid = f"{asof_iso}-{tk}-pred" if h == _HORIZON else f"{asof_iso}-{tk}-pred{h}"
+                ledger.append({"id": pid, "ticker": tk, "asof": asof_iso,
+                               "dir": u["dir"], "score": u["score"], "band": u["band"],
+                               "prob": _prob(u["score"]), "entry_px": u["price"], "horizon_d": h,
+                               "status": "open", "realized": None, "resolved_on": None})
+                open_keys.add((tk, h))
+        if panel and spy is not None:
+            for row in ledger:
+                if row.get("status") != "open":
+                    continue
+                rr = _label(
+                    panel, spy, row["ticker"], row["asof"],
+                    int(row.get("horizon_d") or _HORIZON), asof_iso,
+                )
+                if rr is not None:
+                    row["status"], row["realized"], row["resolved_on"] = "resolved", rr, asof_iso
+        _save_ledger_unlocked(ledger)
+        return coverage(_bounded_rows(ledger))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
