@@ -562,8 +562,8 @@ const STUDIO_PING_TOOL = Object.freeze({
   description:
     'Reports private Studio gateway liveness with an ephemeral process-generation nonce, per-call ' +
     'nonce, wall-clock timestamp, monotonic age, call duration, gateway version, and MCP session ' +
-    'reference. The generation nonce is randomized at process start and is not a host, hardware, ' +
-    'operating-system, or durable device identifier. The gateway answers this probe without invoking ' +
+    'reference. The generation nonce is random and process-scoped; it carries no host or hardware ' +
+    'data. The gateway answers this probe without invoking ' +
     'the Desktop Commander backend or filesystem.',
   inputSchema: {
     type: 'object',
