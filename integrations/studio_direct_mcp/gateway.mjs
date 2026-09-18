@@ -100,14 +100,13 @@ import {
 } from './git-publish.mjs';
 
 /** Gateway version. Kept independent of the backend's version. */
-export const GATEWAY_VERSION = '0.1.4';
+export const GATEWAY_VERSION = '0.1.5';
 
 const BOOT_MS = Date.now();
 const BOOT_NS = process.hrtime.bigint();
 const HOSTNAME = os.hostname();
 /** Unique for the lifetime of this gateway process. */
-const GATEWAY_GENERATION =
-  `${process.pid.toString(36)}-${BOOT_MS.toString(36)}-${randomUUID().slice(0, 8)}`;
+const GATEWAY_GENERATION = randomUUID();
 
 /** Body cap: write_file/write_pdf payloads, still bounded. */
 const MAX_BODY_BYTES = 10 * 1024 * 1024;
@@ -561,11 +560,11 @@ const STUDIO_PING_TOOL = Object.freeze({
   name: 'studio_ping',
   title: 'Studio Gateway Ping',
   description:
-    'Liveness probe for the private Studio MCP gateway. Returns the gateway hostname, the ' +
-    'gateway process id, a wall-clock ISO timestamp, a unique per-process generation id, a ' +
-    'unique per-call ping id, the monotonic clock offset since gateway start and the monotonic ' +
-    'duration of this ping. Answered by the gateway itself: it does not reach the Desktop ' +
-    'Commander backend and never touches the filesystem.',
+    'Reports private Studio gateway liveness with an ephemeral process-generation nonce, per-call ' +
+    'nonce, wall-clock timestamp, monotonic age, call duration, gateway version, and MCP session ' +
+    'reference. The generation nonce is random and process-scoped; it carries no host or hardware ' +
+    'data. The gateway answers this probe without invoking ' +
+    'the Desktop Commander backend or filesystem.',
   inputSchema: {
     type: 'object',
     properties: {},
@@ -587,8 +586,6 @@ let pingCounter = 0;
 function handleStudioPing(session) {
   const startNs = process.hrtime.bigint();
   const structured = {
-    hostname: HOSTNAME,
-    pid: process.pid,
     timestamp: new Date().toISOString(),
     generation: GATEWAY_GENERATION,
     pingId: `ping-${(++pingCounter).toString(36)}-${randomUUID().slice(0, 8)}`,
@@ -634,9 +631,47 @@ function conservativeAnnotations(tool) {
   };
 }
 
+const NEUTRAL_BACKEND_TOOL_DESCRIPTIONS = Object.freeze({
+  get_config: 'Returns Desktop Commander configuration, access bounds, runtime metadata, and client information.',
+  set_config_value: 'Updates one supported Desktop Commander configuration value.',
+  read_file: 'Reads one allowed local file or supported URL, with bounded paging for supported formats.',
+  read_multiple_files: 'Reads multiple allowed local files and returns contents or per-file errors.',
+  write_file: 'Creates, replaces, or appends content in one allowed local file.',
+  write_pdf: 'Creates a PDF or writes a modified copy of an existing PDF from structured page operations.',
+  create_directory: 'Creates an allowed local directory path, including missing parent directories.',
+  list_directory: 'Lists entries beneath an allowed local directory to the requested depth.',
+  move_file: 'Moves or renames an allowed local file or directory.',
+  start_search: 'Starts a bounded filesystem search and returns a search handle with initial results.',
+  get_more_search_results: 'Returns additional results for an existing filesystem search handle.',
+  stop_search: 'Stops an existing filesystem search handle.',
+  list_searches: 'Lists active filesystem search handles.',
+  get_file_info: 'Returns metadata for an allowed local file or directory.',
+  list_allowed_directories: 'Returns the local filesystem directories allowed for file operations.',
+  edit_block: 'Applies an exact text or supported document-block replacement in one allowed local file.',
+  start_process: 'Starts a local terminal process for a caller-supplied command and returns initial output with process state.',
+  read_process_output: 'Reads bounded output from an existing terminal process.',
+  interact_with_process: 'Sends input to an existing terminal process and returns subsequent output with process state.',
+  force_terminate: 'Terminates an existing terminal session by process identifier.',
+  list_sessions: 'Lists terminal sessions owned by the Desktop Commander runtime.',
+  list_processes: 'Lists operating-system processes visible to the Desktop Commander runtime.',
+  kill_process: 'Terminates a running operating-system process by process identifier.',
+  get_usage_stats: 'Returns Desktop Commander usage and performance statistics.',
+  get_recent_tool_calls: 'Returns recent locally retained Desktop Commander tool-call metadata and bounded outputs.',
+  give_feedback_to_desktop_commander: 'Opens the Desktop Commander feedback form in the local browser.',
+  get_prompts: 'Returns one Desktop Commander onboarding prompt by identifier.',
+  search_files: 'Searches allowed local directories for files matching a bounded query.',
+});
+
+const FALLBACK_BACKEND_TOOL_DESCRIPTION =
+  'Backend MCP capability. The input schema defines accepted parameters and annotations describe its effect posture.';
+
 function sanitizeTool(tool) {
   if (!tool || typeof tool !== 'object' || typeof tool.name !== 'string') return tool;
-  return { ...tool, annotations: conservativeAnnotations(tool) };
+  return {
+    ...tool,
+    description: NEUTRAL_BACKEND_TOOL_DESCRIPTIONS[tool.name] ?? FALLBACK_BACKEND_TOOL_DESCRIPTION,
+    annotations: conservativeAnnotations(tool),
+  };
 }
 
 function sanitizeToolList(tools) {
