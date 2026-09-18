@@ -3559,6 +3559,8 @@ class CodexWorkerAdapter:
     async def _terminate(self, state: _RunState) -> tuple[bool, bool, bool]:
         async with state.termination_lock:
             finalization = state.finalization
+            if finalization.error is not None:
+                raise ProcessIdentityError(finalization.error)
             if finalization.group_proven_absent:
                 if finalization.error is not None:
                     raise ProcessIdentityError(finalization.error)
@@ -3911,7 +3913,26 @@ class CodexWorkerAdapter:
             raise LaunchValidationError("cancellation reason is required")
         state.cancel_reason = reason[:1000]
         state.status = WorkerRunStatus.CANCELLING
-        sent, escalated, already_exited = await self._terminate(state)
+        try:
+            sent, escalated, already_exited = await self._terminate(state)
+        except ProcessIdentityError:
+            if state.finalization.error is not None:
+                monitor_task = state.monitor_task
+                if monitor_task is not None and not monitor_task.done():
+                    monitor_task.cancel()
+                await _settle_or_cancel_owned_tasks(
+                    (
+                        state.process_wait_task,
+                        state.stdout_task,
+                        state.stderr_task,
+                    ),
+                    timeout=_LOCAL_STREAM_DRAIN_SECONDS,
+                )
+                if monitor_task is not None:
+                    await asyncio.gather(monitor_task, return_exceptions=True)
+                if state.finished_at is None:
+                    state.finished_at = _utc_now()
+            raise
         if state.monitor_task is not None:
             await state.monitor_task
         return CancelReceipt(

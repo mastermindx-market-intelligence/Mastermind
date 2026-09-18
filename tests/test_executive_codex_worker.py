@@ -3028,6 +3028,101 @@ def test_validation_residual_group_signal_refusal_is_typed(
     asyncio.run(exercise())
 
 
+def test_public_cancel_signal_refusal_retires_local_tasks_without_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def exercise() -> None:
+        monkeypatch.setattr(cw, "_LOCAL_TRANSPORT_FINALIZATION_SECONDS", 0.01)
+        monkeypatch.setattr(cw, "_LOCAL_STREAM_DRAIN_SECONDS", 0.01)
+        adapter, spec, _workspace_path, _run_dir = _fixture(
+            tmp_path, prompt="sleep", timeout=30, grace=0.1
+        )
+        ref = await adapter.start(spec)
+        state = adapter._runs[spec.run_id]
+        assert state.monitor_task is not None
+        signal_calls: list[tuple[int, int]] = []
+        original_killpg = cw.os.killpg
+
+        def refuse_published_signal(pgid: int, sig: int) -> None:
+            if pgid == ref.pgid and sig in {signal.SIGTERM, signal.SIGKILL}:
+                signal_calls.append((pgid, sig))
+                raise PermissionError("synthetic public cancel signal refusal")
+            original_killpg(pgid, sig)
+
+        monkeypatch.setattr(cw.os, "killpg", refuse_published_signal)
+        owned_tasks = (
+            state.process_wait_task,
+            state.stdout_task,
+            state.stderr_task,
+        )
+        owned_fd_identities = []
+        for fd in (state.stdout_fd, state.stderr_fd):
+            info = os.fstat(fd)
+            owned_fd_identities.append((fd, info.st_dev, info.st_ino))
+        try:
+            with pytest.raises(
+                cw.ProcessIdentityError,
+                match="worker process signal failed: PermissionError",
+            ):
+                await asyncio.wait_for(
+                    adapter.cancel(ref, "operator requested"),
+                    timeout=1.0,
+                )
+            state.violation.set()
+            await asyncio.sleep(0.05)
+            with pytest.raises(
+                cw.ProcessIdentityError,
+                match="worker process signal failed: PermissionError",
+            ):
+                await adapter._terminate(state)
+            assert signal_calls == [(ref.pgid, signal.SIGTERM)]
+            assert state.monitor_task.done(), (
+                "public cancel signal refusal left monitor able to retry termination"
+            )
+            assert all(task is None or task.done() for task in owned_tasks)
+            assert state.finished_at is not None
+            assert state.finalization.error == (
+                "worker process signal failed: PermissionError"
+            )
+            assert state.finalization.group_proven_absent is False
+            assert state.finalization.transport_close_started is False
+            assert state.finalization.transport_close_completed is False
+            assert state.process.returncode is None
+            same_owned_fds = []
+            for fd, expected_dev, expected_ino in owned_fd_identities:
+                try:
+                    observed = os.fstat(fd)
+                except OSError:
+                    continue
+                if (observed.st_dev, observed.st_ino) == (
+                    expected_dev,
+                    expected_ino,
+                ):
+                    same_owned_fds.append(fd)
+            assert same_owned_fds == []
+        finally:
+            monkeypatch.setattr(cw.os, "killpg", original_killpg)
+            if state.process.returncode is None:
+                try:
+                    original_killpg(ref.pgid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                await asyncio.wait_for(state.process.wait(), 2.0)
+            if not state.monitor_task.done():
+                state.monitor_task.cancel()
+            await asyncio.gather(state.monitor_task, return_exceptions=True)
+            for task in owned_tasks:
+                if task is not None and not task.done():
+                    task.cancel()
+            await asyncio.gather(
+                *(task for task in owned_tasks if task is not None),
+                return_exceptions=True,
+            )
+
+    asyncio.run(exercise())
+
+
 def test_worker_residual_group_signal_refusal_is_typed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
