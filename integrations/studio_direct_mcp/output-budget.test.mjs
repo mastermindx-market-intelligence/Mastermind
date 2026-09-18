@@ -6,9 +6,9 @@ const size=x=>Buffer.byteLength(JSON.stringify(x));
 const body=x=>JSON.parse(x.content[0].text);
 const result=(text,extra={})=>({content:[{type:'text',text}],...extra});
 const make=extra=>new TextOutputPager({responseBytes:2048,...extra});
-function reconstruct(pager,receipt){let offset=0,chunks=[];
+function reconstruct(pager,receipt,limit=2048){let offset=0,chunks=[];
   for(let n=0;n<1000;n++){const response=pager.read({receipt_id:receipt.receipt_id,offset});
-    assert.ok(size(response)<=2048);const p=body(response);assert.equal(p.status,'OUTPUT_PAGE');
+    assert.ok(size(response)<=limit);const p=body(response);assert.equal(p.status,'OUTPUT_PAGE');
     assert.equal(p.offset,offset);assert.equal(p.sha256,receipt.sha256);
     assert.equal(Buffer.byteLength(p.text),p.next_offset-offset);chunks.push(p.text);
     if(p.done){const text=chunks.join('');assert.equal(Buffer.byteLength(text),receipt.source_bytes);
@@ -27,6 +27,12 @@ test('large results are bounded and reconstruct byte-exactly',()=>{
 test('Unicode and JSON escaping count serialized payload bytes',()=>{
   const p=make(),r=result(('🧠漢字\n\t\\\"\u0000').repeat(1300)),out=p.project(r);
   assert.ok(size(out)<=2048);assert.deepEqual(reconstruct(p,body(out)),r);
+});
+test('receipt preview stays context-conservative while retained output stays exact',()=>{
+  const p=new TextOutputPager({responseBytes:4096}),r=result('A'.repeat(9000)+'TAIL');
+  const out=p.project(r,{toolName:'read_process_output'}),info=body(out);
+  assert.equal(info.preview.head.length,256);assert.equal(info.preview.tail.length,256);
+  assert.deepEqual(reconstruct(p,info,4096),r);
 });
 test('backend error truth and tail failures survive paging',()=>{
   const p=make(),r=result('log'.repeat(8000)+'\nFAIL: exit 17',{isError:true}),out=p.project(r);

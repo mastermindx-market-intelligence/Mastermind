@@ -11,6 +11,7 @@ export const OUTPUT_PAGE_TOOL = Object.freeze({
   _meta:{'private-studio-mcp/gateway':true},
 });
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const PREVIEW_CHARS=256;
 const wireBytes=value=>Buffer.byteLength(JSON.stringify(value),'utf8');
 const toolResult=(data,isError)=>({content:[{type:'text',text:JSON.stringify(data)}],...(typeof isError==='boolean'?{isError}:{})});
 const errorResult=status=>toolResult({status,notice:'No backend call was made. Reconcile the original source or effect; never repeat a modifying call to recover output.'},true);
@@ -46,7 +47,7 @@ export class TextOutputPager {
       source_tool:typeof toolName==='string'&&/^[A-Za-z0-9_.-]{1,64}$/.test(toolName)?toolName:'unknown',source_bytes:raw.length,sha256,
       backend_is_error:typeof result.isError==='boolean'?result.isError:null,
       retention:'existing_backend_owner_bounded_memory',
-      preview:{head:result.content[0].text.slice(0,512),tail:result.content.at(-1).text.slice(-512)},
+      preview:{head:result.content[0].text.slice(0,PREVIEW_CHARS),tail:result.content.at(-1).text.slice(-PREVIEW_CHARS)},
       notice:retained?
         'Output projection only, not an execution verdict. Read pages as needed; previews omit content. Never repeat the original action to recover its output. Receipt may expire with owner closure or eviction.':
         'Backend response received, but full output exceeds retention or its owner is closed. No full-result receipt exists. Never repeat the original action to recover output; reconcile its original source/effect.'};
