@@ -419,38 +419,35 @@ def _clean_git_snapshot(
         raise GatewayError("backend_unavailable", f"installed {label} HEAD is unavailable")
 
     try:
-        graph_result = runner(
-            [
-                "git", "rev-list", "--objects", "--missing=print",
-                "--no-object-names", head,
-            ],
+        history_result = runner(
+            ["git", "rev-list", "--parents", head],
             cwd=path, timeout=10.0, max_bytes=32 * 1024 * 1024, env=env,
         )
     except Exception as exc:
         raise GatewayError(
             "backend_unavailable", f"installed {label} repository objects are incomplete"
         ) from exc
-    if not isinstance(graph_result, Mapping) or any(
-        graph_result.get(flag) is True
+    if not isinstance(history_result, Mapping) or any(
+        history_result.get(flag) is True
         for flag in ("timed_out", "limit_exceeded", "invalid_utf8")
     ):
         raise GatewayError(
             "backend_unavailable", f"installed {label} repository objects are incomplete"
         )
-    graph_stdout = graph_result.get("stdout")
-    if graph_result.get("code") != 0 or type(graph_stdout) is not str:
+    history_stdout = history_result.get("stdout")
+    if history_result.get("code") != 0 or type(history_stdout) is not str:
         raise GatewayError(
             "backend_unavailable", f"installed {label} repository objects are incomplete"
         )
-    reachable_objects: set[str] = set()
-    for line in graph_stdout.splitlines():
-        object_id = line.strip()
-        if not _valid_sha(object_id):
+    ancestry_commits: set[str] = set()
+    for line in history_stdout.splitlines():
+        object_ids = line.split()
+        if not object_ids or any(not _valid_sha(object_id) for object_id in object_ids):
             raise GatewayError(
                 "backend_unavailable", f"installed {label} repository objects are incomplete"
             )
-        reachable_objects.add(object_id)
-    if head not in reachable_objects:
+        ancestry_commits.update(object_ids)
+    if head not in ancestry_commits:
         raise GatewayError(
             "backend_unavailable", f"installed {label} repository objects are incomplete"
         )
@@ -463,7 +460,7 @@ def _clean_git_snapshot(
     for record in tree.split("\0"):
         if not record:
             continue
-        meta, sep, rel = record.partition("\t")
+        meta, sep, rel = record.partition("	")
         parts = meta.split()
         if not sep or len(parts) != 3:
             raise GatewayError("backend_unavailable", f"installed {label} tree is malformed")
@@ -478,59 +475,66 @@ def _clean_git_snapshot(
             raise GatewayError("backend_unavailable", f"installed {label} tree is unsupported")
         expected[rel] = (mode, oid)
 
-    expected_object_types: dict[str, str] = {head: "commit"}
-    for _rel, (_mode, object_oid) in expected.items():
-        expected_object_types[object_oid] = "blob"
-
-    # A commit-graph can let rev-list enumerate a missing parent as a bare oid.
-    # Enumeration is therefore not existence proof: every reachable object must
-    # cross the no-lazy-fetch object database boundary below.
-    required_objects = set(reachable_objects)
-    required_objects.update(expected_object_types)
-    object_input = ("\n".join(sorted(required_objects)) + "\n").encode("ascii")
-    try:
-        object_result = runner(
-            ["git", "cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize)"],
-            cwd=path, timeout=10.0, max_bytes=32 * 1024 * 1024, env=env,
-            input_bytes=object_input,
-        )
-    except Exception as exc:
-        raise GatewayError(
-            "backend_unavailable", f"installed {label} repository objects are incomplete"
-        ) from exc
-    if not isinstance(object_result, Mapping) or any(
-        object_result.get(flag) is True
-        for flag in ("timed_out", "limit_exceeded", "invalid_utf8")
-    ):
-        raise GatewayError(
-            "backend_unavailable", f"installed {label} repository objects are incomplete"
-        )
-    object_stdout = object_result.get("stdout")
-    if object_result.get("code") != 0 or type(object_stdout) is not str:
-        raise GatewayError(
-            "backend_unavailable", f"installed {label} repository objects are incomplete"
-        )
-    observed_objects: dict[str, str] = {}
-    for line in object_stdout.splitlines():
-        parts = line.split()
-        if (
-            len(parts) != 3
-            or not _valid_sha(parts[0])
-            or parts[1] not in {"blob", "commit", "tree", "tag"}
-            or not parts[2].isdigit()
-            or parts[0] in observed_objects
+    def require_object_types(expected_types: Mapping[str, str]) -> None:
+        if not expected_types:
+            return
+        object_input = ("\n".join(sorted(expected_types)) + "\n").encode("ascii")
+        try:
+            object_result = runner(
+                [
+                    "git", "cat-file",
+                    "--batch-check=%(objectname) %(objecttype) %(objectsize)",
+                ],
+                cwd=path, timeout=10.0, max_bytes=32 * 1024 * 1024, env=env,
+                input_bytes=object_input,
+            )
+        except Exception as exc:
+            raise GatewayError(
+                "backend_unavailable", f"installed {label} repository objects are incomplete"
+            ) from exc
+        if not isinstance(object_result, Mapping) or any(
+            object_result.get(flag) is True
+            for flag in ("timed_out", "limit_exceeded", "invalid_utf8")
         ):
             raise GatewayError(
                 "backend_unavailable", f"installed {label} repository objects are incomplete"
             )
-        observed_objects[parts[0]] = parts[1]
-    if set(observed_objects) != required_objects or any(
-        observed_objects.get(object_id) != expected_type
-        for object_id, expected_type in expected_object_types.items()
-    ):
-        raise GatewayError(
-            "backend_unavailable", f"installed {label} repository objects are incomplete"
-        )
+        object_stdout = object_result.get("stdout")
+        if object_result.get("code") != 0 or type(object_stdout) is not str:
+            raise GatewayError(
+                "backend_unavailable", f"installed {label} repository objects are incomplete"
+            )
+        observed_objects: dict[str, str] = {}
+        for line in object_stdout.splitlines():
+            parts = line.split()
+            if (
+                len(parts) != 3
+                or not _valid_sha(parts[0])
+                or parts[1] not in {"blob", "commit", "tree", "tag"}
+                or not parts[2].isdigit()
+                or parts[0] in observed_objects
+            ):
+                raise GatewayError(
+                    "backend_unavailable", f"installed {label} repository objects are incomplete"
+                )
+            observed_objects[parts[0]] = parts[1]
+        if set(observed_objects) != set(expected_types) or any(
+            observed_objects.get(object_id) != expected_type
+            for object_id, expected_type in expected_types.items()
+        ):
+            raise GatewayError(
+                "backend_unavailable", f"installed {label} repository objects are incomplete"
+            )
+
+    # Commit graphs can enumerate missing parents as bare object IDs, so every
+    # ancestry commit still crosses the no-lazy-fetch object database boundary.
+    # Historical trees/blobs are not consumed by installed reads and can number in
+    # the millions; current HEAD bytes are instead bound by the complete ls-tree
+    # inventory and a second bounded batch over every current blob.
+    require_object_types({object_id: "commit" for object_id in ancestry_commits})
+    require_object_types(
+        {object_oid: "blob" for _rel, (_mode, object_oid) in expected.items()}
+    )
 
     expected_leaves = set(expected)
     expected_directories = _tree_directory_paths(expected_leaves)
@@ -546,19 +550,20 @@ def _clean_git_snapshot(
         ) from exc
     if actual_types != expected_types or actual_directories != expected_directories:
         raise GatewayError("backend_unavailable", f"installed {label} worktree path set differs")
-    if content_scope == "macro_brief" and "symlink" in expected_types.values():
-        # Agent OS uses Path.exists() across authored artifact/ownership prefixes.
-        # A symlink can make that result depend on an external target that HEAD does
-        # not bind, so a production Macro snapshot with symlinks needs a separately
-        # reviewed projection instead of silently widening this reader.
-        raise GatewayError("backend_unavailable", f"installed {label} symlinks are unsupported")
-
     try:
         content_paths = _content_paths_for_scope(set(expected), content_scope)
     except ValueError as exc:
         raise GatewayError(
             "backend_unavailable", f"installed {label} content scope is invalid"
         ) from exc
+    if content_scope == "macro_brief" and any(
+        expected[rel][0] == "120000" for rel in content_paths
+    ):
+        # Agent OS dereferences the authored paths it actually consumes.  A symlink
+        # in that read closure can therefore make the brief depend on target bytes
+        # HEAD does not bind.  Tracked symlinks elsewhere remain fully path/type
+        # bound but cannot influence this scoped reader.
+        raise GatewayError("backend_unavailable", f"installed {label} symlinks are unsupported")
     for rel in sorted(content_paths):
         mode, expected_oid = expected[rel]
         try:
