@@ -302,7 +302,8 @@ def _fixture(tmp_path: Path):
     run_dir = run_root / "run-1"
     schema = run_dir / "input" / "result.schema.json"
     workspace.mkdir(mode=0o700)
-    schema.parent.mkdir(parents=True, mode=0o700)
+    run_dir.mkdir(mode=0o700)
+    schema.parent.mkdir(mode=0o700)
     schema.write_text("{}\n", encoding="utf-8")
     policy = BrokerPolicy(
         control_uid=control_uid,

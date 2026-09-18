@@ -66,7 +66,7 @@ from control_plane.worker_execution_contract import (
 _SAFE_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 _VERSION_RE = re.compile(r"(?P<version>\d+\.\d+\.\d+)\s+\(Claude Code\)")
 _MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
-_MAX_BINARY_BYTES = 512 * 1024 * 1024
+_MAX_BINARY_BYTES = 1 << 29
 _MAX_TURNS = 64
 _MOVING_MODEL_ALIASES = frozenset({"haiku", "opus", "sonnet"})
 _READ_TOOLS = ("Glob", "Grep", "Read")
@@ -89,6 +89,7 @@ _MAX_STDERR_BYTES = 4 * 1024 * 1024
 _MAX_RESULT_BYTES = 1 * 1024 * 1024
 _MAX_AUTH_JSON_BYTES = 16 * 1024
 _MAX_AUTH_STRING_BYTES = 1024
+_MAX_SESSION_ID_BYTES = 1 << 9
 _MAX_PROCESS_CENSUS_BYTES = 64 * 1024
 _MAX_PROCESS_CENSUS_MEMBERS = 256
 _DARWIN_PROCESS_RUN_STATES = frozenset("IRSTUZ")
@@ -1846,7 +1847,7 @@ class ClaudeCodeWorkerAdapter:
         if session is not None and (
             not isinstance(session, str)
             or not session
-            or len(session.encode("utf-8", "strict")) > 512
+            or len(session.encode("utf-8", "strict")) > _MAX_SESSION_ID_BYTES
             or _CONTROL_RE.search(session)
             or _contains_secret_shaped(session)
         ):
