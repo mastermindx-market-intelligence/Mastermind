@@ -5,8 +5,8 @@ web/news, reasons 2nd/3rd-order, writes proposals back via the MCP action tools)
 
 ingest_proposals(): turns Claude's free-form proposals into first-class, gated objects —
 each becomes a falsifiable brain_decision.v1 whose falsifier the ENGINE derives, clamped
-by the risk officer (Claude can't escalate a blocked name), appended to the same ledger +
-Brier scorer as the deterministic brain. Sizing still happens downstream via the
+by the risk officer (Claude can't escalate a blocked name or escalate while block evidence is
+unavailable), appended to the same ledger + Brier scorer as the deterministic brain. Sizing still happens downstream via the
 confluence scorecard — Claude proposes the hypothesis; it never pushes size. Paper-only.
 """
 from __future__ import annotations
@@ -197,17 +197,31 @@ def _clamp(lean: str, subject: str, blocked: set[str]) -> tuple[str, str]:
     return lean, ""
 
 
-def _engine_blocked(subject: str) -> bool:
-    """Whether the deterministic engine hard-blocks this name (a hard veto or size_authority
-    'blocked'). Lets the risk officer de-escalate a bullish Claude lean on a vetoed name even when
-    the caller passes no `blocked` set — the daily loop never did, so the clamp was dead there and a
-    bullish thesis on a parabolic / Altman-distress name was ingested un-clamped."""
+def _engine_blocked(subject: str) -> bool | None:
+    """Return hard-block truth from deterministic engine evidence.
+
+    ``True`` means a real hard veto / ``size_authority=blocked``. ``False`` means the
+    synthesis completed and is not hard-blocked. ``None`` means that evidence could not be
+    read or did not satisfy the synthesis contract; callers must not reinterpret unknown as clean.
+    """
     try:
         from portfolio import lenses
-        syn = lenses.full(subject, "name").get("synthesis", {})
-        return bool(syn.get("vetoes")) or syn.get("size_authority") == "blocked"
+
+        matrix = lenses.full(subject, "name")
+        if not isinstance(matrix, dict):
+            return None
+        syn = matrix.get("synthesis")
+        if not isinstance(syn, dict):
+            return None
+        vetoes = syn.get("vetoes")
+        authority = syn.get("size_authority")
+        if not isinstance(vetoes, list):
+            return None
+        if authority not in {"up", "down", "hold", "blocked", "insufficient_data"}:
+            return None
+        return bool(vetoes) or authority == "blocked"
     except Exception:
-        return False
+        return None
 
 
 def ingest_proposals(asof: str | None = None, *, blocked: set[str] | None = None,
@@ -228,9 +242,17 @@ def ingest_proposals(asof: str | None = None, *, blocked: set[str] | None = None
         # de-escalate a bullish lean on an engine-blocked name whether the caller flagged it OR the
         # engine itself vetoes it (the daily loop passes no `blocked` set, so self-derive it).
         eff_blocked = set(blocked)
-        if subj.upper() not in {b.upper() for b in eff_blocked} and _engine_blocked(subj):
-            eff_blocked.add(subj)
-        lean, clamp_note = _clamp(r.get("lean", "watch"), subj, eff_blocked)
+        explicit_block = subj.upper() in {b.upper() for b in eff_blocked}
+        engine_block_state: bool | None = None
+        if not explicit_block:
+            engine_block_state = _engine_blocked(subj)
+            if engine_block_state is True:
+                eff_blocked.add(subj)
+        proposed_lean = r.get("lean", "watch")
+        lean, clamp_note = _clamp(proposed_lean, subj, eff_blocked)
+        if not clamp_note and engine_block_state is None and proposed_lean in _BULLISH:
+            lean = "watch"
+            clamp_note = "clamped: engine block status unavailable (cannot escalate without risk evidence)"
         doc = DecisionDoc(
             id=f"{asof}-{r['subject']}-claude-{i}", subject=r["subject"], lean=lean,
             conviction=("low" if clamp_note else r.get("conviction", "low")),
