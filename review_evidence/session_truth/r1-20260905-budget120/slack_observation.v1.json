@@ -1,0 +1,68 @@
+{
+  "schema": "mastermind.slack_observation.v1",
+  "available": true,
+  "observed_at": "2026-09-05T03:45:09Z",
+  "channels": [
+    {
+      "channel_id": "C0BSBM78V1N",
+      "member_ids": [
+        "U0BR1GQH7SB",
+        "U0BRET6191C",
+        "U0BRETDUAS2",
+        "U0BRGTF1H26",
+        "U0BRLGVFFU4",
+        "U0BS3H525NW",
+        "U0BSB73JWNL",
+        "U0BSLFRGA79",
+        "U0BST4WG996",
+        "U0BSXSXQ39B",
+        "U0BT03G58UW",
+        "U0BT0EHCD7Y",
+        "U0BT20ZL77C",
+        "U0BT5J8NTSQ",
+        "U0BT644JP6Y",
+        "U0BT71H4FQE",
+        "U0BTCHX8HMF",
+        "U0BTF3QGABF"
+      ]
+    }
+  ],
+  "messages": [
+    {
+      "channel_id": "C0BSBM78V1N",
+      "ts": "1787876752.102929",
+      "thread_ts": null,
+      "sender_id": "U0BSB73JWNL",
+      "operation_key": "session-truth-r1-project-watch-20260827-sol-001",
+      "payload_hash": null,
+      "transport": "VISIBILITY_ONLY",
+      "message_class": "VISIBILITY",
+      "target_principal_id": "U0BT20ZL77C",
+      "delivered": true,
+      "acked": true,
+      "receiver_eligible": true,
+      "ack_required": true,
+      "created_at": "2026-08-27T17:25:52-07:00",
+      "source_law_sha": "ac1c045ed4cdf0b2b87fbc81760effa909271436",
+      "freeze_at": null
+    },
+    {
+      "channel_id": "C0BSBM78V1N",
+      "ts": "1788045823.134149",
+      "thread_ts": "1787876752.102929",
+      "sender_id": "U0BT20ZL77C",
+      "operation_key": "session-truth-r1-project-watch-20260827-sol-001",
+      "payload_hash": null,
+      "transport": "VISIBILITY_ONLY",
+      "message_class": "BUILD_EVENT",
+      "target_principal_id": null,
+      "delivered": true,
+      "acked": false,
+      "receiver_eligible": null,
+      "ack_required": true,
+      "created_at": "2026-08-29T16:23:43-07:00",
+      "source_law_sha": null,
+      "freeze_at": null
+    }
+  ]
+}

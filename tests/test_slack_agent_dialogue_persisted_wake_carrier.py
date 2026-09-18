@@ -5,6 +5,12 @@ import dataclasses
 
 import pytest
 
+from control_plane.dialogue_wake_canary_activation import (
+    DialogueWakeCanaryActivationGrant,
+    DialogueWakeCanaryProfile,
+    SCHEMA as CANARY_SCHEMA,
+    effective_dialogue_wake_canary_route,
+)
 from control_plane.executive_runtime import Runtime, StateConflict
 from control_plane.session_targets import RuntimeBinding
 from control_plane.wake_dispatcher import WakeEffectUnknownError, WakePreSubmitError
@@ -12,8 +18,16 @@ from control_plane.wake_events import mint_obligation
 from control_plane.wake_ledger import LedgerPhase, requested_record
 from control_plane.wake_persist import WakeLedgerRepository
 from integrations.executive_wake.registry import WakeDispatcherRegistry
-from integrations.slack_agent_dialogue.persisted_wake_carrier import PersistedWakeCarrier
-from integrations.slack_agent_dialogue.turn_observer import DialogueTurnObserver, ObservationOutcome, WakeCarrierState
+from integrations.slack_agent_dialogue.persisted_wake_carrier import (
+    CanaryWakeHistoryError,
+    HistoricalWakeContext,
+    PersistedWakeCarrier,
+)
+from integrations.slack_agent_dialogue.turn_observer import (
+    DialogueTurnObserver,
+    ObservationOutcome,
+    WakeCarrierState,
+)
 from tests.test_executive_wake_persisted_dispatch import (
     _Dispatcher,
     _POLICY,
@@ -41,6 +55,182 @@ def _carrier(repo, dispatcher, binding: RuntimeBinding):
         current_binding_for=lambda _route: binding,
         retry_policy=_POLICY,
     )
+
+
+def _canary(obligation, route, **overrides):
+    values = {
+        "schema": CANARY_SCHEMA,
+        "installed_release_sha": "a" * 40,
+        "operation_key": "runtime-continuity-r2-test",
+        "source_root_job_id": "JOB-900",
+        "source_job_id": "JOB-901",
+        "source_attempt_id": "ATT-" + "6" * 32,
+        "source_worker_id": "worker-test",
+        "source_semantic_digest": "b" * 64,
+        "obligation_id": obligation.obligation_id,
+        "target_seat": route.target_seat,
+        "target_session_alias": route.session_alias,
+        "target_attempt_id": "ATT-" + "7" * 32,
+        "binding_id": route.binding_id,
+        "binding_generation": route.binding_generation,
+        "process_generation_id": "generation-test-1",
+        "policy_digest": route.policy_digest,
+        "valid_from_epoch_seconds": 1_700_000_000,
+        "expires_at_epoch_seconds": 1_700_000_600,
+    }
+    values.update(overrides)
+    grant = DialogueWakeCanaryActivationGrant(**values)
+    profile = DialogueWakeCanaryProfile(grant)
+    from control_plane.session_targets import route_digest
+
+    base = dataclasses.replace(
+        route,
+        production_armed=False,
+        target_enabled=False,
+        policy_digest=grant.policy_digest,
+        route_digest=route_digest(
+            obligation_id=route.obligation_id,
+            destination=route.destination_digest,
+            policy_digest=grant.policy_digest,
+        ),
+    )
+    return profile, effective_dialogue_wake_canary_route(profile, base)
+
+
+@pytest.mark.parametrize("outcome", ["FAILED", "TARGET_UNAVAILABLE"])
+def test_canary_known_negative_history_is_recorded_without_retry(tmp_path, outcome) -> None:
+    from control_plane.wake_dispatcher import TransportOutcome
+
+    runtime = Runtime.at(tmp_path)
+    repo = WakeLedgerRepository(runtime)
+    obligation, route, binding = _pair()
+    profile, effective = _canary(obligation, route)
+    dispatcher = _Dispatcher(outcome=TransportOutcome(outcome), repo=repo)
+    carrier = PersistedWakeCarrier(
+        repository=repo,
+        dispatchers=WakeDispatcherRegistry({"codex-app-server": dispatcher}),
+        current_binding_for=lambda _route: binding,
+        retry_policy=_POLICY,
+        canary_profile=profile,
+    )
+
+    _run(carrier.submit(obligation, effective))
+    before = tuple(_phases(repo, obligation.obligation_id))
+    _run(carrier.submit(obligation, effective))
+    assert tuple(_phases(repo, obligation.obligation_id)) == before
+    assert dispatcher.nudge_calls == 1
+
+
+def test_null_or_changed_canary_grant_cannot_erase_persisted_effect(tmp_path) -> None:
+    from control_plane.wake_dispatcher import TransportOutcome
+
+    runtime = Runtime.at(tmp_path)
+    repo = WakeLedgerRepository(runtime)
+    obligation, route, binding = _pair()
+    profile, effective = _canary(obligation, route)
+    dispatcher = _Dispatcher(outcome=TransportOutcome.FAILED, repo=repo)
+    seeded = PersistedWakeCarrier(
+        repository=repo,
+        dispatchers=WakeDispatcherRegistry({"codex-app-server": dispatcher}),
+        current_binding_for=lambda _route: binding,
+        retry_policy=_POLICY,
+        canary_profile=profile,
+    )
+    _run(seeded.submit(obligation, effective))
+    before = tuple(_phases(repo, obligation.obligation_id))
+    forbidden_calls = 0
+
+    def forbidden(_route):
+        nonlocal forbidden_calls
+        forbidden_calls += 1
+        return binding
+
+    null = PersistedWakeCarrier(
+        repository=repo,
+        dispatchers=WakeDispatcherRegistry(),
+        current_binding_for=forbidden,
+        retry_policy=_POLICY,
+        canary_profile=DialogueWakeCanaryProfile(None),
+    )
+    with pytest.raises(CanaryWakeHistoryError):
+        _run(null.reconcile(obligation, effective))
+    changed, _changed_route = _canary(obligation, route, policy_digest="c" * 16)
+    drifted = PersistedWakeCarrier(
+        repository=repo,
+        dispatchers=WakeDispatcherRegistry(),
+        current_binding_for=forbidden,
+        retry_policy=_POLICY,
+        canary_profile=changed,
+    )
+    with pytest.raises(CanaryWakeHistoryError):
+        _run(drifted.reconcile(obligation, effective))
+    assert tuple(_phases(repo, obligation.obligation_id)) == before
+    assert forbidden_calls == 0
+
+
+def test_canary_accepted_history_resolves_original_context_lazily(tmp_path) -> None:
+    from control_plane.wake_dispatcher import TransportOutcome, TransportReceipt
+    from control_plane.wake_events import utc_now_iso
+
+    runtime = Runtime.at(tmp_path)
+    repo = WakeLedgerRepository(runtime)
+    obligation, route, binding = _pair()
+    profile, effective = _canary(obligation, route)
+    first = _Dispatcher(outcome=TransportOutcome.ACCEPTED, repo=repo)
+    submitted = PersistedWakeCarrier(
+        repository=repo,
+        dispatchers=WakeDispatcherRegistry({"codex-app-server": first}),
+        current_binding_for=lambda _route: binding,
+        retry_policy=_POLICY,
+        canary_profile=profile,
+    )
+    _run(submitted.submit(obligation, effective))
+
+    class HistoricalDispatcher:
+        transport_id = "codex-app-server"
+        calls = 0
+
+        async def reconcile(self, wake):
+            self.calls += 1
+            return TransportReceipt(
+                outcome=TransportOutcome.DELIVERED,
+                reason_code="delivered",
+                created_at=utc_now_iso(),
+                details=(("nudge_id", wake.nudge_id),),
+            )
+
+    historical = HistoricalDispatcher()
+    resolver_calls = 0
+
+    def resolve(attempt):
+        nonlocal resolver_calls
+        resolver_calls += 1
+        assert attempt.matches_route(effective)
+        return HistoricalWakeContext(
+            dispatchers=WakeDispatcherRegistry({"codex-app-server": historical}),
+            runtime_binding=binding,
+        )
+
+    replay = PersistedWakeCarrier(
+        repository=repo,
+        dispatchers=WakeDispatcherRegistry(),
+        current_binding_for=lambda _route: (_ for _ in ()).throw(
+            AssertionError("historical replay cannot consult current binding")
+        ),
+        retry_policy=_POLICY,
+        canary_profile=profile,
+        historical_context_for=resolve,
+    )
+    assert _run(
+        replay.reconcile(
+            obligation,
+            dataclasses.replace(route, production_armed=False, target_enabled=False),
+        )
+    ) is WakeCarrierState.RECORDED
+    assert resolver_calls == 1
+    assert historical.calls == 1
+    assert first.nudge_calls == 1
+    assert _phases(repo, obligation.obligation_id).count(LedgerPhase.DELIVERY_ATTEMPT) == 1
 
 
 def _phases(repo, obligation_id):

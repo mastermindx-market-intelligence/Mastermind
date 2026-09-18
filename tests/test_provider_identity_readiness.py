@@ -209,6 +209,24 @@ def test_exact_pinned_login_status_is_the_auth_mode_source(
     ) is None
 
 
+def test_live_probe_rejects_invalid_worker_principal_before_root_execution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        identity,
+        "binary_identity",
+        lambda _binary: {"safe": "binary-identity-sentinel"},
+    )
+    with pytest.raises(identity.IdentityProbeError, match="worker_identity_invalid"):
+        identity.live_probe(
+            binary=Path("/opt/codex/bin/codex"),
+            provider_home=Path("/var/lib/mastermind-executive"),
+            expected_kind="service-account",
+            workspace_binding_class=identity.WORKSPACE_BINDING_CLASS,
+            worker_user="worker",
+        )
+
+
 def _config_read(*, effective=None, origins=None, layers=None):
     return {
         "config": (

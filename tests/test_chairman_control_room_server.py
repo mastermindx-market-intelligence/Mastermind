@@ -64,6 +64,310 @@ def _fixed_now(value: str):
     return _now
 
 
+def _b5_server_doc(stamp="2026-09-05T00:00:00Z"):
+    return server_mod.ccr.compose_control_room(
+        inbox=None, boot_packet=None, active_builds=None, bindings=None,
+        runtime_jobs=None, binding_problems=(), generated_at=stamp,
+        agent_os_state={"schema": "agent_os_state.v1", "generated_at": "2026-09-03T00:00:01Z",
+                        "workstreams": [{"key": "B5", "title": "Bounded source",
+                                         "owner": "ceo-sol", "status": "active"}]},
+    )
+
+
+def _b5_sample(elapsed, *, wall_offset=0):
+    # Exact fixture epoch for the reference above; no real host clock change.
+    wall = 1788566400000 + elapsed - 1000 + wall_offset
+    return [elapsed, wall, elapsed, wall]
+
+
+def test_b5_cache_debits_gather_and_residence_without_changing_source_document(tmp_path, monkeypatch):
+    config = _make_config(tmp_path)
+    clock = _b5_sample(1000)
+    config.validity_sample_fn = lambda: tuple(clock)
+    original = _b5_server_doc()
+    original_bytes = json.dumps(original, sort_keys=True)
+    calls = []
+
+    def compose(*args, **kwargs):
+        calls.append("gather")
+        clock[:] = _b5_sample(1200)
+        return original
+
+    monkeypatch.setattr(server_mod, "_compose_state_doc", compose)
+    generation = server_mod._reserve_composition(config)
+    server_mod._refresh_state_cache(config, timeout=240, generation=generation, include_capabilities=False)
+    clock[:] = _b5_sample(1300)
+    snapshot = server_mod._cached_state_snapshot(config)
+    validity = snapshot.get("source_validity", {})
+    assert validity.get("publication_seq") == generation
+    assert validity["browser_qualification"] is None
+    component = validity["cards"][0]["components"]["card"]
+    assert component["remaining_ms"] == 684  #1000 - gather200 - residence100 - U16
+    clock[:] = _b5_sample(1984)
+    expired = server_mod._cached_state_snapshot(config)["source_validity"]["cards"][0]["components"]["card"]
+    assert expired["remaining_ms"] == 0
+    assert json.dumps(original, sort_keys=True) == original_bytes
+    assert calls == ["gather"]
+
+
+def test_b5_cached_publication_cannot_renew_same_proof_after_reference_rollback(tmp_path, monkeypatch):
+    config = _make_config(tmp_path)
+    clock = _b5_sample(1000)
+    config.validity_sample_fn = lambda: tuple(clock)
+    monkeypatch.setattr(server_mod, "_compose_state_doc", lambda *a, **k: _b5_server_doc())
+    server_mod._refresh_state_cache(config, timeout=240, generation=server_mod._reserve_composition(config),
+                                    include_capabilities=False)
+    clock[:] = _b5_sample(2000)
+    first = server_mod._cached_state_snapshot(config)
+    assert first.get("source_validity", {}).get("cards")
+    monkeypatch.setattr(server_mod, "_compose_state_doc", lambda *a, **k: _b5_server_doc("2026-09-04T23:59:50Z"))
+    server_mod._refresh_state_cache(config, timeout=240, generation=server_mod._reserve_composition(config),
+                                    include_capabilities=False)
+    second = server_mod._cached_state_snapshot(config)
+    assert second["source_validity"]["publication_seq"] > first["source_validity"]["publication_seq"]
+    assert second["source_validity"]["cards"][0]["components"]["card"]["remaining_ms"] in (None, 0)
+
+
+@pytest.mark.parametrize("elapsed, wall_offset, remaining", [
+    (0, 0, 984), (983, 0, 1), (984, 0, 0), (1000, 0, 0),
+    (100, 8, 884), (100, 9, None), (100, -8, 884), (100, -9, None),
+    (1000, 60000, None), (61000, 0, 0),
+])
+def test_b5_paired_clock_contract_pays_full_reserve(tmp_path, elapsed, wall_offset, remaining):
+    config = _make_config(tmp_path)
+    anchor = tuple(_b5_sample(1000))
+    bound = {"budget": 1000, "anchor": anchor, "previous": anchor,
+             "clock_id": id(config.validity_sample_fn)}
+    sample = tuple(_b5_sample(1000 + elapsed, wall_offset=wall_offset))
+    assert server_mod._source_remaining(bound, sample, config) == remaining
+
+
+@pytest.mark.parametrize("sample", [None, (0, 0, 2, 0), (0, 0, 0, 2),
+    (True, 0, 1, 0), (0.0, 0, 0, 0), (0, "0", 0, 0),
+    (0, 0, float("nan"), 0), (0, 0, float("inf"), 0),
+    (-1, 0, 0, 0), (2**53, 0, 2**53, 0), (1, 0, 0, 0), (0, 1, 0, 0)])
+def test_b5_invalid_clock_samples_refuse_without_coercion(sample):
+    assert server_mod._valid_clock_sample(sample) is False
+
+
+def test_b5_cumulative_discrepancy_and_poisoned_same_proof_do_not_reset(tmp_path):
+    config = _make_config(tmp_path)
+    anchor = tuple(_b5_sample(1000))
+    bound = {"budget": 100000, "anchor": anchor, "previous": anchor,
+             "clock_id": id(config.validity_sample_fn)}
+    assert server_mod._source_remaining(bound, _b5_sample(1100, wall_offset=4), config) == 99884
+    assert server_mod._source_remaining(bound, _b5_sample(1200, wall_offset=8), config) == 99784
+    assert server_mod._source_remaining(bound, _b5_sample(1300, wall_offset=12), config) is None
+    assert server_mod._source_remaining(bound, _b5_sample(1400), config) is None
+
+
+def test_b5_legacy_cache_and_unsupported_server_clock_cannot_claim_currency(tmp_path, monkeypatch):
+    config = _make_config(tmp_path)
+    config.state_cache["doc"] = _b5_server_doc()
+    assert server_mod._cached_state_snapshot(config)["source_validity"]["cards"] == []
+    config.validity_sample_fn = lambda: None
+    monkeypatch.setattr(server_mod, "_compose_state_doc", lambda *a, **k: _b5_server_doc())
+    server_mod._refresh_state_cache(config, timeout=240, generation=server_mod._reserve_composition(config),
+                                    include_capabilities=False)
+    components = server_mod._cached_state_snapshot(config)["source_validity"]["cards"][0]["components"]
+    assert all(c["remaining_ms"] is None for c in components.values())
+
+
+def test_b5_contradictory_qualification_reference_is_unqualified(tmp_path, monkeypatch):
+    config = _make_config(tmp_path)
+    config.validity_sample_fn = lambda: tuple(_b5_sample(1000))
+    monkeypatch.setattr(server_mod, "_compose_state_doc", lambda *a, **k: _b5_server_doc("2026-09-04T23:59:59Z"))
+    server_mod._refresh_state_cache(config, timeout=240, generation=server_mod._reserve_composition(config),
+                                    include_capabilities=False)
+    components = server_mod._cached_state_snapshot(config)["source_validity"]["cards"][0]["components"]
+    assert all(c["remaining_ms"] is None for c in components.values())
+
+
+def _b5_navigation_fixture(tmp_path, monkeypatch):
+    config = _make_config(tmp_path, now_value="2026-09-05T00:00:00Z")
+    clock = _b5_sample(1000)
+    config.validity_sample_fn = lambda: tuple(clock)
+    binding = sb.new_binding(work_ref="WS:B5", role="ceo", provider="cursor_agent",
+        locator_kind="cursor_agent_thread", locator={"chat_id": "b5-fake-only", "workspace_dir": None},
+        observed_at="2026-09-05T00:00:00Z", last_verified_at=None,
+        binding_id="55555555-5555-4555-8555-555555555555")
+    bindings = {"schema": sb.SCHEMA, "bindings": [binding]}
+    sb.save_bindings(bindings, config.bindings_path)
+    doc = server_mod.ccr.compose_control_room(
+        inbox={"schema": server_mod.ccr.EXECUTIVE_INBOX_SCHEMA, "generated_at": "2026-09-05T00:00:00Z",
+               "attention": [{"attention_id": "ATTENTION-B5", "kind": "decision", "target": "ceo",
+                              "reason": "Review the harmless fixture", "workstream": "WS:B5"}]},
+        boot_packet=None, active_builds=None, bindings=bindings, binding_problems=(),
+        runtime_jobs=[{"job_id": "JOB-B5", "root_job_id": "JOB-B5", "workstream": "WS:B5"}],
+        generated_at="2026-09-05T00:00:00Z", agent_os_state={"schema": "agent_os_state.v1",
+            "generated_at": "2026-09-03T00:00:01Z", "workstreams": [{"key": "B5", "title": "Bounded fixture",
+                "owner": "ceo-sol", "status": "active"}]},
+        dispatch_evidence=[{"responsibility_ref": "WS:B5", "root_job_id": "JOB-B5",
+            "runtime_root_state": "RESOLVED", "carrier_state": "OWNER_HELD", "w3c_state": "RESOLVED",
+            "w3c_terminal_state": "APPLIED", "w3c_wake_state": "TARGET_ACKNOWLEDGED",
+            "w3c_terminal_applied": "true", "w3c_source_observed_at": "2026-09-05T00:00:00Z",
+            "w3c_source_freshness": "SOURCE_EVIDENCE_TIME", "w3c_snapshot_digest": "a" * 64,
+            "w3c_terminal_source_owner": "executive_terminal_return", "w3c_wake_source_owner": "wake_ledger"}],
+    )
+    owed = doc["autonomy"]["responsibilities"][0]["validity"]["owed_open_age"]
+    assert owed["valid_for_ms"] == 1000  # actual mapper, no fabricated optimistic envelope
+    monkeypatch.setattr(server_mod, "_compose_state_doc", lambda *a, **k: doc)
+    return config, clock, binding
+
+
+def _b5_owed_request(envelope):
+    card = envelope["control_room"]["autonomy"]["responsibilities"][0]
+    owed = card["validity"]["owed_open_age"]
+    return {"binding_id": owed["binding_id"], "owed_context": {
+        "schema": "mastermind.owed_navigation.v1", "publication_seq": envelope["source_validity"]["publication_seq"],
+        "responsibility_ref": card["responsibility_ref"], "root_job_id": card["root_job_id"],
+        "proof_ref": owed["proof_ref"], "binding_fingerprint": owed["binding_fingerprint"],
+        "owed_seat": owed["owed_seat"]}}
+
+
+@pytest.mark.parametrize("case", ["valid", "expired", "publication", "root", "proof", "binding", "seat", "missing"])
+def test_b5_owed_handoff_requires_exact_current_context_and_never_persists(tmp_path, monkeypatch, case):
+    config, clock, binding = _b5_navigation_fixture(tmp_path, monkeypatch)
+    providers, saves = [], []
+    def provider(checked, runner, **kwargs):
+        providers.append(checked)
+        assert checked == binding
+        return {"ok": True, "verified": True, "action": "fake-only"}
+    config.open_binding_fn = provider
+    monkeypatch.setattr(sb, "save_bindings", lambda *a, **k: saves.append(a))
+    with _running_server(config) as (_httpd, port):
+        status, _, body = _get(port, "/api/state", headers=_auth_headers(config))
+        assert status == 200
+        request = _b5_owed_request(json.loads(body))
+        if case == "expired": clock[:] = _b5_sample(1984)
+        elif case == "publication": request["owed_context"]["publication_seq"] += 1
+        elif case == "root": request["owed_context"]["root_job_id"] = "JOB-OTHER"
+        elif case == "proof": request["owed_context"]["proof_ref"] = "b" * 64
+        elif case == "binding": request["owed_context"]["binding_fingerprint"] = "c" * 64
+        elif case == "seat": request["owed_context"]["owed_seat"] = "worker"
+        elif case == "missing": del request["owed_context"]["proof_ref"]
+        status, _, body = _post(port, "/api/open", request, headers=_auth_headers(config))
+    assert status == (200 if case == "valid" else 409)
+    assert len(providers) == (1 if case == "valid" else 0)
+    assert saves == []
+
+
+@pytest.mark.parametrize("movement", ["binding", "second_candidate", "expiry_during_read", "publication_during_read"])
+def test_b5_final_handoff_rechecks_after_canonical_binding_read(tmp_path, monkeypatch, movement):
+    config, clock, binding = _b5_navigation_fixture(tmp_path, monkeypatch)
+    providers = []
+    config.open_binding_fn = lambda *a, **k: providers.append(a) or {"ok": True, "verified": True}
+    with _running_server(config) as (_httpd, port):
+        _, _, body = _get(port, "/api/state", headers=_auth_headers(config))
+        request = _b5_owed_request(json.loads(body))
+        if movement == "second_candidate":
+            sibling = dict(binding, binding_id="66666666-6666-4666-8666-666666666666",
+                           locator={"chat_id": "second-target", "workspace_dir": None})
+            sb.save_bindings({"schema": sb.SCHEMA, "bindings": [binding, sibling]}, config.bindings_path)
+        elif movement == "binding":
+            changed = dict(binding, locator={"chat_id": "different-target", "workspace_dir": None})
+            sb.save_bindings({"schema": sb.SCHEMA, "bindings": [changed]}, config.bindings_path)
+        else:
+            original_read = sb.load_bindings
+            def read(*args, **kwargs):
+                result = original_read(*args, **kwargs)
+                if movement == "expiry_during_read": clock[:] = _b5_sample(1984)
+                else:
+                    with config.state_lock: config.state_published_seq += 1
+                return result
+            monkeypatch.setattr(sb, "load_bindings", read)
+        before = config.bindings_path.read_bytes()
+        status, _, body = _post(port, "/api/open", request, headers=_auth_headers(config))
+    assert status == 409
+    assert providers == []
+    assert config.bindings_path.read_bytes() == before
+
+
+def test_b5_checked_target_is_immutable_and_verified_result_cannot_overwrite_new_binding(tmp_path, monkeypatch):
+    config, clock, binding = _b5_navigation_fixture(tmp_path, monkeypatch)
+    providers = []
+    changed = dict(binding, locator={"chat_id": "concurrent-target", "workspace_dir": None})
+    def provider(checked, runner, **kwargs):
+        providers.append(checked)
+        assert checked == binding
+        with pytest.raises(TypeError): checked["role"] = "worker"
+        with pytest.raises(TypeError): checked["locator"]["chat_id"] = "mutated"
+        # No composition lock spans provider work.
+        assert config.state_lock.acquire(blocking=False)
+        config.state_lock.release()
+        sb.save_bindings({"schema": sb.SCHEMA, "bindings": [changed]}, config.bindings_path)
+        return {"ok": True, "verified": True, "action": "fake-only"}
+    config.open_binding_fn = provider
+    with _running_server(config) as (_httpd, port):
+        _, _, body = _get(port, "/api/state", headers=_auth_headers(config))
+        status, _, body = _post(port, "/api/open", _b5_owed_request(json.loads(body)), headers=_auth_headers(config))
+    assert status == 200 and len(providers) == 1
+    after, errors = sb.load_bindings(config.bindings_path)
+    assert not errors and after["bindings"] == [changed]
+
+
+
+@pytest.mark.parametrize("failure", ["expired", "clock_poison"])
+@pytest.mark.parametrize("intervening", ["omitted", "different_proof"])
+def test_b5_same_proof_never_renews_across_successful_publications(tmp_path, failure, intervening):
+    config = _make_config(tmp_path)
+    clock = _b5_sample(1000)
+    config.validity_sample_fn = lambda: tuple(clock)
+    original = _b5_server_doc()
+    # Exercise the real cache owner with real mapper metadata. The rollback
+    # is a deterministic fixture; neither host clock nor source files change.
+    def publish(doc):
+        server_mod._publish_source_validity(config, doc, tuple(clock), tuple(clock))
+        config.state_cache["doc"] = doc
+    publish(original)
+    clock[:] = _b5_sample(2000, wall_offset=9 if failure == "clock_poison" else 0)
+    first = server_mod._source_validity_snapshot(config, tuple(clock))["cards"][0]["components"]["card"]
+    assert first["remaining_ms"] == (None if failure == "clock_poison" else 0)
+    changed = json.loads(json.dumps(original))
+    if intervening == "omitted":
+        changed["autonomy"] = None
+    else:
+        for meta in changed["autonomy"]["responsibilities"][0]["validity"].values():
+            meta["proof_ref"] = "b" * 64
+    publish(changed)
+    if intervening == "omitted":
+        assert server_mod._source_validity_snapshot(config, tuple(clock))["cards"] == []
+    clock[:] = _b5_sample(1000)
+    publish(original)
+    final = server_mod._source_validity_snapshot(config, tuple(clock))["cards"][0]["components"]["card"]
+    assert final["proof_ref"] == first["proof_ref"]
+    assert final["remaining_ms"] in (None, 0)
+
+
+def test_b5_server_boots_with_optional_projection_absent():
+    import os
+    import subprocess
+    import sys
+    program = r"""
+import importlib.abc, importlib.util, sys
+blocked = "control_plane.autonomy_control_room_projection"
+original = importlib.util.find_spec
+importlib.util.find_spec = lambda name, *a, **k: None if name == blocked else original(name, *a, **k)
+class Absent(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path, target=None):
+        if fullname == blocked:
+            raise ModuleNotFoundError(fullname, name=fullname)
+sys.meta_path.insert(0, Absent())
+from scripts import chairman_control_room as server
+assert server.ccr.autonomy_control_room_projection is None
+config = server.ServerConfig(repo_root=server._REPO_ROOT, macro_root=server._REPO_ROOT,
+                             bindings_path=server._REPO_ROOT / "absent-fixture.json", token="fixture",
+                             origin="http://127.0.0.1:0", port=0)
+server._publish_source_validity(config, {"autonomy": None}, None, None)
+assert server._source_validity_snapshot(config, None)["cards"] == []
+print("OPTIONAL_OWNER_UNAVAILABLE")
+"""
+    result = subprocess.run([sys.executable, "-c", program], cwd=server_mod._REPO_ROOT,
+                            env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"),
+                            capture_output=True, text=True, timeout=15)
+    assert result.returncode == 0, result.stderr
+    assert "OPTIONAL_OWNER_UNAVAILABLE" in result.stdout
+
 # ---------------------------------------------------------------------------
 # server harness
 # ---------------------------------------------------------------------------
@@ -1548,3 +1852,42 @@ def test_favicon_is_204(tmp_path):
         status, _headers, body = _get(port, "/favicon.ico")
     assert status == 204
     assert body == b""
+
+
+def test_b5_handoff_cannot_select_historical_proof_under_current_publication(tmp_path, monkeypatch):
+    config, clock, binding = _b5_navigation_fixture(tmp_path, monkeypatch)
+    providers = []
+    config.open_binding_fn = lambda *a, **k: providers.append(a) or {"ok": True, "verified": True}
+    with _running_server(config) as (_httpd, port):
+        _, _, body = _get(port, "/api/state", headers=_auth_headers(config))
+        request = _b5_owed_request(json.loads(body))
+        current = json.loads(json.dumps(config.state_cache["doc"]))
+        card = current["autonomy"]["responsibilities"][0]
+        card["dispatch"]["dispatch_state"] = "EFFECT_UNKNOWN"
+        card["validity"]["owed_open_age"].update(proof_ref="b" * 64, valid_for_ms=None)
+        with config.state_lock:
+            server_mod._publish_source_validity(config, current, tuple(clock), tuple(clock))
+            config.state_cache["doc"] = current
+            config.state_published_seq += 1
+            request["owed_context"]["publication_seq"] = config.state_published_seq
+        before = config.bindings_path.read_bytes()
+        status, _, _ = _post(port, "/api/open", request, headers=_auth_headers(config))
+    assert status == 409 and providers == []
+    assert config.bindings_path.read_bytes() == before
+
+
+def test_b5_proof_accounting_capacity_refuses_instead_of_forgetting(tmp_path, monkeypatch):
+    config = _make_config(tmp_path)
+    clock = tuple(_b5_sample(1000))
+    config.validity_sample_fn = lambda: clock
+    monkeypatch.setattr(server_mod, "_VALIDITY_MAX_PROOFS", 4, raising=False)
+    doc = _b5_server_doc()
+    server_mod._publish_source_validity(config, doc, clock, clock)
+    config.state_cache["doc"] = doc
+    assert server_mod._source_validity_snapshot(config, clock)["cards"][0]["components"]["card"]["remaining_ms"] == 984
+    changed = json.loads(json.dumps(doc))
+    changed["autonomy"]["responsibilities"][0]["validity"]["card"]["proof_ref"] = "b" * 64
+    server_mod._publish_source_validity(config, changed, clock, clock)
+    server_mod._publish_source_validity(config, doc, clock, clock)
+    assert len(config.state_cache["source_validity_bounds"]) <= 4
+    assert server_mod._source_validity_snapshot(config, clock)["cards"][0]["components"]["card"]["remaining_ms"] is None

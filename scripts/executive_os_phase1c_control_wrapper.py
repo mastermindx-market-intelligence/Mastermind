@@ -9,6 +9,7 @@ import pwd
 import re
 import stat
 import sys
+import unicodedata
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -23,10 +24,106 @@ from control_plane.codex_worker import ProcessInspector  # noqa: E402
 SCHEMA_VERSION = "mastermind.executive_control_environment_attestation/v1"
 SENTINEL_NAME = "EXECUTIVE_CONTROL_CANARY_VALUE"
 _VALUE_RE = re.compile(r"^[0-9a-f]{64}$")
+_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
+_MAX_IDENTITY_TEXT_BYTES = 256
+_MAX_EXECUTABLE_PATH_BYTES = 4096
+
+
+# W1H3F R13 (Sol R80, PR #677 comment 5704046553): the closed field sets are
+# owned by THIS module and nowhere else.  H3 must NOT restate them.  They are
+# derived from the document ``attest_current_service_environment`` constructs.
+ATTESTATION_FIELDS = frozenset(
+    {
+        "schema_version",
+        "observed_at",
+        "process_identity",
+        "config_sha256",
+        "release_manifest_sha256",
+        "release_commit_sha",
+        "python_executable_path",
+        "python_executable_sha256",
+        "sentinel_name_sha256",
+        "sentinel_value_sha256",
+        "sentinel_present",
+    }
+)
+PROCESS_IDENTITY_FIELDS = frozenset(
+    {
+        "pid",
+        "pgid",
+        "session_id",
+        "start_identity",
+        "boot_id",
+        "effective_uid",
+        "effective_gid",
+        "real_uid",
+        "real_gid",
+    }
+)
 
 
 class ControlWrapperError(RuntimeError):
     pass
+
+
+def _contains_control_character(value: str) -> bool:
+    return any(unicodedata.category(character) == "Cc" for character in value)
+
+
+def _bounded_identity_integer(
+    value: object, *, name: str, minimum: int
+) -> int:
+    if type(value) is not int or not (minimum <= value <= 2**31 - 1):
+        raise ControlWrapperError(
+            f"attestation process identity fact {name} is not a bounded integer"
+        )
+    return value
+
+
+def _bounded_identity_text(value: object, *, name: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise ControlWrapperError(
+            f"attestation process identity fact {name} is not a non-empty string"
+        )
+    try:
+        encoded = value.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise ControlWrapperError(
+            f"attestation process identity fact {name} is not valid UTF-8"
+        ) from exc
+    if (
+        len(encoded) > _MAX_IDENTITY_TEXT_BYTES
+        or _contains_control_character(value)
+    ):
+        raise ControlWrapperError(
+            f"attestation process identity fact {name} is not bounded safe text"
+        )
+    return value
+
+
+def _canonical_executable_path(value: object) -> str:
+    if not isinstance(value, str) or not value:
+        raise ControlWrapperError(
+            "attestation python_executable_path is not a canonical absolute POSIX path"
+        )
+    try:
+        encoded = value.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise ControlWrapperError(
+            "attestation python_executable_path is not valid UTF-8"
+        ) from exc
+    if (
+        len(encoded) > _MAX_EXECUTABLE_PATH_BYTES
+        or _contains_control_character(value)
+        or not os.path.isabs(value)
+        or value.startswith("//")
+        or os.path.normpath(value) != value
+        or not Path(value).name
+    ):
+        raise ControlWrapperError(
+            "attestation python_executable_path is not a canonical absolute POSIX path"
+        )
+    return value
 
 
 def _sha256(path: Path) -> str:
@@ -101,6 +198,117 @@ def _write_attestation(path: Path, value: dict[str, object]) -> None:
     os.replace(temporary, path)
 
 
+def validate_control_environment_attestation(
+    document: object,
+    *,
+    expected_config_sha256: str,
+    expected_release_commit_sha: str,
+    expected_pid: int,
+    inspector: ProcessInspector,
+) -> dict[str, object]:
+    """Wrapper-owned fail-closed validator for the post-restart attestation.
+
+    Sol R80 (PR #677 comment 5704046553): the fixed label + fixed socket +
+    AWAITING_CANARY probe proves LIVENESS only -- it does NOT prove the
+    restarted process consumed the exact candidate/restored control bytes.
+    Disk agreement cannot close that gap after a no-effect ``kickstart -k``.
+    The validator below is the wrapper's smallest lawful repair: ONE pure,
+    import-safe, fail-closed validator that the CEO-admission probe in H3
+    consumes before it returns ``True``.
+
+    It raises :class:`ControlWrapperError` on ANY failure and returns the
+    validated document on success.  It does NOT read the filesystem,
+    spawn processes, or mutate ``document``; the inspector is the only
+    injection point (tests inject a fake, production passes a real
+    :class:`control_plane.codex_worker.ProcessInspector`).
+    """
+
+    if not isinstance(document, dict):
+        raise ControlWrapperError("attestation document must be a dict")
+    if set(document) != ATTESTATION_FIELDS:
+        raise ControlWrapperError("attestation field set is not the exact closed set")
+    if document["schema_version"] != SCHEMA_VERSION:
+        raise ControlWrapperError("attestation schema_version is not the live wrapper schema")
+    observed_at = document["observed_at"]
+    if not isinstance(observed_at, str):
+        raise ControlWrapperError("attestation observed_at must be an ISO-8601 string")
+    try:
+        parsed = datetime.fromisoformat(observed_at)
+    except ValueError as exc:
+        raise ControlWrapperError("attestation observed_at is not parseable ISO-8601") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() != UTC.utcoffset(parsed):
+        raise ControlWrapperError("attestation observed_at is not a UTC timestamp")
+    identity = document["process_identity"]
+    if not isinstance(identity, dict) or set(identity) != PROCESS_IDENTITY_FIELDS:
+        raise ControlWrapperError("attestation process_identity is not the exact closed set")
+    pid = _bounded_identity_integer(identity["pid"], name="pid", minimum=1)
+    for integer_name in ("pgid", "session_id"):
+        _bounded_identity_integer(identity[integer_name], name=integer_name, minimum=1)
+    for integer_name in ("effective_uid", "effective_gid", "real_uid", "real_gid"):
+        _bounded_identity_integer(identity[integer_name], name=integer_name, minimum=0)
+    for text_name in ("start_identity", "boot_id"):
+        _bounded_identity_text(identity[text_name], name=text_name)
+    if pid != expected_pid:
+        raise ControlWrapperError("attestation pid does not match the live process pid")
+    try:
+        observed = inspector.inspect(pid)
+        boot_id = inspector.boot_session_id()
+    except Exception as exc:  # inspector is the ONLY injection point
+        raise ControlWrapperError(
+            "attestation fresh observation is unavailable"
+        ) from exc
+    identity_facts = {
+        "pgid": observed.pgid,
+        "session_id": observed.session_id,
+        "start_identity": observed.start_identity,
+        "effective_uid": observed.effective_uid,
+        "effective_gid": observed.effective_gid,
+        "real_uid": observed.real_uid,
+        "real_gid": observed.real_gid,
+    }
+    for fact_name, observed_value in identity_facts.items():
+        if identity[fact_name] != observed_value:
+            raise ControlWrapperError(
+                f"attestation process identity fact {fact_name} is stale"
+            )
+    if identity["boot_id"] != boot_id:
+        raise ControlWrapperError("attestation boot identity is stale")
+    if (
+        not isinstance(expected_config_sha256, str)
+        or _VALUE_RE.fullmatch(expected_config_sha256) is None
+        or document["config_sha256"] != expected_config_sha256
+    ):
+        raise ControlWrapperError("attestation config_sha256 is not the live config digest")
+    if (
+        not isinstance(expected_release_commit_sha, str)
+        or _COMMIT_RE.fullmatch(expected_release_commit_sha) is None
+        or not isinstance(document["release_commit_sha"], str)
+        or _COMMIT_RE.fullmatch(document["release_commit_sha"]) is None
+        or document["release_commit_sha"] != expected_release_commit_sha
+    ):
+        raise ControlWrapperError(
+            "attestation release_commit_sha is not the live release sha"
+        )
+    for digest_field in (
+        "release_manifest_sha256",
+        "python_executable_sha256",
+        "sentinel_name_sha256",
+        "sentinel_value_sha256",
+    ):
+        digest_value = document[digest_field]
+        if (
+            not isinstance(digest_value, str)
+            or _VALUE_RE.fullmatch(digest_value) is None
+        ):
+            raise ControlWrapperError(
+                f"attestation {digest_field} is not 64 lowercase hex"
+            )
+    _canonical_executable_path(document["python_executable_path"])
+    if document["sentinel_present"] is not True:
+        raise ControlWrapperError("attestation sentinel_present is not exactly True")
+    return document
+
+
 def attest_current_service_environment(
     *,
     config_path: Path,
@@ -141,6 +349,13 @@ def attest_current_service_environment(
     }
     if config.get("control_uid") != os.geteuid():
         raise ControlWrapperError("live service config principal differs")
+    validate_control_environment_attestation(
+        attestation,
+        expected_config_sha256=_sha256(config_path),
+        expected_release_commit_sha=manifest_value["commit_sha"],
+        expected_pid=os.getpid(),
+        inspector=inspector,
+    )
     _write_attestation(attestation_path, attestation)
     return attestation
 

@@ -14,6 +14,36 @@ A worker posting `RESULT` and saying it is awaiting Sol remains nonterminal from
 
 This law is symmetric. Sol must not leave a worker hanging, and a worker must not leave Sol hanging when the protocol requires a return or terminal acknowledgement.
 
+### 1.1 Slack exact-carrier root
+
+For a Slack child, exact carrier identity is **workspace + conversation/channel + thread-root timestamp**.
+When a Sol/Chairman commission is the top-level parent, that parent timestamp is the immutable dialogue
+root for the child. `PICKUP_ACK`, `WATCH_ARMED`/`WATCH_UNAVAILABLE`, `START`, `PROGRESS`, `BLOCKED`,
+`DECISION_REQUEST`, `RESULT`, Sol `CONTINUE`/`RULING`/repair, and terminal `STOP` **must be replies under
+that exact parent** unless current canonical transport law explicitly establishes a different carrier.
+
+A **top-level post in the same channel is a carrier-root mismatch**. Same workspace and channel do not
+make two different parent timestamps the same carrier, and a worker cannot create/move its own carrier
+by posting a new top-level ACK. Treat such a post as transport evidence to reconcile, not as a valid
+reciprocal edge for the assigned child.
+
+### 1.2 New-child origination and unconsumed delivery
+
+A `DIRECT_TARGETED — NEW CHILD` buried reply under an unrelated parent/program/previous-child root
+cannot by itself originate a new independent child and cannot by itself become that child's
+receiver-assignment event. It may carry evidence, an already-authorized child return, or a continuation
+for that existing child, but it never turns the enclosing root into a new child commission.
+
+A new independent Slack-only child may originate only through a Sol-authored top-level child commission
+root, an eligible command-create event, deliberate current live delivery into the actual provider
+interaction, or a production-proven exact native wake/resume path that binds that child to an exact root.
+These are origin/assignment edges, not a second lifecycle, router, or Slack command bus.
+
+DELIVERY_SENT or a Slack mention without a valid receiver PICKUP_ACK is DELIVERY_UNCONSUMED / PRE_START
+and must not be projected as active, STARTED, executing, waiting-on-worker, or watcher-consumed.
+PICKUP_ACK and START are separate edges. Executive OS remains the lifecycle owner: a delivery, pickup,
+watcher receipt, or this procedure does not create a Job, Attempt, or Worker state.
+
 ## 2. Mandatory Sol edge after every worker return
 
 After every worker/COO `BLOCKED`, `DECISION_REQUEST`, or `RESULT`, Sol must emit exactly one explicit state in the same lawful carrier/thread.
@@ -164,6 +194,88 @@ Those source lifetimes are not the resource lifetime.
 
 This is resource/attention discipline only. It creates no watcher registry, source database, seat lifecycle, queue or authority owner.
 
+### 3.6 Source-writer stickiness and remote-complete terminality
+
+A Source Continuity receipt reports source identity; it does not replace dialogue or writer authority.
+`CHECKPOINT_VERIFIED is never a terminal, retry, transfer, or writer-release edge`. A checkpoint may
+truthfully coexist with in-scope dirt, unpushed commits, or an open known effect when the pure verifier
+permits it; the already-`START`ed source writer remains sticky to the same operation/carrier/runtime.
+`EFFECT_UNKNOWN remains exact-session sticky` and must reconcile before any receiver, retry, failover,
+or release-maintainer transition.
+
+`REMOTE_COMPLETE_VERIFIED` is stronger source evidence, but the builder is not terminal merely because
+local and remote source now match. The mandatory ordering is:
+
+```text
+REMOTE_COMPLETE_VERIFIED
+-> SOL_ACCEPTED_BUILDER_RESULT
+-> TERMINAL_BUILDER_STOP
+-> EXACT_CHILD_SOURCE_REMOVAL_OR_WATCH_STOP_FAILED
+-> BRANCH_WRITER_RELEASED
+```
+
+Only after `BRANCH_WRITER_RELEASED` may a separately authorized release owner enter through the fresh
+maintenance-only release operation defined by `REVIEW_RETURN.md`. That release operation remains on
+the same PR/branch, cannot continue the original builder child, and gains no permission to edit
+feature semantics, retry an effect, change receiver identity, mark Ready, merge, deploy, or claim
+production merely from a Source Continuity receipt.
+
+### 3.7 Technical writer gate and procedural release
+
+`BRANCH_WRITER_RELEASED is a procedural custody edge`. It closes the builder's modifying responsibility
+under the §3.6 ordering, but it does not by itself revoke the stale writer's Git credentials or ref
+authority: after a fetch, any account with push permission can still fast-forward the operation branch
+unless GitHub-side enforcement mediates updates. Detection of such a stale write is the release
+maintainer's fresh exact-head `REMOTE_COMPLETE_VERIFIED` re-proof (a moved head/tree fails closed);
+prevention is the technical writer gate.
+
+The technical writer gate is read, never asserted. `scripts/source_continuity.py writer-gate` recomputes
+it from exact GitHub readback of the branch's active rules and the rulesets that supply them, and emits
+one evidence-only receipt (`mastermind.source_continuity_writer_gate/v1`):
+
+- `TECHNICAL_WRITER_GATE_ACTIVE` — active `update`, `deletion` and `non_fast_forward` rules cover the
+  branch, branch `creation` is not restricted, every additional applicable mutation rule (including
+  `lock_branch`) retains the same expected-head mediation path, every enforcing ruleset is `active`,
+  and the complete effective bypass set is exactly the one accepted source-writer integration in
+  `always` mode. The same integration in `pull_request` mode is not equivalent. GitHub's valid
+  `exempt` mode is evidence, but any `exempt` actor widens the effective bypass set.
+- `TECHNICAL_WRITER_GATE_UNAVAILABLE` — any readable configuration short of that, naming every defect
+  (`RULES_ABSENT`, `UPDATE_RULE_MISSING`, `DELETION_RULE_MISSING`, `NON_FAST_FORWARD_RULE_MISSING`,
+  `CREATION_RESTRICTED`, `ENFORCEMENT_NOT_ACTIVE`, `BYPASS_WIDENED`, `UNKNOWN_APPLICABLE_RULE`,
+  `OWNER_INTEGRATION_ABSENT`, `LEGACY_PROTECTION_PRESENT`). Unknown applicable branch-rule types are
+  retained in the receipt and fail closed; the adapter must never filter them out merely because the
+  current classifier does not yet know their semantics.
+- a fixed refusal when the readback is invalid, incomplete, mismatched, or moved during the proof. A
+  refusal is never `ACTIVE`.
+
+Applicability is closed by exclusion, never by enumeration. Every active branch rule is applicable
+except the inert set `merge_queue`, `branch_name_pattern` and `tag_name_pattern`, which govern ref
+creation/renaming or how pull requests merge into the branch and cannot block a direct fast-forward
+ref update; the receipt's `rule_types` is that applicable census. Of the applicable rules, only
+`creation`, `deletion` and `non_fast_forward` need no accepted-integration bypass, because a
+tree-preserving fence commit creates no ref, deletes none and rewrites no history. Every other
+applicable rule — `lock_branch`, `pull_request`, `required_signatures`, `required_status_checks`,
+content and pattern restrictions, and any type this verifier does not yet know — must leave the
+accepted integration an executable expected-head path, or the gate is `UNAVAILABLE`.
+
+Classic branch protection is a second enforcement layer, read separately. GitHub enforces branch
+protections and rulesets alongside one another, and the
+branch summary `protected` flag is not a classic-protection observation — it is true for a
+ruleset-only branch as well. The gate therefore reads the branch's own classic protection endpoint,
+and `legacy_branch_protected` on the receipt is that reading alone. Because a classic layer can
+independently require pull requests or status checks, restrict push access to named actors, or lock
+the ref, V1 requires `no concurrent classic branch protection` for `ACTIVE`: any present layer is
+`LEGACY_PROTECTION_PRESENT` and `UNAVAILABLE`, whatever the rulesets say. Absence must come from an
+actual absent readback; an unreadable, malformed or moved one is a refusal and is never converted to
+absence. A later version may model the complete classic configuration and prove the accepted
+integration retains the exact expected-head path; until then the conservative reading stands.
+
+Neither state changes the §3.6 ordering or any fence: `EFFECT_UNKNOWN remains exact-session sticky`,
+local dirt and unpushed commits remain nontransferable, and the receipt authorizes no release, fence
+commit, retry, merge, or receiver transfer. While the gate is `UNAVAILABLE`,
+checkpoint abandonment after writer loss is prohibited (RCH-1A); only the clean `REMOTE_COMPLETE_VERIFIED`
+release of §3.6 remains available, and its release maintainer must record the gate state it observed.
+
 ## 4. Critical anti-pattern
 
 Forbidden:
@@ -227,6 +339,10 @@ Independent child operation B requires, under the currently accepted carrier voc
 
 An aggregate permanent seat/principal watcher resource may be reused as the **resource** for B if current law permits it, but an old child A source, old thread state, provider session, worker seat or prior STOP never implicitly authorizes B.
 
+A receiver assignment is exhausted with the child it assigned. General or standing program intent may
+keep Sol authorized to advance the parent program, but it does not let the worker self-mint child B or
+reuse child A's assignment. Child B needs the explicit fresh commission/delivery/placement edge above.
+
 Where the current machine schema has not yet implemented a distinct typed `START`, the human/session procedure must still keep pickup acknowledgement and actual execution start conceptually separate; do not claim a runtime `START` receipt exists when it does not.
 
 ## 8. Universal session-close checklist
@@ -260,6 +376,8 @@ The 2026-08-29 Codex fleet incident added a third failure class: native Codex ta
 
 Independent adversarial review of that repair exposed a fourth incident-causal defect: a combined Codex heartbeat serving a permanent seat inbox plus child sources was paused wholesale when one child reached terminal STOP. That conflated child-source lifetime with aggregate watcher-resource lifetime and caused a later valid Exec Ops directive to go unseen. The repair is equally explicit: child STOP removes the child source; it does not terminate the seat/principal watcher resource or sibling sources.
 
+The 2026-09-02 Fable carrier incident added a fifth defect: a worker interpreted an older standing Chairman program instruction as a surviving receiver assignment after terminal `SOL ACCEPTED / STOP`, self-minted a successor child, and posted its `PICKUP_ACK` as a new top-level message in the same Slack channel. The repair is now explicit: receiver assignment is child-local, terminal STOP consumes it, and Slack carrier identity includes the exact thread root rather than channel membership alone.
+
 Universal repair:
 
-> **Every reciprocal dialogue loop gets an explicit terminal edge, every promised continuation path must actually be armed, watcher prompts never outrank later valid carrier edges, qualifying events re-enter normal procedure, and child-source termination never silently kills an independently valid aggregate seat/principal watcher resource.**
+> **Every reciprocal dialogue loop gets an explicit terminal edge, every promised continuation path must actually be armed, watcher prompts never outrank later valid carrier edges, qualifying events re-enter normal procedure, child-source termination never silently kills an independently valid aggregate seat/principal watcher resource, terminal STOP never self-authorizes a successor child, and Slack reciprocal edges remain under the exact assigned thread root.**

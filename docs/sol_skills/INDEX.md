@@ -56,6 +56,20 @@ supply current intent at the human/session procedure layer. Do not require a red
 invent an impersonation theory unless current accepted source law requires another identity gate or
 there is actual conflicting evidence. All other modification gates still apply.
 
+### Child-origin and delivery-consumption boundary
+
+A `DIRECT_TARGETED — NEW CHILD` reply buried under an unrelated parent/program/previous-child root
+cannot by itself originate a new independent child or become that child's receiver-assignment event.
+The current protected dialogue law permits a new child only through its own Sol-authored top-level
+child commission root, an eligible command-create event, deliberate current live delivery into the
+actual provider interaction, or a production-proven exact native wake/resume path that binds that child
+to an exact root. A standing program, historical thread, or buried reply never makes that buried reply
+a successor-child assignment.
+
+DELIVERY_SENT or a Slack mention without a valid receiver PICKUP_ACK is DELIVERY_UNCONSUMED / PRE_START
+and must not be projected as active, STARTED, executing, waiting-on-worker, or watcher-consumed.
+Receipt and execution remain separate under the dialogue law; Executive OS remains the lifecycle owner.
+
 ## Capability-state vocabulary
 
 Use the company ledger vocabulary precisely:
@@ -71,6 +85,19 @@ Do not call architecture/docs “built,” a merged implementation “proven liv
 ### `COLD_START.md`
 Use when opening/recovering a program, workstream, unfamiliar task, or fresh CEO session.
 Produces a current-state model, disagreement ledger and exact next action.
+
+### `ACTIVE_EXECUTION.md`
+Mandatory after current-state recovery for substantial continuing or modifying CEO work in the
+active session. It keeps Sol on the highest-leverage unblocked critical-path dependency, prevents
+status/artifact substitution and repeated tool rediscovery, and applies the final-response gate.
+
+### `WEB_CEO_DELEGATION.md`
+Mandatory companion to `ACTIVE_EXECUTION.md` for substantial Web CEO work that requires
+principal-duty selection, delegation economics, worker packets, capacity-aware routing, or
+evidence/continuity handling. Load it from the same pinned Skillpack revision. ACTIVE_EXECUTION
+remains the sole active-turn, no-delta and finalization owner; this companion does not select a
+provider, account, credential, host, model setting, or reasoning mode, and grants no lifecycle,
+admission, retry, transfer, effect, or production authority.
 
 ### `REVIEW_RETURN.md`
 Use when a worker/Fable/Claude/Codex/Grok session returns code, a PR, research or a claimed
@@ -180,6 +207,19 @@ specific law.
     Codex, Claude, Fable, Grok or another surface is exempt from current protected placement procedure
     because of historical account behavior or prior `PRECOMMISSION` / `OPEN_PICKUP` /
     `CHAIRMAN_SELECTS` practice.
+21. Receiver assignment is child-specific. A terminal STOP consumes that child assignment. A
+    standing program instruction does not self-assign a successor child; each independent successor
+    requires a fresh Sol/Chairman delivery or canonical placement edge plus fresh carrier/pickup under
+    current law.
+22. For Slack reciprocal dialogue, the exact carrier includes the workspace, conversation/channel,
+    and thread-root timestamp. A same-channel top-level post is not the same carrier. When a Sol or
+    Chairman commission is the thread parent, pickup/start/return/ruling/STOP edges stay under that
+    exact parent unless current canonical transport law explicitly establishes a different carrier.
+23. Forward execution. After current-source recovery, keep advancing the highest-leverage unblocked
+    dependency in the Chairman-authorized scope. A genuine blocker freezes that lane, not the whole
+    turn, while another useful independent lane remains. Supporting artifacts do not substitute for
+    capability advancement. Do not finalize while the truthful state is `MORE_WORK_EXISTS`; durable
+    work may outlive the turn only through a production-proven external owner with a real return path.
 
 ## Modification handshake
 

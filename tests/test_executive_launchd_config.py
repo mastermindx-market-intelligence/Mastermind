@@ -111,6 +111,11 @@ def test_launchd_templates_are_two_non_root_persistent_system_jobs() -> None:
         assert set(value["EnvironmentVariables"]) == expected_environment
 
     _assert_private_unix_socket(control["Sockets"]["Operator"], mode=0o660)
+    _assert_private_unix_socket(
+        control["Sockets"]["DialogueObservation"], mode=0o660
+    )
+    assert control["Sockets"]["DialogueObservation"]["SockPathOwner"] == 450
+    assert control["Sockets"]["DialogueObservation"]["SockPathGroup"] == 457
     _assert_private_unix_socket(worker["Sockets"]["WorkerBroker"], mode=0o600)
     assert worker["Sockets"]["WorkerBroker"]["SockPathOwner"] == 450
     assert worker["Sockets"]["WorkerBroker"]["SockPathGroup"] == 450
@@ -199,6 +204,23 @@ def test_generated_launchd_plists_pass_plutil_lint(tmp_path: Path) -> None:
     plutil("-replace", "Sockets.Operator.SockPathOwner", "-integer", "450", str(control))
     plutil("-replace", "Sockets.Operator.SockPathGroup", "-integer", "453", str(control))
     plutil(
+        "-replace", "Sockets.DialogueObservation.SockPathName", "-string",
+        "/var/run/mastermind-dialogue-observation/dialogue-observation.sock",
+        str(control),
+    )
+    plutil(
+        "-replace", "Sockets.DialogueObservation.SockPathOwner", "-integer",
+        "450", str(control),
+    )
+    plutil(
+        "-replace", "Sockets.DialogueObservation.SockPathGroup", "-integer",
+        "457", str(control),
+    )
+    plutil(
+        "-replace", "Sockets.DialogueObservation.SockPathMode", "-integer",
+        "432", str(control),
+    )
+    plutil(
         "-replace", "StandardOutPath", "-string",
         "/var/log/mastermind-executive/control/stdout.log", str(control),
     )
@@ -253,6 +275,24 @@ def test_generated_launchd_plists_pass_plutil_lint(tmp_path: Path) -> None:
         text=True,
     )
     assert completed.returncode == 0, completed.stdout + completed.stderr
+
+    rendered_control = plistlib.loads(control.read_bytes())
+    assert set(rendered_control["Sockets"]) == {
+        "Operator",
+        "CeoIngress",
+        "DialogueObservation",
+    }
+    assert rendered_control["Sockets"]["DialogueObservation"] == {
+        "SockPathName": (
+            "/var/run/mastermind-dialogue-observation/"
+            "dialogue-observation.sock"
+        ),
+        "SockType": "stream",
+        "SockPassive": True,
+        "SockPathOwner": 450,
+        "SockPathGroup": 457,
+        "SockPathMode": 0o660,
+    }
 
     for rendered_path in (control, worker):
         with rendered_path.open("rb") as handle:
@@ -564,16 +604,38 @@ def test_control_wrapper_post_exec_argv_contains_no_canary_name(
 def test_installer_replaces_whole_program_argument_arrays() -> None:
     install = (OPS / "install.sh").read_text(encoding="utf-8")
     assert "render_launchd_program_arguments.py" in install
-    assert install.count("render_launchd_program_arguments.py") == 2
+    # DR-B1 added backup and the privileged-action wave adds one socket-activated
+    # root broker. All four still replace ProgramArguments wholesale via the
+    # reviewed renderer, never piecemeal via `plutil -replace ProgramArguments.N`.
+    assert install.count("render_launchd_program_arguments.py") == 4
     assert "plutil -replace ProgramArguments." not in install
     assert '"$CONTROL_PLIST" --' in install
     assert '"$WORKER_PLIST" --' in install
+    assert '"$BACKUP_PLIST" --' in install
+    assert '"$PRIVILEGED_PLIST" --' in install
     assert 'scripts/executive_os_phase1c_worker.py"' in install
+    assert 'ops/executive_os/run_nightly_backup.sh"' in install
     assert 'plutil -replace UserName -string "$WORKER_USER" "$WORKER_PLIST"' in install
     assert 'plutil -replace GroupName -string "$WORKER_GROUP" "$WORKER_PLIST"' in install
+    assert 'plutil -replace UserName -string "$CONTROL_USER" "$BACKUP_PLIST"' in install
     assert 'WORKER_SUPPLEMENTARY_GIDS' in install
     assert 'worker account has an unreviewed macOS directory group vector' in install
     assert 'verify_reviewed_system_group com.apple.access_disabled 396' in install
+
+
+def test_installer_ships_the_backup_daemon_disabled_like_the_others() -> None:
+    install = (OPS / "install.sh").read_text(encoding="utf-8")
+    assert 'BACKUP_LABEL="com.mastermind.executive.backup"' in install
+    for line in (
+        '/bin/launchctl disable "system/$BACKUP_LABEL"',
+        '/bin/launchctl bootout "system/$BACKUP_LABEL"',
+    ):
+        assert line in install
+    assert 'if /bin/launchctl print "system/$BACKUP_LABEL" >/dev/null 2>&1; then' in install
+    assert (
+        '/usr/bin/install -o root -g wheel -m 0644 "$RELEASE_ROOT/ops/executive_os/$BACKUP_LABEL.plist.template" "$BACKUP_PLIST"'
+        in install
+    )
 
 
 def test_worker_config_requires_sorted_exact_ambient_group_allowlist(
@@ -1477,4 +1539,919 @@ def test_installer_stops_old_daemons_before_first_release_or_policy_mutation() -
     assert stop < control_absent < worker_absent < archive < config_write < plist_install
     assert "trap leave_installed_services_stopped EXIT" in source
     tail_after_plists = source[plist_install:]
-    assert '/bin/launchctl bootstrap' not in tail_after_plists
+    # Normal Executive daemons stay inert. The only bootstrap is the explicitly
+    # armed privileged broker, after exact-release verification.
+    assert '/bin/launchctl bootstrap system "$CONTROL_PLIST"' not in tail_after_plists
+    assert '/bin/launchctl bootstrap system "$WORKER_PLIST"' not in tail_after_plists
+    assert '/bin/launchctl bootstrap system "$BACKUP_PLIST"' not in tail_after_plists
+    assert tail_after_plists.count('/bin/launchctl bootstrap') == 1
+    arm = tail_after_plists.index('if [ "$ARM_PRIVILEGED_BROKER" = "1" ]; then')
+    bootstrap = tail_after_plists.index('/bin/launchctl bootstrap system "$PRIVILEGED_PLIST"')
+    manifest_verify = tail_after_plists.rindex('release_manifest.py" verify', 0, arm)
+    assert manifest_verify < arm < bootstrap
+
+
+@pytest.mark.skipif(sys.platform != 'darwin', reason='macOS plutil installer rendering')
+def test_installer_renders_every_control_socket_path(tmp_path):
+    """Exercise the installer's real socket substitutions without root or launchd."""
+    import shlex
+
+    destination = tmp_path / 'control.plist'
+    destination.write_bytes(CONTROL.read_bytes())
+    replacements = {
+        '$CONTROL_PLIST': str(destination),
+        '$CONTROL_UID': '450',
+        '$OPS_GID': '453',
+    }
+    for line in (OPS / 'install.sh').read_text().splitlines():
+        if (line.startswith('/usr/bin/plutil -replace Sockets.')
+                and line.endswith('"$CONTROL_PLIST"')):
+            argv = [replacements.get(part, part) for part in shlex.split(line)]
+            subprocess.run(argv, check=True, capture_output=True, text=True)
+
+    sockets = plistlib.loads(destination.read_bytes())['Sockets']
+    assert sockets['CeoIngress'] == {
+        'SockPathName': '/var/run/mastermind-executive/ceo-ingress.sock',
+        'SockType': 'stream', 'SockPassive': True,
+        'SockPathOwner': 450, 'SockPathGroup': 452, 'SockPathMode': 0o660,
+    }
+    assert all(Path(row['SockPathName']).is_absolute() for row in sockets.values())
+    assert all('__' not in row['SockPathName'] for row in sockets.values())
+def test_privileged_broker_launchd_template_is_root_socket_activated_and_closed() -> None:
+    path = OPS / "com.mastermind.executive.privileged.plist.template"
+    value = _plist(path)
+    assert value["Label"] == "com.mastermind.executive.privileged"
+    assert value["UserName"] == "root"
+    assert value["GroupName"] == "wheel"
+    assert "RunAtLoad" not in value
+    assert "KeepAlive" not in value
+    assert value["ProcessType"] == "Background"
+    assert value["Umask"] == 0o77
+    assert value["ProgramArguments"] == [
+        "__PYTHON_BINARY__",
+        "-I",
+        "-S",
+        "-B",
+        "__PRIVILEGED_ENTRYPOINT__",
+        "serve",
+        "--config",
+        "__PRIVILEGED_CONFIG__",
+    ]
+    assert not any(
+        item in {"/bin/sh", "/bin/bash", "/usr/bin/env"}
+        for item in value["ProgramArguments"]
+    )
+    assert set(value["Sockets"]) == {"PrivilegedActions"}
+    _assert_private_unix_socket(value["Sockets"]["PrivilegedActions"], mode=0o660)
+    assert value["Sockets"]["PrivilegedActions"]["SockPathOwner"] == 450
+    assert value["Sockets"]["PrivilegedActions"]["SockPathGroup"] == 453
+    assert set(value["EnvironmentVariables"]) == {
+        "HOME", "LANG", "LC_ALL", "NO_COLOR", "PATH", "PYTHONUNBUFFERED", "TZ"
+    }
+    assert not any(
+        token in key.upper()
+        for key in value["EnvironmentVariables"]
+        for token in ("KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL")
+    )
+
+
+def test_installer_privileged_broker_is_explicitly_armed_and_never_edits_sudoers() -> None:
+    text = (OPS / "install.sh").read_text(encoding="utf-8")
+    assert 'PRIVILEGED_LABEL="com.mastermind.executive.privileged"' in text
+    assert 'ARM_PRIVILEGED_BROKER="0"' in text
+    assert '--arm-privileged-broker) ARM_PRIVILEGED_BROKER="1"; shift ;;' in text
+    assert 'PRIVILEGED_CONFIG="$SYSTEM_ROOT/config/privileged-broker.json"' in text
+    assert 'PRIVILEGED_RECEIPT_ROOT="$RUNTIME_ROOT/privileged-actions/receipts"' in text
+    assert 'PRIVILEGED_SOCKET="/var/run/mastermind-executive/privileged.sock"' in text
+    assert '/etc/sudoers' not in text
+    assert 'NOPASSWD' not in text
+    arm = text.index('if [ "$ARM_PRIVILEGED_BROKER" = "1" ]; then')
+    enable = text.index('/bin/launchctl enable "system/$PRIVILEGED_LABEL"', arm)
+    bootstrap = text.index('/bin/launchctl bootstrap system "$PRIVILEGED_PLIST"', enable)
+    live = text.index('PRIVILEGED_BROKER_LIVE="1"', bootstrap)
+    assert arm < enable < bootstrap < live
+    assert '/usr/bin/stat -f' in text[live - 1800 : live]
+
+
+def test_failed_privileged_arm_cleanup_proves_the_root_daemon_is_absent() -> None:
+    text = (OPS / "install.sh").read_text(encoding="utf-8")
+    start = text.index("leave_installed_services_stopped() {")
+    end = text.index("trap leave_installed_services_stopped EXIT", start)
+    cleanup = text[start:end]
+    assert 'if /bin/launchctl print "system/$PRIVILEGED_LABEL" >/dev/null 2>&1; then' in cleanup
+    assert "privileged LaunchDaemon remained loaded after cleanup" in cleanup
+
+
+def test_privileged_broker_budget_exceeds_provider_inference_canary_budget() -> None:
+    install = (OPS / "install.sh").read_text(encoding="utf-8")
+    canary = (OPS / "provider_inference_canary.py").read_text(encoding="utf-8")
+    assert '"timeout_seconds": 600' in install
+    assert 'timeout_seconds: float = 180.0' in canary
+
+
+def test_privileged_client_and_broker_entrypoints_are_in_release_manifest_surface() -> None:
+    install = (OPS / "install.sh").read_text(encoding="utf-8")
+    for relative in (
+        "scripts/executive_os_privileged_broker.py",
+        "scripts/mmx_admin.py",
+        "control_plane/executive_privileged_action.py",
+        "control_plane/executive_privileged_broker.py",
+    ):
+        assert relative in install or "release_manifest.py" in install
+
+
+def test_privileged_broker_cli_rejects_unknown_command_without_traceback(tmp_path: Path) -> None:
+    target = ROOT / "scripts" / "executive_os_privileged_broker.py"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-S",
+            "-B",
+            str(target),
+            "--definitely-not-a-real-subcommand",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 2
+    assert "arguments are required: command" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+# === W1H3F R13: wrapper-owned live-attestation validator (Sol R80, PR #677) ===
+#
+# The wrapper writes the document; the same wrapper now owns the validator
+# that H3 consumes.  ``ATTESTATION_FIELDS`` and ``PROCESS_IDENTITY_FIELDS``
+# are the closed field sets the wrapper writes and that the validator
+# enforces; ``SCHEMA_VERSION`` is the wrapper's own constant.  H3 must NOT
+# restate any of them.
+
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class _FakeIdentity:
+    pgid: int
+    session_id: int
+    start_identity: str
+    effective_uid: int
+    effective_gid: int
+    real_uid: int
+    real_gid: int
+
+
+class _FakeProcessInspector:
+    """Stand-in for ``control_plane.codex_worker.ProcessInspector``.
+
+    The validator's only injection point; tests pin the live observation
+    (``boot_session_id`` and ``inspect(pid)``) so the fresh-observation
+    refusal path is deterministic on Linux.
+    """
+
+    def __init__(self, *, boot_id: str = "boot-aaaa", identity: _FakeIdentity | None = None):
+        self.boot_id = boot_id
+        self.identity = identity or _FakeIdentity(
+            pgid=4242,
+            session_id=4242,
+            start_identity="1723500000.000000",
+            effective_uid=501,
+            effective_gid=20,
+            real_uid=501,
+            real_gid=20,
+        )
+        self.calls: list[int] = []
+
+    def boot_session_id(self) -> str:
+        return self.boot_id
+
+    def inspect(self, pid: int) -> _FakeIdentity:
+        self.calls.append(pid)
+        return self.identity
+
+
+_EXPECTED_CONFIG_SHA = "a" * 64
+_EXPECTED_RELEASE_SHA = "b" * 40
+_EXPECTED_PID = 4242
+
+
+def _good_document() -> dict[str, object]:
+    """A document the validator accepts, byte-for-byte what the producer writes."""
+
+    return {
+        "schema_version": "mastermind.executive_control_environment_attestation/v1",
+        "observed_at": "2026-09-16T12:00:00+00:00",
+        "process_identity": {
+            "pid": _EXPECTED_PID,
+            "pgid": 4242,
+            "session_id": 4242,
+            "start_identity": "1723500000.000000",
+            "boot_id": "boot-aaaa",
+            "effective_uid": 501,
+            "effective_gid": 20,
+            "real_uid": 501,
+            "real_gid": 20,
+        },
+        "config_sha256": _EXPECTED_CONFIG_SHA,
+        "release_manifest_sha256": "c" * 64,
+        "release_commit_sha": _EXPECTED_RELEASE_SHA,
+        "python_executable_path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "python_executable_sha256": "d" * 64,
+        "sentinel_name_sha256": "e" * 64,
+        "sentinel_value_sha256": "f" * 64,
+        "sentinel_present": True,
+    }
+
+
+def test_attestation_validator_accepts_the_producers_own_output():
+    """D10 (positive, wrapper-self-validation): the wrapper writes what it validates."""
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    inspector = _FakeProcessInspector()
+    document = _good_document()
+
+    assert (
+        wrapper.validate_control_environment_attestation(
+            document,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=inspector,
+        )
+        == document
+    )
+    # The validator really did consult the inspector (fresh-observation).
+    assert inspector.calls == [_EXPECTED_PID]
+
+
+def test_attestation_validator_refuses_a_stale_attested_config_digest():
+    """D1: config_sha256 in the document does not match the disk digest."""
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    document = _good_document()
+    document["config_sha256"] = "9" * 64
+
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            document,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=_FakeProcessInspector(),
+        )
+
+
+def test_attestation_validator_refuses_a_stale_attested_release_sha():
+    """D2: release_commit_sha in the document does not match the installed SHA."""
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    document = _good_document()
+    document["release_commit_sha"] = "z" * 40
+
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            document,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=_FakeProcessInspector(),
+        )
+
+
+def test_attestation_validator_refuses_a_stale_start_identity_with_the_same_pid():
+    """D3a: same PID, different start_identity -> fresh observation refuses."""
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    document = _good_document()
+    # Pin a stale start_identity the LIVE process no longer carries.
+    document["process_identity"]["start_identity"] = "1723499999.999999"
+    inspector = _FakeProcessInspector()
+
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            document,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=inspector,
+        )
+
+
+def test_attestation_validator_refuses_a_stale_boot_identity_with_the_same_pid():
+    """D3b: same PID, different boot_id -> fresh observation refuses."""
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    document = _good_document()
+    document["process_identity"]["boot_id"] = "boot-stale-bbbb"
+    inspector = _FakeProcessInspector(boot_id="boot-live-cccc")
+
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            document,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=inspector,
+        )
+
+
+def test_attestation_validator_refuses_a_status_pid_that_differs_from_the_attested_pid():
+    """D4a: status ``pid`` != document ``pid`` refuses."""
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    document = _good_document()
+
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            document,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID + 1,
+            inspector=_FakeProcessInspector(),
+        )
+
+
+@pytest.mark.parametrize("bad_pid", [True, False, "4242", 1.5, None, 0, -1, 2**31])
+def test_attestation_validator_refuses_a_non_int_or_out_of_range_pid(bad_pid):
+    """D4b: non-int / bool / out-of-range status PID refuses."""
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    document = _good_document()
+
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            document,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=bad_pid,  # type: ignore[arg-type]
+            inspector=_FakeProcessInspector(),
+        )
+
+
+def test_attestation_validator_refuses_malformed_top_level_fields():
+    """D6a: extra / missing / renamed top-level fields refuse."""
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    base = _good_document()
+
+    # Missing field
+    missing = {k: v for k, v in base.items() if k != "sentinel_present"}
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            missing,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=_FakeProcessInspector(),
+        )
+
+    # Extra field
+    extra = dict(base)
+    extra["extra_top"] = "nope"
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            extra,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=_FakeProcessInspector(),
+        )
+
+    # Renamed field
+    renamed = dict(base)
+    renamed["schemaVersion"] = renamed.pop("schema_version")
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            renamed,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=_FakeProcessInspector(),
+        )
+
+    # Wrong schema_version
+    wrong_schema = dict(base)
+    wrong_schema["schema_version"] = "wrong"
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            wrong_schema,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=_FakeProcessInspector(),
+        )
+
+
+def test_attestation_validator_refuses_non_utc_or_unparseable_observed_at():
+    """D6b: observed_at must be an ISO-8601 UTC string."""
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    base = _good_document()
+
+    for bad in ("2026-09-16 12:00:00", "not-a-date", "", "2026-09-16T12:00:00"):
+        document = dict(base)
+        document["observed_at"] = bad
+        with pytest.raises(wrapper.ControlWrapperError):
+            wrapper.validate_control_environment_attestation(
+                document,
+                expected_config_sha256=_EXPECTED_CONFIG_SHA,
+                expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+                expected_pid=_EXPECTED_PID,
+                inspector=_FakeProcessInspector(),
+            )
+
+
+def test_attestation_validator_refuses_malformed_process_identity_fields():
+    """D6c: extra / missing / renamed process_identity fields refuse."""
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    base = _good_document()
+
+    # Missing
+    missing = dict(base)
+    missing["process_identity"] = {k: v for k, v in base["process_identity"].items() if k != "boot_id"}
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            missing,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=_FakeProcessInspector(),
+        )
+
+    # Extra
+    extra = dict(base)
+    extra["process_identity"] = dict(base["process_identity"], extra_field="x")
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            extra,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=_FakeProcessInspector(),
+        )
+
+    # Renamed
+    renamed = dict(base)
+    inner = dict(base["process_identity"])
+    inner["process_id"] = inner.pop("pid")
+    renamed["process_identity"] = inner
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            renamed,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=_FakeProcessInspector(),
+        )
+
+
+def test_attestation_validator_refuses_sentinel_present_when_not_exactly_true():
+    """D6d: ``sentinel_present`` must be the literal ``True``."""
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    base = _good_document()
+    for bad in (1, "true", 1.0, None, False):
+        document = dict(base)
+        document["sentinel_present"] = bad
+        with pytest.raises(wrapper.ControlWrapperError):
+            wrapper.validate_control_environment_attestation(
+                document,
+                expected_config_sha256=_EXPECTED_CONFIG_SHA,
+                expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+                expected_pid=_EXPECTED_PID,
+                inspector=_FakeProcessInspector(),
+            )
+
+
+def test_attestation_validator_refuses_non_dict_documents():
+    """D6e: the validator refuses non-dict, list, int, None, str inputs."""
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    for bad in ([], "string", 1, 1.5, None):
+        with pytest.raises(wrapper.ControlWrapperError):
+            wrapper.validate_control_environment_attestation(
+                bad,
+                expected_config_sha256=_EXPECTED_CONFIG_SHA,
+                expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+                expected_pid=_EXPECTED_PID,
+                inspector=_FakeProcessInspector(),
+            )
+
+
+def test_attestation_validator_is_import_safe_and_pure():
+    """Importing the wrapper does not execve / fork / touch the FS."""
+
+    import importlib
+
+    import scripts.executive_os_phase1c_control_wrapper as wrapper_module
+
+    module = importlib.reload(wrapper_module)
+    assert module.validate_control_environment_attestation.__module__ == (
+        "scripts.executive_os_phase1c_control_wrapper"
+    )
+    # Validator signature is pure: only the document, expected digests, expected
+    # PID, and inspector are parameters; no filesystem, no execve.
+    import inspect
+
+    signature = inspect.signature(module.validate_control_environment_attestation)
+    assert set(signature.parameters) == {
+        "document",
+        "expected_config_sha256",
+        "expected_release_commit_sha",
+        "expected_pid",
+        "inspector",
+    }
+    assert all(
+        parameter.default is inspect.Parameter.empty
+        for parameter in signature.parameters.values()
+    )
+
+
+def test_attestation_validator_is_owned_only_by_the_wrapper_module():
+    """H3 must NOT restate the closed field sets; they live in the wrapper."""
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    assert isinstance(wrapper.ATTESTATION_FIELDS, frozenset)
+    assert isinstance(wrapper.PROCESS_IDENTITY_FIELDS, frozenset)
+    assert (
+        wrapper.ATTESTATION_FIELDS
+        == frozenset(
+            {
+                "schema_version",
+                "observed_at",
+                "process_identity",
+                "config_sha256",
+                "release_manifest_sha256",
+                "release_commit_sha",
+                "python_executable_path",
+                "python_executable_sha256",
+                "sentinel_name_sha256",
+                "sentinel_value_sha256",
+                "sentinel_present",
+            }
+        )
+    )
+    assert wrapper.PROCESS_IDENTITY_FIELDS == frozenset(
+        {
+            "pid",
+            "pgid",
+            "session_id",
+            "start_identity",
+            "boot_id",
+            "effective_uid",
+            "effective_gid",
+            "real_uid",
+            "real_gid",
+        }
+    )
+
+
+def test_attestation_validator_treats_inspector_exceptions_as_refusals():
+    """The fresh-observation call is the ONLY injection point; an exception refuses."""
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    class _BoomInspector(_FakeProcessInspector):
+        def inspect(self, pid):  # type: ignore[override]
+            raise RuntimeError("inspector failure")
+
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            _good_document(),
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=_BoomInspector(),
+        )
+
+
+def _producer_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
+    """Config / release / attestation triple the real producer accepts."""
+
+    release = tmp_path / "release"
+    release.mkdir()
+    (release / ".executive-release-manifest.json").write_text(
+        json.dumps({"commit_sha": _EXPECTED_RELEASE_SHA}), encoding="utf-8"
+    )
+    config = tmp_path / "control.json"
+    config.write_text(json.dumps({"control_uid": os.geteuid()}), encoding="utf-8")
+    tmp_path.chmod(0o700)
+    return config, release, tmp_path / "attestation.json"
+
+
+def test_producer_refuses_to_write_a_document_its_own_validator_rejects(
+    monkeypatch, tmp_path
+) -> None:
+    """Sol R80 item 2 (WRITER side): ``attest_current_service_environment`` validates
+    the document it constructs THROUGH the wrapper-owned validator BEFORE the atomic
+    write, and a document that fails that validator is NEVER written.
+
+    This is the discriminator for the producer. ``..._accepts_the_producers_own_output``
+    validates a SYNTHETIC document, so it stays green even when the producer never calls
+    the validator at all -- bypassing the call is a mutation that must turn THIS test red.
+    """
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    config, release, target = _producer_fixture(tmp_path)
+    inspector = _FakeProcessInspector()
+    monkeypatch.setattr(wrapper, "ProcessInspector", lambda: inspector)
+
+    seen: list[dict[str, object]] = []
+
+    def refusing(document, **kwargs):
+        seen.append({"document": document, **kwargs})
+        raise wrapper.ControlWrapperError("fixture refusal")
+
+    monkeypatch.setattr(wrapper, "validate_control_environment_attestation", refusing)
+
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.attest_current_service_environment(
+            config_path=config,
+            attestation_path=target,
+            release=release,
+            sentinel="c" * 64,
+        )
+
+    # The producer consulted the ONE wrapper-owned validator, with explicit expected
+    # facts taken from current evidence -- not from the document it just built.
+    assert len(seen) == 1
+    assert seen[0]["expected_pid"] == os.getpid()
+    assert seen[0]["expected_release_commit_sha"] == _EXPECTED_RELEASE_SHA
+    assert seen[0]["expected_config_sha256"] == wrapper._sha256(config)
+    assert seen[0]["inspector"] is inspector
+    # ...and nothing reached disk.
+    assert not target.exists()
+
+
+def test_producer_output_is_written_only_after_it_passes_the_real_validator(
+    monkeypatch, tmp_path
+) -> None:
+    """Sol R80 discriminator: the wrapper producer's OWN output passes its OWN validator.
+
+    Unlike the synthetic-document positive, this drives the real writer end to end and
+    then re-validates the bytes that actually landed on disk.
+    """
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    config, release, target = _producer_fixture(tmp_path)
+    inspector = _FakeProcessInspector()
+    monkeypatch.setattr(wrapper, "ProcessInspector", lambda: inspector)
+
+    returned = wrapper.attest_current_service_environment(
+        config_path=config,
+        attestation_path=target,
+        release=release,
+        sentinel="c" * 64,
+    )
+
+    assert target.exists()
+    assert stat.S_IMODE(target.lstat().st_mode) == 0o400
+    written = json.loads(target.read_text(encoding="utf-8"))
+    assert written == returned
+    assert set(written) == wrapper.ATTESTATION_FIELDS
+    assert written["config_sha256"] == wrapper._sha256(config)
+    assert written["release_commit_sha"] == _EXPECTED_RELEASE_SHA
+    assert written["process_identity"]["pid"] == os.getpid()
+
+    # The bytes on disk validate under the same closed rules, with the same observation.
+    assert (
+        wrapper.validate_control_environment_attestation(
+            written,
+            expected_config_sha256=wrapper._sha256(config),
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=os.getpid(),
+            inspector=inspector,
+        )
+        == written
+    )
+
+
+# R13 blocking finding (W1H3F): every fact the validator re-observes through the
+# injected ProcessInspector is an authority check, so every one of them needs its
+# OWN stale-value discriminator. Before this, only ``start_identity`` and ``boot_id``
+# had one, and deleting any of the other six comparisons left both owning suites green.
+_FRESH_OBSERVATION_FACTS = frozenset(
+    {
+        "pgid",
+        "session_id",
+        "start_identity",
+        "boot_id",
+        "effective_uid",
+        "effective_gid",
+        "real_uid",
+        "real_gid",
+    }
+)
+
+
+def test_every_process_identity_fact_has_a_stale_observation_discriminator() -> None:
+    """Structural guard: the parameterization below must cover the whole closed set.
+
+    ``pid`` is excluded because it is bound by ``expected_pid`` and has its own
+    dedicated tests. If a tenth identity fact is ever added to the wrapper's closed
+    set, this test fails until a stale-observation discriminator exists for it.
+    """
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    assert set(wrapper.PROCESS_IDENTITY_FIELDS) == _FRESH_OBSERVATION_FACTS | {"pid"}
+
+
+@pytest.mark.parametrize("fact", sorted(_FRESH_OBSERVATION_FACTS))
+def test_attestation_validator_refuses_each_stale_fresh_observation_fact(fact: str) -> None:
+    """Sol R80 item 4: the attested identity must equal the FRESHLY OBSERVED identity.
+
+    One case per fact, so each individual comparison is load-bearing: removing any
+    single fact from the validator's fresh-observation comparison turns exactly this
+    test red for that fact instead of leaving the suites green.
+    """
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    document = _good_document()
+    live = document["process_identity"][fact]
+    document["process_identity"][fact] = (
+        live + 1 if isinstance(live, int) and not isinstance(live, bool) else f"{live}-stale"
+    )
+
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            document,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=_FakeProcessInspector(),
+        )
+
+
+@pytest.mark.parametrize(
+    "field,bad_value",
+    [
+        ("pgid", 4242.0),
+        ("session_id", 4242.0),
+        ("effective_uid", 501.0),
+        ("effective_gid", 20.0),
+        ("real_uid", 501.0),
+        ("real_gid", 20.0),
+        ("pgid", True),
+        ("effective_uid", -1),
+    ],
+)
+def test_attestation_validator_refuses_non_exact_identity_integer_types(
+    field, bad_value
+):
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    document = _good_document()
+    document["process_identity"][field] = bad_value
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            document,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=_FakeProcessInspector(),
+        )
+
+
+def test_attestation_validator_refuses_unicode_control_in_matching_identity_text():
+    """B2: fresh matching identity text still refuses Unicode Cc controls."""
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    unsafe_identity = "1723500000.\u0085"
+    document = _good_document()
+    document["process_identity"]["start_identity"] = unsafe_identity
+    inspector = _FakeProcessInspector(
+        identity=_FakeIdentity(
+            pgid=4242,
+            session_id=4242,
+            start_identity=unsafe_identity,
+            effective_uid=501,
+            effective_gid=20,
+            real_uid=501,
+            real_gid=20,
+        )
+    )
+
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            document,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=inspector,
+        )
+
+
+def test_attestation_validator_refuses_unicode_control_in_executable_path():
+    """B2: a canonical-looking absolute path refuses Unicode Cc controls."""
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    document = _good_document()
+    document["python_executable_path"] = "/tmp/python\u0085bin"
+
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            document,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=_FakeProcessInspector(),
+        )
+
+
+@pytest.mark.parametrize(
+    "field,bad_value",
+    [
+        ("start_identity", ""),
+        ("start_identity", "value\nsecond"),
+        ("boot_id", "value\x00suffix"),
+        ("boot_id", "x" * 257),
+        ("boot_id", 7),
+    ],
+)
+def test_attestation_validator_refuses_unsafe_identity_text(field, bad_value):
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    document = _good_document()
+    document["process_identity"][field] = bad_value
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            document,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=_FakeProcessInspector(),
+        )
+
+
+@pytest.mark.parametrize(
+    "bad_path",
+    [
+        "/tmp/\x00bad",
+        "/tmp/python\nother",
+        "/tmp/../python",
+        "/tmp//python",
+        "//tmp/python",
+        "relative/python",
+    ],
+)
+def test_attestation_validator_refuses_noncanonical_executable_paths(bad_path):
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    document = _good_document()
+    document["python_executable_path"] = bad_path
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            document,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=_FakeProcessInspector(),
+        )
+
+
+@pytest.mark.parametrize(
+    "expected,document_value",
+    [
+        ("B" * 40, "b" * 40),
+        ("b" * 39, "b" * 39),
+        ("b" * 40, "B" * 40),
+        ("b" * 40, "b" * 39),
+    ],
+)
+def test_attestation_validator_requires_exact_lowercase_commit_identity(
+    expected, document_value
+):
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    document = _good_document()
+    document["release_commit_sha"] = document_value
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            document,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=expected,
+            expected_pid=_EXPECTED_PID,
+            inspector=_FakeProcessInspector(),
+        )

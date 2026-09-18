@@ -318,6 +318,30 @@ def test_injected_run_preserves_non_tty_enroll_seam(monkeypatch):
     assert json.loads(stdout.getvalue())["status"] == "PASS"
 
 
+def test_enable_w3c_flag_reaches_only_the_enrollment_composition(monkeypatch):
+    enrollment = _module()
+    stdin = io.BytesIO(b"hermetic-input\n")
+    stdout = io.StringIO()
+    enroll_calls: list[tuple[object, ...]] = []
+
+    async def fake_enroll(*, bot_user_id, stdin, w3c_enabled):
+        enroll_calls.append((bot_user_id, stdin, w3c_enabled))
+        return {"action": "enrolled", "release_sha": "a" * 40}
+
+    monkeypatch.setattr(enrollment, "_enroll", fake_enroll)
+
+    assert (
+        enrollment.run(
+            ["enroll", "--expected-bot-user-id", BOT, "--enable-w3c"],
+            stdin=stdin,
+            stdout=stdout,
+            environ={"SAFE": "1"},
+        )
+        == 0
+    )
+    assert enroll_calls == [(BOT, stdin, True)]
+
+
 def test_fixed_policy_document_and_plist_are_release_bound_and_secret_free():
     enrollment = _module()
     release_sha = "a" * 40
@@ -335,8 +359,12 @@ def test_fixed_policy_document_and_plist_are_release_bound_and_secret_free():
         "relay_uid": 457,
         "allowed_peer_uids": [450],
         "allowed_sol_user_ids": ["U0BRETDUAS2", "U0BSB73JWNL"],
-        "allowed_parent_user_ids": ["U0BRETDUAS2"],
-    }
+            "allowed_parent_user_ids": ["U0BRETDUAS2"],
+            "w3c_enabled": False,
+            "dialogue_coordination_socket_path": os.fspath(
+                enrollment.DIALOGUE_COORDINATION_SOCKET_PATH
+            ),
+        }
 
     plist = plistlib.loads(
         enrollment.render_plist(bot_user_id=BOT, release_sha=release_sha)
@@ -369,6 +397,8 @@ def test_fixed_policy_document_and_plist_are_release_bound_and_secret_free():
         "U0BSB73JWNL",
         "--allowed-parent-user-id",
         "U0BRETDUAS2",
+        "--dialogue-coordination-socket-path",
+        os.fspath(enrollment.DIALOGUE_COORDINATION_SOCKET_PATH),
     ]
     assert plist["RunAtLoad"] is True
     assert plist["KeepAlive"] is True
@@ -376,6 +406,58 @@ def test_fixed_policy_document_and_plist_are_release_bound_and_secret_free():
         "xox" in str(value).lower()
         for value in plist["ProgramArguments"]
     )
+
+
+def test_w3c_enrollment_is_explicit_all_or_none_and_default_byte_compatible():
+    enrollment = _module()
+    release_sha = "a" * 40
+    default_config = enrollment.build_config_document(
+        bot_user_id=BOT,
+        release_sha=release_sha,
+    )
+    default_plist = enrollment.render_plist(
+        bot_user_id=BOT,
+        release_sha=release_sha,
+    )
+    assert default_config == enrollment.build_config_document(
+        bot_user_id=BOT,
+        release_sha=release_sha,
+        w3c_enabled=False,
+    )
+    assert default_plist == enrollment.render_plist(
+        bot_user_id=BOT,
+        release_sha=release_sha,
+        w3c_enabled=False,
+    )
+    assert default_config["w3c_enabled"] is False
+    assert default_config["dialogue_coordination_socket_path"] == os.fspath(
+        enrollment.DIALOGUE_COORDINATION_SOCKET_PATH
+    )
+    default_args = plistlib.loads(default_plist)["ProgramArguments"]
+    assert default_args[-2:] == [
+        "--dialogue-coordination-socket-path",
+        os.fspath(enrollment.DIALOGUE_COORDINATION_SOCKET_PATH),
+    ]
+    assert "--enable-w3c" not in default_args
+
+    enabled_config = enrollment.build_config_document(
+        bot_user_id=BOT,
+        release_sha=release_sha,
+        w3c_enabled=True,
+    )
+    assert enabled_config == {
+        **default_config,
+        "w3c_enabled": True,
+    }
+    enabled_args = plistlib.loads(
+        enrollment.render_plist(
+            bot_user_id=BOT,
+            release_sha=release_sha,
+            w3c_enabled=True,
+        )
+    )["ProgramArguments"]
+    assert enabled_args[-1] == "--enable-w3c"
+    assert enabled_args[:-1] == default_args
 
 
 def test_qualification_proves_exact_identity_scopes_and_channel_history():

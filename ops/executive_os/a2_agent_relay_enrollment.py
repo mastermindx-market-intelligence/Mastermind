@@ -55,6 +55,9 @@ TOKEN_PATH = SYSTEM_ROOT / "config" / "agent-relay.token"
 CONFIG_PATH = SYSTEM_ROOT / "config" / "agent-relay.json"
 PLIST_PATH = Path("/Library/LaunchDaemons/com.mastermind.executive.agent-relay.plist")
 SOCKET_PATH = Path("/var/run/mastermind-agent-relay/agent-relay.sock")
+DIALOGUE_COORDINATION_SOCKET_PATH = Path(
+    "/var/run/mastermind-dialogue-observation/dialogue-observation.sock"
+)
 PYTHON_BINARY = Path(
     "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12"
 )
@@ -131,6 +134,7 @@ def build_parser() -> argparse.ArgumentParser:
     for name in ("enroll", "verify"):
         child = commands.add_parser(name)
         child.add_argument("--expected-bot-user-id", required=True)
+        child.add_argument("--enable-w3c", action="store_true")
     return parser
 
 
@@ -150,7 +154,12 @@ def read_token_from_stdin(stream: BinaryIO) -> str:
         raise A2EnrollmentError("A2_ENROLLMENT_INPUT_REFUSED") from None
 
 
-def build_config_document(*, bot_user_id: str, release_sha: str) -> dict[str, object]:
+def build_config_document(
+    *,
+    bot_user_id: str,
+    release_sha: str,
+    w3c_enabled: bool = False,
+) -> dict[str, object]:
     try:
         metadata_verifier.validate_expectation(
             metadata_verifier.MetadataExpectation(
@@ -163,7 +172,9 @@ def build_config_document(*, bot_user_id: str, release_sha: str) -> dict[str, ob
         raise A2EnrollmentError("A2_ENROLLMENT_ARGUMENTS_REFUSED") from None
     if _RELEASE_RE.fullmatch(release_sha or "") is None:
         raise A2EnrollmentError("A2_ENROLLMENT_HOST_REFUSED")
-    return {
+    if type(w3c_enabled) is not bool:
+        raise A2EnrollmentError("A2_ENROLLMENT_ARGUMENTS_REFUSED")
+    document: dict[str, object] = {
         "schema": "mastermind.agent_relay_enrollment.v1",
         "release_sha": release_sha,
         "slack_workspace_id": SLACK_WORKSPACE_ID,
@@ -177,7 +188,12 @@ def build_config_document(*, bot_user_id: str, release_sha: str) -> dict[str, ob
         "allowed_peer_uids": list(ALLOWED_PEER_UIDS),
         "allowed_sol_user_ids": list(ALLOWED_SOL_USER_IDS),
         "allowed_parent_user_ids": list(ALLOWED_PARENT_USER_IDS),
+        "w3c_enabled": w3c_enabled,
+        "dialogue_coordination_socket_path": os.fspath(
+            DIALOGUE_COORDINATION_SOCKET_PATH
+        ),
     }
+    return document
 
 
 def _replace_placeholders(value: object, replacements: Mapping[str, str]) -> object:
@@ -193,8 +209,17 @@ def _replace_placeholders(value: object, replacements: Mapping[str, str]) -> obj
     return value
 
 
-def render_plist(*, bot_user_id: str, release_sha: str) -> bytes:
-    build_config_document(bot_user_id=bot_user_id, release_sha=release_sha)
+def render_plist(
+    *,
+    bot_user_id: str,
+    release_sha: str,
+    w3c_enabled: bool = False,
+) -> bytes:
+    build_config_document(
+        bot_user_id=bot_user_id,
+        release_sha=release_sha,
+        w3c_enabled=w3c_enabled,
+    )
     release_root = SYSTEM_RELEASE_ROOT / release_sha
     template_path = _ROOT / "ops" / "executive_os" / (
         "com.mastermind.executive.agent-relay.plist.template"
@@ -210,6 +235,9 @@ def render_plist(*, bot_user_id: str, release_sha: str) -> bytes:
         ),
         "__RELAY_SOCKET_PATH__": os.fspath(SOCKET_PATH),
         "__RELAY_TOKEN_FILE__": os.fspath(TOKEN_PATH),
+        "__DIALOGUE_COORDINATION_SOCKET_PATH__": os.fspath(
+            DIALOGUE_COORDINATION_SOCKET_PATH
+        ),
         "__SLACK_WORKSPACE_ID__": SLACK_WORKSPACE_ID,
         "__SLACK_CHANNEL_ID__": SLACK_CHANNEL_ID,
         "__SLACK_BOT_USER_ID__": bot_user_id,
@@ -232,6 +260,8 @@ def render_plist(*, bot_user_id: str, release_sha: str) -> bytes:
             for user_id in ALLOWED_SOL_USER_IDS
             for value in ("--allowed-sol-user-id", user_id)
         ]
+        if w3c_enabled:
+            arguments.append("--enable-w3c")
         encoded = plistlib.dumps(document, fmt=plistlib.FMT_XML, sort_keys=False)
     except Exception:
         raise A2EnrollmentError("A2_ENROLLMENT_HOST_REFUSED") from None
@@ -811,11 +841,20 @@ def _validate_existing(
     bot_user_id: str,
     release_sha: str,
     expected_token: bytes | None = None,
+    w3c_enabled: bool = False,
 ) -> None:
     expected_config = _canonical_json_bytes(
-        build_config_document(bot_user_id=bot_user_id, release_sha=release_sha)
+        build_config_document(
+            bot_user_id=bot_user_id,
+            release_sha=release_sha,
+            w3c_enabled=w3c_enabled,
+        )
     )
-    expected_plist = render_plist(bot_user_id=bot_user_id, release_sha=release_sha)
+    expected_plist = render_plist(
+        bot_user_id=bot_user_id,
+        release_sha=release_sha,
+        w3c_enabled=w3c_enabled,
+    )
     if (
         (
             expected_token is not None
@@ -842,7 +881,12 @@ def _validate_existing(
         raise A2EnrollmentError("A2_ENROLLMENT_EXISTING_REFUSED")
 
 
-async def _enroll(*, bot_user_id: str, stdin: BinaryIO) -> dict[str, object]:
+async def _enroll(
+    *,
+    bot_user_id: str,
+    stdin: BinaryIO,
+    w3c_enabled: bool = False,
+) -> dict[str, object]:
     release_sha = _assert_host_prepared()
     binding = _open_bound_config_directory()
     bound_created: list[_BoundCreatedFile] = []
@@ -875,6 +919,7 @@ async def _enroll(*, bot_user_id: str, stdin: BinaryIO) -> dict[str, object]:
                     build_config_document(
                         bot_user_id=bot_user_id,
                         release_sha=release_sha,
+                        w3c_enabled=w3c_enabled,
                     )
                 ),
                 uid=RELAY_UID,
@@ -885,7 +930,11 @@ async def _enroll(*, bot_user_id: str, stdin: BinaryIO) -> dict[str, object]:
         absolute_created.append(
             write_new_private_file(
                 PLIST_PATH,
-                render_plist(bot_user_id=bot_user_id, release_sha=release_sha),
+                render_plist(
+                    bot_user_id=bot_user_id,
+                    release_sha=release_sha,
+                    w3c_enabled=w3c_enabled,
+                ),
                 uid=PLIST_UID,
                 gid=PLIST_GID,
                 mode=0o644,
@@ -896,6 +945,7 @@ async def _enroll(*, bot_user_id: str, stdin: BinaryIO) -> dict[str, object]:
             bot_user_id=bot_user_id,
             release_sha=release_sha,
             expected_token=(token + "\n").encode("ascii"),
+            w3c_enabled=w3c_enabled,
         )
         _assert_disarmed()
         _assert_bound_config_current(binding)
@@ -918,7 +968,7 @@ async def _enroll(*, bot_user_id: str, stdin: BinaryIO) -> dict[str, object]:
     return {**qualification, "action": "enrolled", "release_sha": release_sha}
 
 
-async def _verify(*, bot_user_id: str) -> dict[str, object]:
+async def _verify(*, bot_user_id: str, w3c_enabled: bool = False) -> dict[str, object]:
     release_sha = _assert_host_prepared()
     binding = _open_bound_config_directory()
     try:
@@ -932,6 +982,7 @@ async def _verify(*, bot_user_id: str) -> dict[str, object]:
             binding,
             bot_user_id=bot_user_id,
             release_sha=release_sha,
+            w3c_enabled=w3c_enabled,
         )
         token = _existing_token(binding)
         qualification = await qualify_token(token=token, bot_user_id=bot_user_id)
@@ -978,11 +1029,20 @@ def _run_invocation(
         if require_native_tty and args.command == "enroll":
             _require_native_tty(stdin)
         if args.command == "enroll":
+            enroll_kwargs = {
+                "bot_user_id": args.expected_bot_user_id,
+                "stdin": stdin,
+            }
+            if args.enable_w3c:
+                enroll_kwargs["w3c_enabled"] = True
             receipt = asyncio.run(
-                _enroll(bot_user_id=args.expected_bot_user_id, stdin=stdin)
+                _enroll(**enroll_kwargs)
             )
         elif args.command == "verify":
-            receipt = asyncio.run(_verify(bot_user_id=args.expected_bot_user_id))
+            verify_kwargs = {"bot_user_id": args.expected_bot_user_id}
+            if args.enable_w3c:
+                verify_kwargs["w3c_enabled"] = True
+            receipt = asyncio.run(_verify(**verify_kwargs))
         else:  # pragma: no cover
             raise A2EnrollmentError("A2_ENROLLMENT_ARGUMENTS_REFUSED")
         stdout.write(
@@ -1047,6 +1107,7 @@ if __name__ == "__main__":
 
 __all__ = [
     "A2EnrollmentError",
+    "DIALOGUE_COORDINATION_SOCKET_PATH",
     "ERROR_CODES",
     "build_config_document",
     "build_parser",

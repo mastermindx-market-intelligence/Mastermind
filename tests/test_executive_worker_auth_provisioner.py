@@ -297,6 +297,20 @@ wait "$child_pid"
                 pass
 
 
+def test_post_install_auth_operations_prefer_installed_binary_over_mutable_source() -> None:
+    source = _source()
+    selection = source.index('if [ -x "$INSTALLED_CODEX_BINARY" ] && [ ! -L "$INSTALLED_CODEX_BINARY" ]; then')
+    assignment = source.index('CODEX_BINARY="$INSTALLED_CODEX_BINARY"', selection)
+    readiness_requires_install = source.index('elif [ "$VERIFY_READY" = "true" ]; then', assignment)
+    source_attestation = source.index('[ -f "$CODEX_BINARY" ]', readiness_requires_install)
+    ready_branch = source.index('if [ "$VERIFY_READY" = "true" ]; then', source_attestation)
+
+    assert selection < assignment < readiness_requires_install < source_attestation < ready_branch
+    assert 'mutable Homebrew enrollment source is' in source
+    assert 'credential rotation, Personal-Pro enrollment, --verify-only' in source
+    assert '--binary "$INSTALLED_CODEX_BINARY"' in source[ready_branch:]
+
+
 def test_metadata_pinning_and_login_status_remain_strict_and_non_disclosing() -> None:
     source = _source()
     assert 'CODEX_VERSION="0.147.0"' in source

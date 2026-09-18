@@ -309,6 +309,7 @@ def plans() -> list[dict]:
     """Return the normalized ACTIVE, LONG, equity plans from the index (``[]`` when inert).
 
     Filters applied to ``index()["plans"]``:
+      * ``closed`` is absent (legacy) or exactly False; retired/unknown plans are inert,
       * ``direction == "BULL"`` (the sleeve is long-only additive; a bear plan sources nothing),
       * ``phase`` NOT in {invalidated, expired, closed} (dead geometries drop; ``overtime`` stays),
       * ``asset`` is a plain equity ticker (uppercase alnum, dots/hyphens allowed).
@@ -325,6 +326,10 @@ def plans() -> list[dict]:
         out: list[dict] = []
         for p in raw_plans:
             if not isinstance(p, dict):
+                continue
+            # The publisher retains historical phase/action after ledger closure.
+            # Legacy absence is supported; a present flag must be explicit False.
+            if "closed" in p and p["closed"] is not False:
                 continue
             if str(p.get("direction") or "").upper() != "BULL":
                 continue

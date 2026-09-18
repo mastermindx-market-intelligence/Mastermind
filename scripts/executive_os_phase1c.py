@@ -6,8 +6,9 @@ crosses the distinct-UID worker broker; this entrypoint has no local adapter or
 TCP fallback.  G1 adds one exact-root deterministic COO-cycle operation and one
 bounded service tick; both remain disabled by checked-in host configuration.
 C1 may additionally expose the already-implemented dedicated CeoIngress state
-listener through the SAME service process while CEO write admission remains
-hard-disabled. Restore operations are deliberately offline CLI commands and are
+listener through the SAME service process while C1 write admission remains
+hard-disabled. An explicitly configured App peer has a separate admission
+setting and canonical read binding on that same socket. Restore operations are deliberately offline CLI commands and are
 never exposed through the live control socket.
 """
 from __future__ import annotations
@@ -24,18 +25,70 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+_ROOT = Path(__file__).resolve().parents[1]
+if os.fspath(_ROOT) not in sys.path:
+    sys.path.insert(0, os.fspath(_ROOT))
+
 from control_plane.executive_runtime import RuntimeProofError, RuntimeStore
 from control_plane.executive_autonomy import (
     AutonomyRefusal,
     validate_runtime_guard_file,
 )
 from control_plane.executive_service import (
+    ExecutiveDialogueWakeBridge,
     ExecutiveControlService,
+    CeoIngressAppBinding,
     ServiceConfig,
     ServiceError,
     activate_launchd_socket,
     send_control_request,
 )
+from control_plane.wake_ledger import WakeRetryPolicy
+
+
+def _build_executive_dialogue_wake_carrier(
+    *,
+    runtime,
+    resolved,
+    target,
+    current_binding,
+    retry_policy,
+    generation,
+):
+    """Compose existing Wake owners outside the control-plane dependency layer."""
+
+    from control_plane.runtime_binding_projection import project_runtime_binding
+    from control_plane.wake_persist import WakeLedgerRepository
+    from integrations.executive_wake.codex_app_server import (
+        CodexAppServerWakeDispatcher,
+    )
+    from integrations.executive_wake.codex_app_server_rpc import (
+        CodexCurrentWriterWakeClient,
+    )
+    from integrations.executive_wake.registry import WakeDispatcherRegistry
+    from integrations.slack_agent_dialogue.persisted_wake_carrier import (
+        PersistedWakeCarrier,
+    )
+
+    wake_client = CodexCurrentWriterWakeClient(
+        operator_adapter=resolved.operator_adapter,
+        generation=generation,
+        attempt_id=resolved.target_attempt_id,
+        runtime_binding=current_binding,
+    )
+    return PersistedWakeCarrier(
+        repository=WakeLedgerRepository(runtime),
+        dispatchers=WakeDispatcherRegistry(
+            {"codex-app-server": CodexAppServerWakeDispatcher(wake_client)}
+        ),
+        current_binding_for=lambda _route: project_runtime_binding(
+            runtime,
+            resolved.target_attempt_id,
+            target,
+        ),
+        retry_policy=retry_policy,
+        target_registry=resolved.registry,
+    )
 
 
 CONTROL_CONFIG_SCHEMA_VERSION = "mastermind.executive_control_config/v1"
@@ -47,6 +100,12 @@ SECRET_CANARY_ENVELOPE_SCHEMA_VERSION = (
 )
 CONTROL_ENVIRONMENT_PROBE_SCHEMA_VERSION = (
     "mastermind.executive_control_env_probe/v1"
+)
+_CANONICAL_AGENT_RELAY_SOCKET = Path(
+    "/var/run/mastermind-agent-relay/agent-relay.sock"
+)
+_CANONICAL_DIALOGUE_OBSERVATION_SOCKET = Path(
+    "/var/run/mastermind-dialogue-observation/dialogue-observation.sock"
 )
 _BACKUP_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.sqlite3$")
 _CONFIG_REQUIRED = frozenset(
@@ -83,6 +142,7 @@ _CONFIG_OPTIONAL = frozenset(
         "effort",
         "cost_class",
         "coo_autonomy_armed",
+        "ceo_submit_armed",
         "coo_operator_harness_armed",
         "coo_tick_interval_seconds",
         "coo_model_alias",
@@ -97,6 +157,17 @@ _CONFIG_OPTIONAL = frozenset(
         "ceo_ingress_socket_path",
         "ceo_ingress_launchd_socket_name",
         "ceo_ingress_peer_uid",
+        "ceo_ingress_app_peer_uid",
+        "ceo_ingress_app_armed",
+        "ceo_ingress_app_macro_root",
+        "ceo_ingress_app_boot_python",
+        "terminal_return_armed",
+        "terminal_return_socket_path",
+        "dialogue_observation_socket_path",
+        "dialogue_observation_launchd_socket_name",
+        "dialogue_observation_peer_uid",
+        "dialogue_bridge_armed",
+        "dialogue_wake_retry_policy",
     }
 )
 _CEO_INGRESS_CONFIG_KEYS = frozenset(
@@ -106,6 +177,25 @@ _CEO_INGRESS_CONFIG_KEYS = frozenset(
         "ceo_ingress_peer_uid",
     }
 )
+_CEO_INGRESS_APP_CONFIG_KEYS = frozenset({
+    "ceo_ingress_app_peer_uid", "ceo_ingress_app_armed", "ceo_ingress_app_macro_root",
+})
+_TERMINAL_RETURN_CONFIG_KEYS = frozenset(
+    {
+        "terminal_return_armed",
+        "terminal_return_socket_path",
+    }
+)
+_DIALOGUE_BRIDGE_CONFIG_KEYS = frozenset(
+    {
+        "dialogue_observation_socket_path",
+        "dialogue_observation_launchd_socket_name",
+        "dialogue_observation_peer_uid",
+        "dialogue_bridge_armed",
+        "dialogue_wake_retry_policy",
+    }
+)
+_CONFIG_DISABLED_EXTENSIONS = frozenset()
 
 
 def _absolute_path(value: str) -> Path:
@@ -204,6 +294,48 @@ def _path(value: Any, name: str) -> Path:
     return Path(value).resolve(strict=False)
 
 
+def _sealed_root_executable(value: Any, name: str) -> Path:
+    """Require one root-owned executable behind no symlink/writable ancestor."""
+    if not isinstance(value, str) or not Path(value).is_absolute():
+        raise ServiceError(f"control config {name} must be an absolute path")
+    path = Path(value)
+    try:
+        if path.resolve(strict=True) != path:
+            raise ServiceError(f"control config {name} must not traverse symlinks")
+        for node in (path, *path.parents):
+            info = node.lstat()
+            if stat.S_ISLNK(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+                raise ServiceError(
+                    f"control config {name} must be root-owned and sealed through its path"
+                )
+            if node == path:
+                if (not stat.S_ISREG(info.st_mode) or not info.st_mode & 0o111
+                        or info.st_nlink != 1):
+                    raise ServiceError(
+                        f"control config {name} must name one sealed executable file"
+                    )
+            elif not stat.S_ISDIR(info.st_mode):
+                raise ServiceError(
+                    f"control config {name} has a non-directory ancestor"
+                )
+    except ServiceError:
+        raise
+    except OSError as exc:
+        raise ServiceError(f"control config {name} is unavailable") from exc
+    return path
+
+
+def _attest_app_boot_runtime(path: Path) -> Path:
+    """Bind the optional App boot interpreter to the accepted CF2 capacity runtime."""
+    from control_plane.ceo_boot_packet import attest_capacity_boot_runtime
+
+    try:
+        attest_capacity_boot_runtime(path)
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        raise ServiceError("App boot runtime attestation failed") from exc
+    return path
+
+
 def _integer(value: Any, name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise ServiceError(f"control config {name} must be a non-negative integer")
@@ -218,7 +350,12 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
         raise ServiceError("unsupported Executive control config schema")
     keys = set(config)
     missing = sorted(_CONFIG_REQUIRED - keys)
-    unknown = sorted(keys - _CONFIG_REQUIRED - _CONFIG_OPTIONAL)
+    unknown = sorted(
+        keys
+        - _CONFIG_REQUIRED
+        - _CONFIG_OPTIONAL
+        - _CONFIG_DISABLED_EXTENSIONS
+    )
     if missing or unknown:
         raise ServiceError(
             f"Executive control config fields drifted; missing={missing}, unknown={unknown}"
@@ -226,6 +363,22 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
     ceo_ingress_present = keys & _CEO_INGRESS_CONFIG_KEYS
     if ceo_ingress_present and ceo_ingress_present != _CEO_INGRESS_CONFIG_KEYS:
         raise ServiceError("CeoIngress control config fields must be supplied together")
+    app_present = keys & _CEO_INGRESS_APP_CONFIG_KEYS
+    if app_present and (
+        app_present != _CEO_INGRESS_APP_CONFIG_KEYS
+        or ceo_ingress_present != _CEO_INGRESS_CONFIG_KEYS
+    ):
+        raise ServiceError("App binding requires all App and CeoIngress configuration fields")
+    if "ceo_ingress_app_boot_python" in keys and app_present != _CEO_INGRESS_APP_CONFIG_KEYS:
+        raise ServiceError("App boot interpreter requires the complete App binding")
+    terminal_return_present = keys & _TERMINAL_RETURN_CONFIG_KEYS
+    if terminal_return_present and terminal_return_present != _TERMINAL_RETURN_CONFIG_KEYS:
+        raise ServiceError("terminal-return control config fields must be supplied together")
+    observation_present = keys & _DIALOGUE_BRIDGE_CONFIG_KEYS
+    if observation_present and observation_present != _DIALOGUE_BRIDGE_CONFIG_KEYS:
+        raise ServiceError(
+            "dialogue-observation control config fields must be supplied together"
+        )
     for name in (
         "runtime_root",
         "control_socket_path",
@@ -244,12 +397,111 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
         config["ceo_ingress_socket_path"] = _path(
             config["ceo_ingress_socket_path"], "ceo_ingress_socket_path"
         )
+    if terminal_return_present:
+        terminal_return_socket = config["terminal_return_socket_path"]
+        config["terminal_return_socket_path"] = _path(
+            terminal_return_socket,
+            "terminal_return_socket_path",
+        )
+        if terminal_return_socket != os.fspath(_CANONICAL_AGENT_RELAY_SOCKET):
+            raise ServiceError(
+                "control config terminal_return_socket_path must be exactly "
+                f"{_CANONICAL_AGENT_RELAY_SOCKET}"
+            )
+    if observation_present:
+        observation_socket = config["dialogue_observation_socket_path"]
+        config["dialogue_observation_socket_path"] = _path(
+            observation_socket,
+            "dialogue_observation_socket_path",
+        )
+        if observation_socket != os.fspath(_CANONICAL_DIALOGUE_OBSERVATION_SOCKET):
+            raise ServiceError(
+                "control config dialogue_observation_socket_path must be exactly "
+                f"{_CANONICAL_DIALOGUE_OBSERVATION_SOCKET}"
+            )
     for name in ("control_uid", "worker_uid", "worker_gid", "shared_run_gid"):
         config[name] = _integer(config[name], name)
     if ceo_ingress_present:
         config["ceo_ingress_peer_uid"] = _integer(
             config["ceo_ingress_peer_uid"], "ceo_ingress_peer_uid"
         )
+    if app_present:
+        config["ceo_ingress_app_peer_uid"] = _integer(
+            config["ceo_ingress_app_peer_uid"], "ceo_ingress_app_peer_uid"
+        )
+        if config["ceo_ingress_app_peer_uid"] in {
+            config["control_uid"], config["ceo_ingress_peer_uid"], config["worker_uid"],
+            *config["allowed_peer_uids"],
+        }:
+            raise ServiceError("App peer must be distinct from control, Operator, C1 and worker identities")
+        if type(config["ceo_ingress_app_armed"]) is not bool:
+            raise ServiceError("App admission arming must be boolean")
+        config["ceo_ingress_app_macro_root"] = _path(
+            config["ceo_ingress_app_macro_root"], "ceo_ingress_app_macro_root"
+        )
+        if "ceo_ingress_app_boot_python" in config:
+            sealed_boot_python = _sealed_root_executable(
+                config["ceo_ingress_app_boot_python"], "ceo_ingress_app_boot_python"
+            )
+            config["ceo_ingress_app_boot_python"] = _attest_app_boot_runtime(
+                sealed_boot_python
+            )
+    if observation_present:
+        config["dialogue_observation_peer_uid"] = _integer(
+            config["dialogue_observation_peer_uid"],
+            "dialogue_observation_peer_uid",
+        )
+        if config["dialogue_observation_peer_uid"] != 457:
+            raise ServiceError(
+                "dialogue observation peer uid must be Agent Relay uid 457"
+            )
+        if type(config["dialogue_bridge_armed"]) is not bool:
+            raise ServiceError("control config dialogue_bridge_armed must be boolean")
+        retry_policy = config["dialogue_wake_retry_policy"]
+        retry_keys = {
+            "max_delivery_attempts",
+            "retry_cooldown_s",
+            "accepted_ttl_s",
+            "target_unavailable_backoff_s",
+            "reenable_on_binding_rotation",
+            "armed",
+        }
+        if not isinstance(retry_policy, dict) or set(retry_policy) != retry_keys:
+            raise ServiceError(
+                "control config dialogue_wake_retry_policy fields drifted"
+            )
+        for name in (
+            "max_delivery_attempts",
+            "retry_cooldown_s",
+            "accepted_ttl_s",
+            "target_unavailable_backoff_s",
+        ):
+            value = retry_policy[name]
+            if value is not None and (
+                type(value) is not int or value < 1
+            ):
+                raise ServiceError(
+                    f"control config dialogue_wake_retry_policy.{name} "
+                    "must be null or a positive integer"
+                )
+        for name in ("reenable_on_binding_rotation", "armed"):
+            if type(retry_policy[name]) is not bool:
+                raise ServiceError(
+                    f"control config dialogue_wake_retry_policy.{name} "
+                    "must be boolean"
+                )
+        if retry_policy["armed"] is not config["dialogue_bridge_armed"]:
+            raise ServiceError(
+                "dialogue bridge and Wake retry policy arming must match"
+            )
+        try:
+            config["dialogue_wake_retry_policy"] = WakeRetryPolicy(
+                **retry_policy
+            )
+        except (TypeError, ValueError) as exc:
+            raise ServiceError(
+                "control config dialogue_wake_retry_policy is invalid"
+            ) from exc
     if config["control_uid"] != os.geteuid():
         raise ServiceError("control service effective uid does not match control config")
     if config["worker_uid"] == config["control_uid"]:
@@ -273,10 +525,56 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
             raise ServiceError("CeoIngress launchd socket name must differ from Operator")
         if config["ceo_ingress_peer_uid"] == config["control_uid"]:
             raise ServiceError("CeoIngress peer uid must differ from control uid")
+    if observation_present:
+        name = config["dialogue_observation_launchd_socket_name"]
+        if not isinstance(name, str) or not name.strip():
+            raise ServiceError(
+                "control config dialogue_observation_launchd_socket_name is required"
+            )
+        names = {config["launchd_socket_name"]}
+        if ceo_ingress_present:
+            names.add(config["ceo_ingress_launchd_socket_name"])
+        if name in names:
+            raise ServiceError(
+                "Dialogue Observation launchd socket name must be distinct"
+            )
+        observation_socket = config["dialogue_observation_socket_path"]
+        forbidden_sockets = {
+            config["control_socket_path"],
+            config["worker_broker_socket_path"],
+            _CANONICAL_AGENT_RELAY_SOCKET,
+        }
+        if ceo_ingress_present:
+            forbidden_sockets.add(config["ceo_ingress_socket_path"])
+        if observation_socket in forbidden_sockets:
+            raise ServiceError(
+                "Dialogue Observation socket must be distinct from every service path"
+            )
+    if terminal_return_present:
+        if type(config["terminal_return_armed"]) is not bool:
+            raise ServiceError("control config terminal_return_armed must be boolean")
+        terminal_socket = config["terminal_return_socket_path"]
+        forbidden_sockets = {
+            "control socket": config["control_socket_path"],
+            "worker broker socket": config["worker_broker_socket_path"],
+        }
+        if ceo_ingress_present:
+            forbidden_sockets["CeoIngress socket"] = config[
+                "ceo_ingress_socket_path"
+            ]
+        for label, forbidden_socket in forbidden_sockets.items():
+            if terminal_socket == forbidden_socket:
+                raise ServiceError(
+                    f"terminal-return Relay socket must be distinct from {label}"
+                )
     if "coo_autonomy_armed" in config and not isinstance(
         config["coo_autonomy_armed"], bool
     ):
         raise ServiceError("control config coo_autonomy_armed must be boolean")
+    if "ceo_submit_armed" in config and not isinstance(
+        config["ceo_submit_armed"], bool
+    ):
+        raise ServiceError("control config ceo_submit_armed must be boolean")
     if "coo_operator_harness_armed" in config and not isinstance(
         config["coo_operator_harness_armed"], bool
     ):
@@ -698,6 +996,7 @@ def _service_from_config(
         effort=str(raw.get("effort") or "xhigh"),
         cost_class=str(raw.get("cost_class") or "standard"),
         coo_autonomy_armed=raw.get("coo_autonomy_armed", False),
+        ceo_submit_armed=raw.get("ceo_submit_armed", False),
         coo_operator_harness_armed=raw.get(
             "coo_operator_harness_armed", False
         ),
@@ -715,6 +1014,8 @@ def _service_from_config(
         coo_operator_quota_class=str(
             raw.get("coo_operator_quota_class") or "codex-coo-operator"
         ),
+        terminal_return_armed=raw.get("terminal_return_armed", False),
+        terminal_return_socket_path=raw.get("terminal_return_socket_path"),
         operator_harness_binary_digest=binary_digest,
         operator_harness_version=binary_version,
         allowed_peer_uids=tuple(raw["allowed_peer_uids"]),
@@ -740,7 +1041,6 @@ def _service_from_config(
         return ExecutiveSupervisor(
             runtime,
             adapter,
-            codex_home=raw["worker_provider_home"],
             runs_root=raw["worker_runs_root"],
             isolation_roots=(
                 raw["proof_workspace_root"],
@@ -781,12 +1081,31 @@ def _service_from_config(
         if identity.get("operator_harness_armed") is not True:
             raise ServiceError("control/worker Operator Harness arming state differs")
 
+    terminal_return_kwargs: dict[str, Any] = {}
+    if config.terminal_return_armed:
+        from integrations.slack_agent_dialogue.executive_terminal_return_projector import (
+            ExecutiveTerminalReturnProjector,
+            RuntimeTerminalReturnBindingResolver,
+        )
+
+        def terminal_return_projector_factory(runtime_provider, socket_path):
+            return ExecutiveTerminalReturnProjector(
+                RuntimeTerminalReturnBindingResolver(runtime_provider),
+                socket_path=socket_path,
+            )
+
+        terminal_return_kwargs["terminal_return_projector_factory"] = (
+            terminal_return_projector_factory
+        )
+
     listener = activate_launchd_socket(str(raw["launchd_socket_name"]))
+    activated_listeners = [listener]
     ceo_ingress_kwargs: dict[str, Any] = {}
     if _CEO_INGRESS_CONFIG_KEYS <= set(raw):
         ceo_listener = activate_launchd_socket(
             str(raw["ceo_ingress_launchd_socket_name"])
         )
+        activated_listeners.append(ceo_listener)
         ceo_ingress_kwargs = {
             "ceo_ingress_socket_path": raw["ceo_ingress_socket_path"],
             "ceo_ingress_peer_uid": int(raw["ceo_ingress_peer_uid"]),
@@ -794,6 +1113,76 @@ def _service_from_config(
             "ceo_ingress_armed": False,
             "ceo_ingress_activated_socket": ceo_listener,
         }
+    if _CEO_INGRESS_APP_CONFIG_KEYS <= set(raw):
+        # SDK-free canonical projection runs under the existing control uid.
+        # The network App has no Runtime database or source-checkout access.
+        from integrations.executive_mcp.installed import InstalledExecutiveReaders
+        readers = InstalledExecutiveReaders(
+            repo_root=Path(raw["proof_source_repository"]),
+            macro_root=Path(raw["ceo_ingress_app_macro_root"]),
+            runtime_root=Path(raw["runtime_root"]),
+            boot_python=(Path(raw["ceo_ingress_app_boot_python"])
+                         if "ceo_ingress_app_boot_python" in raw else None),
+            code_root=Path(__file__).resolve().parents[1],
+            expected_source_sha=str(raw["proof_base_sha"]),
+        )
+        ceo_ingress_kwargs["ceo_ingress_app_binding"] = CeoIngressAppBinding(
+            peer_uid=int(raw["ceo_ingress_app_peer_uid"]),
+            armed=raw["ceo_ingress_app_armed"],
+            grounding_provider=readers, read_provider=readers,
+        )
+    dialogue_observation_kwargs: dict[str, Any] = {}
+    if (
+        _DIALOGUE_BRIDGE_CONFIG_KEYS <= set(raw)
+        and raw["dialogue_bridge_armed"] is True
+    ):
+        def dialogue_wake_turn_input_loader(_turn):
+            raise ServiceError(
+                "dialogue Wake adapter cannot load provider turns"
+            )
+
+        observation_listener = activate_launchd_socket(
+            str(raw["dialogue_observation_launchd_socket_name"])
+        )
+        activated_listeners.append(observation_listener)
+        dialogue_observation_kwargs = {
+            "dialogue_observation_socket_path": raw[
+                "dialogue_observation_socket_path"
+            ],
+            "dialogue_observation_peer_uid": int(
+                raw["dialogue_observation_peer_uid"]
+            ),
+            "dialogue_observation_group_gid": 457,
+            "dialogue_wake_handler": ExecutiveDialogueWakeBridge(
+                target_provider=None,
+                retry_policy=raw["dialogue_wake_retry_policy"],
+                operator_adapter=RemoteCodexOperatorAdapter(
+                    client,
+                    turn_input_loader=dialogue_wake_turn_input_loader,
+                ),
+                carrier_factory=_build_executive_dialogue_wake_carrier,
+            ),
+            "dialogue_observation_activated_socket": observation_listener,
+        }
+    if config.terminal_return_socket_path is not None:
+        for activated_listener in activated_listeners:
+            getsockname = getattr(activated_listener, "getsockname", None)
+            if not callable(getsockname):
+                continue
+            activated_path = getsockname()
+            if isinstance(activated_path, bytes):
+                activated_path = os.fsdecode(activated_path)
+            if (
+                isinstance(activated_path, str)
+                and activated_path
+                and not activated_path.startswith("\0")
+                and Path(activated_path).resolve(strict=False)
+                == config.terminal_return_socket_path
+            ):
+                raise ServiceError(
+                    "terminal-return Relay socket must be distinct from every "
+                    "activated listener"
+                )
     return ExecutiveControlService(
         config,
         supervisor_factory=supervisor_factory,
@@ -806,6 +1195,8 @@ def _service_from_config(
         service_state="READY" if initially_ready else "AWAITING_CANARY",
         canary_loader=canary_loader,
         **ceo_ingress_kwargs,
+        **dialogue_observation_kwargs,
+        **terminal_return_kwargs,
     )
 
 

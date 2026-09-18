@@ -38,39 +38,16 @@ REQUIRED_RUNTIME_PATHS = frozenset({
     "app/static/chairman_control/control_room.css",
     "app/static/chairman_control/control_room.js",
     "app/static/chairman_control/remote.html",
-    "common/__init__.py",
-    "common/redaction.py",
     "config/strategic_state.yml",
     "control_plane/__init__.py",
     "control_plane/ceo_boot_packet.py",
-    "control_plane/ceo_intent.py",
     "control_plane/chairman_control_room.py",
     "control_plane/chairman_control_room_remote.py",
-    "control_plane/codex_worker.py",
-    "control_plane/executive_agent_capabilities.py",
-    "control_plane/executive_ambient_process.py",
-    "control_plane/executive_authority.py",
-    "control_plane/executive_coo_policy.py",
     "control_plane/executive_inbox.py",
-    "control_plane/executive_orchestration_principal.py",
-    "control_plane/executive_orchestration_result.py",
-    "control_plane/executive_retry_safety.py",
-    "control_plane/executive_runtime.py",
-    "control_plane/executive_supervisor.py",
-    "control_plane/executive_worker_broker.py",
-    "control_plane/executive_workspace.py",
-    "control_plane/flags.py",
-    "control_plane/operator_harness_contract.py",
-    "control_plane/operator_harness_wire.py",
     "control_plane/strategic_state.py",
     "control_plane/surface_bindings.py",
-    "control_plane/worker_adapter.py",
-    "control_plane/worker_browser_b1.py",
     "ops/control_room_remote/mastermind-control-room-remote.service",
-    "scripts/__init__.py",
     "scripts/chairman_control_room_remote.py",
-    "scripts/ohf/__init__.py",
-    "scripts/ohf/redaction.py",
 })
 SOURCE_AGENT_OS_BRIEF = "agent_os_brief"
 SOURCE_AGENT_OS_STATE = "agent_os_state"
@@ -92,7 +69,7 @@ _PRIVATE_HOST_RE = re.compile(
     r"\b172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2}\b)"
 )
 _PATH_RE = re.compile(
-    r"/(?:Users|opt|home|var|private|etc|root|run|srv|tmp|usr)(?:/|$)"
+    r"/(?:Users|Volumes|opt|home|var|private|etc|root|run|srv|tmp|usr)(?:/|$)"
 )
 _SESSION_RE = re.compile(r"(?i)\b(?:provider[_ -]?session(?:[_ -]?id)?|session[_ -]?identity)\s*[:=]")
 

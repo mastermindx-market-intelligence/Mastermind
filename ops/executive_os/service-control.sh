@@ -39,17 +39,43 @@ start_one() {
   local label="$1"
   local plist="$2"
   /bin/launchctl enable "system/$label"
-  if /bin/launchctl print "system/$label" >/dev/null 2>&1; then
-    /bin/launchctl kickstart "system/$label"
-  else
-    /bin/launchctl bootstrap system "$plist"
+  local before_status=0
+  /bin/launchctl print "system/$label" >/dev/null 2>&1 || before_status=$?
+  case "$before_status" in
+    0) /bin/launchctl kickstart "system/$label" ;;
+    113) /bin/launchctl bootstrap system "$plist" ;;
+    *)
+      /bin/echo "service registration state unknown before start: $label (launchctl print exit $before_status)" >&2
+      return 1
+      ;;
+  esac
+  # A zero exit from kickstart/bootstrap is not proof of registration; read back.
+  local after_output after_status=0
+  after_output="$(/bin/launchctl print "system/$label" 2>/dev/null)" || after_status=$?
+  if [ "$after_status" -ne 0 ]; then
+    /bin/echo "service registration missing after start: $label (launchctl print exit $after_status)" >&2
+    return 1
   fi
+  /bin/echo "$after_output" | /usr/bin/awk -v label="$label" '/state =/ {print "service=" label " " $0; exit}'
 }
 
 stop_one() {
   local label="$1"
   /bin/launchctl disable "system/$label"
+  # A nonzero bootout alone cannot prove absence or failure; read back.
   /bin/launchctl bootout "system/$label" >/dev/null 2>&1 || true
+  local after_status=0
+  /bin/launchctl print "system/$label" >/dev/null 2>&1 || after_status=$?
+  if [ "$after_status" -eq 113 ]; then
+    /bin/echo "service=$label state=absent"
+    return 0
+  fi
+  if [ "$after_status" -eq 0 ]; then
+    /bin/echo "service still registered after stop: $label" >&2
+  else
+    /bin/echo "service registration state unknown after stop: $label (launchctl print exit $after_status)" >&2
+  fi
+  return 1
 }
 
 [ "$#" -eq 1 ] || usage

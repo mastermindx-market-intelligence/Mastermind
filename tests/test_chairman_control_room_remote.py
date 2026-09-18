@@ -134,6 +134,29 @@ def test_remote_projection_is_closed_and_omits_local_authority(canonical_doc):
         assert forbidden not in encoded
 
 
+def test_remote_projection_never_exposes_the_autonomy_key(canonical_doc):
+    """The AD-CR1A Phase A ``autonomy`` key never reaches the remote surface.
+
+    ``canonical_doc`` is a REAL ``compose_control_room`` output — it
+    genuinely carries an ``autonomy`` key (``ccr.OUTPUT_KEYS`` includes it,
+    and this fixture would already fail the ``_require_exact_keys(canonical,
+    ccr.OUTPUT_KEYS)`` check inside ``project_remote_document`` if it did
+    not).  The remote projector still accepts it and still projects through
+    its own closed allowlist, which was never extended: ``autonomy`` is
+    absent from both the projected key set and the encoded JSON body.
+    """
+    assert "autonomy" in canonical_doc
+    assert "autonomy" in ccr.OUTPUT_KEYS
+
+    projected = _project(canonical_doc)
+    assert "autonomy" not in projected
+    assert set(projected) == {
+        "schema", "observed_at", "code_identity", "source_freshness",
+        "degraded", "attention", "work", "unjoined_open_prs",
+    }
+    assert "autonomy" not in json.dumps(projected, sort_keys=True)
+
+
 @pytest.mark.parametrize(
     ("mutation", "code"),
     [
@@ -159,6 +182,92 @@ def test_remote_projection_rejects_adversarial_canonical_documents(canonical_doc
     with pytest.raises(remote.RemoteProjectionError) as exc:
         _project(bad)
     assert exc.value.code == code
+
+
+_PATH_ROOT_CASES = (
+    "failed at root=/Volumes/Mastermind/private.db",
+    "https://status.example.invalid/public/research",
+    "ratio 1/2 remains public",
+)
+_ACCEPTED_PATH_ROOT_CODES = ("sensitive_value", None, None)
+_ACCEPTED_SANITIZED_DEGRADED = (
+    "executive_inbox_detail_redacted",
+    "https://status.example.invalid/public/research",
+    "ratio 1/2 remains public",
+)
+
+
+def _degraded_projection_codes(canonical_doc):
+    codes = []
+    for value in _PATH_ROOT_CASES:
+        document = copy.deepcopy(canonical_doc)
+        document["degraded"].append(value)
+        try:
+            _project(document)
+        except remote.RemoteProjectionError as exc:
+            codes.append(exc.code)
+        else:
+            codes.append(None)
+    return tuple(codes)
+
+
+def _sanitized_path_root_cases():
+    document = {"degraded": list(_PATH_ROOT_CASES)}
+    sanitized = remote._sanitize_collected_degraded(
+        document,
+        source="executive_inbox",
+    )
+    assert document["degraded"] == list(_PATH_ROOT_CASES)
+    return tuple(sanitized["degraded"])
+
+
+def _assert_accepted_path_root_contract(canonical_doc):
+    assert (
+        _degraded_projection_codes(canonical_doc) == _ACCEPTED_PATH_ROOT_CODES
+    ), "accepted path-root codes"
+    assert (
+        _sanitized_path_root_cases() == _ACCEPTED_SANITIZED_DEGRADED
+    ), "accepted sanitizer categories"
+
+
+def test_remote_path_root_classifier_rejects_volumes_without_overmatching(
+    canonical_doc,
+):
+    _assert_accepted_path_root_contract(canonical_doc)
+
+
+@pytest.mark.parametrize(
+    ("pattern", "expected_codes", "expected_sanitized"),
+    [
+        (
+            r"/(?:Users|opt|home|var|private|etc|root|run|srv|tmp|usr)(?:/|$)",
+            (None, None, None),
+            _PATH_ROOT_CASES,
+        ),
+        (
+            r"/(?:[^/]+)(?:/|$)",
+            ("sensitive_value", "sensitive_value", "sensitive_value"),
+            (
+                "executive_inbox_detail_redacted",
+                "executive_inbox_detail_redacted",
+                "executive_inbox_detail_redacted",
+            ),
+        ),
+    ],
+    ids=("missing-volumes-root", "generic-slash-overmatch"),
+)
+def test_remote_path_root_classifier_mutants_fail_the_same_accepted_contract(
+    monkeypatch,
+    canonical_doc,
+    pattern,
+    expected_codes,
+    expected_sanitized,
+):
+    monkeypatch.setattr(remote, "_PATH_RE", remote.re.compile(pattern))
+    assert _degraded_projection_codes(canonical_doc) == expected_codes
+    assert _sanitized_path_root_cases() == expected_sanitized
+    with pytest.raises(AssertionError, match="accepted path-root codes"):
+        _assert_accepted_path_root_contract(canonical_doc)
 
 
 def test_remote_projection_rejects_bad_freshness_and_identity(canonical_doc):

@@ -62,13 +62,20 @@ async function sha256Hex(value) {
 }
 
 async function buildProbe(expectedConversationFingerprint = null) {
+  const observationIdentity = canonicalConversationIdentity();
   const targetPresent = CHAT_PATH.test(location.pathname);
   const composerAvailable = firstMatch(COMPOSER_SELECTORS);
   const generationActive = firstMatch(ACTIVE_SELECTORS);
   const providerErrorPresent = firstMatch(ERROR_SELECTORS);
+  const documentReadyState = normalizedReadyState();
+  const visibility = normalizeVisibility();
+  const authRequired = authState(targetPresent, composerAvailable);
   const conversationFingerprint = targetPresent
-    ? await sha256Hex(canonicalConversationIdentity())
+    ? await sha256Hex(observationIdentity)
     : null;
+  if (canonicalConversationIdentity() !== observationIdentity) {
+    throw new Error("OBSERVATION_INVALIDATED");
+  }
   const exactConversationLoaded =
     targetPresent &&
     typeof expectedConversationFingerprint === "string" &&
@@ -82,11 +89,11 @@ async function buildProbe(expectedConversationFingerprint = null) {
       target_present: targetPresent,
       exact_conversation_loaded: exactConversationLoaded,
       page_responsive: true,
-      document_ready_state: normalizedReadyState(),
-      visibility: normalizeVisibility(),
+      document_ready_state: documentReadyState,
+      visibility,
       composer_available: composerAvailable,
       generation_state: generationActive ? "active" : composerAvailable ? "idle" : "unknown",
-      auth_required: authState(targetPresent, composerAvailable),
+      auth_required: authRequired,
       provider_error_present: providerErrorPresent,
     },
   };

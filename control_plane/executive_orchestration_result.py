@@ -19,6 +19,8 @@ from scripts.ohf.redaction import evidence_contains_secret, redact_evidence
 
 RESULT_SCHEMA = "mastermind.executive_orchestration_result/v1"
 RAW_OBSERVATION_SCHEMA = "mastermind.operator_raw_role_result_observation/v1"
+PLAN_SCHEMA_V1 = "mastermind.execution_plan/v1"
+PLAN_SCHEMA_V2 = "mastermind.execution_plan/v2"
 MAX_CANONICAL_RESULT_BYTES = 8_388_608
 ROLES = frozenset({"plan", "work", "review", "repair", "aggregation"})
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -106,7 +108,7 @@ def _role_body_schema(role: str) -> dict[str, Any]:
     artifact = _schema_object({"path": _schema_string(maximum=1024, minimum=1), "digest": digest})
 
     if role == "plan":
-        step = _schema_object(
+        v1_step = _schema_object(
             {
                 "ordinal": {"type": "integer", "minimum": 0, "maximum": 7},
                 "step_id": identifier,
@@ -132,12 +134,28 @@ def _role_body_schema(role: str) -> dict[str, Any]:
                 "cost_class": {"type": "string", "enum": ["default", "small"]},
             }
         )
+        v2_step = json.loads(json.dumps(v1_step))
+        v2_step["properties"]["placement"] = _schema_object(
+            {
+                "provider_realm": _schema_string(minimum=1, maximum=128),
+                "quota_class": _schema_string(minimum=1, maximum=128),
+            }
+        )
+        v2_step["required"].append("placement")
         return _schema_object(
             {
-                "schema_version": {"const": "mastermind.execution_plan/v1"},
+                "schema_version": {
+                    "anyOf": [
+                        {"const": PLAN_SCHEMA_V1},
+                        {"const": PLAN_SCHEMA_V2},
+                    ]
+                },
                 "root_job_id": identifier,
                 "plan_attempt_id": identifier,
-                "steps": _schema_array(step, minimum=1, maximum=8),
+                "steps": {
+                    **_schema_array(v1_step, minimum=1, maximum=8),
+                    "items": {"anyOf": [v1_step, v2_step]},
+                },
             }
         )
 
@@ -260,6 +278,11 @@ def orchestration_result_schema(
         return {"const": value} if value is not None else _schema_identifier()
 
     role_body = _role_body_schema(role)
+    if role == "plan":
+        role_body["properties"]["schema_version"] = {"const": PLAN_SCHEMA_V1}
+        role_body["properties"]["steps"]["items"] = role_body["properties"][
+            "steps"
+        ]["items"]["anyOf"][0]
     if root_job_id is not None:
         role_body = json.loads(json.dumps(role_body))
         role_body["properties"]["root_job_id"] = {"const": root_job_id}
@@ -456,7 +479,8 @@ def _validate_plan(value: Any, *, outer: Mapping[str, Any]) -> dict[str, Any]:
         name="plan role_result",
         keys={"schema_version", "root_job_id", "plan_attempt_id", "steps"},
     )
-    if raw["schema_version"] != "mastermind.execution_plan/v1":
+    schema_version = raw["schema_version"]
+    if schema_version not in {PLAN_SCHEMA_V1, PLAN_SCHEMA_V2}:
         raise OrchestrationResultError("unsupported plan schema")
     expected_root = outer.get("expected_root_job_id")
     if expected_root is None:
@@ -476,7 +500,8 @@ def _validate_plan(value: Any, *, outer: Mapping[str, Any]) -> dict[str, Any]:
                 "ordinal", "step_id", "objective", "business_impact",
                 "review_required", "requested_authorities", "allowed_write_paths",
                 "validation_ids", "attempt_limit", "cost_class",
-            },
+            }
+            | ({"placement"} if schema_version == PLAN_SCHEMA_V2 else set()),
         )
         if _integer(step["ordinal"], name="ordinal", minimum=0, maximum=7) != index:
             raise OrchestrationResultError("step ordinal must equal its array position")
@@ -500,31 +525,50 @@ def _validate_plan(value: Any, *, outer: Mapping[str, Any]) -> dict[str, Any]:
                 )
             ),
         )
-        steps.append(
-            {
-                "ordinal": index,
-                "step_id": step_id,
-                "objective": _text(step["objective"], name="objective", nonempty=True),
-                "business_impact": impact,
-                "review_required": _boolean(step["review_required"], name="review_required"),
-                "requested_authorities": authorities,
-                "allowed_write_paths": _unique_strings(
-                    step["allowed_write_paths"], name="allowed_write_paths", maximum=32,
-                    validator=_path,
+        resolved = {
+            "ordinal": index,
+            "step_id": step_id,
+            "objective": _text(step["objective"], name="objective", nonempty=True),
+            "business_impact": impact,
+            "review_required": _boolean(step["review_required"], name="review_required"),
+            "requested_authorities": authorities,
+            "allowed_write_paths": _unique_strings(
+                step["allowed_write_paths"], name="allowed_write_paths", maximum=32,
+                validator=_path,
+            ),
+            "validation_ids": _unique_strings(
+                step["validation_ids"], name="validation_ids", validator=_digest
+            ),
+            "attempt_limit": _integer(
+                step["attempt_limit"], name="attempt_limit", minimum=1, maximum=2
+            ),
+            "cost_class": step["cost_class"],
+        }
+        if schema_version == PLAN_SCHEMA_V2 and "placement" in step:
+            placement = _closed(
+                step["placement"],
+                name=f"steps[{index}].placement",
+                keys={"provider_realm", "quota_class"},
+            )
+            resolved["placement"] = {
+                "provider_realm": _text(
+                    placement["provider_realm"],
+                    name=f"steps[{index}].placement.provider_realm",
+                    maximum=128,
+                    nonempty=True,
                 ),
-                "validation_ids": _unique_strings(
-                    step["validation_ids"], name="validation_ids", validator=_digest
+                "quota_class": _text(
+                    placement["quota_class"],
+                    name=f"steps[{index}].placement.quota_class",
+                    maximum=128,
+                    nonempty=True,
                 ),
-                "attempt_limit": _integer(
-                    step["attempt_limit"], name="attempt_limit", minimum=1, maximum=2
-                ),
-                "cost_class": step["cost_class"],
             }
-        )
+        steps.append(resolved)
         if not isinstance(step["cost_class"], str) or step["cost_class"] not in {"default", "small"}:
             raise OrchestrationResultError("step cost_class is invalid")
     return {
-        "schema_version": "mastermind.execution_plan/v1",
+        "schema_version": schema_version,
         "root_job_id": root_job_id,
         "plan_attempt_id": raw["plan_attempt_id"],
         "steps": steps,
@@ -828,6 +872,8 @@ __all__ = [
     "GOLDEN_ROLE_SCHEMA_DIGESTS",
     "MAX_CANONICAL_RESULT_BYTES",
     "OrchestrationResultError",
+    "PLAN_SCHEMA_V1",
+    "PLAN_SCHEMA_V2",
     "RAW_OBSERVATION_SCHEMA",
     "RESULT_SCHEMA",
     "ROLES",

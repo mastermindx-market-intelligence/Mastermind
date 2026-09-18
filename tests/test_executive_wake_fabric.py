@@ -297,18 +297,28 @@ def _route_for(obligation, *, registry=None, binding=None):
     return route_obligation(obligation, registry, binding=binding)
 
 
-def _ack_row(obligation, alias="PROPHET-COO-A"):
+def _ack_row(obligation, alias="PROPHET-COO-A", *, route=None, attempt_n=1):
+    route = route or _route_for(
+        obligation,
+        binding=_binding(alias=alias),
+    )
     ack = acknowledge(
         obligation,
         trusted=TrustedAckContext(
             ack_mode=AckMode.REASONING_SESSION,
             target_seat=obligation.declared_target_seat,
-            session_alias=alias,
-            reasoning_surface="chatgpt-sol",
-            binding_id=_BIND,
+            session_alias=route.session_alias,
+            reasoning_surface=route.reasoning_surface,
+            binding_id=route.binding_id,
+            binding_generation=route.binding_generation,
             acknowledged_at=_FROZEN,
         ),
         claimed_obligation_ids=[obligation.obligation_id],
+        delivered_command_id=ledger_command_id(
+            obligation.obligation_id,
+            LedgerPhase.DELIVERED,
+            attempt_n=attempt_n,
+        ),
     )
     return ack_record(obligation, ack)
 
@@ -867,7 +877,7 @@ def test_accepted_is_not_delivered():
 def test_delivery_and_acknowledgement_are_separate():
     obligation = _obligation_from_inbox()
     oid = obligation.obligation_id
-    route = _route_for(obligation)
+    route = _route_for(obligation, binding=_binding())
     delivered = ledger_command_id(oid, LedgerPhase.DELIVERED, attempt_n=1)
     accepted = ledger_command_id(oid, LedgerPhase.ACCEPTED, attempt_n=1)
     ack = ledger_command_id(oid, LedgerPhase.TARGET_ACKNOWLEDGED)
@@ -879,7 +889,7 @@ def test_delivery_and_acknowledgement_are_separate():
         delivery_record(oid, LedgerPhase.DELIVERED, attempt_n=1, route=route),
     ]
     assert reconstruct_status(oid, records, route=route) is ObligationStatus.DELIVERED_UNACKNOWLEDGED
-    records_ack = records + [_ack_row(obligation)]
+    records_ack = records + [_ack_row(obligation, route=route)]
     assert reconstruct_status(oid, records_ack, route=route) is ObligationStatus.TARGET_ACKNOWLEDGED
     replay = already_delivered_receipt(
         obligation,
@@ -1186,7 +1196,7 @@ def test_route_rotation_allows_second_delivery_until_ack():
         a2_delivered,
     ]
     assert reconstruct_status(oid, records2, route=r2) is ObligationStatus.DELIVERED_UNACKNOWLEDGED
-    closed = records2 + [_ack_row(obligation)]
+    closed = records2 + [_ack_row(obligation, route=r2, attempt_n=2)]
     assert reconstruct_status(oid, closed, route=r1) is ObligationStatus.TARGET_ACKNOWLEDGED
     assert reconstruct_status(oid, closed, route=r2) is ObligationStatus.TARGET_ACKNOWLEDGED
 
@@ -1235,3 +1245,27 @@ def test_mixed_binding_generations_cannot_coalesce():
 def test_negative_binding_generation_fails_closed():
     with pytest.raises(SessionTargetError, match="integer|>= 1"):
         RuntimeBinding(session_alias="PROPHET-COO-A", binding_id=_BIND, binding_generation=-1)
+
+
+def test_grok_bot_vocabulary_adds_no_target_or_transport_implementation() -> None:
+    assert "grok-bot" in REASONING_SURFACES
+    binding = RuntimeBinding(
+        session_alias="GROK-BOT-A",
+        binding_id="bind-grokbot00000001",
+        binding_generation=1,
+        reasoning_surface="grok-bot",
+    )
+    assert binding.reasoning_surface == "grok-bot"
+
+    registry = load_session_targets()
+    assert all(
+        target.reasoning_surface != "grok-bot"
+        for target in registry.targets.values()
+    )
+    assert "grok-bot" not in DEFAULT_TARGETS_PATH.read_text(encoding="utf-8")
+    assert transport_implemented("grok-computer") is False
+    assert {
+        transport_id
+        for transport_id, descriptor in WAKE_TRANSPORT_DESCRIPTORS.items()
+        if descriptor.transport_implemented
+    } == {"codex-app-server"}

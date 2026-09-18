@@ -38,8 +38,8 @@ import re
 import signal
 import stat
 import subprocess
+import weakref
 from datetime import datetime, timezone
-from enum import Enum
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterator, Mapping, Sequence
 from uuid import uuid4
@@ -50,6 +50,26 @@ from control_plane.executive_workspace import (
     git_observation_env,
     observe_launch_cleanliness,
 )
+from control_plane.worker_execution_contract import (
+    MAX_ARTIFACTS,
+    MAX_ARTIFACT_BYTES,
+    MAX_ARTIFACT_TOTAL_BYTES,
+    LAUNCH_ATTESTATION_SCHEMA_VERSION,
+    ArtifactReceipt,
+    BinaryAttestation,
+    CancelReceipt,
+    CollectionReceipt,
+    LaunchAttestation,
+    ValidationReceipt,
+    WorkerLaunchSpec,
+    WorkerProcessRef,
+    WorkerResult,
+    WorkerRunStatus,
+)
+
+
+LaunchSpec = WorkerLaunchSpec
+ProcessRef = WorkerProcessRef
 
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -62,9 +82,6 @@ _MAX_RESULT_BYTES = 1 * 1024 * 1024
 _MAX_STDOUT_BYTES = 32 * 1024 * 1024
 _MAX_STDERR_BYTES = 4 * 1024 * 1024
 _MAX_JSONL_LINE_BYTES = 1 * 1024 * 1024
-_MAX_ARTIFACTS = 32
-_MAX_ARTIFACT_BYTES = 8 * 1024 * 1024
-_MAX_ARTIFACT_TOTAL_BYTES = 32 * 1024 * 1024
 _MAX_VALIDATION_STDOUT_BYTES = 4 * 1024 * 1024
 _MAX_VALIDATION_STDERR_BYTES = 1 * 1024 * 1024
 _MAX_VALIDATION_ARGV_BYTES = 64 * 1024
@@ -120,7 +137,6 @@ _JSONL_EVENT_TYPES = frozenset({
     "error",
 })
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
-LAUNCH_ATTESTATION_SCHEMA_VERSION = "mastermind.executive_launch_attestation/v1"
 SECRET_CANARY_SCHEMA_VERSION = "mastermind.executive_secret_canary/v1"
 ISOLATION_MANIFEST_SCHEMA_VERSION = "mastermind.executive_isolation_manifest/v1"
 _SECRET_CANARY_CHECKS = frozenset(
@@ -223,33 +239,6 @@ class ResultValidationError(CodexWorkerError):
     """Provider output did not satisfy the local result contract."""
 
 
-class WorkerRunStatus(str, Enum):
-    STARTING = "STARTING"
-    RUNNING = "RUNNING"
-    CANCELLING = "CANCELLING"
-    SUCCEEDED = "SUCCEEDED"
-    FAILED = "FAILED"
-    INVALID_RESULT = "INVALID_RESULT"
-    CANCELLED = "CANCELLED"
-    TIMED_OUT = "TIMED_OUT"
-
-
-@dataclasses.dataclass(frozen=True)
-class BinaryAttestation:
-    path: str
-    real_path: str
-    version: str
-    sha256: str
-    team_identifier: str | None
-    size: int
-    device: int
-    inode: int
-    mode: int
-    uid: int
-    gid: int
-    mtime_ns: int
-
-
 @dataclasses.dataclass(frozen=True)
 class ProcessIdentity:
     """Boot-scoped process identity including the OS-principal boundary."""
@@ -261,166 +250,6 @@ class ProcessIdentity:
     effective_gid: int
     real_uid: int
     real_gid: int
-
-
-@dataclasses.dataclass(frozen=True)
-class LaunchAttestation:
-    """Complete, secret-free launch receipt persisted before RUNNING."""
-
-    schema_version: str
-    created_at: str
-    executable_path: str
-    binary: BinaryAttestation
-    rendered_argv: tuple[str, ...]
-    environment_keys: tuple[str, ...]
-    permission_profile_sha256: str
-    prompt_sha256: str
-    expected_base_sha: str | None
-    observed_base_sha: str
-    workspace_identity: Mapping[str, Any]
-    worker_identity: Mapping[str, Any]
-    provider_home_identity: Mapping[str, Any]
-    secret_canary_verdict: Mapping[str, Any]
-    launch_nonce: str
-    process_identity: Mapping[str, Any]
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "schema_version": self.schema_version,
-            "created_at": self.created_at,
-            "executable_path": self.executable_path,
-            "binary": dataclasses.asdict(self.binary),
-            "rendered_argv": list(self.rendered_argv),
-            "environment_keys": list(self.environment_keys),
-            "permission_profile_sha256": self.permission_profile_sha256,
-            "prompt_sha256": self.prompt_sha256,
-            "expected_base_sha": self.expected_base_sha,
-            "observed_base_sha": self.observed_base_sha,
-            "workspace_identity": dict(self.workspace_identity),
-            "worker_identity": dict(self.worker_identity),
-            "provider_home_identity": dict(self.provider_home_identity),
-            "secret_canary_verdict": dict(self.secret_canary_verdict),
-            "launch_nonce": self.launch_nonce,
-            "process_identity": dict(self.process_identity),
-        }
-
-
-@dataclasses.dataclass(frozen=True)
-class LaunchSpec:
-    """Immutable inputs for one authorized, non-interactive Codex turn."""
-
-    run_id: str
-    job_id: str
-    worker_id: str
-    workspace_path: Path
-    run_dir: Path
-    prompt: str
-    result_schema_path: Path
-    codex_home: Path
-    # Executable grants are an exact set, not an ordinal.  ``authority`` is a
-    # temporary scalar compatibility seam for callers predating Phase 1B;
-    # callers that need WRITE_BRANCH + RUN_TESTS should use ``authorities``.
-    authorities: tuple[str, ...] = ()
-    authority: str | None = None
-    model: str = "gpt-5.6-sol"
-    reasoning_effort: str = "xhigh"
-    timeout_seconds: float = 1800.0
-    cancel_grace_seconds: float = 10.0
-    worker_user: str = "mastermind-worker"
-    expected_base_sha: str | None = None
-    allowed_artifact_paths: tuple[str, ...] = ()
-    # The control principal freezes every existing sibling assignment before
-    # launch.  The worker cannot enumerate the control-owned 0710 roots.
-    isolation_roots: tuple[Path, ...] = ()
-    isolation_denied_paths: tuple[Path, ...] = ()
-    isolation_manifest: Mapping[str, Any] = dataclasses.field(default_factory=dict)
-    isolation_manifest_sha256: str | None = None
-    forbidden_paths: tuple[Path, ...] = ()
-    max_artifacts: int = _MAX_ARTIFACTS
-    max_artifact_bytes: int = _MAX_ARTIFACT_BYTES
-    max_artifact_total_bytes: int = _MAX_ARTIFACT_TOTAL_BYTES
-    expected_worker_uid: int | None = None
-    expected_worker_gid: int | None = None
-    shared_run_gid: int | None = None
-    secret_canary_verdict: Mapping[str, Any] = dataclasses.field(default_factory=dict)
-    require_secret_canary: bool = False
-
-
-@dataclasses.dataclass(frozen=True)
-class ProcessRef:
-    run_id: str
-    pid: int
-    pgid: int
-    process_start_identity: str
-    boot_session_id: str
-    launch_nonce: str
-    provider_session_id: str | None
-    stdout_path: str
-    stderr_path: str
-    result_path: str
-    started_at: str
-    binary: BinaryAttestation
-    base_sha: str
-    session_id: int | None = None
-    effective_uid: int | None = None
-    effective_gid: int | None = None
-    real_uid: int | None = None
-    real_gid: int | None = None
-
-
-@dataclasses.dataclass(frozen=True)
-class ArtifactReceipt:
-    path: str
-    sha256: str
-    size: int
-
-
-@dataclasses.dataclass(frozen=True)
-class WorkerResult:
-    job_id: str
-    run_id: str
-    worker_id: str
-    status: WorkerRunStatus
-    structured_output: Mapping[str, Any] | None
-    artifact_manifest: tuple[ArtifactReceipt, ...]
-    git_manifest: Mapping[str, Any]
-    usage: Mapping[str, Any]
-    provider_session_id: str | None
-    exit_code: int | None
-    started_at: str
-    finished_at: str
-    error: str | None
-
-
-@dataclasses.dataclass(frozen=True)
-class CollectionReceipt:
-    process_ref: ProcessRef
-    result: WorkerResult
-    stdout_sha256: str
-    stderr_sha256: str
-    result_sha256: str | None
-
-
-@dataclasses.dataclass(frozen=True)
-class CancelReceipt:
-    run_id: str
-    reason: str
-    signal_sent: bool
-    escalated_to_sigkill: bool
-    already_exited: bool
-    finished_at: str
-
-
-@dataclasses.dataclass(frozen=True)
-class ValidationReceipt:
-    argv: tuple[str, ...]
-    exit_code: int | None
-    stdout_sha256: str
-    stdout_size: int
-    stderr_sha256: str
-    stderr_size: int
-    timed_out: bool
-    error: str | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -557,9 +386,24 @@ def _sha256_path(path: Path, *, max_bytes: int | None = None) -> str:
     return digest.hexdigest()
 
 
+def _jsonable(value: Any) -> Any:
+    if dataclasses.is_dataclass(value):
+        return {
+            field.name: _jsonable(getattr(value, field.name))
+            for field in dataclasses.fields(value)
+        }
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, Mapping):
+        return {str(key): _jsonable(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(item) for item in value]
+    return value
+
+
 def _canonical_sha256(value: Any) -> str:
     payload = json.dumps(
-        value,
+        _jsonable(value),
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
@@ -627,7 +471,12 @@ def validate_secret_canary_verdict(
         }
     try:
         document = json.loads(
-            json.dumps(value, sort_keys=True, ensure_ascii=False, allow_nan=False)
+            json.dumps(
+                _jsonable(value),
+                sort_keys=True,
+                ensure_ascii=False,
+                allow_nan=False,
+            )
         )
     except (TypeError, ValueError) as exc:
         raise LaunchValidationError(f"secret canary verdict is not JSON data: {exc}") from exc
@@ -1365,8 +1214,11 @@ def _create_private_file(path: Path) -> int:
 
 
 def _validate_codex_home(path: Path) -> Path:
-    resolved = path.resolve(strict=True)
-    info = path.lstat()
+    try:
+        info = path.lstat()
+        resolved = path.resolve(strict=True)
+    except OSError as exc:
+        raise LaunchValidationError("CODEX_HOME is unavailable") from exc
     if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
         raise LaunchValidationError("CODEX_HOME must be a real directory")
     if stat.S_IMODE(info.st_mode) & 0o077:
@@ -1944,17 +1796,25 @@ async def _hash_validation_stream(
     return digest.hexdigest(), total
 
 
+_CONSTRUCTED_CODEX_ADAPTERS: weakref.WeakSet["CodexWorkerAdapter"] = weakref.WeakSet()
+
+
 class CodexWorkerAdapter:
     """One-host, one-shot Codex process adapter with no queue/runtime authority."""
+
+    adapter_id = "codex-cli"
 
     def __init__(
         self,
         binary_path: str | os.PathLike[str],
         *,
+        codex_home: str | os.PathLike[str] | None = None,
         binary_attestation: BinaryAttestation | None = None,
         allowed_versions: frozenset[str] | None = None,
         required_team_identifier: str | None = _OPENAI_TEAM_IDENTIFIER,
         inspector: ProcessInspector | None = None,
+        provider_realm: Any | None = None,
+        provider_credential_loader: Any | None = None,
     ) -> None:
         path = Path(binary_path)
         if not path.is_absolute():
@@ -1973,10 +1833,59 @@ class CodexWorkerAdapter:
             and self.binary.team_identifier != required_team_identifier
         ):
             raise BinaryAttestationError("injected Codex signer is not allowlisted")
+        self._codex_home = Path(codex_home) if codex_home is not None else None
+        self.provider_realm = provider_realm
+        self.provider_credential_loader = provider_credential_loader
+        if (provider_realm is None) != (provider_credential_loader is None):
+            from control_plane.codex_provider_realm import ProviderRealmError
+
+            raise ProviderRealmError(
+                "provider realm and credential loader must be configured together"
+            )
         self.inspector = inspector or ProcessInspector()
         self._runs: dict[str, _RunState] = {}
+        _CONSTRUCTED_CODEX_ADAPTERS.add(self)
 
-    def _validate_spec(self, spec: LaunchSpec) -> tuple[Path, Path, Path, Path, _GitSnapshot, Any]:
+    @property
+    def codex_home(self) -> Path:
+        if self._codex_home is None:
+            raise LaunchValidationError("Codex home is not configured")
+        return self._codex_home
+
+    def _validated_codex_home(self) -> Path:
+        """Re-open the adapter-private provider home at each execution edge."""
+
+        if self.provider_realm is None or self.provider_realm.requires_codex_auth_file:
+            return _validate_codex_home(self.codex_home)
+        path = self.codex_home
+        try:
+            info = path.lstat()
+            resolved = path.resolve(strict=True)
+        except OSError as exc:
+            raise LaunchValidationError("CODEX_HOME is unavailable") from exc
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+            raise LaunchValidationError("CODEX_HOME must be a real directory")
+        if stat.S_IMODE(info.st_mode) & 0o077:
+            raise LaunchValidationError("CODEX_HOME must be mode 0700 or narrower")
+        return resolved
+
+    def _bind_legacy_codex_home(self, _codex_home: str | os.PathLike[str]) -> None:
+        """Reject every attempt to inject a second provider-home authority."""
+
+        if self._codex_home is not None:
+            raise LaunchValidationError("Codex home is already configured on the adapter")
+        raise LaunchValidationError(
+            "Codex home is not configured; launch-spec home binding is disabled"
+        )
+
+    def _validate_spec(
+        self,
+        spec: LaunchSpec,
+        *,
+        codex_home: Path | None = None,
+    ) -> tuple[Path, Path, Path, Path, _GitSnapshot, Any]:
+        if codex_home is None:
+            codex_home = self._validated_codex_home()
         with _launch_validation_stage("spec_contract"):
             for field_name in ("run_id", "job_id", "worker_id"):
                 value = getattr(spec, field_name)
@@ -2030,7 +1939,6 @@ class CodexWorkerAdapter:
         _ensure_private_directory(run_dir / "logs")
         _ensure_private_directory(run_dir / "output")
 
-        codex_home = _validate_codex_home(Path(spec.codex_home))
         if (spec.expected_worker_uid is None) != (spec.expected_worker_gid is None):
             raise LaunchValidationError("expected worker UID and GID must be configured together")
         if spec.require_secret_canary and spec.expected_worker_uid is None:
@@ -2050,10 +1958,10 @@ class CodexWorkerAdapter:
                 raise LaunchValidationError("configured worker account does not exist") from exc
             if worker_account.pw_uid != expected_uid or worker_account.pw_gid != expected_gid:
                 raise LaunchValidationError("configured worker account UID/GID does not match")
-            for label, protected_path in (
-                ("provider home", codex_home),
-                ("provider auth", codex_home / "auth.json"),
-            ):
+            protected_paths = [("provider home", codex_home)]
+            if self.provider_realm is None or self.provider_realm.requires_codex_auth_file:
+                protected_paths.append(("provider auth", codex_home / "auth.json"))
+            for label, protected_path in protected_paths:
                 if protected_path.lstat().st_uid != expected_uid:
                     raise LaunchValidationError(
                         f"{label} is not owned by the configured worker principal"
@@ -2091,15 +1999,15 @@ class CodexWorkerAdapter:
                 raise LaunchValidationError(
                     f"write path targets protected Git/credential metadata: {pattern!r}"
                 )
-        if len(allowed) > _MAX_ARTIFACTS:
+        if len(allowed) > MAX_ARTIFACTS:
             raise LaunchValidationError("allowed artifact path patterns exceed adapter ceiling")
         if "WRITE_BRANCH" in _authority_set(spec) and not allowed:
             raise LaunchValidationError("WRITE_BRANCH requires at least one allowed write path")
-        if not 0 <= int(spec.max_artifacts) <= _MAX_ARTIFACTS:
+        if not 0 <= int(spec.max_artifacts) <= MAX_ARTIFACTS:
             raise LaunchValidationError("max_artifacts exceeds adapter ceiling")
-        if not 0 < int(spec.max_artifact_bytes) <= _MAX_ARTIFACT_BYTES:
+        if not 0 < int(spec.max_artifact_bytes) <= MAX_ARTIFACT_BYTES:
             raise LaunchValidationError("max_artifact_bytes exceeds adapter ceiling")
-        if not 0 < int(spec.max_artifact_total_bytes) <= _MAX_ARTIFACT_TOTAL_BYTES:
+        if not 0 < int(spec.max_artifact_total_bytes) <= MAX_ARTIFACT_TOTAL_BYTES:
             raise LaunchValidationError("max_artifact_total_bytes exceeds adapter ceiling")
         return workspace, run_dir, home, tmp, baseline, schema
 
@@ -2142,8 +2050,12 @@ class CodexWorkerAdapter:
         return {"/Users", "/Users/**"}
 
     @staticmethod
-    def _validate_isolation_identity(value: Any, *, label: str) -> dict[str, Any]:
-        if not isinstance(value, dict) or set(value) != {
+    def _validate_isolation_identity(
+        value: Any,
+        *,
+        label: str,
+    ) -> Mapping[str, Any]:
+        if not isinstance(value, Mapping) or set(value) != {
             "path",
             "device",
             "inode",
@@ -2206,10 +2118,10 @@ class CodexWorkerAdapter:
         root_values = manifest.get("roots")
         entry_values = manifest.get("entries")
         if (
-            not isinstance(root_values, list)
+            not isinstance(root_values, (list, tuple))
             or not root_values
             or len(root_values) > 8
-            or not isinstance(entry_values, list)
+            or not isinstance(entry_values, (list, tuple))
             or len(entry_values) > 256
         ):
             raise LaunchValidationError("isolation manifest lists are outside safe bounds")
@@ -2223,9 +2135,9 @@ class CodexWorkerAdapter:
         )
         if root_paths != sorted(root_paths) or root_paths != configured_roots:
             raise LaunchValidationError("isolation manifest roots are incomplete or unordered")
-        entries: list[tuple[str, str, str, dict[str, Any]]] = []
+        entries: list[tuple[str, str, str, Mapping[str, Any]]] = []
         for raw in entry_values:
-            if not isinstance(raw, dict) or set(raw) != {
+            if not isinstance(raw, Mapping) or set(raw) != {
                 "root_path",
                 "disposition",
                 "identity",
@@ -2296,13 +2208,18 @@ class CodexWorkerAdapter:
         return values
 
     def _sensitive_denied_filesystem_paths(
-        self, spec: LaunchSpec, workspace: Path
+        self,
+        spec: LaunchSpec,
+        workspace: Path,
+        *,
+        codex_home: Path | None = None,
     ) -> set[str]:
         try:
             real_home = Path(pwd.getpwuid(os.geteuid()).pw_dir).resolve()
         except (KeyError, OSError):
             real_home = Path.home().resolve()
-        codex_home = Path(spec.codex_home).resolve()
+        if codex_home is None:
+            codex_home = self._validated_codex_home()
         values = {
             str(real_home / ".ssh" / "**"),
             str(real_home / ".config" / "gh" / "**"),
@@ -2338,15 +2255,31 @@ class CodexWorkerAdapter:
             values.add(resolved + "-*")
         return values
 
-    def _denied_filesystem_paths(self, spec: LaunchSpec, workspace: Path) -> list[str]:
+    def _denied_filesystem_paths(
+        self,
+        spec: LaunchSpec,
+        workspace: Path,
+        *,
+        codex_home: Path | None = None,
+    ) -> list[str]:
         return sorted(
             self._isolation_denied_filesystem_paths(
                 spec, workspace, Path(spec.run_dir).resolve(strict=False)
             )
-            | self._sensitive_denied_filesystem_paths(spec, workspace)
+            | self._sensitive_denied_filesystem_paths(
+                spec,
+                workspace,
+                codex_home=codex_home,
+            )
         )
 
-    def _permission_overrides(self, spec: LaunchSpec, workspace: Path) -> list[str]:
+    def _permission_overrides(
+        self,
+        spec: LaunchSpec,
+        workspace: Path,
+        *,
+        codex_home: Path | None = None,
+    ) -> list[str]:
         write = "WRITE_BRANCH" in _authority_set(spec)
         profile_name = "mastermind_exec_write" if write else "mastermind_exec_read"
         run_dir = Path(spec.run_dir).resolve(strict=False)
@@ -2379,7 +2312,13 @@ class CodexWorkerAdapter:
             for relative in spec.allowed_artifact_paths:
                 pattern = _normalise_relative_path(relative)
                 filesystem[str(workspace / pattern)] = "write"
-        for denied in sorted(self._sensitive_denied_filesystem_paths(spec, workspace)):
+        for denied in sorted(
+            self._sensitive_denied_filesystem_paths(
+                spec,
+                workspace,
+                codex_home=codex_home,
+            )
+        ):
             filesystem[denied] = "deny"
         rendered = ",".join(
             f"{json.dumps(key)}={json.dumps(value)}" for key, value in filesystem.items()
@@ -2400,6 +2339,7 @@ class CodexWorkerAdapter:
         result_path: Path,
         home: Path,
         tmp: Path,
+        codex_home: Path,
     ) -> list[str]:
         shell_set = {
             "HOME": str(home),
@@ -2452,15 +2392,25 @@ class CodexWorkerAdapter:
             "-c", "mcp_servers={}",
             "-c", f"shell_environment_policy={shell_policy}",
         ]
-        argv.extend(self._permission_overrides(spec, workspace))
+        argv.extend(
+            self._permission_overrides(
+                spec,
+                workspace,
+                codex_home=codex_home,
+            )
+        )
+        if self.provider_realm is not None:
+            for override in self.provider_realm.config_overrides():
+                argv.extend(["-c", override])
         for feature in _DISABLED_FEATURES:
             argv.extend(["--disable", feature])
         argv.append("-")
         return argv
 
-    @staticmethod
-    def _environment(spec: LaunchSpec, home: Path, tmp: Path, codex_home: Path) -> dict[str, str]:
-        return {
+    def _environment(
+        self, spec: LaunchSpec, home: Path, tmp: Path, codex_home: Path
+    ) -> dict[str, str]:
+        environment = {
             "HOME": str(home),
             "USER": spec.worker_user,
             "LOGNAME": spec.worker_user,
@@ -2478,6 +2428,17 @@ class CodexWorkerAdapter:
             "GIT_CONFIG_NOSYSTEM": "1",
             "GIT_OPTIONAL_LOCKS": "0",
         }
+        if self.provider_realm is not None:
+            loader = self.provider_credential_loader
+            if loader is None:
+                raise LaunchValidationError("provider credential loader is unavailable")
+            try:
+                credential = loader()
+                credential = self.provider_realm.validate_credential(credential)
+            except Exception:
+                raise LaunchValidationError("provider credential is unavailable") from None
+            environment[self.provider_realm.env_key] = credential
+        return environment
 
     @staticmethod
     def _validation_environment(spec: LaunchSpec, home: Path, tmp: Path) -> dict[str, str]:
@@ -2584,6 +2545,7 @@ class CodexWorkerAdapter:
         if not 0.1 <= timeout <= 3600:
             raise LaunchValidationError("validation timeout is out of bounds")
 
+        codex_home = self._validated_codex_home()
         _authority_set(spec)
         workspace_lexical = Path(spec.workspace_path)
         if not workspace_lexical.is_absolute():
@@ -2610,7 +2572,6 @@ class CodexWorkerAdapter:
             raise LaunchValidationError("run_dir and workspace must be disjoint")
         validation_home = _ensure_private_directory(run_dir / "validation-home")
         validation_tmp = _ensure_private_directory(run_dir / "validation-tmp")
-        _validate_codex_home(Path(spec.codex_home))
         _assert_binary_unchanged(self.binary)
 
         read_spec = dataclasses.replace(
@@ -2627,7 +2588,11 @@ class CodexWorkerAdapter:
             profile_name,
             "-C",
             str(workspace),
-            *self._permission_overrides(read_spec, workspace),
+            *self._permission_overrides(
+                read_spec,
+                workspace,
+                codex_home=codex_home,
+            ),
             "--",
             *exact_argv,
         ]
@@ -2757,9 +2722,12 @@ class CodexWorkerAdapter:
         )
 
     async def start(self, spec: LaunchSpec) -> ProcessRef:
-        workspace, run_dir, home, tmp, baseline, _schema = self._validate_spec(spec)
+        codex_home = self._validated_codex_home()
+        workspace, run_dir, home, tmp, baseline, _schema = self._validate_spec(
+            spec,
+            codex_home=codex_home,
+        )
         _assert_binary_unchanged(self.binary)
-        codex_home = _validate_codex_home(Path(spec.codex_home))
         canary_verdict = validate_secret_canary_verdict(
             spec.secret_canary_verdict,
             require_passed=bool(spec.require_secret_canary),
@@ -2777,7 +2745,15 @@ class CodexWorkerAdapter:
         try:
             result_fd = _create_private_file(result_path)
             os.close(result_fd)
-            argv = self._argv(spec, workspace, schema_path, result_path, home, tmp)
+            argv = self._argv(
+                spec,
+                workspace,
+                schema_path,
+                result_path,
+                home,
+                tmp,
+                codex_home,
+            )
             environment = self._environment(spec, home, tmp, codex_home)
             process = await asyncio.create_subprocess_exec(
                 *argv,
@@ -2855,7 +2831,11 @@ class CodexWorkerAdapter:
         except KeyError:
             observed_user = None
         permission_profile = {
-            "permission_overrides": self._permission_overrides(spec, workspace),
+            "permission_overrides": self._permission_overrides(
+                spec,
+                workspace,
+                codex_home=codex_home,
+            ),
             "isolation_manifest_sha256": spec.isolation_manifest_sha256,
             "network_enabled": False,
             "disabled_features": list(_DISABLED_FEATURES),

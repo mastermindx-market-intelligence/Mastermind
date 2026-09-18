@@ -1,0 +1,92 @@
+{
+  "schema": "mastermind.subscription_provider_profiles/v1",
+  "verified_at": "2026-09-13T06:55:00Z",
+  "profiles": {
+    "glm-coding-plan": {
+      "provider": "glm",
+      "product": "coding_plan",
+      "protocol": "anthropic",
+      "base_url": "https://api.z.ai/api/anthropic",
+      "models": {
+        "routine": "GLM-5.3-Flash",
+        "hard": "GLM-5.3",
+        "fast": "GLM-5.3-Flash",
+        "subagent": "GLM-5.3-Flash"
+      },
+      "default_model_class": "routine",
+      "supported_tool_only": true,
+      "credential_binding": "adapter_private_provider_realm",
+      "quota_profile": {
+        "provider": "glm",
+        "product": "coding_plan",
+        "tier": null
+      },
+      "autonomous_allowed": false,
+      "activation_gate": "provider_realm_enrolled_and_capacity_known",
+      "usage_policy": {
+        "supported_harness_required": true,
+        "interactive_only": true,
+        "unattended_background_allowed": false,
+        "production_backend_allowed": false
+      }
+    },
+    "alibaba-token-plan-personal": {
+      "provider": "alibaba",
+      "product": "token_plan_personal",
+      "protocol": "anthropic",
+      "base_url": "https://token-plan.ap-southeast-1.maas.aliyuncs.com/apps/anthropic",
+      "models": {
+        "routine": "qwen3.8-max",
+        "hard": "qwen3.8-max",
+        "fast": "qwen3.6-flash",
+        "subagent": "qwen3.7-max"
+      },
+      "default_model_class": "routine",
+      "supported_tool_only": true,
+      "credential_binding": "adapter_private_provider_realm",
+      "quota_profile": {
+        "provider": "alibaba",
+        "product": "token_plan_personal",
+        "tier": null
+      },
+      "autonomous_allowed": false,
+      "activation_gate": "provider_realm_enrolled_and_capacity_known",
+      "usage_policy": {
+        "supported_harness_required": true,
+        "interactive_only": true,
+        "unattended_background_allowed": false,
+        "production_backend_allowed": false,
+        "single_user_only": true
+      }
+    },
+    "minimax-token-plan": {
+      "provider": "minimax",
+      "product": "token_plan_current_m3",
+      "protocol": "anthropic",
+      "base_url": "https://api.minimax.io/anthropic",
+      "models": {
+        "routine": "MiniMax-M3",
+        "hard": "MiniMax-M3",
+        "fast": "MiniMax-M3",
+        "subagent": "MiniMax-M3"
+      },
+      "default_model_class": "routine",
+      "supported_tool_only": false,
+      "credential_binding": "adapter_private_provider_realm",
+      "quota_profile": {
+        "provider": "minimax",
+        "product": "token_plan_current_m3",
+        "tier": null
+      },
+      "autonomous_allowed": false,
+      "activation_gate": "provider_realm_enrolled_and_capacity_known",
+      "usage_policy": {
+        "supported_harness_required": true,
+        "interactive_only": true,
+        "unattended_background_allowed": false,
+        "production_backend_allowed": false,
+        "payg_recommended_for_production": true
+      }
+    }
+  }
+}

@@ -1,0 +1,118 @@
+name: Executive OS DR drill
+
+# DR-D1: proves the full off-host disaster-recovery chain (backup -> verify
+# -> encrypt-then-MAC export -> ship to a GitHub release -> discard local
+# copies -> fetch on this same disposable runner -> decrypt -> restore
+# verification -> logical-state equality) with zero dependence on the
+# control host. Ships DRAFT release assets under the reserved `dr-export/*`
+# tag namespace on THIS repo (adversarial review M10 -- a draft creates no
+# git tag/ref until published, so routine drills never accumulate permanent,
+# undecryptable-elsewhere tags), authenticated by the workflow's own
+# ephemeral, repo-scoped GITHUB_TOKEN -- no long-lived credential, no
+# enrollment.
+#
+# See research/MASTERMIND_EXECUTIVE_DR_V1_ARCHITECTURE_2026-09-01.md §9/§12
+# and ops/executive_os/DR_RUNBOOK.md.
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    # Weekly, well outside the 05:00-11:00 UTC window CLAUDE.md reserves.
+    - cron: "0 15 * * 0"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dr-drill
+  cancel-in-progress: false
+
+jobs:
+  drill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # No `pip install` step: control_plane/executive_dr.py,
+      # control_plane/executive_backup.py, control_plane/executive_runtime.py,
+      # and scripts/dr_drill.py import stdlib only (plus the platform
+      # /usr/bin/openssl binary via subprocess), by construction of the same
+      # isolated `python3.12 -I -S` runtime the production Executive service
+      # runs under. `python3 -I -S -B scripts/dr_drill.py --offline` proves
+      # the identical import graph locally with zero network -- transport
+      # selection (--offline vs the real github-release run below) does not
+      # change what gets imported, only which transport function is called.
+
+      # Adversarial review B2: `secrets.GITHUB_TOKEN` is NOT automatically
+      # present in a step's process environment -- it must be mapped
+      # explicitly via `env:`, or `os.environ.get("GITHUB_TOKEN")` inside
+      # the drill (default `--token-env`) reads nothing and every GitHub
+      # call fails CREDENTIAL_LOST.
+      - name: Run the DR-D1 drill
+        env:
+          DR_DRILL_SOURCE_COMMIT: ${{ github.sha }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 -I -S -B scripts/dr_drill.py --receipt-out drill-receipt.json --repo "${{ github.repository }}"
+
+      # Adversarial review M8: run_drill now writes a receipt on EVERY exit
+      # path, success or failure (stage reached + typed state on failure),
+      # so the artifact upload can now require the file to exist.
+      - name: Upload drill receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dr-drill-receipt
+          path: drill-receipt.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Summarize
+        if: always()
+        run: |
+          python3 -I -S -B - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          receipt = json.load(open("drill-receipt.json", encoding="utf-8"))
+          print("# Executive OS DR-D1 drill")
+          print("")
+          if receipt.get("ok"):
+              print(f"- export_id: `{receipt['export_id']}`")
+              print(f"- tag: `{receipt['tag']}`")
+              print(f"- transport: `{receipt['transport']}`")
+              print(f"- logical_state_equal: **{receipt['logical_state_equal']}**")
+              # Component measure only -- NOT the packet's <=4h RTO target,
+              # which additionally includes host provisioning and is
+              # measured by the full ceremony drill (DR_RUNBOOK.md), not by
+              # this automated component alone.
+              print(f"- fetch_to_verified_ms (automated component only): **{receipt['fetch_to_verified_ms']} ms**")
+              print(f"- ciphertext byte size: {receipt['ciphertext_byte_size']}")
+          else:
+              print(f"- **FAILED** at stage `{receipt.get('failed_stage')}`")
+              print(f"- error_state: `{receipt.get('error_state')}`")
+              print(f"- error_message: {receipt.get('error_message')}")
+          print("")
+          print("| stage | ms |")
+          print("|---|---|")
+          for name, ms in receipt.get("stage_timings_ms", {}).items():
+              print(f"| {name} | {ms} |")
+          PY
+
+      # Adversarial review M10: fixed-count retention for the DRILL lane
+      # only (draft + dr-export/* releases). Runs only after a successful
+      # drill -- a failed drill's release, if any exists, stays for
+      # investigation. Never touches the non-draft production/vault lane.
+      - name: Prune old drill releases
+        if: success()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          python3 -I -S -B scripts/dr_drill_prune_releases.py
+          --repo "${{ github.repository }}" --keep 8
+          --summary-out "$GITHUB_STEP_SUMMARY"

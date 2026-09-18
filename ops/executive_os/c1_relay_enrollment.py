@@ -50,6 +50,10 @@ CONTROL_CONFIG = Path(
     "/Library/Application Support/MastermindExecutive/config/control.json"
 )
 CONTROL_PLIST = Path("/Library/LaunchDaemons/com.mastermind.executive.control.plist")
+DIALOGUE_OBSERVATION_SOCKET = Path(
+    "/var/run/mastermind-dialogue-observation/dialogue-observation.sock"
+)
+DIALOGUE_RELAY_GID = 457
 RELAY_PLIST = Path(
     "/Library/LaunchDaemons/com.mastermind.executive.sol-state-relay.plist"
 )
@@ -340,11 +344,14 @@ def _launchd_disabled(label: str) -> bool:
         return False
     if completed.returncode != 0:
         return False
-    return re.search(
-        rf'^\s*"{re.escape(label)}"\s*=>\s*true\s*$',
+    # macOS emits enabled/disabled; retain the legacy boolean form as well.
+    # An absent, unknown, or repeated override cannot prove a stopped boundary.
+    states = re.findall(
+        rf'^\s*"{re.escape(label)}"\s*=>\s*(\S+)\s*$',
         completed.stdout,
         re.MULTILINE,
-    ) is not None
+    )
+    return states in (["true"], ["disabled"])
 
 
 def _launchd_loaded(label: str) -> bool:
@@ -430,12 +437,27 @@ def _assert_host_prepared() -> str:
             or control.get("ceo_ingress_peer_uid") != RELAY_UID
             or control.get("ceo_ingress_socket_path")
             != os.fspath(c1_runtime.EXECUTIVE_SOCKET_PATH)
+            or control.get("dialogue_bridge_armed") is not False
+            or control.get("dialogue_observation_launchd_socket_name")
+            != "DialogueObservation"
+            or control.get("dialogue_observation_peer_uid") != DIALOGUE_RELAY_GID
+            or control.get("dialogue_observation_socket_path")
+            != os.fspath(DIALOGUE_OBSERVATION_SOCKET)
+            or control.get("dialogue_wake_retry_policy")
+            != {
+                "accepted_ttl_s": None,
+                "armed": False,
+                "max_delivery_attempts": None,
+                "reenable_on_binding_rotation": True,
+                "retry_cooldown_s": None,
+                "target_unavailable_backoff_s": None,
+            }
             or "ceo_ingress_armed" in control
         ):
             raise ValueError
         control_plist = plistlib.loads(CONTROL_PLIST.read_bytes())
         sockets = control_plist["Sockets"]
-        if set(sockets) != {"Operator", "CeoIngress"}:
+        if set(sockets) != {"Operator", "CeoIngress", "DialogueObservation"}:
             raise ValueError
         if (
             sockets["Operator"].get("SockPathOwner") != 450
@@ -444,6 +466,12 @@ def _assert_host_prepared() -> str:
             or sockets["CeoIngress"].get("SockPathOwner") != 450
             or sockets["CeoIngress"].get("SockPathGroup") != RELAY_GID
             or sockets["CeoIngress"].get("SockPathMode") != 0o660
+            or sockets["DialogueObservation"].get("SockPathName")
+            != os.fspath(DIALOGUE_OBSERVATION_SOCKET)
+            or sockets["DialogueObservation"].get("SockPathOwner") != 450
+            or sockets["DialogueObservation"].get("SockPathGroup")
+            != DIALOGUE_RELAY_GID
+            or sockets["DialogueObservation"].get("SockPathMode") != 0o660
         ):
             raise ValueError
 

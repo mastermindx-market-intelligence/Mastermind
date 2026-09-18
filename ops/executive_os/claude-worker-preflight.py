@@ -5,10 +5,11 @@ advanced by Operator Continuity OCR-1 V3. It owns only non-secret binary/auth
 readiness observations. It does not perform login, execute a model turn,
 select capacity, create Executive lifecycle state, or persist provider identity.
 
-V1 intentionally permits only two provider commands:
+V1 intentionally permits only two provider commands, each fenced from ambient
+user/project/local settings and customization discovery:
 
-* ``claude --version``
-* ``claude auth status``
+* ``claude --safe-mode --setting-sources "" --version``
+* ``claude --safe-mode --setting-sources "" auth status``
 
 The public receipt is a closed, secret-free contract. Provider account PII is
 never copied into it. Host/principal references are wire identities supplied by
@@ -23,8 +24,13 @@ import hashlib
 import json
 import os
 import re
+import selectors
+import shutil
+import signal
 import stat
 import subprocess
+import tempfile
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Mapping
@@ -123,10 +129,56 @@ _RAW_AUTH_ALLOWED_KEYS = frozenset(
     }
 )
 _PROVIDER_TIMEOUT_SECONDS = 15.0
+_PROVIDER_IDLE_TIMEOUT_SECONDS = 5.0
+_PROCESS_TERMINATE_GRACE_SECONDS = 0.5
+_READ_CHUNK_BYTES = 8 * 1024
 _HASH_CHUNK_BYTES = 1024 * 1024
 # A reviewed provider binary may be large, but hashing must never read an
 # unbounded caller-selected file into memory or chase growth without a ceiling.
 MAX_BINARY_BYTES = 512 * 1024 * 1024
+MAX_STDOUT_BYTES = 16 * 1024
+MAX_STDERR_BYTES = 4 * 1024
+MAX_OUTPUT_LINE_BYTES = 16 * 1024
+MAX_AUTH_JSON_BYTES = 16 * 1024
+MAX_AUTH_STRING_BYTES = 1024
+
+_SAFE_CHILD_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
+_CHILD_ENV_PATH_KEYS = frozenset(
+    {
+        "HOME",
+        "XDG_CONFIG_HOME",
+        "XDG_CACHE_HOME",
+        "CLAUDE_CONFIG_DIR",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+    }
+)
+_DENIED_PROVIDER_ENV_KEYS = frozenset(
+    {
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_AUTH_TOKEN",
+        "ANTHROPIC_BASE_URL",
+        "ANTHROPIC_API_URL",
+        "ANTHROPIC_PROFILE",
+        "ANTHROPIC_FEDERATION_RULE_ID",
+        "ANTHROPIC_ORGANIZATION_ID",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "CLAUDE_CODE_USE_BEDROCK",
+        "CLAUDE_CODE_USE_VERTEX",
+        "CLAUDE_CODE_USE_FOUNDRY",
+        "CLAUDE_CODE_API_KEY_HELPER",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        "AWS_BEARER_TOKEN_BEDROCK",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "CLOUD_ML_REGION",
+    }
+)
+_DENIED_PROVIDER_ENV_PREFIXES = (
+    "ANTHROPIC_",
+    "CLAUDE_CODE_OAUTH_TOKEN_",
+)
 
 
 class PreflightError(RuntimeError):
@@ -144,7 +196,144 @@ class AuthObservation:
 @dataclasses.dataclass(frozen=True)
 class CommandObservation:
     returncode: int
-    stdout: str
+    stdout: bytes | str
+
+
+@dataclasses.dataclass(frozen=True)
+class _DirectoryIdentity:
+    device: int
+    inode: int
+    mode: int
+    uid: int
+    gid: int
+
+
+@dataclasses.dataclass(frozen=True)
+class _BinaryIdentity:
+    device: int
+    inode: int
+    mode: int
+    links: int
+    uid: int
+    gid: int
+    size: int
+    modified_ns: int
+    changed_ns: int
+
+
+@dataclasses.dataclass
+class _RetainedExecutable:
+    """Process-local descriptor graph for one exact executable object."""
+
+    path: Path
+    directory_fds: tuple[int, ...]
+    directory_names: tuple[str, ...]
+    directory_identities: tuple[_DirectoryIdentity, ...]
+    leaf_name: str
+    fd: int
+    identity: _BinaryIdentity
+    sha256: str
+    execution_directory: Path
+    execution_directory_fd: int
+    execution_directory_identity: _DirectoryIdentity
+    execution_name: str
+    execution_fd: int
+    execution_identity: _BinaryIdentity
+    observation_directory: Path
+    observation_directory_fd: int
+    observation_directory_identity: _DirectoryIdentity
+    closed: bool = False
+    cleanup_failed: bool = False
+
+    @property
+    def execution_path(self) -> str:
+        if self.closed or self.execution_fd < 0:
+            _raise("BINARY_CHANGED_DURING_PREFLIGHT")
+        # Darwin has no public fexecve/execveat equivalent. This private-copy
+        # coordinate is therefore valid only inside the canonical OS-principal
+        # trust boundary enforced by F6; it is not a hostile-same-EUID sandbox.
+        return str(self.execution_directory / self.execution_name)
+
+    @property
+    def observation_path(self) -> str:
+        if self.closed or self.observation_directory_fd < 0:
+            _raise("BINARY_CHANGED_DURING_PREFLIGHT")
+        return str(self.observation_directory)
+
+    def close(self) -> None:
+        if self.closed:
+            if self.cleanup_failed:
+                _raise("BINARY_CHANGED_DURING_PREFLIGHT")
+            return
+        self.closed = True
+        cleanup_ok = True
+        cleanup_directory_fd = self.execution_directory_fd
+        cleanup_execution_fd = self.execution_fd
+        cleanup_observation_fd = self.observation_directory_fd
+        self.execution_directory_fd = -1
+        self.execution_fd = -1
+        self.observation_directory_fd = -1
+        if cleanup_execution_fd >= 0:
+            try:
+                os.close(cleanup_execution_fd)
+            except OSError:
+                cleanup_ok = False
+        if cleanup_directory_fd >= 0:
+            try:
+                os.fchmod(cleanup_directory_fd, 0o700)
+            except OSError:
+                pass
+        if cleanup_observation_fd >= 0:
+            cleanup_ok = (
+                cleanup_directory_fd >= 0
+                and _remove_observation_tree(
+                    cleanup_directory_fd,
+                    cleanup_observation_fd,
+                    self.observation_directory.name,
+                    self.observation_directory_identity,
+                )
+                and cleanup_ok
+            )
+            try:
+                os.close(cleanup_observation_fd)
+            except OSError:
+                cleanup_ok = False
+        if cleanup_directory_fd >= 0:
+            cleanup_ok = (
+                _remove_execution_file(cleanup_directory_fd, self.execution_name)
+                and cleanup_ok
+            )
+            try:
+                os.close(cleanup_directory_fd)
+            except OSError:
+                cleanup_ok = False
+        cleanup_ok = (
+            _remove_execution_directory(
+                self.execution_directory,
+                self.execution_directory_identity,
+            )
+            and cleanup_ok
+        )
+
+        descriptors = (self.fd, *reversed(self.directory_fds))
+        self.fd = -1
+        for descriptor in descriptors:
+            if descriptor < 0:
+                continue
+            try:
+                os.close(descriptor)
+            except OSError:
+                cleanup_ok = False
+        self.cleanup_failed = not cleanup_ok
+        if self.cleanup_failed:
+            _raise("BINARY_CHANGED_DURING_PREFLIGHT")
+
+    def __enter__(self) -> _RetainedExecutable:
+        return self
+
+    def __exit__(self, exc_type, exc, traceback) -> None:
+        del exc_type, exc, traceback
+        self.close()
 
 
 def _raise(code: str) -> None:
@@ -187,7 +376,15 @@ def _require_utc(value: Any) -> str:
 
 
 def _normalize_claude_version(value: Any) -> str:
-    text = str(value or "").strip()
+    if isinstance(value, bytes):
+        try:
+            text = value.decode("utf-8", "strict").strip()
+        except UnicodeDecodeError:
+            _raise("BINARY_INVALID")
+    elif isinstance(value, str):
+        text = value.strip()
+    else:
+        _raise("BINARY_INVALID")
     if not text or len(text) > 128 or _CONTROL_RE.search(text):
         _raise("BINARY_INVALID")
     _reject_secret_shaped(text)
@@ -231,29 +428,628 @@ def require_current_identity_owner(host_ref: str, os_principal_ref: str) -> None
     _raise("HOST_IDENTITY_SEAM_UNAVAILABLE")
 
 
-def _require_binary(binary: Path) -> Path:
-    raw = Path(binary)
-    if not raw.is_absolute():
+def _required_open_flags(*names: str) -> int:
+    flags = 0
+    for name in names:
+        value = getattr(os, name, None)
+        if type(value) is not int or value == 0:
+            _raise("BINARY_INVALID")
+        flags |= value
+    return flags
+
+
+def _directory_identity(info: os.stat_result) -> _DirectoryIdentity:
+    mode = stat.S_IMODE(info.st_mode)
+    writable_by_others = bool(mode & (stat.S_IWGRP | stat.S_IWOTH))
+    safe_shared_directory = (
+        info.st_uid == 0 and bool(mode & stat.S_ISVTX) and stat.S_ISDIR(info.st_mode)
+    )
+    if (
+        not stat.S_ISDIR(info.st_mode)
+        or info.st_uid not in {0, os.geteuid()}
+        or (writable_by_others and not safe_shared_directory)
+    ):
         _raise("BINARY_INVALID")
+    return _DirectoryIdentity(
+        device=int(info.st_dev),
+        inode=int(info.st_ino),
+        mode=mode,
+        uid=int(info.st_uid),
+        gid=int(info.st_gid),
+    )
+
+
+def _binary_identity(info: os.stat_result) -> _BinaryIdentity:
+    mode = stat.S_IMODE(info.st_mode)
+    owner_execute = bool(mode & stat.S_IXUSR) if info.st_uid == os.geteuid() else False
+    root_execute = bool(mode & stat.S_IXOTH) if info.st_uid == 0 else False
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or info.st_uid not in {0, os.geteuid()}
+        or not (owner_execute or root_execute)
+        or bool(mode & (stat.S_IWGRP | stat.S_IWOTH | stat.S_ISUID | stat.S_ISGID))
+        or info.st_nlink != 1
+        or info.st_size <= 0
+        or info.st_size > MAX_BINARY_BYTES
+    ):
+        _raise("BINARY_INVALID")
+    return _BinaryIdentity(
+        device=int(info.st_dev),
+        inode=int(info.st_ino),
+        mode=mode,
+        links=int(info.st_nlink),
+        uid=int(info.st_uid),
+        gid=int(info.st_gid),
+        size=int(info.st_size),
+        modified_ns=int(info.st_mtime_ns),
+        changed_ns=int(info.st_ctime_ns),
+    )
+
+
+def _sha256_descriptor(
+    descriptor: int,
+    *,
+    expected_size: int,
+    error_code: str,
+) -> str:
+    if not hasattr(os, "pread"):
+        _raise(error_code)
+    digest = hashlib.sha256()
+    total = 0
     try:
-        info = raw.lstat()
+        while True:
+            chunk = os.pread(descriptor, _HASH_CHUNK_BYTES, total)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_BINARY_BYTES:
+                _raise(error_code)
+            digest.update(chunk)
     except OSError:
+        _raise(error_code)
+    if total != expected_size or total <= 0:
+        _raise(error_code)
+    return digest.hexdigest()
+
+
+def _same_directory(info: os.stat_result, expected: _DirectoryIdentity) -> bool:
+    return (
+        stat.S_ISDIR(info.st_mode)
+        and int(info.st_dev) == expected.device
+        and int(info.st_ino) == expected.inode
+        and stat.S_IMODE(info.st_mode) == expected.mode
+        and int(info.st_uid) == expected.uid
+        and int(info.st_gid) == expected.gid
+    )
+
+
+def _same_binary(info: os.stat_result, expected: _BinaryIdentity) -> bool:
+    return (
+        stat.S_ISREG(info.st_mode)
+        and int(info.st_dev) == expected.device
+        and int(info.st_ino) == expected.inode
+        and stat.S_IMODE(info.st_mode) == expected.mode
+        and int(info.st_nlink) == expected.links
+        and int(info.st_uid) == expected.uid
+        and int(info.st_gid) == expected.gid
+        and int(info.st_size) == expected.size
+        and int(info.st_mtime_ns) == expected.modified_ns
+        and int(info.st_ctime_ns) == expected.changed_ns
+    )
+
+
+def _remove_execution_file(directory_fd: int, execution_name: str) -> bool:
+    for _ in range(2):
+        try:
+            os.unlink(execution_name, dir_fd=directory_fd)
+        except FileNotFoundError:
+            return True
+        except OSError:
+            continue
+        return True
+    return False
+
+
+def _remove_observation_tree(
+    parent_fd: int,
+    observation_fd: int,
+    observation_name: str,
+    expected: _DirectoryIdentity,
+) -> bool:
+    """Remove only the retained private CWD, recursively and without link chasing."""
+
+    if not getattr(shutil.rmtree, "avoids_symlink_attacks", False):
+        return False
+    try:
+        named = os.stat(observation_name, dir_fd=parent_fd, follow_symlinks=False)
+        opened = os.fstat(observation_fd)
+        # Integrity validation has already refused any mode drift. Cleanup
+        # still removes that same retained inode after a child chmod, but never
+        # a substituted path or a directory owned by another principal.
+        if any(
+            not stat.S_ISDIR(info.st_mode)
+            or int(info.st_dev) != expected.device
+            or int(info.st_ino) != expected.inode
+            or int(info.st_uid) != expected.uid
+            or int(info.st_gid) != expected.gid
+            for info in (named, opened)
+        ):
+            return False
+        os.fchmod(observation_fd, 0o700)
+        cleanup_identity = _directory_identity(os.fstat(observation_fd))
+        if (
+            cleanup_identity.device != expected.device
+            or cleanup_identity.inode != expected.inode
+            or cleanup_identity.uid != expected.uid
+            or cleanup_identity.gid != expected.gid
+        ):
+            return False
+    except (OSError, ValueError):
+        return False
+
+    for _ in range(2):
+        try:
+            named = os.stat(
+                observation_name,
+                dir_fd=parent_fd,
+                follow_symlinks=False,
+            )
+        except FileNotFoundError:
+            return True
+        except OSError:
+            continue
+        try:
+            if not _same_directory(named, cleanup_identity):
+                return False
+            shutil.rmtree(observation_name, dir_fd=parent_fd)
+        except FileNotFoundError:
+            return True
+        except (OSError, TypeError, ValueError):
+            continue
+        return True
+    return False
+
+
+def _remove_execution_directory(
+    directory: Path,
+    expected: _DirectoryIdentity | None,
+) -> bool:
+    for _ in range(2):
+        try:
+            current = directory.lstat()
+        except FileNotFoundError:
+            return True
+        except OSError:
+            continue
+        if (
+            not stat.S_ISDIR(current.st_mode)
+            or (expected is not None and int(current.st_dev) != expected.device)
+            or (expected is not None and int(current.st_ino) != expected.inode)
+            or (expected is None and int(current.st_uid) != os.geteuid())
+        ):
+            return False
+        try:
+            os.rmdir(directory)
+        except FileNotFoundError:
+            return True
+        except OSError:
+            continue
+        return True
+    return False
+
+
+def _safe_scratch_root() -> Path:
+    try:
+        root = Path("/tmp").resolve(strict=True)
+        _directory_identity(root.lstat())
+    except (OSError, PreflightError):
+        _raise("BINARY_INVALID")
+    return root
+
+
+def _create_execution_copy(
+    source_fd: int,
+    source_identity: _BinaryIdentity,
+    source_sha256: str,
+) -> tuple[
+    Path,
+    int,
+    _DirectoryIdentity,
+    str,
+    int,
+    _BinaryIdentity,
+    Path,
+    int,
+    _DirectoryIdentity,
+]:
+    directory = Path(
+        tempfile.mkdtemp(
+            prefix="mastermind-claude-preflight-",
+            dir=str(_safe_scratch_root()),
+        )
+    )
+    directory_fd = -1
+    writer_fd = -1
+    execution_fd = -1
+    observation_directory_fd = -1
+    execution_name = "claude"
+    observation_directory_name = "observation"
+    observation_directory = directory / observation_directory_name
+    complete = False
+    cleanup_directory_identity: _DirectoryIdentity | None = None
+    cleanup_observation_identity: _DirectoryIdentity | None = None
+    try:
+        directory_fd = os.open(
+            directory,
+            os.O_RDONLY | _required_open_flags("O_DIRECTORY", "O_NOFOLLOW", "O_CLOEXEC"),
+        )
+        initial_directory = os.fstat(directory_fd)
+        if (
+            not stat.S_ISDIR(initial_directory.st_mode)
+            or initial_directory.st_uid != os.geteuid()
+            or stat.S_IMODE(initial_directory.st_mode) != 0o700
+        ):
+            _raise("BINARY_INVALID")
+        cleanup_directory_identity = _directory_identity(initial_directory)
+
+        os.mkdir(observation_directory_name, 0o700, dir_fd=directory_fd)
+        observation_directory_fd = os.open(
+            observation_directory_name,
+            os.O_RDONLY
+            | _required_open_flags("O_DIRECTORY", "O_NOFOLLOW", "O_CLOEXEC"),
+            dir_fd=directory_fd,
+        )
+        # Metadata commands need only search/inspect this directory. Keeping it
+        # owner-readable/executable but non-writable prevents ordinary child
+        # state from turning the CWD into a new settings surface.
+        os.fchmod(observation_directory_fd, 0o500)
+        observation_info = os.fstat(observation_directory_fd)
+        if (
+            not stat.S_ISDIR(observation_info.st_mode)
+            or observation_info.st_uid != os.geteuid()
+            or stat.S_IMODE(observation_info.st_mode) != 0o500
+            or os.listdir(observation_directory_fd)
+        ):
+            _raise("BINARY_INVALID")
+        cleanup_observation_identity = _directory_identity(observation_info)
+
+        writer_fd = os.open(
+            execution_name,
+            os.O_WRONLY
+            | os.O_CREAT
+            | os.O_EXCL
+            | _required_open_flags("O_NOFOLLOW", "O_CLOEXEC"),
+            0o700,
+            dir_fd=directory_fd,
+        )
+        copied_digest = hashlib.sha256()
+        offset = 0
+        while offset < source_identity.size:
+            chunk = os.pread(
+                source_fd,
+                min(_HASH_CHUNK_BYTES, source_identity.size - offset),
+                offset,
+            )
+            if not chunk:
+                _raise("BINARY_CHANGED_DURING_PREFLIGHT")
+            copied_digest.update(chunk)
+            written = 0
+            while written < len(chunk):
+                count = os.write(writer_fd, chunk[written:])
+                if count <= 0:
+                    _raise("BINARY_INVALID")
+                written += count
+            offset += len(chunk)
+        if os.pread(source_fd, 1, offset):
+            _raise("BINARY_CHANGED_DURING_PREFLIGHT")
+        if copied_digest.hexdigest() != source_sha256:
+            _raise("BINARY_CHANGED_DURING_PREFLIGHT")
+        os.fsync(writer_fd)
+        os.fchmod(writer_fd, 0o500)
+        writer_identity = _binary_identity(os.fstat(writer_fd))
+        os.close(writer_fd)
+        writer_fd = -1
+
+        execution_fd = os.open(
+            execution_name,
+            os.O_RDONLY | _required_open_flags("O_NOFOLLOW", "O_CLOEXEC"),
+            dir_fd=directory_fd,
+        )
+        execution_identity = _binary_identity(os.fstat(execution_fd))
+        if execution_identity != writer_identity:
+            _raise("BINARY_INVALID")
+        if (
+            _sha256_descriptor(
+                execution_fd,
+                expected_size=execution_identity.size,
+                error_code="BINARY_INVALID",
+            )
+            != source_sha256
+        ):
+            _raise("BINARY_INVALID")
+
+        os.fchmod(directory_fd, 0o500)
+        directory_identity = _directory_identity(os.fstat(directory_fd))
+        complete = True
+        return (
+            directory,
+            directory_fd,
+            directory_identity,
+            execution_name,
+            execution_fd,
+            execution_identity,
+            observation_directory,
+            observation_directory_fd,
+            cleanup_observation_identity,
+        )
+    except PreflightError:
+        raise
+    except (OSError, ValueError, TypeError):
+        _raise("BINARY_INVALID")
+    finally:
+        cleanup_ok = True
+        if writer_fd >= 0:
+            try:
+                os.close(writer_fd)
+            except OSError:
+                cleanup_ok = False
+        if not complete:
+            if execution_fd >= 0:
+                try:
+                    os.close(execution_fd)
+                except OSError:
+                    cleanup_ok = False
+            if observation_directory_fd >= 0:
+                try:
+                    os.close(observation_directory_fd)
+                except OSError:
+                    cleanup_ok = False
+            if directory_fd >= 0:
+                try:
+                    os.fchmod(directory_fd, 0o700)
+                except OSError:
+                    pass
+                cleanup_ok = (
+                    _remove_execution_directory(
+                        observation_directory,
+                        cleanup_observation_identity,
+                    )
+                    and cleanup_ok
+                )
+                cleanup_ok = (
+                    _remove_execution_file(directory_fd, execution_name)
+                    and cleanup_ok
+                )
+                try:
+                    os.close(directory_fd)
+                except OSError:
+                    cleanup_ok = False
+            cleanup_ok = (
+                _remove_execution_directory(directory, cleanup_directory_identity)
+                and cleanup_ok
+            )
+            if not cleanup_ok:
+                _raise("BINARY_CHANGED_DURING_PREFLIGHT")
+
+
+def _assert_retained_binary(
+    retained: _RetainedExecutable, *, verify_source_digest: bool = True
+) -> None:
+    if (
+        retained.closed
+        or retained.fd < 0
+        or retained.execution_fd < 0
+        or retained.execution_directory_fd < 0
+        or retained.observation_directory_fd < 0
+        or not retained.directory_fds
+    ):
+        _raise("BINARY_CHANGED_DURING_PREFLIGHT")
+    try:
+        if not _same_directory(
+            os.fstat(retained.directory_fds[0]), retained.directory_identities[0]
+        ):
+            _raise("BINARY_CHANGED_DURING_PREFLIGHT")
+        for index, name in enumerate(retained.directory_names, start=1):
+            named = os.stat(
+                name,
+                dir_fd=retained.directory_fds[index - 1],
+                follow_symlinks=False,
+            )
+            opened = os.fstat(retained.directory_fds[index])
+            expected = retained.directory_identities[index]
+            if not _same_directory(named, expected) or not _same_directory(
+                opened, expected
+            ):
+                _raise("BINARY_CHANGED_DURING_PREFLIGHT")
+
+        named_leaf = os.stat(
+            retained.leaf_name,
+            dir_fd=retained.directory_fds[-1],
+            follow_symlinks=False,
+        )
+        opened_leaf = os.fstat(retained.fd)
+        if not _same_binary(named_leaf, retained.identity) or not _same_binary(
+            opened_leaf, retained.identity
+        ):
+            _raise("BINARY_CHANGED_DURING_PREFLIGHT")
+        if verify_source_digest:
+            digest = _sha256_descriptor(
+                retained.fd,
+                expected_size=retained.identity.size,
+                error_code="BINARY_CHANGED_DURING_PREFLIGHT",
+            )
+            if digest != retained.sha256 or not _same_binary(
+                os.fstat(retained.fd), retained.identity
+            ):
+                _raise("BINARY_CHANGED_DURING_PREFLIGHT")
+
+        execution_directory = os.fstat(retained.execution_directory_fd)
+        named_execution_directory = retained.execution_directory.lstat()
+        named_execution = os.stat(
+            retained.execution_name,
+            dir_fd=retained.execution_directory_fd,
+            follow_symlinks=False,
+        )
+        opened_execution = os.fstat(retained.execution_fd)
+        if not _same_directory(
+            execution_directory, retained.execution_directory_identity
+        ) or not _same_directory(
+            named_execution_directory, retained.execution_directory_identity
+        ) or not _same_binary(
+            named_execution, retained.execution_identity
+        ) or not _same_binary(opened_execution, retained.execution_identity):
+            _raise("BINARY_CHANGED_DURING_PREFLIGHT")
+        execution_digest = _sha256_descriptor(
+            retained.execution_fd,
+            expected_size=retained.execution_identity.size,
+            error_code="BINARY_CHANGED_DURING_PREFLIGHT",
+        )
+        if execution_digest != retained.sha256 or not _same_binary(
+            os.fstat(retained.execution_fd), retained.execution_identity
+        ):
+            _raise("BINARY_CHANGED_DURING_PREFLIGHT")
+
+        observation_directory = os.fstat(retained.observation_directory_fd)
+        named_observation_directory = retained.observation_directory.lstat()
+        if not _same_directory(
+            observation_directory, retained.observation_directory_identity
+        ) or not _same_directory(
+            named_observation_directory, retained.observation_directory_identity
+        ):
+            _raise("BINARY_CHANGED_DURING_PREFLIGHT")
+        # Provider metadata never needs a project directory. Any entry here
+        # would reintroduce a filesystem discovery surface, so fail closed.
+        if os.listdir(retained.observation_directory_fd):
+            _raise("BINARY_CHANGED_DURING_PREFLIGHT")
+    except PreflightError:
+        raise
+    except (OSError, ValueError):
+        _raise("BINARY_CHANGED_DURING_PREFLIGHT")
+
+
+def _retain_binary(binary: Path) -> _RetainedExecutable:
+    raw = Path(binary)
+    if (
+        not raw.is_absolute()
+        or raw.anchor != "/"
+        or len(raw.parts) < 2
+        or any(part in {"", ".", ".."} for part in raw.parts[1:])
+    ):
+        _raise("BINARY_INVALID")
+
+    directory_fds: list[int] = []
+    directory_names: list[str] = []
+    directory_identities: list[_DirectoryIdentity] = []
+    leaf_fd = -1
+    try:
+        root_flags = os.O_RDONLY | _required_open_flags("O_DIRECTORY", "O_CLOEXEC")
+        directory_flags = root_flags | _required_open_flags("O_NOFOLLOW")
+        # The leaf is caller-selected and has not been type-checked yet.  A
+        # blocking read-open would hang forever on a FIFO before the fixed
+        # refusal boundary or any provider timeout exists.
+        leaf_flags = os.O_RDONLY | _required_open_flags(
+            "O_NOFOLLOW", "O_CLOEXEC", "O_NONBLOCK"
+        )
+
+        root_fd = os.open("/", root_flags)
+        directory_fds.append(root_fd)
+        directory_identities.append(_directory_identity(os.fstat(root_fd)))
+
+        for part in raw.parts[1:-1]:
+            child_fd = os.open(part, directory_flags, dir_fd=directory_fds[-1])
+            directory_names.append(part)
+            directory_fds.append(child_fd)
+            directory_identities.append(_directory_identity(os.fstat(child_fd)))
+
+        leaf_fd = os.open(raw.name, leaf_flags, dir_fd=directory_fds[-1])
+        identity = _binary_identity(os.fstat(leaf_fd))
+        digest = _sha256_descriptor(
+            leaf_fd,
+            expected_size=identity.size,
+            error_code="BINARY_INVALID",
+        )
+        (
+            execution_directory,
+            execution_directory_fd,
+            execution_directory_identity,
+            execution_name,
+            execution_fd,
+            execution_identity,
+            observation_directory,
+            observation_directory_fd,
+            observation_directory_identity,
+        ) = _create_execution_copy(leaf_fd, identity, digest)
+        retained = _RetainedExecutable(
+            path=raw,
+            directory_fds=tuple(directory_fds),
+            directory_names=tuple(directory_names),
+            directory_identities=tuple(directory_identities),
+            leaf_name=raw.name,
+            fd=leaf_fd,
+            identity=identity,
+            sha256=digest,
+            execution_directory=execution_directory,
+            execution_directory_fd=execution_directory_fd,
+            execution_directory_identity=execution_directory_identity,
+            execution_name=execution_name,
+            execution_fd=execution_fd,
+            execution_identity=execution_identity,
+            observation_directory=observation_directory,
+            observation_directory_fd=observation_directory_fd,
+            observation_directory_identity=observation_directory_identity,
+        )
+        try:
+            _assert_retained_binary(retained, verify_source_digest=False)
+        except BaseException:
+            retained.close()
+            leaf_fd = -1
+            directory_fds = []
+            raise
+        leaf_fd = -1
+        directory_fds = []
+        return retained
+    except FileNotFoundError:
         _raise("BINARY_UNAVAILABLE")
-    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+    except PreflightError:
+        raise
+    except (OSError, ValueError, TypeError):
         _raise("BINARY_INVALID")
-    if not os.access(raw, os.X_OK):
-        _raise("BINARY_INVALID")
-    if info.st_size <= 0 or info.st_size > MAX_BINARY_BYTES:
-        _raise("BINARY_INVALID")
-    return raw
+    finally:
+        if leaf_fd >= 0:
+            try:
+                os.close(leaf_fd)
+            except OSError:
+                pass
+        for descriptor in reversed(directory_fds):
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
 
 
-def build_allowed_argv(binary: Path, operation: str) -> tuple[str, ...]:
-    resolved = _require_binary(binary)
+def _require_binary(binary: Path) -> Path:
+    with _retain_binary(binary) as retained:
+        return retained.path
+
+
+def build_allowed_argv(
+    binary: Path | _RetainedExecutable, operation: str
+) -> tuple[str, ...]:
+    if not isinstance(binary, _RetainedExecutable):
+        _raise("BINARY_INVALID")
+    _assert_retained_binary(binary, verify_source_digest=False)
+    coordinate = binary.execution_path
+    # Action-time Claude Code 2.1.259 grammar was probed provider-work-free:
+    # a literal empty value disables every selectable settings tier, while
+    # safe mode disables CLAUDE.md/hooks/skills/plugins/MCP discovery without
+    # disabling native OAuth/keychain observation. Admin policy deliberately
+    # remains in force; observe_auth binds its effective auth selection and
+    # refuses anything other than the exact native first-party result.
+    fence = ("--safe-mode", "--setting-sources", "")
     if operation == "version":
-        return (str(resolved), "--version")
+        return (coordinate, *fence, "--version")
     if operation == "auth_status":
-        return (str(resolved), "auth", "status")
+        return (coordinate, *fence, "auth", "status")
     _raise("COMMAND_NOT_ALLOWED")
 
 
@@ -374,71 +1170,391 @@ def validate_receipt(value: Mapping[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _provider_environment_key_is_denied(key: str) -> bool:
+    upper = key.upper()
+    if upper in _DENIED_PROVIDER_ENV_KEYS:
+        return True
+    if any(upper.startswith(prefix) for prefix in _DENIED_PROVIDER_ENV_PREFIXES):
+        return True
+    if upper.startswith("CLAUDE_CODE_") and any(
+        marker in upper
+        for marker in ("API", "AUTH", "TOKEN", "GATEWAY", "HELPER", "FEDERATION")
+    ):
+        return True
+    return False
+
+
+def _closed_child_environment(
+    source: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    incoming = os.environ if source is None else source
+    for key in incoming:
+        if not isinstance(key, str) or _provider_environment_key_is_denied(key):
+            _raise("PROVIDER_ENV_REFUSED")
+
+    result = {
+        "PATH": _SAFE_CHILD_PATH,
+        "LANG": "C",
+        "LC_ALL": "C",
+        "TMPDIR": "/tmp",
+    }
+    for key in _CHILD_ENV_PATH_KEYS:
+        value = incoming.get(key)
+        if value is None:
+            continue
+        try:
+            encoded_length = len(value.encode("utf-8", "strict"))
+        except (AttributeError, UnicodeError):
+            _raise("PROVIDER_ENV_REFUSED")
+        if (
+            not isinstance(value, str)
+            or not value
+            or encoded_length > 4096
+            or _CONTROL_RE.search(value)
+            or _SECRET_RE.search(value)
+            or not Path(value).is_absolute()
+        ):
+            _raise("PROVIDER_ENV_REFUSED")
+        result[key] = value
+    return result
+
+
+def _line_length_after(current: int, chunk: bytes) -> int:
+    pieces = chunk.split(b"\n")
+    if len(pieces) == 1:
+        candidate = current + len(chunk)
+        if candidate > MAX_OUTPUT_LINE_BYTES:
+            _raise("PROVIDER_COMMAND_FAILED")
+        return candidate
+    if current + len(pieces[0]) > MAX_OUTPUT_LINE_BYTES or any(
+        len(piece) > MAX_OUTPUT_LINE_BYTES for piece in pieces[1:-1]
+    ):
+        _raise("PROVIDER_COMMAND_FAILED")
+    if len(pieces[-1]) > MAX_OUTPUT_LINE_BYTES:
+        _raise("PROVIDER_COMMAND_FAILED")
+    return len(pieces[-1])
+
+
+def _process_group_exists(group_id: int) -> bool:
+    try:
+        os.killpg(group_id, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _signal_process_group(group_id: int, requested_signal: int) -> bool:
+    try:
+        os.killpg(group_id, requested_signal)
+    except ProcessLookupError:
+        return True
+    except PermissionError:
+        return False
+    return True
+
+
+def _wait_for_process_group_exit(group_id: int, timeout_seconds: float) -> bool:
+    deadline = time.monotonic() + max(0.0, timeout_seconds)
+    while _process_group_exists(group_id) and time.monotonic() < deadline:
+        time.sleep(0.01)
+    return not _process_group_exists(group_id)
+
+
+def _cleanup_owned_process(proc: subprocess.Popen[bytes], group_id: int) -> bool:
+    cleanup_ok = True
+    if _process_group_exists(group_id):
+        cleanup_ok = _signal_process_group(group_id, signal.SIGTERM)
+    try:
+        proc.wait(timeout=_PROCESS_TERMINATE_GRACE_SECONDS)
+    except subprocess.TimeoutExpired:
+        # An owned child may ignore TERM; reaching the KILL phase is expected.
+        pass
+    except OSError:
+        cleanup_ok = False
+
+    group_gone = _wait_for_process_group_exit(
+        group_id, _PROCESS_TERMINATE_GRACE_SECONDS
+    )
+    if not group_gone:
+        cleanup_ok = _signal_process_group(group_id, signal.SIGKILL) and cleanup_ok
+        try:
+            proc.wait(timeout=_PROCESS_TERMINATE_GRACE_SECONDS)
+        except (OSError, subprocess.TimeoutExpired):
+            cleanup_ok = False
+        group_gone = _wait_for_process_group_exit(
+            group_id, _PROCESS_TERMINATE_GRACE_SECONDS
+        )
+    if proc.returncode is None:
+        try:
+            proc.kill()
+            proc.wait(timeout=_PROCESS_TERMINATE_GRACE_SECONDS)
+        except (OSError, subprocess.TimeoutExpired):
+            cleanup_ok = False
+    return cleanup_ok and group_gone and proc.returncode is not None
+
+
+def _collect_bounded_output(
+    proc: subprocess.Popen[bytes],
+    *,
+    timeout_seconds: float,
+) -> tuple[bytes, int]:
+    if proc.stdout is None or proc.stderr is None:
+        _raise("PROVIDER_COMMAND_FAILED")
+    selector = selectors.DefaultSelector()
+    streams = {"stdout": proc.stdout, "stderr": proc.stderr}
+    sizes = {"stdout": 0, "stderr": 0}
+    line_lengths = {"stdout": 0, "stderr": 0}
+    stdout = bytearray()
+    started = time.monotonic()
+    absolute_deadline = started + timeout_seconds
+    idle_deadline = started + min(timeout_seconds, _PROVIDER_IDLE_TIMEOUT_SECONDS)
+    try:
+        for name, stream in streams.items():
+            descriptor = stream.fileno()
+            os.set_blocking(descriptor, False)
+            selector.register(descriptor, selectors.EVENT_READ, name)
+
+        while selector.get_map():
+            now = time.monotonic()
+            wait_seconds = min(absolute_deadline, idle_deadline) - now
+            if wait_seconds <= 0:
+                _raise("PROVIDER_TIMEOUT")
+            try:
+                ready = selector.select(wait_seconds)
+            except OSError:
+                _raise("PROVIDER_COMMAND_FAILED")
+            if not ready:
+                _raise("PROVIDER_TIMEOUT")
+
+            made_progress = False
+            for key, _ in ready:
+                name = str(key.data)
+                limit = MAX_STDOUT_BYTES if name == "stdout" else MAX_STDERR_BYTES
+                remaining = max(0, limit - sizes[name])
+                try:
+                    chunk = os.read(key.fd, min(_READ_CHUNK_BYTES, remaining + 1))
+                except BlockingIOError:
+                    continue
+                except OSError:
+                    _raise("PROVIDER_COMMAND_FAILED")
+                if not chunk:
+                    try:
+                        selector.unregister(key.fd)
+                    except (KeyError, ValueError):
+                        pass
+                    streams[name].close()
+                    continue
+
+                made_progress = True
+                sizes[name] += len(chunk)
+                if sizes[name] > limit or sum(sizes.values()) > (
+                    MAX_STDOUT_BYTES + MAX_STDERR_BYTES
+                ):
+                    _raise("PROVIDER_COMMAND_FAILED")
+                line_lengths[name] = _line_length_after(line_lengths[name], chunk)
+                if name == "stdout":
+                    stdout.extend(chunk)
+            if made_progress:
+                idle_deadline = time.monotonic() + min(
+                    timeout_seconds, _PROVIDER_IDLE_TIMEOUT_SECONDS
+                )
+
+        remaining = min(absolute_deadline, idle_deadline) - time.monotonic()
+        if remaining <= 0:
+            _raise("PROVIDER_TIMEOUT")
+        try:
+            return bytes(stdout), int(proc.wait(timeout=remaining))
+        except subprocess.TimeoutExpired:
+            _raise("PROVIDER_TIMEOUT")
+        except OSError:
+            _raise("PROVIDER_COMMAND_FAILED")
+    finally:
+        try:
+            selector.close()
+        finally:
+            for stream in streams.values():
+                try:
+                    stream.close()
+                except OSError:
+                    pass
+
+
 def _run(
     argv: tuple[str, ...],
     *,
     accepted_returncodes: frozenset[int] = frozenset({0}),
     timeout_seconds: float = _PROVIDER_TIMEOUT_SECONDS,
+    pass_fds: tuple[int, ...] = (),
+    launch_guard: _RetainedExecutable | None = None,
 ) -> CommandObservation:
+    if (
+        os.name != "posix"
+        or type(timeout_seconds) not in {int, float}
+        or timeout_seconds <= 0
+        or not argv
+        or not isinstance(argv[0], str)
+        or not argv[0]
+        or any(not isinstance(item, str) for item in argv[1:])
+        or any(type(descriptor) is not int or descriptor < 0 for descriptor in pass_fds)
+        or (launch_guard is not None and not isinstance(launch_guard, _RetainedExecutable))
+    ):
+        _raise("PROVIDER_COMMAND_FAILED")
+    environment = _closed_child_environment()
+    child_cwd: str | None = None
+    if launch_guard is not None:
+        _assert_retained_binary(launch_guard, verify_source_digest=False)
+        if argv[0] != launch_guard.execution_path:
+            _raise("PROVIDER_COMMAND_FAILED")
+        child_cwd = launch_guard.observation_path
     try:
-        completed = subprocess.run(
+        proc = subprocess.Popen(
             argv,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
-            check=False,
-            timeout=timeout_seconds,
+            text=False,
+            bufsize=0,
+            close_fds=True,
+            pass_fds=pass_fds,
+            start_new_session=True,
+            env=environment,
+            cwd=child_cwd,
         )
-    except subprocess.TimeoutExpired:
-        _raise("PROVIDER_TIMEOUT")
-    if completed.returncode not in accepted_returncodes:
+    except (OSError, ValueError, TypeError):
         _raise("PROVIDER_COMMAND_FAILED")
-    return CommandObservation(
-        returncode=int(completed.returncode),
-        stdout=str(completed.stdout or ""),
-    )
+
+    failure: PreflightError | None = None
+    observation: CommandObservation | None = None
+    try:
+        stdout, returncode = _collect_bounded_output(
+            proc, timeout_seconds=float(timeout_seconds)
+        )
+        if returncode not in accepted_returncodes:
+            _raise("PROVIDER_COMMAND_FAILED")
+        observation = CommandObservation(returncode=returncode, stdout=stdout)
+    except PreflightError as exc:
+        failure = exc
+    except BaseException:
+        failure = PreflightError("PROVIDER_COMMAND_FAILED")
+
+    cleanup_ok = _cleanup_owned_process(proc, proc.pid)
+    if not cleanup_ok:
+        _raise("PROVIDER_COMMAND_FAILED")
+    if failure is not None:
+        raise failure from None
+    if observation is None:
+        _raise("PROVIDER_COMMAND_FAILED")
+    return observation
 
 
 def _sha256_bounded(path: Path) -> str:
-    digest = hashlib.sha256()
-    total = 0
+    with _retain_binary(path) as retained:
+        return retained.sha256
+
+
+def _retained_executable(
+    binary: Path | _RetainedExecutable,
+) -> tuple[_RetainedExecutable, bool]:
+    if isinstance(binary, _RetainedExecutable):
+        return binary, False
+    return _retain_binary(binary), True
+
+
+def observe_binary(
+    binary: Path | _RetainedExecutable,
+) -> tuple[str, str]:
+    retained, owned = _retained_executable(binary)
     try:
-        with path.open("rb") as handle:
-            while True:
-                chunk = handle.read(_HASH_CHUNK_BYTES)
-                if not chunk:
-                    break
-                total += len(chunk)
-                if total > MAX_BINARY_BYTES:
-                    _raise("BINARY_INVALID")
-                digest.update(chunk)
-    except OSError:
-        _raise("BINARY_UNAVAILABLE")
-    if total <= 0:
-        _raise("BINARY_INVALID")
-    return digest.hexdigest()
+        _assert_retained_binary(retained)
+        observed = _run(
+            build_allowed_argv(retained, "version"),
+            launch_guard=retained,
+        )
+        _assert_retained_binary(retained)
+        version = _normalize_claude_version(observed.stdout)
+        return retained.sha256, version
+    finally:
+        if owned:
+            retained.close()
 
 
-def observe_binary(binary: Path) -> tuple[str, str]:
-    resolved = _require_binary(binary)
-    digest = _sha256_bounded(resolved)
-    observed = _run(build_allowed_argv(resolved, "version"))
-    version = _normalize_claude_version(observed.stdout)
-    return digest, version
+class _DuplicateJsonKey(ValueError):
+    pass
 
 
-def observe_auth(binary: Path) -> AuthObservation:
-    observed = _run(
-        build_allowed_argv(binary, "auth_status"),
-        accepted_returncodes=frozenset({0, 1}),
-    )
+def _reject_duplicate_json_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise _DuplicateJsonKey
+        result[key] = value
+    return result
+
+
+def _reject_json_constant(value: str) -> None:
+    del value
+    raise ValueError
+
+
+def _parse_auth_status(raw: bytes | str) -> dict[str, Any]:
     try:
-        parsed = json.loads(observed.stdout)
-    except (TypeError, ValueError):
+        encoded = raw if isinstance(raw, bytes) else raw.encode("utf-8", "strict")
+    except (AttributeError, UnicodeError):
+        _raise("AUTH_STATUS_UNSUPPORTED")
+    if not encoded or len(encoded) > MAX_AUTH_JSON_BYTES:
+        _raise("AUTH_STATUS_UNSUPPORTED")
+    try:
+        text = encoded.decode("utf-8", "strict")
+        parsed = json.loads(
+            text,
+            object_pairs_hook=_reject_duplicate_json_keys,
+            parse_constant=_reject_json_constant,
+        )
+    except (MemoryError, RecursionError, TypeError, UnicodeError, ValueError):
         _raise("AUTH_STATUS_UNSUPPORTED")
     if not isinstance(parsed, dict):
         _raise("AUTH_STATUS_UNSUPPORTED")
+    if not set(parsed).issubset(_RAW_AUTH_ALLOWED_KEYS):
+        _raise("AUTH_STATUS_UNSUPPORTED")
+    for key, value in parsed.items():
+        if key == "loggedIn":
+            if type(value) is not bool:
+                _raise("AUTH_STATUS_UNSUPPORTED")
+            continue
+        if value is not None and not isinstance(value, str):
+            _raise("AUTH_STATUS_UNSUPPORTED")
+        if isinstance(value, str):
+            try:
+                encoded_length = len(value.encode("utf-8", "strict"))
+            except UnicodeError:
+                _raise("AUTH_STATUS_UNSUPPORTED")
+            if (
+                encoded_length > MAX_AUTH_STRING_BYTES
+                or _CONTROL_RE.search(value)
+                or _SECRET_RE.search(value)
+            ):
+                _raise("AUTH_STATUS_UNSUPPORTED")
+        if key == "apiKeySource" and value not in {None, "/login managed key"}:
+            _raise("AUTH_STATUS_UNSUPPORTED")
+    return parsed
+
+
+def observe_auth(binary: Path | _RetainedExecutable) -> AuthObservation:
+    retained, owned = _retained_executable(binary)
+    try:
+        _assert_retained_binary(retained)
+        observed = _run(
+            build_allowed_argv(retained, "auth_status"),
+            accepted_returncodes=frozenset({0, 1}),
+            launch_guard=retained,
+        )
+        _assert_retained_binary(retained)
+        parsed = _parse_auth_status(observed.stdout)
+    finally:
+        if owned:
+            retained.close()
 
     # Current first-party Claude Code contract: auth status exits 0 when logged
     # in and 1 when logged out, while still emitting the JSON status document.
@@ -522,19 +1638,20 @@ def main(argv: list[str] | None = None) -> int:
     # Unreachable under the current Task-2 estate. Kept as the bounded positive
     # composition that a future accepted identity owner may invoke without
     # introducing a second preflight family.
-    digest, version = observe_binary(args.claude_binary)
-    auth = observe_auth(args.claude_binary)
-    receipt = build_ready_receipt(
-        realm_label=args.realm_label,
-        host_ref=args.host_ref,
-        os_principal_ref=args.os_principal_ref,
-        execution_context=args.execution_context,
-        worker_id=args.worker_id,
-        quota_class=args.quota_class,
-        binary_sha256=digest,
-        version=version,
-        auth=auth,
-    )
+    with _retain_binary(args.claude_binary) as retained:
+        digest, version = observe_binary(retained)
+        auth = observe_auth(retained)
+        receipt = build_ready_receipt(
+            realm_label=args.realm_label,
+            host_ref=args.host_ref,
+            os_principal_ref=args.os_principal_ref,
+            execution_context=args.execution_context,
+            worker_id=args.worker_id,
+            quota_class=args.quota_class,
+            binary_sha256=digest,
+            version=version,
+            auth=auth,
+        )
     print(json.dumps(receipt, sort_keys=True, separators=(",", ":")))
     return 0
 
