@@ -2732,6 +2732,11 @@ def run(asof: str | None = None, force: bool = False, research: bool = False,
     try:
         from portfolio import readiness as _readiness
         _rr = _readiness.check_and_record(asof)
+        if _rr.get("error"):
+            _rl_log(
+                _run_id, "decision", "readiness persistence degraded",
+                f"error={_rr['error']}",
+            )
         if _rr.get("new"):
             _rl_log(_run_id, "decision", "READINESS crossed", f"newly_ready={_rr['new']}")
     except Exception as _e:
