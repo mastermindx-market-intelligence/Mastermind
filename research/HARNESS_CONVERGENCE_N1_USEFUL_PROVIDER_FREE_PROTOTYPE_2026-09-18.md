@@ -264,3 +264,114 @@ It does **not** establish:
 - rich/resumable operation;
 - WRITE/TEST capability;
 - superiority of DSH over another harness.
+
+
+## Real DeepSeek adapter through the existing Go endpoint
+
+The provider-free proof was extended one layer deeper after the payload-provenance result above. The disposable DSH composition now uses the **actual pinned `@deepseek-ai/dsh-llm-deepseek` Chat Completions adapter**, not the inert fixture adapter, while keeping the external provider synthetic.
+
+The exact path is:
+
+```text
+AcpWorkerAdapter / AcpNativeProcessOwner
+-> confined pinned DSH ACP process
+-> pinned DeepSeekAdapter(chat-completions, maxRetries=0)
+-> HTTP 127.0.0.1:<attempt-ephemeral-port>
+-> existing GoHarnessEndpoint
+-> synthetic parent-owned upstream stream only
+-> DSH tool call: read_file
+-> real scoped workspace read
+-> second DeepSeekAdapter HTTP turn
+-> DSH tool call: search_text
+-> real scoped literal search
+-> third DeepSeekAdapter HTTP turn
+-> final schema-valid JSON
+-> existing WorkerResult
+```
+
+The child is configured only with the attempt-local endpoint URL and its opaque endpoint client capability. The synthetic parent provider key remains outside the child. The Go endpoint receives and validates the child Authorization value, but the request handed to the upstream transport contains no Authorization, no DeepSeek harness user-id header, and no DeepSeek native session header. The upstream transport sees the parent-owned `ProviderRequest.session_id`.
+
+### Exact-port Seatbelt network boundary
+
+Pinned DSH's own `sandbox-local` Seatbelt builder is file-effect-only: it emits `(allow default)` plus file-write restrictions and does not own network/process visibility. Whole-agent N1 confinement therefore remains an outer native-owner responsibility.
+
+Apple's installed SBPL profiles demonstrate `(remote ip "*:PORT")`. A direct parser probe established that numeric `127.0.0.1:PORT` is refused as a policy predicate; Seatbelt requires host `localhost` or `*`.
+
+The N1 deny-default profile therefore grants exactly:
+
+```scheme
+(allow network-outbound (remote ip "localhost:<attempt-ephemeral-port>"))
+```
+
+while the endpoint itself still binds only numeric IPv4 `127.0.0.1`.
+
+Executed canary under the same deny-default policy:
+
+- connection to the exact admitted numeric loopback endpoint: **CONNECTED**;
+- second numeric loopback port: **EPERM/EACCES**;
+- external `1.1.1.1:443`: **EPERM/EACCES**.
+
+A deliberate mutation to `localhost:*` lets the wrong loopback port connect and turns the test RED. The exact-port restriction is therefore discriminating.
+
+### Actual adapter positive control
+
+The synthetic parent endpoint returns the pinned DeepSeek wire/SSE shapes, including real streamed tool calls. Three actual HTTP requests occur:
+
+1. model turn exposes exactly `read_file` and `search_text`, returns `read_file`;
+2. outgoing DeepSeek history contains the exact `role=tool` read result, returns `search_text`;
+3. outgoing history contains the exact search result, returns final JSON.
+
+The final existing WorkerResult is successful and the git workspace remains clean.
+
+The ACP result's `usage` mapping remains empty in this fixture because the optional DSH token-meter service is deliberately not mounted. Provider/token usage is therefore **not proven by this test** and must not be inferred from the synthetic SSE counters.
+
+### Effect-unknown and retry controls
+
+Two real-adapter error controls were exercised with raw inbound HTTP-attempt counting:
+
+1. **pre-stream effect unknown** — request admission and parent credential loading occur, then synthetic upstream effect becomes unknown before response bytes;
+2. **partial-stream effect unknown** — DSH receives initial SSE bytes, then synthetic upstream effect becomes unknown.
+
+For both controls:
+
+- inbound child HTTP attempts = **1**;
+- no second DSH request is issued;
+- Go endpoint records `effect_unknown` and remains fail-stopped;
+- no successful WorkerResult is produced.
+
+This directly covers the required "client retry after partial/unknown result" falsifier for the current provider-free composition. The DSH adapter config uses `normal / maxRetries=0`, and the retry plugin is not mounted. The Go endpoint's own fail-stop remains an independent backstop.
+
+### Credential and persistence boundary
+
+After the positive path, workspace/run/home/scratch files were scanned for both:
+
+- the endpoint client capability supplied to DSH; and
+- the synthetic parent-only provider credential.
+
+Neither value persisted. The native launch receipt contains environment **keys**, not values. The actual child-to-parent HTTP translation also strips child Authorization before the upstream transport request.
+
+This is a provider-free secret-handling proof, not a proof about any real OpenCode Go credential.
+
+### Refreshed verification receipt
+
+With the real DeepSeek adapter and exact-port tests included:
+
+- strict pinned-DSH TypeScript integration typecheck: **PASS**;
+- selected regression receipt: **119 tests / 0 failures / 0 errors / 0 skips**;
+- current disposable bundle SHA-256: **`13171822852cd03d533b043f14c4981da62cfe253eb486302b0b0206b4f65190`**;
+- positive DeepSeekAdapter HTTP turns: **3**;
+- pre-stream effect-unknown attempts: **1**;
+- partial-stream effect-unknown attempts: **1**;
+- exact loopback port: permitted;
+- wrong loopback port: denied;
+- external IP: denied;
+- credential persistence scan: PASS;
+- external provider calls: **0**.
+
+The same pre-existing timing-sensitive local native-peer cleanup test remains intentionally excluded for the reasons already recorded above; this deeper proof does not change that ruling.
+
+### Consequence
+
+The first real-provider canary no longer needs to prove DSH/ACP/DeepSeek-adapter/Go-endpoint protocol composition, read-tool continuation, exact-port network isolation, zero local retry after ambiguous effects, or endpoint-capability separation for the first time. Those are now provider-free proven behaviors.
+
+The real canary is narrowed to the provider-owned facts that provider-free testing cannot establish: enrolled OpenCode Go realm/account generation, current model entitlement/offer, usage/capacity policy, actual provider response identity, real credential owner behavior, and current admission economics.
