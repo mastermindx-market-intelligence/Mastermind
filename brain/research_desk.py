@@ -11,8 +11,13 @@ confluence scorecard — Claude proposes the hypothesis; it never pushes size. P
 """
 from __future__ import annotations
 
+import fcntl
 import json
-from datetime import date
+import os
+import tempfile
+import threading
+from contextlib import contextmanager
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import bot  # noqa: F401
@@ -22,7 +27,82 @@ from brain.decision import DecisionDoc
 
 _ROOT = Path(__file__).resolve().parent.parent
 _PROPOSALS = _ROOT / "data" / "brain" / "proposals.jsonl"
+_PROPOSAL_LOCAL_LOCK = threading.RLock()
 _BULLISH = {"add", "overweight", "accumulate", "constructive", "buy"}
+
+
+def _proposal_lock_path(queue: Path) -> Path:
+    """Sibling lock derived from the selected queue at call time (test/alternate-root safe)."""
+    return queue.with_name(f".{queue.name}.lock")
+
+
+@contextmanager
+def _proposal_lock(queue: Path):
+    """Serialize producer enqueue with consumer read/effect/mark across threads and processes."""
+    with _PROPOSAL_LOCAL_LOCK:
+        queue.parent.mkdir(parents=True, exist_ok=True)
+        with _proposal_lock_path(queue).open("a+", encoding="utf-8") as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                try:
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+                except OSError:
+                    # Queue effect (if any) is already decided by atomic replace. Do not turn a
+                    # known effect into an apparent failure because lock cleanup itself failed.
+                    pass
+
+
+def _read_proposals_unlocked(queue: Path) -> list[dict]:
+    if not queue.exists():
+        return []
+    # Proposal evidence is accountability input. Malformed rows fail closed instead of being
+    # skipped/quarantined into a second implicit queue.
+    return [json.loads(line) for line in queue.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def _atomic_write_proposals(queue: Path, rows: list[dict]) -> None:
+    """Atomically replace the selected queue; failed replacement preserves prior bytes."""
+    queue.parent.mkdir(parents=True, exist_ok=True)
+    payload = "".join(json.dumps(row, default=str) + "\n" for row in rows)
+    tmp_name: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=queue.parent,
+            prefix=f".{queue.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as tmp:
+            tmp_name = tmp.name
+            tmp.write(payload)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+        os.replace(tmp_name, queue)
+        tmp_name = None
+    finally:
+        if tmp_name:
+            try:
+                Path(tmp_name).unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def enqueue_proposal(row: dict, *, queue_path: Path | None = None) -> dict:
+    """Append one model proposal through the same serialized queue owner used by ingestion.
+
+    `queue_path` exists for explicit test/alternate-root custody; production callers pass the
+    bot MCP's canonical path, which is the same file `_PROPOSALS` consumed by this module.
+    """
+    queue = Path(queue_path) if queue_path is not None else _PROPOSALS
+    with _proposal_lock(queue):
+        rows = _read_proposals_unlocked(queue)
+        record = {**row, "logged_at": datetime.now(timezone.utc).isoformat()}
+        rows.append(record)
+        _atomic_write_proposals(queue, rows)
+        return record
 
 RESEARCH_PROMPT = """You are the Brain — the decision-making reasoning layer for the Mastermind, an
 autonomous, paper-only narrative-investing bot. Today is {asof}; the macro regime is {quad} ({quad_name}).
@@ -229,51 +309,74 @@ def ingest_proposals(asof: str | None = None, *, blocked: set[str] | None = None
     """Convert Claude's 'proposed' rows into gated, falsifiable ledger theses. Returns a summary."""
     blocked = blocked or set()
     asof = asof or date.today().isoformat()
-    if not _PROPOSALS.exists():
-        return {"ingested": 0, "theses": [], "note": "no proposals"}
+    # Hold the same queue lock used by enqueue_proposal through read -> ledger effects -> status
+    # publication. A model proposal arriving mid-ingest waits, then appends to the successor queue;
+    # it can never be silently overwritten by this consumer's final replace.
+    queue = _PROPOSALS
+    with _proposal_lock(queue):
+        rows = _read_proposals_unlocked(queue)
+        if not rows:
+            return {"ingested": 0, "theses": [], "note": "no proposals"}
 
-    rows = [json.loads(l) for l in _PROPOSALS.read_text().splitlines() if l.strip()]
-    out, kept = [], []
-    for i, r in enumerate(rows):
-        if r.get("status") != "proposed":
-            kept.append(r)
-            continue
-        subj = r.get("subject", "")
-        # de-escalate a bullish lean on an engine-blocked name whether the caller flagged it OR the
-        # engine itself vetoes it (the daily loop passes no `blocked` set, so self-derive it).
-        eff_blocked = set(blocked)
-        explicit_block = subj.upper() in {b.upper() for b in eff_blocked}
-        engine_block_state: bool | None = None
-        if not explicit_block:
-            engine_block_state = _engine_blocked(subj)
-            if engine_block_state is True:
-                eff_blocked.add(subj)
-        proposed_lean = r.get("lean", "watch")
-        lean, clamp_note = _clamp(proposed_lean, subj, eff_blocked)
-        if not clamp_note and engine_block_state is None and proposed_lean in _BULLISH:
-            lean = "watch"
-            clamp_note = "clamped: engine block status unavailable (cannot escalate without risk evidence)"
-        doc = DecisionDoc(
-            id=f"{asof}-{r['subject']}-claude-{i}", subject=r["subject"], lean=lean,
-            conviction=("low" if clamp_note else r.get("conviction", "low")),
-            prob_correct=float(r.get("prob_correct") or 0.55), horizon_d=int(r.get("horizon_d") or 21),
-            thesis=r.get("thesis", ""), state_asof=asof, evidence=r.get("evidence", []),
-            dissent=clamp_note, sleeve="conviction",
-        ).finalize()                     # engine-derives the falsifier + check_by + time_stop_by
-        appended = ledger.append(doc.to_json())
-        if con is not None:
-            try:
-                from data_layer import store
-                store.insert_thesis(con, doc.to_json())
-            except Exception:
-                pass
-        out.append({"id": doc.id, "subject": doc.subject, "lean": doc.lean,
-                    "clamped": bool(clamp_note), "appended": appended,
-                    "falsifier_kind": doc.falsifier["check"]["kind"]})
-        kept.append({**r, "status": "ingested", "thesis_id": doc.id})
+        out, kept = [], []
+        for i, r in enumerate(rows):
+            if r.get("status") != "proposed":
+                kept.append(r)
+                continue
+            subj = r.get("subject", "")
+            # de-escalate a bullish lean on an engine-blocked name whether the caller flagged it OR the
+            # engine itself vetoes it (the daily loop passes no `blocked` set, so self-derive it).
+            eff_blocked = set(blocked)
+            explicit_block = subj.upper() in {b.upper() for b in eff_blocked}
+            engine_block_state: bool | None = None
+            if not explicit_block:
+                engine_block_state = _engine_blocked(subj)
+                if engine_block_state is True:
+                    eff_blocked.add(subj)
+            proposed_lean = r.get("lean", "watch")
+            lean, clamp_note = _clamp(proposed_lean, subj, eff_blocked)
+            if not clamp_note and engine_block_state is None and proposed_lean in _BULLISH:
+                lean = "watch"
+                clamp_note = "clamped: engine block status unavailable (cannot escalate without risk evidence)"
+            doc = DecisionDoc(
+                id=f"{asof}-{r['subject']}-claude-{i}", subject=r["subject"], lean=lean,
+                conviction=("low" if clamp_note else r.get("conviction", "low")),
+                prob_correct=float(r.get("prob_correct") or 0.55), horizon_d=int(r.get("horizon_d") or 21),
+                thesis=r.get("thesis", ""), state_asof=asof, evidence=r.get("evidence", []),
+                dissent=clamp_note, sleeve="conviction",
+            ).finalize()                 # engine-derives the falsifier + check_by + time_stop_by
+            appended = ledger.append(doc.to_json())
+            if con is not None:
+                try:
+                    from data_layer import store
+                    store.insert_thesis(con, doc.to_json())
+                except Exception:
+                    pass
+            out.append({"id": doc.id, "subject": doc.subject, "lean": doc.lean,
+                        "clamped": bool(clamp_note), "appended": appended,
+                        "falsifier_kind": doc.falsifier["check"]["kind"]})
+            kept.append({**r, "status": "ingested", "thesis_id": doc.id})
 
-    _PROPOSALS.write_text("".join(json.dumps(r, default=str) + "\n" for r in kept))
-    return {"ingested": len(out), "clamped": sum(1 for o in out if o["clamped"]), "theses": out, "asof": asof}
+        try:
+            _atomic_write_proposals(queue, kept)
+        except Exception:
+            # Ledger effects above may already be committed. Do not imply that nothing happened, and
+            # do not expose backend details. The unchanged proposal queue intentionally remains
+            # retry/reconciliation evidence; ledger.append's open-subject invariant prevents duplicates.
+            return {
+                "ingested": len(out),
+                "clamped": sum(1 for o in out if o["clamped"]),
+                "theses": out,
+                "asof": asof,
+                "proposal_queue_status": "unavailable",
+                "proposal_rows_marked": False,
+                "error": "proposal_queue_update_unavailable",
+                "note": (
+                    "Thesis-ledger effects may already be committed, but proposal queue status "
+                    "could not be advanced; reconcile before interpreting the rows as unprocessed."
+                ),
+            }
+        return {"ingested": len(out), "clamped": sum(1 for o in out if o["clamped"]), "theses": out, "asof": asof}
 
 
 def daily_research_and_ingest(asof: str | None = None, *, blocked: set[str] | None = None) -> dict:
