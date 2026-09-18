@@ -10,6 +10,20 @@ The point of this file is twofold:
 2. PIN THE BLOCKER: the existing single mutation sink cannot durably carry the
    typed service-principal provenance schema or a ``task_kind`` marker, and these
    tests trigger the real refusals rather than trusting a documented string.
+
+Repair round 2 adds three more laws to prove:
+
+* **A1** - the intent id is a hash of exactly (schema, principal_id,
+  operation_key), so a changed objective or a changed grounding SHA for the same
+  logical operation is the sink's existing whole-envelope conflict, never a
+  second Job;
+* **A2** - the typed block states the WRITE ceiling (``write_authorities``, always
+  empty) *and* the truthful READ/RESEARCH grant (``requested_authorities`` /
+  ``effective_authorities``), with drift refused in both directions; and
+* **A3** - ``submit()`` fails closed while the tier is ``NOT_YET_ADMITTED``.
+  Because of A3 the reachable-sink proof lives HERE, calling the unchanged sink
+  directly (``test_hermetic_sink_reachability_proof_*``), so no production-facing
+  callable mutates Runtime in this state.
 """
 from __future__ import annotations
 
@@ -22,7 +36,14 @@ from pathlib import Path
 import pytest
 
 from control_plane import ceo_intent
-from control_plane.ceo_intent import INTENT_SCHEMA, CeoIntentError, command_id_for, submit_intent
+from control_plane import executive_service_principal as esp
+from control_plane.ceo_intent import (
+    INTENT_SCHEMA,
+    CeoIntentConflict,
+    CeoIntentError,
+    command_id_for,
+    submit_intent,
+)
 from control_plane.executive_runtime import (
     JobRegistry,
     JobStatus,
@@ -41,6 +62,7 @@ from control_plane.executive_service_principal import (
     SERVICE_SEAT,
     TASK_KIND,
     ServicePrincipal,
+    ServicePrincipalNotAdmitted,
     ServicePrincipalRefused,
     admission_status,
     command_id,
@@ -49,6 +71,7 @@ from control_plane.executive_service_principal import (
     fingerprint,
     service_principal,
     submit,
+    validate_grant,
     validate_provenance,
 )
 
@@ -97,6 +120,19 @@ def _derived(**overrides) -> dict:
     return derive_intent(_principal(), _request(**overrides), now=0)
 
 
+def _sink_submit(runtime, request: dict | None = None):
+    """The hermetic reachability path: the UNCHANGED sink, called directly.
+
+    ``submit()`` is deliberately closed while the tier is ``NOT_YET_ADMITTED``
+    (A3), so the reachable part of this tier is exercised here, where the test
+    owns the call, instead of through a production-facing callable that would
+    mutate Runtime while unadmitted.
+    """
+
+    derived = derive_intent(_principal(), request if request is not None else _request(), now=0)
+    return submit_intent(runtime, derived["envelope"])
+
+
 def _source_lines(relative: str) -> list[str]:
     return (_ROOT / relative).read_text(encoding="utf-8").splitlines()
 
@@ -120,7 +156,13 @@ def test_closed_schema_refuses_drift_unknown_ids_and_reserved_actors():
     assert derived["schema"] == SCHEMA
     assert set(derived["envelope"]) <= _PROPOSED_ENVELOPE_KEYS | {"workstream"}
     assert set(derived["provenance"]) == {
-        "schema", "actor", "principal_id", "task_kind", "authorities",
+        "schema",
+        "actor",
+        "principal_id",
+        "task_kind",
+        "write_authorities",
+        "requested_authorities",
+        "effective_authorities",
     }
 
     # unknown principal id
@@ -136,7 +178,9 @@ def test_closed_schema_refuses_drift_unknown_ids_and_reserved_actors():
         (lambda block: block.pop("task_kind"), "missing required key"),
         (lambda block: block.__setitem__("schema", INTENT_SCHEMA), "provenance.schema must be"),
         (lambda block: block.__setitem__("task_kind", "implementation"), "task_kind must be"),
-        (lambda block: block.__setitem__("authorities", ["WRITE_BRANCH"]), "must be empty"),
+        (lambda block: block.__setitem__("write_authorities", ["WRITE_BRANCH"]), "must be empty"),
+        (lambda block: block.__setitem__("requested_authorities", ["READ"]), "requested_authorities"),
+        (lambda block: block.__setitem__("effective_authorities", ["READ"]), "effective_authorities"),
         (lambda block: block.__setitem__("actor", "svc-other"), "does not match registered"),
         (lambda block: block.__setitem__("principal_id", "svc-rogue"), "unknown principal id"),
     ):
@@ -255,19 +299,27 @@ def test_authority_is_refused_independently_of_actor(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# 4. submit through the existing sink
+# 4. hermetic sink reachability — the UNCHANGED sink, called directly (A3 move)
 # ---------------------------------------------------------------------------
 
 
-def test_submit_creates_exactly_one_coo_job_and_reconciles_duplicates(tmp_path: Path):
+def test_hermetic_sink_reachability_proof_one_coo_job_no_dispatch_and_duplicate(tmp_path: Path):
+    """What this tier CAN reach today, proven against the real sink.
+
+    ``submit()`` is closed while unadmitted (A3), so the proof calls
+    ``control_plane.ceo_intent.submit_intent`` directly - the same envelope
+    ``derive_intent`` returns - and asserts the whole reachable contract.
+    """
+
     request = _request()
     runtime = Runtime.at(tmp_path / "runtime")
-    first = submit(_principal(), request, runtime)
-    second = submit(_principal(), request, runtime)
+    first = _sink_submit(runtime, request)
+    second = _sink_submit(runtime, request)
 
     assert first["accepted"] is True
     assert first["dispatched"] is False
     assert first["status"] == JobStatus.QUEUED.value
+    assert first["duplicate"] is False
     assert second["duplicate"] is True
     assert second["job_id"] == first["job_id"]
     assert second["fingerprint"] == first["fingerprint"]
@@ -302,16 +354,252 @@ def test_submit_creates_exactly_one_coo_job_and_reconciles_duplicates(tmp_path: 
     assert provenance["grounding"] == _GROUNDING
     assert len([e for e in reader.events.list_events(job_id=job.job_id) if e.event_type == "JOB_CREATED"]) == 1
 
+    # ...and the production-facing path is closed, so this tier cannot mutate
+    # Runtime through it while the verdict stands (A3, detail in section 7).
+    with pytest.raises(ServicePrincipalNotAdmitted):
+        submit(_principal(), request, runtime)
+    assert len(Runtime.at(tmp_path / "runtime").jobs.list_jobs()) == 1
+
 
 # ---------------------------------------------------------------------------
-# 5. no CEO identity is ever emitted
+# 5. A1 — STABLE LOGICAL-OPERATION IDENTITY
+# ---------------------------------------------------------------------------
+
+
+def test_a1_intent_id_depends_only_on_principal_and_operation_key():
+    base = _derived()
+    changed_objective = _derived(objective="A completely different objective for the same audit.")
+    changed_grounding = _derived(grounding={"mastermind_sha": "a" * 40, "macro_sha": "b" * 40})
+    other_operation = _derived(operation_key="source-health-audit")
+
+    # same principal + same operation_key => same intent id, whatever else moved
+    assert base["intent_id"] == changed_objective["intent_id"]
+    assert base["intent_id"] == changed_grounding["intent_id"]
+    assert command_id(base) == command_id(changed_objective)
+    # a different operation_key is a different logical operation
+    assert other_operation["intent_id"] != base["intent_id"]
+    assert base["intent_id"].startswith(INTENT_ID_PREFIX)
+
+    # The whole-envelope fingerprint DOES move: that difference is the conflict
+    # the sink adjudicates, not a second identity this module invents.
+    assert fingerprint(base) != fingerprint(changed_objective)
+    assert fingerprint(base) != fingerprint(changed_grounding)
+
+    # The quoted sink predicates this law relies on are still where we cite them.
+    assert "find_event_by_command_id(command_id)" in _source_window(
+        "control_plane/ceo_intent.py", 984, 990
+    )
+    assert "if fingerprint is not None and recorded != fingerprint:" in _source_window(
+        "control_plane/ceo_intent.py", 783, 790
+    )
+    assert 'return f"{COMMAND_ID_PREFIX}{intent_id}"' in _source_window(
+        "control_plane/ceo_intent.py", 660, 666
+    )
+    pins = admission_status()["identity"]["conflict_predicates"]
+    assert {pin["line"] for pin in pins} == {"L986", "L785", "L662"}
+    for pin in pins:
+        assert pin["file"] == "control_plane/ceo_intent.py"
+
+
+def test_a1_duplicate_changed_objective_and_changed_grounding_stay_one_job(tmp_path: Path):
+    """(i) duplicate -> same Job; (ii)/(iii) same operation, changed envelope -> conflict."""
+
+    runtime = Runtime.at(tmp_path / "runtime")
+    base = _derived()["envelope"]
+    first = submit_intent(runtime, copy.deepcopy(base))
+    assert first["accepted"] is True
+    assert first["duplicate"] is False
+    first_command_id = command_id_for(base["intent_id"])
+
+    # (i) exact duplicate: same Job, reconciled (duplicate=true), no second event
+    again = submit_intent(runtime, copy.deepcopy(base))
+    assert again["duplicate"] is True
+    assert again["job_id"] == first["job_id"]
+    assert again["fingerprint"] == first["fingerprint"]
+
+    # (ii)/(iii) changed objective / changed grounding SHAs under the SAME
+    # principal + operation_key: same intent id, same durable command id, a
+    # DIFFERENT whole-envelope fingerprint, so the sink's own conflict predicate
+    # refuses instead of minting a second Job.
+    for changed_request in (
+        _request(objective="A different objective for the same logical operation."),
+        _request(grounding={"mastermind_sha": "a" * 40, "macro_sha": "b" * 40}),
+    ):
+        changed = derive_intent(_principal(), changed_request, now=0)["envelope"]
+        assert changed["intent_id"] == base["intent_id"]
+        assert command_id_for(changed["intent_id"]) == first_command_id
+        with pytest.raises(CeoIntentConflict, match="already accepted with a different envelope"):
+            submit_intent(runtime, changed)
+
+    reader = Runtime.at(tmp_path / "runtime")
+    jobs = reader.jobs.list_jobs()
+    assert len(jobs) == 1
+    assert jobs[0].job_id == first["job_id"]
+    assert len(
+        [e for e in reader.events.list_events(job_id=first["job_id"]) if e.event_type == "JOB_CREATED"]
+    ) == 1
+
+
+def test_a1_different_operation_key_gets_a_second_job_and_command_id(tmp_path: Path):
+    runtime = Runtime.at(tmp_path / "runtime")
+    first_envelope = _derived()["envelope"]
+    second_envelope = _derived(operation_key="source-health-audit")["envelope"]
+
+    first = submit_intent(runtime, first_envelope)
+    second = submit_intent(runtime, second_envelope)
+
+    assert first["job_id"] != second["job_id"]
+    assert first["fingerprint"] != second["fingerprint"]
+    assert command_id_for(first_envelope["intent_id"]) != command_id_for(second_envelope["intent_id"])
+    assert {job.job_id for job in Runtime.at(tmp_path / "runtime").jobs.list_jobs()} == {
+        first["job_id"],
+        second["job_id"],
+    }
+
+
+# ---------------------------------------------------------------------------
+# 6. A2 — TRUTHFUL GRANT IN THE TYPED BLOCK (write ceiling + READ/RESEARCH grant)
+# ---------------------------------------------------------------------------
+
+
+def test_a2_typed_block_states_the_write_ceiling_and_the_reviewed_read_grant():
+    block = _derived()["provenance"]
+    assert block["write_authorities"] == []
+    assert block["requested_authorities"] == ["READ", "RESEARCH"]
+    assert block["effective_authorities"] == ["READ", "RESEARCH"]
+    assert validate_provenance(dict(block)) == block
+    assert validate_grant(_derived()) == block
+
+    contract = _derived()["envelope"]["execution_contract"]
+    assert contract["requested_authorities"] == block["requested_authorities"]
+    assert contract["requested_authorities"] == block["effective_authorities"]
+
+
+def test_a2_block_grant_drift_from_the_registry_is_refused():
+    for mutate, match in (
+        (lambda b: b.__setitem__("requested_authorities", ["READ"]), "requested_authorities"),
+        (lambda b: b.__setitem__("effective_authorities", ["READ"]), "effective_authorities"),
+        (
+            lambda b: b.__setitem__("requested_authorities", ["READ", "RESEARCH", "RUN_TESTS"]),
+            "requested_authorities",
+        ),
+        (lambda b: b.__setitem__("write_authorities", ["WRITE_BRANCH"]), "must be empty"),
+        (lambda b: b.__setitem__("requested_authorities", "READ,RESEARCH"), "must be a list"),
+        (lambda b: b.__setitem__("effective_authorities", []), "must not be empty"),
+    ):
+        block = dict(_derived()["provenance"])
+        mutate(block)
+        with pytest.raises(ServicePrincipalRefused, match=match):
+            validate_provenance(block)
+        tampered = copy.deepcopy(_derived())
+        tampered["provenance"] = block
+        with pytest.raises(ServicePrincipalRefused, match=match):
+            validate_grant(tampered)
+
+
+def test_a2_envelope_grant_drift_from_the_block_is_refused_before_any_sink_call(
+    monkeypatch, tmp_path: Path
+):
+    sink_calls: list = []
+    monkeypatch.setattr(ceo_intent, "submit_intent", lambda *a, **k: sink_calls.append(a))
+
+    for granted, match in (
+        (["READ"], "envelope.execution_contract.requested_authorities"),
+        (["READ", "RESEARCH", "WRITE_BRANCH"], "envelope requests write authority"),
+        ([], "must not be empty"),
+    ):
+        tampered = copy.deepcopy(_derived())
+        tampered["envelope"]["execution_contract"]["requested_authorities"] = granted
+        with pytest.raises(ServicePrincipalRefused, match=match):
+            validate_grant(tampered)
+
+    # An unknown contract key (a write path, an argv validation) is refused too.
+    tampered = copy.deepcopy(_derived())
+    tampered["envelope"]["execution_contract"]["allowed_write_paths"] = ["docs/x.md"]
+    with pytest.raises(ServicePrincipalRefused, match="unexpected key"):
+        validate_grant(tampered)
+
+    # The pre-sink ORDER is pinned in source: derive -> validate_grant -> gate -> sink.
+    source = (_ROOT / "control_plane" / "executive_service_principal.py").read_text(encoding="utf-8")
+    submit_body = source.split("def submit(", 1)[1]
+    assert submit_body.index("validate_grant(derived)") < submit_body.index("ceo_intent.submit_intent(")
+
+    # ...and a normal request cannot reach the monkeypatched sink either (A3).
+    with pytest.raises(ServicePrincipalNotAdmitted):
+        submit(_principal(), _request(), object())
+    assert sink_calls == []
+
+
+# ---------------------------------------------------------------------------
+# 7. A3 — FAIL CLOSED WHILE NOT_YET_ADMITTED
+# ---------------------------------------------------------------------------
+
+
+def test_a3_submit_fails_closed_while_not_yet_admitted(monkeypatch, tmp_path: Path):
+    status = admission_status()
+    assert status["status"] == NOT_YET_ADMITTED
+
+    sink_calls: list = []
+    monkeypatch.setattr(ceo_intent, "submit_intent", lambda *a, **k: sink_calls.append(a))
+
+    # (a) the typed refusal, with the blocker predicates in the message.  A
+    #     sentinel runtime is passed on purpose: reading it at all would raise
+    #     AttributeError, so this proves the refusal precedes ANY runtime access.
+    with pytest.raises(ServicePrincipalNotAdmitted) as caught:
+        submit(_principal(), _request(), object())
+    message = str(caught.value)
+    assert "NOT_YET_ADMITTED" in message
+    assert status["reason"] in message
+    for predicate in status["predicates"]:
+        assert predicate["file"] in message
+        assert predicate["line"] in message
+    assert sink_calls == []
+
+    # (b) a REAL runtime is untouched too.
+    runtime = Runtime.at(tmp_path / "runtime")
+    with pytest.raises(ServicePrincipalNotAdmitted):
+        submit(_principal(), _request(), runtime)
+    assert Runtime.at(tmp_path / "runtime").jobs.list_jobs() == []
+    assert sink_calls == []
+
+    # (c) the gate is a live read of the admission verdict, not a hard-coded
+    #     refusal: with an ADMITTED verdict the same call reaches the sink.  This
+    #     is the positive control that the tier's path is blocked by admission
+    #     ONLY, and it never touches a real runtime (the sink is monkeypatched).
+    monkeypatch.setattr(esp, "admission_status", lambda: dict(status, status=ADMITTED))
+    sentinel = {"accepted": True}
+    monkeypatch.setattr(ceo_intent, "submit_intent", lambda *a, **k: sink_calls.append(a) or sentinel)
+    assert submit(_principal(), _request(), object()) == sentinel
+    assert len(sink_calls) == 1
+
+
+def test_a3_no_other_module_level_callable_submits_anyway():
+    """Exactly one module-level callable reaches the sink, and it is the gated one."""
+
+    source = (_ROOT / "control_plane" / "executive_service_principal.py").read_text(encoding="utf-8")
+    callers = set()
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        for inner in ast.walk(node):
+            if not isinstance(inner, ast.Call):
+                continue
+            target = inner.func
+            name = target.attr if isinstance(target, ast.Attribute) else getattr(target, "id", None)
+            if name in {"submit_intent", "create_job", "create_v2_orchestration_root"}:
+                callers.add(node.name)
+    assert callers == {"submit"}
+
+
+# ---------------------------------------------------------------------------
+# 8. no CEO identity is ever emitted
 # ---------------------------------------------------------------------------
 
 
 def test_emitted_provenance_never_carries_a_ceo_identity(tmp_path: Path):
     request = _request()
     runtime = Runtime.at(tmp_path / "runtime")
-    receipt = submit(_principal(), request, runtime)
+    receipt = _sink_submit(runtime, request)
     reader = Runtime.at(tmp_path / "runtime")
     emitted = json.dumps(
         {
@@ -343,7 +631,7 @@ def test_emitted_provenance_never_carries_a_ceo_identity(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# 6. the pinned blocker — the sink cannot carry the typed schema or task_kind
+# 9. the pinned blocker — the sink cannot carry the typed schema or task_kind
 # ---------------------------------------------------------------------------
 
 
@@ -380,7 +668,7 @@ def test_sink_cannot_carry_the_typed_schema_or_task_kind(tmp_path: Path):
     assert runtime.jobs.list_jobs() == []
 
     # (d) what IS reachable: the actor, durably, with the sink's own schema stamp.
-    receipt = submit(_principal(), _request(), runtime)
+    receipt = _sink_submit(runtime)
     reader = Runtime.at(tmp_path / "runtime")
     durable = durable_provenance(reader, receipt["job_id"])
     assert durable["provenance"]["actor"] == _principal().actor
@@ -421,7 +709,7 @@ def test_sink_cannot_carry_the_typed_schema_or_task_kind(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# 7. the registry is closed
+# 10. the registry is closed
 # ---------------------------------------------------------------------------
 
 
@@ -454,28 +742,33 @@ def test_registry_is_closed_and_look_alikes_confer_nothing():
 
 
 # ---------------------------------------------------------------------------
-# 8. KNOWN OPEN GAP (A2 follow-on, OWNED by executive_runtime.py / #699)
+# 11. KNOWN OPEN GAP (A2 follow-on, OWNED by executive_runtime.py / #699)
 # ---------------------------------------------------------------------------
 #
 # The CEO branch of ``_has_executive_provenance`` is SCHEMA-ONLY
 # (``executive_runtime.py`` L937-L938, cited here as a string): it compares the
 # schema and DISCARDS the actor, while the chairman branch checks schema AND
-# actor.  The stamp this tier's ``submit()`` leaves in
+# actor.  The stamp this tier's derived envelope receives from the sink in
 # ``event.payload["provenance"]`` is exactly
 # ``schema=mastermind.ceo_intent.v1`` / ``actor=svc-site-maintenance``, so that
 # stamp satisfies the CEO branch.  The tests below PIN that as a known,
 # documented open gap instead of fixing it: the gate, the sink stamp, and the
-# OWNED runtime (#699) are all outside this packet's fences.  The module's own
-# ``submit()`` never passes ``owner_seat``/``escalation_target``, so its Jobs
-# stay ``coo`` (asserted in section 4); the gap is *reuse* of the stamped
-# provenance by any other runtime holder, not this path today.
+# OWNED runtime (#699) are all outside this packet's fences.  This tier never
+# passes ``owner_seat``/``escalation_target`` (the sink's own ``coo`` defaults
+# seat the Job, asserted in section 4), so the gap is *reuse* of the stamped
+# provenance by any other runtime holder, not a Job this tier can create.
 
 
 def _durable_sink_stamp(tmp_path: Path) -> tuple[dict, dict]:
-    """The sink's stamped provenance block and the sink's own receipt."""
+    """The sink's stamped provenance block and the sink's own receipt.
+
+    The stamp comes from calling the UNCHANGED sink directly, because ``submit()``
+    is closed while unadmitted (A3): the gap is about what the sink stamps, not
+    about a production path that mutates now.
+    """
 
     runtime = Runtime.at(tmp_path / "runtime")
-    receipt = submit(_principal(), _request(), runtime)
+    receipt = _sink_submit(runtime)
     reader = Runtime.at(tmp_path / "runtime")
     stamp = durable_provenance(reader, receipt["job_id"])["provenance"]
     assert stamp["schema"] == INTENT_SCHEMA
@@ -539,9 +832,9 @@ def test_open_gap_ceo_seat_is_admitted_with_the_sink_stamp_A2(tmp_path: Path):
             provenance=dict(_derived()["provenance"]),
         )
 
-    # (c) this tier's OWN submit path stays coo: it never passes a seat, so no
-    # Job created by this module can be seated above coo - even in a database
-    # that now also holds the ceo-seated probes above.
+    # (c) this tier's own envelope rides the sink's ``coo`` defaults: it never
+    # carries a seat, so no Job created from it can be seated above coo - even in
+    # a database that now also holds the ceo-seated probes above.
     reader = Runtime.at(tmp_path / "runtime")
     own = [job for job in reader.jobs.list_jobs() if job.job_id == receipt["job_id"]]
     assert len(own) == 1

@@ -37,6 +37,33 @@ WHAT THIS IS NOT
   ``_has_executive_provenance`` (``executive_runtime.py:L928-L942``, consulted only
   from ``:10287-10297``) is never consulted.
 
+  :func:`submit` therefore FAILS CLOSED while that verdict stands: it raises
+  :class:`ServicePrincipalNotAdmitted` *before* it reads its ``runtime``
+  argument, so no production-facing callable in this module mutates Runtime
+  while the tier is unadmitted.  The reachable part is still proven, hermetically,
+  by the tests calling the unchanged sink directly
+  (``ceo_intent.submit_intent(runtime, derived["envelope"])``).
+
+Identity law
+------------
+The intent id is a domain-separated hash of EXACTLY ``SCHEMA`` +
+``principal_id`` + the normalized ``operation_key`` - nothing else.  One logical
+operation keeps one intent id and one durable command id, so a later envelope for
+the same operation (a changed objective, a changed grounding SHA) is adjudicated
+by the sink's existing whole-envelope conflict predicate
+(``ceo_intent.py:L785``, raising ``CeoIntentConflict``) instead of minting a
+second Job.  A different ``operation_key`` is a different operation and
+legitimately gets its own Job.
+
+Grant law
+---------
+The typed block states the WRITE ceiling (``write_authorities``: always empty for
+this tier) *and* the reviewed READ/RESEARCH grant (``requested_authorities`` and
+``effective_authorities``, both exactly the registered principal/profile grant).
+:func:`validate_grant` refuses drift in either direction - a block that disagrees
+with the registry, or an envelope whose ``execution_contract`` disagrees with the
+block - before any sink call is reachable.
+
 Source-line pins in this module are written as ``L<number>`` strings or as
 comments (``L561``), never as bare integer literals: the repository's D8 identity
 ratchet flags every unexplained 4xx-9xx integer in *added production source*, and
@@ -68,6 +95,7 @@ __all__ = [
     "TASK_KIND",
     "WRITE_OPERATIONS",
     "ServicePrincipal",
+    "ServicePrincipalNotAdmitted",
     "ServicePrincipalRefused",
     "admission_status",
     "command_id",
@@ -76,6 +104,7 @@ __all__ = [
     "fingerprint",
     "service_principal",
     "submit",
+    "validate_grant",
     "validate_provenance",
 ]
 
@@ -151,6 +180,16 @@ class ServicePrincipalRefused(ValueError):
     """A typed refusal: unknown principal, unregistered identity, or drift."""
 
 
+class ServicePrincipalNotAdmitted(ServicePrincipalRefused):
+    """Typed refusal: the sink cannot yet durably carry this typed principal.
+
+    Raised by :func:`submit` while :func:`admission_status` reports
+    ``NOT_YET_ADMITTED``, *before* the ``runtime`` argument is touched at all, so
+    the tier fails closed instead of quietly landing an unattributed Job.  It
+    carries the blocking predicates in its message.
+    """
+
+
 def _refuse(message: str) -> "ServicePrincipalRefused":
     return ServicePrincipalRefused(f"service principal refused: {message}")
 
@@ -173,6 +212,43 @@ def _authority_set(value: Any, name: str, *, allow_empty: bool = False) -> froze
         if not isinstance(item, str) or not item:
             raise _refuse(f"{name} members must be non-empty strings")
     return items
+
+
+def _authority_list(value: Any, name: str, *, allow_empty: bool = False) -> list[str]:
+    """A reviewed authority LIST (ordered, string, non-empty unless allowed).
+
+    ``_authority_set`` is the dataclass-field shape; this is the wire shape the
+    sink's ``execution_contract.requested_authorities`` uses, so grant drift is
+    compared as an ordered list rather than a silently-absorbing set.
+    """
+
+    if isinstance(value, str) or not isinstance(value, (tuple, list)):
+        raise _refuse(f"{name} must be a list of authority names")
+    if not value and not allow_empty:
+        raise _refuse(f"{name} must not be empty")
+    for item in value:
+        if not isinstance(item, str) or not item:
+            raise _refuse(f"{name} members must be non-empty strings")
+    return list(value)
+
+
+def _registered_grant(principal: ServicePrincipal) -> list[str]:
+    """The one reviewed grant, bound to BOTH the registered principal and the profile.
+
+    ``sorted`` matches the sink's own ``derive_authorities`` ordering
+    (``ceo_request.py:L514``), so the typed block and the sink envelope always
+    carry byte-identical lists.
+    """
+
+    grant = sorted(principal.allowed_operations)
+    profile_grant = sorted(ceo_request.derive_authorities(READ_ONLY_PROFILE))
+    if grant != profile_grant or grant != sorted(READ_OPERATIONS):
+        raise _refuse(
+            f"principal {principal.principal_id!r} does not carry the reviewed "
+            f"READ/RESEARCH grant {sorted(READ_OPERATIONS)}: registry says {grant}, "
+            f"profile {READ_ONLY_PROFILE!r} says {profile_grant}"
+        )
+    return grant
 
 
 @dataclass(frozen=True)
@@ -299,7 +375,18 @@ def _require_registered(principal: ServicePrincipal) -> ServicePrincipal:
 # ---------------------------------------------------------------------------
 
 _PROVENANCE_KEYS = frozenset(
-    {"schema", "actor", "principal_id", "task_kind", "authorities"}
+    {
+        "schema",
+        "actor",
+        "principal_id",
+        "task_kind",
+        # The WRITE ceiling.  Always empty for this tier; named "write" so an
+        # empty value can never be misread as "no grant at all".
+        "write_authorities",
+        # The reviewed READ/RESEARCH grant, stated truthfully in both directions.
+        "requested_authorities",
+        "effective_authorities",
+    }
 )
 
 
@@ -307,8 +394,9 @@ def validate_provenance(block: Any) -> dict[str, Any]:
     """Return the canonical form of one typed provenance block, or refuse.
 
     Pure and local: no sink, no I/O, no clock.  Drift in either direction
-    (missing key, extra key, wrong schema, wrong actor, non-empty write
-    authority set) is refused with a precise message.
+    (missing key, extra key, wrong schema, wrong actor, a non-empty WRITE
+    ceiling, or a READ/RESEARCH grant that disagrees with the registered
+    principal/profile) is refused with a precise message.
     """
 
     if not isinstance(block, Mapping):
@@ -334,24 +422,46 @@ def validate_provenance(block: Any) -> dict[str, Any]:
         raise _refuse(
             f"provenance.task_kind must be {TASK_KIND!r}; got {block['task_kind']!r}"
         )
-    authorities = _authority_set(
-        block["authorities"], "provenance.authorities", allow_empty=True
+    write = _authority_list(
+        block["write_authorities"], "provenance.write_authorities", allow_empty=True
     )
-    if authorities:
+    if write:
         raise _refuse(
-            "a service principal carries no write authority; provenance.authorities "
-            f"must be empty, got {sorted(authorities)}"
+            "a service principal carries no write authority; "
+            f"provenance.write_authorities must be empty, got {sorted(write)}"
+        )
+    expected = _registered_grant(principal)
+    requested = sorted(
+        _authority_list(block["requested_authorities"], "provenance.requested_authorities")
+    )
+    effective = sorted(
+        _authority_list(block["effective_authorities"], "provenance.effective_authorities")
+    )
+    if requested != expected:
+        raise _refuse(
+            f"provenance.requested_authorities {requested} does not match the "
+            f"registered principal/profile grant {expected}"
+        )
+    if effective != expected:
+        raise _refuse(
+            f"provenance.effective_authorities {effective} does not match the "
+            f"registered principal/profile grant {expected}"
         )
     return {
         "schema": SCHEMA,
         "actor": actor,
         "principal_id": principal_id,
         "task_kind": TASK_KIND,
-        "authorities": [],
+        "write_authorities": [],
+        "requested_authorities": list(expected),
+        "effective_authorities": list(expected),
     }
 
 
-def _provenance(principal: ServicePrincipal) -> dict[str, Any]:
+def _provenance(principal: ServicePrincipal, authorities: Any) -> dict[str, Any]:
+    """The typed block for ``principal``: empty WRITE ceiling, truthful READ grant."""
+
+    grant = sorted(_authority_list(authorities, "grant"))
     return validate_provenance(
         {
             "schema": SCHEMA,
@@ -360,9 +470,68 @@ def _provenance(principal: ServicePrincipal) -> dict[str, Any]:
             "task_kind": TASK_KIND,
             # READ/RESEARCH grants no write authority, so the write-authority set
             # is empty by construction - not by omission.
-            "authorities": [],
+            "write_authorities": [],
+            # ...and the READ/RESEARCH grant is stated, not hidden behind an
+            # empty list that only ever named the WRITE ceiling.
+            "requested_authorities": grant,
+            "effective_authorities": grant,
         }
     )
+
+
+_CONTRACT_KEYS = frozenset({"requested_authorities", "authority_level", "attempt_limit"})
+
+
+def validate_grant(derived: Mapping[str, Any]) -> dict[str, Any]:
+    """Refuse grant drift in EITHER direction, before any sink call is reachable.
+
+    Two independent statements must agree:
+
+    * the typed block carries exactly the registered principal/profile grant
+      (enforced by :func:`validate_provenance`), and
+    * the derived envelope's ``execution_contract.requested_authorities`` is
+      exactly that grant - the same list the block declares as both requested
+      and effective.
+
+    Pure: no runtime, no sink, no I/O.  :func:`submit` calls this BEFORE it reads
+    its ``runtime`` argument or reaches the sink, so a drifted pair is refused
+    before it can mutate anything.
+    """
+
+    if not isinstance(derived, Mapping):
+        raise _refuse("derived intent must be an object")
+    canonical = validate_provenance(derived.get("provenance"))
+    envelope = _envelope(derived)
+    contract = envelope.get("execution_contract")
+    if not isinstance(contract, Mapping):
+        raise _refuse("envelope.execution_contract must be an object")
+    unexpected = sorted(set(contract) - _CONTRACT_KEYS)
+    if unexpected:
+        raise _refuse(f"envelope.execution_contract has unexpected key(s): {unexpected}")
+    if "requested_authorities" not in contract:
+        raise _refuse("envelope.execution_contract is missing requested_authorities")
+    envelope_requested = sorted(
+        _authority_list(
+            contract["requested_authorities"],
+            "envelope.execution_contract.requested_authorities",
+        )
+    )
+    write = sorted(set(envelope_requested) & WRITE_OPERATIONS)
+    if write:
+        raise _refuse(f"envelope requests write authority: {write}")
+    if envelope_requested != canonical["requested_authorities"]:
+        raise _refuse(
+            "envelope.execution_contract.requested_authorities "
+            f"{envelope_requested} differ from the typed block "
+            f"requested_authorities {canonical['requested_authorities']}"
+        )
+    if envelope_requested != canonical["effective_authorities"]:
+        raise _refuse(
+            "envelope.execution_contract.requested_authorities "
+            f"{envelope_requested} differ from the typed block "
+            f"effective_authorities {canonical['effective_authorities']}"
+        )
+    return canonical
 
 
 # ---------------------------------------------------------------------------
@@ -370,15 +539,26 @@ def _provenance(principal: ServicePrincipal) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def _intent_id(principal: ServicePrincipal, normalized: Mapping[str, Any], grounding: Mapping[str, Any]) -> str:
+def _intent_id(principal: ServicePrincipal, normalized: Mapping[str, Any]) -> str:
+    """Stable logical-operation identity: EXACTLY (SCHEMA, principal_id, operation_key).
+
+    Nothing else enters the hash - not the objective, not the priority, not the
+    grounding SHAs.  A repeat of the same logical operation therefore reuses ONE
+    intent id and ONE durable command id, and any changed envelope under that id
+    is refused by the sink's existing whole-envelope conflict predicate
+    (``ceo_intent.py:L785``, raising ``CeoIntentConflict``) instead of silently
+    creating a second Job.  A different ``operation_key`` is a different
+    operation and legitimately gets its own Job.
+    """
+
+    operation_key = normalized.get("operation_key")
+    if not isinstance(operation_key, str) or not operation_key:
+        raise _refuse("the normalized request is missing its operation_key")
     identity = json.dumps(
         {
             "schema": SCHEMA,
             "principal_id": principal.principal_id,
-            "actor": principal.actor,
-            "task_kind": TASK_KIND,
-            "request": dict(normalized),
-            "grounding": dict(grounding),
+            "operation_key": operation_key,
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -468,9 +648,13 @@ def derive_intent(principal: ServicePrincipal, request: Mapping[str, Any], *, no
             f"{sorted(registered.allowed_operations)}"
         )
 
-    intent_id = _intent_id(registered, normalized, grounding)
+    intent_id = _intent_id(registered, normalized)
+    provenance = _provenance(registered, authorities)
     contract: dict[str, Any] = {
-        "requested_authorities": list(authorities),
+        # The envelope's grant is READ OFF the typed block, so the two can never
+        # be built to disagree; validate_grant() then refuses any drift a caller
+        # puts between them afterwards.
+        "requested_authorities": list(provenance["effective_authorities"]),
         "authority_level": ceo_request.AUTHORITY_LEVEL,
         "attempt_limit": int(normalized["attempt_limit"]),
     }
@@ -490,14 +674,18 @@ def derive_intent(principal: ServicePrincipal, request: Mapping[str, Any], *, no
     if normalized.get("workstream"):
         envelope["workstream"] = str(normalized["workstream"])
 
-    return {
+    derived: dict[str, Any] = {
         "schema": SCHEMA,
         "intent_id": intent_id,
         "envelope": envelope,
-        "provenance": _provenance(registered),
+        "provenance": provenance,
         "admission": admission_status(),
         "derived_at_ms": _now_ms(now),
     }
+    # Self-audit: a future edit that builds the block and the envelope apart
+    # fails here, loudly, instead of shipping a false grant.
+    validate_grant(derived)
+    return derived
 
 
 def fingerprint(derived: Mapping[str, Any]) -> str:
@@ -527,17 +715,41 @@ def _envelope(derived: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def submit(principal: ServicePrincipal, request: Mapping[str, Any], runtime: Any, *, now: Any = None) -> dict[str, Any]:
-    """Submit through the one existing mutation sink; return its result unchanged.
+    """FAIL CLOSED while the tier is ``NOT_YET_ADMITTED``; never mutates Runtime.
 
-    No dispatch, no Attempt, no worker, no queue of our own.  A duplicate
-    submission derives the same intent id and reconciles to the same Job by the
-    sink's existing ``command_id`` semantics.  The typed provenance block is
-    validated locally and deliberately NOT passed to the sink (the sink refuses
-    it - see :func:`admission_status`).
+    Order of business, all of it before the ``runtime`` argument is read:
+
+    1. derive + locally validate (closed identity, typed block, truthful grant),
+    2. refuse any grant drift between block and envelope,
+    3. refuse outright while :func:`admission_status` is not ``ADMITTED``.
+
+    The sink call below is therefore unreachable in this build; when an owner
+    admits the typed schema the gate opens by itself and this becomes the thin
+    passthrough it was always meant to be - no second path, no dispatch, no
+    Attempt, no worker, no queue of our own.
     """
 
     derived = derive_intent(principal, request, now=now)
+    validate_grant(derived)
+    _require_admitted()
     return ceo_intent.submit_intent(runtime, derived["envelope"])
+
+
+def _require_admitted() -> None:
+    """The A3 gate: no production-facing callable mutates Runtime while unadmitted."""
+
+    status = admission_status()
+    if status["status"] == ADMITTED:
+        return
+    blockers = "; ".join(
+        f"{predicate['file']}:{predicate['line']} {predicate['what']}"
+        for predicate in status["predicates"]
+    )
+    raise ServicePrincipalNotAdmitted(
+        f"service principal refused: submit() is closed while admission_status()['status'] "
+        f"is {status['status']!r} for schema {status['schema']!r}: {status['reason']}. "
+        f"blocking predicates: {blockers}"
+    )
 
 
 def durable_provenance(runtime: Any, job_id: str) -> dict[str, Any]:
@@ -588,6 +800,11 @@ def admission_status() -> dict[str, Any]:
             "without editing an owned file or forking a second path"
         ),
         "sink": "control_plane.ceo_intent.submit_intent",
+        "submit_gate": (
+            "public submit() FAILS CLOSED while this verdict is not ADMITTED: it raises "
+            "ServicePrincipalNotAdmitted before it reads its runtime argument, so no "
+            "production-facing callable in this module mutates Runtime in this state"
+        ),
         "predicates": (
             {
                 "file": "control_plane/ceo_intent.py",
@@ -623,9 +840,43 @@ def admission_status() -> dict[str, Any]:
                 ),
             },
         ),
+        "identity": {
+            "id": (
+                "domain-separated hash of EXACTLY (SCHEMA, principal_id, normalized "
+                "operation_key); the objective and the grounding SHAs are NOT in it"
+            ),
+            "conflict_predicates": (
+                {
+                    "file": "control_plane/ceo_intent.py",
+                    "line": "L986",
+                    "what": (
+                        "submit_intent looks the derived command id up in the durable "
+                        "event log first, so a reused intent id reconciles instead of "
+                        "creating a second Job"
+                    ),
+                },
+                {
+                    "file": "control_plane/ceo_intent.py",
+                    "line": "L785",
+                    "what": (
+                        "_receipt_from_event raises CeoIntentConflict when the reused "
+                        "intent id was already accepted under a DIFFERENT whole-envelope "
+                        "fingerprint; that predicate is the whole-envelope conflict law "
+                        "this module relies on rather than reimplement"
+                    ),
+                },
+                {
+                    "file": "control_plane/ceo_intent.py",
+                    "line": "L662",
+                    "what": "command_id_for() derives the durable command id from the intent id",
+                },
+            ),
+        },
         "reachable_today": (
-            "actor='svc-site-maintenance' with the unmodified owner_seat='coo' / "
-            "escalation_target='coo' defaults reaches exactly one QUEUED Job with "
+            "a caller that goes DIRECTLY to the unchanged sink "
+            "(control_plane.ceo_intent.submit_intent(runtime, derived['envelope'])) "
+            "reaches exactly one QUEUED Job with actor='svc-site-maintenance', the "
+            "unmodified owner_seat='coo' / escalation_target='coo' defaults, "
             "READ/RESEARCH authorities and no dispatch; _has_executive_provenance "
             "(executive_runtime.py:L928-L942) is never consulted because it is only "
             "called from :10287-10297 when a seat is not 'coo'"

@@ -25,9 +25,42 @@ plus a derive/submit path that rides the **existing** single mutation sink
 - `owner_seat="coo"` / `escalation_target="coo"` always, so
   `_has_executive_provenance` (`executive_runtime.py:928-942`, called only from
   `:10287-10297` when a seat is not `coo`) is never consulted.
-- Submission is a thin wrapper returning the sink's receipt unchanged: no
-  dispatch, no Attempt, no worker, no queue of its own; a duplicate submission
-  reconciles to the same Job by the sink's `command_id` semantics.
+
+### Identity law (repair round 2, A1)
+
+The intent id is a domain-separated hash of **exactly** (`SCHEMA`, `principal_id`,
+normalized `operation_key`) — nothing else. One logical operation keeps one
+intent id and one durable command id, so a later envelope for the same operation
+(a changed objective, changed grounding SHAs) is adjudicated by the sink's own
+whole-envelope fingerprint conflict law (`ceo_intent.py:785-786`, raising
+`CeoIntentConflict`) instead of minting a second Job; a different
+`operation_key` legitimately gets its own Job. The module does **not** reimplement
+the conflict: it relies on `submit_intent`'s command-id lookup
+(`ceo_intent.py:986`) and `command_id_for` (`ceo_intent.py:662`).
+
+### Grant law (repair round 2, A2)
+
+The typed block states the **write ceiling** — `write_authorities`, always `[]`
+for this tier — *and* the reviewed grant: `requested_authorities` and
+`effective_authorities`, both exactly `["READ","RESEARCH"]`, bound to the
+registered principal *and* to the reviewed `research_only` profile
+(`ceo_request.py:514` `derive_authorities`). `validate_grant` refuses drift in
+both directions before any sink call is reachable: a block that disagrees with
+the registry/profile, or an envelope whose
+`execution_contract.requested_authorities` disagrees with the block.
+
+### Submission is closed while unadmitted (repair round 2, A3)
+
+`submit()` **fails closed**: while `admission_status()["status"] != "ADMITTED"` it
+raises the typed `ServicePrincipalNotAdmitted` (carrying the blocking predicates)
+*before* it reads its `runtime` argument, so no production-facing callable here
+mutates Runtime in this state. There is no "submit anyway" escape hatch: exactly
+one module-level callable reaches the sink, and it is the gated one (pinned by an
+AST test). The reachable part is still proven — hermetically, by the tests calling
+the **unchanged** sink directly
+(`ceo_intent.submit_intent(runtime, derived["envelope"])`,
+`test_hermetic_sink_reachability_proof_*`): one QUEUED Job, `coo` seats,
+`READ`/`RESEARCH`, no dispatch, duplicate reconcile.
 
 ## What it is NOT
 
@@ -48,10 +81,31 @@ plus a derive/submit path that rides the **existing** single mutation sink
 ## The pinned blocker (`admission_status()` → `NOT_YET_ADMITTED`)
 
 `derive_intent` returns the sink envelope, the typed provenance block, and an
-honest admission verdict. `submit` still lands the reachable part: exactly one
-QUEUED Job with `actor=svc-site-maintenance`, the unmodified `coo` seats,
+honest admission verdict. `submit()` is **closed** (see A3 above), so the
+reachable part is only reachable by calling the unchanged sink directly: exactly
+one QUEUED Job with `actor=svc-site-maintenance`, the unmodified `coo` seats,
 `["READ","RESEARCH"]` authorities, `events.actor` untouched at `"operator"`, and
 `event.payload["provenance"]` recording the **sink's** schema.
+
+## A2 (per Sol) — what the typed schema actually is
+
+Per Sol's ruling, A2 is a **strict non-CEO schema
+`mastermind.executive_service_intent.v1` carried on the EXISTING sink** — it is
+**NOT** a Runtime change, and it must not become one:
+
+* the sink (`control_plane/ceo_intent.py`) is the only mutation path; A2 adds an
+  exact-keyed, closed, non-CEO *intent* schema there (`mastermind.executive_service_intent.v1`),
+  admitted by the same `validate_intent` fence that admits the CEO schemas today;
+* no `executive_runtime.py` seat/provenance change is part of A2;
+* `executive_inbox.ceo_intent_provenance` (`executive_inbox.py:639`) must keep
+  recognizing **CEO schema only** (`CEO_INTENT_PROVENANCE_SCHEMA =
+  "mastermind.ceo_intent.v1"` plus the v2 sibling at `:666`). A service-principal
+  schema is *not* CEO provenance and must never be reported as such, or the
+  inbox/control-room surfaces would attribute a bounded non-CEO audit to the CEO
+  seat.
+
+The `KNOWN OPEN GAP` below stays a Runtime-owned residual (PR #699); it is not
+the A2 schema slice, and this PR does not touch either file.
 
 Not reachable without editing an owned file, so not done here:
 
@@ -86,8 +140,8 @@ consulted only when `owner_seat != "coo"` **or** `escalation_target != "coo"`.
 For `target="ceo"` the schema is compared and the actor is never consulted; for
 the human seat the schema **and** the actor are both required.
 
-Reproduced on a temp runtime from this tier's own `submit()` — the durable
-`event.payload["provenance"]` is
+Reproduced on a temp runtime from this tier's own derived envelope submitted
+through the unchanged sink — the durable `event.payload["provenance"]` is
 `{"schema": "mastermind.ceo_intent.v1", "actor": "svc-site-maintenance", ...}`:
 
 | Probe with that exact stamp | Result |
@@ -100,10 +154,11 @@ Reproduced on a temp runtime from this tier's own `submit()` — the durable
 | `create_job(..., owner_seat="ceo")` with no provenance | `StateConflict` |
 | `create_job(..., owner_seat="ceo", provenance=<typed `mastermind.executive_service_principal.v1`>)` | `StateConflict` |
 
-Why this is not a live escalation *from this tier*: `submit()` never passes
+Why this is not a live escalation *from this tier*: this tier never passes
 `owner_seat` / `escalation_target`, so its Jobs keep the runtime's `coo` defaults
 (`executive_runtime.py:10108-10109`) and the gate is never consulted for them
-(asserted in section 4 of the test module). The gap is **reuse**: any later
+(asserted in section 4 of the test module) — and `submit()` cannot create a Job at
+all while unadmitted (A3). The gap is **reuse**: any later
 Runtime holder — or a child `create_job` — that hands this Job's durable
 provenance to a non-`coo` seat passes the CEO gate because of the sink's schema
 stamp, not because of the actor. There is no in-place reseat API; the exposure
@@ -137,8 +192,9 @@ and `::test_open_gap_ceo_seat_is_admitted_with_the_sink_stamp_A2`).
 ## Verification
 
 ```
-python3 -m pytest tests/test_executive_service_principal.py -q   # 9 passed
+python3 -m pytest tests/test_executive_service_principal.py -q   # 17 passed
 python3 -m pytest tests/test_ceo_intent.py -q                    # 60 passed (sink unregressed)
+python3 -m pytest tests/test_ceo_submit_armed_composition.py -q -k d8_template_topology  # 1 passed
 ```
 
 `git diff --name-only origin/master` is exactly the three new paths above.
