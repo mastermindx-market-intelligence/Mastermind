@@ -66,6 +66,7 @@ def test_producer_imports_only_standard_library_and_common() -> None:
         "pathlib",
         "re",
         "socket",
+        "types",
         "typing",
         "uuid",
     }
@@ -126,6 +127,53 @@ def test_producer_has_no_retry_sleep_thread_file_or_tcp_path() -> None:
     assert "AF_INET6" not in source
     assert "SOCK_STREAM" not in source
     assert source.count("sendto(") == 1
+
+
+def test_p0_has_no_retry_queue_or_durable_state_primitives() -> None:
+    paths = [PRODUCER, CLI, *sorted(PACKAGE_ROOT.glob("*.py"))]
+    forbidden_imports = {
+        "agentos",
+        "asyncio",
+        "control_plane",
+        "dbm",
+        "multiprocessing",
+        "queue",
+        "shelve",
+        "sqlite3",
+        "subprocess",
+        "threading",
+    }
+    forbidden_calls = {
+        "Queue",
+        "SimpleQueue",
+        "Thread",
+        "accept",
+        "connect",
+        "create_task",
+        "listen",
+        "open",
+        "put",
+        "put_nowait",
+        "run_in_executor",
+        "sleep",
+    }
+
+    for path in paths:
+        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(path))
+        assert imported_roots(path).isdisjoint(forbidden_imports), path
+        calls = {
+            node.func.id
+            if isinstance(node.func, ast.Name)
+            else node.func.attr
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, (ast.Name, ast.Attribute))
+        }
+        assert calls.isdisjoint(forbidden_calls), (path, calls & forbidden_calls)
+        assert "AF_INET" not in source, path
+        assert "AF_INET6" not in source, path
+        assert "SOCK_STREAM" not in source, path
 
 
 def test_cli_accepts_only_absolute_disposable_unix_socket_path() -> None:

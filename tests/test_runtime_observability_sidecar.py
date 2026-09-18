@@ -7,6 +7,7 @@ import time
 import pytest
 
 from common.runtime_diagnostics import (
+    UnixDatagramRuntimeDiagnosticEmitter,
     build_runtime_diagnostic_event,
     runtime_diagnostic_event_bytes,
 )
@@ -53,6 +54,53 @@ def test_processes_valid_packet() -> None:
     assert len(sink.events) == 1
     assert sidecar.counters.accepted == 1
     assert sidecar.counters.rejected == 0
+
+
+def test_valid_event_round_trip_from_emitter_through_sidecar(tmp_path) -> None:
+    socket_path = tmp_path / "runtime-observability.sock"
+    receiver = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    receiver.bind(str(socket_path))
+    sink = InMemorySink()
+    sidecar = RuntimeDiagnosticSidecar(sink=sink)
+    stop = threading.Event()
+    thread = threading.Thread(
+        target=lambda: sidecar.serve_sockets(
+            {"worker": receiver},
+            stop_requested=stop.is_set,
+            poll_seconds=0.01,
+        ),
+        daemon=True,
+    )
+    event = build_runtime_diagnostic_event(
+        service="worker-broker",
+        event_name="diagnostics.canary",
+        signal="POINT",
+        outcome="SUCCEEDED",
+        correlation={"attempt_id": "attempt:round-trip"},
+        dimensions={
+            "phase": "broker",
+            "environment": "test",
+            "transport": "unix-datagram",
+            "evidence_source": "runtime-emitter",
+        },
+    )
+
+    thread.start()
+    try:
+        assert UnixDatagramRuntimeDiagnosticEmitter(socket_path).emit(event) is True
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and sidecar.counters.accepted != 1:
+            time.sleep(0.01)
+        assert sidecar.counters.accepted == 1
+        assert len(sink.events) == 1
+        assert sink.events[0].event == event
+    finally:
+        stop.set()
+        thread.join(timeout=2.0)
+        receiver.close()
+        socket_path.unlink(missing_ok=True)
+    assert thread.is_alive() is False
+    assert sink.closed is True
 
 
 def test_rejects_malformed_packet_without_raising() -> None:

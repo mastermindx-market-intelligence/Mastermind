@@ -17,6 +17,7 @@ import socket
 import uuid
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from types import MappingProxyType
 from typing import Protocol
 
 from common.redaction import REDACTION, sanitize_external_text
@@ -94,7 +95,7 @@ OUTCOMES = frozenset(
     }
 )
 
-CORRELATION_PREFIXES: dict[str, tuple[str, ...]] = {
+CORRELATION_PREFIXES: Mapping[str, tuple[str, ...]] = {
     "root_job_id": ("root-job:",),
     "job_id": ("job:",),
     "attempt_id": ("attempt:",),
@@ -109,7 +110,7 @@ CORRELATION_PREFIXES: dict[str, tuple[str, ...]] = {
     "request_id": ("request:",),
 }
 
-DIMENSION_VALUES: dict[str, frozenset[str]] = {
+DIMENSION_VALUES: Mapping[str, frozenset[str]] = {
     "phase": frozenset(
         {
             "admission",
@@ -234,6 +235,9 @@ DIMENSION_VALUES: dict[str, frozenset[str]] = {
     ),
 }
 
+CORRELATION_PREFIXES = MappingProxyType(dict(CORRELATION_PREFIXES))
+DIMENSION_VALUES = MappingProxyType(dict(DIMENSION_VALUES))
+
 _CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 _ID_TAIL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,111}$")
 _JWT_SHAPE_RE = re.compile(
@@ -271,6 +275,21 @@ class RuntimeDiagnosticEvent:
     correlation: Mapping[str, str]
     dimensions: Mapping[str, str]
     duration_ms: float | None = None
+
+    def __post_init__(self) -> None:
+        """Snapshot mapping inputs so a validated event cannot mutate before encode."""
+
+        for field_name in ("correlation", "dimensions"):
+            value = getattr(self, field_name)
+            if not isinstance(value, Mapping):
+                continue
+            try:
+                snapshot = dict(value.items())
+            except Exception as exc:
+                raise RuntimeDiagnosticValidationError(
+                    f"{field_name} must be a stable object"
+                ) from exc
+            object.__setattr__(self, field_name, MappingProxyType(snapshot))
 
     def to_dict(self) -> dict[str, object]:
         document: dict[str, object] = {
@@ -569,13 +588,15 @@ class UnixDatagramRuntimeDiagnosticEmitter:
             transport.setblocking(False)
             sent = transport.sendto(payload, str(self.socket_path))
             return sent == len(payload)
-        except OSError:
+        except Exception:
+            # Telemetry adapter defects are diagnostic loss, never domain failure.
+            # BaseException remains process-control territory and is not swallowed.
             return False
         finally:
             if transport is not None:
                 try:
                     transport.close()
-                except OSError:
+                except Exception:
                     pass
 
 

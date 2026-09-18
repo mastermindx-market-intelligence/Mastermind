@@ -109,6 +109,27 @@ def test_composite_sink_isolates_one_emit_failure() -> None:
     assert "<redacted>" in failures[0].message
 
 
+def test_composite_sink_isolates_timeout_and_continues() -> None:
+    normalized = normalized_event()
+    healthy = InMemorySink()
+
+    class TimeoutSink:
+        def emit(self, event) -> None:
+            raise TimeoutError("sink timed out with sk-ant-abcdefghijklmnopqrstuvwxyz")
+
+        def close(self) -> None:
+            return None
+
+    failures = CompositeSink((TimeoutSink(), healthy)).emit(normalized)
+
+    assert healthy.events == [normalized]
+    assert len(failures) == 1
+    assert failures[0].operation == "emit"
+    assert failures[0].sink_class == "TimeoutSink"
+    assert "sk-ant-" not in failures[0].message
+    assert "<redacted>" in failures[0].message
+
+
 def test_composite_sink_isolates_close_failures_and_closes_every_sink() -> None:
     first = BrokenSink()
     second = BrokenSink(fail_emit=False, fail_close=False)

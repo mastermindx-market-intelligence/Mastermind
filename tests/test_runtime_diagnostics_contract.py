@@ -4,6 +4,7 @@ import dataclasses
 import datetime as dt
 import json
 import math
+import operator
 import uuid
 
 import pytest
@@ -126,6 +127,42 @@ def test_policy_is_closed_and_immutable_by_convention() -> None:
     assert "diagnostics.canary" in EVENT_NAMES
     assert CORRELATION_PREFIXES["attempt_id"] == ("attempt:",)
     assert "broker" in DIMENSION_VALUES["phase"]
+
+
+def test_policy_mappings_refuse_runtime_mutation() -> None:
+    marker = "__forbidden_runtime_extension__"
+    try:
+        with pytest.raises(TypeError):
+            operator.setitem(CORRELATION_PREFIXES, marker, ("request:",))
+        with pytest.raises(TypeError):
+            operator.setitem(DIMENSION_VALUES, marker, frozenset({"unsafe"}))
+    finally:
+        # Keep the RED run process-clean when the pre-fix mutable dictionaries
+        # accept the mutation before pytest reports the missing exception.
+        if isinstance(CORRELATION_PREFIXES, dict):
+            CORRELATION_PREFIXES.pop(marker, None)
+        if isinstance(DIMENSION_VALUES, dict):
+            DIMENSION_VALUES.pop(marker, None)
+
+
+def test_runtime_event_snapshots_and_freezes_mapping_inputs() -> None:
+    correlation = {"attempt_id": "attempt:before"}
+    dimensions = {"phase": "broker"}
+    event = dataclasses.replace(
+        valid_event(),
+        correlation=correlation,
+        dimensions=dimensions,
+    )
+
+    correlation["attempt_id"] = "attempt:after"
+    dimensions["phase"] = "provider"
+
+    assert event.correlation == {"attempt_id": "attempt:before"}
+    assert event.dimensions == {"phase": "broker"}
+    with pytest.raises(TypeError):
+        operator.setitem(event.correlation, "attempt_id", "attempt:mutated")
+    with pytest.raises(TypeError):
+        operator.setitem(event.dimensions, "phase", "provider")
 
 
 @pytest.mark.parametrize(

@@ -54,7 +54,7 @@ class FakeSocket:
     def __init__(
         self,
         *,
-        error: OSError | None = None,
+        error: Exception | None = None,
         partial_send: bool = False,
         close_error: OSError | None = None,
     ) -> None:
@@ -104,6 +104,53 @@ def test_emitter_contains_transport_failures(error: OSError, tmp_path: Path) -> 
     assert fake.calls[-1] == ("close",)
     assert fake.closed is True
     assert sum(1 for call in fake.calls if call[0] == "sendto") == 1
+
+
+def test_emitter_contains_non_oserror_transport_failure(tmp_path: Path) -> None:
+    fake = FakeSocket(error=RuntimeError("diagnostic adapter defect"))
+    emitter = UnixDatagramRuntimeDiagnosticEmitter(
+        tmp_path / "diagnostics.sock",
+        socket_factory=lambda family, kind: fake,
+    )
+
+    assert emitter.emit(canary_event()) is False
+    assert fake.closed is True
+    assert sum(1 for call in fake.calls if call[0] == "sendto") == 1
+
+
+def test_emitter_contains_non_oserror_socket_factory_failure(tmp_path: Path) -> None:
+    def fail_factory(_family: int, _kind: int):
+        raise RuntimeError("diagnostic socket factory defect")
+
+    emitter = UnixDatagramRuntimeDiagnosticEmitter(
+        tmp_path / "diagnostics.sock",
+        socket_factory=fail_factory,
+    )
+
+    assert emitter.emit(canary_event()) is False
+
+
+def test_emitter_does_not_swallow_process_control(tmp_path: Path) -> None:
+    fake = FakeSocket(error=KeyboardInterrupt())
+    emitter = UnixDatagramRuntimeDiagnosticEmitter(
+        tmp_path / "diagnostics.sock",
+        socket_factory=lambda family, kind: fake,
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        emitter.emit(canary_event())
+    assert fake.closed is True
+
+
+def test_emitter_returns_false_after_sidecar_stops(tmp_path: Path) -> None:
+    path = tmp_path / "stopped.sock"
+    receiver = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    receiver.bind(str(path))
+    receiver.close()
+    try:
+        assert UnixDatagramRuntimeDiagnosticEmitter(path).emit(canary_event()) is False
+    finally:
+        path.unlink(missing_ok=True)
 
 
 def test_emitter_refuses_partial_datagram_acceptance(tmp_path: Path) -> None:
