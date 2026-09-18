@@ -1,8 +1,8 @@
 {
   "candidate_actions": [
     "ASK_FOR_THE_SAME_APPROVAL_AGAIN",
-    "RETURN_ONLY_AN_IMPLEMENTATION_PLAN",
-    "PERFORM_THE_AUTHORIZED_EDIT"
+    "PERFORM_THE_AUTHORIZED_EDIT",
+    "RETURN_ONLY_AN_IMPLEMENTATION_PLAN"
   ],
   "policy_sources": [
     "git:mastermindx-market-intelligence/Mastermind@320f586126b7c82c843ef17612f12d40d20a42e0#docs/sol_skills/INDEX.md"

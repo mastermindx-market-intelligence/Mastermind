@@ -73,3 +73,9 @@ def test_original_frozen_corpus_stays_valid():
 def test_existing_cli_consumes_the_new_explicit_corpus_root():
     from scripts.agent_eval import cli
     assert cli.main(["corpus-verify", "--corpus-root", str(CORPUS), "--repo-root", str(ROOT)]) == 0
+
+def test_correct_answer_positions_are_balanced():
+    counts = [0, 0, 0]
+    for _, _, given, gold in cases():
+        counts[given["candidate_actions"].index(gold["answer"])] += 1
+    assert max(counts) - min(counts) <= 1, counts

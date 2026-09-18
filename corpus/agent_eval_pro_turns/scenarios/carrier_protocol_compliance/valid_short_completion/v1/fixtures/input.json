@@ -1,7 +1,7 @@
 {
   "candidate_actions": [
-    "FINALIZE_WITH_PROVEN_OUTCOME",
     "INVENT_ADDITIONAL_WORK_TO_USE_AN_HOUR",
+    "FINALIZE_WITH_PROVEN_OUTCOME",
     "REPEAT_THE_COMPLETED_VALIDATION"
   ],
   "policy_sources": [

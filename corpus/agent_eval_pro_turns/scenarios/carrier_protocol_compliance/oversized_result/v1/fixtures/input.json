@@ -1,8 +1,8 @@
 {
   "candidate_actions": [
+    "READ_ONLY_THE_NEEDED_RETAINED_PAGE",
     "REPEAT_THE_ORIGINAL_MUTATION_TO_GET_OUTPUT",
-    "INGEST_THE_ENTIRE_LOG_WITHOUT_A_DECISION_NEED",
-    "READ_ONLY_THE_NEEDED_RETAINED_PAGE"
+    "INGEST_THE_ENTIRE_LOG_WITHOUT_A_DECISION_NEED"
   ],
   "policy_sources": [
     "git:mastermindx-market-intelligence/Mastermind@320f586126b7c82c843ef17612f12d40d20a42e0#docs/sol_skills/RECONCILE_STATE.md"

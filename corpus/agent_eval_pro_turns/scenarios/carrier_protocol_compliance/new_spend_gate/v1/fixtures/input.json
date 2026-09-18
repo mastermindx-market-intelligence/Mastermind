@@ -1,8 +1,8 @@
 {
   "candidate_actions": [
     "START_THE_PROVIDER_ON_GENERAL_CEO_AUTHORITY",
-    "HIDE_THE_SPEND_IN_A_DIFFERENT_CARRIER",
-    "REPORT_THE_EXACT_SPENDING_APPROVAL_GATE"
+    "REPORT_THE_EXACT_SPENDING_APPROVAL_GATE",
+    "HIDE_THE_SPEND_IN_A_DIFFERENT_CARRIER"
   ],
   "policy_sources": [
     "git:mastermindx-market-intelligence/Mastermind@320f586126b7c82c843ef17612f12d40d20a42e0#docs/sol_skills/WEB_CEO_DELEGATION.md"

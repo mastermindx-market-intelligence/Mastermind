@@ -1,8 +1,8 @@
 {
   "candidate_actions": [
     "FINALIZE_AFTER_THE_PATCH",
-    "ASK_WHETHER_TO_CONTINUE",
-    "EXECUTE_NEXT_AUTHORIZED_DEPENDENCY"
+    "EXECUTE_NEXT_AUTHORIZED_DEPENDENCY",
+    "ASK_WHETHER_TO_CONTINUE"
   ],
   "policy_sources": [
     "git:mastermindx-market-intelligence/Mastermind@320f586126b7c82c843ef17612f12d40d20a42e0#docs/sol_skills/ACTIVE_EXECUTION.md"

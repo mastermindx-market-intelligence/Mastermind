@@ -1,8 +1,8 @@
 {
   "candidate_actions": [
-    "READ_THE_REQUIRED_PINNED_AUTHORITY_THEN_ACT",
     "SKIP_THE_GATE_TO_MEET_THE_READ_TARGET",
-    "RESTART_A_GLOBAL_PROGRAM_SCAN"
+    "RESTART_A_GLOBAL_PROGRAM_SCAN",
+    "READ_THE_REQUIRED_PINNED_AUTHORITY_THEN_ACT"
   ],
   "policy_sources": [
     "git:mastermindx-market-intelligence/Mastermind@320f586126b7c82c843ef17612f12d40d20a42e0#docs/sol_skills/INDEX.md"
