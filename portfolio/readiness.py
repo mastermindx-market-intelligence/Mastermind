@@ -15,13 +15,19 @@ Watched thresholds:
 """
 from __future__ import annotations
 
+import fcntl
 import json
+import os
+import tempfile
+import threading
+from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
 _STATE = _ROOT / "data" / "shadow" / "readiness_state.json"
 _ALERTS = _ROOT / "data" / "shadow" / "readiness_alerts.jsonl"
+_LOCAL_LOCK = threading.RLock()
 
 _LABELS = {
     "calibration_forge": "Calibration (FORGE) left cold-start — its stated confidence now self-corrects "
@@ -40,6 +46,101 @@ def _load(p: Path) -> dict:
         return json.loads(p.read_text())
     except Exception:  # noqa: BLE001
         return {}
+
+
+def _read_alert_rows() -> list[dict]:
+    """Canonical readiness evidence; missing is empty, malformed is unavailable."""
+    if not _ALERTS.exists():
+        return []
+    rows: list[dict] = []
+    for line in _ALERTS.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        row = json.loads(line)
+        if not isinstance(row, dict) or not isinstance(row.get("flag"), str):
+            raise ValueError("readiness alert row is malformed")
+        rows.append(row)
+    return rows
+
+
+def _fsync_parent(path: Path) -> None:
+    try:
+        fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    except OSError:
+        pass
+
+
+def _atomic_write(path: Path, payload: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_name: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=path.parent,
+            prefix=f".{path.name}.", suffix=".tmp", delete=False,
+        ) as tmp:
+            tmp_name = tmp.name
+            tmp.write(payload)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+        os.replace(tmp_name, path)
+        tmp_name = None
+        _fsync_parent(path)
+    finally:
+        if tmp_name:
+            try:
+                Path(tmp_name).unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def _write_alert_rows(rows: list[dict]) -> None:
+    if not all(isinstance(row, dict) and isinstance(row.get("flag"), str) for row in rows):
+        raise ValueError("readiness alert rows must be mappings with flags")
+    _atomic_write(
+        _ALERTS,
+        "".join(json.dumps(row, default=str) + "\n" for row in rows),
+    )
+
+
+def _write_state(flags: set[str]) -> None:
+    _atomic_write(_STATE, json.dumps({flag: True for flag in sorted(flags)}, indent=2))
+
+
+def _state_projection_current(flags: set[str]) -> bool:
+    if not _STATE.exists():
+        return not flags
+    try:
+        payload = json.loads(_STATE.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            return False
+        projected = {str(key) for key, value in payload.items() if value is True}
+        return projected == flags and all(value is True for value in payload.values())
+    except Exception:
+        return False
+
+
+def _readiness_lock_path() -> Path:
+    return _ALERTS.with_name(".readiness.lock")
+
+
+@contextmanager
+def _readiness_lock():
+    with _LOCAL_LOCK:
+        _ALERTS.parent.mkdir(parents=True, exist_ok=True)
+        with _readiness_lock_path().open("a+", encoding="utf-8") as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                try:
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+                except OSError:
+                    pass
 
 
 def status() -> dict:
@@ -76,32 +177,68 @@ def status() -> dict:
 
 
 def check_and_record(asof: str | None = None) -> dict:
-    """Detect thresholds that JUST crossed (not previously recorded), append an alert per new crossing
-    to readiness_alerts.jsonl, and update the once-per-crossing state. Returns {new, flags}. Best-effort."""
+    """Persist newly crossed readiness thresholds exactly once.
+
+    The alert ledger is canonical durable evidence. ``readiness_state.json`` is only a projection
+    and is rebuilt from that ledger, so a lost state write cannot duplicate a crossing later.
+    """
     asof = str(asof or date.today().isoformat())[:10]
     st = status()
     flags = st["flags"]
-    recorded = _load(_STATE)            # {flag: True once alerted}
-    new = [k for k, v in flags.items() if v and not recorded.get(k)]
-    try:
+    with _readiness_lock():
+        try:
+            rows = _read_alert_rows()
+        except Exception:
+            pending = [key for key, value in flags.items() if value]
+            return {
+                "new": [],
+                "flags": flags,
+                "pending_new": pending,
+                "persistence_status": "unavailable",
+                "error": "readiness_alert_ledger_unavailable",
+            }
+
+        recorded = {
+            str(row.get("flag"))
+            for row in rows
+            if isinstance(row.get("flag"), str)
+        }
+        new = [key for key, value in flags.items() if value and key not in recorded]
         if new:
-            _ALERTS.parent.mkdir(parents=True, exist_ok=True)
-            with _ALERTS.open("a") as fh:
-                for k in new:
-                    fh.write(json.dumps({"date": asof, "flag": k,
-                                         "message": _LABELS.get(k, k)}) + "\n")
-            for k in new:
-                recorded[k] = True
-            _STATE.write_text(json.dumps(recorded, indent=2))
-    except Exception:  # noqa: BLE001
-        pass
+            additions = [
+                {"date": asof, "flag": key, "message": _LABELS.get(key, key)}
+                for key in new
+            ]
+            try:
+                _write_alert_rows([*rows, *additions])
+            except Exception:
+                return {
+                    "new": [],
+                    "flags": flags,
+                    "pending_new": new,
+                    "persistence_status": "unavailable",
+                    "error": "readiness_alert_write_failed",
+                }
+            recorded.update(new)
+
+        # State is a rebuildable projection only. Once an alert is durable, state failure must not
+        # cause the same crossing to be appended again on the next run.
+        try:
+            if not _state_projection_current(recorded):
+                _write_state(recorded)
+        except Exception:
+            return {
+                "new": new,
+                "flags": flags,
+                "persistence_status": "partial",
+                "state_heal_pending": True,
+                "error": "readiness_state_write_failed",
+            }
+
     return {"new": new, "flags": flags}
 
 
 def alerts(limit: int = 20) -> list:
     """Recorded readiness alerts (most recent last). For the dashboard banner."""
-    try:
-        rows = [json.loads(l) for l in _ALERTS.read_text().splitlines() if l.strip()]
-        return rows[-limit:]
-    except Exception:  # noqa: BLE001
-        return []
+    rows = _read_alert_rows()
+    return rows[-limit:]
