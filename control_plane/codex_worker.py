@@ -3270,10 +3270,12 @@ class CodexWorkerAdapter:
                 exc.add_note("validation owned tasks did not converge")
             raise
         except asyncio.CancelledError as cancellation:
-            cleanup_error: ProcessIdentityError | None = None
-            try:
-                await asyncio.shield(
-                    self._terminate_validation_process(
+            async def finish_cancellation_cleanup() -> tuple[
+                ProcessIdentityError | None, _OwnedTaskSettlement
+            ]:
+                cleanup_error: ProcessIdentityError | None = None
+                try:
+                    await self._terminate_validation_process(
                         process,
                         wait_task,
                         finalization,
@@ -3283,13 +3285,30 @@ class CodexWorkerAdapter:
                         boot_id=boot_id,
                         grace_seconds=min(float(spec.cancel_grace_seconds), 5.0),
                     )
+                except ProcessIdentityError as exc:
+                    cleanup_error = exc
+                settlement = await _settle_or_cancel_owned_tasks(
+                    (wait_task, stdout_task, stderr_task),
+                    timeout=_LOCAL_STREAM_DRAIN_SECONDS,
                 )
-            except ProcessIdentityError as exc:
-                cleanup_error = exc
-            settlement = await _settle_or_cancel_owned_tasks(
-                (wait_task, stdout_task, stderr_task),
-                timeout=_LOCAL_STREAM_DRAIN_SECONDS,
-            )
+                return cleanup_error, settlement
+
+            cleanup_task = asyncio.create_task(finish_cancellation_cleanup())
+            while not cleanup_task.done():
+                try:
+                    await asyncio.shield(cleanup_task)
+                except asyncio.CancelledError:
+                    # Retain the original caller cancellation, but do not let a
+                    # repeated cancellation orphan adapter-owned cleanup.
+                    continue
+            try:
+                cleanup_error, settlement = cleanup_task.result()
+            except BaseException as exc:
+                cancellation.add_note(
+                    "validation cancellation cleanup failed internally: "
+                    f"{type(exc).__name__}"
+                )
+                raise cancellation from exc
             if cleanup_error is not None:
                 cancellation.add_note(str(cleanup_error))
             for error in settlement.errors:

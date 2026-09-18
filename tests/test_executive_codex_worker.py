@@ -2979,6 +2979,114 @@ def test_validation_cancellation_preserves_cancelled_error_when_signal_refused(
     asyncio.run(exercise())
 
 
+def test_validation_repeated_cancellation_waits_for_terminal_cleanup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def exercise() -> None:
+        adapter, spec, _workspace_path, _run_dir = _fixture(tmp_path)
+        recorded_hash_tasks: list[asyncio.Task[object]] = []
+        processes: list[asyncio.subprocess.Process] = []
+        cleanup_started = asyncio.Event()
+        cleanup_release = asyncio.Event()
+        cleanup_finished = asyncio.Event()
+        termination_calls = 0
+        original_create = cw.asyncio.create_subprocess_exec
+        original_killpg = cw.os.killpg
+
+        async def capture_process(*args, **kwargs):
+            process = await original_create(*args, **kwargs)
+            processes.append(process)
+            return process
+
+        async def never_finish_hash(*_args, **_kwargs):
+            task = asyncio.current_task()
+            assert task is not None
+            recorded_hash_tasks.append(task)
+            await asyncio.Event().wait()
+            raise AssertionError("cancelled hash task resumed")
+
+        async def delayed_termination(*_args, **_kwargs) -> bool:
+            nonlocal termination_calls
+            termination_calls += 1
+            cleanup_started.set()
+            try:
+                await cleanup_release.wait()
+            finally:
+                cleanup_finished.set()
+            raise cw.ProcessIdentityError("validation cleanup identity failure")
+
+        monkeypatch.setattr(cw.asyncio, "create_subprocess_exec", capture_process)
+        monkeypatch.setattr(cw, "_hash_validation_stream", never_finish_hash)
+        monkeypatch.setattr(
+            adapter,
+            "_terminate_validation_process",
+            delayed_termination,
+        )
+
+        task = asyncio.create_task(
+            adapter.run_validation_argv(
+                spec,
+                ("/bin/sleep", "60"),
+                timeout_seconds=5,
+            )
+        )
+        try:
+            for _ in range(200):
+                if processes and len(recorded_hash_tasks) == 2:
+                    break
+                await asyncio.sleep(0.01)
+            assert processes and len(recorded_hash_tasks) == 2
+
+            task.cancel()
+            await asyncio.wait_for(cleanup_started.wait(), timeout=1.0)
+            task.cancel()
+            done, _pending = await asyncio.wait({task}, timeout=0.05)
+
+            assert task not in done, (
+                "repeated cancellation escaped before terminal cleanup completed"
+            )
+            assert cleanup_finished.is_set() is False
+            assert any(not hash_task.done() for hash_task in recorded_hash_tasks)
+
+            cleanup_release.set()
+            with pytest.raises(asyncio.CancelledError) as caught:
+                await asyncio.wait_for(task, timeout=1.0)
+
+            cleanup_evidence = []
+            if caught.value.__cause__ is not None:
+                cleanup_evidence.append(str(caught.value.__cause__))
+            cleanup_evidence.extend(
+                getattr(caught.value, "__notes__", ()) or ()
+            )
+            assert any(
+                "validation cleanup identity failure" in item
+                for item in cleanup_evidence
+            )
+            assert cleanup_finished.is_set() is True
+            assert termination_calls == 1
+            assert all(hash_task.done() for hash_task in recorded_hash_tasks)
+            assert processes[0].returncode is None
+        finally:
+            cleanup_release.set()
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            for hash_task in recorded_hash_tasks:
+                if not hash_task.done():
+                    hash_task.cancel()
+            await asyncio.gather(*recorded_hash_tasks, return_exceptions=True)
+            for process in processes:
+                if process.returncode is None:
+                    try:
+                        original_killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    await asyncio.wait_for(process.wait(), 2.0)
+
+    asyncio.run(exercise())
+
+
 def test_worker_monitor_signal_refusal_retires_owned_tasks_boundedly(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
