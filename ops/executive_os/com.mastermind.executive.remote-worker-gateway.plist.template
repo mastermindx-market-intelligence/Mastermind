@@ -9,8 +9,8 @@
     <string>__GATEWAY_ENTRYPOINT__</string><string>--config</string><string>__GATEWAY_CONFIG__</string>
   </array>
   <key>WorkingDirectory</key><string>__RELEASE_ROOT__</string>
-  <key>UserName</key><string>_mastermind_exec</string>
-  <key>GroupName</key><string>_mastermind_exec</string>
+  <key>UserName</key><string>__CONTROL_USER__</string>
+  <key>GroupName</key><string>__CONTROL_GROUP__</string>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>ThrottleInterval</key><integer>10</integer>

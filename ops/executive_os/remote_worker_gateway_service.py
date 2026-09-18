@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import plistlib
+import re
 import signal
 import stat
 import sys
@@ -27,6 +28,7 @@ DEFAULT_GATEWAY_ROOT = Path("/Library/Application Support/MastermindExecutive/re
 DEFAULT_BROKER_SOCKET_ROOT = Path("/var/run/mastermind-executive")
 MAX_CONFIG_BYTES = 64 * 1024
 MAX_TLS_FILE_BYTES = 1024 * 1024
+_ACCOUNT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]{0,63}$")
 
 CONFIG_FIELDS = frozenset(
     {
@@ -57,6 +59,23 @@ class RemoteWorkerGatewayServiceError(ValueError):
 
 def _refuse(code: str) -> None:
     raise RemoteWorkerGatewayServiceError(code)
+
+
+def _existing_control_identity() -> tuple[str, str]:
+    """Read the established Executive control identity without owning it here."""
+
+    from ops.executive_os import acceptance as executive_acceptance
+
+    user = executive_acceptance.CONTROL_USER
+    group = executive_acceptance.CONTROL_GROUP
+    if (
+        type(user) is not str
+        or type(group) is not str
+        or _ACCOUNT_RE.fullmatch(user) is None
+        or _ACCOUNT_RE.fullmatch(group) is None
+    ):
+        _refuse("GATEWAY_IDENTITY_INVALID")
+    return user, group
 
 
 def _safe_absolute(path: Path | str, *, code: str) -> Path:
@@ -384,9 +403,17 @@ def render_remote_worker_gateway_plist(
         value = plistlib.loads(template_bytes)
     except (plistlib.InvalidFileException, ValueError):
         raise RemoteWorkerGatewayServiceError("GATEWAY_PLIST_TEMPLATE_INVALID") from None
-    if not isinstance(value, dict) or value.get("Label") != SERVICE_LABEL:
+    if (
+        not isinstance(value, dict)
+        or value.get("Label") != SERVICE_LABEL
+        or value.get("UserName") != "__CONTROL_USER__"
+        or value.get("GroupName") != "__CONTROL_GROUP__"
+    ):
         _refuse("GATEWAY_PLIST_TEMPLATE_INVALID")
+    control_user, control_group = _existing_control_identity()
     replacements = {
+        "__CONTROL_USER__": control_user,
+        "__CONTROL_GROUP__": control_group,
         "__PYTHON_BINARY__": _path_argument(
             python_binary, code="GATEWAY_PLIST_ARGUMENT_INVALID"
         ),
@@ -422,8 +449,8 @@ def render_remote_worker_gateway_plist(
     if (
         rendered.get("ProgramArguments") != expected_arguments
         or rendered.get("WorkingDirectory") != replacements["__RELEASE_ROOT__"]
-        or rendered.get("UserName") != "_mastermind_exec"
-        or rendered.get("GroupName") != "_mastermind_exec"
+        or rendered.get("UserName") != replacements["__CONTROL_USER__"]
+        or rendered.get("GroupName") != replacements["__CONTROL_GROUP__"]
         or rendered.get("RunAtLoad") is not True
         or rendered.get("KeepAlive") is not True
     ):
@@ -458,6 +485,25 @@ async def wait_for_gateway_shutdown() -> None:
             loop.remove_signal_handler(item)
 
 
+def _broker_socket_identity(path: Path) -> tuple[int, int, int, int, int]:
+    """Prove the current local broker endpoint before exposing the gateway."""
+
+    try:
+        info = path.lstat()
+    except OSError:
+        raise RemoteWorkerGatewayServiceError("GATEWAY_BROKER_SOCKET_INVALID") from None
+    if (
+        stat.S_ISLNK(info.st_mode)
+        or not stat.S_ISSOCK(info.st_mode)
+        or info.st_nlink != 1
+        or info.st_uid != os.geteuid()
+        or info.st_gid != os.getegid()
+        or stat.S_IMODE(info.st_mode) != 0o600
+    ):
+        _refuse("GATEWAY_BROKER_SOCKET_INVALID")
+    return (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid)
+
+
 async def serve_remote_worker_gateway(
     config: RemoteWorkerGatewayConfig,
     *,
@@ -466,7 +512,10 @@ async def serve_remote_worker_gateway(
 ) -> None:
     if not isinstance(config, RemoteWorkerGatewayConfig):
         raise TypeError("config must be RemoteWorkerGatewayConfig")
+    broker_identity = _broker_socket_identity(config.broker_socket_path)
     gateway = gateway_factory(config)
+    if _broker_socket_identity(config.broker_socket_path) != broker_identity:
+        _refuse("GATEWAY_BROKER_SOCKET_INVALID")
     server = await gateway.start_server()
     try:
         async with server:
