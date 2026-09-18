@@ -1804,6 +1804,108 @@ async def _wait_for_process_group_exit(pgid: int, *, timeout: float = 2.0) -> bo
     return True
 
 
+async def _cleanup_unpublished_process(
+    process: asyncio.subprocess.Process,
+    *,
+    wait_task: asyncio.Task[int] | None,
+    owned_fds: Sequence[int],
+    label: str,
+) -> ProcessIdentityError | None:
+    """Attempt one bounded fail-closed cleanup before a process is published."""
+
+    failures: list[str] = []
+    local_wait_task = wait_task
+    try:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        except BaseException as exc:  # preserve cancellation until owned cleanup ends
+            failures.append(f"signal:{type(exc).__name__}")
+
+        if not failures:
+            if local_wait_task is None:
+                local_wait_task = asyncio.create_task(process.wait())
+            try:
+                await asyncio.wait_for(
+                    asyncio.shield(local_wait_task),
+                    timeout=_LOCAL_TRANSPORT_FINALIZATION_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                failures.append("process-wait-timeout")
+            except BaseException as exc:  # exact local task; never retry signaling
+                failures.append(f"process-wait:{type(exc).__name__}")
+            else:
+                try:
+                    group_absent = await _wait_for_process_group_exit(process.pid)
+                except BaseException as exc:
+                    failures.append(f"group-absence:{type(exc).__name__}")
+                else:
+                    if not group_absent:
+                        failures.append("process-group-still-present")
+    finally:
+        if failures and local_wait_task is not None:
+            if not local_wait_task.done():
+                local_wait_task.cancel()
+            await asyncio.gather(local_wait_task, return_exceptions=True)
+        for fd in owned_fds:
+            try:
+                os.close(fd)
+            except OSError as exc:
+                failures.append(f"fd-close:{type(exc).__name__}")
+
+    if failures:
+        return ProcessIdentityError(f"{label} cleanup failed: {', '.join(failures)}")
+    return None
+
+
+async def _raise_after_unpublished_process_failure(
+    process: asyncio.subprocess.Process,
+    original: BaseException,
+    *,
+    wait_task: asyncio.Task[int] | None = None,
+    owned_fds: Sequence[int] = (),
+    label: str,
+) -> None:
+    """Finish bounded quarantine, then preserve cancellation or causal failure."""
+
+    cleanup_task = asyncio.create_task(
+        _cleanup_unpublished_process(
+            process,
+            wait_task=wait_task,
+            owned_fds=owned_fds,
+            label=label,
+        )
+    )
+    pending_cancellation = (
+        original if isinstance(original, asyncio.CancelledError) else None
+    )
+    while not cleanup_task.done():
+        try:
+            await asyncio.shield(cleanup_task)
+        except asyncio.CancelledError as exc:
+            if pending_cancellation is None:
+                pending_cancellation = exc
+
+    try:
+        cleanup_error = cleanup_task.result()
+    except BaseException as exc:
+        cleanup_error = ProcessIdentityError(
+            f"{label} cleanup failed internally: {type(exc).__name__}"
+        )
+
+    if pending_cancellation is not None:
+        if cleanup_error is not None:
+            pending_cancellation.add_note(str(cleanup_error))
+            raise pending_cancellation from cleanup_error
+        if pending_cancellation is original:
+            raise pending_cancellation
+        raise pending_cancellation from original
+    if cleanup_error is not None:
+        raise cleanup_error from original
+    raise original.with_traceback(original.__traceback__)
+
+
 async def _hash_validation_stream(
     reader: asyncio.StreamReader,
     *,
@@ -2926,21 +3028,19 @@ class CodexWorkerAdapter:
             limit=128 * 1024,
         )
         if process.stdout is None or process.stderr is None:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            await process.wait()
-            raise CodexWorkerError("validation process pipes were not created")
+            await _raise_after_unpublished_process_failure(
+                process,
+                CodexWorkerError("validation process pipes were not created"),
+                label="unpublished validation launch",
+            )
         try:
             finalization = _capture_process_finalization(process)
-        except Exception:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            await process.wait()
-            raise
+        except BaseException as exc:
+            await _raise_after_unpublished_process_failure(
+                process,
+                exc,
+                label="unpublished validation launch",
+            )
         try:
             start_identity, pgid = self.inspector.identity(process.pid)
             boot_id = self.inspector.boot_session_id()
@@ -2948,13 +3048,12 @@ class CodexWorkerAdapter:
                 raise ProcessIdentityError(
                     "validation process did not become its own process group"
                 )
-        except Exception:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            await process.wait()
-            raise
+        except BaseException as exc:
+            await _raise_after_unpublished_process_failure(
+                process,
+                exc,
+                label="unpublished validation launch",
+            )
 
         output_exceeded = asyncio.Event()
         wait_task = asyncio.create_task(process.wait())
@@ -3182,30 +3281,26 @@ class CodexWorkerAdapter:
                 start_new_session=True,
                 limit=128 * 1024,
             )
-        except Exception:
+        except BaseException:
             os.close(stdout_fd)
             os.close(stderr_fd)
             raise
         if process.stdin is None or process.stdout is None or process.stderr is None:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            await process.wait()
-            os.close(stdout_fd)
-            os.close(stderr_fd)
-            raise CodexWorkerError("Codex process pipes were not created")
+            await _raise_after_unpublished_process_failure(
+                process,
+                CodexWorkerError("Codex process pipes were not created"),
+                owned_fds=(stdout_fd, stderr_fd),
+                label="unpublished Codex launch",
+            )
         try:
             finalization = _capture_process_finalization(process)
-        except Exception:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            await process.wait()
-            os.close(stdout_fd)
-            os.close(stderr_fd)
-            raise
+        except BaseException as exc:
+            await _raise_after_unpublished_process_failure(
+                process,
+                exc,
+                owned_fds=(stdout_fd, stderr_fd),
+                label="unpublished Codex launch",
+            )
         try:
             observed_identity = self.inspector.inspect(process.pid)
             start_identity = observed_identity.start_identity
@@ -3225,15 +3320,13 @@ class CodexWorkerAdapter:
                 and observed_identity.effective_gid != int(spec.expected_worker_gid)
             ):
                 raise ProcessIdentityError("Codex process effective GID does not match worker")
-        except Exception:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            await process.wait()
-            os.close(stdout_fd)
-            os.close(stderr_fd)
-            raise
+        except BaseException as exc:
+            await _raise_after_unpublished_process_failure(
+                process,
+                exc,
+                owned_fds=(stdout_fd, stderr_fd),
+                label="unpublished Codex launch",
+            )
         process_wait_task: asyncio.Task[int] | None = None
         try:
             ref = ProcessRef(
@@ -3324,18 +3417,14 @@ class CodexWorkerAdapter:
                 finalization=finalization,
                 status=WorkerRunStatus.RUNNING,
             )
-        except Exception:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            if process_wait_task is None:
-                await process.wait()
-            else:
-                await process_wait_task
-            os.close(stdout_fd)
-            os.close(stderr_fd)
-            raise
+        except BaseException as exc:
+            await _raise_after_unpublished_process_failure(
+                process,
+                exc,
+                wait_task=process_wait_task,
+                owned_fds=(stdout_fd, stderr_fd),
+                label="unpublished Codex launch",
+            )
         self._runs[spec.run_id] = state
         state.stdout_task = asyncio.create_task(_pump_stream(
             process.stdout,

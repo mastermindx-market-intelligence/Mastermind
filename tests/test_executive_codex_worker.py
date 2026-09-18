@@ -2968,3 +2968,377 @@ def test_start_prepublication_state_failure_reaps_unpublished_process(
                     pass
 
     asyncio.run(exercise())
+
+
+def test_start_cleanup_signal_failure_closes_fds_and_preserves_original(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def exercise() -> None:
+        adapter, spec, _workspace_path, _run_dir = _fixture(
+            tmp_path, prompt="sleep", timeout=30, grace=0.1
+        )
+        spawned: list[asyncio.subprocess.Process] = []
+        created_fds: list[int] = []
+        kill_calls: list[tuple[int, int]] = []
+        real_create_subprocess_exec = cw.asyncio.create_subprocess_exec
+        real_create_private_file = cw._create_private_file
+        real_path_identity = cw._path_identity
+        real_killpg = cw.os.killpg
+
+        async def recording_create_subprocess_exec(*args, **kwargs):
+            process = await real_create_subprocess_exec(*args, **kwargs)
+            spawned.append(process)
+            return process
+
+        def recording_create_private_file(path: Path) -> int:
+            fd = real_create_private_file(path)
+            created_fds.append(fd)
+            return fd
+
+        def fail_attestation_identity(path: Path):
+            if spawned:
+                raise OSError("original attestation identity failure")
+            return real_path_identity(path)
+
+        def refuse_cleanup_signal(pgid: int, sig: int) -> None:
+            if spawned and pgid == spawned[0].pid and sig == signal.SIGKILL:
+                kill_calls.append((pgid, sig))
+                raise PermissionError("synthetic cleanup signal refusal")
+            real_killpg(pgid, sig)
+
+        monkeypatch.setattr(
+            cw.asyncio, "create_subprocess_exec", recording_create_subprocess_exec
+        )
+        monkeypatch.setattr(cw, "_create_private_file", recording_create_private_file)
+        monkeypatch.setattr(cw, "_path_identity", fail_attestation_identity)
+        monkeypatch.setattr(cw.os, "killpg", refuse_cleanup_signal)
+
+        process = None
+        try:
+            with pytest.raises(
+                cw.ProcessIdentityError,
+                match="unpublished Codex launch cleanup failed",
+            ) as caught:
+                await adapter.start(spec)
+            assert len(spawned) == 1
+            process = spawned[0]
+            assert isinstance(caught.value.__cause__, OSError)
+            assert str(caught.value.__cause__) == "original attestation identity failure"
+            assert "signal:PermissionError" in str(caught.value)
+            assert kill_calls == [(process.pid, signal.SIGKILL)]
+            assert spec.run_id not in adapter._runs
+            open_fds = []
+            for fd in created_fds:
+                try:
+                    os.fstat(fd)
+                except OSError:
+                    continue
+                open_fds.append(fd)
+            assert open_fds == []
+            assert process.returncode is None
+        finally:
+            if process is None and spawned:
+                process = spawned[0]
+            if process is not None and process.returncode is None:
+                try:
+                    real_killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                except PermissionError:
+                    process.kill()
+                await asyncio.wait_for(process.wait(), 2.0)
+            for fd in created_fds:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+
+    asyncio.run(exercise())
+
+
+def test_start_cancellation_waits_for_unpublished_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def exercise() -> None:
+        adapter, spec, _workspace_path, _run_dir = _fixture(
+            tmp_path, prompt="sleep", timeout=30, grace=0.1
+        )
+        spawned: list[asyncio.subprocess.Process] = []
+        created_fds: list[int] = []
+        cleanup_wait_started = asyncio.Event()
+        allow_cleanup_wait = asyncio.Event()
+        real_create_subprocess_exec = cw.asyncio.create_subprocess_exec
+        real_create_private_file = cw._create_private_file
+        real_path_identity = cw._path_identity
+        real_killpg = cw.os.killpg
+
+        class DelayedWaitProcess:
+            def __init__(self, process: asyncio.subprocess.Process) -> None:
+                self._process = process
+
+            def __getattr__(self, name: str):
+                return getattr(self._process, name)
+
+            async def wait(self) -> int:
+                cleanup_wait_started.set()
+                await allow_cleanup_wait.wait()
+                return await self._process.wait()
+
+        async def recording_create_subprocess_exec(*args, **kwargs):
+            process = await real_create_subprocess_exec(*args, **kwargs)
+            spawned.append(process)
+            return DelayedWaitProcess(process)
+
+        def recording_create_private_file(path: Path) -> int:
+            fd = real_create_private_file(path)
+            created_fds.append(fd)
+            return fd
+
+        def fail_attestation_identity(path: Path):
+            if spawned:
+                raise OSError("attestation construction failed before cancellation")
+            return real_path_identity(path)
+
+        monkeypatch.setattr(
+            cw.asyncio, "create_subprocess_exec", recording_create_subprocess_exec
+        )
+        monkeypatch.setattr(cw, "_create_private_file", recording_create_private_file)
+        monkeypatch.setattr(cw, "_path_identity", fail_attestation_identity)
+
+        task = asyncio.create_task(adapter.start(spec))
+        process = None
+        try:
+            await asyncio.wait_for(cleanup_wait_started.wait(), 1.0)
+            process = spawned[0]
+            task.cancel()
+            await asyncio.sleep(0)
+            allow_cleanup_wait.set()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(task, 2.0)
+            assert spec.run_id not in adapter._runs
+            open_fds = []
+            for fd in created_fds:
+                try:
+                    os.fstat(fd)
+                except OSError:
+                    continue
+                open_fds.append(fd)
+            assert open_fds == []
+            assert process.returncode is not None
+        finally:
+            allow_cleanup_wait.set()
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            if process is None and spawned:
+                process = spawned[0]
+            if process is not None and process.returncode is None:
+                try:
+                    real_killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                except PermissionError:
+                    process.kill()
+                await asyncio.wait_for(process.wait(), 2.0)
+            for fd in created_fds:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+
+    asyncio.run(exercise())
+
+
+def test_validation_cleanup_signal_failure_preserves_original(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def exercise() -> None:
+        adapter, spec, _workspace_path, _run_dir = _fixture(tmp_path)
+        spawned: list[asyncio.subprocess.Process] = []
+        kill_calls: list[tuple[int, int]] = []
+        real_create_subprocess_exec = cw.asyncio.create_subprocess_exec
+        real_capture_process_finalization = cw._capture_process_finalization
+        real_killpg = cw.os.killpg
+
+        async def recording_create_subprocess_exec(*args, **kwargs):
+            process = await real_create_subprocess_exec(*args, **kwargs)
+            spawned.append(process)
+            return process
+
+        def fail_finalization_capture(process: asyncio.subprocess.Process):
+            if spawned:
+                raise OSError("original validation finalization failure")
+            return real_capture_process_finalization(process)
+
+        def refuse_cleanup_signal(pgid: int, sig: int) -> None:
+            if spawned and pgid == spawned[0].pid and sig == signal.SIGKILL:
+                kill_calls.append((pgid, sig))
+                raise PermissionError("synthetic validation cleanup signal refusal")
+            real_killpg(pgid, sig)
+
+        monkeypatch.setattr(
+            cw.asyncio, "create_subprocess_exec", recording_create_subprocess_exec
+        )
+        monkeypatch.setattr(
+            cw, "_capture_process_finalization", fail_finalization_capture
+        )
+        monkeypatch.setattr(cw.os, "killpg", refuse_cleanup_signal)
+
+        process = None
+        try:
+            with pytest.raises(
+                cw.ProcessIdentityError,
+                match="unpublished validation launch cleanup failed",
+            ) as caught:
+                await adapter.run_validation_argv(
+                    spec,
+                    ("/bin/sleep", "60"),
+                    timeout_seconds=5,
+                )
+            assert len(spawned) == 1
+            process = spawned[0]
+            assert isinstance(caught.value.__cause__, OSError)
+            assert str(caught.value.__cause__) == (
+                "original validation finalization failure"
+            )
+            assert "signal:PermissionError" in str(caught.value)
+            assert kill_calls == [(process.pid, signal.SIGKILL)]
+            assert process.returncode is None
+        finally:
+            if process is None and spawned:
+                process = spawned[0]
+            if process is not None and process.returncode is None:
+                try:
+                    real_killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                except PermissionError:
+                    process.kill()
+                await asyncio.wait_for(process.wait(), 2.0)
+
+    asyncio.run(exercise())
+
+
+def test_start_cleanup_refuses_unproven_group_absence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def exercise() -> None:
+        adapter, spec, _workspace_path, _run_dir = _fixture(
+            tmp_path, prompt="sleep", timeout=30, grace=0.1
+        )
+        spawned: list[asyncio.subprocess.Process] = []
+        created_fds: list[int] = []
+        kill_calls: list[tuple[int, int]] = []
+        real_create_subprocess_exec = cw.asyncio.create_subprocess_exec
+        real_create_private_file = cw._create_private_file
+        real_path_identity = cw._path_identity
+        real_killpg = cw.os.killpg
+
+        async def recording_create_subprocess_exec(*args, **kwargs):
+            process = await real_create_subprocess_exec(*args, **kwargs)
+            spawned.append(process)
+            return process
+
+        def recording_create_private_file(path: Path) -> int:
+            fd = real_create_private_file(path)
+            created_fds.append(fd)
+            return fd
+
+        def fail_attestation_identity(path: Path):
+            if spawned:
+                raise OSError("attestation failed before absence proof")
+            return real_path_identity(path)
+
+        def recording_killpg(pgid: int, sig: int) -> None:
+            if spawned and pgid == spawned[0].pid and sig == signal.SIGKILL:
+                kill_calls.append((pgid, sig))
+            real_killpg(pgid, sig)
+
+        async def refuse_absence(_pgid: int, *, timeout: float = 2.0) -> bool:
+            del timeout
+            return False
+
+        monkeypatch.setattr(
+            cw.asyncio, "create_subprocess_exec", recording_create_subprocess_exec
+        )
+        monkeypatch.setattr(cw, "_create_private_file", recording_create_private_file)
+        monkeypatch.setattr(cw, "_path_identity", fail_attestation_identity)
+        monkeypatch.setattr(cw.os, "killpg", recording_killpg)
+        monkeypatch.setattr(cw, "_wait_for_process_group_exit", refuse_absence)
+
+        process = None
+        try:
+            with pytest.raises(
+                cw.ProcessIdentityError,
+                match="process-group-still-present",
+            ) as caught:
+                await adapter.start(spec)
+            assert len(spawned) == 1
+            process = spawned[0]
+            assert isinstance(caught.value.__cause__, OSError)
+            assert str(caught.value.__cause__) == (
+                "attestation failed before absence proof"
+            )
+            assert kill_calls == [(process.pid, signal.SIGKILL)]
+            assert spec.run_id not in adapter._runs
+            open_fds = []
+            for fd in created_fds:
+                try:
+                    os.fstat(fd)
+                except OSError:
+                    continue
+                open_fds.append(fd)
+            assert open_fds == []
+            assert process.returncode is not None
+        finally:
+            if process is None and spawned:
+                process = spawned[0]
+            if process is not None and process.returncode is None:
+                process.kill()
+                await asyncio.wait_for(process.wait(), 2.0)
+            for fd in created_fds:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+
+    asyncio.run(exercise())
+
+
+def test_unpublished_cleanup_consumes_done_wait_task_after_signal_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def exercise() -> None:
+        async def fail_wait() -> int:
+            raise RuntimeError("owned wait task failed")
+
+        wait_task = asyncio.create_task(fail_wait())
+        await asyncio.sleep(0)
+        assert wait_task.done()
+
+        process = type("Process", (), {"pid": 424242})()
+        gather_calls: list[tuple[object, ...]] = []
+        real_gather = cw.asyncio.gather
+
+        def refuse_signal(_pgid: int, _sig: int) -> None:
+            raise PermissionError("synthetic signal refusal")
+
+        async def recording_gather(*awaitables, **kwargs):
+            gather_calls.append(awaitables)
+            return await real_gather(*awaitables, **kwargs)
+
+        monkeypatch.setattr(cw.os, "killpg", refuse_signal)
+        monkeypatch.setattr(cw.asyncio, "gather", recording_gather)
+
+        error = await cw._cleanup_unpublished_process(
+            process,
+            wait_task=wait_task,
+            owned_fds=(),
+            label="unpublished test launch",
+        )
+        assert isinstance(error, cw.ProcessIdentityError)
+        assert "signal:PermissionError" in str(error)
+        assert gather_calls == [(wait_task,)]
+        assert isinstance(wait_task.exception(), RuntimeError)
+
+    asyncio.run(exercise())
