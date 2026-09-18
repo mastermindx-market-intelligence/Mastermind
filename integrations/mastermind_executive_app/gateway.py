@@ -154,24 +154,41 @@ def _default_jwks_cache(policy: ResourcePolicy) -> JwksKeySource:
     )
 
 
+def _jwks_cache_contract(policy: ResourcePolicy) -> tuple[object, ...]:
+    """Return the authority and refresh controls that make a JWKS cache shareable."""
+
+    return (
+        policy.resource,
+        policy.issuer,
+        policy.authorization_servers,
+        policy.jwks_uri,
+        policy.allowed_algorithms,
+        policy.jwks_cache_ttl_seconds,
+        policy.unknown_kid_refresh_cooldown_seconds,
+        policy.fetch_failure_backoff_seconds,
+    )
+
+
 def make_jwt_authenticators(
     policies: AppPolicies, *, jwks_cache: JwksKeySource | None = None
 ) -> tuple[JwtAuthenticator, JwtAuthenticator]:
     """Build the (read, submit) :class:`JwtAuthenticator` pair.
 
-    ``integrations.business_mcp_auth.jwks.BoundedJwksCache``/``HttpxJwksFetcher``
-    are each bound to exactly ONE :class:`ResourcePolicy` (its own
-    ``jwks_uri``/cache TTL), so the default production wiring builds one
-    independent cache PER policy even though both name the same authorization
-    server in every legal deployment.  A caller-supplied ``jwks_cache`` is a
-    single stateless object (e.g. a test fake) reused for BOTH authenticators
-    instead — the :class:`JwksKeySource` protocol has no policy-affinity
-    requirement, only ``.key_for(kid)``.
+    Read and submit remain separate authorization policies.  When they bind
+    the same OAuth resource/JWKS authority and the same cache safety controls,
+    they share one process-memory JWKS cache.  This prevents a wider-scope
+    token from performing two independent JWKS refreshes while preserving
+    separate scope, subject, audience, lifetime, and tool-authority checks.
+    Policies with different JWKS authority or refresh controls keep independent
+    caches.  A caller-supplied ``jwks_cache`` is reused for both as before.
     """
 
     if jwks_cache is None:
         read_cache: JwksKeySource = _default_jwks_cache(policies.read)
-        submit_cache: JwksKeySource = _default_jwks_cache(policies.submit)
+        if _jwks_cache_contract(policies.read) == _jwks_cache_contract(policies.submit):
+            submit_cache: JwksKeySource = read_cache
+        else:
+            submit_cache = _default_jwks_cache(policies.submit)
     else:
         read_cache = submit_cache = jwks_cache
     read_authenticator = JwtAuthenticator(policy=policies.read, jwks_cache=read_cache)
