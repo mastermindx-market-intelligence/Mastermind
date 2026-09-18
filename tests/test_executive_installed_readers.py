@@ -741,6 +741,7 @@ def _capacity_runtime_contract_fixture(tmp_path: Path, monkeypatch):
         runtime_tree_sha256="b" * 64,
         owner_uid=os.getuid(),
         owner_gid=os.getgid(),
+        has_extended_acl=lambda _descriptor: False,
         verify_pyyaml_record=lambda root: "a" * 64,
         runtime_tree_digest=lambda root: "b" * 64,
     )
@@ -788,6 +789,7 @@ def test_capacity_boot_runtime_attestor_binds_exact_closure_and_probe(
 def test_capacity_boot_runtime_attestor_allows_root_owned_sealed_ancestor_with_different_gid(
     tmp_path: Path, monkeypatch,
 ):
+    import os
     import stat
     from types import SimpleNamespace
 
@@ -796,16 +798,29 @@ def test_capacity_boot_runtime_attestor_allows_root_owned_sealed_ancestor_with_d
     outer.mkdir()
     contract.trusted_ancestors = (outer, contract.runtime_root)
     original_lstat = Path.lstat
+    original_fstat = os.fstat
+    outer_real = original_lstat(outer)
+
+    def observed_outer(real):
+        return SimpleNamespace(
+            st_dev=real.st_dev, st_ino=real.st_ino,
+            st_mode=stat.S_IFDIR | 0o755, st_uid=contract.owner_uid,
+            st_gid=contract.owner_gid + 1, st_nlink=real.st_nlink,
+        )
 
     def lstat(path):
         if path == outer:
-            return SimpleNamespace(
-                st_mode=stat.S_IFDIR | 0o755, st_uid=contract.owner_uid,
-                st_gid=contract.owner_gid + 1, st_nlink=2,
-            )
+            return observed_outer(original_lstat(path))
         return original_lstat(path)
 
+    def fstat(descriptor):
+        real = original_fstat(descriptor)
+        if (real.st_dev, real.st_ino) == (outer_real.st_dev, outer_real.st_ino):
+            return observed_outer(real)
+        return real
+
     monkeypatch.setattr(Path, "lstat", lstat)
+    monkeypatch.setattr(os, "fstat", fstat)
     result = packet.attest_capacity_boot_runtime(
         contract.python_binary,
         runner=lambda *_args, **_kwargs: {
@@ -909,3 +924,131 @@ def test_installed_reader_reserves_gateway_timeout_margin(tmp_path: Path):
 
     assert readers.config.boot_packet_timeout == READ_TIMEOUT_SECONDS - 2.0
     assert readers.config.boot_packet_timeout < READ_TIMEOUT_SECONDS
+
+
+def test_installed_boot_packet_collector_refuses_materialized_macro_mutate_and_restore(
+    tmp_path: Path,
+):
+    import json
+    import subprocess
+    import time
+    from integrations.executive_mcp.installed import (
+        InstalledBootPacketCollector,
+        _default_packet_runner,
+    )
+    from integrations.executive_mcp.schemas import GatewayError
+
+    repo = tmp_path / "mastermind"
+    macro = tmp_path / "macro"
+    code = tmp_path / "immutable-release"
+    repo.mkdir()
+    macro.mkdir()
+    (code / "scripts").mkdir(parents=True)
+    (repo / "README.md").write_text("source\n", encoding="utf-8")
+    record = macro / "agentos" / "workstreams" / "WS-TEST.md"
+    record.parent.mkdir(parents=True)
+    record.write_text("---\nkey: WS-TEST\n---\noriginal\n", encoding="utf-8")
+    for root in (repo, macro):
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        subprocess.run(
+            ["git", "-C", str(root), "config", "user.email", "test@example.invalid"],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(root), "config", "user.name", "Test"],
+            check=True,
+        )
+        subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+        subprocess.run(
+            ["git", "-C", str(root), "commit", "-q", "-m", "fixture"],
+            check=True,
+        )
+    source_sha = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"],
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    macro_sha = subprocess.run(
+        ["git", "-C", str(macro), "rev-parse", "HEAD"],
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    python = tmp_path / "network-python"
+    python.write_text("fixture", encoding="utf-8")
+
+    def runner(argv, **kwargs):
+        if str(argv[0]) == "git":
+            return _default_packet_runner(argv, **kwargs)
+        child_macro = Path(argv[argv.index("--macro-root") + 1])
+        child_record = child_macro / "agentos" / "workstreams" / "WS-TEST.md"
+        original = child_record.read_bytes()
+        before_ctime = child_record.stat().st_ctime_ns
+        time.sleep(0.01)
+        child_record.write_bytes(b"transient child mutation\n")
+        child_record.write_bytes(original)
+        assert child_record.read_bytes() == original
+        assert child_record.stat().st_ctime_ns != before_ctime
+        packet = {
+            "schema": "mastermind.ceo_boot_packet.v1",
+            "mastermind": {"root": str(repo), "sha": source_sha, "branch": "HEAD"},
+            "macro": {
+                "root": str(child_macro),
+                "sha": macro_sha,
+                "resolved_via": "flag",
+                "candidates_tried": [],
+            },
+        }
+        return {
+            "code": 0,
+            "stdout": json.dumps(packet),
+            "stderr": "",
+            "timed_out": False,
+            "limit_exceeded": False,
+            "invalid_utf8": False,
+        }
+
+    collector = InstalledBootPacketCollector(
+        source_root=repo,
+        macro_root=macro,
+        code_root=code,
+        python_executable=python,
+        runner=runner,
+        expected_source_sha=source_sha,
+    )
+    with pytest.raises(GatewayError, match="materialized Macro changed during boot-packet read"):
+        collector(repo_root=repo, macro_root_flag=str(macro), now=None, timeout=5.0)
+
+
+def test_capacity_boot_runtime_attestor_refuses_extended_acl_observation(
+    tmp_path: Path, monkeypatch,
+):
+    from control_plane import ceo_boot_packet as packet
+
+    packet, contract = _capacity_runtime_contract_fixture(tmp_path, monkeypatch)
+    contract.has_extended_acl = lambda _descriptor: True
+
+    with pytest.raises(RuntimeError, match="capacity runtime ACL seal differs"):
+        packet.attest_capacity_boot_runtime(
+            contract.python_binary,
+            runner=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("probe must not run after ACL drift")
+            ),
+        )
+
+
+def test_capacity_boot_runtime_attestor_refuses_acl_observer_failure(
+    tmp_path: Path, monkeypatch,
+):
+    from control_plane import ceo_boot_packet as packet
+
+    packet, contract = _capacity_runtime_contract_fixture(tmp_path, monkeypatch)
+
+    def fail_acl(_descriptor):
+        raise OSError("acl observer unavailable")
+
+    contract.has_extended_acl = fail_acl
+    with pytest.raises(RuntimeError, match="capacity runtime ACL inspection failed"):
+        packet.attest_capacity_boot_runtime(
+            contract.python_binary,
+            runner=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("probe must not run after ACL observer failure")
+            ),
+        )

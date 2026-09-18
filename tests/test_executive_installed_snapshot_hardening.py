@@ -447,3 +447,79 @@ def test_macro_brief_scope_refuses_committed_symlink_dependency(tmp_path: Path):
             repo, runner=_default_packet_runner, env=env,
             label="Macro source", content_scope="macro_brief",
         )
+
+
+def test_clean_snapshot_refuses_grafts_before_git(tmp_path: Path):
+    from integrations.executive_mcp.installed import (
+        _clean_git_snapshot,
+        _installed_child_env,
+    )
+    from integrations.executive_mcp.schemas import GatewayError
+
+    repo, _tracked = _clean_repo(tmp_path)
+    grafts = repo / ".git" / "info" / "grafts"
+    grafts.parent.mkdir(parents=True, exist_ok=True)
+    grafts.write_text("0" * 40 + "\n", encoding="utf-8")
+    calls = 0
+
+    def runner(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise AssertionError("grafts must refuse before Git execution")
+
+    env = _installed_child_env(code_root=repo, macro_root=repo)
+    with pytest.raises(GatewayError, match="repository topology is unsafe"):
+        _clean_git_snapshot(
+            repo, runner=runner, env=env, label="Mastermind source",
+        )
+    assert calls == 0
+
+
+def test_clean_snapshot_refuses_nonempty_linked_worktree_admin_before_git(tmp_path: Path):
+    from integrations.executive_mcp.installed import (
+        _clean_git_snapshot,
+        _installed_child_env,
+    )
+    from integrations.executive_mcp.schemas import GatewayError
+
+    repo, _tracked = _clean_repo(tmp_path)
+    admin = repo / ".git" / "worktrees" / "foreign"
+    admin.mkdir(parents=True)
+    (admin / "HEAD").write_text("ref: refs/heads/foreign\n", encoding="utf-8")
+    calls = 0
+
+    def runner(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise AssertionError("linked-worktree admin must refuse before Git execution")
+
+    env = _installed_child_env(code_root=repo, macro_root=repo)
+    with pytest.raises(GatewayError, match="repository topology is unsafe"):
+        _clean_git_snapshot(
+            repo, runner=runner, env=env, label="Macro source",
+        )
+    assert calls == 0
+
+
+def test_clean_snapshot_refuses_missing_reachable_parent_commit(tmp_path: Path):
+    from integrations.executive_mcp.installed import (
+        _clean_git_snapshot,
+        _default_packet_runner,
+        _installed_child_env,
+    )
+    from integrations.executive_mcp.schemas import GatewayError
+
+    repo, tracked = _clean_repo(tmp_path)
+    tracked.write_text("second\n", encoding="utf-8")
+    _git(repo, "add", "tracked.txt")
+    _git(repo, "commit", "-q", "-m", "second")
+    parent_oid = _git(repo, "rev-parse", "HEAD^").stdout.strip()
+    parent_object = repo / ".git" / "objects" / parent_oid[:2] / parent_oid[2:]
+    assert parent_object.is_file()
+    parent_object.unlink()
+
+    env = _installed_child_env(code_root=repo, macro_root=repo)
+    with pytest.raises(GatewayError, match="repository objects are incomplete"):
+        _clean_git_snapshot(
+            repo, runner=_default_packet_runner, env=env, label="Mastermind source",
+        )

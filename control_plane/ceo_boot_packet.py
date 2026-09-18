@@ -284,6 +284,7 @@ class _CapacityBootRuntimeContract:
     owner_gid: int
     trusted_ancestors: tuple[Path, ...]
     strict_group_ancestors: tuple[Path, ...]
+    has_extended_acl: Callable[[int], bool]
     verify_pyyaml_record: Callable[[Path], str]
     runtime_tree_digest: Callable[[Path], str]
 
@@ -317,9 +318,47 @@ def _capacity_runtime_contract() -> _CapacityBootRuntimeContract:
         strict_group_ancestors=(
             system_root, system_root / "capacity-runtimes", runtime_root,
         ),
+        has_extended_acl=capacity_host_artifacts._descriptor_has_extended_acl,
         verify_pyyaml_record=capacity_host_artifacts.verify_pyyaml_record,
         runtime_tree_digest=capacity_host_artifacts.runtime_tree_digest,
     )
+
+
+def _require_capacity_runtime_acl(
+    path: Path, observed: os.stat_result, contract: Any,
+) -> None:
+    """Reuse the capacity host ACL observer and bind it to the lstat object."""
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    if stat.S_ISDIR(observed.st_mode):
+        flags |= getattr(os, "O_DIRECTORY", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise RuntimeError("capacity runtime ACL inspection failed") from exc
+    try:
+        opened = os.fstat(descriptor)
+        if (
+            opened.st_dev,
+            opened.st_ino,
+            opened.st_mode,
+            opened.st_uid,
+            opened.st_gid,
+        ) != (
+            observed.st_dev,
+            observed.st_ino,
+            observed.st_mode,
+            observed.st_uid,
+            observed.st_gid,
+        ):
+            raise RuntimeError("capacity runtime metadata changed during ACL inspection")
+        try:
+            has_extended_acl = contract.has_extended_acl(descriptor)
+        except Exception as exc:
+            raise RuntimeError("capacity runtime ACL inspection failed") from exc
+        if has_extended_acl:
+            raise RuntimeError("capacity runtime ACL seal differs")
+    finally:
+        os.close(descriptor)
 
 
 def _require_capacity_runtime_metadata(contract: Any) -> None:
@@ -343,6 +382,7 @@ def _require_capacity_runtime_metadata(contract: Any) -> None:
             or stat.S_IMODE(observed.st_mode) & 0o022
         ):
             raise RuntimeError("capacity runtime ancestor metadata differs")
+        _require_capacity_runtime_acl(ancestor, observed, contract)
 
     for directory, directory_names, file_names in os.walk(
         runtime_root, topdown=True, followlinks=False,
@@ -363,6 +403,7 @@ def _require_capacity_runtime_metadata(contract: Any) -> None:
                     raise RuntimeError("capacity runtime file hard-link count differs")
             elif not stat.S_ISDIR(observed.st_mode):
                 raise RuntimeError("capacity runtime object type differs")
+            _require_capacity_runtime_acl(path, observed, contract)
 
     python_binary = Path(contract.python_binary)
     binary_stat = python_binary.lstat()

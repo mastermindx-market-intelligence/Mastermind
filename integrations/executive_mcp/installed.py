@@ -74,6 +74,7 @@ def _direct_git_directory(path: Path, *, label: str) -> Path | None:
     fixed_markers = (
         git_metadata / "commondir",
         git_metadata / "shallow",
+        git_metadata / "info" / "grafts",
         objects_root / "info" / "alternates",
         objects_root / "info" / "http-alternates",
     )
@@ -82,6 +83,25 @@ def _direct_git_directory(path: Path, *, label: str) -> Path | None:
             raise GatewayError(
                 "backend_unavailable", f"installed {label} repository topology is unsafe"
             )
+
+        worktrees_root = git_metadata / "worktrees"
+        try:
+            worktrees_stat = worktrees_root.lstat()
+        except FileNotFoundError:
+            worktrees_stat = None
+        if worktrees_stat is not None:
+            if (
+                not stat.S_ISDIR(worktrees_stat.st_mode)
+                or stat.S_ISLNK(worktrees_stat.st_mode)
+            ):
+                raise GatewayError(
+                    "backend_unavailable", f"installed {label} repository topology is unsafe"
+                )
+            with os.scandir(worktrees_root) as worktree_entries:
+                if next(worktree_entries, None) is not None:
+                    raise GatewayError(
+                        "backend_unavailable", f"installed {label} repository topology is unsafe"
+                    )
 
         config_path = git_metadata / "config"
         config_stat = config_path.lstat()
@@ -393,6 +413,43 @@ def _clean_git_snapshot(
     if not _valid_sha(head):
         raise GatewayError("backend_unavailable", f"installed {label} HEAD is unavailable")
 
+    try:
+        graph_result = runner(
+            [
+                "git", "rev-list", "--objects", "--missing=print",
+                "--no-object-names", head,
+            ],
+            cwd=path, timeout=10.0, max_bytes=32 * 1024 * 1024, env=env,
+        )
+    except Exception as exc:
+        raise GatewayError(
+            "backend_unavailable", f"installed {label} repository objects are incomplete"
+        ) from exc
+    if not isinstance(graph_result, Mapping) or any(
+        graph_result.get(flag) is True
+        for flag in ("timed_out", "limit_exceeded", "invalid_utf8")
+    ):
+        raise GatewayError(
+            "backend_unavailable", f"installed {label} repository objects are incomplete"
+        )
+    graph_stdout = graph_result.get("stdout")
+    if graph_result.get("code") != 0 or type(graph_stdout) is not str:
+        raise GatewayError(
+            "backend_unavailable", f"installed {label} repository objects are incomplete"
+        )
+    reachable_objects: set[str] = set()
+    for line in graph_stdout.splitlines():
+        object_id = line.strip()
+        if not _valid_sha(object_id):
+            raise GatewayError(
+                "backend_unavailable", f"installed {label} repository objects are incomplete"
+            )
+        reachable_objects.add(object_id)
+    if head not in reachable_objects:
+        raise GatewayError(
+            "backend_unavailable", f"installed {label} repository objects are incomplete"
+        )
+
     tree = observe(
         ["ls-tree", "-r", "-z", "--full-tree", head],
         max_bytes=32 * 1024 * 1024,
@@ -665,12 +722,19 @@ class InstalledBootPacketCollector:
             child_env = _installed_child_env(
                 code_root=self._code_root, macro_root=packet_macro_root,
             )
+            materialized_observation: tuple[str, str] | None = None
             if packet_macro_root != self._macro_root:
-                materialized_sha = _clean_git_snapshot(
+                observed_materialized = _clean_git_snapshot(
                     packet_macro_root, runner=self._runner, env=child_env,
                     label="materialized Macro source", content_scope="macro_brief",
+                    include_seal=True,
                 )
-                if materialized_sha != pre_macro_sha:
+                if not isinstance(observed_materialized, tuple):
+                    raise GatewayError(
+                        "backend_unavailable", "installed Macro materialization seal is unavailable"
+                    )
+                materialized_observation = observed_materialized
+                if materialized_observation[0] != pre_macro_sha:
                     raise GatewayError(
                         "backend_unavailable", "installed Macro materialization SHA differs"
                     )
@@ -689,6 +753,26 @@ class InstalledBootPacketCollector:
                 )
             except Exception as exc:
                 raise GatewayError("backend_unavailable", "installed boot-packet collector failed") from exc
+            if materialized_observation is not None:
+                try:
+                    post_materialized = _clean_git_snapshot(
+                        packet_macro_root, runner=self._runner, env=child_env,
+                        label="materialized Macro source", content_scope="macro_brief",
+                        include_seal=True,
+                    )
+                except GatewayError as exc:
+                    raise GatewayError(
+                        "backend_unavailable",
+                        "installed materialized Macro changed during boot-packet read",
+                    ) from exc
+                if (
+                    not isinstance(post_materialized, tuple)
+                    or post_materialized != materialized_observation
+                ):
+                    raise GatewayError(
+                        "backend_unavailable",
+                        "installed materialized Macro changed during boot-packet read",
+                    )
             if not isinstance(result, Mapping) or result.get("code") != 0:
                 raise GatewayError("backend_unavailable", "installed boot-packet collector failed")
             if any(result.get(flag) is True for flag in ("timed_out", "limit_exceeded", "invalid_utf8")):
