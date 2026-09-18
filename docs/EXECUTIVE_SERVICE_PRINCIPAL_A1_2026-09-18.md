@@ -66,6 +66,57 @@ Each row is triggered for real by `tests/test_executive_service_principal.py`,
 which also pins the cited lines so a move is a loud failure rather than a silent
 lie.
 
+## KNOWN OPEN GAP (A2 follow-on, owned by `executive_runtime.py` / #699)
+
+The durable provenance this tier emits is **sufficient** to satisfy the
+runtime's higher-seat gate for the CEO target, because that gate is
+**schema-only**. This is a residual of the OWNED runtime, stated here so A2 does
+not have to rediscover it:
+
+```
+if target == "ceo":
+    return schema == "mastermind.ceo_intent.v1"        # actor is read, then DISCARDED
+return schema in {"mastermind.executive_decision.v1",
+                  "mastermind.chairman_decision.v1"} and actor in {"chairman", "chris", "chairman-chris"}
+```
+
+Predicate: `_has_executive_provenance` (`executive_runtime.py:928-942`; the
+schema-only CEO branch is `:937-938`). Gate call sites: `:10287-10297`,
+consulted only when `owner_seat != "coo"` **or** `escalation_target != "coo"`.
+For `target="ceo"` the schema is compared and the actor is never consulted; for
+the human seat the schema **and** the actor are both required.
+
+Reproduced on a temp runtime from this tier's own `submit()` — the durable
+`event.payload["provenance"]` is
+`{"schema": "mastermind.ceo_intent.v1", "actor": "svc-site-maintenance", ...}`:
+
+| Probe with that exact stamp | Result |
+|---|---|
+| `_has_executive_provenance(stamp, target="ceo")` | **`True`** |
+| `_has_executive_provenance(stamp, target="chairman")` | `False` |
+| `create_job(..., owner_seat="ceo", provenance=stamp)` | **ADMITTED** (`owner_seat="ceo"`) |
+| `create_job(..., owner_seat="ceo", escalation_target="ceo", provenance=stamp)` | **ADMITTED** |
+| `create_job(..., owner_seat="chairman", provenance=stamp)` | `StateConflict` (actor-aware branch) |
+| `create_job(..., owner_seat="ceo")` with no provenance | `StateConflict` |
+| `create_job(..., owner_seat="ceo", provenance=<typed `mastermind.executive_service_principal.v1`>)` | `StateConflict` |
+
+Why this is not a live escalation *from this tier*: `submit()` never passes
+`owner_seat` / `escalation_target`, so its Jobs keep the runtime's `coo` defaults
+(`executive_runtime.py:10108-10109`) and the gate is never consulted for them
+(asserted in section 4 of the test module). The gap is **reuse**: any later
+Runtime holder — or a child `create_job` — that hands this Job's durable
+provenance to a non-`coo` seat passes the CEO gate because of the sink's schema
+stamp, not because of the actor. There is no in-place reseat API; the exposure
+is stamp reuse and child creation.
+
+The fix belongs in the **OWNED runtime** (A2 follow-on, PR #699): make the CEO
+branch actor-aware, or require a distinct executive schema for the CEO seat. It
+is deliberately **not** fixed in this PR — neither the sink stamp nor the gate
+is touched, and no second submit path is introduced. The gap is pinned by
+passing tests
+(`tests/test_executive_service_principal.py::test_open_gap_executive_provenance_gate_is_schema_only_A2`
+and `::test_open_gap_ceo_seat_is_admitted_with_the_sink_stamp_A2`).
+
 ## Follow-ons NOT taken (owned-file collisions)
 
 - **A2 — the seat/provenance extension.** `control_plane/executive_runtime.py`
@@ -86,7 +137,7 @@ lie.
 ## Verification
 
 ```
-python3 -m pytest tests/test_executive_service_principal.py -q   # 7 passed
+python3 -m pytest tests/test_executive_service_principal.py -q   # 9 passed
 python3 -m pytest tests/test_ceo_intent.py -q                    # 60 passed (sink unregressed)
 ```
 

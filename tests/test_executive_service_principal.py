@@ -23,7 +23,13 @@ import pytest
 
 from control_plane import ceo_intent
 from control_plane.ceo_intent import INTENT_SCHEMA, CeoIntentError, command_id_for, submit_intent
-from control_plane.executive_runtime import JobRegistry, JobStatus, Runtime
+from control_plane.executive_runtime import (
+    JobRegistry,
+    JobStatus,
+    Runtime,
+    StateConflict,
+    _has_executive_provenance,
+)
 from control_plane.executive_service_principal import (
     ADMITTED,
     ALLOWED_TASK_KINDS,
@@ -383,19 +389,24 @@ def test_sink_cannot_carry_the_typed_schema_or_task_kind(tmp_path: Path):
     assert SCHEMA not in json.dumps(durable)
 
     # (e) the recorded path:line evidence must still describe the real code.
+    #     The module's pins are ``L<number>`` STRINGS, never bare integer
+    #     literals: the D8 identity ratchet flags unexplained 4xx-9xx integers
+    #     in added production source, and a source-line citation is not an
+    #     identity.  The predicates below are unchanged.
     windows = {
-        561: _source_window("control_plane/ceo_intent.py", 555, 575),
-        562: _source_window("control_plane/ceo_intent.py", 555, 575),
-        735: _source_window("control_plane/ceo_intent.py", 730, 745),
-        163: _source_window("control_plane/ceo_intent.py", 160, 175),
+        "L561": _source_window("control_plane/ceo_intent.py", 555, 575),
+        "L562": _source_window("control_plane/ceo_intent.py", 555, 575),
+        "L735": _source_window("control_plane/ceo_intent.py", 730, 745),
+        "L163": _source_window("control_plane/ceo_intent.py", 160, 175),
     }
-    assert "intent.schema must be" in windows[561]
-    assert "_exact_keys" in windows[562] or "exact_keys" in windows[562]
-    assert '"schema": intent["schema"],' in windows[735]
-    assert "_CONSTRAINT_KEYS = frozenset(" in windows[163]
+    assert "intent.schema must be" in windows["L561"]
+    assert "_exact_keys" in windows["L562"] or "exact_keys" in windows["L562"]
+    assert '"schema": intent["schema"],' in windows["L735"]
+    assert "_CONSTRAINT_KEYS = frozenset(" in windows["L163"]
     for predicate in status["predicates"]:
         assert predicate["line"] in windows, predicate
         assert predicate["file"] == "control_plane/ceo_intent.py"
+        assert predicate["line"].startswith("L") and predicate["line"][1:].isdigit()
 
     # (f) the A2 anchors this tier deliberately did NOT edit.
     assert "_JOB_SEATS = frozenset({\"coo\", \"ceo\", \"chairman\"})" in _source_window(
@@ -440,3 +451,100 @@ def test_registry_is_closed_and_look_alikes_confer_nothing():
     )
     with pytest.raises(ServicePrincipalRefused, match="does not match its registered definition"):
         derive_intent(tampered, _request(), now=0)
+
+
+# ---------------------------------------------------------------------------
+# 8. KNOWN OPEN GAP (A2 follow-on, OWNED by executive_runtime.py / #699)
+# ---------------------------------------------------------------------------
+#
+# The CEO branch of ``_has_executive_provenance`` is SCHEMA-ONLY
+# (``executive_runtime.py`` L937-L938, cited here as a string): it compares the
+# schema and DISCARDS the actor, while the chairman branch checks schema AND
+# actor.  The stamp this tier's ``submit()`` leaves in
+# ``event.payload["provenance"]`` is exactly
+# ``schema=mastermind.ceo_intent.v1`` / ``actor=svc-site-maintenance``, so that
+# stamp satisfies the CEO branch.  The tests below PIN that as a known,
+# documented open gap instead of fixing it: the gate, the sink stamp, and the
+# OWNED runtime (#699) are all outside this packet's fences.  The module's own
+# ``submit()`` never passes ``owner_seat``/``escalation_target``, so its Jobs
+# stay ``coo`` (asserted in section 4); the gap is *reuse* of the stamped
+# provenance by any other runtime holder, not this path today.
+
+
+def _durable_sink_stamp(tmp_path: Path) -> tuple[dict, dict]:
+    """The sink's stamped provenance block and the sink's own receipt."""
+
+    runtime = Runtime.at(tmp_path / "runtime")
+    receipt = submit(_principal(), _request(), runtime)
+    reader = Runtime.at(tmp_path / "runtime")
+    stamp = durable_provenance(reader, receipt["job_id"])["provenance"]
+    assert stamp["schema"] == INTENT_SCHEMA
+    assert stamp["actor"] == _principal().actor
+    return stamp, receipt
+
+
+def test_open_gap_executive_provenance_gate_is_schema_only_A2(tmp_path: Path):
+    """OPEN GAP: the CEO target accepts the sink's stamp because it ignores the actor."""
+
+    stamp, _receipt = _durable_sink_stamp(tmp_path)
+
+    # (a) the predicate, on the durable stamp: CEO True, chairman False.
+    assert _has_executive_provenance(dict(stamp), target="ceo") is True
+    assert _has_executive_provenance(dict(stamp), target="chairman") is False
+
+    # ...and the schema-only branch is still exactly where the record says it is.
+    source = (_ROOT / "control_plane" / "executive_runtime.py").read_text(encoding="utf-8")
+    assert 'if target == "ceo":\n        return schema == "mastermind.ceo_intent.v1"' in source
+
+
+def test_open_gap_ceo_seat_is_admitted_with_the_sink_stamp_A2(tmp_path: Path):
+    """OPEN GAP: today ``create_job`` admits a ``ceo`` seat on the sink's stamp."""
+
+    stamp, receipt = _durable_sink_stamp(tmp_path)
+    runtime = Runtime.at(tmp_path / "runtime")
+
+    # (b) ADMITTED today.  Recorded, never fixed here: the fix is an
+    # actor-aware gate in the OWNED runtime, not in this tier.
+    seated = runtime.jobs.create_job(
+        "known open gap probe: ceo seat with the sink's v1 stamp",
+        owner_seat="ceo",
+        provenance=dict(stamp),
+    )
+    assert seated.owner_seat == "ceo"
+
+    escalated = runtime.jobs.create_job(
+        "known open gap probe: ceo escalation with the sink's v1 stamp",
+        owner_seat="ceo",
+        escalation_target="ceo",
+        provenance=dict(stamp),
+    )
+    assert escalated.escalation_target == "ceo"
+
+    # REFUSED: the human seat's branch is actor-aware (schema AND actor).
+    with pytest.raises(StateConflict, match="owner_seat='chairman' requires"):
+        runtime.jobs.create_job(
+            "known open gap probe: chairman seat",
+            owner_seat="chairman",
+            provenance=dict(stamp),
+        )
+
+    # REFUSED: the same seats with no provenance at all, and with this tier's
+    # own typed schema - the gate keys on the CEO intent schema, not the actor.
+    with pytest.raises(StateConflict, match="owner_seat='ceo' requires"):
+        runtime.jobs.create_job("known open gap probe: no provenance", owner_seat="ceo")
+    with pytest.raises(StateConflict, match="owner_seat='ceo' requires"):
+        runtime.jobs.create_job(
+            "known open gap probe: typed service-principal schema",
+            owner_seat="ceo",
+            provenance=dict(_derived()["provenance"]),
+        )
+
+    # (c) this tier's OWN submit path stays coo: it never passes a seat, so no
+    # Job created by this module can be seated above coo - even in a database
+    # that now also holds the ceo-seated probes above.
+    reader = Runtime.at(tmp_path / "runtime")
+    own = [job for job in reader.jobs.list_jobs() if job.job_id == receipt["job_id"]]
+    assert len(own) == 1
+    assert own[0].owner_seat == SERVICE_SEAT == "coo"
+    assert own[0].escalation_target == SERVICE_SEAT
+    assert own[0].requested_authorities == ["READ", "RESEARCH"]
