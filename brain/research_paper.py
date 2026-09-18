@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -44,7 +45,7 @@ def llm_enabled() -> bool:
 
 _ROOT = Path(__file__).resolve().parent.parent
 _PAPERS = _ROOT / "data" / "research" / "papers"
-_INDEX = _PAPERS / "index.jsonl"
+_INDEX = _PAPERS / "index.jsonl"  # legacy auxiliary catalog; canonical readers scan paper JSON files
 _NOTES = _ROOT / "data" / "research" / "notes"
 
 SCHEMA = "research_paper.v1"
@@ -1057,13 +1058,55 @@ def render_markdown(paper: dict) -> str:
 
 
 def save_paper(paper: dict) -> Path:
-    """Persist a paper to data/research/papers/<asof>_<TICKER>.json and append to the index."""
+    """Atomically replace the canonical paper JSON; the legacy index is best-effort only.
+
+    All production readers (`load_papers`, web research routes, and Brain consumers) scan the
+    canonical JSON files directly.  Therefore an index append must never turn a completed
+    canonical save into an apparent failed effect.  Conversely, any exception from the atomic
+    canonical phase occurs before `os.replace`, so callers may safely report that this attempt
+    did not replace the paper.
+    """
     _PAPERS.mkdir(parents=True, exist_ok=True)
     path = _PAPERS / f"{paper['asof']}_{paper['ticker']}.json"
-    path.write_text(json.dumps(paper, indent=2, default=str, ensure_ascii=False))
-    with _INDEX.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps({"id": paper["id"], "ticker": paper["ticker"], "asof": paper["asof"],
-                             "generated_at": paper["generated_at"], "file": path.name}, default=str) + "\n")
+    payload = json.dumps(paper, indent=2, default=str, ensure_ascii=False)
+
+    tmp_name: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=_PAPERS,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as tmp:
+            tmp_name = tmp.name
+            tmp.write(payload)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+        os.replace(tmp_name, path)
+        tmp_name = None
+    finally:
+        if tmp_name:
+            try:
+                Path(tmp_name).unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    # This catalog has no production reader; preserve it only as a compatibility breadcrumb.
+    # Once the canonical replace succeeds, catalog failure is auxiliary and cannot revoke that
+    # known effect or force a retry that would duplicate lifecycle state.
+    try:
+        with _INDEX.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps({
+                "id": paper["id"],
+                "ticker": paper["ticker"],
+                "asof": paper["asof"],
+                "generated_at": paper["generated_at"],
+                "file": path.name,
+            }, default=str) + "\n")
+    except Exception:
+        pass
     return path
 
 
