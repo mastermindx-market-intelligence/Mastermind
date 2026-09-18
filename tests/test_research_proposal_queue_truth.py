@@ -157,9 +157,9 @@ def test_enqueue_during_ingest_is_not_lost(tmp_path, monkeypatch):
         inside_ingest.set()
         if not release_ingest.wait(timeout=5):
             raise TimeoutError("test did not release ingest")
-        return True
+        return {"appended": True, "thesis_id": _doc["id"], "reason": None}
 
-    monkeypatch.setattr(ledger, "append", gated_ledger_append)
+    monkeypatch.setattr(ledger, "append_receipt", gated_ledger_append)
 
     def run_ingest():
         try:
@@ -210,7 +210,11 @@ def test_post_ledger_queue_update_failure_returns_effect_receipt_and_preserves_q
     queue.write_text(previous)
     monkeypatch.setattr(rd, "_engine_blocked", lambda _subject: False)
     effects = []
-    monkeypatch.setattr(ledger, "append", lambda doc: effects.append(dict(doc)) or True)
+    monkeypatch.setattr(
+        ledger,
+        "append_receipt",
+        lambda doc: effects.append(dict(doc)) or {"appended": True, "thesis_id": doc["id"], "reason": None},
+    )
     original_write_text = Path.write_text
     original_replace = os.replace
 

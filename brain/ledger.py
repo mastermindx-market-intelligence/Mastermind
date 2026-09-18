@@ -91,16 +91,33 @@ def open_subjects() -> set[str]:
     return {t["subject"] for t in _read() if t.get("status", "open") == "open"}
 
 
-def append(doc: dict) -> bool:
-    """Append a decision doc unless an open thesis on the same subject exists. Returns appended?"""
+def append_receipt(doc: dict) -> dict:
+    """Atomically append or identify the existing open thesis for this subject.
+
+    The receipt lets effect-aware callers distinguish a real new ledger effect from the
+    dedup invariant without inventing an ID for a thesis that was never appended.
+    """
     with _ledger_lock():
         rows = _read_unlocked()
         subject = doc["subject"]
-        if any(t["subject"] == subject for t in rows if t.get("status", "open") == "open"):
-            return False
+        existing = next(
+            (t for t in rows if t.get("subject") == subject and t.get("status", "open") == "open"),
+            None,
+        )
+        if existing is not None:
+            return {
+                "appended": False,
+                "thesis_id": existing.get("id"),
+                "reason": "open_subject_exists",
+            }
         rows.append({**doc, "status": "open"})
         _atomic_write(rows)
-        return True
+        return {"appended": True, "thesis_id": doc.get("id"), "reason": None}
+
+
+def append(doc: dict) -> bool:
+    """Compatibility API: append unless an open thesis exists; return appended?"""
+    return bool(append_receipt(doc)["appended"])
 
 
 def close(subject: str, resolution: str = "closed", *, outcome: int | None = None,
