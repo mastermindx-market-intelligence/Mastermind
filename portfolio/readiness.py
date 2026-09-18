@@ -48,6 +48,19 @@ def _load(p: Path) -> dict:
         return {}
 
 
+def _optional_mapping(path: Path) -> tuple[dict | None, str]:
+    """Distinguish first-run absence from existing unreadable readiness evidence."""
+    if not path.exists():
+        return {}, "missing"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None, "failed"
+    if not isinstance(payload, dict):
+        return None, "failed"
+    return payload, "ok"
+
+
 def _read_alert_rows() -> list[dict]:
     """Canonical readiness evidence; missing is empty, malformed is unavailable."""
     if not _ALERTS.exists():
@@ -144,36 +157,105 @@ def _readiness_lock():
 
 
 def status() -> dict:
-    """Current readiness flags + the supporting counts. Cheap; never raises."""
-    flags, detail = {}, {}
-    try:
-        cal = _load(_ROOT / "data" / "brain" / "calibration.json")
-        ag = cal.get("agents") or {}
-        minn = cal.get("min_n", 12)
+    """Current readiness flags + supporting counts, with unavailable sources kept unknown."""
+    flags: dict[str, bool | None] = {}
+    detail: dict[str, dict] = {}
+    failed_sources: list[str] = []
+
+    cal, cal_state = _optional_mapping(_ROOT / "data" / "brain" / "calibration.json")
+    if cal_state == "failed":
+        failed_sources.append("calibration")
         for who in ("forge", "sentinel"):
-            n = int((ag.get(who) or {}).get("n", 0) or 0)
-            flags[f"calibration_{who}"] = n >= minn
-            detail[f"calibration_{who}"] = {"n": n, "need": minn}
-    except Exception:  # noqa: BLE001
-        pass
+            key = f"calibration_{who}"
+            flags[key] = None
+            detail[key] = {"n": None, "need": None, "read_status": "unavailable"}
+    else:
+        try:
+            agents = (cal or {}).get("agents") or {}
+            if not isinstance(agents, dict):
+                raise TypeError("calibration agents are malformed")
+            minn = (cal or {}).get("min_n", 12)
+            if not isinstance(minn, (int, float)) or isinstance(minn, bool):
+                raise TypeError("calibration min_n is malformed")
+            for who in ("forge", "sentinel"):
+                row = agents.get(who) or {}
+                if not isinstance(row, dict):
+                    raise TypeError("calibration agent row is malformed")
+                n = int(row.get("n", 0) or 0)
+                key = f"calibration_{who}"
+                flags[key] = n >= int(minn)
+                detail[key] = {"n": n, "need": int(minn)}
+        except Exception:
+            if "calibration" not in failed_sources:
+                failed_sources.append("calibration")
+            for who in ("forge", "sentinel"):
+                key = f"calibration_{who}"
+                flags[key] = None
+                detail[key] = {"n": None, "need": None, "read_status": "unavailable"}
+
     try:
         from portfolio import predictions as P
-        led = P._load_ledger()
-        res_dates = sorted({r["asof"] for r in led if r.get("status") == "resolved" and r.get("asof")})
-        indep = len(P._thin_independent([(d, 1) for d in res_dates]))
-        flags["prediction_xsec"] = indep >= P._MIN_DATES
-        detail["prediction_xsec"] = {"independent_clusters": indep, "need": P._MIN_DATES}
-    except Exception:  # noqa: BLE001
-        flags.setdefault("prediction_xsec", False)
-    try:
-        lb = _load(_ROOT / "data" / "shadow" / "leaderboard.json")
-        books = lb.get("books") or {}
-        n_res = max((int((b or {}).get("n_resolved", 0) or 0) for b in books.values()), default=0)
-        flags["shadow_forward"] = n_res >= 5
-        detail["shadow_forward"] = {"max_resolved": n_res, "need": 5}
-    except Exception:  # noqa: BLE001
-        flags.setdefault("shadow_forward", False)
-    return {"flags": flags, "detail": detail}
+        ledger = P._load_ledger()
+        if not isinstance(ledger, list) or not all(isinstance(row, dict) for row in ledger):
+            raise TypeError("prediction ledger is malformed")
+        resolved_dates = sorted({
+            row["asof"]
+            for row in ledger
+            if row.get("status") == "resolved" and row.get("asof")
+        })
+        independent = len(P._thin_independent([(day, 1) for day in resolved_dates]))
+        flags["prediction_xsec"] = independent >= P._MIN_DATES
+        detail["prediction_xsec"] = {
+            "independent_clusters": independent,
+            "need": P._MIN_DATES,
+        }
+    except Exception:
+        failed_sources.append("prediction_xsec")
+        try:
+            need = P._MIN_DATES
+        except Exception:
+            need = None
+        flags["prediction_xsec"] = None
+        detail["prediction_xsec"] = {
+            "independent_clusters": None,
+            "need": need,
+            "read_status": "unavailable",
+        }
+
+    leaderboard, leaderboard_state = _optional_mapping(
+        _ROOT / "data" / "shadow" / "leaderboard.json"
+    )
+    if leaderboard_state == "failed":
+        failed_sources.append("shadow_forward")
+        flags["shadow_forward"] = None
+        detail["shadow_forward"] = {
+            "max_resolved": None, "need": 5, "read_status": "unavailable"
+        }
+    else:
+        try:
+            books = (leaderboard or {}).get("books") or {}
+            if not isinstance(books, dict) or not all(
+                isinstance(value, dict) for value in books.values()
+            ):
+                raise TypeError("shadow leaderboard books are malformed")
+            n_resolved = max(
+                (int((book or {}).get("n_resolved", 0) or 0) for book in books.values()),
+                default=0,
+            )
+            flags["shadow_forward"] = n_resolved >= 5
+            detail["shadow_forward"] = {"max_resolved": n_resolved, "need": 5}
+        except Exception:
+            failed_sources.append("shadow_forward")
+            flags["shadow_forward"] = None
+            detail["shadow_forward"] = {
+                "max_resolved": None, "need": 5, "read_status": "unavailable"
+            }
+
+    result: dict = {"flags": flags, "detail": detail}
+    if failed_sources:
+        result["read_status"] = "unavailable" if len(set(failed_sources)) == 3 else "partial"
+        result["failed_sources"] = sorted(set(failed_sources))
+    return result
 
 
 def check_and_record(asof: str | None = None) -> dict:
