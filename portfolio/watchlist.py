@@ -20,7 +20,13 @@ silently withhold a name — matching ``_timing_ok``'s fail-open contract.
 """
 from __future__ import annotations
 
+import fcntl
 import json
+import os
+import tempfile
+import threading
+from contextlib import contextmanager
+from functools import wraps
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -29,6 +35,7 @@ _WATCHLIST = _ROOT / "data" / "portfolios" / "flagship" / "watchlist.jsonl"
 # docs/design/desk/03-buy-pipeline-and-watchlist.md). Kept SEPARATE from the append-only log above
 # so append/latest/for_date stay byte-compatible for the modules that already call them.
 _STATE = _ROOT / "data" / "portfolios" / "flagship" / "watchlist_state.jsonl"
+_LOCAL_LOCK = threading.RLock()
 
 # ── re-review state machine constants (the doctrine's TTL / cap rules, §3.6.2) ──
 _WATCH = "watch"
@@ -92,11 +99,99 @@ def _path() -> Path:
     return _WATCHLIST
 
 
-def _read_rows() -> list[dict]:
-    try:
-        return [json.loads(l) for l in _path().read_text().splitlines() if l.strip()]
-    except Exception:  # noqa: BLE001
+def _read_jsonl(path: Path) -> list[dict]:
+    """Read canonical JSONL strictly; missing is absence, malformed evidence is a failure."""
+    if not path.exists():
         return []
+    rows: list[dict] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        row = json.loads(line)
+        if not isinstance(row, dict):
+            raise ValueError(f"{path.name} row must be a mapping")
+        rows.append(row)
+    return rows
+
+
+def _fsync_parent(path: Path) -> None:
+    try:
+        fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    except OSError:
+        pass
+
+
+def _atomic_write_jsonl(path: Path, rows: list[dict]) -> None:
+    if any(not isinstance(row, dict) for row in rows):
+        raise ValueError(f"{path.name} rows must be mappings")
+    payload = "".join(json.dumps(row, default=str) + "\n" for row in rows)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_name: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as tmp:
+            tmp_name = tmp.name
+            tmp.write(payload)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+        os.replace(tmp_name, path)
+        tmp_name = None
+        _fsync_parent(path)
+    finally:
+        if tmp_name:
+            try:
+                Path(tmp_name).unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def _lock_path() -> Path:
+    return _path().with_name(".watchlist.lock")
+
+
+@contextmanager
+def _watchlist_lock():
+    """Serialize watchlist read-modify-write operations across threads and processes."""
+    with _LOCAL_LOCK:
+        _lock_path().parent.mkdir(parents=True, exist_ok=True)
+        with _lock_path().open("a+", encoding="utf-8") as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                try:
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+                except OSError:
+                    pass
+
+
+def _locked(default):
+    """Keep additive watchlist mutations best-effort while serializing canonical effects."""
+    def decorate(fn):
+        @wraps(fn)
+        def wrapped(*args, **kwargs):
+            try:
+                with _watchlist_lock():
+                    return fn(*args, **kwargs)
+            except Exception:  # noqa: BLE001
+                return default() if callable(default) else default
+        return wrapped
+    return decorate
+
+
+def _read_rows() -> list[dict]:
+    return _read_jsonl(_path())
 
 
 def _origin(row: dict | None) -> str:
@@ -114,6 +209,7 @@ def _origin(row: dict | None) -> str:
     return ORIGIN_ROTATION if o == ORIGIN_ROTATION else ORIGIN_TIMING
 
 
+@_locked(False)
 def append(ticker: str, asof: str, reason: str, tech: dict | None = None,
            combined: float | None = None) -> bool:
     """Append a withheld-name record, IDEMPOTENT per (ticker, asof): a re-run on the same day for the
@@ -129,8 +225,7 @@ def append(ticker: str, asof: str, reason: str, tech: dict | None = None,
         rows = [r for r in _read_rows()
                 if not ((r.get("ticker") or "").upper() == t and str(r.get("asof"))[:10] == asof)]
         rows.append(rec)
-        _path().parent.mkdir(parents=True, exist_ok=True)
-        _path().write_text("".join(json.dumps(r, default=str) + "\n" for r in rows))
+        _atomic_write_jsonl(_path(), rows)
         return True
     except Exception:  # noqa: BLE001
         return False
@@ -171,45 +266,39 @@ def all_rows() -> list[dict]:
 # Everything here is best-effort and NEVER raises — a logging/IO failure must never break the build.
 # ─────────────────────────────────────────────────────────────────────────────
 def _read_state() -> list[dict]:
-    try:
-        return [json.loads(l) for l in _STATE.read_text().splitlines() if l.strip()]
-    except Exception:  # noqa: BLE001
-        return []
+    return _read_jsonl(_STATE)
 
 
 def _write_state(rows: list[dict]) -> bool:
     try:
-        _STATE.parent.mkdir(parents=True, exist_ok=True)
-        _STATE.write_text("".join(json.dumps(r, default=str) + "\n" for r in rows))
+        _atomic_write_jsonl(_STATE, rows)
         return True
     except Exception:  # noqa: BLE001
         return False
 
 
 def _seed_from_log(state_by_ticker: dict[str, dict]) -> dict[str, dict]:
-    """Back-fill the state snapshot from the append-only log for any parked ticker not yet tracked
-    (so names parked by the Gate Officer / L3 timing gate BEFORE this loop existed are picked up).
-    A name already EXPIRED in the snapshot is NOT resurrected. Pure; never raises."""
-    try:
-        for r in latest():
-            t = (r.get("ticker") or "").upper().strip()
-            if not t or t in state_by_ticker:
-                continue
-            state_by_ticker[t] = {
-                "ticker": t,
-                "asof": str(r.get("asof") or "")[:10],
-                "reason": r.get("reason"),
-                "combined": r.get("combined"),
-                "tech": r.get("tech"),
-                "thesis": r.get("thesis") or r.get("reason"),
-                "state": _WATCH,
-                "last_review": None,
-                "days_in_state": 0,
-            }
-    except Exception:  # noqa: BLE001
-        pass
-    return state_by_ticker
+    """Back-fill active state from the canonical park log.
 
+    Missing log is legitimate absence. Corrupt canonical evidence propagates to the caller so
+    review cannot overwrite a partial state snapshot after silently losing parked names.
+    """
+    for r in latest():
+        t = (r.get("ticker") or "").upper().strip()
+        if not t or t in state_by_ticker:
+            continue
+        state_by_ticker[t] = {
+            "ticker": t,
+            "asof": str(r.get("asof") or "")[:10],
+            "reason": r.get("reason"),
+            "combined": r.get("combined"),
+            "tech": r.get("tech"),
+            "thesis": r.get("thesis") or r.get("reason"),
+            "state": _WATCH,
+            "last_review": None,
+            "days_in_state": 0,
+        }
+    return state_by_ticker
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ROTATION-IN park lane (additive; DORMANT — no live call site enrolls yet).
@@ -225,6 +314,7 @@ def _seed_from_log(state_by_ticker: dict[str, dict]) -> dict[str, dict]:
 # identification call) and ``review_trigger`` (the condition that advances/kills the park — the
 # call's falsifier / advancement rule, logged verbatim, never recomputed here).
 # ─────────────────────────────────────────────────────────────────────────────
+@_locked(False)
 def append_rotation(ticker: str, asof: str, call_id: str, *, target: str | None = None,
                     state: str = _WATCH, confidence: float | None = None,
                     thesis: str | None = None, trigger=None) -> bool:
@@ -297,6 +387,7 @@ def append_rotation(ticker: str, asof: str, call_id: str, *, target: str | None 
         return False
 
 
+@_locked(None)
 def _advance_rotation(call_id: str, asof: str, *, state=None, confidence: float | None = None,
                       trigger=None, promote: bool = False) -> dict | None:
     """Advance a rotation park row (WATCH→ARMED on TURNING/evidence; ARMED→promote on CONFIRMED).
@@ -330,12 +421,14 @@ def _advance_rotation(call_id: str, asof: str, *, state=None, confidence: float 
         if promote:
             target_row["last_review"] = str(asof)[:10]
             target_row["_cleared_today"] = True
-        _write_state(rows)
+        if not _write_state(rows):
+            return None
         return target_row
     except Exception:  # noqa: BLE001
         return None
 
 
+@_locked(lambda: {"promote": [], "expired": [], "active": []})
 def review(asof: str, *, still_withheld) -> dict:
     """Run the once-per-build-day re-review over every ACTIVE parked name. IDEMPOTENT per
     (ticker, asof): a re-run on the same build day does not double-age or re-promote a name.
@@ -419,7 +512,8 @@ def review(asof: str, *, still_withheld) -> dict:
         # + the carried-through ROTATION rows (untouched — a separate lane the timing loop never
         # ages or evicts). Rotation rows are preserved across every timing review.
         snapshot = active + [r for r in expired if r.get("state") == _EXPIRED] + rotation_rows
-        _write_state(snapshot)
+        if not _write_state(snapshot):
+            return {"promote": [], "expired": [], "active": []}
         return {"promote": promote, "expired": expired, "active": active}
     except Exception:  # noqa: BLE001 — the re-review loop is additive; never break the build
         return {"promote": [], "expired": [], "active": []}
@@ -449,8 +543,11 @@ def promote_candidates(asof: str) -> list[dict]:
 
 
 def state_rows() -> list[dict]:
-    """The current re-review state snapshot (one row per tracked ticker) — the source for the
-    /api/desk/watchlist surface (state + days-in-state). Never raises."""
+    """The canonical re-review snapshot for /api/desk/watchlist.
+
+    Missing state is an empty first-run snapshot; malformed state raises so the API can report
+    unavailable instead of falsely presenting a zero-name watchlist.
+    """
     return _read_state()
 
 
