@@ -148,7 +148,7 @@ This proves the policy is discriminating, not merely decorative.
 Current disposable useful prototype:
 
 - strict TypeScript typecheck against the exact pinned DSH dependency/project graph: **PASS**;
-- selected common + predecessor + useful-provider-free regression set: **114 tests, 0 failures, 0 errors, 0 skips**;
+- selected common + predecessor + useful-provider-free regression set after the payload-provenance prototype: **115 tests, 0 failures, 0 errors, 0 skips**;
 - useful native confinement tests: PASS;
 - prototype bundle SHA-256: **`56ff5907b2140f7dd3be43dcdfe82e2f96a5d0af6994a9ffea73c84e0ab3e322`**;
 - useful tool census: `read_file`, `search_text`;
@@ -199,6 +199,35 @@ After spawn, it must verify the live PID executable is the admitted Node executa
 The resulting facts belong in the existing native launch attestation/receipt. Missing, changed or mismatched inner executable/bundle evidence refuses before prompt. Do not represent a wrapper attestation as the payload executable.
 
 This is an owner-coordinated extension to `integrations/acp_worker/native.py` / its existing materialization contract, not a new process registry.
+
+### Disposable repair-shape proof
+
+The required native-owner shape was then implemented only in the disposable exact-#825 prototype, reusing the existing `BinaryAttestation` / `_assert_binary_unchanged` file-identity primitive rather than creating another hash or identity service.
+
+The prototype adds to `AcpNativeProfile`:
+
+- a bounded immutable tuple of launch payload attestations;
+- one optional expected post-`execvp` executable, required to be a member of that tuple.
+
+Before spawn, every admitted payload identity is rechecked with the existing file-identity primitive. After spawn, the existing macOS PID-to-executable primitive verifies the live process executable equals the admitted inner Node binary. The existing boot/start/pgid/session/UID/GID checks remain unchanged. The existing ACP native launch-attestation mapping carries the payload identities and expected post-exec executable.
+
+The confined useful profile binds exactly:
+
+1. `/usr/bin/sandbox-exec` as the launch wrapper;
+2. the pinned Node executable as an admitted payload and required live post-exec executable;
+3. the exact built DSH ACP bundle as another admitted payload.
+
+Executed results:
+
+- positive read/search/final WorkerResult path: PASS;
+- deliberate parent pre-prompt refusal: PASS with zero model calls;
+- Seatbelt effect canaries: PASS;
+- deliberately setting the DSH bundle as the expected live executable: **refused before `AcpWorkerAdapter.start` can return**, with `ACP post-exec process executable does not match admission`;
+- strict pinned-DSH TypeScript integration typecheck: PASS;
+- refreshed selected regression receipt: **115 tests / 0 failures / 0 errors / 0 skips**;
+- external provider calls: 0.
+
+This removes uncertainty about whether the provenance gap is technically repairable inside the existing owner. It does **not** authorize those disposable changes for #825 or production. The incumbent ACP integration owner must still adopt the exact source boundary, and a canonical implementation must receive current-base CI/security plus independent review.
 
 ## Provider boundary remains held
 
