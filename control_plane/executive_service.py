@@ -1604,15 +1604,26 @@ class _ModuleBackupBackend:
 
 
 CEO_APP_READ_SCHEMA = ceo_ingress.APP_READ_SCHEMA
-CEO_APP_READ_TOOLS = frozenset(
-    {
-        "executive_state",
-        "executive_inbox",
-        "executive_job",
-        "executive_fabric",
-        "ceo_intent_status",
-    }
-)
+CEO_WEB_CEO_READ_SCHEMA = ceo_ingress.APP_READ_SCHEMA_V2
+CEO_APP_READ_TOOLS_BY_SCHEMA = {
+    CEO_APP_READ_SCHEMA: frozenset(
+        {
+            "executive_state",
+            "executive_inbox",
+            "executive_job",
+            "ceo_intent_status",
+        }
+    ),
+    CEO_WEB_CEO_READ_SCHEMA: frozenset(
+        {
+            "executive_state",
+            "executive_inbox",
+            "executive_job",
+            "executive_fabric",
+            "ceo_intent_status",
+        }
+    ),
+}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1627,6 +1638,7 @@ class CeoIngressAppBinding:
     armed: bool
     grounding_provider: ceo_ingress.GroundingProvider
     read_provider: Any | None = None
+    read_schema: str = CEO_APP_READ_SCHEMA
 
     def __post_init__(self) -> None:
         if type(self.peer_uid) is not int or self.peer_uid < 0:
@@ -1635,6 +1647,8 @@ class CeoIngressAppBinding:
             raise ValueError("App admission arming must be boolean")
         if not callable(getattr(self.grounding_provider, "observe", None)):
             raise ValueError("App binding requires a grounding provider")
+        if self.read_schema not in CEO_APP_READ_TOOLS_BY_SCHEMA:
+            raise ValueError("App binding read schema is not an admitted profile")
 
 
 class ExecutiveControlService:
@@ -3794,7 +3808,7 @@ class ExecutiveControlService:
                 )
                 return
             if app_peer and isinstance(parsed, Mapping) and parsed.get("schema") in {
-                ceo_ingress.APP_READ_SCHEMA, ceo_ingress.APP_GROUNDING_SCHEMA,
+                app_binding.read_schema, ceo_ingress.APP_GROUNDING_SCHEMA,
             }:
                 try:
                     if parsed["schema"] == ceo_ingress.APP_GROUNDING_SCHEMA:
@@ -3806,8 +3820,11 @@ class ExecutiveControlService:
                     else:
                         if set(parsed) != {"schema", "tool", "arguments"}:
                             raise ValueError("invalid read frame")
+                        admitted_read_tools = CEO_APP_READ_TOOLS_BY_SCHEMA[
+                            app_binding.read_schema
+                        ]
                         if (
-                            parsed["tool"] not in CEO_APP_READ_TOOLS
+                            parsed["tool"] not in admitted_read_tools
                             or not isinstance(parsed["arguments"], dict)
                         ):
                             raise ValueError("invalid read operation")

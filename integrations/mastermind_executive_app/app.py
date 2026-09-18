@@ -63,10 +63,15 @@ from integrations.mastermind_executive_app.gateway import (
     CeoIngressClient,
     build_read_gateway,
     CeoIngressReadGateway,
+    WebCeoCeoIngressReadGateway,
     make_jwt_authenticators,
 )
+from integrations.executive_mcp.web_ceo import (
+    build_web_ceo_read_gateway,
+    web_ceo_tool_names,
+)
 
-__all__ = ["AppSettings", "create_app"]
+__all__ = ["AppSettings", "create_app", "create_web_ceo_app"]
 
 _MAX_BODY_BYTES = 65536
 
@@ -328,8 +333,14 @@ class _RawPathFence:
         await self._read_gateway.aclose()
 
 
-def create_app(settings: AppSettings) -> Any:
-    """Build one stateless ASGI app instance from ``settings``.
+def _create_profile_app(
+    settings: AppSettings,
+    *,
+    read_tool_names: tuple[str, ...],
+    ingress_gateway_type: type[CeoIngressReadGateway],
+    read_gateway_builder: Callable[..., Any],
+) -> Any:
+    """Build one stateless ASGI app from one compile-time selected profile.
 
     A fresh instance is cheap and holds no state beyond ``settings`` itself
     (plus the two verified-at-construction :class:`JwtAuthenticator`s), so a
@@ -347,9 +358,11 @@ def create_app(settings: AppSettings) -> Any:
             connect_timeout=settings.connect_timeout, read_timeout=settings.read_timeout
         )
     if settings.read_from_ceo_ingress:
-        read_gateway = CeoIngressReadGateway(settings.ceo_ingress_socket_path, ceo_ingress_client)
+        read_gateway = ingress_gateway_type(
+            settings.ceo_ingress_socket_path, ceo_ingress_client
+        )
     else:
-        read_gateway = build_read_gateway(
+        read_gateway = read_gateway_builder(
             settings.mastermind_root,
             macro_root_flag=settings.macro_root_flag,
             runtime_root=settings.runtime_root,
@@ -357,7 +370,7 @@ def create_app(settings: AppSettings) -> Any:
 
     async def call_read_tool(request: Request) -> JSONResponse:
         tool_name = request.path_params["tool_name"]
-        if tool_name not in READ_TOOL_NAMES:
+        if tool_name not in read_tool_names:
             return JSONResponse(
                 {"ok": False, "error": {"code": "not_found", "message": f"unknown tool {tool_name!r}"}},
                 status_code=404,
@@ -455,4 +468,28 @@ def create_app(settings: AppSettings) -> Any:
         application,
         metadata_path=metadata_path,
         read_gateway=read_gateway,
+    )
+
+def create_app(settings: AppSettings) -> Any:
+    """Legacy BSC-E1 app; exact v1 read/tool surface remains frozen."""
+
+    return _create_profile_app(
+        settings,
+        read_tool_names=READ_TOOL_NAMES,
+        ingress_gateway_type=CeoIngressReadGateway,
+        read_gateway_builder=build_read_gateway,
+    )
+
+
+def create_web_ceo_app(settings: AppSettings) -> Any:
+    """Separately versioned Web-CEO app over the same auth/admission owners."""
+
+    read_names = tuple(
+        name for name in web_ceo_tool_names() if name != "submit_ceo_intent"
+    )
+    return _create_profile_app(
+        settings,
+        read_tool_names=read_names,
+        ingress_gateway_type=WebCeoCeoIngressReadGateway,
+        read_gateway_builder=build_web_ceo_read_gateway,
     )

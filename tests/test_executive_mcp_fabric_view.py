@@ -13,32 +13,41 @@ from control_plane import fabric_job_view
 from integrations.executive_mcp.adapter import ExecutiveMcpGateway, GatewayConfig
 
 from integrations.executive_mcp.schemas import (
+    SCHEMA_SNAPSHOT_SHA256,
     GatewayError,
     ServerMode,
+    schema_snapshot_sha256,
     tool_names,
-    tool_spec,
-    validate_tool_arguments,
+)
+from integrations.executive_mcp.web_ceo import (
+    WEB_CEO_SCHEMA_SNAPSHOT_SHA256,
+    WebCeoExecutiveMcpGateway,
+    validate_web_ceo_tool_arguments,
+    web_ceo_schema_snapshot_sha256,
+    web_ceo_tool_names,
+    web_ceo_tool_spec,
 )
 
 
 def test_executive_fabric_is_read_only_and_advertised() -> None:
-    spec = tool_spec("executive_fabric")
+    spec = web_ceo_tool_spec("executive_fabric")
 
     assert spec.read_only is True
-    assert "executive_fabric" in tool_names()
+    assert "executive_fabric" not in tool_names()
+    assert "executive_fabric" in web_ceo_tool_names()
     assert spec.input_schema["additionalProperties"] is False
     assert spec.input_schema["required"] == ["view"]
 
 
 def test_executive_fabric_validates_closed_modes() -> None:
-    assert validate_tool_arguments("executive_fabric", {"view": "roots"}) == {
+    assert validate_web_ceo_tool_arguments("executive_fabric", {"view": "roots"}) == {
         "view": "roots",
         "limit": 50,
     }
-    assert validate_tool_arguments(
+    assert validate_web_ceo_tool_arguments(
         "executive_fabric", {"view": "roots", "limit": 7}
     ) == {"view": "roots", "limit": 7}
-    assert validate_tool_arguments(
+    assert validate_web_ceo_tool_arguments(
         "executive_fabric", {"view": "root", "root_job_id": "JOB-7"}
     ) == {"view": "root", "root_job_id": "JOB-7"}
 
@@ -61,7 +70,7 @@ def test_executive_fabric_rejects_ambiguous_or_unbounded_inputs(
     payload: dict[str, object],
 ) -> None:
     with pytest.raises(GatewayError) as exc:
-        validate_tool_arguments("executive_fabric", payload)
+        validate_web_ceo_tool_arguments("executive_fabric", payload)
 
     assert exc.value.code == "invalid_input"
 
@@ -69,12 +78,12 @@ def test_executive_fabric_rejects_ambiguous_or_unbounded_inputs(
 _FROZEN_NOW = "2026-09-17T22:00:00Z"
 
 
-def _gateway(tmp_path: Path) -> tuple[ExecutiveMcpGateway, Path]:
+def _gateway(tmp_path: Path) -> tuple[WebCeoExecutiveMcpGateway, Path]:
     repo_root = tmp_path / "repo"
     runtime_root = tmp_path / "runtime"
     repo_root.mkdir()
     runtime_root.mkdir()
-    gateway = ExecutiveMcpGateway(
+    gateway = WebCeoExecutiveMcpGateway(
         GatewayConfig(
             mode=ServerMode.READONLY,
             repo_root=repo_root,
@@ -87,7 +96,7 @@ def _gateway(tmp_path: Path) -> tuple[ExecutiveMcpGateway, Path]:
 
 
 def _call(
-    gateway: ExecutiveMcpGateway,
+    gateway: WebCeoExecutiveMcpGateway,
     arguments: dict[str, object],
 ) -> dict[str, Any]:
     return asyncio.run(gateway.call("executive_fabric", arguments))
@@ -221,29 +230,55 @@ def test_executive_fabric_projector_failure_is_typed_and_path_safe(
     assert "traceback" not in serialized.lower()
 
 
-def test_server_surface_is_six_tool_and_table_driven() -> None:
-    server_path = (
-        Path(__file__).resolve().parents[1]
-        / "integrations"
-        / "executive_mcp"
-        / "server.py"
+def test_legacy_and_web_ceo_schema_surfaces_are_both_pinned() -> None:
+    assert tool_names() == (
+        "executive_state",
+        "executive_inbox",
+        "executive_job",
+        "ceo_intent_status",
+        "submit_ceo_intent",
     )
-    source = server_path.read_text(encoding="utf-8")
+    assert web_ceo_tool_names() == (
+        "executive_state",
+        "executive_inbox",
+        "executive_job",
+        "executive_fabric",
+        "ceo_intent_status",
+        "submit_ceo_intent",
+    )
+    assert schema_snapshot_sha256() == SCHEMA_SNAPSHOT_SHA256
+    assert SCHEMA_SNAPSHOT_SHA256 == (
+        "546b4345e30c24363a02ae3d4fc873e17559ffd569cde188a533fb628b284232"
+    )
+    assert web_ceo_schema_snapshot_sha256() == WEB_CEO_SCHEMA_SNAPSHOT_SHA256
+    assert WEB_CEO_SCHEMA_SNAPSHOT_SHA256 == (
+        "17e052ed734c2c4606094c49b0e9c057382a193fc181d595fc084da10809a5cd"
+    )
 
-    assert "The static six-tool advertisement" in source
-    assert "Wire the six tools" in source
-    assert "for spec in TOOL_SPECS" in source
-    assert 'if name == "executive_fabric"' not in source
+
+def test_legacy_gateway_refuses_fabric_while_web_profile_serves_it(tmp_path: Path) -> None:
+    repo = tmp_path / "legacy-repo"
+    repo.mkdir()
+    legacy = ExecutiveMcpGateway(
+        GatewayConfig(mode=ServerMode.READONLY, repo_root=repo),
+        clock=lambda: _FROZEN_NOW,
+    )
+    envelope = asyncio.run(legacy.call("executive_fabric", {"view": "roots"}))
+    assert envelope["ok"] is False
+    assert envelope["error"]["code"] == "not_found"
+    assert envelope["server_version"] == "1.0.0"
 
 
-def test_sdk_advertises_executive_fabric_as_read_only() -> None:
+def test_sdk_advertises_fabric_only_on_web_ceo_profile() -> None:
     pytest.importorskip("mcp")
-    from integrations.executive_mcp.server import build_tools
+    from integrations.executive_mcp.server import build_tools, build_web_ceo_tools
 
-    tools = {tool.name: tool for tool in build_tools()}
-    tool = tools["executive_fabric"]
-
+    legacy_tools = {tool.name: tool for tool in build_tools()}
+    web_tools = {tool.name: tool for tool in build_web_ceo_tools()}
+    assert "executive_fabric" not in legacy_tools
+    tool = web_tools["executive_fabric"]
+    assert set(web_tools) == set(web_ceo_tool_names())
     assert tool.annotations is not None
     assert tool.annotations.readOnlyHint is True
     assert tool.annotations.destructiveHint is False
-    assert tool.inputSchema == tool_spec("executive_fabric").input_schema
+    assert tool.inputSchema == web_ceo_tool_spec("executive_fabric").input_schema

@@ -1,7 +1,7 @@
 """integrations.executive_mcp.schemas — the frozen MCP tool contract.
 
 This module is the **whole** public surface the ChatGPT CEO seat can reach.  It
-holds the six-tool registry, the strict input schemas, the typed error
+holds the five-tool registry, the strict input schemas, the typed error
 vocabulary, the response envelope, the gateway-authored derivations, and the
 output-bounding law.  It imports the standard library plus first-party
 ``control_plane``/``common`` modules and **nothing else** — the MCP SDK is
@@ -40,7 +40,6 @@ from typing import Any
 from common.redaction import sanitize_external_text
 from control_plane import ceo_intent as _ceo_intent
 from control_plane import ceo_request as _ceo_request
-from control_plane import fabric_job_view as _fabric_job_view
 
 __all__ = [
     "ERROR_CODES",
@@ -80,7 +79,7 @@ SERVER_NAME = "mastermind-executive"
 
 #: Server version.  Part of the pinned schema snapshot: a bump is a deliberate
 #: contract change, never an accident.
-SERVER_VERSION = "1.1.0"
+SERVER_VERSION = "1.0.0"
 
 #: Response envelope schema.  A response schema only — no durable store exists
 #: for it anywhere in this package (commission §5, §3.1).
@@ -530,7 +529,7 @@ def derive_authorities(execution_profile: str) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# the six-tool registry
+# the five-tool registry
 # ---------------------------------------------------------------------------
 
 
@@ -637,59 +636,6 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         output_description=(
             "mastermind.executive_mcp_result.v1 envelope whose data holds job, "
             "attempts, and any bounding receipts."
-        ),
-        read_only=True,
-    ),
-    ToolSpec(
-        name="executive_fabric",
-        description=(
-            _READ_NOTE
-            + "Reads the canonical Mastermind Fabric root projection through the "
-            "existing Executive Runtime. view=roots enumerates at most 50 root Jobs; "
-            "view=root renders one root with child Jobs, Attempts, review, repair, and "
-            "result state. This is visibility only: it never dispatches, cancels, "
-            "retries, reassigns, wakes, or mutates lifecycle state. " + _BOUNDARY_NOTE
-        ),
-        input_schema={
-            "type": "object",
-            "properties": {
-                "view": {
-                    "type": "string",
-                    "enum": ["roots", "root"],
-                    "description": "Bounded root enumeration or one-root detail.",
-                },
-                "root_job_id": {
-                    "type": "string",
-                    "pattern": "^JOB-[0-9]{1,9}$",
-                    "maxLength": 16,
-                    "description": "Required only when view=root.",
-                },
-                "limit": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": _fabric_job_view.LIST_ROOTS_LIMIT,
-                    "description": "Optional only when view=roots; defaults to 50.",
-                },
-            },
-            "required": ["view"],
-            "additionalProperties": False,
-            "oneOf": [
-                {
-                    "properties": {"view": {"const": "roots"}},
-                    "not": {"required": ["root_job_id"]},
-                },
-                {
-                    "properties": {"view": {"const": "root"}},
-                    "required": ["root_job_id"],
-                    "not": {"required": ["limit"]},
-                },
-            ],
-        },
-        output_description=(
-            "mastermind.executive_mcp_result.v1 envelope whose data is either the "
-            "canonical mastermind.fabric_job_root_list.v1 or "
-            "mastermind.fabric_job_view.v1 document, with host paths redacted by the "
-            "gateway."
         ),
         read_only=True,
     ),
@@ -943,45 +889,6 @@ def validate_tool_arguments(tool_name: str, arguments: Any) -> dict[str, Any]:
         )
     if spec.name == MODIFYING_TOOL:
         return _validate_submit(arguments)
-    if spec.name == "executive_fabric":
-        _exact_keys(
-            arguments,
-            "arguments",
-            frozenset({"view"}),
-            frozenset({"root_job_id", "limit"}),
-        )
-        view = _plain_text(arguments["view"], "view", max_chars=5)
-        if view == "roots":
-            if "root_job_id" in arguments:
-                raise GatewayError(
-                    "invalid_input", "root_job_id is valid only when view=root"
-                )
-            limit = arguments.get("limit", _fabric_job_view.LIST_ROOTS_LIMIT)
-            if isinstance(limit, bool) or not isinstance(limit, int):
-                raise GatewayError("invalid_input", "limit must be an integer")
-            if not 1 <= limit <= _fabric_job_view.LIST_ROOTS_LIMIT:
-                raise GatewayError(
-                    "invalid_input",
-                    f"limit must be between 1 and {_fabric_job_view.LIST_ROOTS_LIMIT}",
-                )
-            return {"view": view, "limit": limit}
-        if view == "root":
-            if "limit" in arguments:
-                raise GatewayError("invalid_input", "limit is valid only when view=roots")
-            if "root_job_id" not in arguments:
-                raise GatewayError(
-                    "invalid_input", "root_job_id is required when view=root"
-                )
-            return {
-                "view": view,
-                "root_job_id": _matches(
-                    arguments["root_job_id"],
-                    "root_job_id",
-                    _JOB_ID_RE,
-                    max_chars=16,
-                ),
-            }
-        raise GatewayError("invalid_input", "view must be 'roots' or 'root'")
     if spec.name == "executive_job":
         _exact_keys(arguments, "arguments", frozenset({"job_id"}), frozenset())
         return {"job_id": _matches(arguments["job_id"], "job_id", _JOB_ID_RE, max_chars=16)}
@@ -1254,5 +1161,5 @@ def schema_snapshot_sha256() -> str:
 #: hash and reds CI — which is the point: the ChatGPT app is frozen against a
 #: reviewed surface, so a silent change to it must be impossible.
 SCHEMA_SNAPSHOT_SHA256 = (
-    "dc40738208a517ead4e6a17014e166b67b6fb8740a63d759a75a7d58be2bdd57"
+    "546b4345e30c24363a02ae3d4fc873e17559ffd569cde188a533fb628b284232"
 )

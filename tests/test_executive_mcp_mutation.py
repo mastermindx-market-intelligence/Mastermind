@@ -298,14 +298,14 @@ def _invariant_production_socket_refused() -> None:
         )
 
 
-def _invariant_tool_census_is_six() -> None:
-    assert len(schemas.TOOL_SPECS) == 6
+def _invariant_tool_census_is_five() -> None:
+    assert len(schemas.TOOL_SPECS) == 5
     assert schemas.schema_snapshot_sha256() == schemas.SCHEMA_SNAPSHOT_SHA256
 
 
 def _invariant_read_tools_are_annotated_read_only() -> None:
     read_only = [spec for spec in schemas.TOOL_SPECS if spec.read_only]
-    assert len(read_only) == 5
+    assert len(read_only) == 4
     for spec in read_only:
         assert spec.annotations["readOnlyHint"] is True
     assert schemas.schema_snapshot_sha256() == schemas.SCHEMA_SNAPSHOT_SHA256
@@ -653,22 +653,22 @@ def test_mutant_startup_only_production_check_is_observable(tmp_path: Path):
 
 
 # ===========================================================================
-# M11 / M12 — a seventh tool, a removed read-only annotation
+# M11 / M12 — a sixth tool, a removed read-only annotation
 # ===========================================================================
 
 
-def test_mutant_seventh_tool_is_observable(monkeypatch: pytest.MonkeyPatch):
-    _invariant_tool_census_is_six()
-    seventh = schemas.ToolSpec(
+def test_mutant_sixth_tool_is_observable(monkeypatch: pytest.MonkeyPatch):
+    _invariant_tool_census_is_five()
+    sixth = schemas.ToolSpec(
         name="executive_shell",
         description="a hidden admin tool that must never exist",
         input_schema=dict(schemas._EMPTY_INPUT),
         output_description="",
         read_only=False,
     )
-    monkeypatch.setattr(schemas, "TOOL_SPECS", schemas.TOOL_SPECS + (seventh,))
+    monkeypatch.setattr(schemas, "TOOL_SPECS", schemas.TOOL_SPECS + (sixth,))
     with _mutation_visible():
-        _invariant_tool_census_is_six()
+        _invariant_tool_census_is_five()
 
 
 def test_mutant_removed_read_only_annotation_is_observable(monkeypatch: pytest.MonkeyPatch):

@@ -2,17 +2,19 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Give an authenticated Web CEO one truthful, read-only Executive MCP tool for bounded Fabric-root enumeration and one-root job/attempt/review/result inspection.
+**Goal:** Give an authenticated Web CEO one truthful, read-only Fabric-root view without changing the frozen BSC-E1 / EXEC-MCP-A five-tool contract.
 
-**Architecture:** Add one `executive_fabric` tool to the existing Executive MCP contract. The tool delegates all lifecycle reading to the protected `control_plane.fabric_job_view` projector, redacts host path coordinates before crossing the MCP boundary, and uses the existing bounded read executor/envelope. It creates no lifecycle, registry, queue, scheduler, cancellation, dispatch, or result store.
+**Architecture:** Preserve legacy Executive MCP `1.0.0` and its pinned five-tool schema byte-for-byte. Add `executive_fabric` only to the separately versioned static `web_ceo_v1` profile. Both profiles reuse the existing schema primitives, bounded gateway/executor, A1 auth, Mastermind Executive App, CeoIngress and Executive Runtime; the Fabric tool delegates lifecycle derivation to `control_plane.fabric_job_view`. The v2 App-read frame is host-bound profile selection, never request input. No new lifecycle, registry, queue, scheduler, cancellation, dispatch, retry, auth or result store is created.
 
-**Tech Stack:** Python 3.12, MCP Python SDK, existing Executive MCP schema/adapter/server, existing `mastermind.fabric_job_view.v1` projector, pytest.
+**Tech Stack:** Python 3.12, MCP Python SDK, existing Executive MCP/App/CeoIngress owners, existing `mastermind.fabric_job_view.v1` projector, pytest.
 
-**Spec:** `docs/FABRIC_JOB_VIEW.md`
+**Specs:** `docs/FABRIC_JOB_VIEW.md` and `docs/EXECUTIVE_WEB_CEO_FABRIC_READ_AMENDMENT.md`.
+
+> **Architecture correction (2026-09-17):** The first implementation widened global `TOOL_SPECS` from five to six. Hosted CI correctly failed five protected BSC-E1/Wake freeze guards. Current protected architecture also explicitly prohibits in-place widening for the existing Astra/BSC-E1 client. That approach is superseded. The task detail below is retained as implementation archaeology where useful, but any reference to changing the existing five-tool contract must be read as changing only `web_ceo_v1`.
 
 ## Global Constraints
 
-- Protected base: `7a191cc11039199843d4734c7df8d5523280e09c`.
+- Protected integration base for the corrected carrier: `320f586126b7c82c843ef17612f12d40d20a42e0`.
 - Existing Executive OS remains sole Job/Attempt/Worker/Event lifecycle owner.
 - `control_plane.fabric_job_view` is consumed unchanged; PR #124's stale projector path is not edited.
 - Tool is read-only and cannot dispatch, cancel, retry, reassign, wake, merge, deploy, or touch credentials/providers.

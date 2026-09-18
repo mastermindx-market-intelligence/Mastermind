@@ -1,4 +1,4 @@
-"""Native six-tool transport, real A1 and temporary CeoIngress/Runtime.
+"""Native five-tool transport, real A1 and temporary CeoIngress/Runtime.
 
 No installed socket, provider, credential, or production service is used.
 """
@@ -107,18 +107,12 @@ def test_native_scan_and_read_accept_both_existing_exact_policies(settings, rsa_
                 listed = await rpc(client, token, "tools/list")
                 assert {t["name"] for t in listed["tools"]} == {
                     "executive_state", "executive_inbox", "executive_job",
-                    "executive_fabric", "ceo_intent_status", "submit_ceo_intent",
+                    "ceo_intent_status", "submit_ceo_intent",
                 }
                 _, body = await call(client, token, "executive_state", {})
                 assert body["ok"] is True, body
                 assert body["schema"] == "mastermind.executive_mcp_result.v1"
                 assert body["tool"] == "executive_state"
-                _, fabric = await call(
-                    client, token, "executive_fabric", {"view": "roots", "limit": 5}
-                )
-                assert fabric["ok"] is True, fabric
-                assert fabric["tool"] == "executive_fabric"
-                assert fabric["data"]["schema"] == "mastermind.fabric_job_root_list.v1"
     asyncio.run(exercise())
 
 

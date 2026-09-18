@@ -1,4 +1,4 @@
-"""integrations.executive_mcp.adapter — the six tools, over existing primitives.
+"""integrations.executive_mcp.adapter — the five tools, over existing primitives.
 
 This module is the whole behavioural surface of the gateway.  It composes the
 existing Executive OS reads (CEO boot packet, Executive Inbox, runtime
@@ -313,7 +313,7 @@ _CLOSE_TIMEOUT_SECONDS = 5.0
 
 
 class ExecutiveMcpGateway:
-    """Six tools over existing Executive OS primitives.  No new authority."""
+    """Five legacy tools over existing Executive OS primitives.  No new authority."""
 
     def __init__(
         self,
@@ -370,6 +370,16 @@ class ExecutiveMcpGateway:
 
     # -- public entry point ------------------------------------------------
 
+    def _resolve_tool_spec(self, tool_name: str):
+        """Legacy public contract lookup; versioned profiles override this seam."""
+
+        return tool_spec(tool_name)
+
+    def _validate_call_arguments(self, tool_name: str, arguments: Any) -> dict[str, Any]:
+        """Legacy public contract validation; versioned profiles override this seam."""
+
+        return validate_tool_arguments(tool_name, arguments)
+
     async def call(self, tool_name: str, arguments: Any) -> dict[str, Any]:
         """Run one tool call and return one response envelope.
 
@@ -381,7 +391,7 @@ class ExecutiveMcpGateway:
 
         generated_at = self._clock()
         try:
-            spec = tool_spec(tool_name)
+            spec = self._resolve_tool_spec(tool_name)
         except GatewayError as exc:
             return error_envelope(
                 str(tool_name), mode=self.config.mode, generated_at=generated_at,
@@ -393,7 +403,7 @@ class ExecutiveMcpGateway:
                     "backend_unavailable",
                     "gateway is closed and cannot admit new calls",
                 )
-            validated = validate_tool_arguments(spec.name, arguments)
+            validated = self._validate_call_arguments(spec.name, arguments)
             if spec.name == MODIFYING_TOOL:
                 return await self._run_submit(validated, generated_at)
             return await self._run_read(spec.name, validated, generated_at)
@@ -530,8 +540,7 @@ class ExecutiveMcpGateway:
         if self.config.fixture is None:
             return []
         return [
-            "mode=fixture: executive_job, executive_fabric, and ceo_intent_status read "
-            "the temporary "
+            "mode=fixture: executive_job and ceo_intent_status read the temporary "
             "fixture runtime, while executive_state and executive_inbox project the "
             "reviewed repository checkout; the fixture lane is BUILT_NOT_PROVEN, "
             "not live"
