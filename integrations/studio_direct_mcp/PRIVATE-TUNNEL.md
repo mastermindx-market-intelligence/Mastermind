@@ -37,7 +37,7 @@ Local proof and native ChatGPT proof are separate:
 3. Run `tunnel-client doctor` for the exact profile. No Auth metadata returning 404 is expected; initialization must succeed.
 4. Start the owned tunnel LaunchAgent and verify `running`, `healthy`, `ready`, `managedAliasRunning: false`, and `transportTTL: "5h"` with `python3 private_tunnel_service.py status --account <account>`.
 5. Run `node private-state-probe.mjs <absolute-private-gateway-module> --expect-shared` against an isolated real engine to prove cross-session process reads, creator DELETE, and twelve-session capacity churn.
-6. Create/select the native ChatGPT app with the exact tunnel and **No Auth**. Invoke `studio_ping` and a bounded file read. Match the returned hostname, process generation, and calls in the installed gateway log. Test a harmless command only if the native account permits that correctly annotated tool.
+6. Create/select the native ChatGPT app with the exact tunnel and **No Auth**. Invoke `studio_ping` and a bounded file read. Match the returned ephemeral gateway generation/session reference and calls in the installed gateway log. The ping intentionally omits raw hostname and process ID. Test a harmless command only if the native account permits that correctly annotated tool.
 
 An installed process, a green doctor check, or a tool-list scan alone does not prove native ChatGPT execution. Receipts in `work/` record the scope of each check. Existing public OAuth and Desktop Commander services are separate; only the owned public Funnel 8443 is eligible for retirement after private native verification.
 
