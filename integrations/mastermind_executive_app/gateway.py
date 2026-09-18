@@ -72,6 +72,7 @@ __all__ = [
     "GroundingUnavailable",
     "load_app_policies",
     "make_jwt_authenticators",
+    "make_shared_jwks_cache",
     "observe_trusted_grounding",
     "read_only_gateway_config",
 ]
@@ -169,6 +170,19 @@ def _jwks_cache_contract(policy: ResourcePolicy) -> tuple[object, ...]:
     )
 
 
+def make_shared_jwks_cache(policies: AppPolicies) -> JwksKeySource | None:
+    """Build one cache only when both policies have the same JWKS contract.
+
+    The cache contains public signing keys and bounded refresh state only; it
+    carries no authorization decision.  Scope, subject, audience, lifetime, and
+    tool authority stay inside the separate JwtAuthenticator instances.
+    """
+
+    if _jwks_cache_contract(policies.read) != _jwks_cache_contract(policies.submit):
+        return None
+    return _default_jwks_cache(policies.read)
+
+
 def make_jwt_authenticators(
     policies: AppPolicies, *, jwks_cache: JwksKeySource | None = None
 ) -> tuple[JwtAuthenticator, JwtAuthenticator]:
@@ -184,11 +198,12 @@ def make_jwt_authenticators(
     """
 
     if jwks_cache is None:
-        read_cache: JwksKeySource = _default_jwks_cache(policies.read)
-        if _jwks_cache_contract(policies.read) == _jwks_cache_contract(policies.submit):
-            submit_cache: JwksKeySource = read_cache
+        shared_cache = make_shared_jwks_cache(policies)
+        if shared_cache is None:
+            read_cache: JwksKeySource = _default_jwks_cache(policies.read)
+            submit_cache: JwksKeySource = _default_jwks_cache(policies.submit)
         else:
-            submit_cache = _default_jwks_cache(policies.submit)
+            read_cache = submit_cache = shared_cache
     else:
         read_cache = submit_cache = jwks_cache
     read_authenticator = JwtAuthenticator(policy=policies.read, jwks_cache=read_cache)
