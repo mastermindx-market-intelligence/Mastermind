@@ -332,6 +332,8 @@ def _allowed_command(argv: tuple[str, ...]) -> bool:
         "-p",
     ):
         return argv[4].isdigit() and int(argv[4]) > 0
+    if len(argv) == 4 and argv[:3] == ("/usr/bin/stat", "-f", "%Sp"):
+        return argv[3] in SOCKET_METADATA_PATHS
     return False
 
 
@@ -1609,18 +1611,41 @@ def enforce_content_budget(sizes: Sequence[int]) -> int:
 
 
 def inspect_acl(filesystem: Any, commands: Any, path: str) -> bool:
-    """Inspect extended macOS ACL entries on one stable inode."""
+    """Inspect ACLs on one stable inode without weakening socket handling.
+
+    Regular files/directories keep the descriptor-bound shared ACL observer.
+    Frozen Unix sockets cannot be opened through that file/directory-only
+    observer, so their ACL marker is read through the bounded stat path and
+    still bound to the same pre/post inode identity.
+    """
 
     before = filesystem.metadata(path)
     if not before.get("exists"):
         return False
-    commands.run(("/usr/bin/true",))
+
+    if before.get("type") == "socket":
+        if path not in SOCKET_METADATA_PATHS:
+            raise PreimageUnsettled("ACL_UNKNOWN")
+        result = commands.run(("/usr/bin/stat", "-f", "%Sp", path))
+    else:
+        commands.run(("/usr/bin/true",))
+        result = None
+
     after = filesystem.metadata(path)
     if (before.get("device"), before.get("inode")) != (
         after.get("device"),
         after.get("inode"),
     ):
         raise PreimageUnsettled("FILESYSTEM_TORN")
+
+    if before.get("type") == "socket":
+        marker = result.get("stdout") if isinstance(result, dict) else None
+        if not isinstance(marker, str) or re.fullmatch(
+            r"s[rwxStTs-]{9}[ +]?\n?", marker
+        ) is None:
+            raise PreimageUnsettled("ACL_UNKNOWN")
+        return marker.rstrip("\n").endswith("+")
+
     try:
         return has_macos_acl(path)
     except FilesystemSecurityError:
@@ -2000,6 +2025,7 @@ def _describe() -> dict[str, Any]:
             "/bin/launchctl print-disabled system",
             "/bin/launchctl print system/<frozen-label>",
             "/bin/ps -o uid=,gid=,pid=,ppid= -p <positive-pid>",
+            "/usr/bin/stat -f %Sp <frozen-socket-path>",
             "/usr/bin/true",
         ],
         "mutation_count": 0,

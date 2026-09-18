@@ -83,8 +83,11 @@ opened descriptor and post-read named identity, recheck ancestor identities,
 and reject torn observations. Metadata-only observations likewise compare the
 complete admitted ancestor identity before and after the final `lstat`, even
 when the final path is absent. The exact macOS
-`/var -> /private/var` alias is the only accepted alias. ACL checks use the
-macOS stat marker and bind pre/post device and inode.
+`/var -> /private/var` alias is the only accepted alias. Regular-file and
+directory ACL checks use the shared descriptor-bound macOS observer. The three
+frozen Unix socket paths use the bounded `stat -f %Sp` ACL marker because the
+file/directory observer cannot open sockets. Both paths bind the observation to
+matching pre/post device and inode identity.
 
 For the three frozen socket metadata paths only, the exact `/var/run`
 ancestor may be root:daemon (UID 0, GID 1), mode `0775`, matching the installed
@@ -103,7 +106,8 @@ The command adapter permits only:
 /bin/launchctl print-disabled system
 /bin/launchctl print system/<one frozen label>
 /bin/ps -o uid=,gid=,pid=,ppid= -p <exact positive launchd pid>
-/usr/bin/stat -f %Sp <one frozen path>
+/usr/bin/stat -f %Sp <one frozen socket path>
+/usr/bin/true
 ```
 
 The disabled-service parser accepts native `enabled`/`disabled` entries and

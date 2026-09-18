@@ -162,11 +162,17 @@ def test_command_adapter_has_exact_allowlist_and_nonmutating_subprocess_contract
 
     def runner(argv, **kwargs):
         calls.append((tuple(argv), kwargs))
+        if tuple(argv)[:3] == ("/usr/bin/stat", "-f", "%Sp"):
+            return Completed(stdout=b"srw-rw---- \n")
         return Completed(stdout=b"disabled services = {\n}\n")
 
     adapter = module.CommandAdapter(runner=runner)
     result = adapter.run(("/bin/launchctl", "print-disabled", "system"))
     assert result == {"status": "ok", "stdout": "disabled services = {\n}\n"}
+    socket_result = adapter.run(
+        ("/usr/bin/stat", "-f", "%Sp", module.SOCKET_METADATA_PATHS[0])
+    )
+    assert socket_result == {"status": "ok", "stdout": "srw-rw---- \n"}
     argv, kwargs = calls[0]
     assert argv == ("/bin/launchctl", "print-disabled", "system")
     assert kwargs == {
@@ -184,12 +190,13 @@ def test_command_adapter_has_exact_allowlist_and_nonmutating_subprocess_contract
         ("/bin/launchctl", "kickstart", "system/com.mastermind.executive.control"),
         ("/bin/ps", "aux"),
         ("/usr/bin/stat", "-f", "%Sp", "/tmp/not-frozen"),
+        ("/usr/bin/stat", "-f", "%Sp", module.CONTROL_CONFIG),
     )
     for argv in forbidden:
         with pytest.raises(module.PreimageRefusal) as error:
             adapter.run(argv)
         assert error.value.code == "COMMAND_REFUSED"
-    assert len(calls) == 1
+    assert len(calls) == 2
 
 
 @pytest.mark.parametrize(
@@ -573,6 +580,54 @@ def test_acl_marker_requires_stable_identity_and_closed_marker():
     assert error.value.code == "ACL_UNKNOWN"
 
 
+def test_socket_acl_uses_bounded_stat_marker_and_never_file_acl_observer():
+    module = subject()
+    path = module.SOCKET_METADATA_PATHS[0]
+    metadata = {
+        "path": path,
+        "exists": True,
+        "type": "socket",
+        "device": 4,
+        "inode": 9,
+    }
+
+    class FS:
+        def metadata(self, observed_path):
+            assert observed_path == path
+            return dict(metadata)
+
+    class Commands:
+        def __init__(self, marker):
+            self.marker = marker
+            self.calls = []
+
+        def run(self, argv):
+            self.calls.append(tuple(argv))
+            return {"status": "ok", "stdout": self.marker}
+
+    no_acl = Commands("srw-rw---- \n")
+    with mock.patch.object(
+        module,
+        "has_macos_acl",
+        side_effect=AssertionError("socket path must not use file ACL observer"),
+    ):
+        assert module.inspect_acl(FS(), no_acl, path) is False
+    assert no_acl.calls == [("/usr/bin/stat", "-f", "%Sp", path)]
+
+    with_acl = Commands("srw-rw----+\n")
+    with mock.patch.object(
+        module,
+        "has_macos_acl",
+        side_effect=AssertionError("socket path must not use file ACL observer"),
+    ):
+        assert module.inspect_acl(FS(), with_acl, path) is True
+
+    malformed = Commands("not-a-mode\n")
+    with pytest.raises(module.PreimageUnsettled) as error:
+        module.inspect_acl(FS(), malformed, path)
+    assert error.value.code == "ACL_UNKNOWN"
+
+
 def test_installation_evaluation_distinguishes_matching_stale_and_conflicting():
     module = subject()
     documents = module.expected_document_fixture(SHA, TREE)
@@ -930,6 +985,9 @@ class InstalledCommands:
         command = tuple(argv)
         if command == ("/usr/bin/true",):
             return {"status": "ok", "stdout": ""}
+        if command[:3] == ("/usr/bin/stat", "-f", "%Sp"):
+            assert command[3] in module.SOCKET_METADATA_PATHS
+            return {"status": "ok", "stdout": "srw-rw---- \n"}
         if command == ("/bin/launchctl", "print-disabled", "system"):
             entries = "".join(f'    "{label}" => true\n' for label in module.LABELS)
             return {"status": "ok", "stdout": f"disabled services = {{\n{entries}}}\n"}
