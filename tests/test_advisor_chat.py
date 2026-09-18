@@ -276,12 +276,22 @@ def test_advisor_action_is_proposal_only_and_cannot_touch_paper_state(tmp_path, 
     from brain import bot_mcp
     from brain import research_paper as rp
     from portfolio import advisor_trade
+    from portfolio import lenses
     from portfolio import paper_account as pa
     from portfolio import position_log as pl
 
     proposals = tmp_path / "recommendations.jsonl"
     monkeypatch.setattr(advisor_trade, "_PROPOSALS", proposals)
     monkeypatch.setattr(rp, "latest_for", lambda ticker: {"ticker": ticker, "confirmed": True})
+    # This test owns the proposal-only/no-execution invariant, not gate eligibility. Arrange a
+    # complete current preliminary gate so the proposal path is intentionally reachable.
+    monkeypatch.setattr(lenses, "full", lambda *_a, **_k: {
+        "subject": "AAPL", "kind": "name",
+        "rows": [{"lens": "trend", "direction": "bull"}],
+        "synthesis": {
+            "confluence": 0.42, "size_authority": "up", "vetoes": [], "divergences": []
+        },
+    })
 
     # Any regression into the former mutation path fails loudly.
     monkeypatch.setattr(pa, "execute_fill", lambda *a, **k: (_ for _ in ()).throw(
