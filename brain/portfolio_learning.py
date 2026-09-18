@@ -24,6 +24,7 @@ import math
 import os
 import re
 import tempfile
+import threading
 import uuid
 from contextlib import contextmanager
 from datetime import UTC, date, datetime
@@ -50,7 +51,10 @@ LESSON_AUTHORITY = "research_request_only"
 APPLICATION_AUTHORITY = "observational_only"
 LESSON_TRACE_COHORT = "portfolio_v2_lesson_trace"
 _ACTIVE_PRESENTATIONS: dict[tuple[str, str], str] = {}
-_TRACE_JSONL_NAMES = frozenset({"applications.jsonl", "presentations.jsonl"})
+_STRICT_ATOMIC_JSONL_NAMES = frozenset({
+    "applications.jsonl", "presentations.jsonl", "context_requests.jsonl",
+})
+_CONTEXT_LOCAL_LOCK = threading.RLock()
 _LESSON_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
 _LESSON_ID_RE = re.compile(
     r"^lesson\.v1\.(US_ONLY|CN_ONLY|HK_ONLY|CROSS_MARKET_CANDIDATE)\."
@@ -174,7 +178,7 @@ def _read_jsonl(path: Path) -> list[dict]:
     application rows are settlement lineage, so an existing malformed row is failed evidence rather
     than an invitation to reason from a thinner ledger.
     """
-    strict = path.name in _TRACE_JSONL_NAMES
+    strict = path.name in _STRICT_ATOMIC_JSONL_NAMES
     if not path.exists():
         return []
     try:
@@ -213,8 +217,8 @@ def _fsync_parent(path: Path) -> None:
         pass
 
 
-def _replace_trace_jsonl(path: Path, rows: list[dict]) -> None:
-    """Atomically publish one complete lesson trace ledger."""
+def _replace_atomic_jsonl(path: Path, rows: list[dict]) -> None:
+    """Atomically publish one complete canonical JSONL ledger."""
     if not all(isinstance(value, dict) for value in rows):
         raise ValueError("lesson trace rows must be mappings")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -250,9 +254,9 @@ def _replace_trace_jsonl(path: Path, rows: list[dict]) -> None:
 def _append_jsonl(path: Path, row: dict) -> bool:
     """Append one complete transition and report whether it reached the local ledger."""
     try:
-        if path.name in _TRACE_JSONL_NAMES:
+        if path.name in _STRICT_ATOMIC_JSONL_NAMES:
             prior = _read_jsonl(path)
-            _replace_trace_jsonl(path, [*prior, row])
+            _replace_atomic_jsonl(path, [*prior, row])
             return True
 
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -2050,6 +2054,26 @@ def application_finalization_status(
     }
 
 
+def _context_request_lock_path() -> Path:
+    return _DIR / ".context_requests.lock"
+
+
+@contextmanager
+def _context_request_lock():
+    """Serialize context-request read/decide/write transitions across threads and processes."""
+    with _CONTEXT_LOCAL_LOCK:
+        _DIR.mkdir(parents=True, exist_ok=True)
+        with _context_request_lock_path().open("a+", encoding="utf-8") as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                try:
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+                except OSError:
+                    pass
+
+
 def request_context(book: str, plane: str, reason: str, ticker: str | None = None) -> dict:
     """Queue a bounded context-access request for later orchestrator review."""
     b = _clean_book(book)
@@ -2060,17 +2084,29 @@ def request_context(book: str, plane: str, reason: str, ticker: str | None = Non
         return {"ok": False, "error": "plane must be a lowercase typed identifier"}
     if len(why) < 20:
         return {"ok": False, "error": "reason must explain the decision-relevant gap"}
-    existing = context_requests(limit=500)
-    dedupe = (b, p, tk, why.lower())
-    if any((r.get("book"), r.get("plane"), r.get("ticker"), str(r.get("reason") or "").lower()) == dedupe
-           for r in existing[-200:]):
-        return {"ok": True, "deduped": True}
-    row = {"schema": "portfolio.context_request.v1", "id": f"ctx-{uuid.uuid4().hex[:16]}",
-           "ts": _now(), "book": b, "plane": p, "ticker": tk, "reason": why,
-           "status": "queued_for_orchestrator_review", "authority": "request_only"}
-    if not _append_jsonl(_DIR / "context_requests.jsonl", row):
-        return {"ok": False, "error": "context_request_write_failed"}
-    return {"ok": True, "request": row}
+    with _context_request_lock():
+        existing = context_requests(limit=500)
+        dedupe = (b, p, tk, why.lower())
+        if any(
+            (r.get("book"), r.get("plane"), r.get("ticker"), str(r.get("reason") or "").lower())
+            == dedupe
+            for r in existing[-200:]
+        ):
+            return {"ok": True, "deduped": True}
+        row = {
+            "schema": "portfolio.context_request.v1",
+            "id": f"ctx-{uuid.uuid4().hex[:16]}",
+            "ts": _now(),
+            "book": b,
+            "plane": p,
+            "ticker": tk,
+            "reason": why,
+            "status": "queued_for_orchestrator_review",
+            "authority": "request_only",
+        }
+        if not _append_jsonl(_DIR / "context_requests.jsonl", row):
+            return {"ok": False, "error": "context_request_write_failed"}
+        return {"ok": True, "request": row}
 
 
 def context_requests(limit: int | None = 50) -> list[dict]:
@@ -2098,34 +2134,40 @@ def advance_context_request(
     status_value = str(status_value or "")
     if not rid.startswith("ctx-") or status_value not in _CONTEXT_STATUSES:
         return False
-    existing = next((row for row in context_requests(limit=None) if row.get("id") == rid), None)
-    if existing is None:
-        return False
-    if (existing.get("status") == status_value and
-            (not directive_id or existing.get("directive_id") == str(directive_id)[:40])):
-        return True
-    current_status = str(existing.get("status") or "")
-    current_rank = _CONTEXT_STATUS_RANK.get(current_status, -1)
-    target_rank = _CONTEXT_STATUS_RANK.get(status_value, -1)
-    # Reconciliation may observe an older directive delta after the request has already advanced.
-    # Treat that as satisfied, never append a regressive state transition. Conflicting terminal
-    # states remain fail-closed and require explicit operator resolution.
-    if current_rank > target_rank:
-        return True
-    if current_rank == target_rank and current_status != status_value:
-        return False
-    row = {
-        "schema": "portfolio.context_request_transition.v1",
-        "id": rid,
-        "ts": _now(),
-        "status": status_value,
-        "authority": "request_only",
-    }
-    if directive_id:
-        row["directive_id"] = str(directive_id)[:40]
-    if note:
-        row["note"] = " ".join(str(note).split())[:280]
-    return _append_jsonl(_DIR / "context_requests.jsonl", row)
+    with _context_request_lock():
+        existing = next(
+            (row for row in context_requests(limit=None) if row.get("id") == rid),
+            None,
+        )
+        if existing is None:
+            return False
+        if (
+            existing.get("status") == status_value
+            and (not directive_id or existing.get("directive_id") == str(directive_id)[:40])
+        ):
+            return True
+        current_status = str(existing.get("status") or "")
+        current_rank = _CONTEXT_STATUS_RANK.get(current_status, -1)
+        target_rank = _CONTEXT_STATUS_RANK.get(status_value, -1)
+        # Reconciliation may observe an older directive delta after the request has already advanced.
+        # Treat that as satisfied, never append a regressive state transition. Conflicting terminal
+        # states remain fail-closed and require explicit operator resolution.
+        if current_rank > target_rank:
+            return True
+        if current_rank == target_rank and current_status != status_value:
+            return False
+        row = {
+            "schema": "portfolio.context_request_transition.v1",
+            "id": rid,
+            "ts": _now(),
+            "status": status_value,
+            "authority": "request_only",
+        }
+        if directive_id:
+            row["directive_id"] = str(directive_id)[:40]
+        if note:
+            row["note"] = " ".join(str(note).split())[:280]
+        return _append_jsonl(_DIR / "context_requests.jsonl", row)
 
 
 def acknowledge_context_directives(directive_ids: set[str] | list[str] | tuple[str, ...]) -> int:

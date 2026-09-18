@@ -90,9 +90,9 @@ def test_trace_replace_failure_preserves_prior_complete_bytes(tmp_path, monkeypa
     assert not list(path.parent.glob(f".{path.name}.*.tmp"))
 
 
-def test_non_trace_jsonl_keeps_existing_best_effort_read_contract(tmp_path, monkeypatch):
+def test_unrelated_jsonl_keeps_existing_best_effort_read_contract(tmp_path, monkeypatch):
     pl = _wire(tmp_path, monkeypatch)
-    path = tmp_path / "learning" / "context_requests.jsonl"
+    path = tmp_path / "learning" / "legacy_best_effort.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"id": "ctx-good"}) + "\n{broken\n", encoding="utf-8")
 
