@@ -1052,3 +1052,11 @@ def test_capacity_boot_runtime_attestor_refuses_acl_observer_failure(
                 AssertionError("probe must not run after ACL observer failure")
             ),
         )
+
+
+def test_capacity_boot_runtime_contract_reuses_capacity_acl_owner():
+    from control_plane import ceo_boot_packet as packet
+    from ops.executive_os import capacity_host_artifacts
+
+    contract = packet._capacity_runtime_contract()
+    assert contract.has_extended_acl is capacity_host_artifacts._descriptor_has_extended_acl
