@@ -325,6 +325,17 @@ def _sealed_root_executable(value: Any, name: str) -> Path:
     return path
 
 
+def _attest_app_boot_runtime(path: Path) -> Path:
+    """Bind the optional App boot interpreter to the accepted CF2 capacity runtime."""
+    from control_plane.ceo_boot_packet import attest_capacity_boot_runtime
+
+    try:
+        attest_capacity_boot_runtime(path)
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        raise ServiceError("App boot runtime attestation failed") from exc
+    return path
+
+
 def _integer(value: Any, name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise ServiceError(f"control config {name} must be a non-negative integer")
@@ -429,8 +440,11 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
             config["ceo_ingress_app_macro_root"], "ceo_ingress_app_macro_root"
         )
         if "ceo_ingress_app_boot_python" in config:
-            config["ceo_ingress_app_boot_python"] = _sealed_root_executable(
+            sealed_boot_python = _sealed_root_executable(
                 config["ceo_ingress_app_boot_python"], "ceo_ingress_app_boot_python"
+            )
+            config["ceo_ingress_app_boot_python"] = _attest_app_boot_runtime(
+                sealed_boot_python
             )
     if observation_present:
         config["dialogue_observation_peer_uid"] = _integer(
@@ -1109,6 +1123,8 @@ def _service_from_config(
             runtime_root=Path(raw["runtime_root"]),
             boot_python=(Path(raw["ceo_ingress_app_boot_python"])
                          if "ceo_ingress_app_boot_python" in raw else None),
+            code_root=Path(__file__).resolve().parents[1],
+            expected_source_sha=str(raw["proof_base_sha"]),
         )
         ceo_ingress_kwargs["ceo_ingress_app_binding"] = CeoIngressAppBinding(
             peer_uid=int(raw["ceo_ingress_app_peer_uid"]),

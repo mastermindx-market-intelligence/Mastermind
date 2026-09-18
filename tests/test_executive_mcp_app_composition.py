@@ -51,6 +51,10 @@ def settings(rsa_key, tmp_path, short_socket_root):
     (macro / "scripts").mkdir(parents=True)
     (macro / "scripts" / "agentos.py").write_text("")
     (macro / "agentos").mkdir()
+    # The installed reader binds the complete filesystem path set to HEAD. Keep
+    # the fixture's Agent OS directory represented in Git instead of leaving an
+    # untracked empty directory that production correctly refuses.
+    (macro / "agentos" / ".keep").write_text("")
     fixture._git_repo(macro)
     return fixture._real_app_settings(
         rsa_key, mastermind_root=mastermind, macro_root=macro,
@@ -205,7 +209,7 @@ def test_real_mcp_admission_duplicate_conflict_and_same_request_status(
             async with connection(bound) as client:
                 token = fixture._submit_token(rsa_key)
                 _, body = await call(client, token, "submit_ceo_intent", PAYLOAD)
-                assert body["status"] == "accepted", body
+                assert body.get("status") == "accepted", body
                 receipt = body["receipt"]
                 assert receipt["status"] == "QUEUED"
                 assert receipt["dispatched"] is False
