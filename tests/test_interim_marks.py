@@ -43,7 +43,9 @@ def test_scorecard_hit_rate_and_underwater(tmp_path, monkeypatch):
     assert [w["subject"] for w in ew] == ["BBB"]             # only the underwater name is flagged
 
 
-def test_record_never_raises(tmp_path, monkeypatch):
+def test_record_propagates_canonical_thesis_read_failure(tmp_path, monkeypatch):
     monkeypatch.setattr(IM, "_PATH", tmp_path / "im.jsonl")
     monkeypatch.setattr(IM, "all_theses", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
-    assert IM.record("2026-07-10") == {"n_marks": 0, "new": 0}   # degrade-safe
+    import pytest
+    with pytest.raises(RuntimeError, match="boom"):
+        IM.record("2026-07-10")
