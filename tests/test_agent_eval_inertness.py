@@ -691,6 +691,10 @@ ALLOWED_PATHS = frozenset(
         "scripts/agent_eval/prereg.py",
         "tests/test_agent_eval_prereg.py",
         "experiments/agent_eval/e1/preregistration.json",
+        # Pro-turn conformance extension, Chairman-authorized 2026-09-17,
+        # operation pro-turn-conformance-corpus-20260917-sol-001.
+        "docs/superpowers/plans/2026-09-17-pro-turn-conformance-corpus.md",
+        "tests/test_agent_eval_pro_turn_corpus.py",
     }
 )
 
@@ -700,13 +704,13 @@ ALLOWED_PATHS = frozenset(
 # to this fence only by explicit principal authorization, never by the
 # wave's own worker unilaterally widening its own gate. C0's corpus tree
 # (``corpus/agent_eval/``) grows case-by-case across this and future
-# C0-lineage waves without renaming any script or test, so it is the one
-# path allowed as a PREFIX rather than an ever-growing enumerated file
-# list -- every other wave's surface (R0's own paths above, and C0's three
-# new exact files above) stays exact-path-only. A future wave widening
-# this ratchet further still needs its own explicit principal
-# authorization and its own operation-key citation, exactly like this one.
-ALLOWED_PATH_PREFIXES = frozenset({"corpus/agent_eval/"})
+# C0-lineage waves without renaming any script or test, so it established
+# the bounded corpus-prefix mechanism rather than an ever-growing file list.
+# The Chairman-authorized Pro-turn extension (2026-09-17, operation
+# pro-turn-conformance-corpus-20260917-sol-001) adds the second corpus prefix
+# while reusing the same filename/type guard below. Any further widening
+# still needs explicit principal authorization and its own operation citation.
+ALLOWED_PATH_PREFIXES = frozenset({"corpus/agent_eval/", "corpus/agent_eval_pro_turns/"})
 
 # NB-8 repair: a prefix in ALLOWED_PATH_PREFIXES is NOT a blanket allowance
 # for any file type dropped under that tree -- admission is further
@@ -1064,3 +1068,11 @@ def test_fence_scoping_unratcheted_program_adjacent_file_still_fails(tmp_path: P
     assert _fence_not_applicable_reason(changed) is None
     unexpected = {path for path in changed if not _changed_path_is_allowed(path)}
     assert unexpected == {adjacent_path}  # FAIL: not yet ratchet-authorized
+
+def test_pro_turn_conformance_surface_ratchet_is_narrow():
+    assert _changed_path_is_allowed("docs/superpowers/plans/2026-09-17-pro-turn-conformance-corpus.md")
+    assert _changed_path_is_allowed("tests/test_agent_eval_pro_turn_corpus.py")
+    assert _changed_path_is_allowed("corpus/agent_eval_pro_turns/README.md")
+    assert _changed_path_is_allowed("corpus/agent_eval_pro_turns/scenarios/carrier_protocol_compliance/healthy_chunk/v1/scenario.json")
+    assert _changed_path_is_allowed("corpus/agent_eval_pro_turns/scenarios/carrier_protocol_compliance/healthy_chunk/v1/fixtures/input.json")
+    assert not _changed_path_is_allowed("corpus/agent_eval_pro_turns/scenarios/carrier_protocol_compliance/healthy_chunk/v1/payload.py")
