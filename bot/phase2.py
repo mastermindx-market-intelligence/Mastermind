@@ -1349,8 +1349,13 @@ def run(asof: str | None = None, force: bool = False, research: bool = False,
     except Exception:  # noqa: BLE001 — the re-review is additive; never break the build
         _w8_promoted = []
 
+    # live=True: `asof` labels the trading day being decided, and the build uses the best CURRENT
+    # evidence. It is declared here because only this call site knows it is the live run — the Macro
+    # lanes publish on different cadences, so `asof` (the regime date) is routinely OLDER than the
+    # artifacts this build must read, and any wall-clock guess would make live sources inert. A
+    # historical replay omits it and gets the point-in-time contract (portfolio/conviction.build).
     _build_result = conviction.build(conv_budget, name_cap=cfg["caps"]["name_cap"], held=_held_conv,
-                                     asof=asof, extra_candidates=_w8_promoted)
+                                     asof=asof, extra_candidates=_w8_promoted, live=True)
     # conviction.build returns (sized_list, rejected_list) as a tuple
     if isinstance(_build_result, tuple) and len(_build_result) == 2:
         sized, _rejected = _build_result
