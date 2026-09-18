@@ -1438,7 +1438,16 @@ async def file_research_paper(args):
         "report_md": report_md,
     }
     rp._attach_gate(paper, confluence)          # -> engine_score, combined, confirmed, gate_reason
-    rp.save_paper(paper)
+    try:
+        rp.save_paper(paper)
+    except Exception:  # noqa: BLE001 - atomic save guarantees no canonical replacement on failure
+        return _json({
+            "ticker": t,
+            "write_status": "unavailable",
+            "error": "research_paper_save_unavailable",
+            "paper_saved": False,
+            "note": "Research paper was not filed because canonical persistence did not complete.",
+        })
     try:
         rp.write_feed_note(paper)
     except Exception:
