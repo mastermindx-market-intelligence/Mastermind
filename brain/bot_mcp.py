@@ -508,16 +508,57 @@ async def get_portfolio(args):
 @tool("get_decision_matrix", "The MULTI-SIDED decision matrix for a name or theme — every lens (valuation, quality, growth, narrative, leadership, asymmetry, risk, policy/admin tilt, Fed, institutional flows, options, rate sensitivity, cross-asset, conviction) with its read + honest status, plus the confluence/divergence synthesis. ALWAYS call this before any verdict.",
       {"type": "object", "properties": {"subject": {"type": "string"}, "kind": {"type": "string", "enum": ["name", "theme"]}}, "required": ["subject"]})
 async def get_decision_matrix(args):
-    from portfolio import lenses
-    return _json(lenses.full(args["subject"], args.get("kind", "name")))
+    subject = str(args["subject"])
+    try:
+        from portfolio import lenses
+        payload = lenses.full(subject, args.get("kind", "name"))
+        if (not isinstance(payload, dict)
+                or not isinstance(payload.get("rows"), list)
+                or not isinstance(payload.get("synthesis"), dict)):
+            raise TypeError("decision matrix payload is malformed")
+    except Exception:  # noqa: BLE001
+        return _json({
+            "subject": subject,
+            "read_status": "unavailable",
+            "error": "decision_matrix_unavailable",
+            "failed_sources": ["decision_matrix"],
+        })
+    return _json(payload)
 
 
 @tool("get_divergences", "Just the divergence patterns for a subject — where the lenses DISAGREE (the edge or the trap): distribution, early_edge, high_confluence_buy, crowded_top, policy_early.",
       {"type": "object", "properties": {"subject": {"type": "string"}, "kind": {"type": "string", "enum": ["name", "theme"]}}, "required": ["subject"]})
 async def get_divergences(args):
-    from portfolio import lenses
-    s = lenses.synthesize(lenses.decision_matrix(args["subject"], args.get("kind", "name")))
-    return _json({"divergences": s["divergences"], "confluence": s["confluence"], "vetoes": s["vetoes"]})
+    subject = str(args["subject"])
+    try:
+        from portfolio import lenses
+        matrix = lenses.decision_matrix(subject, args.get("kind", "name"))
+        if not isinstance(matrix, dict) or not isinstance(matrix.get("rows"), list):
+            raise TypeError("decision matrix payload is malformed")
+    except Exception:  # noqa: BLE001
+        return _json({
+            "subject": subject,
+            "read_status": "unavailable",
+            "error": "divergence_synthesis_unavailable",
+            "failed_sources": ["decision_matrix"],
+        })
+    try:
+        synthesis = lenses.synthesize(matrix)
+        if not isinstance(synthesis, dict):
+            raise TypeError("lens synthesis is not a mapping")
+        divergences = synthesis["divergences"]
+        confluence = synthesis["confluence"]
+        vetoes = synthesis["vetoes"]
+        if not isinstance(divergences, list) or not isinstance(vetoes, list):
+            raise TypeError("lens synthesis lists are malformed")
+    except Exception:  # noqa: BLE001
+        return _json({
+            "subject": subject,
+            "read_status": "unavailable",
+            "error": "divergence_synthesis_unavailable",
+            "failed_sources": ["divergence_synthesis"],
+        })
+    return _json({"divergences": divergences, "confluence": confluence, "vetoes": vetoes})
 
 
 @tool("get_altdata", "Alternative-data flow + Trump-family/administration linkage for a NAME — cross-signal convergence across congress/insider/government-contract/lobbying/Trump-trade channels, plus whether the name sits in the latent-stake entity graph (e.g. American Bitcoin -> Hut 8, branded crypto but the value accrues to an AI-power-infra parent). A QUALITATIVE research signal: politically-linked smart-money flow. Public-record + CONTEXT-ONLY (never a scored axis) — informs narrative/conviction, never sizes alone.",
