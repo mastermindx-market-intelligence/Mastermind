@@ -91,6 +91,13 @@ Mandatory after current-state recovery for substantial continuing or modifying C
 active session. It keeps Sol on the highest-leverage unblocked critical-path dependency, prevents
 status/artifact substitution and repeated tool rediscovery, and applies the final-response gate.
 
+### `SESSION_RELIABILITY.md`
+Mandatory companion whenever a session expects more than three tool calls, starts or continues a host process,
+performs multi-source archaeology, resumes after any generation/tool failure, or is expected to run longer than
+one material phase. It bounds output at source, reconciles timeout/taint by exact identity, checkpoints before
+context pressure, and rotates through the existing context-rotation owner without creating another lifecycle,
+memory, retry, session, or transport plane.
+
 ### `WEB_CEO_DELEGATION.md`
 Mandatory companion to `ACTIVE_EXECUTION.md` for substantial Web CEO work that requires
 principal-duty selection, delegation economics, worker packets, capacity-aware routing, or

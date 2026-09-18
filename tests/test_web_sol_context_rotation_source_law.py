@@ -12,6 +12,9 @@ PLAN_PATH = (
 HIERARCHY_PATH = "docs/EXECUTIVE_CHAT_NATIVE_SOL_HIERARCHY_LAW.md"
 SESSION_TARGETS_PATH = "control_plane/session_targets.py"
 ACTION_TARGET_PATH = "control_plane/sol_action_target.py"
+SESSION_RELIABILITY_PATH = "docs/sol_skills/SESSION_RELIABILITY.md"
+INDEX_PATH = "docs/sol_skills/INDEX.md"
+BOOTSTRAP_KERNEL_PATH = "docs/sol_skills/BOOTSTRAP_KERNEL.md"
 
 
 def _read(path: str) -> str:
@@ -315,3 +318,93 @@ def test_implementation_plan_preserves_open_carriers_and_one_capability_per_pr()
     )
     for phrase in required:
         assert phrase in plan, f"implementation plan omits required boundary: {phrase}"
+
+
+def test_session_reliability_skill_is_enrolled_and_compatible() -> None:
+    path = ROOT / SESSION_RELIABILITY_PATH
+    assert path.exists(), f"missing protected session-reliability skill: {path}"
+    skill = _read(SESSION_RELIABILITY_PATH)
+    index = _normalized(_read(INDEX_PATH))
+
+    for phrase in (
+        "schema: mastermind.sol_skillpack.v1",
+        "skillpack_version: 1.0.1",
+        "minimum_bootstrap_major: 1",
+        "skill: session_reliability",
+    ):
+        assert phrase in skill, f"session-reliability skill omits compatible metadata: {phrase}"
+    assert "### `SESSION_RELIABILITY.md`" in index
+    for trigger in (
+        "more than three tool calls",
+        "starts or continues a host process",
+        "multi-source archaeology",
+        "resumes after any generation/tool failure",
+        "longer than one material phase",
+    ):
+        assert trigger in index, f"INDEX omits session-reliability trigger: {trigger}"
+
+
+def test_session_reliability_budgets_capsule_and_no_duplicate_plane_are_explicit() -> None:
+    skill = _normalized(_read(SESSION_RELIABILITY_PATH))
+    for phrase in (
+        "8 KiB or 150 lines",
+        "16 KiB",
+        "100 matches",
+        "32 KiB",
+        "six material tool calls",
+        "15 seconds",
+        "30 seconds",
+        "12 KiB / 1500 words",
+        "UNRESOLVED EFFECTS / PIDS / REQUEST REFS",
+        "WHAT MUST NOT BE REDONE",
+        "no transcript database",
+        "no chat lifecycle database",
+        "no retry ledger",
+        "no alternate RuntimeBinding writer",
+    ):
+        assert phrase in skill, f"session-reliability skill omits budget/capsule boundary: {phrase}"
+
+
+def test_rotation_threshold_taint_hygiene_and_compact_kernel_are_aligned() -> None:
+    law = _normalized(_read(LAW_PATH))
+    skill = _normalized(_read(SESSION_RELIABILITY_PATH))
+    kernel = _normalized(_read(BOOTSTRAP_KERNEL_PATH))
+
+    required = (
+        "two consecutive terminal generation failures",
+        "no successful intervening turn",
+        "one resume failure",
+        "unresolved tool timeout",
+        "connector taint",
+        "EFFECT_UNKNOWN",
+        "tainted connector generation",
+        "raw tool history is not a continuation manifest",
+        "already-durable continuation",
+        "Thinking failed != context exhausted",
+        "exact surface cannot safely continue",
+        "Chairman explicitly retires the conversation",
+    )
+    for phrase in required:
+        assert phrase in law, f"context-rotation law omits session-hygiene rule: {phrase}"
+        assert phrase in skill, f"session-reliability skill omits session-hygiene rule: {phrase}"
+
+    for phrase in (
+        "allow at most one clean retry when no effect is uncertain",
+        "original carrier and connector generation",
+        "never authorizes replay or carrier failover",
+    ):
+        assert phrase in skill, f"session-reliability skill omits retry/taint fence: {phrase}"
+
+    for phrase in (
+        "SESSION RELIABILITY",
+        "load current protected docs/sol_skills/SESSION_RELIABILITY.md",
+        "Bound tool output at source",
+        "checkpoint before context pressure",
+        "reconcile timed-out or tainted tool operations by exact identity",
+        "two consecutive terminal generation failures with no successful intervening turn",
+        "one resume failure following unresolved tool timeout, connector taint, or EFFECT_UNKNOWN",
+        "stop executing in that conversation",
+        "Never keep issuing Continue into a surface classified ROTATION_REQUIRED",
+        "never paste raw tool history into its successor",
+    ):
+        assert phrase in kernel, f"bootstrap kernel omits compact reliability law: {phrase}"

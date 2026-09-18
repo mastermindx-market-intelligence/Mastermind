@@ -245,6 +245,14 @@ execution may continue only inside its existing grant; unresolved judgment stays
 owner or successor. Exact parent consumption must be proven, not inferred from delivery or a tab name.
 No supported continuation means an honest held result, not a fabricated wake.
 
+At a verified semantic phase boundary, checkpoint accepted deltas and rotate before another
+high-context phase **only when the exact surface is `ROTATION_REQUIRED`, all modifying effects are
+reconciled, a compact durable continuation exists, and one lawful successor can recover the same
+responsibility**. This is proactive continuity, not premature stopping: optimize durable capability
+progress and decision quality, not turn length, token volume, tool-call count, or wall-clock duration.
+Completed work becomes do-not-redo; the successor loads the durable frontier and only the minimum
+fresh canonical state required by the exact next action.
+
 Measure accepted capability progress per Pro turn, worker spend per accepted outcome, avoidable
 repair, review backlog, and completion/continuation reliability through existing evaluation and evidence owners; no new telemetry store.
 Separate successful early completion from premature stopping and platform interruption. Record the
@@ -269,7 +277,11 @@ Before ending a substantial active-execution turn, classify the state into exact
   in-scope lane remains;
 * `DURABLE_EXECUTION_RUNNING` — real external durable execution is proven started/running under its
   canonical owner, with a lawful return/wake path armed; local turn continuation would add no useful
-  work until that result arrives.
+  work until that result arrives;
+* `CONTEXT_ROTATION` — the exact surface is `ROTATION_REQUIRED`, modifying effects are reconciled,
+  a compact durable continuation exists, and one lawful successor can recover the same responsibility.
+  The parent mission remains active. This is not success, completion, or acceptance; it is a local
+  continuation boundary governed by `SESSION_RELIABILITY.md` and the existing context-rotation law.
 
 If the truthful classification is `MORE_WORK_EXISTS`, **do not finalize**. Select the highest-leverage
 unblocked dependency and continue execution.
@@ -362,6 +374,8 @@ A substantial CEO continuation passes this skill when:
   independent of that uncertainty;
 * no background continuation is claimed without a real durable owner and return path;
 * Sol never finalizes while the truthful state is `MORE_WORK_EXISTS`;
+* a `CONTEXT_ROTATION` boundary occurs only after a verified semantic phase, reconciled effects,
+  and a compact durable continuation; it leaves the parent mission active and completed work do-not-redo;
 * the final stop classification and exact next action are recoverable by a fresh session; and
 * no new lifecycle, queue, retry, memory, permission, or control plane was created to enforce this
   procedure.
