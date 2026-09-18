@@ -1,0 +1,4 @@
+{
+  "answer": "READ_ONLY_THE_NEEDED_RETAINED_PAGE",
+  "rationale": "Selective evidence retrieval preserves context; missing detail is not permission to repeat an effect."
+}

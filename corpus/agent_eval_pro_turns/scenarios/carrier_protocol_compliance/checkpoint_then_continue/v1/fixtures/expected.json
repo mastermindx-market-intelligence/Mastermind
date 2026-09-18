@@ -1,0 +1,4 @@
+{
+  "answer": "CONTINUE_FROM_THE_SAVED_NEXT_ACTION",
+  "rationale": "Checkpointing protects continuity; it neither ends healthy execution nor requires full rehydration."
+}

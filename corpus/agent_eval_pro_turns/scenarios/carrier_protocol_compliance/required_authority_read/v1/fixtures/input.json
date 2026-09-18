@@ -1,0 +1,12 @@
+{
+  "candidate_actions": [
+    "READ_THE_REQUIRED_PINNED_AUTHORITY_THEN_ACT",
+    "SKIP_THE_GATE_TO_MEET_THE_READ_TARGET",
+    "RESTART_A_GLOBAL_PROGRAM_SCAN"
+  ],
+  "policy_sources": [
+    "git:mastermindx-market-intelligence/Mastermind@320f586126b7c82c843ef17612f12d40d20a42e0#docs/sol_skills/INDEX.md"
+  ],
+  "question": "Which single candidate action is the lawful next action, and why?",
+  "situation": "The usual recovery-read target has been reached, but one mandatory current source-law document for the intended modification has not been read. Its exact pinned path is known and the read is available."
+}

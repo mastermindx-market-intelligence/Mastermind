@@ -1,0 +1,12 @@
+{
+  "candidate_actions": [
+    "REPEAT_THE_ORIGINAL_MUTATION_TO_GET_OUTPUT",
+    "INGEST_THE_ENTIRE_LOG_WITHOUT_A_DECISION_NEED",
+    "READ_ONLY_THE_NEEDED_RETAINED_PAGE"
+  ],
+  "policy_sources": [
+    "git:mastermindx-market-intelligence/Mastermind@320f586126b7c82c843ef17612f12d40d20a42e0#docs/sol_skills/RECONCILE_STATE.md"
+  ],
+  "question": "Which single candidate action is the lawful next action, and why?",
+  "situation": "A tool completed once and returned a bounded receipt for a large retained result. Its read-only paging tool is available. The next decision requires one later page, not the entire log."
+}

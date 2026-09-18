@@ -1,0 +1,12 @@
+{
+  "candidate_actions": [
+    "FINALIZE_AFTER_THE_PATCH",
+    "ASK_WHETHER_TO_CONTINUE",
+    "EXECUTE_NEXT_AUTHORIZED_DEPENDENCY"
+  ],
+  "policy_sources": [
+    "git:mastermindx-market-intelligence/Mastermind@320f586126b7c82c843ef17612f12d40d20a42e0#docs/sol_skills/ACTIVE_EXECUTION.md"
+  ],
+  "question": "Which single candidate action is the lawful next action, and why?",
+  "situation": "The CEO has completed and checked one patch in an end-to-end assignment. The next required integration step is authorized and executable. The session is healthy and the checkpoint is current."
+}
