@@ -6,9 +6,12 @@ Claude's reads return real dashboard data and its actions write to the app's rev
 import asyncio
 import json
 from pathlib import Path
+from unittest.mock import AsyncMock, Mock
 
 import bot  # noqa: F401
 import pytest
+from claude_agent_sdk import create_sdk_mcp_server, tool
+from claude_agent_sdk._internal.query import Query
 
 from brain import bot_mcp, cli_bridge
 
@@ -17,6 +20,61 @@ _ROOT = Path(__file__).resolve().parent.parent
 
 def _text(result: dict) -> str:
     return result["content"][0]["text"]
+
+
+def _strict_json(text: str):
+    return json.loads(
+        text,
+        parse_constant=lambda token: (_ for _ in ()).throw(ValueError(token)),
+    )
+
+
+def _utf8_bytes(text: str) -> int:
+    return len(text.encode("utf-8"))
+
+
+async def _sdk_wire_tool_call(config: dict, tool_name: str, arguments: dict) -> dict:
+    """Drive the actual SDK in-memory server over its JSON-RPC request seam."""
+    transport = AsyncMock()
+    transport.is_ready = Mock(return_value=True)
+    query = Query(
+        transport=transport,
+        is_streaming_mode=True,
+        sdk_mcp_servers={"bot": config["instance"]},
+    )
+    try:
+        initialized = await query._handle_sdk_mcp_request(
+            "bot",
+            {
+                "jsonrpc": "2.0",
+                "id": 0,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-06-18",
+                    "capabilities": {},
+                    "clientInfo": {"name": "test-client", "version": "0"},
+                },
+            },
+        )
+        assert initialized and "result" in initialized
+        assert await query._handle_sdk_mcp_request(
+            "bot",
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+        ) is None
+        response = await query._handle_sdk_mcp_request(
+            "bot",
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": tool_name, "arguments": arguments},
+            },
+        )
+        assert response and "error" not in response
+        return response["result"]
+    finally:
+        await query.close()
+        query.close_receive_stream()
 
 
 def test_read_tools_return_real_data():
@@ -78,6 +136,287 @@ def test_json_transport_compaction_remains_valid_json():
     assert parsed["status"] == "ok"
     assert parsed["_transport_truncated"] is True
     assert parsed["rows"]
+
+
+def test_json_transport_preserves_ordinary_json_and_counts_utf8_bytes():
+    result = bot_mcp._json(
+        {"status": "ok", "none": None, "zero": 0, "flag": False, "rows": ["電", "🚀"]}
+    )
+    text = _text(result)
+
+    assert _strict_json(text) == {
+        "status": "ok", "none": None, "zero": 0, "flag": False, "rows": ["電", "🚀"]
+    }
+    assert _utf8_bytes(text) <= 8_000
+    assert result.get("is_error") is not True
+
+
+def test_json_transport_accepts_exactly_8000_bytes_and_compacts_8001():
+    exact = bot_mcp._json({"v": "x" * 7_991})
+    overflow = bot_mcp._json({"v": "x" * 7_992})
+
+    assert _utf8_bytes(_text(exact)) == 8_000
+    assert _strict_json(_text(exact)) == {"v": "x" * 7_991}
+    assert _utf8_bytes(_text(overflow)) <= 8_000
+    assert _strict_json(_text(overflow))["_transport_truncated"] is True
+
+
+def test_json_transport_measures_final_unicode_payload_after_metadata():
+    result = bot_mcp._json({"rows": ["電" * 240 for _ in range(20)]})
+    text = _text(result)
+
+    assert _utf8_bytes(text) == 7_280
+    assert _strict_json(text)["_transport_truncated"] is True
+
+
+def test_json_transport_rechecks_final_metadata_at_the_utf8_boundary():
+    payload = {"k" * 6_792: "電" * 2_700}
+    first_compact = bot_mcp._compact_json_value(payload, list_limit=20, str_limit=400)
+    first_text = json.dumps(first_compact, ensure_ascii=False, allow_nan=False)
+    first_compact["_transport_truncated"] = True
+    marked_text = json.dumps(first_compact, ensure_ascii=False, allow_nan=False)
+    result = bot_mcp._json(payload)
+    text = _text(result)
+
+    assert _utf8_bytes(first_text) == 8_000
+    assert _utf8_bytes(marked_text) == 8_030
+    assert _utf8_bytes(text) == 7_550
+    assert _strict_json(text)["_transport_truncated"] is True
+
+
+@pytest.mark.parametrize(
+    "payload",
+    (
+        {"v": "x" * 7_991},       # exactly 8,000 serialized UTF-8 bytes
+        {"v": "x" * 7_992},       # 8,001 bytes must compact instead of overflow
+        {"v": "電" * 2_700},       # character count is under 8k; UTF-8 bytes are not
+        {"v": "🚀" * 4_000},
+        {f"key-{index}": 1 for index in range(1_500)},
+        {f"key-{index}": "x" * 200 for index in range(150)},
+    ),
+)
+def test_json_transport_never_exceeds_utf8_budget_for_valid_payloads(payload):
+    result = bot_mcp._json(payload)
+    text = _text(result)
+
+    assert _utf8_bytes(text) <= 8_000
+    _strict_json(text)
+    assert result.get("is_error") is not True
+
+
+def test_json_transport_returns_fixed_error_for_wide_scalar_fallback():
+    result = bot_mcp._json({"k" * 9_000: 1})
+    text = _text(result)
+
+    assert _strict_json(text) == {"error": "MCP_RESPONSE_TOO_LARGE"}
+    assert result["is_error"] is True
+    assert _utf8_bytes(text) <= 8_000
+
+
+@pytest.mark.parametrize("value", (float("nan"), float("inf"), float("-inf"), "\ud800"))
+def test_json_transport_returns_fixed_error_for_non_strict_or_unencodable_values(value):
+    result = bot_mcp._json({"value": value})
+    text = _text(result)
+
+    assert _strict_json(text) == {"error": "MCP_RESPONSE_NOT_JSON"}
+    assert result["is_error"] is True
+    assert _utf8_bytes(text) <= 8_000
+
+
+def test_json_transport_catches_ordinary_serialization_exceptions():
+    class ExplosiveStringification:
+        def __str__(self):
+            raise RuntimeError("do not leak this")
+
+    result = bot_mcp._json({"value": ExplosiveStringification()})
+
+    assert _strict_json(_text(result)) == {"error": "MCP_RESPONSE_NOT_JSON"}
+    assert result["is_error"] is True
+
+
+@pytest.mark.parametrize("signal", (KeyboardInterrupt, SystemExit, GeneratorExit, asyncio.CancelledError))
+def test_json_transport_propagates_base_exception_subclasses(signal):
+    class TerminatingStringification:
+        def __str__(self):
+            raise signal()
+
+    with pytest.raises(signal):
+        bot_mcp._json({"value": TerminatingStringification()})
+
+
+def test_json_transport_propagates_termination_from_compaction_path():
+    class ChangesDuringSerialization:
+        calls = 0
+
+        def __str__(self):
+            type(self).calls += 1
+            if type(self).calls == 1:
+                return "x" * 9_000
+            raise KeyboardInterrupt()
+
+    with pytest.raises(KeyboardInterrupt):
+        bot_mcp._json({"value": ChangesDuringSerialization()})
+
+
+@pytest.mark.parametrize("root", (["x" * 1_000] * 50, tuple(["x" * 1_000] * 50), "x" * 9_000))
+def test_json_transport_refuses_oversized_non_object_roots(root):
+    result = bot_mcp._json(root)
+
+    assert _strict_json(_text(result)) == {"error": "MCP_RESPONSE_TOO_LARGE"}
+    assert result["is_error"] is True
+
+
+def test_real_decorated_handler_sets_sdk_wire_error_once(monkeypatch):
+    producer_calls = 0
+    handler_calls = 0
+    original_handler = bot_mcp.get_regime.handler
+
+    def invalid_regime(_path):
+        nonlocal producer_calls
+        producer_calls += 1
+        return {"quad": "Q1", "sector_rs": [float("nan")]}
+
+    async def counted_handler(args):
+        nonlocal handler_calls
+        handler_calls += 1
+        return await original_handler(args)
+
+    monkeypatch.setattr(bot_mcp, "_read_json", invalid_regime)
+    monkeypatch.setattr(bot_mcp.get_regime, "handler", counted_handler)
+
+    wire = asyncio.run(_sdk_wire_tool_call(bot_mcp.build_server(), "get_regime", {}))
+
+    assert handler_calls == 1
+    assert producer_calls == 1
+    assert wire["isError"] is True
+    assert _strict_json(wire["content"][0]["text"]) == {"error": "MCP_RESPONSE_NOT_JSON"}
+
+
+def test_real_decorated_handler_preserves_multilingual_success_through_sdk(monkeypatch):
+    producer_calls = 0
+    handler_calls = 0
+    original_handler = bot_mcp.get_regime.handler
+
+    def regime_fixture(_path):
+        nonlocal producer_calls
+        producer_calls += 1
+        return {"quad": "Q1", "cycle_tag": "電力", "growth_score": 0, "liquidity_overlay": False,
+                "sector_rs": ["🚀"], "data_quality": None}
+
+    async def counted_handler(args):
+        nonlocal handler_calls
+        handler_calls += 1
+        return await original_handler(args)
+
+    monkeypatch.setattr(bot_mcp, "_read_json", regime_fixture)
+    monkeypatch.setattr(bot_mcp.get_regime, "handler", counted_handler)
+    wire = asyncio.run(_sdk_wire_tool_call(bot_mcp.build_server(), "get_regime", {}))
+    parsed = _strict_json(wire["content"][0]["text"])
+
+    assert handler_calls == producer_calls == 1
+    assert wire.get("isError", False) is False
+    assert _utf8_bytes(wire["content"][0]["text"]) <= 8_000
+    assert parsed["cycle_tag"] == "電力" and parsed["growth_score"] == 0
+    assert parsed["liquidity_overlay"] is False
+
+
+def test_real_intel_hub_handler_compacts_multilingual_fixture_through_sdk(tmp_path, monkeypatch):
+    producer_calls = 0
+    handler_calls = 0
+    original_read_json = bot_mcp._read_json
+    original_handler = bot_mcp.get_intel_hub.handler
+    hub_path = tmp_path / "site" / "intel_hub" / "hub.json"
+    hub_path.parent.mkdir(parents=True)
+    hub_path.write_text(json.dumps({
+        "as_of": "2026-09-06",
+        "macro_context": {"label": "電力", "confidence": 0, "risk_off": False, "note": None},
+        "desks": {"research": {"active": True}},
+        "counts": {"actionable": 0, "complete": False, "pending": None},
+        "n_actionable": 0,
+        "command": [
+            {
+                "ticker": f"T{index:02d}", "name": "電" * 160,
+                "composite_conviction": 0, "lean": False, "n_confirm": 0,
+                "flags": ["電力", "🚀"], "read": "多語研究",
+                "peers": ["PWR"], "sectors": ["utilities"], "falsifier": None,
+            }
+            for index in range(24)
+        ],
+        "divergence_alerts": {"early_edge": []}, "sector_heat": [], "how_to_use": "研究用",
+    }, ensure_ascii=False))
+
+    def counted_read_json(path):
+        nonlocal producer_calls
+        producer_calls += 1
+        return original_read_json(path)
+
+    async def counted_handler(args):
+        nonlocal handler_calls
+        handler_calls += 1
+        return await original_handler(args)
+
+    monkeypatch.setattr(bot_mcp, "_V", tmp_path)
+    monkeypatch.setattr(bot_mcp, "_read_json", counted_read_json)
+    monkeypatch.setattr(bot_mcp.get_intel_hub, "handler", counted_handler)
+    wire = asyncio.run(_sdk_wire_tool_call(bot_mcp.build_server(), "get_intel_hub", {"top": 24}))
+    text = wire["content"][0]["text"]
+    parsed = _strict_json(text)
+
+    assert handler_calls == producer_calls == 1
+    assert wire.get("isError", False) is False
+    assert _utf8_bytes(text) <= 8_000
+    assert parsed["_transport_truncated"] is True
+    assert parsed["command"] and parsed["command"][0]["ticker"] == "T00"
+    assert parsed["command"][0]["composite_conviction"] == 0
+    assert parsed["command"][0]["lean"] is False
+    assert parsed["command"][0]["falsifier"] is None
+    assert "電" in parsed["command"][0]["name"] and "🚀" in parsed["command"][0]["flags"]
+
+
+@pytest.mark.parametrize("invalid", (float("nan"), "\ud800"))
+def test_real_handler_rejects_invalid_data_before_compaction_can_omit_it(monkeypatch, invalid):
+    producer_calls = 0
+    handler_calls = 0
+    original_handler = bot_mcp.get_themes.handler
+    retained_control = {"id": "late-control", "name": None, "category": False, "n_members": 0}
+    baskets = [
+        {"id": f"basket-{index}", "name": "電" * 400, "category": "research", "n_members": index}
+        for index in range(24)
+    ] + [retained_control, {"id": "invalid-late", "perf": {"20d": {"rel": invalid}}}]
+
+    def oversized_fixture(_path):
+        nonlocal producer_calls
+        producer_calls += 1
+        return {"as_of": "2026-09-05", "baskets": baskets}
+
+    async def counted_handler(args):
+        nonlocal handler_calls
+        handler_calls += 1
+        return await original_handler(args)
+
+    monkeypatch.setattr(bot_mcp, "_read_json", oversized_fixture)
+    monkeypatch.setattr(bot_mcp.get_themes, "handler", counted_handler)
+
+    wire = asyncio.run(_sdk_wire_tool_call(bot_mcp.build_server(), "get_themes", {}))
+
+    assert handler_calls == producer_calls == 1
+    assert wire["isError"] is True
+    assert _strict_json(wire["content"][0]["text"]) == {"error": "MCP_RESPONSE_NOT_JSON"}
+    assert retained_control == {"id": "late-control", "name": None, "category": False, "n_members": 0}
+
+
+def test_sdk_does_not_treat_camel_case_handler_error_as_an_error():
+    @tool("camel_only", "Negative handler-key control.", {})
+    async def camel_only(_args):
+        return {
+            "content": [{"type": "text", "text": '{"error":"MCP_RESPONSE_NOT_JSON"}'}],
+            "isError": True,
+        }
+
+    config = create_sdk_mcp_server(name="camel-only", version="0", tools=[camel_only])
+    wire = asyncio.run(_sdk_wire_tool_call(config, "camel_only", {}))
+
+    assert wire.get("isError", False) is False
 
 
 def test_subscription_env_strips_api_key(monkeypatch):
