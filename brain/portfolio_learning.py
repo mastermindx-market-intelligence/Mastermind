@@ -23,6 +23,7 @@ import json
 import math
 import os
 import re
+import tempfile
 import uuid
 from contextlib import contextmanager
 from datetime import UTC, date, datetime
@@ -49,6 +50,7 @@ LESSON_AUTHORITY = "research_request_only"
 APPLICATION_AUTHORITY = "observational_only"
 LESSON_TRACE_COHORT = "portfolio_v2_lesson_trace"
 _ACTIVE_PRESENTATIONS: dict[tuple[str, str], str] = {}
+_TRACE_JSONL_NAMES = frozenset({"applications.jsonl", "presentations.jsonl"})
 _LESSON_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
 _LESSON_ID_RE = re.compile(
     r"^lesson\.v1\.(US_ONLY|CN_ONLY|HK_ONLY|CROSS_MARKET_CANDIDATE)\."
@@ -166,23 +168,93 @@ def _write_json(path: Path, value: Any) -> None:
 
 
 def _read_jsonl(path: Path) -> list[dict]:
-    rows: list[dict] = []
+    """Read JSONL, failing closed for lesson trace ledgers only.
+
+    Context-request history intentionally keeps its older best-effort semantics.  Presentation and
+    application rows are settlement lineage, so an existing malformed row is failed evidence rather
+    than an invitation to reason from a thinner ledger.
+    """
+    strict = path.name in _TRACE_JSONL_NAMES
+    if not path.exists():
+        return []
     try:
-        for line in path.read_text(encoding="utf-8").splitlines() if path.exists() else []:
-            try:
-                row = json.loads(line)
-                if isinstance(row, dict):
-                    rows.append(row)
-            except Exception:
-                continue
+        lines = path.read_text(encoding="utf-8").splitlines()
     except Exception:
-        pass
+        if strict:
+            raise
+        return []
+    rows: list[dict] = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except Exception:
+            if strict:
+                raise
+            continue
+        if not isinstance(row, dict):
+            if strict:
+                raise ValueError(f"{path.name} row must be a mapping")
+            continue
+        rows.append(row)
     return rows
+
+
+def _fsync_parent(path: Path) -> None:
+    try:
+        dir_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
+    except OSError:
+        pass
+
+
+def _replace_trace_jsonl(path: Path, rows: list[dict]) -> None:
+    """Atomically publish one complete lesson trace ledger."""
+    if not all(isinstance(value, dict) for value in rows):
+        raise ValueError("lesson trace rows must be mappings")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = "".join(
+        json.dumps(value, default=str, ensure_ascii=False) + "\n"
+        for value in rows
+    )
+    tmp_name: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as tmp:
+            tmp_name = tmp.name
+            tmp.write(payload)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+        os.replace(tmp_name, path)
+        tmp_name = None
+        _fsync_parent(path)
+    finally:
+        if tmp_name:
+            try:
+                Path(tmp_name).unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def _append_jsonl(path: Path, row: dict) -> bool:
     """Append one complete transition and report whether it reached the local ledger."""
     try:
+        if path.name in _TRACE_JSONL_NAMES:
+            prior = _read_jsonl(path)
+            _replace_trace_jsonl(path, [*prior, row])
+            return True
+
         path.parent.mkdir(parents=True, exist_ok=True)
         created = not path.exists()
         with path.open("a", encoding="utf-8") as fh:
@@ -190,15 +262,7 @@ def _append_jsonl(path: Path, row: dict) -> bool:
             fh.flush()
             os.fsync(fh.fileno())
         if created:
-            try:
-                dir_fd = os.open(path.parent, os.O_RDONLY)
-                try:
-                    os.fsync(dir_fd)
-                finally:
-                    os.close(dir_fd)
-            except OSError:
-                # The row itself is durable even on filesystems that reject directory fsync.
-                pass
+            _fsync_parent(path)
         return True
     except Exception:
         return False
