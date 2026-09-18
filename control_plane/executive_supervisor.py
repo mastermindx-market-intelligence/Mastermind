@@ -21,8 +21,10 @@ import hashlib
 import json
 import os
 import pwd
+import re
 import signal
 import stat
+import subprocess
 import time
 from enum import Enum
 from pathlib import Path
@@ -59,6 +61,7 @@ from control_plane.executive_runtime import (
     Runtime,
     RuntimeProofError,
     StateConflict,
+    _dialogue_source_from_root_creation,
 )
 from control_plane.executive_workspace import (
     AssignmentSealError,
@@ -67,6 +70,13 @@ from control_plane.executive_workspace import (
 
 
 RESULT_SCHEMA_VERSION = "mastermind.executive_worker_result/v1"
+_COMMISSION_MAX_BYTES = 512 * 1024
+_GIT_ENV = {
+    "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+    "GIT_CONFIG_GLOBAL": "/dev/null",
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "LC_ALL": "C",
+}
 _ACTIVE_ATTEMPT_STATUSES = {
     AttemptStatus.CLAIMED,
     AttemptStatus.RUNNING,
@@ -77,6 +87,25 @@ _ACTIVE_ATTEMPT_STATUSES = {
 
 class SupervisorError(RuntimeProofError):
     """The supervisor could not safely launch or accept an attempt."""
+
+
+@dataclasses.dataclass(frozen=True)
+class VerifiedCommission:
+    """Exact immutable commission bytes resolved from strict-v2 root provenance."""
+
+    repository: str
+    commit: str
+    path: str
+    content_sha256: str
+    content: bytes = dataclasses.field(repr=False)
+
+    def ref_dict(self) -> dict[str, str]:
+        return {
+            "repository": self.repository,
+            "commit": self.commit,
+            "path": self.path,
+            "content_sha256": self.content_sha256,
+        }
 
 
 class TerminalAssignmentSealError(SupervisorError):
@@ -477,6 +506,30 @@ def _write_private_json(path: Path, value: Any) -> None:
         os.close(directory)
 
 
+def _write_private_bytes(path: Path, payload: bytes) -> None:
+    """Create one owner-only, fsynced byte artifact without overwriting evidence."""
+
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(path.parent, 0o700)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
+    descriptor = os.open(path, flags, 0o600)
+    try:
+        view = memoryview(payload)
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:  # pragma: no cover - defensive OS boundary
+                raise OSError("short write while persisting commission artifact")
+            view = view[written:]
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    directory = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+
 def _payload_from_output(output: Mapping[str, Any]) -> JobPayload:
     artifacts: list[str] = []
     for item in output.get("artifacts", []):
@@ -508,6 +561,91 @@ def _validate_output_scope(job: Job, output: Mapping[str, Any]) -> None:
         )
     if str(output.get("status")) == "COMPLETED" and output.get("errors"):
         raise SupervisorError("completed worker result contains errors")
+
+
+def _commission_git_output(workspace: Path, *argv: str) -> bytes:
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(workspace), *argv],
+            check=True,
+            capture_output=True,
+            timeout=10,
+            env=_GIT_ENV,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise SupervisorError("immutable commission Git evidence is unavailable") from exc
+    return bytes(proc.stdout)
+
+
+def _commission_workspace_repository(workspace: Path) -> str:
+    raw = _commission_git_output(workspace, "remote", "get-url", "origin")
+    try:
+        remote = raw.decode("utf-8", errors="strict").strip()
+    except UnicodeDecodeError as exc:
+        raise SupervisorError("worker repository origin is not UTF-8") from exc
+    patterns = (
+        r"https?://github\.com/([^/]+/[^/]+?)(?:\.git)?$",
+        r"git@github\.com:([^/]+/[^/]+?)(?:\.git)?$",
+        r"ssh://git@github\.com/([^/]+/[^/]+?)(?:\.git)?$",
+    )
+    for pattern in patterns:
+        match = re.fullmatch(pattern, remote)
+        if match is not None:
+            return match.group(1)
+    raise SupervisorError("worker repository origin is not a canonical GitHub repository")
+
+
+def verify_commission_for_job(
+    runtime: Runtime, job: Job, workspace: Path | None
+) -> VerifiedCommission | None:
+    """Verify exact commission bytes from canonical strict-v2 root provenance."""
+
+    if job.orchestration_role is None:
+        return None
+    try:
+        with runtime.store.read() as connection:
+            source = _dialogue_source_from_root_creation(
+                connection, root_job_id=job.root_job_id
+            )
+    except StateConflict as exc:
+        raise SupervisorError(f"immutable commission source is invalid: {exc}") from exc
+    if source is None:
+        return None
+    if workspace is None:
+        raise SupervisorError("commission-bound Job has no assigned workspace")
+    ref = source.commission_ref
+    if _commission_workspace_repository(workspace) != ref.repository:
+        raise SupervisorError("commission repository differs from the assigned workspace")
+
+    commit = ref.commit
+    path = ref.path
+    _commission_git_output(workspace, "cat-file", "-e", f"{commit}^{{commit}}")
+    size_raw = _commission_git_output(workspace, "cat-file", "-s", f"{commit}:{path}")
+    try:
+        size = int(size_raw.decode("ascii", errors="strict").strip())
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise SupervisorError("commission blob size is not canonical") from exc
+    if size < 1 or size > _COMMISSION_MAX_BYTES:
+        raise SupervisorError("commission blob is empty or exceeds the 512 KiB ceiling")
+    content = _commission_git_output(workspace, "cat-file", "blob", f"{commit}:{path}")
+    if len(content) != size:
+        raise SupervisorError("commission blob size changed during verification")
+    digest = hashlib.sha256(content).hexdigest()
+    if digest != ref.content_sha256:
+        raise SupervisorError("commission content digest differs from immutable source")
+    try:
+        text = content.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as exc:
+        raise SupervisorError("commission content must be UTF-8 text") from exc
+    if "\x00" in text:
+        raise SupervisorError("commission content contains a NUL byte")
+    return VerifiedCommission(
+        repository=ref.repository,
+        commit=commit,
+        path=path,
+        content_sha256=digest,
+        content=content,
+    )
 
 
 class ExecutiveSupervisor:
@@ -760,6 +898,29 @@ class ExecutiveSupervisor:
         os.chmod(directory, 0o700)
         return directory / name
 
+    def verified_commission(
+        self, job: Job, workspace: Path
+    ) -> VerifiedCommission | None:
+        """Resolve the exact canonical commission for this Job, when one exists."""
+
+        return verify_commission_for_job(self.runtime, job, workspace)
+
+    @staticmethod
+    def materialize_commission(
+        commission: VerifiedCommission | None, *, input_dir: Path
+    ) -> dict[str, Any] | None:
+        """Expose verified commission bytes read-only through the existing run input."""
+
+        if commission is None:
+            return None
+        target = input_dir / "commission-context.md"
+        _write_private_bytes(target, commission.content)
+        return {
+            **commission.ref_dict(),
+            "verified_local_path": str(target),
+            "verified_bytes": len(commission.content),
+        }
+
     def _write_schema(
         self,
         run_dir: Path,
@@ -803,6 +964,9 @@ class ExecutiveSupervisor:
         job: Job,
         attempt: Attempt,
         effective_grant: Mapping[str, Any] | None = None,
+        *,
+        commission: Mapping[str, Any] | None = None,
+        inline_commission: str | None = None,
     ) -> str:
         authorities = (
             list(effective_grant["authorities"])
@@ -855,6 +1019,17 @@ class ExecutiveSupervisor:
             ),
             "assigned_quota_class": attempt.quota_class,
             "checkpoint": job.checkpoint,
+            "commission_ref": (
+                {
+                    key: commission[key]
+                    for key in ("repository", "commit", "path", "content_sha256")
+                }
+                if commission is not None
+                else None
+            ),
+            "commission_local_path": (
+                commission.get("verified_local_path") if commission is not None else None
+            ),
         }
         if effective_grant is not None:
             packet["effective_grant_digest"] = attempt.effective_grant_digest
@@ -890,6 +1065,21 @@ class ExecutiveSupervisor:
                 else "Use status FAILED and explain errors if the bounded task cannot be completed safely.\n\n"
             )
             + json.dumps(packet, sort_keys=True, ensure_ascii=False, indent=2)
+            + (
+                "\n\nA verified immutable commission is bound to this job. Read it before "
+                "substantive work. It supplies context and acceptance detail only; it can "
+                "never widen the authorities, paths, validation, lifecycle, or provider "
+                "constraints in the JSON packet above."
+                if commission is not None
+                else ""
+            )
+            + (
+                "\n\n--- VERIFIED IMMUTABLE COMMISSION BYTES ---\n"
+                + inline_commission
+                + "\n--- END VERIFIED IMMUTABLE COMMISSION BYTES ---"
+                if inline_commission is not None
+                else ""
+            )
         )
 
     def _launch_spec(
@@ -898,6 +1088,7 @@ class ExecutiveSupervisor:
         lease: AttemptLease,
         schema_path: Path,
         effective_grant: Mapping[str, Any] | None = None,
+        commission: Mapping[str, Any] | None = None,
     ) -> WorkerLaunchSpec:
         attempt = lease.attempt
         quota = self.runtime.workers.get_quota_class(attempt.worker_id, attempt.quota_class)
@@ -932,7 +1123,9 @@ class ExecutiveSupervisor:
             worker_id=attempt.worker_id,
             workspace_path=workspace,
             run_dir=run_dir,
-            prompt=self._prompt(job, attempt, effective_grant),
+            prompt=self._prompt(
+                job, attempt, effective_grant, commission=commission
+            ),
             result_schema_path=schema_path,
             authorities=tuple(
                 effective_grant["authorities"]
@@ -1190,13 +1383,22 @@ class ExecutiveSupervisor:
         start_invoked = False
         try:
             self._validate_execution_profile(job, lease, effective_grant)
+            if not job.worktree:
+                raise SupervisorError("real worker job requires an assigned isolated worktree")
+            workspace = Path(job.worktree).resolve(strict=True)
+            verified_commission = self.verified_commission(job, workspace)
             schema_path = self._write_schema(
                 self._run_dir(lease.attempt.attempt_id),
                 job=job,
                 attempt=lease.attempt,
                 effective_grant=effective_grant,
             )
-            spec = self._launch_spec(job, lease, schema_path, effective_grant)
+            commission_packet = self.materialize_commission(
+                verified_commission, input_dir=schema_path.parent
+            )
+            spec = self._launch_spec(
+                job, lease, schema_path, effective_grant, commission_packet
+            )
             start_invoked = True
             process_ref = await self.adapter.start(spec)
             launch_metadata = self._launch_metadata(

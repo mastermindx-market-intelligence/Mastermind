@@ -8,6 +8,7 @@ import os
 import signal
 import sqlite3
 import stat
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -1170,3 +1171,158 @@ def test_invalid_provider_result_with_ambient_pid_fails_job_not_containment(
     seal = json.loads(Path(receipt.assignment_seal_receipt_path or "").read_text())
     assert seal["passed"] is True
     assert seal["uid_sweep"]["ambient_pids"] == [88688]
+
+
+def _strict_v2_root_with_commission(
+    tmp_path: Path,
+    *,
+    content: bytes = b"# Worker commission\n\nReview the exact bounded change.\n",
+    repository: str = "mastermindx-market-intelligence/Mastermind",
+    digest: str | None = None,
+):
+    workspace_parent = tmp_path / "workspaces"
+    workspace = workspace_parent / "commission-workspace"
+    workspace.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(workspace)], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(workspace),
+            "remote",
+            "add",
+            "origin",
+            f"https://github.com/{repository}.git",
+        ],
+        check=True,
+    )
+    commission_path = workspace / "research" / "commission.md"
+    commission_path.parent.mkdir(parents=True)
+    commission_path.write_bytes(content)
+    subprocess.run(["git", "-C", str(workspace), "add", "research/commission.md"], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(workspace),
+            "-c",
+            "user.name=Mastermind Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-q",
+            "-m",
+            "fixture commission",
+        ],
+        check=True,
+    )
+    head = subprocess.run(
+        ["git", "-C", str(workspace), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    runtime = Runtime.at(tmp_path)
+    receipt = submit_intent(
+        runtime,
+        {
+            "schema": INTENT_SCHEMA_V2,
+            "intent_id": "CEO-COMMISSION-CONTEXT-001",
+            "actor": "ceo-sol",
+            "objective": "Execute the compact objective using the immutable commission.",
+            "department": "executive-infrastructure",
+            "priority": 9,
+            "grounding": {"mastermind_sha": head, "macro_sha": "b" * 40},
+            "execution_contract": {
+                "requested_authorities": ["READ"],
+                "worktree": str(workspace.resolve()),
+                "attempt_limit": 2,
+                "constraints": {
+                    "base_sha": head,
+                    "eligible_quota_classes": ["default"],
+                },
+            },
+            "workstream": "WS:TEST-COMMISSION",
+            "intent_kind": "executive_coo_cycle",
+            "business_impact": "routine",
+        },
+        workspace_root=workspace_parent,
+        dialogue_source={
+            "schema_version": "mastermind.executive_dialogue_source/v1",
+            "work_ref": "WS:TEST-COMMISSION",
+            "commission_ref": {
+                "repository": repository,
+                "commit": head,
+                "path": "research/commission.md",
+                "content_sha256": digest or hashlib.sha256(content).hexdigest(),
+            },
+            "watch_mode": None,
+        },
+        require_dialogue_source=True,
+    )
+    root = runtime.jobs.get_job(receipt["job_id"])
+    assert root is not None
+    return runtime, root, workspace, content
+
+
+def test_strict_v2_commission_is_verified_from_git_and_materialized_read_only(
+    tmp_path: Path,
+) -> None:
+    runtime, root, workspace, content = _strict_v2_root_with_commission(tmp_path)
+    supervisor = _supervisor(runtime, tmp_path, FakeAdapter(FakeInspector()))
+
+    verified = supervisor.verified_commission(root, workspace)
+
+    assert verified is not None
+    assert verified.repository == "mastermindx-market-intelligence/Mastermind"
+    assert verified.path == "research/commission.md"
+    assert verified.content == content
+    assert verified.content_sha256 == hashlib.sha256(content).hexdigest()
+
+    target_dir = tmp_path / "manual-run" / "input"
+    packet = supervisor.materialize_commission(verified, input_dir=target_dir)
+    assert packet is not None
+    local_path = Path(packet["verified_local_path"])
+    assert local_path.read_bytes() == content
+    assert stat.S_IMODE(local_path.stat().st_mode) == 0o600
+    assert packet["verified_bytes"] == len(content)
+
+
+def test_strict_v2_commission_digest_mismatch_refuses_before_worker_use(
+    tmp_path: Path,
+) -> None:
+    runtime, root, workspace, _content = _strict_v2_root_with_commission(
+        tmp_path, digest="0" * 64
+    )
+    supervisor = _supervisor(runtime, tmp_path, FakeAdapter(FakeInspector()))
+
+    with pytest.raises(
+        SupervisorError, match="commission content digest differs from immutable source"
+    ):
+        supervisor.verified_commission(root, workspace)
+
+
+def test_strict_v2_commission_repository_mismatch_refuses(
+    tmp_path: Path,
+) -> None:
+    runtime, root, workspace, _content = _strict_v2_root_with_commission(tmp_path)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(workspace),
+            "remote",
+            "set-url",
+            "origin",
+            "https://github.com/mastermindx-market-intelligence/Other.git",
+        ],
+        check=True,
+    )
+    supervisor = _supervisor(runtime, tmp_path, FakeAdapter(FakeInspector()))
+
+    with pytest.raises(
+        SupervisorError, match="commission repository differs from the assigned workspace"
+    ):
+        supervisor.verified_commission(root, workspace)

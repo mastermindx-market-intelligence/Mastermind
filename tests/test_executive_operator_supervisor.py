@@ -23,12 +23,13 @@ from control_plane.executive_orchestration_result import (
     canonical_bytes,
 )
 from control_plane.executive_runtime import (
+    AttemptLease,
     AttemptStatus,
     JobStatus,
     OrchestrationDispatchOutcome,
     Runtime,
 )
-from control_plane.executive_supervisor import ReconcileStatus
+from control_plane.executive_supervisor import ReconcileStatus, VerifiedCommission
 from control_plane.model_router import ModelRouter
 from control_plane.operator_harness_contract import (
     AuthRealmFact,
@@ -502,6 +503,21 @@ class _RecoveryAdapter:
 class _PromptSource:
     def _prompt(self, *_args):
         return "Read the exact Job and produce the bounded plan."
+
+
+class _CommissionPromptSource(_PromptSource):
+    def _prompt(
+        self,
+        *_args,
+        commission=None,
+        inline_commission=None,
+    ):
+        text = super()._prompt(*_args)
+        if commission is not None:
+            text += "\n" + json.dumps(commission, sort_keys=True)
+        if inline_commission is not None:
+            text += "\n" + inline_commission
+        return text
 
 
 def _seed_dispatchable_operator_planner(tmp_path: Path):
@@ -1284,3 +1300,38 @@ def test_remote_adapter_caches_closed_browser_receipt_only_after_stop():
         generation, operation_id=OperationId("ohf-op:stop-remote")
     ) == observation
     assert adapter.terminal_artifact_receipt(generation) == receipt
+
+
+def test_operator_prompt_carries_verified_commission_without_widening_job_grant(
+    tmp_path: Path,
+) -> None:
+    runtime, root, planner = _seed_dispatchable_operator_planner(tmp_path)
+    dispatch = runtime.attempts.dispatch_cycle_job(
+        planner.job_id,
+        command_id=f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1",
+        worker_id="worker-a",
+    )
+    assert isinstance(dispatch, OrchestrationDispatchOutcome)
+    assert dispatch.lease_token is not None
+    lease = AttemptLease(dispatch.attempt, dispatch.lease_token)
+    commission_text = "# Immutable commission\nUse the exact bounded acceptance contract.\n"
+    commission = VerifiedCommission(
+        repository="mastermindx-market-intelligence/Mastermind",
+        commit="c" * 40,
+        path="research/commission.md",
+        content_sha256=hashlib.sha256(commission_text.encode()).hexdigest(),
+        content=commission_text.encode(),
+    )
+    supervisor = ExecutiveOperatorSupervisor(
+        runtime,
+        adapter_factory=lambda _loader: None,  # type: ignore[arg-type]
+        prompt_source=_CommissionPromptSource(),  # type: ignore[arg-type]
+    )
+
+    prompt = supervisor._prompt(planner, lease, commission)
+
+    assert commission_text in prompt
+    assert '"path": "research/commission.md"' in prompt
+    assert "output schema" in prompt
+    assert planner.requested_authorities == ["READ"]
+    assert planner.allowed_write_paths == []

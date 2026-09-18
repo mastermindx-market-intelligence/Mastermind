@@ -158,6 +158,35 @@ bounded returns `output_too_large` rather than something misleading. Errors and
 | `validation` | no | `{pytest_targets?, compileall_paths?, git_diff_check?}` |
 | `attempt_limit` | no | 1–3, default 2 |
 
+### Large worker handoffs stay out of the CEO-intent payload
+
+`submit_ceo_intent` is the compact semantic/authority envelope, not a transport for a
+second agent prompt. The 4,000-character `objective` ceiling remains unchanged. For
+strict-v2 Executive work, the existing trusted dialogue-source owner supplies the
+immutable `commission_ref` separately from caller input:
+
+```text
+repository + exact 40-hex commit + repository-relative path + content SHA-256
+```
+
+That reference is canonical context/provenance, **not authority**. The effective Job
+grant, allowed paths, validation and provider/lifecycle controls remain authoritative.
+Before either the sealed worker or read-only Operator planner consumes the commission,
+the supervisor resolves the exact blob from the assigned workspace's local Git object
+store (no network fetch), verifies the workspace repository identity, commit object,
+512 KiB text-size ceiling, UTF-8 encoding and content digest, and fails closed before a
+new provider process starts on disagreement. Sealed workers receive the verified bytes
+as an owner-only read-only run-input artifact; the Operator planner receives the same
+verified bytes in its internal provider prompt because that lane has no separate local
+run-input file argument.
+
+This keeps the Web CEO call small and typed while preserving a complete worker brief.
+Do not add `handoff_ref`, raw prompt text, Drive URLs, or another caller-authored context
+field to this public schema merely to move large instructions; that would duplicate the
+existing `commission_ref` owner and blur context with execution authority. External
+documents may be evidence referenced by the commission, but they do not become a second
+commission/lifecycle plane.
+
 ### Structurally absent from every input schema
 
 `actor`, `requested_authorities`, `validation_commands`, `mastermind_sha`,
