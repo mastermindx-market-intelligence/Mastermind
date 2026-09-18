@@ -172,13 +172,19 @@ repository + exact 40-hex commit + repository-relative path + content SHA-256
 That reference is canonical context/provenance, **not authority**. The effective Job
 grant, allowed paths, validation and provider/lifecycle controls remain authoritative.
 Before either the sealed worker or read-only Operator planner consumes the commission,
-the supervisor resolves the exact blob from the assigned workspace's local Git object
-store (no network fetch), verifies the workspace repository identity, commit object,
-512 KiB text-size ceiling, UTF-8 encoding and content digest, and fails closed before a
-new provider process starts on disagreement. Sealed workers receive the verified bytes
-as an owner-only read-only run-input artifact; the Operator planner receives the same
-verified bytes in its internal provider prompt because that lane has no separate local
-run-input file argument.
+the supervisor resolves the exact blob from the **durable Job-assigned workspace's** local
+Git object store (no network fetch), requires the canonical Mastermind repository identity,
+verifies that the Git top-level is exactly that assigned workspace, verifies the commit
+object, 512 KiB text-size ceiling, UTF-8 encoding and content digest, and fails closed
+before a new provider process starts on disagreement. Mutable local Git remote labels are
+not repository identity; production worker clones deliberately carry no remotes. Sealed
+workers receive the verified bytes as a non-writable run-input artifact: owner-readable
+`0400` for same-principal execution or control-owned/group-readable `0440` for the existing
+dedicated-worker shared group. The Operator planner receives the same verified bytes in
+its internal provider prompt because that lane has no separate local run-input file
+argument. Cancellation/containment of an already-live Operator remains available even if a
+later commission verification fails; that failure still blocks every new/resumed model
+turn.
 
 This keeps the Web CEO call small and typed while preserving a complete worker brief.
 Do not add `handoff_ref`, raw prompt text, Drive URLs, or another caller-authored context

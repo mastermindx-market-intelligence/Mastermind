@@ -21,7 +21,6 @@ import hashlib
 import json
 import os
 import pwd
-import re
 import signal
 import stat
 import subprocess
@@ -70,11 +69,13 @@ from control_plane.executive_workspace import (
 
 
 RESULT_SCHEMA_VERSION = "mastermind.executive_worker_result/v1"
-_COMMISSION_MAX_BYTES = 512 * 1024
+_COMMISSION_MAX_BYTES = 1 << 19
+_CANONICAL_COMMISSION_REPOSITORY = "mastermindx-market-intelligence/Mastermind"
 _GIT_ENV = {
     "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
     "GIT_CONFIG_GLOBAL": "/dev/null",
     "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_NO_REPLACE_OBJECTS": "1",
     "LC_ALL": "C",
 }
 _ACTIVE_ATTEMPT_STATUSES = {
@@ -509,7 +510,7 @@ def _write_private_json(path: Path, value: Any) -> None:
 def _write_private_bytes(path: Path, payload: bytes) -> None:
     """Create one owner-only, fsynced byte artifact without overwriting evidence."""
 
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=stat.S_IRWXU)
     os.chmod(path.parent, 0o700)
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
     descriptor = os.open(path, flags, 0o600)
@@ -577,22 +578,24 @@ def _commission_git_output(workspace: Path, *argv: str) -> bytes:
     return bytes(proc.stdout)
 
 
-def _commission_workspace_repository(workspace: Path) -> str:
-    raw = _commission_git_output(workspace, "remote", "get-url", "origin")
+def _verify_commission_workspace(job: Job, workspace: Path) -> None:
+    """Bind Git reads to the exact Executive-assigned workspace, never a remote label."""
+
+    if not job.worktree:
+        raise SupervisorError("commission-bound Job has no assigned workspace")
     try:
-        remote = raw.decode("utf-8", errors="strict").strip()
-    except UnicodeDecodeError as exc:
-        raise SupervisorError("worker repository origin is not UTF-8") from exc
-    patterns = (
-        r"https?://github\.com/([^/]+/[^/]+?)(?:\.git)?$",
-        r"git@github\.com:([^/]+/[^/]+?)(?:\.git)?$",
-        r"ssh://git@github\.com/([^/]+/[^/]+?)(?:\.git)?$",
-    )
-    for pattern in patterns:
-        match = re.fullmatch(pattern, remote)
-        if match is not None:
-            return match.group(1)
-    raise SupervisorError("worker repository origin is not a canonical GitHub repository")
+        assigned = Path(job.worktree).resolve(strict=True)
+    except OSError as exc:
+        raise SupervisorError("assigned commission workspace is unavailable") from exc
+    if workspace != assigned:
+        raise SupervisorError("commission workspace differs from the durable Job assignment")
+    raw = _commission_git_output(workspace, "rev-parse", "--show-toplevel")
+    try:
+        top_level = Path(raw.decode("utf-8", errors="strict").strip()).resolve(strict=True)
+    except (UnicodeDecodeError, OSError, ValueError) as exc:
+        raise SupervisorError("assigned commission workspace Git root is invalid") from exc
+    if top_level != assigned:
+        raise SupervisorError("commission Git root differs from the durable Job assignment")
 
 
 def verify_commission_for_job(
@@ -614,8 +617,9 @@ def verify_commission_for_job(
     if workspace is None:
         raise SupervisorError("commission-bound Job has no assigned workspace")
     ref = source.commission_ref
-    if _commission_workspace_repository(workspace) != ref.repository:
-        raise SupervisorError("commission repository differs from the assigned workspace")
+    if ref.repository != _CANONICAL_COMMISSION_REPOSITORY:
+        raise SupervisorError("commission repository is outside the canonical Executive repository")
+    _verify_commission_workspace(job, workspace)
 
     commit = ref.commit
     path = ref.path
@@ -905,16 +909,20 @@ class ExecutiveSupervisor:
 
         return verify_commission_for_job(self.runtime, job, workspace)
 
-    @staticmethod
     def materialize_commission(
-        commission: VerifiedCommission | None, *, input_dir: Path
+        self, commission: VerifiedCommission | None, *, input_dir: Path
     ) -> dict[str, Any] | None:
-        """Expose verified commission bytes read-only through the existing run input."""
+        """Expose verified bytes through one non-writable existing run-input boundary."""
 
         if commission is None:
             return None
         target = input_dir / "commission-context.md"
         _write_private_bytes(target, commission.content)
+        if self.shared_run_gid is None:
+            os.chmod(target, 0o400)
+        else:
+            os.chown(target, -1, self.shared_run_gid)
+            os.chmod(target, 0o440)
         return {
             **commission.ref_dict(),
             "verified_local_path": str(target),

@@ -11,7 +11,10 @@ from pathlib import Path
 import pytest
 
 from control_plane.ceo_intent import INTENT_SCHEMA_V2, submit_intent
-from control_plane.executive_operator_supervisor import ExecutiveOperatorSupervisor
+from control_plane.executive_operator_supervisor import (
+    ExecutiveOperatorSupervisor,
+    ExecutiveOperatorSupervisorError,
+)
 from control_plane.executive_orchestration_principal import (
     OSProcessCredentialObservation,
     OperatorPrincipalObservation,
@@ -1335,3 +1338,94 @@ def test_operator_prompt_carries_verified_commission_without_widening_job_grant(
     assert "output schema" in prompt
     assert planner.requested_authorities == ["READ"]
     assert planner.allowed_write_paths == []
+
+
+def test_fresh_operator_commission_refusal_happens_before_provider_construction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime, root, planner = _seed_dispatchable_operator_planner(tmp_path)
+    factory_calls = 0
+
+    def refuse(*_args, **_kwargs):
+        raise RuntimeError("synthetic immutable commission refusal")
+
+    def factory(_loader):
+        nonlocal factory_calls
+        factory_calls += 1
+        raise AssertionError("provider adapter must not be constructed after commission refusal")
+
+    monkeypatch.setattr(
+        "control_plane.executive_operator_supervisor.verify_commission_for_job", refuse
+    )
+    supervisor = ExecutiveOperatorSupervisor(
+        runtime,
+        adapter_factory=factory,  # type: ignore[arg-type]
+        prompt_source=_PromptSource(),  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(
+        ExecutiveOperatorSupervisorError, match="immutable commission verification failed"
+    ):
+        asyncio.run(
+            supervisor.start_cycle_job(
+                planner.job_id,
+                command_id=f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1",
+            )
+        )
+
+    assert factory_calls == 0
+
+
+def test_restart_commission_refusal_blocks_resume_but_not_later_cancellation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock, runtime, _root, planner, dispatch, profile, _epoch = _seed_expired_g1(
+        tmp_path, observed_dead=False, with_turn=True
+    )
+    adapters: list[_RecoveryAdapter] = []
+    verification_calls = 0
+
+    def factory(loader):
+        adapter = _RecoveryAdapter(
+            runtime, profile, loader, live_existing=True
+        )
+        adapters.append(adapter)
+        return adapter
+
+    def refuse(*_args, **_kwargs):
+        nonlocal verification_calls
+        verification_calls += 1
+        raise RuntimeError("synthetic immutable commission refusal")
+
+    monkeypatch.setattr(
+        "control_plane.executive_operator_supervisor.verify_commission_for_job", refuse
+    )
+    supervisor = ExecutiveOperatorSupervisor(
+        runtime,
+        adapter_factory=factory,  # type: ignore[arg-type]
+        prompt_source=_PromptSource(),  # type: ignore[arg-type]
+    )
+    clock.advance(3)
+
+    held = supervisor.reconcile_restart()
+
+    assert [item.status for item in held] == [ReconcileStatus.IDENTITY_AMBIGUOUS]
+    assert verification_calls == 1
+    assert adapters == []
+    attempt = runtime.attempts.get_attempt(dispatch.attempt.attempt_id)
+    assert attempt is not None
+    assert attempt.status in {AttemptStatus.CLAIMED, AttemptStatus.RUNNING, AttemptStatus.CHECKPOINTED}
+
+    cancelled = runtime.jobs.cancel_job(planner.job_id)
+    assert cancelled.status is JobStatus.CANCEL_REQUESTED
+    clock.advance(361)
+    recovered = supervisor.reconcile_restart()
+
+    assert [item.status for item in recovered] == [ReconcileStatus.MISSING_CANCELLED]
+    assert verification_calls == 1, "cancellation containment must not re-read commission"
+    assert len(adapters) == 1
+    assert adapters[0].resume_calls == 0
+    assert adapters[0].begin_turn_calls == 0
+    assert adapters[0].cancel_calls == 1
+    attempt = runtime.attempts.get_attempt(dispatch.attempt.attempt_id)
+    assert attempt is not None and attempt.status is AttemptStatus.CANCELLED

@@ -41,6 +41,7 @@ from control_plane.executive_supervisor import (
     ReconcileStatus,
     RESULT_SCHEMA_VERSION,
     SupervisorError,
+    verify_commission_for_job,
     worker_result_schema,
 )
 
@@ -396,7 +397,13 @@ def _runtime_and_job(
     return runtime, job.job_id, workspace
 
 
-def _supervisor(runtime: Runtime, tmp_path: Path, adapter: FakeAdapter) -> ExecutiveSupervisor:
+def _supervisor(
+    runtime: Runtime,
+    tmp_path: Path,
+    adapter: FakeAdapter,
+    *,
+    shared_run_gid: int | None = None,
+) -> ExecutiveSupervisor:
     codex_home = tmp_path / "codex-home"
     codex_home.mkdir(mode=0o700, exist_ok=True)
     adapter.provider_home = codex_home
@@ -408,6 +415,7 @@ def _supervisor(runtime: Runtime, tmp_path: Path, adapter: FakeAdapter) -> Execu
         heartbeat_interval_seconds=0.01,
         inspector=adapter.inspector,
         process_controller=FakeProcessController(adapter.inspector),
+        shared_run_gid=shared_run_gid,
         secret_canary_verdict={
             "schema_version": "mastermind.executive_secret_canary/v1",
             "passed": True,
@@ -1179,23 +1187,13 @@ def _strict_v2_root_with_commission(
     content: bytes = b"# Worker commission\n\nReview the exact bounded change.\n",
     repository: str = "mastermindx-market-intelligence/Mastermind",
     digest: str | None = None,
+    ref_commit: str | None = None,
+    ref_path: str = "research/commission.md",
 ):
     workspace_parent = tmp_path / "workspaces"
     workspace = workspace_parent / "commission-workspace"
     workspace.mkdir(parents=True)
     subprocess.run(["git", "init", "-q", str(workspace)], check=True)
-    subprocess.run(
-        [
-            "git",
-            "-C",
-            str(workspace),
-            "remote",
-            "add",
-            "origin",
-            f"https://github.com/{repository}.git",
-        ],
-        check=True,
-    )
     commission_path = workspace / "research" / "commission.md"
     commission_path.parent.mkdir(parents=True)
     commission_path.write_bytes(content)
@@ -1254,8 +1252,8 @@ def _strict_v2_root_with_commission(
             "work_ref": "WS:TEST-COMMISSION",
             "commission_ref": {
                 "repository": repository,
-                "commit": head,
-                "path": "research/commission.md",
+                "commit": ref_commit or head,
+                "path": ref_path,
                 "content_sha256": digest or hashlib.sha256(content).hexdigest(),
             },
             "watch_mode": None,
@@ -1273,6 +1271,13 @@ def test_strict_v2_commission_is_verified_from_git_and_materialized_read_only(
     runtime, root, workspace, content = _strict_v2_root_with_commission(tmp_path)
     supervisor = _supervisor(runtime, tmp_path, FakeAdapter(FakeInspector()))
 
+    assert subprocess.run(
+        ["git", "-C", str(workspace), "remote"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout == ""
+
     verified = supervisor.verified_commission(root, workspace)
 
     assert verified is not None
@@ -1286,7 +1291,7 @@ def test_strict_v2_commission_is_verified_from_git_and_materialized_read_only(
     assert packet is not None
     local_path = Path(packet["verified_local_path"])
     assert local_path.read_bytes() == content
-    assert stat.S_IMODE(local_path.stat().st_mode) == 0o600
+    assert stat.S_IMODE(local_path.stat().st_mode) == 0o400
     assert packet["verified_bytes"] == len(content)
 
 
@@ -1307,22 +1312,122 @@ def test_strict_v2_commission_digest_mismatch_refuses_before_worker_use(
 def test_strict_v2_commission_repository_mismatch_refuses(
     tmp_path: Path,
 ) -> None:
-    runtime, root, workspace, _content = _strict_v2_root_with_commission(tmp_path)
-    subprocess.run(
-        [
-            "git",
-            "-C",
-            str(workspace),
-            "remote",
-            "set-url",
-            "origin",
-            "https://github.com/mastermindx-market-intelligence/Other.git",
-        ],
-        check=True,
+    runtime, root, workspace, _content = _strict_v2_root_with_commission(
+        tmp_path, repository="mastermindx-market-intelligence/Other"
     )
     supervisor = _supervisor(runtime, tmp_path, FakeAdapter(FakeInspector()))
 
     with pytest.raises(
-        SupervisorError, match="commission repository differs from the assigned workspace"
+        SupervisorError, match="outside the canonical Executive repository"
     ):
         supervisor.verified_commission(root, workspace)
+
+
+
+def test_commission_refuses_foreign_workspace_even_with_matching_git_bytes(
+    tmp_path: Path,
+) -> None:
+    runtime, root, workspace, content = _strict_v2_root_with_commission(tmp_path)
+    foreign = tmp_path / "foreign-workspace"
+    subprocess.run(["git", "clone", "-q", "--no-local", str(workspace), str(foreign)], check=True)
+    supervisor = _supervisor(runtime, tmp_path, FakeAdapter(FakeInspector()))
+
+    with pytest.raises(
+        SupervisorError, match="workspace differs from the durable Job assignment"
+    ):
+        supervisor.verified_commission(root, foreign.resolve(strict=True))
+
+    assert (foreign / "research" / "commission.md").read_bytes() == content
+
+def test_commission_artifact_is_group_readable_but_non_writable_when_shared(
+    tmp_path: Path,
+) -> None:
+    runtime, root, workspace, content = _strict_v2_root_with_commission(tmp_path)
+    supervisor = _supervisor(
+        runtime, tmp_path, FakeAdapter(FakeInspector()), shared_run_gid=os.getegid()
+    )
+    verified = supervisor.verified_commission(root, workspace)
+    assert verified is not None
+    target_dir = tmp_path / "shared-run" / "input"
+
+    packet = supervisor.materialize_commission(verified, input_dir=target_dir)
+
+    assert packet is not None
+    local_path = Path(packet["verified_local_path"])
+    info = local_path.stat()
+    assert stat.S_IMODE(info.st_mode) == 0o440
+    assert info.st_gid == os.getegid()
+    assert subprocess.run(
+        ["/bin/cat", str(local_path)], check=True, capture_output=True
+    ).stdout == content
+
+
+@pytest.mark.parametrize(
+    ("fixture_kwargs", "message"),
+    [
+        ({"ref_commit": "f" * 40}, "Git evidence is unavailable"),
+        ({"ref_path": "research/missing.md"}, "Git evidence is unavailable"),
+        ({"content": b""}, "commission blob is empty"),
+        ({"content": b"x" * (512 * 1024 + 1)}, "exceeds the 512 KiB ceiling"),
+        ({"content": b"bad\x00commission"}, "contains a NUL byte"),
+        ({"content": b"bad-utf8-\xff"}, "must be UTF-8 text"),
+    ],
+)
+def test_commission_invalid_object_or_content_refuses(
+    tmp_path: Path, fixture_kwargs: dict[str, object], message: str
+) -> None:
+    runtime, root, workspace, _content = _strict_v2_root_with_commission(
+        tmp_path, **fixture_kwargs
+    )
+    supervisor = _supervisor(runtime, tmp_path, FakeAdapter(FakeInspector()))
+
+    with pytest.raises(SupervisorError, match=message):
+        supervisor.verified_commission(root, workspace)
+
+
+def test_commission_verification_failure_refuses_before_provider_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime, job_id, _workspace = _runtime_and_routed_job(tmp_path)
+    lease = runtime.attempts.claim_job(job_id, lease_owner="supervisor-fixture")
+    assert lease is not None
+    adapter = FakeAdapter(FakeInspector())
+    supervisor = _supervisor(runtime, tmp_path, adapter)
+
+    def refuse(_job, _workspace):
+        raise SupervisorError("synthetic immutable commission refusal")
+
+    monkeypatch.setattr(supervisor, "verified_commission", refuse)
+    with pytest.raises(SupervisorError, match="synthetic immutable commission refusal"):
+        asyncio.run(supervisor._start_claimed_job(job_id, lease))
+
+    assert adapter.spec is None
+    attempt = runtime.attempts.get_attempt(lease.attempt.attempt_id)
+    job = runtime.jobs.get_job(job_id)
+    assert attempt is not None and attempt.status is AttemptStatus.FAILED
+    assert job is not None and job.status is JobStatus.FAILED
+
+
+def test_source_free_orchestration_job_keeps_legacy_no_commission_behavior(
+    tmp_path: Path,
+) -> None:
+    runtime = Runtime.at(tmp_path)
+    receipt = submit_intent(runtime, {
+        "schema": INTENT_SCHEMA_V2,
+        "intent_id": "CEO-COMMISSION-LEGACY-001",
+        "actor": "ceo-sol",
+        "objective": "Keep source-free orchestration compatible.",
+        "department": "executive-infrastructure",
+        "priority": 9,
+        "grounding": {"mastermind_sha": "a" * 40, "macro_sha": "b" * 40},
+        "execution_contract": {"requested_authorities": ["READ"], "attempt_limit": 2},
+        "intent_kind": "executive_coo_cycle",
+        "business_impact": "routine",
+    })
+    root = runtime.jobs.get_job(receipt["job_id"])
+    assert root is not None
+    planner = runtime.jobs.create_cycle_planner(
+        root.job_id, command_id=f"coo-cycle:{root.job_id}:create-planner:0"
+    )
+
+    assert verify_commission_for_job(runtime, planner, None) is None

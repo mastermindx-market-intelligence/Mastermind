@@ -951,16 +951,22 @@ class ExecutiveOperatorSupervisor:
                 lease,
                 require_turn=False,
             )
-            try:
-                verified_commission = verify_commission_for_job(
-                    self.runtime,
-                    job,
-                    (Path(job.worktree).resolve(strict=True) if job.worktree else None),
-                )
-            except Exception as exc:
-                raise ExecutiveOperatorSupervisorError(
-                    f"operator immutable commission verification failed: {exc}"
-                ) from exc
+            verified_commission = None
+            if lease.attempt.status is not AttemptStatus.CANCEL_REQUESTED:
+                try:
+                    verified_commission = verify_commission_for_job(
+                        self.runtime,
+                        job,
+                        (Path(job.worktree).resolve(strict=True) if job.worktree else None),
+                    )
+                except Exception as exc:
+                    raise ExecutiveOperatorSupervisorError(
+                        f"operator immutable commission verification failed: {exc}"
+                    ) from exc
+            # Cancellation/containment of an already-live writer must never depend
+            # on later availability of the immutable commission.  No new/resumed
+            # turn is permitted without verification; the source-free prompt here
+            # is only a loader placeholder for reconcile/cancel mechanics.
             prompt = self._prompt(job, lease, verified_commission)
             adapter = self.adapter_factory(lambda _turn: prompt)
             orchestrator = self._orchestrator(lease, adapter)
