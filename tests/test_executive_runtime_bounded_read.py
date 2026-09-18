@@ -40,6 +40,18 @@ def _make_attempts(runtime: Runtime, job_id: str, count: int) -> None:
             runtime.jobs.requeue_job(job_id)
 
 
+def test_bounded_ceilings_track_existing_owner_policy():
+    from control_plane.ceo_intent import MAX_ATTEMPT_LIMIT
+    from control_plane.executive_coo_policy import CooCyclePolicy
+
+    policy = CooCyclePolicy.load()
+    assert er.BOUNDED_RUNTIME_ROOT_MAX_CHILDREN == policy.max_children_total
+    assert er.BOUNDED_RUNTIME_JOB_MAX_ATTEMPTS == MAX_ATTEMPT_LIMIT
+    assert er.BOUNDED_RUNTIME_ROOT_MAX_ATTEMPTS_TOTAL == (
+        (1 + policy.max_children_total) * MAX_ATTEMPT_LIMIT
+    )
+
+
 def test_root_discovery_is_sql_bounded_before_job_conversion(tmp_path, monkeypatch):
     _root, runtime = _runtime(tmp_path)
     for index in range(er.BOUNDED_RUNTIME_ROOT_DISCOVERY_MAX_ROOTS + 3):
