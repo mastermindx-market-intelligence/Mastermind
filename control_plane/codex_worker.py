@@ -260,6 +260,12 @@ class _GitSnapshot:
     status: bytes
 
 
+@dataclasses.dataclass(frozen=True)
+class _OwnedTaskSettlement:
+    converged: bool
+    errors: tuple[str, ...]
+
+
 @dataclasses.dataclass
 class _JSONLState:
     thread_started: int = 0
@@ -2125,38 +2131,76 @@ async def _settle_or_cancel_owned_tasks(
     tasks: Sequence[asyncio.Task[Any] | None],
     *,
     timeout: float | None = None,
-) -> bool:
-    """Bound only the exact adapter-owned local tasks supplied by the caller."""
+) -> _OwnedTaskSettlement:
+    """Bound and consume only the exact adapter-owned local tasks supplied."""
 
     current = asyncio.current_task()
     seen: set[int] = set()
-    pending: list[asyncio.Task[Any]] = []
+    owned: list[asyncio.Task[Any]] = []
     for task in tasks:
-        if task is None or task is current or task.done() or id(task) in seen:
+        if task is None or task is current or id(task) in seen:
             continue
         seen.add(id(task))
-        pending.append(task)
-    if not pending:
-        return True
-    budget = (
+        owned.append(task)
+    if not owned:
+        return _OwnedTaskSettlement(converged=True, errors=())
+    budget = max(
+        0.0,
         _LOCAL_TRANSPORT_FINALIZATION_SECONDS
         if timeout is None
-        else float(timeout)
+        else float(timeout),
     )
+
+    async def settle() -> _OwnedTaskSettlement:
+        pending = {task for task in owned if not task.done()}
+        required_cancellation = False
+        if pending:
+            _done, remaining = await asyncio.wait(pending, timeout=budget)
+            if remaining:
+                required_cancellation = True
+                for task in remaining:
+                    task.cancel()
+                _done, remaining = await asyncio.wait(remaining, timeout=budget)
+        else:
+            remaining = set()
+
+        errors: list[str] = []
+        for index, task in enumerate(owned, start=1):
+            if not task.done() or task.cancelled():
+                continue
+            try:
+                task.result()
+            except BaseException as exc:  # exact owned task; safe type evidence only
+                errors.append(f"owned task {index} failed: {type(exc).__name__}")
+        return _OwnedTaskSettlement(
+            converged=not required_cancellation and not remaining,
+            errors=tuple(errors),
+        )
+
+    settlement_task = asyncio.create_task(settle())
+    pending_cancellation: asyncio.CancelledError | None = None
+    while not settlement_task.done():
+        try:
+            await asyncio.shield(settlement_task)
+        except asyncio.CancelledError as exc:
+            if pending_cancellation is None:
+                pending_cancellation = exc
     try:
-        _done, remaining = await asyncio.wait(pending, timeout=budget)
-    except asyncio.CancelledError:
-        remaining = {task for task in pending if not task.done()}
-        for task in remaining:
-            task.cancel()
-        await asyncio.gather(*remaining, return_exceptions=True)
+        settlement = settlement_task.result()
+    except BaseException as exc:
+        if pending_cancellation is not None:
+            pending_cancellation.add_note(
+                f"owned task settlement failed internally: {type(exc).__name__}"
+            )
+            raise pending_cancellation from exc
         raise
-    if not remaining:
-        return True
-    for task in remaining:
-        task.cancel()
-    await asyncio.gather(*remaining, return_exceptions=True)
-    return False
+    if pending_cancellation is not None:
+        for error in settlement.errors:
+            pending_cancellation.add_note(error)
+        if not settlement.converged:
+            pending_cancellation.add_note("owned tasks did not converge")
+        raise pending_cancellation
+    return settlement
 
 
 async def _bounded_task_convergence(
@@ -2164,9 +2208,13 @@ async def _bounded_task_convergence(
     *,
     label: str,
 ) -> None:
-    if await _settle_or_cancel_owned_tasks(tasks):
+    settlement = await _settle_or_cancel_owned_tasks(tasks)
+    details = list(settlement.errors)
+    if not settlement.converged:
+        details.insert(0, "owned tasks did not converge")
+    if not details:
         return
-    raise ProcessIdentityError(f"{label} owned tasks did not converge")
+    raise ProcessIdentityError(f"{label}: {'; '.join(details)}")
 
 
 def _record_worker_forced_retirement(state: _RunState) -> None:
@@ -3211,13 +3259,18 @@ class CodexWorkerAdapter:
                     label="validation stream finalization",
                 )
                 error = error or "validation required forced local stream finalization"
-        except ProcessIdentityError:
-            await _settle_or_cancel_owned_tasks(
+        except ProcessIdentityError as exc:
+            settlement = await _settle_or_cancel_owned_tasks(
                 (wait_task, stdout_task, stderr_task),
                 timeout=_LOCAL_STREAM_DRAIN_SECONDS,
             )
+            for error in settlement.errors:
+                exc.add_note(error)
+            if not settlement.converged:
+                exc.add_note("validation owned tasks did not converge")
             raise
-        except asyncio.CancelledError:
+        except asyncio.CancelledError as cancellation:
+            cleanup_error: ProcessIdentityError | None = None
             try:
                 await asyncio.shield(
                     self._terminate_validation_process(
@@ -3231,13 +3284,21 @@ class CodexWorkerAdapter:
                         grace_seconds=min(float(spec.cancel_grace_seconds), 5.0),
                     )
                 )
-            except ProcessIdentityError:
-                pass
-            await _settle_or_cancel_owned_tasks(
+            except ProcessIdentityError as exc:
+                cleanup_error = exc
+            settlement = await _settle_or_cancel_owned_tasks(
                 (wait_task, stdout_task, stderr_task),
                 timeout=_LOCAL_STREAM_DRAIN_SECONDS,
             )
-            raise
+            if cleanup_error is not None:
+                cancellation.add_note(str(cleanup_error))
+            for error in settlement.errors:
+                cancellation.add_note(error)
+            if not settlement.converged:
+                cancellation.add_note("validation owned tasks did not converge")
+            if cleanup_error is not None:
+                raise cancellation from cleanup_error
+            raise cancellation
         finally:
             exceeded_task.cancel()
             returncode_task.cancel()
@@ -3779,18 +3840,22 @@ class CodexWorkerAdapter:
                         termination_failed = True
 
             if termination_failed and not state.finalization.group_proven_absent:
-                converged = await _settle_or_cancel_owned_tasks(
+                settlement = await _settle_or_cancel_owned_tasks(
                     (
                         state.process_wait_task,
                         state.stdout_task,
                         state.stderr_task,
                     )
                 )
-                if not converged:
+                if not settlement.converged:
                     marker = (
                         "worker pre-latch identity failure required bounded "
                         "local task cancellation"
                     )
+                    if marker not in state.stream_errors:
+                        state.stream_errors.append(marker)
+                for error in settlement.errors:
+                    marker = f"worker local task settlement: {error}"
                     if marker not in state.stream_errors:
                         state.stream_errors.append(marker)
                 return
@@ -3915,12 +3980,12 @@ class CodexWorkerAdapter:
         state.status = WorkerRunStatus.CANCELLING
         try:
             sent, escalated, already_exited = await self._terminate(state)
-        except ProcessIdentityError:
+        except ProcessIdentityError as exc:
             if state.finalization.error is not None:
                 monitor_task = state.monitor_task
                 if monitor_task is not None and not monitor_task.done():
                     monitor_task.cancel()
-                await _settle_or_cancel_owned_tasks(
+                settlement = await _settle_or_cancel_owned_tasks(
                     (
                         state.process_wait_task,
                         state.stdout_task,
@@ -3928,6 +3993,13 @@ class CodexWorkerAdapter:
                     ),
                     timeout=_LOCAL_STREAM_DRAIN_SECONDS,
                 )
+                for error in settlement.errors:
+                    exc.add_note(error)
+                    marker = f"worker local task settlement: {error}"
+                    if marker not in state.stream_errors:
+                        state.stream_errors.append(marker)
+                if not settlement.converged:
+                    exc.add_note("worker owned tasks did not converge")
                 if monitor_task is not None:
                     await asyncio.gather(monitor_task, return_exceptions=True)
                 if state.finished_at is None:

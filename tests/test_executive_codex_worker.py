@@ -2562,6 +2562,70 @@ def test_local_schema_validator_fails_closed_on_unknown_keyword():
         cw.validate_json_schema({"x": 1}, {"type": "object", "unevaluatedProperties": False})
 
 
+def test_owned_task_settlement_consumes_precompleted_failure() -> None:
+    async def exercise() -> None:
+        async def fail_owned_task() -> None:
+            raise RuntimeError("precompleted owned task failure")
+
+        task = asyncio.create_task(fail_owned_task())
+        await asyncio.sleep(0)
+        assert task.done()
+        assert getattr(task, "_log_traceback", False) is True
+
+        settlement = await cw._settle_or_cancel_owned_tasks(
+            (task,), timeout=0.01
+        )
+
+        assert settlement.converged is True
+        assert settlement.errors == ("owned task 1 failed: RuntimeError",)
+        assert getattr(task, "_log_traceback", False) is False
+
+    asyncio.run(exercise())
+
+
+def test_owned_task_settlement_consumes_failure_during_bounded_wait() -> None:
+    async def exercise() -> None:
+        release = asyncio.Event()
+
+        async def fail_owned_task() -> None:
+            await release.wait()
+            raise RuntimeError("owned task failed during settlement")
+
+        task = asyncio.create_task(fail_owned_task())
+        asyncio.get_running_loop().call_later(0.01, release.set)
+
+        settlement = await cw._settle_or_cancel_owned_tasks(
+            (task,), timeout=0.2
+        )
+
+        assert task.done()
+        assert settlement.converged is True
+        assert settlement.errors == ("owned task 1 failed: RuntimeError",)
+        assert getattr(task, "_log_traceback", False) is False
+
+    asyncio.run(exercise())
+
+
+def test_bounded_task_convergence_rejects_failed_owned_task() -> None:
+    async def exercise() -> None:
+        async def fail_owned_task() -> None:
+            raise RuntimeError("bounded convergence task failure")
+
+        task = asyncio.create_task(fail_owned_task())
+        await asyncio.sleep(0)
+
+        with pytest.raises(
+            cw.ProcessIdentityError,
+            match="owned task 1 failed: RuntimeError",
+        ):
+            await cw._bounded_task_convergence(
+                (task,), label="review settlement"
+            )
+        assert getattr(task, "_log_traceback", False) is False
+
+    asyncio.run(exercise())
+
+
 def test_monitor_bounds_owned_tasks_after_pre_latch_identity_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2878,8 +2942,22 @@ def test_validation_cancellation_preserves_cancelled_error_when_signal_refused(
                 await asyncio.sleep(0.01)
             assert processes and len(recorded_hash_tasks) == 2
             task.cancel()
-            with pytest.raises(asyncio.CancelledError):
+            with pytest.raises(asyncio.CancelledError) as caught:
                 await asyncio.wait_for(task, timeout=1.0)
+            cleanup_evidence = []
+            if caught.value.__cause__ is not None:
+                cleanup_evidence.append(str(caught.value.__cause__))
+            cleanup_evidence.extend(
+                getattr(caught.value, "__notes__", ()) or ()
+            )
+            assert any(
+                "validation process signal failed: PermissionError" in item
+                for item in cleanup_evidence
+            ), (
+                "typed cleanup failure was discarded from cancellation: "
+                f"cause={caught.value.__cause__!r}, "
+                f"notes={getattr(caught.value, '__notes__', None)!r}"
+            )
             assert all(hash_task.done() for hash_task in recorded_hash_tasks)
             assert signal_calls == [(processes[0].pid, signal.SIGTERM)]
         finally:
