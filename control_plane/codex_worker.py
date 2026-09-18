@@ -1795,6 +1795,26 @@ def _process_group_exists(pgid: int) -> bool:
     return True
 
 
+def _signal_process_group_once(
+    pgid: int,
+    sig: int,
+    *,
+    finalization: _ProcessFinalizationState,
+    label: str,
+) -> bool:
+    """Send one group signal or fail closed through the typed finalization boundary."""
+
+    try:
+        os.killpg(pgid, sig)
+    except ProcessLookupError:
+        return False
+    except OSError as exc:
+        error = finalization.error or f"{label} signal failed: {type(exc).__name__}"
+        finalization.error = error
+        raise ProcessIdentityError(error) from exc
+    return True
+
+
 async def _wait_for_process_group_exit(pgid: int, *, timeout: float = 2.0) -> bool:
     deadline = asyncio.get_running_loop().time() + timeout
     while _process_group_exists(pgid):
@@ -2864,11 +2884,13 @@ class CodexWorkerAdapter:
             identity, observed_pgid = self.inspector.identity(pid)
             if identity != start_identity or observed_pgid != pgid:
                 raise ProcessIdentityError("validation process identity changed")
-            try:
-                os.killpg(pgid, signal.SIGTERM)
+            if _signal_process_group_once(
+                pgid,
+                signal.SIGTERM,
+                finalization=finalization,
+                label="validation process",
+            ):
                 finalization.signal_sent = True
-            except ProcessLookupError:
-                pass
 
         if not leader_exited:
             try:
@@ -2907,11 +2929,15 @@ class CodexWorkerAdapter:
 
         if group_exists:
             if not finalization.sigkill_sent:
-                try:
-                    os.killpg(pgid, signal.SIGKILL)
+                if _signal_process_group_once(
+                    pgid,
+                    signal.SIGKILL,
+                    finalization=finalization,
+                    label="validation process",
+                ):
                     finalization.signal_sent = True
                     finalization.sigkill_sent = True
-                except ProcessLookupError:
+                else:
                     group_exists = False
             if group_exists and not wait_task.done():
                 try:
@@ -3162,11 +3188,15 @@ class CodexWorkerAdapter:
                         "validation process leader remained resolvable after recorded exit"
                     )
                 if group_exists:
-                    try:
-                        os.killpg(pgid, signal.SIGKILL)
+                    if _signal_process_group_once(
+                        pgid,
+                        signal.SIGKILL,
+                        finalization=finalization,
+                        label="validation process",
+                    ):
                         finalization.signal_sent = True
                         finalization.sigkill_sent = True
-                    except ProcessLookupError:
+                    else:
                         group_exists = False
                     if group_exists and not await _wait_for_process_group_exit(pgid):
                         raise ProcessIdentityError(
@@ -3506,9 +3536,12 @@ class CodexWorkerAdapter:
             if latch_absence:
                 _latch_process_group_absence(finalization, label="worker")
             return False
-        try:
-            os.killpg(state.ref.pgid, signal.SIGKILL)
-        except ProcessLookupError:
+        if not _signal_process_group_once(
+            state.ref.pgid,
+            signal.SIGKILL,
+            finalization=finalization,
+            label="worker process",
+        ):
             if latch_absence:
                 _latch_process_group_absence(finalization, label="worker")
             return False
@@ -3588,11 +3621,13 @@ class CodexWorkerAdapter:
                     raise ProcessIdentityError(
                         "refusing to signal a process whose identity changed"
                     )
-                try:
-                    os.killpg(state.ref.pgid, signal.SIGTERM)
+                if _signal_process_group_once(
+                    state.ref.pgid,
+                    signal.SIGTERM,
+                    finalization=finalization,
+                    label="worker process",
+                ):
                     finalization.signal_sent = True
-                except ProcessLookupError:
-                    pass
 
             if not leader_exited:
                 try:
@@ -3648,12 +3683,16 @@ class CodexWorkerAdapter:
 
             if group_exists:
                 if not finalization.sigkill_sent:
-                    try:
-                        os.killpg(state.ref.pgid, signal.SIGKILL)
+                    if _signal_process_group_once(
+                        state.ref.pgid,
+                        signal.SIGKILL,
+                        finalization=finalization,
+                        label="worker process",
+                    ):
                         finalization.signal_sent = True
                         finalization.sigkill_sent = True
                         state.escalated = True
-                    except ProcessLookupError:
+                    else:
                         group_exists = False
                 if group_exists and not state.process_wait_task.done():
                     try:

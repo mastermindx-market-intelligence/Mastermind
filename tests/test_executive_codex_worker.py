@@ -2826,6 +2826,285 @@ def test_validation_cancellation_preserves_cancelled_error_when_identity_cleanup
     asyncio.run(exercise())
 
 
+def test_validation_cancellation_preserves_cancelled_error_when_signal_refused(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def exercise() -> None:
+        adapter, spec, _workspace_path, _run_dir = _fixture(tmp_path)
+        recorded_hash_tasks: list[asyncio.Task[object]] = []
+        processes: list[asyncio.subprocess.Process] = []
+        signal_calls: list[tuple[int, int]] = []
+        original_create = cw.asyncio.create_subprocess_exec
+        original_hash = cw._hash_validation_stream
+        original_killpg = cw.os.killpg
+
+        async def capture_process(*args, **kwargs):
+            process = await original_create(*args, **kwargs)
+            processes.append(process)
+            return process
+
+        async def recording_hash(*args, **kwargs):
+            task = asyncio.current_task()
+            assert task is not None
+            recorded_hash_tasks.append(task)
+            return await original_hash(*args, **kwargs)
+
+        def refuse_published_signal(pgid: int, sig: int) -> None:
+            if (
+                processes
+                and pgid == processes[0].pid
+                and sig in {signal.SIGTERM, signal.SIGKILL}
+            ):
+                signal_calls.append((pgid, sig))
+                raise PermissionError("synthetic published validation signal refusal")
+            original_killpg(pgid, sig)
+
+        monkeypatch.setattr(cw.asyncio, "create_subprocess_exec", capture_process)
+        monkeypatch.setattr(cw, "_hash_validation_stream", recording_hash)
+        monkeypatch.setattr(cw.os, "killpg", refuse_published_signal)
+
+        task = asyncio.create_task(
+            adapter.run_validation_argv(
+                spec,
+                ("/bin/sleep", "60"),
+                timeout_seconds=5,
+            )
+        )
+        try:
+            for _ in range(200):
+                if processes and len(recorded_hash_tasks) == 2:
+                    break
+                await asyncio.sleep(0.01)
+            assert processes and len(recorded_hash_tasks) == 2
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(task, timeout=1.0)
+            assert all(hash_task.done() for hash_task in recorded_hash_tasks)
+            assert signal_calls == [(processes[0].pid, signal.SIGTERM)]
+        finally:
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            for hash_task in recorded_hash_tasks:
+                if not hash_task.done():
+                    hash_task.cancel()
+            await asyncio.gather(*recorded_hash_tasks, return_exceptions=True)
+            for process in processes:
+                if process.returncode is None:
+                    try:
+                        original_killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    await asyncio.wait_for(process.wait(), 2.0)
+
+    asyncio.run(exercise())
+
+
+def test_worker_monitor_signal_refusal_retires_owned_tasks_boundedly(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def exercise() -> None:
+        monkeypatch.setattr(cw, "_LOCAL_TRANSPORT_FINALIZATION_SECONDS", 0.01)
+        monkeypatch.setattr(cw, "_LOCAL_STREAM_DRAIN_SECONDS", 0.01)
+        adapter, spec, _workspace_path, _run_dir = _fixture(
+            tmp_path, prompt="sleep", timeout=30, grace=0.1
+        )
+        ref = await adapter.start(spec)
+        state = adapter._runs[spec.run_id]
+        assert state.monitor_task is not None
+        signal_calls: list[tuple[int, int]] = []
+        original_killpg = cw.os.killpg
+
+        def refuse_published_signal(pgid: int, sig: int) -> None:
+            if pgid == ref.pgid and sig in {signal.SIGTERM, signal.SIGKILL}:
+                signal_calls.append((pgid, sig))
+                raise PermissionError("synthetic published worker signal refusal")
+            original_killpg(pgid, sig)
+
+        monkeypatch.setattr(cw.os, "killpg", refuse_published_signal)
+        owned_tasks = (state.process_wait_task, state.stdout_task, state.stderr_task)
+        try:
+            state.violation.set()
+            await asyncio.wait_for(state.monitor_task, timeout=1.0)
+            assert all(task is None or task.done() for task in owned_tasks)
+            assert state.finished_at is not None
+            assert state.finalization.error == (
+                "worker process signal failed: PermissionError"
+            )
+            assert any(
+                "worker process signal failed: PermissionError" in item
+                for item in state.stream_errors
+            )
+            assert signal_calls == [(ref.pgid, signal.SIGTERM)]
+            assert state.process.returncode is None
+        finally:
+            if state.process.returncode is None:
+                try:
+                    original_killpg(ref.pgid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                await asyncio.wait_for(state.process.wait(), 2.0)
+            for task in owned_tasks:
+                if task is not None and not task.done():
+                    task.cancel()
+            await asyncio.gather(
+                *(task for task in owned_tasks if task is not None),
+                return_exceptions=True,
+            )
+
+    asyncio.run(exercise())
+
+
+def test_validation_residual_group_signal_refusal_is_typed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def exercise() -> None:
+        adapter, spec, _workspace_path, run_dir = _fixture(tmp_path, grace=0.1)
+        child_path = run_dir / "validation-residual-child.pid"
+        processes: list[asyncio.subprocess.Process] = []
+        signal_calls: list[tuple[int, int]] = []
+        original_create = cw.asyncio.create_subprocess_exec
+        original_killpg = cw.os.killpg
+        program = (
+            "import pathlib,subprocess,sys; "
+            "p=subprocess.Popen(['/bin/sleep','60'], "
+            "stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,"
+            "stderr=subprocess.DEVNULL); "
+            "pathlib.Path(sys.argv[1]).write_text(str(p.pid))"
+        )
+
+        async def capture_process(*args, **kwargs):
+            process = await original_create(*args, **kwargs)
+            processes.append(process)
+            return process
+
+        def refuse_residual_signal(pgid: int, sig: int) -> None:
+            if processes and pgid == processes[0].pid and sig == signal.SIGKILL:
+                signal_calls.append((pgid, sig))
+                raise PermissionError("synthetic validation residual signal refusal")
+            original_killpg(pgid, sig)
+
+        monkeypatch.setattr(cw.asyncio, "create_subprocess_exec", capture_process)
+        monkeypatch.setattr(cw.os, "killpg", refuse_residual_signal)
+
+        child_pid = None
+        try:
+            with pytest.raises(
+                cw.ProcessIdentityError,
+                match="validation process signal failed: PermissionError",
+            ):
+                await asyncio.wait_for(
+                    adapter.run_validation_argv(
+                        spec,
+                        ("/usr/bin/python3", "-c", program, str(child_path)),
+                        timeout_seconds=5,
+                    ),
+                    timeout=2.0,
+                )
+            assert processes
+            child_pid = int(child_path.read_text())
+            assert signal_calls == [(processes[0].pid, signal.SIGKILL)]
+        finally:
+            if processes:
+                try:
+                    original_killpg(processes[0].pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                except PermissionError:
+                    if child_pid is not None:
+                        try:
+                            os.kill(child_pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+            elif child_pid is not None:
+                try:
+                    os.kill(child_pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
+    asyncio.run(exercise())
+
+
+def test_worker_residual_group_signal_refusal_is_typed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def exercise() -> None:
+        wait_forever = asyncio.Event()
+        wait_task = asyncio.create_task(wait_forever.wait())
+        finalization = type(
+            "Finalization",
+            (),
+            {
+                "group_proven_absent": False,
+                "error": None,
+                "signal_sent": False,
+                "sigkill_sent": False,
+            },
+        )()
+        ref = type(
+            "Ref",
+            (),
+            {
+                "pid": 424242,
+                "pgid": 424242,
+                "process_start_identity": "captured",
+                "boot_session_id": "boot",
+            },
+        )()
+        state = type(
+            "State",
+            (),
+            {
+                "finalization": finalization,
+                "ref": ref,
+                "process": type("Process", (), {"returncode": None})(),
+                "process_wait_task": wait_task,
+                "escalated": False,
+            },
+        )()
+
+        class Inspector:
+            def boot_session_id(self) -> str:
+                return "boot"
+
+            def identity(self, _pid: int):
+                raise cw.ProcessIdentityError("synthetic reaped leader")
+
+        adapter = object.__new__(cw.CodexWorkerAdapter)
+        adapter.inspector = Inspector()
+        signal_calls: list[tuple[int, int]] = []
+
+        monkeypatch.setattr(cw, "_process_group_exists", lambda _pgid: True)
+
+        def refuse_signal(pgid: int, sig: int) -> None:
+            signal_calls.append((pgid, sig))
+            raise PermissionError("synthetic worker residual signal refusal")
+
+        monkeypatch.setattr(cw.os, "killpg", refuse_signal)
+
+        try:
+            with pytest.raises(
+                cw.ProcessIdentityError,
+                match="worker process signal failed: PermissionError",
+            ):
+                await adapter._kill_residual_process_group(
+                    state,
+                    latch_absence=True,
+                )
+            assert signal_calls == [(424242, signal.SIGKILL)]
+            assert finalization.error == "worker process signal failed: PermissionError"
+            assert finalization.group_proven_absent is False
+            assert state.escalated is False
+        finally:
+            wait_task.cancel()
+            await asyncio.gather(wait_task, return_exceptions=True)
+
+    asyncio.run(exercise())
+
+
 def test_start_attestation_identity_failure_reaps_unpublished_process(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -2978,7 +3257,7 @@ def test_start_cleanup_signal_failure_closes_fds_and_preserves_original(
             tmp_path, prompt="sleep", timeout=30, grace=0.1
         )
         spawned: list[asyncio.subprocess.Process] = []
-        created_fds: list[int] = []
+        created_fds: list[tuple[int, int, int]] = []
         kill_calls: list[tuple[int, int]] = []
         real_create_subprocess_exec = cw.asyncio.create_subprocess_exec
         real_create_private_file = cw._create_private_file
@@ -2992,7 +3271,8 @@ def test_start_cleanup_signal_failure_closes_fds_and_preserves_original(
 
         def recording_create_private_file(path: Path) -> int:
             fd = real_create_private_file(path)
-            created_fds.append(fd)
+            identity = os.fstat(fd)
+            created_fds.append((fd, identity.st_dev, identity.st_ino))
             return fd
 
         def fail_attestation_identity(path: Path):
@@ -3028,12 +3308,16 @@ def test_start_cleanup_signal_failure_closes_fds_and_preserves_original(
             assert kill_calls == [(process.pid, signal.SIGKILL)]
             assert spec.run_id not in adapter._runs
             open_fds = []
-            for fd in created_fds:
+            for fd, expected_dev, expected_ino in created_fds:
                 try:
-                    os.fstat(fd)
+                    observed = os.fstat(fd)
                 except OSError:
                     continue
-                open_fds.append(fd)
+                if (observed.st_dev, observed.st_ino) == (
+                    expected_dev,
+                    expected_ino,
+                ):
+                    open_fds.append(fd)
             assert open_fds == []
             assert process.returncode is None
         finally:
@@ -3047,7 +3331,7 @@ def test_start_cleanup_signal_failure_closes_fds_and_preserves_original(
                 except PermissionError:
                     process.kill()
                 await asyncio.wait_for(process.wait(), 2.0)
-            for fd in created_fds:
+            for fd, _expected_dev, _expected_ino in created_fds:
                 try:
                     os.close(fd)
                 except OSError:
