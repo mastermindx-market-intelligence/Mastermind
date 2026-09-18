@@ -3309,6 +3309,190 @@ def test_public_cancel_signal_refusal_retires_local_tasks_without_retry(
     asyncio.run(exercise())
 
 
+def test_public_cancel_caller_cancellation_waits_for_terminal_transaction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def exercise() -> None:
+        adapter, spec, _workspace_path, _run_dir = _fixture(
+            tmp_path, prompt="sleep", timeout=30, grace=0.1
+        )
+        ref = await adapter.start(spec)
+        state = adapter._runs[spec.run_id]
+        signal_calls: list[tuple[int, int]] = []
+        sigterm_seen = asyncio.Event()
+        original_killpg = cw.os.killpg
+
+        def hold_sigterm_then_kill(pgid: int, sig: int) -> None:
+            if pgid == ref.pgid and sig in {signal.SIGTERM, signal.SIGKILL}:
+                signal_calls.append((pgid, sig))
+                if sig == signal.SIGTERM:
+                    sigterm_seen.set()
+                    # SIGTERM was issued but has not caused exit yet.
+                    return
+            original_killpg(pgid, sig)
+
+        monkeypatch.setattr(cw.os, "killpg", hold_sigterm_then_kill)
+        task = asyncio.create_task(adapter.cancel(ref, "operator requested"))
+        try:
+            await asyncio.wait_for(sigterm_seen.wait(), timeout=1.0)
+            task.cancel()
+            await asyncio.sleep(0)
+            task.cancel()
+
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(task, timeout=3.0)
+
+            assert signal_calls == [
+                (ref.pgid, signal.SIGTERM),
+                (ref.pgid, signal.SIGKILL),
+            ]
+            assert state.process.returncode is not None
+            assert state.finalization.group_proven_absent is True
+            assert state.finalization.error is None
+            assert state.monitor_task is not None
+            assert state.monitor_task.done()
+            assert state.finished_at is not None
+        finally:
+            monkeypatch.setattr(cw.os, "killpg", original_killpg)
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            if state.process.returncode is None:
+                try:
+                    original_killpg(ref.pgid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                await asyncio.wait_for(state.process.wait(), 2.0)
+            if state.monitor_task is not None and not state.monitor_task.done():
+                state.monitor_task.cancel()
+            if state.monitor_task is not None:
+                await asyncio.gather(state.monitor_task, return_exceptions=True)
+            for owned in (
+                state.process_wait_task,
+                state.stdout_task,
+                state.stderr_task,
+            ):
+                if owned is not None and not owned.done():
+                    owned.cancel()
+            await asyncio.gather(
+                *(
+                    owned
+                    for owned in (
+                        state.process_wait_task,
+                        state.stdout_task,
+                        state.stderr_task,
+                    )
+                    if owned is not None
+                ),
+                return_exceptions=True,
+            )
+
+    asyncio.run(exercise())
+
+
+def test_public_cancel_caller_cancellation_retains_typed_signal_refusal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def exercise() -> None:
+        adapter, spec, _workspace_path, _run_dir = _fixture(
+            tmp_path, prompt="sleep", timeout=30, grace=0.1
+        )
+        ref = await adapter.start(spec)
+        state = adapter._runs[spec.run_id]
+        original_killpg = cw.os.killpg
+        real_settlement = cw._settle_or_cancel_owned_tasks
+        signal_refused = asyncio.Event()
+        settlement_started = asyncio.Event()
+        settlement_release = asyncio.Event()
+        signal_calls: list[tuple[int, int]] = []
+
+        def refuse_sigterm(pgid: int, sig: int) -> None:
+            if pgid == ref.pgid and sig == signal.SIGTERM:
+                signal_calls.append((pgid, sig))
+                signal_refused.set()
+                raise PermissionError("synthetic public cancellation signal refusal")
+            original_killpg(pgid, sig)
+
+        async def delayed_settlement(*args, **kwargs):
+            settlement_started.set()
+            await settlement_release.wait()
+            return await real_settlement(*args, **kwargs)
+
+        monkeypatch.setattr(cw.os, "killpg", refuse_sigterm)
+        monkeypatch.setattr(cw, "_settle_or_cancel_owned_tasks", delayed_settlement)
+        task = asyncio.create_task(adapter.cancel(ref, "operator requested"))
+        try:
+            await asyncio.wait_for(signal_refused.wait(), timeout=1.0)
+            await asyncio.wait_for(settlement_started.wait(), timeout=1.0)
+            task.cancel()
+            await asyncio.sleep(0)
+            task.cancel()
+            settlement_release.set()
+
+            with pytest.raises(asyncio.CancelledError) as caught:
+                await asyncio.wait_for(task, timeout=2.0)
+
+            assert isinstance(caught.value.__cause__, cw.ProcessIdentityError)
+            assert "worker process signal failed: PermissionError" in str(
+                caught.value.__cause__
+            )
+            notes = getattr(caught.value, "__notes__", ()) or ()
+            assert any(
+                "worker process signal failed: PermissionError" in note
+                for note in notes
+            )
+            assert signal_calls == [(ref.pgid, signal.SIGTERM)]
+            assert state.finalization.group_proven_absent is False
+            assert state.finalization.error == (
+                "worker process signal failed: PermissionError"
+            )
+            assert state.monitor_task is not None
+            assert state.monitor_task.done()
+            assert state.finished_at is not None
+        finally:
+            settlement_release.set()
+            monkeypatch.setattr(cw.os, "killpg", original_killpg)
+            monkeypatch.setattr(
+                cw, "_settle_or_cancel_owned_tasks", real_settlement
+            )
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            if state.process.returncode is None:
+                try:
+                    original_killpg(ref.pgid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                await asyncio.wait_for(state.process.wait(), 2.0)
+            if state.monitor_task is not None and not state.monitor_task.done():
+                state.monitor_task.cancel()
+            if state.monitor_task is not None:
+                await asyncio.gather(state.monitor_task, return_exceptions=True)
+            for owned in (
+                state.process_wait_task,
+                state.stdout_task,
+                state.stderr_task,
+            ):
+                if owned is not None and not owned.done():
+                    owned.cancel()
+            await asyncio.gather(
+                *(
+                    owned
+                    for owned in (
+                        state.process_wait_task,
+                        state.stdout_task,
+                        state.stderr_task,
+                    )
+                    if owned is not None
+                ),
+                return_exceptions=True,
+            )
+
+    asyncio.run(exercise())
+
+
 def test_worker_residual_group_signal_refusal_is_typed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

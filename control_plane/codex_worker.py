@@ -3301,6 +3301,10 @@ class CodexWorkerAdapter:
                     # Retain the original caller cancellation, but do not let a
                     # repeated cancellation orphan adapter-owned cleanup.
                     continue
+                except BaseException:
+                    if not cleanup_task.done():
+                        raise
+                    break
             try:
                 cleanup_error, settlement = cleanup_task.result()
             except BaseException as exc:
@@ -3997,43 +4001,74 @@ class CodexWorkerAdapter:
             raise LaunchValidationError("cancellation reason is required")
         state.cancel_reason = reason[:1000]
         state.status = WorkerRunStatus.CANCELLING
+
+        async def finish_cancellation_transaction() -> CancelReceipt:
+            try:
+                sent, escalated, already_exited = await self._terminate(state)
+            except ProcessIdentityError as exc:
+                if state.finalization.error is not None:
+                    monitor_task = state.monitor_task
+                    if monitor_task is not None and not monitor_task.done():
+                        monitor_task.cancel()
+                    settlement = await _settle_or_cancel_owned_tasks(
+                        (
+                            state.process_wait_task,
+                            state.stdout_task,
+                            state.stderr_task,
+                        ),
+                        timeout=_LOCAL_STREAM_DRAIN_SECONDS,
+                    )
+                    for error in settlement.errors:
+                        exc.add_note(error)
+                        marker = f"worker local task settlement: {error}"
+                        if marker not in state.stream_errors:
+                            state.stream_errors.append(marker)
+                    if not settlement.converged:
+                        exc.add_note("worker owned tasks did not converge")
+                    if monitor_task is not None:
+                        await asyncio.gather(monitor_task, return_exceptions=True)
+                    if state.finished_at is None:
+                        state.finished_at = _utc_now()
+                raise
+            if state.monitor_task is not None:
+                await state.monitor_task
+            return CancelReceipt(
+                run_id=ref.run_id,
+                reason=state.cancel_reason,
+                signal_sent=sent,
+                escalated_to_sigkill=escalated,
+                already_exited=already_exited,
+                finished_at=state.finished_at or _utc_now(),
+            )
+
+        cancellation_task = asyncio.create_task(finish_cancellation_transaction())
+        pending_cancellation: asyncio.CancelledError | None = None
+        while not cancellation_task.done():
+            try:
+                await asyncio.shield(cancellation_task)
+            except asyncio.CancelledError as exc:
+                if pending_cancellation is None:
+                    pending_cancellation = exc
+            except BaseException:
+                if not cancellation_task.done():
+                    raise
+                break
         try:
-            sent, escalated, already_exited = await self._terminate(state)
-        except ProcessIdentityError as exc:
-            if state.finalization.error is not None:
-                monitor_task = state.monitor_task
-                if monitor_task is not None and not monitor_task.done():
-                    monitor_task.cancel()
-                settlement = await _settle_or_cancel_owned_tasks(
-                    (
-                        state.process_wait_task,
-                        state.stdout_task,
-                        state.stderr_task,
-                    ),
-                    timeout=_LOCAL_STREAM_DRAIN_SECONDS,
-                )
-                for error in settlement.errors:
-                    exc.add_note(error)
-                    marker = f"worker local task settlement: {error}"
-                    if marker not in state.stream_errors:
-                        state.stream_errors.append(marker)
-                if not settlement.converged:
-                    exc.add_note("worker owned tasks did not converge")
-                if monitor_task is not None:
-                    await asyncio.gather(monitor_task, return_exceptions=True)
-                if state.finished_at is None:
-                    state.finished_at = _utc_now()
+            receipt = cancellation_task.result()
+        except BaseException as exc:
+            if pending_cancellation is not None:
+                if isinstance(exc, ProcessIdentityError):
+                    pending_cancellation.add_note(str(exc))
+                else:
+                    pending_cancellation.add_note(
+                        "worker cancellation transaction failed internally: "
+                        f"{type(exc).__name__}"
+                    )
+                raise pending_cancellation from exc
             raise
-        if state.monitor_task is not None:
-            await state.monitor_task
-        return CancelReceipt(
-            run_id=ref.run_id,
-            reason=state.cancel_reason,
-            signal_sent=sent,
-            escalated_to_sigkill=escalated,
-            already_exited=already_exited,
-            finished_at=state.finished_at or _utc_now(),
-        )
+        if pending_cancellation is not None:
+            raise pending_cancellation
+        return receipt
 
     def _validate_process_ref_after_exit(self, state: _RunState) -> None:
         # Once reaped, proc_pidinfo should no longer resolve the exact identity.
