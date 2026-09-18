@@ -153,6 +153,7 @@ class FakeGithub:
         self.move_head_on_read: int | None = None
         self.fail_head_on_read: int | None = None
         self.applied: dict[str, tuple[str, dict[str, str]]] = {}
+        self.pending: dict[str, tuple[str, dict[str, GithubBlob], dict[str, str]]] = {}
         self.effect_unknown: set[str] = set()
 
     async def read_branch_head(self, target: ResolvedPatchTarget) -> str:
@@ -192,18 +193,31 @@ class FakeGithub:
             raise NativeCommitError(effect_possible=True)
         if self.commit_mode == "ambiguous_not_applied":
             raise NativeCommitError(effect_possible=True)
+        if self.commit_mode == "generic_exception":
+            raise RuntimeError("private post-boundary failure")
 
         commit_oid = "c" * 40
         after: dict[str, str] = {}
+        next_blobs: dict[str, GithubBlob] = {}
         for item in files:
             assert hashlib.sha256(item.content.encode()).hexdigest() == item.after_sha256
-            self.blobs[item.path] = GithubBlob(item.path, _git_blob_oid(item.content), item.content)
+            next_blobs[item.path] = GithubBlob(item.path, _git_blob_oid(item.content), item.content)
             after[item.path] = item.after_sha256
+        if self.commit_mode == "ambiguous_delayed":
+            self.pending[effect_digest] = (commit_oid, next_blobs, after)
+            raise NativeCommitError(effect_possible=True)
+        self.blobs.update(next_blobs)
         self.head = commit_oid
         self.applied[effect_digest] = (commit_oid, after)
         if self.commit_mode == "ambiguous_applied":
             raise NativeCommitError(effect_possible=True)
         return NativeCommitResult(True, commit_oid, False)
+
+    def settle_pending(self, effect_digest: str) -> None:
+        commit_oid, blobs, after = self.pending.pop(effect_digest)
+        self.blobs.update(blobs)
+        self.head = commit_oid
+        self.applied[effect_digest] = (commit_oid, after)
 
     async def reconcile_branch_patch(
         self,
@@ -519,7 +533,7 @@ def test_exact_commit_is_applied_once_and_repeated_commit_is_read_only() -> None
     assert github.commit_calls == 1
 
 
-def test_repeated_old_token_after_proven_not_applied_needs_fresh_owner_attempt_permit() -> None:
+def test_repeated_consumed_attempt_without_durable_terminal_settlement_stays_unknown() -> None:
     github = FakeGithub(_source())
     github.commit_mode = "definite_refusal"
     gateway, _, _ = _gateway(github, target=_target_with_owner_facts())
@@ -530,8 +544,9 @@ def test_repeated_old_token_after_proven_not_applied_needs_fresh_owner_attempt_p
 
     assert first["data"]["effect_state"] == EffectState.NOT_APPLIED.value
     assert first["data"]["native_request_attempts"] == 1
-    assert second["status"] == "REFUSED"
-    assert second["data"]["effect_state"] == EffectState.NOT_APPLIED.value
+    assert second["status"] == "UNKNOWN"
+    assert second["issues"] == [IssueCode.PRIOR_EFFECT_UNKNOWN.value]
+    assert second["data"]["effect_state"] == EffectState.EFFECT_UNKNOWN.value
     assert second["data"]["native_request_attempts"] == 0
     assert github.commit_calls == 1
 
@@ -796,8 +811,9 @@ def test_expiry_is_exclusive_at_exact_expiry_but_reconcile_remains_available() -
     ("mode", "state", "attempts"),
     [
         ("definite_refusal", "NOT_APPLIED", 1),
-        ("ambiguous_not_applied", "NOT_APPLIED", 1),
+        ("ambiguous_not_applied", "EFFECT_UNKNOWN", 1),
         ("ambiguous_unknown", "EFFECT_UNKNOWN", 1),
+        ("generic_exception", "EFFECT_UNKNOWN", 1),
         ("ambiguous_applied", "APPLIED", 1),
     ],
 )
@@ -813,6 +829,61 @@ def test_native_write_outcomes_are_reconciled_without_retry(
     result = _run(gateway.call(COMMIT_TOOL, {"prepared_token": _token(prepared)}))
     assert result["data"]["effect_state"] == state
     assert result["data"]["native_request_attempts"] == attempts
+    assert github.commit_calls == 1
+
+
+def test_delayed_original_request_stays_unknown_then_reconciles_applied_without_resend() -> None:
+    github = FakeGithub(_source())
+    github.commit_mode = "ambiguous_delayed"
+    gateway, _, _ = _gateway(github)
+    prepared = _prepare(gateway, github)
+    token = _token(prepared)
+    effect = _effect_digest(prepared)
+
+    first = _run(gateway.call(COMMIT_TOOL, {"prepared_token": token}))
+    assert first["status"] == "UNKNOWN"
+    assert first["data"]["effect_state"] == EffectState.EFFECT_UNKNOWN.value
+    assert first["data"]["native_request_attempts"] == 1
+    assert github.commit_calls == 1
+
+    github.settle_pending(effect)
+    reconciled = _run(
+        gateway.call(
+            RECONCILE_TOOL,
+            {
+                "operation_key": OPERATION,
+                "normalized_effect_digest": effect,
+                "prepared_token": token,
+            },
+        )
+    )
+    assert reconciled["status"] == "OK"
+    assert reconciled["data"]["effect_state"] == EffectState.APPLIED.value
+    assert reconciled["data"]["native_request_attempts"] == 0
+    assert github.commit_calls == 1
+
+    repeated = _run(gateway.call(COMMIT_TOOL, {"prepared_token": token}))
+    assert repeated["status"] == "OK"
+    assert repeated["data"]["effect_state"] == EffectState.APPLIED.value
+    assert repeated["data"]["native_request_attempts"] == 0
+    assert github.commit_calls == 1
+
+
+def test_possible_send_negative_read_replay_is_unknown_and_never_resends() -> None:
+    github = FakeGithub(_source())
+    github.commit_mode = "ambiguous_not_applied"
+    gateway, _, _ = _gateway(github)
+    token = _token(_prepare(gateway, github))
+
+    first = _run(gateway.call(COMMIT_TOOL, {"prepared_token": token}))
+    second = _run(gateway.call(COMMIT_TOOL, {"prepared_token": token}))
+
+    assert first["status"] == "UNKNOWN"
+    assert first["data"]["effect_state"] == EffectState.EFFECT_UNKNOWN.value
+    assert second["status"] == "UNKNOWN"
+    assert second["issues"] == [IssueCode.PRIOR_EFFECT_UNKNOWN.value]
+    assert second["data"]["effect_state"] == EffectState.EFFECT_UNKNOWN.value
+    assert second["data"]["native_request_attempts"] == 0
     assert github.commit_calls == 1
 
 
