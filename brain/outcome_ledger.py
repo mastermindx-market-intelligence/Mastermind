@@ -129,18 +129,20 @@ def _realized_map(asof) -> dict[str, float]:
         return {}
 
 
-def _lens_snapshot(subject: str, asof_decided: str | None) -> dict:
-    """The PIT signal_history row for this name at its decision date (empty if it predates recording)."""
+def _lens_snapshot(subject: str, asof_decided: str | None) -> dict | None:
+    """Return the PIT signal row, or ``None`` only after a successful absence read.
+
+    Canonical signal-history read failure deliberately propagates. Outcome rows are KEEP-FIRST, so
+    converting a temporary/unreadable history failure into an empty snapshot would permanently erase
+    decision-time lens evidence and prevent later recovery.
+    """
     if not asof_decided:
-        return {}
-    try:
-        from brain import signal_history
-        for r in signal_history.load(asof_decided):
-            if (r.get("ticker") or "").upper() == (subject or "").upper():
-                return r
-    except Exception:
-        pass
-    return {}
+        return None
+    from brain import signal_history
+    for row in signal_history.load(asof_decided):
+        if (row.get("ticker") or "").upper() == (subject or "").upper():
+            return row
+    return None
 
 
 def _outcome(check: dict, realized: float) -> int | None:
@@ -177,14 +179,18 @@ def resolve(asof, realized: dict | None = None, *, theses: list | None = None) -
         if outcome is None:                       # non-directional (watch/hold) — not a graded bet
             continue
         asof_decided = t.get("state_asof")
-        snap = _lens_snapshot(t.get("subject"), asof_decided)
+        snapshot = _lens_snapshot(t.get("subject"), asof_decided)
+        snapshot_status = "available" if snapshot is not None else "missing"
+        snap = snapshot or {}
         candidates.append({
             "thesis_id": tid, "subject": t.get("subject"),
             "asof_decided": asof_decided, "asof_resolved": asof_resolved,
             "prob_correct": t.get("prob_correct"), "lean": t.get("lean"),
             "horizon_d": t.get("horizon_d"), "sleeve": t.get("sleeve"),
             "realized_rel": round(float(rel), 4), "outcome": outcome,
-            # what it SAW at decision time (empty if decided before signal_history existed)
+            # What it SAW at decision time. ``missing`` means the history read completed but this
+            # thesis predates/has no matching snapshot; unavailable history never reaches this write.
+            "lens_snapshot_status": snapshot_status,
             "lens_dirs": snap.get("lens_dirs") or {},
             "confluence_at_entry": snap.get("confluence"),
             "size_authority_at_entry": snap.get("size_authority"),
