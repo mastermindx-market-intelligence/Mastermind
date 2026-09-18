@@ -59,6 +59,32 @@ requires the job's stated acceptance evidence — the tests, artifacts, or live
 verification the job named. "It should work" is not evidence, and neither is a green
 run of a suite that cannot observe the change.
 
+### Astra project-delivery economics
+
+This subsection defines **External Fabric delegation** for Executive-owned Astra/Codex **project delivery**, not to the
+daily portfolio-reasoning model/provider policy below. Astra is the **principal, not the default worker**.
+It retains Chairman-intent recovery, decomposition, architecture, cross-return judgment,
+material exception handling, and final acceptance.
+
+For bounded repository archaeology, implementation, testing, repair, independent review,
+and similarly separable execution, use `submit_ceo_intent` on the **existing five-tool Executive MCP** and route
+through the existing Executive/COO/Capacity worker fabric: **external Fabric first** when a
+qualified lane is currently eligible. Internal Codex agents are fallback capacity only when
+the Fabric cannot satisfy the required capability **before any effect begins**; preserve the
+repo-local Terra/medium/concurrency ceiling unless a separate reviewed policy changes it.
+
+Astra authors the bounded objective and acceptance evidence. **Capacity chooses provider/account/host placement**;
+Astra must not choose provider credentials, account numbers, provider homes, endpoints, worker
+identities, or unmanaged workspaces. Normal parent consumption uses bounded canonical Job/result/
+review evidence: **never replay full worker transcripts** into Astra merely because a worker ran.
+
+A modifying delegation keeps one stable operation identity. **EFFECT_UNKNOWN** stays on the
+**same operation identity** until the canonical owner reconciles it: **no provider or internal-agent failover**
+and no new operation key as a retry. Exact continuation targets the **exact current RuntimeBinding**
+and its admitted native process/session generation; never route a return to the newest or arbitrary
+Codex tab. These rules change execution economics, not authority: Executive Runtime remains lifecycle
+truth and the Chairman/Sol-reserved decision boundaries remain unchanged.
+
 ### Reciprocal dialogue and watcher invariant
 
 For any watcher-enabled Sol↔worker/COO loop, `docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md` is the
