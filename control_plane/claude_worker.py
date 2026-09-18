@@ -95,6 +95,7 @@ _MAX_PROCESS_CENSUS_MEMBERS = 256
 _DARWIN_PROCESS_RUN_STATES = frozenset("IRSTUZ")
 _DARWIN_PROCESS_STATE_FLAGS = frozenset("+<>AELNSsVWX")
 _LAUNCH_QUARANTINE_CLEANUP_SECONDS = 0.2
+_LOCAL_TASK_SETTLEMENT_SECONDS = 0.2
 _DENIED_PROVIDER_ENV_KEYS = frozenset(
     {
         "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
@@ -138,6 +139,10 @@ class ClaudeLaunchError(ClaudeWorkerContractError):
 
 class ClaudeProcessIdentityError(ClaudeWorkerContractError):
     """A process reference cannot be proven to identify the spawned process."""
+
+
+class ClaudeProcessSignalError(ClaudeProcessIdentityError):
+    """An owned process-group signal was refused before a safe terminal state."""
 
 
 class ClaudeResultValidationError(ClaudeWorkerContractError):
@@ -218,6 +223,8 @@ class _RunState:
     receipt: CollectionReceipt | None = None
     collection_task: asyncio.Task[CollectionReceipt] | None = None
     residual_reconciliation_task: asyncio.Task[bool] | None = None
+    signal_sent: bool = False
+    terminal_cleanup_error: str | None = None
     evidence_closed: bool = False
 
 
@@ -1219,7 +1226,14 @@ class ClaudeCodeWorkerAdapter:
         members = () if leader is not None else self._owned_residual_members(ref)
         if leader is None and not members:
             return False
-        os.killpg(ref.pgid, signum)
+        try:
+            os.killpg(ref.pgid, signum)
+        except ProcessLookupError:
+            raise
+        except OSError as exc:
+            raise ClaudeProcessSignalError(
+                f"Claude process group signal failed: {type(exc).__name__}"
+            ) from exc
         return True
 
     async def _safe_launch_failure_cleanup(
@@ -1494,10 +1508,67 @@ class ClaudeCodeWorkerAdapter:
         state = self._state(ref)
         if state.receipt is not None:
             return state.receipt.result.status
+        if state.terminal_cleanup_error is not None:
+            return WorkerRunStatus.FAILED
         if state.monitor_task is not None and state.monitor_task.done():
             # Collection alone validates a terminal provider result.
             return WorkerRunStatus.CANCELLING if state.cancel_reason else WorkerRunStatus.RUNNING
         return state.status
+
+    @staticmethod
+    def _latch_terminal_cleanup_error(state: _RunState, exc: BaseException) -> None:
+        if state.terminal_cleanup_error is None:
+            detail = str(exc).strip() or type(exc).__name__
+            state.terminal_cleanup_error = f"{type(exc).__name__}: {detail}"[:500]
+        if state.terminal_cleanup_error not in state.stream_errors:
+            state.stream_errors.append(state.terminal_cleanup_error)
+
+    async def _settle_or_cancel_local_tasks(
+        self, state: _RunState, *, include_monitor: bool = False
+    ) -> None:
+        current = asyncio.current_task()
+        candidates: list[asyncio.Task[Any]] = [state.process_wait_task]
+        candidates.extend(
+            task for task in (state.stdout_task, state.stderr_task) if task is not None
+        )
+        if (
+            include_monitor
+            and state.monitor_task is not None
+            and state.monitor_task is not current
+        ):
+            candidates.append(state.monitor_task)
+        tasks = tuple(dict.fromkeys(task for task in candidates if task is not current))
+        if not tasks:
+            return
+        done = {task for task in tasks if task.done()}
+        pending = set(tasks) - done
+        if pending:
+            newly_done, pending = await asyncio.wait(
+                pending, timeout=_LOCAL_TASK_SETTLEMENT_SECONDS
+            )
+            done.update(newly_done)
+        for task in pending:
+            task.cancel()
+        if pending:
+            newly_done, pending = await asyncio.wait(
+                pending, timeout=_LOCAL_TASK_SETTLEMENT_SECONDS
+            )
+            done.update(newly_done)
+        for task in done:
+            if task.cancelled():
+                continue
+            try:
+                task.result()
+            except asyncio.CancelledError:
+                pass
+            except Exception as exc:
+                message = f"local task failed: {type(exc).__name__}"
+                if message not in state.stream_errors:
+                    state.stream_errors.append(message)
+        for task in pending:
+            task.add_done_callback(self._retrieve_task_exception)
+        if pending and "local task settlement incomplete" not in state.stream_errors:
+            state.stream_errors.append("local task settlement incomplete")
 
     async def collect_result(self, ref: WorkerProcessRef) -> CollectionReceipt:
         state = self._state(ref)
@@ -1631,7 +1702,17 @@ class ClaudeCodeWorkerAdapter:
         state = self._state(ref)
         if not isinstance(reason, str) or not reason.strip() or len(reason) > 1000:
             raise ClaudeLaunchError("cancellation reason is invalid")
-        sent, escalated, already = await self._terminate(state, reason.strip())
+        try:
+            sent, escalated, already = await self._terminate(state, reason.strip())
+        except ClaudeProcessIdentityError as exc:
+            if isinstance(exc, ClaudeProcessSignalError) or state.signal_sent:
+                self._latch_terminal_cleanup_error(state, exc)
+                if state.monitor_task is not None and not state.monitor_task.done():
+                    state.monitor_task.cancel()
+                await self._settle_or_cancel_local_tasks(state, include_monitor=True)
+                if state.finished_at is None:
+                    state.finished_at = _utc_now()
+            raise
         if state.monitor_task is not None:
             await asyncio.shield(state.monitor_task)
         return CancelReceipt(
@@ -1648,53 +1729,68 @@ class ClaudeCodeWorkerAdapter:
     async def _terminate(
         self, state: _RunState, reason: str | None
     ) -> tuple[bool, bool, bool]:
+        if state.terminal_cleanup_error is not None:
+            raise ClaudeProcessIdentityError(state.terminal_cleanup_error)
         ref = state.ref
         if ref is None:
             raise ClaudeProcessIdentityError("Claude process identity is unavailable")
         async with state.termination_lock:
-            leader_already_exited = state.process_wait_task.done()
-            sent = escalated = False
-            if not leader_already_exited:
-                leader = self._exact_leader_identity(ref)
-                if leader is None:
-                    # The leader exited in the race between wait sampling and
-                    # inspection.  Reconcile descendants before awaiting the
-                    # asyncio transport, because inherited pipes can keep that
-                    # wait pending after the OS leader is already gone.
-                    residual = await self._reconcile_residual_process_group(state)
-                    await state.process_wait_task
-                    return residual, residual, not residual
-                if reason is not None:
-                    state.cancel_reason = reason
-                    state.status = WorkerRunStatus.CANCELLING
-                try:
-                    sent = self._signal_owned_group(ref, signal.SIGTERM)
-                except ProcessLookupError:
-                    pass
-                try:
-                    await asyncio.wait_for(
-                        asyncio.shield(state.process_wait_task),
-                        timeout=float(state.spec.cancel_grace_seconds),
-                    )
-                except asyncio.TimeoutError:
+            if state.terminal_cleanup_error is not None:
+                raise ClaudeProcessIdentityError(state.terminal_cleanup_error)
+            try:
+                leader_already_exited = state.process_wait_task.done()
+                sent = escalated = False
+                if not leader_already_exited:
                     leader = self._exact_leader_identity(ref)
-                    residual_members = (
-                        () if leader is not None else self._owned_residual_members(ref)
-                    )
-                    # The OS may report the leader and group absent one event-loop
-                    # turn before asyncio publishes the wait-task completion.
-                    # Absence authorizes no further signal; the shared residual
-                    # reconciliation below still proves the terminal group state.
-                    if leader is not None or residual_members:
-                        try:
-                            escalated = self._signal_owned_group(ref, signal.SIGKILL)
-                            sent = sent or escalated
-                        except ProcessLookupError:
-                            pass
+                    if leader is None:
+                        # The leader exited in the race between wait sampling and
+                        # inspection. Reconcile descendants before awaiting the
+                        # asyncio transport, because inherited pipes can keep that
+                        # wait pending after the OS leader is already gone.
+                        residual = await self._reconcile_residual_process_group(state)
                         await state.process_wait_task
-            residual = await self._reconcile_residual_process_group(state)
-            await state.process_wait_task
-            return sent or residual, escalated or residual, leader_already_exited and not residual
+                        return residual, residual, not residual
+                    if reason is not None:
+                        state.cancel_reason = reason
+                        state.status = WorkerRunStatus.CANCELLING
+                    try:
+                        sent = self._signal_owned_group(ref, signal.SIGTERM)
+                        state.signal_sent = state.signal_sent or sent
+                    except ProcessLookupError:
+                        pass
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.shield(state.process_wait_task),
+                            timeout=float(state.spec.cancel_grace_seconds),
+                        )
+                    except asyncio.TimeoutError:
+                        leader = self._exact_leader_identity(ref)
+                        residual_members = (
+                            () if leader is not None else self._owned_residual_members(ref)
+                        )
+                        # The OS may report the leader and group absent one event-loop
+                        # turn before asyncio publishes the wait-task completion.
+                        # Absence authorizes no further signal; the shared residual
+                        # reconciliation below still proves the terminal group state.
+                        if leader is not None or residual_members:
+                            try:
+                                escalated = self._signal_owned_group(ref, signal.SIGKILL)
+                                state.signal_sent = state.signal_sent or escalated
+                                sent = sent or escalated
+                            except ProcessLookupError:
+                                pass
+                            await state.process_wait_task
+                residual = await self._reconcile_residual_process_group(state)
+                await state.process_wait_task
+                return (
+                    sent or residual,
+                    escalated or residual,
+                    leader_already_exited and not residual,
+                )
+            except ClaudeProcessIdentityError as exc:
+                if isinstance(exc, ClaudeProcessSignalError) or state.signal_sent:
+                    self._latch_terminal_cleanup_error(state, exc)
+                raise
 
     async def _reconcile_residual_process_group(self, state: _RunState) -> bool:
         """Run one identity-bound residual reconciliation and share its outcome."""
@@ -1730,6 +1826,7 @@ class ClaudeCodeWorkerAdapter:
                 return False
         except ProcessLookupError:
             return False
+        state.signal_sent = True
         state.escalated = True
         try:
             if not await _wait_for_process_group_exit(ref.pgid, timeout=0.2):
@@ -1778,8 +1875,10 @@ class ClaudeCodeWorkerAdapter:
             if residual:
                 state.stream_errors.append("provider left a residual process group")
                 state.violation.set()
-        except BaseException:
+        except BaseException as exc:
             failed = True
+            if isinstance(exc, ClaudeProcessIdentityError):
+                self._latch_terminal_cleanup_error(state, exc)
             raise
         finally:
             violation_task.cancel()
@@ -1787,11 +1886,13 @@ class ClaudeCodeWorkerAdapter:
             await asyncio.gather(
                 violation_task, leader_exit_task, return_exceptions=True
             )
-            tasks = tuple(task for task in (state.stdout_task, state.stderr_task) if task is not None)
             if failed:
-                for task in tasks:
-                    task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
+                await self._settle_or_cancel_local_tasks(state)
+            else:
+                tasks = tuple(
+                    task for task in (state.stdout_task, state.stderr_task) if task is not None
+                )
+                await asyncio.gather(*tasks, return_exceptions=True)
             state.finished_at = _utc_now()
 
     @staticmethod

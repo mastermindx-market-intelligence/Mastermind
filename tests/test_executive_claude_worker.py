@@ -1233,6 +1233,9 @@ def test_cancel_accepts_os_absence_while_wait_task_settles(
             cancel_reason=None,
             status=WorkerRunStatus.RUNNING,
             residual_reconciliation_task=None,
+            signal_sent=False,
+            terminal_cleanup_error=None,
+            stream_errors=[],
         )
         leader_observations = 0
 
@@ -1484,6 +1487,213 @@ def test_cancel_rechecks_ownership_at_the_final_signal_boundary(
         assert (await adapter.collect_result(ref)).result.status is WorkerRunStatus.CANCELLED
 
     asyncio.run(execute())
+
+
+
+def test_local_task_settlement_consumes_failed_owned_task_exceptions(
+    tmp_path: Path,
+) -> None:
+    adapter = _adapter(tmp_path)
+
+    async def fail_now() -> int:
+        raise RuntimeError("already failed")
+
+    async def fail_during_wait() -> None:
+        await asyncio.sleep(0.01)
+        raise ValueError("failed during wait")
+
+    async def execute() -> tuple[bool, bool, tuple[str, ...], list[dict[str, object]]]:
+        loop = asyncio.get_running_loop()
+        reported: list[dict[str, object]] = []
+        old_handler = loop.get_exception_handler()
+        loop.set_exception_handler(lambda _loop, context: reported.append(context))
+        try:
+            first = asyncio.create_task(fail_now())
+            second = asyncio.create_task(fail_during_wait())
+            await asyncio.sleep(0)
+            state = SimpleNamespace(
+                process_wait_task=first,
+                stdout_task=second,
+                stderr_task=None,
+                monitor_task=None,
+                stream_errors=[],
+            )
+            await adapter._settle_or_cancel_local_tasks(state)  # type: ignore[arg-type]
+            await asyncio.sleep(0)
+            return first.done(), second.done(), tuple(state.stream_errors), reported
+        finally:
+            loop.set_exception_handler(old_handler)
+
+    first_done, second_done, errors, reported = asyncio.run(execute())
+    assert first_done and second_done
+    assert "local task failed: RuntimeError" in errors
+    assert "local task failed: ValueError" in errors
+    assert reported == []
+
+
+def test_monitor_identity_failure_bounds_owned_tasks_and_records_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    (tmp_path / "mode").write_text("sleep", encoding="utf-8")
+    adapter = _adapter(tmp_path, binary)
+
+    async def execute() -> tuple[bool, bool, bool, bool, str | None, tuple[str, ...]]:
+        ref = await adapter.start(_workspace_and_spec(tmp_path, timeout_seconds=5))
+        state = adapter._runs[ref.run_id]
+        assert state.monitor_task is not None
+
+        async def fail_terminate(
+            _adapter: ClaudeCodeWorkerAdapter, _state: object, _reason: str | None
+        ) -> tuple[bool, bool, bool]:
+            raise claude_worker.ClaudeProcessIdentityError("synthetic identity uncertainty")
+
+        monkeypatch.setattr(ClaudeCodeWorkerAdapter, "_terminate", fail_terminate)
+        state.violation.set()
+        try:
+            with pytest.raises(
+                claude_worker.ClaudeProcessIdentityError,
+                match="synthetic identity uncertainty",
+            ):
+                await asyncio.wait_for(asyncio.shield(state.monitor_task), timeout=1)
+            return (
+                state.process_wait_task.done(),
+                bool(state.stdout_task and state.stdout_task.done()),
+                bool(state.stderr_task and state.stderr_task.done()),
+                state.monitor_task.done(),
+                state.finished_at,
+                tuple(state.stream_errors),
+            )
+        finally:
+            monkeypatch.undo()
+            try:
+                os.killpg(ref.pgid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            try:
+                await asyncio.wait_for(state.process.wait(), timeout=1)
+            except (asyncio.TimeoutError, ProcessLookupError):
+                pass
+
+    settled = asyncio.run(execute())
+    assert settled[:4] == (True, True, True, True)
+    assert settled[4] is not None
+    assert any("identity" in error.lower() for error in settled[5])
+
+
+
+def test_monitor_failure_stays_bounded_when_owned_task_suppresses_cancel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    (tmp_path / "mode").write_text("sleep", encoding="utf-8")
+    adapter = _adapter(tmp_path, binary)
+
+    async def execute() -> bool:
+        ref = await adapter.start(_workspace_and_spec(tmp_path, timeout_seconds=5))
+        state = adapter._runs[ref.run_id]
+        assert state.monitor_task is not None
+        release = asyncio.Event()
+        original_stdout = state.stdout_task
+        if original_stdout is not None:
+            original_stdout.cancel()
+            await asyncio.gather(original_stdout, return_exceptions=True)
+
+        async def stubborn_owned_task() -> None:
+            while not release.is_set():
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    continue
+
+        state.stdout_task = asyncio.create_task(stubborn_owned_task())
+
+        async def fail_terminate(
+            _adapter: ClaudeCodeWorkerAdapter, _state: object, _reason: str | None
+        ) -> tuple[bool, bool, bool]:
+            raise claude_worker.ClaudeProcessIdentityError("synthetic bounded failure")
+
+        monkeypatch.setattr(ClaudeCodeWorkerAdapter, "_terminate", fail_terminate)
+        monkeypatch.setattr(claude_worker, "_LOCAL_TASK_SETTLEMENT_SECONDS", 0.01)
+        state.violation.set()
+        bounded = True
+        try:
+            try:
+                await asyncio.wait_for(asyncio.shield(state.monitor_task), timeout=0.1)
+            except claude_worker.ClaudeProcessIdentityError:
+                bounded = True
+            except asyncio.TimeoutError:
+                bounded = False
+        finally:
+            release.set()
+            if state.stdout_task is not None and not state.stdout_task.done():
+                state.stdout_task.cancel()
+            await asyncio.gather(state.stdout_task, return_exceptions=True)
+            if state.monitor_task is not None:
+                await asyncio.gather(state.monitor_task, return_exceptions=True)
+            monkeypatch.undo()
+            try:
+                os.killpg(ref.pgid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            try:
+                await asyncio.wait_for(state.process.wait(), timeout=1)
+            except (asyncio.TimeoutError, ProcessLookupError):
+                pass
+        return bounded
+
+    assert asyncio.run(execute()) is True
+
+
+def test_cancel_signal_refusal_stops_monitor_reentry_and_local_tasks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    (tmp_path / "mode").write_text("sleep", encoding="utf-8")
+    adapter = _adapter(tmp_path, binary)
+    real_killpg = claude_worker.os.killpg
+    signal_calls: list[tuple[int, int]] = []
+
+    def refuse_signal(pgid: int, signum: int) -> None:
+        signal_calls.append((pgid, signum))
+        raise PermissionError("synthetic signal refusal")
+
+    async def execute() -> tuple[BaseException | None, int, bool, bool, bool, bool, str | None]:
+        ref = await adapter.start(_workspace_and_spec(tmp_path, timeout_seconds=5))
+        state = adapter._runs[ref.run_id]
+        monkeypatch.setattr(claude_worker.os, "killpg", refuse_signal)
+        error: BaseException | None = None
+        try:
+            try:
+                await adapter.cancel(ref, "operator requested")
+            except BaseException as exc:
+                error = exc
+            state.violation.set()
+            await asyncio.sleep(0.05)
+            return (
+                error,
+                len(signal_calls),
+                bool(state.monitor_task and state.monitor_task.done()),
+                state.process_wait_task.done(),
+                bool(state.stdout_task and state.stdout_task.done()),
+                bool(state.stderr_task and state.stderr_task.done()),
+                state.finished_at,
+            )
+        finally:
+            monkeypatch.setattr(claude_worker.os, "killpg", real_killpg)
+            try:
+                real_killpg(ref.pgid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            try:
+                await asyncio.wait_for(state.process.wait(), timeout=1)
+            except (asyncio.TimeoutError, ProcessLookupError):
+                pass
+
+    observed = asyncio.run(execute())
+    assert isinstance(observed[0], claude_worker.ClaudeProcessIdentityError)
+    assert observed[1:6] == (1, True, True, True, True)
+    assert observed[6] is not None
 
 
 def test_unprovable_launch_cleanup_is_bounded_and_closes_evidence(
