@@ -20,16 +20,21 @@ Best-effort throughout — never breaks the build.
 """
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
+import tempfile
+import threading
 from collections import defaultdict
+from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
 _DIR = _ROOT / "data" / "shadow" / "rejections"
 _LEDGER = _DIR / "ledger.jsonl"
+_LOCAL_LOCK = threading.RLock()
 
 _HORIZON = 21              # business days — matches the conviction falsifier (what these names competed for)
 _MAX_RESOLVED = 60_000     # soft cap so the ledger can't grow without bound
@@ -110,23 +115,77 @@ def _held_stage(reason: str) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 # isolated ledger
 # ─────────────────────────────────────────────────────────────────────────────
+def _lock_path() -> Path:
+    return _LEDGER.with_name(f".{_LEDGER.name}.lock")
+
+
+@contextmanager
+def _ledger_lock():
+    """Serialize rejection-ledger read/modify/write across threads and processes."""
+    with _LOCAL_LOCK:
+        _DIR.mkdir(parents=True, exist_ok=True)
+        with _lock_path().open("a+", encoding="utf-8") as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                try:
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+                except OSError:
+                    pass
+
+
 def _load_ledger() -> list:
-    try:
-        return [json.loads(l) for l in _LEDGER.read_text().splitlines() if l.strip()]
-    except Exception:  # noqa: BLE001
+    if not _LEDGER.exists():
         return []
+    rows = []
+    for line in _LEDGER.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        if not isinstance(row, dict):
+            raise ValueError("rejection ledger row is not a mapping")
+        rows.append(row)
+    return rows
 
 
-def _save_ledger(rows: list) -> None:
+def _bounded_rows(rows: list) -> list[dict]:
+    if not all(isinstance(row, dict) for row in rows):
+        raise ValueError("rejection ledger rows must be mappings")
     openr = [r for r in rows if r.get("status") == "open"]
     resr = [r for r in rows if r.get("status") != "open"]
     if len(resr) > _MAX_RESOLVED:
         resr = sorted(resr, key=lambda r: r.get("resolved_on") or "")[-_MAX_RESOLVED:]
+    return openr + resr
+
+
+def _save_ledger_unlocked(rows: list) -> None:
+    """Atomically replace the canonical rejection ledger; preserve prior bytes on failure."""
+    payload = "".join(json.dumps(row, default=str) + "\n" for row in _bounded_rows(rows))
+    _DIR.mkdir(parents=True, exist_ok=True)
+    tmp_name = None
     try:
-        _DIR.mkdir(parents=True, exist_ok=True)
-        _LEDGER.write_text("".join(json.dumps(r, default=str) + "\n" for r in (openr + resr)))
-    except Exception:  # noqa: BLE001
-        pass
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=_DIR, prefix=f".{_LEDGER.name}.",
+            suffix=".tmp", delete=False,
+        ) as tmp:
+            tmp_name = tmp.name
+            tmp.write(payload)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+        os.replace(tmp_name, _LEDGER)
+        tmp_name = None
+    finally:
+        if tmp_name:
+            try:
+                Path(tmp_name).unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def _save_ledger(rows: list) -> None:
+    with _ledger_lock():
+        _save_ledger_unlocked(rows)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -156,55 +215,55 @@ def _grade(ticker: str, entry_iso: str, horizon: int, asof: date) -> float | Non
 # ─────────────────────────────────────────────────────────────────────────────
 def record(asof: str, rejected: list | None = None, held: list | None = None,
            explored: list | None = None) -> dict:
-    """Sync the rejection ledger: open one row per newly-rejected name (deduped while open, like the
-    prod ledger), then forward-grade every open row and resolve the matured ones. `rejected` is the
-    conviction-gate veto list ({ticker, reason, vetoes, bear, confluence}); `held` is the research-gate
-    hold list ({ticker, reason, **research_block, [committee]}); `explored` is the borderline rejects the
-    desk ε-EXPLORE-BOUGHT this run ({ticker, stage, reason, ...}) — logged action='explored_buy' at
-    propensity ε so their forward outcome makes the off-policy value estimable. All may be omitted (a
-    carried day just grades open rows forward). Returns coverage. Best-effort; never raises."""
-    try:
-        asof_iso = str(asof)[:10]
+    """Sync rejected/explored names and forward-grade them under one ledger transaction.
+
+    Garbage/non-dict candidate rows and unavailable forward labels remain fail-soft. Canonical
+    rejection-ledger read/publish failures propagate to the scheduler's existing failure boundary
+    rather than masquerading as empty coverage or a successful in-memory update.
+    """
+    asof_iso = str(asof)[:10]
+    asof_d = date.fromisoformat(asof_iso)
+    eps = _explore_eps()
+    batches = (
+        ("reject", "conviction_veto", rejected or []),
+        ("reject", None, held or []),
+        ("explored_buy", None, explored or []),
+    )
+    with _ledger_lock():
         ledger = _load_ledger()
-        open_subj = {r["ticker"] for r in ledger if r.get("status") == "open"}
-        eps = _explore_eps()
-        # (action, default_stage, items) — explored buys are NOT rejects: they were actually bought.
-        batches = (
-            ("reject", "conviction_veto", rejected or []),
-            ("reject", None, held or []),
-            ("explored_buy", None, explored or []),
-        )
+        open_subj = {row["ticker"] for row in ledger if row.get("status") == "open"}
         for action, default_stage, items in batches:
-            for it in items:
-                if not isinstance(it, dict):
-                    continue
-                tk = (it.get("ticker") or "").upper().strip()
-                if not tk or tk in open_subj:
-                    continue
-                st = it.get("stage") or default_stage or _held_stage(it.get("reason"))
-                score = it.get("combined")
-                if score is None:
-                    score = it.get("confluence")
-                prop = round(float(eps), 4) if action == "explored_buy" else _propensity(st, eps)
-                ledger.append({
-                    "id": f"{asof_iso}-{tk}-rej", "ticker": tk, "asof": asof_iso,
-                    "action": action, "stage": st, "reason": (it.get("reason") or "")[:200],
-                    "score": score, "confluence": it.get("confluence"),
-                    "propensity": prop,
-                    "policy": "epsilon_greedy" if eps else "deterministic",
-                    "horizon_d": _HORIZON, "status": "open", "realized": None, "resolved_on": None})
-                open_subj.add(tk)
-        asof_d = date.fromisoformat(asof_iso)
-        for r in ledger:
-            if r.get("status") != "open":
+            if not isinstance(items, (list, tuple)):
                 continue
-            rel = _grade(r["ticker"], r["asof"], int(r.get("horizon_d") or _HORIZON), asof_d)
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                ticker = (item.get("ticker") or "").upper().strip()
+                if not ticker or ticker in open_subj:
+                    continue
+                stage = item.get("stage") or default_stage or _held_stage(item.get("reason"))
+                score = item.get("combined")
+                if score is None:
+                    score = item.get("confluence")
+                propensity = (round(float(eps), 4) if action == "explored_buy"
+                              else _propensity(stage, eps))
+                ledger.append({
+                    "id": f"{asof_iso}-{ticker}-rej", "ticker": ticker, "asof": asof_iso,
+                    "action": action, "stage": stage, "reason": (item.get("reason") or "")[:200],
+                    "score": score, "confluence": item.get("confluence"),
+                    "propensity": propensity,
+                    "policy": "epsilon_greedy" if eps else "deterministic",
+                    "horizon_d": _HORIZON, "status": "open", "realized": None, "resolved_on": None,
+                })
+                open_subj.add(ticker)
+        for row in ledger:
+            if row.get("status") != "open":
+                continue
+            rel = _grade(row["ticker"], row["asof"], int(row.get("horizon_d") or _HORIZON), asof_d)
             if rel is not None:
-                r["status"], r["realized"], r["resolved_on"] = "resolved", rel, asof_iso
-        _save_ledger(ledger)
-        return coverage(ledger)
-    except Exception:  # noqa: BLE001
-        return coverage()
+                row["status"], row["realized"], row["resolved_on"] = "resolved", rel, asof_iso
+        _save_ledger_unlocked(ledger)
+        return coverage(_bounded_rows(ledger))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
