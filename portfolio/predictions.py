@@ -309,6 +309,89 @@ def coverage(ledger: list | None = None) -> dict:
             "first_date": dates[0] if dates else None, "last_date": dates[-1] if dates else None}
 
 
+def _rank_ic_fallback(signal, fwd) -> float:
+    """Dependency-independent equivalent of Macro engine.validation.rank_ic."""
+    import pandas as pd
+    joined = pd.concat(
+        [pd.Series(signal).rename("s"), pd.Series(fwd).rename("f")], axis=1
+    ).dropna()
+    if len(joined) < 10:
+        return float("nan")
+    return float(joined["s"].rank().corr(joined["f"].rank()))
+
+
+def _normal_cdf(x: float) -> float:
+    import math
+    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+
+def _newey_west_tstat_fallback(x, lags: int = 4) -> dict:
+    """Dependency-independent equivalent of Macro engine.validation.newey_west_tstat."""
+    import math
+    import numpy as np
+    import pandas as pd
+    values = np.asarray(pd.Series(x).dropna(), float)
+    n = len(values)
+    if n < 8:
+        return {"mean": None, "se": None, "t": None, "p": None, "n": n,
+                "lags": None, "lags_requested": int(lags)}
+    mean = float(values.mean())
+    centered = values - mean
+    variance = float(np.dot(centered, centered) / n)
+    effective_lags = min(int(lags), n - 1)
+    for lag in range(1, effective_lags + 1):
+        gamma = float(np.dot(centered[lag:], centered[:-lag]) / n)
+        variance += 2.0 * (1.0 - lag / (effective_lags + 1)) * gamma
+    se = math.sqrt(max(variance, 1e-18) / n)
+    t_stat = mean / se if se else float("nan")
+    return {
+        "mean": round(mean, 5), "se": round(se, 5), "t": round(t_stat, 3),
+        "p": round(2.0 * (1.0 - _normal_cdf(abs(t_stat))), 4), "n": n,
+        "lags": effective_lags, "lags_requested": int(lags),
+    }
+
+
+def _brier_reliability_fallback(probabilities, outcomes, n_bins: int = 10) -> dict:
+    """Dependency-independent equivalent of Macro engine.validation.brier_reliability."""
+    import numpy as np
+    p = np.asarray(probabilities, float)
+    y = np.asarray(outcomes, float)
+    finite = np.isfinite(p) & np.isfinite(y)
+    p, y = p[finite], y[finite]
+    if len(p) < 30:
+        return {}
+    brier = float(np.mean((p - y) ** 2))
+    base = float(np.mean((y.mean() - y) ** 2))
+    edges = np.linspace(0, 1, n_bins + 1)
+    reliability = []
+    for i in range(n_bins):
+        hi_inclusive = i == n_bins - 1
+        selected = ((p >= edges[i]) &
+                    ((p <= edges[i + 1]) if hi_inclusive else (p < edges[i + 1])))
+        count = int(selected.sum())
+        if count >= 10:
+            reliability.append({
+                "bin": f"{edges[i]:.1f}-{edges[i + 1]:.1f}", "n": count,
+                "pred": round(float(p[selected].mean()), 3),
+                "obs": round(float(y[selected].mean()), 3),
+            })
+    return {
+        "brier": round(brier, 4), "base_brier": round(base, 4),
+        "skill_score": round(1 - brier / base, 3) if base else None,
+        "reliability": reliability, "n": int(len(p)),
+        "base_rate": round(float(y.mean()), 3),
+    }
+
+
+def _validation_helpers():
+    """Use Macro's canonical helpers when importable; otherwise use exact local equivalents."""
+    try:
+        from engine.validation import rank_ic, newey_west_tstat, brier_reliability
+        return rank_ic, newey_west_tstat, brier_reliability
+    except ImportError:
+        return _rank_ic_fallback, _newey_west_tstat_fallback, _brier_reliability_fallback
+
+
 def _ci(mean, se, z=1.96):
     if mean is None or se is None:
         return None
@@ -380,7 +463,7 @@ def score(asof: str | None = None, horizon: int | None = None) -> dict:
     try:
         import numpy as np
         import pandas as pd
-        from engine.validation import rank_ic, newey_west_tstat, brier_reliability
+        rank_ic, newey_west_tstat, brier_reliability = _validation_helpers()
 
         ledger = _load_ledger()
         res = [r for r in ledger if r.get("status") == "resolved" and r.get("realized") is not None
@@ -471,8 +554,10 @@ def score(asof: str | None = None, horizon: int | None = None) -> dict:
                                                   and ci and ci[0] > 0)}
 
         out["status"] = "scoring" if out["effective_n"] >= _MIN_DATES else "building"
-    except Exception as exc:  # noqa: BLE001
-        out["error"] = str(exc)
+    except Exception:
+        # A broken canonical ledger/statistical path is unavailable evidence, not a valid
+        # "building" sample. The API owner already projects this as predictions_unavailable.
+        raise
     return out
 
 
