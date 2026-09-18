@@ -24,25 +24,23 @@ WHAT THIS IS NOT
 * NOT a write path.  The derived envelope requests exactly the reviewed
   ``research_only`` profile authorities (``READ``, ``RESEARCH``).  Write paths and
   validation commands on a request are REFUSED, not dropped.
-* NOT YET ADMITTED (see :func:`admission_status`).  The existing sink durably
-  stamps ``provenance.schema`` from the *intent envelope* schema
-  (``ceo_intent.py:L735``), and ``validate_intent`` admits only
-  ``mastermind.ceo_intent.v1`` / ``mastermind.ceo_intent.v2``
-  (``ceo_intent.py:L561-L568``).  So the typified schema, and the ``task_kind``
-  marker, cannot be carried durably by the sink without editing an owned file
-  (``control_plane/ceo_intent.py``) or forking a path - both prohibited by the
-  operation packet.  The module therefore derives and validates its own schema
-  locally, reports ``NOT_YET_ADMITTED``, and still submits what IS reachable:
-  the reviewed non-CEO actor riding the unmodified ``coo`` seat defaults, where
-  ``_has_executive_provenance`` (``executive_runtime.py:L928-L942``, consulted only
-  from ``:10287-10297``) is never consulted.
+* ADMITTED (A2).  The strict non-CEO service schema
+  ``mastermind.executive_service_intent.v1`` is carried by the EXISTING sink
+  (``control_plane/ceo_intent.py``): the envelope is exact-keyed, READ/RESEARCH
+  only under a sink-local ceiling, stamped with typed service evidence in
+  ``event.payload["provenance"]`` (``ceo_intent.py:L855``), and seated explicitly
+  on ``coo`` (``ceo_intent.py:L1158``).  :func:`admission_status` reports
+  ``ADMITTED``, and :func:`submit` is therefore a thin passthrough that mutates
+  ONLY through :func:`control_plane.ceo_intent.submit_intent` - one sink, no
+  second writer, no dispatch, no queue of our own.
 
-  :func:`submit` therefore FAILS CLOSED while that verdict stands: it raises
-  :class:`ServicePrincipalNotAdmitted` *before* it reads its ``runtime``
-  argument, so no production-facing callable in this module mutates Runtime
-  while the tier is unadmitted.  The reachable part is still proven, hermetically,
-  by the tests calling the unchanged sink directly
-  (``ceo_intent.submit_intent(runtime, derived["envelope"])``).
+  The residual is a RUNTIME gap this slice does not fix and must not: because the
+  sink now stamps the envelope's own schema, the SERVICE stamp no longer matches
+  the CEO branch of ``_has_executive_provenance`` (``executive_runtime.py:L928-L942``,
+  consulted only from ``:10287-10297``) - but a RAW ``mastermind.ceo_intent.v1``
+  stamp still does.  That raw-v1 residual stays OWNED by
+  ``executive_runtime.py`` (the Runtime seat lane).  Authenticated service
+  ingress (A5) remains deferred to the app/gateway lane.
 
 Identity law
 ------------
@@ -51,7 +49,7 @@ The intent id is a domain-separated hash of EXACTLY ``SCHEMA`` +
 operation keeps one intent id and one durable command id, so a later envelope for
 the same operation (a changed objective, a changed grounding SHA) is adjudicated
 by the sink's existing whole-envelope conflict predicate
-(``ceo_intent.py:L785``, raising ``CeoIntentConflict``) instead of minting a
+(``ceo_intent.py:L906``, raising ``CeoIntentConflict``) instead of minting a
 second Job.  A different ``operation_key`` is a different operation and
 legitimately gets its own Job.
 
@@ -65,7 +63,7 @@ with the registry, or an envelope whose ``execution_contract`` disagrees with th
 block - before any sink call is reachable.
 
 Source-line pins in this module are written as ``L<number>`` strings or as
-comments (``L561``), never as bare integer literals: the repository's D8 identity
+comments (``L633``), never as bare integer literals: the repository's D8 identity
 ratchet flags every unexplained 4xx-9xx integer in *added production source*, and
 a source-line citation is not an identity.  The convention is pinned by
 ``tests/test_executive_service_principal.py``.
@@ -181,12 +179,13 @@ class ServicePrincipalRefused(ValueError):
 
 
 class ServicePrincipalNotAdmitted(ServicePrincipalRefused):
-    """Typed refusal: the sink cannot yet durably carry this typed principal.
+    """Typed refusal: the sink does not (or no longer) carry this typed principal.
 
     Raised by :func:`submit` while :func:`admission_status` reports
-    ``NOT_YET_ADMITTED``, *before* the ``runtime`` argument is touched at all, so
-    the tier fails closed instead of quietly landing an unattributed Job.  It
-    carries the blocking predicates in its message.
+    anything other than ``ADMITTED``, *before* the ``runtime`` argument is touched
+    at all, so the tier fails closed instead of quietly landing an unattributed
+    Job.  It carries the blocking predicates in its message.  A2 admits the
+    schema, so this is now a latent gate rather than the standing verdict.
     """
 
 
@@ -546,7 +545,7 @@ def _intent_id(principal: ServicePrincipal, normalized: Mapping[str, Any]) -> st
     grounding SHAs.  A repeat of the same logical operation therefore reuses ONE
     intent id and ONE durable command id, and any changed envelope under that id
     is refused by the sink's existing whole-envelope conflict predicate
-    (``ceo_intent.py:L785``, raising ``CeoIntentConflict``) instead of silently
+    (``ceo_intent.py:L906``, raising ``CeoIntentConflict``) instead of silently
     creating a second Job.  A different ``operation_key`` is a different
     operation and legitimately gets its own Job.
     """
@@ -597,15 +596,18 @@ def derive_intent(principal: ServicePrincipal, request: Mapping[str, Any], *, no
 
     Returns a mapping with three parts:
 
-    * ``envelope`` - a ``mastermind.ceo_intent.v1`` envelope, sink-ready, whose
-      actor is the *service principal's* actor (never ``ceo-sol``).
+    * ``envelope`` - a ``mastermind.executive_service_intent.v1`` envelope,
+      sink-ready, whose actor is the *service principal's* actor (never
+      ``ceo-sol``), carrying the registered ``principal_id`` and the reviewed
+      ``task_kind``.
     * ``provenance`` - this module's typed block,
       ``mastermind.executive_service_principal.v1``, validated locally.
     * ``admission`` - the honest admission verdict from
       :func:`admission_status`.
 
-    The parts are kept separate on purpose: the sink would refuse the combined
-    object, and merging them would invite treating the typed block as admitted.
+    The parts are kept separate on purpose: the typed block is EVIDENCE about the
+    principal, not an envelope field, and merging them would invite treating the
+    block as the admitted schema.
     """
 
     registered = _require_registered(principal)
@@ -659,7 +661,7 @@ def derive_intent(principal: ServicePrincipal, request: Mapping[str, Any], *, no
         "attempt_limit": int(normalized["attempt_limit"]),
     }
     envelope: dict[str, Any] = {
-        "schema": ceo_intent.INTENT_SCHEMA,
+        "schema": ceo_intent.INTENT_SCHEMA_SERVICE,
         "intent_id": intent_id,
         # The service principal's OWN actor.  Never control_plane.ceo_request.ACTOR:
         # reusing build_trusted_envelope() would stamp "ceo-sol" (ceo_request.py:134
@@ -669,6 +671,10 @@ def derive_intent(principal: ServicePrincipal, request: Mapping[str, Any], *, no
         "department": str(normalized["department"]),
         "priority": int(normalized["priority"]),
         "grounding": dict(grounding),
+        # The typed service identity the sink's strict service branch requires:
+        # the registered principal id and the reviewed task kind.
+        "principal_id": registered.principal_id,
+        "task_kind": TASK_KIND,
         "execution_contract": contract,
     }
     if normalized.get("workstream"):
@@ -682,6 +688,10 @@ def derive_intent(principal: ServicePrincipal, request: Mapping[str, Any], *, no
         "admission": admission_status(),
         "derived_at_ms": _now_ms(now),
     }
+    # Self-audit the ENVELOPE with the sink's OWN validator - no local shadow
+    # copy of the key sets or the ceiling: the envelope this module emits must be
+    # exactly what the sink admits, or derive fails here.
+    ceo_intent.validate_intent(envelope)
     # Self-audit: a future edit that builds the block and the envelope apart
     # fails here, loudly, instead of shipping a false grant.
     validate_grant(derived)
@@ -715,18 +725,18 @@ def _envelope(derived: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def submit(principal: ServicePrincipal, request: Mapping[str, Any], runtime: Any, *, now: Any = None) -> dict[str, Any]:
-    """FAIL CLOSED while the tier is ``NOT_YET_ADMITTED``; never mutates Runtime.
+    """Admit one request through the EXISTING single sink - nothing else.
 
-    Order of business, all of it before the ``runtime`` argument is read:
+    Order of business:
 
     1. derive + locally validate (closed identity, typed block, truthful grant),
     2. refuse any grant drift between block and envelope,
-    3. refuse outright while :func:`admission_status` is not ``ADMITTED``.
+    3. re-read :func:`admission_status` (the gate stays live),
+    4. hand the envelope to :func:`control_plane.ceo_intent.submit_intent`.
 
-    The sink call below is therefore unreachable in this build; when an owner
-    admits the typed schema the gate opens by itself and this becomes the thin
-    passthrough it was always meant to be - no second path, no dispatch, no
-    Attempt, no worker, no queue of our own.
+    No second path, no dispatch, no Attempt, no worker, no queue of our own.  The
+    gate is a live read, not a hard-coded refusal: should the sink's admission
+    ever regress, ``_require_admitted`` closes this path again by itself.
     """
 
     derived = derive_intent(principal, request, now=now)
@@ -736,7 +746,7 @@ def submit(principal: ServicePrincipal, request: Mapping[str, Any], runtime: Any
 
 
 def _require_admitted() -> None:
-    """The A3 gate: no production-facing callable mutates Runtime while unadmitted."""
+    """The A3 gate: this is the ONLY production-facing callable that mutates Runtime."""
 
     status = admission_status()
     if status["status"] == ADMITTED:
@@ -773,7 +783,7 @@ def durable_provenance(runtime: Any, job_id: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# admission verdict - the pinned blocker, stated positively
+# admission verdict - ADMITTED on the existing sink, with the pinning predicates
 # ---------------------------------------------------------------------------
 
 #: Every ``"line"`` value below is an ``L<number>`` STRING, never a bare integer:
@@ -783,60 +793,70 @@ def durable_provenance(runtime: Any, job_id: str) -> dict[str, Any]:
 
 
 def admission_status() -> dict[str, Any]:
-    """Why this tier is NOT_YET_ADMITTED, with the refusing predicates.
+    """ADMITTED: the sink carries the strict service schema, READ/RESEARCH only.
 
     Every claim below is pinned by a passing test in
     ``tests/test_executive_service_principal.py`` that triggers the real refusal
-    rather than trusting this text.
+    (or reads the real durable stamp) rather than trusting this text.
     """
 
     return {
-        "status": NOT_YET_ADMITTED,
+        "status": ADMITTED,
         "schema": SCHEMA,
         "reason": (
-            "the existing single mutation sink stamps the durable provenance schema "
-            "from the intent envelope schema, and admits only the CEO intent schemas, "
-            "so the typed service-principal provenance cannot be carried durably "
-            "without editing an owned file or forking a second path"
+            "the existing single mutation sink admits the strict non-CEO schema "
+            "mastermind.executive_service_intent.v1 on its non-v2 branch: the "
+            "envelope is exact-keyed, READ/RESEARCH only under a sink-local ceiling, "
+            "stamped with typed service evidence, and seated explicitly on coo, so "
+            "the typed service-principal provenance is durably carried with no "
+            "second path and no Runtime change"
         ),
         "sink": "control_plane.ceo_intent.submit_intent",
         "submit_gate": (
-            "public submit() FAILS CLOSED while this verdict is not ADMITTED: it raises "
-            "ServicePrincipalNotAdmitted before it reads its runtime argument, so no "
-            "production-facing callable in this module mutates Runtime in this state"
+            "public submit() is OPEN while this verdict is ADMITTED: it derives + "
+            "validates, refuses grant drift, re-reads this verdict, then mutates ONLY "
+            "through ceo_intent.submit_intent - one sink, no dispatch, no second "
+            "writer.  The gate is a live read, so a sink admission regression closes "
+            "this path again by itself"
         ),
         "predicates": (
             {
                 "file": "control_plane/ceo_intent.py",
-                "line": "L561",
+                "line": "L633",
                 "what": (
-                    "validate_intent refuses any intent.schema other than "
-                    "mastermind.ceo_intent.v1 / mastermind.ceo_intent.v2"
+                    "validate_intent admits the third, strict service schema through "
+                    "the same exact-key-set fence: _SERVICE_REQUIRED_KEYS = the v1 keys "
+                    "plus principal_id and task_kind (no extra carrier)"
                 ),
             },
             {
                 "file": "control_plane/ceo_intent.py",
-                "line": "L562",
+                "line": "L578",
                 "what": (
-                    "the v1 branch's exact-key-set check (_exact_keys, :319) refuses an "
-                    "extra 'provenance' key riding inside the envelope"
+                    "_require_service_ceiling refuses any requested authority outside "
+                    "{READ, RESEARCH}, any allowed_write_paths, and any authority_level "
+                    "other than the READ level A0 - the ceiling the downstream policy "
+                    "would otherwise GRANT (executive_authority.py:21)"
                 ),
             },
             {
                 "file": "control_plane/ceo_intent.py",
-                "line": "L735",
+                "line": "L855",
                 "what": (
-                    "_provenance() sets \"schema\": intent[\"schema\"], so the durable "
-                    "event.payload['provenance']['schema'] is the INTENT schema"
+                    "_provenance() stamps the typed service evidence (principal_id, "
+                    "task_kind, requested_authorities, effective_authorities, "
+                    "write_authorities) beside the envelope schema tag, so "
+                    "event.payload['provenance']['schema'] is the SERVICE schema"
                 ),
             },
             {
                 "file": "control_plane/ceo_intent.py",
-                "line": "L163",
+                "line": "L1158",
                 "what": (
-                    "_CONSTRAINT_KEYS is a closed set with no task_kind, and "
-                    "executive_runtime.create_job has no task_kind parameter "
-                    "(executive_runtime.py:10088-10130)"
+                    "the service branch of submit_intent passes EXPLICIT "
+                    "owner_seat='coo' / escalation_target='coo' and no orchestration "
+                    "role, no execution_binding and no dialogue_source, so a service "
+                    "Job can never be seated above coo"
                 ),
             },
         ),
@@ -848,7 +868,7 @@ def admission_status() -> dict[str, Any]:
             "conflict_predicates": (
                 {
                     "file": "control_plane/ceo_intent.py",
-                    "line": "L986",
+                    "line": "L1103",
                     "what": (
                         "submit_intent looks the derived command id up in the durable "
                         "event log first, so a reused intent id reconciles instead of "
@@ -857,7 +877,7 @@ def admission_status() -> dict[str, Any]:
                 },
                 {
                     "file": "control_plane/ceo_intent.py",
-                    "line": "L785",
+                    "line": "L906",
                     "what": (
                         "_receipt_from_event raises CeoIntentConflict when the reused "
                         "intent id was already accepted under a DIFFERENT whole-envelope "
@@ -867,30 +887,37 @@ def admission_status() -> dict[str, Any]:
                 },
                 {
                     "file": "control_plane/ceo_intent.py",
-                    "line": "L662",
+                    "line": "L761",
                     "what": "command_id_for() derives the durable command id from the intent id",
                 },
             ),
         },
         "reachable_today": (
-            "a caller that goes DIRECTLY to the unchanged sink "
+            "public submit(principal, request, runtime) - and equally a caller that "
+            "goes DIRECTLY to the sink "
             "(control_plane.ceo_intent.submit_intent(runtime, derived['envelope'])) "
-            "reaches exactly one QUEUED Job with actor='svc-site-maintenance', the "
-            "unmodified owner_seat='coo' / escalation_target='coo' defaults, "
-            "READ/RESEARCH authorities and no dispatch; _has_executive_provenance "
-            "(executive_runtime.py:L928-L942) is never consulted because it is only "
-            "called from :10287-10297 when a seat is not 'coo'"
+            "- reaches exactly one QUEUED Job with actor='svc-site-maintenance', "
+            "explicit owner_seat='coo' / escalation_target='coo', READ/RESEARCH "
+            "authorities, a durable event.payload['provenance']['schema'] of "
+            "mastermind.executive_service_intent.v1, and no dispatch"
         ),
         "not_reachable_today": (
-            "event.payload['provenance']['schema'] == "
-            "mastermind.executive_service_principal.v1, and a durable task_kind marker"
+            "any write authority (WRITE_BRANCH / RUN_TESTS), a declared write path, an "
+            "authority_level other than A0, a reserved identity (the CEO stamp, the "
+            "human seats, or the unattributed operator default), a non-'svc-' intent "
+            "id, a task_kind other than 'research', an unknown envelope key, and any "
+            "seat above coo - each refused by the sink, including a service-schema "
+            "envelope shaped like v2"
         ),
         "unblocking_owner": (
-            "A2: control_plane/executive_runtime.py (_JOB_SEATS :146, "
-            "_has_executive_provenance :L928-L942, call sites :10287-10297) - OWNED by "
+            "none for the A2 schema slice: it is DONE on the existing sink.  Two "
+            "residuals stay OUTSIDE this module and outside this packet: (1) "
+            "_has_executive_provenance (executive_runtime.py:L928-L942, call sites "
+            ":10287-10297) still lets a RAW mastermind.ceo_intent.v1 stamp satisfy its "
+            "schema-only CEO branch - OWNED by executive_runtime.py, Runtime seat lane "
             # Adjacent literals on purpose: the D8 scan is mechanical about added
             # production source, so the PR number is split (one string at runtime).
-            "PR #6" "99 - plus a controlled edit of control_plane/ceo_intent.py to admit "
-            "the typed schema. Both are outside this packet's fences."
+            "(PR #6" "99); the SERVICE stamp no longer does, which is pinned by test. "
+            "(2) authenticated service ingress (A5) is deferred to the app/gateway lane."
         ),
     }

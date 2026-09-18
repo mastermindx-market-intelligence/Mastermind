@@ -1,4 +1,4 @@
-"""Acceptance tests for the A1 typified NON-CEO service principal.
+"""Acceptance tests for the A1 typified NON-CEO service principal (A2 admitted).
 
 Hermetic: stdlib + pytest + ``tmp_path`` only.  No installed service, no socket,
 no network, no provider, no credential, no global ``subprocess`` patch, no real
@@ -7,11 +7,13 @@ Job outside the in-repo runtime temp database.
 The point of this file is twofold:
 
 1. prove the closed identity/authority shape of the tier, and
-2. PIN THE BLOCKER: the existing single mutation sink cannot durably carry the
-   typed service-principal provenance schema or a ``task_kind`` marker, and these
-   tests trigger the real refusals rather than trusting a documented string.
+2. prove the A2 admission: the EXISTING single sink durably carries the strict
+   ``mastermind.executive_service_intent.v1`` envelope (typed service evidence in
+   ``event.payload["provenance"]``), seats it explicitly on ``coo``, enforces the
+   READ/RESEARCH ceiling in the sink itself, and is still NOT read as CEO
+   provenance by the unchanged readers.
 
-Repair round 2 adds three more laws to prove:
+The laws proved here:
 
 * **A1** - the intent id is a hash of exactly (schema, principal_id,
   operation_key), so a changed objective or a changed grounding SHA for the same
@@ -19,11 +21,16 @@ Repair round 2 adds three more laws to prove:
   second Job;
 * **A2** - the typed block states the WRITE ceiling (``write_authorities``, always
   empty) *and* the truthful READ/RESEARCH grant (``requested_authorities`` /
-  ``effective_authorities``), with drift refused in both directions; and
-* **A3** - ``submit()`` fails closed while the tier is ``NOT_YET_ADMITTED``.
-  Because of A3 the reachable-sink proof lives HERE, calling the unchanged sink
-  directly (``test_hermetic_sink_reachability_proof_*``), so no production-facing
-  callable mutates Runtime in this state.
+  ``effective_authorities``), with drift refused in both directions; the sink
+  itself refuses any write authority, any declared write path, any non-READ
+  ``authority_level``, a reserved identity, a non-``svc-`` intent id, a foreign
+  ``task_kind``, an unknown key, and a v2-shaped service envelope; and
+* **A3** - the submission gate stays LIVE: open while ``admission_status()`` is
+  ``ADMITTED``, closed the moment that verdict regresses.
+
+The reachable-sink proof now goes through the public ``submit()`` - the tier is
+admitted, so no test needs to bypass the production-facing callable to prove the
+contract.  Every refusal is triggered for real rather than trusted.
 """
 from __future__ import annotations
 
@@ -39,6 +46,8 @@ from control_plane import ceo_intent
 from control_plane import executive_service_principal as esp
 from control_plane.ceo_intent import (
     INTENT_SCHEMA,
+    INTENT_SCHEMA_SERVICE,
+    RECEIPT_SCHEMA_SERVICE,
     CeoIntentConflict,
     CeoIntentError,
     command_id_for,
@@ -89,6 +98,8 @@ _PROPOSED_ENVELOPE_KEYS = {
     "priority",
     "grounding",
     "execution_contract",
+    "principal_id",
+    "task_kind",
 }
 
 
@@ -120,17 +131,15 @@ def _derived(**overrides) -> dict:
     return derive_intent(_principal(), _request(**overrides), now=0)
 
 
-def _sink_submit(runtime, request: dict | None = None):
-    """The hermetic reachability path: the UNCHANGED sink, called directly.
+def _submit(runtime, request: dict | None = None):
+    """The reachable path: the PUBLIC ``submit()`` into the single sink.
 
-    ``submit()`` is deliberately closed while the tier is ``NOT_YET_ADMITTED``
-    (A3), so the reachable part of this tier is exercised here, where the test
-    owns the call, instead of through a production-facing callable that would
-    mutate Runtime while unadmitted.
+    A2 admits the strict service schema, so the tier's own production-facing
+    callable is the reachable path; the test no longer has to call the sink
+    directly to prove the contract.
     """
 
-    derived = derive_intent(_principal(), request if request is not None else _request(), now=0)
-    return submit_intent(runtime, derived["envelope"])
+    return submit(_principal(), request if request is not None else _request(), runtime)
 
 
 def _source_lines(relative: str) -> list[str]:
@@ -155,6 +164,12 @@ def test_closed_schema_refuses_drift_unknown_ids_and_reserved_actors():
     }
     assert derived["schema"] == SCHEMA
     assert set(derived["envelope"]) <= _PROPOSED_ENVELOPE_KEYS | {"workstream"}
+    # A2: the envelope rides the strict SERVICE schema, not the CEO one, and
+    # carries the two typed service keys the sink's service branch requires.
+    assert derived["envelope"]["schema"] == INTENT_SCHEMA_SERVICE
+    assert derived["envelope"]["schema"] != INTENT_SCHEMA
+    assert derived["envelope"]["principal_id"] == _principal().principal_id
+    assert derived["envelope"]["task_kind"] == TASK_KIND == "research"
     assert set(derived["provenance"]) == {
         "schema",
         "actor",
@@ -275,7 +290,7 @@ def test_read_only_ceiling_refuses_write_authority_and_foreign_task_kinds():
 
 
 # ---------------------------------------------------------------------------
-# 3. authority is refused independently of actor (mirrors tests/test_ceo_intent.py:492-501)
+# 3. authority is refused independently of actor (mirrors tests/test_ceo_intent.py:490)
 # ---------------------------------------------------------------------------
 
 
@@ -283,12 +298,14 @@ def test_authority_is_refused_independently_of_actor(tmp_path: Path):
     """The service principal's actor is provenance, not privilege."""
 
     runtime = Runtime.at(tmp_path / "runtime")
-    for actor in (_principal().actor, "ceo-sol"):
+    for actor in (_principal().actor, "svc-other-actor"):
         envelope = copy.deepcopy(_derived()["envelope"])
         envelope["actor"] = actor
         envelope["intent_id"] = f"svc-esp-{actor.replace('-', '').replace('_', '')}"
         envelope["execution_contract"] = {"requested_authorities": ["MERGE"]}
-        with pytest.raises(CeoIntentError, match="authority is denied"):
+        # The SINK's service ceiling refuses the write authority before the
+        # downstream policy is ever consulted; the actor value changes nothing.
+        with pytest.raises(CeoIntentError, match="READ/RESEARCH only"):
             submit_intent(runtime, envelope)
     assert runtime.jobs.list_jobs() == []
 
@@ -299,22 +316,17 @@ def test_authority_is_refused_independently_of_actor(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# 4. hermetic sink reachability — the UNCHANGED sink, called directly (A3 move)
+# 4. hermetic sink reachability — through the PUBLIC submit() (A2 admitted)
 # ---------------------------------------------------------------------------
 
 
 def test_hermetic_sink_reachability_proof_one_coo_job_no_dispatch_and_duplicate(tmp_path: Path):
-    """What this tier CAN reach today, proven against the real sink.
-
-    ``submit()`` is closed while unadmitted (A3), so the proof calls
-    ``control_plane.ceo_intent.submit_intent`` directly - the same envelope
-    ``derive_intent`` returns - and asserts the whole reachable contract.
-    """
+    """What this tier reaches, proven through the real public path."""
 
     request = _request()
     runtime = Runtime.at(tmp_path / "runtime")
-    first = _sink_submit(runtime, request)
-    second = _sink_submit(runtime, request)
+    first = _submit(runtime, request)
+    second = _submit(runtime, request)
 
     assert first["accepted"] is True
     assert first["dispatched"] is False
@@ -350,14 +362,18 @@ def test_hermetic_sink_reachability_proof_one_coo_job_no_dispatch_and_duplicate(
     assert durable["command_id"] == command_id(derived)
     provenance = durable["provenance"]
     assert provenance["actor"] == _principal().actor
+    assert provenance["schema"] == INTENT_SCHEMA_SERVICE
+    assert provenance["principal_id"] == _principal().principal_id
+    assert provenance["task_kind"] == TASK_KIND
+    assert provenance["requested_authorities"] == ["READ", "RESEARCH"]
+    assert provenance["effective_authorities"] == ["READ", "RESEARCH"]
+    assert provenance["write_authorities"] == []
     assert provenance["fingerprint"] == first["fingerprint"]
     assert provenance["grounding"] == _GROUNDING
     assert len([e for e in reader.events.list_events(job_id=job.job_id) if e.event_type == "JOB_CREATED"]) == 1
 
-    # ...and the production-facing path is closed, so this tier cannot mutate
-    # Runtime through it while the verdict stands (A3, detail in section 7).
-    with pytest.raises(ServicePrincipalNotAdmitted):
-        submit(_principal(), request, runtime)
+    # A third identical submission still reconciles to the one durable Job.
+    assert _submit(runtime, request)["job_id"] == first["job_id"]
     assert len(Runtime.at(tmp_path / "runtime").jobs.list_jobs()) == 1
 
 
@@ -387,16 +403,16 @@ def test_a1_intent_id_depends_only_on_principal_and_operation_key():
 
     # The quoted sink predicates this law relies on are still where we cite them.
     assert "find_event_by_command_id(command_id)" in _source_window(
-        "control_plane/ceo_intent.py", 984, 990
+        "control_plane/ceo_intent.py", 1098, 1108
     )
     assert "if fingerprint is not None and recorded != fingerprint:" in _source_window(
-        "control_plane/ceo_intent.py", 783, 790
+        "control_plane/ceo_intent.py", 902, 910
     )
     assert 'return f"{COMMAND_ID_PREFIX}{intent_id}"' in _source_window(
-        "control_plane/ceo_intent.py", 660, 666
+        "control_plane/ceo_intent.py", 757, 764
     )
     pins = admission_status()["identity"]["conflict_predicates"]
-    assert {pin["line"] for pin in pins} == {"L986", "L785", "L662"}
+    assert {pin["line"] for pin in pins} == {"L1103", "L906", "L761"}
     for pin in pins:
         assert pin["file"] == "control_plane/ceo_intent.py"
 
@@ -524,52 +540,57 @@ def test_a2_envelope_grant_drift_from_the_block_is_refused_before_any_sink_call(
     submit_body = source.split("def submit(", 1)[1]
     assert submit_body.index("validate_grant(derived)") < submit_body.index("ceo_intent.submit_intent(")
 
-    # ...and a normal request cannot reach the monkeypatched sink either (A3).
-    with pytest.raises(ServicePrincipalNotAdmitted):
-        submit(_principal(), _request(), object())
-    assert sink_calls == []
+    # ...and with the tier ADMITTED a normal request DOES reach the monkeypatched
+    # sink: the drift refusals above are the pre-sink order, not a closed gate.
+    sentinel = {"accepted": True}
+    monkeypatch.setattr(
+        ceo_intent, "submit_intent", lambda *a, **k: sink_calls.append(a) or sentinel
+    )
+    assert submit(_principal(), _request(), object()) == sentinel
+    assert len(sink_calls) == 1
 
 
 # ---------------------------------------------------------------------------
-# 7. A3 — FAIL CLOSED WHILE NOT_YET_ADMITTED
+# 7. A3 — THE LIVE SUBMISSION GATE (open on ADMITTED, closed on regression)
 # ---------------------------------------------------------------------------
 
 
-def test_a3_submit_fails_closed_while_not_yet_admitted(monkeypatch, tmp_path: Path):
+def test_a3_submission_gate_is_live_and_closes_on_regression(monkeypatch, tmp_path: Path):
     status = admission_status()
-    assert status["status"] == NOT_YET_ADMITTED
+    assert status["status"] == ADMITTED
 
     sink_calls: list = []
-    monkeypatch.setattr(ceo_intent, "submit_intent", lambda *a, **k: sink_calls.append(a))
+    sentinel = {"accepted": True}
+    monkeypatch.setattr(
+        ceo_intent, "submit_intent", lambda *a, **k: sink_calls.append(a) or sentinel
+    )
 
-    # (a) the typed refusal, with the blocker predicates in the message.  A
+    # (a) ADMITTED: the public path reaches the sink (the sentinel proves the
+    #     call; no real runtime is involved).
+    assert submit(_principal(), _request(), object()) == sentinel
+    assert len(sink_calls) == 1
+
+    # (b) The gate is a LIVE read, not a hard-coded refusal: force the verdict to
+    #     regress and the SAME call fails closed BEFORE any runtime access.  A
     #     sentinel runtime is passed on purpose: reading it at all would raise
-    #     AttributeError, so this proves the refusal precedes ANY runtime access.
+    #     AttributeError, so this proves the refusal precedes runtime access.
+    regressed = dict(status, status=NOT_YET_ADMITTED)
+    monkeypatch.setattr(esp, "admission_status", lambda: regressed)
     with pytest.raises(ServicePrincipalNotAdmitted) as caught:
         submit(_principal(), _request(), object())
     message = str(caught.value)
     assert "NOT_YET_ADMITTED" in message
-    assert status["reason"] in message
-    for predicate in status["predicates"]:
+    assert regressed["reason"] in message
+    for predicate in regressed["predicates"]:
         assert predicate["file"] in message
         assert predicate["line"] in message
-    assert sink_calls == []
+    assert len(sink_calls) == 1
 
-    # (b) a REAL runtime is untouched too.
+    # (c) a REAL runtime is untouched while the gate is closed.
     runtime = Runtime.at(tmp_path / "runtime")
     with pytest.raises(ServicePrincipalNotAdmitted):
         submit(_principal(), _request(), runtime)
     assert Runtime.at(tmp_path / "runtime").jobs.list_jobs() == []
-    assert sink_calls == []
-
-    # (c) the gate is a live read of the admission verdict, not a hard-coded
-    #     refusal: with an ADMITTED verdict the same call reaches the sink.  This
-    #     is the positive control that the tier's path is blocked by admission
-    #     ONLY, and it never touches a real runtime (the sink is monkeypatched).
-    monkeypatch.setattr(esp, "admission_status", lambda: dict(status, status=ADMITTED))
-    sentinel = {"accepted": True}
-    monkeypatch.setattr(ceo_intent, "submit_intent", lambda *a, **k: sink_calls.append(a) or sentinel)
-    assert submit(_principal(), _request(), object()) == sentinel
     assert len(sink_calls) == 1
 
 
@@ -599,7 +620,7 @@ def test_a3_no_other_module_level_callable_submits_anyway():
 def test_emitted_provenance_never_carries_a_ceo_identity(tmp_path: Path):
     request = _request()
     runtime = Runtime.at(tmp_path / "runtime")
-    receipt = _sink_submit(runtime, request)
+    receipt = _submit(runtime, request)
     reader = Runtime.at(tmp_path / "runtime")
     emitted = json.dumps(
         {
@@ -631,72 +652,70 @@ def test_emitted_provenance_never_carries_a_ceo_identity(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# 9. the pinned blocker — the sink cannot carry the typed schema or task_kind
+# 9. A2 — the sink carries the strict service schema, with its ceiling
 # ---------------------------------------------------------------------------
 
 
-def test_sink_cannot_carry_the_typed_schema_or_task_kind(tmp_path: Path):
-    """NOT_YET_ADMITTED, proven by triggering the exact refusing predicates."""
+def test_service_schema_is_durably_carried_with_typed_evidence(tmp_path: Path):
+    """A2 admitted: the sink stamps the SERVICE schema plus the typed evidence."""
 
     status = admission_status()
-    assert status["status"] == NOT_YET_ADMITTED != ADMITTED
-    assert _derived()["admission"]["status"] == NOT_YET_ADMITTED
+    assert status["status"] == ADMITTED
+    assert _derived()["admission"]["status"] == ADMITTED
 
     runtime = Runtime.at(tmp_path / "runtime")
-    derived = _derived()
+    receipt = _submit(runtime)
+    assert receipt["schema"] == RECEIPT_SCHEMA_SERVICE
+    assert receipt["schema"] == "mastermind.executive_service_intent_receipt.v1"
 
-    # (a) the typed schema is refused: the sink admits only the CEO intent schemas.
-    typed = copy.deepcopy(derived["envelope"])
-    typed["schema"] = SCHEMA
-    with pytest.raises(CeoIntentError, match="intent.schema must be"):
-        submit_intent(runtime, typed)
-
-    # (b) the typed block cannot ride inside the envelope: exact-key-set refusal.
-    with_block = copy.deepcopy(derived["envelope"])
-    with_block["provenance"] = dict(derived["provenance"])
-    with pytest.raises(CeoIntentError, match=r"unexpected key\(s\): \['provenance'\]"):
-        submit_intent(runtime, with_block)
-
-    # (c) task_kind has no carrier in the envelope, and no parameter on create_job.
-    with_kind = copy.deepcopy(derived["envelope"])
-    with_kind["execution_contract"] = dict(
-        with_kind["execution_contract"], constraints={"task_kind": TASK_KIND}
-    )
-    with pytest.raises(CeoIntentError, match=r"unexpected key\(s\): \['task_kind'\]"):
-        submit_intent(runtime, with_kind)
-    assert "task_kind" not in inspect.signature(JobRegistry.create_job).parameters
-    assert runtime.jobs.list_jobs() == []
-
-    # (d) what IS reachable: the actor, durably, with the sink's own schema stamp.
-    receipt = _sink_submit(runtime)
     reader = Runtime.at(tmp_path / "runtime")
     durable = durable_provenance(reader, receipt["job_id"])
-    assert durable["provenance"]["actor"] == _principal().actor
-    assert durable["provenance"]["schema"] == INTENT_SCHEMA
-    assert durable["provenance"]["schema"] != SCHEMA
+    provenance = durable["provenance"]
+    assert provenance["schema"] == INTENT_SCHEMA_SERVICE
+    assert provenance["actor"] == _principal().actor
+    assert provenance["principal_id"] == _principal().principal_id
+    assert provenance["task_kind"] == TASK_KIND
+    assert provenance["requested_authorities"] == ["READ", "RESEARCH"]
+    assert provenance["effective_authorities"] == ["READ", "RESEARCH"]
+    assert provenance["write_authorities"] == []
+    assert set(provenance) == {
+        "schema", "intent_id", "actor", "fingerprint", "grounding",
+        "principal_id", "task_kind", "requested_authorities",
+        "effective_authorities", "write_authorities",
+    }
     assert SCHEMA not in json.dumps(durable)
+
+    # resolve/replay rebuilds the SERVICE receipt from durable state only
+    resolved = ceo_intent.resolve_intent(reader, receipt["intent_id"])
+    assert resolved["schema"] == RECEIPT_SCHEMA_SERVICE
+    assert resolved["job_id"] == receipt["job_id"]
+    assert resolved["duplicate"] is False
+
+    # task_kind rides the envelope and the durable provenance, never a create_job
+    # parameter: the runtime Job API is unchanged.
+    assert "task_kind" not in inspect.signature(JobRegistry.create_job).parameters
 
     # (e) the recorded path:line evidence must still describe the real code.
     #     The module's pins are ``L<number>`` STRINGS, never bare integer
     #     literals: the D8 identity ratchet flags unexplained 4xx-9xx integers
     #     in added production source, and a source-line citation is not an
-    #     identity.  The predicates below are unchanged.
+    #     identity.
     windows = {
-        "L561": _source_window("control_plane/ceo_intent.py", 555, 575),
-        "L562": _source_window("control_plane/ceo_intent.py", 555, 575),
-        "L735": _source_window("control_plane/ceo_intent.py", 730, 745),
-        "L163": _source_window("control_plane/ceo_intent.py", 160, 175),
+        "L633": _source_window("control_plane/ceo_intent.py", 628, 640),
+        "L578": _source_window("control_plane/ceo_intent.py", 570, 600),
+        "L855": _source_window("control_plane/ceo_intent.py", 850, 866),
+        "L1158": _source_window("control_plane/ceo_intent.py", 1152, 1166),
     }
-    assert "intent.schema must be" in windows["L561"]
-    assert "_exact_keys" in windows["L562"] or "exact_keys" in windows["L562"]
-    assert '"schema": intent["schema"],' in windows["L735"]
-    assert "_CONSTRAINT_KEYS = frozenset(" in windows["L163"]
+    assert "_SERVICE_REQUIRED_KEYS" in windows["L633"]
+    assert "def _require_service_ceiling" in windows["L578"]
+    assert 'value["principal_id"] = intent["principal_id"]' in windows["L855"]
+    assert 'owner_seat="coo"' in windows["L1158"]
     for predicate in status["predicates"]:
         assert predicate["line"] in windows, predicate
         assert predicate["file"] == "control_plane/ceo_intent.py"
         assert predicate["line"].startswith("L") and predicate["line"][1:].isdigit()
 
-    # (f) the A2 anchors this tier deliberately did NOT edit.
+    # (f) the anchors this tier deliberately did NOT edit.
     assert "_JOB_SEATS = frozenset({\"coo\", \"ceo\", \"chairman\"})" in _source_window(
         "control_plane/executive_runtime.py", 146, 146
     )
@@ -706,6 +725,100 @@ def test_sink_cannot_carry_the_typed_schema_or_task_kind(tmp_path: Path):
     assert "if owner_seat != \"coo\" and not _has_executive_provenance(" in _source_window(
         "control_plane/executive_runtime.py", 10287, 10297
     )
+
+
+def test_service_sink_refuses_write_authority_reserved_actors_and_bad_shapes(tmp_path: Path):
+    """Every refusal the A2 ceiling and the closed values promise, triggered."""
+
+    runtime = Runtime.at(tmp_path / "runtime")
+    base = _derived()["envelope"]
+
+    probes = (
+        # the read-only ceiling
+        ({"execution_contract": {"requested_authorities": ["WRITE_BRANCH"]}}, "READ/RESEARCH only"),
+        ({"execution_contract": {"requested_authorities": ["RUN_TESTS"]}}, "READ/RESEARCH only"),
+        ({"execution_contract": {"requested_authorities": ["READ", "MERGE"]}}, "READ/RESEARCH only"),
+        (
+            {"execution_contract": {"requested_authorities": ["READ"], "allowed_write_paths": ["docs/x.md"]}},
+            "may not declare allowed_write_paths",
+        ),
+        (
+            {"execution_contract": {"requested_authorities": ["READ"], "authority_level": "A3"}},
+            "READ level",
+        ),
+        # reserved identities
+        ({"actor": "ceo-sol"}, "reserved identity"),
+        ({"actor": "chairman"}, "reserved identity"),
+        ({"actor": "chris"}, "reserved identity"),
+        ({"actor": "operator"}, "reserved identity"),
+        # the service id domain and closed values
+        ({"intent_id": "esp-not-svc"}, "must start with 'svc-'"),
+        ({"intent_id": "CEO-2026-08-13-A"}, "must start with 'svc-'"),
+        ({"task_kind": "implementation"}, "intent.task_kind must be"),
+        ({"principal_id": "site-maintenance"}, "intent.principal_id has an unsupported form"),
+        ({"principal_id": "svc-X"}, "intent.principal_id has an unsupported form"),
+        # unknown keys
+        ({"extra_key": "x"}, r"unexpected key\(s\): \['extra_key'\]"),
+        ({"provenance": {}}, r"unexpected key\(s\): \['provenance'\]"),
+    )
+    for overrides, match in probes:
+        probe = copy.deepcopy(base)
+        probe.update(overrides)
+        with pytest.raises(CeoIntentError, match=match):
+            submit_intent(runtime, probe)
+
+    # ...and a service-schema envelope shaped like v2 is refused by exact keys.
+    v2_shaped = copy.deepcopy(base)
+    v2_shaped["intent_kind"] = "executive_coo_cycle"
+    v2_shaped["business_impact"] = "material"
+    with pytest.raises(
+        CeoIntentError, match=r"unexpected key\(s\): \['business_impact', 'intent_kind'\]"
+    ):
+        submit_intent(runtime, v2_shaped)
+
+    # A valid service envelope still lands exactly one Job: the refusals above
+    # are the probes failing, not a broken happy path.
+    assert runtime.jobs.list_jobs() == []
+    assert _submit(runtime)["accepted"] is True
+    assert len(Runtime.at(tmp_path / "runtime").jobs.list_jobs()) == 1
+
+
+def test_service_stamp_does_not_satisfy_the_ceo_seat_gate(tmp_path: Path):
+    """The service stamp can never be reused to seat a Job above coo.
+
+    This is the A2 point: the durable provenance schema is the SERVICE schema, so
+    the runtime's CEO branch (which keys on the raw v1 schema) does not fire.
+    """
+
+    runtime = Runtime.at(tmp_path / "runtime")
+    receipt = _submit(runtime)
+    reader = Runtime.at(tmp_path / "runtime")
+    stamp = durable_provenance(reader, receipt["job_id"])["provenance"]
+    assert stamp["schema"] == INTENT_SCHEMA_SERVICE
+
+    assert _has_executive_provenance(dict(stamp), target="ceo") is False
+    assert _has_executive_provenance(dict(stamp), target="chairman") is False
+
+    for seat in ("ceo", "chairman"):
+        with pytest.raises(StateConflict, match=f"owner_seat='{seat}' requires"):
+            runtime.jobs.create_job(
+                f"service stamp cannot seat {seat!r}",
+                owner_seat=seat,
+                provenance=dict(stamp),
+            )
+        with pytest.raises(StateConflict, match=f"escalation_target='{seat}' requires"):
+            runtime.jobs.create_job(
+                f"service stamp cannot escalate to {seat!r}",
+                owner_seat=SERVICE_SEAT,
+                escalation_target=seat,
+                provenance=dict(stamp),
+            )
+
+    # the tier's own Job keeps the coo seats it was created with
+    own = reader.jobs.get_job(receipt["job_id"])
+    assert own.owner_seat == SERVICE_SEAT == "coo"
+    assert own.escalation_target == SERVICE_SEAT
+    assert own.requested_authorities == ["READ", "RESEARCH"]
 
 
 # ---------------------------------------------------------------------------
@@ -741,103 +854,87 @@ def test_registry_is_closed_and_look_alikes_confer_nothing():
         derive_intent(tampered, _request(), now=0)
 
 
+
 # ---------------------------------------------------------------------------
-# 11. KNOWN OPEN GAP (A2 follow-on, OWNED by executive_runtime.py / #699)
+# 11. RESIDUAL RAW-v1 RUNTIME GAP (unchanged, OWNED by executive_runtime.py)
 # ---------------------------------------------------------------------------
 #
-# The CEO branch of ``_has_executive_provenance`` is SCHEMA-ONLY
-# (``executive_runtime.py`` L937-L938, cited here as a string): it compares the
-# schema and DISCARDS the actor, while the chairman branch checks schema AND
-# actor.  The stamp this tier's derived envelope receives from the sink in
-# ``event.payload["provenance"]`` is exactly
-# ``schema=mastermind.ceo_intent.v1`` / ``actor=svc-site-maintenance``, so that
-# stamp satisfies the CEO branch.  The tests below PIN that as a known,
-# documented open gap instead of fixing it: the gate, the sink stamp, and the
-# OWNED runtime (#699) are all outside this packet's fences.  This tier never
-# passes ``owner_seat``/``escalation_target`` (the sink's own ``coo`` defaults
-# seat the Job, asserted in section 4), so the gap is *reuse* of the stamped
-# provenance by any other runtime holder, not a Job this tier can create.
+# A2 closed the SCHEMA-ONLY hole for the service tier: the durable provenance the
+# sink stamps for a service intent now carries the SERVICE schema, so it no
+# longer satisfies the CEO branch of ``_has_executive_provenance`` (pinned in
+# section 9 by ``test_service_stamp_does_not_satisfy_the_ceo_seat_gate``).
+#
+# The residual is what A2 cannot and must not touch: the CEO branch of
+# ``_has_executive_provenance`` is still SCHEMA-ONLY
+# (``executive_runtime.py`` L937-L938, cited here as a string).  A RAW
+# ``mastermind.ceo_intent.v1`` stamp - the stamp ANY v1 CEO submission receives -
+# is compared on its schema and its actor is DISCARDED, while the human-seat
+# branch checks schema AND actor.  The test below pins that residual as a known,
+# documented Runtime gap instead of fixing it: the gate and the OWNED runtime
+# are outside this packet's fences.  This tier's own Jobs ride the explicit
+# ``coo`` seats (section 4), so the residual is *reuse* of a raw-v1 stamped
+# provenance by another runtime holder, never a Job this tier can create.
 
 
-def _durable_sink_stamp(tmp_path: Path) -> tuple[dict, dict]:
-    """The sink's stamped provenance block and the sink's own receipt.
+def test_open_gap_raw_v1_stamp_still_satisfies_the_schema_only_ceo_branch(tmp_path: Path):
+    """RESIDUAL: a RAW v1 stamp passes the CEO seat gate; the service stamp does not.
 
-    The stamp comes from calling the UNCHANGED sink directly, because ``submit()``
-    is closed while unadmitted (A3): the gap is about what the sink stamps, not
-    about a production path that mutates now.
+    Recorded, never fixed here.  The fix is an actor-aware (or distinct-schema)
+    gate in the OWNED runtime, not in this tier.
     """
 
-    runtime = Runtime.at(tmp_path / "runtime")
-    receipt = _sink_submit(runtime)
-    reader = Runtime.at(tmp_path / "runtime")
-    stamp = durable_provenance(reader, receipt["job_id"])["provenance"]
-    assert stamp["schema"] == INTENT_SCHEMA
-    assert stamp["actor"] == _principal().actor
-    return stamp, receipt
+    raw_v1 = {
+        "schema": INTENT_SCHEMA,
+        "intent_id": "CEO-OPEN-GAP-PROBE",
+        "actor": _principal().actor,
+        "fingerprint": "0" * 64,
+        "grounding": dict(_GROUNDING),
+    }
 
-
-def test_open_gap_executive_provenance_gate_is_schema_only_A2(tmp_path: Path):
-    """OPEN GAP: the CEO target accepts the sink's stamp because it ignores the actor."""
-
-    stamp, _receipt = _durable_sink_stamp(tmp_path)
-
-    # (a) the predicate, on the durable stamp: CEO True, chairman False.
-    assert _has_executive_provenance(dict(stamp), target="ceo") is True
-    assert _has_executive_provenance(dict(stamp), target="chairman") is False
+    # (a) the predicate: the raw v1 schema passes CEO and fails the human seat.
+    assert _has_executive_provenance(dict(raw_v1), target="ceo") is True
+    assert _has_executive_provenance(dict(raw_v1), target="chairman") is False
 
     # ...and the schema-only branch is still exactly where the record says it is.
     source = (_ROOT / "control_plane" / "executive_runtime.py").read_text(encoding="utf-8")
     assert 'if target == "ceo":\n        return schema == "mastermind.ceo_intent.v1"' in source
 
-
-def test_open_gap_ceo_seat_is_admitted_with_the_sink_stamp_A2(tmp_path: Path):
-    """OPEN GAP: today ``create_job`` admits a ``ceo`` seat on the sink's stamp."""
-
-    stamp, receipt = _durable_sink_stamp(tmp_path)
+    # (b) ADMITTED today with a raw v1 stamp.  A caller-side ``Object()``
+    #     sentinel cannot work here (``_has_executive_provenance`` requires a
+    #     dict), so the probe uses the raw dict itself.
     runtime = Runtime.at(tmp_path / "runtime")
-
-    # (b) ADMITTED today.  Recorded, never fixed here: the fix is an
-    # actor-aware gate in the OWNED runtime, not in this tier.
     seated = runtime.jobs.create_job(
-        "known open gap probe: ceo seat with the sink's v1 stamp",
+        "residual probe: ceo seat with a raw v1 stamp",
         owner_seat="ceo",
-        provenance=dict(stamp),
+        provenance=dict(raw_v1),
     )
     assert seated.owner_seat == "ceo"
-
-    escalated = runtime.jobs.create_job(
-        "known open gap probe: ceo escalation with the sink's v1 stamp",
-        owner_seat="ceo",
-        escalation_target="ceo",
-        provenance=dict(stamp),
-    )
-    assert escalated.escalation_target == "ceo"
 
     # REFUSED: the human seat's branch is actor-aware (schema AND actor).
     with pytest.raises(StateConflict, match="owner_seat='chairman' requires"):
         runtime.jobs.create_job(
-            "known open gap probe: chairman seat",
+            "residual probe: chairman seat",
             owner_seat="chairman",
-            provenance=dict(stamp),
+            provenance=dict(raw_v1),
         )
 
-    # REFUSED: the same seats with no provenance at all, and with this tier's
-    # own typed schema - the gate keys on the CEO intent schema, not the actor.
+    # REFUSED: the same seat with no provenance at all, and with the SERVICE
+    # stamp this tier actually emits - the A2 fix, pinned here as the contrast.
     with pytest.raises(StateConflict, match="owner_seat='ceo' requires"):
-        runtime.jobs.create_job("known open gap probe: no provenance", owner_seat="ceo")
+        runtime.jobs.create_job("residual probe: no provenance", owner_seat="ceo")
+
+    service_receipt = _submit(runtime)
+    reader = Runtime.at(tmp_path / "runtime")
+    service_stamp = durable_provenance(reader, service_receipt["job_id"])["provenance"]
+    assert service_stamp["schema"] == INTENT_SCHEMA_SERVICE
     with pytest.raises(StateConflict, match="owner_seat='ceo' requires"):
         runtime.jobs.create_job(
-            "known open gap probe: typed service-principal schema",
+            "residual probe: service stamp",
             owner_seat="ceo",
-            provenance=dict(_derived()["provenance"]),
+            provenance=dict(service_stamp),
         )
 
-    # (c) this tier's own envelope rides the sink's ``coo`` defaults: it never
-    # carries a seat, so no Job created from it can be seated above coo - even in
-    # a database that now also holds the ceo-seated probes above.
-    reader = Runtime.at(tmp_path / "runtime")
-    own = [job for job in reader.jobs.list_jobs() if job.job_id == receipt["job_id"]]
-    assert len(own) == 1
-    assert own[0].owner_seat == SERVICE_SEAT == "coo"
-    assert own[0].escalation_target == SERVICE_SEAT
-    assert own[0].requested_authorities == ["READ", "RESEARCH"]
+    # The tier's own Job keeps the explicit coo seats.
+    own = reader.jobs.get_job(service_receipt["job_id"])
+    assert own.owner_seat == SERVICE_SEAT == "coo"
+    assert own.escalation_target == SERVICE_SEAT
