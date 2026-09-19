@@ -45,6 +45,13 @@ TYPED_GIT_SOURCE_REPOSITORY_REL = Path("Documents/GitHub/Mastermind")
 TYPED_GIT_BINARY = "/usr/bin/git"
 TYPED_GIT_REMOTE_URL = "https://github.com/mastermindx-market-intelligence/Mastermind.git"
 
+# Paper Desktop capability is a gateway-local consumer of the separately reviewed
+# guarded adapter in PR #585. The private gateway never accepts these paths or
+# hashes from ChatGPT.
+PAPER_RUNTIME_REL = Path(".local/share/mastermind-paper/runtime/v1")
+PAPER_BRIDGE_SHA256 = "94329a2813e37f1081e1be48aacf371b8f1b23505ec609cc6e8d453554cf8fa0"
+PAPER_COMMAND_TIMEOUT_MS = 70_000
+
 # CLI adapter. gateway.mjs is still staged as the engine import, never argv[1].
 PRIVATE_GATEWAY_NAME = "private-tunnel-gateway.mjs"
 
@@ -59,20 +66,27 @@ STAGE_FILES = (
     "gateway.mjs",
     "output-budget.mjs",
     "git-publish.mjs",
+    "paper-design.mjs",
     "private-tunnel-auth.mjs",
     "private-tunnel-gateway.mjs",
     "package.json",
     "package-lock.json",
 )
 
-# Version-1 installs created before typed Git did not stage git-publish.mjs.
-# Accept only that exact historical set (or the current set) so the canonical
-# installer can stop and upgrade those known installs without accepting an
-# arbitrary manifest shape.
-LEGACY_STAGE_FILES_V2 = tuple(name for name in STAGE_FILES if name != "output-budget.mjs")
+# Historical installs are admitted only through exact known file sets. The
+# immediately preceding v0.1.5 install has every current file except the new
+# Paper capability module; earlier generations also predate output paging and
+# typed Git.
+LEGACY_STAGE_FILES_V3 = tuple(name for name in STAGE_FILES if name != "paper-design.mjs")
+LEGACY_STAGE_FILES_V2 = tuple(name for name in LEGACY_STAGE_FILES_V3 if name != "output-budget.mjs")
 LEGACY_STAGE_FILES_V1 = tuple(name for name in LEGACY_STAGE_FILES_V2 if name != "git-publish.mjs")
 KNOWN_MANIFEST_FILESETS = frozenset(
-    (frozenset(STAGE_FILES), frozenset(LEGACY_STAGE_FILES_V2), frozenset(LEGACY_STAGE_FILES_V1))
+    (
+        frozenset(STAGE_FILES),
+        frozenset(LEGACY_STAGE_FILES_V3),
+        frozenset(LEGACY_STAGE_FILES_V2),
+        frozenset(LEGACY_STAGE_FILES_V1),
+    )
 )
 
 MANIFEST_VERSION = 2
@@ -94,6 +108,11 @@ MANIFEST_KEYS_V2 = MANIFEST_KEYS_V1 + (
     "backendHash",
     "dependencyTreeHash",
 )
+LEGACY_PROVISIONED_MANIFEST_KEYS = MANIFEST_KEYS_V1 + (
+    "provisioned_from",
+    "installation_state",
+)
+LEGACY_PROVISIONED_STATE = "LOCAL_GATEWAY_PREPARED_TUNNEL_NOT_CREATED"
 
 
 class CmdResult:
@@ -415,6 +434,17 @@ def _typed_git_config(user_root: Path) -> dict:
     }
 
 
+def _paper_design_config(user_root: Path) -> dict:
+    runtime = user_root / PAPER_RUNTIME_REL
+    return {
+        "enabled": True,
+        "pythonPath": str(runtime / "venv" / "bin" / "python"),
+        "bridgePath": str(runtime / "source" / "bridge.py"),
+        "bridgeSha256": PAPER_BRIDGE_SHA256,
+        "commandTimeoutMs": PAPER_COMMAND_TIMEOUT_MS,
+    }
+
+
 def _build_config(
     account: str,
     host: str,
@@ -440,6 +470,7 @@ def _build_config(
         "idleTimeoutMs": IDLE_TIMEOUT_MS,
         "reclaimIdleGraceMs": 30_000,
         "gitPublish": _typed_git_config(user_root),
+        "paperDesign": _paper_design_config(user_root),
     }
 
 
@@ -486,17 +517,40 @@ def _valid_manifest(data, account: str, label: str) -> bool:
     if not isinstance(data, dict):
         return False
     version = data.get("version")
+    keys = frozenset(data)
+    legacy_provisioned = (
+        version == 1 and keys == frozenset(LEGACY_PROVISIONED_MANIFEST_KEYS)
+    )
     expected_keys = (
         frozenset(MANIFEST_KEYS_V1)
-        if version == 1
+        if version == 1 and not legacy_provisioned
         else frozenset(MANIFEST_KEYS_V2)
         if version == MANIFEST_VERSION
+        else frozenset(LEGACY_PROVISIONED_MANIFEST_KEYS)
+        if legacy_provisioned
         else None
     )
-    if expected_keys is None or frozenset(data) != expected_keys:
+    if expected_keys is None or keys != expected_keys:
         return False
     if data.get("account") != account or data.get("label") != label:
         return False
+    if legacy_provisioned:
+        if data.get("installation_state") != LEGACY_PROVISIONED_STATE:
+            return False
+        provisioned_from = data.get("provisioned_from")
+        if not isinstance(provisioned_from, str) or not provisioned_from:
+            return False
+        source_account = Path(provisioned_from)
+        expected_parent = (
+            _user_root() / ".local" / "share" / "studio-direct-mcp" / "private"
+        )
+        if (
+            not source_account.is_absolute()
+            or source_account.parent != expected_parent
+            or source_account.name == account
+            or ACCOUNT_LABEL_RE.fullmatch(source_account.name) is None
+        ):
+            return False
     files = data.get("files")
     if not isinstance(files, dict) or frozenset(files) not in KNOWN_MANIFEST_FILESETS:
         return False

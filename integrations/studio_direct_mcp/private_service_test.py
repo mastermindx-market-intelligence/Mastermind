@@ -185,6 +185,7 @@ def _seal_runtime(account: str = "test-account", recorder=None):
 def _convert_to_legacy_install(roots: dict, *, typed_git: bool = False) -> dict:
     """Recreate one exact historical layout; never include newly staged modules."""
     config = json.loads(roots["config"].read_text(encoding="utf-8"))
+    config.pop("paperDesign", None)
     if not typed_git:
         config.pop("gitPublish", None)
     roots["config"].write_text(json.dumps(config, indent=2, sort_keys=True), encoding="utf-8")
@@ -192,7 +193,9 @@ def _convert_to_legacy_install(roots: dict, *, typed_git: bool = False) -> dict:
     manifest["version"] = 1
     for key in ("nodeHash", "backendHash", "dependencyTreeHash"):
         manifest.pop(key, None)
-    removed = ("output-budget.mjs",) if typed_git else ("output-budget.mjs", "git-publish.mjs")
+    removed = ("paper-design.mjs", "output-budget.mjs") if typed_git else (
+        "paper-design.mjs", "output-budget.mjs", "git-publish.mjs"
+    )
     for name in removed:
         (roots["base"] / name).unlink()
         manifest["files"].pop(name)
@@ -221,6 +224,7 @@ class TestIdentity(unittest.TestCase):
                 "gateway.mjs",
                 "output-budget.mjs",
                 "git-publish.mjs",
+                "paper-design.mjs",
                 "private-tunnel-auth.mjs",
                 "private-tunnel-gateway.mjs",
                 "package.json",
@@ -257,7 +261,9 @@ class TestIdentity(unittest.TestCase):
         legacy = {name: digest for name in svc.LEGACY_STAGE_FILES_V1}
         self.assertTrue(svc._valid_manifest({**base, "files": current}, "test-account", _label_for("test-account")))
         self.assertTrue(svc._valid_manifest({**base, "files": legacy}, "test-account", _label_for("test-account")))
-        typed_legacy = {name: digest for name in svc.STAGE_FILES if name != "output-budget.mjs"}
+        immediate_legacy = {name: digest for name in svc.LEGACY_STAGE_FILES_V3}
+        self.assertTrue(svc._valid_manifest({**base, "files": immediate_legacy}, "test-account", _label_for("test-account")))
+        typed_legacy = {name: digest for name in svc.LEGACY_STAGE_FILES_V2}
         self.assertTrue(svc._valid_manifest({**base, "files": typed_legacy}, "test-account", _label_for("test-account")))
         self.assertNotIn("output-budget.mjs", svc.LEGACY_STAGE_FILES_V1)
         self.assertNotIn("git-publish.mjs", svc.LEGACY_STAGE_FILES_V1)
@@ -268,6 +274,50 @@ class TestIdentity(unittest.TestCase):
         extra["surprise.mjs"] = digest
         self.assertFalse(svc._valid_manifest({**base, "files": extra}, "test-account", _label_for("test-account")))
         self.assertFalse(svc._valid_manifest({**base, "version": 2, "files": current}, "test-account", _label_for("test-account")))
+
+    def test_v1_provisioned_manifest_accepts_only_exact_inert_legacy_shape(self):
+        digest = "0" * 64
+        with tempfile.TemporaryDirectory() as raw:
+            home = Path(raw) / "home"
+            home.mkdir()
+            base = {
+                "version": 1,
+                "account": "chatgpt4",
+                "label": _label_for("chatgpt4"),
+                "configHash": digest,
+                "plistHash": digest,
+                "source": "/tmp/src",
+                "node": "/tmp/node",
+                "backend": "/tmp/backend",
+                "host": "127.0.0.1",
+                "port": 45024,
+                "files": {name: digest for name in svc.LEGACY_STAGE_FILES_V1},
+                "provisioned_from": str(
+                    home / ".local" / "share" / "studio-direct-mcp" / "private" / "chatgpt3"
+                ),
+                "installation_state": svc.LEGACY_PROVISIONED_STATE,
+            }
+            with mock.patch.dict(os.environ, {"HOME": str(home)}):
+                self.assertTrue(
+                    svc._valid_manifest(base, "chatgpt4", _label_for("chatgpt4"))
+                )
+                wrong_state = {**base, "installation_state": "READY"}
+                self.assertFalse(
+                    svc._valid_manifest(wrong_state, "chatgpt4", _label_for("chatgpt4"))
+                )
+                wrong_source = {**base, "provisioned_from": "/tmp/chatgpt3"}
+                self.assertFalse(
+                    svc._valid_manifest(wrong_source, "chatgpt4", _label_for("chatgpt4"))
+                )
+                same_account = {
+                    **base,
+                    "provisioned_from": str(
+                        home / ".local" / "share" / "studio-direct-mcp" / "private" / "chatgpt4"
+                    ),
+                }
+                self.assertFalse(
+                    svc._valid_manifest(same_account, "chatgpt4", _label_for("chatgpt4"))
+                )
 
     def test_dir_mode_is_0700(self):
         self.assertEqual(svc.DIR_MODE, 0o700)
@@ -423,6 +473,20 @@ class TestBuildConfig(unittest.TestCase):
             self.assertNotIn("branch", config["gitPublish"])
             self.assertNotIn("remote", config["gitPublish"])
             self.assertNotIn("credential", config["gitPublish"])
+            paper_runtime = home / ".local" / "share" / "mastermind-paper" / "runtime" / "v1"
+            self.assertEqual(
+                config["paperDesign"],
+                {
+                    "enabled": True,
+                    "pythonPath": str(paper_runtime / "venv" / "bin" / "python"),
+                    "bridgePath": str(paper_runtime / "source" / "bridge.py"),
+                    "bridgeSha256": svc.PAPER_BRIDGE_SHA256,
+                    "commandTimeoutMs": 70_000,
+                },
+            )
+            self.assertNotIn("fileId", config["paperDesign"])
+            self.assertNotIn("account", config["paperDesign"])
+            self.assertNotIn("token", config["paperDesign"])
 
 
 class TestBuildPlist(unittest.TestCase):
