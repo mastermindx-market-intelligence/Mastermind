@@ -155,6 +155,35 @@ test('bridge hash drift refuses before process dispatch', async () => {
   });
   const result = await designer.call('paper_inspect', {});
   assert.equal(result.value.state, 'PAPER_BRIDGE_IDENTITY_REFUSED');
+  assert.equal(result.effectUnknown, false);
+  assert.equal(calls, 0);
+
+  const edit = await designer.call('paper_edit', {
+    tool: 'write_html',
+    arguments: { fileId: 'FILE', html: '<div />' },
+    expected_snapshot: 'e'.repeat(64),
+    operation_id: 'paper-hash-drift-edit',
+  });
+  assert.equal(edit.value.state, 'PAPER_BRIDGE_IDENTITY_REFUSED');
+  assert.equal(edit.effectUnknown, false);
+  assert.equal(calls, 0);
+});
+
+test('oversized arguments refuse before process dispatch without effect ambiguity', async () => {
+  let calls = 0;
+  const designer = createPaperDesigner(cfg(), deps(async () => {
+    calls += 1;
+    return { stdout: '{}' };
+  }));
+  const huge = { fileId: 'FILE', html: 'x'.repeat((1 << 19) + 32) };
+  const edit = await designer.call('paper_edit', {
+    tool: 'write_html',
+    arguments: huge,
+    expected_snapshot: 'f'.repeat(64),
+    operation_id: 'paper-oversized-edit',
+  });
+  assert.equal(edit.value.state, 'PAPER_INVALID_ARGUMENTS');
+  assert.equal(edit.effectUnknown, false);
   assert.equal(calls, 0);
 });
 

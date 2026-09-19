@@ -276,7 +276,9 @@ export function createPaperDesigner(config, dependencies = {}) {
     try {
       await verifyBridge(resolved, deps);
     } catch {
-      return localFailure(editing, 'PAPER_BRIDGE_IDENTITY_REFUSED');
+      // Bridge identity is checked before any subprocess or Paper call begins.
+      // A mismatch is a definite refusal, never an ambiguous modifying effect.
+      return localFailure(false, 'PAPER_BRIDGE_IDENTITY_REFUSED');
     }
 
     let stdout = '';
@@ -329,7 +331,13 @@ export function createPaperDesigner(config, dependencies = {}) {
             typeof input?.arguments !== 'object' || input.arguments === null || Array.isArray(input.arguments)) {
           return localFailure(false, 'PAPER_INVALID_ARGUMENTS');
         }
-        const args = ['read', '--tool', input.tool, '--arguments', stableJson(input.arguments)];
+        let encodedArguments;
+        try {
+          encodedArguments = stableJson(input.arguments);
+        } catch {
+          return localFailure(false, 'PAPER_INVALID_ARGUMENTS');
+        }
+        const args = ['read', '--tool', input.tool, '--arguments', encodedArguments];
         if (input.expected_snapshot !== undefined) {
           if (!SNAPSHOT_RE.test(String(input.expected_snapshot))) {
             return localFailure(false, 'PAPER_INVALID_SNAPSHOT');
@@ -345,13 +353,19 @@ export function createPaperDesigner(config, dependencies = {}) {
             !OPERATION_RE.test(String(input.operation_id ?? ''))) {
           return localFailure(false, 'PAPER_INVALID_ARGUMENTS');
         }
+        let encodedArguments;
+        try {
+          encodedArguments = stableJson(input.arguments);
+        } catch {
+          return localFailure(false, 'PAPER_INVALID_ARGUMENTS');
+        }
         return dispatch(
           'edit',
           [
             'edit',
             '--allow-write',
             '--tool', input.tool,
-            '--arguments', stableJson(input.arguments),
+            '--arguments', encodedArguments,
             '--expected-snapshot', input.expected_snapshot,
             '--operation-id', input.operation_id,
           ],
