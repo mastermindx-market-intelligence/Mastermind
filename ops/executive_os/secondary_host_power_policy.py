@@ -27,11 +27,19 @@ _POWER_SETTING_RE = re.compile(r"^([a-z][a-z0-9]*)\s+(0|[1-9][0-9]{0,9})$")
 
 
 class SecondaryHostPowerPolicyError(RuntimeError):
-    """A fixed, secret-free refusal for the bounded power-policy action."""
+    """A fixed, secret-free refusal before the bounded effect begins."""
+
+
+class SecondaryHostPowerPolicyEffectUnknown(SecondaryHostPowerPolicyError):
+    """The fixed mutation may have started but its final postcondition is unknown."""
 
 
 def _refuse() -> NoReturn:
     raise SecondaryHostPowerPolicyError("SECONDARY_HOST_POWER_POLICY_REFUSED")
+
+
+def _effect_unknown() -> NoReturn:
+    raise SecondaryHostPowerPolicyEffectUnknown("SECONDARY_HOST_POWER_POLICY_EFFECT_UNKNOWN")
 
 
 def _default_runner(command: Tuple[str, ...]) -> subprocess.CompletedProcess:
@@ -47,21 +55,35 @@ def _default_runner(command: Tuple[str, ...]) -> subprocess.CompletedProcess:
     )
 
 
-def _run_checked(
+def _run_mutation(
     runner: Callable[[Tuple[str, ...]], subprocess.CompletedProcess],
-    command: Tuple[str, ...],
 ) -> subprocess.CompletedProcess:
     try:
-        completed = runner(command)
+        completed = runner(PMSET_SET_COMMAND)
     except Exception:
-        _refuse()
+        _effect_unknown()
+    if (
+        not isinstance(completed, subprocess.CompletedProcess)
+        or completed.returncode != 0
+    ):
+        _effect_unknown()
+    return completed
+
+
+def _run_readback(
+    runner: Callable[[Tuple[str, ...]], subprocess.CompletedProcess],
+) -> subprocess.CompletedProcess:
+    try:
+        completed = runner(PMSET_READ_COMMAND)
+    except Exception:
+        _effect_unknown()
     if (
         not isinstance(completed, subprocess.CompletedProcess)
         or completed.returncode != 0
         or not isinstance(completed.stdout, str)
         or len(completed.stdout.encode("utf-8", errors="replace")) > MAX_OUTPUT_BYTES
     ):
-        _refuse()
+        _effect_unknown()
     return completed
 
 
@@ -103,11 +125,14 @@ def prepare_secondary_host_power_policy(
         _refuse()
 
     run = runner or _default_runner
-    _run_checked(run, PMSET_SET_COMMAND)
-    observed = _run_checked(run, PMSET_READ_COMMAND)
-    ac = _parse_ac_power(observed.stdout)
+    _run_mutation(run)
+    observed = _run_readback(run)
+    try:
+        ac = _parse_ac_power(observed.stdout)
+    except SecondaryHostPowerPolicyError:
+        _effect_unknown()
     if ac.get("sleep") != 0 or ac.get("autorestart") != 1:
-        _refuse()
+        _effect_unknown()
 
     return {
         "schema": RECEIPT_SCHEMA,
@@ -130,6 +155,9 @@ def main(
         return 64
     try:
         receipt = prepare_secondary_host_power_policy()
+    except SecondaryHostPowerPolicyEffectUnknown:
+        print("secondary-host power policy effect unknown", file=err)
+        return 75
     except SecondaryHostPowerPolicyError:
         print("secondary-host power policy refused", file=err)
         return 65
