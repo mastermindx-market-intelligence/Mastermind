@@ -144,3 +144,26 @@ def test_success_claim_is_bounded_to_power_remediation_readiness() -> None:
         "ENROLLED",
     ):
         assert forbidden_claim not in text
+
+
+def test_root_helpers_are_not_invoked_from_a_mutable_checkout() -> None:
+    text = _source()
+    source_trust = text.index('SOURCE_PARENT="$(cd "$SOURCE_REPO/.."')
+    runtime_verify = text.index('"$PYTHON_PROVISIONER" --verify-only')
+    policy_verify = text.index('"$PYTHON_BINARY" -I -S -B "$SOURCE_POLICY"')
+    assert source_trust < runtime_verify < policy_verify
+    assert 'source checkout contains a non-root-owned object' in text
+    assert 'source checkout contains a group/other-writable object' in text
+    assert 'source checkout contains a hard-linked file' in text
+    assert 'source checkout contains a filesystem ACL' in text
+
+
+def test_release_manifest_is_created_and_verified_before_atomic_publish() -> None:
+    text = _source()
+    create = text.index('$STAGING/ops/executive_os/release_manifest.py" create')
+    verify = text.index('$STAGING/ops/executive_os/release_manifest.py" verify')
+    publish = text.index('/bin/mv "$STAGING" "$RELEASE_ROOT"')
+    assert create < verify < publish
+    assert '$RELEASE_ROOT/ops/executive_os/release_manifest.py" create' not in text
+    cleanup = text.split('cleanup_on_failure() {', 1)[1].split('}\ntrap', 1)[0]
+    assert '/bin/rm -rf -- "$STAGING"' in cleanup
