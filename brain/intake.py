@@ -31,6 +31,9 @@ _V = _ROOT / "vendor" / "macro"
 
 # corroboration bonus: each INDEPENDENT engine beyond the first adds this to the base score
 _CORROBORATION = 0.08
+# Derived summaries/flags may rank research salience, but cannot masquerade as an
+# independent engine for corroboration breadth.
+_NON_INDEPENDENT_SOURCES = {"briefing", "divergence"}
 # a name flagged by the briefing's divergence block is high-information — lift it
 _DIVERGENCE_BONUS = 0.12
 
@@ -231,6 +234,18 @@ def _from_radar() -> dict:
 
 def _from_altdata() -> dict:
     d = _read("altdata/mastermind.json") or {}
+    article3 = d.get("article3") if isinstance(d.get("article3"), dict) else {}
+    calibration = d.get("calibration") if isinstance(d.get("calibration"), dict) else {}
+    qualification = {
+        "as_of": d.get("as_of"),
+        "generated_utc": d.get("generated_utc"),
+        "brain_usable": d.get("brain_usable"),
+        "is_context_only": d.get("is_context_only"),
+        "article3_granted": article3.get("granted"),
+        "article3_reason": article3.get("reason"),
+        "calibration_n_scored": calibration.get("n_scored"),
+        "calibration_hit_rate": calibration.get("hit_rate"),
+    }
     out = {}
     for s in (d.get("signals") or []):
         t = _u(s.get("ticker"))
@@ -241,7 +256,8 @@ def _from_altdata() -> dict:
         out[t] = {"score": min(abs(sc - 50.0) / 50.0, 1.0),
                   "reason": f"alt-data {act or ''} (score {int(sc)}, {','.join(s.get('channels') or [])})".strip(),
                   "lean": 1 if (sc >= 65 and act != "AVOID") else -1 if (act == "AVOID" or sc < 35) else 0,
-                  "confidence": None, "falsifier": s.get("falsifier")}
+                  "confidence": None, "falsifier": s.get("falsifier"),
+                  "qualification": qualification}
     return out
 
 
@@ -555,7 +571,7 @@ def build(limit: int = 40) -> dict:
         for t, rec in table.items():
             m = merged.setdefault(t, {"ticker": t, "sources": [], "reasons": [],
                                       "_scores": [], "lean_votes": [], "confidence": None,
-                                      "falsifier": None})
+                                      "falsifier": None, "source_qualification": {}})
             m["sources"].append(src)
             if rec.get("reason"):
                 m["reasons"].append(rec["reason"])
@@ -569,26 +585,33 @@ def build(limit: int = 40) -> dict:
                 m["confidence"] = rec["confidence"]
             if rec.get("falsifier") and not m["falsifier"]:
                 m["falsifier"] = rec["falsifier"]
+            if isinstance(rec.get("qualification"), dict):
+                m["source_qualification"][src] = dict(rec["qualification"])
 
     out = []
     for t, m in merged.items():
-        indep = len([s for s in m["sources"] if s != "divergence"])   # divergence is a flag, not an engine
+        observed = len(set(m["sources"]))
+        indep = len({s for s in m["sources"] if s not in _NON_INDEPENDENT_SOURCES})
         base = max(m["_scores"]) if m["_scores"] else 0.0
         score = round(min(base + _CORROBORATION * max(indep - 1, 0)
                           + (_DIVERGENCE_BONUS if "divergence" in m["sources"] else 0.0), 1.0), 3)
         votes = m["lean_votes"]
         lean = (1 if sum(votes) > 0 else -1 if sum(votes) < 0 else 0) if votes else None
         out.append({"ticker": t, "score": score, "sources": sorted(set(m["sources"])),
-                    "n_sources": indep, "reasons": m["reasons"][:4], "lean": lean,
+                    "n_sources": indep, "n_observed_sources": observed,
+                    "reasons": m["reasons"][:4], "lean": lean,
                     "confidence": m["confidence"], "falsifier": m["falsifier"],
+                    "source_qualification": m["source_qualification"],
                     "divergent": "divergence" in m["sources"]})
 
     # seed fallback so the queue is never empty (inert/pre-build state)
     if not out:
         for t in _SEED:
             out.append({"ticker": t, "score": 0.3, "sources": ["seed"], "n_sources": 0,
+                        "n_observed_sources": 0,
                         "reasons": ["static seed (dashboard signals not built yet)"],
-                        "lean": None, "confidence": None, "falsifier": None, "divergent": False})
+                        "lean": None, "confidence": None, "falsifier": None,
+                        "source_qualification": {}, "divergent": False})
 
     out.sort(key=lambda x: (x["score"], x["n_sources"]), reverse=True)
     return {"as_of": macro.get("as_of"), "macro_context": macro,
