@@ -118,10 +118,11 @@ class ReconcileStatus(str, Enum):
 
 
 class ProcessPresence(str, Enum):
-    """PID/start/boot/PGID comparison result for one persisted invocation."""
+    """Persisted execution presence at its canonical process owner."""
 
     LIVE = "LIVE"
     ABSENT = "ABSENT"
+    TERMINAL_OWNED = "TERMINAL_OWNED"
     UNKNOWN = "UNKNOWN"
 
 
@@ -2458,7 +2459,12 @@ class ExecutiveSupervisor:
                 "worker_recovery_binding"
             )
             if (
-                presence in {ProcessPresence.LIVE, ProcessPresence.ABSENT}
+                presence
+                in {
+                    ProcessPresence.LIVE,
+                    ProcessPresence.ABSENT,
+                    ProcessPresence.TERMINAL_OWNED,
+                }
                 and isinstance(recovery_raw, Mapping)
             ):
                 if (
@@ -2474,6 +2480,23 @@ class ExecutiveSupervisor:
                         )
                     )
                     continue
+            if (
+                presence is ProcessPresence.TERMINAL_OWNED
+                and not isinstance(recovery_raw, Mapping)
+            ):
+                outcomes.append(
+                    ReconcileReceipt(
+                        attempt_id=attempt.attempt_id,
+                        job_id=attempt.job_id,
+                        status=ReconcileStatus.LIVE_QUARANTINED,
+                        process_was_live=False,
+                        error=(
+                            "terminal execution remains owned by its adapter but "
+                            "has no durable recovery binding"
+                        ),
+                    )
+                )
+                continue
             if (
                 process_was_live
                 and not isinstance(recovery_raw, Mapping)
