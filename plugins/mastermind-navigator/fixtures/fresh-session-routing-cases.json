@@ -91,11 +91,13 @@
       "capability_class": "domain_deploy",
       "expected_owner": "domain owner",
       "expected_tool_family": "domain-deploy-owner",
-      "expected_schema_loads": [
+      "expected_schema_loads": [],
+      "owner_native_action": "Discover the named target current domain owner; load no domain schema until owner-native organizational authorization evidence is YES with a non-empty artifact identity, then load only the selected minimal tool family.",
+      "does_not_claim_live_before_probe": true,
+      "authorization_gate": "OWNER_NATIVE_ORGANIZATIONAL_AUTHORIZATION_REQUIRED",
+      "expected_schema_loads_after_authorization": [
         "domain-deploy-owner"
-      ],
-      "owner_native_action": "Discover and use only the named deployment target current owner.",
-      "does_not_claim_live_before_probe": true
+      ]
     },
     {
       "id": "domain-data-to-domain-owner",
@@ -103,11 +105,13 @@
       "capability_class": "domain_data",
       "expected_owner": "domain owner",
       "expected_tool_family": "domain-data-owner",
-      "expected_schema_loads": [
+      "expected_schema_loads": [],
+      "owner_native_action": "Discover the named target current domain owner; load no domain schema until owner-native organizational authorization evidence is YES with a non-empty artifact identity, then load only the selected minimal tool family.",
+      "does_not_claim_live_before_probe": true,
+      "authorization_gate": "OWNER_NATIVE_ORGANIZATIONAL_AUTHORIZATION_REQUIRED",
+      "expected_schema_loads_after_authorization": [
         "domain-data-owner"
-      ],
-      "owner_native_action": "Discover and use only the named data system current owner.",
-      "does_not_claim_live_before_probe": true
+      ]
     },
     {
       "id": "domain-design-to-domain-owner",
@@ -115,11 +119,13 @@
       "capability_class": "domain_design",
       "expected_owner": "domain owner",
       "expected_tool_family": "domain-design-owner",
-      "expected_schema_loads": [
+      "expected_schema_loads": [],
+      "owner_native_action": "Discover the named target current domain owner; load no domain schema until owner-native organizational authorization evidence is YES with a non-empty artifact identity, then load only the selected minimal tool family.",
+      "does_not_claim_live_before_probe": true,
+      "authorization_gate": "OWNER_NATIVE_ORGANIZATIONAL_AUTHORIZATION_REQUIRED",
+      "expected_schema_loads_after_authorization": [
         "domain-design-owner"
-      ],
-      "owner_native_action": "Discover and use only the named design artifact current owner.",
-      "does_not_claim_live_before_probe": true
+      ]
     },
     {
       "id": "domain-comms-to-domain-owner",
@@ -127,11 +133,13 @@
       "capability_class": "domain_comms",
       "expected_owner": "domain owner",
       "expected_tool_family": "domain-comms-owner",
-      "expected_schema_loads": [
+      "expected_schema_loads": [],
+      "owner_native_action": "Discover the named target current domain owner; load no domain schema until owner-native organizational authorization evidence is YES with a non-empty artifact identity, then load only the selected minimal tool family.",
+      "does_not_claim_live_before_probe": true,
+      "authorization_gate": "OWNER_NATIVE_ORGANIZATIONAL_AUTHORIZATION_REQUIRED",
+      "expected_schema_loads_after_authorization": [
         "domain-comms-owner"
-      ],
-      "owner_native_action": "Discover and use only the named communications target current owner.",
-      "does_not_claim_live_before_probe": true
+      ]
     }
   ]
 }

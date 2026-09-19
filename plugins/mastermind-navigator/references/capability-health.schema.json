@@ -48,8 +48,19 @@
       "uniqueItems": true
     },
     "requested_route": {
-      "type": "string",
-      "minLength": 1
+      "enum": [
+        "lifecycle",
+        "organizational_continuity",
+        "source_pr_ci",
+        "selected_project_action",
+        "local_machine_process",
+        "worker_browser",
+        "exact_chatgpt_actuation",
+        "domain_deploy",
+        "domain_data",
+        "domain_design",
+        "domain_comms"
+      ]
     },
     "sources": {
       "type": "array",
@@ -102,7 +113,10 @@
         "project_ref",
         "session_ref",
         "runtime_generation",
-        "source_sha"
+        "source_sha",
+        "authenticated_subject_ref",
+        "expires_at",
+        "revocation_state"
       ],
       "properties": {
         "host_ref": {
@@ -152,6 +166,24 @@
             "RuntimeBinding",
             "approved-native-session-context",
             "Executive OS Job/Attempt/Worker"
+          ]
+        },
+        "authenticated_subject_ref": {
+          "$ref": "#/$defs/nullableRef"
+        },
+        "expires_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "revocation_state": {
+          "enum": [
+            "ACTIVE",
+            "REVOKED",
+            "UNKNOWN",
+            null
           ]
         }
       }
@@ -255,8 +287,19 @@
           "minLength": 1
         },
         "capability_class": {
-          "type": "string",
-          "minLength": 1
+          "enum": [
+            "lifecycle",
+            "organizational_continuity",
+            "source_pr_ci",
+            "selected_project_action",
+            "local_machine_process",
+            "worker_browser",
+            "exact_chatgpt_actuation",
+            "domain_deploy",
+            "domain_data",
+            "domain_design",
+            "domain_comms"
+          ]
         },
         "canonical_owner": {
           "type": "string",
@@ -368,7 +411,10 @@
                 "const": "YES"
               },
               "authenticated_or_connected": {
-                "const": "YES"
+                "enum": [
+                  "YES",
+                  "NOT_APPLICABLE"
+                ]
               },
               "callable": {
                 "const": "YES"
@@ -1255,6 +1301,282 @@
               "evidence"
             ]
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "installed": {
+                "enum": [
+                  "YES",
+                  "NO"
+                ]
+              }
+            },
+            "required": [
+              "installed"
+            ]
+          },
+          "then": {
+            "properties": {
+              "evidence": {
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "source_type": {
+                      "enum": [
+                        "owner_native",
+                        "observed_call"
+                      ]
+                    },
+                    "supports_dimensions": {
+                      "contains": {
+                        "const": "installed"
+                      },
+                      "minContains": 1
+                    }
+                  },
+                  "required": [
+                    "source_type",
+                    "supports_dimensions"
+                  ]
+                },
+                "minContains": 1
+              }
+            },
+            "required": [
+              "evidence"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "enabled": {
+                "enum": [
+                  "YES",
+                  "NO"
+                ]
+              }
+            },
+            "required": [
+              "enabled"
+            ]
+          },
+          "then": {
+            "properties": {
+              "evidence": {
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "source_type": {
+                      "enum": [
+                        "owner_native",
+                        "observed_call"
+                      ]
+                    },
+                    "supports_dimensions": {
+                      "contains": {
+                        "const": "enabled"
+                      },
+                      "minContains": 1
+                    }
+                  },
+                  "required": [
+                    "source_type",
+                    "supports_dimensions"
+                  ]
+                },
+                "minContains": 1
+              }
+            },
+            "required": [
+              "evidence"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "authenticated_or_connected": {
+                "enum": [
+                  "YES",
+                  "NO"
+                ]
+              }
+            },
+            "required": [
+              "authenticated_or_connected"
+            ]
+          },
+          "then": {
+            "properties": {
+              "evidence": {
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "source_type": {
+                      "enum": [
+                        "owner_native",
+                        "observed_call"
+                      ]
+                    },
+                    "supports_dimensions": {
+                      "contains": {
+                        "const": "authenticated_or_connected"
+                      },
+                      "minContains": 1
+                    }
+                  },
+                  "required": [
+                    "source_type",
+                    "supports_dimensions"
+                  ]
+                },
+                "minContains": 1
+              }
+            },
+            "required": [
+              "evidence"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "callable": {
+                "enum": [
+                  "YES",
+                  "NO"
+                ]
+              }
+            },
+            "required": [
+              "callable"
+            ]
+          },
+          "then": {
+            "properties": {
+              "evidence": {
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "source_type": {
+                      "enum": [
+                        "owner_native",
+                        "observed_call"
+                      ]
+                    },
+                    "supports_dimensions": {
+                      "contains": {
+                        "const": "callable"
+                      },
+                      "minContains": 1
+                    }
+                  },
+                  "required": [
+                    "source_type",
+                    "supports_dimensions"
+                  ]
+                },
+                "minContains": 1
+              }
+            },
+            "required": [
+              "evidence"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "organizationally_authorized": {
+                "enum": [
+                  "YES",
+                  "NO"
+                ]
+              }
+            },
+            "required": [
+              "organizationally_authorized"
+            ]
+          },
+          "then": {
+            "properties": {
+              "evidence": {
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "source_type": {
+                      "enum": [
+                        "owner_native",
+                        "observed_call"
+                      ]
+                    },
+                    "supports_dimensions": {
+                      "contains": {
+                        "const": "organizationally_authorized"
+                      },
+                      "minContains": 1
+                    }
+                  },
+                  "required": [
+                    "source_type",
+                    "supports_dimensions"
+                  ]
+                },
+                "minContains": 1
+              }
+            },
+            "required": [
+              "evidence"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "proven_live": {
+                "enum": [
+                  "YES",
+                  "NO"
+                ]
+              }
+            },
+            "required": [
+              "proven_live"
+            ]
+          },
+          "then": {
+            "properties": {
+              "evidence": {
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "source_type": {
+                      "enum": [
+                        "owner_native",
+                        "observed_call"
+                      ]
+                    },
+                    "supports_dimensions": {
+                      "contains": {
+                        "const": "proven_live"
+                      },
+                      "minContains": 1
+                    }
+                  },
+                  "required": [
+                    "source_type",
+                    "supports_dimensions"
+                  ]
+                },
+                "minContains": 1
+              }
+            },
+            "required": [
+              "evidence"
+            ]
+          }
         }
       ]
     },
@@ -1276,7 +1598,10 @@
           "const": "YES"
         },
         "authenticated_or_connected": {
-          "const": "YES"
+          "enum": [
+            "YES",
+            "NOT_APPLICABLE"
+          ]
         },
         "callable": {
           "const": "YES"
@@ -1646,6 +1971,17 @@
             "runtime_generation": {
               "type": "string",
               "minLength": 1
+            },
+            "expires_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "revocation_state": {
+              "const": "ACTIVE"
+            },
+            "authenticated_subject_ref": {
+              "type": "string",
+              "minLength": 1
             }
           },
           "required": [
@@ -1655,7 +1991,10 @@
             "authority_ref",
             "authority_generation",
             "session_ref",
-            "runtime_generation"
+            "runtime_generation",
+            "expires_at",
+            "revocation_state",
+            "authenticated_subject_ref"
           ]
         },
         {
@@ -1685,6 +2024,13 @@
             "runtime_generation": {
               "type": "string",
               "minLength": 1
+            },
+            "expires_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "revocation_state": {
+              "const": "ACTIVE"
             }
           },
           "required": [
@@ -1694,7 +2040,9 @@
             "authority_ref",
             "authority_generation",
             "session_ref",
-            "runtime_generation"
+            "runtime_generation",
+            "expires_at",
+            "revocation_state"
           ]
         },
         {
@@ -1716,6 +2064,13 @@
             "authority_generation": {
               "type": "string",
               "minLength": 1
+            },
+            "expires_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "revocation_state": {
+              "const": "ACTIVE"
             }
           },
           "required": [
@@ -1723,7 +2078,9 @@
             "project_ref",
             "authority_owner",
             "authority_ref",
-            "authority_generation"
+            "authority_generation",
+            "expires_at",
+            "revocation_state"
           ]
         }
       ]
@@ -1741,12 +2098,17 @@
         "authority_ref": {
           "type": "string",
           "minLength": 1
+        },
+        "authenticated_subject_ref": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "required": [
         "session_ref",
         "runtime_generation",
-        "authority_ref"
+        "authority_ref",
+        "authenticated_subject_ref"
       ]
     },
     "bindingLocalMachineProcess": {

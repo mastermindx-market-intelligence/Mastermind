@@ -32,10 +32,6 @@
             "equals": "YES"
           },
           {
-            "field": "authenticated_or_connected",
-            "equals": "YES"
-          },
-          {
             "field": "callable",
             "equals": "YES"
           },
@@ -50,6 +46,16 @@
           {
             "field": "binding_current",
             "equals": "YES"
+          }
+        ],
+        "any": [
+          {
+            "field": "authenticated_or_connected",
+            "equals": "YES"
+          },
+          {
+            "field": "authenticated_or_connected",
+            "equals": "NOT_APPLICABLE"
           }
         ]
       }

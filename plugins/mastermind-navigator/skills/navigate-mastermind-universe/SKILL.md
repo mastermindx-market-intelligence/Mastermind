@@ -65,7 +65,7 @@ The discovery call is evidence about that exact surface and moment. It is not a 
 2. Select one core role and, only when needed, one domain overlay.
 3. Read the smallest existing boot or owner snapshot that can identify the route.
 4. Build the source-attributed health projection and surface `PROVEN_LIVE`, `BUILT_NOT_PROVEN`, `DEGRADED`, `UNAVAILABLE`, or `UNKNOWN` honestly.
-5. Select one canonical owner and load only its minimal tool family.
+5. Select one canonical owner. For a domain overlay, load its minimal tool family only after the owner-native overlay authorization gate passes; when the overlay is suppressed, withhold the schema. For a core route, load only the selected minimal tool family.
 6. Perform one owner-native action that is useful and within current authority—for example, read the exact protected branch or selected-project identity.
 7. Attach the exact result, binding, state, blocker, and next probe. Do not generalize one successful read into write or production proof.
 

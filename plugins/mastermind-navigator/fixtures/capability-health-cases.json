@@ -76,7 +76,10 @@
               "project_ref": "mastermindx-market-intelligence/Mastermind",
               "session_ref": null,
               "runtime_generation": null,
-              "source_sha": "FIXTURE_PROTECTED_MASTER_SHA"
+              "source_sha": "FIXTURE_PROTECTED_MASTER_SHA",
+              "authenticated_subject_ref": null,
+              "expires_at": null,
+              "revocation_state": "UNKNOWN"
             },
             "blocker": null,
             "next_probe": null
@@ -162,7 +165,10 @@
               "project_ref": "selected-project",
               "session_ref": null,
               "runtime_generation": null,
-              "source_sha": null
+              "source_sha": null,
+              "authenticated_subject_ref": null,
+              "expires_at": null,
+              "revocation_state": "UNKNOWN"
             },
             "blocker": "Workbench Action is not callable in the current session.",
             "next_probe": "Use Workbench Read for read-only needs or re-probe the action owner after installation changes."
@@ -185,12 +191,12 @@
         "sources": [
           {
             "owner": "Worker Browser",
-            "source_type": "repository_source",
-            "artifact_identity": "worker-browser-source",
+            "source_type": "owner_native",
+            "artifact_identity": "worker-browser-owner-health",
             "revision": "FIXTURE_PROTECTED_MASTER_SHA",
             "observed_at": "2026-09-19T12:02:00Z",
-            "coverage": "repository source only",
-            "claim": "Source exists, but current connection and canary evidence are absent.",
+            "coverage": "owner-native Worker Browser health for the exact fixture scope",
+            "claim": "Built source exists and the owner reports no current connection or accepted canary for this target.",
             "supports_dimensions": [
               "implementation_state",
               "usable_scope",
@@ -219,12 +225,12 @@
             "evidence": [
               {
                 "owner": "Worker Browser",
-                "source_type": "repository_source",
-                "artifact_identity": "worker-browser-source",
+                "source_type": "owner_native",
+                "artifact_identity": "worker-browser-owner-health",
                 "revision": "FIXTURE_PROTECTED_MASTER_SHA",
                 "observed_at": "2026-09-19T12:02:00Z",
-                "coverage": "repository source only",
-                "claim": "Built source is present without a current target-bound canary.",
+                "coverage": "owner-native Worker Browser health for the exact fixture scope",
+                "claim": "The owner reports built source without a current target-bound accepted canary.",
                 "supports_dimensions": [
                   "implementation_state",
                   "usable_scope",
@@ -238,7 +244,10 @@
               "project_ref": null,
               "session_ref": null,
               "runtime_generation": null,
-              "source_sha": "FIXTURE_PROTECTED_MASTER_SHA"
+              "source_sha": "FIXTURE_PROTECTED_MASTER_SHA",
+              "authenticated_subject_ref": null,
+              "expires_at": null,
+              "revocation_state": "UNKNOWN"
             },
             "blocker": "No current connection, binding, or owner-native canary is available.",
             "next_probe": "Read Worker Browser health for the exact worker and generation."
@@ -320,7 +329,10 @@
               "project_ref": null,
               "session_ref": null,
               "runtime_generation": null,
-              "source_sha": "FIXTURE_PROTECTED_MASTER_SHA"
+              "source_sha": "FIXTURE_PROTECTED_MASTER_SHA",
+              "authenticated_subject_ref": null,
+              "expires_at": null,
+              "revocation_state": "UNKNOWN"
             },
             "blocker": "Web workspace installation, organization authorization, callable fresh-session invocation, and owner-native action are unproven.",
             "next_probe": "After source protection, use the existing Business workspace admin owner for the fixed-commit canary."
@@ -406,7 +418,10 @@
               "project_ref": "business-workspace-canary",
               "session_ref": null,
               "runtime_generation": null,
-              "source_sha": "FIXTURE_PROTECTED_MASTER_SHA"
+              "source_sha": "FIXTURE_PROTECTED_MASTER_SHA",
+              "authenticated_subject_ref": null,
+              "expires_at": null,
+              "revocation_state": "UNKNOWN"
             },
             "blocker": "Navigator is installed in the Web workspace canary scope but is not enabled or callable for the canary member.",
             "next_probe": "The existing workspace admin owner enables the exact fixed-commit package for the approved canary member and reads back policy."
@@ -495,10 +510,105 @@
               "source_sha": null,
               "execution_mode": "ATTENDED_WEB_OPERATOR",
               "authority_ref": null,
-              "authority_generation": null
+              "authority_generation": null,
+              "authenticated_subject_ref": null,
+              "expires_at": null,
+              "revocation_state": "UNKNOWN"
             },
             "blocker": "The attended Web action lacks an exact current session generation.",
             "next_probe": "Read RuntimeBinding for the exact attended conversation and current generation before any Workbench action."
+          }
+        ],
+        "selected_surface_id": null,
+        "suppressed_surface_ids": [],
+        "domain_overlays": []
+      }
+    },
+    {
+      "id": "workbench-native-missing-session-generation",
+      "expected_state": "UNAVAILABLE",
+      "packet": {
+        "schema": "mastermind.navigator_capability_health.v1",
+        "generated_at": "2026-09-19T12:01:20Z",
+        "protected_master_sha": "FIXTURE_PROTECTED_MASTER_SHA",
+        "role_profile": "native_builder_operator",
+        "requested_route": "selected_project_action",
+        "sources": [
+          {
+            "owner": "Workbench / approved native-session context",
+            "source_type": "owner_native",
+            "artifact_identity": "workbench-native-session-generation-probe",
+            "revision": null,
+            "observed_at": "2026-09-19T12:01:20Z",
+            "coverage": "one selected project and one approved native-operator context",
+            "claim": "The selected project is known, but no exact current approved native-session generation is bound.",
+            "supports_dimensions": [
+              "installed",
+              "enabled",
+              "authenticated_or_connected",
+              "callable",
+              "organizationally_authorized",
+              "proven_live",
+              "binding_current",
+              "implementation_state",
+              "usable_scope"
+            ]
+          }
+        ],
+        "surfaces": [
+          {
+            "surface_id": "workbench-action-native-unbound",
+            "capability_class": "selected_project_action",
+            "canonical_owner": "Workbench",
+            "minimal_tool_family": "workbench",
+            "required_for_role": true,
+            "implementation_state": "BUILT",
+            "usable_scope": "NONE",
+            "binding_current": "NO",
+            "installed": "YES",
+            "enabled": "YES",
+            "authenticated_or_connected": "YES",
+            "callable": "YES",
+            "organizationally_authorized": "YES",
+            "proven_live": "NO",
+            "state": "UNAVAILABLE",
+            "evidence": [
+              {
+                "owner": "Workbench / approved native-session context",
+                "source_type": "owner_native",
+                "artifact_identity": "workbench-native-session-generation-probe",
+                "revision": null,
+                "observed_at": "2026-09-19T12:01:20Z",
+                "coverage": "one selected project and one approved native-operator context",
+                "claim": "The selected project is known, but no exact current approved native-session generation is bound.",
+                "supports_dimensions": [
+                  "installed",
+                  "enabled",
+                  "authenticated_or_connected",
+                  "callable",
+                  "organizationally_authorized",
+                  "proven_live",
+                  "binding_current",
+                  "implementation_state",
+                  "usable_scope"
+                ]
+              }
+            ],
+            "binding": {
+              "host_ref": null,
+              "project_ref": "selected-project",
+              "session_ref": null,
+              "runtime_generation": null,
+              "source_sha": null,
+              "execution_mode": "NATIVE_OPERATOR",
+              "authority_ref": null,
+              "authority_generation": null,
+              "authenticated_subject_ref": null,
+              "expires_at": null,
+              "revocation_state": "UNKNOWN"
+            },
+            "blocker": "The native action lacks an exact current approved native-session generation.",
+            "next_probe": "Read the approved native-session context owner for the exact native session and generation before any Workbench action."
           }
         ],
         "selected_surface_id": null,
@@ -584,7 +694,10 @@
               "source_sha": null,
               "execution_mode": "BOUNDED_WORKER",
               "authority_ref": null,
-              "authority_generation": null
+              "authority_generation": null,
+              "authenticated_subject_ref": null,
+              "expires_at": null,
+              "revocation_state": "UNKNOWN"
             },
             "blocker": "The provider worker has no admitted Executive worker generation for this action.",
             "next_probe": "Read the current Executive OS Job/Attempt/Worker generation and authorization; do not fall back to attended mode."
@@ -670,7 +783,10 @@
               "project_ref": null,
               "session_ref": null,
               "runtime_generation": null,
-              "source_sha": null
+              "source_sha": null,
+              "authenticated_subject_ref": null,
+              "expires_at": null,
+              "revocation_state": "UNKNOWN"
             },
             "blocker": "Only the read subset is currently proven.",
             "next_probe": "Probe the exact requested action class through the existing host owner."
@@ -756,7 +872,10 @@
               "project_ref": null,
               "session_ref": null,
               "runtime_generation": null,
-              "source_sha": null
+              "source_sha": null,
+              "authenticated_subject_ref": null,
+              "expires_at": null,
+              "revocation_state": "UNKNOWN"
             },
             "blocker": "No owner-native exact target, RuntimeBinding generation, authorization, callability, or canary evidence.",
             "next_probe": "Read the current RuntimeBinding owner for the exact logical target and generation before loading or actuating Web-Sol."
@@ -845,7 +964,7 @@
       "expected_suppressed_surface_ids": [
         "figma"
       ],
-      "expected_selected_tool_family": "domain-design-owner",
+      "expected_selected_tool_family": null,
       "load_schemas_for": []
     },
     {

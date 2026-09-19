@@ -311,7 +311,12 @@ def test_fresh_session_cases_route_to_one_owner_native_surface() -> None:
         route = by_class[case["capability_class"]]
         assert case["expected_owner"] == route["canonical_owner"]
         assert case["expected_tool_family"] == route["minimal_tool_family"]
-        assert case["expected_schema_loads"] == [route["minimal_tool_family"]]
+        if case["capability_class"] in REQUIRED_OVERLAYS:
+            assert case["authorization_gate"] == "OWNER_NATIVE_ORGANIZATIONAL_AUTHORIZATION_REQUIRED"
+            assert case["expected_schema_loads"] == []
+            assert case["expected_schema_loads_after_authorization"] == [route["minimal_tool_family"]]
+        else:
+            assert case["expected_schema_loads"] == [route["minimal_tool_family"]]
         assert case["owner_native_action"]
         assert case["does_not_claim_live_before_probe"] is True
 
@@ -477,7 +482,8 @@ def test_repository_local_and_web_workspace_installation_planes_do_not_collapse(
     assert source["enabled"] == "UNKNOWN"
     assert source["organizationally_authorized"] == "UNKNOWN"
     assert source["state"] == "BUILT_NOT_PROVEN"
-    assert source["evidence"][0]["source_type"] == "repository_source"
+    assert source["evidence"][0]["source_type"] == "owner_native"
+    assert source["evidence"][0]["artifact_identity"] == "worker-browser-owner-health"
 
     local = cases["navigator-local-compatibility-install"]["packet"]["surfaces"][0]
     assert local["installed"] == "YES"
@@ -590,6 +596,9 @@ def test_proven_live_requires_route_specific_bindings() -> None:
             "session_ref": None,
             "runtime_generation": None,
             "source_sha": None,
+            "authenticated_subject_ref": None,
+            "expires_at": None,
+            "revocation_state": "UNKNOWN",
         }
         return packet
 
@@ -603,6 +612,9 @@ def test_proven_live_requires_route_specific_bindings() -> None:
         "authority_owner": "RuntimeBinding",
         "authority_ref": "runtime-binding:conversation-1",
         "authority_generation": "policy-generation-1",
+        "authenticated_subject_ref": "subject:approved-user",
+        "expires_at": "2026-09-19T23:59:59Z",
+        "revocation_state": "ACTIVE",
     })
     validator.validate(attended)
 
@@ -620,6 +632,8 @@ def test_proven_live_requires_route_specific_bindings() -> None:
     native["surfaces"][0]["binding"].update({
         "authority_owner": "approved-native-session-context",
         "authority_ref": "native-session-context:native-session-1",
+        "expires_at": "2026-09-19T23:59:59Z",
+        "revocation_state": "ACTIVE",
     })
     validator.validate(native)
 
@@ -629,6 +643,8 @@ def test_proven_live_requires_route_specific_bindings() -> None:
         "authority_owner": "Executive OS Job/Attempt/Worker",
         "authority_ref": "JOB:1/ATTEMPT:1/WORKER:1",
         "authority_generation": "worker-generation-1",
+        "expires_at": "2026-09-19T23:59:59Z",
+        "revocation_state": "ACTIVE",
     })
     validator.validate(worker)
 
@@ -639,6 +655,7 @@ def test_proven_live_requires_route_specific_bindings() -> None:
         "session_ref": "conversation-1",
         "runtime_generation": "runtime-generation-1",
         "authority_ref": "runtime-binding:conversation-1",
+        "authenticated_subject_ref": "subject:approved-user",
     })
     validator.validate(chatgpt)
 
@@ -681,6 +698,9 @@ def test_proven_live_requires_lifecycle_continuity_and_domain_target_bindings() 
             "session_ref": None,
             "runtime_generation": None,
             "source_sha": None,
+            "authenticated_subject_ref": None,
+            "expires_at": None,
+            "revocation_state": "UNKNOWN",
         }
         return packet
 
@@ -758,6 +778,7 @@ def test_workbench_cases_fence_attended_and_worker_generations() -> None:
     by_id = {case["id"]: case for case in health["cases"]}
     expected = {
         "workbench-attended-missing-session-generation": "RuntimeBinding",
+        "workbench-native-missing-session-generation": "approved native-session context",
         "workbench-worker-missing-attempt-generation": "Executive OS Job/Attempt/Worker",
     }
     for case_id, owner_phrase in expected.items():
@@ -817,7 +838,9 @@ def test_domain_overlay_visibility_requires_declared_overlay_and_authorization_e
         ]
         assert visible == composition["expected_visible_surface_ids"]
         assert suppressed == composition["expected_suppressed_surface_ids"]
-        expected_loads = [composition["expected_selected_tool_family"]] if overlay_allowed else []
+        expected_family = composition["expected_selected_tool_family"]
+        assert expected_family == ("domain-design-owner" if overlay_allowed else None)
+        expected_loads = [expected_family] if overlay_allowed else []
         assert composition["load_schemas_for"] == expected_loads
 
 
@@ -880,3 +903,135 @@ def test_skill_requires_authorized_overlay_before_visibility_or_schema_load() ->
     assert "domain_overlays includes the route" in skill
     assert "organizationally_authorized = YES" in skill
     assert "suppress the overlay and load no schema" in skill
+
+
+
+def test_domain_fresh_session_cases_withhold_schema_until_owner_authorization() -> None:
+    fixture = _load("fixtures/fresh-session-routing-cases.json")
+    for case in fixture["cases"]:
+        if case["capability_class"] not in REQUIRED_OVERLAYS:
+            continue
+        assert case["authorization_gate"] == "OWNER_NATIVE_ORGANIZATIONAL_AUTHORIZATION_REQUIRED"
+        assert case["expected_schema_loads"] == []
+        assert case["expected_schema_loads_after_authorization"] == [case["expected_tool_family"]]
+
+
+def test_health_schema_closes_route_vocabulary_before_live_binding_rules() -> None:
+    schema = _load("references/capability-health.schema.json")
+    validator = jsonschema.Draft202012Validator(schema)
+    fixture = _load("fixtures/capability-health-cases.json")
+    live = _materialize_health_packet(fixture["cases"][0]["packet"])
+    validator.validate(live)
+
+    bad_requested = copy.deepcopy(live)
+    bad_requested["requested_route"] = "workbench_action"
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(bad_requested)
+
+    bad_surface = copy.deepcopy(live)
+    bad_surface["surfaces"][0]["capability_class"] = "workbench_action"
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(bad_surface)
+
+
+def test_not_applicable_connection_gate_can_still_be_proven_live() -> None:
+    schema = _load("references/capability-health.schema.json")
+    rules = _load("references/capability-state-rules.json")
+    validator = jsonschema.Draft202012Validator(schema)
+    fixture = _load("fixtures/capability-health-cases.json")
+    packet = _materialize_health_packet(fixture["cases"][0]["packet"])
+    surface = packet["surfaces"][0]
+    surface["authenticated_or_connected"] = "NOT_APPLICABLE"
+
+    assert _derive_state(surface, rules) == "PROVEN_LIVE"
+    validator.validate(packet)
+
+
+def test_decisive_health_yes_and_no_require_owner_native_or_observed_call_evidence() -> None:
+    schema = _load("references/capability-health.schema.json")
+    validator = jsonschema.Draft202012Validator(schema)
+    fixture = _load("fixtures/capability-health-cases.json")
+    live = _materialize_health_packet(fixture["cases"][0]["packet"])
+    surface = live["surfaces"][0]
+    owner_evidence = copy.deepcopy(surface["evidence"][0])
+    owner_evidence["supports_dimensions"] = [
+        "implementation_state", "usable_scope", "binding_current",
+        "organizationally_authorized", "proven_live",
+    ]
+    projection = copy.deepcopy(surface["evidence"][0])
+    projection["source_type"] = "projection"
+    projection["artifact_identity"] = "connector-listing-only"
+    projection["supports_dimensions"] = [
+        "installed", "enabled", "authenticated_or_connected", "callable",
+    ]
+    live["sources"] = [owner_evidence, projection]
+    surface["evidence"] = [owner_evidence, projection]
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(live)
+
+    unavailable = _materialize_health_packet(
+        next(case["packet"] for case in fixture["cases"] if case["id"] == "explicit-callability-refusal")
+    )
+    unavailable_surface = unavailable["surfaces"][0]
+    decisive = copy.deepcopy(unavailable_surface["evidence"][0])
+    decisive["source_type"] = "projection"
+    decisive["supports_dimensions"] = ["callable"]
+    supporting = copy.deepcopy(unavailable_surface["evidence"][0])
+    supporting["supports_dimensions"] = [
+        item for item in supporting["supports_dimensions"] if item != "callable"
+    ]
+    unavailable["sources"] = [supporting, decisive]
+    unavailable_surface["evidence"] = [supporting, decisive]
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(unavailable)
+
+
+def test_live_workbench_and_chatgpt_bindings_require_revocation_and_subject_facts() -> None:
+    schema = _load("references/capability-health.schema.json")
+    validator = jsonschema.Draft202012Validator(schema)
+    fixture = _load("fixtures/capability-health-cases.json")
+    live = _materialize_health_packet(fixture["cases"][0]["packet"])
+
+    attended = copy.deepcopy(live)
+    attended_surface = attended["surfaces"][0]
+    attended_surface.update({
+        "capability_class": "selected_project_action",
+        "canonical_owner": "Workbench",
+        "minimal_tool_family": "workbench",
+    })
+    attended_surface["binding"].update({
+        "project_ref": "selected-project",
+        "execution_mode": "ATTENDED_WEB_OPERATOR",
+        "session_ref": "conversation-1",
+        "runtime_generation": "runtime-generation-1",
+        "authority_owner": "RuntimeBinding",
+        "authority_ref": "runtime-binding:conversation-1",
+        "authority_generation": "policy-generation-1",
+    })
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(attended)
+    attended_surface["binding"].update({
+        "expires_at": "2026-09-19T23:59:59Z",
+        "revocation_state": "ACTIVE",
+    })
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(attended)
+    attended_surface["binding"]["authenticated_subject_ref"] = "subject:approved-user"
+    validator.validate(attended)
+
+    chatgpt = copy.deepcopy(live)
+    chatgpt_surface = chatgpt["surfaces"][0]
+    chatgpt_surface.update({
+        "capability_class": "exact_chatgpt_actuation",
+        "canonical_owner": "Web-Sol + RuntimeBinding",
+        "minimal_tool_family": "web-sol-runtime-binding",
+    })
+    chatgpt_surface["binding"].update({
+        "session_ref": "conversation-1",
+        "runtime_generation": "runtime-generation-1",
+        "authority_ref": "runtime-binding:conversation-1",
+    })
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(chatgpt)
+    chatgpt_surface["binding"]["authenticated_subject_ref"] = "subject:approved-user"
+    validator.validate(chatgpt)
