@@ -10,7 +10,7 @@
   "external_worker_started": false,
   "browser_policy_changed": false,
   "source_checks": {
-    "passed": 15,
+    "passed": 16,
     "failed": 0,
     "latest_exit_code": 0,
     "scope": "actual pure inline JavaScript model + source existence + CSP hash consistency; not DOM/browser behavior",
@@ -26,11 +26,11 @@
         "exit_code": 0
       }
     ],
-    "stdout_sha256": "511fb971caf59261241ec2a3919d9d10c7dcb9ec044ee07d50b2db465184f057"
+    "stdout_sha256": "ecf57d762b443151696ef4727347520d0d5715719bac1e0cd93caddf627ffa61"
   },
   "test_collection": {
-    "total": 54,
-    "source_only": 15,
+    "total": 55,
+    "source_only": 16,
     "browser_dependent": 39
   },
   "red_evidence": {
@@ -113,19 +113,19 @@
     }
   },
   "artifact_sha256": {
-    "docs/superpowers/specs/2026-09-16-mastermind-os-integrated-rollout-design.md": "39c401ca8b902267438a9edde3f421f2bed75928e97bdd72c335fad1f8ba2127",
-    "docs/superpowers/plans/2026-09-16-mastermind-os-reference-workspace.md": "2f964dff438427fb20550b8fcc9b203123543a9553921f4a4a40e4a88fddb3f7",
-    "research/mastermind_os/README.md": "0f08522fbe46f21f9dcfc41531cef65b8889622262a013615172fd21ea5f03c5",
-    "research/mastermind_os/test_reference_workspace.py": "9d51258dd87ac31f6c34e6c722e90a60965eb8a9d577b9277b01bd159cef4161",
+    "docs/superpowers/specs/2026-09-16-mastermind-os-integrated-rollout-design.md": "60a24320dea7ef587191705b8f94e5d6a1663e3586e879007f4cd578f711a099",
+    "docs/superpowers/plans/2026-09-16-mastermind-os-reference-workspace.md": "920d2eb3cd3cf6b12a80ba1aa5d1cf39f2493e709e79ecc2abdc2ac24388c9b7",
+    "research/mastermind_os/README.md": "845ad1e938c50cd1ef49356505c816f9cab50b9cdaf362b53e797e9bad69fb4f",
+    "research/mastermind_os/test_reference_workspace.py": "7f33eb60e1184ed4bd5cce044ed40dd52a17b0fc9c8e4354dc6648e9d7659695",
     "research/mastermind_os/reference_workspace.html": "6e8d2a5643521e217fb3ad40b0bb87b1fc604bd2bf03cd395539617641d49419"
   },
   "next_action": "Consume the repaired #704 freeze plus exact incumbent reader/DF1 contracts, preserve source custody, and admit only the qualified real mission-workspace slice. Browser/installed gates remain open.",
   "native_source_checks": {
-    "observed_at": "2026-09-19T05:39:49Z",
-    "passed": 15,
+    "observed_at": "2026-09-19T05:45:24Z",
+    "passed": 16,
     "failed": 0,
     "exit_code": 0,
-    "stdout_sha256": "511fb971caf59261241ec2a3919d9d10c7dcb9ec044ee07d50b2db465184f057",
+    "stdout_sha256": "ecf57d762b443151696ef4727347520d0d5715719bac1e0cd93caddf627ffa61",
     "python": "3.14.7",
     "node": "v26.5.0",
     "inline_script_syntax_exit_codes": [
@@ -155,5 +155,14 @@
     "firm_blocker": "acceptance record carried two unqualified contradictory environment epochs",
     "hardening_note": "three application focus call sites bypassed the shared connected-target selector",
     "repair_state": "REPAIRED_IN_NEXT_CANDIDATE_AWAITING_EXACT_HEAD_REREVIEW"
+  },
+  "hosted_codeql_previous_alert": {
+    "head": "b2c21525f9b3a9a790bfa577458fe161d983b13d",
+    "conclusion": "failure",
+    "title": "Bad HTML filtering regexp",
+    "path": "research/mastermind_os/test_reference_workspace.py",
+    "root_cause": "case-sensitive regex used as an HTML script extractor in the test harness",
+    "local_repair": "structural HTMLParser extraction plus mixed-case SCRIPT regression",
+    "hosted_rerun_state": "AWAITING_NEXT_PUSH"
   }
 }

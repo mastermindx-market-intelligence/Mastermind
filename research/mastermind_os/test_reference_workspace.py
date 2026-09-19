@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+from html.parser import HTMLParser
 import json
 import os
 import re
@@ -17,6 +18,55 @@ from playwright.sync_api import expect, sync_playwright
 
 HTML = Path(__file__).with_name('reference_workspace.html')
 ROUTES = ('today', 'program', 'workspace', 'connections', 'evidence', 'ask', 'advanced')
+
+
+class _InlineBlockParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=False)
+        self.blocks: list[tuple[str, dict[str, str | None], str]] = []
+        self._tag: str | None = None
+        self._attrs: dict[str, str | None] = {}
+        self._parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        if tag not in {'script', 'style'}:
+            return
+        assert self._tag is None, 'nested inline script/style blocks are unsupported'
+        self._tag = tag
+        self._attrs = dict(attrs)
+        self._parts = []
+
+    def handle_data(self, data: str) -> None:
+        if self._tag is not None:
+            self._parts.append(data)
+
+    def handle_entityref(self, name: str) -> None:
+        if self._tag is not None:
+            self._parts.append('&' + name + ';')
+
+    def handle_charref(self, name: str) -> None:
+        if self._tag is not None:
+            self._parts.append('&#' + name + ';')
+
+    def handle_endtag(self, tag: str) -> None:
+        if self._tag != tag:
+            return
+        self.blocks.append((tag, self._attrs, ''.join(self._parts)))
+        self._tag = None
+        self._attrs = {}
+        self._parts = []
+
+
+def _inline_blocks(text: str) -> list[tuple[str, dict[str, str | None], str]]:
+    parser = _InlineBlockParser()
+    parser.feed(text)
+    parser.close()
+    assert parser._tag is None, 'unterminated inline script/style block'
+    return parser.blocks
+
+
+def _inline_script_blocks(text: str) -> list[str]:
+    return [content for tag, _attrs, content in _inline_blocks(text) if tag == 'script']
 
 
 def test_reference_exists():
@@ -198,7 +248,7 @@ def test_csp_is_content_bound_and_no_dynamic_egress():
     text = HTML.read_text()
     csp = re.search(r'<meta http-equiv="Content-Security-Policy" content="([^"]+)"', text).group(1)
     assert "connect-src 'none'" in csp and "form-action 'none'" in csp
-    blocks = re.findall(r'<(style|script)(?: [^>]*)?>(.*?)</\1>', text, re.S)
+    blocks = [(tag, content) for tag, _attrs, content in _inline_blocks(text)]
     assert blocks, 'The actual inline application sources must be present'
     for _tag, value in blocks:
         digest = base64.b64encode(hashlib.sha256(value.encode()).digest()).decode()
@@ -225,8 +275,12 @@ def test_responsive_routes_have_no_horizontal_overflow(page, route, viewport):
 # They cannot establish CSS/layout, native dialog, CSP enforcement or accessibility.
 def run_presentation_expression(expression: str):
     text = HTML.read_text()
-    found = re.search(r'<script data-purpose="presentation-model">(.*?)</script>', text, re.S)
-    assert found is not None, 'The shared executable relationship/focus model is missing'
+    found = [
+        content
+        for tag, attrs, content in _inline_blocks(text)
+        if tag == 'script' and attrs.get('data-purpose') == 'presentation-model'
+    ]
+    assert len(found) == 1, 'The shared executable relationship/focus model is missing or ambiguous'
     node = shutil.which('node')
     assert node is not None, 'Node is required for the source-only model checks'
     driver = r"""
@@ -240,7 +294,7 @@ process.stdout.write(JSON.stringify(result));
 """
     result = subprocess.run(
         [node, '-e', driver],
-        input=json.dumps({'source': found.group(1), 'expression': expression}),
+        input=json.dumps({'source': found[0], 'expression': expression}),
         text=True, capture_output=True, timeout=5, check=False,
     )
     assert result.returncode == 0, result.stderr
@@ -365,7 +419,7 @@ def test_narrow_connections_default_to_readable_equivalent_list(page):
 
 def test_application_focus_calls_are_centralized_through_connected_guard():
     text = HTML.read_text()
-    scripts = re.findall(r'<script(?: [^>]*)?>(.*?)</script>', text, re.S)
+    scripts = _inline_script_blocks(text)
     assert len(scripts) == 2
     app = scripts[1]
     assert 'function focusConnected(' in app
@@ -385,3 +439,8 @@ def test_acceptance_environment_is_epoch_qualified():
     assert historical['scope'] == 'pre_recovery_original_reference_checkpoint'
     assert historical['python'] == '3.13.5'
     assert historical['node'] == 'v22.16.0'
+
+
+def test_inline_script_parser_accepts_html_case_insensitive_tags():
+    sample = '<SCRIPT>upper()</SCRIPT><script data-purpose="x">lower()</script>'
+    assert _inline_script_blocks(sample) == ['upper()', 'lower()']
