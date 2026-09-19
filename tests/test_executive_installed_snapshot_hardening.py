@@ -425,7 +425,7 @@ def test_macro_brief_scope_refuses_tracked_leaf_replaced_by_symlink(tmp_path: Pa
         )
 
 
-def test_macro_brief_scope_refuses_committed_symlink_dependency(tmp_path: Path):
+def test_macro_brief_scope_refuses_consumed_symlink_dependency(tmp_path: Path):
     from integrations.executive_mcp.installed import (
         _clean_git_snapshot,
         _default_packet_runner,
@@ -434,12 +434,14 @@ def test_macro_brief_scope_refuses_committed_symlink_dependency(tmp_path: Path):
     from integrations.executive_mcp.schemas import GatewayError
 
     repo, _tracked = _clean_repo(tmp_path)
-    target = repo / "target.txt"
+    target = repo / "target.md"
     target.write_text("target\n", encoding="utf-8")
-    link = repo / "linked.txt"
-    link.symlink_to("target.txt")
-    _git(repo, "add", "target.txt", "linked.txt")
-    _git(repo, "commit", "-q", "-m", "add symlink")
+    records = repo / "agentos" / "workstreams"
+    records.mkdir(parents=True)
+    link = records / "linked.md"
+    link.symlink_to("../../target.md")
+    _git(repo, "add", "target.md", "agentos/workstreams/linked.md")
+    _git(repo, "commit", "-q", "-m", "add consumed symlink")
     env = _installed_child_env(code_root=repo, macro_root=repo)
 
     with pytest.raises(GatewayError, match="symlinks are unsupported"):
@@ -447,6 +449,31 @@ def test_macro_brief_scope_refuses_committed_symlink_dependency(tmp_path: Path):
             repo, runner=_default_packet_runner, env=env,
             label="Macro source", content_scope="macro_brief",
         )
+
+
+def test_macro_brief_scope_allows_tracked_symlink_outside_read_closure(tmp_path: Path):
+    from integrations.executive_mcp.installed import (
+        _clean_git_snapshot,
+        _default_packet_runner,
+        _installed_child_env,
+    )
+
+    repo, _tracked = _clean_repo(tmp_path)
+    target = repo / "target.txt"
+    target.write_text("target\n", encoding="utf-8")
+    unrelated = repo / "collectors" / "marketdesk_extractor"
+    unrelated.mkdir(parents=True)
+    link = unrelated / "feed.sh"
+    link.symlink_to("../../target.txt")
+    _git(repo, "add", "target.txt", "collectors/marketdesk_extractor/feed.sh")
+    _git(repo, "commit", "-q", "-m", "add unrelated symlink")
+    head = _git(repo, "rev-parse", "HEAD").stdout.strip()
+    env = _installed_child_env(code_root=repo, macro_root=repo)
+
+    assert _clean_git_snapshot(
+        repo, runner=_default_packet_runner, env=env,
+        label="Macro source", content_scope="macro_brief",
+    ) == head
 
 
 def test_clean_snapshot_refuses_grafts_before_git(tmp_path: Path):
@@ -717,19 +744,24 @@ def test_installed_collector_refuses_if_git_disappears_after_macro_presnapshot(
     python.write_text("fixture", encoding="utf-8")
     source_sha = _git(repo, "rev-parse", "HEAD").stdout.strip()
     macro_sha = _git(macro, "rev-parse", "HEAD").stdout.strip()
-    macro_git_calls = 0
+    macro_head_observations = 0
     helper_called = False
 
     def runner(argv, **kwargs):
-        nonlocal macro_git_calls, helper_called
+        nonlocal macro_head_observations, helper_called
         if str(argv[0]) == "git":
             result = _default_packet_runner(argv, **kwargs)
-            if Path(kwargs["cwd"]) == macro:
-                macro_git_calls += 1
-                # A real production snapshot currently issues exactly five
-                # bounded Git observations. Remove metadata only after the
-                # complete pre-snapshot has already been observed.
-                if macro_git_calls == 5:
+            if (
+                Path(kwargs["cwd"]) == macro
+                and tuple(str(item) for item in argv[1:])
+                == ("rev-parse", "--verify", "HEAD^{commit}")
+            ):
+                macro_head_observations += 1
+                # The snapshot begins and ends by observing the exact HEAD.
+                # Remove .git only after the second observation has returned,
+                # which is the completed pre-snapshot boundary independent of
+                # how many bounded object/tree checks happen in between.
+                if macro_head_observations == 2:
                     shutil.rmtree(macro / ".git")
             return result
         helper_called = True
@@ -755,5 +787,111 @@ def test_installed_collector_refuses_if_git_disappears_after_macro_presnapshot(
         collector(
             repo_root=repo, macro_root_flag=str(macro), now=None, timeout=5.0,
         )
-    assert macro_git_calls == 5
+    assert macro_head_observations == 2
     assert helper_called is False
+
+
+def test_clean_snapshot_avoids_full_reachable_object_history_transport(tmp_path: Path):
+    """Production history can contain millions of objects; closure proof must not
+    serialize every historical tree/blob through the bounded runner."""
+    from integrations.executive_mcp.installed import (
+        _clean_git_snapshot,
+        _default_packet_runner,
+        _installed_child_env,
+    )
+
+    repo, tracked = _clean_repo(tmp_path)
+    tracked.write_text("second\n", encoding="utf-8")
+    _git(repo, "add", "tracked.txt")
+    _git(repo, "commit", "-q", "-m", "second")
+    head = _git(repo, "rev-parse", "HEAD").stdout.strip()
+    calls: list[tuple[str, ...]] = []
+
+    def bounded_runner(argv, **kwargs):
+        normalized = tuple(str(item) for item in argv)
+        calls.append(normalized)
+        if len(normalized) >= 3 and normalized[:2] == ("git", "rev-list") and "--objects" in normalized:
+            return {
+                "code": 0,
+                "stdout": "",
+                "stderr": "",
+                "timed_out": False,
+                "limit_exceeded": True,
+                "invalid_utf8": False,
+            }
+        return _default_packet_runner(argv, **kwargs)
+
+    env = _installed_child_env(code_root=repo, macro_root=repo)
+    assert _clean_git_snapshot(
+        repo, runner=bounded_runner, env=env, label="Mastermind source",
+    ) == head
+    assert any(call[:2] == ("git", "rev-list") and "--parents" in call for call in calls)
+    assert not any(call[:2] == ("git", "rev-list") and "--objects" in call for call in calls)
+
+
+def test_installed_collector_runs_macro_closure_once_with_cumulative_budget(
+    tmp_path: Path,
+):
+    import json
+    from integrations.executive_mcp.installed import (
+        InstalledBootPacketCollector,
+        _default_packet_runner,
+    )
+
+    mastermind_parent = tmp_path / "mastermind-fixture"
+    macro_parent = tmp_path / "macro-fixture"
+    mastermind_parent.mkdir()
+    macro_parent.mkdir()
+    repo, _tracked = _clean_repo(mastermind_parent)
+    macro, _macro_tracked = _clean_repo(macro_parent)
+    code = tmp_path / "immutable-release"
+    (code / "scripts").mkdir(parents=True)
+    python = tmp_path / "python"
+    python.write_text("fixture", encoding="utf-8")
+    source_sha = _git(repo, "rev-parse", "HEAD").stdout.strip()
+    macro_sha = _git(macro, "rev-parse", "HEAD").stdout.strip()
+    macro_history_walks = 0
+    child_budget: dict[str, float] = {}
+
+    def runner(argv, **kwargs):
+        nonlocal macro_history_walks
+        normalized = tuple(str(item) for item in argv)
+        if normalized[0] == "git":
+            if (
+                Path(kwargs["cwd"]) == macro
+                and normalized[1:3] == ("rev-list", "--parents")
+            ):
+                macro_history_walks += 1
+            return _default_packet_runner(argv, **kwargs)
+
+        child_macro = Path(normalized[normalized.index("--macro-root") + 1])
+        child_budget["runner"] = float(kwargs["timeout"])
+        child_budget["inner"] = float(normalized[normalized.index("--timeout") + 1])
+        return {
+            "code": 0,
+            "stdout": json.dumps({
+                "schema": "mastermind.ceo_boot_packet.v1",
+                "mastermind": {"root": str(repo), "sha": source_sha, "branch": "HEAD"},
+                "macro": {
+                    "root": str(child_macro), "sha": macro_sha,
+                    "resolved_via": "flag", "candidates_tried": [],
+                },
+            }),
+            "stderr": "", "timed_out": False,
+            "limit_exceeded": False, "invalid_utf8": False,
+        }
+
+    collector = InstalledBootPacketCollector(
+        source_root=repo, macro_root=macro, code_root=code,
+        python_executable=python, runner=runner, expected_source_sha=source_sha,
+    )
+    packet = collector(
+        repo_root=repo, macro_root_flag=str(macro), now=None, timeout=28.0,
+    )
+
+    assert macro_history_walks == 1
+    assert 0 < child_budget["runner"] < 28.0
+    assert 0 < child_budget["inner"] < child_budget["runner"]
+    assert packet["mastermind"]["sha"] == source_sha
+    assert packet["macro"]["sha"] == macro_sha
+    assert packet["macro"]["root"] == str(macro)
