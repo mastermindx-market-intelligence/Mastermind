@@ -683,16 +683,16 @@
         "generated_at": "2026-09-19T12:04:00Z",
         "protected_master_sha": "FIXTURE_PROTECTED_MASTER_SHA",
         "role_profile": "web_ceo_core",
-        "requested_route": "domain_design",
+        "requested_route": "exact_chatgpt_actuation",
         "sources": [
           {
-            "owner": "domain owner",
+            "owner": "Web-Sol + RuntimeBinding",
             "source_type": "projection",
             "artifact_identity": "connector-name-only",
             "revision": null,
             "observed_at": "2026-09-19T12:04:00Z",
-            "coverage": "name listing only",
-            "claim": "A named design connector appears in a listing; effective capability is unobserved.",
+            "coverage": "connector name listing only",
+            "claim": "A named browser/session connector appears in a listing; exact RuntimeBinding, authorization, and callability remain unobserved.",
             "supports_dimensions": [
               "installed",
               "enabled",
@@ -708,10 +708,10 @@
         ],
         "surfaces": [
           {
-            "surface_id": "domain-design-unknown",
-            "capability_class": "domain_design",
-            "canonical_owner": "domain owner",
-            "minimal_tool_family": "domain-design-owner",
+            "surface_id": "web-sol-runtime-binding-unknown",
+            "capability_class": "exact_chatgpt_actuation",
+            "canonical_owner": "Web-Sol + RuntimeBinding",
+            "minimal_tool_family": "web-sol-runtime-binding",
             "required_for_role": true,
             "implementation_state": "UNKNOWN",
             "usable_scope": "UNKNOWN",
@@ -725,13 +725,13 @@
             "state": "UNKNOWN",
             "evidence": [
               {
-                "owner": "domain owner",
+                "owner": "Web-Sol + RuntimeBinding",
                 "source_type": "projection",
                 "artifact_identity": "connector-name-only",
                 "revision": null,
                 "observed_at": "2026-09-19T12:04:00Z",
-                "coverage": "name listing only",
-                "claim": "The plugin or connector name is not effective-capability evidence.",
+                "coverage": "connector name listing only",
+                "claim": "The connector name is not exact target, RuntimeBinding generation, authorization, callability, or liveness evidence.",
                 "supports_dimensions": [
                   "installed",
                   "enabled",
@@ -752,8 +752,8 @@
               "runtime_generation": null,
               "source_sha": null
             },
-            "blocker": "No owner-native installation, connection, callability, authorization, or canary evidence.",
-            "next_probe": "Discover the named artifact's actual design owner and run its smallest read-only probe."
+            "blocker": "No owner-native exact target, RuntimeBinding generation, authorization, callability, or canary evidence.",
+            "next_probe": "Read the current RuntimeBinding owner for the exact logical target and generation before loading or actuating Web-Sol."
           }
         ],
         "selected_surface_id": null,

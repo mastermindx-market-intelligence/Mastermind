@@ -704,6 +704,420 @@
           }
         ]
       }
+    },
+    "authorizedOverlaySurfaceDomainDeploy": {
+      "type": "object",
+      "properties": {
+        "capability_class": {
+          "const": "domain_deploy"
+        },
+        "organizationally_authorized": {
+          "const": "YES"
+        },
+        "evidence": {
+          "type": "array",
+          "contains": {
+            "type": "object",
+            "properties": {
+              "source_type": {
+                "const": "owner_native"
+              },
+              "supports_dimensions": {
+                "type": "array",
+                "contains": {
+                  "const": "organizationally_authorized"
+                },
+                "minContains": 1
+              }
+            },
+            "required": [
+              "source_type",
+              "supports_dimensions"
+            ]
+          },
+          "minContains": 1
+        }
+      },
+      "required": [
+        "capability_class",
+        "organizationally_authorized",
+        "evidence"
+      ]
+    },
+    "authorizedOverlaySurfaceDomainData": {
+      "type": "object",
+      "properties": {
+        "capability_class": {
+          "const": "domain_data"
+        },
+        "organizationally_authorized": {
+          "const": "YES"
+        },
+        "evidence": {
+          "type": "array",
+          "contains": {
+            "type": "object",
+            "properties": {
+              "source_type": {
+                "const": "owner_native"
+              },
+              "supports_dimensions": {
+                "type": "array",
+                "contains": {
+                  "const": "organizationally_authorized"
+                },
+                "minContains": 1
+              }
+            },
+            "required": [
+              "source_type",
+              "supports_dimensions"
+            ]
+          },
+          "minContains": 1
+        }
+      },
+      "required": [
+        "capability_class",
+        "organizationally_authorized",
+        "evidence"
+      ]
+    },
+    "authorizedOverlaySurfaceDomainDesign": {
+      "type": "object",
+      "properties": {
+        "capability_class": {
+          "const": "domain_design"
+        },
+        "organizationally_authorized": {
+          "const": "YES"
+        },
+        "evidence": {
+          "type": "array",
+          "contains": {
+            "type": "object",
+            "properties": {
+              "source_type": {
+                "const": "owner_native"
+              },
+              "supports_dimensions": {
+                "type": "array",
+                "contains": {
+                  "const": "organizationally_authorized"
+                },
+                "minContains": 1
+              }
+            },
+            "required": [
+              "source_type",
+              "supports_dimensions"
+            ]
+          },
+          "minContains": 1
+        }
+      },
+      "required": [
+        "capability_class",
+        "organizationally_authorized",
+        "evidence"
+      ]
+    },
+    "authorizedOverlaySurfaceDomainComms": {
+      "type": "object",
+      "properties": {
+        "capability_class": {
+          "const": "domain_comms"
+        },
+        "organizationally_authorized": {
+          "const": "YES"
+        },
+        "evidence": {
+          "type": "array",
+          "contains": {
+            "type": "object",
+            "properties": {
+              "source_type": {
+                "const": "owner_native"
+              },
+              "supports_dimensions": {
+                "type": "array",
+                "contains": {
+                  "const": "organizationally_authorized"
+                },
+                "minContains": 1
+              }
+            },
+            "required": [
+              "source_type",
+              "supports_dimensions"
+            ]
+          },
+          "minContains": 1
+        }
+      },
+      "required": [
+        "capability_class",
+        "organizationally_authorized",
+        "evidence"
+      ]
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "domain_overlays": {
+            "contains": {
+              "const": "domain_deploy"
+            },
+            "minContains": 1
+          }
+        },
+        "required": [
+          "domain_overlays"
+        ]
+      },
+      "then": {
+        "properties": {
+          "surfaces": {
+            "contains": {
+              "$ref": "#/$defs/authorizedOverlaySurfaceDomainDeploy"
+            },
+            "minContains": 1
+          }
+        },
+        "required": [
+          "surfaces"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "surfaces": {
+            "contains": {
+              "type": "object",
+              "properties": {
+                "capability_class": {
+                  "const": "domain_deploy"
+                }
+              },
+              "required": [
+                "capability_class"
+              ]
+            },
+            "minContains": 1
+          }
+        },
+        "required": [
+          "surfaces"
+        ]
+      },
+      "then": {
+        "properties": {
+          "domain_overlays": {
+            "contains": {
+              "const": "domain_deploy"
+            },
+            "minContains": 1
+          }
+        },
+        "required": [
+          "domain_overlays"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "domain_overlays": {
+            "contains": {
+              "const": "domain_data"
+            },
+            "minContains": 1
+          }
+        },
+        "required": [
+          "domain_overlays"
+        ]
+      },
+      "then": {
+        "properties": {
+          "surfaces": {
+            "contains": {
+              "$ref": "#/$defs/authorizedOverlaySurfaceDomainData"
+            },
+            "minContains": 1
+          }
+        },
+        "required": [
+          "surfaces"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "surfaces": {
+            "contains": {
+              "type": "object",
+              "properties": {
+                "capability_class": {
+                  "const": "domain_data"
+                }
+              },
+              "required": [
+                "capability_class"
+              ]
+            },
+            "minContains": 1
+          }
+        },
+        "required": [
+          "surfaces"
+        ]
+      },
+      "then": {
+        "properties": {
+          "domain_overlays": {
+            "contains": {
+              "const": "domain_data"
+            },
+            "minContains": 1
+          }
+        },
+        "required": [
+          "domain_overlays"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "domain_overlays": {
+            "contains": {
+              "const": "domain_design"
+            },
+            "minContains": 1
+          }
+        },
+        "required": [
+          "domain_overlays"
+        ]
+      },
+      "then": {
+        "properties": {
+          "surfaces": {
+            "contains": {
+              "$ref": "#/$defs/authorizedOverlaySurfaceDomainDesign"
+            },
+            "minContains": 1
+          }
+        },
+        "required": [
+          "surfaces"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "surfaces": {
+            "contains": {
+              "type": "object",
+              "properties": {
+                "capability_class": {
+                  "const": "domain_design"
+                }
+              },
+              "required": [
+                "capability_class"
+              ]
+            },
+            "minContains": 1
+          }
+        },
+        "required": [
+          "surfaces"
+        ]
+      },
+      "then": {
+        "properties": {
+          "domain_overlays": {
+            "contains": {
+              "const": "domain_design"
+            },
+            "minContains": 1
+          }
+        },
+        "required": [
+          "domain_overlays"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "domain_overlays": {
+            "contains": {
+              "const": "domain_comms"
+            },
+            "minContains": 1
+          }
+        },
+        "required": [
+          "domain_overlays"
+        ]
+      },
+      "then": {
+        "properties": {
+          "surfaces": {
+            "contains": {
+              "$ref": "#/$defs/authorizedOverlaySurfaceDomainComms"
+            },
+            "minContains": 1
+          }
+        },
+        "required": [
+          "surfaces"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "surfaces": {
+            "contains": {
+              "type": "object",
+              "properties": {
+                "capability_class": {
+                  "const": "domain_comms"
+                }
+              },
+              "required": [
+                "capability_class"
+              ]
+            },
+            "minContains": 1
+          }
+        },
+        "required": [
+          "surfaces"
+        ]
+      },
+      "then": {
+        "properties": {
+          "domain_overlays": {
+            "contains": {
+              "const": "domain_comms"
+            },
+            "minContains": 1
+          }
+        },
+        "required": [
+          "domain_overlays"
+        ]
+      }
+    }
+  ]
 }

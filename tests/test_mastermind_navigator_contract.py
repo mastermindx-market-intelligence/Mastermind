@@ -633,6 +633,60 @@ def test_domain_overlay_visibility_requires_declared_overlay_and_authorization_e
         assert composition["load_schemas_for"] == expected_loads
 
 
+
+def test_health_schema_binds_domain_overlay_visibility_to_owner_native_authorization() -> None:
+    schema = _load("references/capability-health.schema.json")
+    validator = jsonschema.Draft202012Validator(schema)
+    fixture = _load("fixtures/capability-health-cases.json")
+
+    for case in fixture["cases"]:
+        packet = _materialize_health_packet(case["packet"])
+        overlays = set(packet["domain_overlays"])
+        for surface in packet["surfaces"]:
+            capability_class = surface["capability_class"]
+            if capability_class in REQUIRED_OVERLAYS:
+                assert capability_class in overlays
+
+    source_only = _materialize_health_packet(
+        next(case for case in fixture["cases"] if case["id"] == "source-built-without-live-canary")["packet"]
+    )
+    surface = source_only["surfaces"][0]
+    source_only["requested_route"] = "domain_design"
+    source_only["domain_overlays"] = ["domain_design"]
+    surface["surface_id"] = "authorized-domain-design"
+    surface["capability_class"] = "domain_design"
+    surface["canonical_owner"] = "domain owner"
+    surface["minimal_tool_family"] = "domain-design-owner"
+    surface["organizationally_authorized"] = "YES"
+    for evidence in [*source_only["sources"], *surface["evidence"]]:
+        evidence["owner"] = "domain owner"
+        evidence["source_type"] = "owner_native"
+        evidence["artifact_identity"] = "domain-design-authorization-receipt"
+        if "organizationally_authorized" not in evidence["supports_dimensions"]:
+            evidence["supports_dimensions"].append("organizationally_authorized")
+    validator.validate(source_only)
+
+    declared_without_surface = _materialize_health_packet(fixture["cases"][0]["packet"])
+    declared_without_surface["domain_overlays"] = ["domain_design"]
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(declared_without_surface)
+
+    visible_without_declaration = copy.deepcopy(source_only)
+    visible_without_declaration["domain_overlays"] = []
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(visible_without_declaration)
+
+    missing_authorization = copy.deepcopy(source_only)
+    missing_authorization["surfaces"][0]["organizationally_authorized"] = "UNKNOWN"
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(missing_authorization)
+
+    projection_only = copy.deepcopy(source_only)
+    for evidence in [*projection_only["sources"], *projection_only["surfaces"][0]["evidence"]]:
+        evidence["source_type"] = "projection"
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(projection_only)
+
 def test_skill_requires_authorized_overlay_before_visibility_or_schema_load() -> None:
     skill = (PACKAGE / "skills/navigate-mastermind-universe/SKILL.md").read_text(encoding="utf-8")
     assert "domain_overlays includes the route" in skill
