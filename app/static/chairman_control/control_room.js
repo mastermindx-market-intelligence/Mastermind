@@ -1013,7 +1013,7 @@
       else evidence.appendChild(chip(jobs.length + " job" + (jobs.length === 1 ? "" : "s"), "is-slate"));
     }
     var prs = ((card.github || {}).prs) || [];
-    evidence.appendChild(chip(prs.length ? "PR " + prs.length : "NO OPEN PR", prs.length ? "is-slate" : "is-dim"));
+    evidence.appendChild(chip(prs.length ? "PR " + prs.length : "NO PR OBSERVED", prs.length ? "is-slate" : "is-dim"));
     if (disagreements) evidence.appendChild(chip("SOURCE DRIFT", "is-danger"));
     var reasons = focusReasons(card);
     if (reasons.indexOf("authored blocked state") !== -1) evidence.appendChild(chip("BLOCKED", "is-danger"));
@@ -1113,7 +1113,7 @@
     });
     detailRail(rails, "GitHub", function (node) {
       var prs = ((card.github || {}).prs) || [];
-      if (!prs.length) { detailLine(node, "silent — no open PR cites this reference", true); return; }
+      if (!prs.length) { detailLine(node, "No open PR in the loaded snapshot cites this reference.", true); return; }
       prs.forEach(function (pr) {
         var row = el("div", { className: "ccr-detail-pr" });
         var left = el("div");
@@ -1236,7 +1236,7 @@
       li.appendChild(el("span", { text: safeText(pr.repo) + " #" + safeText(pr.number) + " · " + safeText(pr.title, "Untitled PR"), className: "ccr-row-title" }));
       li.appendChild(el("a", { text: "Open PR", className: "ccr-open-button", attrs: { href: pr.url || "#", target: "_blank", rel: "noopener noreferrer" } }));
       return li;
-    }, "Every loaded open PR is claimed by a work card.");
+    }, "Every loaded open PR is linked to a work card.");
 
     var unbound = renderLooseRows("#unbound-surfaces", doc.unbound_surfaces, function (binding) {
       var li = el("li", { className: "ccr-row" });
