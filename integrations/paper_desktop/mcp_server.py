@@ -1,8 +1,10 @@
-"""Optional MCP projection using the official, pinned Python MCP SDK.
+"""Optional native-client MCP projection using the official, pinned Python SDK.
 
-Transport is stdio only. Use the already-authorized desktop transport for web
-access or enroll this process through the official Secure MCP Tunnel. This
-module does not create an HTTP/authentication gateway or arm Executive grants.
+Transport is stdio only. Approved local clients may launch this process directly.
+ChatGPT Web uses the existing Studio Direct private tunnel and its gateway-owned
+paper_* tools, which invoke the same guarded bridge; do not enroll a second Paper
+web gateway from this module. This module does not create HTTP/auth infrastructure
+or arm Executive grants.
 """
 
 import argparse

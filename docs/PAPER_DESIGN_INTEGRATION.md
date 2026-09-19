@@ -227,9 +227,10 @@ Installed SHA-256 after hardening:
 wrapper/server and requirement pins are unchanged. This proves the local
 read/write/screenshot/JSX substrate, not fleet production or visual product quality.
 
-A first-class ChatGPT full-MCP write app remains behind OpenAI's current
-Business/Enterprise/Edu developer-mode gate and Secure MCP Tunnel. Existing
-authorized RDC remains the web-to-native carrier for this session.
+ChatGPT Web now reuses the existing Studio Direct Secure MCP Tunnel and
+gateway-owned Paper tools. Do not enroll a second direct Paper ChatGPT app merely
+because the underlying stdio projection exists. Remote Desktop Commander remains
+an authorized host-diagnostic/local-ops carrier, not the normal design product path.
 
 ### Observed local-client enrollment
 
