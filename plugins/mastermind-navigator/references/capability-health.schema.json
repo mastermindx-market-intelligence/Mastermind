@@ -134,6 +134,18 @@
         },
         "authority_generation": {
           "$ref": "#/$defs/nullableRef"
+        },
+        "operation_ref": {
+          "$ref": "#/$defs/nullableRef"
+        },
+        "work_ref": {
+          "$ref": "#/$defs/nullableRef"
+        },
+        "record_revision": {
+          "$ref": "#/$defs/nullableRef"
+        },
+        "target_ref": {
+          "$ref": "#/$defs/nullableRef"
         }
       }
     },
@@ -523,6 +535,60 @@
                 "const": "PROVEN_LIVE"
               },
               "capability_class": {
+                "const": "lifecycle"
+              }
+            },
+            "required": [
+              "state",
+              "capability_class"
+            ]
+          },
+          "then": {
+            "properties": {
+              "binding": {
+                "$ref": "#/$defs/bindingLifecycle"
+              }
+            },
+            "required": [
+              "binding"
+            ]
+          }
+        },
+        {
+          "x-navigator-generated": "route-binding",
+          "if": {
+            "properties": {
+              "state": {
+                "const": "PROVEN_LIVE"
+              },
+              "capability_class": {
+                "const": "organizational_continuity"
+              }
+            },
+            "required": [
+              "state",
+              "capability_class"
+            ]
+          },
+          "then": {
+            "properties": {
+              "binding": {
+                "$ref": "#/$defs/bindingOrganizationalContinuity"
+              }
+            },
+            "required": [
+              "binding"
+            ]
+          }
+        },
+        {
+          "x-navigator-generated": "route-binding",
+          "if": {
+            "properties": {
+              "state": {
+                "const": "PROVEN_LIVE"
+              },
+              "capability_class": {
                 "const": "source_pr_ci"
               }
             },
@@ -643,6 +709,38 @@
             "properties": {
               "binding": {
                 "$ref": "#/$defs/bindingExactChatgptActuation"
+              }
+            },
+            "required": [
+              "binding"
+            ]
+          }
+        },
+        {
+          "x-navigator-generated": "route-binding",
+          "if": {
+            "properties": {
+              "state": {
+                "const": "PROVEN_LIVE"
+              },
+              "capability_class": {
+                "enum": [
+                  "domain_deploy",
+                  "domain_data",
+                  "domain_design",
+                  "domain_comms"
+                ]
+              }
+            },
+            "required": [
+              "state",
+              "capability_class"
+            ]
+          },
+          "then": {
+            "properties": {
+              "binding": {
+                "$ref": "#/$defs/bindingDomainTarget"
               }
             },
             "required": [
@@ -1623,6 +1721,59 @@
       "required": [
         "project_ref",
         "source_sha"
+      ]
+    },
+    "bindingLifecycle": {
+      "properties": {
+        "operation_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "authority_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "authority_generation": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "operation_ref",
+        "authority_ref",
+        "authority_generation"
+      ]
+    },
+    "bindingOrganizationalContinuity": {
+      "properties": {
+        "work_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "record_revision": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "work_ref",
+        "record_revision"
+      ]
+    },
+    "bindingDomainTarget": {
+      "properties": {
+        "target_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "authority_ref": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "target_ref",
+        "authority_ref"
       ]
     }
   },

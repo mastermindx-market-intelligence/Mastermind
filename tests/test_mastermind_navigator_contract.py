@@ -643,6 +643,70 @@ def test_proven_live_requires_route_specific_bindings() -> None:
     validator.validate(browser)
 
 
+def test_proven_live_requires_lifecycle_continuity_and_domain_target_bindings() -> None:
+    schema = _load("references/capability-health.schema.json")
+    validator = jsonschema.Draft202012Validator(schema)
+    fixture = _load("fixtures/capability-health-cases.json")
+    live = _materialize_health_packet(fixture["cases"][0]["packet"])
+
+    def packet_for(capability_class: str, owner: str, family: str) -> dict[str, object]:
+        packet = copy.deepcopy(live)
+        surface = packet["surfaces"][0]
+        surface["capability_class"] = capability_class
+        surface["canonical_owner"] = owner
+        surface["minimal_tool_family"] = family
+        surface["binding"] = {
+            "host_ref": None,
+            "project_ref": "irrelevant-project",
+            "session_ref": None,
+            "runtime_generation": None,
+            "source_sha": "b" * 40,
+        }
+        return packet
+
+    lifecycle = packet_for("lifecycle", "Executive OS", "executive-os")
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(lifecycle)
+    lifecycle["surfaces"][0]["binding"].update({
+        "operation_ref": "JOB:1/ATTEMPT:1",
+        "authority_ref": "executive-policy:1",
+        "authority_generation": "attempt-generation-1",
+    })
+    validator.validate(lifecycle)
+
+    continuity = packet_for("organizational_continuity", "Agent OS", "agent-os")
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(continuity)
+    continuity["surfaces"][0]["binding"].update({
+        "work_ref": "WS:TEST",
+        "record_revision": "agentos-revision-1",
+    })
+    validator.validate(continuity)
+
+    for capability_class, family in (
+        ("domain_deploy", "domain-deploy-owner"),
+        ("domain_data", "domain-data-owner"),
+        ("domain_design", "domain-design-owner"),
+        ("domain_comms", "domain-comms-owner"),
+    ):
+        packet = packet_for(capability_class, "domain owner", family)
+        packet["domain_overlays"] = [capability_class]
+        packet["requested_route"] = capability_class
+        surface = packet["surfaces"][0]
+        for evidence in [*packet["sources"], *surface["evidence"]]:
+            evidence["owner"] = "domain owner"
+            evidence["source_type"] = "owner_native"
+            if "organizationally_authorized" not in evidence["supports_dimensions"]:
+                evidence["supports_dimensions"].append("organizationally_authorized")
+        with pytest.raises(jsonschema.ValidationError):
+            validator.validate(packet)
+        surface["binding"].update({
+            "target_ref": f"{capability_class}:target-1",
+            "authority_ref": f"{capability_class}:authorization-1",
+        })
+        validator.validate(packet)
+
+
 def test_known_health_dimensions_require_supporting_surface_evidence() -> None:
     schema = _load("references/capability-health.schema.json")
     validator = jsonschema.Draft202012Validator(schema)
