@@ -37,7 +37,6 @@ _ACTIONS = (
     "executive.services.start",
     "executive.services.stop",
     "executive.services.restart",
-    "executive.host.prepare_secondary_power_policy",
     "executive.worker_auth.verify_only",
     "executive.worker_auth.verify_ready",
     "executive.worker_auth.recover_transaction",
