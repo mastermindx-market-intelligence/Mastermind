@@ -1,0 +1,137 @@
+{
+  "schema": "mastermind.navigator_fresh_session_cases.v1",
+  "cases": [
+    {
+      "id": "lifecycle-to-executive-os",
+      "request": "What is the current Job/Attempt state?",
+      "capability_class": "lifecycle",
+      "expected_owner": "Executive OS",
+      "expected_tool_family": "executive-os",
+      "expected_schema_loads": [
+        "executive-os"
+      ],
+      "owner_native_action": "Read the exact current Job/Attempt/Event.",
+      "does_not_claim_live_before_probe": true
+    },
+    {
+      "id": "continuity-to-agent-os",
+      "request": "What decision and handoff should this CEO continue?",
+      "capability_class": "organizational_continuity",
+      "expected_owner": "Agent OS",
+      "expected_tool_family": "agent-os",
+      "expected_schema_loads": [
+        "agent-os"
+      ],
+      "owner_native_action": "Read the current workstream, decision, and handoff records.",
+      "does_not_claim_live_before_probe": true
+    },
+    {
+      "id": "source-pr-ci-to-github",
+      "request": "Inspect protected source, PR, and CI truth.",
+      "capability_class": "source_pr_ci",
+      "expected_owner": "GitHub",
+      "expected_tool_family": "github",
+      "expected_schema_loads": [
+        "github"
+      ],
+      "owner_native_action": "Read the protected branch or exact PR/CI record.",
+      "does_not_claim_live_before_probe": true
+    },
+    {
+      "id": "selected-project-action-to-workbench",
+      "request": "Act on the selected project only.",
+      "capability_class": "selected_project_action",
+      "expected_owner": "Workbench",
+      "expected_tool_family": "workbench",
+      "expected_schema_loads": [
+        "workbench"
+      ],
+      "owner_native_action": "Resolve the selected project, require the owner-admitted execution mode and its existing authority owner (RuntimeBinding for attended Web, approved native-session context for native operator, Executive Job/Attempt/Worker for bounded worker), then call the admitted Workbench capability.",
+      "does_not_claim_live_before_probe": true
+    },
+    {
+      "id": "local-process-to-studio-direct",
+      "request": "Inspect or operate the exact local host process.",
+      "capability_class": "local_machine_process",
+      "expected_owner": "Studio Direct / existing fleet owner",
+      "expected_tool_family": "studio-direct",
+      "expected_schema_loads": [
+        "studio-direct"
+      ],
+      "owner_native_action": "Read the bound host/process and invoke the existing local owner.",
+      "does_not_claim_live_before_probe": true
+    },
+    {
+      "id": "worker-browser-to-worker-browser",
+      "request": "Use the governed worker browser.",
+      "capability_class": "worker_browser",
+      "expected_owner": "Worker Browser",
+      "expected_tool_family": "worker-browser",
+      "expected_schema_loads": [
+        "worker-browser"
+      ],
+      "owner_native_action": "Read Worker Browser health and invoke one admitted target-bound browser operation.",
+      "does_not_claim_live_before_probe": true
+    },
+    {
+      "id": "exact-chatgpt-actuation-to-web-sol-runtime-binding",
+      "request": "Actuate this exact ChatGPT conversation.",
+      "capability_class": "exact_chatgpt_actuation",
+      "expected_owner": "Web-Sol + RuntimeBinding",
+      "expected_tool_family": "web-sol-runtime-binding",
+      "expected_schema_loads": [
+        "web-sol-runtime-binding"
+      ],
+      "owner_native_action": "Resolve the current exact RuntimeBinding before one admitted Web-Sol action.",
+      "does_not_claim_live_before_probe": true
+    },
+    {
+      "id": "domain-deploy-to-domain-owner",
+      "request": "Use the actual owner for the named deployment target.",
+      "capability_class": "domain_deploy",
+      "expected_owner": "domain owner",
+      "expected_tool_family": "domain-deploy-owner",
+      "expected_schema_loads": [
+        "domain-deploy-owner"
+      ],
+      "owner_native_action": "Discover and use only the named deployment target current owner.",
+      "does_not_claim_live_before_probe": true
+    },
+    {
+      "id": "domain-data-to-domain-owner",
+      "request": "Use the actual owner for the named data system.",
+      "capability_class": "domain_data",
+      "expected_owner": "domain owner",
+      "expected_tool_family": "domain-data-owner",
+      "expected_schema_loads": [
+        "domain-data-owner"
+      ],
+      "owner_native_action": "Discover and use only the named data system current owner.",
+      "does_not_claim_live_before_probe": true
+    },
+    {
+      "id": "domain-design-to-domain-owner",
+      "request": "Use the actual owner for the named design artifact.",
+      "capability_class": "domain_design",
+      "expected_owner": "domain owner",
+      "expected_tool_family": "domain-design-owner",
+      "expected_schema_loads": [
+        "domain-design-owner"
+      ],
+      "owner_native_action": "Discover and use only the named design artifact current owner.",
+      "does_not_claim_live_before_probe": true
+    },
+    {
+      "id": "domain-comms-to-domain-owner",
+      "request": "Use the actual owner for the named communications target.",
+      "capability_class": "domain_comms",
+      "expected_owner": "domain owner",
+      "expected_tool_family": "domain-comms-owner",
+      "expected_schema_loads": [
+        "domain-comms-owner"
+      ],
+      "owner_native_action": "Discover and use only the named communications target current owner.",
+      "does_not_claim_live_before_probe": true
+    }
+  ]
+}

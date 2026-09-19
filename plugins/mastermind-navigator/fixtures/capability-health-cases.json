@@ -1,0 +1,885 @@
+{
+  "schema": "mastermind.navigator_capability_health_cases.v1",
+  "cases": [
+    {
+      "id": "all-gates-current",
+      "expected_state": "PROVEN_LIVE",
+      "packet": {
+        "schema": "mastermind.navigator_capability_health.v1",
+        "generated_at": "2026-09-19T12:00:00Z",
+        "protected_master_sha": "FIXTURE_PROTECTED_MASTER_SHA",
+        "role_profile": "web_ceo_core",
+        "requested_route": "source_pr_ci",
+        "sources": [
+          {
+            "owner": "GitHub",
+            "source_type": "observed_call",
+            "artifact_identity": "protected-master-read",
+            "revision": "FIXTURE_PROTECTED_MASTER_SHA",
+            "observed_at": "2026-09-19T12:00:00Z",
+            "coverage": "protected branch and exact repository",
+            "claim": "The current protected branch was read successfully.",
+            "supports_dimensions": [
+              "installed",
+              "enabled",
+              "authenticated_or_connected",
+              "callable",
+              "organizationally_authorized",
+              "proven_live",
+              "binding_current",
+              "implementation_state",
+              "usable_scope"
+            ]
+          }
+        ],
+        "surfaces": [
+          {
+            "surface_id": "github-source",
+            "capability_class": "source_pr_ci",
+            "canonical_owner": "GitHub",
+            "minimal_tool_family": "github",
+            "required_for_role": true,
+            "implementation_state": "BUILT",
+            "usable_scope": "FULL",
+            "binding_current": "YES",
+            "installed": "YES",
+            "enabled": "YES",
+            "authenticated_or_connected": "YES",
+            "callable": "YES",
+            "organizationally_authorized": "YES",
+            "proven_live": "YES",
+            "state": "PROVEN_LIVE",
+            "evidence": [
+              {
+                "owner": "GitHub",
+                "source_type": "observed_call",
+                "artifact_identity": "protected-master-read",
+                "revision": "FIXTURE_PROTECTED_MASTER_SHA",
+                "observed_at": "2026-09-19T12:00:00Z",
+                "coverage": "protected branch and exact repository",
+                "claim": "One exact owner-native read succeeded on the current target.",
+                "supports_dimensions": [
+                  "installed",
+                  "enabled",
+                  "authenticated_or_connected",
+                  "callable",
+                  "organizationally_authorized",
+                  "proven_live",
+                  "binding_current",
+                  "implementation_state",
+                  "usable_scope"
+                ]
+              }
+            ],
+            "binding": {
+              "host_ref": null,
+              "project_ref": "mastermindx-market-intelligence/Mastermind",
+              "session_ref": null,
+              "runtime_generation": null,
+              "source_sha": "FIXTURE_PROTECTED_MASTER_SHA"
+            },
+            "blocker": null,
+            "next_probe": null
+          }
+        ],
+        "selected_surface_id": "github-source",
+        "suppressed_surface_ids": [],
+        "domain_overlays": []
+      }
+    },
+    {
+      "id": "explicit-callability-refusal",
+      "expected_state": "UNAVAILABLE",
+      "packet": {
+        "schema": "mastermind.navigator_capability_health.v1",
+        "generated_at": "2026-09-19T12:01:00Z",
+        "protected_master_sha": "FIXTURE_PROTECTED_MASTER_SHA",
+        "role_profile": "native_builder_operator",
+        "requested_route": "selected_project_action",
+        "sources": [
+          {
+            "owner": "Workbench",
+            "source_type": "observed_call",
+            "artifact_identity": "workbench-action-probe",
+            "revision": null,
+            "observed_at": "2026-09-19T12:01:00Z",
+            "coverage": "selected-project action capability",
+            "claim": "The action capability is not callable in this session.",
+            "supports_dimensions": [
+              "installed",
+              "enabled",
+              "authenticated_or_connected",
+              "callable",
+              "organizationally_authorized",
+              "proven_live",
+              "binding_current",
+              "implementation_state",
+              "usable_scope"
+            ]
+          }
+        ],
+        "surfaces": [
+          {
+            "surface_id": "workbench-action",
+            "capability_class": "selected_project_action",
+            "canonical_owner": "Workbench",
+            "minimal_tool_family": "workbench",
+            "required_for_role": true,
+            "implementation_state": "BUILT",
+            "usable_scope": "NONE",
+            "binding_current": "YES",
+            "installed": "YES",
+            "enabled": "YES",
+            "authenticated_or_connected": "YES",
+            "callable": "NO",
+            "organizationally_authorized": "YES",
+            "proven_live": "NO",
+            "state": "UNAVAILABLE",
+            "evidence": [
+              {
+                "owner": "Workbench",
+                "source_type": "observed_call",
+                "artifact_identity": "workbench-action-probe",
+                "revision": null,
+                "observed_at": "2026-09-19T12:01:00Z",
+                "coverage": "selected-project action capability",
+                "claim": "The owner-native call was refused as unavailable.",
+                "supports_dimensions": [
+                  "installed",
+                  "enabled",
+                  "authenticated_or_connected",
+                  "callable",
+                  "organizationally_authorized",
+                  "proven_live",
+                  "binding_current",
+                  "implementation_state",
+                  "usable_scope"
+                ]
+              }
+            ],
+            "binding": {
+              "host_ref": null,
+              "project_ref": "selected-project",
+              "session_ref": null,
+              "runtime_generation": null,
+              "source_sha": null
+            },
+            "blocker": "Workbench Action is not callable in the current session.",
+            "next_probe": "Use Workbench Read for read-only needs or re-probe the action owner after installation changes."
+          }
+        ],
+        "selected_surface_id": null,
+        "suppressed_surface_ids": [],
+        "domain_overlays": []
+      }
+    },
+    {
+      "id": "source-built-without-live-canary",
+      "expected_state": "BUILT_NOT_PROVEN",
+      "packet": {
+        "schema": "mastermind.navigator_capability_health.v1",
+        "generated_at": "2026-09-19T12:02:00Z",
+        "protected_master_sha": "FIXTURE_PROTECTED_MASTER_SHA",
+        "role_profile": "browser_provider_operator",
+        "requested_route": "worker_browser",
+        "sources": [
+          {
+            "owner": "Worker Browser",
+            "source_type": "repository_source",
+            "artifact_identity": "worker-browser-source",
+            "revision": "FIXTURE_PROTECTED_MASTER_SHA",
+            "observed_at": "2026-09-19T12:02:00Z",
+            "coverage": "repository source only",
+            "claim": "Source exists, but current connection and canary evidence are absent.",
+            "supports_dimensions": [
+              "implementation_state",
+              "usable_scope",
+              "proven_live",
+              "binding_current"
+            ]
+          }
+        ],
+        "surfaces": [
+          {
+            "surface_id": "worker-browser",
+            "capability_class": "worker_browser",
+            "canonical_owner": "Worker Browser",
+            "minimal_tool_family": "worker-browser",
+            "required_for_role": true,
+            "implementation_state": "BUILT",
+            "usable_scope": "UNKNOWN",
+            "binding_current": "UNKNOWN",
+            "installed": "UNKNOWN",
+            "enabled": "UNKNOWN",
+            "authenticated_or_connected": "UNKNOWN",
+            "callable": "UNKNOWN",
+            "organizationally_authorized": "UNKNOWN",
+            "proven_live": "NO",
+            "state": "BUILT_NOT_PROVEN",
+            "evidence": [
+              {
+                "owner": "Worker Browser",
+                "source_type": "repository_source",
+                "artifact_identity": "worker-browser-source",
+                "revision": "FIXTURE_PROTECTED_MASTER_SHA",
+                "observed_at": "2026-09-19T12:02:00Z",
+                "coverage": "repository source only",
+                "claim": "Built source is present without a current target-bound canary.",
+                "supports_dimensions": [
+                  "implementation_state",
+                  "usable_scope",
+                  "proven_live",
+                  "binding_current"
+                ]
+              }
+            ],
+            "binding": {
+              "host_ref": null,
+              "project_ref": null,
+              "session_ref": null,
+              "runtime_generation": null,
+              "source_sha": "FIXTURE_PROTECTED_MASTER_SHA"
+            },
+            "blocker": "No current connection, binding, or owner-native canary is available.",
+            "next_probe": "Read Worker Browser health for the exact worker and generation."
+          }
+        ],
+        "selected_surface_id": null,
+        "suppressed_surface_ids": [],
+        "domain_overlays": []
+      }
+    },
+    {
+      "id": "navigator-local-compatibility-install",
+      "expected_state": "BUILT_NOT_PROVEN",
+      "packet": {
+        "schema": "mastermind.navigator_capability_health.v1",
+        "generated_at": "2026-09-19T12:02:30Z",
+        "protected_master_sha": "FIXTURE_PROTECTED_MASTER_SHA",
+        "role_profile": "native_builder_operator",
+        "requested_route": "local_machine_process",
+        "sources": [
+          {
+            "owner": "local Codex plugin manager",
+            "source_type": "observed_call",
+            "artifact_identity": "local-plugin-install-canary",
+            "revision": "FIXTURE_PROTECTED_MASTER_SHA",
+            "observed_at": "2026-09-19T12:02:30Z",
+            "coverage": "one disposable local HOME/CODEX_HOME package install, readback, and cleanup",
+            "claim": "The exact Navigator package installed and enabled locally; Web workspace installation and invocation were not exercised.",
+            "supports_dimensions": [
+              "installed",
+              "enabled",
+              "authenticated_or_connected",
+              "binding_current",
+              "implementation_state",
+              "usable_scope",
+              "proven_live"
+            ]
+          }
+        ],
+        "surfaces": [
+          {
+            "surface_id": "mastermind-navigator-local-compatibility",
+            "capability_class": "local_machine_process",
+            "canonical_owner": "local Codex plugin manager",
+            "minimal_tool_family": "mastermind-navigator",
+            "required_for_role": true,
+            "implementation_state": "BUILT",
+            "usable_scope": "UNKNOWN",
+            "binding_current": "YES",
+            "installed": "YES",
+            "enabled": "YES",
+            "authenticated_or_connected": "NOT_APPLICABLE",
+            "callable": "UNKNOWN",
+            "organizationally_authorized": "UNKNOWN",
+            "proven_live": "NO",
+            "state": "BUILT_NOT_PROVEN",
+            "evidence": [
+              {
+                "owner": "local Codex plugin manager",
+                "source_type": "observed_call",
+                "artifact_identity": "local-plugin-install-canary",
+                "revision": "FIXTURE_PROTECTED_MASTER_SHA",
+                "observed_at": "2026-09-19T12:02:30Z",
+                "coverage": "one disposable local HOME/CODEX_HOME package install, readback, and cleanup",
+                "claim": "The exact Navigator package installed and enabled locally; Web workspace installation and invocation were not exercised.",
+                "supports_dimensions": [
+                  "installed",
+                  "enabled",
+                  "authenticated_or_connected",
+                  "binding_current",
+                  "implementation_state",
+                  "usable_scope",
+                  "proven_live"
+                ]
+              }
+            ],
+            "binding": {
+              "host_ref": "disposable-local-codex-home",
+              "project_ref": null,
+              "session_ref": null,
+              "runtime_generation": null,
+              "source_sha": "FIXTURE_PROTECTED_MASTER_SHA"
+            },
+            "blocker": "Web workspace installation, organization authorization, callable fresh-session invocation, and owner-native action are unproven.",
+            "next_probe": "After source protection, use the existing Business workspace admin owner for the fixed-commit canary."
+          }
+        ],
+        "selected_surface_id": null,
+        "suppressed_surface_ids": [],
+        "domain_overlays": []
+      }
+    },
+    {
+      "id": "navigator-web-workspace-installed-disabled",
+      "expected_state": "UNAVAILABLE",
+      "packet": {
+        "schema": "mastermind.navigator_capability_health.v1",
+        "generated_at": "2026-09-19T12:02:45Z",
+        "protected_master_sha": "FIXTURE_PROTECTED_MASTER_SHA",
+        "role_profile": "web_ceo_core",
+        "requested_route": "source_pr_ci",
+        "sources": [
+          {
+            "owner": "Business workspace plugin administrator",
+            "source_type": "owner_native",
+            "artifact_identity": "workspace-fixed-commit-import-readback",
+            "revision": "FIXTURE_PROTECTED_MASTER_SHA",
+            "observed_at": "2026-09-19T12:02:45Z",
+            "coverage": "one approved Business workspace canary member and exact fixed-commit Navigator package",
+            "claim": "Navigator is imported and installed for the canary scope but disabled and not callable.",
+            "supports_dimensions": [
+              "installed",
+              "enabled",
+              "authenticated_or_connected",
+              "callable",
+              "organizationally_authorized",
+              "proven_live",
+              "binding_current",
+              "implementation_state",
+              "usable_scope"
+            ]
+          }
+        ],
+        "surfaces": [
+          {
+            "surface_id": "mastermind-navigator-web-workspace",
+            "capability_class": "source_pr_ci",
+            "canonical_owner": "Business workspace plugin administrator",
+            "minimal_tool_family": "mastermind-navigator",
+            "required_for_role": true,
+            "implementation_state": "BUILT",
+            "usable_scope": "NONE",
+            "binding_current": "YES",
+            "installed": "YES",
+            "enabled": "NO",
+            "authenticated_or_connected": "NOT_APPLICABLE",
+            "callable": "NO",
+            "organizationally_authorized": "YES",
+            "proven_live": "NO",
+            "state": "UNAVAILABLE",
+            "evidence": [
+              {
+                "owner": "Business workspace plugin administrator",
+                "source_type": "owner_native",
+                "artifact_identity": "workspace-fixed-commit-import-readback",
+                "revision": "FIXTURE_PROTECTED_MASTER_SHA",
+                "observed_at": "2026-09-19T12:02:45Z",
+                "coverage": "one approved Business workspace canary member and exact fixed-commit Navigator package",
+                "claim": "Navigator is imported and installed for the canary scope but disabled and not callable.",
+                "supports_dimensions": [
+                  "installed",
+                  "enabled",
+                  "authenticated_or_connected",
+                  "callable",
+                  "organizationally_authorized",
+                  "proven_live",
+                  "binding_current",
+                  "implementation_state",
+                  "usable_scope"
+                ]
+              }
+            ],
+            "binding": {
+              "host_ref": null,
+              "project_ref": "business-workspace-canary",
+              "session_ref": null,
+              "runtime_generation": null,
+              "source_sha": "FIXTURE_PROTECTED_MASTER_SHA"
+            },
+            "blocker": "Navigator is installed in the Web workspace canary scope but is not enabled or callable for the canary member.",
+            "next_probe": "The existing workspace admin owner enables the exact fixed-commit package for the approved canary member and reads back policy."
+          }
+        ],
+        "selected_surface_id": null,
+        "suppressed_surface_ids": [],
+        "domain_overlays": []
+      }
+    },
+    {
+      "id": "workbench-attended-missing-session-generation",
+      "expected_state": "UNAVAILABLE",
+      "packet": {
+        "schema": "mastermind.navigator_capability_health.v1",
+        "generated_at": "2026-09-19T12:01:15Z",
+        "protected_master_sha": "FIXTURE_PROTECTED_MASTER_SHA",
+        "role_profile": "web_ceo_core",
+        "requested_route": "selected_project_action",
+        "sources": [
+          {
+            "owner": "Workbench / RuntimeBinding",
+            "source_type": "owner_native",
+            "artifact_identity": "workbench-attended-session-generation-probe",
+            "revision": null,
+            "observed_at": "2026-09-19T12:01:15Z",
+            "coverage": "one selected project and one attended Web operator context",
+            "claim": "The selected project is known, but no exact current attended-session generation is bound.",
+            "supports_dimensions": [
+              "installed",
+              "enabled",
+              "authenticated_or_connected",
+              "callable",
+              "organizationally_authorized",
+              "proven_live",
+              "binding_current",
+              "implementation_state",
+              "usable_scope"
+            ]
+          }
+        ],
+        "surfaces": [
+          {
+            "surface_id": "workbench-action-attended-unbound",
+            "capability_class": "selected_project_action",
+            "canonical_owner": "Workbench",
+            "minimal_tool_family": "workbench",
+            "required_for_role": true,
+            "implementation_state": "BUILT",
+            "usable_scope": "NONE",
+            "binding_current": "NO",
+            "installed": "YES",
+            "enabled": "YES",
+            "authenticated_or_connected": "YES",
+            "callable": "YES",
+            "organizationally_authorized": "YES",
+            "proven_live": "NO",
+            "state": "UNAVAILABLE",
+            "evidence": [
+              {
+                "owner": "Workbench / RuntimeBinding",
+                "source_type": "owner_native",
+                "artifact_identity": "workbench-attended-session-generation-probe",
+                "revision": null,
+                "observed_at": "2026-09-19T12:01:15Z",
+                "coverage": "one selected project and one attended Web operator context",
+                "claim": "The selected project is known, but no exact current attended-session generation is bound.",
+                "supports_dimensions": [
+                  "installed",
+                  "enabled",
+                  "authenticated_or_connected",
+                  "callable",
+                  "organizationally_authorized",
+                  "proven_live",
+                  "binding_current",
+                  "implementation_state",
+                  "usable_scope"
+                ]
+              }
+            ],
+            "binding": {
+              "host_ref": null,
+              "project_ref": "selected-project",
+              "session_ref": null,
+              "runtime_generation": null,
+              "source_sha": null,
+              "execution_mode": "ATTENDED_WEB_OPERATOR",
+              "authority_ref": null,
+              "authority_generation": null
+            },
+            "blocker": "The attended Web action lacks an exact current session generation.",
+            "next_probe": "Read RuntimeBinding for the exact attended conversation and current generation before any Workbench action."
+          }
+        ],
+        "selected_surface_id": null,
+        "suppressed_surface_ids": [],
+        "domain_overlays": []
+      }
+    },
+    {
+      "id": "workbench-worker-missing-attempt-generation",
+      "expected_state": "UNAVAILABLE",
+      "packet": {
+        "schema": "mastermind.navigator_capability_health.v1",
+        "generated_at": "2026-09-19T12:01:30Z",
+        "protected_master_sha": "FIXTURE_PROTECTED_MASTER_SHA",
+        "role_profile": "native_builder_operator",
+        "requested_route": "selected_project_action",
+        "sources": [
+          {
+            "owner": "Workbench / Executive OS",
+            "source_type": "owner_native",
+            "artifact_identity": "workbench-worker-attempt-generation-probe",
+            "revision": null,
+            "observed_at": "2026-09-19T12:01:30Z",
+            "coverage": "one selected project and one provider-worker request",
+            "claim": "The selected project is known, but no current admitted Executive worker generation is bound.",
+            "supports_dimensions": [
+              "installed",
+              "enabled",
+              "authenticated_or_connected",
+              "callable",
+              "organizationally_authorized",
+              "proven_live",
+              "binding_current",
+              "implementation_state",
+              "usable_scope"
+            ]
+          }
+        ],
+        "surfaces": [
+          {
+            "surface_id": "workbench-action-worker-unbound",
+            "capability_class": "selected_project_action",
+            "canonical_owner": "Workbench",
+            "minimal_tool_family": "workbench",
+            "required_for_role": true,
+            "implementation_state": "BUILT",
+            "usable_scope": "NONE",
+            "binding_current": "NO",
+            "installed": "YES",
+            "enabled": "YES",
+            "authenticated_or_connected": "YES",
+            "callable": "YES",
+            "organizationally_authorized": "NO",
+            "proven_live": "NO",
+            "state": "UNAVAILABLE",
+            "evidence": [
+              {
+                "owner": "Workbench / Executive OS",
+                "source_type": "owner_native",
+                "artifact_identity": "workbench-worker-attempt-generation-probe",
+                "revision": null,
+                "observed_at": "2026-09-19T12:01:30Z",
+                "coverage": "one selected project and one provider-worker request",
+                "claim": "The selected project is known, but no current admitted Executive worker generation is bound.",
+                "supports_dimensions": [
+                  "installed",
+                  "enabled",
+                  "authenticated_or_connected",
+                  "callable",
+                  "organizationally_authorized",
+                  "proven_live",
+                  "binding_current",
+                  "implementation_state",
+                  "usable_scope"
+                ]
+              }
+            ],
+            "binding": {
+              "host_ref": null,
+              "project_ref": "selected-project",
+              "session_ref": null,
+              "runtime_generation": null,
+              "source_sha": null,
+              "execution_mode": "BOUNDED_WORKER",
+              "authority_ref": null,
+              "authority_generation": null
+            },
+            "blocker": "The provider worker has no admitted Executive worker generation for this action.",
+            "next_probe": "Read the current Executive OS Job/Attempt/Worker generation and authorization; do not fall back to attended mode."
+          }
+        ],
+        "selected_surface_id": null,
+        "suppressed_surface_ids": [],
+        "domain_overlays": []
+      }
+    },
+    {
+      "id": "bounded-partial-path",
+      "expected_state": "DEGRADED",
+      "packet": {
+        "schema": "mastermind.navigator_capability_health.v1",
+        "generated_at": "2026-09-19T12:03:00Z",
+        "protected_master_sha": "FIXTURE_PROTECTED_MASTER_SHA",
+        "role_profile": "native_builder_operator",
+        "requested_route": "local_machine_process",
+        "sources": [
+          {
+            "owner": "Studio Direct / existing fleet owner",
+            "source_type": "observed_call",
+            "artifact_identity": "studio-direct-read-probe",
+            "revision": null,
+            "observed_at": "2026-09-19T12:03:00Z",
+            "coverage": "bounded host reads",
+            "claim": "Host reads work, while the requested modifying path is outside current proof.",
+            "supports_dimensions": [
+              "installed",
+              "enabled",
+              "authenticated_or_connected",
+              "callable",
+              "organizationally_authorized",
+              "proven_live",
+              "binding_current",
+              "implementation_state",
+              "usable_scope"
+            ]
+          }
+        ],
+        "surfaces": [
+          {
+            "surface_id": "studio-direct",
+            "capability_class": "local_machine_process",
+            "canonical_owner": "Studio Direct / existing fleet owner",
+            "minimal_tool_family": "studio-direct",
+            "required_for_role": true,
+            "implementation_state": "BUILT",
+            "usable_scope": "PARTIAL",
+            "binding_current": "YES",
+            "installed": "YES",
+            "enabled": "YES",
+            "authenticated_or_connected": "YES",
+            "callable": "YES",
+            "organizationally_authorized": "YES",
+            "proven_live": "NO",
+            "state": "DEGRADED",
+            "evidence": [
+              {
+                "owner": "Studio Direct / existing fleet owner",
+                "source_type": "observed_call",
+                "artifact_identity": "studio-direct-read-probe",
+                "revision": null,
+                "observed_at": "2026-09-19T12:03:00Z",
+                "coverage": "bounded host reads",
+                "claim": "Read operations are live; the requested write class lacks proof.",
+                "supports_dimensions": [
+                  "installed",
+                  "enabled",
+                  "authenticated_or_connected",
+                  "callable",
+                  "organizationally_authorized",
+                  "proven_live",
+                  "binding_current",
+                  "implementation_state",
+                  "usable_scope"
+                ]
+              }
+            ],
+            "binding": {
+              "host_ref": "studio-primary",
+              "project_ref": null,
+              "session_ref": null,
+              "runtime_generation": null,
+              "source_sha": null
+            },
+            "blocker": "Only the read subset is currently proven.",
+            "next_probe": "Probe the exact requested action class through the existing host owner."
+          }
+        ],
+        "selected_surface_id": "studio-direct",
+        "suppressed_surface_ids": [],
+        "domain_overlays": []
+      }
+    },
+    {
+      "id": "decisive-evidence-missing",
+      "expected_state": "UNKNOWN",
+      "packet": {
+        "schema": "mastermind.navigator_capability_health.v1",
+        "generated_at": "2026-09-19T12:04:00Z",
+        "protected_master_sha": "FIXTURE_PROTECTED_MASTER_SHA",
+        "role_profile": "web_ceo_core",
+        "requested_route": "exact_chatgpt_actuation",
+        "sources": [
+          {
+            "owner": "Web-Sol + RuntimeBinding",
+            "source_type": "projection",
+            "artifact_identity": "connector-name-only",
+            "revision": null,
+            "observed_at": "2026-09-19T12:04:00Z",
+            "coverage": "connector name listing only",
+            "claim": "A named browser/session connector appears in a listing; exact RuntimeBinding, authorization, and callability remain unobserved.",
+            "supports_dimensions": [
+              "installed",
+              "enabled",
+              "authenticated_or_connected",
+              "callable",
+              "organizationally_authorized",
+              "proven_live",
+              "binding_current",
+              "implementation_state",
+              "usable_scope"
+            ]
+          }
+        ],
+        "surfaces": [
+          {
+            "surface_id": "web-sol-runtime-binding-unknown",
+            "capability_class": "exact_chatgpt_actuation",
+            "canonical_owner": "Web-Sol + RuntimeBinding",
+            "minimal_tool_family": "web-sol-runtime-binding",
+            "required_for_role": true,
+            "implementation_state": "UNKNOWN",
+            "usable_scope": "UNKNOWN",
+            "binding_current": "UNKNOWN",
+            "installed": "UNKNOWN",
+            "enabled": "UNKNOWN",
+            "authenticated_or_connected": "UNKNOWN",
+            "callable": "UNKNOWN",
+            "organizationally_authorized": "UNKNOWN",
+            "proven_live": "UNKNOWN",
+            "state": "UNKNOWN",
+            "evidence": [
+              {
+                "owner": "Web-Sol + RuntimeBinding",
+                "source_type": "projection",
+                "artifact_identity": "connector-name-only",
+                "revision": null,
+                "observed_at": "2026-09-19T12:04:00Z",
+                "coverage": "connector name listing only",
+                "claim": "The connector name is not exact target, RuntimeBinding generation, authorization, callability, or liveness evidence.",
+                "supports_dimensions": [
+                  "installed",
+                  "enabled",
+                  "authenticated_or_connected",
+                  "callable",
+                  "organizationally_authorized",
+                  "proven_live",
+                  "binding_current",
+                  "implementation_state",
+                  "usable_scope"
+                ]
+              }
+            ],
+            "binding": {
+              "host_ref": null,
+              "project_ref": null,
+              "session_ref": null,
+              "runtime_generation": null,
+              "source_sha": null
+            },
+            "blocker": "No owner-native exact target, RuntimeBinding generation, authorization, callability, or canary evidence.",
+            "next_probe": "Read the current RuntimeBinding owner for the exact logical target and generation before loading or actuating Web-Sol."
+          }
+        ],
+        "selected_surface_id": null,
+        "suppressed_surface_ids": [],
+        "domain_overlays": []
+      }
+    }
+  ],
+  "role_filter_case": {
+    "profile": "web_ceo_core",
+    "requested_route": "worker_browser",
+    "source_surfaces": [
+      {
+        "surface_id": "executive-os",
+        "capability_class": "lifecycle"
+      },
+      {
+        "surface_id": "agent-os",
+        "capability_class": "organizational_continuity"
+      },
+      {
+        "surface_id": "github",
+        "capability_class": "source_pr_ci"
+      },
+      {
+        "surface_id": "workbench",
+        "capability_class": "selected_project_action"
+      },
+      {
+        "surface_id": "studio-direct",
+        "capability_class": "local_machine_process"
+      },
+      {
+        "surface_id": "worker-browser",
+        "capability_class": "worker_browser"
+      },
+      {
+        "surface_id": "web-sol-runtime-binding",
+        "capability_class": "exact_chatgpt_actuation"
+      },
+      {
+        "surface_id": "figma",
+        "capability_class": "domain_design"
+      }
+    ],
+    "expected_visible_surface_ids": [
+      "executive-os",
+      "agent-os",
+      "github",
+      "workbench",
+      "studio-direct",
+      "worker-browser",
+      "web-sol-runtime-binding"
+    ],
+    "expected_suppressed_surface_ids": [
+      "figma"
+    ],
+    "expected_selected_tool_family": "worker-browser",
+    "load_schemas_for": [
+      "worker-browser"
+    ]
+  },
+  "overlay_filter_cases": [
+    {
+      "id": "domain-design-request-without-authorized-overlay",
+      "profile": "web_ceo_core",
+      "requested_route": "domain_design",
+      "domain_overlays": [],
+      "overlay_authorization_evidence": {},
+      "source_surfaces": [
+        {
+          "surface_id": "github",
+          "capability_class": "source_pr_ci"
+        },
+        {
+          "surface_id": "figma",
+          "capability_class": "domain_design"
+        }
+      ],
+      "expected_visible_surface_ids": [
+        "github"
+      ],
+      "expected_suppressed_surface_ids": [
+        "figma"
+      ],
+      "expected_selected_tool_family": "domain-design-owner",
+      "load_schemas_for": []
+    },
+    {
+      "id": "domain-design-request-with-authorized-overlay",
+      "profile": "web_ceo_core",
+      "requested_route": "domain_design",
+      "domain_overlays": [
+        "domain_design"
+      ],
+      "overlay_authorization_evidence": {
+        "domain_design": {
+          "organizationally_authorized": "YES",
+          "artifact_identity": "design-owner-authorization-receipt"
+        }
+      },
+      "source_surfaces": [
+        {
+          "surface_id": "github",
+          "capability_class": "source_pr_ci"
+        },
+        {
+          "surface_id": "figma",
+          "capability_class": "domain_design"
+        }
+      ],
+      "expected_visible_surface_ids": [
+        "github",
+        "figma"
+      ],
+      "expected_suppressed_surface_ids": [],
+      "expected_selected_tool_family": "domain-design-owner",
+      "load_schemas_for": [
+        "domain-design-owner"
+      ]
+    }
+  ]
+}
