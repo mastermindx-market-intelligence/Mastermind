@@ -837,3 +837,115 @@ def test_restart_joins_collection_after_receipt_before_terminal_sweep(
         assert unhandled == []
 
     asyncio.run(scenario())
+
+
+def test_cancelled_restart_waits_for_inflight_validation_owner(
+    tmp_path: Path,
+) -> None:
+    """Cancellation cannot release capacity while exact validation is still owned."""
+
+    async def scenario() -> None:
+        loop = asyncio.get_running_loop()
+        unhandled: list[dict] = []
+        prior_handler = loop.get_exception_handler()
+        loop.set_exception_handler(
+            lambda _loop, context: unhandled.append(dict(context))
+        )
+        broker, adapter, server, socket_path, client = await _serve_fixture(
+            tmp_path
+        )
+        runtime_root, runtime, job = _runtime_and_job(tmp_path, broker)
+        pending: asyncio.Task | None = None
+        finisher: asyncio.Task | None = None
+        try:
+            first = _supervisor_for(
+                runtime,
+                broker,
+                client,
+                tmp_path,
+                instance_id="before-cancelled-validation-restart",
+            )
+            active = await first.start_job(job.job_id)
+            attempt_id = active.lease.attempt.attempt_id
+            original_fence = active.lease.attempt.fence_generation
+
+            adapter.finished.set()
+            collected = await first.adapter.collect_result(active.process_ref)
+            assert collected.result.exit_code == 0
+            adapter.block_validation = True
+            pending = asyncio.create_task(
+                first.adapter.run_validation_argv(
+                    active.launch_spec,
+                    ["/usr/bin/true"],
+                )
+            )
+            await adapter.validation_entered.wait()
+            pending.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await pending
+            runtime.jobs.cancel_job(job.job_id)
+
+            del active
+            del first
+            reopened = Runtime.at(runtime_root, lease_seconds=30)
+            restarted = _supervisor_for(
+                reopened,
+                broker,
+                client,
+                tmp_path,
+                instance_id="after-cancelled-validation-restart",
+            )
+            outcomes = await asyncio.to_thread(
+                restarted.reconcile_restart,
+                requeue_lost=False,
+            )
+            assert [item.status for item in outcomes] == [
+                ReconcileStatus.TERMINAL_RECOVERED
+            ]
+            recovered = restarted.take_recovered_runs()
+            assert len(recovered) == 1
+
+            finisher = asyncio.create_task(
+                restarted.finish_job(recovered[0])
+            )
+            await asyncio.sleep(0.05)
+            assert not finisher.done(), (
+                "replacement supervisor released the cancelled Attempt while "
+                "the broker still owned its validation"
+            )
+            status = await client.request("status", {"run_id": attempt_id})
+            assert status["run"]["validation_busy"] is True
+
+            adapter.validation_release.set()
+            terminal = await finisher
+
+            assert terminal.job.status is JobStatus.CANCELLED
+            assert terminal.attempt.status is AttemptStatus.CANCELLED
+            assert terminal.attempt.attempt_id == attempt_id
+            assert terminal.attempt.fence_generation == original_fence + 1
+            assert terminal.validation_receipt_path is None
+            assert adapter.start_calls == 1
+            assert adapter.collect_calls == 1
+            assert adapter.validation_calls == [("/usr/bin/true",)]
+            status = await client.request("status", {"run_id": attempt_id})
+            assert status["run"]["validation_busy"] is False
+            assert status["validation_busy"] is False
+            assert [
+                item.attempt_id
+                for item in reopened.attempts.list_attempts(job.job_id)
+            ] == [attempt_id]
+        finally:
+            adapter.finished.set()
+            adapter.validation_release.set()
+            if pending is not None and not pending.done():
+                pending.cancel()
+            if finisher is not None and not finisher.done():
+                finisher.cancel()
+                await asyncio.gather(finisher, return_exceptions=True)
+            await asyncio.sleep(0)
+            await _close_fixture(broker, adapter, server, socket_path)
+            await asyncio.sleep(0.05)
+            loop.set_exception_handler(prior_handler)
+        assert unhandled == []
+
+    asyncio.run(scenario())

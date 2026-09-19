@@ -303,6 +303,9 @@ class ActiveRun:
     effective_grant: Mapping[str, Any] | None = dataclasses.field(
         default=None, repr=False
     )
+    recovered_presence: ProcessPresence | None = dataclasses.field(
+        default=None, repr=False
+    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1691,6 +1694,46 @@ class ExecutiveSupervisor:
             ) from exc
         return path
 
+    async def _settle_recovered_terminal_owner(
+        self, active: ActiveRun
+    ) -> None:
+        """Keep cancellation fenced until broker-owned terminal work settles."""
+
+        if active.recovered_presence is not ProcessPresence.TERMINAL_OWNED:
+            return
+        attempt = active.lease.attempt
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + max(
+            1.0,
+            float(self.validation_timeout_seconds) + 60.0,
+        )
+        while True:
+            presence = await asyncio.to_thread(
+                self.process_controller.presence, attempt
+            )
+            if presence is ProcessPresence.ABSENT:
+                if not await asyncio.to_thread(
+                    self.process_controller.absence_verified, attempt
+                ):
+                    raise SupervisorError(
+                        "recovered terminal owner lost its verified absence"
+                    )
+                return
+            if presence is not ProcessPresence.TERMINAL_OWNED:
+                raise SupervisorError(
+                    "recovered terminal owner became live or ambiguous"
+                )
+            if loop.time() >= deadline:
+                raise SupervisorError(
+                    "recovered terminal owner did not settle before timeout"
+                )
+            self.runtime.attempts.heartbeat_attempt(
+                attempt.attempt_id,
+                fence_generation=attempt.fence_generation,
+                lease_token=active.lease.lease_token,
+            )
+            await asyncio.sleep(self.heartbeat_interval_seconds)
+
     def _active_terminal_uid_sweep(
         self, active: ActiveRun
     ) -> Mapping[str, Any] | None:
@@ -1894,6 +1937,7 @@ class ExecutiveSupervisor:
             )
         job = self._job(attempt.job_id)
         if job.status == JobStatus.CANCEL_REQUESTED:
+            await self._settle_recovered_terminal_owner(active)
             ensure_sealed()
             cancelled = self.runtime.attempts.acknowledge_cancel(
                 attempt.attempt_id, fence_generation=fence, lease_token=token
@@ -2357,6 +2401,7 @@ class ExecutiveSupervisor:
             process_ref=ref,
             launch_spec=spec,
             effective_grant=effective_grant,
+            recovered_presence=presence,
         )
         self._recovered_runs[attempt.attempt_id] = active
         self._recovered_attempt_ids.add(attempt.attempt_id)
