@@ -28,6 +28,13 @@ if [ -d /Volumes/Mastermind ]; then
   fi
 fi
 
+# Reuse the host's existing storage policy; absence is pinned explicitly.
+# Once enrolled, a missing/invalid file fails closed in the Python route.
+storage_policy=""
+if [ -e "$HOME/.config/mastermind/worktree-storage.json" ] || [ -L "$HOME/.config/mastermind/worktree-storage.json" ]; then
+  storage_policy="$HOME/.config/mastermind/worktree-storage.json"
+fi
+
 target="${MASTERMIND_WORKSPACE_CLI_INSTALL:-$HOME/.local/bin/mmx-workspace}"
 payload_root="${MASTERMIND_WORKSPACE_CLI_PAYLOAD_ROOT:-$HOME/.local/share/mastermind/workspace-cli/$release_sha}"
 mkdir -p "$(dirname "$target")" "$payload_root/scripts" "$payload_root/control_plane"
@@ -51,6 +58,7 @@ if [ -n "\$workspace_mount" ]; then
 fi
 export MASTERMIND_SOURCE_REPO='$source_repo'
 export MASTERMIND_AGENT_WORKSPACE_ROOT='$workspace_root'
+export MASTERMIND_WORKSPACE_STORAGE_POLICY='$storage_policy'
 if [ -n "\${MASTERMIND_PYTHON:-}" ]; then
   exec "\$MASTERMIND_PYTHON" '$payload_root/scripts/mastermind_workspace.py' "\$@"
 elif [ -x /opt/homebrew/bin/python3 ]; then
