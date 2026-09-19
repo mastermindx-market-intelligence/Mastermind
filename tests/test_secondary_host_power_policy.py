@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import ast
 import io
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -10,6 +12,13 @@ from ops.executive_os import secondary_host_power_policy as power
 
 def _completed(command: tuple[str, ...], *, rc: int = 0, stdout: str = "") -> subprocess.CompletedProcess[str]:
     return subprocess.CompletedProcess(command, rc, stdout, "")
+
+
+def test_helper_is_python39_grammar_and_stdlib_only() -> None:
+    source = Path(power.__file__).read_text(encoding="utf-8")
+    ast.parse(source, feature_version=(3, 9))
+    assert "from ops." not in source
+    assert "from control_plane." not in source
 
 
 def test_non_root_refuses_before_any_command() -> None:
@@ -94,6 +103,20 @@ def test_cli_rejects_arguments_without_effect(monkeypatch: pytest.MonkeyPatch) -
         lambda: pytest.fail("effect should not run"),
     )
     assert power.main(["--anything"], stdout=io.StringIO(), stderr=io.StringIO()) == 64
+
+
+def test_cli_maps_post_mutation_uncertainty_to_reserved_exit_75(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def uncertain() -> dict[str, object]:
+        raise power.SecondaryHostPowerPolicyEffectUnknown("unknown")
+
+    monkeypatch.setattr(power, "prepare_secondary_host_power_policy", uncertain)
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    assert power.main([], stdout=stdout, stderr=stderr) == 75
+    assert stdout.getvalue() == ""
+    assert stderr.getvalue() == "secondary-host power policy effect unknown\n"
 
 
 def test_cli_success_is_secret_free_canonical_json(monkeypatch: pytest.MonkeyPatch) -> None:
