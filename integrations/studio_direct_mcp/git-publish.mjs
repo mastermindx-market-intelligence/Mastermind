@@ -130,6 +130,9 @@ export const STUDIO_GIT_PUSH_CURRENT_BRANCH_TOOL = Object.freeze({
   description:
     'Push exactly the current HEAD of one existing clean Mastermind attended Web workspace to its ' +
     'same host-resolved sol/web-* origin branch without force, tags, branch selection or credential input. ' +
+    'The complete effective push destination, including remote.origin.pushurl and insteadOf rewrites, must ' +
+    'be the single host-allowed repository this operation also reads back from, and the authorized ref ' +
+    'effect is that one branch regardless of ambient follow-tags, submodule or mirror push configuration. ' +
     'Requires the caller to fence the action with the exact expected local HEAD. If the remote already ' +
     'equals that HEAD, no push is issued. A failure after push starts is EFFECT_UNKNOWN unless remote ' +
     'readback proves the exact HEAD is applied; never blindly retry an EFFECT_UNKNOWN result. Use ' +
@@ -403,6 +406,16 @@ function oneLine(value, label) {
   return text;
 }
 
+/**
+ * A remote may carry several fetch or push URLs. This publication boundary owns
+ * exactly one destination, so more than one is a refusal rather than a choice.
+ */
+function exactlyOneUrl(value, label) {
+  const lines = String(value ?? '').trim().split(/\r?\n/).filter((line) => line.trim() !== '');
+  if (lines.length !== 1) throw new Error(`${label} must resolve to exactly one destination`);
+  return oneLine(lines[0], label);
+}
+
 function actionRef(operationId, branch, head) {
   return createHash('sha256')
     .update('mastermind.studio_git_push_current_branch.v1\0')
@@ -498,21 +511,37 @@ export function createGitPublisher(config, dependencies = {}) {
     const branch = oneLine(receipt.branch, 'workspace branch');
     if (!BRANCH_RE.test(branch)) throw new Error('workspace branch is outside the sol/web-* publication boundary');
 
-    const [{ stdout: topOut }, { stdout: branchOut }, { stdout: headOut }, { stdout: statusOut }, { stdout: remoteOut }] = await Promise.all([
+    const [
+      { stdout: topOut }, { stdout: branchOut }, { stdout: headOut }, { stdout: statusOut },
+      { stdout: fetchUrlOut }, { stdout: pushUrlOut },
+    ] = await Promise.all([
       git(workspacePath, ['rev-parse', '--show-toplevel']),
       git(workspacePath, ['symbolic-ref', '--quiet', '--short', 'HEAD']),
       git(workspacePath, ['rev-parse', 'HEAD']),
       git(workspacePath, ['status', '--porcelain=v1', '--untracked-files=all']),
-      git(workspacePath, ['remote', 'get-url', 'origin']),
+      // `git remote get-url` expands insteadOf/pushInsteadOf rewrites, so these
+      // are the effective transport destinations rather than the raw config.
+      git(workspacePath, ['remote', 'get-url', '--all', 'origin']),
+      git(workspacePath, ['remote', 'get-url', '--push', '--all', 'origin']),
     ]);
     const top = await realpath(oneLine(topOut, 'workspace top level'));
     const currentBranch = oneLine(branchOut, 'current branch');
     const localHead = oneLine(headOut, 'local HEAD');
-    const remoteUrl = oneLine(remoteOut, 'origin URL');
     if (top !== workspacePath) throw new Error('workspace path is not the Git top level');
     if (currentBranch !== branch) throw new Error('current Git branch does not match mmx-workspace ownership');
     if (!SHA_RE.test(localHead)) throw new Error('local HEAD is invalid');
+
+    // The fetch URL alone does not decide where a push lands: remote.origin.pushurl
+    // and url.<base>.pushInsteadOf can send the write to a different repository
+    // while the readback keeps observing the unchanged fetch origin. Qualify the
+    // complete effective destination, and require the single destination this
+    // operation both writes to and reads back from.
+    const fetchUrls = exactlyOneUrl(fetchUrlOut, 'origin fetch URL');
+    const pushUrl = exactlyOneUrl(pushUrlOut, 'origin push URL');
+    const remoteUrl = fetchUrls;
     if (!cfg.allowedRemoteUrls.includes(remoteUrl)) throw new Error('origin URL is outside the configured Mastermind remote boundary');
+    if (!cfg.allowedRemoteUrls.includes(pushUrl)) throw new Error('origin push URL is outside the configured Mastermind remote boundary');
+    if (pushUrl !== remoteUrl) throw new Error('origin push URL is not the fetch URL this operation reconciles against');
 
     const ref = `refs/heads/${branch}`;
     let remoteHead;
@@ -942,7 +971,17 @@ export function createGitPublisher(config, dependencies = {}) {
         before.workspacePath,
         // Push the fenced commit object, never mutable HEAD. A concurrent local
         // branch advance after precheck must not widen the authorized remote effect.
-        ['push', '--porcelain', 'origin', `${expectedHead}:${before.ref}`],
+        //
+        // The explicit refspec alone does not bound the ref effect: push.followTags
+        // adds annotated tags, push.recurseSubmodules can write other repositories,
+        // and remote.origin.mirror turns the push into a mirror. The complete
+        // allowed effect is one exact branch ref, so each is disabled here instead
+        // of being inherited from ambient repository or user configuration.
+        [
+          '-c', 'remote.origin.mirror=false',
+          'push', '--porcelain', '--no-follow-tags', '--recurse-submodules=no',
+          'origin', `${expectedHead}:${before.ref}`,
+        ],
         { timeoutMs: cfg.pushTimeoutMs },
       );
     } catch (error) {

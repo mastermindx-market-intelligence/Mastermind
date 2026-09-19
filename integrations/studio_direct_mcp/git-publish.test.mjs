@@ -104,6 +104,8 @@ test('tool metadata is narrow and truthful', () => {
   assert.equal(STUDIO_GIT_PUSH_CURRENT_BRANCH_TOOL.annotations.idempotentHint, true);
   assert.equal(STUDIO_GIT_PUSH_CURRENT_BRANCH_TOOL.annotations.openWorldHint, true);
   assert.match(STUDIO_GIT_COMMIT_CURRENT_CHANGES_TOOL.description, /real index is synchronized to that exact commit/);
+  assert.match(STUDIO_GIT_PUSH_CURRENT_BRANCH_TOOL.description, /complete effective push destination/);
+  assert.match(STUDIO_GIT_PUSH_CURRENT_BRANCH_TOOL.description, /regardless of ambient follow-tags, submodule or mirror push configuration/);
   assert.deepEqual(STUDIO_GIT_PUSH_CURRENT_BRANCH_TOOL.inputSchema.required, ['operation_id', 'expected_head_sha']);
   assert.equal('branch' in STUDIO_GIT_PUSH_CURRENT_BRANCH_TOOL.inputSchema.properties, false);
   assert.equal('remote' in STUDIO_GIT_PUSH_CURRENT_BRANCH_TOOL.inputSchema.properties, false);
@@ -412,7 +414,7 @@ test('concurrent local HEAD advance cannot widen the fenced remote effect', asyn
     let advancedHead = null;
     let injected = false;
     const wrappedExec = async (file, args, options) => {
-      if (file === GIT && args[0] === 'push' && !injected) {
+      if (file === GIT && args.includes('push') && !injected) {
         injected = true;
         await writeFile(path.join(f.workspace, 'proof.txt'), 'v2\n');
         await git(f.workspace, 'add', 'proof.txt');
@@ -442,7 +444,7 @@ test('lost push response reconciles to APPLIED when exact remote head proves the
   try {
     let injected = false;
     const wrappedExec = async (file, args, options) => {
-      if (file === GIT && args[0] === 'push' && !injected) {
+      if (file === GIT && args.includes('push') && !injected) {
         injected = true;
         await execFile(file, args, options);
         const error = new Error('simulated lost response after remote accepted push');
@@ -467,7 +469,7 @@ test('push failure after admission remains EFFECT_UNKNOWN when exact remote effe
   try {
     let injected = false;
     const wrappedExec = async (file, args, options) => {
-      if (file === GIT && args[0] === 'push' && !injected) {
+      if (file === GIT && args.includes('push') && !injected) {
         injected = true;
         const error = new Error('simulated transport failure after push admission');
         error.code = 'SIMULATED_LOSS';
@@ -945,6 +947,153 @@ test('a symlinked ancestor on the commission path creates nothing outside the wo
     );
     assert.deepEqual(await readdir(outside), [],
       'a redirected ancestor must be refused before anything is created through it');
+  } finally {
+    await f.cleanup();
+  }
+});
+
+// --- Effective push destination and ref-effect ceiling ----------------------
+// Regressions for the two blockers found by independent exact-head review of
+// 42d50bf6: the validated fetch origin was not the effective push destination,
+// and ambient push configuration could widen the authorized ref set.
+
+test('an effective push URL outside the allowlist is refused before any remote effect', async () => {
+  const f = await fixture();
+  try {
+    const outside = path.join(f.root, 'outside-policy.git');
+    await git(f.root, 'init', '--bare', outside);
+    await git(f.workspace, 'config', 'remote.origin.pushurl', outside);
+    const publisher = createGitPublisher(f.config);
+    await assert.rejects(
+      () => publisher.push({ operation_id: f.operationId, expected_head_sha: f.head }),
+      /origin push URL is outside/,
+    );
+    const { stdout } = await git(outside, 'for-each-ref', '--format=%(objectname)', `refs/heads/${f.branch}`);
+    assert.equal(stdout.trim(), '', 'an out-of-policy repository must never be written');
+    const { stdout: allowed } = await git(f.remote, 'for-each-ref', '--format=%(objectname)', `refs/heads/${f.branch}`);
+    assert.equal(allowed.trim(), '', 'a refused push must not reach the allowed remote either');
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('a pushInsteadOf rewrite cannot redirect the push away from the allowed remote', async () => {
+  const f = await fixture();
+  try {
+    const rewritten = path.join(f.root, 'rewritten.git');
+    await git(f.root, 'init', '--bare', rewritten);
+    await git(f.workspace, 'config', `url.${rewritten}.pushInsteadOf`, f.remote);
+    const publisher = createGitPublisher(f.config);
+    await assert.rejects(
+      () => publisher.push({ operation_id: f.operationId, expected_head_sha: f.head }),
+      /origin push URL is outside/,
+    );
+    const { stdout } = await git(rewritten, 'for-each-ref', '--format=%(objectname)', `refs/heads/${f.branch}`);
+    assert.equal(stdout.trim(), '', 'a rewritten destination must never be written');
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('an allowed push URL that is not the readback origin is refused', async () => {
+  const f = await fixture();
+  try {
+    const second = path.join(f.root, 'second-allowed.git');
+    await git(f.root, 'init', '--bare', second);
+    await git(f.workspace, 'config', 'remote.origin.pushurl', second);
+    // Both destinations are host-allowed, but the operation must write to and
+    // reconcile against one repository, or the readback proves nothing.
+    const publisher = createGitPublisher({ ...f.config, allowedRemoteUrls: [f.remote, second] });
+    await assert.rejects(
+      () => publisher.push({ operation_id: f.operationId, expected_head_sha: f.head }),
+      /not the fetch URL this operation reconciles against/,
+    );
+    const { stdout } = await git(second, 'for-each-ref', '--format=%(objectname)', `refs/heads/${f.branch}`);
+    assert.equal(stdout.trim(), '');
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('a remote with several fetch or push URLs is refused rather than chosen between', async () => {
+  for (const key of ['remote.origin.url', 'remote.origin.pushurl']) {
+    const f = await fixture();
+    try {
+      const second = path.join(f.root, 'second-allowed.git');
+      await git(f.root, 'init', '--bare', second);
+      if (key === 'remote.origin.pushurl') await git(f.workspace, 'config', key, f.remote);
+      await git(f.workspace, 'config', '--add', key, second);
+      const publisher = createGitPublisher({ ...f.config, allowedRemoteUrls: [f.remote, second] });
+      await assert.rejects(
+        () => publisher.push({ operation_id: f.operationId, expected_head_sha: f.head }),
+        /must resolve to exactly one destination/,
+        key,
+      );
+      const { stdout } = await git(second, 'for-each-ref', '--format=%(objectname)', `refs/heads/${f.branch}`);
+      assert.equal(stdout.trim(), '', key);
+    } finally {
+      await f.cleanup();
+    }
+  }
+});
+
+test('ambient push configuration cannot widen the authorized ref set', async () => {
+  const f = await fixture();
+  try {
+    await git(f.workspace, 'tag', '-a', 'unrequested-regression-tag', '-m', 'fixture only');
+    await git(f.workspace, 'tag', 'unrequested-lightweight-tag');
+    await git(f.workspace, 'config', 'push.followTags', 'true');
+    await git(f.workspace, 'config', 'remote.origin.mirror', 'true');
+    await git(f.workspace, 'config', 'remote.origin.push', 'refs/heads/*:refs/heads/*');
+
+    const calls = [];
+    const publisher = createGitPublisher(f.config, {
+      execFile: async (file, args, options) => {
+        calls.push(args);
+        return execFile(file, args, options);
+      },
+    });
+    const result = await publisher.push({ operation_id: f.operationId, expected_head_sha: f.head });
+    assert.equal(result.status, 'OK');
+    assert.equal(result.effect_state, 'APPLIED');
+    assert.equal(result.remote_head_sha, f.head);
+
+    const { stdout: tags } = await git(f.remote, 'for-each-ref', '--format=%(refname)', 'refs/tags/');
+    assert.equal(tags.trim(), '', 'a one-branch tool must never publish a tag');
+    const { stdout: refs } = await git(f.remote, 'for-each-ref', '--format=%(refname)');
+    assert.deepEqual(refs.trim().split('\n'), [`refs/heads/${f.branch}`],
+      'exactly one branch ref may exist on the remote');
+
+    const pushArgs = calls.find((args) => args.includes('push'));
+    assert.ok(pushArgs);
+    for (const required of ['--no-follow-tags', '--recurse-submodules=no', 'remote.origin.mirror=false']) {
+      assert.ok(pushArgs.includes(required), `${required} must bound the push`);
+    }
+    for (const forbidden of ['--force', '-f', '--mirror', '--tags', '--all', '--force-with-lease', '--delete']) {
+      assert.equal(pushArgs.includes(forbidden), false, `${forbidden} must never be issued`);
+    }
+    assert.equal(pushArgs.some((arg) => arg.startsWith('+')), false, 'no refspec may request a force update');
+    assert.equal(pushArgs.at(-1), `${f.head}:refs/heads/${f.branch}`);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('an unpublishable destination is refused identically through the typed status and commit paths', async () => {
+  const f = await fixture();
+  try {
+    const outside = path.join(f.root, 'outside-policy.git');
+    await git(f.root, 'init', '--bare', outside);
+    await git(f.workspace, 'config', 'remote.origin.pushurl', outside);
+    const publisher = createGitPublisher(f.config);
+    await assert.rejects(() => publisher.status({ operation_id: f.operationId }), /origin push URL is outside/);
+    await writeFile(path.join(f.workspace, 'pending.txt'), 'pending\n');
+    await assert.rejects(
+      () => publisher.commit({ operation_id: f.operationId, expected_head_sha: f.head, message: 'test: blocked' }),
+      /origin push URL is outside/,
+    );
+    const { stdout } = await git(f.workspace, 'rev-parse', 'HEAD');
+    assert.equal(stdout.trim(), f.head, 'a refused destination must not leave a local commit behind');
   } finally {
     await f.cleanup();
   }
