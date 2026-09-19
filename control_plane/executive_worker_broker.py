@@ -36,7 +36,6 @@ import time
 import uuid
 from collections import OrderedDict
 from pathlib import Path
-from types import MappingProxyType
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from common.redaction import sanitize_external_text
@@ -114,6 +113,7 @@ from control_plane.operator_materialization_receipt import (
     validate_materialization_request,
 )
 from control_plane.worker_execution_contract import (
+    _freeze as _freeze_worker_execution_value,
     ArtifactReceipt,
     BinaryAttestation,
     CancelReceipt,
@@ -3931,7 +3931,7 @@ class RemoteWorkerBrokerEndpoint:
         object.__setattr__(
             self,
             "secret_canary_verdict",
-            MappingProxyType(dict(self.secret_canary_verdict)),
+            _freeze_worker_execution_value(self.secret_canary_verdict),
         )
 
     def bind_launch_spec(self, spec: WorkerLaunchSpec) -> WorkerLaunchSpec:
@@ -3955,6 +3955,12 @@ class RemoteWorkerBrokerFleet:
     and retains the binding after any exception so ambiguous effects can only be
     reconciled on the same carrier.
     """
+
+    @property
+    def adapter_id(self) -> str:
+        """Immutable identity of the transport facade, never a provider label."""
+
+        return "remote-worker-broker-fleet"
 
     def __init__(
         self,

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import tempfile
 import types
 import unittest
 from dataclasses import replace
 from pathlib import Path
 
+from control_plane.executive_runtime import Runtime
+from control_plane.executive_supervisor import ExecutiveSupervisor
 from control_plane.executive_worker_broker import (
     BrokerStateError,
     RemoteWorkerBrokerEndpoint,
@@ -12,6 +15,7 @@ from control_plane.executive_worker_broker import (
     WorkerBrokerClient,
     WorkerBrokerError,
 )
+from control_plane.worker_adapter import WorkerExecutionAdapter
 from control_plane.worker_execution_contract import (
     BinaryAttestation,
     WorkerLaunchSpec,
@@ -174,6 +178,26 @@ class RemoteWorkerBrokerFleetTest(unittest.IsolatedAsyncioTestCase):
             controller_factory=lambda row: self.controllers[row.worker_id],
         )
 
+    def test_fleet_satisfies_common_adapter_and_supervisor_composition(self) -> None:
+        fleet = self._fleet()
+        self.assertIsInstance(fleet, WorkerExecutionAdapter)
+        self.assertEqual(fleet.adapter_id, "remote-worker-broker-fleet")
+        with self.assertRaises(AttributeError):
+            fleet.adapter_id = "codex-cli"  # type: ignore[misc]
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            supervisor = ExecutiveSupervisor(
+                Runtime.at(root / "runtime"),
+                fleet,
+                runs_root=root / "runs",
+                process_controller=fleet,
+                worker_user="fixture-worker",
+            )
+            self.assertIs(supervisor.adapter, fleet)
+            self.assertIs(supervisor.process_controller, fleet)
+            self.assertIs(supervisor.inspector, fleet.inspector)
+
     async def test_claimed_worker_routes_all_run_operations_to_one_carrier(self) -> None:
         fleet = self._fleet()
         spec = _spec("run-1", "alibaba-token-01")
@@ -247,9 +271,40 @@ class RemoteWorkerBrokerFleetTest(unittest.IsolatedAsyncioTestCase):
             )
 
     def test_endpoint_canary_binding_is_immutable_after_construction(self) -> None:
-        endpoint = _endpoint("alibaba-token-01", 458)
+        source = {
+            "passed": True,
+            "worker_id": "alibaba-token-01",
+            "evidence": {"digest": "original", "chain": ["first"]},
+        }
+        endpoint = RemoteWorkerBrokerEndpoint(
+            worker_id="alibaba-token-01",
+            client=WorkerBrokerClient(Path("/tmp/alibaba-token-01.sock")),
+            worker_user="_mastermind_alibaba_token_01",
+            worker_uid=458,
+            worker_gid=458,
+            secret_canary_verdict=source,
+        )
+
+        source["evidence"]["digest"] = "mutated"
+        source["evidence"]["chain"].append("mutated")
+        evidence = endpoint.secret_canary_verdict["evidence"]
+        self.assertEqual(evidence["digest"], "original")
+        self.assertEqual(evidence["chain"], ("first",))
         with self.assertRaises(TypeError):
             endpoint.secret_canary_verdict["passed"] = False  # type: ignore[index]
+        with self.assertRaises(TypeError):
+            evidence["digest"] = "changed"  # type: ignore[index]
+        with self.assertRaises(TypeError):
+            evidence["chain"][0] = "changed"  # type: ignore[index]
+
+        spec = _spec("run-canary-snapshot", "alibaba-token-01")
+        bound = endpoint.bind_launch_spec(spec)
+        self.assertEqual(bound.secret_canary_verdict["evidence"]["digest"], "original")
+        self.assertEqual(bound.secret_canary_verdict["evidence"]["chain"], ("first",))
+        self.assertEqual(dict(spec.secret_canary_verdict), {})
+        self.assertEqual(spec.worker_user, "mastermind-worker")
+        self.assertIsNone(spec.expected_worker_uid)
+        self.assertIsNone(spec.expected_worker_gid)
 
     async def test_fresh_fleet_restart_uses_only_persisted_worker_carrier(self) -> None:
         self.adapters["alibaba-token-01"].fail_start = True
