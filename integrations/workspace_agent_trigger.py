@@ -35,9 +35,9 @@ from integrations.workspace_agent_api import (
 
 MAX_TRIGGER_BODY_BYTES = 32_768
 BETA_HEADER = "workspace_agent_runs=v1"
-_OPERATION_KEY = re.compile(r"[a-z0-9][a-z0-9-]{2,95}\\Z", re.ASCII)
-_SHA256 = re.compile(r"[0-9a-f]{64}\\Z", re.ASCII)
-_IDEMPOTENCY_KEY = re.compile(r"mmx-wa-v1-[0-9a-f]{64}\\Z", re.ASCII)
+_OPERATION_KEY = re.compile(r"[a-z0-9][a-z0-9-]{2,95}\Z", re.ASCII)
+_SHA256 = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
+_IDEMPOTENCY_KEY = re.compile(r"mmx-wa-v1-[0-9a-f]{64}\Z", re.ASCII)
 
 
 @dataclass(frozen=True)
@@ -93,7 +93,7 @@ def _canonical_body(input_text: str, conversation_key: str | None) -> bytes:
         input_text.encode("utf-8", errors="strict")
     except UnicodeError:
         raise InvalidObservation("INVALID_TRIGGER_INPUT") from None
-    if "\\x00" in input_text:
+    if "\x00" in input_text:
         raise InvalidObservation("INVALID_TRIGGER_INPUT")
 
     value: dict[str, str] = {"input": input_text}
