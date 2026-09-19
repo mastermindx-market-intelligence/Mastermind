@@ -605,7 +605,6 @@ def test_subscription_probe_is_secret_free_but_contains_reviewed_provider_config
             slot_id="alibaba-token-01",
         ),
         canary_id="canary-bbbbbbbbbbbb",
-        provider_home=tmp_path / "provider-home",
     )
     invocation = canary.prepare_probe(config)
     rendered = "\0".join(invocation.argv)
@@ -633,7 +632,6 @@ def test_subscription_live_runner_injects_secret_only_in_exec_environment(
             slot_id="minimax-token-01",
         ),
         canary_id="canary-cccccccccccc",
-        provider_home=tmp_path / "provider-home",
     )
     invocation = canary.prepare_probe(config)
     observed: dict[str, object] = {}
@@ -679,7 +677,6 @@ def test_subscription_receipt_is_attributed_and_cannot_masquerade_as_native_read
             slot_id="alibaba-token-01",
         ),
         canary_id="canary-dddddddddddd",
-        provider_home=tmp_path / "provider-home",
     )
 
     def runner(invocation: canary.CodexInvocation) -> canary.CodexRunResult:
