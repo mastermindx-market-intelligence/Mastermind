@@ -11,7 +11,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 NODE_TEST = ROOT / "tests" / "web_sol_census_popup_truth.test.cjs"
-EXPECTED_NODE_CASES = 29
+EXPECTED_NODE_CASES = 30
 NODE_TIMEOUT_SECONDS = 20
 MAX_TAP_BYTES = 128 * 1024
 
