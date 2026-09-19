@@ -6,6 +6,8 @@
   const MESSAGE_KIND = "MMX_WEB_SOL_SUBMIT_CONTINUATION";
   const RESULT_SCHEMA = "mastermind.web_sol_continuation_submit_result.v1";
   const MAX_EFFECTS = 256;
+  const START_OBSERVATION_ATTEMPTS = 10;
+  const START_OBSERVATION_INTERVAL_MS = 200;
   const CORRELATION_KEYS = Object.freeze([
     "turn_id", "directive_digest", "session_alias", "runtime_binding_id",
     "runtime_binding_generation", "runtime_binding_fingerprint",
@@ -115,12 +117,16 @@
     if (submission.effect === "SUBMIT_EFFECT_UNKNOWN") {
       return result("CONTINUATION_SUBMIT_EFFECT_UNKNOWN", before.observation);
     }
-    await new Promise((resolve) => setTimeout(resolve, 250));
-    const after = await ops.freshProbe(resolved.tabId, request.conversation_fingerprint);
-    if (after && after.conversation_fingerprint === request.conversation_fingerprint &&
-        after.observation.target_present && after.observation.exact_conversation_loaded &&
-        after.observation.auth_required !== true && after.observation.generation_state === "active") {
-      return result("CONTINUATION_STARTED", after.observation);
+    let after = null;
+    for (let attempt = 0; attempt < START_OBSERVATION_ATTEMPTS; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, START_OBSERVATION_INTERVAL_MS));
+      after = await ops.freshProbe(resolved.tabId, request.conversation_fingerprint);
+      if (after && after.conversation_fingerprint === request.conversation_fingerprint &&
+          after.observation.target_present && after.observation.exact_conversation_loaded &&
+          after.observation.auth_required !== true && after.observation.generation_state === "active") {
+        return result("CONTINUATION_STARTED", after.observation);
+      }
+      if (ops.requestWindowStatus(request)) break;
     }
     return result(
       "CONTINUATION_SUBMIT_EFFECT_UNKNOWN",
