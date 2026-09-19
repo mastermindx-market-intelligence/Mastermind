@@ -301,7 +301,10 @@ def test_fresh_session_cases_route_to_one_owner_native_surface() -> None:
         "local-process-to-studio-direct",
         "worker-browser-to-worker-browser",
         "exact-chatgpt-actuation-to-web-sol-runtime-binding",
-        "domain-work-to-domain-owner",
+        "domain-deploy-to-domain-owner",
+        "domain-data-to-domain-owner",
+        "domain-design-to-domain-owner",
+        "domain-comms-to-domain-owner",
     } <= case_ids
     for case in fixture["cases"]:
         route = by_class[case["capability_class"]]
