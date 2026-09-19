@@ -7,7 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from control_plane.executive_privileged_action import REQUEST_SCHEMA, STATUS_REQUEST_SCHEMA
+from control_plane.executive_privileged_action import (
+    REQUEST_SCHEMA,
+    STATUS_REQUEST_SCHEMA,
+    PrivilegedActionError,
+)
 from scripts import mmx_admin
 from scripts.mmx_admin import build_request, build_status_request, send_request, send_status_request
 
@@ -64,6 +68,35 @@ def test_service_action_cannot_accept_arbitrary_command_or_path() -> None:
 def test_unknown_action_refuses_in_argparse() -> None:
     with pytest.raises(SystemExit):
         build_request(["shell", "--request-id", "req-bad-001"])
+
+
+def test_client_builds_fixed_secondary_host_power_policy_request() -> None:
+    request = build_request(
+        [
+            "executive.host.prepare_secondary_power_policy",
+            "--request-id",
+            "req-power-001",
+        ]
+    )
+    assert request == {
+        "schema": REQUEST_SCHEMA,
+        "request_id": "req-power-001",
+        "action": "executive.host.prepare_secondary_power_policy",
+        "args": {},
+    }
+
+
+def test_secondary_host_power_policy_refuses_caller_arguments() -> None:
+    with pytest.raises(PrivilegedActionError, match="host policy action arguments"):
+        build_request(
+            [
+                "executive.host.prepare_secondary_power_policy",
+                "--slot-id",
+                "codex-pro-01",
+                "--request-id",
+                "req-power-bad-001",
+            ]
+        )
 
 
 def test_generated_request_id_is_contract_safe() -> None:
@@ -157,7 +190,7 @@ def test_status_rejects_effect_arguments(argv: list[str]) -> None:
         build_status_request(argv)
 
 
-def test_six_effect_actions_remain_backward_compatible() -> None:
+def test_existing_effect_actions_remain_backward_compatible() -> None:
     request = build_request(["executive.services.start", "--request-id", "req-effect-001"])
     assert request["action"] == "executive.services.start"
     assert request["schema"] == REQUEST_SCHEMA
