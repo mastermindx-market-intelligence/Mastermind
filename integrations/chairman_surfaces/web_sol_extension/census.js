@@ -27,6 +27,11 @@
     "PROBE_UNAVAILABLE", "PROBE_TIMEOUT", "INVALID_PROBE", "LOOKUP_UNAVAILABLE",
     "SWEEP_DEADLINE", "PROBE_SLOTS_EXHAUSTED",
   ]);
+  const INSTANCE_CONFIG_KEYS = new Set([
+    "schema", "instanceId", "nativeHost", "protocolMajor",
+    "clientPackageVersion", "nativePackageVersion", "extensionPackageVersion",
+    "capabilityDigest",
+  ]);
   let busy = false;
   let generation = 0;
   if (globalThis.addEventListener) globalThis.addEventListener("pagehide", () => {generation++; clearSnapshot();});
@@ -54,6 +59,58 @@
     } catch (_) {
       return null;
     }
+  }
+  function exactKeys(object, expected) {
+    if (!object || typeof object !== "object" || Array.isArray(object)) return false;
+    const keys = Object.keys(object);
+    return keys.length === expected.size && keys.every(key => expected.has(key));
+  }
+  function validPackageVersion(value) {
+    return typeof value === "string" &&
+      /^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$/.test(value);
+  }
+  function renderAdapterContract() {
+    const node = byId("adapter");
+    const raw = globalThis.MMX_WEB_SOL_INSTANCE;
+    const manifestVersion = extensionVersion();
+    const boundary = "Configuration evidence only; not a live native-host handshake.";
+    if (raw === undefined || raw === null) {
+      node.className = "status warning";
+      node.textContent = `Profile package declaration: unavailable. ${boundary}`;
+      return;
+    }
+    const structurallyValid =
+      exactKeys(raw, INSTANCE_CONFIG_KEYS) &&
+      raw.schema === "mastermind.web_sol_instance_config.v1" &&
+      typeof raw.instanceId === "string" && /^[0-9a-f]{64}$/.test(raw.instanceId) &&
+      raw.nativeHost === `com.mastermind.web_sol_surface.${raw.instanceId.slice(0, 24)}` &&
+      Number.isSafeInteger(raw.protocolMajor) && raw.protocolMajor >= 1 &&
+      validPackageVersion(raw.clientPackageVersion) &&
+      validPackageVersion(raw.nativePackageVersion) &&
+      validPackageVersion(raw.extensionPackageVersion) &&
+      typeof raw.capabilityDigest === "string" && /^[0-9a-f]{64}$/.test(raw.capabilityDigest);
+    if (!structurallyValid) {
+      node.className = "status warning";
+      node.textContent = `Profile package declaration: invalid. ${boundary}`;
+      return;
+    }
+    const versions = [
+      raw.clientPackageVersion, raw.nativePackageVersion, raw.extensionPackageVersion,
+    ];
+    const coherent = validPackageVersion(manifestVersion) &&
+      versions.every(version => version === manifestVersion);
+    if (!coherent) {
+      node.className = "status warning";
+      node.textContent =
+        `Profile package declaration: version mismatch · manifest ${manifestVersion || "unknown"} · ` +
+        `client ${raw.clientPackageVersion} · native ${raw.nativePackageVersion} · ` +
+        `extension pin ${raw.extensionPackageVersion}. ${boundary}`;
+      return;
+    }
+    node.className = "status";
+    node.textContent =
+      `Profile package declaration: coherent · extension ${manifestVersion} · ` +
+      `protocol ${raw.protocolMajor} · capability ${raw.capabilityDigest.slice(0, 8)}…. ${boundary}`;
   }
   function observationTime(value) {
     if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T/.test(value)) return null;
@@ -155,5 +212,6 @@
     } finally { if (current === generation) {busy = false; byId("refresh").disabled = false;} }
   }
   byId("refresh").addEventListener("click", refresh);
+  renderAdapterContract();
   refresh();
 })();
