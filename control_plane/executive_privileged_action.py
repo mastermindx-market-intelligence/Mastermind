@@ -58,6 +58,9 @@ ACTION_EFFECT_CLASS = {
     "executive.worker_auth.recover_transaction": "CREDENTIAL_ADMIN_RECOVERY",
     "executive.host.prepare_secondary_power_policy": "HOST_POWER_POLICY",
 }
+ACTION_EFFECT_UNKNOWN_EXIT_CODE = {
+    "executive.host.prepare_secondary_power_policy": 75,
+}
 
 
 class PrivilegedActionError(ValueError):
@@ -292,6 +295,7 @@ def canonical_request_bytes(request: ValidatedPrivilegedAction) -> bytes:
 
 __all__ = [
     "ACTION_EFFECT_CLASS",
+    "ACTION_EFFECT_UNKNOWN_EXIT_CODE",
     "PRIVILEGED_ACTIONS",
     "REQUEST_SCHEMA",
     "STATUS_REQUEST_SCHEMA",
