@@ -130,7 +130,7 @@ test('package version disagreement is surfaced without pretending the native hos
 });
 test('invalid profile package declaration fails closed without echoing malformed values', async () => {
   const ui = await settled(mount(() => snapshot([]), {
-    capabilityDigest: 'PRIVATE_SENTINEL',
+    protocolMajor: 2, capabilityDigest: 'PRIVATE_SENTINEL',
   }));
   assert.match(ui.nodes.adapter.className, /warning/);
   assert.match(ui.nodes.adapter.textContent, /Profile package declaration: invalid/);
