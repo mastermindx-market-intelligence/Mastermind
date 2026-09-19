@@ -30,10 +30,12 @@ function mount(next, options = {}) {
   let calls = 0, schedulingCalls = 0; const lifecycle = {};
   const received = [];
   const context = {document: {getElementById(id) { assert.ok(nodes[id]); return nodes[id]; },
-    createElement: tag => new Element(tag)}, chrome: {runtime: {sendMessage(message) {
-      assert.equal(JSON.stringify(message), JSON.stringify({kind:'MMX_WEB_SOL_CENSUS_REFRESH'}));
-      calls++; received.push([tabs, config?.instanceId]); return next(tabs, config?.instanceId);
-    }}},
+    createElement: tag => new Element(tag)}, chrome: {runtime: {
+      getManifest() { return {version: options.version || '0.2.0'}; },
+      sendMessage(message) {
+        assert.equal(JSON.stringify(message), JSON.stringify({kind:'MMX_WEB_SOL_CENSUS_REFRESH'}));
+        calls++; received.push([tabs, config?.instanceId]); return next(tabs, config?.instanceId);
+      }}},
     addEventListener(name, callback) { lifecycle[name] = callback; },
     setTimeout() { schedulingCalls++; throw Error('CONTROLLER_RETRY_TIMER_FORBIDDEN'); },
     setInterval() { schedulingCalls++; throw Error('CONTROLLER_RETRY_TIMER_FORBIDDEN'); }};
@@ -69,7 +71,7 @@ test('healthy discarded duplicate rows retain measured counts and unknown model'
   assert.match(ui.nodes.rows.textContent, /Served model: unknown/);
   assert.match(ui.nodes.rows.textContent, /Model\/effort telemetry is not implemented in census v1/);
   assert.doesNotMatch(ui.nodes.status.className, /error|warning/);
-  assert.match(ui.nodes.timestamp.textContent, /^Captured /);
+  assert.match(ui.nodes.timestamp.textContent, /^Extension 0\.2\.0 · Captured /);
 });
 test('successful empty inventory remains distinguishable as measured zero', async () => {
   const ui = await settled(mount(() => snapshot([])));
@@ -77,6 +79,11 @@ test('successful empty inventory remains distinguishable as measured zero', asyn
   assert.match(ui.nodes.scope.textContent, /0\/0 document probes sampled/);
   assert.match(ui.nodes.rows.textContent, /No normal ChatGPT tabs were sampled/);
   assert.doesNotMatch(ui.nodes.status.className, /error|warning/);
+});
+test('installed extension version is visible without changing census semantics', async () => {
+  const ui = await settled(mount(() => snapshot([]), {version: '0.4.0'}));
+  assert.match(ui.nodes.timestamp.textContent, /^Extension 0\.4\.0 · Captured /);
+  assert.deepEqual(metrics(ui), ['0', '0', '0', '0']);
 });
 test('complete inventory with unreachable content probes is visibly degraded and actionable', async () => {
   const row = {...tab(1), discarded: false};
@@ -130,7 +137,7 @@ for (const [label, input, options] of [
   assert.deepEqual(metrics(ui), ['—', '—', '—', '—']);
   assert.doesNotMatch(ui.nodes.scope.textContent, /0\/0 document probes sampled|0 distinct/);
   assert.match(ui.nodes.rows.textContent, /not evidence that no sessions exist/);
-  assert.match(ui.nodes.timestamp.textContent, /^Attempted /);
+  assert.match(ui.nodes.timestamp.textContent, /^Extension 0\.2\.0 · Attempted /);
 });
 test('refresh clears the previous scope while a new result is pending', async () => {
   const prior = await snapshot([tab(1), tab(2)]); let resolve; let call = 0;
